@@ -1,0 +1,55 @@
+{
+  "name": "@dsh-external/dsh-luna-vision-bridge",
+  "description": "DSH LLM adapter that transcribes native image attachments with Codex Luna before delegating to DeepSeek",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "scripts/read-image-luna.sh",
+    "dsh.plugin.json",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "setup:dsh": "node scripts/link-dsh-source.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "schemastery": "^3.18.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-attachment": "^0.0.1",
+    "@deepseek-ai/dsh-llm": "^0.0.1",
+    "cordis": "^4.0.0-rc.7"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-attachment": "link:.dsh/source/current/packages/attachment/attachment",
+    "@deepseek-ai/dsh-llm": "link:.dsh/source/current/packages/llm/llm",
+    "@types/node": "^22.0.0",
+    "cordis": "link:.dsh/source/current/vendor/cordis",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "license": "BSD-3-Clause"
+}

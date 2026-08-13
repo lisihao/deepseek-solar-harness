@@ -1,0 +1,22 @@
+{
+  "name": "@dsh-external/dsh-luna-vision-bridge",
+  "version": "0.1.0",
+  "description": "Transcribe DSH native image attachments with Codex Luna, then delegate the text-enriched request to DeepSeek",
+  "host": "lib/index.js",
+  "bundle": "cordis.patch.yml",
+  "config": {
+    "bridgeProvider": "luna-vision-bridge",
+    "bridgeModel": "deepseek-v4-flash",
+    "bridgeModelName": "DeepSeek V4 Flash + Luna",
+    "targetProvider": "deepseek-official",
+    "targetModel": "deepseek-v4-flash",
+    "codexCommand": "codex",
+    "lunaModel": "gpt-5.6-luna",
+    "timeoutMs": 180000,
+    "maxOutputBytes": 4194304,
+    "cacheDescriptions": true,
+    "cacheNamespace": "v1",
+    "includeUserText": true,
+    "maxUserTextChars": 4000
+  }
+}
