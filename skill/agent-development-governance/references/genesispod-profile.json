@@ -1,6 +1,9 @@
 {
   "profile_version": 1,
   "name": "genesispod",
+  "harness_bundle": {
+    "manifest": "tools/agent-development-governance/manifest.json"
+  },
   "project_markers": [
     ".claude/CLAUDE.md",
     "backend/src/__tests__/architecture",
@@ -25,7 +28,9 @@
         ".claude/**",
         ".github/**",
         ".husky/**",
+        ".agent-governance/**",
         "scripts/**",
+        "tools/agent-development-governance/**",
         "package.json",
         "package-lock.json",
         "backend/package.json",
@@ -44,15 +49,45 @@
   "ci_contracts": [
     {
       "path": ".github/workflows/ci.yml",
-      "required_text": ["ci-status:", "arch-boundary:", "ui-discipline:", "boot-smoke:", "capability-index:"]
+      "required_text": [
+        "governance-contract:",
+        "name: Governance Harness Contract",
+        "python3 tools/agent-development-governance/governance.py audit",
+        "ci-status:",
+        "arch-boundary:",
+        "ui-discipline:",
+        "boot-smoke:",
+        "capability-index:"
+      ]
     },
     {"path": ".github/workflows/gitleaks.yml", "required_text": ["gitleaks/gitleaks-action"]}
   ],
   "gates": [
     {
       "id": "diff-check",
-      "label": "Git whitespace and conflict check",
-      "command": ["git", "diff", "--check"],
+      "label": "All-change whitespace and conflict check",
+      "command": [
+        "python3",
+        "tools/agent-development-governance/check_changed_text.py",
+        "--project",
+        "."
+      ],
+      "cwd": ".",
+      "scopes": ["always"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "governance-contract",
+      "label": "Governance bundle, hooks, and CI contract",
+      "command": [
+        "python3",
+        "tools/agent-development-governance/governance.py",
+        "audit",
+        "--project",
+        ".",
+        "--strict-warnings"
+      ],
       "cwd": ".",
       "scopes": ["always"],
       "levels": ["quick", "full"],
