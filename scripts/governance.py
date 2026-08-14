@@ -196,6 +196,26 @@ def git_head(project: Path) -> str:
     return result.stdout.strip() if result.returncode == 0 else "UNBORN"
 
 
+def resolve_report_path(project: Path, requested: str) -> Path:
+    """Resolve @git inside the active repository or linked worktree metadata."""
+    if requested != "@git":
+        return Path(requested).expanduser().resolve()
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-path", "governance-attestation.json"],
+        cwd=project,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise GovernanceError(
+            f"cannot resolve worktree attestation path: {result.stderr.strip()}"
+        )
+    path = Path(result.stdout.strip())
+    return path.resolve() if path.is_absolute() else (project / path).resolve()
+
+
 def change_fingerprint(project: Path, files: list[str], profile_sha256: str) -> str:
     """Bind an attestation to HEAD, the selected paths, and their current bytes."""
     digest = hashlib.sha256()
@@ -684,9 +704,16 @@ def parse_args() -> argparse.Namespace:
         if name == "verify":
             command.add_argument("--dry-run", action="store_true")
             command.add_argument("--fail-fast", action="store_true")
-            command.add_argument("--report", help="Write a change-bound JSON attestation")
+            command.add_argument(
+                "--report",
+                help="Write a change-bound JSON attestation; use @git for worktree metadata",
+            )
         if name == "attest":
-            command.add_argument("--report", required=True, help="Attestation JSON to verify")
+            command.add_argument(
+                "--report",
+                required=True,
+                help="Attestation JSON to verify; use @git for worktree metadata",
+            )
             command.add_argument("--require-level", choices=("quick", "full"))
     return parser.parse_args()
 
@@ -700,7 +727,7 @@ def main() -> int:
 
     if args.command == "attest":
         payload = check_attestation(
-            Path(args.report).expanduser().resolve(),
+            resolve_report_path(project, args.report),
             project,
             profile,
             profile_path,
@@ -744,7 +771,7 @@ def main() -> int:
         "summary": f"{sum(item['status'] == 'ok' for item in results)}/{len(results)} gates passed",
     }
     if args.report and not args.dry_run:
-        report_path = Path(args.report).expanduser().resolve()
+        report_path = resolve_report_path(project, args.report)
         attestation = write_attestation(
             report_path,
             project,

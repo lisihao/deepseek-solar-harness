@@ -202,6 +202,11 @@ class GovernanceTests(unittest.TestCase):
         failed = {item["id"] for item in stale["items"] if item["status"] == "error"}
         self.assertIn("fingerprint", failed)
 
+    def test_git_report_alias_resolves_inside_repository_metadata(self):
+        report = governance.resolve_report_path(self.root, "@git")
+        expected = (self.root / ".git" / "governance-attestation.json").resolve()
+        self.assertEqual(report, expected)
+
     def test_exported_bundle_is_verified_and_tampering_fails(self):
         project_profile = dict(self.profile)
         project_profile["harness_bundle"] = {

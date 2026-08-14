@@ -13,6 +13,7 @@
 - 每个 gate 保留退出码、超时、耗时、输出 SHA-256 和尾部摘要。
 - 任一必需 gate 失败，进程退出非零。
 - attestation 绑定 profile bytes、Git HEAD、changed paths 和当前文件内容；变化后自动失效。
+- `--report @git` 让 Git 解析普通 checkout 或 linked worktree 各自的 attestation 路径。
 - `export_bundle.py` 将 Harness 与项目 Profile 导出为带版本和 SHA-256 清单的仓内 bundle，供远端 CI 使用。
 
 ## 强制执行

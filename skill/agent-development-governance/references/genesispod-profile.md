@@ -30,6 +30,7 @@ This profile is an extracted adapter for `/Users/sihaoli/Projects/GenesisPod`; i
 - Local hooks are bypassable and their executable mode must be checked. CI is the merge-control source of truth.
 - `governance-contract` must run first and fail on bundle drift, non-executable required hooks, or missing CI wiring.
 - Local full verification mirrors CI environment for Node heap, test secrets, boot smoke, and frontend build; formatting is strict for changed files so pre-existing debt cannot mask regressions.
+- npm governance entrypoints store attestation through `--report @git`, so regular checkouts and linked worktrees remain isolated.
 - Some rules in `.claude/CLAUDE.md` explicitly remain honor-only.
 - The bundled profile runs deterministic local equivalents. Gitleaks, dependency audit, branch protection, hosted CI, and scheduled runtime smoke tests still need their own evidence.
 
