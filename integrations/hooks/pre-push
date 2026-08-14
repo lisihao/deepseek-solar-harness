@@ -5,7 +5,7 @@ set -eu
 # harness path stable. Full enforcement still belongs in required CI.
 PROJECT_ROOT=$(git rev-parse --show-toplevel)
 HARNESS=${AGENT_GOVERNANCE_HARNESS:-"$PROJECT_ROOT/tools/agent-development-governance/governance.py"}
-REPORT="$PROJECT_ROOT/.git/governance-attestation.json"
+REPORT="@git"
 
 python3 "$HARNESS" audit --project "$PROJECT_ROOT"
 python3 "$HARNESS" verify \

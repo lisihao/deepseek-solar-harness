@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SKILL = ROOT / "skill" / "agent-development-governance"
 GOVERNANCE_SCRIPT = ROOT / "scripts" / "governance.py"
+PRE_PUSH_TEMPLATE = ROOT / "integrations" / "hooks" / "pre-push"
 
 
 def fail(message: str) -> None:
@@ -81,11 +83,27 @@ def validate_shared_script() -> None:
         fail(f"skill harness resolves to wrong target: {linked.resolve()}")
 
 
+def validate_integrations() -> None:
+    text = PRE_PUSH_TEMPLATE.read_text(encoding="utf-8")
+    if 'REPORT="@git"' not in text:
+        fail("pre-push template must use the worktree-safe @git report alias")
+    syntax = subprocess.run(
+        ["sh", "-n", str(PRE_PUSH_TEMPLATE)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if syntax.returncode != 0:
+        fail(f"pre-push template has invalid shell syntax: {syntax.stdout.strip()}")
+
+
 def main() -> None:
     validate_frontmatter()
     validate_openai_metadata()
     validate_profiles()
     validate_shared_script()
+    validate_integrations()
     print("Skill, metadata, profiles, schema, and shared Code Harness are valid.")
 
 
