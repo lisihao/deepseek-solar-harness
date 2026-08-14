@@ -54,6 +54,14 @@ scripts/     repo gates and generators
 website/     VitePress projection of selected bilingual docs/ sources
 ```
 
+## MacBook development and runtime copies
+
+- The only development repository and source of edits, commits, builds, and pushes is `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness`.
+- The login-time runtime deployment is `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness`. Treat it as a generated deployment copy: never edit files there, never commit from it, and never copy changes from it back into the development repository.
+- `/Users/sihaoli/Library/LaunchAgents/com.lisihao.deepseek-solar-harness.plist` starts the runtime deployment. `/Users/sihaoli/Library/LaunchAgents/com.lisihao.deepseek-solar-harness.tunnels.plist` owns only the Mac mini forwards required by the Remote Modules plugin.
+- Deploy only an identified development commit to the runtime copy after relevant checks pass. Record that commit in the runtime copy, then verify the LaunchAgent, port `3081`, the four SSH forwards, GenesisPod, and ThunderOMLX. A loaded LaunchAgent is not runtime-health evidence.
+- When the two copies differ, preserve the development repository as authoritative and redeploy the runtime copy. Do not merge, reset, or overwrite the development repository from runtime state.
+
 Package groups: [packages/README.md](packages/README.md).
 
 ## Commands
