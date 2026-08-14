@@ -57,6 +57,25 @@ pnpm setup:dsh -- /absolute/path/to/dsh
 
 ## 安装到 Web profile
 
+### 通过 npm（推荐）
+
+插件已发布到 npm：`@ycp424c/dsh-luna-vision-bridge`。
+
+```bash
+# 1. 安装依赖（等价于在 profile 目录执行 pnpm add）
+dsh plugin add --profile web @ycp424c/dsh-luna-vision-bridge
+
+# 2. 挂载插件：把包名追加到 ~/.dsh/profiles/web/package.json 的 bundles
+#    "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@ycp424c/dsh-luna-vision-bridge"] } }
+
+# 3. 重启
+dsh web
+```
+
+peerDependencies（`@deepseek-ai/dsh-attachment`、`@deepseek-ai/dsh-llm`）由 DSH 本体提供，无需单独安装。
+
+### 本地 link（开发）
+
 构建后以本地 link 安装：
 
 ```bash
