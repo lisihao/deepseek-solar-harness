@@ -13,7 +13,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-BUNDLE_FILES = ("governance.py", "check_changed_text.py")
+BUNDLE_FILES = (
+    "governance.py",
+    "check_changed_text.py",
+    "check_changed_format.py",
+)
 
 
 def sha256_file(path: Path) -> str:

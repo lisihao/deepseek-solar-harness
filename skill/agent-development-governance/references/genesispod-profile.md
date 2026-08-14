@@ -21,7 +21,7 @@ This profile is an extracted adapter for `/Users/sihaoli/Projects/GenesisPod`; i
 | backend | `backend/**`, Prisma | lint, type, full coverage tests, architecture, build/boot, capability and script audits |
 | frontend | `frontend/**` | lint, type, coverage tests, build, UI/i18n/mission audits |
 | governance | `.claude/**`, `.github/**`, `.husky/**`, scripts and package manifests | both product scopes plus governance wiring audit |
-| docs | `docs/**`, Markdown | formatting and instruction consistency; CI path filters need separate attention |
+| docs | `docs/**`, Markdown | changed-file formatting and instruction consistency |
 
 ## Important limitations
 
@@ -29,6 +29,7 @@ This profile is an extracted adapter for `/Users/sihaoli/Projects/GenesisPod`; i
 - `verify:changed` ignores untracked files and runs a reduced set without lint, architecture, UI, build, or CI-equivalent tests.
 - Local hooks are bypassable and their executable mode must be checked. CI is the merge-control source of truth.
 - `governance-contract` must run first and fail on bundle drift, non-executable required hooks, or missing CI wiring.
+- Local full verification mirrors CI environment for Node heap, test secrets, boot smoke, and frontend build; formatting is strict for changed files so pre-existing debt cannot mask regressions.
 - Some rules in `.claude/CLAUDE.md` explicitly remain honor-only.
 - The bundled profile runs deterministic local equivalents. Gitleaks, dependency audit, branch protection, hosted CI, and scheduled runtime smoke tests still need their own evidence.
 

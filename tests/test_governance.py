@@ -15,6 +15,7 @@ SCRIPT = (
     / "governance.py"
 )
 TEXT_CHECK = Path(__file__).resolve().parents[1] / "scripts" / "check_changed_text.py"
+FORMAT_CHECK = Path(__file__).resolve().parents[1] / "scripts" / "check_changed_format.py"
 EXPORT_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "export_bundle.py"
 SPEC = importlib.util.spec_from_file_location("governance", SCRIPT)
 assert SPEC and SPEC.loader
@@ -107,6 +108,17 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(result[0]["status"], "error")
         self.assertEqual(result[0]["returncode"], 7)
 
+    def test_gate_environment_is_injected_without_shell(self):
+        gate = dict(self.profile["gates"][0])
+        gate["env"] = {"HARNESS_TEST_VALUE": "expected"}
+        gate["command"] = [
+            sys.executable,
+            "-c",
+            "import os; raise SystemExit(0 if os.environ.get('HARNESS_TEST_VALUE') == 'expected' else 8)",
+        ]
+        result = governance.execute_gates(self.root, [gate], False, False)
+        self.assertEqual(result[0]["status"], "ok")
+
     def test_invalid_shell_string_is_rejected(self):
         invalid = dict(self.profile)
         invalid["gates"] = [dict(self.profile["gates"][0])]
@@ -132,6 +144,34 @@ class GovernanceTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("trailing whitespace", result.stdout)
+
+    def test_changed_format_check_only_passes_matching_changed_files(self):
+        (self.root / "src" / "format-me.ts").write_text("const value=1\n", encoding="utf-8")
+        (self.root / "src" / "ignore.py").write_text("VALUE = 2\n", encoding="utf-8")
+        assertion = (
+            "import sys; "
+            "raise SystemExit(0 if sys.argv[1:] == ['src/format-me.ts'] else 9)"
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(FORMAT_CHECK),
+                "--project",
+                str(self.root),
+                "--extensions",
+                "ts,tsx",
+                "--",
+                sys.executable,
+                "-c",
+                assertion,
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("1 changed files", result.stdout)
 
     def test_attestation_becomes_stale_after_file_change(self):
         (self.root / "src" / "new.py").write_text("VALUE = 2\n", encoding="utf-8")

@@ -45,6 +45,7 @@
         "py_compile",
         "scripts/governance.py",
         "scripts/check_changed_text.py",
+        "scripts/check_changed_format.py",
         "scripts/export_bundle.py",
         "scripts/validate_skill.py",
         "tests/test_governance.py"

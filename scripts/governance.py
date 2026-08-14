@@ -99,6 +99,14 @@ def validate_profile(profile: dict[str, Any], source: Path) -> None:
             isinstance(arg, str) and arg for arg in command
         ):
             raise GovernanceError(f"gate '{gate_id}' command must be a non-empty string array")
+        environment = gate.get("env", {})
+        if not isinstance(environment, dict) or not all(
+            isinstance(key, str)
+            and key
+            and isinstance(value, str)
+            for key, value in environment.items()
+        ):
+            raise GovernanceError(f"gate '{gate_id}' env must be a string-to-string object")
         if not gate.get("scopes") or not gate.get("levels"):
             raise GovernanceError(f"gate '{gate_id}' must declare scopes and levels")
         unknown_scopes = set(gate["scopes"]) - declared_scopes - {"always"}
@@ -266,15 +274,16 @@ def plan_payload(
     files = changed_files(project, changed_from)
     scopes = infer_scopes(profile, files, scope)
     gates = select_gates(profile, scopes, level)
-    items = [
-        {
+    items = []
+    for gate in gates:
+        environment = gate.get("env", {})
+        env_note = f" env={sorted(environment)}" if environment else ""
+        items.append({
             "id": gate["id"],
             "label": gate.get("label", gate["id"]),
             "status": "pending",
-            "detail": f"(cd {gate.get('cwd', '.')}) {shlex.join(gate['command'])}",
-        }
-        for gate in gates
-    ]
+            "detail": f"(cd {gate.get('cwd', '.')}){env_note} {shlex.join(gate['command'])}",
+        })
     return {
         "title": "Governance verification plan",
         "project": str(project),
@@ -469,7 +478,9 @@ def execute_gates(
     for gate in gates:
         command = gate["command"]
         cwd = (project / gate.get("cwd", ".")).resolve()
-        detail = f"(cd {cwd}) {shlex.join(command)}"
+        environment = gate.get("env", {})
+        env_note = f" env={sorted(environment)}" if environment else ""
+        detail = f"(cd {cwd}){env_note} {shlex.join(command)}"
         if dry_run:
             results.append(
                 {"id": gate["id"], "label": gate.get("label", gate["id"]), "status": "pending", "detail": detail}
@@ -483,6 +494,7 @@ def execute_gates(
             completed = subprocess.run(
                 command,
                 cwd=cwd,
+                env={**os.environ, **environment},
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

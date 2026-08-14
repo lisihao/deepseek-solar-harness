@@ -2,7 +2,7 @@
 
 ## 1. 稳定边界
 
-核心执行器只负责：Profile 加载、输入验证、Git 改动发现、scope 推导、gate 选择、无 shell 执行、超时、输出摘要和不可陈旧的 attestation。它不理解 NestJS、Next.js、GenesisPod 的 AI 分层或具体 UI 组件。
+核心执行器只负责：Profile 加载、输入验证、Git 改动发现、scope 推导、gate 选择、显式环境注入、无 shell 执行、超时、输出摘要和不可陈旧的 attestation。它不理解 NestJS、Next.js、GenesisPod 的 AI 分层或具体 UI 组件。
 
 项目知识位于 Profile 和引用文档中。这样新增项目不会使既有项目规则互相污染。
 

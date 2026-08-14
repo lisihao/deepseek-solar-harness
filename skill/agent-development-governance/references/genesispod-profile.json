@@ -140,8 +140,20 @@
     },
     {
       "id": "format",
-      "label": "Repository formatting",
-      "command": ["npm", "run", "format:check"],
+      "label": "Changed-file formatting",
+      "command": [
+        "python3",
+        "tools/agent-development-governance/check_changed_format.py",
+        "--project",
+        ".",
+        "--extensions",
+        "ts,tsx,js,jsx,json,md",
+        "--exclude-prefix",
+        "docs/_archive/",
+        "--",
+        "node_modules/.bin/prettier",
+        "--check"
+      ],
       "cwd": ".",
       "scopes": ["backend", "frontend", "docs", "governance"],
       "levels": ["full"],
@@ -151,6 +163,7 @@
       "id": "backend-lint",
       "label": "Backend lint",
       "command": ["npm", "run", "lint:backend"],
+      "env": {"NODE_OPTIONS": "--max-old-space-size=12288"},
       "cwd": ".",
       "scopes": ["backend"],
       "levels": ["full"],
@@ -169,6 +182,7 @@
       "id": "backend-ci-tests",
       "label": "Backend full coverage tests",
       "command": ["npm", "run", "test:ci"],
+      "env": {"JWT_SECRET": "test_secret", "NODE_ENV": "test"},
       "cwd": "backend",
       "scopes": ["backend"],
       "levels": ["full"],
@@ -196,6 +210,12 @@
       "id": "backend-boot",
       "label": "Backend DI boot smoke",
       "command": ["npm", "run", "test:boot"],
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/genesis_test",
+        "JWT_SECRET": "test_secret",
+        "STORAGE_ADMIN_KEY": "test_storage_admin_key",
+        "NODE_ENV": "test"
+      },
       "cwd": "backend",
       "scopes": ["backend"],
       "levels": ["full"],
@@ -205,6 +225,10 @@
       "id": "frontend-build",
       "label": "Frontend production build",
       "command": ["npm", "run", "build"],
+      "env": {
+        "NEXT_PUBLIC_API_URL": "http://localhost:4000",
+        "NODE_ENV": "production"
+      },
       "cwd": "frontend",
       "scopes": ["frontend"],
       "levels": ["full"],
