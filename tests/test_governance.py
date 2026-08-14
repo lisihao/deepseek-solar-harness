@@ -15,10 +15,15 @@ SCRIPT = (
     / "governance.py"
 )
 TEXT_CHECK = Path(__file__).resolve().parents[1] / "scripts" / "check_changed_text.py"
+EXPORT_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "export_bundle.py"
 SPEC = importlib.util.spec_from_file_location("governance", SCRIPT)
 assert SPEC and SPEC.loader
 governance = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(governance)
+EXPORT_SPEC = importlib.util.spec_from_file_location("export_bundle", EXPORT_SCRIPT)
+assert EXPORT_SPEC and EXPORT_SPEC.loader
+exporter = importlib.util.module_from_spec(EXPORT_SPEC)
+EXPORT_SPEC.loader.exec_module(exporter)
 
 
 class GovernanceTests(unittest.TestCase):
@@ -156,6 +161,32 @@ class GovernanceTests(unittest.TestCase):
         )
         failed = {item["id"] for item in stale["items"] if item["status"] == "error"}
         self.assertIn("fingerprint", failed)
+
+    def test_exported_bundle_is_verified_and_tampering_fails(self):
+        project_profile = dict(self.profile)
+        project_profile["harness_bundle"] = {
+            "manifest": "tools/agent-development-governance/manifest.json"
+        }
+        source_profile = self.root / "source-profile.json"
+        source_profile.write_text(json.dumps(project_profile), encoding="utf-8")
+        exporter.export_bundle(self.root, source_profile, "test-commit")
+        installed_profile = self.root / ".agent-governance" / "profile.json"
+        audit = governance.audit_project(
+            self.root, project_profile, installed_profile
+        )
+        bundle_item = next(item for item in audit["items"] if item["id"] == "harness-bundle")
+        self.assertEqual(bundle_item["status"], "ok")
+
+        installed_harness = (
+            self.root / "tools" / "agent-development-governance" / "governance.py"
+        )
+        installed_harness.write_text("tampered\n", encoding="utf-8")
+        tampered = governance.audit_project(
+            self.root, project_profile, installed_profile
+        )
+        bundle_item = next(item for item in tampered["items"] if item["id"] == "harness-bundle")
+        self.assertEqual(bundle_item["status"], "error")
+        self.assertIn("digest mismatch", bundle_item["detail"])
 
 
 if __name__ == "__main__":

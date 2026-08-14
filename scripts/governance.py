@@ -81,6 +81,13 @@ def validate_profile(profile: dict[str, Any], source: Path) -> None:
         unknown = set(rule.get("expands", [])) - declared_scopes
         if unknown:
             raise GovernanceError(f"scope '{rule['scope']}' expands unknown scopes: {sorted(unknown)}")
+    bundle = profile.get("harness_bundle")
+    if bundle is not None:
+        if not isinstance(bundle, dict) or not bundle.get("manifest"):
+            raise GovernanceError("harness_bundle must declare a manifest path")
+        manifest = Path(bundle["manifest"])
+        if manifest.is_absolute() or ".." in manifest.parts:
+            raise GovernanceError("harness_bundle manifest must remain inside the project")
     seen: set[str] = set()
     for gate in profile["gates"]:
         gate_id = gate.get("id")
@@ -370,6 +377,44 @@ def audit_project(
                 "label": "CI contract",
                 "status": "ok" if not missing else "error",
                 "detail": f"{contract['path']}" + (" wired" if not missing else f" missing {missing}"),
+            }
+        )
+
+    bundle = profile.get("harness_bundle")
+    if bundle:
+        manifest_path = project / bundle["manifest"]
+        bundle_errors: list[str] = []
+        if not manifest_path.is_file():
+            bundle_errors.append(f"missing manifest {bundle['manifest']}")
+        else:
+            try:
+                manifest = load_json(manifest_path)
+                files = manifest.get("files", {})
+                if manifest.get("bundle_version") != 1 or not isinstance(files, dict):
+                    bundle_errors.append("invalid bundle manifest schema")
+                else:
+                    for relative, expected in sorted(files.items()):
+                        candidate = Path(relative)
+                        if candidate.is_absolute() or ".." in candidate.parts:
+                            bundle_errors.append(f"unsafe bundle path {relative}")
+                            continue
+                        actual_path = project / candidate
+                        if not actual_path.is_file():
+                            bundle_errors.append(f"missing {relative}")
+                        elif sha256_file(actual_path) != expected:
+                            bundle_errors.append(f"digest mismatch {relative}")
+            except GovernanceError as exc:
+                bundle_errors.append(str(exc))
+        items.append(
+            {
+                "id": "harness-bundle",
+                "label": "Harness bundle",
+                "status": "ok" if not bundle_errors else "error",
+                "detail": (
+                    f"{bundle['manifest']} verified"
+                    if not bundle_errors
+                    else "; ".join(bundle_errors)
+                ),
             }
         )
 

@@ -11,7 +11,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-GOVERNANCE = ROOT / "scripts" / "governance.py"
+SIBLING_GOVERNANCE = Path(__file__).resolve().parent / "governance.py"
+GOVERNANCE = (
+    SIBLING_GOVERNANCE
+    if SIBLING_GOVERNANCE.is_file()
+    else ROOT / "scripts" / "governance.py"
+)
 TEXT_SUFFIXES = {
     ".c",
     ".cc",

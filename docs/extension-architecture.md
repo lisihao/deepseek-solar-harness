@@ -6,6 +6,8 @@
 
 项目知识位于 Profile 和引用文档中。这样新增项目不会使既有项目规则互相污染。
 
+远端 CI 不依赖开发机绝对路径。中央项目通过 `scripts/export_bundle.py` 生成版本化仓内副本和 SHA-256 manifest；项目 Profile 的 `harness_bundle.manifest` 让 `audit` 对漂移 fail-closed。
+
 ## 2. 版本策略
 
 | 对象 | 当前版本 | 兼容策略 |

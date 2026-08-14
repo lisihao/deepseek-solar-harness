@@ -28,6 +28,7 @@ GenesisPod 是第一个参考实现，不是通用内核的硬编码前提。
 | `docs/genesispod-analysis.md` | GenesisPod 规则、脚本、门禁与缺口的证据分析 |
 | `docs/extension-architecture.md` | 版本、Profile 和控制器的扩展契约 |
 | `scripts/governance.py` | Code Harness 核心；不依赖 Agent 自觉执行规则 |
+| `scripts/export_bundle.py` | 将核心和项目 Profile 导出为可由 CI 独立验证的版本化 bundle |
 | `skill/agent-development-governance/` | Codex 与 Claude Code 共用的薄适配层 |
 | `integrations/` | Hook/CI 的强制接线模板 |
 | `tests/` | 治理执行器的回归测试 |
@@ -67,3 +68,13 @@ python3 "$SKILL_DIR/scripts/governance.py" attest \
 3. 不通过修改测试、基线、白名单或 bypass 开关换取绿色结果。
 4. 本地验证、远端 CI、分支保护和运行态验证分别举证。
 5. 通用内核保持稳定，业务差异通过版本化 Profile 扩展。
+
+## 导出到项目
+
+```bash
+python3 scripts/export_bundle.py \
+  --project /path/to/project \
+  --profile /path/to/project-profile.json
+```
+
+导出内容位于项目的 `tools/agent-development-governance/` 与 `.agent-governance/profile.json`。Manifest 记录中央版本、源提交和每个文件的 SHA-256；项目执行 `audit` 时会拒绝缺失或漂移的 bundle。
