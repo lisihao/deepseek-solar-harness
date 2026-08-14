@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AttachmentStore, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import { LlmError } from '@deepseek-ai/dsh-llm'
-import type { ResolvedConfig } from './config.js'
+import type { ResolvedConfig, ResolvedConfigSource } from './config.js'
 
 /** Replaceable subprocess operation used by tests and alternative Luna launchers. */
 export type VisionCommand = (
@@ -24,7 +24,7 @@ export type VisionCommand = (
 /** Dependencies required to materialize and transcribe a durable DSH image. */
 export interface LunaVisionDeps {
   attachments: AttachmentStore
-  config: ResolvedConfig
+  config: ResolvedConfigSource
   runCommand?: VisionCommand
 }
 
@@ -189,7 +189,7 @@ export class LunaVision {
    * @returns Luna's non-empty visual transcription.
    */
   describe(ref: ImageAttachmentRef, prompt: string, signal?: AbortSignal): Promise<string> {
-    const key = cacheKey(this.deps.config, ref, prompt)
+    const key = cacheKey(this.deps.config(), ref, prompt)
     const memory = this.descriptions.get(key)
     if (memory !== undefined) return Promise.resolve(memory)
     const active = this.pending.get(key)
@@ -210,7 +210,8 @@ export class LunaVision {
     prompt: string,
     signal?: AbortSignal,
   ): Promise<string> {
-    const cached = await this.readCache(key)
+    const cfg = this.deps.config()
+    const cached = await this.readCache(key, cfg)
     if (cached !== undefined) return cached
     const stored = await this.deps.attachments.readImage(ref)
     const temporaryRoot = await mkdtemp(join(tmpdir(), 'dsh-luna-vision-bridge-'))
@@ -219,14 +220,14 @@ export class LunaVision {
     try {
       await writeFile(imagePath, stored.data, { mode: 0o600 })
       const raw = await this.runCommand(
-        this.deps.config.lunaCommand,
+        cfg.lunaCommand,
         imagePath,
         prompt,
         {
-          timeoutMs: this.deps.config.timeoutMs,
-          maxOutputBytes: this.deps.config.maxOutputBytes,
-          codexCommand: this.deps.config.codexCommand,
-          model: this.deps.config.lunaModel,
+          timeoutMs: cfg.timeoutMs,
+          maxOutputBytes: cfg.maxOutputBytes,
+          codexCommand: cfg.codexCommand,
+          model: cfg.lunaModel,
           ...(signal === undefined ? {} : { signal }),
         },
       )
@@ -234,17 +235,17 @@ export class LunaVision {
       if (description === '') {
         throw new LlmError('Luna image transcription returned an empty response', 'LUNA_VISION_EMPTY')
       }
-      await this.writeCache(key, description)
+      await this.writeCache(key, description, cfg)
       return description
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true })
     }
   }
 
-  private async readCache(key: string): Promise<string | undefined> {
-    if (!this.deps.config.cacheDescriptions) return undefined
+  private async readCache(key: string, cfg: ResolvedConfig): Promise<string | undefined> {
+    if (!cfg.cacheDescriptions) return undefined
     try {
-      const raw = await readFile(join(this.deps.config.cacheDir, `${key}.json`), 'utf8')
+      const raw = await readFile(join(cfg.cacheDir, `${key}.json`), 'utf8')
       const value = JSON.parse(raw) as Partial<CachedDescription>
       return value.version === 1 && typeof value.description === 'string' && value.description.trim() !== ''
         ? value.description
@@ -255,12 +256,12 @@ export class LunaVision {
     }
   }
 
-  private async writeCache(key: string, description: string): Promise<void> {
-    if (!this.deps.config.cacheDescriptions) return
-    await mkdir(this.deps.config.cacheDir, { recursive: true, mode: 0o700 })
-    await chmod(this.deps.config.cacheDir, 0o700)
-    const target = join(this.deps.config.cacheDir, `${key}.json`)
-    const temporary = join(this.deps.config.cacheDir, `.${key}.${randomUUID()}.tmp`)
+  private async writeCache(key: string, description: string, cfg: ResolvedConfig): Promise<void> {
+    if (!cfg.cacheDescriptions) return
+    await mkdir(cfg.cacheDir, { recursive: true, mode: 0o700 })
+    await chmod(cfg.cacheDir, 0o700)
+    const target = join(cfg.cacheDir, `${key}.json`)
+    const temporary = join(cfg.cacheDir, `.${key}.${randomUUID()}.tmp`)
     const record: CachedDescription = { version: 1, description }
     try {
       await writeFile(temporary, `${JSON.stringify(record)}\n`, { mode: 0o600, flag: 'wx' })

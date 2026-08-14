@@ -8,7 +8,18 @@ source ??= process.env.DSH_SOURCE ?? resolve(homedir(), '.dsh/source/current')
 if (!isAbsolute(source)) throw new Error('usage: pnpm setup:dsh -- /absolute/path/to/dsh')
 
 const root = resolve(import.meta.dirname, '..')
-for (const required of ['AGENTS.md', 'packages/llm/llm', 'packages/attachment/attachment', 'vendor/cordis']) {
+for (const required of [
+  'AGENTS.md',
+  'packages/llm/llm',
+  'packages/attachment/attachment',
+  'packages/settings/settings',
+  'packages/client/runtime',
+  'packages/client/connection',
+  'packages/client/ui-slots',
+  'packages/client/ui-settings',
+  'packages/host/apiproxy',
+  'vendor/cordis',
+]) {
   await lstat(resolve(source, required))
 }
 

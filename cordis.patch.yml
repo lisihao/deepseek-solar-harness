@@ -3,7 +3,7 @@
 # path remain unchanged.
 - insert:
     - id: luna-vision-bridge
-      name: '@dsh-external/dsh-luna-vision-bridge'
+      name: '@ycp424c/dsh-luna-vision-bridge'
       inject:
         - llm
         - attachments
