@@ -1,0 +1,14 @@
+- id: ui-remote-modules
+  disabled: false
+  config:
+    instances:
+      - id: genesispod
+        label: GenesisPod
+        url: !!js process.env.DSH_E2E_GENESISPOD_PAGE
+        relayPort: 0
+        order: 100
+      - id: thunder-omlx
+        label: ThunderOMLX
+        url: !!js process.env.DSH_E2E_THUNDEROMLX_PAGE
+        relayPort: 0
+        order: 200

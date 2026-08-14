@@ -353,12 +353,15 @@ describe('settings domain', () => {
     ctx.settings.register(settingsNamespace('web-search-deepseek'), z.object({
       baseURL: z.string(),
     }))
+    ctx.settings.register(settingsNamespace('ui-remote-modules'), z.object({
+      instances: z.array(z.object({ id: z.string(), label: z.string(), url: z.string(), relayPort: z.number(), order: z.number() })),
+    }), { applies: 'restart' })
     const api = createApiProxy(ctx, DEFAULTS)
 
     const value = expectOk(await api.settings.describe(request({})))
     expect(value.namespaces.map(view => view.ns)).toEqual([
       'llm-deepseek', 'permission', 'ui-theme', 'locale', 'ui-conversation',
-      'shell', 'agent-loop', 'web-search-deepseek',
+      'shell', 'agent-loop', 'web-search-deepseek', 'ui-remote-modules',
     ])
     const permission = expectOk(await api.settings.mutate(request({
       ns: 'permission',
@@ -395,6 +398,16 @@ describe('settings domain', () => {
       ops: [{ op: 'set', path: ['baseURL'], value: 'https://search.test/v1' }],
     })))
     expect(webSearch.value).toEqual({ baseURL: 'https://search.test/v1' })
+    const remoteModules = expectOk(await api.settings.mutate(request({
+      ns: 'ui-remote-modules',
+      ops: [{ op: 'set', path: ['instances'], value: [{
+        id: 'docs', label: 'Docs', url: 'https://example.test/', relayPort: 18103, order: 300,
+      }] }],
+    })))
+    expect(remoteModules.value).toEqual({
+      instances: [{ id: 'docs', label: 'Docs', url: 'https://example.test/', relayPort: 18103, order: 300 }],
+    })
+    expect(remoteModules.applies).toBe('restart')
 
     for (const response of [
       await api.settings.update(request({ ns: 'some-other-plugin', patch: { secretPath: '/etc/shadow' } })),

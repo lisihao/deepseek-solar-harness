@@ -1,0 +1,31 @@
+{
+  "extends": "../../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo",
+    "types": ["node"]
+  },
+  "files": [
+    "src/client/index.ts",
+    "src/client/RemoteModuleEntry.tsx",
+    "src/client/RemoteModulesSettings.tsx",
+    "src/client/settings-draft.ts",
+    "src/client/settings-locales.ts",
+    "src/client/store.ts",
+    "src/contract.ts",
+    "src/css-modules.d.ts"
+  ],
+  "references": [
+    { "path": "../../api/remotes/tsconfig.client.json" },
+    { "path": "../connection/tsconfig.client.json" },
+    { "path": "../locale" },
+    { "path": "../runtime" },
+    { "path": "../ui-primitives" },
+    { "path": "../ui-settings" },
+    { "path": "../ui-settings-plugins" },
+    { "path": "../ui-sidebar" },
+    { "path": "../ui-slots" },
+    { "path": "../../../vendor/cordis" }
+  ]
+}

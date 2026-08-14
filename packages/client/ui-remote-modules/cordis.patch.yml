@@ -1,0 +1,6 @@
+# Installable bundle seat. Profile-local configuration replaces this disabled
+# row with one or more `instances` entries.
+- insert:
+    - id: ui-remote-modules
+      name: '@deepseek-ai/dsh-client-ui-remote-modules'
+      disabled: true

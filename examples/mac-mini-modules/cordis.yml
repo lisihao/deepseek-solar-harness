@@ -1,0 +1,23 @@
+# MacBook overlay for full Mac mini application pages. SSH owns the target
+# forwards; the plugin owns stable loopback relays that make frame-denying pages
+# embeddable without changing GenesisPod or ThunderOMLX.
+
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3081
+
+- id: ui-remote-modules
+  disabled: false
+  config:
+    instances:
+      - id: genesispod
+        label: GenesisPod
+        url: http://127.0.0.1:13000/
+        relayPort: 3000
+        order: 100
+      - id: thunder-omlx
+        label: ThunderOMLX
+        url: http://127.0.0.1:18002/admin/
+        relayPort: 18102
+        order: 200

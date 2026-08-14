@@ -183,6 +183,12 @@
     - id: ui-sidebar
       name: '@deepseek-ai/dsh-client-ui-sidebar'
 
+    # Generic configurable Web-page plugin. Deployments opt in through a later
+    # patch and may add any number of independently labelled target instances.
+    - id: ui-remote-modules
+      name: '@deepseek-ai/dsh-client-ui-remote-modules'
+      disabled: true
+
     - id: ui-settings
       name: '@deepseek-ai/dsh-client-ui-settings'
 

@@ -1,0 +1,9 @@
+- button "GenesisPod":
+  - img
+  - text: GenesisPod
+- button "ThunderOMLX":
+  - img
+  - text: ThunderOMLX
+- button "Settings":
+  - img
+  - text: Settings

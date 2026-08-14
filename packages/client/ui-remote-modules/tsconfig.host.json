@@ -1,0 +1,21 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+  },
+  "files": [
+    "src/contract.ts",
+    "src/index.ts",
+    "src/invariant.ts",
+    "src/relay.ts"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../host/webserver" },
+    { "path": "../../settings/settings" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

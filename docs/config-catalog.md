@@ -428,6 +428,39 @@ export interface Config {
 
 Source: [`packages/client/hmr/src/index.ts:31`](../packages/client/hmr/src/index.ts)
 
+<a id="deepseek-aidsh-client-ui-remote-modules"></a>
+
+## `@deepseek-ai/dsh-client-ui-remote-modules`
+
+Requires: `webServer` · `settings`
+
+```ts config-catalog
+/** Cordis entry configuration accepted by the plugin. */
+export type Config = RemoteModulesConfig
+
+/** Plugin configuration; every array member becomes an independent page instance. */
+export interface RemoteModulesConfig {
+  /** Non-empty instance list; each member starts one relay and sidebar entry. */
+  instances: WebpageInstanceConfig[]
+}
+
+/** One independently rendered page instance managed by this plugin. */
+export interface WebpageInstanceConfig {
+  /** Stable kebab-case identifier. */
+  id: string
+  /** User-facing sidebar label. */
+  label: string
+  /** Full HTTP(S) target page, including an optional path, query, and fragment. */
+  url: string
+  /** Stable loopback relay port; `0` asks the OS for an ephemeral port. */
+  relayPort: number
+  /** Ascending order inside the vertical sidebar container. */
+  order: number
+}
+```
+
+Source: [`packages/client/ui-remote-modules/src/index.ts:21`](../packages/client/ui-remote-modules/src/index.ts)
+
 <a id="deepseek-aidsh-code-runtime-worker-thread"></a>
 
 ## `@deepseek-ai/dsh-code-runtime-worker-thread`
