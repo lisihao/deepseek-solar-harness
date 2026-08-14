@@ -16,12 +16,12 @@ This profile is an extracted adapter for `/Users/sihaoli/Projects/GenesisPod`; i
 
 ## Scope mapping
 
-| Scope | Representative paths | Required control families |
-| --- | --- | --- |
-| backend | `backend/**`, Prisma | lint, type, full coverage tests, architecture, build/boot, capability and script audits |
-| frontend | `frontend/**` | lint, type, coverage tests, build, UI/i18n/mission audits |
-| governance | `.claude/**`, `.github/**`, `.husky/**`, scripts and package manifests | both product scopes plus governance wiring audit |
-| docs | `docs/**`, Markdown | changed-file formatting and instruction consistency |
+| Scope      | Representative paths                                                   | Required control families                                                               |
+| ---------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| backend    | `backend/**`, Prisma                                                   | lint, type, full coverage tests, architecture, build/boot, capability and script audits |
+| frontend   | `frontend/**`                                                          | lint, type, coverage tests, build, UI/i18n/mission audits                               |
+| governance | `.claude/**`, `.github/**`, `.husky/**`, scripts and package manifests | both product scopes plus governance wiring audit                                        |
+| docs       | `docs/**`, Markdown                                                    | changed-file formatting and instruction consistency                                     |
 
 ## Important limitations
 

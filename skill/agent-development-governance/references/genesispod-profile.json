@@ -11,17 +11,37 @@
     "backend/package.json"
   ],
   "instruction_sources": [
-    {"path": ".claude/CLAUDE.md", "required": true, "kind": "agent-instructions"},
-    {"glob": ".claude/standards/*.md", "required": true, "kind": "development-policy"},
-    {"glob": ".claude/agents/*.md", "required": true, "kind": "role-workflow"},
-    {"glob": ".claude/commands/*.md", "required": true, "kind": "task-workflow"},
-    {"path": "CONTRIBUTING.md", "required": true, "kind": "contributor-policy"},
-    {"path": "SECURITY.md", "required": true, "kind": "security-policy"}
+    {
+      "path": ".claude/CLAUDE.md",
+      "required": true,
+      "kind": "agent-instructions"
+    },
+    {
+      "glob": ".claude/standards/*.md",
+      "required": true,
+      "kind": "development-policy"
+    },
+    {
+      "glob": ".claude/agents/*.md",
+      "required": true,
+      "kind": "role-workflow"
+    },
+    {
+      "glob": ".claude/commands/*.md",
+      "required": true,
+      "kind": "task-workflow"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "required": true,
+      "kind": "contributor-policy"
+    },
+    { "path": "SECURITY.md", "required": true, "kind": "security-policy" }
   ],
   "scope_rules": [
-    {"scope": "backend", "patterns": ["backend/**", "prisma/**"]},
-    {"scope": "frontend", "patterns": ["frontend/**"]},
-    {"scope": "docs", "patterns": ["docs/**", "*.md"]},
+    { "scope": "backend", "patterns": ["backend/**", "prisma/**"] },
+    { "scope": "frontend", "patterns": ["frontend/**"] },
+    { "scope": "docs", "patterns": ["docs/**", "*.md"] },
     {
       "scope": "governance",
       "patterns": [
@@ -42,9 +62,9 @@
     }
   ],
   "hooks": [
-    {"path": ".husky/pre-commit", "required": true},
-    {"path": ".husky/pre-push", "required": true},
-    {"path": ".husky/commit-msg", "required": true}
+    { "path": ".husky/pre-commit", "required": true },
+    { "path": ".husky/pre-push", "required": true },
+    { "path": ".husky/commit-msg", "required": true }
   ],
   "ci_contracts": [
     {
@@ -60,7 +80,10 @@
         "capability-index:"
       ]
     },
-    {"path": ".github/workflows/gitleaks.yml", "required_text": ["gitleaks/gitleaks-action"]}
+    {
+      "path": ".github/workflows/gitleaks.yml",
+      "required_text": ["gitleaks/gitleaks-action"]
+    }
   ],
   "gates": [
     {
@@ -163,7 +186,7 @@
       "id": "backend-lint",
       "label": "Backend lint",
       "command": ["npm", "run", "lint:backend"],
-      "env": {"NODE_OPTIONS": "--max-old-space-size=12288"},
+      "env": { "NODE_OPTIONS": "--max-old-space-size=12288" },
       "cwd": ".",
       "scopes": ["backend"],
       "levels": ["full"],
@@ -182,7 +205,7 @@
       "id": "backend-ci-tests",
       "label": "Backend full coverage tests",
       "command": ["npm", "run", "test:ci"],
-      "env": {"JWT_SECRET": "test_secret", "NODE_ENV": "test"},
+      "env": { "JWT_SECRET": "test_secret", "NODE_ENV": "test" },
       "cwd": "backend",
       "scopes": ["backend"],
       "levels": ["full"],
