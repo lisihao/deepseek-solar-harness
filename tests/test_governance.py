@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = (
@@ -134,6 +135,21 @@ class GovernanceTests(unittest.TestCase):
             context_env={"GOVERNANCE_CHANGED_FROM": "base-ref"},
         )
         self.assertEqual(result[0]["status"], "ok")
+
+    def test_inherited_changed_from_is_scoped_to_project_root(self):
+        nested = self.root / "nested"
+        nested.mkdir()
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "GOVERNANCE_CHANGED_FROM": "base-ref",
+                "GOVERNANCE_PROJECT_ROOT": str(self.root),
+            },
+        ):
+            self.assertEqual(
+                governance.inherited_changed_from(self.root), "base-ref"
+            )
+            self.assertIsNone(governance.inherited_changed_from(nested))
 
     def test_invalid_shell_string_is_rejected(self):
         invalid = dict(self.profile)

@@ -184,6 +184,26 @@ def changed_files(project: Path, changed_from: str | None) -> list[str]:
     return sorted(path.replace(os.sep, "/") for path in files)
 
 
+def inherited_changed_from(project: Path) -> str | None:
+    """Return the parent gate's branch baseline only for the same project.
+
+    Gates may create and inspect nested Git repositories.  A branch reference
+    from the outer project is meaningless there, so scope the inherited value
+    to the project root that originally supplied it.
+    """
+    changed_from = os.environ.get("GOVERNANCE_CHANGED_FROM")
+    if not changed_from:
+        return None
+    context_root = os.environ.get("GOVERNANCE_PROJECT_ROOT")
+    if not context_root:
+        return changed_from
+    try:
+        same_project = Path(context_root).expanduser().resolve() == project.resolve()
+        return changed_from if same_project else None
+    except OSError:
+        return None
+
+
 def git_head(project: Path) -> str:
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -761,7 +781,10 @@ def main() -> int:
     gates_by_id = {gate["id"]: gate for gate in profile["gates"]}
     gates = [gates_by_id[gate_id] for gate_id in payload["gates"]]
     context_env = (
-        {"GOVERNANCE_CHANGED_FROM": args.changed_from}
+        {
+            "GOVERNANCE_CHANGED_FROM": args.changed_from,
+            "GOVERNANCE_PROJECT_ROOT": str(project),
+        }
         if args.changed_from
         else None
     )

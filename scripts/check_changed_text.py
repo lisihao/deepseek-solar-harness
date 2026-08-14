@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -68,16 +67,17 @@ def git_check(project: Path, args: list[str]) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", required=True)
-    parser.add_argument("--changed-from", default=os.environ.get("GOVERNANCE_CHANGED_FROM"))
+    parser.add_argument("--changed-from")
     args = parser.parse_args()
     project = Path(args.project).expanduser().resolve()
     governance = load_governance()
+    changed_from = args.changed_from or governance.inherited_changed_from(project)
     errors = git_check(project, ["diff", "--check"])
     errors += git_check(project, ["diff", "--cached", "--check"])
-    if args.changed_from:
-        errors += git_check(project, ["diff", "--check", f"{args.changed_from}...HEAD"])
+    if changed_from:
+        errors += git_check(project, ["diff", "--check", f"{changed_from}...HEAD"])
 
-    for relative in governance.changed_files(project, args.changed_from):
+    for relative in governance.changed_files(project, changed_from):
         path = project / relative
         if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES:
             continue
