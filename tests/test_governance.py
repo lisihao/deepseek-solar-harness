@@ -119,6 +119,22 @@ class GovernanceTests(unittest.TestCase):
         result = governance.execute_gates(self.root, [gate], False, False)
         self.assertEqual(result[0]["status"], "ok")
 
+    def test_gate_context_environment_is_injected(self):
+        gate = dict(self.profile["gates"][0])
+        gate["command"] = [
+            sys.executable,
+            "-c",
+            "import os; raise SystemExit(0 if os.environ.get('GOVERNANCE_CHANGED_FROM') == 'base-ref' else 8)",
+        ]
+        result = governance.execute_gates(
+            self.root,
+            [gate],
+            False,
+            False,
+            context_env={"GOVERNANCE_CHANGED_FROM": "base-ref"},
+        )
+        self.assertEqual(result[0]["status"], "ok")
+
     def test_invalid_shell_string_is_rejected(self):
         invalid = dict(self.profile)
         invalid["gates"] = [dict(self.profile["gates"][0])]

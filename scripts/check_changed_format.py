@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,7 +32,7 @@ def load_governance():
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", required=True)
-    parser.add_argument("--changed-from")
+    parser.add_argument("--changed-from", default=os.environ.get("GOVERNANCE_CHANGED_FROM"))
     parser.add_argument("--extensions", required=True)
     parser.add_argument("--exclude-prefix", action="append", default=[])
     parser.add_argument("formatter", nargs=argparse.REMAINDER)

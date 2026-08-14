@@ -7,6 +7,7 @@
 - Profile 只接受 argv 数组，不执行 shell 字符串。
 - Gate 环境变量必须在 Profile 的字符串映射中显式声明，由 Harness 注入，不拼接 shell。
 - 改动发现包含 unstaged、staged、untracked 和可选 branch range。
+- Harness 将 `--changed-from` 作为 `GOVERNANCE_CHANGED_FROM` 传给子门禁，保持 clean worktree 的分支差异语义。
 - `check_changed_text.py` 对上述全部改动状态检查 whitespace diff 和冲突标记。
 - `check_changed_format.py` 只把匹配后缀的本次改动文件交给项目 formatter，避免存量格式债务掩盖新回归。
 - scope 和 gate 选择由机器配置决定。

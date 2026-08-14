@@ -493,6 +493,7 @@ def execute_gates(
     gates: list[dict[str, Any]],
     dry_run: bool,
     fail_fast: bool,
+    context_env: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for gate in gates:
@@ -514,7 +515,7 @@ def execute_gates(
             completed = subprocess.run(
                 command,
                 cwd=cwd,
-                env={**os.environ, **environment},
+                env={**os.environ, **(context_env or {}), **environment},
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -759,7 +760,18 @@ def main() -> int:
 
     gates_by_id = {gate["id"]: gate for gate in profile["gates"]}
     gates = [gates_by_id[gate_id] for gate_id in payload["gates"]]
-    results = execute_gates(project, gates, args.dry_run, args.fail_fast)
+    context_env = (
+        {"GOVERNANCE_CHANGED_FROM": args.changed_from}
+        if args.changed_from
+        else None
+    )
+    results = execute_gates(
+        project,
+        gates,
+        args.dry_run,
+        args.fail_fast,
+        context_env=context_env,
+    )
     output = {
         "title": "Governance verification",
         "project": str(project),
