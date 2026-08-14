@@ -10,7 +10,7 @@ import { SettingsScopeBinder } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { apply, inject, SETTINGS_LOCALE_NAMESPACE } from '../src/client/index.ts'
-import { WebpageEntry, WebpageModulesSidebar } from '../src/client/RemoteModuleEntry.tsx'
+import { alignLoopbackEmbedUrl, WebpageEntry, WebpageModulesSidebar } from '../src/client/RemoteModuleEntry.tsx'
 import { createWebpageModulesStore } from '../src/client/store.ts'
 import type { WebpageInstanceView } from '../src/contract.ts'
 
@@ -110,6 +110,15 @@ describe('Web page browser plugin', () => {
 })
 
 describe('Web page instance UI', () => {
+  it('keeps relay cookies same-site when Harness uses an IPv4 loopback address', () => {
+    expect(alignLoopbackEmbedUrl('http://localhost:18102/admin/', '127.0.0.1'))
+      .toBe('http://127.0.0.1:18102/admin/')
+    expect(alignLoopbackEmbedUrl('http://localhost:18102/admin/', 'localhost'))
+      .toBe('http://localhost:18102/admin/')
+    expect(alignLoopbackEmbedUrl('https://example.com/admin/', '127.0.0.1'))
+      .toBe('https://example.com/admin/')
+  })
+
   it('renders every configured instance as a vertical sidebar row', async () => {
     render(<WebpageModulesSidebar
       useSessions={vi.fn()} useWorkspaces={vi.fn()} wide

@@ -26,9 +26,26 @@ interface WebpagePanelProps extends WebpageInstanceView {
   onClose: () => void
 }
 
+/**
+ * Keep a loopback relay on the same browser site as Harness. Chromium rejects
+ * SameSite cookies when Harness is opened through 127.0.0.1 but an iframe uses
+ * localhost, even though both names resolve to this Mac.
+ */
+export function alignLoopbackEmbedUrl(
+  embedUrl: string,
+  pageHostname = window.location.hostname,
+): string {
+  if (!/^127(?:\.\d{1,3}){3}$/.test(pageHostname)) return embedUrl
+  const parsed = new URL(embedUrl)
+  if (parsed.hostname !== 'localhost') return embedUrl
+  parsed.hostname = pageHostname
+  return parsed.href
+}
+
 function WebpagePanel({ id, label, targetUrl, embedUrl, onClose }: WebpagePanelProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null)
   const [frameRevision, setFrameRevision] = useState(0)
+  const browserEmbedUrl = alignLoopbackEmbedUrl(embedUrl)
   useEffect(() => {
     closeButton.current?.focus()
     const onKeyDown = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
@@ -49,7 +66,7 @@ function WebpagePanel({ id, label, targetUrl, embedUrl, onClose }: WebpagePanelP
           </div>
           <div className={css.actions}>
             <Tooltip label="在新窗口打开">
-              <a className={css.iconButton} aria-label={`在新窗口打开 ${label}`} href={embedUrl} target="_blank" rel="noreferrer">
+              <a className={css.iconButton} aria-label={`在新窗口打开 ${label}`} href={browserEmbedUrl} target="_blank" rel="noreferrer">
                 <IconLinkOutline16 size={16} />
               </a>
             </Tooltip>
@@ -70,7 +87,7 @@ function WebpagePanel({ id, label, targetUrl, embedUrl, onClose }: WebpagePanelP
           className={css.webFrame}
           data-testid={`remote-webpage-frame-${id}`}
           title={`${label} 网页`}
-          src={embedUrl}
+          src={browserEmbedUrl}
           allow="clipboard-read; clipboard-write; fullscreen"
           referrerPolicy="no-referrer"
           allowFullScreen
