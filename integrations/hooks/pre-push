@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -eu
+
+# Copy this project-specific adapter into a governed repository and keep the
+# harness path stable. Full enforcement still belongs in required CI.
+PROJECT_ROOT=$(git rev-parse --show-toplevel)
+HARNESS=${AGENT_GOVERNANCE_HARNESS:-"$PROJECT_ROOT/tools/agent-development-governance/governance.py"}
+REPORT="$PROJECT_ROOT/.git/governance-attestation.json"
+
+python3 "$HARNESS" audit --project "$PROJECT_ROOT"
+python3 "$HARNESS" verify \
+  --project "$PROJECT_ROOT" \
+  --scope auto \
+  --level quick \
+  --report "$REPORT"
+python3 "$HARNESS" attest --project "$PROJECT_ROOT" --report "$REPORT" --require-level quick

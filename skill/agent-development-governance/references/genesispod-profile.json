@@ -1,0 +1,278 @@
+{
+  "profile_version": 1,
+  "name": "genesispod",
+  "project_markers": [
+    ".claude/CLAUDE.md",
+    "backend/src/__tests__/architecture",
+    "frontend/package.json",
+    "backend/package.json"
+  ],
+  "instruction_sources": [
+    {"path": ".claude/CLAUDE.md", "required": true, "kind": "agent-instructions"},
+    {"glob": ".claude/standards/*.md", "required": true, "kind": "development-policy"},
+    {"glob": ".claude/agents/*.md", "required": true, "kind": "role-workflow"},
+    {"glob": ".claude/commands/*.md", "required": true, "kind": "task-workflow"},
+    {"path": "CONTRIBUTING.md", "required": true, "kind": "contributor-policy"},
+    {"path": "SECURITY.md", "required": true, "kind": "security-policy"}
+  ],
+  "scope_rules": [
+    {"scope": "backend", "patterns": ["backend/**", "prisma/**"]},
+    {"scope": "frontend", "patterns": ["frontend/**"]},
+    {"scope": "docs", "patterns": ["docs/**", "*.md"]},
+    {
+      "scope": "governance",
+      "patterns": [
+        ".claude/**",
+        ".github/**",
+        ".husky/**",
+        "scripts/**",
+        "package.json",
+        "package-lock.json",
+        "backend/package.json",
+        "frontend/package.json",
+        ".lintstagedrc.js",
+        "commitlint.config.js"
+      ],
+      "expands": ["backend", "frontend"]
+    }
+  ],
+  "hooks": [
+    {"path": ".husky/pre-commit", "required": true},
+    {"path": ".husky/pre-push", "required": true},
+    {"path": ".husky/commit-msg", "required": true}
+  ],
+  "ci_contracts": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "required_text": ["ci-status:", "arch-boundary:", "ui-discipline:", "boot-smoke:", "capability-index:"]
+    },
+    {"path": ".github/workflows/gitleaks.yml", "required_text": ["gitleaks/gitleaks-action"]}
+  ],
+  "gates": [
+    {
+      "id": "diff-check",
+      "label": "Git whitespace and conflict check",
+      "command": ["git", "diff", "--check"],
+      "cwd": ".",
+      "scopes": ["always"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "backend-architecture",
+      "label": "Backend architecture contracts",
+      "command": ["npm", "run", "verify:arch"],
+      "cwd": "backend",
+      "scopes": ["backend"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 900
+    },
+    {
+      "id": "backend-typecheck",
+      "label": "Backend TypeScript type check",
+      "command": ["npm", "run", "type-check"],
+      "cwd": "backend",
+      "scopes": ["backend"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 900
+    },
+    {
+      "id": "frontend-typecheck",
+      "label": "Frontend TypeScript type check",
+      "command": ["npm", "run", "type-check"],
+      "cwd": "frontend",
+      "scopes": ["frontend"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 900
+    },
+    {
+      "id": "backend-quick-tests",
+      "label": "Backend quick test suite",
+      "command": ["npm", "run", "test:quick"],
+      "cwd": "backend",
+      "scopes": ["backend"],
+      "levels": ["quick"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "frontend-tests",
+      "label": "Frontend test suite",
+      "command": ["npm", "run", "test"],
+      "cwd": "frontend",
+      "scopes": ["frontend"],
+      "levels": ["quick"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "format",
+      "label": "Repository formatting",
+      "command": ["npm", "run", "format:check"],
+      "cwd": ".",
+      "scopes": ["backend", "frontend", "docs", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 900
+    },
+    {
+      "id": "backend-lint",
+      "label": "Backend lint",
+      "command": ["npm", "run", "lint:backend"],
+      "cwd": ".",
+      "scopes": ["backend"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "frontend-lint",
+      "label": "Frontend lint",
+      "command": ["npm", "run", "lint:frontend"],
+      "cwd": ".",
+      "scopes": ["frontend"],
+      "levels": ["full"],
+      "timeout_seconds": 1200
+    },
+    {
+      "id": "backend-ci-tests",
+      "label": "Backend full coverage tests",
+      "command": ["npm", "run", "test:ci"],
+      "cwd": "backend",
+      "scopes": ["backend"],
+      "levels": ["full"],
+      "timeout_seconds": 3600
+    },
+    {
+      "id": "frontend-ci-tests",
+      "label": "Frontend full coverage tests",
+      "command": ["npm", "run", "test:ci", "--", "--coverage"],
+      "cwd": "frontend",
+      "scopes": ["frontend"],
+      "levels": ["full"],
+      "timeout_seconds": 2400
+    },
+    {
+      "id": "backend-build",
+      "label": "Backend production build",
+      "command": ["npm", "run", "build"],
+      "cwd": "backend",
+      "scopes": ["backend"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "backend-boot",
+      "label": "Backend DI boot smoke",
+      "command": ["npm", "run", "test:boot"],
+      "cwd": "backend",
+      "scopes": ["backend"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "frontend-build",
+      "label": "Frontend production build",
+      "command": ["npm", "run", "build"],
+      "cwd": "frontend",
+      "scopes": ["frontend"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "facade-boundary",
+      "label": "Facade boundary audit",
+      "command": ["npm", "run", "check:facade"],
+      "cwd": ".",
+      "scopes": ["backend", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "backend-capability-audit",
+      "label": "Backend capability anti-pattern audit",
+      "command": ["npm", "run", "audit:capability"],
+      "cwd": "backend",
+      "scopes": ["backend"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "backend-scripts-audit",
+      "label": "Backend scripts governance audit",
+      "command": ["npm", "run", "audit:scripts"],
+      "cwd": "backend",
+      "scopes": ["backend", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "ui-discipline",
+      "label": "Frontend canonical UI discipline",
+      "command": ["npm", "run", "audit:ui-discipline"],
+      "cwd": ".",
+      "scopes": ["frontend"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "ui-tokens",
+      "label": "Frontend design-token discipline",
+      "command": ["npm", "run", "audit:ui-tokens"],
+      "cwd": ".",
+      "scopes": ["frontend"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "i18n-placeholders",
+      "label": "i18n placeholder syntax",
+      "command": ["npx", "tsx", "scripts/utils/audit-i18n-placeholders.ts"],
+      "cwd": ".",
+      "scopes": ["frontend"],
+      "levels": ["full"],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "i18n-hardcoded",
+      "label": "Hardcoded Chinese ratchet",
+      "command": ["npm", "run", "audit:i18n-hardcoded"],
+      "cwd": ".",
+      "scopes": ["frontend"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "mission-detail",
+      "label": "Mission detail UI ratchet",
+      "command": ["npm", "run", "audit:mission-detail"],
+      "cwd": ".",
+      "scopes": ["frontend"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "tool-categories",
+      "label": "Frontend/backend tool category parity",
+      "command": ["npm", "run", "audit:tool-categories"],
+      "cwd": ".",
+      "scopes": ["backend", "frontend"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "ai-app-docs",
+      "label": "AI application documentation coverage",
+      "command": ["npm", "run", "audit:ai-app-docs"],
+      "cwd": ".",
+      "scopes": ["backend", "frontend", "docs"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "capability-index",
+      "label": "Capability index drift check",
+      "command": ["npm", "run", "capabilities:check"],
+      "cwd": ".",
+      "scopes": ["backend", "frontend", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    }
+  ]
+}

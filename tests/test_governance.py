@@ -1,0 +1,162 @@
+import importlib.util
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+SCRIPT = (
+    Path(__file__).resolve().parents[1]
+    / "skill"
+    / "agent-development-governance"
+    / "scripts"
+    / "governance.py"
+)
+TEXT_CHECK = Path(__file__).resolve().parents[1] / "scripts" / "check_changed_text.py"
+SPEC = importlib.util.spec_from_file_location("governance", SCRIPT)
+assert SPEC and SPEC.loader
+governance = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(governance)
+
+
+class GovernanceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=self.root, check=True)
+        (self.root / "src").mkdir()
+        (self.root / "tests").mkdir()
+        (self.root / ".github").mkdir()
+        (self.root / "package.json").write_text('{"scripts": {}}\n', encoding="utf-8")
+        (self.root / "src" / "tracked.py").write_text("VALUE = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "initial"], cwd=self.root, check=True)
+        self.profile_path = self.root / "profile.json"
+        self.profile = {
+            "profile_version": 1,
+            "name": "fixture",
+            "project_markers": ["package.json"],
+            "instruction_sources": [],
+            "scope_rules": [
+                {"scope": "source", "patterns": ["src/**", "tests/**"]},
+                {
+                    "scope": "governance",
+                    "patterns": [".github/**"],
+                    "expands": ["source"],
+                },
+            ],
+            "gates": [
+                {
+                    "id": "always",
+                    "label": "always",
+                    "command": [sys.executable, "-c", "raise SystemExit(0)"],
+                    "cwd": ".",
+                    "scopes": ["always"],
+                    "levels": ["quick", "full"],
+                },
+                {
+                    "id": "source",
+                    "label": "source",
+                    "command": [sys.executable, "-c", "raise SystemExit(0)"],
+                    "cwd": ".",
+                    "scopes": ["source"],
+                    "levels": ["full"],
+                },
+            ],
+        }
+        self.profile_path.write_text(json.dumps(self.profile), encoding="utf-8")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_changed_files_include_untracked(self):
+        (self.root / "src" / "new.py").write_text("VALUE = 2\n", encoding="utf-8")
+        files = governance.changed_files(self.root, None)
+        self.assertIn("src/new.py", files)
+
+    def test_governance_scope_expands_to_source(self):
+        scopes = governance.infer_scopes(
+            self.profile, [".github/workflows.yml"], "auto"
+        )
+        self.assertEqual(scopes, ["governance", "source"])
+
+    def test_root_only_pattern_does_not_match_nested_file(self):
+        self.assertTrue(governance.matches("README.md", ["*.md"]))
+        self.assertFalse(governance.matches("docs/README.md", ["*.md"]))
+
+    def test_full_plan_selects_always_and_source(self):
+        (self.root / "src" / "new.py").write_text("VALUE = 2\n", encoding="utf-8")
+        payload = governance.plan_payload(
+            self.root, self.profile, self.profile_path, "auto", "full", None
+        )
+        self.assertEqual(payload["gates"], ["always", "source"])
+
+    def test_verify_propagates_failure(self):
+        gate = dict(self.profile["gates"][0])
+        gate["command"] = [sys.executable, "-c", "raise SystemExit(7)"]
+        result = governance.execute_gates(self.root, [gate], False, False)
+        self.assertEqual(result[0]["status"], "error")
+        self.assertEqual(result[0]["returncode"], 7)
+
+    def test_invalid_shell_string_is_rejected(self):
+        invalid = dict(self.profile)
+        invalid["gates"] = [dict(self.profile["gates"][0])]
+        invalid["gates"][0]["command"] = "echo unsafe"
+        with self.assertRaises(governance.GovernanceError):
+            governance.validate_profile(invalid, self.profile_path)
+
+    def test_gate_cannot_escape_project(self):
+        invalid = dict(self.profile)
+        invalid["gates"] = [dict(self.profile["gates"][0])]
+        invalid["gates"][0]["cwd"] = "../outside"
+        with self.assertRaises(governance.GovernanceError):
+            governance.validate_profile(invalid, self.profile_path)
+
+    def test_untracked_trailing_whitespace_fails_changed_text_check(self):
+        (self.root / "src" / "bad.py").write_text("VALUE = 1  \n", encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(TEXT_CHECK), "--project", str(self.root)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("trailing whitespace", result.stdout)
+
+    def test_attestation_becomes_stale_after_file_change(self):
+        (self.root / "src" / "new.py").write_text("VALUE = 2\n", encoding="utf-8")
+        payload = governance.plan_payload(
+            self.root, self.profile, self.profile_path, "auto", "full", None
+        )
+        gates = governance.select_gates(self.profile, payload["scopes"], "full")
+        results = governance.execute_gates(self.root, gates, False, False)
+        report = self.root / "attestation.json"
+        governance.write_attestation(
+            report,
+            self.root,
+            self.profile,
+            self.profile_path,
+            payload,
+            results,
+            None,
+        )
+        fresh = governance.check_attestation(
+            report, self.root, self.profile, self.profile_path, "full"
+        )
+        self.assertTrue(all(item["status"] == "ok" for item in fresh["items"]))
+
+        (self.root / "src" / "new.py").write_text("VALUE = 3\n", encoding="utf-8")
+        stale = governance.check_attestation(
+            report, self.root, self.profile, self.profile_path
+        )
+        failed = {item["id"] for item in stale["items"] if item["status"] == "error"}
+        self.assertIn("fingerprint", failed)
+
+
+if __name__ == "__main__":
+    unittest.main()

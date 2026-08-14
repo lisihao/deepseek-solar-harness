@@ -1,0 +1,84 @@
+{
+  "profile_version": 1,
+  "name": "agent-development-governance",
+  "project_markers": [
+    "README.md",
+    "scripts/governance.py",
+    "skill/agent-development-governance/SKILL.md"
+  ],
+  "instruction_sources": [
+    {"path": "README.md", "required": true, "kind": "project-contract"},
+    {"glob": "docs/*.md", "required": true, "kind": "architecture-and-analysis"},
+    {
+      "path": "skill/agent-development-governance/SKILL.md",
+      "required": true,
+      "kind": "agent-adapter"
+    }
+  ],
+  "scope_rules": [
+    {"scope": "harness", "patterns": ["scripts/**", "tests/**"]},
+    {"scope": "skill", "patterns": ["skill/**", "README.md", "docs/**"]},
+    {
+      "scope": "governance",
+      "patterns": ["*", ".agent-governance/**", "integrations/**"],
+      "expands": ["harness", "skill"]
+    }
+  ],
+  "hooks": [],
+  "ci_contracts": [],
+  "gates": [
+    {
+      "id": "diff-check",
+      "label": "Whitespace and conflict check",
+      "command": ["python3", "scripts/check_changed_text.py", "--project", "."],
+      "cwd": ".",
+      "scopes": ["always"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "python-compile",
+      "label": "Python syntax compilation",
+      "command": [
+        "python3",
+        "-m",
+        "py_compile",
+        "scripts/governance.py",
+        "scripts/check_changed_text.py",
+        "scripts/validate_skill.py",
+        "tests/test_governance.py"
+      ],
+      "cwd": ".",
+      "scopes": ["harness", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "unit-tests",
+      "label": "Code Harness regression tests",
+      "command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+      "cwd": ".",
+      "scopes": ["harness", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "skill-contract",
+      "label": "Shared Skill and profile contract",
+      "command": ["python3", "scripts/validate_skill.py"],
+      "cwd": ".",
+      "scopes": ["harness", "skill", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "self-audit",
+      "label": "Self-governance wiring audit",
+      "command": ["python3", "scripts/governance.py", "audit", "--project", "."],
+      "cwd": ".",
+      "scopes": ["harness", "skill", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 120
+    }
+  ]
+}
