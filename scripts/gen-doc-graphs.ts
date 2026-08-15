@@ -76,6 +76,7 @@ const GROUP_ORDER = [
   'skill',
   'compact',
   'subagent',
+  'physical-operator',
   'tasks',
   'workflow',
   'web',
@@ -196,6 +197,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     implementations: ['session-telemetry-otel'],
     consumers: [],
     note: 'The seam captures, redacts, and hands session records to one backend; nothing else consumes the service — its output leaves the process.',
+  },
+  {
+    key: 'physicalOperators',
+    pkg: 'physical-operator',
+    title: 'Physical operator registry',
+    mode: 'seam',
+    implementations: ['physical-operator-subagent'],
+    consumers: ['tool-physical-operator'],
+    note: 'Stable deployment-owned operator ids, live availability, fail-fast capacity admission, and paired lifecycle events; the first provider delegates execution through ctx.subagents without exposing transport to the consumer.',
   },
   {
     key: 'storage',

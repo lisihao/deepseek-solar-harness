@@ -61,6 +61,9 @@
         "acp-agent/tests/fixtures/subagent/subagent-claude-code/driver.ts",
         "acp-agent/tests/fixtures/subagent/subagent-codex/fixture.ts",
         "acp-agent/tests/fixtures/subagent/subagent-codex/driver.ts",
+        "acp-agent/tests/fixtures/physical-operator/subagent/driver.ts",
+        "acp-agent/tests/fixtures/physical-operator/subagent/fixture.ts",
+        "acp-agent/tests/fixtures/physical-operator/subagent/product-driver.ts",
         "jsonrpc-agent/tests/fixtures/subagent/subagent-dsh-sdk/driver.ts",
         "jsonrpc-agent/tests/fixtures/subagent/subagent-dsh-sdk/child-mock-llm.ts",
         "jsonrpc-agent/tests/fixtures/subagent/subagent-dsh-sdk/mock-delegating-llm.ts",
@@ -246,6 +249,16 @@
     "packages/*/*": {
       "entry": [
         "tests/**/*.spec.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
+    "packages/physical-operator/physical-operator-subagent": {
+      "entry": [
+        "tests/**/*.spec.ts",
+        "tests/**/*.e2e.ts"
       ],
       "project": [
         "src/**/*.ts",

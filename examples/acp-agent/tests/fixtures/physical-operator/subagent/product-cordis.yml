@@ -1,0 +1,60 @@
+# Real product-provider mapping proof. Loading this tree registers the two
+# stable physical operator ids without probing or starting either product.
+- id: fixture
+  name: './fixture.ts'
+
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+
+- id: subagent-codex
+  name: '@deepseek-ai/dsh-subagent-codex'
+
+- id: subagent-claude-code
+  name: '@deepseek-ai/dsh-subagent-claude-code'
+
+- id: physical-operator
+  name: '@deepseek-ai/dsh-physical-operator'
+
+- id: physical-operator-subagent
+  name: '@deepseek-ai/dsh-physical-operator-subagent'
+  config:
+    operators:
+      - id: physics-codex
+        provider: codex
+        displayName: Physics via Codex
+        description: Solves one bounded physics task with the Codex product provider.
+        tags:
+          - physics
+          - codex
+      - id: physics-claude-code
+        provider: claude-code
+        displayName: Physics via Claude Code
+        description: Solves one bounded physics task with the Claude Code product provider.
+        tags:
+          - physics
+          - claude-code
+
+- id: tool-physical-operator
+  name: '@deepseek-ai/dsh-tool-physical-operator'
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents:
+      - id: main
+        provider: fixture
+        model: fixture
+        cwd: !!js process.cwd()
+    persona: 'This composition test must not start a model or product turn.'
+    workspaceContext: false
+
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+
+- id: checkpoint-policy
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'

@@ -28,6 +28,7 @@ import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentLimits, ImageAttachmentRef, SaveImageAttachment, StoredImageAttachment } from '@deepseek-ai/dsh-attachment'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import PlanModeController from '@deepseek-ai/dsh-plan-mode'
+import PhysicalOperatorRuntime from '@deepseek-ai/dsh-physical-operator'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import * as WebSearchExa from '@deepseek-ai/dsh-web-search-exa'
 import * as WebFetchLocal from '@deepseek-ai/dsh-web-fetch-http'
@@ -54,6 +55,7 @@ import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
 import * as ToolSchedule from '@deepseek-ai/dsh-schedule'
 import Lsp from '@deepseek-ai/dsh-lsp'
 import * as ToolLsp from '@deepseek-ai/dsh-tool-lsp'
+import * as ToolPhysicalOperator from '@deepseek-ai/dsh-tool-physical-operator'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import * as ToolSessionQuery from '@deepseek-ai/dsh-tool-session-query'
 import * as ToolTasks from '@deepseek-ai/dsh-tool-jobs'
@@ -220,6 +222,20 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-physical-operator',
+    dir: 'tool-physical-operator',
+    source: 'packages/physical-operator/tool-physical-operator/src/index.ts',
+    requires: ['ctx.tools', 'ctx.physicalOperators', 'a calling Agent for action=run'],
+    writes: ['tool/call', 'tool/result', 'physical-operator lifecycle through the selected provider'],
+    async mount(ctx) {
+      await ctx.plugin(PhysicalOperatorRuntime)
+      await ctx.plugin(ToolPhysicalOperator)
+    },
+    note:
+      'The schema exposes stable physical-operator ids rather than provider transports. '
+      + 'Deployments register operators separately; the catalog intentionally harvests the empty-registry schema.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-bash',

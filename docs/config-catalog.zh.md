@@ -1391,6 +1391,38 @@ export interface Config {
 
 来源：[`packages/preset/persona/src/index.ts:34`](../packages/preset/persona/src/index.ts)
 
+<a id="deepseek-aidsh-physical-operator-subagent"></a>
+
+## `@deepseek-ai/dsh-physical-operator-subagent`
+
+需要：`physicalOperators` · `subagents`
+
+```ts config-catalog
+/** Plugin configuration containing one or more operator mappings. */
+export interface Config {
+  /** Stable operator identities and their existing subagent provider bindings. */
+  readonly operators: OperatorConfig[]
+}
+
+/** Declarative mapping from one physical operator to a DSH subagent provider. */
+export interface OperatorConfig {
+  /** Stable caller-visible operator identity. */
+  readonly id: string
+  /** Existing `ctx.subagents` provider name, such as `codex` or `claude-code`. */
+  readonly provider: string
+  /** Human-readable operator name. */
+  readonly displayName: string
+  /** Concise intended-use description. */
+  readonly description: string
+  /** Selection hints surfaced by discovery; no authority semantics. */
+  readonly tags?: string[]
+  /** Fail-fast concurrent execution capacity. Defaults to one. */
+  readonly maxConcurrency?: number
+}
+```
+
+来源：[`packages/physical-operator/physical-operator-subagent/src/index.ts:41`](../packages/physical-operator/physical-operator-subagent/src/index.ts)
+
 <a id="deepseek-aidsh-plan-mode"></a>
 
 ## `@deepseek-ai/dsh-plan-mode`
@@ -3108,6 +3140,7 @@ export interface Config {
 - `@deepseek-ai/dsh-host-plugin-inventory` — 需要 `loader`（[`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts)）
 - `@deepseek-ai/dsh-llm`（[`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts)）
 - `@deepseek-ai/dsh-lsp`（[`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts)）
+- `@deepseek-ai/dsh-physical-operator`（[`packages/physical-operator/physical-operator/src/index.ts`](../packages/physical-operator/physical-operator/src/index.ts)）
 - `@deepseek-ai/dsh-schedule` — 需要 `agents` · `sessions` · `tools` · `sessionPersistence`（[`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts)）
 - `@deepseek-ai/dsh-session`（[`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts)）
 - `@deepseek-ai/dsh-session-checkpoint-policy` — 需要 `llm` · `sessionPersistence` · `sessions` · `tools`（[`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts)）
@@ -3122,6 +3155,7 @@ export interface Config {
 - `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userInteraction`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
 - `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect`（[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
+- `@deepseek-ai/dsh-tool-physical-operator` — 需要 `tools` · `physicalOperators`（[`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts)）
 - `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents`（[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）
 - `@deepseek-ai/dsh-user-questions`（[`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-workspace` — 需要 `storageDomain` · `sessionPersistence`（[`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts)）

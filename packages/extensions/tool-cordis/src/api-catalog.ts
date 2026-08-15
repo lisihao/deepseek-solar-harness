@@ -945,6 +945,43 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'physicalOperators',
+    summary: 'Registry and execution admission service for deployment-defined physical operators.',
+    description: 'Registry and execution admission service for deployment-defined physical operators.',
+    methods: [
+      {
+        signature: 'registerOperator(operator: PhysicalOperator): () => Promise<void>',
+        description: 'Register one operator. The registration follows the caller fiber and is safe to remove while accepted executions finish under holder ownership.',
+        parameters: [{ name: 'operator', description: 'trusted implementation and immutable descriptor to register.' }],
+        returns: 'the exact asynchronous Cordis effect disposer.',
+      },
+      {
+        signature: 'getOperator(id: string): PhysicalOperator | undefined',
+        description: 'Resolve one registered operator, or undefined when it is absent.',
+        parameters: [{ name: 'id', description: 'stable operator identity to resolve.' }],
+        returns: 'the current registered implementation, when present.',
+      },
+      {
+        signature: 'list(): PhysicalOperatorStatus[]',
+        description: 'Return live status snapshots in registration order.',
+        parameters: [],
+        returns: 'provider availability combined with service-owned capacity.',
+      },
+      {
+        signature: 'status(id: string): PhysicalOperatorStatus',
+        description: 'Resolve one live status or fail loud for an unknown operator id.',
+        parameters: [{ name: 'id', description: 'stable operator identity to inspect.' }],
+        returns: 'the current status snapshot.',
+      },
+      {
+        signature: 'async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun>',
+        description: 'Admit and publish one execution. Capacity is reserved synchronously before provider startup and released exactly once when the result settles.',
+        parameters: [{ name: 'id', description: 'stable operator identity to execute.' }, { name: 'request', description: 'caller-owned task, parent, and cancellation signal.' }],
+        returns: 'the accepted, holder-owned execution handle.',
+      },
+    ],
+  },
+  {
     key: 'planMode',
     summary: '`ctx.planMode`: owns logged plan state, applies and narrates selected state at step start, the `plan:policy` section, the `/plan` command, and the stable exit tool.',
     description: '`ctx.planMode`: owns logged plan state, applies and narrates selected state at step start, the `plan:policy` section, the `/plan` command, and the stable exit tool. UIs observe committed flips through `session/event`; there is no live mirror.',
@@ -2398,6 +2435,38 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'options', description: 'the full request. A LOOP-built request carries the process-local {@link markAgentLoopRequest} identity and arrives deep-frozen (mutation throws): its content is a pure function of the session log (the reconstructability Agent Note), so listeners read it, never rewrite it. Hand-built calls do not carry that marker; their messages already obey the immutable creation contract.' }],
   },
   {
+    name: 'physical-operator/added',
+    mode: 'emit',
+    signature: '\'physical-operator/added\'(operator: PhysicalOperator): void',
+    summary: 'A stable operator became discoverable.',
+    description: 'A stable operator became discoverable.',
+    parameters: [{ name: 'operator', description: 'newly registered implementation and descriptor.' }],
+  },
+  {
+    name: 'physical-operator/end',
+    mode: 'emit',
+    signature: '\'physical-operator/end\'(info: PhysicalOperatorExecutionEndInfo): void',
+    summary: 'A published execution settled.',
+    description: 'A published execution settled.',
+    parameters: [{ name: 'info', description: 'paired execution identity and terminal reason.' }],
+  },
+  {
+    name: 'physical-operator/removed',
+    mode: 'emit',
+    signature: '\'physical-operator/removed\'(id: PhysicalOperatorId): void',
+    summary: 'An operator stopped accepting new executions.',
+    description: 'An operator stopped accepting new executions. Accepted runs survive.',
+    parameters: [{ name: 'id', description: 'stable identity removed from discovery.' }],
+  },
+  {
+    name: 'physical-operator/start',
+    mode: 'emit',
+    signature: '\'physical-operator/start\'(info: PhysicalOperatorExecutionInfo): void',
+    summary: 'A provider published an accepted execution.',
+    description: 'A provider published an accepted execution.',
+    parameters: [{ name: 'info', description: 'stable operator and unique execution identities.' }],
+  },
+  {
     name: 'session-telemetry/record',
     mode: 'waterfall',
     signature: '\'session-telemetry/record\'(record: SessionTelemetryRecord, next: () => SessionTelemetryRecord): SessionTelemetryRecord',
@@ -3476,6 +3545,62 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PermissionSelect',
     declaration: 'export interface PermissionSelect {\n    options: PresetOption[];\n    currentValue: string;\n}',
+  },
+  {
+    name: 'PhysicalOperator',
+    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(): PhysicalOperatorAvailability;\n    start(request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
+  },
+  {
+    name: 'PhysicalOperatorAvailability',
+    declaration: 'export type PhysicalOperatorAvailability = {\n    readonly available: true;\n} | {\n    readonly available: false;\n    readonly reason: string;\n};',
+  },
+  {
+    name: 'PhysicalOperatorDescriptor',
+    declaration: 'export interface PhysicalOperatorDescriptor {\n    readonly id: PhysicalOperatorId;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n}',
+  },
+  {
+    name: 'PhysicalOperatorExecutionEndInfo',
+    declaration: 'export interface PhysicalOperatorExecutionEndInfo extends PhysicalOperatorExecutionInfo {\n    readonly stopReason: PhysicalOperatorStopReason;\n}',
+  },
+  {
+    name: 'PhysicalOperatorExecutionId',
+    declaration: 'export type PhysicalOperatorExecutionId = Branded<\'PhysicalOperatorExecutionId\'>;',
+  },
+  {
+    name: 'PhysicalOperatorExecutionInfo',
+    declaration: 'export interface PhysicalOperatorExecutionInfo {\n    readonly executionId: PhysicalOperatorExecutionId;\n    readonly operatorId: PhysicalOperatorId;\n}',
+  },
+  {
+    name: 'PhysicalOperatorId',
+    declaration: 'export type PhysicalOperatorId = Branded<\'PhysicalOperatorId\'>;',
+  },
+  {
+    name: 'PhysicalOperatorProviderRun',
+    declaration: 'export interface PhysicalOperatorProviderRun {\n    readonly result: Promise<PhysicalOperatorResult>;\n    dispose(): Promise<void>;\n}',
+  },
+  {
+    name: 'PhysicalOperatorResult',
+    declaration: 'export interface PhysicalOperatorResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n}',
+  },
+  {
+    name: 'PhysicalOperatorRun',
+    declaration: 'export interface PhysicalOperatorRun extends PhysicalOperatorProviderRun {\n    readonly id: PhysicalOperatorExecutionId;\n    readonly operatorId: PhysicalOperatorId;\n}',
+  },
+  {
+    name: 'PhysicalOperatorStartRequest',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
+    name: 'PhysicalOperatorStatus',
+    declaration: 'export interface PhysicalOperatorStatus extends PhysicalOperatorDescriptor {\n    readonly state: \'available\' | \'busy\' | \'unavailable\';\n    readonly active: number;\n    readonly unavailableReason?: string;\n}',
+  },
+  {
+    name: 'PhysicalOperatorStopReason',
+    declaration: 'export type PhysicalOperatorStopReason = PhysicalOperatorStopReasonMap[keyof PhysicalOperatorStopReasonMap];',
+  },
+  {
+    name: 'PhysicalOperatorStopReasonMap',
+    declaration: 'export interface PhysicalOperatorStopReasonMap {\n    completed: \'completed\';\n    aborted: \'aborted\';\n    error: \'error\';\n    \'max-tokens\': \'max-tokens\';\n    refusal: \'refusal\';\n}',
   },
   {
     name: 'PostToolDecision',
