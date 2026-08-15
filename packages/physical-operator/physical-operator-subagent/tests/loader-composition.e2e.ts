@@ -78,7 +78,10 @@ describe('physical-operator public Loader composition', () => {
 
     expect(stderr).toBe('')
     expect(JSON.parse(stdout)).toEqual({
-      providers: ['codex', 'claude-code'],
+      providers: [
+        { name: 'codex', authentication: { mode: 'native-subscription' } },
+        { name: 'claude-code', authentication: { mode: 'native-subscription' } },
+      ],
       operators: [
         { id: 'physics-codex', state: 'available', active: 0, maxConcurrency: 1 },
         { id: 'physics-claude-code', state: 'available', active: 0, maxConcurrency: 1 },

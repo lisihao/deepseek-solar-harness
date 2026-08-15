@@ -4219,6 +4219,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type StreamChunk = {\n    type: \'block-start\';\n    index: number;\n    blockType: ContentBlockType;\n} | {\n    type: \'text-delta\';\n    index: number;\n    text: string;\n} | {\n    type: \'reasoning-delta\';\n    index: number;\n    text: string;\n} | {\n    type: \'tool-call-delta\';\n    index: number;\n    id: CallId;\n    name?: string;\n    argumentsDelta: string;\n} | {\n    type: \'block-end\';\n    index: number;\n    block: ContentBlock;\n} | {\n    type: \'usage\';\n    usage: TokenUsage;\n} | {\n    type: \'finish\';\n    reason: FinishReason;\n    replayState?: unknown;\n};',
   },
   {
+    name: 'SubagentAuthentication',
+    declaration: 'export interface SubagentAuthentication {\n    readonly mode: SubagentAuthenticationMode;\n}',
+  },
+  {
+    name: 'SubagentAuthenticationMode',
+    declaration: 'export type SubagentAuthenticationMode = \'native-subscription\' | \'explicit-environment\';',
+  },
+  {
     name: 'SubagentCapabilities',
     declaration: 'export interface SubagentCapabilities {\n    readonly outputSchema: boolean;\n    readonly depthLimit: boolean;\n    readonly toolFilter: boolean;\n    readonly persona: boolean;\n}',
   },
@@ -4240,7 +4248,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentProvider',
-    declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly capabilities: SubagentCapabilities;\n    readonly inheritsParentContext: boolean;\n    start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>;\n}',
+    declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly authentication?: SubagentAuthentication;\n    readonly capabilities: SubagentCapabilities;\n    readonly inheritsParentContext: boolean;\n    start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>;\n}',
   },
   {
     name: 'SubagentReportDelivery',

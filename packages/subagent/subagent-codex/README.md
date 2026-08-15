@@ -27,6 +27,8 @@ The provider advertises no optional start-time capabilities and reports `inherit
 
 Production resolves `codex` from `PATH` and uses the host's native Codex configuration and authentication. The plugin does not install Codex, select a model, create `CODEX_HOME`, log in, or probe a version. Credential-shaped ambient variables are removed by the subprocess seam, so an API key intended for the child must be supplied explicitly in `env`; ordinary ambient values such as `PATH` and `HOME` remain available unless overridden.
 
+An empty `env` makes the provider attest `authentication.mode: native-subscription`; any explicit entry makes it attest `explicit-environment`. This is deliberately conservative: even a non-secret override removes the provider's ability to attest the untouched native-account path. The physical-operator adapter accepts `codex` only in `native-subscription` mode and fails closed for explicit or missing attestations. The generic subagent provider remains usable with an explicit environment for deployments that intentionally choose API billing.
+
 Shipped profiles load this provider once on the host and start no Codex process until a tool call. Full Agent Presets carry the tool row below with `disabled: true`; copy a preset and remove that field to expose `subagent_codex` only to agents composed from the copy. A custom host composition can still use both rows directly.
 
 ```yaml
@@ -84,6 +86,7 @@ Append-only: the new tool result follows the reusable parent request prefix.
 
 - **One fresh process, thread, and turn per run** — there is no continuation, resume, pooling, progress stream, or product-session persistence.
 - **Host-managed product installation and account state** — a missing or incompatible `codex`, configuration error, or authentication failure is surfaced as a startup or run error; the plugin provides no installer, login flow, or runtime version gate.
+- **Attestation is configuration-derived** — `native-subscription` proves that DSH supplied no explicit child environment; a live canary is still required to prove that the host's current native login is valid and subscription-backed.
 - **Compatibility is pinned by development evidence** — upgrading from the verified 0.147.0 protocol baseline requires regenerating upstream schema evidence and rerunning handshake, answer-selection, approval, cancellation, keyless real-product, and credentialed DeepSeek nonce tests.
 - **No human approval path** — known unattended approval requests are denied and unknown server requests fail closed; deployments cannot configure an allow policy through this package.
 - **Final text only** — reasoning, commentary, intermediate messages, tool traffic, usage, stderr, and workspace diffs remain product-local.

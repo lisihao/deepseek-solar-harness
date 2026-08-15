@@ -1,0 +1,63 @@
+# Manual live canary for the complete subscription-only physical-operator route.
+# The caller supplies isolated roots through DSH_CANARY_*; product providers
+# intentionally receive no explicit env entries.
+- id: fixture
+  name: './fixture.ts'
+
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+
+- id: subagent-codex
+  name: '@deepseek-ai/dsh-subagent-codex'
+
+- id: subagent-claude-code
+  name: '@deepseek-ai/dsh-subagent-claude-code'
+
+- id: physical-operator
+  name: '@deepseek-ai/dsh-physical-operator'
+
+- id: physical-operator-subagent
+  name: '@deepseek-ai/dsh-physical-operator-subagent'
+  config:
+    operators:
+      - id: physics-codex
+        provider: codex
+        displayName: Physics via Codex
+        description: Runs one bounded native-subscription Codex canary.
+        tags: [physics, codex, subscription]
+      - id: physics-claude-code
+        provider: claude-code
+        displayName: Physics via Claude Code
+        description: Runs one bounded native-subscription Claude Code canary.
+        tags: [physics, claude-code, subscription]
+
+- id: tool-physical-operator
+  name: '@deepseek-ai/dsh-tool-physical-operator'
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents:
+      - id: main
+        provider: fixture
+        model: fixture
+        cwd: !!js process.env.DSH_CANARY_WORKSPACE
+    persona: 'Manual subscription canary parent; no parent model turn is allowed.'
+    dshHome: !!js process.env.DSH_CANARY_HOME
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+    goals: false
+    workspaceContext: false
+
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: !!js process.env.DSH_CANARY_SESSIONS
+
+- id: checkpoint-policy
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'

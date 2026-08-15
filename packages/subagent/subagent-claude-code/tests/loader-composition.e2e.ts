@@ -35,6 +35,7 @@ describe('product-provider public Loader composition', () => {
       providers: [
         {
           name: 'codex',
+          authentication: { mode: 'native-subscription' },
           capabilities: {
             outputSchema: false,
             depthLimit: false,
@@ -45,6 +46,7 @@ describe('product-provider public Loader composition', () => {
         },
         {
           name: 'claude-code',
+          authentication: { mode: 'native-subscription' },
           capabilities: {
             outputSchema: false,
             depthLimit: false,

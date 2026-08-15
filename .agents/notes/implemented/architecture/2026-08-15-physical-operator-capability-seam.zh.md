@@ -15,7 +15,7 @@ AI4Research 包含有价值的物理算子概念，但若把整个项目作为�
 只抽取稳定能力边界，不移植 AI4Research runtime。第一个切片遵循仓库的 Service Definition / Service Provider / Consumer 架构：
 
 1. `@deepseek-ai/dsh-physical-operator` 负责 `ctx.physicalOperators`、稳定 ID、描述符、实时可用性、快速失败容量、类型化错误和成对执行生命周期事件。
-2. `@deepseek-ai/dsh-physical-operator-subagent` 把稳定 ID 映射到现有 `ctx.subagents` Provider。首批验证的产品映射是 `codex` 与 `claude-code`；加载映射不会启动任何产品。
+2. `@deepseek-ai/dsh-physical-operator-subagent` 把稳定 ID 映射到现有 `ctx.subagents` Provider。首批验证的产品映射是 `codex` 与 `claude-code`；两者都只允许订阅套餐，并会在 Provider 未声明“无显式子进程环境的原生账户路径”时默认拒绝。加载映射不会启动任何产品。
 3. `@deepseek-ai/dsh-tool-physical-operator` 暴露一个固定的 `physical_operator` 工具，支持 `list` 和前台 `run`。模型选择稳定算子 ID，不会看到 Provider 传输。
 
 三个角色作为独立包和可选 Loader composition 交付，而不是 AI4Research Bundle。Provider 与 Consumer 只依赖 Service Definition，互不 import。已接受的运行可以跨 Provider HMR 继续完成；容量按稳定 ID 保留到运行结束。调用方取消信号经服务传给现有 subagent Provider，后者仍是执行和资源释放责任方。
@@ -32,6 +32,6 @@ AI4Research 包含有价值的物理算子概念，但若把整个项目作为�
 
 ## 后果
 
-DSH 现在具备一个小型、可替换的物理算子 capability seam，可以复用已经实现的 Claude Code 与 Codex 产品，无需修改 Core。无密钥 Loader 证据会执行完整的工具到 subagent 路径；第二个真实产品 composition 则在空 `PATH` 下证明两个产品映射均可注册且保持惰性。
+DSH 现在具备一个小型、可替换的物理算子 capability seam，可以复用已经实现的 Claude Code 与 Codex 产品，无需修改 Core。无密钥 Loader 证据会执行完整的工具到 subagent 路径；第二个真实产品 composition 则在空 `PATH` 下证明两个产品映射均可注册、报告 `native-subscription` 身份验证且保持惰性。单元证据证明缺失声明或 `explicit-environment` 声明会在发现和执行边界被拒绝；宿主真实 canary 继续负责证明当前订阅权益。
 
 这有意只完成底座的第一个切片。选择与评分、持久化 command receipt、持久化与崩溃恢复、队列与公平性、配额或冷却、进度、类型化物理 schema、内容寻址工件、provenance 和 actor-host 迁移仍然推迟。后续设计必须扩展或替换合适的角色，而不是继续膨胀一个单体 Bundle。

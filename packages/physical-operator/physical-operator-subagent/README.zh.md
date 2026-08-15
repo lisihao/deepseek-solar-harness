@@ -38,7 +38,13 @@
 
 即使后端 subagent Provider 尚不存在，映射也会注册。此时发现结果报告 `unavailable`；Provider 加载或重载后会自动转为可用。加载本插件不会启动子进程，也不会探测产品二进制。已接受的调用通过 `ctx.subagents.start` 委托，并保留调用方的父 agent 与取消信号；subagent Provider 仍是生命周期和资源释放的责任方。
 
+产品映射 `codex` 与 `claude-code` 只允许使用订阅套餐。发现和 `start()` 都要求后端 Provider 声明 `authentication.mode: native-subscription`；显式子进程环境或缺失声明都会令算子不可用。这会在真正执行操作的边界阻止由 DSH 配置的 API Key 计费。其他 Provider 名称仍遵循自身身份验证策略；若以后引入别名，必须显式加入这项限制，不能依靠命名约定自动继承。
+
 Provider 与 Consumer 包只依赖 Service Definition，绝不互相 import。本包不添加调度器、持久化、命令 receipt、模型选择、子进程实现或 AI4Research 业务代码。
+
+## 真实订阅证据
+
+手工 [`subscription-canary-cordis.yml`](../../../examples/acp-agent/tests/fixtures/physical-operator/subagent/subscription-canary-cordis.yml) composition 及其 driver 会使用隔离的 DSH、Session 与工作区根目录调用公开 `physical_operator` 工具。它们不提供任何产品 `env`，调用前校验 Provider 声明，最终只保留算子 ID、身份验证模式、有界标记和匹配结果。只有在独立确认宿主 CLI 原生登录后才能运行该 canary；它会消耗一次真实产品请求，因此有意不纳入 CI。
 
 ## 模型体验
 
@@ -54,3 +60,4 @@ Provider 与 Consumer 包只依赖 Service Definition，绝不互相 import。�
 - **面向文本的任务约定**：Provider 专用物理输入、类型化工件与 schema 校验留待后续。
 - **部署决定映射**：本包不负责 Provider 间的评分、基准、路由、故障切换或负载均衡。
 - **Provider 副作用仍归 Provider 所有**：取消不能撤销 Provider 停止前完成的文件或外部操作。
+- **原生账户有效性属于宿主状态**：硬门禁只能证明 DSH 没有注入显式环境；当前 CLI 登录与订阅权益仍须由真实 canary 单独证明。

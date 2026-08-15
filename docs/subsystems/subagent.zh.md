@@ -407,7 +407,7 @@ interface SubagentRun {
 
 ## 提供方约定：`SubagentProvider`
 
-每个提供方都是一个具名的子 agent 传输层，多个提供方可以共存。服务在 `start()` 之前校验请求的启动时能力，并拒绝在没有 `prepareContinuable` 的提供方上发起可继续 start。`inheritsParentContext` 仅描述对话种子注入（`fork`：true；`spawn` 和 `acp`：false），使消费方能生成准确的面向模型措辞，而不暗示继承了工具、服务或权限。
+每个提供方都是一个具名的子 agent 传输层，多个提供方可以共存。服务在 `start()` 之前校验请求的启动时能力，并拒绝在没有 `prepareContinuable` 的提供方上发起可继续 start。`authentication` 是由 Provider 自己负责的可选元数据；带计费权威限制的 Consumer 会把字段缺失视为不可信。`inheritsParentContext` 仅描述对话种子注入（`fork`：true；`spawn` 和 `acp`：false），使消费方能生成准确的面向模型措辞，而不暗示继承了工具、服务或权限。
 
 ```ts type-equiv
 /**
@@ -421,6 +421,8 @@ interface SubagentRun {
 interface SubagentProvider {
   /** Unique registry name (e.g. `spawn`, `fork`, `acp`). */
   readonly name: string
+  /** Optional authentication attestation; restricted consumers fail closed when it is absent. */
+  readonly authentication?: SubagentAuthentication
   /** The start-time features this provider supports (see {@link SubagentCapabilities}). */
   readonly capabilities: SubagentCapabilities
   /**
@@ -648,7 +650,7 @@ async start(name: string, request: SubagentStartRequest): Promise<SubagentRun>
 
 Types: [Agent](core.md) · [ContentBlock](llm-streaming.md) · [MessageId](llm-streaming.md) · [SessionId](core.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:171`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:173`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagent-events"></a>
 
@@ -674,7 +676,7 @@ A published child settled. Scope-filtered dispatch uses the same delegating pare
 
 Types: [Scoped](scope.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:166`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:168`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentprovider-added--emit"></a>
 
@@ -691,7 +693,7 @@ A provider became resolvable in the registry.
 'subagent/provider-added'(provider: SubagentProvider): void
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:140`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:142`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentprovider-removed--emit"></a>
 
@@ -708,7 +710,7 @@ A provider left the registry. Accepted runs remain holder-owned.
 'subagent/provider-removed'(name: string): void
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:146`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:148`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentstart--emit"></a>
 
@@ -732,5 +734,5 @@ A provider established a published child. For in-process providers, `ctx.agents.
 
 Types: [Scoped](scope.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:157`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:159`](../../packages/subagent/subagent/src/index.ts)
 <!-- END GENERATED cordis-surface -->

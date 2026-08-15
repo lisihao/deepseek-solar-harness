@@ -301,6 +301,7 @@ describe('task admission and package contracts', () => {
     const fiber = await ctx.plugin(claudeCode, {})
     expect(ctx.subagents.getProvider('claude-code')).toMatchObject({
       name: 'claude-code',
+      authentication: { mode: 'native-subscription' },
       capabilities: {
         outputSchema: false,
         depthLimit: false,
@@ -312,6 +313,14 @@ describe('task admission and package contracts', () => {
     expect(ctx.subagents.list()).toEqual(['claude-code'])
     await fiber.dispose()
     expect(ctx.subagents.list()).toEqual([])
+
+    const explicitFiber = await ctx.plugin(claudeCode, {
+      env: { ANTHROPIC_API_KEY: 'test-only-key' },
+    })
+    expect(ctx.subagents.getProvider('claude-code')).toMatchObject({
+      authentication: { mode: 'explicit-environment' },
+    })
+    await explicitFiber.dispose()
 
     for (const disposeGraceMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       await expect(ctx.plugin(claudeCode, { disposeGraceMs }))

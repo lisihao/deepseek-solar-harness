@@ -25,7 +25,9 @@ try {
   const tool = ctx.tools.schemas().find(candidate => candidate.name === 'physical_operator')
   if (tool === undefined) throw new Error('physical_operator tool was not registered')
   process.stdout.write(`${JSON.stringify({
-    providers: ctx.subagents.list().filter(name => name === 'codex' || name === 'claude-code'),
+    providers: ctx.subagents.list()
+      .filter(name => name === 'codex' || name === 'claude-code')
+      .map(name => ({ name, authentication: ctx.subagents.getProvider(name)?.authentication })),
     operators: ctx.physicalOperators.list().map(operator => ({
       id: operator.id,
       state: operator.state,

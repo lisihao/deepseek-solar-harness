@@ -5,6 +5,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import PhysicalOperatorRuntime from '@deepseek-ai/dsh-physical-operator'
 import SubagentRuntime, {
   type ResolvedSubagentStartRequest,
+  type SubagentAuthentication,
   type SubagentProvider,
   type SubagentResult,
   type SubagentRun,
@@ -16,16 +17,23 @@ function fakeParent(): Agent {
 }
 
 class StubSubagentProvider implements SubagentProvider {
-  readonly name = 'worker'
+  readonly name: string
   readonly capabilities = { outputSchema: false, depthLimit: false, toolFilter: false, persona: false }
   readonly inheritsParentContext = false
+  readonly authentication?: SubagentAuthentication
   lastRequest: ResolvedSubagentStartRequest | undefined
   disposed = 0
 
-  constructor(private readonly outcome: Promise<SubagentResult> = Promise.resolve({
-    output: [{ type: 'text', text: 'computed' }],
-    stopReason: 'completed',
-  })) {}
+  constructor(
+    private readonly outcome: Promise<SubagentResult> = Promise.resolve({
+      output: [{ type: 'text', text: 'computed' }],
+      stopReason: 'completed',
+    }),
+    options: { name?: string; authentication?: SubagentAuthentication } = {},
+  ) {
+    this.name = options.name ?? 'worker'
+    if (options.authentication !== undefined) this.authentication = options.authentication
+  }
 
   async start(request: ResolvedSubagentStartRequest): Promise<SubagentRun> {
     this.lastRequest = request
@@ -133,6 +141,50 @@ describe('physical-operator subagent provider', () => {
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'OPERATOR_UNAVAILABLE' })
   })
+
+  it.each(['codex', 'claude-code'] as const)(
+    'fails closed when the %s provider does not attest native subscription authentication',
+    async (providerName) => {
+      for (const authentication of [
+        undefined,
+        { mode: 'explicit-environment' as const },
+      ]) {
+        const ctx = await setup()
+        ctx.subagents.registerProvider(new StubSubagentProvider(undefined, {
+          name: providerName,
+          ...authentication === undefined ? {} : { authentication },
+        }))
+        await ctx.plugin(adapter, {
+          operators: [{ ...config.operators[0]!, provider: providerName }],
+        })
+        const status = ctx.physicalOperators.status('physics-solver')
+        expect(status.state).toBe('unavailable')
+        expect(status.unavailableReason).toContain('native-subscription')
+        await expect(ctx.physicalOperators.start('physics-solver', {
+          prompt: [{ type: 'text', text: 'work' }],
+          parent: fakeParent(),
+          signal: new AbortController().signal,
+        })).rejects.toMatchObject({ code: 'OPERATOR_UNAVAILABLE' })
+        await ctx.fiber.dispose()
+      }
+    },
+  )
+
+  it.each(['codex', 'claude-code'] as const)(
+    'accepts the %s provider only with native subscription authentication',
+    async (providerName) => {
+      const ctx = await setup()
+      ctx.subagents.registerProvider(new StubSubagentProvider(undefined, {
+        name: providerName,
+        authentication: { mode: 'native-subscription' },
+      }))
+      await ctx.plugin(adapter, {
+        operators: [{ ...config.operators[0]!, provider: providerName }],
+      })
+      expect(ctx.physicalOperators.status('physics-solver')).toMatchObject({ state: 'available' })
+      await ctx.fiber.dispose()
+    },
+  )
 
   it('validates direct configuration before registering any operator', async () => {
     const ctx = await setup()

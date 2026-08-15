@@ -15,7 +15,7 @@ DSH nevertheless needs one seamless way for agents and plugins to discover a phy
 Extract the stable capability boundary, not the AI4Research runtime. The first slice follows the repository's Service Definition / Service Provider / Consumer architecture:
 
 1. `@deepseek-ai/dsh-physical-operator` owns `ctx.physicalOperators`, stable ids, descriptors, live availability, fail-fast capacity, typed errors, and paired execution lifecycle events.
-2. `@deepseek-ai/dsh-physical-operator-subagent` maps stable ids to existing `ctx.subagents` providers. The first verified product mappings are `codex` and `claude-code`; loading the mapping starts neither product.
+2. `@deepseek-ai/dsh-physical-operator-subagent` maps stable ids to existing `ctx.subagents` providers. The first verified product mappings are `codex` and `claude-code`; both are subscription-only and fail closed unless their provider attests a native-account path with no explicit child environment. Loading the mapping starts neither product.
 3. `@deepseek-ai/dsh-tool-physical-operator` exposes one fixed `physical_operator` tool with `list` and foreground `run`. The model chooses a stable operator id and never sees provider transport.
 
 The three roles ship as independent packages and an opt-in Loader composition, not as an AI4Research Bundle. Provider and Consumer depend only on the Service Definition and do not import one another. Accepted runs survive Provider HMR; capacity is preserved by stable id until settlement. Caller cancellation flows through the service into the existing subagent provider, which remains the execution and teardown owner.
@@ -32,6 +32,6 @@ This extraction copies no AI4Research Python daemon, scheduler, TaskGraph, state
 
 ## Consequences
 
-DSH now has a small, replaceable physical-operator capability seam that can use the already implemented Claude Code and Codex products without Core changes. Keyless Loader evidence exercises the complete tool-to-subagent route, while a second real-product composition proves both product mappings register and stay lazy with an empty `PATH`.
+DSH now has a small, replaceable physical-operator capability seam that can use the already implemented Claude Code and Codex products without Core changes. Keyless Loader evidence exercises the complete tool-to-subagent route, while a second real-product composition proves both product mappings register, report native-subscription authentication, and stay lazy with an empty `PATH`. Unit evidence proves missing or explicit-environment attestations are rejected at discovery and execution; a host live canary remains the evidence for current subscription entitlement.
 
 This is intentionally only the first substrate slice. Selection/scoring, durable command receipts, persistence and crash recovery, queues and fairness, quota/cooldown, progress, typed physics schemas, content-addressed artifacts, provenance, and actor-host migration remain deferred. Their later design must extend or replace the appropriate role rather than expanding a monolithic Bundle.

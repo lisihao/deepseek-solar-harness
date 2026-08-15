@@ -274,6 +274,19 @@ export interface SubagentRun {
   dispose(): Promise<void>
 }
 
+/** How a product-backed provider obtains credentials for one child process. */
+export type SubagentAuthenticationMode = 'native-subscription' | 'explicit-environment'
+
+/**
+ * Provider-owned authentication attestation for consumers that restrict
+ * billing authority. `native-subscription` means the provider supplies no
+ * explicit child environment and delegates authentication to the host
+ * product's native account state. Absence is untrusted, not an implicit mode.
+ */
+export interface SubagentAuthentication {
+  readonly mode: SubagentAuthenticationMode
+}
+
 /**
  * One registered transport for running child agents. Providers are trusted
  * same-process implementations; callers treat descriptors and returned values
@@ -285,6 +298,8 @@ export interface SubagentRun {
 export interface SubagentProvider {
   /** Unique registry name (e.g. `spawn`, `fork`, `acp`). */
   readonly name: string
+  /** Optional authentication attestation; restricted consumers fail closed when it is absent. */
+  readonly authentication?: SubagentAuthentication
   /** The start-time features this provider supports (see {@link SubagentCapabilities}). */
   readonly capabilities: SubagentCapabilities
   /**

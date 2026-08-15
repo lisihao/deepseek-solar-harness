@@ -32,6 +32,7 @@ try {
     }
     return {
       name: provider.name,
+      authentication: provider.authentication,
       capabilities: provider.capabilities,
       inheritsParentContext: provider.inheritsParentContext,
     }

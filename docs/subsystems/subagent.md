@@ -405,7 +405,7 @@ A local one-shot run MUST publish an ordinary child agent/session before `start(
 
 ## The provider contract: `SubagentProvider`
 
-Each provider is a named child-agent transport, and multiple providers may coexist. The service validates requested start-time capabilities before `start()`, and rejects a continuable start on a provider without `prepareContinuable`. `inheritsParentContext` describes only conversation seeding (`fork`: true; `spawn` and `acp`: false), allowing consumers to generate accurate model-facing wording without implying inherited tools, services, or authority.
+Each provider is a named child-agent transport, and multiple providers may coexist. The service validates requested start-time capabilities before `start()`, and rejects a continuable start on a provider without `prepareContinuable`. `authentication` is optional provider-owned metadata; consumers with a billing-authority restriction treat absence as untrusted. `inheritsParentContext` describes only conversation seeding (`fork`: true; `spawn` and `acp`: false), allowing consumers to generate accurate model-facing wording without implying inherited tools, services, or authority.
 
 ```ts type-equiv
 /**
@@ -419,6 +419,8 @@ Each provider is a named child-agent transport, and multiple providers may coexi
 interface SubagentProvider {
   /** Unique registry name (e.g. `spawn`, `fork`, `acp`). */
   readonly name: string
+  /** Optional authentication attestation; restricted consumers fail closed when it is absent. */
+  readonly authentication?: SubagentAuthentication
   /** The start-time features this provider supports (see {@link SubagentCapabilities}). */
   readonly capabilities: SubagentCapabilities
   /**
@@ -646,7 +648,7 @@ async start(name: string, request: SubagentStartRequest): Promise<SubagentRun>
 
 Types: [Agent](core.md) · [ContentBlock](llm-streaming.md) · [MessageId](llm-streaming.md) · [SessionId](core.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:171`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:173`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagent-events"></a>
 
@@ -672,7 +674,7 @@ A published child settled. Scope-filtered dispatch uses the same delegating pare
 
 Types: [Scoped](scope.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:166`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:168`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentprovider-added--emit"></a>
 
@@ -689,7 +691,7 @@ A provider became resolvable in the registry.
 'subagent/provider-added'(provider: SubagentProvider): void
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:140`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:142`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentprovider-removed--emit"></a>
 
@@ -706,7 +708,7 @@ A provider left the registry. Accepted runs remain holder-owned.
 'subagent/provider-removed'(name: string): void
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:146`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:148`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentstart--emit"></a>
 
@@ -730,5 +732,5 @@ A provider established a published child. For in-process providers, `ctx.agents.
 
 Types: [Scoped](scope.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:157`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:159`](../../packages/subagent/subagent/src/index.ts)
 <!-- END GENERATED cordis-surface -->

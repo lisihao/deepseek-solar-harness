@@ -64,6 +64,7 @@
         "acp-agent/tests/fixtures/physical-operator/subagent/driver.ts",
         "acp-agent/tests/fixtures/physical-operator/subagent/fixture.ts",
         "acp-agent/tests/fixtures/physical-operator/subagent/product-driver.ts",
+        "acp-agent/tests/fixtures/physical-operator/subagent/subscription-canary-driver.ts",
         "jsonrpc-agent/tests/fixtures/subagent/subagent-dsh-sdk/driver.ts",
         "jsonrpc-agent/tests/fixtures/subagent/subagent-dsh-sdk/child-mock-llm.ts",
         "jsonrpc-agent/tests/fixtures/subagent/subagent-dsh-sdk/mock-delegating-llm.ts",

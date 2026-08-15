@@ -293,6 +293,7 @@ describe('task admission and package contracts', () => {
     const provider = ctx.subagents.getProvider('codex')!
     expect(provider).toMatchObject({
       name: 'codex',
+      authentication: { mode: 'native-subscription' },
       capabilities: {
         outputSchema: false,
         depthLimit: false,
@@ -304,6 +305,14 @@ describe('task admission and package contracts', () => {
     expect(ctx.subagents.list()).toEqual(['codex'])
     await fiber.dispose()
     expect(ctx.subagents.list()).toEqual([])
+
+    const explicitFiber = await ctx.plugin(codex, {
+      env: { OPENAI_API_KEY: 'test-only-key' },
+    })
+    expect(ctx.subagents.getProvider('codex')).toMatchObject({
+      authentication: { mode: 'explicit-environment' },
+    })
+    await explicitFiber.dispose()
 
     for (const disposeGraceMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       await expect(ctx.plugin(codex, { disposeGraceMs }))

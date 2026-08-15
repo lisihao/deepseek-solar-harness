@@ -1419,7 +1419,7 @@ export interface OperatorConfig {
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-subagent/src/index.ts:41`](../packages/physical-operator/physical-operator-subagent/src/index.ts)
+Source: [`packages/physical-operator/physical-operator-subagent/src/index.ts:59`](../packages/physical-operator/physical-operator-subagent/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 
@@ -2158,7 +2158,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/subagent/subagent-claude-code/src/index.ts:32`](../packages/subagent/subagent-claude-code/src/index.ts)
+Source: [`packages/subagent/subagent-claude-code/src/index.ts:33`](../packages/subagent/subagent-claude-code/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-codex"></a>
 
@@ -2179,7 +2179,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/subagent/subagent-codex/src/index.ts:30`](../packages/subagent/subagent-codex/src/index.ts)
+Source: [`packages/subagent/subagent-codex/src/index.ts:31`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 

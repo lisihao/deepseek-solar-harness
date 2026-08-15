@@ -31,6 +31,8 @@ Follow-up authority comes from the exact live direct parent recorded in the chil
 
 Same-process requests, descriptors, results, and event payloads are trusted typed values borrowed as immutable. The service does not clone or freeze them; serialization and hostile-input validation belong at actual process, worker, persistence, and model boundaries.
 
+Product-backed providers may expose `provider.authentication` as a provider-owned billing-authority attestation. `native-subscription` means the provider supplies no explicit child environment and delegates authentication to the host product's native account state; `explicit-environment` means deployment configuration supplied at least one child environment entry. Absence is untrusted, not an implicit mode. The registry reports this metadata but does not enforce it globally, so restricted consumers such as physical operators must check it both during discovery and immediately before execution.
+
 ## Capabilities
 
 Start-time features are advertised in `provider.capabilities` because the service must reject an unsupported one-shot request before child creation:

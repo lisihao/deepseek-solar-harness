@@ -16,10 +16,28 @@ import {
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorStartRequest,
 } from '@deepseek-ai/dsh-physical-operator'
-import type { SubagentRun } from '@deepseek-ai/dsh-subagent'
+import type { SubagentProvider, SubagentRun } from '@deepseek-ai/dsh-subagent'
 
 export const name = 'physical-operator-subagent'
 export const inject = ['physicalOperators', 'subagents']
+
+const SUBSCRIPTION_ONLY_PROVIDERS: ReadonlySet<string> = new Set([
+  'codex',
+  'claude-code',
+])
+
+/** Return the fail-closed reason for one backing provider, when unavailable. */
+function providerUnavailableReason(
+  providerName: string,
+  provider: SubagentProvider | undefined,
+): string | undefined {
+  if (provider === undefined) return `subagent provider "${providerName}" is not registered`
+  if (!SUBSCRIPTION_ONLY_PROVIDERS.has(providerName)) return undefined
+  const mode = provider.authentication?.mode ?? 'unattested'
+  return mode === 'native-subscription'
+    ? undefined
+    : `subagent provider "${providerName}" must attest native-subscription authentication; received ${mode}`
+}
 
 /** Declarative mapping from one physical operator to a DSH subagent provider. */
 export interface OperatorConfig {
@@ -74,15 +92,23 @@ class SubagentPhysicalOperator implements PhysicalOperator {
   }
 
   availability() {
-    return this.ctx.subagents.getProvider(this.provider) === undefined
-      ? { available: false as const, reason: `subagent provider "${this.provider}" is not registered` }
-      : { available: true as const }
+    const reason = providerUnavailableReason(
+      this.provider,
+      this.ctx.subagents.getProvider(this.provider),
+    )
+    return reason === undefined
+      ? { available: true as const }
+      : { available: false as const, reason }
   }
 
   async start(request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorProviderRun> {
-    if (this.ctx.subagents.getProvider(this.provider) === undefined) {
+    const reason = providerUnavailableReason(
+      this.provider,
+      this.ctx.subagents.getProvider(this.provider),
+    )
+    if (reason !== undefined) {
       throw new PhysicalOperatorError(
-        `physical operator "${this.descriptor.id}" requires missing subagent provider "${this.provider}"`,
+        `physical operator "${this.descriptor.id}" is unavailable: ${reason}`,
         'OPERATOR_UNAVAILABLE',
       )
     }
