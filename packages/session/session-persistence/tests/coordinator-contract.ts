@@ -17,6 +17,13 @@ import SessionStore, { SESSION_FORMAT_VERSION, Session, SessionId } from '@deeps
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { meta, oneTurnLog, appendLog } from './contract.ts'
 
+declare module '@deepseek-ai/dsh-session' {
+  interface SessionEventMap {
+    /** Out-of-repo event used to prove the append marker survives every backend. */
+    'coordinator-test/plugin-log': { payload: number }
+  }
+}
+
 /**
  * The backend-specific capabilities the orchestration suite needs beyond the
  * public service API. A fresh fixture is created per test (isolated storage);
@@ -237,6 +244,31 @@ export function runCoordinatorContract(name: string, makeFixture: () => Promise<
         expect(loaded.events).toHaveLength(6)
         expect(loaded.meta.cwd).toBe(WORK)
       } finally {
+        await fiber.dispose()
+        await fix.cleanup()
+      }
+    })
+
+    it('cold-loads an out-of-repo event marked ignorable through Session.append', async () => {
+      const fix = await makeFixture()
+      const { ctx, fiber } = await freshCtx(fix)
+      let session!: Session
+      const sessionFiber = await ctx.plugin(Object.assign((inner: Context) => {
+        session = inner.sessions.create(SessionId('plugin-log'), { meta: { cwd: WORK } })
+      }, { inject: ['sessions'] }))
+      try {
+        session.append('coordinator-test/plugin-log', { payload: 1 }, { ignorable: true })
+        await ctx.sessions.flush(session)
+        await sessionFiber.dispose()
+
+        const loaded = await ctx.sessionPersistence.load(session.id)
+        expect(loaded.events).toMatchObject([{
+          type: 'coordinator-test/plugin-log',
+          data: { payload: 1 },
+          ignorable: true,
+        }])
+      } finally {
+        await sessionFiber.dispose()
         await fiber.dispose()
         await fix.cleanup()
       }

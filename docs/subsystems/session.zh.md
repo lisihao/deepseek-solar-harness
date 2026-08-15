@@ -206,8 +206,8 @@ interface RequestContext {
  * they only exist on {@link SurfaceEventType} variants (`user/message`,
  * `assistant/message`, `tool/result`).
  * Non-surface events (boundary markers, chunks, usage, errors) never carry
- * surface metadata — the compiler enforces this at `Session.append()`
- * call sites.
+ * surface metadata; they may carry the optional `ignorable` marker — the
+ * compiler enforces both rules at `Session.append()` call sites.
  */
 type SessionEvent<T extends SessionEventType = SessionEventType> = {
   [K in SessionEventType]: {
@@ -311,6 +311,22 @@ interface SurfaceIntent {
 对 `SurfaceEventType` 事件必填：每个产生消息的事件都必须声明它如何加入 surface（派生模型历史的唯一来源）。面向人类的 transcript（文本记录）是另一个投影，读取的是日志中追加来源的事件，因为 surface 会有意遮蔽替换所概括的范围（见 [dsh-session](../../packages/core/session/README.md) 的 `isAppendSurfaceEvent`）。非 surface 类型在编译期拒绝此参数。
 
 只有 `assistant/message` 可以携带存在但为空的 `sourceEventSeqs`；字段不存在时，该事件没有记录这条消息由哪些早期事件产生，但提供方仍可能发出过分片。
+
+### `LogIntent`：`session.append()` 的可选持久化元数据
+
+```ts type-equiv
+/**
+ * Optional persistence metadata for a log-only {@link Session.append} call.
+ * `ignorable` permits a reader that does not know a plugin-owned event type to
+ * reconstruct the core session without that extension. Omit it when the event
+ * changes how the core log must be interpreted.
+ */
+interface LogIntent {
+  ignorable?: true
+}
+```
+
+只有纯日志事件接受此参数。如果某个仓库外插件的事件只贡献可选扩展状态，不会改变核心 surface 或执行重建，该插件就设置此标记；认识该插件的读取器仍然可以读取持久化事件。
 
 ### `SessionSurface`：实时只读 surface 投影
 
@@ -444,14 +460,12 @@ declare class Session {
    *
    * @param type - The event type (key of {@link SessionEventMap}).
    * @param data - The event payload; must be JSON-serializable.
-   * @param opts - Surface metadata: `surfaceOp` controls how the event enters
-   *   the ordered surface; `sourceEventSeqs` lists the seq numbers of earlier
-   *   events this one derives from. REQUIRED for
-   *   {@link SurfaceEventType} events (every message-producing event must
-   *   declare how it joins the surface, the sole source of derived model
-   *   history) and
-   *   rejected by the compiler for non-surface types like `turn/start` or
-   *   `assistant/chunk`.
+   * @param opts - REQUIRED {@link SurfaceIntent} for
+   *   {@link SurfaceEventType} events: `surfaceOp` controls how the event enters
+   *   the ordered surface and `sourceEventSeqs` lists the earlier events it
+   *   derives from. Log-only events instead accept an optional
+   *   {@link LogIntent}; an out-of-repo plugin sets `ignorable: true` only when
+   *   a reader without that plugin can reconstruct the core session safely.
    * @returns the logged event — its assigned `seq`/`time` plus the SNAPSHOT of
    *   `data` that entered the log, so reading `event.data` back sees the logged
    *   value, never the caller's still-mutable input.
@@ -472,7 +486,7 @@ declare class Session {
   append<T extends SessionEventType>(
     type: T,
     data: SessionEventMap[T],
-    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent] : []
+    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent] : [opts?: LogIntent]
   ): SessionEvent<T>;
   /**
    * The {@link EpochHeader} in force after the log's last header event — the
@@ -748,7 +762,7 @@ fork(source: SessionForkSource, boundary?: number, childSessionId?: SessionId): 
 
 Types: [CreateSessionOptions](persistence.md) · [PrepareSessionOptions](persistence.md) · [SessionId](core.md)
 
-Source: [`packages/core/session/src/index.ts:792`](../../packages/core/session/src/index.ts)
+Source: [`packages/core/session/src/index.ts:795`](../../packages/core/session/src/index.ts)
 
 <a id="session-events"></a>
 

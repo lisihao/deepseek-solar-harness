@@ -389,6 +389,16 @@ export interface SurfaceIntent {
 }
 
 /**
+ * Optional persistence metadata for a log-only {@link Session.append} call.
+ * `ignorable` permits a reader that does not know a plugin-owned event type to
+ * reconstruct the core session without that extension. Omit it when the event
+ * changes how the core log must be interpreted.
+ */
+export interface LogIntent {
+  ignorable?: true
+}
+
+/**
  * One immutable entry in the session log.
  *
  * A proper discriminated union over `type` (not independent `type`/`data`
@@ -398,8 +408,8 @@ export interface SurfaceIntent {
  * they only exist on {@link SurfaceEventType} variants (`user/message`,
  * `assistant/message`, `tool/result`).
  * Non-surface events (boundary markers, chunks, usage, errors) never carry
- * surface metadata — the compiler enforces this at `Session.append()`
- * call sites.
+ * surface metadata; they may carry the optional `ignorable` marker — the
+ * compiler enforces both rules at `Session.append()` call sites.
  */
 export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   [K in SessionEventType]: {

@@ -71,6 +71,8 @@ export function appendLog(session: Session, events: readonly SessionEvent[]): vo
         ...se.sourceEventSeqs !== undefined ? { sourceEventSeqs: se.sourceEventSeqs } : {},
       }
       session.append(e.type, e.data, intent)
+    } else if (e.ignorable === true) {
+      session.append(e.type, e.data, { ignorable: true })
     } else {
       session.append(e.type, e.data)
     }

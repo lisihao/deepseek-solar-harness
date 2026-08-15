@@ -206,8 +206,8 @@ A proper discriminated union over `type` (not independent `type`/`data` unions),
  * they only exist on {@link SurfaceEventType} variants (`user/message`,
  * `assistant/message`, `tool/result`).
  * Non-surface events (boundary markers, chunks, usage, errors) never carry
- * surface metadata — the compiler enforces this at `Session.append()`
- * call sites.
+ * surface metadata; they may carry the optional `ignorable` marker — the
+ * compiler enforces both rules at `Session.append()` call sites.
  */
 type SessionEvent<T extends SessionEventType = SessionEventType> = {
   [K in SessionEventType]: {
@@ -311,6 +311,22 @@ interface SurfaceIntent {
 Required for `SurfaceEventType` events — every message-producing event must declare how it joins the surface, the sole source of derived model history. A human-facing transcript is the other projection and reads the log's append-origin events instead, because the surface deliberately shadows the ranges a replacement summarizes (`isAppendSurfaceEvent` in [dsh-session](../../packages/core/session/README.md)). Non-surface types reject it at compile time.
 
 Only `assistant/message` may carry a present empty `sourceEventSeqs`; when the field is absent, the event does not record which earlier events produced the message, and the provider may still have emitted chunks.
+
+### `LogIntent` — optional persistence metadata for `session.append()`
+
+```ts type-equiv
+/**
+ * Optional persistence metadata for a log-only {@link Session.append} call.
+ * `ignorable` permits a reader that does not know a plugin-owned event type to
+ * reconstruct the core session without that extension. Omit it when the event
+ * changes how the core log must be interpreted.
+ */
+interface LogIntent {
+  ignorable?: true
+}
+```
+
+Only log-only events accept this parameter. An out-of-repo plugin sets the marker when its event contributes optional extension state but does not alter core surface or execution reconstruction; the persisted event remains available to a reader that does know the plugin.
 
 ### `SessionSurface` — the live readonly surface projection
 
@@ -444,14 +460,12 @@ declare class Session {
    *
    * @param type - The event type (key of {@link SessionEventMap}).
    * @param data - The event payload; must be JSON-serializable.
-   * @param opts - Surface metadata: `surfaceOp` controls how the event enters
-   *   the ordered surface; `sourceEventSeqs` lists the seq numbers of earlier
-   *   events this one derives from. REQUIRED for
-   *   {@link SurfaceEventType} events (every message-producing event must
-   *   declare how it joins the surface, the sole source of derived model
-   *   history) and
-   *   rejected by the compiler for non-surface types like `turn/start` or
-   *   `assistant/chunk`.
+   * @param opts - REQUIRED {@link SurfaceIntent} for
+   *   {@link SurfaceEventType} events: `surfaceOp` controls how the event enters
+   *   the ordered surface and `sourceEventSeqs` lists the earlier events it
+   *   derives from. Log-only events instead accept an optional
+   *   {@link LogIntent}; an out-of-repo plugin sets `ignorable: true` only when
+   *   a reader without that plugin can reconstruct the core session safely.
    * @returns the logged event — its assigned `seq`/`time` plus the SNAPSHOT of
    *   `data` that entered the log, so reading `event.data` back sees the logged
    *   value, never the caller's still-mutable input.
@@ -472,7 +486,7 @@ declare class Session {
   append<T extends SessionEventType>(
     type: T,
     data: SessionEventMap[T],
-    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent] : []
+    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent] : [opts?: LogIntent]
   ): SessionEvent<T>;
   /**
    * The {@link EpochHeader} in force after the log's last header event — the
@@ -746,7 +760,7 @@ fork(source: SessionForkSource, boundary?: number, childSessionId?: SessionId): 
 
 Types: [CreateSessionOptions](persistence.md) · [PrepareSessionOptions](persistence.md) · [SessionId](core.md)
 
-Source: [`packages/core/session/src/index.ts:792`](../../packages/core/session/src/index.ts)
+Source: [`packages/core/session/src/index.ts:795`](../../packages/core/session/src/index.ts)
 
 <a id="session-events"></a>
 

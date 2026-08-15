@@ -1088,6 +1088,18 @@ describe('Session', () => {
     ])
     expect(marked.events[0]?.ignorable).toBe(true)
   })
+
+  it('lets a log-only producer mark its event ignorable at append time', () => {
+    const session = Session.create(SessionId('ignorable-append'))
+    const event = session.append('turn/start', { turn: 1 }, { ignorable: true })
+
+    expect(event).toMatchObject({
+      type: 'turn/start',
+      data: { turn: 1 },
+      ignorable: true,
+    })
+    expect(session.events[0]?.ignorable).toBe(true)
+  })
 })
 
 
