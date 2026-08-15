@@ -24,7 +24,7 @@ Application Support runtime as source code.
 | Full local lifecycle | ok | Eight gates recorded; last event is completion-accepted |
 | Visible trace | ok | Denied delivery is projected from the durable session log with phase, reason, tool, and command digest |
 | Browser plugin | ok | Installed package declares `dsh.client`, exports `lib/client.js`, and appears in the real Web boot graph |
-| Sidebar entry | ok | Real Chromium locates `治理 Trace` and opens `governance-trace-panel` without browser errors |
+| Sidebar entry | ok | Real Chromium locates the full-width `治理 Trace` row in a single-column footer and opens the compact centered `governance-trace-panel` without browser errors |
 | Trace HTTP API | ok | Same-origin `/code-harness/v1/trace` reads live or persisted sessions and never publishes or mutates the inspected log |
 
 Reproducible host check:
