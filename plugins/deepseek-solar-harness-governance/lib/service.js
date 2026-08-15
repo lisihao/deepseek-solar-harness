@@ -101,7 +101,7 @@ function projectFor(agent) {
 }
 
 function append(agent, type, data) {
-  return agent.session.append(type, data)
+  return agent.session.append(type, data, { ignorable: true })
 }
 
 function normalizeLevel(level) {

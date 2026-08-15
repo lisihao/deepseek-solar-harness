@@ -2,9 +2,11 @@
 
 Static Cordis governance bundle for DeepSeek-Solar-Harness. The plugin adapts
 the repository's canonical `scripts/governance.py`; it does not replace
-project-native rules or remote CI. Version 0.3.4 also ships a `dsh.client`
-browser plugin with a visible, single-column `治理 Trace` sidebar entry and a
-compact centered trace panel.
+project-native rules or remote CI. Version 0.3.5 marks its durable governance
+events as safe for core-session reconstruction by a Harness reader that does
+not know this out-of-repo plugin. It also ships a `dsh.client` browser plugin
+with a visible, single-column `治理 Trace` sidebar entry and a compact centered
+trace panel.
 
 ## Install
 
@@ -17,7 +19,7 @@ cd plugins/deepseek-solar-harness-governance
 npm test
 npm run verify
 npm pack
-dsh plugin --profile governed-code add ./lisihao-dsh-code-harness-governance-0.3.4.tgz
+dsh plugin --profile governed-code add ./lisihao-dsh-code-harness-governance-0.3.5.tgz
 ```
 
 Inspect the composition and start through the fail-closed admission wrapper:
