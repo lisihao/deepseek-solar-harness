@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "objective": "Deliver a fail-closed Code-as-Harness Cordis governance bundle",
+  "nodes": [
+    {
+      "id": "P0",
+      "title": "Completion and evidence contract",
+      "depends_on": [],
+      "status": "completed",
+      "acceptance": ["PRD exists", "state machine and authority boundaries are explicit"]
+    },
+    {
+      "id": "P1",
+      "title": "Cordis service, provider, events, and invariant",
+      "depends_on": ["P0"],
+      "status": "completed",
+      "acceptance": ["bundle loads", "runner uses argv without shell", "invalid transitions fail"]
+    },
+    {
+      "id": "P2",
+      "title": "Tools, stop policy, and milestone guards",
+      "depends_on": ["P1"],
+      "status": "completed",
+      "acceptance": ["agent cannot self-certify", "commit and delivery milestones are guarded"]
+    },
+    {
+      "id": "P3",
+      "title": "Governed launcher and installable artifact",
+      "depends_on": ["P1", "P2"],
+      "status": "completed",
+      "acceptance": ["tarball builds", "dump-config admission fails closed", "real DSH profile loads"]
+    },
+    {
+      "id": "P4",
+      "title": "Independent CI and repository protection",
+      "depends_on": ["P3"],
+      "status": "completed",
+      "acceptance": ["CI uploads attestation", "branch protection state is explicitly verified"]
+    },
+    {
+      "id": "P5",
+      "title": "Full verification and release evidence",
+      "depends_on": ["P3", "P4"],
+      "status": "completed",
+      "acceptance": ["full gates pass", "fresh attestation passes", "commit and remote branch exist"]
+    }
+  ]
+}

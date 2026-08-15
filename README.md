@@ -30,6 +30,7 @@ GenesisPod 是第一个参考实现，不是通用内核的硬编码前提。
 | `scripts/governance.py` | Code Harness 核心；不依赖 Agent 自觉执行规则 |
 | `scripts/export_bundle.py` | 将核心和项目 Profile 导出为可由 CI 独立验证的版本化 bundle |
 | `skill/agent-development-governance/` | Codex 与 Claude Code 共用的薄适配层 |
+| `plugins/deepseek-solar-harness-governance/` | DeepSeek-Solar-Harness 原生 Cordis 治理 Bundle |
 | `integrations/` | Hook/CI 的强制接线模板 |
 | `tests/` | 治理执行器的回归测试 |
 
@@ -68,6 +69,31 @@ python3 "$SKILL_DIR/scripts/governance.py" attest \
 3. 不通过修改测试、基线、白名单或 bypass 开关换取绿色结果。
 4. 本地验证、远端 CI、分支保护和运行态验证分别举证。
 5. 通用内核保持稳定，业务差异通过版本化 Profile 扩展。
+
+## DeepSeek-Solar-Harness 插件
+
+DeepSeek 插件不是第二份治理实现。它通过 Cordis 的 Agent、Tool 和 Session
+扩展点调用同一个 `scripts/governance.py`，并把运行、门禁、attestation、拒绝和
+accepted 状态写入 append-only Session Log。Agent 只能调用完成申请工具，不能
+直接写入 accepted 状态。
+
+```bash
+python3 scripts/build_dsh_plugin.py
+python3 scripts/verify_dsh_plugin.py
+npm test --prefix plugins/deepseek-solar-harness-governance
+npm pack --prefix plugins/deepseek-solar-harness-governance
+```
+
+与真实 DeepSeek-Solar-Harness 源码宿主做可复现兼容性验收：
+
+```bash
+python3 scripts/verify_dsh_host.py \
+  --dsh-root /path/to/DeepSeek-Solar-Harness
+```
+
+设计与完成契约见 `docs/deepseek-harness-plugin-prd.md`。正式启动应使用
+`governed-code` Profile 和 Bundle 自带的 `dsh-governed` 准入器；远端 CI、保护
+分支与部署 SHA 验证仍是独立的最终权威。
 
 ## 导出到项目
 

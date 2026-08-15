@@ -1,0 +1,12 @@
+- insert:
+    - id: code-harness-invariants
+      name: '@deepseek-ai/dsh-invariants'
+      config:
+        enabled: true
+    - id: code-harness-governance
+      name: '@lisihao/dsh-code-harness-governance'
+      config:
+        strict: true
+        maxContinuationRejections: 3
+    - id: code-harness-governance-invariant
+      name: '@lisihao/dsh-code-harness-governance/invariant'
