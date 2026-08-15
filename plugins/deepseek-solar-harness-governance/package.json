@@ -1,0 +1,40 @@
+{
+  "name": "@lisihao/dsh-code-harness-governance",
+  "version": "0.1.0",
+  "description": "Fail-closed Code-as-Harness governance bundle for DeepSeek-Solar-Harness",
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./invariant": "./invariant.js",
+    "./state": "./lib/state.js",
+    "./preflight": "./lib/preflight.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-governed": "./bin/dsh-governed.mjs"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "runtime/",
+    "index.js",
+    "invariant.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "verify": "node scripts/verify-bundle.mjs",
+    "pack:plugin": "npm pack"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

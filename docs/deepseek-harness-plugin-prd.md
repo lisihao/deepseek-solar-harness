@@ -1,0 +1,115 @@
+# DeepSeek-Solar-Harness Governance Plugin PRD
+
+## Objective
+
+Turn the existing Code-as-Harness executor into a native, installable Cordis
+bundle for DeepSeek-Solar-Harness. The bundle must prevent an agent from
+self-certifying completion, retain machine-checkable evidence, and make stale
+evidence fail closed.
+
+The shared Python executor remains the only gate-selection and attestation
+implementation. The Cordis package is an adapter and policy layer, not a second
+governance engine.
+
+## Repository boundary
+
+- Source of governance truth: `agent-development-governance`.
+- Harness host and compatibility target:
+  `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness`.
+- The generated DeepSeek runtime checkout under Application Support is never a
+  development source and is not modified by this work.
+
+## Completion contract
+
+Conversation completion, `turn/end { kind: "completed" }`, and Goal completion
+are not delivery completion. Only a fresh `governance/completion-accepted`
+event may represent locally certified work.
+
+An accepted event requires all of the following:
+
+1. A governed work record exists for the session and project.
+2. A full verification run completed with every selected gate passing.
+3. The generated attestation still matches the profile, Git HEAD, changed path
+   set, and current file bytes.
+4. The accepted event cites the exact run, attestation digest, and Git HEAD.
+5. The session log has crossed a durability barrier.
+
+Remote acceptance additionally requires the repository-native CI aggregate and
+protected-branch policy. Local hooks and the plugin cannot substitute for that
+external authority.
+
+## Runtime requirements
+
+- Install as a static `dsh.bundle`, not a dynamic `cordis_run` definition.
+- Expose a `ctx.governance` service and model-facing status, plan, verify, and
+  completion-submission tools.
+- Use `agent/pre-step` to expose current certification state.
+- Use `agent/turn-stopping` to reject an unverified completion claim and steer
+  bounded corrective work.
+- Use monotonic tool guards for commit, push, merge, release, and deployment
+  milestones.
+- Execute the Python harness through argument arrays with `shell: false`.
+- Persist structured governance events in the append-only session log.
+- Ship an invariant companion that validates the event state machine before
+  candidate events commit.
+- Store full command output outside the model-visible log; persist bounded
+  summaries, digests, and artifact locations in events.
+
+## State machine
+
+```text
+open -> planned -> verifying -> candidate -> accepted
+  |         |           |            |
+  +---------+-----------+------------+-> blocked
+                         |
+                         +-------------> invalidated
+```
+
+Any change to Git HEAD, the selected path set, file bytes, or the governance
+profile invalidates prior evidence. The agent may request certification, but it
+cannot supply or directly append an accepted result through a model-facing
+argument.
+
+## Evidence events
+
+- `governance/work-opened`
+- `governance/plan-recorded`
+- `governance/run-started`
+- `governance/gate-finished`
+- `governance/attestation-issued`
+- `governance/completion-requested`
+- `governance/completion-rejected`
+- `governance/completion-accepted`
+- `governance/invalidated`
+
+Every event carries a `workId` and ISO timestamp. Run and attestation events
+also carry the run id, level, Git HEAD, profile digest, change fingerprint,
+output digest, and attestation digest where applicable.
+
+## Distribution
+
+The bundle is developed under `plugins/deepseek-solar-harness-governance/` and
+published as a prebuilt tarball. Its packaged Python runtime is generated from
+the shared executor and checked against a SHA-256 source manifest. A dedicated
+`governed-code` profile and the `dsh-governed` launcher verify that the composed
+config still contains both the policy plugin and invariant companion.
+
+## Non-goals
+
+- Preventing a machine owner from editing files outside Harness.
+- Treating a Cordis VM as a hostile-code security boundary.
+- Replacing project-native tests, hooks, CI, or branch protection.
+- Copying project-specific rules into prompt prose.
+
+## Acceptance tests
+
+1. Direct natural-language completion without evidence is rejected.
+2. A failed, skipped, or timed-out gate cannot produce an accepted event.
+3. File, profile, or HEAD mutation invalidates an attestation.
+4. Commit requires fresh candidate evidence; push/merge/deploy requires fresh
+   accepted evidence.
+5. An illegal event transition is rejected by the invariant companion.
+6. Removing the policy or invariant row makes `dsh-governed` fail closed.
+7. The packaged Python runtime digest matches the canonical executor.
+8. The bundle installs and appears in a real DeepSeek-Harness composed config.
+9. CI independently runs the full profile and publishes its attestation.
