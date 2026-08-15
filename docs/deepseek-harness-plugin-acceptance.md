@@ -23,6 +23,9 @@ Application Support runtime as source code.
 | Negative startup test | ok | Disabled companion rejected with exit 78 |
 | Full local lifecycle | ok | Eight gates recorded; last event is completion-accepted |
 | Visible trace | ok | Denied delivery is projected from the durable session log with phase, reason, tool, and command digest |
+| Browser plugin | ok | Installed package declares `dsh.client`, exports `lib/client.js`, and appears in the real Web boot graph |
+| Sidebar entry | ok | Real Chromium locates `治理 Trace` and opens `governance-trace-panel` without browser errors |
+| Trace HTTP API | ok | Same-origin `/code-harness/v1/trace` rejects a missing session and never mutates the inspected log |
 
 Reproducible host check:
 
@@ -34,13 +37,14 @@ python3 scripts/verify_dsh_host.py \
 Verified host snapshot:
 
 - Repository: `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness`
-- Branch: `master`
-- Commit: `accdfc00f111f7740fdcb78db5f4a45629ea8f2e`
 - Profile admission: `ok`
 - Cordis tools: `5/5`
 - Forged accepted event: rejected
 - Unaccepted push: denied
 - Trace event: `governance/milestone-evaluated`, `decision=denied`, `reasonCode=missing-acceptance`
+- Client boot entry: `@lisihao/dsh-code-harness-governance/client.js`
+- Browser entry: `治理 Trace`
+- Browser panel: `Code-as-Harness 治理 Trace`
 
 ## Repository authority evidence
 
@@ -63,16 +67,9 @@ constraint is reported as `warn`, not silently treated as protected.
 
 ## Remote evidence
 
-- Branch: `codex/dsh-governance-plugin`
-- Implementation commit: `19271a5382f94cf3f616445b0315eb414ca33a4e`
-- Workflow: `Governance Harness`
-- Workflow run: <https://github.com/lisihao/agent-development-governance/actions/runs/31856621815>
-- Workflow result: `success`
-- Attestation artifact: `governance-attestation`
-- Artifact ID: `9239212474`
-- Artifact size: `2852` bytes
-- Artifact expired: `false`
-
-The workflow and attestation artifact are tied to the exact implementation
-commit above. The final evidence-only commit is re-attested locally and must
-also pass the same remote workflow before merge.
+The current implementation branch must pass the repository's `Governance
+Harness` push and pull-request checks. The workflow uploads the
+`governance-attestation` artifact and binds it to the exact PR head; GitHub's
+PR checks are the authoritative run and commit record instead of a stale
+hard-coded workflow id in this document. The merge commit must pass the same
+workflow independently.

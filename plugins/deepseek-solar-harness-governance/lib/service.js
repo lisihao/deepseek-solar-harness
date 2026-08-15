@@ -170,6 +170,10 @@ export class GovernanceService {
 
   trace(agent, requestedLimit) {
     this.ensureWork(agent)
+    return this.traceSession(agent.session, requestedLimit)
+  }
+
+  traceSession(session, requestedLimit) {
     const limit = requestedLimit ?? this.config.maxTraceEvents
     positiveInteger(limit, 'trace limit')
     if (limit > this.config.maxTraceEvents) {
@@ -177,7 +181,7 @@ export class GovernanceService {
     }
     let governanceState = emptyGovernanceState()
     const events = []
-    for (const [sequence, event] of agent.session.events.entries()) {
+    for (const [sequence, event] of session.events.entries()) {
       if (!isGovernanceEvent(event)) continue
       governanceState = applyGovernanceEvent(governanceState, event)
       events.push({

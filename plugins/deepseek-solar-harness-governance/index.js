@@ -1,4 +1,5 @@
 import { GovernanceService } from './lib/service.js'
+import { registerGovernanceTraceRoute } from './lib/web.js'
 
 export const name = 'code-harness-governance'
 export const inject = ['tools', 'sessions']
@@ -85,6 +86,7 @@ function governanceContext(state) {
 export function apply(ctx, config = {}) {
   const governance = new GovernanceService(ctx, config)
   ctx.provide('governance', governance)
+  registerGovernanceTraceRoute(ctx, governance)
 
   ctx.tools.register({
     name: 'governance_status',

@@ -22,6 +22,10 @@ def main() -> None:
     package = json.loads((PLUGIN / "package.json").read_text(encoding="utf-8"))
     if package.get("dsh", {}).get("bundle", {}).get("patch") != "./cordis.patch.yml":
         fail("package.json does not declare the Cordis bundle patch")
+    if package.get("dsh", {}).get("client", {}).get("platform") != "web":
+        fail("package.json does not declare the DSH Web client")
+    if package.get("exports", {}).get("./client") != "./lib/client.js":
+        fail("package.json does not export the DSH Web client bundle")
     patch = (PLUGIN / "cordis.patch.yml").read_text(encoding="utf-8")
     for marker in (
         "@deepseek-ai/dsh-invariants'",
@@ -41,6 +45,16 @@ def main() -> None:
     )
     if build_check.returncode != 0:
         fail(build_check.stdout.strip())
+    client_check = subprocess.run(
+        ["node", str(PLUGIN / "scripts" / "build-client.mjs"), "--check"],
+        cwd=PLUGIN,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if client_check.returncode != 0:
+        fail(client_check.stdout.strip())
     print("DeepSeek-Solar-Harness governance plugin contract is valid.")
 
 
