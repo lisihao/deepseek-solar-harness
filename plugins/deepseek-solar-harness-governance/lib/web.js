@@ -21,7 +21,7 @@ function parseLimit(url) {
 }
 
 export function createGovernanceTraceHandler(ctx, governance) {
-  return (req, res) => {
+  return async (req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       sendJson(res, 405, {
         error: { code: 'METHOD_NOT_ALLOWED', message: 'governance trace accepts GET and HEAD only' },
@@ -40,20 +40,38 @@ export function createGovernanceTraceHandler(ctx, governance) {
       sendJson(res, 400, { error: { code: 'SESSION_REQUIRED', message: 'sessionId is required' } })
       return
     }
-    const session = ctx.sessions.get(sessionId)
-    if (session === undefined) {
-      sendJson(res, 404, { error: { code: 'SESSION_NOT_FOUND', message: `session ${sessionId} is not live` } })
-      return
-    }
+    const live = ctx.sessions.get(sessionId)
     try {
+      const limit = parseLimit(url)
+      let source = 'live'
+      let session = live
+      if (session === undefined) {
+        const persistence = ctx.get('sessionPersistence')
+        if (persistence === undefined) {
+          sendJson(res, 404, { error: { code: 'SESSION_NOT_FOUND', message: `session ${sessionId} was not found` } })
+          return
+        }
+        try {
+          session = await persistence.inspect(sessionId)
+          source = 'persistence'
+        } catch (error) {
+          if (error instanceof Error && /not[ -]found/iu.test(error.message)) {
+            sendJson(res, 404, { error: { code: 'SESSION_NOT_FOUND', message: `session ${sessionId} was not found` } })
+            return
+          }
+          throw error
+        }
+      }
       sendJson(res, 200, {
         sessionId,
-        ...governance.traceSession(session, parseLimit(url)),
+        source,
+        ...governance.traceSession(session, limit),
       }, req.method === 'HEAD')
     } catch (error) {
-      sendJson(res, 400, {
+      const invalidLimit = error instanceof RangeError
+      sendJson(res, invalidLimit ? 400 : 500, {
         error: {
-          code: 'INVALID_LIMIT',
+          code: invalidLimit ? 'INVALID_LIMIT' : 'SESSION_INSPECTION_FAILED',
           message: error instanceof Error ? error.message : String(error),
         },
       })

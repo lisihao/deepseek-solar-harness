@@ -57,7 +57,9 @@ external authority.
 - Ship a `dsh.client` browser half that registers additively in
   `sidebar.footer.action`; do not replace the sidebar.
 - Expose a same-origin, no-store, read-only HTTP projection for the selected
-  live session and render it in a user-visible `治理 Trace` panel.
+  session and render it in a user-visible `治理 Trace` panel. Prefer the live
+  Session and fall back to immutable persistence inspection for historical
+  tasks; viewing a trace must not publish a cold Session.
 
 ## State machine
 

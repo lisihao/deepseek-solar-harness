@@ -25,7 +25,7 @@ Application Support runtime as source code.
 | Visible trace | ok | Denied delivery is projected from the durable session log with phase, reason, tool, and command digest |
 | Browser plugin | ok | Installed package declares `dsh.client`, exports `lib/client.js`, and appears in the real Web boot graph |
 | Sidebar entry | ok | Real Chromium locates `治理 Trace` and opens `governance-trace-panel` without browser errors |
-| Trace HTTP API | ok | Same-origin `/code-harness/v1/trace` rejects a missing session and never mutates the inspected log |
+| Trace HTTP API | ok | Same-origin `/code-harness/v1/trace` reads live or persisted sessions and never publishes or mutates the inspected log |
 
 Reproducible host check:
 
