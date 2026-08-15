@@ -66,4 +66,7 @@ test('built browser plugin registers a visible governance Trace sidebar entry', 
   assert.ok(entry)
   assert.equal(entry.props['aria-label'], '治理 Trace')
   assert.equal(styles[0].dataset.plugin, '@lisihao/dsh-code-harness-governance')
+  assert.match(styles[0].textContent, /\[data-slot='sidebar\.footer\.action'\]\s*\{[^}]*flex-direction:\s*column/iu)
+  assert.match(styles[0].textContent, /\.dsh-governance-overlay\s*\{[^}]*align-items:\s*center/iu)
+  assert.match(styles[0].textContent, /\.dsh-governance-panel\s*\{[^}]*max-width:\s*720px/iu)
 })

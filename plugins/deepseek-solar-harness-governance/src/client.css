@@ -1,16 +1,25 @@
+[data-slot='sidebar.footer.action'] {
+  display: flex !important;
+  flex-direction: column;
+  width: 100%;
+}
+
 .dsh-governance-trigger {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: 12px;
+  box-sizing: border-box;
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   display: flex;
+  flex: none;
   font: inherit;
   gap: 8px;
-  min-height: 32px;
-  padding: 6px 8px;
-  width: 100%;
+  margin-left: -4px;
+  min-height: 34px;
+  padding: 6px 2px 6px 10px;
+  width: calc(100% + 8px);
 }
 
 .dsh-governance-trigger:hover {
@@ -24,7 +33,11 @@
 }
 
 .dsh-governance-overlay {
+  align-items: center;
+  display: flex;
   inset: 0;
+  justify-content: center;
+  padding: 24px;
   position: fixed;
   z-index: 1000;
 }
@@ -41,17 +54,18 @@
   background: var(--dsw-alias-bg-layer-1);
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 14px;
-  bottom: 24px;
+  box-sizing: border-box;
   box-shadow: 0 20px 56px var(--dsw-alias-bg-mask-2);
   color: var(--dsw-alias-label-primary);
   display: flex;
   flex-direction: column;
-  max-width: 760px;
+  max-height: min(720px, calc(100vh - 48px));
+  max-width: 720px;
+  min-height: 320px;
   overflow: hidden;
-  position: absolute;
-  right: 24px;
-  top: 24px;
-  width: calc(100vw - 48px);
+  position: relative;
+  width: 100%;
+  z-index: 1;
 }
 
 .dsh-governance-header {
@@ -133,11 +147,11 @@
 
 .dsh-governance-events {
   display: flex;
-  flex: 1;
   flex-direction: column;
   gap: 10px;
   list-style: none;
   margin: 0;
+  max-height: min(560px, 60vh);
   overflow: auto;
   padding: 16px 20px 24px;
 }
@@ -175,17 +189,27 @@
 }
 
 .dsh-governance-empty {
+  align-items: center;
   color: var(--dsw-alias-label-tertiary);
-  padding: 48px 20px;
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-height: 200px;
+  padding: 24px 20px;
   text-align: center;
 }
 
 @media (max-width: 720px) {
+  .dsh-governance-overlay {
+    padding: 0;
+  }
+
   .dsh-governance-panel {
     border-radius: 0;
-    bottom: 0;
-    right: 0;
-    top: 0;
+    height: 100%;
+    max-height: none;
+    max-width: none;
+    min-height: 0;
     width: 100%;
   }
 }
