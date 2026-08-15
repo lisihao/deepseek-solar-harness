@@ -1,11 +1,22 @@
+import { randomUUID } from 'node:crypto'
 import { GovernanceService } from './lib/service.js'
 import { registerGovernanceTraceRoute } from './lib/web.js'
 
 export const name = 'code-harness-governance'
 export const inject = ['tools', 'sessions']
 
-const PLUGIN_SOURCE = { kind: 'plugin', plugin: name }
+const PLUGIN_SOURCE = Object.freeze({ kind: 'plugin', plugin: name })
 const OUTPUT_SCHEMA = { type: 'object', additionalProperties: true }
+
+function continuationMessage(text) {
+  const content = Object.freeze([Object.freeze({ type: 'text', text })])
+  return Object.freeze({
+    id: randomUUID(),
+    role: 'user',
+    content,
+    source: PLUGIN_SOURCE,
+  })
+}
 
 function output() {
   return {
@@ -181,12 +192,8 @@ export function apply(ctx, config = {}) {
     const result = governance.rejectStop(agent)
     await ctx.sessions.flush(agent.session)
     if (!result.continue) return
-    agent.steer({
-      content: [{
-        type: 'text',
-        text: 'Code-as-Harness rejected completion. Inspect governance_status, fix or verify the work, run full governance_verify, and submit completion.',
-      }],
-      source: PLUGIN_SOURCE,
-    })
+    agent.steer(continuationMessage(
+      'Code-as-Harness rejected completion. Inspect governance_status, fix or verify the work, run full governance_verify, and submit completion.',
+    ))
   })
 }

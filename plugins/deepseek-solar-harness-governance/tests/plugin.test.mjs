@@ -92,6 +92,34 @@ test('governance events are append-marked safe for a core reader without this pl
   assert.equal(session.events[0].ignorable, true)
 })
 
+test('completion continuation is a complete identified user message', async () => {
+  const ctx = fakeContext()
+  apply(ctx, {})
+  const events = []
+  const steered = []
+  const session = {
+    header: { cwd: '/tmp/project' },
+    events,
+    append(type, data, options) {
+      events.push({ type, data, ...options })
+    },
+  }
+  const agent = { session, steer(message) { steered.push(message) } }
+  const governance = ctx._provided.get('governance')
+  governance.ensureWork(agent)
+
+  await ctx._listeners.get('agent/turn-stopping')({ agent })
+
+  assert.equal(steered.length, 1)
+  assert.match(steered[0].id, /^[0-9a-f-]{36}$/u)
+  assert.equal(steered[0].role, 'user')
+  assert.equal(steered[0].source.kind, 'plugin')
+  assert.equal(steered[0].source.plugin, 'code-harness-governance')
+  assert.match(steered[0].content[0].text, /rejected completion/u)
+  assert.equal(Object.isFrozen(steered[0]), true)
+  assert.equal(Object.isFrozen(steered[0].content), true)
+})
+
 test('milestone classification separates commit from delivery', () => {
   const service = new GovernanceService(fakeContext(), {})
   assert.equal(service.classifyExecution({ name: 'bash', arguments: { command: 'git commit -m x' } }), 'commit')
