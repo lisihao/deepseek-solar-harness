@@ -54,6 +54,21 @@ def validate_frontmatter() -> None:
         fail("skill description is too short to trigger reliably")
 
 
+def validate_delivery_rule() -> None:
+    content = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    required = (
+        "### 4. Push after verified functionality",
+        "Functional acceptance must be backed by a test, executable probe, or inspected user-facing result",
+        "run the required post-commit verification and re-attest the exact commit before delivery",
+        "Do not ask for confirmation before this push",
+        "Read back the remote branch SHA and require it to equal the local SHA",
+        "if it fails, continue fixing and re-verifying",
+    )
+    missing = [marker for marker in required if marker not in content]
+    if missing:
+        fail(f"SKILL.md delivery rule is incomplete; missing: {missing}")
+
+
 def validate_openai_metadata() -> None:
     text = (SKILL / "agents" / "openai.yaml").read_text(encoding="utf-8")
     for key in ("display_name:", "short_description:", "default_prompt:"):
@@ -100,6 +115,7 @@ def validate_integrations() -> None:
 
 def main() -> None:
     validate_frontmatter()
+    validate_delivery_rule()
     validate_openai_metadata()
     validate_profiles()
     validate_shared_script()

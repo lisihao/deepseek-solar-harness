@@ -61,11 +61,23 @@ Completion requires fresh output from every selected gate. Record:
 - result and duration;
 - skipped gate and concrete reason;
 - remaining warning, exception, or environment blocker;
-- CI status when local execution is not equivalent to the merge gate.
+- CI status when local execution is not equivalent to the merge gate;
+- local branch and SHA, remote branch SHA, and push result.
 
 Do not equate local hooks with CI or a successful command with full project compliance. Branch protection and external CI settings require separate evidence.
 
-### 4. Review governance changes as production code
+### 4. Push after verified functionality
+
+When every selected required gate passes and the requested functionality has passed its relevant acceptance probe, push the current development branch. Functional acceptance must be backed by a test, executable probe, or inspected user-facing result; an agent statement that the feature looks correct is not evidence.
+
+1. Commit only the intended files. Preserve unrelated user changes and follow the repository's branch policy; do not turn this rule into a direct default-branch push when the repository requires a development branch or pull request.
+2. Because a commit changes `HEAD`, run the required post-commit verification and re-attest the exact commit before delivery. In DeepSeek-Solar-Harness, request `governance_submit_completion` after the fresh full attestation so the delivery guard can observe accepted status.
+3. Push the current branch with a normal non-force push as soon as the gates, functional acceptance, and fresh attestation are all `ok`. Do not ask for confirmation before this push.
+4. Read back the remote branch SHA and require it to equal the local SHA. Observe the required remote CI when available; if it fails, continue fixing and re-verifying instead of reporting delivery as successful.
+
+Stop before pushing only for a concrete credential, permission, protected-branch, remote-divergence, network, or safety failure. Report the exact failing command and retain the verified local evidence; never bypass the failed authority.
+
+### 5. Review governance changes as production code
 
 When instructions, hooks, scripts, profiles, or CI change, verify both semantics and wiring:
 
