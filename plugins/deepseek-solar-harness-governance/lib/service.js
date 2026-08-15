@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import {
   applyGovernanceEvent,
@@ -100,6 +101,16 @@ function projectFor(agent) {
   return project
 }
 
+function hasGitBoundary(project) {
+  let current = project
+  for (;;) {
+    if (existsSync(join(current, '.git'))) return true
+    const parent = dirname(current)
+    if (parent === current) return false
+    current = parent
+  }
+}
+
 function append(agent, type, data) {
   return agent.session.append(type, data, { ignorable: true })
 }
@@ -168,6 +179,14 @@ export class GovernanceService {
     return foldGovernance(agent.session.events)
   }
 
+  applies(agent) {
+    try {
+      return hasGitBoundary(projectFor(agent))
+    } catch {
+      return false
+    }
+  }
+
   trace(agent, requestedLimit) {
     this.ensureWork(agent)
     return this.traceSession(agent.session, requestedLimit)
@@ -203,6 +222,7 @@ export class GovernanceService {
 
   ensureWork(agent, forceNew = false) {
     const state = this.state(agent)
+    if (!this.applies(agent)) return state
     if (!forceNew && state.phase !== 'unmanaged') return state
     if (!['unmanaged', 'accepted', 'blocked'].includes(state.phase)) return state
     append(agent, 'governance/work-opened', {
@@ -431,6 +451,7 @@ export class GovernanceService {
 
   guardExecution(exec) {
     if (exec.agent === undefined) return undefined
+    if (!this.applies(exec.agent)) return undefined
     const kind = this.classifyExecution(exec)
     if (kind !== 'commit' && kind !== 'delivery') return undefined
     this.ensureWork(exec.agent)
@@ -470,6 +491,7 @@ export class GovernanceService {
 
   markMutation(agent, reason) {
     const state = this.state(agent)
+    if (!this.applies(agent)) return state
     if (!['candidate', 'accepted', 'rejected'].includes(state.phase)) return state
     append(agent, 'governance/invalidated', {
       workId: state.workId,
@@ -482,6 +504,7 @@ export class GovernanceService {
 
   rejectStop(agent) {
     const state = this.state(agent)
+    if (!this.applies(agent)) return { continue: false, state }
     if (state.phase === 'accepted' || state.phase === 'blocked' || state.phase === 'unmanaged') {
       return { continue: false, state }
     }

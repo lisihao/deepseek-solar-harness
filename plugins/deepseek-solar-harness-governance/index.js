@@ -171,13 +171,20 @@ export function apply(ctx, config = {}) {
 
   ctx.on('tools/result', (exec, result) => {
     if (exec.agent === undefined || result.isError || exec.name.startsWith('governance_')) return
+    if (!governance.applies(exec.agent)) return
     const kind = governance.classifyExecution(exec)
-    if (kind === 'mutation' || kind === 'commit') governance.markMutation(exec.agent, exec.name)
+    if (kind === 'mutation' || kind === 'commit') {
+      const state = governance.state(exec.agent)
+      governance.ensureWork(exec.agent, state.phase === 'accepted' || state.phase === 'blocked')
+      governance.markMutation(exec.agent, exec.name)
+    }
   })
 
   ctx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
+    if (!governance.applies(agent)) return next()
     const current = governance.state(agent)
     const directUserRequest = messages.some(message => message?.source?.kind === 'user')
+    if (current.phase === 'unmanaged') return next()
     governance.ensureWork(agent, current.phase === 'accepted' && directUserRequest)
     const decision = await next()
     if (decision.kind !== 'enter' || signal.aborted) return decision
@@ -188,12 +195,16 @@ export function apply(ctx, config = {}) {
   })
 
   ctx.on('agent/turn-stopping', async ({ agent }) => {
+    if (!governance.applies(agent)) return
     governance.invalidateIfStale(agent)
     const result = governance.rejectStop(agent)
     await ctx.sessions.flush(agent.session)
     if (!result.continue) return
-    agent.steer(continuationMessage(
-      'Code-as-Harness rejected completion. Inspect governance_status, fix or verify the work, run full governance_verify, and submit completion.',
-    ))
+    agent.steer(continuationMessage([
+      'Code-as-Harness rejected completion.',
+      'If governance tools are hidden, first call dev_tool_search with toolNames',
+      '["governance_status","governance_plan","governance_verify","governance_submit_completion"].',
+      'Then inspect status, fix or verify the work, run full governance_verify, and submit completion.',
+    ].join(' ')))
   })
 }

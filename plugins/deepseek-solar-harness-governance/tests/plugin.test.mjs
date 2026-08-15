@@ -45,7 +45,7 @@ test('denied delivery is durable and visible through governance trace', async ()
   apply(ctx, {})
   const events = []
   const session = {
-    header: { cwd: '/tmp/project' },
+    header: { cwd: process.cwd() },
     events,
     append(type, data) {
       events.push({ type, data })
@@ -76,7 +76,7 @@ test('denied delivery is durable and visible through governance trace', async ()
 test('governance events are append-marked safe for a core reader without this plugin', () => {
   const calls = []
   const session = {
-    header: { cwd: '/tmp/project' },
+    header: { cwd: process.cwd() },
     events: [],
     append(...args) {
       calls.push(args)
@@ -98,7 +98,7 @@ test('completion continuation is a complete identified user message', async () =
   const events = []
   const steered = []
   const session = {
-    header: { cwd: '/tmp/project' },
+    header: { cwd: process.cwd() },
     events,
     append(type, data, options) {
       events.push({ type, data, ...options })
@@ -118,6 +118,55 @@ test('completion continuation is a complete identified user message', async () =
   assert.match(steered[0].content[0].text, /rejected completion/u)
   assert.equal(Object.isFrozen(steered[0]), true)
   assert.equal(Object.isFrozen(steered[0].content), true)
+})
+
+test('non-git sessions stay unmanaged and stop without governance continuation', async () => {
+  const ctx = fakeContext()
+  apply(ctx, {})
+  const events = []
+  const steered = []
+  const agent = {
+    session: {
+      header: { cwd: '/tmp/dsh-governance-non-git-session' },
+      events,
+      append(type, data, options) { events.push({ type, data, ...options }) },
+    },
+    steer(message) { steered.push(message) },
+  }
+  let nextCalls = 0
+  const decision = await ctx._listeners.get('agent/pre-step')({
+    agent,
+    messages: [{ source: { kind: 'user' } }],
+    signal: new AbortController().signal,
+  }, async () => {
+    nextCalls += 1
+    return { kind: 'enter', messages: [] }
+  })
+  await ctx._listeners.get('agent/turn-stopping')({ agent })
+
+  assert.equal(decision.kind, 'enter')
+  assert.equal(nextCalls, 1)
+  assert.deepEqual(events, [])
+  assert.deepEqual(steered, [])
+})
+
+test('governance stays lazy until a successful mutation in a git worktree', () => {
+  const ctx = fakeContext()
+  apply(ctx, {})
+  const events = []
+  const agent = {
+    session: {
+      header: { cwd: process.cwd() },
+      events,
+      append(type, data, options) { events.push({ type, data, ...options }) },
+    },
+  }
+
+  assert.equal(ctx._provided.get('governance').state(agent).phase, 'unmanaged')
+  ctx._listeners.get('tools/result')({ name: 'apply_patch', arguments: {}, agent }, { isError: false })
+
+  assert.deepEqual(events.map(event => event.type), ['governance/work-opened'])
+  assert.equal(events[0].ignorable, true)
 })
 
 test('milestone classification separates commit from delivery', () => {
