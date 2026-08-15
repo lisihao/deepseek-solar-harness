@@ -73,6 +73,25 @@ test('denied delivery is durable and visible through governance trace', async ()
   assert.match(traceTool.output.render({}, trace)[0].text, /decision=denied/)
 })
 
+test('governance events are append-marked safe for a core reader without this plugin', () => {
+  const calls = []
+  const session = {
+    header: { cwd: '/tmp/project' },
+    events: [],
+    append(...args) {
+      calls.push(args)
+      const [type, data, options] = args
+      session.events.push({ type, data, ...options })
+    },
+  }
+
+  new GovernanceService(fakeContext(), {}).ensureWork({ session })
+
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls[0][2], { ignorable: true })
+  assert.equal(session.events[0].ignorable, true)
+})
+
 test('milestone classification separates commit from delivery', () => {
   const service = new GovernanceService(fakeContext(), {})
   assert.equal(service.classifyExecution({ name: 'bash', arguments: { command: 'git commit -m x' } }), 'commit')

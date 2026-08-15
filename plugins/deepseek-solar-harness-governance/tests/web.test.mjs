@@ -78,6 +78,60 @@ test('trace HTTP projection reads persisted sessions without publishing them liv
   assert.equal(ctx.sessions.get('session-cold'), undefined)
 })
 
+test('trace HTTP projection reads legacy unmarked governance events from a raw artifact', async () => {
+  const sessionId = 'session-legacy'
+  const persistence = {
+    supportsRawArtifacts: true,
+    async inspect() {
+      throw new Error(`session "${sessionId}" contains event type "governance/work-opened" (seq 9) unknown to this harness and not marked ignorable`)
+    },
+    async readRaw(id) {
+      assert.equal(id, sessionId)
+      return {
+        meta: { id },
+        filename: 'session.jsonl',
+        content: [
+          JSON.stringify({ type: 'session', version: 0, id }),
+          JSON.stringify({ type: 'turn/start', seq: 8, time: 1, data: { turn: 1 } }),
+          JSON.stringify({
+            type: 'governance/work-opened',
+            seq: 9,
+            time: 2,
+            data: { workId: 'work-legacy', project: '/tmp/project', openedAt: '2026-08-15T00:00:00.000Z' },
+          }),
+        ].join('\n'),
+      }
+    },
+  }
+  const ctx = context(undefined, persistence)
+  const handler = createGovernanceTraceHandler(ctx, new GovernanceService(ctx, {}))
+  const res = response()
+  await handler({ method: 'GET', url: `${GOVERNANCE_TRACE_PATH}?sessionId=${sessionId}` }, res)
+  assert.equal(res.status, 200)
+  const body = JSON.parse(res.body)
+  assert.equal(body.source, 'raw-persistence')
+  assert.equal(body.phase, 'open')
+  assert.equal(body.events[0].sequence, 9)
+})
+
+test('trace HTTP projection does not bypass refusals for other unknown event types', async () => {
+  let rawReads = 0
+  const persistence = {
+    supportsRawArtifacts: true,
+    async inspect() {
+      throw new Error('event type "other/required" unknown to this harness and not marked ignorable')
+    },
+    async readRaw() { rawReads += 1 },
+  }
+  const ctx = context(undefined, persistence)
+  const handler = createGovernanceTraceHandler(ctx, new GovernanceService(ctx, {}))
+  const res = response()
+  await handler({ method: 'GET', url: `${GOVERNANCE_TRACE_PATH}?sessionId=session-other` }, res)
+  assert.equal(res.status, 500)
+  assert.equal(JSON.parse(res.body).error.code, 'SESSION_INSPECTION_FAILED')
+  assert.equal(rawReads, 0)
+})
+
 test('trace HTTP projection bounds limits and supports HEAD', async () => {
   const session = { id: 'session-1', events: [] }
   const ctx = context(session)

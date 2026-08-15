@@ -1,5 +1,35 @@
 export const GOVERNANCE_TRACE_PATH = '/code-harness/v1/trace'
 
+function isLegacyGovernanceRefusal(error) {
+  return error instanceof Error
+    && /event type "governance\/[^"]+"/u.test(error.message)
+    && /unknown to this harness and not marked ignorable/iu.test(error.message)
+}
+
+function rawGovernanceSession(raw, sessionId) {
+  if (raw === undefined) return undefined
+  if (raw.meta?.id !== sessionId) throw new Error(`raw session identity mismatch for ${sessionId}`)
+  if (typeof raw.content !== 'string') throw new Error(`raw session ${sessionId} has no text content`)
+  const events = []
+  const lines = raw.content.split('\n')
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index].trim()
+    if (line === '') continue
+    let record
+    try {
+      record = JSON.parse(line)
+    } catch (error) {
+      throw new Error(`raw session ${sessionId} contains invalid JSON at line ${String(index + 1)}`, { cause: error })
+    }
+    if (typeof record?.type !== 'string' || !record.type.startsWith('governance/')) continue
+    if (!Number.isSafeInteger(record.seq) || record.seq < 0 || record.data === null || typeof record.data !== 'object') {
+      throw new Error(`raw session ${sessionId} contains an invalid governance event at line ${String(index + 1)}`)
+    }
+    events.push(record)
+  }
+  return { events }
+}
+
 function sendJson(res, status, payload, head = false, extraHeaders = {}) {
   const body = JSON.stringify(payload)
   res.writeHead(status, {
@@ -59,7 +89,10 @@ export function createGovernanceTraceHandler(ctx, governance) {
             sendJson(res, 404, { error: { code: 'SESSION_NOT_FOUND', message: `session ${sessionId} was not found` } })
             return
           }
-          throw error
+          if (!isLegacyGovernanceRefusal(error) || persistence.supportsRawArtifacts !== true) throw error
+          session = rawGovernanceSession(await persistence.readRaw(sessionId), sessionId)
+          if (session === undefined) throw error
+          source = 'raw-persistence'
         }
       }
       sendJson(res, 200, {

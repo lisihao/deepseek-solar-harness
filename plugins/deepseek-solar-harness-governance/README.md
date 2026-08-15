@@ -2,7 +2,7 @@
 
 Static Cordis governance bundle for DeepSeek-Solar-Harness. The plugin adapts
 the repository's canonical `scripts/governance.py`; it does not replace
-project-native rules or remote CI. Version 0.3.4 also ships a `dsh.client`
+project-native rules or remote CI. Version 0.3.5 also ships a `dsh.client`
 browser plugin with a visible, single-column `治理 Trace` sidebar entry and a
 compact centered trace panel.
 
@@ -17,7 +17,7 @@ cd plugins/deepseek-solar-harness-governance
 npm test
 npm run verify
 npm pack
-dsh plugin --profile governed-code add ./lisihao-dsh-code-harness-governance-0.3.4.tgz
+dsh plugin --profile governed-code add ./lisihao-dsh-code-harness-governance-0.3.5.tgz
 ```
 
 Inspect the composition and start through the fail-closed admission wrapper:
@@ -60,6 +60,13 @@ inspects its immutable persisted log, so historical tasks remain visible
 without publishing them as active sessions. Full command output remains in the
 mode-`0600` run log under Git metadata and is referenced by digest and path
 instead of copied into the visible trace.
+
+Every `governance/*` record is appended with the DSH `ignorable` envelope
+marker because it is informational and does not participate in conversation
+reconstruction. For logs written before that marker was available, only the
+Trace HTTP projection falls back to the backend's read-only raw artifact and
+extracts governance records; unrelated unsupported event types still fail
+closed, and the stored artifact is never rewritten.
 
 ## Authority boundary
 
