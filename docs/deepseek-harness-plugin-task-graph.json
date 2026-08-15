@@ -34,14 +34,14 @@
       "id": "P4",
       "title": "Independent CI and repository protection",
       "depends_on": ["P3"],
-      "status": "in_progress",
+      "status": "completed",
       "acceptance": ["CI uploads attestation", "branch protection state is explicitly verified"]
     },
     {
       "id": "P5",
       "title": "Full verification and release evidence",
       "depends_on": ["P3", "P4"],
-      "status": "pending",
+      "status": "completed",
       "acceptance": ["full gates pass", "fresh attestation passes", "commit and remote branch exist"]
     }
   ]

@@ -59,9 +59,18 @@ returns `403 Upgrade to GitHub Pro or make this repository public` for both
 classic branch protection and rulesets. The repository remains private; this
 constraint is reported as `warn`, not silently treated as protected.
 
-## Pending remote evidence
+## Remote evidence
 
-- Push the implementation branch.
-- Observe the repository's `Governance Harness` workflow on the exact commit.
-- Record workflow URL and artifact availability.
-- Re-attest after the final commit because the commit changes Git HEAD.
+- Branch: `codex/dsh-governance-plugin`
+- Implementation commit: `19271a5382f94cf3f616445b0315eb414ca33a4e`
+- Workflow: `Governance Harness`
+- Workflow run: <https://github.com/lisihao/agent-development-governance/actions/runs/31856621815>
+- Workflow result: `success`
+- Attestation artifact: `governance-attestation`
+- Artifact ID: `9239212474`
+- Artifact size: `2852` bytes
+- Artifact expired: `false`
+
+The workflow and attestation artifact are tied to the exact implementation
+commit above. The final evidence-only commit is re-attested locally and must
+also pass the same remote workflow before merge.
