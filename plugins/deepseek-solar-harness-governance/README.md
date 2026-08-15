@@ -42,10 +42,19 @@ the policy plugin or its invariant companion, or if strict mode was overridden.
 - `governance_plan`
 - `governance_verify`
 - `governance_submit_completion`
+- `governance_trace`
 
 Only `governance_submit_completion` can request acceptance, and the service
 re-attests the current worktree before it appends
 `governance/completion-accepted`. The tool has no `accepted` input field.
+
+`governance_trace` projects a bounded, secret-minimized timeline from the
+append-only session log. It includes gate results, attestation digests, phase
+transitions, and every commit or delivery admission decision. The Web client
+renders the tool result in the conversation, so the same trace is visible to
+the user and the model. Full command output remains in the mode-`0600` run log
+under Git metadata and is referenced by digest and path instead of copied into
+the model-visible trace.
 
 ## Authority boundary
 

@@ -8,5 +8,6 @@
       config:
         strict: true
         maxContinuationRejections: 3
+        maxTraceEvents: 200
     - id: code-harness-governance-invariant
       name: '@lisihao/dsh-code-harness-governance/invariant'

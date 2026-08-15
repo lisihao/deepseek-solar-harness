@@ -40,9 +40,20 @@ def package_tarball() -> Path:
     return (PLUGIN / filename).resolve()
 
 
-def cordis_probe(dsh_root: Path) -> dict[str, object]:
-    index_uri = (PLUGIN / "index.js").resolve().as_uri()
-    invariant_uri = (PLUGIN / "invariant.js").resolve().as_uri()
+def installed_plugin_root(home: Path, profile: str) -> Path:
+    candidates = (
+        home / "profiles" / profile / "node_modules" / "@lisihao" / "dsh-code-harness-governance",
+        home / "profiles" / "node_modules" / "@lisihao" / "dsh-code-harness-governance",
+    )
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate.resolve()
+    raise RuntimeError(f"installed governance plugin not found under {home}")
+
+
+def cordis_probe(dsh_root: Path, plugin_root: Path) -> dict[str, object]:
+    index_uri = (plugin_root / "index.js").resolve().as_uri()
+    invariant_uri = (plugin_root / "invariant.js").resolve().as_uri()
     project = ROOT.as_posix()
     source = f"""
 import {{ Context }} from '@deepseek-ai/cordis';
@@ -61,6 +72,7 @@ await ctx.plugin(Governance);
 await ctx.plugin(GovernanceInvariant);
 const tools = ctx.tools.schemas().map(item => item.name).filter(name => name.startsWith('governance_'));
 const session = ctx.sessions.create(undefined, {{ meta: {{ cwd: {json.dumps(project)} }} }});
+const agent = {{ session }};
 let invariantRejectedForgery = false;
 try {{
   session.append('governance/completion-accepted', {{
@@ -69,10 +81,16 @@ try {{
   }});
 }} catch {{ invariantRejectedForgery = true; }}
 const pushDenied = Boolean(ctx.governance.guardExecution({{
-  name: 'bash', arguments: {{ command: 'git push origin main' }}, agent: {{ session }},
+  name: 'bash', arguments: {{ command: 'git push origin main' }}, agent,
 }}));
-if (tools.length !== 4 || !invariantRejectedForgery || !pushDenied) process.exit(2);
-console.log(JSON.stringify({{ tools, invariantRejectedForgery, pushDenied }}));
+const trace = ctx.governance.trace(agent, 20);
+const denied = trace.events.find(event =>
+  event.type === 'governance/milestone-evaluated'
+  && event.kind === 'delivery'
+  && event.decision === 'denied'
+  && event.reasonCode === 'missing-acceptance');
+if (tools.length !== 5 || !invariantRejectedForgery || !pushDenied || denied === undefined) process.exit(2);
+console.log(JSON.stringify({{ tools, invariantRejectedForgery, pushDenied, trace }}));
 """
     result = run(
         ["node", "--import", "tsx/esm", "--input-type=module", "-e", source],
@@ -126,13 +144,16 @@ def main() -> int:
         ):
             if marker not in admitted.stdout:
                 raise RuntimeError(f"governed dump-config missing {marker}")
+        installed_root = installed_plugin_root(home, "governed-code")
+        cordis = cordis_probe(dsh_root, installed_root)
 
     evidence = {
         "status": "ok",
         "dsh_root": str(dsh_root),
         "bundle": str(tarball),
         "profile_admission": "ok",
-        "cordis": cordis_probe(dsh_root),
+        "installed_plugin": str(installed_root),
+        "cordis": cordis,
     }
     print(json.dumps(evidence, ensure_ascii=False, indent=2))
     return 0

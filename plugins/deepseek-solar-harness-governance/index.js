@@ -13,6 +13,27 @@ function output() {
   }
 }
 
+function traceOutput() {
+  return {
+    schema: OUTPUT_SCHEMA,
+    render: (_args, value) => {
+      const header = `governance trace phase=${String(value.phase)} work_id=${String(value.workId ?? 'N/A')} events=${String(value.returnedEvents)}/${String(value.totalEvents)}`
+      const rows = Array.isArray(value.events)
+        ? value.events.map(event => [
+            `#${String(event.sequence)}`,
+            String(event.timestamp ?? 'N/A'),
+            String(event.type),
+            `phase=${String(event.phaseAfter)}`,
+            event.decision === undefined ? null : `decision=${String(event.decision)}`,
+            event.gateId === undefined ? null : `gate=${String(event.gateId)}:${String(event.status)}`,
+            event.reasonCode === undefined ? null : `reason=${String(event.reasonCode)}`,
+          ].filter(Boolean).join(' '))
+        : []
+      return [{ type: 'text', text: [header, ...rows].join('\n') }]
+    },
+  }
+}
+
 function objectParameters(properties = {}, required = []) {
   return {
     type: 'object',
@@ -56,7 +77,7 @@ function governanceContext(state) {
     `accepted_head=${state.attestation?.gitHead ?? 'N/A'}`,
     state.phase === 'accepted'
       ? 'This work has fresh local governance acceptance. Remote CI and protected-branch status remain independent.'
-      : 'Do not claim completion. Run governance_plan, governance_verify with level full, then governance_submit_completion.',
+      : 'Do not claim completion. Run governance_plan, governance_verify with level full, then governance_submit_completion. Use governance_trace to inspect durable evidence and guard decisions.',
   ].join('\n')
   return { content: [{ type: 'text', text }], source: PLUGIN_SOURCE }
 }
@@ -114,6 +135,22 @@ export function apply(ctx, config = {}) {
     output: output(),
     async execute(_args, exec) {
       return governance.requestCompletion(requireAgent(exec))
+    },
+  })
+
+  ctx.tools.register({
+    name: 'governance_trace',
+    description: 'Read the durable governance event trace, including gate evidence and commit or delivery admission decisions.',
+    parameters: objectParameters({
+      limit: {
+        type: 'integer',
+        minimum: 1,
+        maximum: governance.config.maxTraceEvents,
+      },
+    }),
+    output: traceOutput(),
+    async execute(args, exec) {
+      return governance.trace(requireAgent(exec), args.limit)
     },
   })
 

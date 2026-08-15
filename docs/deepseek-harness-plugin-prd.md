@@ -81,10 +81,16 @@ argument.
 - `governance/completion-rejected`
 - `governance/completion-accepted`
 - `governance/invalidated`
+- `governance/milestone-evaluated`
 
 Every event carries a `workId` and ISO timestamp. Run and attestation events
 also carry the run id, level, Git HEAD, profile digest, change fingerprint,
 output digest, and attestation digest where applicable.
+
+The model-facing `governance_trace` tool renders a bounded projection of these
+events. Milestone events record commit or delivery, allowed or denied, the
+current phase, a reason code, tool name, and command digest. They never persist
+the raw command in the model-visible trace.
 
 ## Distribution
 
@@ -113,3 +119,4 @@ config still contains both the policy plugin and invariant companion.
 7. The packaged Python runtime digest matches the canonical executor.
 8. The bundle installs and appears in a real DeepSeek-Harness composed config.
 9. CI independently runs the full profile and publishes its attestation.
+10. A denied delivery appears in `governance_trace` with its phase and reason.

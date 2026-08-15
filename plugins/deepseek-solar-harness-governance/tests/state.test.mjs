@@ -69,6 +69,33 @@ test('failed gate cannot issue an attestation', () => {
   })), /requires at least one successful gate/)
 })
 
+test('milestone decision is validated without changing certification phase', () => {
+  const opened = applyGovernanceEvent(emptyGovernanceState(), work)
+  const evaluated = applyGovernanceEvent(opened, event('governance/milestone-evaluated', {
+    workId: 'w1',
+    kind: 'delivery',
+    decision: 'denied',
+    toolName: 'bash',
+    commandSha256: 'command',
+    phase: 'open',
+    reasonCode: 'missing-acceptance',
+    message: 'delivery requires accepted evidence',
+    evaluatedAt: '2026-08-14T00:00:02.000Z',
+  }))
+  assert.equal(evaluated.phase, 'open')
+  assert.throws(() => applyGovernanceEvent(opened, event('governance/milestone-evaluated', {
+    workId: 'w1',
+    kind: 'delivery',
+    decision: 'forged',
+    toolName: 'bash',
+    commandSha256: 'command',
+    phase: 'open',
+    reasonCode: 'missing-acceptance',
+    message: 'delivery requires accepted evidence',
+    evaluatedAt: '2026-08-14T00:00:02.000Z',
+  })), /decision must be allowed or denied/)
+})
+
 test('accepted work cannot be downgraded without opening new work', () => {
   const accepted = foldGovernance([
     work,
