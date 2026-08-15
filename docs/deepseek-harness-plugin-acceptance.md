@@ -13,7 +13,7 @@ Application Support runtime as source code.
 | --- | --- | --- |
 | Canonical Python runtime | ok | Packaged SHA-256 is checked against `scripts/governance.py` |
 | Cordis service | ok | `ctx.governance` resolves in a real Cordis Context |
-| Model tools | ok | status, plan, verify, and completion submission registered |
+| Model tools | ok | status, plan, verify, completion submission, and trace registered |
 | Independent invariant | ok | Forged accepted event rejected before session commit |
 | Commit guard | ok | Commit requires fresh candidate evidence |
 | Delivery guard | ok | Unaccepted `git push` is denied |
@@ -22,6 +22,7 @@ Application Support runtime as source code.
 | Startup admission | ok | Policy, invariant service, companion, and strict mode required |
 | Negative startup test | ok | Disabled companion rejected with exit 78 |
 | Full local lifecycle | ok | Eight gates recorded; last event is completion-accepted |
+| Visible trace | ok | Denied delivery is projected from the durable session log with phase, reason, tool, and command digest |
 
 Reproducible host check:
 
@@ -36,9 +37,10 @@ Verified host snapshot:
 - Branch: `master`
 - Commit: `accdfc00f111f7740fdcb78db5f4a45629ea8f2e`
 - Profile admission: `ok`
-- Cordis tools: `4/4`
+- Cordis tools: `5/5`
 - Forged accepted event: rejected
 - Unaccepted push: denied
+- Trace event: `governance/milestone-evaluated`, `decision=denied`, `reasonCode=missing-acceptance`
 
 ## Repository authority evidence
 

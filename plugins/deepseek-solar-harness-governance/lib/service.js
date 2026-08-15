@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { foldGovernance } from './state.js'
+import {
+  applyGovernanceEvent,
+  emptyGovernanceState,
+  foldGovernance,
+  isGovernanceEvent,
+} from './state.js'
 import {
   gitMetadataPath,
   runGovernance,
@@ -30,6 +35,7 @@ export function resolveConfig(config = {}) {
   const known = new Set([
     'python', 'corePath', 'profilePath', 'strict', 'timeoutMs', 'syncTimeoutMs',
     'maxOutputBytes', 'maxContinuationRejections', 'mutationToolNames',
+    'maxTraceEvents',
     'commitCommandPatterns', 'deliveryCommandPatterns', 'mutationCommandPatterns',
   ])
   const unknown = Object.keys(config).filter(key => !known.has(key))
@@ -43,6 +49,7 @@ export function resolveConfig(config = {}) {
     syncTimeoutMs: config.syncTimeoutMs ?? 30_000,
     maxOutputBytes: config.maxOutputBytes ?? 4 * 1024 * 1024,
     maxContinuationRejections: config.maxContinuationRejections ?? 3,
+    maxTraceEvents: config.maxTraceEvents ?? 200,
     mutationToolNames: config.mutationToolNames ?? [
       'apply_patch', 'str_replace_editor', 'write_file', 'edit_file', 'notebook_edit',
     ],
@@ -70,6 +77,7 @@ export function resolveConfig(config = {}) {
   positiveInteger(result.syncTimeoutMs, 'syncTimeoutMs')
   positiveInteger(result.maxOutputBytes, 'maxOutputBytes')
   positiveInteger(result.maxContinuationRejections, 'maxContinuationRejections')
+  positiveInteger(result.maxTraceEvents, 'maxTraceEvents')
   result.mutationToolNames = stringArray(result.mutationToolNames, 'mutationToolNames')
   result.commitCommandPatterns = stringArray(result.commitCommandPatterns, 'commitCommandPatterns')
   result.deliveryCommandPatterns = stringArray(result.deliveryCommandPatterns, 'deliveryCommandPatterns')
@@ -123,6 +131,33 @@ function redactOutput(value) {
     .replace(/\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY))=([^\s]+)/gu, '$1=[REDACTED]')
 }
 
+const TRACE_TIMESTAMP_FIELDS = Object.freeze([
+  'openedAt', 'recordedAt', 'startedAt', 'finishedAt', 'issuedAt',
+  'requestedAt', 'rejectedAt', 'acceptedAt', 'invalidatedAt', 'evaluatedAt',
+])
+
+const TRACE_DATA_FIELDS = Object.freeze([
+  'workId', 'runId', 'gateId', 'status', 'level', 'scope', 'gitHead',
+  'profileSha256', 'changeFingerprint', 'attestationSha256', 'outputSha256',
+  'logPath', 'reportPath', 'reasonCode', 'message', 'kind', 'decision',
+  'toolName', 'commandSha256',
+])
+
+function traceTimestamp(data) {
+  for (const field of TRACE_TIMESTAMP_FIELDS) {
+    if (typeof data[field] === 'string') return data[field]
+  }
+  return null
+}
+
+function traceData(data) {
+  const result = {}
+  for (const field of TRACE_DATA_FIELDS) {
+    if (data[field] !== undefined) result[field] = data[field]
+  }
+  return result
+}
+
 export class GovernanceService {
   constructor(ctx, config = {}) {
     this.ctx = ctx
@@ -131,6 +166,35 @@ export class GovernanceService {
 
   state(agent) {
     return foldGovernance(agent.session.events)
+  }
+
+  trace(agent, requestedLimit) {
+    this.ensureWork(agent)
+    const limit = requestedLimit ?? this.config.maxTraceEvents
+    positiveInteger(limit, 'trace limit')
+    if (limit > this.config.maxTraceEvents) {
+      throw new RangeError(`trace limit cannot exceed ${String(this.config.maxTraceEvents)}`)
+    }
+    let governanceState = emptyGovernanceState()
+    const events = []
+    for (const [sequence, event] of agent.session.events.entries()) {
+      if (!isGovernanceEvent(event)) continue
+      governanceState = applyGovernanceEvent(governanceState, event)
+      events.push({
+        sequence,
+        type: event.type,
+        timestamp: traceTimestamp(event.data),
+        phaseAfter: governanceState.phase,
+        ...traceData(event.data),
+      })
+    }
+    return {
+      phase: governanceState.phase,
+      workId: governanceState.workId,
+      totalEvents: events.length,
+      returnedEvents: Math.min(events.length, limit),
+      events: events.slice(-limit),
+    }
   }
 
   ensureWork(agent, forceNew = false) {
@@ -365,13 +429,39 @@ export class GovernanceService {
     if (exec.agent === undefined) return undefined
     const kind = this.classifyExecution(exec)
     if (kind !== 'commit' && kind !== 'delivery') return undefined
+    this.ensureWork(exec.agent)
     const state = this.invalidateIfStale(exec.agent)
+    const command = typeof exec.arguments?.command === 'string' ? exec.arguments.command : ''
+    let decision
     if (kind === 'commit') {
-      if (state.phase === 'candidate' && state.attestation !== null) return undefined
-      return 'Code-as-Harness: git commit requires a fresh governance candidate attestation'
+      decision = state.phase === 'candidate' && state.attestation !== null
+        ? { allowed: true, reasonCode: 'fresh-candidate', message: 'commit admitted by fresh candidate attestation' }
+        : {
+            allowed: false,
+            reasonCode: 'missing-candidate',
+            message: 'Code-as-Harness: git commit requires a fresh governance candidate attestation',
+          }
+    } else {
+      decision = state.phase === 'accepted' && state.attestation !== null
+        ? { allowed: true, reasonCode: 'accepted', message: 'delivery admitted by accepted governance evidence' }
+        : {
+            allowed: false,
+            reasonCode: 'missing-acceptance',
+            message: 'Code-as-Harness: push, PR, release, and deployment require governance accepted status',
+          }
     }
-    if (state.phase === 'accepted' && state.attestation !== null) return undefined
-    return 'Code-as-Harness: push, PR, release, and deployment require governance accepted status'
+    append(exec.agent, 'governance/milestone-evaluated', {
+      workId: state.workId,
+      kind,
+      decision: decision.allowed ? 'allowed' : 'denied',
+      toolName: exec.name,
+      commandSha256: sha256(command),
+      phase: state.phase,
+      reasonCode: decision.reasonCode,
+      message: decision.message,
+      evaluatedAt: now(),
+    })
+    return decision.allowed ? undefined : decision.message
   }
 
   markMutation(agent, reason) {
@@ -427,6 +517,7 @@ export class GovernanceService {
       rejection: state.lastRejection,
       acceptedAt: state.acceptedAt,
       continuationRejections: state.continuationRejections,
+      traceEventCount: agent.session.events.filter(isGovernanceEvent).length,
     }
   }
 }

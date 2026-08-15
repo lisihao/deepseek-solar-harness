@@ -73,9 +73,10 @@ python3 "$SKILL_DIR/scripts/governance.py" attest \
 ## DeepSeek-Solar-Harness 插件
 
 DeepSeek 插件不是第二份治理实现。它通过 Cordis 的 Agent、Tool 和 Session
-扩展点调用同一个 `scripts/governance.py`，并把运行、门禁、attestation、拒绝和
-accepted 状态写入 append-only Session Log。Agent 只能调用完成申请工具，不能
-直接写入 accepted 状态。
+扩展点调用同一个 `scripts/governance.py`，并把运行、门禁、attestation、拒绝、
+commit/push 准入决策和 accepted 状态写入 append-only Session Log。Agent 只能
+调用完成申请工具，不能直接写入 accepted 状态。`governance_trace` 将这条持久轨迹
+以限长、脱敏的时间线呈现在 DeepSeek-Solar-Harness 对话中。
 
 ```bash
 python3 scripts/build_dsh_plugin.py

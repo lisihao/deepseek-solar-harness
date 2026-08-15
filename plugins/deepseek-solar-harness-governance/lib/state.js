@@ -10,6 +10,7 @@ export const GOVERNANCE_EVENTS = Object.freeze([
   'governance/completion-rejected',
   'governance/completion-accepted',
   'governance/invalidated',
+  'governance/milestone-evaluated',
 ])
 
 const EVENT_SET = new Set(GOVERNANCE_EVENTS)
@@ -246,6 +247,24 @@ export function applyGovernanceEvent(source, event) {
         message: text(data.message, 'message'),
         rejectedAt: data.invalidatedAt,
         terminal: false,
+      }
+      return state
+    }
+    case 'governance/milestone-evaluated': {
+      requireWork(state, data)
+      if (data.kind !== 'commit' && data.kind !== 'delivery') {
+        fail('milestone kind must be commit or delivery')
+      }
+      if (data.decision !== 'allowed' && data.decision !== 'denied') {
+        fail('milestone decision must be allowed or denied')
+      }
+      text(data.toolName, 'toolName')
+      text(data.commandSha256, 'commandSha256')
+      text(data.reasonCode, 'reasonCode')
+      text(data.message, 'message')
+      timestamp(data.evaluatedAt, 'evaluatedAt')
+      if (data.phase !== state.phase) {
+        fail(`milestone phase ${String(data.phase)} does not match ${state.phase}`)
       }
       return state
     }
