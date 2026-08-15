@@ -54,6 +54,10 @@ external authority.
   candidate events commit.
 - Store full command output outside the model-visible log; persist bounded
   summaries, digests, and artifact locations in events.
+- Ship a `dsh.client` browser half that registers additively in
+  `sidebar.footer.action`; do not replace the sidebar.
+- Expose a same-origin, no-store, read-only HTTP projection for the selected
+  live session and render it in a user-visible `治理 Trace` panel.
 
 ## State machine
 
@@ -120,3 +124,5 @@ config still contains both the policy plugin and invariant companion.
 8. The bundle installs and appears in a real DeepSeek-Harness composed config.
 9. CI independently runs the full profile and publishes its attestation.
 10. A denied delivery appears in `governance_trace` with its phase and reason.
+11. The installed package appears in the real Web boot graph, the sidebar entry
+    is visible, and clicking it opens the Trace panel without browser errors.

@@ -34,9 +34,11 @@ def run(argv: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> sub
 
 
 def package_tarball() -> Path:
-    result = run(["npm", "pack", "--json"], cwd=PLUGIN)
-    payload = json.loads(result.stdout)
-    filename = payload[0]["filename"]
+    result = run(["npm", "pack", "--silent"], cwd=PLUGIN)
+    candidates = [line.strip() for line in result.stdout.splitlines() if line.strip().endswith(".tgz")]
+    if len(candidates) != 1:
+        raise RuntimeError(f"npm pack did not report exactly one tarball: {result.stdout.strip()}")
+    filename = candidates[0]
     return (PLUGIN / filename).resolve()
 
 
@@ -49,6 +51,32 @@ def installed_plugin_root(home: Path, profile: str) -> Path:
         if candidate.is_dir():
             return candidate.resolve()
     raise RuntimeError(f"installed governance plugin not found under {home}")
+
+
+def client_probe(plugin_root: Path) -> dict[str, object]:
+    package = json.loads((plugin_root / "package.json").read_text(encoding="utf-8"))
+    client_export = package.get("exports", {}).get("./client")
+    client = plugin_root / str(client_export).removeprefix("./")
+    if package.get("dsh", {}).get("client", {}).get("platform") != "web":
+        raise RuntimeError("installed package does not declare a DSH Web client")
+    if not client.is_file():
+        raise RuntimeError(f"installed client bundle does not exist: {client}")
+    source = client.read_text(encoding="utf-8")
+    markers = (
+        "window.__ModuleLoader__.load",
+        "code-harness-governance-trace",
+        "/code-harness/v1/trace",
+        "governance-trace-panel",
+    )
+    missing = [marker for marker in markers if marker not in source]
+    if missing:
+        raise RuntimeError(f"installed client bundle is missing markers: {', '.join(missing)}")
+    return {
+        "platform": "web",
+        "bundle": str(client),
+        "sidebar_entry": "code-harness-governance-trace",
+        "trace_path": "/code-harness/v1/trace",
+    }
 
 
 def cordis_probe(dsh_root: Path, plugin_root: Path) -> dict[str, object]:
@@ -146,6 +174,7 @@ def main() -> int:
                 raise RuntimeError(f"governed dump-config missing {marker}")
         installed_root = installed_plugin_root(home, "governed-code")
         cordis = cordis_probe(dsh_root, installed_root)
+        client = client_probe(installed_root)
 
     evidence = {
         "status": "ok",
@@ -154,6 +183,7 @@ def main() -> int:
         "profile_admission": "ok",
         "installed_plugin": str(installed_root),
         "cordis": cordis,
+        "client": client,
     }
     print(json.dumps(evidence, ensure_ascii=False, indent=2))
     return 0

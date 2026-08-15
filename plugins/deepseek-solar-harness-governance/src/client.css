@@ -1,0 +1,191 @@
+.dsh-governance-trigger {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.dsh-governance-trigger:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.dsh-governance-trigger-rail {
+  justify-content: center;
+  padding: 7px;
+}
+
+.dsh-governance-overlay {
+  inset: 0;
+  position: fixed;
+  z-index: 1000;
+}
+
+.dsh-governance-mask {
+  background: var(--dsw-alias-bg-mask-drop);
+  border: 0;
+  inset: 0;
+  position: absolute;
+  width: 100%;
+}
+
+.dsh-governance-panel {
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
+  bottom: 24px;
+  box-shadow: 0 20px 56px var(--dsw-alias-bg-mask-2);
+  color: var(--dsw-alias-label-primary);
+  display: flex;
+  flex-direction: column;
+  max-width: 760px;
+  overflow: hidden;
+  position: absolute;
+  right: 24px;
+  top: 24px;
+  width: calc(100vw - 48px);
+}
+
+.dsh-governance-header {
+  align-items: center;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  display: flex;
+  justify-content: space-between;
+  padding: 18px 20px;
+}
+
+.dsh-governance-header h2,
+.dsh-governance-header p {
+  margin: 0;
+}
+
+.dsh-governance-header h2 {
+  font-size: 17px;
+}
+
+.dsh-governance-header p {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.dsh-governance-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.dsh-governance-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+}
+
+.dsh-governance-actions button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.dsh-governance-summary {
+  align-items: center;
+  background: var(--dsw-alias-bg-layer-2);
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+  padding: 10px 20px;
+}
+
+.dsh-governance-phase {
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.dsh-governance-phase-accepted {
+  background: var(--dsw-alias-state-success-secondary);
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.dsh-governance-phase-blocked {
+  background: var(--dsw-alias-state-error-secondary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.dsh-governance-error {
+  background: var(--dsw-alias-state-error-secondary);
+  color: var(--dsw-alias-state-error-primary);
+  margin: 16px 20px 0;
+  padding: 10px 12px;
+}
+
+.dsh-governance-events {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  overflow: auto;
+  padding: 16px 20px 24px;
+}
+
+.dsh-governance-event {
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.dsh-governance-event[data-decision='denied'] {
+  border-color: var(--dsw-alias-state-error-primary);
+}
+
+.dsh-governance-event-head {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto 1fr auto;
+}
+
+.dsh-governance-sequence,
+.dsh-governance-event-status {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+.dsh-governance-event-meta,
+.dsh-governance-event-detail,
+.dsh-governance-event-message {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  margin-top: 7px;
+}
+
+.dsh-governance-empty {
+  color: var(--dsw-alias-label-tertiary);
+  padding: 48px 20px;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .dsh-governance-panel {
+    border-radius: 0;
+    bottom: 0;
+    right: 0;
+    top: 0;
+    width: 100%;
+  }
+}

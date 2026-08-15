@@ -15,6 +15,7 @@ function fakeContext() {
     },
     sessions: { flush: async () => true },
     provide(key, value) { provided.set(key, value); return () => {} },
+    inject() { return () => {} },
     on(name, callback) { listeners.set(name, callback); return () => {} },
     _tools: tools,
     _guards: guards,

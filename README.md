@@ -76,7 +76,8 @@ DeepSeek 插件不是第二份治理实现。它通过 Cordis 的 Agent、Tool �
 扩展点调用同一个 `scripts/governance.py`，并把运行、门禁、attestation、拒绝、
 commit/push 准入决策和 accepted 状态写入 append-only Session Log。Agent 只能
 调用完成申请工具，不能直接写入 accepted 状态。`governance_trace` 将这条持久轨迹
-以限长、脱敏的时间线呈现在 DeepSeek-Solar-Harness 对话中。
+以限长、脱敏的时间线提供给模型；Web 端同时在左侧栏提供“治理 Trace”入口，显示
+当前任务的同一份只读事件投影。
 
 ```bash
 python3 scripts/build_dsh_plugin.py
