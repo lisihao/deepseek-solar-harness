@@ -208,6 +208,50 @@ describe('CI workflow', () => {
   })
 })
 
+describe('fork branch CI workflow', () => {
+  it('maps codex branch pushes to the repository-native required gates', () => {
+    const workflow = loadWorkflow('.github/workflows/fork-ci.yml')
+    const push = workflowEvent(workflow, 'push')
+    const linux = workflowJob(workflow, 'linux-primary')
+    const compat = workflowJob(workflow, 'node-compat')
+    const pythonSdk = workflowJob(workflow, 'python-sdk')
+    const pythonRuntime = workflowJob(workflow, 'python-runtime')
+    const windows = workflowJob(workflow, 'windows')
+    const aggregate = workflowJob(workflow, 'all-checks-passed')
+    if (!Array.isArray(linux.steps)
+      || !Array.isArray(compat.steps)
+      || !Array.isArray(pythonSdk.steps)
+      || !Array.isArray(windows.steps)
+      || !Array.isArray(aggregate.needs)) {
+      throw new TypeError('fork CI jobs must define executable steps and aggregate dependencies')
+    }
+
+    expect(push).toEqual({ branches: ['codex/**'] })
+    expect(workflow.permissions).toEqual({ contents: 'read' })
+    expect(linux['runs-on']).toBe('ubuntu-latest')
+    expect(JSON.stringify(linux.steps)).toContain('pnpm run check:ci:linux-primary')
+    expect(JSON.stringify(compat.steps)).toContain('pnpm run check:node-compat')
+    expect(JSON.stringify(pythonSdk.steps)).toContain('python/sdk pytest')
+    expect(pythonRuntime).toMatchObject({
+      uses: './.github/workflows/build-exe-for-python-sdk.yml',
+      with: { targets: 'node24-linux-x64', ci: true },
+    })
+    expect(windows['runs-on']).toBe('windows-latest')
+    expect(JSON.stringify(windows.steps)).toContain('pnpm run check:ci:windows-blocking')
+    expect(aggregate).toMatchObject({
+      name: 'all checks passed',
+      if: 'always()',
+    })
+    expect(aggregate.needs).toEqual([
+      'linux-primary',
+      'node-compat',
+      'python-sdk',
+      'python-runtime',
+      'windows',
+    ])
+  })
+})
+
 describe('E2B e2e workflow', () => {
   it('is manual-only and fails loud before running the focused live suite', () => {
     const workflow = loadWorkflow('.github/workflows/e2b-e2e.yml')
