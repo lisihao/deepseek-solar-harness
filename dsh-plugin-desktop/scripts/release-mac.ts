@@ -84,6 +84,7 @@ export function releaseMac(options: MacReleaseOptions = defaultReleaseOptions())
     'exec', 'electron-builder', '--mac', 'dmg',
     '--config.forceCodeSigning=true', '--config.mac.notarize=true',
   ], options.desktopRoot, releaseEnvironment)
+  options.run(process.execPath, ['scripts/verify-packaged-node-pty.ts'], options.desktopRoot, buildEnvironment)
   options.run(process.execPath, ['scripts/verify-mac-release.ts'], options.desktopRoot, buildEnvironment)
 }
 

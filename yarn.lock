@@ -2930,7 +2930,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-session@npm:0.1.0-rc.6, @deepseek-ai/dsh-session@npm:^0.1.0-rc.6":
+"@deepseek-ai/dsh-session@npm:0.1.0-rc.6":
   version: 0.1.0-rc.6
   resolution: "@deepseek-ai/dsh-session@npm:0.1.0-rc.6"
   peerDependencies:
@@ -2941,6 +2941,20 @@ __metadata:
     "@deepseek-ai/dsh-scope": ^0.1.0-rc.6
     "@deepseek-ai/dsh-typert-protocol": ^0.1.0-rc.6
   checksum: 10c0/b110f15fad91ec67f00a6bfc9bbcb5abbfc0b94a55a948d73029ff0146874edc1b8b8098435eea84777d3d3bb9094c0af8ba12e158241b9d8d0ceaebf4bdb451
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.6#./patches/dsh-session@0.1.0-rc.6.patch::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.6
+  resolution: "@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.6#./patches/dsh-session@0.1.0-rc.6.patch::version=0.1.0-rc.6&hash=1d273e&locator=deepseek-harness-desktop%40workspace%3A."
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-brand": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-scope": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-typert-protocol": ^0.1.0-rc.6
+  checksum: 10c0/5c1aeb716fae7ec186dcb3c505b350f06a24c90a47ce042e8609f2c598a1cc75497a577e65a5eb4b1a95b6c35ff437bf9355441bcfab1276a9b3ff43dff02f5b
   languageName: node
   linkType: hard
 
@@ -9395,13 +9409,23 @@ __metadata:
   languageName: node
   linkType: hard
 
-"node-pty@npm:^1.1.0":
+"node-pty@npm:1.1.0":
   version: 1.1.0
   resolution: "node-pty@npm:1.1.0"
   dependencies:
     node-addon-api: "npm:^7.1.0"
     node-gyp: "npm:latest"
   checksum: 10c0/e527305263da36d554b7d2116aee6430b898675fc50e7bd82fbd762f14cb6b948fb8d997736af1f70d76bf9ffd4f5179bc1ed1d8002567dfcf3b29f039291798
+  languageName: node
+  linkType: hard
+
+"node-pty@patch:node-pty@npm%3A1.1.0#./patches/node-pty@1.1.0.patch::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 1.1.0
+  resolution: "node-pty@patch:node-pty@npm%3A1.1.0#./patches/node-pty@1.1.0.patch::version=1.1.0&hash=f9da53&locator=deepseek-harness-desktop%40workspace%3A."
+  dependencies:
+    node-addon-api: "npm:^7.1.0"
+    node-gyp: "npm:latest"
+  checksum: 10c0/b3552c8f60f00329a613d52473825aee0a0dd5e2e021f262c8a596b24f1ef1e238046803beade7b3a0ac35627c40e332752ea3e3d3869f6c5db14880a26748ac
   languageName: node
   linkType: hard
 

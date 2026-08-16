@@ -193,6 +193,7 @@ describe('published package surface', () => {
     expect(manifest.scripts?.build).toContain('node scripts/generate-mac-app-icon.mjs')
     expect(manifest.scripts?.['package:dir']).toBe('yarn run build && node scripts/package-dir.mjs')
     expect(packageDir).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
+    expect(packageDir).toContain('verify-packaged-node-pty.ts')
     expect(manifest.scripts?.['dist:mac']).toBe('node scripts/release-mac.ts')
     expect(manifest.scripts?.['dist:win']).toBe('node scripts/package-win.ts')
     expect(manifest.scripts?.['check:win-package']).toContain('yarn run build')

@@ -50,7 +50,7 @@ describe('macOS release command boundary', () => {
     }, calls, identityEnvironments, logs))
 
     expect(identityEnvironments).toEqual([{ PATH: '/usr/bin', SAFE_BUILD_VALUE: 'kept' }])
-    expect(calls).toHaveLength(3)
+    expect(calls).toHaveLength(4)
     expect(calls[0]).toEqual({
       command: 'yarn',
       args: ['run', 'check'],
@@ -73,6 +73,12 @@ describe('macOS release command boundary', () => {
       },
     })
     expect(calls[2]).toEqual({
+      command: process.execPath,
+      args: ['scripts/verify-packaged-node-pty.ts'],
+      cwd: '/repo/dsh-plugin-desktop',
+      env: { PATH: '/usr/bin', SAFE_BUILD_VALUE: 'kept' },
+    })
+    expect(calls[3]).toEqual({
       command: process.execPath,
       args: ['scripts/verify-mac-release.ts'],
       cwd: '/repo/dsh-plugin-desktop',
@@ -104,7 +110,7 @@ describe('macOS release command boundary', () => {
 
     releaseMac(options)
 
-    expect(calls).toHaveLength(3)
+    expect(calls).toHaveLength(4)
     expect(calls[0]?.env).toEqual({ PATH: '/usr/bin' })
     expect(calls[1]?.env.CSC_LINK).toBe(`data:application/x-pkcs12;base64,${p12}`)
     expect(calls[1]?.env.CSC_NAME).toBe('Mengxin Yang (TEAM123456)')
@@ -112,6 +118,7 @@ describe('macOS release command boundary', () => {
     expect(calls[1]?.env.MAC_CERT_P12_BASE64).toBeUndefined()
     expect(calls[1]?.env.MACOS_SIGN_IDENTITY).toBeUndefined()
     expect(calls[2]?.env).toEqual({ PATH: '/usr/bin' })
+    expect(calls[3]?.env).toEqual({ PATH: '/usr/bin' })
   })
 
   it('rejects development signing before running any command', () => {
