@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -43,6 +43,17 @@ try {
     'anchored-standard',
     'compaction-epoch.mjs',
   )).href
+  const lunaConfigModule = pathToFileURL(join(
+    appRoot,
+    'Contents',
+    'Resources',
+    'app.asar',
+    'node_modules',
+    '@ycp424c',
+    'dsh-luna-vision-bridge',
+    'lib',
+    'config.js',
+  )).href
   const anchoredConfig = join(
     unpackedRoot,
     'vendor',
@@ -51,11 +62,25 @@ try {
     'agent.cordis.yml',
   )
 
-  const [{ prepareDesktopProfile }, { composeEntries }, { createEpochPromotion }] = await Promise.all([
+  const [{ prepareDesktopProfile }, { composeEntries }, { createEpochPromotion }, { resolveConfig }] = await Promise.all([
     import(profileModule),
     import(appBootModule),
     import(epochModule),
+    import(lunaConfigModule),
   ])
+  const lunaCommand = resolveConfig({}).lunaCommand
+  const expectedLunaCommand = join(
+    unpackedRoot,
+    'node_modules',
+    '@ycp424c',
+    'dsh-luna-vision-bridge',
+    'scripts',
+    'read-image-luna.sh',
+  )
+  if (lunaCommand !== expectedLunaCommand) {
+    throw new Error(`verify-packaged-composition-smoke: Luna launcher resolved to ${lunaCommand}`)
+  }
+  accessSync(lunaCommand, constants.X_OK)
   const prepared = prepareDesktopProfile(undefined, temporaryHome, 'darwin')
   const rows = composeEntries([prepared.patches])
   const rowsWithId = id => rows.filter(row => row.id === id)
@@ -137,6 +162,7 @@ try {
       remoteWebUi: remoteRows[0].name,
       billing: billingRows[0].name,
       lunaVisionBridge: lunaRows[0].name,
+      lunaCommand,
       remoteModules: remoteModuleRows[0].name,
       remoteModuleInstances: remoteInstances.map(instance => instance.id),
     },

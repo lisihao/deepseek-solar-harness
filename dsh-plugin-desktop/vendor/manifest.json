@@ -34,7 +34,7 @@
     {
       "name": "Luna Vision Bridge",
       "repository": "https://github.com/lisihao/dsh-luna-vision-bridge",
-      "commit": "238b4a4e3c80d069a3bbbd32cb0e4f2a93503e4c"
+      "commit": "0173d93fab9f480d9a7548ac65cf04c3488fb8bb"
     }
   ],
   "files": {
@@ -58,6 +58,6 @@
     "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03",
     "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
     "dsh-packages/dsh-web-billing-1.1.0.tgz": "565808ed954bc78595b852079f6e4b72140bff5568bd37ff44ee289090140ceb",
-    "dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.1.tgz": "7422103323389d07d5e6895d3f83e56d06398854933c8dbb73cbc9170415ba95"
+    "dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.2.tgz": "8fbe4f744bc0b43db9d076fdd7aafb2e15c09a99066f42207530de0b8dda1d0e"
   }
 }
