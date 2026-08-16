@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "sources": [
     {
-      "name": "Resident Physical Operators",
+      "name": "Resident Physical Operators and session activity refresh",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "764e9ede7587b872ef7a62702c8c64e1fb1993ec"
+      "commit": "dfdc680373dbaf2612200f0a87609b1d9dc2afad"
     },
     {
       "name": "GenesisPod and ThunderOMLX Remote Modules",
@@ -54,7 +54,8 @@
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "21874e802cb99ce3a635c0f66fe664a2048c76aea366d157d8cbab8209944223",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "7e442e4d75bc6e6a23199d3f201474cc9d9c8f8d3315de421207cd8526e707a8",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "1e474b894f4d956c42574abc12b83557d0d381d06baddd84666916809d8e4238",
-    "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "5ebee67785bb202dec1fe95a7a0c304478788979de243c2fab53e7642db814f4",
+    "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "471a232245ccfc4e5a26a734ede1f63485b42d28195508a5e13d909b96d0618b",
+    "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "bb9a44e47a83d0a0e0ec354255553ac832c577ed87a3db32568debf62c0dd14e",
     "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03",
     "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
     "dsh-packages/dsh-web-billing-1.1.0.tgz": "565808ed954bc78595b852079f6e4b72140bff5568bd37ff44ee289090140ceb",
