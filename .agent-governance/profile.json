@@ -94,7 +94,7 @@
     {
       "id": "related-tests",
       "label": "Vitest tests related to the outgoing branch diff",
-      "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/master"],
+      "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/master", "--maxWorkers=4"],
       "cwd": ".",
       "scopes": ["source", "tooling", "release"],
       "levels": ["full"],
