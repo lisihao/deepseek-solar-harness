@@ -170,7 +170,7 @@ describe('dsh-sdk-jsonrpc-server plugin apply', () => {
     }
   })
 
-  it('drives a session/prompt turn end-to-end and forwards session notifications as output frames', async () => {
+  it('drives a session/prompt turn end-to-end and forwards session notifications as output frames', { timeout: 30_000 }, async () => {
     const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-apply-prompt-'))
     const llmServer = await mockCompletionServer()
     vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')

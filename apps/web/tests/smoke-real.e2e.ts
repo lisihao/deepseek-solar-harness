@@ -28,6 +28,7 @@ import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { REPO_ROOT, connectFreshWorkspace, newEnglishPage, probeFreePort, requireDist, saveFailureShot } from './support.ts'
 
 const WEB_SURFACE_PROMPT = fileURLToPath(new URL('./snapshots/web-runtime-context/web-surface-prompt.expected.md', import.meta.url))
+const INTERNAL_TESTING_NOTICE = { title: 'Internal Testing Notice', continueLabel: 'Continue' } as const
 
 function waitForReadyLine(child: ChildProcess): Promise<string> {
   return new Promise((resolveReady, reject) => {
@@ -509,6 +510,10 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || notReady.length > 0)('web smoke
     page = await newEnglishPage(browser)
     page.on('pageerror', e => pageErrors.push(String(e)))
     await page.goto(baseUrl, { waitUntil: 'load' })
+    const welcome = page.getByRole('dialog', { name: INTERNAL_TESTING_NOTICE.title })
+    await welcome.waitFor({ timeout: 30_000 })
+    await welcome.getByRole('button', { name: INTERNAL_TESTING_NOTICE.continueLabel }).click()
+    await welcome.waitFor({ state: 'hidden', timeout: 10_000 })
   }, 120_000)
 
   afterAll(async () => {
@@ -534,8 +539,9 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY || notReady.length > 0)('web smoke
   it('empty-state first send completes a real model round', async () => {
     onTestFailed(() => saveFailureShot(page, 'w5-first-round'))
     // This scenario spawns its own server against a fresh $DSH_HOME with the
-    // DeepSeek credential inherited from the environment, so no onboarding
-    // step mounts and the page is immediately interactive.
+    // DeepSeek credential inherited from the environment, so provider
+    // onboarding does not mount. The versioned internal-testing notice was
+    // explicitly acknowledged during boot, leaving the page interactive.
     // Fresh world: connect a Workspace so the composer starts live.
     await connectFreshWorkspace(page, sessionsDir)
     const input = page.locator('textarea').first()
