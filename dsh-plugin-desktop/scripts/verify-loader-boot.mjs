@@ -128,6 +128,18 @@ try {
       host.provide('webServer', {
         host: '127.0.0.1',
         port: 43120,
+        register() { return () => {} },
+      })
+      host.provide('residentOperators', {
+        providers: async () => [],
+        list: async () => [],
+        inspect: async () => { throw new Error('loader smoke has no Resident Sessions') },
+        inspectTurn: async () => { throw new Error('loader smoke has no Resident turns') },
+        readEvents: async () => ({ events: [] }),
+        execute: async () => { throw new Error('loader smoke does not execute Resident turns') },
+        interrupt: async () => {},
+        reset: async () => { throw new Error('loader smoke has no Resident Sessions') },
+        resolveIndeterminate: async () => {},
       })
       host.provide('webRuntime', {})
       host.provide('appExit', () => {})

@@ -40,7 +40,9 @@ describe('Solar desktop branding', () => {
     }
 
     const entry = registrations.find(({ options }) => options.id === 'solar-desktop-brand')
+    const resident = registrations.find(({ options }) => options.id === 'resident-physical-operators')
     expect(entry).toBeDefined()
+    expect(resident).toBeDefined()
     expect(visibleText(entry?.component({ wide: true }))).toBe(`DSH Desktop v2.0.1${SOLAR_BRAND}`)
     expect(visibleText(entry?.component({ wide: false }))).toBe('v2.0.1')
   })

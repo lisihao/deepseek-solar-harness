@@ -10,6 +10,8 @@ import {
   type ThemeSettings,
 } from '@deepseek-ai/dsh-client-ui-theme'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-resident-operator'
+import { registerResidentDashboard } from './resident-dashboard.ts'
 import type { DesktopShellMode } from './runtime.ts'
 import type {} from './runtime.ts'
 
@@ -17,7 +19,7 @@ import type {} from './runtime.ts'
 export const name = 'desktop-shell'
 
 /** Services required before the shell can register its renderer generation. */
-export const inject = ['desktopRuntime', 'webServer', 'webRuntime', 'appExit', 'settings']
+export const inject = ['desktopRuntime', 'webServer', 'webRuntime', 'appExit', 'settings', 'residentOperators']
 
 /** Standard settings namespace shared by tray and configuration surfaces. */
 export const DESKTOP_SETTINGS_NAMESPACE = settingsNamespace('dsh-desktop')
@@ -92,6 +94,10 @@ export function apply(ctx: Context, config: Config): void {
   if (ctx.webServer.host !== '127.0.0.1') {
     throw new Error('dsh-plugin-desktop: desktop shell requires a loopback Web server')
   }
+  ctx.effect(
+    () => registerResidentDashboard(ctx),
+    'dsh-plugin-desktop: Resident Operator dashboard route',
+  )
   const iconFilename = ctx.desktopRuntime.platform === 'darwin'
     ? 'app-icon-mac.png'
     : 'app-icon.png'

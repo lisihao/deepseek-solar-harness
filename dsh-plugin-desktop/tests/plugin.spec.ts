@@ -31,6 +31,7 @@ interface PluginHarness {
   update: ReturnType<typeof vi.fn<(patch: object) => Promise<void>>>
   restart: ReturnType<typeof vi.fn<() => Promise<void>>>
   setThemeSource: ReturnType<typeof vi.fn<(source: ThemePreference) => void>>
+  registerRoute: ReturnType<typeof vi.fn>
   notify(next: DesktopSettings, prev: DesktopSettings): Promise<void>
   notifyTheme(preference: ThemePreference): void
 }
@@ -41,6 +42,7 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
   const update = vi.fn(async (_patch: object) => {})
   const restart = vi.fn(async () => {})
   const setThemeSource = vi.fn<(source: ThemePreference) => void>()
+  const registerRoute = vi.fn(() => () => {})
   let settingsUpdated: ((namespace: unknown, next: unknown) => void) | undefined
   let themePreference: ThemePreference = 'system'
   const runtime: DesktopRuntime = {
@@ -87,6 +89,18 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
     webServer: {
       host: '127.0.0.1',
       port: 43120,
+      register: registerRoute,
+    },
+    residentOperators: {
+      providers: vi.fn(async () => []),
+      list: vi.fn(async () => []),
+      inspect: vi.fn(),
+      inspectTurn: vi.fn(),
+      readEvents: vi.fn(),
+      execute: vi.fn(),
+      interrupt: vi.fn(),
+      reset: vi.fn(),
+      resolveIndeterminate: vi.fn(),
     },
     settings,
     logger: { warn: vi.fn(), error: vi.fn() },
@@ -104,6 +118,7 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
     update,
     restart,
     setThemeSource,
+    registerRoute,
     notify: async (next, prev) => { await watcher?.(next, prev) },
     notifyTheme: (preference) => {
       themePreference = preference
@@ -140,7 +155,12 @@ describe('desktop Host plugin', () => {
     apply(harness.ctx, config)
 
     expect(inject).toContain('settings')
+    expect(inject).toContain('residentOperators')
     expect(inject).not.toContain('loader')
+    expect(harness.registerRoute).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'exact',
+      path: '/api/desktop/resident-operators',
+    }))
     const register = vi.mocked(harness.ctx.settings.register)
     expect(register.mock.calls[0]?.[2]).toEqual(expect.objectContaining({ applies: 'restart' }))
     expect(register.mock.calls[0]?.[2]).not.toHaveProperty('base')

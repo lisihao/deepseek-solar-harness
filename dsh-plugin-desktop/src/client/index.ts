@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { SolarBrand, solarBrandLabel } from './SolarBrand.tsx'
+import { ResidentOperatorsPanel } from './ResidentOperatorsPanel.tsx'
 import { installSolarBrandStyles } from './styles.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
@@ -30,5 +31,11 @@ export function apply(ctx: ClientContext): void {
     order: -1000,
     label: solarBrandLabel(environment.productVersion),
   }, props => SolarBrand({ ...props, productVersion: environment.productVersion })))
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action',
+    id: 'resident-physical-operators',
+    order: -900,
+    label: 'Resident 物理算子',
+  }, props => ResidentOperatorsPanel(props)))
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)
 }

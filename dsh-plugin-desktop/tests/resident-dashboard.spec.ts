@@ -1,0 +1,71 @@
+import type { Context } from '@deepseek-ai/cordis'
+import {
+  ResidentOperatorCommandId,
+  ResidentOperatorSessionId,
+  ResidentOperatorTurnId,
+} from '@deepseek-ai/dsh-resident-operator'
+import { describe, expect, it, vi } from 'vitest'
+import { readResidentDashboard } from '../src/resident-dashboard.ts'
+
+describe('Resident Operator Desktop projection', () => {
+  it('reconnects to daemon-owned session, progress, and settled result state', async () => {
+    const sessionId = ResidentOperatorSessionId('session-1')
+    const turnId = ResidentOperatorTurnId('turn-1')
+    const commandId = ResidentOperatorCommandId('command-1')
+    const latestEvent = {
+      sequence: 7,
+      type: 'turn.progress',
+      time: '2026-08-16T10:00:00.000Z',
+      data: { commandId, turnId, phase: 'reasoning' },
+    }
+    const residentOperators = {
+      providers: vi.fn(async () => [{
+        operatorId: 'codex',
+        product: 'codex' as const,
+        available: true,
+        authentication: 'native-subscription' as const,
+        productVersion: '0.147.0',
+        protocolHash: 'schema',
+      }]),
+      list: vi.fn(async () => [{
+        sessionId,
+        operatorId: 'codex',
+        workspace: '/tmp/research',
+        lifecycle: 'running' as const,
+        health: 'ok' as const,
+        control: 'automation' as const,
+        stateRevision: 4,
+        activeTurnId: turnId,
+        latestTurn: {
+          commandId,
+          turnId,
+          state: 'running' as const,
+          updatedAt: latestEvent.time,
+        },
+        latestEvent,
+        updatedAt: latestEvent.time,
+      }]),
+      readEvents: vi.fn(async () => ({ events: [latestEvent], nextCursor: 7 })),
+      inspectTurn: vi.fn(async () => ({
+        commandId,
+        turnId,
+        sessionId,
+        stateRevision: 4,
+        state: 'running' as const,
+        updatedAt: latestEvent.time,
+      })),
+    }
+
+    const dashboard = await readResidentDashboard({ residentOperators } as unknown as Context, String(sessionId))
+
+    expect(dashboard.providers).toEqual([expect.objectContaining({ operatorId: 'codex', available: true })])
+    expect(dashboard.sessions).toEqual([expect.objectContaining({
+      sessionId: 'session-1',
+      activeTurnId: 'turn-1',
+      latestTurn: expect.objectContaining({ state: 'running' }),
+      latestEvent: expect.objectContaining({ data: expect.objectContaining({ phase: 'reasoning' }) }),
+    })])
+    expect(dashboard.selectedTurn).toEqual(expect.objectContaining({ turnId: 'turn-1', state: 'running' }))
+    expect(dashboard.events).toEqual([expect.objectContaining({ type: 'turn.progress' })])
+  })
+})
