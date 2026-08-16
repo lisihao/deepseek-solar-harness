@@ -40,6 +40,11 @@ external authority.
 
 ## Runtime requirements
 
+- Activate governance only when the session resolves to a Git root with either
+  the project-local `.agent-governance/profile.json` or an explicitly configured
+  profile. A Git repository without an adopted Profile remains unmanaged.
+- Anchor nested working directories to the nearest Git root so audit, planning,
+  verification, and evidence all refer to the same project boundary.
 - Install as a static `dsh.bundle`, not a dynamic `cordis_run` definition.
 - Expose a `ctx.governance` service and model-facing status, plan, verify, and
   completion-submission tools.
@@ -50,6 +55,11 @@ external authority.
   milestones.
 - Execute the Python harness through argument arrays with `shell: false`.
 - Persist structured governance events in the append-only session log.
+- Persist audit and planning failures as `governance/completion-rejected` events
+  before returning the tool error, so the visible trace records the actual cause.
+- Treat a mutation-classified tool as a trigger to recheck existing evidence,
+  not proof of mutation. Invalidate candidate or accepted evidence only when the
+  attestation no longer matches or the recheck times out.
 - Ship an invariant companion that validates the event state machine before
   candidate events commit.
 - Store full command output outside the model-visible log; persist bounded
@@ -71,10 +81,11 @@ open -> planned -> verifying -> candidate -> accepted
                          +-------------> invalidated
 ```
 
-Any change to Git HEAD, the selected path set, file bytes, or the governance
-profile invalidates prior evidence. The agent may request certification, but it
-cannot supply or directly append an accepted result through a model-facing
-argument.
+Any confirmed change to Git HEAD, the selected path set, file bytes, or the
+governance profile invalidates prior evidence. The agent may request
+certification, but it cannot supply or directly append an accepted result
+through a model-facing argument. A command name or shell text alone is not
+mutation evidence.
 
 ## Evidence events
 
@@ -128,3 +139,11 @@ config still contains both the policy plugin and invariant companion.
 10. A denied delivery appears in `governance_trace` with its phase and reason.
 11. The installed package appears in the real Web boot graph, the sidebar entry
     is visible, and clicking it opens the Trace panel without browser errors.
+12. A nested DSH session resolves to the repository root and a Git repository
+    without a governance Profile stays unmanaged.
+13. Audit and planning process failures remain visible as durable rejection
+    events with specific reason codes.
+14. A mutation-classified tool preserves matching candidate evidence and
+    invalidates only confirmed stale evidence.
+15. Candidate, rejected, and invalidated phases render as distinct Chinese
+    states rather than falling through to `未治理`.

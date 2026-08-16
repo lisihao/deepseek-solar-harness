@@ -43,6 +43,19 @@
       "depends_on": ["P3", "P4"],
       "status": "completed",
       "acceptance": ["full gates pass", "fresh attestation passes", "commit and remote branch exist"]
+    },
+    {
+      "id": "P6",
+      "title": "Project binding and trace diagnostic correctness",
+      "depends_on": ["P2", "P5"],
+      "status": "completed",
+      "acceptance": [
+        "DSH owns a project-local Profile",
+        "nested sessions bind to the Git root",
+        "audit and plan failures are durable",
+        "tool classification cannot invent a mutation",
+        "visible phase labels distinguish rejected and invalidated work"
+      ]
     }
   ]
 }

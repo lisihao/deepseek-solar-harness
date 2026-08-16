@@ -70,3 +70,11 @@ test('built browser plugin registers a visible governance Trace sidebar entry', 
   assert.match(styles[0].textContent, /\.dsh-governance-overlay\s*\{[^}]*align-items:\s*center/iu)
   assert.match(styles[0].textContent, /\.dsh-governance-panel\s*\{[^}]*max-width:\s*720px/iu)
 })
+
+test('trace source distinguishes rejected and invalidated work from unmanaged sessions', async () => {
+  const source = await readFile(new URL('../src/client.cjs', import.meta.url), 'utf8')
+  assert.match(source, /case 'rejected': return '验收拒绝'/u)
+  assert.match(source, /case 'invalidated': return '证明失效'/u)
+  assert.match(source, /case 'candidate': return '待验收'/u)
+  assert.match(source, /治理事件/u)
+})

@@ -138,6 +138,12 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+.dsh-governance-phase-rejected,
+.dsh-governance-phase-invalidated {
+  background: var(--dsw-alias-state-error-secondary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
 .dsh-governance-error {
   background: var(--dsw-alias-interactive-bg-hover-danger);
   color: var(--dsw-alias-state-error-primary);

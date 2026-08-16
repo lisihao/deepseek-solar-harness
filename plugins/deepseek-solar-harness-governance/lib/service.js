@@ -93,22 +93,28 @@ function now() {
   return new Date().toISOString()
 }
 
-function projectFor(agent) {
-  const project = agent?.session?.header?.cwd
-  if (typeof project !== 'string' || project === '') {
+function sessionCwd(agent) {
+  const cwd = agent?.session?.header?.cwd
+  if (typeof cwd !== 'string' || cwd === '') {
     throw new Error('governance requires an agent session with an absolute cwd')
   }
-  return project
+  return cwd
 }
 
-function hasGitBoundary(project) {
-  let current = project
+function findGitRoot(cwd) {
+  let current = cwd
   for (;;) {
-    if (existsSync(join(current, '.git'))) return true
+    if (existsSync(join(current, '.git'))) return current
     const parent = dirname(current)
-    if (parent === current) return false
+    if (parent === current) return null
     current = parent
   }
+}
+
+function projectFor(agent) {
+  const project = findGitRoot(sessionCwd(agent))
+  if (project === null) throw new Error('governance requires a session inside a Git worktree')
+  return project
 }
 
 function append(agent, type, data) {
@@ -181,7 +187,9 @@ export class GovernanceService {
 
   applies(agent) {
     try {
-      return hasGitBoundary(projectFor(agent))
+      const project = projectFor(agent)
+      return this.config.profilePath !== null
+        || existsSync(join(project, '.agent-governance', 'profile.json'))
     } catch {
       return false
     }
@@ -259,9 +267,27 @@ export class GovernanceService {
       extra.push('--changed-from', options.changedFrom)
     }
     const audit = await this.audit(agent)
-    if (!audit.ok) throw new Error(`governance audit failed with exit ${String(audit.code)}`)
+    if (!audit.ok) {
+      append(agent, 'governance/completion-rejected', {
+        workId: state.workId,
+        reasonCode: 'audit-failed',
+        message: `governance audit failed with exit ${String(audit.code)}`,
+        terminal: false,
+        rejectedAt: now(),
+      })
+      await this.ctx.sessions.flush(agent.session)
+      throw new Error(`governance audit failed with exit ${String(audit.code)}`)
+    }
     const result = await runGovernance(this.config, 'plan', project, extra)
     if (result.code !== 0 || result.payload === null) {
+      append(agent, 'governance/completion-rejected', {
+        workId: state.workId,
+        reasonCode: 'plan-failed',
+        message: `governance plan failed with exit ${String(result.code)}`,
+        terminal: false,
+        rejectedAt: now(),
+      })
+      await this.ctx.sessions.flush(agent.session)
       throw new Error(`governance plan failed with exit ${String(result.code)}`)
     }
     const gates = Array.isArray(result.payload.gates) ? result.payload.gates : []
@@ -421,7 +447,9 @@ export class GovernanceService {
     if (state.phase !== 'candidate' || state.attestation === null || state.attestation.level !== 'full') {
       append(agent, 'governance/completion-rejected', {
         workId: state.workId,
-        reasonCode: state.phase === 'invalidated' ? 'stale-evidence' : 'missing-full-attestation',
+        reasonCode: state.attestation !== null && state.phase === 'invalidated'
+          ? 'stale-evidence'
+          : 'missing-full-attestation',
         message: 'completion requires a fresh full attestation',
         terminal: false,
         rejectedAt: now(),
@@ -492,11 +520,15 @@ export class GovernanceService {
   markMutation(agent, reason) {
     const state = this.state(agent)
     if (!this.applies(agent)) return state
-    if (!['candidate', 'accepted', 'rejected'].includes(state.phase)) return state
+    if (!['candidate', 'accepted'].includes(state.phase) || state.attestation === null) return state
+    const fresh = this.freshness(projectFor(agent), state.attestation.level)
+    if (fresh.ok) return state
     append(agent, 'governance/invalidated', {
       workId: state.workId,
-      reasonCode: 'tool-mutation',
-      message: `tool execution changed governed state: ${reason}`,
+      reasonCode: fresh.timedOut ? 'attestation-timeout' : 'tool-mutation',
+      message: fresh.timedOut
+        ? `governance evidence could not be rechecked after tool execution: ${reason}`
+        : `tool execution changed attested project state: ${reason}`,
       invalidatedAt: now(),
     })
     return this.state(agent)

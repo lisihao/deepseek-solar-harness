@@ -14,6 +14,9 @@ function phaseLabel(phase) {
   switch (phase) {
     case 'accepted': return '已验收'
     case 'blocked': return '已阻塞'
+    case 'candidate': return '待验收'
+    case 'rejected': return '验收拒绝'
+    case 'invalidated': return '证明失效'
     case 'verified': return '已验证'
     case 'verifying': return '验证中'
     case 'planned': return '已规划'
@@ -131,7 +134,7 @@ function GovernanceTraceEntry({ wide, useSessions }) {
       ),
       h('div', { className: 'dsh-governance-summary' },
         h('span', { className: `dsh-governance-phase dsh-governance-phase-${String(trace?.phase ?? 'unmanaged')}` }, phaseLabel(trace?.phase)),
-        h('span', null, trace === null ? '事件 N/A' : `事件 ${String(trace.returnedEvents)}/${String(trace.totalEvents)}`),
+        h('span', null, trace === null ? '治理事件 N/A' : `治理事件 ${String(trace.returnedEvents)}/${String(trace.totalEvents)}`),
         loading ? h('span', null, '刷新中…') : null,
       ),
       error === null ? null : h('div', { className: 'dsh-governance-error', role: 'alert' }, error),

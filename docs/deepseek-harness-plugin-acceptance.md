@@ -26,6 +26,11 @@ Application Support runtime as source code.
 | Browser plugin | ok | Installed package declares `dsh.client`, exports `lib/client.js`, and appears in the real Web boot graph |
 | Sidebar entry | ok | Real Chromium locates the full-width `治理 Trace` row in a single-column footer and opens the compact centered `governance-trace-panel` without browser errors |
 | Trace HTTP API | ok | Same-origin `/code-harness/v1/trace` reads live or persisted sessions and never publishes or mutates the inspected log |
+| Project admission | ok | Nested sessions bind to the nearest Git root; repositories without an adopted Profile remain unmanaged |
+| Failure durability | ok | Audit and planning process failures append specific rejection events before the tool returns an error |
+| Mutation evidence | ok | Tool classification triggers freshness recheck; matching evidence survives and confirmed stale evidence invalidates |
+| Phase rendering | ok | Candidate, rejected, and invalidated states have explicit Chinese labels in the browser client |
+| DSH project Profile | ok | DSH owns its Profile and bilingual implemented Agent Note in the authoritative source repository |
 
 Reproducible host check:
 
@@ -45,6 +50,8 @@ Verified host snapshot:
 - Client boot entry: `@lisihao/dsh-code-harness-governance/client.js`
 - Browser entry: `治理 Trace`
 - Browser panel: `Code-as-Harness 治理 Trace`
+- Project-local Profile: `.agent-governance/profile.json`
+- Plugin regression suite: `36/36`
 
 ## Repository authority evidence
 
