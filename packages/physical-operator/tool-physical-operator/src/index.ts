@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
+  isAgentLoopRequest,
   LlmAdapter,
   type ContentBlock,
   type GenerateOptions,
@@ -407,6 +408,9 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
   }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    if (!isAgentLoopRequest(options)) {
+      throw new Error('physical-operator router only accepts the primary agent-loop request')
+    }
     const agent = this.ctx.agents.requireInitiator()
     const dispatch = latestDispatch(agent.session.events)
     if (dispatch === undefined || dispatch.operatorId !== options.model) {

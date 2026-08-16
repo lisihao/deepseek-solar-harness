@@ -162,6 +162,50 @@ describe('host physical-operator routing', () => {
     expect(automatic.deepseek.requests).toHaveLength(0)
   })
 
+  it('rejects an auxiliary title call without duplicating or terminating the active Resident command', async () => {
+    const { ctx, agent, codex } = await setup({ codexImmediate: false })
+    send(agent, '用 Codex 深度检查这个仓库并持续执行')
+    while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+
+    const titleChunks: StreamChunk[] = []
+    for await (const chunk of ctx.llm.stream({
+      provider: 'dsh-physical-operator',
+      model: 'codex',
+      purpose: 'session-title',
+      sessionId: agent.session.id,
+      messages: [createUserMessage({
+        content: [{ type: 'text', text: 'Generate the session title.' }],
+        source: { kind: 'plugin', plugin: 'dsh-session-title-llm' },
+      })],
+    })) titleChunks.push(chunk)
+    expect(titleChunks.at(-1)).toEqual({
+      type: 'finish',
+      reason: {
+        kind: 'error',
+        failure: {
+          code: 'UNKNOWN',
+          message: 'physical-operator router only accepts the primary agent-loop request',
+        },
+      },
+    })
+
+    expect(codex.requests).toHaveLength(1)
+    expect(agent.session.events.some(event => (
+      event.type === 'physical-operator/dispatch-terminal'
+    ))).toBe(false)
+
+    const receipt = codex.receipts.values().next().value
+    if (receipt === undefined) throw new Error('expected the active durable receipt')
+    receipt.result.resolve({
+      output: [{ type: 'text', text: 'primary codex result' }],
+      stopReason: 'completed',
+    })
+    await agent.whenIdle()
+    expect(lastAssistantMessage(agent).content).toEqual([
+      { type: 'text', text: 'primary codex result' },
+    ])
+  })
+
   it('replays the same durable command after caller interruption and router remount', async () => {
     const { ctx, agent, deepseek, codex, mounted } = await setup({ codexImmediate: false })
     send(agent, '用 Codex 深度检查这个仓库并持续执行')
