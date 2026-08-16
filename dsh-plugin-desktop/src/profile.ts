@@ -1,7 +1,16 @@
 /** Compatibility profile composition over the official Web bundle and user plugins. */
 
 import { createRequire } from 'node:module'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { evaluate, isJsExpr, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
@@ -28,6 +37,16 @@ import FileSettingsProvider, {
 } from '@deepseek-ai/dsh-settings-file'
 import { parseDocument } from 'yaml'
 import { unpackedAsarPath } from './packaged-runtime-path.ts'
+import {
+  AGENT_TEAMS_PACKAGE,
+  AGENT_TEAMS_ROW_ID,
+  DEFAULT_REMOTE_MODULE_INSTANCES,
+  PRODUCT_BUNDLE_PACKAGES,
+  PRODUCT_BUNDLE_ROW_IDS,
+  SEALED_RUNTIME_PACKAGES,
+  UI_REMOTE_MODULES_PACKAGE,
+  UI_REMOTE_MODULES_ROW_ID,
+} from './product-bundles.ts'
 import type { DesktopShellMode } from './runtime.ts'
 
 /** Persistent profile managed by the desktop launcher and the ordinary dsh plugin command. */
@@ -53,32 +72,12 @@ const UPSTREAM_PWSH_SANDBOX_PACKAGE = '@deepseek-ai/dsh-pwsh-sandbox'
 const DESKTOP_WINDOWS_PWSH_SANDBOX_ROW_ID = 'desktop-windows-pwsh-sandbox'
 const DESKTOP_WINDOWS_PWSH_SANDBOX_PACKAGE = 'dsh-plugin-desktop/windows-pwsh-sandbox'
 const DEFAULT_DESKTOP_SHELL_MODE: DesktopShellMode = 'compatibility'
+const DESKTOP_MODULE_BASE_DIR = '.dsh-desktop-runtime'
 const SETTINGS_FILE_PACKAGE = '@deepseek-ai/dsh-settings-file'
 const DESKTOP_SETTINGS_NAMESPACE = 'dsh-desktop'
 const UI_LAYOUT_PACKAGE = '@deepseek-ai/dsh-client-ui-layout'
 const UI_SIDEBAR_PACKAGE = '@deepseek-ai/dsh-client-ui-sidebar'
 const UI_CONVERSATION_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
-const RESIDENT_BUNDLE_PACKAGE = '@deepseek-ai/dsh-resident-operators'
-const AGENT_TEAMS_PACKAGE = '@nanmicoder/dsh-agent-teams'
-const AGENT_TEAMS_ROW_ID = 'agent-teams'
-const REMOTE_WEB_UI_PACKAGE = '@linxin666/dsh-remote-web-ui'
-const WEB_BILLING_PACKAGE = 'dsh-web-billing'
-const LUNA_VISION_BRIDGE_PACKAGE = '@ycp424c/dsh-luna-vision-bridge'
-const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
-  [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
-  [AGENT_TEAMS_PACKAGE, AGENT_TEAMS_ROW_ID],
-  [REMOTE_WEB_UI_PACKAGE, 'remote-web-ui'],
-  [WEB_BILLING_PACKAGE, 'web-billing'],
-  [LUNA_VISION_BRIDGE_PACKAGE, 'luna-vision-bridge'],
-])
-const PRODUCT_BUNDLE_PACKAGES = [
-  RESIDENT_BUNDLE_PACKAGE,
-  AGENT_TEAMS_PACKAGE,
-  REMOTE_WEB_UI_PACKAGE,
-  WEB_BILLING_PACKAGE,
-  LUNA_VISION_BRIDGE_PACKAGE,
-] as const
-
 /**
  * Parse desktop presentation state and reject corrupted values.
  * @param value - untrusted settings value.
@@ -233,6 +232,47 @@ function productBundlePatches(
     ))
 }
 
+/** Ensure one runtime-owned package link, rejecting an unrelated real path. */
+function ensureRuntimePackageLink(link: string, target: string): void {
+  let stat: ReturnType<typeof lstatSync> | undefined
+  try {
+    stat = lstatSync(link)
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause
+  }
+  if (stat !== undefined) {
+    if (!stat.isSymbolicLink()) {
+      throw new Error(`${BIN_NAME}: generated product package link is occupied by a real path: ${link}`)
+    }
+    if (readlinkSync(link) === target) return
+    unlinkSync(link)
+  }
+  symlinkSync(target, link, 'junction')
+}
+
+/**
+ * Build a profile-local resolution seat. Product packages resolve from the
+ * sealed App first; ordinary packages continue through the selected profile's
+ * own node_modules and then the installation fallback in profiles/node_modules.
+ */
+function ensureDesktopModuleBase(profileDir: string): string {
+  const root = join(profileDir, DESKTOP_MODULE_BASE_DIR)
+  const modules = join(root, 'node_modules')
+  mkdirSync(modules, { recursive: true })
+  const packagePath = join(root, 'package.json')
+  writeFileSync(packagePath, '{"name":"dsh-desktop-runtime-base","private":true}\n')
+  const require = createRequire(INSTALL_ANCHOR)
+  for (const packageName of [DESKTOP_PACKAGE_NAME, ...SEALED_RUNTIME_PACKAGES]) {
+    const target = packageName === DESKTOP_PACKAGE_NAME
+      ? dirname(INSTALL_ANCHOR)
+      : dirname(require.resolve(`${packageName}/package.json`))
+    const link = join(modules, packageName)
+    mkdirSync(dirname(link), { recursive: true })
+    ensureRuntimePackageLink(link, target)
+  }
+  return packagePath
+}
+
 /** Read a row's object config without trusting arbitrary YAML values. */
 function rowConfig(row: EntryOptions | undefined): Record<string, unknown> {
   const config = row?.config
@@ -268,13 +308,16 @@ export function prepareDesktopProfile(
   platform: NodeJS.Platform = process.platform,
   profileName: string = DESKTOP_PROFILE_NAME,
 ): PreparedDesktopProfile {
-  const profileDir = profileName === DESKTOP_PROFILE_NAME
-    ? ensureDesktopProfile(home)
-    : resolveProfileDir(profileName, home)
+  if (profileName === DESKTOP_PROFILE_NAME) ensureDesktopProfile(home)
+  else resolveProfileDir(profileName, home)
   healProfilesModuleFallback(INSTALL_ANCHOR, home)
   const profile = loadProfile(BIN_NAME, profileName, INSTALL_ANCHOR, home)
-  const rootConfig = join(profileDir, DESKTOP_PROFILE_ROOT)
-  const bareModuleBaseUrl = pathToFileURL(join(profile.dir, 'package.json')).href
+  const moduleBasePath = ensureDesktopModuleBase(profile.dir)
+  // app-boot derives ctx.baseUrl (used by clientModules) from the root config
+  // directory. Keep the empty generated root beside the product-first module
+  // seat so Host imports and browser client bundles resolve the same package.
+  const rootConfig = join(dirname(moduleBasePath), DESKTOP_PROFILE_ROOT)
+  const bareModuleBaseUrl = pathToFileURL(moduleBasePath).href
   writeFileSync(rootConfig, '[]\n')
 
   const desktopPatches = loadOverlayPatches(BIN_NAME, DESKTOP_PATCH_PATH)
@@ -365,6 +408,23 @@ export function prepareDesktopProfile(
     config: {
       ...rowConfig(agentTeams),
       memberPersonaPlacement: 'prompt',
+    },
+  })
+  // GenesisPod/ThunderOMLX are first-party embedded application modules. A
+  // selected profile may provide its own instances, but the Desktop product
+  // always supplies the executable package name and usable local defaults.
+  const remoteModules = rows.get(UI_REMOTE_MODULES_ROW_ID)
+  const remoteModuleConfig = rowConfig(remoteModules)
+  const configuredInstances = remoteModuleConfig.instances
+  patches.push({
+    id: UI_REMOTE_MODULES_ROW_ID,
+    name: UI_REMOTE_MODULES_PACKAGE,
+    disabled: false,
+    config: {
+      ...remoteModuleConfig,
+      instances: Array.isArray(configuredInstances) && configuredInstances.length > 0
+        ? configuredInstances
+        : DEFAULT_REMOTE_MODULE_INSTANCES,
     },
   })
   if (!rows.has('webserver')) {

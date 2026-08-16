@@ -27,6 +27,8 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-resident-operators',
   '@deepseek-ai/dsh-subagent-codex',
   '@deepseek-ai/dsh-tool-physical-operator',
+  '@deepseek-ai/dsh-client-ui-remote-modules',
+  '@deepseek-ai/dsh-host-apiproxy',
 ])
 
 if (workspace.packageManager !== 'yarn@4.18.0') {

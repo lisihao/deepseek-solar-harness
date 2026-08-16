@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "private": true,
   "description": "DSH Desktop product workspace",
   "license": "MIT",
@@ -20,6 +20,8 @@
     "@deepseek-ai/dsh-resident-operators": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-subagent-codex": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-tool-physical-operator": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-client-ui-remote-modules": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-host-apiproxy": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz",
     "@linxin666/dsh-remote-web-ui": "file:./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz",
     "@ycp424c/dsh-luna-vision-bridge": "file:./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.1.tgz",
     "dsh-web-billing": "file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.0.tgz",

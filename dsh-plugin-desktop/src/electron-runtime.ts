@@ -462,14 +462,20 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       window.hide()
     }
     const preserveBlankTitle = (event: Electron.Event): void => { event.preventDefault() }
-    const navigate = (event: Electron.Event<{ url: string }>): void => {
-      let targetOrigin: string | undefined
+    const navigate = (event: Electron.Event<Electron.WebContentsWillFrameNavigateEventParams>): void => {
+      let target: URL | undefined
       try {
-        targetOrigin = new URL(event.url).origin
+        target = new URL(event.url)
       } catch {
-        targetOrigin = undefined
+        target = undefined
       }
-      if (targetOrigin !== origin) event.preventDefault()
+      if (target?.origin === origin) return
+      // Remote Modules are rendered in subframes through product-owned local
+      // relays. Keep top-level navigation origin-locked while allowing only
+      // credential-free HTTP loopback subframes and their local redirects.
+      if (!event.isMainFrame && target?.protocol === 'http:'
+        && (target.hostname === '127.0.0.1' || target.hostname === 'localhost')) return
+      event.preventDefault()
     }
 
     app.on('activate', show)

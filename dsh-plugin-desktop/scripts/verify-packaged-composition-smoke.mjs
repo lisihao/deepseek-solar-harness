@@ -66,6 +66,7 @@ try {
   const remoteRows = rowsWithId('remote-web-ui')
   const billingRows = rowsWithId('web-billing')
   const lunaRows = rowsWithId('luna-vision-bridge')
+  const remoteModuleRows = rowsWithId('ui-remote-modules')
   if (residentRows.length !== 1 || residentRows[0].name !== '@deepseek-ai/dsh-resident-operator-local') {
     throw new Error('verify-packaged-composition-smoke: Resident bundle is not composed exactly once')
   }
@@ -86,6 +87,16 @@ try {
   }
   if (lunaRows.length !== 1 || lunaRows[0].name !== '@ycp424c/dsh-luna-vision-bridge') {
     throw new Error('verify-packaged-composition-smoke: Luna Vision Bridge bundle is not composed exactly once')
+  }
+  if (remoteModuleRows.length !== 1
+    || remoteModuleRows[0].name !== '@deepseek-ai/dsh-client-ui-remote-modules'
+    || remoteModuleRows[0].disabled === true) {
+    throw new Error('verify-packaged-composition-smoke: GenesisPod/ThunderOMLX bundle is not enabled exactly once')
+  }
+  const remoteInstances = remoteModuleRows[0].config?.instances
+  if (!Array.isArray(remoteInstances)
+    || remoteInstances.map(instance => instance.id).join(',') !== 'genesispod,thunder-omlx') {
+    throw new Error('verify-packaged-composition-smoke: GenesisPod/ThunderOMLX defaults are incomplete')
   }
 
   const presetRow = rowsWithId('agent-presets')[0]
@@ -126,6 +137,8 @@ try {
       remoteWebUi: remoteRows[0].name,
       billing: billingRows[0].name,
       lunaVisionBridge: lunaRows[0].name,
+      remoteModules: remoteModuleRows[0].name,
+      remoteModuleInstances: remoteInstances.map(instance => instance.id),
     },
     anchoredStandard: {
       presetRoot: roots[0].path,

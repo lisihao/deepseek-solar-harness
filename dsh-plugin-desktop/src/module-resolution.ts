@@ -1,10 +1,20 @@
 /** Profile-relative package resolution for Electron's restricted Node runtime. */
 
 import { registerHooks } from 'node:module'
+import { SEALED_RUNTIME_PACKAGES } from './product-bundles.ts'
 
 const LOADER_ENTRY_URL = import.meta.resolve('@deepseek-ai/cordis-plugin-loader')
 const DESKTOP_ENTRY_URL = new URL('../lib/index.js', import.meta.url).href
 const DESKTOP_PACKAGE_NAME = 'dsh-plugin-desktop'
+const PRODUCT_ENTRY_URLS = new Map<string, string>(
+  SEALED_RUNTIME_PACKAGES.map(packageName => [packageName, import.meta.resolve(packageName)]),
+)
+
+/** Resolve one Desktop-owned Loader package to the App-sealed implementation. */
+export function desktopProductEntryUrl(specifier: string): string | undefined {
+  if (specifier === DESKTOP_PACKAGE_NAME) return DESKTOP_ENTRY_URL
+  return PRODUCT_ENTRY_URLS.get(specifier)
+}
 
 /** Return whether a Loader request needs Node package resolution. */
 function isBareSpecifier(specifier: string): boolean {
@@ -20,8 +30,9 @@ export function installProfilePackageResolver(profileBaseUrl: string): () => voi
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
       const fromLoader = context.parentURL === LOADER_ENTRY_URL
-      if (fromLoader && specifier === DESKTOP_PACKAGE_NAME) {
-        return { shortCircuit: true, url: DESKTOP_ENTRY_URL }
+      const productEntry = fromLoader ? desktopProductEntryUrl(specifier) : undefined
+      if (productEntry !== undefined) {
+        return { shortCircuit: true, url: productEntry }
       }
       if (!fromLoader || !isBareSpecifier(specifier)) {
         return nextResolve(specifier, context)

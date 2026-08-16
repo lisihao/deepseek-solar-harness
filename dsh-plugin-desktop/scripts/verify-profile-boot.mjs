@@ -51,6 +51,17 @@ try {
       }],
     },
     ...prepared.patches,
+    // Smoke generations may run beside the installed App. Use ephemeral relay
+    // ports so verification never collides with the product's stable 3000/18102.
+    {
+      id: 'ui-remote-modules',
+      config: {
+        instances: [
+          { id: 'genesispod', label: 'GenesisPod', url: 'http://127.0.0.1:13000/', relayPort: 0, order: 100 },
+          { id: 'thunder-omlx', label: 'ThunderOMLX', url: 'http://127.0.0.1:18002/admin/', relayPort: 0, order: 200 },
+        ],
+      },
+    },
   ]
   const packageRoot = new URL('../', import.meta.url)
   const desktopVersion = JSON.parse(readFileSync(new URL('package.json', packageRoot), 'utf8')).version
@@ -205,6 +216,28 @@ try {
   const html = await response.text()
   if (response.status !== 200) {
     throw new Error(`assembled Web root returned HTTP ${String(response.status)}`)
+  }
+  const settingsRpcId = crypto.randomUUID()
+  const settingsResponse = await fetch(new URL('/api/settings.describe', expectedUrl), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      type: 'client-request',
+      rpcId: settingsRpcId,
+      method: 'settings.describe',
+      payload: {},
+    }),
+  })
+  const settingsEnvelope = await settingsResponse.json()
+  const remoteSettings = settingsEnvelope?.result?.value?.namespaces?.find(
+    namespace => namespace.ns === 'ui-remote-modules',
+  )
+  if (settingsResponse.status !== 200
+    || settingsEnvelope?.result?.ok !== true
+    || settingsEnvelope.rpcId !== settingsRpcId
+    || settingsEnvelope.result.value.writable !== true
+    || remoteSettings?.value?.instances?.length !== 2) {
+    throw new Error('assembled Web API does not expose writable Remote Modules settings')
   }
   const bootMatch = html.match(/window\.__DSH_BOOT__ = (\{.*?\})<\/script>/u)
   if (bootMatch?.[1] === undefined) {

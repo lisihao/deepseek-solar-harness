@@ -282,6 +282,47 @@ describe('Electron compatibility runtime', () => {
     expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
   })
 
+  it('keeps main navigation origin-locked while allowing loopback Remote Module frames', async () => {
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    runtime.schedule(spec)
+    await runtime.mountScheduled()
+
+    const window = electron.browserWindows[0]
+    const registration = window?.webContents.on.mock.calls.find(call => call[0] === 'will-frame-navigate')
+    expect(registration).toBeDefined()
+    const navigate = registration?.[1] as (event: {
+      url: string
+      isMainFrame: boolean
+      preventDefault(): void
+    }) => void
+    const event = (url: string, isMainFrame: boolean) => ({
+      url,
+      isMainFrame,
+      preventDefault: vi.fn(),
+    })
+
+    const sameOrigin = event('http://127.0.0.1:43120/settings', true)
+    navigate(sameOrigin)
+    expect(sameOrigin.preventDefault).not.toHaveBeenCalled()
+
+    for (const url of ['http://127.0.0.1:3000/', 'http://localhost:18102/admin/']) {
+      const relay = event(url, false)
+      navigate(relay)
+      expect(relay.preventDefault).not.toHaveBeenCalled()
+    }
+
+    for (const [url, isMainFrame] of [
+      ['https://example.com/', false],
+      ['http://127.0.0.1:3000/', true],
+      ['file:///tmp/remote.html', false],
+    ] as const) {
+      const blocked = event(url, isMainFrame)
+      navigate(blocked)
+      expect(blocked.preventDefault).toHaveBeenCalledOnce()
+    }
+  })
+
   it('uses the Windows caption, hidden menu bar, removed menu, and fixed blue tray image', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
@@ -475,7 +516,7 @@ describe('Electron compatibility runtime', () => {
         pnpmBinPath: expect.stringMatching(/\/node_modules\/pnpm\/bin\/pnpm\.mjs$/u),
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.2',
+        productVersion: '2.0.3',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         stateDir: expect.stringMatching(/^\/tmp\/dsh-desktop-user-data\/cli\/[a-f0-9]{64}$/u),
@@ -542,7 +583,7 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.2',
+      currentVersion: '2.0.3',
       statePath: '/tmp/dsh-desktop-user-data/updates/state.json',
     })
     electron.app.isPackaged = true

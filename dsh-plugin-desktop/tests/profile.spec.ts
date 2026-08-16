@@ -103,7 +103,11 @@ describe('desktop profile composition', () => {
     }))
     expect(readFileSync(prepared.rootConfig, 'utf8')).toBe('[]\n')
     expect(prepared.homeDir).toBe(home)
-    expect(fileURLToPath(prepared.bareModuleBaseUrl)).toBe(join(prepared.profile.dir, 'package.json'))
+    expect(fileURLToPath(prepared.bareModuleBaseUrl)).toBe(join(
+      prepared.profile.dir,
+      '.dsh-desktop-runtime',
+      'package.json',
+    ))
     expect(prepared.mode).toBe('compatibility')
 
     const rows = composeEntries([prepared.patches])
@@ -168,6 +172,16 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'luna-vision-bridge')).toEqual(expect.objectContaining({
       name: '@ycp424c/dsh-luna-vision-bridge',
     }))
+    expect(rows.find(row => row.id === 'ui-remote-modules')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-client-ui-remote-modules',
+      disabled: false,
+      config: expect.objectContaining({
+        instances: [
+          expect.objectContaining({ id: 'genesispod', label: 'GenesisPod', relayPort: 3000 }),
+          expect.objectContaining({ id: 'thunder-omlx', label: 'ThunderOMLX', relayPort: 18102 }),
+        ],
+      }),
+    }))
   })
 
   it('boots a selected Web profile without overriding its compatibility UI rows', () => {
@@ -226,6 +240,7 @@ describe('desktop profile composition', () => {
     }))
     expect(rows.filter(row => row.id === 'resident-operators')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'remote-web-ui')).toHaveLength(1)
+    expect(rows.filter(row => row.id === 'ui-remote-modules')).toHaveLength(1)
   })
 
   it('projects advanced YAML settings into the Host and client Loader rows', () => {
