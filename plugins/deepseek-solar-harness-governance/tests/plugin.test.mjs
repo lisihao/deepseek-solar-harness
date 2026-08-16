@@ -168,7 +168,6 @@ test('governance stays lazy until a successful mutation in a git worktree', () =
   assert.deepEqual(events.map(event => event.type), ['governance/work-opened'])
   assert.equal(events[0].ignorable, true)
 })
-
 test('milestone classification separates commit from delivery', () => {
   const service = new GovernanceService(fakeContext(), {})
   assert.equal(service.classifyExecution({ name: 'bash', arguments: { command: 'git commit -m x' } }), 'commit')

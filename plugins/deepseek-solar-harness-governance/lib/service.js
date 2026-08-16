@@ -200,11 +200,11 @@ export class GovernanceService {
     }
     let governanceState = emptyGovernanceState()
     const events = []
-    for (const [sequence, event] of session.events.entries()) {
+    for (const [index, event] of session.events.entries()) {
       if (!isGovernanceEvent(event)) continue
       governanceState = applyGovernanceEvent(governanceState, event)
       events.push({
-        sequence,
+        sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
         type: event.type,
         timestamp: traceTimestamp(event.data),
         phaseAfter: governanceState.phase,
