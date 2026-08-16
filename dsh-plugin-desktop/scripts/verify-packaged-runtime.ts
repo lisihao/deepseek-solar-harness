@@ -44,6 +44,9 @@ export const REQUIRED_PACKAGED_RUNTIME_ENTRIES = [
   'node_modules/@deepseek-ai/dsh-resident-operator-local/lib/startup.js',
   'node_modules/@deepseek-ai/dsh-resident-operators/cordis.patch.yml',
   'node_modules/@nanmicoder/dsh-agent-teams/lib/index.js',
+  'node_modules/@linxin666/dsh-remote-web-ui/cordis.patch.yml',
+  'node_modules/@ycp424c/dsh-luna-vision-bridge/cordis.patch.yml',
+  'node_modules/dsh-web-billing/cordis.patch.yml',
   'node_modules/pnpm/bin/pnpm.mjs',
   'vendor/agent-presets/anchored-standard/agent.cordis.yml',
   'vendor/agent-presets/anchored-standard/tool-bootstrap.mjs',
@@ -76,6 +79,9 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'node_modules/@deepseek-ai/dsh-resident-operator-local/lib/startup.js',
   'node_modules/@deepseek-ai/dsh-resident-operators/cordis.patch.yml',
   'node_modules/@nanmicoder/dsh-agent-teams/lib/index.js',
+  'node_modules/@linxin666/dsh-remote-web-ui/cordis.patch.yml',
+  'node_modules/@ycp424c/dsh-luna-vision-bridge/cordis.patch.yml',
+  'node_modules/dsh-web-billing/cordis.patch.yml',
   'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html',
   'node_modules/pnpm/bin/pnpm.mjs',
   'vendor/agent-presets/anchored-standard/agent.cordis.yml',
@@ -109,6 +115,9 @@ export const REQUIRED_UNPACKED_PACKAGE_SPECIFIERS = [
   '@deepseek-ai/dsh-resident-operators/cordis.patch.yml',
   '@deepseek-ai/dsh-web-app/package.json',
   '@nanmicoder/dsh-agent-teams/cordis.patch.yml',
+  '@linxin666/dsh-remote-web-ui/package.json',
+  '@ycp424c/dsh-luna-vision-bridge/package.json',
+  'dsh-web-billing/package.json',
 ] as const
 
 /** Injectable archive listing seam used by focused tests. */

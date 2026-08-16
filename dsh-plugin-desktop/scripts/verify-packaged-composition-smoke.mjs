@@ -63,6 +63,9 @@ try {
   const residentRows = rowsWithId('resident-operators')
   const dualModeRows = rowsWithId('physical-operator-dual-mode')
   const teamRows = rowsWithId('agent-teams')
+  const remoteRows = rowsWithId('remote-web-ui')
+  const billingRows = rowsWithId('web-billing')
+  const lunaRows = rowsWithId('luna-vision-bridge')
   if (residentRows.length !== 1 || residentRows[0].name !== '@deepseek-ai/dsh-resident-operator-local') {
     throw new Error('verify-packaged-composition-smoke: Resident bundle is not composed exactly once')
   }
@@ -74,6 +77,15 @@ try {
   }
   if (teamRows[0].config?.memberPersonaPlacement !== 'prompt') {
     throw new Error('verify-packaged-composition-smoke: AgentTeams member persona is not prompt-scoped')
+  }
+  if (remoteRows.length !== 1 || remoteRows[0].name !== '@linxin666/dsh-remote-web-ui') {
+    throw new Error('verify-packaged-composition-smoke: Remote Web UI bundle is not composed exactly once')
+  }
+  if (billingRows.length !== 1 || billingRows[0].name !== 'dsh-web-billing') {
+    throw new Error('verify-packaged-composition-smoke: Billing bundle is not composed exactly once')
+  }
+  if (lunaRows.length !== 1 || lunaRows[0].name !== '@ycp424c/dsh-luna-vision-bridge') {
+    throw new Error('verify-packaged-composition-smoke: Luna Vision Bridge bundle is not composed exactly once')
   }
 
   const presetRow = rowsWithId('agent-presets')[0]
@@ -111,6 +123,9 @@ try {
       physicalRouter: dualModeRows[0].name,
       agentTeams: teamRows[0].name,
       memberPersonaPlacement: teamRows[0].config.memberPersonaPlacement,
+      remoteWebUi: remoteRows[0].name,
+      billing: billingRows[0].name,
+      lunaVisionBridge: lunaRows[0].name,
     },
     anchoredStandard: {
       presetRoot: roots[0].path,

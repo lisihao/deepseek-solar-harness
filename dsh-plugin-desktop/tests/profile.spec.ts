@@ -159,6 +159,15 @@ describe('desktop profile composition', () => {
       name: '@nanmicoder/dsh-agent-teams',
       config: expect.objectContaining({ memberPersonaPlacement: 'prompt' }),
     }))
+    expect(rows.find(row => row.id === 'remote-web-ui')).toEqual(expect.objectContaining({
+      name: '@linxin666/dsh-remote-web-ui',
+    }))
+    expect(rows.find(row => row.id === 'web-billing')).toEqual(expect.objectContaining({
+      name: 'dsh-web-billing',
+    }))
+    expect(rows.find(row => row.id === 'luna-vision-bridge')).toEqual(expect.objectContaining({
+      name: '@ycp424c/dsh-luna-vision-bridge',
+    }))
   })
 
   it('boots a selected Web profile without overriding its compatibility UI rows', () => {

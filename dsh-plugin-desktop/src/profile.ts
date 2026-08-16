@@ -61,7 +61,16 @@ const UI_CONVERSATION_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
 const RESIDENT_BUNDLE_PACKAGE = '@deepseek-ai/dsh-resident-operators'
 const AGENT_TEAMS_PACKAGE = '@nanmicoder/dsh-agent-teams'
 const AGENT_TEAMS_ROW_ID = 'agent-teams'
-const PRODUCT_BUNDLE_PACKAGES = [RESIDENT_BUNDLE_PACKAGE, AGENT_TEAMS_PACKAGE] as const
+const REMOTE_WEB_UI_PACKAGE = '@linxin666/dsh-remote-web-ui'
+const WEB_BILLING_PACKAGE = 'dsh-web-billing'
+const LUNA_VISION_BRIDGE_PACKAGE = '@ycp424c/dsh-luna-vision-bridge'
+const PRODUCT_BUNDLE_PACKAGES = [
+  RESIDENT_BUNDLE_PACKAGE,
+  AGENT_TEAMS_PACKAGE,
+  REMOTE_WEB_UI_PACKAGE,
+  WEB_BILLING_PACKAGE,
+  LUNA_VISION_BRIDGE_PACKAGE,
+] as const
 
 /**
  * Parse desktop presentation state and reject corrupted values.
@@ -207,7 +216,7 @@ function productBundlePatches(installedPackages: ReadonlySet<string>): PatchOpti
     .filter(packageName => !installedPackages.has(packageName))
     .flatMap(packageName => loadOverlayPatches(
       BIN_NAME,
-      require.resolve(`${packageName}/cordis.patch.yml`),
+      join(dirname(require.resolve(`${packageName}/package.json`)), 'cordis.patch.yml'),
     ))
 }
 

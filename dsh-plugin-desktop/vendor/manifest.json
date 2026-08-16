@@ -15,6 +15,21 @@
       "name": "Anchored Standard delegated-worker bootstrap",
       "repository": "local accepted preset snapshot",
       "commit": "N/A"
+    },
+    {
+      "name": "Remote Web UI",
+      "repository": "https://github.com/lisihao/dsh-web-ui",
+      "commit": "7b99d9eb69202199fffe378b289425b224691d23"
+    },
+    {
+      "name": "DSH Web Billing",
+      "repository": "https://github.com/lisihao/dsh-web-billing",
+      "commit": "3e76038353587db6375edda09b524c5fb6289713"
+    },
+    {
+      "name": "Luna Vision Bridge",
+      "repository": "https://github.com/lisihao/dsh-luna-vision-bridge",
+      "commit": "238b4a4e3c80d069a3bbbd32cb0e4f2a93503e4c"
     }
   ],
   "files": {
@@ -33,6 +48,9 @@
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "1c32654ca5a0278f5e35e091089dc9b8910f44b21e64a088a468b7ec7e2dd241",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "21874e802cb99ce3a635c0f66fe664a2048c76aea366d157d8cbab8209944223",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "d2d92e25a61f33887b95d298e7b4529e57522cda96e9da6505f14828000436d3",
-    "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03"
+    "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03",
+    "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
+    "dsh-packages/dsh-web-billing-1.1.0.tgz": "cd6fa47a147991166cdb8b20537c65314f05e9205eb9f6b57661b075826019c5",
+    "dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.1.tgz": "7422103323389d07d5e6895d3f83e56d06398854933c8dbb73cbc9170415ba95"
   }
 }

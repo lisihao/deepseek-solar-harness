@@ -4722,6 +4722,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@linxin666/dsh-remote-web-ui@file:./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.17
+  resolution: "@linxin666/dsh-remote-web-ui@file:./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz#./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz::hash=1158a0&locator=deepseek-harness-desktop%40workspace%3A."
+  dependencies:
+    cloudflared: "npm:^0.7.3"
+    clsx: "npm:^2.1.1"
+    qrcode.react: "npm:^4.2.0"
+    schemastery: "npm:^3.18.0"
+    zod: "npm:^4.4.3"
+  peerDependencies:
+    react: ^18.2.0
+    react-dom: ^18.2.0
+  checksum: 10c0/b131c6a3b109ca56b03ed663e74123dcac64fbc367589a8b6da92f0de8133927a65b1b7adceb109afa93f7d308e7f8be96732fe717e7873fb688977e1ed79952
+  languageName: node
+  linkType: hard
+
 "@malept/cross-spawn-promise@npm:^2.0.0":
   version: 2.0.0
   resolution: "@malept/cross-spawn-promise@npm:2.0.0"
@@ -6061,6 +6077,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@ycp424c/dsh-luna-vision-bridge@file:./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.1.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.1
+  resolution: "@ycp424c/dsh-luna-vision-bridge@file:./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.1.tgz#./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.1.tgz::hash=83c52c&locator=deepseek-harness-desktop%40workspace%3A."
+  dependencies:
+    schemastery: "npm:^3.18.0"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-attachment": ">=0.1.0-rc.5 <0.2.0"
+    "@deepseek-ai/dsh-llm": ">=0.1.0-rc.5 <0.2.0"
+    "@deepseek-ai/dsh-settings": ">=0.1.0-rc.5 <0.2.0"
+  bin:
+    dsh-read-image-luna: scripts/read-image-luna.sh
+  checksum: 10c0/8fe0afc30a4e4616abce113329167ed45605051dfd6dca3228765fcfeb417b99229ca99e63b874a9cb8a4a8d1e94ea01e8edc9f7b3f4fe00bc6bb621cf240852
+  languageName: node
+  linkType: hard
+
 "abbrev@npm:^4.0.0":
   version: 4.0.0
   resolution: "abbrev@npm:4.0.0"
@@ -6658,7 +6690,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"clsx@npm:^2.0.0":
+"cloudflared@npm:^0.7.3":
+  version: 0.7.3
+  resolution: "cloudflared@npm:0.7.3"
+  bin:
+    cloudflared: ./lib/cloudflared.js
+  checksum: 10c0/b0902ae9ae35a4611b7e69cdfbe52beaefa60d8b399cb5cc6fc5c3b6535513bbcc1cc2ca9b869fde41f076bb31960c1bec4580e72be12b0affd41c9a529313fa
+  languageName: node
+  linkType: hard
+
+"clsx@npm:^2.0.0, clsx@npm:^2.1.1":
   version: 2.1.1
   resolution: "clsx@npm:2.1.1"
   checksum: 10c0/c4c8eb865f8c82baab07e71bfa8897c73454881c4f99d6bc81585aecd7c441746c1399d08363dc096c550cceaf97bd4ce1e8854e1771e9998d9f94c4fe075839
@@ -6788,6 +6829,13 @@ __metadata:
     object-assign: "npm:^4"
     vary: "npm:^1"
   checksum: 10c0/ab2bc57b8af8ef8476682a59647f7c55c1a7d406b559ac06119aa1c5f70b96d35036864d197b24cf86e228e4547231088f1f94ca05061dbb14d89cc0bc9d4cab
+  languageName: node
+  linkType: hard
+
+"cosmokit@npm:^1.8.1":
+  version: 1.8.1
+  resolution: "cosmokit@npm:1.8.1"
+  checksum: 10c0/56b0294572efc7793d5854b0022243fab9899d0ab6ce7da873839572b4dc8c6d3ba8d6ff5b61231dca2e9d821af73a2be5d502d9ea52af2671374711a93620aa
   languageName: node
   linkType: hard
 
@@ -7109,15 +7157,19 @@ __metadata:
     "@deepseek-ai/dsh-workflow": "npm:0.1.0-rc.6"
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     "@electron/asar": "npm:3.4.1"
+    "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz"
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz"
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^22.20.0"
     "@types/react": "npm:^18"
+    "@ycp424c/dsh-luna-vision-bridge": "file:vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.1.tgz"
+    dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.0.tgz"
     electron: "npm:43.4.0"
     electron-builder: "npm:26.15.3"
     node-addon-require-builtin: "npm:^0.1.4"
     pnpm: "npm:11.7.0"
     react: "npm:18.3.1"
+    react-dom: "npm:18.3.1"
     sharp: "npm:0.35.3"
     tsdown: "npm:0.22.2"
     typescript: "npm:6.0.3"
@@ -7130,6 +7182,19 @@ __metadata:
     dsh-plugin-desktop: lib/bin.js
   languageName: unknown
   linkType: soft
+
+"dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.0.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 1.1.0
+  resolution: "dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.0.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.0.tgz::hash=9eb664&locator=deepseek-harness-desktop%40workspace%3A."
+  dependencies:
+    "@deepseek-ai/dsh-home-paths": "npm:^0.1.0-rc.6"
+    "@deepseek-ai/schemastery": "npm:^3.18.1"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-invariants": ">=0.1.0-rc.6 <0.2.0"
+  checksum: 10c0/3ed6011b943ae121c5d3cc333ace55b3d9eab377f27a8c5e5c2dfb0c1b87f6708cd4dddeafafa7adaf622803a0c7e1d8fcda1c8f4fd2a9264642764f2937033c
+  languageName: node
+  linkType: hard
 
 "dts-resolver@npm:^3.0.0":
   version: 3.0.0
@@ -9807,6 +9872,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"qrcode.react@npm:^4.2.0":
+  version: 4.2.0
+  resolution: "qrcode.react@npm:4.2.0"
+  peerDependencies:
+    react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+  checksum: 10c0/68c691d130e5fda2f57cee505ed7aea840e7d02033100687b764601f9595e1116e34c13876628a93e1a5c2b85e4efc27d30b2fda72e2050c02f3e1c4e998d248
+  languageName: node
+  linkType: hard
+
 "qs@npm:^6.14.0, qs@npm:^6.15.2":
   version: 6.15.3
   resolution: "qs@npm:6.15.3"
@@ -9850,7 +9924,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-dom@npm:^18.2.0":
+"react-dom@npm:18.3.1, react-dom@npm:^18.2.0":
   version: 18.3.1
   resolution: "react-dom@npm:18.3.1"
   dependencies:
@@ -10210,6 +10284,16 @@ __metadata:
   dependencies:
     loose-envify: "npm:^1.1.0"
   checksum: 10c0/26383305e249651d4c58e6705d5f8425f153211aef95f15161c151f7b8de885f24751b377e4a0b3dd42cce09aad3f87a61dab7636859c0d89b7daf1a1e2a5c78
+  languageName: node
+  linkType: hard
+
+"schemastery@npm:^3.18.0":
+  version: 3.18.0
+  resolution: "schemastery@npm:3.18.0"
+  dependencies:
+    "@standard-schema/spec": "npm:^1.1.0"
+    cosmokit: "npm:^1.8.1"
+  checksum: 10c0/2f18f79adbc478e8f90914c3dbb9cf74f6e17a593b32565cbdf6e13cf152bdf0d03fa9f42aed35d27430fec54b0c2bf53b71b8b505ccc80f121cb694095a9513
   languageName: node
   linkType: hard
 
