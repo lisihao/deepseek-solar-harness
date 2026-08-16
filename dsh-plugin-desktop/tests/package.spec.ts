@@ -84,7 +84,10 @@ describe('published package surface', () => {
     expect(manifest.dsh?.client).toEqual({
       platform: 'web',
       inject: [
+        '@deepseek-ai/dsh-api-remotes',
         '@deepseek-ai/dsh-client-runtime',
+        '@deepseek-ai/dsh-client-ui-conversation',
+        '@deepseek-ai/dsh-client-ui-primitives',
         '@deepseek-ai/dsh-client-ui-theme',
       ],
     })

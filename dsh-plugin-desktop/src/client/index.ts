@@ -1,4 +1,5 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type convergence only: locale/theme declarations expose settings slot rows.
 // The desktop client does not load or register a settings surface.
@@ -8,6 +9,10 @@ import { applyAdvancedShell } from './advanced-shell.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { SolarBrand, solarBrandLabel } from './SolarBrand.tsx'
 import { ResidentOperatorsPanel } from './ResidentOperatorsPanel.tsx'
+import {
+  PhysicalOperatorRoutingControl,
+  type PhysicalOperatorRoutingInjected,
+} from './PhysicalOperatorRoutingControl.tsx'
 import { installSolarBrandStyles } from './styles.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
@@ -17,6 +22,8 @@ export type { DesktopClientEnvironment, DesktopClientMode, DesktopClientPlatform
 /** Services required by advanced presentation. */
 export const inject = [
   'slots',
+  'remote',
+  'remote.commands',
   'sessions',
   'theme',
 ]
@@ -37,5 +44,19 @@ export function apply(ctx: ClientContext): void {
     order: -900,
     label: 'Resident 物理算子',
   }, props => ResidentOperatorsPanel(props)))
+  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+    name: 'conversation.input.right',
+    id: 'physical-operator-routing',
+    order: 900,
+    label: '物理算子执行策略',
+    inject: (sessionId: SessionId): PhysicalOperatorRoutingInjected => ({
+      select: async (policy) => {
+        const result = await ctx.remote.commands.execute(sessionId, `/operator ${policy}`)
+        if (!result.ok) return `${result.error.message} (${result.error.code})`
+        if (result.value === undefined) return 'unknown command: /operator'
+        return null
+      },
+    }),
+  }, PhysicalOperatorRoutingControl))
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)
 }

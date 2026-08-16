@@ -14,9 +14,9 @@ desktop package 拥有普通 Host 与 Web Client 两个 face。它的 Client fac
 
 托盘中的 profile 选择器会列出现有 profile，以及可延迟创建的 `desktop` 与 `web` 默认项。可选 profile 必须直接按顺序组合 `dsh-base` 与 `dsh-web-app`；headless、损坏或已经内嵌 desktop bundle 的 profile 仍会显示，但不可选择。只有 `desktop` 是 Launcher 管理的 profile：它会修复安装方拥有的前缀，同时保留第三方 bundle 的相对顺序。其他被选 profile 的 manifest、用户 patch 与依赖均保持不变。Launcher 只会为当前 generation 在 `dsh-web-app` 后插入自有 desktop layer，不会把该 layer 持久化到被选 bundle 列表。
 
-Desktop 产品层还会提供 Resident Physical Operators 与 AgentTeams，但不会把任一 bundle 持久化到用户选择的 profile。物理算子默认仍为 `ephemeral`；调用方必须显式请求 `resident`。在 macOS 上，launcher 会把用户原生的 `claude` 与 `codex` 命令解析为仅 owner 可访问的私有 wrapper，Resident daemon 使用产品订阅登录态和原生 session 连续性，禁止 API key fallback。Daemon 独立于 Electron generation，因此应用重启只会断开客户端，不会删除 receipt、lease、artifact 或原生产品 session。
+Desktop 产品层还会提供 Resident Physical Operators 与 AgentTeams，但不会把任一 bundle 持久化到用户选择的 profile。普通模型选择旁会显示独立的执行策略选择器。每个未配置的 Session 使用“智能自动”：主 Agent 会评估非简单任务，并在无需用户点名产品的情况下委派给 Codex 或 Claude Code。“仅当前模型”、`Codex` 与 `Claude Code` 人工策略会按 Session 记录。底层 physical-operator 请求在调用方省略 `mode` 时仍缺省为 `ephemeral`，从而保持 Provider 兼容；智能自动会对仓库、多轮和需要跨重启连续的工作显式优先使用 `resident`。在 macOS 上，launcher 会把用户原生的 `claude` 与 `codex` 命令解析为仅 owner 可访问的私有 wrapper，Resident daemon 使用产品订阅登录态和原生 session 连续性，禁止 API key fallback。Daemon 独立于 Electron generation，因此应用重启只会断开客户端，不会删除 receipt、lease、artifact 或原生产品 session。
 
-普通 sidebar 会在两种呈现模式下增加一个纯新增的 **物理算子** action。它会打开同源、只读的状态面板，显示 Provider 资格、持久 Session、最新 Receipt 状态与有界进度事件。Host route 按需读取 `ctx.residentOperators`，不会创建 Desktop 自有的 Resident 状态库。面板还会展示直接调用示例与插件能力契约：模型工作使用 `physical_operator` 工具，Host 插件通过注入 `ctx.physicalOperators` 执行，可信管理/状态插件则可注入 `ctx.residentOperators` 检查状态。基于实时 descriptor、tag 与 execution mode 的指引会告诉模型，何时独立实现/审查或多轮连续性值得调用算子；系统不增加隐藏分类器或第二调度权威。
+普通 sidebar 会在两种呈现模式下增加一个纯新增的 **物理算子** action。它会打开同源、只读的状态面板，显示 Provider 资格、持久 Session、最新 Receipt 状态与有界进度事件。Host route 按需读取 `ctx.residentOperators`，不会创建 Desktop 自有的 Resident 状态库。面板还会说明智能自动与插件能力契约：模型工作使用 `physical_operator` 工具，Host 插件通过注入 `ctx.physicalOperators` 执行，可信管理/状态插件则可注入 `ctx.residentOperators` 检查状态。基于实时 descriptor、tag 与 execution mode 的指引会主动触发委派；策略可见且已记录，不会引入隐藏分类器或第二调度权威。
 
 打包内的 `anchored-standard` preset 是 system-trust 产品输入，并排在同名上游 preset root 之前。它的首轮 gate 会覆盖 delegated agent，因此 AgentTeams worker 会与主 agent 一样从 `bash` 和 `str_replace_editor` 两个 bootstrap 工具开始，而不是被当作已经 promoted。AgentTeams 还会把 member protocol 放入首条 user prompt，不再替换所选 preset 的 persona。若用户 profile 已声明 AgentTeams，产品层不会重复加载；最终 patch 仍会强制这一 prompt placement。
 
@@ -169,7 +169,7 @@ corepack.cmd yarn dist:win
 
 ## 模型体验
 
-产品层会增加 AgentTeams 与既有 physical-operator 工具面。Resident 执行必须显式选择，并只返回有界 continuity metadata；缺省请求仍为 ephemeral。动态 system-prompt 区段会根据实时 descriptor、tag 和 mode 说明何时使用可用算子，而 sidebar 面板只向人投影状态。打包内的 Anchored Standard 会让主 agent 与 delegated agent 都使用双工具首轮 bootstrap。AgentTeams 会把协调协议放在 worker 的首条 user message 中，并保留 preset persona。
+产品层会增加 AgentTeams 与既有 physical-operator 工具面。每个 Session 的执行策略缺省为“智能自动”，并显示在模型选择旁；也可以通过 `/operator` 命令或 Desktop 菜单人工覆盖。Resident 执行只返回有界 continuity metadata，底层 run API 在省略 `mode` 时仍按 ephemeral 处理。动态 system-prompt 区段会在每个非简单任务开始时对照实时 descriptor、tag 和 mode 进行判断，而 sidebar 面板只向人投影状态。打包内的 Anchored Standard 会让主 agent 与 delegated agent 都使用双工具首轮 bootstrap。AgentTeams 会把协调协议放在 worker 的首条 user message 中，并保留 preset persona。
 
 #### KV Cache 影响
 

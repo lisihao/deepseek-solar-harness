@@ -4,7 +4,7 @@
     {
       "name": "Resident Physical Operators",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "c6509111a055909ebdb8b76fff876962c4068fca"
+      "commit": "4f8abdb9a712bd1335a28d0a95aa1d710ff974d5"
     },
     {
       "name": "GenesisPod and ThunderOMLX Remote Modules",
@@ -50,9 +50,9 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "3b6b98708e6b5593a3162f3496570c4c0840a1a2b3e31d21e977ef3192a00981",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "c7461185ea313c281f89cdf1617d531fff26b067909e5e163eac526c4b7fe6c5",
     "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "645b3499404c89d86373d518bf8d163a1d97585df186df0a3c1f9160053a1024",
-    "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "1c32654ca5a0278f5e35e091089dc9b8910f44b21e64a088a468b7ec7e2dd241",
+    "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "0bbeaedb999afb783514efce7da0b2ab2cfcfd3b2957621d5bd0dcd691e4e524",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "21874e802cb99ce3a635c0f66fe664a2048c76aea366d157d8cbab8209944223",
-    "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "6c8c199ef1bdc81b78c4ab8ce94c2c2a8b51afb3c40053cf7596b8c82d17652f",
+    "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "ecd64e3b522dccbe34c60e8cd1983411565bbb8602bdff4cdde0afd082bb9a7d",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "1e474b894f4d956c42574abc12b83557d0d381d06baddd84666916809d8e4238",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "5ebee67785bb202dec1fe95a7a0c304478788979de243c2fab53e7642db814f4",
     "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03",

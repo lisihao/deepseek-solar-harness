@@ -91,6 +91,15 @@ const SOLAR_BRAND_STYLES = `
 .dshDesktopResidentEvents time { grid-row: 1 / 3; color: var(--dsw-alias-label-secondary); }
 .dshDesktopResidentEvents li span { color: var(--dsw-alias-label-secondary); }
 .dshDesktopResidentError { margin: 12px 24px 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, #ff453a 45%, transparent); border-radius: 8px; background: color-mix(in srgb, #ff453a 12%, transparent); color: #ff6961; font-size: 11px; }
+.dshDesktopOperatorRoutingWrap { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.dshDesktopOperatorRoutingChip { display: inline-flex; align-items: center; gap: 2px; max-width: 148px; height: 26px; padding: 0 5px 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; font-size: 11px; white-space: nowrap; }
+.dshDesktopOperatorRoutingChip:hover:not(:disabled), .dshDesktopOperatorRoutingChip[aria-expanded="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.dshDesktopOperatorRoutingChip:disabled { cursor: default; opacity: .48; }
+.dshDesktopOperatorRoutingChip > span { overflow: hidden; text-overflow: ellipsis; }
+.dshDesktopOperatorRoutingItem { display: grid; max-width: 270px; gap: 2px; }
+.dshDesktopOperatorRoutingItem strong { font-size: 11px; font-weight: 600; }
+.dshDesktopOperatorRoutingItem small { color: var(--dsw-alias-label-secondary); font-size: 9px; line-height: 13px; white-space: normal; }
+.dshDesktopOperatorRoutingError { position: absolute; right: 0; bottom: 100%; margin-bottom: 4px; padding: 3px 5px; border-radius: 5px; background: #ff453a; color: white; font-size: 9px; white-space: nowrap; }
 @media (max-width: 900px) { .dshDesktopResidentGrid { grid-template-columns: 1fr; overflow: auto; } .dshDesktopResidentColumn { overflow: visible; border-right: 0; border-bottom: 1px solid var(--dsw-alias-border-l2); } }
 `
 
