@@ -148,7 +148,7 @@ describe('desktop Host plugin', () => {
       mode: 'compatibility',
       url: 'http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin',
       productName: 'DSH Desktop',
-      windowTitle: 'DeepSeek Harness Desktop',
+      windowTitle: 'DSH - DeepSeek Harness的Solar分支，目标是您的All-in-One AI工作台',
       iconPath: expect.stringMatching(/\/build\/app-icon-mac\.png$/u),
       trayIcons: {
         templatePath: expect.stringMatching(/\/build\/tray-iconTemplate\.png$/u),

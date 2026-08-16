@@ -234,7 +234,7 @@ describe('Electron compatibility runtime', () => {
     expect(electron.browserWindowOptions).toHaveLength(1)
     const options = electron.browserWindowOptions[0]
     expect(options).toEqual(expect.objectContaining({
-      title: '',
+      title: 'DeepSeek Harness Desktop',
       width: 1280,
       height: 840,
       show: false,

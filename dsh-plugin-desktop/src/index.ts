@@ -141,7 +141,7 @@ export function apply(ctx: Context, config: Config): void {
       ...config,
       url: desktopRendererUrl(ctx.webServer.port, config.mode, ctx.desktopRuntime.platform),
       productName: 'DSH Desktop',
-      windowTitle: 'DeepSeek Harness Desktop',
+      windowTitle: 'DSH - DeepSeek Harness的Solar分支，目标是您的All-in-One AI工作台',
       iconPath,
       trayIcons,
       readThemeSource: () => {

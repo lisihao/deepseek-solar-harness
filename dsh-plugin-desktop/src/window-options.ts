@@ -20,7 +20,7 @@ export function compatibilityWindowOptions(
     throw new Error(`dsh-plugin-desktop: unsupported compatibility window mode ${spec.mode}`)
   }
   const options: BrowserWindowConstructorOptions = {
-    title: platform === 'win32' ? spec.windowTitle : '',
+    title: spec.windowTitle,
     width: spec.width,
     height: spec.height,
     minWidth: spec.minWidth,
@@ -54,7 +54,7 @@ export function advancedWindowOptions(
     throw new Error(`dsh-plugin-desktop: unsupported advanced window mode ${spec.mode}`)
   }
   const options: BrowserWindowConstructorOptions = {
-    title: platform === 'win32' ? spec.windowTitle : '',
+    title: spec.windowTitle,
     width: spec.width,
     height: spec.height,
     minWidth: spec.minWidth,
