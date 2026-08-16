@@ -24,7 +24,7 @@
     {
       "name": "DSH Web Billing",
       "repository": "https://github.com/lisihao/dsh-web-billing",
-      "commit": "3e76038353587db6375edda09b524c5fb6289713"
+      "commit": "1cddd2a32151f234ca8d77d649f43685c5622bab"
     },
     {
       "name": "Luna Vision Bridge",
@@ -50,7 +50,7 @@
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "d2d92e25a61f33887b95d298e7b4529e57522cda96e9da6505f14828000436d3",
     "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03",
     "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
-    "dsh-packages/dsh-web-billing-1.1.0.tgz": "cd6fa47a147991166cdb8b20537c65314f05e9205eb9f6b57661b075826019c5",
+    "dsh-packages/dsh-web-billing-1.1.0.tgz": "a8c044716ca4a0562853944ad141221dc6376c513babadecb50c5c4c3cef2823",
     "dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.1.tgz": "7422103323389d07d5e6895d3f83e56d06398854933c8dbb73cbc9170415ba95"
   }
 }
