@@ -31,6 +31,12 @@ export type LunaSectionProps =
 
 const NS = 'luna-vision-bridge'
 
+/** Whether the id follows the current target and must be reset when retargeting. */
+function isAutomaticBridgeModel(row: TargetDraft): boolean {
+  const id = row.bridgeModel.trim()
+  return id === '' || id === row.model.trim() || id === `${row.provider.trim()}-${row.model.trim()}`
+}
+
 /** Minimal inline styling (no CSS pipeline in the client bundle). */
 const styles = {
   panel: { padding: '16px 20px', maxWidth: '720px' },
@@ -149,8 +155,23 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
       targets: current.targets.map((row, i) => (
         i === index
           ? key === 'provider'
-            ? { ...row, provider: value, model: '', name: '', bridgeModel: row.bridgeModel }
-            : { ...row, [key]: value }
+            ? {
+                ...row,
+                provider: value,
+                model: '',
+                name: '',
+                // The zero-config target carries the stable
+                // `deepseek-v4-flash` alias. Once the target changes that
+                // alias is no longer truthful, so return to generated ids.
+                bridgeModel: isAutomaticBridgeModel(row) ? '' : row.bridgeModel,
+              }
+            : key === 'model'
+              ? {
+                  ...row,
+                  model: value,
+                  bridgeModel: isAutomaticBridgeModel(row) ? '' : row.bridgeModel,
+                }
+              : { ...row, [key]: value }
           : row
       )),
     }))
@@ -235,8 +256,8 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
   return (
     <div style={styles.panel}>
       <p style={styles.hint}>
-        图片会先经 Codex Luna 转写成文字，再交给下方每个下游纯文本模型。保存即生效，模型选择器立即出现对应组合；
-        未配置时默认使用 DeepSeek V4 Flash（deepseek-official / deepseek-v4-flash）。
+        识图阶段默认使用当前用户已登录的 Codex 订阅与 gpt-5.6-luna，不使用 OpenAI API key；下方选择的是接收转写文本并生成最终回答的下游模型，
+        其调用按该 provider 自己的计费方式执行。未配置时下游为 DeepSeek V4 Flash（deepseek-official / deepseek-v4-flash）。
       </p>
       <div style={styles.field}>
         <label style={styles.label} htmlFor="luna-provider-name">Provider 显示名</label>
@@ -332,7 +353,7 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
               <input
                 style={styles.input}
                 type="text"
-                placeholder="桥接模型 id（可选，默认 provider-model）"
+                placeholder={`桥接模型 id（留空自动生成 ${row.provider || 'provider'}-${row.model || 'model'}）`}
                 aria-label={`第 ${index + 1} 行桥接模型 id`}
                 value={row.bridgeModel}
                 disabled={writeDisabled}

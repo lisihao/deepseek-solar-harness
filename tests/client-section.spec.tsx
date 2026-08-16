@@ -160,7 +160,7 @@ describe('LunaSection', () => {
     })
 
     expect(benchApi.update).toHaveBeenCalledOnce()
-    expect(benchApi.update.mock.calls[0]?.[0]).toMatchObject({
+    expect(benchApi.update.mock.calls[0]?.[0]).toEqual({
       ns: 'luna-vision-bridge',
       expectedRevision: 1,
       patch: {

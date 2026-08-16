@@ -101,17 +101,20 @@ dsh plugin --profile web add "link:/absolute/path/to/dsh-luna-vision-bridge"
 
 1. 打开 Web 界面的 **设置 → "Luna Vision Bridge"**（设置面板左侧导航，模型页同组）
 2. 表单会预填一行当前默认组合（未配置时默认 `DeepSeek / DeepSeek-V4-Flash`），在表单里编辑：
+   - 顶部说明会明确区分两段：识图默认走用户已登录的 Codex 订阅与 `gpt-5.6-luna`；下游模型负责最终回答，并按其自身 provider 计费
    - `Provider 显示名`：桥接 provider 在模型选择器里的显示名，默认 `Luna Vision Bridge`
    - `下游模型`：一行一个组合，每行：
      - `provider`：**下拉选择**（来自 DSH 模型目录，已过滤桥接自身），如 `DeepSeek`
      - `model`：**下拉选择**（按所选 provider 的模型目录联动），如 `DeepSeek-V4-Pro`
      - `显示名`（可选）：模型选择器显示名，默认 `<model> + Luna`
-     - `高级`（可选折叠）：`桥接模型 id`，默认 `<provider>-<model>`，必须互不相同
+     - `高级`（可选折叠）：`桥接模型 id`；零配置默认项为稳定 id `deepseek-v4-flash`，新组合留空时自动生成 `<provider>-<model>`，必须互不相同
    - 用"＋ 添加下游模型"增加组合、"删除"移除、"恢复默认"清空用户覆盖
    - 模型目录不可用时自动降级为手动输入框
 3. 点击**保存**即生效（无需重启，模型选择器立即出现新组合）
 
 浏览器端表单通过 `settings.update` 写入用户设置层，Host 端仍会做完整校验（重复 `bridgeModel`、`provider` 与 `bridgeProvider` 相同等会被拒绝并提示）。表单字段也可在 `settings.yaml` 的 `luna-vision-bridge:` 段手动编辑，两者等价。其余字段（Luna 转写、缓存等）与下游无关，全局共用，一般保持默认即可。
+
+切换某一行的 provider 或 model 时，表单会清除由旧目标自动生成的桥接 id，防止新下游继续挂在旧的 `deepseek-v4-flash` 别名下；人工填写的稳定别名则保留。
 
 > 无 settings 服务挂载的 DSH 环境自动回退到 cordis 配置；两者可并存，Web 设置里保存的值优先。
 
