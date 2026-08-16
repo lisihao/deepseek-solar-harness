@@ -82,6 +82,8 @@ Every `SessionEvent` carries three optional top-level fields (structural metadat
 - `surfaceOp?: SurfaceOp` — how this event entered the surface. Absent for non-surface events (boundaries, chunks, usage, errors).
 - `ignorable?: true` — marks an event a reader may safely skip when it does not recognize the type; absent means required, so an unknown-type event refuses session reconstruction ([mechanism](../../../.agents/notes/implemented/architecture/2026-08-10-session-log-version-mechanism.md)).
 
+A downstream plugin passes `{ ignorable: true }` as the optional third argument to `Session.append` only for a non-surface event whose absence cannot affect reconstruction. Surface event intents reject this marker.
+
 ### Metadata types (`types.ts`)
 
 - `SessionHeader` — session metadata written once when published as `Session.header`, where detachment and deep-freezing enforce immutability at runtime: `{ version, id, createdAt, cwd?, parentSession?, seedLength?, delegationDepth? }`. Persistence loaders may return mutable detached copies of the same data type. Owned here (beside `SessionId`) because `Session.header` is typed by it; persistence backends re-export it rather than own it (which would force a package cycle).

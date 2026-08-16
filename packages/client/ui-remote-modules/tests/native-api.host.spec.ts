@@ -8,7 +8,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   apply, inject, normalizeWebpageInstances, parseWebpageTarget, type Config,
 } from '../src/index.ts'
-import { REMOTE_MODULES_SETTINGS_NAMESPACE } from '../src/contract.ts'
+import {
+  REMOTE_MODULES_SETTINGS_NAMESPACE, parseRemoteModulesConfig, parseWebpageInstances,
+} from '../src/contract.ts'
 
 const servers: Server[] = []
 const contexts: Context[] = []
@@ -73,6 +75,81 @@ describe('fixed-target Web page relay', () => {
     }
   })
 
+  it('validates every user-settings field before accepting a remote-module configuration', () => {
+    const valid = {
+      id: 'genesispod', label: '  GenesisPod  ', url: 'https://example.test/app', relayPort: 0, order: 20,
+    }
+    expect(parseRemoteModulesConfig({ instances: [valid] })).toEqual({
+      instances: [{ ...valid, label: 'GenesisPod' }],
+    })
+    expect(parseRemoteModulesConfig({ instances: [valid, {
+      id: 'thunder-omlx', label: 'ThunderOMLX', url: 'http://127.0.0.1:8002/docs', relayPort: 0, order: 30,
+    }] })?.instances).toHaveLength(2)
+
+    const invalid: unknown[] = [
+      null,
+      [],
+      {},
+      { instances: [] },
+      { instances: 'not-an-array' },
+      { instances: [null] },
+      { instances: [{ ...valid, id: 1 }] },
+      { instances: [{ ...valid, id: 'Not Valid' }] },
+      { instances: [valid, { ...valid }] },
+      { instances: [{ ...valid, label: 1 }] },
+      { instances: [{ ...valid, label: '   ' }] },
+      { instances: [{ ...valid, url: 1 }] },
+      { instances: [{ ...valid, url: 'not a url' }] },
+      { instances: [{ ...valid, url: 'ftp://example.test' }] },
+      { instances: [{ ...valid, url: 'https://user:secret@example.test' }] },
+      { instances: [{ ...valid, relayPort: '8000' }] },
+      { instances: [{ ...valid, relayPort: 1.5 }] },
+      { instances: [{ ...valid, relayPort: -1 }] },
+      { instances: [{ ...valid, relayPort: 65536 }] },
+      { instances: [
+        { ...valid, relayPort: 39191 },
+        { ...valid, id: 'thunder-omlx', relayPort: 39191 },
+      ] },
+      { instances: [{ ...valid, order: '20' }] },
+      { instances: [{ ...valid, order: 20.5 }] },
+    ]
+    for (const value of invalid) expect(parseRemoteModulesConfig(value)).toBeUndefined()
+  })
+
+  it('rejects malformed Host rosters and returns deterministic browser ordering', () => {
+    const valid = {
+      id: 'genesispod', label: '  GenesisPod  ', targetUrl: 'https://example.test/app',
+      embedUrl: 'http://localhost:39191/app', order: 20,
+    }
+    expect(parseWebpageInstances({ instances: [
+      { ...valid, id: 'thunder-omlx', label: 'ThunderOMLX', order: 30 },
+      valid,
+      { ...valid, id: 'alpha', label: 'Alpha', order: 20 },
+    ] })).toEqual([
+      { ...valid, id: 'alpha', label: 'Alpha' },
+      { ...valid, label: 'GenesisPod' },
+      { ...valid, id: 'thunder-omlx', label: 'ThunderOMLX', order: 30 },
+    ])
+
+    const invalidEntries: unknown[] = [
+      null,
+      { ...valid, id: 1 },
+      { ...valid, id: 'Not Valid' },
+      { ...valid, label: 1 },
+      { ...valid, label: '  ' },
+      { ...valid, targetUrl: 'ftp://example.test' },
+      { ...valid, embedUrl: 'not a url' },
+      { ...valid, order: '20' },
+      { ...valid, order: 20.5 },
+    ]
+    expect(() => parseWebpageInstances(null)).toThrow(/invalid instance roster/)
+    expect(() => parseWebpageInstances({ instances: 'not-an-array' })).toThrow(/invalid instance roster/)
+    for (const candidate of invalidEntries) {
+      expect(() => parseWebpageInstances({ instances: [candidate] })).toThrow(/invalid instance at index 0/)
+    }
+    expect(() => parseWebpageInstances({ instances: [valid, { ...valid }] })).toThrow(/duplicate instance id/)
+  })
+
   it('proxies the actual target page and removes only headers that forbid embedding', async () => {
     const origin = await target((req, res) => {
       expect(req.url).toBe('/app?fixture=1')
@@ -112,7 +189,9 @@ describe('fixed-target Web page relay', () => {
     expect(roster.instances.map(item => item.id)).toEqual(['genesispod', 'thunder-omlx'])
     expect((await fetch(roster.instances[0]!.embedUrl)).status).toBe(200)
     expect((await fetch(`${app.base}/remote-webpages/v1/instances`, { method: 'POST' })).status).toBe(405)
-    expect((await fetch(`${app.base}/remote-webpages/v1/instances`, { method: 'HEAD' })).status).toBe(200)
+    const head = await fetch(`${app.base}/remote-webpages/v1/instances`, { method: 'HEAD' })
+    expect(head.status).toBe(200)
+    expect(await head.text()).toBe('')
     const relayUrl = roster.instances[0]!.embedUrl
     await app.fiber.dispose()
     expect((await fetch(`${app.base}/remote-webpages/v1/instances`)).status).toBe(404)
@@ -148,5 +227,13 @@ describe('fixed-target Web page relay', () => {
       { ...base, id: 'one', relayPort: 39191 }, { ...base, id: 'two', relayPort: 39191 },
     ])).toThrow(/duplicate relayPort/)
     expect(() => normalizeWebpageInstances([{ ...base, id: 'Not Valid' }])).toThrow(/must be kebab-case/)
+    expect(() => normalizeWebpageInstances([{ ...base, id: 'empty-label', label: '  ' }])).toThrow(/must not be empty/)
+    expect(() => normalizeWebpageInstances([{ ...base, id: 'fractional-order', order: 1.5 }])).toThrow(/must be an integer/)
+    expect(normalizeWebpageInstances([
+      { ...base, id: 'zulu', label: '  Zulu  ', order: 100 },
+      { ...base, id: 'alpha', label: 'Alpha', order: 100 },
+    ]).map(instance => ({ id: instance.id, label: instance.label }))).toEqual([
+      { id: 'alpha', label: 'Alpha' }, { id: 'zulu', label: 'Zulu' },
+    ])
   })
 })
