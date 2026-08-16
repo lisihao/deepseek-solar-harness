@@ -5,7 +5,7 @@
  * downstream targets are editable from the Web Settings UI without touching
  * any configuration file.
  */
-import type { Context } from 'cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { LunaVisionBridgeAdapter } from './adapter.js'
 import { Config, resolveConfig } from './config.js'

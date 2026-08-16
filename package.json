@@ -50,10 +50,10 @@
     "schemastery": "^3.18.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-attachment": "^0.0.1",
-    "@deepseek-ai/dsh-llm": "^0.0.1",
-    "@deepseek-ai/dsh-settings": "^0.0.1",
-    "cordis": "^4.0.0-rc.7"
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-attachment": ">=0.1.0-rc.5 <0.2.0",
+    "@deepseek-ai/dsh-llm": ">=0.1.0-rc.5 <0.2.0",
+    "@deepseek-ai/dsh-settings": ">=0.1.0-rc.5 <0.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-attachment": "link:.dsh/source/current/packages/attachment/attachment",
@@ -67,7 +67,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-test-renderer": "^18.3.1",
-    "cordis": "link:.dsh/source/current/vendor/cordis",
+    "@deepseek-ai/cordis": "link:.dsh/source/current/vendor/cordis",
     "react": "^18.2.0",
     "react-test-renderer": "^18.2.0",
     "tsdown": "^0.22.2",
