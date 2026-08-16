@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-本包是面向模型的 `ctx.physicalOperators` Consumer。它注册一个固定的 `physical_operator` 工具，包含发现实时算子和运行一个稳定算子 ID 两个动作。Provider 传输不会出现在工具约定中。
+本包是面向模型的 `ctx.physicalOperators` Consumer。它注册一个固定的 `physical_operator` 工具，包含发现实时算子和运行一个稳定算子 ID 两个动作。动态 system-prompt 区段会说明何时委派、何时使用 Resident 连续性，并列出当前实时 descriptor、tag 与 mode。Provider 传输不会出现在工具约定中。
 
 ## 工具约定
 
@@ -48,6 +48,6 @@ prompt 必须包含本轮所需的完整工作。Ephemeral Provider 会在全新
 ## 已知限制与后续工作
 
 - **仅前台执行**：模型不会获得后台句柄、进度流、管理状态、reset 或 interrupt 操作；可信 CLI 和插件负责 Resident 管理。
-- **不自动选择算子**：模型必须调用 `list` 并选择稳定 ID；工具没有排序或策略引擎。
+- **模型策略而非隐藏分类器**：模型根据注册指引和实时 descriptor/tag 选择算子，也可调用 `list`；系统刻意不创建第二个排序服务或不透明路由权威。
 - **没有类型化物理 payload**：首版接受文本任务，返回普通内容块或 Provider 持有的产物引用。
 - **没有通用输出大小策略**：Resident 本地执行提供有界产物策略，其他 Provider 仍需对完整结果大小负责。

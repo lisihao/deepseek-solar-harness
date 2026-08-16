@@ -39,10 +39,12 @@ class MemoryDriver implements ResidentProductDriver {
   }
 
   async execute(request: DriverExecuteRequest) {
+    request.onProgress('connecting')
     const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
     const count = (this.counts.get(session) ?? 0) + 1
     this.counts.set(session, count)
     request.onRunning(session, `turn-${count}`)
+    request.onProgress('reasoning')
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, 5)
       request.signal.addEventListener('abort', () => {
@@ -67,6 +69,38 @@ class BlockingDriver extends MemoryDriver {
       setTimeout(resolve, 5_000)
     })
     return { output: [], stopReason: 'completed' as const, nativeSessionId: session }
+  }
+}
+
+class ReconnectDriver extends MemoryDriver {
+  readonly running: Promise<void>
+  readonly release: () => void
+  private readonly markRunning: () => void
+
+  constructor() {
+    super()
+    let markRunning = (): void => {}
+    let release = (): void => {}
+    this.running = new Promise<void>((resolve) => { markRunning = resolve })
+    this.release = () => { release() }
+    this.markRunning = markRunning
+    this.released = new Promise<void>((resolve) => { release = resolve })
+  }
+
+  private readonly released: Promise<void>
+
+  override async execute(request: DriverExecuteRequest) {
+    request.onProgress('connecting')
+    request.onRunning('native-reconnect', 'turn-reconnect')
+    request.onProgress('reasoning')
+    this.markRunning()
+    await this.released
+    request.onProgress('finalizing')
+    return {
+      output: [{ type: 'text' as const, text: 'reconnected result' }],
+      stopReason: 'completed' as const,
+      nativeSessionId: 'native-reconnect',
+    }
   }
 }
 
@@ -112,6 +146,19 @@ describe('ResidentDaemon', () => {
       prompt: [{ type: 'text', text: 'first' }], signal: new AbortController().signal,
     })
     expect(await first.result).toMatchObject({ output: [{ text: 'session=native-1;count=1' }] })
+    const reconnected = await firstClient.inspect(first.sessionId)
+    expect(reconnected.latestTurn).toMatchObject({ turnId: first.turnId, state: 'settled', stopReason: 'completed' })
+    expect(reconnected.latestEvent).toMatchObject({ type: 'turn.settled' })
+    expect(await firstClient.inspectTurn(first.turnId)).toMatchObject({
+      commandId: 'command-1',
+      sessionId: first.sessionId,
+      state: 'settled',
+      result: { stopReason: 'completed' },
+    })
+    const reasoning = (await firstClient.readEvents(first.sessionId)).events.find(event => (
+      event.type === 'turn.progress' && event.data.phase === 'reasoning'
+    ))
+    expect(reasoning).toBeDefined()
 
     const restartedClient = client(root)
     const second = await restartedClient.execute({
@@ -127,6 +174,40 @@ describe('ResidentDaemon', () => {
     })
     expect(isolated.sessionId).not.toBe(first.sessionId)
     expect(await isolated.result).toMatchObject({ output: [{ text: 'session=native-2;count=1' }] })
+    await daemon.close()
+  })
+
+  it('reattaches a fresh client to an active turn and observes durable progress through settlement', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new ReconnectDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const original = await client(root).execute({
+      commandId: 'reconnect-active', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'keep running' }], signal: new AbortController().signal,
+    })
+    await driver.running
+
+    const reattached = client(root)
+    expect(await reattached.inspect(original.sessionId)).toMatchObject({
+      lifecycle: 'running',
+      activeTurnId: original.turnId,
+      latestTurn: { turnId: original.turnId, state: 'running' },
+      latestEvent: { type: 'turn.progress', data: { phase: 'reasoning' } },
+    })
+    expect(await reattached.inspectTurn(original.turnId)).toMatchObject({
+      commandId: 'reconnect-active',
+      state: 'running',
+    })
+
+    driver.release()
+    await expect(original.result).resolves.toMatchObject({ output: [{ text: 'reconnected result' }] })
+    expect(await reattached.inspectTurn(original.turnId)).toMatchObject({
+      state: 'settled',
+      result: { stopReason: 'completed' },
+    })
     await daemon.close()
   })
 

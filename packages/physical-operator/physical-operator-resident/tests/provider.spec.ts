@@ -56,6 +56,7 @@ class ResidentStub extends ResidentOperatorService {
   }
   list() { return Promise.resolve([]) }
   inspect(): Promise<never> { return Promise.reject(new Error('unused')) }
+  inspectTurn(): Promise<never> { return Promise.reject(new Error('unused')) }
   readEvents() { return Promise.resolve({ events: [], nextSequence: 0 }) }
   interrupt() { return Promise.resolve() }
   reset(): Promise<never> { return Promise.reject(new Error('unused')) }

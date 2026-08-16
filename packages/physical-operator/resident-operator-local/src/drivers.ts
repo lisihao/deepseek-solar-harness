@@ -14,6 +14,7 @@ import {
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   ResidentProviderStatus,
+  ResidentProgressPhase,
   ResidentStopReason,
   ResidentTurnResult,
 } from '@deepseek-ai/dsh-resident-operator'
@@ -40,6 +41,8 @@ export interface DriverExecuteRequest {
   readonly nativeSessionId?: string
   readonly signal: AbortSignal
   readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
+  /** Persist a bounded product-neutral progress phase for reconnecting observers. */
+  readonly onProgress: (phase: ResidentProgressPhase) => void
 }
 
 /** Native product qualification and resumable turn adapter. */
@@ -138,6 +141,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
       )
     }
     const texts = textPrompt(request.prompt, 'Claude Code')
+    request.onProgress('connecting')
     const controller = new AbortController()
     const abort = (): void => { controller.abort(request.signal.reason) }
     if (request.signal.aborted) abort()
@@ -146,13 +150,13 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     let final: SDKResultMessage | undefined
     let approvalRequired: string | undefined
     const running = new Set<string>()
-    const canUseTool: CanUseTool = async (toolName, _input, options) => {
+    const canUseTool: CanUseTool = (toolName, _input, options) => {
       approvalRequired = options.title ?? options.displayName ?? toolName
-      return {
+      return Promise.resolve({
         behavior: 'deny',
         message: `Resident execution requires out-of-band approval for ${toolName}`,
         interrupt: true,
-      }
+      })
     }
     const query = claudeQuery({
       prompt: texts.join(''),
@@ -174,9 +178,15 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
           if (!running.has(session)) {
             running.add(session)
             request.onRunning(session)
+            request.onProgress('session_ready')
           }
         }
-        if (message.type === 'result') final = message
+        if (message.type === 'assistant') request.onProgress('reasoning')
+        if (message.type === 'user') request.onProgress('tool_activity')
+        if (message.type === 'result') {
+          request.onProgress('finalizing')
+          final = message
+        }
       }
     } catch (error) {
       if (approvalRequired !== undefined) {
@@ -266,6 +276,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
       throw new ResidentOperatorError(qualification.unavailableReason ?? 'Codex unavailable', code)
     }
     const texts = textPrompt(request.prompt, 'Codex')
+    request.onProgress('connecting')
     const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
     if (!existsSync(socketPath)) {
       throw new ResidentOperatorError('Codex app-server control socket is unavailable', 'RUNTIME_UNAVAILABLE')
@@ -293,6 +304,8 @@ export class CodexResidentDriver implements ResidentProductDriver {
         throw new ResidentOperatorError('Codex returned no persistent thread id', 'INVALID_RESULT')
       }
       request.onRunning(threadId)
+      request.onProgress('session_ready')
+      request.onProgress('reasoning')
       const result = await wire.runTurn(texts, request.signal, (turnId) => {
         request.onRunning(threadId, turnId)
       }).catch((error: unknown) => {
@@ -301,6 +314,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
         }
         throw error
       })
+      request.onProgress('finalizing')
       return { ...result, nativeSessionId: threadId }
     } finally {
       request.signal.removeEventListener('abort', abort)

@@ -10,7 +10,7 @@ Claude Code 使用官方 Agent SDK 持久化与恢复 Session；Codex 通过固�
 
 JSON-RPC 2.0 通过仅属主可访问的 Unix socket 以 NDJSON 传输。握手会拒绝 Resident 协议、state schema、daemon build、必需方法集、产品版本、产品协议 hash 或原生订阅资格不一致。daemon 在单写 WAL 数据库中保存 `resident_sessions`、`command_receipts`、`session_leases`、有界事件及 Artifact 索引。
 
-Receipt 按 `accepted -> running -> settled` 推进；daemon 在无法证明结算前崩溃时，启动恢复会将其标为 `indeterminate`。相同 command 与 canonical hash 重放会返回同一 Receipt，内容变化则冲突。重试只能在显式处置后用新 command ID 准入，并唯一关联旧 Receipt。正常停止会排空已准入 turn；进程被强制终止时由启动恢复处理，绝不自动重放。
+Receipt 按 `accepted -> running -> settled` 推进；有界 `turn.progress` 阶段会暴露连接、原生 Session 就绪、推理/工具活动与结果整理进度，但不保存 prompt 或 transcript。重新连接的 DSH 或 Desktop 客户端可以从 daemon 权威状态检查活动 turn、最新阶段及已结算结果。daemon 在无法证明结算前崩溃时，启动恢复会将 Receipt 标为 `indeterminate`。相同 command 与 canonical hash 重放会返回同一 Receipt，内容变化则冲突。重试只能在显式处置后用新 command ID 准入，并唯一关联旧 Receipt。正常停止会排空已准入 turn；进程被强制终止时由启动恢复处理，绝不自动重放。
 
 ## 配置与安全
 

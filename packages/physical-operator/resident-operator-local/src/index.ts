@@ -13,6 +13,7 @@ import ResidentOperatorService, {
   type ResidentResetRequest,
   type ResidentSessionSnapshot,
   type ResidentTurn,
+  type ResidentTurnSnapshot,
 } from '@deepseek-ai/dsh-resident-operator'
 import { brandedSession, brandedTurn, ResidentDaemonClient } from './client.ts'
 
@@ -91,6 +92,10 @@ class LocalResidentOperatorService extends ResidentOperatorService {
 
   inspect(sessionId: string): Promise<ResidentSessionSnapshot> {
     return this.client.inspect(sessionId)
+  }
+
+  inspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
+    return this.client.inspectTurn(turnId)
   }
 
   readEvents(request: ResidentEventReadRequest): Promise<ResidentEventPage> {

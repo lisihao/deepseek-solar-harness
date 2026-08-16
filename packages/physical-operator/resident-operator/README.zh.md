@@ -8,9 +8,9 @@ Provider 是唯一状态写者。Resident Session 由稳定算子 ID 与规范�
 
 ## 契约
 
-`execute()` 接收调用方生成的持久 command ID、算子 ID、工作区、content blocks 与取消信号。经显式授权的重试可以关联一条已 abandon 的 indeterminate command，但必须使用新 command ID。`list()`、`inspect()`、`readEvents()`、`interrupt()`、`reset()` 与 `resolveIndeterminate()` 只供可信插件和 CLI 管理消费者使用。
+`execute()` 接收调用方生成的持久 command ID、算子 ID、工作区、content blocks 与取消信号。经显式授权的重试可以关联一条已 abandon 的 indeterminate command，但必须使用新 command ID。`list()`、`inspect()`、`inspectTurn()`、`readEvents()`、`interrupt()`、`reset()` 与 `resolveIndeterminate()` 只供可信插件和 CLI 管理消费者使用。
 
-生命周期、健康度、原因、Receipt、事件和 Artifact 引用均为 Provider 无关类型。`reset` 使用乐观 state revision，只更换原生 Session 关联，不删除产品历史或 Artifact。
+生命周期、健康度、原因、Receipt、事件和 Artifact 引用均为 Provider 无关类型。Session 快照包含最新持久 turn 摘要和最新结构化事件；客户端重启后可通过 `inspectTurn()` 恢复当前或已结算 Receipt 的结果。`reset` 使用乐观 state revision，只更换原生 Session 关联，不删除产品历史或 Artifact。
 
 ## Model Experience
 

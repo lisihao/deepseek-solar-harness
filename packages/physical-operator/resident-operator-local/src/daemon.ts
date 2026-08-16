@@ -328,6 +328,9 @@ export class ResidentDaemon {
         onRunning: (nativeSessionId, nativeTurnId) => {
           this.store.markRunning(commandId, nativeSessionId, nativeTurnId)
         },
+        onProgress: (phase) => {
+          this.store.progress(commandId, phase)
+        },
       })
       this.store.markRunning(commandId, result.nativeSessionId)
       this.store.settle(commandId, result)

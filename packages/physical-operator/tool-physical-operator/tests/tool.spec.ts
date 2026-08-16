@@ -92,6 +92,10 @@ describe('physical_operator tool', () => {
     expect(Object.keys(properties).sort()).toEqual(['action', 'description', 'mode', 'operator_id', 'prompt'])
     expect(schema!.description).not.toMatch(/codex|claude|subagent/i)
     expect(schema!.description).toContain('backing provider')
+    const section = (await ctx.systemPrompt.assemble()).sections
+      .find(candidate => candidate.name === 'tool:physical-operator')
+    expect(section?.text).toContain('Choose resident mode for multi-turn work')
+    expect(section?.text).toContain('physics-solver: Solves bounded physics problems. [physics, reasoning]')
   })
 
   it('lists canonical live status without requiring a calling agent', async () => {
@@ -207,8 +211,10 @@ describe('physical_operator tool', () => {
     ctx.physicalOperators.registerOperator(operator)
     const mounted = await ctx.plugin(tool)
     expect(ctx.tools.schemas().some(schema => schema.name === 'physical_operator')).toBe(true)
+    expect((await ctx.systemPrompt.assemble()).sections.some(section => section.name === 'tool:physical-operator')).toBe(true)
     await mounted.dispose()
     expect(ctx.tools.schemas().some(schema => schema.name === 'physical_operator')).toBe(false)
+    expect((await ctx.systemPrompt.assemble()).sections.some(section => section.name === 'tool:physical-operator')).toBe(false)
     expect(ctx.physicalOperators.getOperator('physics-solver')).toBe(operator)
   })
 })

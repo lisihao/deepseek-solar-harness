@@ -13,6 +13,7 @@ import ResidentOperatorService, {
   type ResidentResetRequest,
   type ResidentSessionSnapshot,
   type ResidentTurn,
+  type ResidentTurnSnapshot,
 } from '@deepseek-ai/dsh-resident-operator'
 
 const sessionId = ResidentOperatorSessionId('resident:loader-session')
@@ -52,6 +53,7 @@ class FixtureResidentOperatorService extends ResidentOperatorService {
 
   list(): Promise<ResidentSessionSnapshot[]> { return Promise.resolve([]) }
   inspect(_sessionId: string): Promise<ResidentSessionSnapshot> { return Promise.reject(new Error('not used')) }
+  inspectTurn(_turnId: string): Promise<ResidentTurnSnapshot> { return Promise.reject(new Error('not used')) }
   readEvents(_request: ResidentEventReadRequest): Promise<ResidentEventPage> { return Promise.resolve({ events: [], nextSequence: 0 }) }
   interrupt(_request: ResidentInterruptRequest): Promise<void> { return Promise.resolve() }
   reset(_request: ResidentResetRequest): Promise<ResidentSessionSnapshot> { return Promise.reject(new Error('not used')) }

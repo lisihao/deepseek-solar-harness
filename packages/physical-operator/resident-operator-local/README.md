@@ -10,7 +10,7 @@ Claude Code uses the official Agent SDK with persisted/resumed sessions. Codex u
 
 JSON-RPC 2.0 messages are newline-delimited over an owner-only Unix socket. Handshake rejects mismatched Resident protocol, state schema, daemon build, required method set, product version, product protocol hash, or native-subscription qualification. The daemon stores `resident_sessions`, `command_receipts`, `session_leases`, bounded events, and artifact indexes in a single-writer WAL database.
 
-A receipt advances `accepted -> running -> settled`; a daemon crash before provable settlement recovers it as `indeterminate`. Replaying the same command and canonical hash returns the same receipt, while changed content conflicts. A retry is admitted only after explicit resolution, uses a new command id, and records a unique link to the old receipt. Graceful daemon stop drains admitted turns; forced process death relies on startup recovery and never auto-replays work.
+A receipt advances `accepted -> running -> settled`; bounded `turn.progress` phases expose connection, native-session readiness, reasoning/tool activity, and finalization without storing prompts or transcripts. A newly connected DSH or Desktop client can inspect the active turn, latest phase, and settled result from daemon-owned state. A daemon crash before provable settlement recovers the receipt as `indeterminate`. Replaying the same command and canonical hash returns the same receipt, while changed content conflicts. A retry is admitted only after explicit resolution, uses a new command id, and records a unique link to the old receipt. Graceful daemon stop drains admitted turns; forced process death relies on startup recovery and never auto-replays work.
 
 ## Configuration and security
 

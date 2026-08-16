@@ -2,9 +2,9 @@
 
 English | [中文](physical-operator.zh.md)
 
-The physical-operator seam gives DSH a stable, deployment-defined identity for bounded physics work while keeping execution products replaceable. The [Service Definition](../../packages/physical-operator/physical-operator/README.md) owns `ctx.physicalOperators`, mode discovery, availability, fail-fast capacity, preallocated execution identity, and paired lifecycle observation. The one-shot [Service Provider](../../packages/physical-operator/physical-operator-subagent/README.md) maps those ids to existing `ctx.subagents`; the [dual-mode Provider](../../packages/physical-operator/physical-operator-resident/README.md) preserves that default and routes explicit Resident requests through a separate control seam. The [Consumer](../../packages/physical-operator/tool-physical-operator/README.md) exposes one provider-neutral model tool.
+The physical-operator seam gives DSH a stable, deployment-defined identity for bounded physics work while keeping execution products replaceable. The [Service Definition](../../packages/physical-operator/physical-operator/README.md) owns `ctx.physicalOperators`, mode discovery, availability, fail-fast capacity, preallocated execution identity, and paired lifecycle observation. The one-shot [Service Provider](../../packages/physical-operator/physical-operator-subagent/README.md) maps those ids to existing `ctx.subagents`; the [dual-mode Provider](../../packages/physical-operator/physical-operator-resident/README.md) preserves that default and routes explicit Resident requests through a separate control seam. The [Consumer](../../packages/physical-operator/tool-physical-operator/README.md) exposes one provider-neutral model tool plus live descriptor/tag/mode selection guidance.
 
-[`ctx.residentOperators`](../../packages/physical-operator/resident-operator/README.md) defines trusted management for workspace-scoped native product continuity. Its [local Provider](../../packages/physical-operator/resident-operator-local/README.md) is a disposable client for an independent Unix-socket daemon that uniquely owns receipts, leases, session associations, events, and artifacts. Native Claude Code sessions and Codex threads remain product authority. DSH Session, Jobs, Web UI, tmux, and plugin lifetime are projections or clients, never alternate writers.
+[`ctx.residentOperators`](../../packages/physical-operator/resident-operator/README.md) defines trusted management for workspace-scoped native product continuity. Its [local Provider](../../packages/physical-operator/resident-operator-local/README.md) is a disposable client for an independent Unix-socket daemon that uniquely owns receipts, leases, session associations, events, and artifacts. Session snapshots and turn inspection let a newly connected DSH or Desktop client recover the latest bounded progress and settled result without copying state. Native Claude Code sessions and Codex threads remain product authority. DSH Session, Jobs, Web UI, tmux, and plugin lifetime are projections or clients, never alternate writers.
 
 This subsystem does not import the AI4Research scheduler, state store, TaskGraph, filesystem inbox, or operator catalog. The extraction rationale and deferred execution-substrate work are recorded in the [physical-operator capability seam Agent Note](../../.agents/notes/implemented/architecture/2026-08-15-physical-operator-capability-seam.md).
 
@@ -107,6 +107,13 @@ abstract list(): Promise<ResidentSessionSnapshot[]>
 abstract inspect(sessionId: string): Promise<ResidentSessionSnapshot>
 
 /**
+ * Read the durable receipt and bounded result for one turn after caller reconnect.
+ * @param turnId - opaque turn identity from execution, a Session snapshot, or an event.
+ * @returns the current receipt state, result reference, and terminal result when available.
+ */
+abstract inspectTurn(turnId: string): Promise<ResidentTurnSnapshot>
+
+/**
  * Read a bounded page of structured observation events.
  * @param request - Session identity, exclusive cursor, bound, and optional signal.
  * @returns ordered events and the next exclusive cursor.
@@ -135,7 +142,7 @@ abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:165`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:195`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

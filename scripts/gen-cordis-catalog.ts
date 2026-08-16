@@ -430,6 +430,8 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   ResidentStopReason: 'physical-operator.md',
   ResidentTurn: 'physical-operator.md',
   ResidentTurnResult: 'physical-operator.md',
+  ResidentTurnSnapshot: 'physical-operator.md',
+  ResidentTurnSummary: 'physical-operator.md',
   ContinuableCreateRequest: 'subagent.md',
   ContinuableCreateSpec: 'subagent.md',
   ContinuableSetupContribution: 'subagent.md',

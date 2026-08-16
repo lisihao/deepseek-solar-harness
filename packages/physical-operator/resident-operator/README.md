@@ -8,9 +8,9 @@ The provider is the only state writer. A resident session is keyed by stable ope
 
 ## Contract
 
-`execute()` accepts a caller-generated durable command id, operator id, workspace, content blocks, and cancellation signal. An explicitly authorized retry may name one already-abandoned indeterminate command; it must use a new command id. `list()`, `inspect()`, `readEvents()`, `interrupt()`, `reset()`, and `resolveIndeterminate()` are management operations for trusted plugins and CLI consumers.
+`execute()` accepts a caller-generated durable command id, operator id, workspace, content blocks, and cancellation signal. An explicitly authorized retry may name one already-abandoned indeterminate command; it must use a new command id. `list()`, `inspect()`, `inspectTurn()`, `readEvents()`, `interrupt()`, `reset()`, and `resolveIndeterminate()` are management operations for trusted plugins and CLI consumers.
 
-The lifecycle, health, reason, receipt, event, and artifact-reference types are provider-neutral. `reset` uses optimistic state revision and changes only the native-session association. It never deletes product history or artifacts.
+The lifecycle, health, reason, receipt, event, and artifact-reference types are provider-neutral. Session snapshots include the latest durable turn summary and latest structured event, while `inspectTurn()` recovers the current or settled receipt result after a client restart. `reset` uses optimistic state revision and changes only the native-session association. It never deletes product history or artifacts.
 
 ## Model Experience
 

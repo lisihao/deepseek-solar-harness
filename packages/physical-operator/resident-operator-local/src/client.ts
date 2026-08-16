@@ -15,6 +15,7 @@ import {
   type ResidentEventPage,
   type ResidentProviderStatus,
   type ResidentSessionSnapshot,
+  type ResidentTurnSnapshot,
   type ResidentTurnResult,
 } from '@deepseek-ai/dsh-resident-operator'
 import { unwrapWire } from './protocol.ts'
@@ -92,6 +93,15 @@ export class ResidentDaemonClient {
    */
   inspect(sessionId: string): Promise<ResidentSessionSnapshot> {
     return this.request('session.inspect', { session_id: sessionId })
+  }
+
+  /**
+   * Inspect one durable turn after the original caller disconnected.
+   * @param turnId - daemon turn identity from execution, Session projection, or events.
+   * @returns current receipt state and bounded terminal result when available.
+   */
+  inspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
+    return this.request('turn.inspect', { turn_id: turnId })
   }
 
   /**

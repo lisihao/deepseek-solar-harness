@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The model-facing Consumer for `ctx.physicalOperators`. It registers one fixed `physical_operator` tool with two actions: discover live operators and run one stable operator id. Provider transport never appears in the tool contract.
+The model-facing Consumer for `ctx.physicalOperators`. It registers one fixed `physical_operator` tool with two actions: discover live operators and run one stable operator id. A dynamic system-prompt section describes when to delegate, when to request Resident continuity, and the current live descriptors/tags/modes. Provider transport never appears in the tool contract.
 
 ## Tool contract
 
@@ -48,6 +48,6 @@ Append-only after the existing request prefix.
 ## Known Limitations and Deferred Work
 
 - **Foreground execution only** — the model receives no background handle, progress stream, management status, reset, or interrupt operation; trusted CLI and plugins own Resident management.
-- **No automatic operator selection** — the model must call `list` and choose a stable id; the tool has no ranking or policy engine.
+- **Model policy, not a hidden classifier** — the model selects from live descriptors/tags using the registered guidance and may call `list`; there is intentionally no second ranking service or opaque routing authority.
 - **No typed physics payloads** — the first release accepts text tasks and returns ordinary content blocks or Provider-owned artifact references.
 - **No generic output-size policy** — Resident local execution has a bounded artifact policy, while other Providers remain responsible for their complete result size.

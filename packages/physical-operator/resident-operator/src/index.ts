@@ -58,6 +58,13 @@ export type ResidentHealthReason =
 export type ResidentReceiptState = 'accepted' | 'running' | 'settled' | 'indeterminate'
 /** Provider-neutral terminal outcome for one Resident turn. */
 export type ResidentStopReason = 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
+/** Bounded product-neutral progress phase persisted without prompt or transcript text. */
+export type ResidentProgressPhase =
+  | 'connecting'
+  | 'session_ready'
+  | 'reasoning'
+  | 'tool_activity'
+  | 'finalizing'
 
 /** Current qualification result for one native product Driver. */
 export interface ResidentProviderStatus {
@@ -82,7 +89,30 @@ export interface ResidentSessionSnapshot {
   readonly stateRevision: number
   readonly nativeSessionId?: string
   readonly activeTurnId?: ResidentOperatorTurnId
+  /** Most recently updated durable receipt for reconnecting clients. */
+  readonly latestTurn?: ResidentTurnSummary
+  /** Most recent bounded daemon event, including product-neutral progress. */
+  readonly latestEvent?: ResidentEvent
   readonly updatedAt: string
+}
+
+/** Bounded reconnect projection of one durable command receipt. */
+export interface ResidentTurnSummary {
+  readonly commandId: ResidentOperatorCommandId
+  readonly turnId: ResidentOperatorTurnId
+  readonly state: ResidentReceiptState
+  readonly nativeTurnId?: string
+  readonly stopReason?: ResidentStopReason
+  readonly resultRef?: string
+  readonly updatedAt: string
+}
+
+/** Full trusted inspection result for a known Resident turn. */
+export interface ResidentTurnSnapshot extends ResidentTurnSummary {
+  readonly sessionId: ResidentOperatorSessionId
+  readonly stateRevision: number
+  readonly result?: ResidentTurnResult
+  readonly error?: { readonly code: string; readonly message: string }
 }
 
 /** Caller-owned input for one idempotent Resident turn. */
@@ -192,6 +222,13 @@ export abstract class ResidentOperatorService extends Service {
    * @returns the current lifecycle, health, revision, and native association.
    */
   abstract inspect(sessionId: string): Promise<ResidentSessionSnapshot>
+
+  /**
+   * Read the durable receipt and bounded result for one turn after caller reconnect.
+   * @param turnId - opaque turn identity from execution, a Session snapshot, or an event.
+   * @returns the current receipt state, result reference, and terminal result when available.
+   */
+  abstract inspectTurn(turnId: string): Promise<ResidentTurnSnapshot>
 
   /**
    * Read a bounded page of structured observation events.

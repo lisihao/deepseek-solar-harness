@@ -1030,6 +1030,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the current lifecycle, health, revision, and native association.',
       },
       {
+        signature: 'abstract inspectTurn(turnId: string): Promise<ResidentTurnSnapshot>',
+        description: 'Read the durable receipt and bounded result for one turn after caller reconnect.',
+        parameters: [{ name: 'turnId', description: 'opaque turn identity from execution, a Session snapshot, or an event.' }],
+        returns: 'the current receipt state, result reference, and terminal result when available.',
+      },
+      {
         signature: 'abstract readEvents(request: ResidentEventReadRequest): Promise<ResidentEventPage>',
         description: 'Read a bounded page of structured observation events.',
         parameters: [{ name: 'request', description: 'Session identity, exclusive cursor, bound, and optional signal.' }],
@@ -3834,12 +3840,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: \'claude-code\' | \'codex\';\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n}',
   },
   {
+    name: 'ResidentReceiptState',
+    declaration: 'export type ResidentReceiptState = \'accepted\' | \'running\' | \'settled\' | \'indeterminate\';',
+  },
+  {
     name: 'ResidentResetRequest',
     declaration: 'export interface ResidentResetRequest {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly expectedStateRevision: number;\n    readonly reason: string;\n}',
   },
   {
     name: 'ResidentSessionSnapshot',
-    declaration: 'export interface ResidentSessionSnapshot {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly lifecycle: ResidentLifecycle;\n    readonly health: ResidentHealth;\n    readonly healthReason?: ResidentHealthReason;\n    readonly control: \'automation\';\n    readonly stateRevision: number;\n    readonly nativeSessionId?: string;\n    readonly activeTurnId?: ResidentOperatorTurnId;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface ResidentSessionSnapshot {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly lifecycle: ResidentLifecycle;\n    readonly health: ResidentHealth;\n    readonly healthReason?: ResidentHealthReason;\n    readonly control: \'automation\';\n    readonly stateRevision: number;\n    readonly nativeSessionId?: string;\n    readonly activeTurnId?: ResidentOperatorTurnId;\n    readonly latestTurn?: ResidentTurnSummary;\n    readonly latestEvent?: ResidentEvent;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'ResidentStopReason',
@@ -3852,6 +3862,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ResidentTurnResult',
     declaration: 'export interface ResidentTurnResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: ResidentStopReason;\n    readonly resultRef?: string;\n}',
+  },
+  {
+    name: 'ResidentTurnSnapshot',
+    declaration: 'export interface ResidentTurnSnapshot extends ResidentTurnSummary {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly stateRevision: number;\n    readonly result?: ResidentTurnResult;\n    readonly error?: {\n        readonly code: string;\n        readonly message: string;\n    };\n}',
+  },
+  {
+    name: 'ResidentTurnSummary',
+    declaration: 'export interface ResidentTurnSummary {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly turnId: ResidentOperatorTurnId;\n    readonly state: ResidentReceiptState;\n    readonly nativeTurnId?: string;\n    readonly stopReason?: ResidentStopReason;\n    readonly resultRef?: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'ResolvedAlwaysRetryPolicy',

@@ -18,7 +18,7 @@ AI4Research 包含有价值的物理算子概念，但若把整个项目作为�
 2. `@deepseek-ai/dsh-resident-operator` 增加与 Provider 无关的 `ctx.residentOperators` 控制 seam。Session 由算子 ID 与规范化工作区共同确定，只允许一个 active turn，并为可信方提供管理操作；模型仍只能通过 physical-operator Consumer 执行。
 3. `@deepseek-ai/dsh-resident-operator-local` 运行独立、仅属主可访问的 Unix-socket daemon，作为 Session/Receipt/Lease/Event/Artifact 的唯一写者。Command identity 与 canonical request hash 分离：相同重放返回同一 Receipt，内容改变则冲突；崩溃变为 `indeterminate`；获授权的重试使用新 ID，并唯一关联已 abandon 的旧 Receipt。
 4. 原生产品连续性保持权威。Claude Code 使用官方 Agent SDK 的持久 Session 与 resume；Codex 使用固定 app-server schema 的非临时 thread start/resume。两者都在当前 CLI、版本、协议与原生订阅资格无法证明时默认拒绝，且只接收凭据清理后的环境，不提供 API fallback。
-5. `@deepseek-ai/dsh-physical-operator-resident` 在现有 ephemeral subagent 与 Resident seam 之间路由同一稳定 ID。`@deepseek-ai/dsh-tool-physical-operator` 仍是唯一模型 Consumer，`@deepseek-ai/dsh-resident-operators` 则提供 opt-in composition Bundle。
+5. `@deepseek-ai/dsh-physical-operator-resident` 在现有 ephemeral subagent 与 Resident seam 之间路由同一稳定 ID。`@deepseek-ai/dsh-tool-physical-operator` 仍是唯一模型 Consumer，并根据实时 descriptor/tag/mode 目录注册动态选择指引，而不是引入隐藏分类器；`@deepseek-ai/dsh-resident-operators` 则提供 opt-in composition Bundle。
 
 Provider、路由器与 Consumer 依赖 Service Definition，而不依赖彼此实现。DSH/HMR 释放只断开客户端，不终止 daemon；daemon 正常停止会排空已准入 turn。Tmux 只是可选的只读事件观察器，不是任务传输或权威。DSH Session、Jobs、Web UI 与 terminal pane 可投影有界状态，但不拥有原生产品 Session 或 Resident Receipt。
 
@@ -36,7 +36,7 @@ Provider、路由器与 Consumer 依赖 Service Definition，而不依赖彼此�
 
 ## 后果
 
-DSH 现在既保持原有一次性行为，又在不修改 Core 的前提下增加 opt-in 持久控制面。Daemon 负责 SQLite WAL 状态、仅属主可访问的本地 IPC、内容寻址大结果、恢复、有界结构化观察、严格产品资格与 prompt/凭据安全诊断。公共 execution ID 同时作为持久 command ID，因此传输重试不会产生第二次产品调用。
+DSH 现在既保持原有一次性行为，又在不修改 Core 的前提下增加 opt-in 持久控制面。Daemon 负责 SQLite WAL 状态、仅属主可访问的本地 IPC、内容寻址大结果、恢复、有界结构化观察、严格产品资格与 prompt/凭据安全诊断。Session 投影会暴露最新 turn 与事件，`inspectTurn()` 能在客户端重启后恢复活动或已结算 Receipt，产品 Driver 则发布不包含 transcript 的有界进度阶段。公共 execution ID 同时作为持久 command ID，因此传输重试不会产生第二次产品调用。
 
 新增状态也带来明确运维责任：产品和协议版本是固定资格输入；强制终止可能需要显式处置 indeterminate；状态只向前迁移；产品原生权限仍是权威，不继承 DSH 文件沙箱。人工写接管、排队与公平性、亲和调度、durable Jobs 投影、远程传输、类型化物理 schema、provenance 与 actor-host 迁移仍后置，且必须以独立 seam 或版本化契约接入。
 

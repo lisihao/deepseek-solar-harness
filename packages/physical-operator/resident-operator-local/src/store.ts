@@ -7,14 +7,18 @@ import { DatabaseSync } from 'node:sqlite'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
   ResidentOperatorError,
+  ResidentOperatorCommandId,
   ResidentOperatorSessionId,
   ResidentOperatorTurnId,
   RESIDENT_STATE_SCHEMA_VERSION,
   type ResidentEventPage,
+  type ResidentProgressPhase,
   type ResidentReceiptState,
   type ResidentSessionSnapshot,
   type ResidentStopReason,
   type ResidentTurnResult,
+  type ResidentTurnSnapshot,
+  type ResidentTurnSummary,
 } from '@deepseek-ai/dsh-resident-operator'
 
 const MAX_INLINE_RESULT_BYTES = 64 * 1024
@@ -45,6 +49,7 @@ interface ReceiptRow {
   error_code: string | null
   error_message: string | null
   resolution: string | null
+  updated_at: string
 }
 
 /** Durable receipt projection returned immediately after admission or replay. */
@@ -56,10 +61,7 @@ export interface AcceptedTurn {
 }
 
 /** Receipt projection enriched with settled result or coded failure. */
-export interface TurnInspection extends AcceptedTurn {
-  readonly result?: ResidentTurnResult
-  readonly error?: { readonly code: string; readonly message: string }
-}
+export type TurnInspection = ResidentTurnSnapshot
 
 /**
  * Hash the behaviorally relevant command request independently of its identity.
@@ -345,6 +347,23 @@ export class ResidentStore {
   }
 
   /**
+   * Append one bounded product-neutral progress event for reconnecting observers.
+   * @param commandId - admitted durable command identity.
+   * @param phase - stable progress phase with no prompt or transcript content.
+   */
+  progress(commandId: string, phase: ResidentProgressPhase): void {
+    const receipt = this.requireReceipt(commandId)
+    if (receipt.state !== 'accepted' && receipt.state !== 'running') return
+    const now = new Date().toISOString()
+    this.db.prepare('UPDATE session_leases SET heartbeat_at = ? WHERE session_id = ?').run(now, receipt.session_id)
+    this.appendEvent(receipt.session_id, 'turn.progress', {
+      commandId,
+      turnId: receipt.turn_id,
+      phase,
+    }, now)
+  }
+
+  /**
    * Atomically settle one receipt and release its Session lease.
    * @param commandId - admitted durable command identity.
    * @param result - bounded product outcome, spilled when necessary.
@@ -422,20 +441,33 @@ export class ResidentStore {
    * @param turnId - daemon-generated turn identity.
    * @returns current receipt projection.
    */
-  inspectTurn(turnId: string): TurnInspection {
+  inspectTurn(turnId: string): ResidentTurnSnapshot {
     const receipt = this.db.prepare('SELECT * FROM command_receipts WHERE turn_id = ?')
       .get(turnId) as unknown as ReceiptRow | undefined
     if (receipt === undefined) {
       throw new ResidentOperatorError(`unknown resident turn ${turnId}`, 'SESSION_UNAVAILABLE')
     }
-    const accepted = this.acceptedFrom(receipt)
+    const session = this.sessionRow(receipt.session_id)
     const result = receipt.result_json === null
       ? undefined
       : JSON.parse(receipt.result_json) as ResidentTurnResult
     const error = receipt.error_code === null
       ? undefined
       : { code: receipt.error_code, message: receipt.error_message ?? receipt.error_code }
-    return { ...accepted, ...result === undefined ? {} : { result }, ...error === undefined ? {} : { error } }
+    const parsedStopReason = result?.stopReason
+    return {
+      commandId: ResidentOperatorCommandId(receipt.command_id),
+      turnId: ResidentOperatorTurnId(receipt.turn_id),
+      sessionId: ResidentOperatorSessionId(receipt.session_id),
+      stateRevision: session.revision,
+      state: receipt.state,
+      ...receipt.native_turn_id === null ? {} : { nativeTurnId: receipt.native_turn_id },
+      ...parsedStopReason === undefined ? {} : { stopReason: parsedStopReason },
+      ...receipt.result_ref === null ? {} : { resultRef: receipt.result_ref },
+      updatedAt: receipt.updated_at,
+      ...result === undefined ? {} : { result },
+      ...error === undefined ? {} : { error },
+    }
   }
 
   /**
@@ -618,6 +650,8 @@ export class ResidentStore {
   }
 
   private snapshot(row: SessionRow): ResidentSessionSnapshot {
+    const latestTurn = this.latestTurn(row.id)
+    const latestEvent = this.latestEvent(row.id)
     return {
       sessionId: ResidentOperatorSessionId(row.id),
       operatorId: row.operator_id,
@@ -629,7 +663,50 @@ export class ResidentStore {
       stateRevision: row.revision,
       ...row.native_session_id === null ? {} : { nativeSessionId: row.native_session_id },
       ...row.active_turn_id === null ? {} : { activeTurnId: ResidentOperatorTurnId(row.active_turn_id) },
+      ...latestTurn === undefined ? {} : { latestTurn },
+      ...latestEvent === undefined ? {} : { latestEvent },
       updatedAt: row.updated_at,
+    }
+  }
+
+  private latestTurn(sessionId: string): ResidentTurnSummary | undefined {
+    const receipt = this.db.prepare(`
+      SELECT * FROM command_receipts
+      WHERE session_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1
+    `).get(sessionId) as unknown as ReceiptRow | undefined
+    if (receipt === undefined) return undefined
+    const result = receipt.result_json === null
+      ? undefined
+      : JSON.parse(receipt.result_json) as ResidentTurnResult
+    return {
+      commandId: ResidentOperatorCommandId(receipt.command_id),
+      turnId: ResidentOperatorTurnId(receipt.turn_id),
+      state: receipt.state,
+      ...receipt.native_turn_id === null ? {} : { nativeTurnId: receipt.native_turn_id },
+      ...result?.stopReason === undefined ? {} : { stopReason: result.stopReason },
+      ...receipt.result_ref === null ? {} : { resultRef: receipt.result_ref },
+      updatedAt: receipt.updated_at,
+    }
+  }
+
+  private latestEvent(sessionId: string) {
+    const row = this.db.prepare(`
+      SELECT sequence, session_id, type, time, data_json FROM resident_events
+      WHERE session_id = ? ORDER BY sequence DESC LIMIT 1
+    `).get(sessionId) as {
+      sequence: number
+      session_id: string
+      type: string
+      time: string
+      data_json: string
+    } | undefined
+    if (row === undefined) return undefined
+    return {
+      sequence: row.sequence,
+      sessionId: ResidentOperatorSessionId(row.session_id),
+      type: row.type,
+      time: row.time,
+      data: JSON.parse(row.data_json) as Record<string, unknown>,
     }
   }
 

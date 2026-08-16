@@ -17,7 +17,7 @@ import type {
 } from '@deepseek-ai/dsh-physical-operator'
 
 export const name = 'tool-physical-operator'
-export const inject = ['tools', 'physicalOperators']
+export const inject = ['tools', 'physicalOperators', 'systemPrompt']
 
 type ToolRequest = {
   readonly action: string
@@ -51,6 +51,11 @@ type ToolValue =
 
 /** Register the fixed discovery-and-execution tool. */
 export function apply(ctx: Context): void {
+  ctx.systemPrompt.section({
+    name: 'tool:physical-operator',
+    order: 116,
+    text: () => selectionGuidance(ctx.physicalOperators.list()),
+  })
   ctx.tools.register(defineTool({
     name: 'physical_operator',
     description:
@@ -191,6 +196,20 @@ export function apply(ctx: Context): void {
       }
     },
   }))
+}
+
+/** Render task-selection guidance from the same live descriptors the tool lists. */
+function selectionGuidance(operators: readonly PhysicalOperatorStatus[]): string {
+  const available = operators
+    .filter(operator => operator.state !== 'unavailable')
+    .map(operator => `${operator.id}: ${operator.description} [${operator.tags.join(', ') || 'no tags'}]; modes=${operator.executionModes.join(',')}`)
+  if (available.length === 0) return ''
+  return [
+    'Physical operators are separate native Claude Code or Codex workers. Use physical_operator when the user names one, when an independent implementation or review materially helps, or when a long task benefits from product-native context continuity.',
+    'Choose resident mode for multi-turn work, work that must remain inspectable across a DSH restart, or work that should continue in the same native product session. Keep ephemeral mode for one isolated call.',
+    'Call action=list when the user did not select an operator. Match the task to the live description and tags below, then send one complete standalone prompt. Do not delegate trivial work that the current agent can finish directly.',
+    ...available.map(operator => `- ${operator}`),
+  ].join('\n')
 }
 
 /** Reject run-only keys on list so accidental work requests are never ignored. */
