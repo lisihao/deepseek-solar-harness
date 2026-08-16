@@ -1,7 +1,7 @@
 {
   "name": "@ycp424c/dsh-luna-vision-bridge",
   "description": "DSH LLM adapter that transcribes native image attachments with Codex Luna before delegating to DeepSeek",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

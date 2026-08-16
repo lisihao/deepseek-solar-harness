@@ -26,9 +26,10 @@ export interface TargetPatch {
  * carries no `targets`. The editor prefills one row with it so the effective
  * default stays visible instead of vanishing from the form.
  */
-export const DEFAULT_TARGET: Pick<TargetDraft, 'provider' | 'model'> = {
+export const DEFAULT_TARGET: Pick<TargetDraft, 'provider' | 'model' | 'bridgeModel'> = {
   provider: 'deepseek-official',
   model: 'deepseek-v4-flash',
+  bridgeModel: 'deepseek-v4-flash',
 }
 
 /** Editable section draft (user-layer view). */

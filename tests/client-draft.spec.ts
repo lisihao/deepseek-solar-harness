@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   blankTarget, draftBlockers, draftFromValue, draftToPatch,
 } from '../src/client/draft.js'
+import { resolveConfig } from '../src/config.js'
 
 describe('draftFromValue', () => {
   it('extracts providerName and targets from a resolved settings value', () => {
@@ -24,11 +25,11 @@ describe('draftFromValue', () => {
   it('prefills the visible legacy target when the section carries none', () => {
     expect(draftFromValue(undefined)).toEqual({
       providerName: '',
-      targets: [{ provider: 'deepseek-official', model: 'deepseek-v4-flash', name: '', bridgeModel: '' }],
+      targets: [{ provider: 'deepseek-official', model: 'deepseek-v4-flash', name: '', bridgeModel: 'deepseek-v4-flash' }],
     })
     expect(draftFromValue({})).toEqual({
       providerName: '',
-      targets: [{ provider: 'deepseek-official', model: 'deepseek-v4-flash', name: '', bridgeModel: '' }],
+      targets: [{ provider: 'deepseek-official', model: 'deepseek-v4-flash', name: '', bridgeModel: 'deepseek-v4-flash' }],
     })
   })
 
@@ -97,6 +98,14 @@ describe('draftBlockers', () => {
 })
 
 describe('draftToPatch', () => {
+  it('preserves the zero-config bridge model identity after saving the visible default', () => {
+    const zeroConfig = resolveConfig({})
+    const draft = draftFromValue({ providerName: zeroConfig.providerName })
+    const savedConfig = resolveConfig(draftToPatch(draft))
+
+    expect(savedConfig.targets[0]?.bridgeModel).toBe(zeroConfig.targets[0]?.bridgeModel)
+  })
+
   it('trims values and omits blank optional fields', () => {
     expect(draftToPatch({
       providerName: '  My Bridge  ',

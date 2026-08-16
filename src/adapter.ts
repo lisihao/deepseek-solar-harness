@@ -9,7 +9,7 @@ import type {
   GenerateOptions,
   LlmModelInfo,
   LlmResolvedModelInfo,
-  LlmService,
+  LlmRuntime,
   Message,
   ResolvedRetryPolicy,
   StreamChunk,
@@ -22,7 +22,7 @@ import type { VisionCommand } from './vision.js'
 
 /** Adapter dependencies, with the Luna process replaceable for tests. */
 export interface LunaVisionBridgeDeps {
-  llm: LlmService
+  llm: LlmRuntime
   attachments: AttachmentStore
   config: ResolvedConfigSource
   runVisionCommand?: VisionCommand
@@ -80,7 +80,18 @@ export function visionBoundary(
 }
 
 function targetByBridgeModel(config: ResolvedConfig, model: string): ResolvedTarget | undefined {
-  return config.targets.find(target => target.bridgeModel === model)
+  const direct = config.targets.find(target => target.bridgeModel === model)
+  if (direct !== undefined) return direct
+
+  // Version 0.1.0's settings editor persisted a missing bridgeModel as the
+  // generated `<provider>-<model>` id, while zero-config used the downstream
+  // model id directly. Accept that stale generated id only when it resolves to
+  // one unambiguous target whose canonical id is the downstream model id.
+  const legacyGenerated = config.targets.filter(target => (
+    target.bridgeModel === target.model
+    && `${target.provider}-${target.model}` === model
+  ))
+  return legacyGenerated.length === 1 ? legacyGenerated[0] : undefined
 }
 
 function bridgeModelInfo(config: ResolvedConfig, target: ResolvedTarget, downstream: LlmResolvedModelInfo): LlmResolvedModelInfo {

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
-import type { GenerateOptions, LlmService, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmRuntime, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { describe, expect, it, vi } from 'vitest'
 import { LunaVisionBridgeAdapter, visionBoundary } from '../src/adapter.js'
 import { resolveConfig } from '../src/config.js'
@@ -35,7 +35,7 @@ const RETRY_POLICY = {
   jitter: 0,
 } as const
 
-function scriptedLlm(onStream?: (options: GenerateOptions) => void): LlmService {
+function scriptedLlm(onStream?: (options: GenerateOptions) => void): LlmRuntime {
   return {
     providerRetryPolicy: vi.fn().mockReturnValue({ ...RETRY_POLICY }),
     resolveModelInfo: vi.fn().mockImplementation(async (provider: string, model: string) => ({
@@ -51,7 +51,7 @@ function scriptedLlm(onStream?: (options: GenerateOptions) => void): LlmService 
         yield { type: 'finish', reason: { kind: 'stop' } } satisfies StreamChunk
       })()
     },
-  } as unknown as LlmService
+  } as unknown as LlmRuntime
 }
 
 function configSource(config: Parameters<typeof resolveConfig>[0] = {}): () => ResolvedConfig {
@@ -146,6 +146,24 @@ describe('LunaVisionBridgeAdapter', () => {
       inputModalities: ['text', 'image'],
     })
     expect(llm.resolveModelInfo).toHaveBeenCalledWith('pi-ai', 'pi-coder', undefined)
+  })
+
+  it('accepts the legacy generated id for the zero-config target', async () => {
+    const llm = scriptedLlm()
+    const adapter = new LunaVisionBridgeAdapter({
+      llm,
+      attachments: attachments(),
+      config: configSource(),
+    })
+
+    await expect(adapter.resolveModel(
+      'luna-vision-bridge',
+      'deepseek-official-deepseek-v4-flash',
+    )).resolves.toMatchObject({
+      provider: 'luna-vision-bridge',
+      id: 'deepseek-v4-flash',
+    })
+    expect(llm.resolveModelInfo).toHaveBeenCalledWith('deepseek-official', 'deepseek-v4-flash', undefined)
   })
 
   it('rejects an unknown bridge model', async () => {
