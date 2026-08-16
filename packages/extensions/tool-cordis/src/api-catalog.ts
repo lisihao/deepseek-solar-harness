@@ -1180,9 +1180,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'The persisted projection cache service. Opens the `session_projcache` domain at init, checkpoints live sessions on a throttled write-behind (count/interval triggers from Config) plus two mandatory points — `turn/end` and session disposal (the live-to-cold moment) — and serves the cold-read ladder: cached row, persistence `readFrom` tail, registry `restore`, durable write-back. Every durable write is fail-soft: failures log a warning and the cache self-heals on the next write or cold read.',
     methods: [
       {
-        signature: 'cachedSnapshot(meta: SessionHeader): ProjectionSnapshot | undefined',
+        signature: 'cachedSnapshot(meta: SessionHeader, expectedRevision?: SessionPersistenceRevision): ProjectionSnapshot | undefined',
         description: 'The zero-I/O listing read: whole values viewed straight from the stored rows (version-matching keys only), each cut carried with its watermark so a client value store can seed under its higher-seq-wins rule — as stale as the last durable checkpoint but never wrong, and never from an unrelated log (the caller\'s header is the identity witness). Fresher paths (the history tail baseline, coldSnapshot) supersede these values whenever a session is actually opened.',
-        parameters: [{ name: 'meta', description: 'the listed session\'s header (identity witness; no log read).' }],
+        parameters: [{ name: 'meta', description: 'the listed session\'s header (identity witness; no log read).' }, { name: 'expectedRevision', description: 'when supplied, require a cold-read checkpoint bound to this exact persistence revision; live checkpoints without a revision deliberately miss so the caller repairs them once.' }],
         returns: 'the cut (`asOfSeq` = lowest served-row watermark), or `undefined` when no usable row exists for this lifecycle.',
       },
       {
@@ -1192,9 +1192,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'resolution after durability and event emission.',
       },
       {
-        signature: 'async coldSnapshot(id: SessionId, signal?: AbortSignal): Promise<ProjectionSnapshot>',
+        signature: 'async coldSnapshot( id: SessionId, signal?: AbortSignal, sourceRevision?: SessionPersistenceRevision, ): Promise<ProjectionSnapshot>',
         description: 'Cold-read one persisted session\'s projections with zero full-log load: cached rows + a persistence `readFrom` tail from the registry\'s restore floor, refolded by the registry and written back (fail-soft) so the next cold read starts closer. A cache row invalidated by a shrunk log (crash-repair truncation) triggers one full re-read from seq 0 — the ladder\'s slow rung, still no crash. Rejects when the session has no persisted log (`not found` from the persistence seam).',
-        parameters: [{ name: 'id', description: 'the persisted session to read.' }, { name: 'signal', description: 'optional cancellation for the persistence reads.' }],
+        parameters: [{ name: 'id', description: 'the persisted session to read.' }, { name: 'signal', description: 'optional cancellation for the persistence reads.' }, { name: 'sourceRevision', description: 'persistence revision observed by the caller; it is stored with the refreshed checkpoint for future zero-I/O validation.' }],
         returns: 'the snapshot cut at the stored log end.',
       },
     ],

@@ -17,7 +17,7 @@ import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
 import type { JsonValue, Session, SessionEvent, SessionEventMap, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
-import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionPersistence, SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
 import { SubagentError } from '@deepseek-ai/dsh-subagent'
 import type { SubagentListEntry as CatalogSubagentListEntry } from '@deepseek-ai/dsh-subagent'
@@ -865,6 +865,31 @@ function listProjectionsFor(ctx: Context, meta: SessionHeader, session: Session 
   } catch (error) {
     ctx.logger.warn(`session.list: projection column for "${meta.id}" failed (serving the row without it): ${String(error)}`)
     return undefined
+  }
+}
+
+/**
+ * Resolve a revision-exact cold projection block. A matching cache row is
+ * zero-I/O; a missing or stale row folds the stored tail once and records the
+ * observed log revision so unchanged future listings stay zero-I/O.
+ */
+async function coldListProjectionsFor(
+  ctx: Context,
+  meta: SessionHeader,
+  revision: SessionPersistenceRevision | undefined,
+  signal?: AbortSignal,
+): Promise<SessionProjectionsBlock | undefined> {
+  const cache = ctx.get('sessionProjectionCache')
+  if (cache === undefined || revision === undefined) return listProjectionsFor(ctx, meta, undefined)
+  try {
+    const cached = cache.cachedSnapshot(meta, revision)
+    const block = cached?.values.sessionListMetadata !== undefined
+      ? cached
+      : await cache.coldSnapshot(meta.id, signal, revision)
+    return Object.keys(block.values).length > 0 ? block : undefined
+  } catch (error) {
+    ctx.logger.warn(`session.list: exact projection refresh for "${meta.id}" failed (serving a stale or absent column): ${String(error)}`)
+    return listProjectionsFor(ctx, meta, undefined)
   }
 }
 
@@ -1739,17 +1764,23 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     const attached = new Set(items.map(item => item.sessionId))
     const persistence = ctx.get('sessionPersistence')
     if (persistence !== undefined) {
-      const cold = (await persistence.list(signal))
-        .filter(meta => !attached.has(meta.id) && meta.cwd !== undefined)
+      // Production persistence exposes source-qualified revisions. The
+      // compatibility fallback keeps narrow test/third-party doubles working,
+      // but cannot certify a cached projection as current.
+      const snapshots = typeof persistence.listSnapshots === 'function'
+        ? await persistence.listSnapshots(signal)
+        : (await persistence.list(signal)).map(header => ({ header, revision: undefined }))
+      const cold = snapshots
+        .filter(snapshot => !attached.has(snapshot.header.id) && snapshot.header.cwd !== undefined)
       signal?.throwIfAborted()
       for (let offset = 0; offset < cold.length; offset += COLD_SUMMARY_BATCH_SIZE) {
         signal?.throwIfAborted()
         const batch = cold.slice(offset, offset + COLD_SUMMARY_BATCH_SIZE)
         const settled = await Promise.allSettled(
-          batch.map(async (meta) => {
-            // Projection hints remain optional. Blank verification may read
-            // this Session's artifact only when it passes the configured size check.
-            const projections = listProjectionsFor(ctx, meta, undefined)
+          batch.map(async ({ header: meta, revision }) => {
+            // Revision-matched projections are exact. A stale or missing row
+            // is repaired from the persistence tail and cached for subsequent listings.
+            const projections = await coldListProjectionsFor(ctx, meta, revision, signal)
             const summary = await summarizeCold(
               ctx,
               persistence,
