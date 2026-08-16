@@ -3,7 +3,17 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from 'schemastery'
 
-const DEFAULT_LUNA_COMMAND = fileURLToPath(new URL('../scripts/read-image-luna.sh', import.meta.url))
+/**
+ * Resolve the bundled launcher from either a regular Node module or an Electron
+ * ASAR module. Electron exposes package resources through `app.asar`, but native
+ * process spawning must target the corresponding `app.asar.unpacked` path.
+ */
+export function resolveBundledLunaCommand(moduleUrl: string = import.meta.url): string {
+  const scriptPath = fileURLToPath(new URL('../scripts/read-image-luna.sh', moduleUrl))
+  return scriptPath.replace(/([/\\][^/\\]+\.asar)(?=[/\\])/u, '$1.unpacked')
+}
+
+const DEFAULT_LUNA_COMMAND = resolveBundledLunaCommand()
 
 /** One downstream target: a pure-text model that receives the Luna transcription. */
 export interface TargetConfig {

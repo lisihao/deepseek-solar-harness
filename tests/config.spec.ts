@@ -1,12 +1,20 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
-import { resolveConfig } from '../src/config.js'
+import { resolveBundledLunaCommand, resolveConfig } from '../src/config.js'
 import type { Config } from '../src/config.js'
 import { LunaVisionBridgeAdapter } from '../src/adapter.js'
 import { apply, NS } from '../src/index.js'
 
 describe('resolveConfig', () => {
+  it('maps an Electron ASAR module URL to the unpacked launcher', () => {
+    const moduleUrl = 'file:///Applications/DSH%20Desktop.app/Contents/Resources/app.asar/node_modules/@ycp424c/dsh-luna-vision-bridge/lib/config.js'
+
+    expect(resolveBundledLunaCommand(moduleUrl)).toBe(
+      '/Applications/DSH Desktop.app/Contents/Resources/app.asar.unpacked/node_modules/@ycp424c/dsh-luna-vision-bridge/scripts/read-image-luna.sh',
+    )
+  })
+
   it('resolves the zero-config bridge with a legacy DeepSeek target', () => {
     const resolved = resolveConfig({})
     expect(resolved).toMatchObject({
