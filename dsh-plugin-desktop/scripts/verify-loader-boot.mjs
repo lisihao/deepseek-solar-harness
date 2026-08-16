@@ -75,6 +75,10 @@ try {
   releasePackageResolver = installProfilePackageResolver(prepared.bareModuleBaseUrl)
   const profileRequire = createRequire(prepared.bareModuleBaseUrl)
   const desktopManifest = fileURLToPath(new URL('../package.json', import.meta.url))
+  const desktopPackage = JSON.parse(readFileSync(desktopManifest, 'utf8'))
+  if (typeof desktopPackage.version !== 'string') {
+    throw new Error('desktop package manifest has no string version')
+  }
   if (profileRequire.resolve('dsh-plugin-desktop/package.json') !== desktopManifest) {
     throw new Error('desktop package manifest did not resolve from the installed launcher')
   }
@@ -85,6 +89,17 @@ try {
 
   const runtime = {
     platform: 'darwin',
+    updates: {
+      isPackaged: false,
+      canDownload: true,
+      currentVersion: desktopPackage.version,
+      statePath: join(home, 'update-state.json'),
+      request: async () => { throw new Error('loader smoke must not perform update requests') },
+      confirmDownload: async () => false,
+      showManualCheckResult: async () => {},
+      downloadAndOpen: async () => {},
+      notify: () => {},
+    },
     schedule(spec) {
       mountedSpec = spec
       return async () => { await mounted }
@@ -142,7 +157,8 @@ try {
   if (mountedSpec?.mode !== 'compatibility') {
     throw new Error(`desktop plugin produced an unexpected shell mode: ${String(mountedSpec?.mode)}`)
   }
-  if (mountedSpec?.url !== 'http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin') {
+  const expectedUrl = `http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin&dsh-desktop-version=${desktopPackage.version}`
+  if (mountedSpec?.url !== expectedUrl) {
     throw new Error(`desktop plugin produced an unexpected renderer URL: ${String(mountedSpec?.url)}`)
   }
 } finally {

@@ -53,7 +53,7 @@ const SOLAR_BRAND_STYLES = `
 .dshDesktopSolarBrandTagline { color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 15px; }
 .dshDesktopSolarBrand:not([data-wide]) { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 2px 0; padding: 0; border-radius: 50%; }
 .dshDesktopSolarBrand:not([data-wide])::before { display: none; }
-.dshDesktopSolarBrandRail { color: #f5a623; font-size: 14px; font-weight: 700; }
+.dshDesktopSolarBrandRail { color: #f5a623; font-size: 8px; font-weight: 700; letter-spacing: -0.2px; white-space: nowrap; }
 `
 
 /** Install and remove the advanced shell's global native-window styles. @returns the style disposer. */

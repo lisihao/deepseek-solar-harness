@@ -6,7 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
-import { SOLAR_BRAND, SolarBrand } from './SolarBrand.tsx'
+import { SolarBrand, solarBrandLabel } from './SolarBrand.tsx'
 import { installSolarBrandStyles } from './styles.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
@@ -28,7 +28,7 @@ export function apply(ctx: ClientContext): void {
     name: 'sidebar.footer.action',
     id: 'solar-desktop-brand',
     order: -1000,
-    label: SOLAR_BRAND,
-  }, SolarBrand))
+    label: solarBrandLabel(environment.productVersion),
+  }, props => SolarBrand({ ...props, productVersion: environment.productVersion })))
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)
 }

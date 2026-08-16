@@ -53,6 +53,8 @@ try {
     ...prepared.patches,
   ]
   const packageRoot = new URL('../', import.meta.url)
+  const desktopVersion = JSON.parse(readFileSync(new URL('package.json', packageRoot), 'utf8')).version
+  if (typeof desktopVersion !== 'string') throw new Error('desktop package manifest has no string version')
   const pnpmBinPath = fileURLToPath(new URL('node_modules/pnpm/bin/pnpm.mjs', packageRoot))
   const electronVersion = JSON.parse(
     readFileSync(new URL('node_modules/electron/package.json', packageRoot), 'utf8'),
@@ -71,7 +73,7 @@ try {
     updates: {
       isPackaged: false,
       canDownload: true,
-      currentVersion: '2.0.0',
+      currentVersion: desktopVersion,
       statePath: join(home, 'update-state.json'),
       request: async () => { throw new Error('profile smoke must not perform update requests') },
       confirmDownload: async () => false,
@@ -174,7 +176,7 @@ try {
     throw new Error(`assembled Windows browse picker listed ${listing.path} instead of ${home}`)
   }
 
-  const expectedUrl = `http://127.0.0.1:${String(ctx.webServer.port)}/?dsh-desktop-mode=advanced&dsh-desktop-platform=win32`
+  const expectedUrl = `http://127.0.0.1:${String(ctx.webServer.port)}/?dsh-desktop-mode=advanced&dsh-desktop-platform=win32&dsh-desktop-version=${desktopVersion}`
   if (mountedSpec?.url !== expectedUrl) {
     throw new Error(`desktop plugin produced an unexpected renderer URL: ${String(mountedSpec?.url)}`)
   }

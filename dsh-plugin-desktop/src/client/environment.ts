@@ -10,10 +10,13 @@ export interface DesktopClientEnvironment {
   mode: DesktopClientMode
   /** Electron Host platform used for native spacing and drag regions. */
   platform: DesktopClientPlatform
+  /** Canonical stable product version read from the packaged Desktop manifest. */
+  productVersion: string
 }
 
 const MODES = new Set<DesktopClientMode>(['compatibility', 'advanced'])
 const PLATFORMS = new Set<DesktopClientPlatform>(['darwin', 'win32', 'linux'])
+const STABLE_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u
 
 /**
  * Validate the Electron-owned query marker before any desktop client effects run.
@@ -24,11 +27,15 @@ export function parseDesktopClientEnvironment(search: string): DesktopClientEnvi
   const params = new URLSearchParams(search)
   const mode = params.get('dsh-desktop-mode')
   const platform = params.get('dsh-desktop-platform')
+  const productVersion = params.get('dsh-desktop-version')
   if (!MODES.has(mode as DesktopClientMode)) {
     throw new Error(`dsh-plugin-desktop: invalid or missing dsh-desktop-mode ${JSON.stringify(mode)}`)
   }
   if (!PLATFORMS.has(platform as DesktopClientPlatform)) {
     throw new Error(`dsh-plugin-desktop: invalid or missing dsh-desktop-platform ${JSON.stringify(platform)}`)
   }
-  return { mode: mode as DesktopClientMode, platform: platform as DesktopClientPlatform }
+  if (productVersion === null || !STABLE_VERSION.test(productVersion)) {
+    throw new Error(`dsh-plugin-desktop: invalid or missing dsh-desktop-version ${JSON.stringify(productVersion)}`)
+  }
+  return { mode: mode as DesktopClientMode, platform: platform as DesktopClientPlatform, productVersion }
 }

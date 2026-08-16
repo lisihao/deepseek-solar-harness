@@ -122,12 +122,13 @@ describe('desktop Host plugin', () => {
   })
 
   it('builds the loopback root with validated renderer mode and platform markers', () => {
-    const url = new URL(desktopRendererUrl(43120, 'advanced', 'darwin'))
+    const url = new URL(desktopRendererUrl(43120, 'advanced', 'darwin', '2.0.1'))
     expect(url.origin).toBe('http://127.0.0.1:43120')
     expect(url.pathname).toBe('/')
     expect(Object.fromEntries(url.searchParams)).toEqual({
       'dsh-desktop-mode': 'advanced',
       'dsh-desktop-platform': 'darwin',
+      'dsh-desktop-version': '2.0.1',
     })
   })
 
@@ -146,7 +147,7 @@ describe('desktop Host plugin', () => {
     expect(loaderAwait).not.toHaveBeenCalled()
     expect(harness.shell()).toEqual(expect.objectContaining({
       mode: 'compatibility',
-      url: 'http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin',
+      url: 'http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.0',
       productName: 'DSH Desktop',
       windowTitle: 'DSH - DeepSeek Harness的Solar分支，目标是您的All-in-One AI工作台',
       iconPath: expect.stringMatching(/\/build\/app-icon-mac\.png$/u),

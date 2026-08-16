@@ -361,7 +361,7 @@ describe('Electron compatibility runtime', () => {
 
   it('rebuilds ordered effect-scoped tray contributions without replacing native commands', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
-    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const { desktopProductVersion, ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
     const later = runtime.registerTrayItem({
       group: 'tools',
@@ -392,6 +392,7 @@ describe('Electron compatibility runtime', () => {
       'Open DSH Desktop', undefined,
       'Earlier Tool', 'Later Tool', undefined,
       'Check for Updates…', undefined,
+      `Version ${desktopProductVersion()}`,
       'Switch to Advanced Mode', undefined,
       'Quit',
     ])
@@ -474,7 +475,7 @@ describe('Electron compatibility runtime', () => {
         pnpmBinPath: expect.stringMatching(/\/node_modules\/pnpm\/bin\/pnpm\.mjs$/u),
         electronVersion: '43.4.0',
         profileName: 'desktop',
-        productVersion: '2.0.0',
+        productVersion: '2.0.1',
         profileDir: '/tmp/dsh-home/profiles/desktop',
         homeDir: '/tmp/dsh-home',
         stateDir: expect.stringMatching(/^\/tmp\/dsh-desktop-user-data\/cli\/[a-f0-9]{64}$/u),
@@ -541,7 +542,7 @@ describe('Electron compatibility runtime', () => {
     expect(runtime.updates).toMatchObject({
       isPackaged: false,
       canDownload: false,
-      currentVersion: '2.0.0',
+      currentVersion: '2.0.1',
       statePath: '/tmp/dsh-desktop-user-data/updates/state.json',
     })
     electron.app.isPackaged = true

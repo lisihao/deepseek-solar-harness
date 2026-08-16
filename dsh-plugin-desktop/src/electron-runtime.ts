@@ -423,6 +423,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (status.length > 0) template.push({ type: 'separator' }, ...status)
     template.push(
       { type: 'separator' },
+      { label: `Version ${PRODUCT_VERSION}`, enabled: false },
       {
         label: modeToggleLabel(spec.mode),
         enabled: this.platform !== 'linux',
