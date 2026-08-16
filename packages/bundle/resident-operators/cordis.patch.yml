@@ -33,15 +33,15 @@
             ephemeralProvider: codex
             residentProvider: codex
             displayName: Codex
-            description: Runs Codex through the user's native ChatGPT subscription.
-            tags: [coding, reasoning, subscription]
+            description: Implements, debugs, tests, and reviews repository changes through the user's native ChatGPT subscription.
+            tags: [coding, implementation, debugging, testing, review, subscription]
             maxConcurrency: 1
           - id: claude-code
             ephemeralProvider: claude-code
             residentProvider: claude-code
             displayName: Claude Code
-            description: Runs Claude Code through the user's native Claude subscription.
-            tags: [coding, reasoning, subscription]
+            description: Analyzes codebases, architecture, and long-context reviews through the user's native Claude subscription.
+            tags: [analysis, architecture, review, long-context, coding, subscription]
             maxConcurrency: 1
 
     - id: tool-physical-operator

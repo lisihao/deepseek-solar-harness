@@ -512,6 +512,22 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 
 Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/interaction/permission-presets/src/index.ts)
 
+### `physical-operator/*`
+
+<a id="physical-operatorpolicy--log-only"></a>
+
+#### `physical-operator/policy` — log-only
+
+```ts persistence-catalog
+/**
+ * Whole-value physical-operator routing preference for subsequent model requests.
+ * @param policy The selected automatic, direct, Codex, or Claude Code policy.
+ */
+'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:35`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
 ### `plan/*`
 
 <a id="planmode--log-only"></a>

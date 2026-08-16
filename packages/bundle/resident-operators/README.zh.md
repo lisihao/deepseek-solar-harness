@@ -14,7 +14,7 @@ Patch 挂载 physical-operator Service Definition、Resident Service Definition�
 
 ## Model Experience
 
-Indirectly, through one `physical_operator` tool whose run action defaults to ephemeral and explicitly accepts resident continuation.
+模型通过一个 `physical_operator` 工具间接调用。新 Session 缺省使用“智能自动”路由，因此主 Agent 无需等待用户点名产品，就能选择合适的算子并显式请求 resident 连续性。底层 run 请求在省略 `mode` 时仍缺省为 ephemeral，以保持第三方兼容性。
 
 #### KV Cache effect
 

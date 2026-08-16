@@ -7,7 +7,10 @@ import { ResidentDaemon } from './daemon.ts'
 
 const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 
-/** Remove Electron's bootstrap marker before product Drivers create children. */
+/**
+ * Remove Electron's bootstrap marker before product Drivers create children.
+ * @param environment - child environment that must not retain Electron RunAsNode state.
+ */
 export function clearElectronRunAsNode(environment: NodeJS.ProcessEnv): void {
   for (const key of Object.keys(environment)) {
     if (key.toUpperCase() === ELECTRON_RUN_AS_NODE) Reflect.deleteProperty(environment, key)

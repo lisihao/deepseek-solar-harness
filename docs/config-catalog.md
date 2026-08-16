@@ -1578,7 +1578,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/physical-operator/resident-operator-local/src/index.ts:35`](../packages/physical-operator/resident-operator-local/src/index.ts)
+Source: [`packages/physical-operator/resident-operator-local/src/index.ts:36`](../packages/physical-operator/resident-operator-local/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -3208,7 +3208,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
-- `@deepseek-ai/dsh-tool-physical-operator` — requires `tools` · `physicalOperators` ([`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts))
+- `@deepseek-ai/dsh-tool-physical-operator` — requires `tools` · `physicalOperators` · `systemPrompt` ([`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-workspace` — requires `storageDomain` · `sessionPersistence` ([`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts))
