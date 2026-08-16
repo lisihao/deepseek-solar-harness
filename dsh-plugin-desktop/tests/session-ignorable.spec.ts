@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { KNOWN_SESSION_EVENT_TYPES } from '../node_modules/@deepseek-ai/dsh-session/lib/types/known-event-types.js'
+import { KNOWN_SESSION_EVENT_TYPES, Session, SessionId } from '@deepseek-ai/dsh-session'
 
 describe('Desktop session compatibility patch', () => {
   it('preserves an ignorable marker supplied by a log-only plugin event', () => {

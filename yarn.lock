@@ -2971,7 +2971,7 @@ __metadata:
 
 "@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.6#./patches/dsh-session@0.1.0-rc.6.patch::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.6
-  resolution: "@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.6#./patches/dsh-session@0.1.0-rc.6.patch::version=0.1.0-rc.6&hash=8cf133&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.6#./patches/dsh-session@0.1.0-rc.6.patch::version=0.1.0-rc.6&hash=813c4f&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-brand": ^0.1.0-rc.6
@@ -2979,7 +2979,7 @@ __metadata:
     "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
     "@deepseek-ai/dsh-scope": ^0.1.0-rc.6
     "@deepseek-ai/dsh-typert-protocol": ^0.1.0-rc.6
-  checksum: 10c0/304f33d79f6f3ea6b329ef58fe5fc8716b2785f9457cad33542b201cf46acb32588466854a979c228074c85a8a1bca5151b04b56989104ad818640720117e98d
+  checksum: 10c0/44dc6d190d86adeb8f3ddd553a0d8b07e49cda372c0a0405858a31a83df7fc12f0211fb6cb6ee16530c4b39532e8c51a1ec5e855ae5fc40560c2fcff04dc63f1
   languageName: node
   linkType: hard
 

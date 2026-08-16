@@ -2,6 +2,10 @@ diff --git a/lib/index.js b/lib/index.js
 index ac18f2b..bf005d2 100644
 --- a/lib/index.js
 +++ b/lib/index.js
+@@ -1074 +1074,2 @@ const KNOWN_SESSION_EVENT_TYPES = new Set([
+-	"permission/preset",
++	"permission/preset",
++	"physical-operator/policy",
 @@ -1438,8 +1438,12 @@ class Session {
  	*   append reentered while this acceptance/publication boundary is open also
  	*   rejects before the log changes.
