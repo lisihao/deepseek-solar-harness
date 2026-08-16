@@ -2971,7 +2971,7 @@ __metadata:
 
 "@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.6#./patches/dsh-session@0.1.0-rc.6.patch::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.6
-  resolution: "@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.6#./patches/dsh-session@0.1.0-rc.6.patch::version=0.1.0-rc.6&hash=1d273e&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-session@patch:@deepseek-ai/dsh-session@npm%3A0.1.0-rc.6#./patches/dsh-session@0.1.0-rc.6.patch::version=0.1.0-rc.6&hash=8cf133&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-brand": ^0.1.0-rc.6
@@ -2979,7 +2979,7 @@ __metadata:
     "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
     "@deepseek-ai/dsh-scope": ^0.1.0-rc.6
     "@deepseek-ai/dsh-typert-protocol": ^0.1.0-rc.6
-  checksum: 10c0/5c1aeb716fae7ec186dcb3c505b350f06a24c90a47ce042e8609f2c598a1cc75497a577e65a5eb4b1a95b6c35ff437bf9355441bcfab1276a9b3ff43dff02f5b
+  checksum: 10c0/304f33d79f6f3ea6b329ef58fe5fc8716b2785f9457cad33542b201cf46acb32588466854a979c228074c85a8a1bca5151b04b56989104ad818640720117e98d
   languageName: node
   linkType: hard
 
@@ -3575,7 +3575,7 @@ __metadata:
 
 "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::hash=0af002&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::hash=63c123&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-agent": ^0.1.0-rc.5
@@ -3588,7 +3588,7 @@ __metadata:
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
     zod: ^4.4.3
-  checksum: 10c0/634c6c3d3575c6a37f1c5486731f2c334cb7e1bbe638516f4999e933f22d883481fdf9b84b98edfc2aaf6181adab998720935264ee8efa48f07ca7ab4773de63
+  checksum: 10c0/d80e5e7634dd913a992ffd68e6067bbc2ba26a285e086757c7c031ad1100ed70d2205d6b3de9c758cd6d1d377eb6c0dd2836b2a4e431a3052cba5a32649697f7
   languageName: node
   linkType: hard
 

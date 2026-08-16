@@ -67,3 +67,15 @@ index ed2f525..8bb34c5 100644
  /**
   * One immutable entry in the session log.
   *
+diff --git a/lib/types/known-event-types.js b/lib/types/known-event-types.js
+index 7541caa..f1365db 100644
+--- a/lib/types/known-event-types.js
++++ b/lib/types/known-event-types.js
+@@ -36,6 +36,7 @@ export const KNOWN_SESSION_EVENT_TYPES = new Set([
+     'llm/retry',
+     'llm/retry-started',
+     'permission/preset',
++    'physical-operator/policy',
+     'plan/mode',
+     'request/context',
+     'request/header',

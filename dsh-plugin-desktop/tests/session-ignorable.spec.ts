@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { KNOWN_SESSION_EVENT_TYPES } from '../node_modules/@deepseek-ai/dsh-session/lib/types/known-event-types.js'
 
 describe('Desktop session compatibility patch', () => {
   it('preserves an ignorable marker supplied by a log-only plugin event', () => {
@@ -13,5 +14,9 @@ describe('Desktop session compatibility patch', () => {
       ignorable: true,
     })
     expect(session.events[0]?.ignorable).toBe(true)
+  })
+
+  it('recognizes legacy physical-operator policy events written without the marker', () => {
+    expect(KNOWN_SESSION_EVENT_TYPES.has('physical-operator/policy')).toBe(true)
   })
 })
