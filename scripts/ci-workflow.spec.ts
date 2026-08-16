@@ -383,12 +383,20 @@ describe('Python release workflows', () => {
     expect(plan.if).toContain('inputs.release')
     expect(JSON.stringify(plan.steps)).toContain('pep440_version')
     expect(JSON.stringify(workflow)).toContain('macosx_14_0_arm64')
+    if (!isRecord(manylinuxAddon) || typeof manylinuxAddon.run !== 'string') {
+      throw new TypeError('Linux node-pty rebuild must define a shell script')
+    }
+    const manylinuxAddonRun = manylinuxAddon.run
     expect(manylinuxAddon).toMatchObject({ if: "runner.os == 'Linux'" })
     expect(JSON.stringify(manylinuxAddon)).toContain('manylinux_2_28_x86_64')
     expect(JSON.stringify(manylinuxAddon)).toContain('manylinux_2_28_aarch64')
     expect(JSON.stringify(manylinuxAddon)).toContain('$HOME/setup-pnpm:$HOME/setup-pnpm:ro')
     expect(JSON.stringify(manylinuxAddon)).toContain('node-pty-glibc-versions.txt')
     expect(JSON.stringify(manylinuxAddon)).toContain('le 2.28')
+    expect(manylinuxAddonRun).toContain('npm_config_build_from_source=true pnpm --dir "$addon_dir" run install')
+    expect(manylinuxAddonRun.indexOf('pnpm --dir "$addon_dir" run install')).toBeLessThan(
+      manylinuxAddonRun.indexOf('make -C build'),
+    )
     expect(macosCheck).toMatchObject({ if: "runner.os == 'macOS'" })
     expect(JSON.stringify(macosCheck)).toContain('scripts/check-macos-deployment-target.py')
     expect(JSON.stringify(macosCheck)).toContain('$EXE-spawn-helper')

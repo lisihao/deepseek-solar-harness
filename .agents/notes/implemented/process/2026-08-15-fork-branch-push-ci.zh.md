@@ -18,6 +18,8 @@ GitHub 会把 fork 贡献的拉取请求事件发送给目标仓库，而不会�
 
 随后一次完整本地重跑又发现两项 fork 分支测试 harness 漂移，而不是产品失败。真实 Host smoke 创建了全新的设置目录，却没有确认带版本号的内测声明，导致模态框拦截之后的所有操作；现在测试会在选择工作区前真实执行并等待这一步用户可见流程。SDK server 集成用例在声明的 Node 24 主通道上可能超过历史的 5 秒或 15 秒 Vitest 预算；其断言、产品超时和协议行为均未改变，只把外层测试预算提高到 30 秒。
 
+第二次托管运行在 pnpm 副作用缓存已预热的情况下执行发布工作流，又暴露了一项确定性的 harness 缺陷。缓存恢复了 node-pty 已生成的 Makefile，却没有恢复该构建图引用的虚拟仓库兄弟文件，因此 manylinux 构建在编译前就失败。发布步骤现在会在进入 manylinux 容器前，显式强制源码构建并调用 node-pty 的安装生命周期。这样无论冷缓存还是暖缓存，node-gyp 都会针对当前安装重新生成构建图；最终的 manylinux 2.28 ABI 构建和 GLIBC 检查仍由容器负责。
+
 ## Alternatives considered
 
 **使用手工工作流调度。** 不采用，因为上游必需聚合任务在 `pull_request` 之外会被跳过；接受这种结果会在未执行受保护依赖图时产生绿色状态。
@@ -32,4 +34,4 @@ GitHub 会把 fork 贡献的拉取请求事件发送给目标仓库，而不会�
 
 ## Verification
 
-CI 工作流契约测试固定触发器、权限、runner 类型、原生命令、可复用 Python 运行时、必需依赖集合和失败关闭聚合名称。定向测试固定所有被拒绝的设置/roster 字段、确定性排序、过期 controller 结果抑制、空草稿拒绝，以及 relay/Host 行为。在 Node 24 下，修复后的 SDK/boot 集合 46/46 通过，真实 Host 浏览器 smoke 12/12 通过，完整插桩套件 13,425 个测试通过，statements、branches、functions、lines 均为 100%。合并前，真实分支推送仍必须产生成功的必需任务和 `all checks passed` 状态。
+CI 工作流契约测试固定触发器、权限、runner 类型、原生命令、可复用 Python 运行时、必需依赖集合、失败关闭聚合名称，以及 manylinux make 之前强制源码执行 node-pty 安装生命周期的顺序。定向测试固定所有被拒绝的设置/roster 字段、确定性排序、过期 controller 结果抑制、空草稿拒绝，以及 relay/Host 行为。在 Node 24 下，修复后的 SDK/boot 集合 46/46 通过，真实 Host 浏览器 smoke 12/12 通过，完整插桩套件 13,425 个测试通过，statements、branches、functions、lines 均为 100%。合并前，真实分支推送仍必须产生成功的必需任务和 `all checks passed` 状态。

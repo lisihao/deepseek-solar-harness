@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-15-fork-branch-push-ci.md
-2026-08-15-fork-branch-push-ci.md: 491b7b20d11dff939bbfaf31fd0d0f7155faa6c2
-2026-08-15-fork-branch-push-ci.zh.md: f3de5161ed33079df327fd1b731b37524250c94a
+2026-08-15-fork-branch-push-ci.md: dfb1fa067ecd779a357b7848f548ba184f3aa41d
+2026-08-15-fork-branch-push-ci.zh.md: c5fb0efab9d30d06b01db88f9dec0cb7702d02ae
