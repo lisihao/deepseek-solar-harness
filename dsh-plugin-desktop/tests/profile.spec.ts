@@ -210,6 +210,12 @@ describe('desktop profile composition', () => {
     const bundles = PROFILE_TEMPLATES.web
     if (bundles === undefined) throw new Error('test requires the shipped Web template')
     initProfile(webDir, [...bundles, '@nanmicoder/dsh-agent-teams'])
+    writeFileSync(join(webDir, 'cordis.patch.yml'), [
+      '- insert:',
+      '    - id: remote-web-ui',
+      "      name: '@linxin666/dsh-remote-web-ui'",
+      '',
+    ].join('\n'))
 
     const prepared = prepareDesktopProfile(undefined, home, 'darwin', 'web-with-teams')
     const rows = composeEntries([prepared.patches])
@@ -219,6 +225,7 @@ describe('desktop profile composition', () => {
       config: expect.objectContaining({ memberPersonaPlacement: 'prompt' }),
     }))
     expect(rows.filter(row => row.id === 'resident-operators')).toHaveLength(1)
+    expect(rows.filter(row => row.id === 'remote-web-ui')).toHaveLength(1)
   })
 
   it('projects advanced YAML settings into the Host and client Loader rows', () => {

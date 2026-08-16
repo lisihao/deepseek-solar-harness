@@ -64,6 +64,13 @@ const AGENT_TEAMS_ROW_ID = 'agent-teams'
 const REMOTE_WEB_UI_PACKAGE = '@linxin666/dsh-remote-web-ui'
 const WEB_BILLING_PACKAGE = 'dsh-web-billing'
 const LUNA_VISION_BRIDGE_PACKAGE = '@ycp424c/dsh-luna-vision-bridge'
+const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
+  [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
+  [AGENT_TEAMS_PACKAGE, AGENT_TEAMS_ROW_ID],
+  [REMOTE_WEB_UI_PACKAGE, 'remote-web-ui'],
+  [WEB_BILLING_PACKAGE, 'web-billing'],
+  [LUNA_VISION_BRIDGE_PACKAGE, 'luna-vision-bridge'],
+])
 const PRODUCT_BUNDLE_PACKAGES = [
   RESIDENT_BUNDLE_PACKAGE,
   AGENT_TEAMS_PACKAGE,
@@ -210,10 +217,16 @@ function desktopPresetRoot(): string {
 }
 
 /** Load product-owned bundles from the packaged application dependency tree. */
-function productBundlePatches(installedPackages: ReadonlySet<string>): PatchOptions[] {
+function productBundlePatches(
+  installedPackages: ReadonlySet<string>,
+  suppliedRows: ReadonlySet<string>,
+): PatchOptions[] {
   const require = createRequire(import.meta.url)
   return PRODUCT_BUNDLE_PACKAGES
-    .filter(packageName => !installedPackages.has(packageName))
+    .filter(packageName => (
+      !installedPackages.has(packageName)
+      && !suppliedRows.has(PRODUCT_BUNDLE_ROW_IDS.get(packageName) ?? '')
+    ))
     .flatMap(packageName => loadOverlayPatches(
       BIN_NAME,
       join(dirname(require.resolve(`${packageName}/package.json`)), 'cordis.patch.yml'),
@@ -265,7 +278,20 @@ export function prepareDesktopProfile(
   writeFileSync(rootConfig, '[]\n')
 
   const desktopPatches = loadOverlayPatches(BIN_NAME, DESKTOP_PATCH_PATH)
-  const productPatches = productBundlePatches(new Set(profile.layers.map(layer => layer.packageName)))
+  const homePatches = loadOptionalPatches(BIN_NAME, join(home, PROFILE_PATCH_FILENAME)) ?? []
+  const selectedProfilePatches = [
+    ...profile.layers.flatMap(layer => layer.patches),
+    ...profile.patches,
+    ...homePatches,
+  ]
+  const suppliedRows = new Set(
+    composeEntries([selectedProfilePatches])
+      .flatMap(row => typeof row.id === 'string' ? [row.id] : []),
+  )
+  const productPatches = productBundlePatches(
+    new Set(profile.layers.map(layer => layer.packageName)),
+    suppliedRows,
+  )
   const bundlePatches: PatchOptions[] = []
   let desktopLayerInserted = false
   for (const layer of profile.layers) {
@@ -279,7 +305,6 @@ export function prepareDesktopProfile(
     throw new Error(`${BIN_NAME}: desktop profile is missing @deepseek-ai/dsh-web-app`)
   }
 
-  const homePatches = loadOptionalPatches(BIN_NAME, join(home, PROFILE_PATCH_FILENAME)) ?? []
   const patches: PatchOptions[] = [
     ...bundlePatches,
     ...profile.patches,
