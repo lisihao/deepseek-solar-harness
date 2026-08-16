@@ -19,6 +19,15 @@ const noteDirectory = '.agents/notes/implemented/process'
 const noteName = '2026-08-15-pinned-upstream-and-isolated-yarn-workspace'
 const notePaths = [`${noteDirectory}/${noteName}.md`, `${noteDirectory}/${noteName}.zh.md`]
 const noteRecordPath = `${noteDirectory}/${noteName}.i18n.yaml`
+const sealedDshExtensions = new Set([
+  '@deepseek-ai/dsh-physical-operator',
+  '@deepseek-ai/dsh-physical-operator-resident',
+  '@deepseek-ai/dsh-resident-operator',
+  '@deepseek-ai/dsh-resident-operator-local',
+  '@deepseek-ai/dsh-resident-operators',
+  '@deepseek-ai/dsh-subagent-codex',
+  '@deepseek-ai/dsh-tool-physical-operator',
+])
 
 if (workspace.packageManager !== 'yarn@4.18.0') {
   fail('the product workspace must pin yarn@4.18.0')
@@ -81,7 +90,12 @@ if (upstreamPackage.version !== upstream.sourceVersion) {
   fail('deepseek-harness package version differs from upstream.json')
 }
 for (const name of Object.keys(plugin.dependencies).filter(name => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))) {
-  if (plugin.dependencies[name] !== upstream.runtimePackageVersion) {
+  const range = plugin.dependencies[name]
+  if (sealedDshExtensions.has(name)) {
+    if (!range.startsWith('file:vendor/dsh-packages/') || !range.endsWith('.tgz')) {
+      fail(`${name} must use a sealed Desktop vendor tarball`)
+    }
+  } else if (range !== upstream.runtimePackageVersion) {
     fail(`${name} must use the recorded DSH runtime package family`)
   }
 }

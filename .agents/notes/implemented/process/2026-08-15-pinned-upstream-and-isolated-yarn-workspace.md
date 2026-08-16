@@ -16,9 +16,11 @@ The outer README files and assets are product-owned and preserve the established
 
 The outer repository is a Yarn 4 workspace using the `node_modules` linker, and its only workspace member is [`dsh-plugin-desktop`](../../../../dsh-plugin-desktop/). The upstream checkout remains an independent pnpm workspace under its own [package-manager decision](../../../../deepseek-harness/.agents/notes/implemented/process/2026-06-16-pnpm-over-yarn.md). Root `upstream:*` scripts use Yarn's portable shell to enter the submodule before invoking its pinned pnpm release through Corepack.
 
-Normal desktop builds resolve published DSH packages from the npm registry instead of linking source from the submodule. `upstream.json` records the source version and the runtime package family independently. The pinned public GitHub source reports `0.1.0-rc.5`, while the desktop runtime uses the published `0.1.0-rc.6` family; the repository does not invent a source commit for an npm artifact that does not publish one.
+Normal desktop builds resolve the base DSH runtime from published npm packages instead of linking source from the submodule. `upstream.json` records the source version and the runtime package family independently. The pinned public GitHub source reports `0.1.0-rc.5`, while the desktop base runtime uses the published `0.1.0-rc.6` family; the repository does not invent a source commit for an npm artifact that does not publish one.
 
-`yarn check:layout` rejects a changed submodule URL, commit, working tree, package-manager boundary, workspace member list, or DSH runtime family. CI initializes submodules, installs the outer workspace immutably, runs the desktop checks, and exercises the upstream command path on Windows.
+Product extensions that have not been published upstream are a narrow sealed-artifact exception, not source links. The seven Resident Physical Operator packages live as exact tarballs below `dsh-plugin-desktop/vendor/dsh-packages/`, identify the fork commit in `vendor/manifest.json`, and are hash-verified before every check. Root resolutions force all transitive references to those same bytes. No Desktop package imports or builds the submodule workspace, and every other `@deepseek-ai/dsh-*` dependency must still equal the recorded published runtime family.
+
+`yarn check:layout` rejects a changed submodule URL, commit, working tree, package-manager boundary, workspace member list, base DSH runtime family, or unsealed Resident package reference. CI initializes submodules, installs the outer workspace immutably, runs the desktop checks, and exercises the upstream command path on Windows.
 
 ## Verification
 

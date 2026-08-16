@@ -121,15 +121,19 @@ describe('published package surface', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
     const snapshot = main.indexOf('const environment = loadLayeredEnv')
     const install = main.indexOf('const pnpmRuntime = installDesktopPnpmRuntime')
+    const products = main.indexOf('const nativeProductRuntime = installNativeProductRuntime')
     const prepare = main.indexOf('const prepared = prepareDesktopProfile')
     const boot = main.indexOf('const ctx = await boot')
 
     expect(snapshot).toBeGreaterThanOrEqual(0)
     expect(install).toBeGreaterThan(snapshot)
-    expect(prepare).toBeGreaterThan(install)
+    expect(products).toBeGreaterThan(install)
+    expect(prepare).toBeGreaterThan(products)
     expect(boot).toBeGreaterThan(prepare)
     expect(main).toContain("'dsh-plugin-desktop: packaged pnpm runtime PATH'")
+    expect(main).toContain("'dsh-plugin-desktop: native product command PATH'")
     expect(main).toContain('disposePnpmRuntime?.()')
+    expect(main).toContain('disposeNativeProductRuntime?.()')
   })
 
   it('fixes the installed application identity', () => {
@@ -141,6 +145,7 @@ describe('published package surface', () => {
       'cordis.patch.yml',
       'build/**',
       'lib/**',
+      'vendor/agent-presets/**',
       'node_modules/**',
     ])
     expect(manifest.build?.electronFuses).toEqual({ runAsNode: true })
@@ -150,6 +155,8 @@ describe('published package surface', () => {
       'build/tray-icon.svg',
       'build/tray-icon*.png',
       'docs/**',
+      'vendor/agent-presets/**',
+      'vendor/dsh-packages/**',
     ]))
     expect(manifest.build?.files).toEqual([
       'build/app-icon.png',
@@ -159,6 +166,7 @@ describe('published package surface', () => {
       'cordis.patch.yml',
       'lib/**',
       'package.json',
+      'vendor/agent-presets/**',
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
     expect(manifest.build?.win?.icon).toBe('build/app-icon.png')

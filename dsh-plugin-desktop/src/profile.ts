@@ -58,6 +58,10 @@ const DESKTOP_SETTINGS_NAMESPACE = 'dsh-desktop'
 const UI_LAYOUT_PACKAGE = '@deepseek-ai/dsh-client-ui-layout'
 const UI_SIDEBAR_PACKAGE = '@deepseek-ai/dsh-client-ui-sidebar'
 const UI_CONVERSATION_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
+const RESIDENT_BUNDLE_PACKAGE = '@deepseek-ai/dsh-resident-operators'
+const AGENT_TEAMS_PACKAGE = '@nanmicoder/dsh-agent-teams'
+const AGENT_TEAMS_ROW_ID = 'agent-teams'
+const PRODUCT_BUNDLE_PACKAGES = [RESIDENT_BUNDLE_PACKAGE, AGENT_TEAMS_PACKAGE] as const
 
 /**
  * Parse desktop presentation state and reject corrupted values.
@@ -191,6 +195,22 @@ function shippedPresetRoot(): string {
   return join(dirname(require.resolve('@deepseek-ai/dsh/package.json')), 'config', 'agent-presets')
 }
 
+/** Resolve the Desktop-owned preset root from source or the unpacked application. */
+function desktopPresetRoot(): string {
+  return unpackedAsarPath(fileURLToPath(new URL('../vendor/agent-presets', import.meta.url)))
+}
+
+/** Load product-owned bundles from the packaged application dependency tree. */
+function productBundlePatches(installedPackages: ReadonlySet<string>): PatchOptions[] {
+  const require = createRequire(import.meta.url)
+  return PRODUCT_BUNDLE_PACKAGES
+    .filter(packageName => !installedPackages.has(packageName))
+    .flatMap(packageName => loadOverlayPatches(
+      BIN_NAME,
+      require.resolve(`${packageName}/cordis.patch.yml`),
+    ))
+}
+
 /** Read a row's object config without trusting arbitrary YAML values. */
 function rowConfig(row: EntryOptions | undefined): Record<string, unknown> {
   const config = row?.config
@@ -236,12 +256,14 @@ export function prepareDesktopProfile(
   writeFileSync(rootConfig, '[]\n')
 
   const desktopPatches = loadOverlayPatches(BIN_NAME, DESKTOP_PATCH_PATH)
+  const productPatches = productBundlePatches(new Set(profile.layers.map(layer => layer.packageName)))
   const bundlePatches: PatchOptions[] = []
   let desktopLayerInserted = false
   for (const layer of profile.layers) {
     bundlePatches.push(...layer.patches)
     if (layer.packageName !== '@deepseek-ai/dsh-web-app') continue
     bundlePatches.push(...desktopPatches)
+    bundlePatches.push(...productPatches)
     desktopLayerInserted = true
   }
   if (!desktopLayerInserted) {
@@ -293,10 +315,24 @@ export function prepareDesktopProfile(
       id: 'agent-presets',
       config: {
         ...rowConfig(presets),
-        roots: [{ path: shippedPresetRoot(), trust: 'system' }],
+        roots: [
+          { path: desktopPresetRoot(), trust: 'system' },
+          { path: shippedPresetRoot(), trust: 'system' },
+        ],
       },
     })
   }
+  const agentTeams = rows.get(AGENT_TEAMS_ROW_ID)
+  if (agentTeams?.name !== AGENT_TEAMS_PACKAGE) {
+    throw new Error(`${BIN_NAME}: product profile must use ${AGENT_TEAMS_PACKAGE} in the ${AGENT_TEAMS_ROW_ID} row`)
+  }
+  patches.push({
+    id: AGENT_TEAMS_ROW_ID,
+    config: {
+      ...rowConfig(agentTeams),
+      memberPersonaPlacement: 'prompt',
+    },
+  })
   if (!rows.has('webserver')) {
     throw new Error(`${BIN_NAME}: desktop profile has no webserver row`)
   }

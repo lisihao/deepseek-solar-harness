@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "name": "Resident Physical Operators",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "23722c1b749b37d7aaf5e65f9bf309e446eea296"
+    },
+    {
+      "name": "AgentTeams preset preservation",
+      "repository": "https://github.com/lisihao/dsh-agent-teams",
+      "commit": "ff3369241dbf9763e34e11292823d5d78a9d8713"
+    },
+    {
+      "name": "Anchored Standard delegated-worker bootstrap",
+      "repository": "local accepted preset snapshot",
+      "commit": "N/A"
+    }
+  ],
+  "files": {
+    "agent-presets/anchored-standard/agent.cordis.yml": "3e223fa8db1f2fba7568e5beb88fefe84fe40e2096bf68c0a9b27a089a370bc4",
+    "agent-presets/anchored-standard/compaction-epoch.mjs": "a235a9904fc7435a5e61830d0624628d06121049a7549813a8f13017ddca0770",
+    "agent-presets/anchored-standard/custom-bash.mjs": "76acbed05588b7fb3db57bc16c626b49265278af74cd0224bd873c09a83b7ad6",
+    "agent-presets/anchored-standard/dev-tool-search.mjs": "29d2fb7ee6be57e0aca58eb205939f0b463e4e2631ee55192c95ef6af6bb76d9",
+    "agent-presets/anchored-standard/instruction-hint.mjs": "d4da4775b3fcebf698518c2831b4c31e6384cf067bb215e95e6a7990e0628df6",
+    "agent-presets/anchored-standard/preset.yml": "4c11b065bc9ae7f2fc8fb80f3163bae884ca308d8c8f27f1b7c5549dd0cb7549",
+    "agent-presets/anchored-standard/skill-search.mjs": "3276149046fd610ca7a3c06dab522354856d74215af16e8395b0176f222c13d7",
+    "agent-presets/anchored-standard/tool-bootstrap.mjs": "ee0090ea53f03bed1d454820372ec153968e9e684c9ccace702211c13f9930d0",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "598fc0312caf474537ad647a82eaa27978b557f1147a764ab104f49034984854",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "3b6b98708e6b5593a3162f3496570c4c0840a1a2b3e31d21e977ef3192a00981",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "a644469542153a29a9af9a6a5df5751b58d41c753bebbaf1a4a4d651b9718e48",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "a98d96b7fce314d608ff5b8f08043766c49808850202d4efc2732a9ebd661eeb",
+    "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "1c32654ca5a0278f5e35e091089dc9b8910f44b21e64a088a468b7ec7e2dd241",
+    "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "21874e802cb99ce3a635c0f66fe664a2048c76aea366d157d8cbab8209944223",
+    "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "d2d92e25a61f33887b95d298e7b4529e57522cda96e9da6505f14828000436d3",
+    "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03"
+  }
+}

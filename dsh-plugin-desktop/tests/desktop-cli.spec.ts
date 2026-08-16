@@ -60,6 +60,7 @@ describe('packaged dsh bootstrap', () => {
     expect(withDefaultDesktopProfile(['--profile', 'web'], 'desktop')).toEqual(['--profile', 'web'])
     expect(withDefaultDesktopProfile(['--profile=web'], 'desktop')).toEqual(['--profile=web'])
     expect(withDefaultDesktopProfile(['web'], 'desktop')).toEqual(['web'])
+    expect(withDefaultDesktopProfile(['resident', 'list'], 'desktop')).toEqual(['resident', 'list'])
     expect(withDefaultDesktopProfile(['--help'], 'desktop')).toEqual(['--help'])
     expect(withDefaultDesktopProfile(['--version'], 'desktop')).toEqual(['--version'])
     expect(withDefaultDesktopProfile(['plugin', 'update'], '工作 profile')).toEqual([

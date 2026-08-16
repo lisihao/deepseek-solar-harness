@@ -31,6 +31,7 @@ export const REQUIRED_PACKAGED_RUNTIME_ENTRIES = [
   'lib/profiles.js',
   'lib/desktop-cli.js',
   'lib/desktop-runtime-environment.js',
+  'lib/native-product-runtime.js',
   'lib/desktop-terminal.js',
   'lib/terminal.js',
   'lib/update-checker.js',
@@ -40,7 +41,12 @@ export const REQUIRED_PACKAGED_RUNTIME_ENTRIES = [
   'node_modules/@deepseek-ai/dsh/lib/bin.js',
   'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html',
   'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js',
+  'node_modules/@deepseek-ai/dsh-resident-operator-local/lib/startup.js',
+  'node_modules/@deepseek-ai/dsh-resident-operators/cordis.patch.yml',
+  'node_modules/@nanmicoder/dsh-agent-teams/lib/index.js',
   'node_modules/pnpm/bin/pnpm.mjs',
+  'vendor/agent-presets/anchored-standard/agent.cordis.yml',
+  'vendor/agent-presets/anchored-standard/tool-bootstrap.mjs',
 ] as const
 
 /** Physical entries required because profile fallback symlinks cannot target ASAR paths. */
@@ -52,6 +58,7 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'build/tray-iconTemplate.png',
   'build/tray-icon-blue.png',
   'lib/main.js',
+  'lib/native-product-runtime.js',
   'lib/client.js',
   'lib/index.js',
   'lib/profile.js',
@@ -66,8 +73,14 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'node_modules/@deepseek-ai/dsh/package.json',
   'node_modules/@deepseek-ai/dsh/lib/bin.js',
   'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js',
+  'node_modules/@deepseek-ai/dsh-resident-operator-local/lib/startup.js',
+  'node_modules/@deepseek-ai/dsh-resident-operators/cordis.patch.yml',
+  'node_modules/@nanmicoder/dsh-agent-teams/lib/index.js',
   'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html',
   'node_modules/pnpm/bin/pnpm.mjs',
+  'vendor/agent-presets/anchored-standard/agent.cordis.yml',
+  'vendor/agent-presets/anchored-standard/instruction-hint.mjs',
+  'vendor/agent-presets/anchored-standard/tool-bootstrap.mjs',
 ] as const
 
 /** Prebuilt Node-API modules required when the Windows package skips native source rebuilds. */
@@ -92,7 +105,10 @@ export const REQUIRED_UNPACKED_PACKAGE_SPECIFIERS = [
   'dsh-plugin-desktop/windows-pwsh-sandbox',
   'dsh-plugin-desktop/package.json',
   '@deepseek-ai/dsh-base/package.json',
+  '@deepseek-ai/dsh-resident-operator-local/startup',
+  '@deepseek-ai/dsh-resident-operators/cordis.patch.yml',
   '@deepseek-ai/dsh-web-app/package.json',
+  '@nanmicoder/dsh-agent-teams/cordis.patch.yml',
 ] as const
 
 /** Injectable archive listing seam used by focused tests. */

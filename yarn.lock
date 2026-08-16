@@ -5,6 +5,99 @@ __metadata:
   version: 10
   cacheKey: 10c0
 
+"@anthropic-ai/claude-agent-sdk-darwin-arm64@npm:0.3.220":
+  version: 0.3.220
+  resolution: "@anthropic-ai/claude-agent-sdk-darwin-arm64@npm:0.3.220"
+  conditions: os=darwin & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@anthropic-ai/claude-agent-sdk-darwin-x64@npm:0.3.220":
+  version: 0.3.220
+  resolution: "@anthropic-ai/claude-agent-sdk-darwin-x64@npm:0.3.220"
+  conditions: os=darwin & cpu=x64
+  languageName: node
+  linkType: hard
+
+"@anthropic-ai/claude-agent-sdk-linux-arm64-musl@npm:0.3.220":
+  version: 0.3.220
+  resolution: "@anthropic-ai/claude-agent-sdk-linux-arm64-musl@npm:0.3.220"
+  conditions: os=linux & cpu=arm64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"@anthropic-ai/claude-agent-sdk-linux-arm64@npm:0.3.220":
+  version: 0.3.220
+  resolution: "@anthropic-ai/claude-agent-sdk-linux-arm64@npm:0.3.220"
+  conditions: os=linux & cpu=arm64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@anthropic-ai/claude-agent-sdk-linux-x64-musl@npm:0.3.220":
+  version: 0.3.220
+  resolution: "@anthropic-ai/claude-agent-sdk-linux-x64-musl@npm:0.3.220"
+  conditions: os=linux & cpu=x64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"@anthropic-ai/claude-agent-sdk-linux-x64@npm:0.3.220":
+  version: 0.3.220
+  resolution: "@anthropic-ai/claude-agent-sdk-linux-x64@npm:0.3.220"
+  conditions: os=linux & cpu=x64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@anthropic-ai/claude-agent-sdk-win32-arm64@npm:0.3.220":
+  version: 0.3.220
+  resolution: "@anthropic-ai/claude-agent-sdk-win32-arm64@npm:0.3.220"
+  conditions: os=win32 & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@anthropic-ai/claude-agent-sdk-win32-x64@npm:0.3.220":
+  version: 0.3.220
+  resolution: "@anthropic-ai/claude-agent-sdk-win32-x64@npm:0.3.220"
+  conditions: os=win32 & cpu=x64
+  languageName: node
+  linkType: hard
+
+"@anthropic-ai/claude-agent-sdk@npm:0.3.220":
+  version: 0.3.220
+  resolution: "@anthropic-ai/claude-agent-sdk@npm:0.3.220"
+  dependencies:
+    "@anthropic-ai/claude-agent-sdk-darwin-arm64": "npm:0.3.220"
+    "@anthropic-ai/claude-agent-sdk-darwin-x64": "npm:0.3.220"
+    "@anthropic-ai/claude-agent-sdk-linux-arm64": "npm:0.3.220"
+    "@anthropic-ai/claude-agent-sdk-linux-arm64-musl": "npm:0.3.220"
+    "@anthropic-ai/claude-agent-sdk-linux-x64": "npm:0.3.220"
+    "@anthropic-ai/claude-agent-sdk-linux-x64-musl": "npm:0.3.220"
+    "@anthropic-ai/claude-agent-sdk-win32-arm64": "npm:0.3.220"
+    "@anthropic-ai/claude-agent-sdk-win32-x64": "npm:0.3.220"
+  peerDependencies:
+    "@anthropic-ai/sdk": ">=0.93.0"
+    "@modelcontextprotocol/sdk": ^1.29.0
+    zod: ^4.0.0
+  dependenciesMeta:
+    "@anthropic-ai/claude-agent-sdk-darwin-arm64":
+      optional: true
+    "@anthropic-ai/claude-agent-sdk-darwin-x64":
+      optional: true
+    "@anthropic-ai/claude-agent-sdk-linux-arm64":
+      optional: true
+    "@anthropic-ai/claude-agent-sdk-linux-arm64-musl":
+      optional: true
+    "@anthropic-ai/claude-agent-sdk-linux-x64":
+      optional: true
+    "@anthropic-ai/claude-agent-sdk-linux-x64-musl":
+      optional: true
+    "@anthropic-ai/claude-agent-sdk-win32-arm64":
+      optional: true
+    "@anthropic-ai/claude-agent-sdk-win32-x64":
+      optional: true
+  checksum: 10c0/0493727410ea8545114c05b185cd35bcab7a2e9f84d8d9e720fa853d900d5fd753d135d5dcd82e3f8e107c254556e4be240767c26c23abdd8190ae6b37e6179a
+  languageName: node
+  linkType: hard
+
 "@anthropic-ai/sdk@npm:0.91.1":
   version: 0.91.1
   resolution: "@anthropic-ai/sdk@npm:0.91.1"
@@ -18,6 +111,22 @@ __metadata:
   bin:
     anthropic-ai-sdk: bin/cli
   checksum: 10c0/aa9fb1b3d0ae47f492ee7a94b76d341ac7c5486b222a9426b4815b07a65a0b6f502430b0250ff5bf2201a0cdae725a5d4f1f7a4aaa075e9fb32cc2ac10d70241
+  languageName: node
+  linkType: hard
+
+"@anthropic-ai/sdk@npm:0.93.0":
+  version: 0.93.0
+  resolution: "@anthropic-ai/sdk@npm:0.93.0"
+  dependencies:
+    json-schema-to-ts: "npm:^3.1.1"
+  peerDependencies:
+    zod: ^3.25.0 || ^4.0.0
+  peerDependenciesMeta:
+    zod:
+      optional: true
+  bin:
+    anthropic-ai-sdk: bin/cli
+  checksum: 10c0/36d82713404322a047f87a85908c1eb7b363a193d534ec70022f2f669f9432083f509abb71a47e045028a544c73d4f5d8d0cc6a566998810a3cb5dde62c37a95
   languageName: node
   linkType: hard
 
@@ -2320,6 +2429,34 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@deepseek-ai/dsh-physical-operator-resident@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-physical-operator-resident@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz::hash=c55e0a&locator=deepseek-harness-desktop%40workspace%3A."
+  dependencies:
+    "@deepseek-ai/schemastery": "npm:^3.18.1"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-physical-operator": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-resident-operator": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-subagent": ^0.1.0-rc.5
+  checksum: 10c0/13ca292b27493dc4932beabc8aa4e71e2597b2273a95be374eee32c8caf8c61f87f040feaab322dacd6c25ef1bc1c50f4faaf3d2e6cbe21c13fffefcb1759e2d
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz::hash=cf3d9b&locator=deepseek-harness-desktop%40workspace%3A."
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-agent": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-brand": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.5
+  checksum: 10c0/d1c41d1f63346a542997a36b06d27cc7a179a6f03a622ad2d26a3f400cb2b86c5fdce58d7c1c78e8a5698a0cdacb42f58ea7b1b996cb32b4791ef1ad2e5eaeb2
+  languageName: node
+  linkType: hard
+
 "@deepseek-ai/dsh-plan-mode@npm:0.1.0-rc.6, @deepseek-ai/dsh-plan-mode@npm:^0.1.0-rc.6":
   version: 0.1.0-rc.6
   resolution: "@deepseek-ai/dsh-plan-mode@npm:0.1.0-rc.6"
@@ -2384,6 +2521,60 @@ __metadata:
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.6
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.6
   checksum: 10c0/cd5a7dd4d5e3215a129c5aa62da95fe326406c244c17fc428ccf63ce0d96d16e0cbcd9366fdf739cd42a50f69bc78900c490baaa2037f66ecdaf5f73dbdff376
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-resident-operator-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-resident-operator-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz::hash=d53518&locator=deepseek-harness-desktop%40workspace%3A."
+  dependencies:
+    "@anthropic-ai/claude-agent-sdk": "npm:0.3.220"
+    "@anthropic-ai/sdk": "npm:0.93.0"
+    "@deepseek-ai/schemastery": "npm:^3.18.1"
+    "@modelcontextprotocol/sdk": "npm:1.29.0"
+    ws: "npm:^8.21.0"
+    zod: "npm:^4.4.3"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-home-paths": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-resident-operator": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-sdk-protocol": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-subagent": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-subagent-codex": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
+  checksum: 10c0/6d8432377d8193e9c6314753bcaee3377ce9856fae67fa258ace8ddccc062e21b55c3cd952d165282011c64c4ced72f3af66c6eb58f74bedb4d317b9700959cf
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-resident-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-resident-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz::hash=8fbaa3&locator=deepseek-harness-desktop%40workspace%3A."
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-brand": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.5
+  checksum: 10c0/39ef62e62e9de30ee83f2dbb540b58980eb3398cb0a32968df436120427cba9fac7d12646f2922928edee9714f01df5cc391ec22ffaa55b507d9981250d6f3b8
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-resident-operators@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-resident-operators@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz::hash=fa0d4a&locator=deepseek-harness-desktop%40workspace%3A."
+  dependencies:
+    "@deepseek-ai/dsh-physical-operator": "npm:^0.1.0-rc.5"
+    "@deepseek-ai/dsh-physical-operator-resident": "npm:^0.1.0-rc.5"
+    "@deepseek-ai/dsh-resident-operator": "npm:^0.1.0-rc.5"
+    "@deepseek-ai/dsh-resident-operator-local": "npm:^0.1.0-rc.5"
+    "@deepseek-ai/dsh-subagent-claude-code": "npm:^0.1.0-rc.5"
+    "@deepseek-ai/dsh-subagent-codex": "npm:^0.1.0-rc.5"
+    "@deepseek-ai/dsh-tool-physical-operator": "npm:^0.1.0-rc.5"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+  checksum: 10c0/3532489de7102efcffed32353e13daeb6129fcf41d4bca5f1f9ee9128599366a4dc206d5a48c1d5d62e124fe8223ef5e8b952db190d84952004997843078541c
   languageName: node
   linkType: hard
 
@@ -2479,6 +2670,19 @@ __metadata:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.6
   checksum: 10c0/85af84699d0c77e642b4cd4783f294a3e96455a30bc692554d6c363acc97d1db4c86198919591ee6052f0e2952efad2a18fc77b94f0d76e19a46797ea7a0b3c6
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-sdk-protocol@npm:0.1.0-rc.6":
+  version: 0.1.0-rc.6
+  resolution: "@deepseek-ai/dsh-sdk-protocol@npm:0.1.0-rc.6"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-session": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-subagent": ^0.1.0-rc.6
+  checksum: 10c0/d73cdfd6889bf9d1a997ac90a9a7a0a4213d846d56869bdd72038490d1b7e4ab6af0d303e766b2696f512fbcfb60011db00d20db0a9ce064fa56f0bbf843c83d
   languageName: node
   linkType: hard
 
@@ -2920,6 +3124,43 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@deepseek-ai/dsh-subagent-claude-code@npm:^0.1.0-rc.5":
+  version: 0.1.0-rc.6
+  resolution: "@deepseek-ai/dsh-subagent-claude-code@npm:0.1.0-rc.6"
+  dependencies:
+    "@anthropic-ai/claude-agent-sdk": "npm:0.3.220"
+    "@anthropic-ai/sdk": "npm:0.93.0"
+    "@deepseek-ai/schemastery": "npm:^3.18.1"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-session": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-subagent": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-timeout": ^0.1.0-rc.6
+  checksum: 10c0/214b1720b514a19efd406a168366db96c48715f7c7a27b8130ed6d7d65dc5ca338a14d04179c1ae4baae1c4623cd0e9add47334aeb4d09f1a9f1d115283a9835
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-subagent-codex@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-subagent-codex@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz::hash=72ac0d&locator=deepseek-harness-desktop%40workspace%3A."
+  dependencies:
+    "@deepseek-ai/schemastery": "npm:^3.18.1"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-sdk-protocol": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-session": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-subagent": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-timeout": ^0.1.0-rc.5
+  checksum: 10c0/2e5a896e1bae32dbef9468096d403f41ae2d2c23529f14cc01c26d00d33187e0fdc5ed8a6ef5b1e7bc41b10c7095d96536036a45256e93e58474bb82e711d91e
+  languageName: node
+  linkType: hard
+
 "@deepseek-ai/dsh-subagent-fork-in-process@npm:^0.1.0-rc.6":
   version: 0.1.0-rc.6
   resolution: "@deepseek-ai/dsh-subagent-fork-in-process@npm:0.1.0-rc.6"
@@ -3290,6 +3531,21 @@ __metadata:
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.6
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.6
   checksum: 10c0/f5a18e5bb9199e9d246eef2b75779da3a577c0a92fa643538c37cefc72e80d01752b91e88d3b891c291d75562f0f127c471dc8e8bbc0733854e5fa827c5307d6
+  languageName: node
+  linkType: hard
+
+"@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::hash=d92fea&locator=deepseek-harness-desktop%40workspace%3A."
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-agent": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-physical-operator": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-session": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
+  checksum: 10c0/098ffc09474536463318dc16bca77b14bbd7ff567ace52fbf2e10ae862230bf68e680c2515a52187a6ba3c7dbe7169556b7d6c2b2f3e527238075a6a70da1234
   languageName: node
   linkType: hard
 
@@ -4034,6 +4290,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@hono/node-server@npm:^1.19.9":
+  version: 1.19.17
+  resolution: "@hono/node-server@npm:1.19.17"
+  peerDependencies:
+    hono: ^4
+  checksum: 10c0/e77907e3b5db8ab68ed4f297ad84807bfdd698636408de86ab8d36dab4658504ac4c0ed9d9436bc272a0172b9b7a5a4b578532e0b5baf97674c7b420cb5cff4b
+  languageName: node
+  linkType: hard
+
 "@hono/node-server@npm:^1.19.9 || ^2.0.5":
   version: 2.1.0
   resolution: "@hono/node-server@npm:2.1.0"
@@ -4488,6 +4753,39 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@modelcontextprotocol/sdk@npm:1.29.0":
+  version: 1.29.0
+  resolution: "@modelcontextprotocol/sdk@npm:1.29.0"
+  dependencies:
+    "@hono/node-server": "npm:^1.19.9"
+    ajv: "npm:^8.17.1"
+    ajv-formats: "npm:^3.0.1"
+    content-type: "npm:^1.0.5"
+    cors: "npm:^2.8.5"
+    cross-spawn: "npm:^7.0.5"
+    eventsource: "npm:^3.0.2"
+    eventsource-parser: "npm:^3.0.0"
+    express: "npm:^5.2.1"
+    express-rate-limit: "npm:^8.2.1"
+    hono: "npm:^4.11.4"
+    jose: "npm:^6.1.3"
+    json-schema-typed: "npm:^8.0.2"
+    pkce-challenge: "npm:^5.0.0"
+    raw-body: "npm:^3.0.0"
+    zod: "npm:^3.25 || ^4.0"
+    zod-to-json-schema: "npm:^3.25.1"
+  peerDependencies:
+    "@cfworker/json-schema": ^4.1.1
+    zod: ^3.25 || ^4.0
+  peerDependenciesMeta:
+    "@cfworker/json-schema":
+      optional: true
+    zod:
+      optional: false
+  checksum: 10c0/7c4bc339205b1652330cd4e6b121cc859079655f2b9c0506bbb15563ba0d07924bda3d949705530532db7f4d2cb86d633dc8f92bc32803d97c7bece2ac63e29f
+  languageName: node
+  linkType: hard
+
 "@modelcontextprotocol/sdk@npm:^1.12.0":
   version: 1.30.0
   resolution: "@modelcontextprotocol/sdk@npm:1.30.0"
@@ -4518,6 +4816,57 @@ __metadata:
     zod:
       optional: false
   checksum: 10c0/6d12d5c88048b42b0d64906222f804eecbfc0aae02fc42a200d2438f037276cc7863510a8ce649e82c96d5972f62a58bfbdedf79624b0558a607738f5e58b97e
+  languageName: node
+  linkType: hard
+
+"@nanmicoder/dsh-agent-teams@file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
+  version: 0.1.5
+  resolution: "@nanmicoder/dsh-agent-teams@file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz#vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz::hash=cf62ab&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1-rc.1
+    "@deepseek-ai/dsh-agent": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-locale": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-ui-conversation": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-llm": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-session": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-subagent": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-tools": ^0.1.0-rc.6
+    "@deepseek-ai/schemastery": ^3.18.1-rc.1
+    react: ^18.2.0
+  peerDependenciesMeta:
+    "@deepseek-ai/cordis":
+      optional: true
+    "@deepseek-ai/dsh-agent":
+      optional: true
+    "@deepseek-ai/dsh-client-locale":
+      optional: true
+    "@deepseek-ai/dsh-client-runtime":
+      optional: true
+    "@deepseek-ai/dsh-client-ui-conversation":
+      optional: true
+    "@deepseek-ai/dsh-client-ui-primitives":
+      optional: true
+    "@deepseek-ai/dsh-client-ui-slots":
+      optional: true
+    "@deepseek-ai/dsh-llm":
+      optional: true
+    "@deepseek-ai/dsh-session":
+      optional: true
+    "@deepseek-ai/dsh-subagent":
+      optional: true
+    "@deepseek-ai/dsh-system-prompt":
+      optional: true
+    "@deepseek-ai/dsh-tools":
+      optional: true
+    "@deepseek-ai/schemastery":
+      optional: true
+    react:
+      optional: true
+  checksum: 10c0/e65c48bd88df53b586c42506a1dc4099f1e33bc83e8feaf772ef726a43cd6d31341aafea501f30ddb19e4ba577ea13ac1935721d1ead82d1e6b6e80f50ba3cfc
   languageName: node
   linkType: hard
 
@@ -6697,13 +7046,19 @@ __metadata:
     "@deepseek-ai/dsh-message-feedback": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-output-retention": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-permission-presets": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-physical-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz"
+    "@deepseek-ai/dsh-physical-operator-resident": "file:vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-plan-mode": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-pwsh-local": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-pwsh-sandbox": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-resident-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz"
+    "@deepseek-ai/dsh-resident-operator-local": "file:vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz"
+    "@deepseek-ai/dsh-resident-operators": "file:vendor/dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-sandbox": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-sandbox-policy": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-sandbox-windows-acl": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-scope": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-sdk-protocol": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-session": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-session-persistence": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-session-projection": "npm:0.1.0-rc.6"
@@ -6721,12 +7076,14 @@ __metadata:
     "@deepseek-ai/dsh-storage": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-storage-domain": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-subagent": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-subagent-codex": "file:vendor/dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-subagent-in-process-driver": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-subprocess": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-system-prompt": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-terminal": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-timeout": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-token-meter": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-tool-physical-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-tool-workflow": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-tools": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-typert-protocol": "npm:0.1.0-rc.6"
@@ -6738,6 +7095,7 @@ __metadata:
     "@deepseek-ai/dsh-workflow": "npm:0.1.0-rc.6"
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     "@electron/asar": "npm:3.4.1"
+    "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz"
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^22.20.0"
     "@types/react": "npm:^18"

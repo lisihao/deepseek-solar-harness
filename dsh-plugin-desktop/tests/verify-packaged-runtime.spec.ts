@@ -69,6 +69,7 @@ describe('packaged desktop runtime verification', () => {
   it.each([
     'lib/client.js',
     'lib/desktop-runtime-environment.js',
+    'lib/native-product-runtime.js',
     'lib/profile-service.js',
     'lib/pnpm.js',
     'lib/update-download.js',
@@ -86,6 +87,8 @@ describe('packaged desktop runtime verification', () => {
     'lib/terminal.js',
     'lib/update-download.js',
     'node_modules/@deepseek-ai/dsh/lib/bin.js',
+    'node_modules/@deepseek-ai/dsh-resident-operator-local/lib/startup.js',
+    'node_modules/@nanmicoder/dsh-agent-teams/lib/index.js',
     'node_modules/pnpm/bin/pnpm.mjs',
     'node_modules/node-pty/prebuilds/win32-x64/conpty.node',
   ])('fails loud when physical runtime entry %s is absent from app.asar.unpacked', (missing) => {

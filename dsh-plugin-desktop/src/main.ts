@@ -16,6 +16,7 @@ import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import { installDesktopPnpmRuntime } from './desktop-runtime-environment.ts'
 import { ElectronDesktopRuntime } from './electron-runtime.ts'
 import { installProfilePackageResolver } from './module-resolution.ts'
+import { installNativeProductRuntime } from './native-product-runtime.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import {
   beginDesktopProfileStartup,
@@ -63,6 +64,7 @@ async function start(): Promise<void> {
   let shutdown: DesktopShutdown | undefined
   let removeShutdownRequests: (() => void) | undefined
   let disposePnpmRuntime: (() => void) | undefined
+  let disposeNativeProductRuntime: (() => void) | undefined
   let runtime!: ElectronDesktopRuntime
   const nativeExit = createDesktopExitCoordinator(
     {
@@ -88,7 +90,11 @@ async function start(): Promise<void> {
       try {
         await current?.fiber.dispose()
       } finally {
-        disposePnpmRuntime?.()
+        try {
+          disposeNativeProductRuntime?.()
+        } finally {
+          disposePnpmRuntime?.()
+        }
       }
     },
     finalExit,
@@ -111,7 +117,11 @@ async function start(): Promise<void> {
     try {
       await current?.fiber.dispose()
     } finally {
-      disposePnpmRuntime?.()
+      try {
+        disposeNativeProductRuntime?.()
+      } finally {
+        disposePnpmRuntime?.()
+      }
     }
   })
 
@@ -132,6 +142,14 @@ async function start(): Promise<void> {
     })
     const releasePnpmRuntime = (): void => { pnpmRuntime.dispose() }
     disposePnpmRuntime = releasePnpmRuntime
+    const nativeProductRuntime = installNativeProductRuntime({
+      platform: process.platform,
+      homeDir: app.getPath('home'),
+      stateDir: join(app.getPath('userData'), 'runtime-products'),
+      environment: process.env,
+    })
+    const releaseNativeProductRuntime = (): void => { nativeProductRuntime.dispose() }
+    disposeNativeProductRuntime = releaseNativeProductRuntime
     const homeDir = resolveDshHome()
     const selectionStatePath = join(app.getPath('userData'), 'profile-selection', 'state.json')
     profileStatePath = selectionStatePath
@@ -164,6 +182,10 @@ async function start(): Promise<void> {
         hostCtx.effect(
           () => releasePnpmRuntime,
           'dsh-plugin-desktop: packaged pnpm runtime PATH',
+        )
+        hostCtx.effect(
+          () => releaseNativeProductRuntime,
+          'dsh-plugin-desktop: native product command PATH',
         )
         current = hostCtx
         hostCtx.effect(

@@ -16,9 +16,11 @@ DSH Desktop 需要保留可供审查的 DeepSeek Harness 官方精确源码，�
 
 外层仓库是使用 `node_modules` linker 的 Yarn 4 工作区，唯一的 workspace 成员是 [`dsh-plugin-desktop`](../../../../dsh-plugin-desktop/)。上游 checkout 按照自己的[包管理器决策](../../../../deepseek-harness/.agents/notes/implemented/process/2026-06-16-pnpm-over-yarn.zh.md)保持为独立的 pnpm 工作区。根目录的 `upstream:*` 脚本通过 Yarn portable shell 进入子模块，再由 Corepack 调用上游固定的 pnpm 版本。
 
-普通桌面构建从 npm registry 解析已发布的 DSH 包，不从子模块链接源码。`upstream.json` 分别记录源码版本和运行时包 family。固定的 GitHub 公开源码声明为 `0.1.0-rc.5`，桌面运行时使用已发布的 `0.1.0-rc.6` family；当 npm artifact 没有发布对应源码提交时，仓库不会虚构两者的对应关系。
+普通桌面构建从 npm registry 解析已发布的 DSH 基础运行时包，不从子模块链接源码。`upstream.json` 分别记录源码版本和运行时包 family。固定的 GitHub 公开源码声明为 `0.1.0-rc.5`，桌面基础运行时使用已发布的 `0.1.0-rc.6` family；当 npm artifact 没有发布对应源码提交时，仓库不会虚构两者的对应关系。
 
-`yarn check:layout` 会拒绝变化的子模块 URL、提交、工作树、包管理边界、workspace 成员列表或 DSH 运行时 family。CI 会初始化子模块，以 immutable 模式安装外层工作区，运行桌面检查，并在 Windows 上执行上游命令路径。
+尚未由上游发布的产品扩展只允许使用狭窄的 sealed-artifact 例外，不能使用源码链接。七个 Resident Physical Operator 包以精确 tarball 存放在 `dsh-plugin-desktop/vendor/dsh-packages/`，其 fork commit 记录在 `vendor/manifest.json`，并在每次检查前验证 hash；root resolutions 会让全部传递引用固定到同一批字节。Desktop 包不会 import 或构建子模块 workspace，其他所有 `@deepseek-ai/dsh-*` 依赖仍必须等于已记录的公开运行时 family。
+
+`yarn check:layout` 会拒绝变化的子模块 URL、提交、工作树、包管理边界、workspace 成员列表、DSH 基础运行时 family 或未封装的 Resident 包引用。CI 会初始化子模块，以 immutable 模式安装外层工作区，运行桌面检查，并在 Windows 上执行上游命令路径。
 
 ## Verification
 

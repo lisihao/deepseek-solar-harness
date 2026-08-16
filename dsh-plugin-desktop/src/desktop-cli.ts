@@ -29,7 +29,7 @@ export function withDefaultDesktopProfile(argv: readonly string[], profileName: 
     return [...argv]
   }
   const first = argv[0]
-  if (first === 'web' || first === '--help' || first === '-h' || first === '--version' || first === '-V') {
+  if (first === 'web' || first === 'resident' || first === '--help' || first === '-h' || first === '--version' || first === '-V') {
     return [...argv]
   }
   if (first === 'plugin') {
