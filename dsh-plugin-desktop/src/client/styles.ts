@@ -44,12 +44,34 @@ html:has([aria-modal="true"]) .dshDesktopSidebarSurface::before { -webkit-app-re
 @media (prefers-reduced-motion: reduce) { .dshDesktopFrame { transition: none !important; } }
 `
 
+/** Root-scoped product marker shared by compatibility and advanced shells. */
+const SOLAR_BRAND_STYLES = `
+.dshDesktopSolarBrand { position: relative; flex: none; box-sizing: border-box; width: calc(100% + 8px); margin: 4px -4px 6px; padding: 8px 10px 8px 12px; overflow: hidden; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: linear-gradient(135deg, var(--dsw-alias-bg-layer-2), var(--dsw-alias-bg-base)); color: var(--dsw-alias-label-primary); }
+.dshDesktopSolarBrand::before { position: absolute; inset: 7px auto 7px 0; width: 3px; border-radius: 0 3px 3px 0; background: #f5a623; content: ""; }
+.dshDesktopSolarBrandPrimary, .dshDesktopSolarBrandTagline { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dshDesktopSolarBrandPrimary { font-size: 11px; font-weight: 600; line-height: 16px; }
+.dshDesktopSolarBrandTagline { color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 15px; }
+.dshDesktopSolarBrand:not([data-wide]) { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 2px 0; padding: 0; border-radius: 50%; }
+.dshDesktopSolarBrand:not([data-wide])::before { display: none; }
+.dshDesktopSolarBrandRail { color: #f5a623; font-size: 14px; font-weight: 700; }
+`
+
 /** Install and remove the advanced shell's global native-window styles. @returns the style disposer. */
 export function installAdvancedStyles(): () => void {
   const style = document.createElement('style')
   style.dataset.plugin = 'dsh-plugin-desktop'
   style.dataset.pluginCss = 'dsh-plugin-desktop/advanced-shell'
   style.textContent = ADVANCED_STYLES
+  document.head.appendChild(style)
+  return () => { style.remove() }
+}
+
+/** Install the always-visible Solar product marker styles. @returns the style disposer. */
+export function installSolarBrandStyles(): () => void {
+  const style = document.createElement('style')
+  style.dataset.plugin = 'dsh-plugin-desktop'
+  style.dataset.pluginCss = 'dsh-plugin-desktop/solar-brand'
+  style.textContent = SOLAR_BRAND_STYLES
   document.head.appendChild(style)
   return () => { style.remove() }
 }
