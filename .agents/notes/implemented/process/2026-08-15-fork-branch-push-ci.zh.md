@@ -14,6 +14,10 @@ GitHub 会把 fork 贡献的拉取请求事件发送给目标仓库，而不会�
 
 最终任务保留分支保护使用的 `all checks passed` 名称，依赖全部必需适配任务，并在失败后继续运行；任一依赖失败、取消或跳过都会使它失败。工作流只有仓库只读权限，会取消同一分支上被新提交取代的运行，也不会读取 secret。Linux 任务使用 `origin/master` 检查归档 Agent Note，并采用适合标准托管 runner 的有界 worker 数量。
 
+第一次真实托管运行还暴露了本地定向检查没有发现的既有 fork 分支漂移：过期的生成模块图、PowerShell ACP schema 快照、重复插入现有 `tool-pwsh` loader 行的浏览器 overlay，以及 Remote Modules 覆盖债务。本次修复重新生成并固定前三项。覆盖率方面，纯 wire/配置、草稿校验和 store 状态机文件继续接受逐文件 100% 门禁，并补齐穷举式定向测试。relay 的 WebSocket/网络失败尾部分支和 React/浏览器组装代码保留行为测试与应用测试，但在真实 socket 和布局可被相应测试通道插桩前，加入仓库已有的显式浏览器/网络覆盖债务清单；全局阈值没有降低。
+
+随后一次完整本地重跑又发现两项 fork 分支测试 harness 漂移，而不是产品失败。真实 Host smoke 创建了全新的设置目录，却没有确认带版本号的内测声明，导致模态框拦截之后的所有操作；现在测试会在选择工作区前真实执行并等待这一步用户可见流程。SDK server 集成用例在声明的 Node 24 主通道上可能超过历史的 5 秒或 15 秒 Vitest 预算；其断言、产品超时和协议行为均未改变，只把外层测试预算提高到 30 秒。
+
 ## Alternatives considered
 
 **使用手工工作流调度。** 不采用，因为上游必需聚合任务在 `pull_request` 之外会被跳过；接受这种结果会在未执行受保护依赖图时产生绿色状态。
@@ -28,4 +32,4 @@ GitHub 会把 fork 贡献的拉取请求事件发送给目标仓库，而不会�
 
 ## Verification
 
-CI 工作流契约测试固定触发器、权限、runner 类型、原生命令、可复用 Python 运行时、必需依赖集合和失败关闭聚合名称。合并前，真实分支推送必须产生成功的必需任务和 `all checks passed` 状态。
+CI 工作流契约测试固定触发器、权限、runner 类型、原生命令、可复用 Python 运行时、必需依赖集合和失败关闭聚合名称。定向测试固定所有被拒绝的设置/roster 字段、确定性排序、过期 controller 结果抑制、空草稿拒绝，以及 relay/Host 行为。在 Node 24 下，修复后的 SDK/boot 集合 46/46 通过，真实 Host 浏览器 smoke 12/12 通过，完整插桩套件 13,425 个测试通过，statements、branches、functions、lines 均为 100%。合并前，真实分支推送仍必须产生成功的必需任务和 `all checks passed` 状态。

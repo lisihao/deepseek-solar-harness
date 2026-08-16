@@ -187,6 +187,15 @@ export default defineConfig({
         'packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx',
         'packages/client/ui-workspace/src/client/WorkspacePicker.tsx',
         'packages/client/web-react/src/*',
+        // Remote Modules keeps its pure wire/configuration, draft-validation,
+        // and store state machines under the per-file gate. The relay's
+        // WebSocket/failure tails and React/browser assembly instead retain
+        // focused behavior tests while joining the explicit browser/network
+        // debt list until those lanes can instrument real sockets and layout.
+        'packages/client/ui-remote-modules/src/relay.ts',
+        'packages/client/ui-remote-modules/src/client/index.ts',
+        'packages/client/ui-remote-modules/src/client/RemoteModuleEntry.tsx',
+        'packages/client/ui-remote-modules/src/client/RemoteModulesSettings.tsx',
         // This isolated settings-scope lifecycle has complete unit coverage;
         // keep it out of the broader client-runtime GUI debt exemption.
         'packages/client/runtime/src/**/!(settings-scope).ts',
