@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { dshCommand, verifyDumpConfig, withGovernedProfile } from '../lib/preflight.js'
 
 let command
@@ -30,13 +30,36 @@ if (!verdict.ok) {
   process.exit(78)
 }
 
-const child = spawnSync(command[0], [...command.slice(1), ...args], {
+const child = spawn(command[0], [...command.slice(1), ...args], {
   stdio: 'inherit',
   env: process.env,
   shell: false,
 })
-if (child.error) {
-  console.error(`dsh-governed: launch failed: ${child.error.message}`)
+
+// LaunchAgent and terminal supervisors signal this wrapper, not the nested DSH
+// process. Forward shutdown signals so the Web host releases its listeners
+// before KeepAlive starts the next wrapper; otherwise the orphaned child keeps
+// port 3081 and the replacement fails with EADDRINUSE.
+const forwardedSignals = ['SIGINT', 'SIGTERM', 'SIGHUP']
+const forward = Object.fromEntries(forwardedSignals.map(signal => [
+  signal,
+  () => { child.kill(signal) },
+]))
+for (const signal of forwardedSignals) process.on(signal, forward[signal])
+
+let launchError
+child.once('error', (error) => { launchError = error })
+const outcome = await new Promise(resolve => {
+  child.once('close', (code, signal) => { resolve({ code, signal }) })
+})
+for (const signal of forwardedSignals) process.off(signal, forward[signal])
+
+if (launchError !== undefined) {
+  console.error(`dsh-governed: launch failed: ${launchError.message}`)
   process.exit(70)
 }
-process.exit(child.status ?? 70)
+if (outcome.signal !== null) {
+  process.kill(process.pid, outcome.signal)
+} else {
+  process.exit(outcome.code ?? 70)
+}
