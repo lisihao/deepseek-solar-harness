@@ -50,6 +50,12 @@ html:has([aria-modal="true"]) .dshDesktopSidebarSurface::before { -webkit-app-re
    form.  Keep the notice visible after the bottom action is clicked so a
    successful save cannot look like a no-op in the Desktop shell. */
 body[data-dsh-desktop-mode="advanced"] .mt-panel .me-notice { position: sticky; top: 0; z-index: 2; }
+/* Its value controls otherwise sit at the extreme right edge of every row,
+   where fixed workbench affordances and pets can intercept the pointer.
+   Use a compact label column so the actual controls stay in the unobscured
+   conversation surface even when those optional plugins are visible. */
+body[data-dsh-desktop-mode="advanced"] .mt-panel .me-form .me-field { justify-content: flex-start; }
+body[data-dsh-desktop-mode="advanced"] .mt-panel .me-form .me-field-label { flex: 0 1 320px; }
 @media (prefers-reduced-motion: reduce) { .dshDesktopFrame { transition: none !important; } }
 `
 
