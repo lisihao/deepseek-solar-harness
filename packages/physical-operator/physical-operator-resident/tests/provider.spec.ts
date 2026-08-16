@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import PhysicalOperatorRuntime from '@deepseek-ai/dsh-physical-operator'
+import ResidentOperatorService, {
+  ResidentOperatorCommandId,
+  ResidentOperatorSessionId,
+  ResidentOperatorTurnId,
+  type ResidentExecuteRequest,
+} from '@deepseek-ai/dsh-resident-operator'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import SubagentRuntime, {
+  type ResolvedSubagentStartRequest,
+  type SubagentProvider,
+  type SubagentRun,
+} from '@deepseek-ai/dsh-subagent'
+import * as provider from '../src/index.ts'
+
+function parent(): Agent {
+  return {
+    id: SessionId('parent'),
+    session: { header: { cwd: '/workspace' } },
+  } as unknown as Agent
+}
+
+class OneShotProvider implements SubagentProvider {
+  readonly name = 'codex'
+  readonly authentication = { mode: 'native-subscription' as const }
+  readonly capabilities = { outputSchema: false, depthLimit: false, toolFilter: false, persona: false }
+  readonly inheritsParentContext = false
+  starts = 0
+
+  start(_request: ResolvedSubagentStartRequest): Promise<SubagentRun> {
+    this.starts += 1
+    return Promise.resolve({
+      id: SessionId('child'),
+      localAgent: undefined,
+      result: Promise.resolve({ output: [{ type: 'text', text: 'ephemeral' }], stopReason: 'completed' }),
+      dispose: () => Promise.resolve(),
+    })
+  }
+}
+
+class ResidentStub extends ResidentOperatorService {
+  requests: ResidentExecuteRequest[] = []
+  providers() { return Promise.resolve([]) }
+  execute(request: ResidentExecuteRequest) {
+    this.requests.push(request)
+    return Promise.resolve({
+      turnId: ResidentOperatorTurnId('turn'),
+      sessionId: ResidentOperatorSessionId('resident-session'),
+      stateRevision: 7,
+      result: Promise.resolve({ output: [{ type: 'text' as const, text: 'resident' }], stopReason: 'completed' as const }),
+      dispose: () => Promise.resolve(),
+    })
+  }
+  list() { return Promise.resolve([]) }
+  inspect(): Promise<never> { return Promise.reject(new Error('unused')) }
+  readEvents() { return Promise.resolve({ events: [], nextSequence: 0 }) }
+  interrupt() { return Promise.resolve() }
+  reset(): Promise<never> { return Promise.reject(new Error('unused')) }
+  resolveIndeterminate() { return Promise.resolve() }
+}
+
+describe('physical-operator-resident', () => {
+  it('keeps ephemeral as default and routes only explicit resident calls to the durable seam', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(PhysicalOperatorRuntime)
+    new ResidentStub(ctx)
+    const oneShot = new OneShotProvider()
+    ctx.subagents.registerProvider(oneShot)
+    await ctx.plugin(provider, {
+      operators: [{
+        id: 'codex', ephemeralProvider: 'codex', residentProvider: 'codex',
+        displayName: 'Codex', description: 'Runs Codex through the user subscription.',
+      }],
+    })
+
+    expect(ctx.physicalOperators.status('codex').executionModes).toEqual(['ephemeral', 'resident'])
+    const ephemeral = await ctx.physicalOperators.start('codex', {
+      prompt: [{ type: 'text', text: 'one shot' }], parent: parent(), signal: new AbortController().signal,
+    })
+    expect(await ephemeral.result).toMatchObject({ output: [{ text: 'ephemeral' }] })
+    expect(oneShot.starts).toBe(1)
+
+    const resident = await ctx.physicalOperators.start('codex', {
+      mode: 'resident', prompt: [{ type: 'text', text: 'continue' }],
+      parent: parent(), signal: new AbortController().signal,
+    })
+    expect(await resident.result).toEqual({
+      output: [{ type: 'text', text: 'resident' }],
+      stopReason: 'completed',
+      continuity: { sessionId: 'resident-session', stateRevision: 7 },
+    })
+    expect((ctx.residentOperators as ResidentStub).requests[0]).toMatchObject({
+      commandId: ResidentOperatorCommandId(String(resident.id)),
+      operatorId: 'codex',
+      workspace: '/workspace',
+    })
+    expect(oneShot.starts).toBe(1)
+  })
+})

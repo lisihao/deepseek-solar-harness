@@ -32,6 +32,9 @@ export function PhysicalOperatorExecutionId(id: string): PhysicalOperatorExecuti
   return id as PhysicalOperatorExecutionId
 }
 
+/** Execution lifetime requested from one stable physical operator. */
+export type PhysicalOperatorExecutionMode = 'ephemeral' | 'resident'
+
 /** Stable descriptive and admission metadata owned by an operator provider. */
 export interface PhysicalOperatorDescriptor {
   /** Stable id selected by callers; it does not expose the backing transport. */
@@ -44,6 +47,8 @@ export interface PhysicalOperatorDescriptor {
   readonly tags: readonly string[]
   /** Maximum accepted executions across current and hot-reloaded registrations. */
   readonly maxConcurrency: number
+  /** Supported lifetimes. Absence preserves the original ephemeral-only contract. */
+  readonly executionModes?: readonly PhysicalOperatorExecutionMode[]
 }
 
 /** Provider-owned live availability, independent of service-owned capacity. */
@@ -52,7 +57,9 @@ export type PhysicalOperatorAvailability =
   | { readonly available: false; readonly reason: string }
 
 /** Current discovery snapshot returned by the registry. */
-export interface PhysicalOperatorStatus extends PhysicalOperatorDescriptor {
+export interface PhysicalOperatorStatus extends Omit<PhysicalOperatorDescriptor, 'executionModes'> {
+  /** Normalized modes; legacy descriptors are reported as ephemeral-only. */
+  readonly executionModes: readonly PhysicalOperatorExecutionMode[]
   /** Effective admission state after availability and capacity are combined. */
   readonly state: 'available' | 'busy' | 'unavailable'
   /** Number of accepted executions that have not settled. */
@@ -71,6 +78,16 @@ export interface PhysicalOperatorStartRequest {
   readonly parent: Agent
   /** Canonical cancellation channel before and after execution publication. */
   readonly signal: AbortSignal
+  /** Requested lifetime. Absence means `ephemeral` for backward compatibility. */
+  readonly mode?: PhysicalOperatorExecutionMode
+}
+
+/** Provider-facing request after the service owns identity and mode normalization. */
+export interface PhysicalOperatorProviderStartRequest extends PhysicalOperatorStartRequest {
+  /** Identity allocated before provider startup; resident providers reuse it as their command receipt id. */
+  readonly executionId: PhysicalOperatorExecutionId
+  /** Normalized requested lifetime. */
+  readonly mode: PhysicalOperatorExecutionMode
 }
 
 /** Known terminal reasons; providers may merge in additional string variants. */
@@ -91,6 +108,11 @@ export interface PhysicalOperatorResult {
   readonly output: ContentBlock[]
   /** Why the execution ended. Only `completed` is a successful result. */
   readonly stopReason: PhysicalOperatorStopReason
+  /** Opaque durable continuation identity returned only by resident executions. */
+  readonly continuity?: {
+    readonly sessionId: string
+    readonly stateRevision: number
+  }
 }
 
 /** Provider-owned run before the service adds identity and lifecycle observation. */
@@ -116,7 +138,7 @@ export interface PhysicalOperator {
   /** Resolve current transport or deployment availability without starting work. */
   availability(): PhysicalOperatorAvailability
   /** Establish one run; fulfillment transfers ownership to the caller. */
-  start(request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorProviderRun>
+  start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>
 }
 
 /** Observe-only identity emitted after one provider run is published. */

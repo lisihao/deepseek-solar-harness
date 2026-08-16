@@ -207,6 +207,14 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
     "prompt": {
       "type": "string",
       "description": "Complete standalone task for the selected operator. Required for action=run."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Execution lifetime. Omit for backward-compatible ephemeral execution.",
+      "enum": [
+        "ephemeral",
+        "resident"
+      ]
     }
   },
   "required": [

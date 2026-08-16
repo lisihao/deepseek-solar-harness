@@ -98,6 +98,7 @@ export class CodexAppServerWire {
   constructor(
     private readonly input: Readable,
     output: Writable,
+    private readonly approvalBehavior: 'decline' | 'require' = 'decline',
   ) {
     this.transport = new JsonRpcLineTransport(input, output)
     // Fatal protocol state can arrive after the current guarded operation has
@@ -146,21 +147,56 @@ export class CodexAppServerWire {
   }
 
   /**
-   * Create the run's private ephemeral thread and retain its identity.
+   * Create the requested private thread and retain its identity.
    * @param cwd - parent Session workspace.
    * @param signal - unpublished-start cancellation.
+   * @param ephemeral - whether product history may discard the thread after this run.
    */
-  async startThread(cwd: string, signal: AbortSignal): Promise<void> {
+  async startThread(cwd: string, signal: AbortSignal, ephemeral = true): Promise<void> {
     const response = object(await this.guarded(this.transport.request('thread/start', {
       cwd,
-      ephemeral: true,
+      ephemeral,
     }, signal), signal), 'thread/start response')
     const thread = object(response.thread, 'thread/start thread')
     const id = string(thread.id, 'thread/start thread id')
-    if (thread.ephemeral !== true) {
-      throw new Error('subagent-codex: app-server did not create an ephemeral thread')
+    if (thread.ephemeral !== ephemeral) {
+      throw new Error(ephemeral
+        ? 'subagent-codex: app-server did not create an ephemeral thread'
+        : 'subagent-codex: app-server did not create the requested persistent thread')
     }
     this.threadId = id
+  }
+
+  /**
+   * Resume one persisted app-server thread for a new turn.
+   * @param threadId - authoritative non-ephemeral product thread identity.
+   * @param cwd - canonical workspace for the resumed turn.
+   * @param signal - unpublished-start cancellation.
+   */
+  async resumeThread(threadId: string, cwd: string, signal: AbortSignal): Promise<void> {
+    const response = object(await this.guarded(this.transport.request('thread/resume', {
+      threadId,
+      cwd,
+    }, signal), signal), 'thread/resume response')
+    const thread = object(response.thread, 'thread/resume thread')
+    const id = string(thread.id, 'thread/resume thread id')
+    if (id !== threadId) {
+      throw new Error('subagent-codex: app-server resumed a different thread')
+    }
+    if (thread.ephemeral === true) {
+      throw new Error('subagent-codex: app-server resumed an ephemeral thread for resident execution')
+    }
+    this.threadId = id
+  }
+
+  /** Native thread identity after start or resume. */
+  get currentThreadId(): string | undefined {
+    return this.threadId
+  }
+
+  /** Native active turn identity after turn/start. */
+  get currentTurnId(): string | undefined {
+    return this.turnId
   }
 
   /**
@@ -168,11 +204,13 @@ export class CodexAppServerWire {
    * terminal notification.
    * @param texts - already validated task text blocks.
    * @param signal - local cancellation for the published run.
+   * @param onStarted - optional callback receiving the authoritative native turn identity.
    * @returns the shared subagent result.
    */
   async runTurn(
     texts: readonly string[],
     signal: AbortSignal,
+    onStarted?: (turnId: string) => void,
   ): Promise<SubagentResult> {
     const completion = Promise.withResolvers<JsonObject>()
     this.turnCompleted = completion
@@ -182,7 +220,9 @@ export class CodexAppServerWire {
       input: texts.map(text => ({ type: 'text', text, text_elements: [] })),
     }, signal), signal), 'turn/start response')
     const turn = object(response.turn, 'turn/start turn')
-    this.commitTurnId(string(turn.id, 'turn/start turn id'))
+    const startedTurnId = string(turn.id, 'turn/start turn id')
+    this.commitTurnId(startedTurnId)
+    onStarted?.(startedTurnId)
 
     const completed = await this.guarded(completion.promise, signal)
     const terminal = object(completed.turn, 'turn/completed turn')
@@ -295,18 +335,30 @@ export class CodexAppServerWire {
     try {
       switch (method) {
         case 'item/commandExecution/requestApproval':
-        case 'item/fileChange/requestApproval':
+        case 'item/fileChange/requestApproval': {
           this.validateRunIds(params)
-          return Promise.resolve({ decision: unattendedDecision(params) })
-        case 'item/permissions/requestApproval':
+          const response = { decision: unattendedDecision(params) }
+          this.requireApproval(method)
+          return Promise.resolve(response)
+        }
+        case 'item/permissions/requestApproval': {
           this.validateRunIds(params)
-          return Promise.resolve({ permissions: {}, scope: 'turn' })
-        case 'item/tool/requestUserInput':
+          const response = { permissions: {}, scope: 'turn' }
+          this.requireApproval(method)
+          return Promise.resolve(response)
+        }
+        case 'item/tool/requestUserInput': {
           this.validateRunIds(params)
-          return Promise.resolve({ answers: {} })
-        case 'mcpServer/elicitation/request':
+          const response = { answers: {} }
+          this.requireApproval(method)
+          return Promise.resolve(response)
+        }
+        case 'mcpServer/elicitation/request': {
           this.validateRunIds(params, true)
-          return Promise.resolve({ action: 'decline', content: null, _meta: null })
+          const response = { action: 'decline', content: null, _meta: null }
+          this.requireApproval(method)
+          return Promise.resolve(response)
+        }
         default:
           throw new Error(`subagent-codex: unsupported app-server request ${JSON.stringify(method)}`)
       }
@@ -314,6 +366,12 @@ export class CodexAppServerWire {
       const normalized = thrown(error)
       this.fail(normalized)
       return Promise.reject(normalized)
+    }
+  }
+
+  private requireApproval(method: string): void {
+    if (this.approvalBehavior === 'require') {
+      this.fail(new CodexApprovalRequiredError(method))
     }
   }
 
@@ -370,5 +428,13 @@ export class CodexAppServerWire {
       throw new Error(`subagent-codex: app-server returned invalid terminal turn status ${String(turn.status)}`)
     }
     turnCompleted.resolve(params)
+  }
+}
+
+/** Product-native request that a headless Resident caller must resolve out of band. */
+export class CodexApprovalRequiredError extends Error {
+  constructor(readonly method: string) {
+    super(`Codex requires interactive approval for ${method}`)
+    this.name = 'CodexApprovalRequiredError'
   }
 }

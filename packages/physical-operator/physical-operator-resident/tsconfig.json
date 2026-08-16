@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cosmokit" },
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../core/agent" },
+    { "path": "../../core/session" },
+    { "path": "../../subagent/subagent" },
+    { "path": "../physical-operator" },
+    { "path": "../resident-operator" },
+    { "path": "../../test-support/loader-smoke" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

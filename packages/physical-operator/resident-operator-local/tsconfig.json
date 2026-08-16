@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cosmokit" },
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../util/home-paths" },
+    { "path": "../../sdk/protocol" },
+    { "path": "../../subprocess/subprocess" },
+    { "path": "../../subagent/subagent" },
+    { "path": "../../subagent/subagent-codex" },
+    { "path": "../resident-operator" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

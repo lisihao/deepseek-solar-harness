@@ -89,7 +89,7 @@ describe('physical_operator tool', () => {
     const schema = ctx.tools.schemas().find(candidate => candidate.name === 'physical_operator')
     expect(schema).toBeDefined()
     const properties = schema!.parameters.properties as Record<string, unknown>
-    expect(Object.keys(properties).sort()).toEqual(['action', 'description', 'operator_id', 'prompt'])
+    expect(Object.keys(properties).sort()).toEqual(['action', 'description', 'mode', 'operator_id', 'prompt'])
     expect(schema!.description).not.toMatch(/codex|claude|subagent/i)
     expect(schema!.description).toContain('backing provider')
   })
@@ -109,6 +109,7 @@ describe('physical_operator tool', () => {
         state: 'available',
         active: 0,
         maxConcurrency: 1,
+        executionModes: ['ephemeral'],
       }],
     })
     expect(text(result)).toContain('physics-solver [available]')

@@ -1389,6 +1389,40 @@ export interface Config {
 
 Source: [`packages/preset/persona/src/index.ts:34`](../packages/preset/persona/src/index.ts)
 
+<a id="deepseek-aidsh-physical-operator-resident"></a>
+
+## `@deepseek-ai/dsh-physical-operator-resident`
+
+Requires: `physicalOperators` · `residentOperators` · `subagents`
+
+```ts config-catalog
+/** Dual-mode router plugin configuration. */
+export interface Config {
+  /** Stable physical-operator mappings to register. */
+  readonly operators: OperatorConfig[]
+}
+
+/** One stable dual-mode physical-operator deployment mapping. */
+export interface OperatorConfig {
+  /** Stable model-selected physical operator identity. */
+  readonly id: string
+  /** Existing `ctx.subagents` Provider used by the default ephemeral mode. */
+  readonly ephemeralProvider: string
+  /** Native product Driver id used by explicit Resident execution. */
+  readonly residentProvider?: string
+  /** Human-readable discovery name. */
+  readonly displayName: string
+  /** Concise discovery statement for model selection. */
+  readonly description: string
+  /** Selection hints only; these grant no authority. */
+  readonly tags?: string[]
+  /** Shared fail-fast capacity across both execution modes. */
+  readonly maxConcurrency?: number
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-resident/src/index.ts:40`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 
 ## `@deepseek-ai/dsh-physical-operator-subagent`
@@ -1525,6 +1559,26 @@ export interface Config {
 ```
 
 Source: [`packages/guard/repeat-tool-reminder/src/index.ts:28`](../packages/guard/repeat-tool-reminder/src/index.ts)
+
+<a id="deepseek-aidsh-resident-operator-local"></a>
+
+## `@deepseek-ai/dsh-resident-operator-local`
+
+```ts config-catalog
+/** Local Resident Service Provider configuration. */
+export interface Config {
+  /** Optional DSH home override whose `resident-operators` child holds daemon state. */
+  readonly dshHome?: string
+  /** Start an independent local daemon when no compatible socket is reachable. */
+  readonly autoStart?: boolean
+  /** Bounded socket connection and daemon startup wait in milliseconds. */
+  readonly connectTimeoutMs?: number
+  /** Turn-settlement polling interval in milliseconds. */
+  readonly pollIntervalMs?: number
+}
+```
+
+Source: [`packages/physical-operator/resident-operator-local/src/index.ts:35`](../packages/physical-operator/resident-operator-local/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -2179,7 +2233,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/subagent/subagent-codex/src/index.ts:31`](../packages/subagent/subagent-codex/src/index.ts)
+Source: [`packages/subagent/subagent-codex/src/index.ts:33`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 
@@ -3139,6 +3193,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-lsp` ([`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts))
 - `@deepseek-ai/dsh-physical-operator` ([`packages/physical-operator/physical-operator/src/index.ts`](../packages/physical-operator/physical-operator/src/index.ts))
+- `@deepseek-ai/dsh-resident-operators` ([`packages/bundle/resident-operators/src/index.ts`](../packages/bundle/resident-operators/src/index.ts))
 - `@deepseek-ai/dsh-schedule` — requires `agents` · `sessions` · `tools` · `sessionPersistence` ([`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts))
 - `@deepseek-ai/dsh-session` ([`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts))
 - `@deepseek-ai/dsh-session-checkpoint-policy` — requires `llm` · `sessionPersistence` · `sessions` · `tools` ([`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts))
@@ -3169,6 +3224,7 @@ Abstract service classes — a deployment loads a concrete implementation packag
 - `@deepseek-ai/dsh-fs` — abstract `FileSystem` ([`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker` — abstract `DirectoryPicker` ([`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts))
 - `@deepseek-ai/dsh-jobs` — abstract `JobRegistry` ([`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts))
+- `@deepseek-ai/dsh-resident-operator` — abstract `ResidentOperatorService` ([`packages/physical-operator/resident-operator/src/index.ts`](../packages/physical-operator/resident-operator/src/index.ts))
 - `@deepseek-ai/dsh-sandbox` — abstract `SandboxProvider` ([`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts))
 - `@deepseek-ai/dsh-session-persistence` — abstract `SessionPersistence` ([`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts))
 - `@deepseek-ai/dsh-session-query` — abstract `SessionQueryEngine` ([`packages/session-query/session-query/src/index.ts`](../packages/session-query/session-query/src/index.ts))

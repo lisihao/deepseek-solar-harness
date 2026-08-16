@@ -219,6 +219,9 @@ importers:
       '@deepseek-ai/dsh-pwsh-sandbox':
         specifier: workspace:^
         version: link:../../packages/shell/pwsh-sandbox
+      '@deepseek-ai/dsh-resident-operator-local':
+        specifier: workspace:^
+        version: link:../../packages/physical-operator/resident-operator-local
       '@deepseek-ai/dsh-schedule':
         specifier: workspace:^
         version: link:../../packages/schedule/schedule
@@ -548,6 +551,9 @@ importers:
       '@deepseek-ai/dsh-physical-operator':
         specifier: workspace:*
         version: link:../packages/physical-operator/physical-operator
+      '@deepseek-ai/dsh-physical-operator-resident':
+        specifier: workspace:*
+        version: link:../packages/physical-operator/physical-operator-resident
       '@deepseek-ai/dsh-physical-operator-subagent':
         specifier: workspace:*
         version: link:../packages/physical-operator/physical-operator-subagent
@@ -560,6 +566,12 @@ importers:
       '@deepseek-ai/dsh-repeat-tool-reminder':
         specifier: workspace:*
         version: link:../packages/guard/repeat-tool-reminder
+      '@deepseek-ai/dsh-resident-operator':
+        specifier: workspace:*
+        version: link:../packages/physical-operator/resident-operator
+      '@deepseek-ai/dsh-resident-operator-local':
+        specifier: workspace:*
+        version: link:../packages/physical-operator/resident-operator-local
       '@deepseek-ai/dsh-sandbox':
         specifier: workspace:*
         version: link:../packages/sandbox/sandbox
@@ -1270,6 +1282,43 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+
+  packages/bundle/resident-operators:
+    dependencies:
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../../physical-operator/physical-operator
+      '@deepseek-ai/dsh-physical-operator-resident':
+        specifier: workspace:^
+        version: link:../../physical-operator/physical-operator-resident
+      '@deepseek-ai/dsh-resident-operator':
+        specifier: workspace:^
+        version: link:../../physical-operator/resident-operator
+      '@deepseek-ai/dsh-resident-operator-local':
+        specifier: workspace:^
+        version: link:../../physical-operator/resident-operator-local
+      '@deepseek-ai/dsh-subagent-claude-code':
+        specifier: workspace:^
+        version: link:../../subagent/subagent-claude-code
+      '@deepseek-ai/dsh-subagent-codex':
+        specifier: workspace:^
+        version: link:../../subagent/subagent-codex
+      '@deepseek-ai/dsh-tool-physical-operator':
+        specifier: workspace:^
+        version: link:../../physical-operator/tool-physical-operator
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: workspace:^
+        version: link:../../../vendor/include
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      js-yaml:
+        specifier: ^4.2.0
+        version: 4.2.0
 
   packages/bundle/web-app:
     dependencies:
@@ -5616,6 +5665,37 @@ importers:
         specifier: workspace:^
         version: link:../../core/session
 
+  packages/physical-operator/physical-operator-resident:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:^
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-loader-smoke':
+        specifier: workspace:^
+        version: link:../../test-support/loader-smoke
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../physical-operator
+      '@deepseek-ai/dsh-resident-operator':
+        specifier: workspace:^
+        version: link:../resident-operator
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-subagent':
+        specifier: workspace:^
+        version: link:../../subagent/subagent
+
   packages/physical-operator/physical-operator-subagent:
     dependencies:
       '@deepseek-ai/schemastery':
@@ -5646,6 +5726,73 @@ importers:
       '@deepseek-ai/dsh-subagent':
         specifier: workspace:^
         version: link:../../subagent/subagent
+
+  packages/physical-operator/resident-operator:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-brand':
+        specifier: workspace:^
+        version: link:../../util/brand
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+
+  packages/physical-operator/resident-operator-local:
+    dependencies:
+      '@anthropic-ai/claude-agent-sdk':
+        specifier: 0.3.220
+        version: 0.3.220(@anthropic-ai/sdk@0.93.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@4.4.3)
+      '@anthropic-ai/sdk':
+        specifier: 0.93.0
+        version: 0.93.0(zod@4.4.3)
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.4.3)
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../util/home-paths
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-resident-operator':
+        specifier: workspace:^
+        version: link:../resident-operator
+      '@deepseek-ai/dsh-sdk-protocol':
+        specifier: workspace:^
+        version: link:../../sdk/protocol
+      '@deepseek-ai/dsh-subagent':
+        specifier: workspace:^
+        version: link:../../subagent/subagent
+      '@deepseek-ai/dsh-subagent-codex':
+        specifier: workspace:^
+        version: link:../../subagent/subagent-codex
+      '@deepseek-ai/dsh-subprocess':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
 
   packages/physical-operator/tool-physical-operator:
     devDependencies:

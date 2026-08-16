@@ -44,8 +44,15 @@ interface PluginInvocation {
   args: string[]
 }
 
+/** Manage and inspect the local resident-operator daemon. */
+interface ResidentInvocation {
+  mode: 'resident'
+  /** Raw resident command arguments parsed by the dedicated adapter. */
+  args: string[]
+}
+
 /** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
-export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation
+export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation | ResidentInvocation
 
 /** Launcher flags shared by the default command and the `web` alias. */
 interface BootOptions {
@@ -69,6 +76,7 @@ Examples:
   dsh --profile tui --resume <session>       arguments after the launcher flags reach the app
   dsh --profile web --help                   the web app's own flags and help
   dsh plugin --profile tui add <package>     install a plugin into the tui profile
+  dsh resident list                          list durable resident sessions
 `
 
 /**
@@ -178,6 +186,16 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       if (options.profile === '') program.error('error: --profile needs a name')
       if (args.length === 0) program.error('error: plugin needs pnpm arguments to forward (e.g. add <package>)')
       resolved = { mode: 'plugin', profile: options.profile, args }
+    })
+
+  const resident = program.command('resident').description('manage and inspect the local resident physical-operator daemon')
+  resident
+    .allowUnknownOption()
+    .argument('[args...]', 'resident command and arguments (list, inspect, attach, interrupt, reset, daemon)')
+    .action((args: string[]) => {
+      rejectParentOptions('resident')
+      if (args.length === 0) program.error('error: resident needs a command (list, inspect, attach, interrupt, reset, resolve-indeterminate, daemon)')
+      resolved = { mode: 'resident', args }
     })
 
   try {

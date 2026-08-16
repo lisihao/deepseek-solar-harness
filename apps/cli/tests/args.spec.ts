@@ -57,6 +57,14 @@ describe('parseDshArgs', () => {
       .toEqual({ mode: 'plugin', profile: 'tui', args: ['add', '--save-dev', 'x'] })
   })
 
+  it('routes resident management commands without a profile boot', () => {
+    expect(parse(['resident', 'list'])).toEqual({ mode: 'resident', args: ['list'] })
+    expect(parse(['resident', 'attach', 'session-1', '--read-only', '--once']))
+      .toEqual({ mode: 'resident', args: ['attach', 'session-1', '--read-only', '--once'] })
+    expect(parse(['resident', 'reset', 'session-1', '--expected-revision', '4']))
+      .toEqual({ mode: 'resident', args: ['reset', 'session-1', '--expected-revision', '4'] })
+  })
+
   it('routes profile and web config dumps', () => {
     expect(parse(['--profile', 'web', '--dump-config']))
       .toEqual({ mode: 'dump-config', profile: 'web', defaultOnly: false, patches: [] })
@@ -96,6 +104,8 @@ describe('parseDshArgs', () => {
     expect(exitCode(['plugin', '--profile', 'tui'])).toBe(1) // nothing to forward
     expect(exitCode(['plugin', '--profile', ''])).toBe(1)
     expect(exitCode(['--profile', 'x', 'plugin', 'add', 'y'])).toBe(1)
+    expect(exitCode(['resident'])).toBe(1)
+    expect(exitCode(['--profile', 'x', 'resident', 'list'])).toBe(1)
   })
 
   it('keeps its own help for an invocation with no app to hand it to', () => {

@@ -1,0 +1,48 @@
+# Opt-in Resident Physical Operator bundle. The base bundle owns subagents,
+# subprocess, tools, and DSH_HOME expression helpers. This layer adds only the
+# generic physical/resident seams and native-subscription product providers.
+
+- insert:
+    - id: physical-operators
+      name: '@deepseek-ai/dsh-physical-operator'
+
+    - id: resident-operators
+      name: '@deepseek-ai/dsh-resident-operator-local'
+      config:
+        autoStart: true
+        connectTimeoutMs: 5000
+        pollIntervalMs: 250
+
+    - id: subagent-codex-native-subscription
+      name: '@deepseek-ai/dsh-subagent-codex'
+      config:
+        env: {}
+        disposeGraceMs: 3000
+
+    - id: subagent-claude-code-native-subscription
+      name: '@deepseek-ai/dsh-subagent-claude-code'
+      config:
+        env: {}
+        disposeGraceMs: 3000
+
+    - id: physical-operator-dual-mode
+      name: '@deepseek-ai/dsh-physical-operator-resident'
+      config:
+        operators:
+          - id: codex
+            ephemeralProvider: codex
+            residentProvider: codex
+            displayName: Codex
+            description: Runs Codex through the user's native ChatGPT subscription.
+            tags: [coding, reasoning, subscription]
+            maxConcurrency: 1
+          - id: claude-code
+            ephemeralProvider: claude-code
+            residentProvider: claude-code
+            displayName: Claude Code
+            description: Runs Claude Code through the user's native Claude subscription.
+            tags: [coding, reasoning, subscription]
+            maxConcurrency: 1
+
+    - id: tool-physical-operator
+      name: '@deepseek-ai/dsh-tool-physical-operator'

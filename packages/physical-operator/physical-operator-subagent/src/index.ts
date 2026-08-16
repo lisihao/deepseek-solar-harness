@@ -14,7 +14,7 @@ import {
   type PhysicalOperator,
   type PhysicalOperatorDescriptor,
   type PhysicalOperatorProviderRun,
-  type PhysicalOperatorStartRequest,
+  type PhysicalOperatorProviderStartRequest,
 } from '@deepseek-ai/dsh-physical-operator'
 import type { SubagentProvider, SubagentRun } from '@deepseek-ai/dsh-subagent'
 
@@ -88,6 +88,7 @@ class SubagentPhysicalOperator implements PhysicalOperator {
       description: config.description,
       tags: Object.freeze([...(config.tags ?? [])]),
       maxConcurrency: config.maxConcurrency ?? 1,
+      executionModes: ['ephemeral'],
     }
   }
 
@@ -101,7 +102,7 @@ class SubagentPhysicalOperator implements PhysicalOperator {
       : { available: false as const, reason }
   }
 
-  async start(request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorProviderRun> {
+  async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
     const reason = providerUnavailableReason(
       this.provider,
       this.ctx.subagents.getProvider(this.provider),

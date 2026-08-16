@@ -33,6 +33,7 @@ try {
       state: operator.state,
       active: operator.active,
       maxConcurrency: operator.maxConcurrency,
+      executionModes: operator.executionModes,
     })),
     tool: tool.name,
     starts: { subagent: subagentStarts, physicalOperator: physicalStarts },

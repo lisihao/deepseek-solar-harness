@@ -8,6 +8,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperator,
   type PhysicalOperatorAvailability,
   type PhysicalOperatorProviderRun,
+  type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
   type PhysicalOperatorStartRequest,
 } from '@deepseek-ai/dsh-physical-operator'
@@ -28,7 +29,7 @@ function request(signal = new AbortController().signal): PhysicalOperatorStartRe
 class StubOperator implements PhysicalOperator {
   readonly descriptor
   starts = 0
-  lastRequest: PhysicalOperatorStartRequest | undefined
+  lastRequest: PhysicalOperatorProviderStartRequest | undefined
   disposed = 0
 
   constructor(
@@ -50,7 +51,7 @@ class StubOperator implements PhysicalOperator {
     return this.live
   }
 
-  async start(value: PhysicalOperatorStartRequest): Promise<PhysicalOperatorProviderRun> {
+  async start(value: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
     this.starts += 1
     this.lastRequest = value
     return {
@@ -80,6 +81,7 @@ describe('PhysicalOperatorRuntime', () => {
     const dispose = service.registerOperator(operator)
     expect(service.list()).toEqual([{
       ...operator.descriptor,
+      executionModes: ['ephemeral'],
       state: 'available',
       active: 0,
     }])
@@ -92,6 +94,10 @@ describe('PhysicalOperatorRuntime', () => {
     })
     await run.dispose()
     expect(operator.starts).toBe(1)
+    expect(operator.lastRequest).toMatchObject({
+      executionId: run.id,
+      mode: 'ephemeral',
+    })
     expect(operator.disposed).toBe(1)
     expect(lifecycle).toEqual(['start', 'end'])
     expect(service.status('physics.solve').active).toBe(0)
@@ -204,5 +210,16 @@ describe('PhysicalOperatorRuntime', () => {
       name: 'PhysicalOperatorError',
       code: 'OPERATOR_BUSY',
     })
+  })
+
+  it('normalizes legacy operators to ephemeral and rejects unsupported resident mode before startup', async () => {
+    const { runtime: service } = await runtime()
+    const operator = new StubOperator('legacy', Promise.resolve({ output: [], stopReason: 'completed' }))
+    service.registerOperator(operator)
+    expect(service.status('legacy').executionModes).toEqual(['ephemeral'])
+    await expect(service.start('legacy', { ...request(), mode: 'resident' })).rejects.toMatchObject({
+      code: 'OPERATOR_MODE_UNSUPPORTED',
+    })
+    expect(operator.starts).toBe(0)
   })
 })

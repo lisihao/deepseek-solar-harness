@@ -6,7 +6,7 @@ The Service Definition for deployment-defined physical operators. It owns the `c
 
 ## Contract and lifecycle
 
-Providers register a `PhysicalOperator` with a stable lowercase id, presentation metadata, selection tags, and positive `maxConcurrency`. `list()` and `status()` return live availability plus service-owned active capacity. `start()` reserves capacity before provider startup, rejects unavailable or busy operators with typed errors, and returns a provider-owned result/disposal handle under a new execution id.
+Providers register a `PhysicalOperator` with a stable lowercase id, presentation metadata, selection tags, positive `maxConcurrency`, and optional execution modes. Omission means `ephemeral` only. `list()` and `status()` return normalized modes, live availability, and service-owned active capacity. `start()` defaults to `ephemeral`, rejects unsupported modes without fallback, reserves capacity, allocates the execution id before Provider startup, and returns a Provider-owned result/disposal handle. A Resident Provider uses that id as its durable command identity, so a disconnected caller can retry without starting duplicate work.
 
 Accepted executions survive provider-plugin disposal. Re-registering the same operator id during HMR sees the outstanding capacity until the old run settles. The service emits `physical-operator/start` and `physical-operator/end` exactly once around every published execution. Listener failures are contained and cannot change execution settlement.
 
@@ -16,6 +16,7 @@ Accepted executions survive provider-plugin disposal. Re-registering the same op
 | `OPERATOR_UNAVAILABLE` | The provider reports unavailable. |
 | `OPERATOR_BUSY` | The configured concurrent capacity is full. |
 | `OPERATOR_ABORTED` | The caller signal was already aborted before admission. |
+| `OPERATOR_MODE_UNSUPPORTED` | The requested execution lifetime is not declared by the Provider. |
 | `DUPLICATE_OPERATOR` | Two live registrations claim the same stable id. |
 | `INVALID_OPERATOR` | Descriptor identity or metadata is invalid. |
 
@@ -33,7 +34,7 @@ No direct invalidation; the named Consumer owns any request-prefix changes.
 
 ## Known Limitations and Deferred Work
 
-- **Fail-fast admission only** — there is no queue, priority, fairness, quota, cooldown, retry, or durable receipt.
+- **Fail-fast admission only** — there is no queue, priority, fairness, quota, or cooldown; durable receipts belong to Resident Providers, not this registry.
 - **Process-local discovery and counters** — registrations and active capacity are not shared across hosts or restored after process restart.
 - **No selector or scoring policy** — callers choose a stable id; tags are only discovery metadata.
 - **Generic subagent-shaped result** — structured physics schemas, content-addressed artifacts, provenance, progress streaming, and checkpoints remain future provider/contract work.

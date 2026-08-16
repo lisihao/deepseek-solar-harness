@@ -28,7 +28,7 @@ describe('physical-operator public Loader composition', () => {
     expect(JSON.parse(stdout)).toEqual({
       tool: {
         name: 'physical_operator',
-        parameterNames: ['action', 'description', 'operator_id', 'prompt'],
+        parameterNames: ['action', 'description', 'mode', 'operator_id', 'prompt'],
         required: ['action'],
       },
       list: {
@@ -41,6 +41,7 @@ describe('physical-operator public Loader composition', () => {
           state: 'available',
           active: 0,
           maxConcurrency: 1,
+          executionModes: ['ephemeral'],
         }],
       },
       run: {
@@ -55,6 +56,7 @@ describe('physical-operator public Loader composition', () => {
         description: 'Solves one bounded physics problem.',
         tags: ['physics', 'reasoning'],
         maxConcurrency: 1,
+        executionModes: ['ephemeral'],
         state: 'available',
         active: 0,
       },
@@ -83,8 +85,8 @@ describe('physical-operator public Loader composition', () => {
         { name: 'claude-code', authentication: { mode: 'native-subscription' } },
       ],
       operators: [
-        { id: 'physics-codex', state: 'available', active: 0, maxConcurrency: 1 },
-        { id: 'physics-claude-code', state: 'available', active: 0, maxConcurrency: 1 },
+        { id: 'physics-codex', state: 'available', active: 0, maxConcurrency: 1, executionModes: ['ephemeral'] },
+        { id: 'physics-claude-code', state: 'available', active: 0, maxConcurrency: 1, executionModes: ['ephemeral'] },
       ],
       tool: 'physical_operator',
       starts: { subagent: 0, physicalOperator: 0 },

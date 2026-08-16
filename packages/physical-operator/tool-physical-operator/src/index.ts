@@ -24,6 +24,7 @@ type ToolRequest = {
   readonly operator_id?: string
   readonly description?: string
   readonly prompt?: string
+  readonly mode?: 'ephemeral' | 'resident'
 }
 
 type OperatorListValue = {
@@ -34,6 +35,7 @@ type OperatorListValue = {
   readonly state: PhysicalOperatorStatus['state']
   readonly active: number
   readonly maxConcurrency: number
+  readonly executionModes: Array<'ephemeral' | 'resident'>
   readonly unavailableReason?: string
 }
 
@@ -44,6 +46,7 @@ type ToolValue =
     readonly operatorId: string
     readonly executionId: string
     readonly output: JsonValue[]
+    readonly continuity?: { readonly sessionId: string; readonly stateRevision: number }
   }
 
 /** Register the fixed discovery-and-execution tool. */
@@ -73,6 +76,11 @@ export function apply(ctx: Context): void {
         type: 'string',
         description: 'Complete standalone task for the selected operator. Required for action=run.',
       },
+      mode: {
+        type: 'string',
+        enum: ['ephemeral', 'resident'],
+        description: 'Execution lifetime. Omit for backward-compatible ephemeral execution.',
+      },
     },
     output: {
       schema: {
@@ -100,6 +108,11 @@ export function apply(ctx: Context): void {
                     },
                     active: { type: 'number', required: true },
                     maxConcurrency: { type: 'number', required: true },
+                    executionModes: {
+                      type: 'array',
+                      required: true,
+                      items: { type: 'string', enum: ['ephemeral', 'resident'] },
+                    },
                     unavailableReason: { type: 'string' },
                   },
                 },
@@ -114,6 +127,14 @@ export function apply(ctx: Context): void {
               operatorId: { type: 'string', required: true },
               executionId: { type: 'string', required: true },
               output: { type: 'array', required: true, items: { type: 'json' } },
+              continuity: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  sessionId: { type: 'string', required: true },
+                  stateRevision: { type: 'number', required: true },
+                },
+              },
             },
           },
         ],
@@ -128,6 +149,7 @@ export function apply(ctx: Context): void {
               `${operator.operatorId} [${operator.state}] ${operator.displayName}`,
               `  ${operator.description}`,
               `  capacity ${operator.active}/${operator.maxConcurrency}`,
+              `  modes: ${operator.executionModes.join(', ')}`,
               operator.tags.length === 0 ? undefined : `  tags: ${operator.tags.join(', ')}`,
               operator.unavailableReason === undefined ? undefined : `  unavailable: ${operator.unavailableReason}`,
             ].filter((line): line is string => line !== undefined).join('\n')).join('\n'),
@@ -157,6 +179,7 @@ export function apply(ctx: Context): void {
         prompt: [{ type: 'text', text: prompt }],
         parent,
         signal: exec.signal,
+        ...request.mode === undefined ? {} : { mode: request.mode },
       })
       const result = await settleForeground(run)
       return {
@@ -164,6 +187,7 @@ export function apply(ctx: Context): void {
         operatorId: String(run.operatorId),
         executionId: String(run.id),
         output: result.output as unknown as JsonValue[],
+        ...result.continuity === undefined ? {} : { continuity: result.continuity },
       }
     },
   }))
@@ -171,7 +195,7 @@ export function apply(ctx: Context): void {
 
 /** Reject run-only keys on list so accidental work requests are never ignored. */
 function rejectRunFieldsOnList(request: ToolRequest): void {
-  for (const field of ['operator_id', 'description', 'prompt'] as const) {
+  for (const field of ['operator_id', 'description', 'prompt', 'mode'] as const) {
     if (request[field] !== undefined) {
       throw new Error(`physical_operator action=list does not accept ${field}`)
     }
@@ -196,6 +220,7 @@ function statusValue(status: PhysicalOperatorStatus): OperatorListValue {
     state: status.state,
     active: status.active,
     maxConcurrency: status.maxConcurrency,
+    executionModes: [...status.executionModes],
     ...status.unavailableReason === undefined ? {} : { unavailableReason: status.unavailableReason },
   }
 }

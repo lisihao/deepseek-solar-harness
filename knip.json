@@ -11,6 +11,7 @@
     "sandbox-exec",
     "tar",
     "taskkill",
+    "tmux",
     "where.exe"
   ],
   "ignoreWorkspaces": [
@@ -65,6 +66,8 @@
         "acp-agent/tests/fixtures/physical-operator/subagent/fixture.ts",
         "acp-agent/tests/fixtures/physical-operator/subagent/product-driver.ts",
         "acp-agent/tests/fixtures/physical-operator/subagent/subscription-canary-driver.ts",
+        "acp-agent/tests/fixtures/physical-operator/resident/driver.ts",
+        "acp-agent/tests/fixtures/physical-operator/resident/resident-fixture.ts",
         "jsonrpc-agent/tests/fixtures/subagent/subagent-dsh-sdk/driver.ts",
         "jsonrpc-agent/tests/fixtures/subagent/subagent-dsh-sdk/child-mock-llm.ts",
         "jsonrpc-agent/tests/fixtures/subagent/subagent-dsh-sdk/mock-delegating-llm.ts",
@@ -260,6 +263,25 @@
       "entry": [
         "tests/**/*.spec.ts",
         "tests/**/*.e2e.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
+    "packages/physical-operator/physical-operator-resident": {
+      "entry": [
+        "tests/**/*.spec.ts",
+        "tests/**/*.e2e.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
+    "packages/physical-operator/resident-operator-local": {
+      "entry": [
+        "tests/**/*.spec.ts"
       ],
       "project": [
         "src/**/*.ts",
@@ -783,6 +805,11 @@
       ]
     },
     "packages/bundle/base": {
+      "ignoreDependencies": [
+        "@deepseek-ai/.+"
+      ]
+    },
+    "packages/bundle/resident-operators": {
       "ignoreDependencies": [
         "@deepseek-ai/.+"
       ]

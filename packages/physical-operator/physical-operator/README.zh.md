@@ -6,7 +6,7 @@
 
 ## 约定与生命周期
 
-Provider 使用稳定的小写 ID、展示元数据、选择标签和正数 `maxConcurrency` 注册 `PhysicalOperator`。`list()` 与 `status()` 返回实时可用性以及由服务维护的活动容量。`start()` 在 Provider 启动前预留容量，以类型化错误拒绝不可用或繁忙的算子，并以新的执行 ID 返回由 Provider 持有的结果与释放句柄。
+Provider 使用稳定的小写 ID、展示元数据、选择标签、正数 `maxConcurrency` 和可选执行模式注册 `PhysicalOperator`。省略执行模式表示只支持 `ephemeral`。`list()` 与 `status()` 返回规范化后的模式、实时可用性以及由服务维护的活动容量。`start()` 默认使用 `ephemeral`，拒绝不受支持的模式且不会回退，在 Provider 启动前预留容量并分配执行 ID，最后返回由 Provider 持有的结果与释放句柄。Resident Provider 会把该 ID 用作持久化命令身份，因此断线调用方可以重试，而不会启动重复工作。
 
 已经接受的执行可以在 Provider 插件释放后继续完成。HMR 期间重新注册同一算子 ID 时，替代实现会继续看到旧运行占用的容量，直至旧运行结束。服务会围绕每个已发布的执行恰好发出一次 `physical-operator/start` 与 `physical-operator/end`。监听器失败会被隔离，不能改变执行结果。
 
@@ -16,6 +16,7 @@ Provider 使用稳定的小写 ID、展示元数据、选择标签和正数 `max
 | `OPERATOR_UNAVAILABLE` | Provider 报告不可用。 |
 | `OPERATOR_BUSY` | 配置的并发容量已满。 |
 | `OPERATOR_ABORTED` | 准入前调用方信号已中止。 |
+| `OPERATOR_MODE_UNSUPPORTED` | Provider 未声明支持请求的执行生命周期。 |
 | `DUPLICATE_OPERATOR` | 两个活动注册占用同一稳定 ID。 |
 | `INVALID_OPERATOR` | 描述符身份或元数据无效。 |
 
@@ -33,7 +34,7 @@ Provider 使用稳定的小写 ID、展示元数据、选择标签和正数 `max
 
 ## 已知限制与后续工作
 
-- **仅快速失败准入**：没有队列、优先级、公平性、配额、冷却、重试或持久化 receipt。
+- **仅快速失败准入**：没有队列、优先级、公平性、配额或冷却；持久化 receipt 归 Resident Provider 所有，而非本注册表。
 - **仅进程内发现与计数**：注册和活动容量不会跨主机共享，也不会在进程重启后恢复。
 - **没有选择器或评分策略**：调用方选择稳定 ID；标签只是发现元数据。
 - **通用 subagent 形态的结果**：结构化物理 schema、内容寻址工件、provenance、进度流和 checkpoint 留待未来的 Provider 或约定扩展。

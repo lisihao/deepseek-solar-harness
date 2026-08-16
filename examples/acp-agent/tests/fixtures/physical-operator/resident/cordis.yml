@@ -1,0 +1,46 @@
+# Keyless real-Loader proof for the dual-mode physical-operator route.
+- id: fixture
+  name: '../subagent/fixture.ts'
+
+- id: resident-fixture
+  name: './resident-fixture.ts'
+
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+
+- id: physical-operator
+  name: '@deepseek-ai/dsh-physical-operator'
+
+- id: physical-operator-resident
+  name: '@deepseek-ai/dsh-physical-operator-resident'
+  config:
+    operators:
+      - id: physics-solver
+        ephemeralProvider: scripted-physics
+        residentProvider: scripted-resident
+        displayName: Physics Solver
+        description: Solves one bounded physics problem.
+        tags: [physics, reasoning]
+        maxConcurrency: 1
+
+- id: tool-physical-operator
+  name: '@deepseek-ai/dsh-tool-physical-operator'
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents:
+      - id: main
+        provider: fixture
+        model: fixture
+        cwd: !!js process.cwd()
+    persona: 'This composition fixture does not run a parent model turn.'
+    workspaceContext: false
+
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+
+- id: checkpoint-policy
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'

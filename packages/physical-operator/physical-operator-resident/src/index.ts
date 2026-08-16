@@ -1,0 +1,180 @@
+/** Dual-mode physical operator provider: one stable id, explicit lifetime routing. @module @deepseek-ai/dsh-physical-operator-resident */
+
+import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
+import {
+  PhysicalOperatorError,
+  PhysicalOperatorId,
+  type PhysicalOperator,
+  type PhysicalOperatorDescriptor,
+  type PhysicalOperatorProviderRun,
+  type PhysicalOperatorProviderStartRequest,
+} from '@deepseek-ai/dsh-physical-operator'
+import { ResidentOperatorCommandId, type ResidentTurn } from '@deepseek-ai/dsh-resident-operator'
+import type { SubagentProvider, SubagentRun } from '@deepseek-ai/dsh-subagent'
+
+export const name = 'physical-operator-resident'
+export const inject = ['physicalOperators', 'residentOperators', 'subagents']
+
+const SUBSCRIPTION_PRODUCTS = new Set(['codex', 'claude-code'])
+
+/** One stable dual-mode physical-operator deployment mapping. */
+export interface OperatorConfig {
+  /** Stable model-selected physical operator identity. */
+  readonly id: string
+  /** Existing `ctx.subagents` Provider used by the default ephemeral mode. */
+  readonly ephemeralProvider: string
+  /** Native product Driver id used by explicit Resident execution. */
+  readonly residentProvider?: string
+  /** Human-readable discovery name. */
+  readonly displayName: string
+  /** Concise discovery statement for model selection. */
+  readonly description: string
+  /** Selection hints only; these grant no authority. */
+  readonly tags?: string[]
+  /** Shared fail-fast capacity across both execution modes. */
+  readonly maxConcurrency?: number
+}
+
+/** Dual-mode router plugin configuration. */
+export interface Config {
+  /** Stable physical-operator mappings to register. */
+  readonly operators: OperatorConfig[]
+}
+
+export const Config: z<Config> = z.object({
+  operators: z.array(z.object({
+    id: z.string().required(),
+    ephemeralProvider: z.string().required(),
+    residentProvider: z.string(),
+    displayName: z.string().required(),
+    description: z.string().required(),
+    tags: z.array(z.string()).default([]),
+    maxConcurrency: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(1),
+  })).min(1),
+})
+
+function subagentReason(name: string, provider: SubagentProvider | undefined): string | undefined {
+  if (provider === undefined) return `subagent provider "${name}" is not registered`
+  if (!SUBSCRIPTION_PRODUCTS.has(name)) return undefined
+  return provider.authentication?.mode === 'native-subscription'
+    ? undefined
+    : `subagent provider "${name}" must attest native-subscription authentication`
+}
+
+class DualModePhysicalOperator implements PhysicalOperator {
+  readonly descriptor: PhysicalOperatorDescriptor
+
+  constructor(
+    private readonly ctx: Context,
+    private readonly config: OperatorConfig,
+  ) {
+    this.descriptor = {
+      id: PhysicalOperatorId(config.id),
+      displayName: config.displayName,
+      description: config.description,
+      tags: Object.freeze([...(config.tags ?? [])]),
+      maxConcurrency: config.maxConcurrency ?? 1,
+      executionModes: config.residentProvider === undefined
+        ? ['ephemeral']
+        : ['ephemeral', 'resident'],
+    }
+  }
+
+  availability() {
+    const reason = subagentReason(
+      this.config.ephemeralProvider,
+      this.ctx.subagents.getProvider(this.config.ephemeralProvider),
+    )
+    return reason === undefined
+      ? { available: true as const }
+      : { available: false as const, reason }
+  }
+
+  async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
+    if (request.mode === 'ephemeral') return this.startEphemeral(request)
+    return this.startResident(request)
+  }
+
+  private async startEphemeral(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
+    const reason = subagentReason(
+      this.config.ephemeralProvider,
+      this.ctx.subagents.getProvider(this.config.ephemeralProvider),
+    )
+    if (reason !== undefined) throw new PhysicalOperatorError(reason, 'OPERATOR_UNAVAILABLE')
+    const run: SubagentRun = await this.ctx.subagents.start(this.config.ephemeralProvider, {
+      ...request.label === undefined ? {} : { label: request.label },
+      prompt: request.prompt,
+      parent: request.parent,
+      signal: request.signal,
+    })
+    return { result: run.result, dispose: () => run.dispose() }
+  }
+
+  private async startResident(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
+    const residentProvider = this.config.residentProvider
+    if (residentProvider === undefined) {
+      throw new PhysicalOperatorError(
+        `physical operator "${this.config.id}" has no resident provider`,
+        'OPERATOR_MODE_UNSUPPORTED',
+      )
+    }
+    const workspace = request.parent.session.header.cwd
+    if (workspace === undefined) {
+      throw new PhysicalOperatorError('resident physical operator requires a parent workspace', 'WORKSPACE_INVALID')
+    }
+    const turn: ResidentTurn = await this.ctx.residentOperators.execute({
+      commandId: ResidentOperatorCommandId(String(request.executionId)),
+      operatorId: residentProvider,
+      workspace,
+      prompt: request.prompt,
+      signal: request.signal,
+    })
+    return {
+      result: turn.result.then(result => ({
+        output: result.output,
+        stopReason: result.stopReason,
+        continuity: {
+          sessionId: String(turn.sessionId),
+          stateRevision: turn.stateRevision,
+        },
+      })),
+      dispose: () => turn.dispose(),
+    }
+  }
+}
+
+export function apply(ctx: Context, config: Config): void {
+  if (!Array.isArray(config.operators) || config.operators.length === 0) {
+    throw new Error('physical-operator-resident: operators must contain at least one mapping')
+  }
+  const ids = new Set<string>()
+  for (const [index, operator] of config.operators.entries()) {
+    validate(operator, index)
+    if (ids.has(operator.id)) throw new Error(`physical-operator-resident: duplicate operator id "${operator.id}"`)
+    ids.add(operator.id)
+  }
+  for (const operator of config.operators) {
+    ctx.physicalOperators.registerOperator(new DualModePhysicalOperator(ctx, operator))
+  }
+}
+
+function validate(config: OperatorConfig, index: number): void {
+  for (const [field, value] of [
+    ['id', config.id],
+    ['ephemeralProvider', config.ephemeralProvider],
+    ['displayName', config.displayName],
+    ['description', config.description],
+  ] as const) {
+    if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
+      throw new Error(`physical-operator-resident: operators[${index}].${field} must be non-blank and trimmed`)
+    }
+  }
+  if (config.residentProvider !== undefined
+    && (config.residentProvider.length === 0 || config.residentProvider.trim() !== config.residentProvider)) {
+    throw new Error(`physical-operator-resident: operators[${index}].residentProvider must be non-blank and trimmed`)
+  }
+  if (!Number.isSafeInteger(config.maxConcurrency ?? 1) || (config.maxConcurrency ?? 1) < 1) {
+    throw new Error(`physical-operator-resident: operators[${index}].maxConcurrency must be positive`)
+  }
+}

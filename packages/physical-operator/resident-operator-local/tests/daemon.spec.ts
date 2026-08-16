@@ -1,0 +1,283 @@
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { ResidentProviderStatus } from '@deepseek-ai/dsh-resident-operator'
+import { ResidentDaemonClient } from '../src/client.ts'
+import { ResidentDaemon } from '../src/daemon.ts'
+import {
+  EXPECTED_CODEX_CLI_VERSION,
+  EXPECTED_CODEX_SCHEMA_SHA256,
+  type DriverExecuteRequest,
+  type ResidentProductDriver,
+} from '../src/drivers.ts'
+
+const roots: string[] = []
+const temporaryRoot = (): string => {
+  const value = mkdtempSync(join(tmpdir(), 'dsh-resident-daemon-'))
+  roots.push(value)
+  return value
+}
+
+afterEach(() => {
+  for (const value of roots.splice(0)) rmSync(value, { recursive: true, force: true })
+})
+
+class MemoryDriver implements ResidentProductDriver {
+  readonly operatorId = 'codex' as const
+  constructor(readonly counts = new Map<string, number>()) {}
+
+  qualify(): Promise<ResidentProviderStatus> {
+    return Promise.resolve({
+      operatorId: 'codex',
+      product: 'codex',
+      available: true,
+      authentication: 'native-subscription',
+      productVersion: 'test',
+      protocolHash: 'test',
+    })
+  }
+
+  async execute(request: DriverExecuteRequest) {
+    const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
+    const count = (this.counts.get(session) ?? 0) + 1
+    this.counts.set(session, count)
+    request.onRunning(session, `turn-${count}`)
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, 5)
+      request.signal.addEventListener('abort', () => {
+        clearTimeout(timer)
+        reject(new Error('aborted'))
+      }, { once: true })
+    })
+    return {
+      output: [{ type: 'text' as const, text: `session=${session};count=${count}` }],
+      stopReason: 'completed' as const,
+      nativeSessionId: session,
+    }
+  }
+}
+
+class BlockingDriver extends MemoryDriver {
+  override async execute(request: DriverExecuteRequest) {
+    const session = request.nativeSessionId ?? 'native-blocking'
+    request.onRunning(session, 'turn-blocking')
+    await new Promise<void>((resolve, reject) => {
+      request.signal.addEventListener('abort', () => { reject(new Error('aborted')) }, { once: true })
+      setTimeout(resolve, 5_000)
+    })
+    return { output: [], stopReason: 'completed' as const, nativeSessionId: session }
+  }
+}
+
+class FailingDriver extends MemoryDriver {
+  override async execute(request: DriverExecuteRequest): Promise<never> {
+    const prompt = request.prompt[0]
+    const text = prompt?.type === 'text' ? prompt.text : 'missing'
+    throw new Error(`failure echoed ${text}; OPENAI_API_KEY=sk-test-secret-token-123456789`)
+  }
+}
+
+class UnavailableTransportDriver extends MemoryDriver {
+  override qualify(): Promise<ResidentProviderStatus> {
+    return Promise.resolve({
+      operatorId: 'codex',
+      product: 'codex',
+      available: false,
+      unavailableReason: 'managed app-server daemon is unavailable',
+      authentication: 'native-subscription',
+      productVersion: EXPECTED_CODEX_CLI_VERSION,
+      protocolHash: EXPECTED_CODEX_SCHEMA_SHA256,
+    })
+  }
+}
+
+function client(root: string): ResidentDaemonClient {
+  return new ResidentDaemonClient({ root, autoStart: false, connectTimeoutMs: 2_000, pollIntervalMs: 5 })
+}
+
+describe('ResidentDaemon', () => {
+  it('continues one operator+realpath workspace across client restart and isolates workspaces', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    const another = join(root, 'another')
+    mkdirSync(workspace)
+    mkdirSync(another)
+    const driver = new MemoryDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const firstClient = client(root)
+    const first = await firstClient.execute({
+      commandId: 'command-1', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'first' }], signal: new AbortController().signal,
+    })
+    expect(await first.result).toMatchObject({ output: [{ text: 'session=native-1;count=1' }] })
+
+    const restartedClient = client(root)
+    const second = await restartedClient.execute({
+      commandId: 'command-2', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'second' }], signal: new AbortController().signal,
+    })
+    expect(second.sessionId).toBe(first.sessionId)
+    expect(await second.result).toMatchObject({ output: [{ text: 'session=native-1;count=2' }] })
+
+    const isolated = await restartedClient.execute({
+      commandId: 'command-3', operatorId: 'codex', workspace: another,
+      prompt: [{ type: 'text', text: 'other' }], signal: new AbortController().signal,
+    })
+    expect(isolated.sessionId).not.toBe(first.sessionId)
+    expect(await isolated.result).toMatchObject({ output: [{ text: 'session=native-2;count=1' }] })
+    await daemon.close()
+  })
+
+  it('canonicalizes symlink workspaces and resumes the native session after daemon restart', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    const alias = join(root, 'workspace-alias')
+    mkdirSync(workspace)
+    symlinkSync(workspace, alias)
+    const productState = new Map<string, number>()
+    const firstDriver = new MemoryDriver(productState)
+    const firstDaemon = new ResidentDaemon({ root, drivers: [firstDriver] })
+    await firstDaemon.start()
+    const first = await client(root).execute({
+      commandId: 'restart-one', operatorId: 'codex', workspace: alias,
+      prompt: [{ type: 'text', text: 'one' }], signal: new AbortController().signal,
+    })
+    await first.result
+    await firstDaemon.close()
+
+    const secondDriver = new MemoryDriver(productState)
+    const secondDaemon = new ResidentDaemon({ root, drivers: [secondDriver] })
+    await secondDaemon.start()
+    const second = await client(root).execute({
+      commandId: 'restart-two', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'two' }], signal: new AbortController().signal,
+    })
+    expect(second.sessionId).toBe(first.sessionId)
+    expect(await second.result).toMatchObject({ output: [{ text: 'session=native-1;count=2' }] })
+    await secondDaemon.close()
+  })
+
+  it('fails concurrent turns loud and leaves an interrupted session reusable', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const daemon = new ResidentDaemon({ root, drivers: [new BlockingDriver()] })
+    await daemon.start()
+    const connected = client(root)
+    const active = await connected.execute({
+      commandId: 'busy-one', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'wait' }], signal: new AbortController().signal,
+    })
+    await expect(connected.execute({
+      commandId: 'busy-two', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'overlap' }], signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'SESSION_BUSY' })
+    const foreignWorkspace = join(root, 'foreign-workspace')
+    mkdirSync(foreignWorkspace)
+    const foreign = await client(root).execute({
+      commandId: 'foreign', operatorId: 'codex', workspace: foreignWorkspace,
+      prompt: [{ type: 'text', text: 'foreign' }], signal: new AbortController().signal,
+    })
+    await expect(connected.interrupt(foreign.sessionId, active.turnId))
+      .rejects.toMatchObject({ code: 'SESSION_UNAVAILABLE' })
+    await connected.interrupt(foreign.sessionId, foreign.turnId)
+    await expect(foreign.result).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    await connected.interrupt(active.sessionId, active.turnId)
+    await expect(active.result).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    expect(await connected.inspect(active.sessionId)).toMatchObject({ lifecycle: 'idle', health: 'ok' })
+    await daemon.close()
+  })
+
+  it('rejects incompatible handshakes and malformed prompt blocks before product execution', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new MemoryDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const raw = connected as unknown as {
+      rawRequest<T>(method: string, params: object, signal?: AbortSignal): Promise<T>
+    }
+    await expect(raw.rawRequest('system.handshake', {
+      protocol_version: 99,
+      state_schema_version: 1,
+    })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+    await expect(raw.rawRequest('turn.execute', {
+      command_id: 'invalid-prompt',
+      operator_id: 'codex',
+      workspace,
+      prompt: [{ type: 'text', text: 42 }],
+    })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+    expect(driver.counts.size).toBe(0)
+    await daemon.close()
+  })
+
+  it('rejects a daemon from a different build before exposing its services', async () => {
+    const root = temporaryRoot()
+    const daemon = new ResidentDaemon({ root, buildCommit: 'foreign-build', drivers: [new MemoryDriver()] })
+    await daemon.start()
+    await expect(client(root).ready()).rejects.toMatchObject({ code: 'PROVIDER_VERSION_MISMATCH' })
+    await daemon.close()
+  })
+
+  it('reports a qualified subscription with an unavailable native transport as runtime unavailable', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const daemon = new ResidentDaemon({ root, drivers: [new UnavailableTransportDriver()] })
+    await daemon.start()
+    await expect(client(root).execute({
+      commandId: 'transport-unavailable', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'never admitted' }], signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    await daemon.close()
+  })
+
+  it('redacts prompt and credential-shaped values before persisting a failed receipt', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const daemon = new ResidentDaemon({ root, drivers: [new FailingDriver()] })
+    await daemon.start()
+    const connected = client(root)
+    const turn = await connected.execute({
+      commandId: 'redacted', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'private prompt nonce' }], signal: new AbortController().signal,
+    })
+    await expect(turn.result).rejects.toThrow('[REDACTED_PROMPT]')
+    const persisted = daemon.store.inspectTurn(turn.turnId)
+    expect(JSON.stringify(persisted)).not.toContain('private prompt nonce')
+    expect(JSON.stringify(persisted)).not.toContain('sk-test-secret-token')
+    await daemon.close()
+  })
+
+  it('returns a settled receipt for an identical command and conflicts on a changed request', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new MemoryDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const first = await connected.execute({
+      commandId: 'same', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'same' }], signal: new AbortController().signal,
+    })
+    await first.result
+    const replay = await connected.execute({
+      commandId: 'same', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'same' }], signal: new AbortController().signal,
+    })
+    expect(replay.turnId).toBe(first.turnId)
+    await replay.result
+    expect(driver.counts.get('native-1')).toBe(1)
+    await expect(connected.execute({
+      commandId: 'same', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'different' }], signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
+    await daemon.close()
+  })
+})

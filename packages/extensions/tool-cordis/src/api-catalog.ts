@@ -1001,6 +1001,61 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'residentOperators',
+    summary: 'Abstract provider-neutral resident session/control surface.',
+    description: 'Abstract provider-neutral resident session/control surface.',
+    methods: [
+      {
+        signature: 'abstract providers(): Promise<ResidentProviderStatus[]>',
+        description: 'Qualify every configured native product provider.',
+        parameters: [],
+        returns: 'current version, protocol, and native-subscription availability snapshots.',
+      },
+      {
+        signature: 'abstract execute(request: ResidentExecuteRequest): Promise<ResidentTurn>',
+        description: 'Admit or replay one durable command for its operator/workspace Session.',
+        parameters: [{ name: 'request', description: 'command identity, optional retry lineage, prompt, workspace, and cancellation signal.' }],
+        returns: 'a holder-owned turn whose result settles independently.',
+      },
+      {
+        signature: 'abstract list(): Promise<ResidentSessionSnapshot[]>',
+        description: 'List all daemon-owned Resident Session snapshots.',
+        parameters: [],
+        returns: 'snapshots ordered by provider-defined recency.',
+      },
+      {
+        signature: 'abstract inspect(sessionId: string): Promise<ResidentSessionSnapshot>',
+        description: 'Read one Resident Session snapshot.',
+        parameters: [{ name: 'sessionId', description: 'opaque Session identity returned by execution or listing.' }],
+        returns: 'the current lifecycle, health, revision, and native association.',
+      },
+      {
+        signature: 'abstract readEvents(request: ResidentEventReadRequest): Promise<ResidentEventPage>',
+        description: 'Read a bounded page of structured observation events.',
+        parameters: [{ name: 'request', description: 'Session identity, exclusive cursor, bound, and optional signal.' }],
+        returns: 'ordered events and the next exclusive cursor.',
+      },
+      {
+        signature: 'abstract interrupt(request: ResidentInterruptRequest): Promise<void>',
+        description: 'Interrupt the named active turn without deleting its Session.',
+        parameters: [{ name: 'request', description: 'matching Session and turn identities.' }],
+        returns: 'after the Provider accepts the interrupt request.',
+      },
+      {
+        signature: 'abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>',
+        description: 'Replace an idle Session\'s native-product association under optimistic concurrency.',
+        parameters: [{ name: 'request', description: 'Session identity, expected state revision, and audit reason.' }],
+        returns: 'the revised idle Session snapshot.',
+      },
+      {
+        signature: 'abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>',
+        description: 'Record an explicit decision for an indeterminate command.',
+        parameters: [{ name: 'request', description: 'command identity, abandon decision, and expected Session revision.' }],
+        returns: 'after the resolution is durably committed.',
+      },
+    ],
+  },
+  {
     key: 'sandbox',
     summary: 'Abstract process-sandbox service.',
     description: 'Abstract process-sandbox service. confine must return enforcing argv or fail closed at wrap or runner-execution time; silent unconfined passthrough is forbidden. Functional probes arbitrate multi-runner chains and may be skipped for a sole candidate, whose own refusal remains the fail-closed end.',
@@ -3548,7 +3603,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperator',
-    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(): PhysicalOperatorAvailability;\n    start(request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
+    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(): PhysicalOperatorAvailability;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
   },
   {
     name: 'PhysicalOperatorAvailability',
@@ -3556,7 +3611,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorDescriptor',
-    declaration: 'export interface PhysicalOperatorDescriptor {\n    readonly id: PhysicalOperatorId;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n}',
+    declaration: 'export interface PhysicalOperatorDescriptor {\n    readonly id: PhysicalOperatorId;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly executionModes?: readonly PhysicalOperatorExecutionMode[];\n}',
   },
   {
     name: 'PhysicalOperatorExecutionEndInfo',
@@ -3571,6 +3626,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorExecutionInfo {\n    readonly executionId: PhysicalOperatorExecutionId;\n    readonly operatorId: PhysicalOperatorId;\n}',
   },
   {
+    name: 'PhysicalOperatorExecutionMode',
+    declaration: 'export type PhysicalOperatorExecutionMode = \'ephemeral\' | \'resident\';',
+  },
+  {
     name: 'PhysicalOperatorId',
     declaration: 'export type PhysicalOperatorId = Branded<\'PhysicalOperatorId\'>;',
   },
@@ -3579,8 +3638,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorProviderRun {\n    readonly result: Promise<PhysicalOperatorResult>;\n    dispose(): Promise<void>;\n}',
   },
   {
+    name: 'PhysicalOperatorProviderStartRequest',
+    declaration: 'export interface PhysicalOperatorProviderStartRequest extends PhysicalOperatorStartRequest {\n    readonly executionId: PhysicalOperatorExecutionId;\n    readonly mode: PhysicalOperatorExecutionMode;\n}',
+  },
+  {
     name: 'PhysicalOperatorResult',
-    declaration: 'export interface PhysicalOperatorResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n}',
+    declaration: 'export interface PhysicalOperatorResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n    readonly continuity?: {\n        readonly sessionId: string;\n        readonly stateRevision: number;\n    };\n}',
   },
   {
     name: 'PhysicalOperatorRun',
@@ -3588,11 +3651,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',
-    declaration: 'export interface PhysicalOperatorStatus extends PhysicalOperatorDescriptor {\n    readonly state: \'available\' | \'busy\' | \'unavailable\';\n    readonly active: number;\n    readonly unavailableReason?: string;\n}',
+    declaration: 'export interface PhysicalOperatorStatus extends Omit<PhysicalOperatorDescriptor, \'executionModes\'> {\n    readonly executionModes: readonly PhysicalOperatorExecutionMode[];\n    readonly state: \'available\' | \'busy\' | \'unavailable\';\n    readonly active: number;\n    readonly unavailableReason?: string;\n}',
   },
   {
     name: 'PhysicalOperatorStopReason',
@@ -3717,6 +3780,78 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RequestRunOutcome',
     declaration: 'export type RequestRunOutcome = \'approved\' | \'completed\' | \'rejected\' | \'cancelled\' | \'failed\';',
+  },
+  {
+    name: 'ResidentEvent',
+    declaration: 'export interface ResidentEvent {\n    readonly sequence: number;\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly type: string;\n    readonly time: string;\n    readonly data: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'ResidentEventPage',
+    declaration: 'export interface ResidentEventPage {\n    readonly events: ResidentEvent[];\n    readonly nextSequence: number;\n}',
+  },
+  {
+    name: 'ResidentEventReadRequest',
+    declaration: 'export interface ResidentEventReadRequest {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly afterSequence?: number;\n    readonly limit?: number;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'ResidentExecuteRequest',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly signal: AbortSignal;\n}',
+  },
+  {
+    name: 'ResidentHealth',
+    declaration: 'export type ResidentHealth = \'ok\' | \'degraded\' | \'unavailable\';',
+  },
+  {
+    name: 'ResidentHealthReason',
+    declaration: 'export type ResidentHealthReason = \'auth_required\' | \'quota_exhausted\' | \'protocol_mismatch\' | \'process_crashed\' | \'workspace_missing\';',
+  },
+  {
+    name: 'ResidentIndeterminateResolutionRequest',
+    declaration: 'export interface ResidentIndeterminateResolutionRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly decision: \'abandon\';\n    readonly expectedStateRevision: number;\n}',
+  },
+  {
+    name: 'ResidentInterruptRequest',
+    declaration: 'export interface ResidentInterruptRequest {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly turnId: ResidentOperatorTurnId;\n}',
+  },
+  {
+    name: 'ResidentLifecycle',
+    declaration: 'export type ResidentLifecycle = \'starting\' | \'idle\' | \'running\' | \'draining\' | \'stopped\';',
+  },
+  {
+    name: 'ResidentOperatorCommandId',
+    declaration: 'export type ResidentOperatorCommandId = Branded<\'ResidentOperatorCommandId\'>;',
+  },
+  {
+    name: 'ResidentOperatorSessionId',
+    declaration: 'export type ResidentOperatorSessionId = Branded<\'ResidentOperatorSessionId\'>;',
+  },
+  {
+    name: 'ResidentOperatorTurnId',
+    declaration: 'export type ResidentOperatorTurnId = Branded<\'ResidentOperatorTurnId\'>;',
+  },
+  {
+    name: 'ResidentProviderStatus',
+    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: \'claude-code\' | \'codex\';\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n}',
+  },
+  {
+    name: 'ResidentResetRequest',
+    declaration: 'export interface ResidentResetRequest {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly expectedStateRevision: number;\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'ResidentSessionSnapshot',
+    declaration: 'export interface ResidentSessionSnapshot {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly lifecycle: ResidentLifecycle;\n    readonly health: ResidentHealth;\n    readonly healthReason?: ResidentHealthReason;\n    readonly control: \'automation\';\n    readonly stateRevision: number;\n    readonly nativeSessionId?: string;\n    readonly activeTurnId?: ResidentOperatorTurnId;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'ResidentStopReason',
+    declaration: 'export type ResidentStopReason = \'completed\' | \'aborted\' | \'error\' | \'max-tokens\' | \'refusal\';',
+  },
+  {
+    name: 'ResidentTurn',
+    declaration: 'export interface ResidentTurn {\n    readonly turnId: ResidentOperatorTurnId;\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly stateRevision: number;\n    readonly result: Promise<ResidentTurnResult>;\n    dispose(): Promise<void>;\n}',
+  },
+  {
+    name: 'ResidentTurnResult',
+    declaration: 'export interface ResidentTurnResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: ResidentStopReason;\n    readonly resultRef?: string;\n}',
   },
   {
     name: 'ResolvedAlwaysRetryPolicy',

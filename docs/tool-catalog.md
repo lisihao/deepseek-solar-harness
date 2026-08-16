@@ -205,6 +205,14 @@ Discover and run deployment-defined physical operators. Use action=list to inspe
     "prompt": {
       "type": "string",
       "description": "Complete standalone task for the selected operator. Required for action=run."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Execution lifetime. Omit for backward-compatible ephemeral execution.",
+      "enum": [
+        "ephemeral",
+        "resident"
+      ]
     }
   },
   "required": [

@@ -17,7 +17,9 @@ import type {
   PhysicalOperatorExecutionEndInfo,
   PhysicalOperatorExecutionInfo,
   PhysicalOperatorId,
+  PhysicalOperatorExecutionMode,
   PhysicalOperatorProviderRun,
+  PhysicalOperatorProviderStartRequest,
   PhysicalOperatorRun,
   PhysicalOperatorStartRequest,
   PhysicalOperatorStatus,
@@ -32,8 +34,10 @@ export type {
   PhysicalOperatorAvailability,
   PhysicalOperatorDescriptor,
   PhysicalOperatorExecutionEndInfo,
+  PhysicalOperatorExecutionMode,
   PhysicalOperatorExecutionInfo,
   PhysicalOperatorProviderRun,
+  PhysicalOperatorProviderStartRequest,
   PhysicalOperatorResult,
   PhysicalOperatorRun,
   PhysicalOperatorStartRequest,
@@ -148,6 +152,13 @@ export class PhysicalOperatorRuntime extends Service {
     }
     const operator = this.expectOperator(id)
     const status = this.statusOf(operator)
+    const mode: PhysicalOperatorExecutionMode = request.mode ?? 'ephemeral'
+    if (!status.executionModes.includes(mode)) {
+      throw new PhysicalOperatorError(
+        `physical operator "${id}" does not support ${mode} execution`,
+        'OPERATOR_MODE_UNSUPPORTED',
+      )
+    }
     if (status.state === 'unavailable') {
       throw new PhysicalOperatorError(
         `physical operator "${id}" is unavailable: ${status.unavailableReason ?? 'no reason reported'}`,
@@ -162,19 +173,24 @@ export class PhysicalOperatorRuntime extends Service {
     }
 
     const stableId = operator.descriptor.id
+    const identity: PhysicalOperatorExecutionInfo = {
+      executionId: executionId(randomUUID()),
+      operatorId: stableId,
+    }
     this.active.set(stableId, status.active + 1)
     let providerRun: PhysicalOperatorProviderRun
     try {
-      providerRun = await operator.start(request)
+      const providerRequest: PhysicalOperatorProviderStartRequest = {
+        ...request,
+        executionId: identity.executionId,
+        mode,
+      }
+      providerRun = await operator.start(providerRequest)
     } catch (error) {
       this.release(stableId)
       throw error
     }
 
-    const identity: PhysicalOperatorExecutionInfo = {
-      executionId: executionId(randomUUID()),
-      operatorId: stableId,
-    }
     const result = providerRun.result.then(
       (settled) => {
         this.emitContained('physical-operator/end', { ...identity, stopReason: settled.stopReason })
@@ -198,7 +214,10 @@ export class PhysicalOperatorRuntime extends Service {
 
   /** Convert one provider plus service-owned capacity to a public snapshot. */
   private statusOf(operator: PhysicalOperator): PhysicalOperatorStatus {
-    const descriptor = operator.descriptor
+    const descriptor = {
+      ...operator.descriptor,
+      executionModes: normalizedModes(operator.descriptor.executionModes),
+    }
     const active = this.active.get(descriptor.id) ?? 0
     const availability = operator.availability()
     if (!availability.available) {
@@ -270,6 +289,7 @@ function validateDescriptor(descriptor: PhysicalOperator['descriptor']): void {
   if (!Number.isSafeInteger(descriptor.maxConcurrency) || descriptor.maxConcurrency < 1) {
     throw new PhysicalOperatorError('physical operator maxConcurrency must be a positive safe integer', 'INVALID_OPERATOR')
   }
+  normalizedModes(descriptor.executionModes)
   const tags = new Set<string>()
   for (const tag of descriptor.tags) {
     if (tag.length === 0 || tag.trim() !== tag) {
@@ -280,6 +300,33 @@ function validateDescriptor(descriptor: PhysicalOperator['descriptor']): void {
     }
     tags.add(tag)
   }
+}
+
+/** Normalize an omitted mode list to the original one-shot contract and reject ambiguity. */
+function normalizedModes(
+  modes: PhysicalOperator['descriptor']['executionModes'],
+): readonly PhysicalOperatorExecutionMode[] {
+  if (modes === undefined) return ['ephemeral']
+  const candidate: unknown = modes
+  if (!isUnknownArray(candidate) || candidate.length === 0) {
+    throw new PhysicalOperatorError('physical operator executionModes must not be empty', 'INVALID_OPERATOR')
+  }
+  const unique = new Set<PhysicalOperatorExecutionMode>()
+  for (const value of candidate) {
+    if (value !== 'ephemeral' && value !== 'resident') {
+      throw new PhysicalOperatorError(`unsupported physical operator execution mode: ${String(value)}`, 'INVALID_OPERATOR')
+    }
+    const mode: PhysicalOperatorExecutionMode = value
+    if (unique.has(mode)) {
+      throw new PhysicalOperatorError(`duplicate physical operator execution mode: ${mode}`, 'INVALID_OPERATOR')
+    }
+    unique.add(mode)
+  }
+  return Object.freeze([...unique])
+}
+
+function isUnknownArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value)
 }
 
 /** Render a listener failure without allowing hostile coercion to escape containment. */

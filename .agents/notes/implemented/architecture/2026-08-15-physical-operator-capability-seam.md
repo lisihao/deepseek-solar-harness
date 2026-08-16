@@ -12,26 +12,38 @@ DSH nevertheless needs one seamless way for agents and plugins to discover a phy
 
 ## Decision
 
-Extract the stable capability boundary, not the AI4Research runtime. The first slice follows the repository's Service Definition / Service Provider / Consumer architecture:
+Extract the stable capability boundary, not the AI4Research runtime, and support two explicit execution lifetimes behind it:
 
-1. `@deepseek-ai/dsh-physical-operator` owns `ctx.physicalOperators`, stable ids, descriptors, live availability, fail-fast capacity, typed errors, and paired execution lifecycle events.
-2. `@deepseek-ai/dsh-physical-operator-subagent` maps stable ids to existing `ctx.subagents` providers. The first verified product mappings are `codex` and `claude-code`; both are subscription-only and fail closed unless their provider attests a native-account path with no explicit child environment. Loading the mapping starts neither product.
-3. `@deepseek-ai/dsh-tool-physical-operator` exposes one fixed `physical_operator` tool with `list` and foreground `run`. The model chooses a stable operator id and never sees provider transport.
+1. `@deepseek-ai/dsh-physical-operator` owns `ctx.physicalOperators`, normalized `ephemeral | resident` mode discovery, fail-fast capacity, pre-provider execution identity, typed errors, and paired lifecycle events. Omission remains `ephemeral`; unsupported modes fail without fallback.
+2. `@deepseek-ai/dsh-resident-operator` adds the provider-neutral `ctx.residentOperators` control seam. A Session is keyed by operator id plus canonical workspace, admits one active turn, and exposes trusted management operations. Models still execute only through the physical-operator Consumer.
+3. `@deepseek-ai/dsh-resident-operator-local` runs an independent owner-only Unix-socket daemon as the sole Session/Receipt/Lease/Event/Artifact writer. Command identity and canonical request hash are separate: identical replay returns the same receipt, changed content conflicts, crashes become `indeterminate`, and an authorized retry uses a new id with a unique link to the abandoned receipt.
+4. Native product continuity remains authoritative. Claude Code uses the official Agent SDK's persisted session and resume; Codex uses pinned app-server schemas with non-ephemeral thread start/resume. Both fail closed unless current CLI/version/protocol checks prove native subscription authentication, and both receive a credential-scrubbed environment with no API fallback.
+5. `@deepseek-ai/dsh-physical-operator-resident` routes one stable id between existing ephemeral subagents and the Resident seam. `@deepseek-ai/dsh-tool-physical-operator` remains the one model Consumer, and `@deepseek-ai/dsh-resident-operators` is an opt-in composition Bundle.
 
-The three roles ship as independent packages and an opt-in Loader composition, not as an AI4Research Bundle. Provider and Consumer depend only on the Service Definition and do not import one another. Accepted runs survive Provider HMR; capacity is preserved by stable id until settlement. Caller cancellation flows through the service into the existing subagent provider, which remains the execution and teardown owner.
+Provider, router, and Consumer depend on Service Definitions rather than one another's implementation. DSH/HMR disposal disconnects clients but does not kill the daemon; graceful daemon shutdown drains admitted turns. Tmux is an optional read-only event viewer, never a task transport or authority. DSH Session, Jobs, Web UI, and terminal panes may project bounded state but do not own native product sessions or Resident receipts.
 
-This extraction copies no AI4Research Python daemon, scheduler, TaskGraph, state store, file inbox, operator catalog, or business workflow. It modifies no Solar repository or generated DSH runtime. Future substrate work can add sibling Providers or deliberately version the shared contract without re-importing the monolith.
+This extraction copies no AI4Research Python daemon, scheduler, TaskGraph, state store, file inbox, operator catalog, persona, Gate, Evidence schema, or business workflow. It modifies no Solar repository or generated DSH runtime.
 
 ## Alternatives considered
 
 - **Install AI4Research as one DSH Bundle** — rejected because it makes a whole application the plugin boundary and carries orchestration/state authority that DSH does not need for a physical-operator call.
-- **Port the existing Python `operator_runtime` and `operatord` unchanged** — rejected because their Solar-shaped persistence, leases, TaskGraph, and file protocol are the exact substrate that still needs redesign.
+- **Port the existing Python `operator_runtime` and `operatord` unchanged** — rejected because their Solar-shaped persistence, TaskGraph, and mailbox mix domain authority with reusable daemon mechanisms.
 - **Expose Codex and Claude Code directly as separate physics tools** — rejected because product selection would leak into the model contract and every new execution backend would churn schemas and prompts.
 - **Use the generic `subagent` tool without a domain seam** — rejected because it has no stable physical-operator identity, availability/capacity contract, or future typed physics result boundary.
-- **Add queueing, routing, receipts, and artifact schemas immediately** — deferred until the old substrate defects and required physics semantics are specified; inventing them during extraction would freeze another guess.
+- **Keep one Claude/Codex CLI process alive forever or use tmux as control** — rejected because native product Session/thread identity, not terminal process lifetime or screen text, is the continuity authority.
+- **Use DSH Jobs as the durable owner** — rejected because current Jobs do not survive DSH restart; a later external durable Job Provider may project Resident turns.
+- **Add queueing, writable human takeover, affinity scheduling, or remote farms** — deferred; protocol v1 is local, fail-fast, single-turn, and automation-controlled.
 
 ## Consequences
 
-DSH now has a small, replaceable physical-operator capability seam that can use the already implemented Claude Code and Codex products without Core changes. Keyless Loader evidence exercises the complete tool-to-subagent route, while a second real-product composition proves both product mappings register, report native-subscription authentication, and stay lazy with an empty `PATH`. Unit evidence proves missing or explicit-environment attestations are rejected at discovery and execution; a host live canary remains the evidence for current subscription entitlement.
+DSH now preserves existing one-shot behavior while adding an opt-in durable control plane without Core changes. The daemon owns SQLite WAL state, owner-only local IPC, content-addressed large results, recovery, bounded structured observation, strict product qualification, and prompt/credential-safe diagnostics. The public execution id doubles as the durable command id, so transport retry cannot create a second product invocation.
 
-This is intentionally only the first substrate slice. Selection/scoring, durable command receipts, persistence and crash recovery, queues and fairness, quota/cooldown, progress, typed physics schemas, content-addressed artifacts, provenance, and actor-host migration remain deferred. Their later design must extend or replace the appropriate role rather than expanding a monolithic Bundle.
+The additional state creates operational responsibility: product and protocol versions are pinned qualification inputs; a forced stop may require explicit indeterminate resolution; state is forward-only; and native product permissions remain authoritative rather than inheriting DSH's file sandbox. Writable human takeover, queueing/fairness, affinity scheduling, durable Jobs projection, remote transports, typed physics schemas, provenance, and actor-host migration remain deferred and must arrive as separate seams or versioned contracts.
+
+## Verification
+
+- Unit, protocol, Loader composition, HMR ownership, receipt conflict/recovery, artifact, redaction, symlink, interrupt/reset, and Unix-WebSocket transport tests pass. The complete repository suite reached 13,457 passing tests; the remaining app-boot/SDK timeout failures reproduce outside this change, while the touched catalog and ACP cases pass in isolation.
+- On the MacBook, Claude Code and Codex both qualified as native subscription products with API-key variables removed. Independent DSH clients resumed the same native Claude Session and Codex thread; both retained random nonces across Resident daemon restart. Codex interruption left the Session inspectable, and revision-guarded reset removed only the association, not native history.
+- A fresh sandbox profile installed the prebuilt Bundle through `dsh plugin`, exposed the dual-mode route in `--dump-config`, and removed the complete composition layer again. Packed-import verification caught and fixed both the hashed daemon-chunk allowlist and the Claude Agent SDK peer closure.
+- Codex daemon transport uses an actual WebSocket upgrade on the owner-local Unix socket. A live canary rejected the earlier incorrect NDJSON-to-`proxy` assumption before it was released.
+- The Mac mini remains outside canary admission: Claude Code reports no subscription login, its Codex launcher is broken by a missing Homebrew `simdjson` library, the standalone daemon install is absent, and no DSH runtime is deployed there. The default profile was not changed.

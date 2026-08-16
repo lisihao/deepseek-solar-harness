@@ -190,12 +190,12 @@ function runSpec(
   }
 }
 
-async function initializeWire(): Promise<{
+async function initializeWire(approvalBehavior: 'decline' | 'require' = 'decline'): Promise<{
   readonly child: FakeChild
   readonly wire: CodexAppServerWire
 }> {
   const child = fakeChild()
-  const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!)
+  const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!, approvalBehavior)
   wire.start()
   const initializing = wire.initialize(new AbortController().signal)
   const initialize = await child.peer.nextMethod('initialize')
@@ -648,6 +648,31 @@ describe('CodexAppServerWire', () => {
 
     child.peer.send(agentMessage('answer', 'final_answer'), turnCompleted('completed'))
     await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    wire.close()
+  })
+
+  it('fails loud on native approval requests when a Resident caller requires out-of-band approval', async () => {
+    const { child, wire } = await initializeWire('require')
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send({
+      id: 'approval',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        availableDecisions: ['decline', 'cancel'],
+      },
+    })
+    expect(await child.peer.nextResponse('approval')).toMatchObject({
+      result: { decision: 'cancel' },
+    })
+    await expect(result).rejects.toMatchObject({
+      name: 'CodexApprovalRequiredError',
+      method: 'item/commandExecution/requestApproval',
+    })
     wire.close()
   })
 
