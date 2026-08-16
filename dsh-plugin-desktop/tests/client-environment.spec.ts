@@ -56,6 +56,16 @@ describe('advanced desktop layout', () => {
 
     try {
       const dispose = installAdvancedStyles()
+      // `dsh-better-sidebar` reserves its fixed right workbench by applying
+      // `margin-right: var(--dsh-sidebar-width)` to #root.  A forced
+      // `width: 100%` on the same element makes that margin overflow the
+      // viewport instead of shrinking the app shell, so the workbench covers
+      // third-party settings controls (notably dsh-memory-evolve).  Keep the
+      // document full-size, but leave the mount point's width automatic.
+      expect(css).toMatch(/html, body \{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*\}/)
+      expect(css).toMatch(/#root \{[^}]*width:\s*auto;[^}]*height:\s*100%;[^}]*\}/)
+      expect(css).not.toMatch(/html, body, #root \{[^}]*width:\s*100%/)
+      expect(css).toMatch(/body\[data-dsh-desktop-mode="advanced"\] \.mt-panel \.me-notice \{[^}]*position:\s*sticky;[^}]*top:\s*0;[^}]*\}/)
       expect(css).toMatch(/\.dshDesktopSidebarSurface\s*\{[^}]*--dsw-specific-sidebar-fill:\s*transparent;/)
       expect(css).toMatch(/data-desktop-platform="darwin"\]\[data-sidebar-collapsed\][^{]*\.dshDesktopUpstreamSidebar \{[^}]*width:\s*56px;[^}]*margin:\s*0 auto;/)
       expect(css).toMatch(new RegExp(`data-desktop-platform="darwin"\\] \\.dshDesktopUpstreamSidebar \\{[^}]*padding-top: ${MACOS_TITLEBAR_HEIGHT}px;[^}]*-webkit-app-region: no-drag;`))

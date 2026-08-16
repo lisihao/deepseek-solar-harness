@@ -9,7 +9,12 @@ import { SIDEBAR_COLLAPSED } from './layout-state.ts'
 
 /** Advanced-shell stylesheet kept as a plain string so the package client bundle stays self-contained. */
 const ADVANCED_STYLES = `
-html, body, #root { width: 100%; height: 100%; }
+html, body { width: 100%; height: 100%; }
+/* Keep the mount point's width automatic.  Workbench plugins such as
+   dsh-better-sidebar reserve a fixed right panel with #root margin-right;
+   forcing width:100% makes that margin overflow instead of shrinking the
+   Desktop frame, so the panel covers the conversation and its controls. */
+#root { width: auto; height: 100%; }
 body[data-dsh-desktop-mode="advanced"] { margin: 0; background: transparent !important; }
 .dshDesktopFrame { position: relative; display: grid; grid-template-rows: 100%; width: 100%; height: 100%; overflow: hidden; background: transparent; }
 .dshDesktopSidebarSurface { --dsw-specific-sidebar-fill: transparent; position: relative; grid-column: 1; grid-row: 1; min-width: 0; overflow: hidden; background: transparent; border-right: 1px solid var(--dsw-alias-border-l1); }
@@ -41,6 +46,10 @@ html:has([aria-modal="true"]) .dshDesktopWindowsCaptionRow::before,
 html:has([aria-modal="true"]) .dshDesktopMacCaptionRow::before,
 html:has([aria-modal="true"]) .dshDesktopSidebarSurface,
 html:has([aria-modal="true"]) .dshDesktopSidebarSurface::before { -webkit-app-region: no-drag !important; }
+/* Memory Evolve renders save feedback before a long, internally scrolling
+   form.  Keep the notice visible after the bottom action is clicked so a
+   successful save cannot look like a no-op in the Desktop shell. */
+body[data-dsh-desktop-mode="advanced"] .mt-panel .me-notice { position: sticky; top: 0; z-index: 2; }
 @media (prefers-reduced-motion: reduce) { .dshDesktopFrame { transition: none !important; } }
 `
 
