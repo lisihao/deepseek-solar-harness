@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 The model-facing Consumer for `ctx.physicalOperators`. It registers one fixed `physical_operator` tool with two actions: discover live operators and run one stable operator id. A dynamic system-prompt section describes when to delegate, when to request Resident continuity, and the current live descriptors/tags/modes. Provider transport never appears in the tool contract.
 
-Every Session also has a durable routing policy. Untouched Sessions project `Smart Auto`: the main Agent evaluates every non-trivial request and may invoke Codex or Claude Code without the user naming either product. `/operator codex`, `/operator claude-code`, `/operator direct`, and `/operator auto` provide visible manual overrides. Because the choice is a Session event and projection, clients can render the same value next to model selection and the model receives the effective value before each step.
+Every Session also has a durable routing policy. Untouched Sessions project `Smart Auto`: the main Agent evaluates every non-trivial request and may invoke Codex or Claude Code without the user naming either product. `/operator codex`, `/operator claude-code`, `/operator direct`, and `/operator auto` provide visible manual overrides. Because the choice is a Session event and projection, clients can render the same value next to model selection and the model receives the effective value before each step. The plugin marks this extension event ignorable so readers without the physical-operator package can still reconstruct the core Session.
 
 ## Tool contract
 

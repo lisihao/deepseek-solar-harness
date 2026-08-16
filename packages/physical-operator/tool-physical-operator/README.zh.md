@@ -4,7 +4,7 @@
 
 本包是面向模型的 `ctx.physicalOperators` Consumer。它注册一个固定的 `physical_operator` 工具，包含发现实时算子和运行一个稳定算子 ID 两个动作。动态 system-prompt 区段会说明何时委派、何时使用 Resident 连续性，并列出当前实时 descriptor、tag 与 mode。Provider 传输不会出现在工具约定中。
 
-每个 Session 还拥有持久化的路由策略。未配置的 Session 会投影为“智能自动”：主 Agent 在每个非简单请求开始时判断是否调用 Codex 或 Claude Code，无需用户点名产品。`/operator codex`、`/operator claude-code`、`/operator direct` 和 `/operator auto` 提供可见的人工覆盖。该选择是 Session 事件和投影，因此客户端可以在模型选择旁显示同一值，模型也会在每一步之前收到当前有效策略。
+每个 Session 还拥有持久化的路由策略。未配置的 Session 会投影为“智能自动”：主 Agent 在每个非简单请求开始时判断是否调用 Codex 或 Claude Code，无需用户点名产品。`/operator codex`、`/operator claude-code`、`/operator direct` 和 `/operator auto` 提供可见的人工覆盖。该选择是 Session 事件和投影，因此客户端可以在模型选择旁显示同一值，模型也会在每一步之前收到当前有效策略。插件将这类扩展事件标为可忽略，使未安装物理算子包的读取器仍能重建核心 Session。
 
 ## 工具约定
 

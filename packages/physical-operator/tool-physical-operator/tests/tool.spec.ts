@@ -129,6 +129,7 @@ describe('physical_operator tool', () => {
     expect(changed?.result).toEqual({ kind: 'success', text: 'routing codex' })
     expect(tool.foldPhysicalOperatorRouting(session.events)).toBe('codex')
     expect(ctx.sessionProjections.snapshot(session).values.physicalOperatorRouting?.currentValue).toBe('codex')
+    expect(session.events.find(event => event.type === 'physical-operator/policy')?.ignorable).toBe(true)
     const preferred = (await ctx.systemPrompt.assemble({ agent })).sections
       .find(candidate => candidate.name === 'tool:physical-operator')?.text
     expect(preferred).toContain('CODEX PREFERRED')

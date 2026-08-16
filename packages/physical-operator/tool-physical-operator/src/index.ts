@@ -148,7 +148,7 @@ export function apply(ctx: Context): void {
           }
         }
         if (foldPhysicalOperatorRouting(agent.session.events) !== value) {
-          agent.session.append('physical-operator/policy', { policy: value })
+          agent.session.append('physical-operator/policy', { policy: value }, { ignorable: true })
         }
         return { kind: 'success', text: `routing ${value}` }
       },
