@@ -6,9 +6,17 @@
  * @module @deepseek-ai/dsh-tool-physical-operator
  */
 
+import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import {
+  LlmAdapter,
+  type ContentBlock,
+  type GenerateOptions,
+  type StreamChunk,
+} from '@deepseek-ai/dsh-llm'
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { z as zod } from 'zod'
 import type {
@@ -16,6 +24,7 @@ import type {
   PhysicalOperatorRun,
   PhysicalOperatorStatus,
 } from '@deepseek-ai/dsh-physical-operator'
+import { PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {
@@ -33,11 +42,49 @@ declare module '@deepseek-ai/dsh-session/types' {
      * @param policy The selected automatic, direct, Codex, or Claude Code policy.
      */
     'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
+    /** Durable host decision that binds one DSH message to one Resident command. */
+    'physical-operator/dispatch': {
+      commandId: string
+      operatorId: string
+      promptMessageId: string
+      requestedByMessageId: string
+      turn: number
+      step: number
+      recovered: boolean
+    }
+    /** Non-cancellation terminal failure; prevents an endless cold-resume loop. */
+    'physical-operator/dispatch-terminal': {
+      commandId: string
+      code: string
+    }
   }
 }
 
 export const name = 'tool-physical-operator'
-export const inject = ['tools', 'physicalOperators', 'systemPrompt']
+export const inject = ['tools', 'physicalOperators', 'systemPrompt', 'llm', 'agents']
+
+const ROUTER_PROVIDER = 'dsh-physical-operator'
+const RESUME_SOURCE = 'physical-operator-resume'
+
+interface PendingHostRoute {
+  readonly commandId: string
+  readonly operatorId: string
+  readonly promptMessageId: string
+  readonly requestedByMessageId: string
+  readonly recovered: boolean
+}
+
+interface DispatchRecord extends PendingHostRoute {
+  readonly turn: number
+  readonly step: number
+  readonly seq: number
+}
+
+interface HostRouteMessage {
+  readonly id: string
+  readonly content: readonly ContentBlock[]
+  readonly source: { readonly kind: string; readonly plugin?: string }
+}
 
 type ToolRequest = {
   readonly action: string
@@ -108,6 +155,49 @@ const routingProjectionSchema = zod.object({
 
 /** Register the fixed discovery-and-execution tool. */
 export function apply(ctx: Context): void {
+  const pending = new WeakMap<Agent, Map<string, PendingHostRoute>>()
+  ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx))
+
+  ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
+    const route = selectHostRoute(agent, messages)
+    if (route !== undefined) {
+      const byPosition = pending.get(agent) ?? new Map<string, PendingHostRoute>()
+      byPosition.set(`${turn}:${step}`, route)
+      pending.set(agent, byPosition)
+    }
+    return next()
+  })
+
+  ctx.on('agent/request', async ({ agent, turn, step }, next) => {
+    const base = await next()
+    const key = `${turn}:${step}`
+    const byPosition = pending.get(agent)
+    let route = byPosition?.get(key)
+    byPosition?.delete(key)
+    route ??= dispatchForPosition(agent.session.events, turn, step)
+    if (route === undefined) return base
+    if (dispatchForPosition(agent.session.events, turn, step) === undefined) {
+      agent.session.append('physical-operator/dispatch', {
+        ...route,
+        turn,
+        step,
+      }, { ignorable: true })
+    }
+    const { reasoningEffort: _reasoningEffort, ...portable } = base
+    return { ...portable, provider: ROUTER_PROVIDER, model: route.operatorId }
+  })
+
+  ctx.on('agent/session-start', ({ agent, source }) => {
+    if (source !== 'resume' || recoverableDispatch(agent.session.events) === undefined) return
+    queueMicrotask(() => {
+      if (agent.status !== 'idle') return
+      agent.followup(createUserMessage({
+        content: [{ type: 'text', text: 'Reconnect and deliver the pending Resident physical-operator result.' }],
+        source: { kind: 'plugin', plugin: RESUME_SOURCE },
+      }))
+    })
+  })
+
   ctx.systemPrompt.section({
     name: 'tool:physical-operator',
     order: 116,
@@ -295,6 +385,208 @@ export function apply(ctx: Context): void {
       }
     },
   }))
+}
+
+/**
+ * Host-level model adapter that makes an accepted routing decision executable.
+ * DeepSeek is never called on this path: its request is replaced before
+ * adapter resolution and the native Resident result becomes the assistant
+ * message directly.
+ */
+class PhysicalOperatorLlmAdapter extends LlmAdapter {
+  constructor(private readonly ctx: Context) {
+    super()
+  }
+
+  override listModels(provider: string): Promise<readonly { provider: string; id: string; name: string }[]> {
+    return Promise.resolve(this.ctx.physicalOperators.list().map(operator => ({
+      provider,
+      id: String(operator.id),
+      name: operator.displayName,
+    })))
+  }
+
+  async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    const agent = this.ctx.agents.requireInitiator()
+    const dispatch = latestDispatch(agent.session.events)
+    if (dispatch === undefined || dispatch.operatorId !== options.model) {
+      throw new Error(`physical-operator router has no durable dispatch for ${options.model}`)
+    }
+    const prompt = promptForMessage(agent.session.events, dispatch.promptMessageId)
+    if (prompt === undefined) {
+      throw new Error(`physical-operator router cannot recover prompt message ${dispatch.promptMessageId}`)
+    }
+    const signal = options.signal ?? new AbortController().signal
+    let run: PhysicalOperatorRun | undefined
+    try {
+      run = await this.ctx.physicalOperators.start(dispatch.operatorId, {
+        executionId: PhysicalOperatorExecutionId(dispatch.commandId),
+        label: labelFor(prompt),
+        prompt,
+        parent: agent,
+        signal,
+        mode: 'resident',
+      })
+      const result = await run.result
+      yield* resultChunks(result)
+    } catch (error) {
+      if (!signal.aborted) {
+        agent.session.append('physical-operator/dispatch-terminal', {
+          commandId: dispatch.commandId,
+          code: errorCode(error),
+        }, { ignorable: true })
+      }
+      throw error
+    } finally {
+      await run?.dispose()
+    }
+  }
+}
+
+/** Resolve explicit, continuation, preferred, and smart-auto routing in strict priority order. */
+function selectHostRoute(
+  agent: Agent,
+  messages: readonly HostRouteMessage[],
+): PendingHostRoute | undefined {
+  const current = [...messages].reverse().find(message => message.source.kind === 'user')
+  const resume = [...messages].reverse().find(message => (
+    message.source.kind === 'plugin' && message.source.plugin === RESUME_SOURCE
+  ))
+  const previous = latestDispatch(agent.session.events)
+  if (resume !== undefined) {
+    const recoverable = recoverableDispatch(agent.session.events)
+    return recoverable === undefined ? undefined : {
+      commandId: recoverable.commandId,
+      operatorId: recoverable.operatorId,
+      promptMessageId: recoverable.promptMessageId,
+      requestedByMessageId: resume.id,
+      recovered: true,
+    }
+  }
+  if (current === undefined) return undefined
+  const text = textContent(current.content)
+  const explicit = explicitOperator(text)
+  if (explicit !== undefined) return newHostRoute(agent, current.id, explicit)
+  if (isContinuation(text) && previous !== undefined) {
+    const recoverable = recoverableDispatch(agent.session.events)
+    return recoverable === undefined
+      ? newHostRoute(agent, current.id, previous.operatorId)
+      : {
+        commandId: recoverable.commandId,
+        operatorId: recoverable.operatorId,
+        promptMessageId: recoverable.promptMessageId,
+        requestedByMessageId: current.id,
+        recovered: true,
+      }
+  }
+  const policy = foldPhysicalOperatorRouting(agent.session.events)
+  if (policy === 'direct') return undefined
+  if (policy === 'codex' || policy === 'claude-code') {
+    return isDelegable(text) ? newHostRoute(agent, current.id, policy) : undefined
+  }
+  const automatic = automaticOperator(text)
+  return automatic === undefined ? undefined : newHostRoute(agent, current.id, automatic)
+}
+
+function newHostRoute(agent: Agent, messageId: string, operatorId: string): PendingHostRoute {
+  return {
+    commandId: `resident-${createHash('sha256').update(`${agent.id}\0${messageId}`).digest('hex').slice(0, 32)}`,
+    operatorId,
+    promptMessageId: messageId,
+    requestedByMessageId: messageId,
+    recovered: false,
+  }
+}
+
+function explicitOperator(text: string): 'codex' | 'claude-code' | undefined {
+  if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*codex\b|\bcodex\s*(?:来|去|帮我|执行|处理|分析|研究|实现|修复)/iu.test(text)) return 'codex'
+  if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*claude(?:\s+code)?\b|\bclaude(?:\s+code)?\s*(?:来|去|帮我|执行|处理|分析|研究|实现|修复)/iu.test(text)) return 'claude-code'
+  if (/\b(?:use|ask|have|let)\s+(?:the\s+)?codex\b/iu.test(text)) return 'codex'
+  if (/\b(?:use|ask|have|let)\s+(?:the\s+)?claude(?:\s+code)?\b/iu.test(text)) return 'claude-code'
+  return undefined
+}
+
+function automaticOperator(text: string): 'codex' | 'claude-code' | undefined {
+  if (/(?:代码|开发|实现|修复|调试|bug|测试|构建|编译|仓库|提交|重构|typescript|javascript|python|git\b|code\b)/iu.test(text)) return 'codex'
+  if (/(?:深度分析|研究|架构|评审|审查|长文|论文|报告|方案|规划|对比|法律|法案|政策|analysis|architecture|research|review)/iu.test(text)) return 'claude-code'
+  return undefined
+}
+
+function isDelegable(text: string): boolean {
+  const value = text.trim()
+  return value.length >= 12 || automaticOperator(value) !== undefined
+}
+
+function isContinuation(text: string): boolean {
+  return /^(?:继续|继续啊|接着|接着做|继续执行|continue|go on|resume)[\s!！。,.，]*$/iu.test(text.trim())
+}
+
+function latestDispatch(events: readonly SessionEvent[]): DispatchRecord | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event === undefined) continue
+    if (event.type !== 'physical-operator/dispatch') continue
+    return { ...event.data, seq: event.seq }
+  }
+  return undefined
+}
+
+function recoverableDispatch(events: readonly SessionEvent[]): DispatchRecord | undefined {
+  const dispatch = latestDispatch(events)
+  if (dispatch === undefined) return undefined
+  const terminal = events.some(event => event.seq > dispatch.seq
+    && event.type === 'physical-operator/dispatch-terminal'
+    && event.data.commandId === dispatch.commandId)
+  if (terminal) return undefined
+  const delivered = events.some((event) => {
+    if (event.seq <= dispatch.seq || event.type !== 'assistant/message') return false
+    const message = event.data.message
+    return message.source.provider === ROUTER_PROVIDER && message.source.model === dispatch.operatorId
+  })
+  return delivered ? undefined : dispatch
+}
+
+function dispatchForPosition(events: readonly SessionEvent[], turn: number, step: number): PendingHostRoute | undefined {
+  const found = [...events].reverse().find(event => event.type === 'physical-operator/dispatch'
+    && event.data.turn === turn && event.data.step === step)
+  if (found?.type !== 'physical-operator/dispatch') return undefined
+  const { commandId, operatorId, promptMessageId, requestedByMessageId, recovered } = found.data
+  return { commandId, operatorId, promptMessageId, requestedByMessageId, recovered }
+}
+
+function promptForMessage(events: readonly SessionEvent[], messageId: string): ContentBlock[] | undefined {
+  const found = events.find(event => event.type === 'user/message' && String(event.data.id) === messageId)
+  return found?.type === 'user/message' ? [...found.data.content] : undefined
+}
+
+function textContent(content: readonly ContentBlock[]): string {
+  return content.filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+    .map(block => block.text).join('\n')
+}
+
+function labelFor(content: readonly ContentBlock[]): string {
+  const text = textContent(content).replace(/\s+/g, ' ').trim()
+  return text.length <= 48 ? text : `${text.slice(0, 47)}…`
+}
+
+function* resultChunks(result: PhysicalOperatorResult): Generator<StreamChunk> {
+  for (const [index, block] of result.output.entries()) {
+    yield { type: 'block-start', index, blockType: block.type }
+    if (block.type === 'text') yield { type: 'text-delta', index, text: block.text }
+    else if (block.type === 'reasoning') yield { type: 'reasoning-delta', index, text: block.text }
+    yield { type: 'block-end', index, block }
+  }
+  yield { type: 'usage', usage: { inputTokens: 0, outputTokens: 0 } }
+  yield {
+    type: 'finish',
+    reason: result.stopReason === 'max-tokens' ? { kind: 'max-tokens' } : { kind: 'stop' },
+  }
+}
+
+function errorCode(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : 'RUNTIME_UNAVAILABLE'
 }
 
 /**

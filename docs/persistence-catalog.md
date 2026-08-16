@@ -514,6 +514,39 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 
 ### `physical-operator/*`
 
+<a id="physical-operatordispatch--log-only"></a>
+
+#### `physical-operator/dispatch` — log-only
+
+```ts persistence-catalog
+/** Durable host decision that binds one DSH message to one Resident command. */
+'physical-operator/dispatch': {
+  commandId: string
+  operatorId: string
+  promptMessageId: string
+  requestedByMessageId: string
+  turn: number
+  step: number
+  recovered: boolean
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:46`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatordispatch-terminal--log-only"></a>
+
+#### `physical-operator/dispatch-terminal` — log-only
+
+```ts persistence-catalog
+/** Non-cancellation terminal failure; prevents an endless cold-resume loop. */
+'physical-operator/dispatch-terminal': {
+  commandId: string
+  code: string
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:56`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
 <a id="physical-operatorpolicy--log-only"></a>
 
 #### `physical-operator/policy` — log-only
@@ -526,7 +559,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:35`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:44`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

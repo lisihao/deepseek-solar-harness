@@ -9,7 +9,7 @@
 import { globSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { type ToolSchema } from '@deepseek-ai/dsh-llm'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createScope } from '@deepseek-ai/dsh-scope'
@@ -230,6 +230,8 @@ const TOOL_PACKAGES: ToolPackage[] = [
     requires: ['ctx.tools', 'ctx.physicalOperators', 'a calling Agent for action=run'],
     writes: ['tool/call', 'tool/result', 'physical-operator lifecycle through the selected provider'],
     async mount(ctx) {
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(AgentRegistry)
       await ctx.plugin(PhysicalOperatorRuntime)
       await ctx.plugin(ToolPhysicalOperator)
     },

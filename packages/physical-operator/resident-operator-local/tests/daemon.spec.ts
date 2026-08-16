@@ -211,6 +211,35 @@ describe('ResidentDaemon', () => {
     await daemon.close()
   })
 
+  it('detaches an aborted caller without interrupting the daemon-owned turn', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new ReconnectDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const caller = new AbortController()
+    const original = await client(root).execute({
+      commandId: 'detach-active', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'keep running after the app exits' }], signal: caller.signal,
+    })
+    await driver.running
+
+    caller.abort(new Error('desktop process stopped'))
+    await expect(original.result).rejects.toThrow('desktop process stopped')
+    expect(await client(root).inspectTurn(original.turnId)).toMatchObject({ state: 'running' })
+
+    const reattached = await client(root).execute({
+      commandId: 'detach-active', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'keep running after the app exits' }],
+      signal: new AbortController().signal,
+    })
+    expect(reattached.turnId).toBe(original.turnId)
+    driver.release()
+    await expect(reattached.result).resolves.toMatchObject({ output: [{ text: 'reconnected result' }] })
+    await daemon.close()
+  })
+
   it('canonicalizes symlink workspaces and resumes the native session after daemon restart', async () => {
     const root = temporaryRoot()
     const workspace = join(root, 'workspace')

@@ -12,6 +12,8 @@ JSON-RPC 2.0 通过仅属主可访问的 Unix socket 以 NDJSON 传输。握手�
 
 Receipt 按 `accepted -> running -> settled` 推进；有界 `turn.progress` 阶段会暴露连接、原生 Session 就绪、推理/工具活动与结果整理进度，但不保存 prompt 或 transcript。重新连接的 DSH 或 Desktop 客户端可以从 daemon 权威状态检查活动 turn、最新阶段及已结算结果。daemon 在无法证明结算前崩溃时，启动恢复会将 Receipt 标为 `indeterminate`。相同 command 与 canonical hash 重放会返回同一 Receipt，内容变化则冲突。重试只能在显式处置后用新 command ID 准入，并唯一关联旧 Receipt。正常停止会排空已准入 turn；进程被强制终止时由启动恢复处理，绝不自动重放。
 
+命令准入后，调用方取消和客户端 dispose 只会分离本地轮询句柄，不会发送 `turn.interrupt`。因此 daemon 权威的原生 turn 能跨 DSH、HMR 或 Desktop 重启继续运行。可信调用方若确实要停止产品工作，必须使用显式 interrupt 方法。
+
 ## 配置与安全
 
 | 字段 | 默认值 | 含义 |

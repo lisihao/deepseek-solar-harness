@@ -4,6 +4,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import PhysicalOperatorRuntime, {
   PhysicalOperatorError,
+  PhysicalOperatorExecutionId,
   PhysicalOperatorId,
   type PhysicalOperator,
   type PhysicalOperatorAvailability,
@@ -101,6 +102,14 @@ describe('PhysicalOperatorRuntime', () => {
     expect(operator.disposed).toBe(1)
     expect(lifecycle).toEqual(['start', 'end'])
     expect(service.status('physics.solve').active).toBe(0)
+
+    const replay = await service.start('physics.solve', {
+      ...request(),
+      executionId: PhysicalOperatorExecutionId('resident-session-message'),
+    })
+    expect(replay.id).toBe('resident-session-message')
+    expect(operator.lastRequest).toMatchObject({ executionId: 'resident-session-message' })
+    await replay.result
 
     await dispose()
     expect(service.list()).toEqual([])

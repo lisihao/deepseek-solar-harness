@@ -70,6 +70,12 @@ export interface PhysicalOperatorStatus extends Omit<PhysicalOperatorDescriptor,
 
 /** Caller-owned input for one operator execution. */
 export interface PhysicalOperatorStartRequest {
+  /**
+   * Optional caller-owned idempotency identity. Trusted durable routers use
+   * this to reconnect to the same Resident command after their process
+   * restarts. Ordinary callers omit it and receive a generated identity.
+   */
+  readonly executionId?: PhysicalOperatorExecutionId
   /** Optional short description used as the child run label. */
   readonly label?: string
   /** Complete standalone task content for the selected operator. */

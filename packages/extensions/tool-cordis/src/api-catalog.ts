@@ -3657,7 +3657,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',

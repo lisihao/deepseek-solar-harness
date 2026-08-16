@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 The model-facing Consumer for `ctx.physicalOperators`. It registers one fixed `physical_operator` tool with two actions: discover live operators and run one stable operator id. A dynamic system-prompt section describes when to delegate, when to request Resident continuity, and the current live descriptors/tags/modes. Provider transport never appears in the tool contract.
 
-Every Session also has a durable routing policy. Untouched Sessions project `Smart Auto`: the main Agent evaluates every non-trivial request and may invoke Codex or Claude Code without the user naming either product. `/operator codex`, `/operator claude-code`, `/operator direct`, and `/operator auto` provide visible manual overrides. Because the choice is a Session event and projection, clients can render the same value next to model selection and the model receives the effective value before each step. The plugin marks this extension event ignorable so readers without the physical-operator package can still reconstruct the core Session.
+Every Session also has a durable routing policy. Untouched Sessions project `Smart Auto`; deterministic host routing recognizes implementation/debugging work as Codex-shaped and analysis/research work as Claude-Code-shaped. `/operator codex`, `/operator claude-code`, `/operator direct`, and `/operator auto` provide visible manual overrides. An explicit product named in the current message always wins over the stored preference. Accepted routes replace the ordinary DeepSeek request with a Resident physical-operator adapter, so DeepSeek cannot silently take the work back. `continue`/`继续` reconnects an undelivered command receipt, and a cold-resumed Session automatically requests that pending result. Dispatch and policy events are durable and ignorable by older readers.
 
 ## Tool contract
 
@@ -50,7 +50,7 @@ Append-only after the existing request prefix.
 ## Known Limitations and Deferred Work
 
 - **Foreground execution only** — the model receives no background handle, progress stream, management status, reset, or interrupt operation; trusted CLI and plugins own Resident management.
-- **Model-native policy, not an opaque classifier** — Smart Auto makes delegation proactive and the selected policy is logged, projected, and inspectable. The main model still judges task fit from live descriptors/tags; the first release has no separately trained ranking service, deterministic skill score, or cost/capacity optimizer.
+- **Conservative deterministic classifier** — explicit requests and selected product policies are hard-routed by the host. Smart Auto uses auditable task-shape rules and leaves unmatched/trivial work on the current model; it has no separately trained ranking service or cost/capacity optimizer.
 - **No queue or affinity scheduler** — one turn runs in the foreground; the Consumer does not yet plan a multi-operator DAG or optimize workspace/provider affinity.
 - **No typed physics payloads** — the first release accepts text tasks and returns ordinary content blocks or Provider-owned artifact references.
 - **No generic output-size policy** — Resident local execution has a bounded artifact policy, while other Providers remain responsible for their complete result size.

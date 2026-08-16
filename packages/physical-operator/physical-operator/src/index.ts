@@ -174,7 +174,7 @@ export class PhysicalOperatorRuntime extends Service {
 
     const stableId = operator.descriptor.id
     const identity: PhysicalOperatorExecutionInfo = {
-      executionId: executionId(randomUUID()),
+      executionId: request.executionId ?? executionId(randomUUID()),
       operatorId: stableId,
     }
     this.active.set(stableId, status.active + 1)

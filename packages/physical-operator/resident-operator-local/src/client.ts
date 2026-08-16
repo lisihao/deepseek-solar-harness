@@ -134,13 +134,15 @@ export class ResidentDaemonClient {
       prompt: request.prompt,
     }, request.signal)
     let settled = false
-    const abort = (): void => {
-      void this.interrupt(accepted.sessionId, accepted.turnId).catch(() => {})
+    const observation = new AbortController()
+    const detach = (): void => {
+      observation.abort(request.signal.reason ?? new Error('resident caller detached'))
     }
-    request.signal.addEventListener('abort', abort, { once: true })
-    const result = this.poll(accepted.turnId, request.signal).finally(() => {
+    if (request.signal.aborted) detach()
+    else request.signal.addEventListener('abort', detach, { once: true })
+    const result = this.poll(accepted.turnId, observation.signal).finally(() => {
       settled = true
-      request.signal.removeEventListener('abort', abort)
+      request.signal.removeEventListener('abort', detach)
     })
     return {
       turnId: accepted.turnId,
@@ -148,7 +150,7 @@ export class ResidentDaemonClient {
       stateRevision: accepted.stateRevision,
       result,
       dispose: async () => {
-        if (!settled) await this.interrupt(accepted.sessionId, accepted.turnId)
+        if (!settled) observation.abort(new Error('resident caller disposed'))
         await result.catch(() => {})
       },
     }

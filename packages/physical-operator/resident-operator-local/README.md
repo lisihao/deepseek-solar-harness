@@ -12,6 +12,8 @@ JSON-RPC 2.0 messages are newline-delimited over an owner-only Unix socket. Hand
 
 A receipt advances `accepted -> running -> settled`; bounded `turn.progress` phases expose connection, native-session readiness, reasoning/tool activity, and finalization without storing prompts or transcripts. A newly connected DSH or Desktop client can inspect the active turn, latest phase, and settled result from daemon-owned state. A daemon crash before provable settlement recovers the receipt as `indeterminate`. Replaying the same command and canonical hash returns the same receipt, while changed content conflicts. A retry is admitted only after explicit resolution, uses a new command id, and records a unique link to the old receipt. Graceful daemon stop drains admitted turns; forced process death relies on startup recovery and never auto-replays work.
 
+Caller cancellation and client disposal detach only the local polling handle after admission; they do not send `turn.interrupt`. This keeps a daemon-owned native turn alive across DSH, HMR, or Desktop restart. Trusted callers that intend to stop product work must use the explicit interrupt method.
+
 ## Configuration and security
 
 | Field | Default | Meaning |

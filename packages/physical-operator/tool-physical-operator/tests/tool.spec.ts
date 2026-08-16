@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import LlmRuntime, { CallId } from '@deepseek-ai/dsh-llm'
 import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
@@ -61,6 +61,8 @@ class ScriptedOperator implements PhysicalOperator {
 async function setup(operator = new ScriptedOperator()) {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(CommandRuntime)
   await ctx.plugin(SystemPrompt)
@@ -249,6 +251,8 @@ describe('physical_operator tool', () => {
   it('unmounts with its plugin fiber and never owns the operator registry', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(LlmRuntime)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(CommandRuntime)
     await ctx.plugin(SystemPrompt)
