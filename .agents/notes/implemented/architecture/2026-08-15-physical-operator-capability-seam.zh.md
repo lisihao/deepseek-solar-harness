@@ -40,10 +40,13 @@ DSH 现在既保持原有一次性行为，又在不修改 Core 的前提下增�
 
 新增状态也带来明确运维责任：产品和协议版本是固定资格输入；强制终止可能需要显式处置 indeterminate；状态只向前迁移；产品原生权限仍是权威，不继承 DSH 文件沙箱。人工写接管、排队与公平性、亲和调度、durable Jobs 投影、远程传输、类型化物理 schema、provenance 与 actor-host 迁移仍后置，且必须以独立 seam 或版本化契约接入。
 
+Electron 打包不会改变 daemon 权威。Electron 宿主仅在 child-only RunAsNode 模式下重新进入启用了 fuse 的自身可执行文件，以启动同一个 standalone daemon entry；daemon 会在任何产品 Driver 进程启动前移除该标记。这样 DSH/HMR 生命周期、daemon 生命周期与 Claude/Codex 产品生命周期继续分离，Desktop shell 不会成为第二个控制面。
+
 ## 验证
 
 - 单元、协议、Loader composition、HMR 所有权、Receipt 冲突与恢复、Artifact、脱敏、符号链接、interrupt/reset 和 Unix-WebSocket transport 测试均通过。仓库完整测试达到 13,457 项通过；剩余 app-boot/SDK 超时失败可在本变更外复现，而本次触及的 catalog 与 ACP 用例单独运行通过。
 - MacBook 上 Claude Code 与 Codex 都以原生订阅产品通过资格审查，且 API-key 环境变量已移除。独立 DSH 客户端分别恢复同一原生 Claude Session 与 Codex thread；两者在 Resident daemon 重启后仍保留随机 nonce。Codex 中断后 Session 仍可 inspect，带 revision 门禁的 reset 只移除关联，不删除原生历史。
 - 全新沙箱 profile 通过 `dsh plugin` 安装预构建 Bundle，`--dump-config` 显示双模式路由，随后可完整移除 composition layer。Packed-import 验证发现并修复了带 hash daemon chunk 的发布白名单与 Claude Agent SDK peer 闭包问题。
 - Codex daemon transport 会在仅属主可访问的 Unix socket 上执行真实 WebSocket upgrade。真实 canary 在发布前拒绝了先前把 NDJSON 直接接到 `proxy` 的错误假设。
+- Electron bootstrap 聚焦测试证明：当前宿主环境不被修改、detached Electron 子进程收到 RunAsNode、daemon 与产品环境会不区分大小写地移除该标记。打包后 `.app` 的真实验收属于 Desktop 发布门禁，不由 daemon 单元测试代替。
 - Mac mini 尚不满足 canary 准入：Claude Code 报告未登录订阅；Codex launcher 因 Homebrew `simdjson` 动态库缺失而损坏；standalone daemon 尚未安装；DSH runtime 也未部署。默认 profile 没有修改。

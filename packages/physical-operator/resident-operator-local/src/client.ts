@@ -32,6 +32,8 @@ const REQUIRED_METHODS = Object.freeze([
   'event.read',
 ] as const)
 
+const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
+
 interface ListResponse {
   readonly providers: ResidentProviderStatus[]
   readonly sessions: ResidentSessionSnapshot[]
@@ -333,13 +335,35 @@ export function startDetachedResidentDaemon(root: string): number {
   const child = spawn(process.execPath, [...process.execArgv, entry, '--root', root], {
     detached: true,
     stdio: 'ignore',
-    env: process.env,
+    env: residentDaemonEnvironment(process.env, process.versions.electron),
   })
   child.unref()
   if (child.pid === undefined) {
     throw new ResidentOperatorError('resident daemon process did not publish a pid', 'RUNTIME_UNAVAILABLE')
   }
   return child.pid
+}
+
+/**
+ * Build the detached daemon environment without changing the current host.
+ * Electron must re-enter its executable in Node mode for the daemon entry;
+ * ordinary Node hosts must remove any inherited marker instead of forwarding it.
+ * @param environment - host environment to copy.
+ * @param electronVersion - Electron runtime marker, injectable for focused tests.
+ * @returns a fresh child-only environment.
+ */
+export function residentDaemonEnvironment(
+  environment: NodeJS.ProcessEnv,
+  electronVersion: string | undefined,
+): NodeJS.ProcessEnv {
+  const childEnvironment = { ...environment }
+  for (const key of Object.keys(childEnvironment)) {
+    if (key.toUpperCase() === ELECTRON_RUN_AS_NODE) Reflect.deleteProperty(childEnvironment, key)
+  }
+  if (electronVersion !== undefined && electronVersion.length > 0) {
+    childEnvironment[ELECTRON_RUN_AS_NODE] = '1'
+  }
+  return childEnvironment
 }
 
 /**

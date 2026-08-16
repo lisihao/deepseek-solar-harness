@@ -5,12 +5,22 @@ import { fileURLToPath } from 'node:url'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { ResidentDaemon } from './daemon.ts'
 
+const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
+
+/** Remove Electron's bootstrap marker before product Drivers create children. */
+export function clearElectronRunAsNode(environment: NodeJS.ProcessEnv): void {
+  for (const key of Object.keys(environment)) {
+    if (key.toUpperCase() === ELECTRON_RUN_AS_NODE) Reflect.deleteProperty(environment, key)
+  }
+}
+
 /**
  * Run one signal-aware Resident daemon until graceful closure.
  * @param root - owner-only daemon state root.
  * @returns after the daemon closes and signal listeners are removed.
  */
 export async function runResidentDaemon(root: string): Promise<void> {
+  clearElectronRunAsNode(process.env)
   const daemon = new ResidentDaemon({ root })
   await daemon.start()
   const stop = (): void => { void daemon.close() }

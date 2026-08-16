@@ -23,6 +23,8 @@ A receipt advances `accepted -> running -> settled`; a daemon crash before prova
 
 The root is mode `0700`; socket, lock, pid, SQLite files, and artifacts are mode `0600`. Raw prompts and terminal screens are not stored. Receipts store only a canonical hash; persisted failures redact prompt and credential-shaped material. Product children receive the shared credential-scrubbed environment, native product permission/approval policies remain authoritative, and neither driver falls back to an API key.
 
+When hosted by an Electron application with the RunAsNode fuse enabled, the client adds `ELECTRON_RUN_AS_NODE=1` only to the detached daemon bootstrap child. The daemon removes that marker before qualifying or launching Claude Code and Codex, so product processes never inherit Electron's launch mode. Ordinary Node hosts also strip a stale inherited marker.
+
 ## Model Experience
 
 Indirectly, through the dual-mode physical-operator provider and `physical_operator` tool. The daemon stores no raw prompt or terminal screen; a large final result becomes a SHA-256 artifact reference.

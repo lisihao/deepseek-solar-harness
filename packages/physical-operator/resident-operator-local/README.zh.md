@@ -23,6 +23,8 @@ Receipt 按 `accepted -> running -> settled` 推进；daemon 在无法证明结�
 
 根目录权限为 `0700`，socket、lock、pid、SQLite 文件与 Artifact 为 `0600`。系统不保存原始 prompt 或终端屏幕；Receipt 只保存 canonical hash，持久化错误会脱敏 prompt 与疑似凭据。产品子进程使用共享的凭据清理环境，产品原生权限和 approval 策略仍是权威，两个 Driver 都不会回退到 API key。
 
+当宿主是已启用 RunAsNode fuse 的 Electron 应用时，客户端只向 detached daemon 的 bootstrap 子进程加入 `ELECTRON_RUN_AS_NODE=1`。daemon 会在资格审查或启动 Claude Code、Codex 前移除该标记，因此产品进程不会继承 Electron 启动模式；普通 Node 宿主也会清除意外继承的旧标记。
+
 ## Model Experience
 
 Indirectly, through the dual-mode physical-operator provider and `physical_operator` tool. The daemon stores no raw prompt or terminal screen; a large final result becomes a SHA-256 artifact reference.
