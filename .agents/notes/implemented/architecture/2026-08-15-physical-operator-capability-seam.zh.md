@@ -19,7 +19,7 @@ AI4Research 包含有价值的物理算子概念，但若把整个项目作为�
 3. `@deepseek-ai/dsh-resident-operator-local` 运行独立、仅属主可访问的 Unix-socket daemon，作为 Session/Receipt/Lease/Event/Artifact 的唯一写者。Command identity 与 canonical request hash 分离：相同重放返回同一 Receipt，内容改变则冲突；崩溃变为 `indeterminate`；获授权的重试使用新 ID，并唯一关联已 abandon 的旧 Receipt。
 4. 原生产品连续性保持权威。Claude Code 使用官方 Agent SDK 的持久 Session 与 resume；Codex 使用固定 app-server schema 的非临时 thread start/resume。两者都在当前 CLI、版本、协议与原生订阅资格无法证明时默认拒绝，且只接收凭据清理后的环境，不提供 API fallback。
 5. `@deepseek-ai/dsh-physical-operator-resident` 在现有 ephemeral subagent 与 Resident seam 之间路由同一稳定 ID。`@deepseek-ai/dsh-tool-physical-operator` 仍是唯一模型 Consumer，并根据实时 descriptor/tag/mode 目录注册动态选择指引，而不是引入隐藏分类器；`@deepseek-ai/dsh-resident-operators` 则提供 opt-in composition Bundle。
-6. Consumer 持有每个 Session 一份已记录的路由策略：`auto | direct | codex | claude-code`。未配置的 Session 使用 `auto`，主 Agent 会评估每个非简单请求，并在无需用户点名产品的情况下调用合适算子。`/operator` 修改持久事件；Session 投影向客户端提供同一值，使 Desktop 能在模型选择旁显示独立的执行策略选择器，而不会把两者混为一谈。
+6. Consumer 持有每个 Session 一份已记录的路由策略：`auto | direct | codex | claude-code`。未配置的 Session 使用 `auto`，主 Agent 会评估每个非简单请求，并在无需用户点名产品的情况下调用合适算子。`/operator` 修改持久事件；Session 投影向客户端提供同一值，使 Desktop 能在模型选择旁显示独立的执行策略选择器，而不会把两者混为一谈。宿主 dispatch 是单 step 覆盖：它记录被替换的主模型配置，在 HMR 或进程恢复后的下一条未匹配消息中恢复该配置，并且在 assistant message 已交付该 dispatch 后不能再次提供结果。
 
 Provider、路由器与 Consumer 依赖 Service Definition，而不依赖彼此实现。DSH/HMR 释放只断开客户端，不终止 daemon；daemon 正常停止会排空已准入 turn。Tmux 只是可选的只读事件观察器，不是任务传输或权威。DSH Session、Jobs、Web UI 与 terminal pane 可投影有界状态，但不拥有原生产品 Session 或 Resident Receipt。
 
@@ -45,6 +45,8 @@ DSH 现在既保持原有一次性行为，又在不修改 Core 的前提下增�
 
 智能自动是主动策略，但不是新的不透明路由权威：可见的主模型依据当前请求和实时 descriptor 作出决定，所选策略则被记录并可检查。因此它改善缺省体验，但不宣称确定性最优路由；训练式排序、成本/容量优化和多算子 DAG 调度仍属后置。
 
+单 step 覆盖避免 Resident 连续性变成聊天模型权威。连续的已路由任务会获得不同 dispatch 与 command identity，只有被中断且尚未交付的 dispatch 才复用 Receipt。无法满足委派条件的短追问会回到主模型，而不是重放最近一次已结算的 Resident 输出。
+
 Electron 打包不会改变 daemon 权威。Electron 宿主仅在 child-only RunAsNode 模式下重新进入启用了 fuse 的自身可执行文件，以启动同一个 standalone daemon entry；daemon 会在任何产品 Driver 进程启动前移除该标记。这样 DSH/HMR 生命周期、daemon 生命周期与 Claude/Codex 产品生命周期继续分离，Desktop shell 不会成为第二个控制面。
 
 ## 验证
@@ -54,4 +56,5 @@ Electron 打包不会改变 daemon 权威。Electron 宿主仅在 child-only Run
 - 全新沙箱 profile 通过 `dsh plugin` 安装预构建 Bundle，`--dump-config` 显示双模式路由，随后可完整移除 composition layer。Packed-import 验证发现并修复了带 hash daemon chunk 的发布白名单与 Claude Agent SDK peer 闭包问题。
 - Codex daemon transport 会在仅属主可访问的 Unix socket 上执行真实 WebSocket upgrade。真实 canary 在发布前拒绝了先前把 NDJSON 直接接到 `proxy` 的错误假设。
 - Electron bootstrap 聚焦测试证明：当前宿主环境不被修改、detached Electron 子进程收到 RunAsNode、daemon 与产品环境会不区分大小写地移除该标记。打包后 `.app` 的真实验收属于 Desktop 发布门禁，不由 daemon 单元测试代替。
+- 路由回归测试先交付一次 Claude 结果，再重新挂载 Consumer，并验证短追问只调用一次主适配器，不启动或重放第二次 Claude 请求。持久 dispatch 会保留用于恢复的主模型配置。
 - Mac mini 尚不满足 canary 准入：Claude Code 报告未登录订阅；Codex launcher 因 Homebrew `simdjson` 动态库缺失而损坏；standalone daemon 尚未安装；DSH runtime 也未部署。默认 profile 没有修改。

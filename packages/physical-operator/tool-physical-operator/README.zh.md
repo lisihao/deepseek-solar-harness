@@ -4,7 +4,7 @@
 
 本包是面向模型的 `ctx.physicalOperators` Consumer。它注册一个固定的 `physical_operator` 工具，包含发现实时算子和运行一个稳定算子 ID 两个动作。动态 system-prompt 区段会说明何时委派、何时使用 Resident 连续性，并列出当前实时 descriptor、tag 与 mode。Provider 传输不会出现在工具约定中。
 
-每个 Session 还拥有持久化的路由策略。未配置的 Session 会投影为“智能自动”；确定性的宿主路由把实现/调试类工作识别为 Codex，把分析/研究类工作识别为 Claude Code。`/operator codex`、`/operator claude-code`、`/operator direct` 和 `/operator auto` 提供可见的人工覆盖。`/operator-profile <product> <model|auto> <effort|auto>` 保存每个产品的可选执行字段；Resident daemon 会根据原生订阅目录校验并补全。当前消息明确点名的产品始终高于已保存偏好。路由一经接受，普通 DeepSeek 请求会被 Resident 物理算子适配器替换，因此 DeepSeek 不能静默接管任务。`continue`/`继续` 会使用同一份已复制偏好重连尚未交付的命令回执，冷恢复 Session 也会自动请求该待交付结果。派发、策略和 profile 事件均持久化，并可被旧 reader 忽略。
+每个 Session 还拥有持久化的路由策略。未配置的 Session 会投影为“智能自动”；确定性的宿主路由把实现/调试类工作识别为 Codex，把分析/研究类工作识别为 Claude Code。`/operator codex`、`/operator claude-code`、`/operator direct` 和 `/operator auto` 提供可见的人工覆盖。`/operator-profile <product> <model|auto> <effort|auto>` 保存每个产品的可选执行字段；Resident daemon 会根据原生订阅目录校验并补全。当前消息明确点名产品或可识别的原生模型系列时，始终高于已保存偏好（`Sonnet`/`Opus`/`Haiku` 选择 Claude Code，`GPT-5.x` 选择 Codex）。已接受的路由只在该模型 step 内替换为 Resident 物理算子适配器，并把被替换的主模型配置记录在 dispatch 中。后续无法匹配的消息会恢复该配置，插件重载后同样如此；适配器也会拒绝结果已经交付的 dispatch。`continue`/`继续` 会使用同一份已复制偏好重连尚未交付的命令回执，冷恢复 Session 也会自动请求该待交付结果。派发、策略和 profile 事件均持久化，并可被旧 reader 忽略。
 
 ## 工具约定
 

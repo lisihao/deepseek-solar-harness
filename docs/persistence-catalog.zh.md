@@ -531,10 +531,11 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   step: number
   recovered: boolean
   residentProfile?: PhysicalOperatorExecutionPreference
+  fallbackConfig?: LlmCallConfig
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:57`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:58`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -548,7 +549,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:68`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:70`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -562,7 +563,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:50`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:51`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -576,7 +577,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:52`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:53`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

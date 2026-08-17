@@ -147,6 +147,26 @@ describe('host physical-operator routing', () => {
     })
   })
 
+  it('treats an explicitly named Claude model as a Claude Code route', async () => {
+    const { agent, deepseek, claude } = await setup()
+
+    send(agent, '用 Sonnet 回答我的问好：你好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(1)
+  })
+
+  it('treats an explicitly named GPT execution model as a Codex route', async () => {
+    const { agent, deepseek, codex } = await setup()
+
+    send(agent, '用 GPT-5.6-Sol 分析这个问题')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(codex.requests).toHaveLength(1)
+  })
+
   it('routes preferred and smart-auto non-trivial work at the host boundary', async () => {
     const preferred = await setup()
     await preferred.ctx.commands.execute(preferred.agent, '/operator codex', new AbortController().signal)
@@ -160,6 +180,33 @@ describe('host physical-operator routing', () => {
     await automatic.agent.whenIdle()
     expect(automatic.codex.requests).toHaveLength(1)
     expect(automatic.deepseek.requests).toHaveLength(0)
+  })
+
+  it('restores the primary model after one routed turn instead of replaying the settled Resident result', async () => {
+    const { ctx, agent, deepseek, claude, mounted } = await setup()
+
+    send(agent, '用 Claude 回答我的问好：你好')
+    await agent.whenIdle()
+    expect(claude.requests).toHaveLength(1)
+    expect(lastAssistantMessage(agent).source).toMatchObject({
+      provider: 'dsh-physical-operator',
+      model: 'claude-code',
+    })
+    expect(agent.session.events.find(event => event.type === 'physical-operator/dispatch')).toMatchObject({
+      data: { fallbackConfig: { provider: 'deepseek', model: 'deepseek' } },
+    })
+
+    await mounted.dispose()
+    await ctx.plugin(tool)
+    send(agent, '刚才是哪个模型回答的')
+    await agent.whenIdle()
+
+    expect(claude.requests).toHaveLength(1)
+    expect(deepseek.requests).toHaveLength(1)
+    expect(lastAssistantMessage(agent).source).toMatchObject({
+      provider: 'deepseek',
+      model: 'deepseek',
+    })
   })
 
   it('persists manual model and effort preferences and replays them with the durable dispatch', async () => {

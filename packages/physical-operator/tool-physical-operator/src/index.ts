@@ -14,6 +14,7 @@ import {
   LlmAdapter,
   type ContentBlock,
   type GenerateOptions,
+  type LlmCallConfig,
   type StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
@@ -63,6 +64,7 @@ declare module '@deepseek-ai/dsh-session/types' {
       step: number
       recovered: boolean
       residentProfile?: PhysicalOperatorExecutionPreference
+      fallbackConfig?: LlmCallConfig
     }
     /** Non-cancellation terminal failure; prevents an endless cold-resume loop. */
     'physical-operator/dispatch-terminal': {
@@ -85,6 +87,7 @@ interface PendingHostRoute {
   readonly requestedByMessageId: string
   readonly recovered: boolean
   readonly residentProfile?: PhysicalOperatorExecutionPreference
+  readonly fallbackConfig?: LlmCallConfig
 }
 
 interface DispatchRecord extends PendingHostRoute {
@@ -181,6 +184,7 @@ const profileProjectionSchema = zod.object({
 /** Register the fixed discovery-and-execution tool. */
 export function apply(ctx: Context): void {
   const pending = new WeakMap<Agent, Map<string, PendingHostRoute>>()
+  const fallbackConfigs = new WeakMap<Agent, LlmCallConfig>()
   ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx))
 
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
@@ -200,7 +204,26 @@ export function apply(ctx: Context): void {
     let route = byPosition?.get(key)
     byPosition?.delete(key)
     route ??= dispatchForPosition(agent.session.events, turn, step)
-    if (route === undefined) return base
+    if (route === undefined) {
+      if (base.provider !== ROUTER_PROVIDER) {
+        fallbackConfigs.set(agent, cloneCallConfig(base))
+        return base
+      }
+      const fallback = recoverFallbackConfig(agent, fallbackConfigs.get(agent))
+      if (fallback === undefined) {
+        throw new Error('physical-operator router cannot restore the primary model route')
+      }
+      fallbackConfigs.set(agent, fallback)
+      return fallback
+    }
+    const fallback = base.provider === ROUTER_PROVIDER
+      ? recoverFallbackConfig(agent, fallbackConfigs.get(agent))
+      : cloneCallConfig(base)
+    if (fallback === undefined) {
+      throw new Error('physical-operator router cannot capture the primary model route')
+    }
+    fallbackConfigs.set(agent, fallback)
+    route = { ...route, fallbackConfig: fallback }
     if (dispatchForPosition(agent.session.events, turn, step) === undefined) {
       agent.session.append('physical-operator/dispatch', {
         ...route,
@@ -474,9 +497,9 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       throw new Error('physical-operator router only accepts the primary agent-loop request')
     }
     const agent = this.ctx.agents.requireInitiator()
-    const dispatch = latestDispatch(agent.session.events)
+    const dispatch = recoverableDispatch(agent.session.events)
     if (dispatch === undefined || dispatch.operatorId !== options.model) {
-      throw new Error(`physical-operator router has no durable dispatch for ${options.model}`)
+      throw new Error(`physical-operator router has no pending durable dispatch for ${options.model}`)
     }
     const prompt = promptForMessage(agent.session.events, dispatch.promptMessageId)
     if (prompt === undefined) {
@@ -573,7 +596,9 @@ function newHostRoute(agent: Agent, messageId: string, operatorId: string): Pend
 
 function explicitOperator(text: string): 'codex' | 'claude-code' | undefined {
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*codex\b|\bcodex\s*(?:来|去|帮我|执行|处理|分析|研究|实现|修复)/iu.test(text)) return 'codex'
+  if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*gpt[-\s]?5(?:\.\d+)?(?:[-\s]?(?:codex|sol|terra))?\b/iu.test(text)) return 'codex'
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*claude(?:\s+code)?\b|\bclaude(?:\s+code)?\s*(?:来|去|帮我|执行|处理|分析|研究|实现|修复)/iu.test(text)) return 'claude-code'
+  if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*(?:sonnet|opus|haiku|fable)\b/iu.test(text)) return 'claude-code'
   if (/\b(?:use|ask|have|let)\s+(?:the\s+)?codex\b/iu.test(text)) return 'codex'
   if (/\b(?:use|ask|have|let)\s+(?:the\s+)?claude(?:\s+code)?\b/iu.test(text)) return 'claude-code'
   return undefined
@@ -623,7 +648,9 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
   const found = [...events].reverse().find(event => event.type === 'physical-operator/dispatch'
     && event.data.turn === turn && event.data.step === step)
   if (found?.type !== 'physical-operator/dispatch') return undefined
-  const { commandId, operatorId, promptMessageId, requestedByMessageId, recovered, residentProfile } = found.data
+  const {
+    commandId, operatorId, promptMessageId, requestedByMessageId, recovered, residentProfile, fallbackConfig,
+  } = found.data
   return {
     commandId,
     operatorId,
@@ -631,6 +658,34 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
     requestedByMessageId,
     recovered,
     ...residentProfile === undefined ? {} : { residentProfile },
+    ...fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(fallbackConfig) },
+  }
+}
+
+/** Recover the non-router model selection that a transient host dispatch replaced. */
+function recoverFallbackConfig(agent: Agent, inMemory?: LlmCallConfig): LlmCallConfig | undefined {
+  if (inMemory !== undefined && inMemory.provider !== ROUTER_PROVIDER) return cloneCallConfig(inMemory)
+  const dispatch = latestDispatch(agent.session.events)
+  if (dispatch?.fallbackConfig !== undefined && dispatch.fallbackConfig.provider !== ROUTER_PROVIDER) {
+    return cloneCallConfig(dispatch.fallbackConfig)
+  }
+  for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
+    const event = agent.session.events[index]
+    if (event?.type !== 'request/header') continue
+    if (event.data.header.config.provider !== ROUTER_PROVIDER) {
+      return cloneCallConfig(event.data.header.config)
+    }
+  }
+  if (agent.options.provider && agent.options.model && agent.options.provider !== ROUTER_PROVIDER) {
+    return { provider: agent.options.provider, model: agent.options.model }
+  }
+  return undefined
+}
+
+function cloneCallConfig(config: LlmCallConfig): LlmCallConfig {
+  return {
+    ...config,
+    ...config.stop === undefined ? {} : { stop: [...config.stop] },
   }
 }
 

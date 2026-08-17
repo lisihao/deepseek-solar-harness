@@ -18,7 +18,7 @@ Claude Code 目录发现使用 Agent SDK 控制通道，不提交模型 prompt�
 
 ## Catalog and automatic selection
 
-Provider 状态包含原生产品当前模型条目、支持的强度、默认强度、可用时的解析后模型别名，以及 adaptive-thinking 能力。Smart Auto 只在内存中把当前 prompt 分类为 quick、standard、complex 或 extreme。它根据产品声明的稳定 ID 与描述选择快、均衡或旗舰条目，再选取最近的受支持强度。手动模型或强度只覆盖对应维度；所有解析值仍须通过实时目录校验。
+Provider 状态包含原生产品当前模型条目、支持的强度、默认强度、可用时的解析后模型别名，以及 adaptive-thinking 能力。Smart Auto 只在内存中把当前 prompt 分类为 quick、standard、complex 或 extreme。它根据产品声明的稳定 ID 与描述选择快、均衡或旗舰条目，再选取最近的受支持强度。手动模型或强度只覆盖对应维度。强度手动、模型自动时，候选范围会收窄到明确支持该强度的目录条目；若没有兼容候选，则以 `EXECUTION_PROFILE_UNSUPPORTED` 明确失败。所有解析值仍须通过实时目录校验。
 
 ## Alternatives considered
 

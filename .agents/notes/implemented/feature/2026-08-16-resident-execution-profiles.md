@@ -18,7 +18,7 @@ The model/effort preference is an ignorable DSH Session event and a browser proj
 
 ## Catalog and automatic selection
 
-Provider status includes the native product's current model rows, supported effort values, default effort, resolved model alias when available, and adaptive-thinking support. Smart Auto classifies only the current in-memory prompt as quick, standard, complex, or extreme. It selects product-advertised fast, balanced, or frontier rows by their stable ids and descriptions, then selects the nearest supported effort. Manual model or effort fields override only their named dimension; every resolved value still passes the live catalog check.
+Provider status includes the native product's current model rows, supported effort values, default effort, resolved model alias when available, and adaptive-thinking support. Smart Auto classifies only the current in-memory prompt as quick, standard, complex, or extreme. It selects product-advertised fast, balanced, or frontier rows by their stable ids and descriptions, then selects the nearest supported effort. Manual model or effort fields override only their named dimension. If effort is manual while model remains automatic, selection is restricted to catalog rows that support that effort; an empty compatible set fails with `EXECUTION_PROFILE_UNSUPPORTED`. Every resolved value still passes the live catalog check.
 
 ## Alternatives considered
 

@@ -61,6 +61,9 @@ describe('Resident execution profile resolution', () => {
     expect(resolveResidentExecutionProfile(
       'claude-code', claudeModels, [{ type: 'text', text: '分析' }], { model: 'claude-opus-5', effort: 'max' },
     )).toMatchObject({ profile: { model: 'default', effort: 'max' }, source: 'manual' })
+    expect(resolveResidentExecutionProfile(
+      'claude-code', claudeModels, [{ type: 'text', text: '一句话快速检查' }], { effort: 'high' },
+    )).toMatchObject({ profile: { model: 'default', effort: 'high' }, source: 'mixed' })
   })
 
   it('fails loud for a model or effort absent from the native catalog', () => {
@@ -69,6 +72,9 @@ describe('Resident execution profile resolution', () => {
     )).toThrow(expect.objectContaining({ code: 'EXECUTION_PROFILE_UNSUPPORTED' }))
     expect(() => resolveResidentExecutionProfile(
       'claude-code', claudeModels, [{ type: 'text', text: 'task' }], { model: 'haiku', effort: 'high' },
+    )).toThrow(expect.objectContaining({ code: 'EXECUTION_PROFILE_UNSUPPORTED' }))
+    expect(() => resolveResidentExecutionProfile(
+      'claude-code', claudeModels, [{ type: 'text', text: 'task' }], { effort: 'ultra' },
     )).toThrow(expect.objectContaining({ code: 'EXECUTION_PROFILE_UNSUPPORTED' }))
   })
 })

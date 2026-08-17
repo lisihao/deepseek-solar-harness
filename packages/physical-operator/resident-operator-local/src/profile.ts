@@ -42,8 +42,18 @@ export function resolveResidentExecutionProfile(
     throw new ResidentOperatorError(`${operatorId} reported no selectable models`, 'RUNTIME_UNAVAILABLE')
   }
   const taskClass = classifyTask(prompt)
+  const requestedEffort = preference?.effort
+  const automaticCandidates = preference?.model === undefined && requestedEffort !== undefined
+    ? models.filter(model => model.supportedEfforts.includes(requestedEffort))
+    : models
+  if (automaticCandidates.length === 0) {
+    throw new ResidentOperatorError(
+      `${operatorId} does not advertise a model supporting ${String(requestedEffort)} effort`,
+      'EXECUTION_PROFILE_UNSUPPORTED',
+    )
+  }
   const selected = preference?.model === undefined
-    ? automaticModel(operatorId, models, taskClass)
+    ? automaticModel(operatorId, automaticCandidates, taskClass)
     : models.find(option => option.model === preference.model || option.resolvedModel === preference.model)
   if (selected === undefined) {
     throw new ResidentOperatorError(
