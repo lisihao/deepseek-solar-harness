@@ -57,7 +57,7 @@ function snapshot(task) {
  * @param {object} deps - { adapters, sessions, tasks, config, writeSummary?, notify? }
  *   writeSummary({cwd, branch, text}) 摘要沉淀回调（可选，失败静默）；
  *   notify(text) 完成通知回调（可选，来自 coiNotifyCommand 配置）。
- * @param {object} [opts] - { spawn: 可注入的 spawn（测试用） }。
+ * @param {object} [opts] - { spawn, killProcessGroup }（均可注入，测试用）。
  */
 export class CoiScheduler {
   constructor(ctx, deps, opts = {}) {
@@ -77,6 +77,7 @@ export class CoiScheduler {
     this.attachmentsStore = deps.attachmentsStore
     this.agentsService = deps.agentsService
     this.spawn = opts.spawn ?? nodeSpawn
+    this.killProcessGroup = opts.killProcessGroup ?? ((pid, signal) => process.kill(-pid, signal))
     this.running = new Map() // taskId -> 内部 task（含 process/buffer/timers）
     this.disposed = false
   }
@@ -600,13 +601,13 @@ export class CoiScheduler {
     const pid = child.pid
     const signal = internal.timedOut ? 'SIGKILL' : 'SIGTERM'
     try {
-      process.kill(-pid, signal)
+      this.killProcessGroup(pid, signal)
     } catch {
       try { child.kill(signal) } catch { /* 已退出 */ }
     }
     if (signal === 'SIGTERM') {
       const killer = setTimeout(() => {
-        try { process.kill(-pid, 'SIGKILL') } catch { /* 已退出 */ }
+        try { this.killProcessGroup(pid, 'SIGKILL') } catch { /* 已退出 */ }
       }, KILL_GRACE_MS)
       killer.unref?.()
     }

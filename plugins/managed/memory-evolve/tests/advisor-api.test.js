@@ -169,6 +169,16 @@ function rigFor(t, overrides) {
   return rig
 }
 
+/** 等待异步评审产生可观察结果，避免用固定睡眠猜测 drain 是否完成。 */
+async function waitUntil(check, label, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (check()) return
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.fail(`等待超时: ${label}`)
+}
+
 /** 通过 http 发请求。 */
 async function makeServer(ctx) {
   const server = createServer((req, res) => ctx.handler(req, res))
@@ -415,7 +425,10 @@ test('生命周期：agent/disposed 后 override 保留（刷新/重建不丢会
 test('Q1：info 级默认仅记录（不注入会话流）；开启 advisorInfoInject 后走 inject', async (t) => {
   const rig = rigFor(t)
   const { agent } = setupSession(rig)
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  await waitUntil(
+    () => rig.ctrl.queryRecords({ sessionId: 'session-1' }).records.length >= 1,
+    '首轮 concern 评审完成',
+  )
   // 让下一轮评审产出 info 级建议
   rig.llm.replies = ['{"note":"可选小提示","severity":"info"}']
   const session = rig.agents.get('session-1').session
@@ -424,7 +437,10 @@ test('Q1：info 级默认仅记录（不注入会话流）；开启 advisorInfoI
   feed(rig, session, event('step/start', { turn: 2 }))
   feed(rig, session, event('assistant/message', { message: { id: 'm4', role: 'assistant', content: [{ type: 'text', text: '好的' }], source: { kind: 'model' } } }, 'append'))
   feed(rig, session, event('turn/end', { turn: 2, reason: { kind: 'completed' } }))
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  await waitUntil(
+    () => rig.ctrl.queryRecords({ sessionId: 'session-1' }).records.length >= 2,
+    'info 记录完成',
+  )
   // 默认（infoInject=false）：记录落盘（outcome=recorded），会话流零打扰
   const records = rig.ctrl.queryRecords({ sessionId: 'session-1' })
   const latest = records.records[0]
@@ -440,7 +456,10 @@ test('Q1：info 级默认仅记录（不注入会话流）；开启 advisorInfoI
   feed(rig, session, event('step/start', { turn: 3 }))
   feed(rig, session, event('assistant/message', { message: { id: 'm6', role: 'assistant', content: [{ type: 'text', text: '好的' }], source: { kind: 'model' } } }, 'append'))
   feed(rig, session, event('turn/end', { turn: 3, reason: { kind: 'completed' } }))
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  await waitUntil(
+    () => rig.ctrl.queryRecords({ sessionId: 'session-1' }).records.length >= 3,
+    'info 注入完成',
+  )
   const records2 = rig.ctrl.queryRecords({ sessionId: 'session-1' })
   assert.equal(records2.records[0].outcome, 'delivered')
   assert.equal(records2.records[0].delivery, 'inject')

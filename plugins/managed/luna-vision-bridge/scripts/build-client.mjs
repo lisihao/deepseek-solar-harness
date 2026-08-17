@@ -6,8 +6,11 @@
  * them).
  */
 import { build } from 'tsdown'
+import { resolve } from 'node:path'
 
 await build({
+  cwd: resolve(import.meta.dirname, '..'),
+  config: false,
   name: '@ycp424c/dsh-luna-vision-bridge/client',
   entry: { client: 'src/client/index.tsx' },
   format: ['cjs'],

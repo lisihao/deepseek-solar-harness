@@ -364,36 +364,36 @@ declare module '@deepseek-ai/cordis' {
      * @param request - correlation identity, owner, target version, mode, and approval requirement.
      * @mode emit
      */
-    'cordis/request-run'(request: DynamicCordisRunRequest): void
+    '@deepseek-ai/cordis/request-run'(request: DynamicCordisRunRequest): void
     /**
      * A pending Client activation request left the answerable state.
      * @param resolved - request identity and outcome.
      * @mode emit
      */
-    'cordis/request-run-resolved'(resolved: DynamicCordisRequestResolved): void
+    '@deepseek-ai/cordis/request-run-resolved'(resolved: DynamicCordisRequestResolved): void
     /**
      * One exact Plugin/Package activation is now live in the Host.
      * @param pkg - stable plugin, immutable package, run identity, and label.
      * @mode emit
      */
-    'cordis/dynamic-package'(pkg: DynamicCordisPackage): void
+    '@deepseek-ai/cordis/dynamic-package'(pkg: DynamicCordisPackage): void
     /**
      * One exact activation was withdrawn.
      * @param retracted - plugin, package, and run identity.
      * @mode emit
      */
-    'cordis/dynamic-retract'(retracted: DynamicCordisRetracted): void
+    '@deepseek-ai/cordis/dynamic-retract'(retracted: DynamicCordisRetracted): void
     /**
      * Request a live read-only query from the Client inspect registry.
      * @param request - correlation, Session, provider, method, and JSON input.
      * @mode emit
      */
-    'cordis/inspect-query'(request: CordisInspectQueryRequest): void
+    '@deepseek-ai/cordis/inspect-query'(request: CordisInspectQueryRequest): void
     /**
      * Notify every Client that an inspect query has settled or been cancelled.
      * @param resolved - exact query identity that is no longer answerable.
      * @mode emit
      */
-    'cordis/inspect-query-resolved'(resolved: CordisInspectQueryResolved): void
+    '@deepseek-ai/cordis/inspect-query-resolved'(resolved: CordisInspectQueryResolved): void
   }
 }

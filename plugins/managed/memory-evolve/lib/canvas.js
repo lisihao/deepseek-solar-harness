@@ -383,8 +383,8 @@ export function resolveNodeFile(config, nodeId) {
  * @param {string} nodeId
  * @returns {{ ok: true } | { error: string }}
  */
-export function openNodeFile(config, nodeId) {
-  return openNodePath(config, nodeId, 'file')
+export function openNodeFile(config, nodeId, deps) {
+  return openNodePath(config, nodeId, 'file', deps)
 }
 
 /**
@@ -399,8 +399,8 @@ export function openNodeFile(config, nodeId) {
  * @param {string} nodeId
  * @returns {{ ok: true } | { error: string }}
  */
-export function openNodeFolder(config, nodeId) {
-  return openNodePath(config, nodeId, 'folder')
+export function openNodeFolder(config, nodeId, deps) {
+  return openNodePath(config, nodeId, 'folder', deps)
 }
 
 /**
@@ -409,9 +409,11 @@ export function openNodeFolder(config, nodeId) {
  * @param {string} nodeId
  * @param {'file'|'folder'} target - file=打开路径本身；folder=文件打开
  *   其父目录、目录打开自身（2026-08-14 新增）
+ * @param {{ spawn?: typeof spawn, platform?: NodeJS.Platform }} [deps] - 测试
+ *   注入点；生产默认使用当前平台与 node:child_process spawn。
  * @returns {{ ok: true } | { error: string }}
  */
-function openNodePath(config, nodeId, target) {
+function openNodePath(config, nodeId, target, deps = {}) {
   const board = readCanvas(config)
   const node = findNode(board.nodes, nodeId)
   if (!node || typeof node.path !== 'string' || node.path === '') {
@@ -437,12 +439,14 @@ function openNodePath(config, nodeId, target) {
   // 平台差异：macOS `open` / Windows `start` / Linux `xdg-open`。
   // spawn 分离进程 + 忽略 stdio + unref：打开后立即返回，不阻塞宿主。
   try {
-    if (process.platform === 'darwin') {
-      spawn('open', [openPath], { detached: true, stdio: 'ignore' }).unref()
-    } else if (process.platform === 'win32') {
-      spawn('cmd', ['/c', 'start', '', openPath], { detached: true, stdio: 'ignore' }).unref()
+    const spawnProcess = deps.spawn ?? spawn
+    const platform = deps.platform ?? process.platform
+    if (platform === 'darwin') {
+      spawnProcess('open', [openPath], { detached: true, stdio: 'ignore' }).unref()
+    } else if (platform === 'win32') {
+      spawnProcess('cmd', ['/c', 'start', '', openPath], { detached: true, stdio: 'ignore' }).unref()
     } else {
-      spawn('xdg-open', [openPath], { detached: true, stdio: 'ignore' }).unref()
+      spawnProcess('xdg-open', [openPath], { detached: true, stdio: 'ignore' }).unref()
     }
     return { ok: true }
   } catch (error) {

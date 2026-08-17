@@ -19,8 +19,16 @@ import { dirname, join } from 'node:path'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-/** DSH source checkout root; override with $DSH_SOURCE when not the default. */
-const CHECKOUT = process.env.DSH_SOURCE ?? join(homedir(), '.dsh/source/current')
+const MONOREPO_CHECKOUT = join(ROOT, '../../..')
+const DEFAULT_CHECKOUT = join(homedir(), '.dsh/source/current')
+/**
+ * DSH source checkout root. Prefer an explicit override, then the enclosing
+ * Solar monorepo checkout, and finally the standalone installed-source link.
+ */
+const CHECKOUT = process.env.DSH_SOURCE
+  ?? (existsSync(join(MONOREPO_CHECKOUT, 'distribution/product.json'))
+    ? MONOREPO_CHECKOUT
+    : DEFAULT_CHECKOUT)
 
 /**
  * Loader entry name — must equal the patch row `name` EXACTLY.

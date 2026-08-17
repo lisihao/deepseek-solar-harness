@@ -374,7 +374,12 @@ function bootScheduler(dir, overrides = {}) {
     config: { coiTaskTimeoutMs: 60000, coiDataDir: dir },
     writeSummary,
     memoryContext: overrides.memoryContext ?? (() => '【记忆】测试记忆轨内容'),
-  }, { spawn: harness.spawn })
+  }, {
+    spawn: harness.spawn,
+    // 真实系统上测试 PID 可能偶然与现有进程组重合；固定触发 child.kill
+    // 回退路径，避免测试误发信号并保证断言可重复。
+    killProcessGroup: () => { throw new Error('fake process group is absent') },
+  })
   schedulers.push(scheduler)
   scheduler.recover()
   return { ...stores, scheduler, harness, writeSummary }

@@ -168,7 +168,7 @@ describe('dynamic runner dispatch', () => {
     expect(ctx.get('dynDoubler')).toEqual({ ok: true })
     // Its own business: the only announcement is the run-state one.
     expect(gateway.events).toEqual([
-      ['cordis/dynamic-package', { pluginId, packageId, pluginRunId: 'run-1', name: 'doubler' }],
+      ['@deepseek-ai/cordis/dynamic-package', { pluginId, packageId, pluginRunId: 'run-1', name: 'doubler' }],
     ])
     await expect(runner.invoke(pluginId, 'run-1' as never, 'double', { value: 21 }))
       .resolves.toEqual({ ok: true, value: 42 })
@@ -202,7 +202,7 @@ describe('dynamic runner dispatch', () => {
       client: { status: 'waiting', waitingFor: ['slots'] },
     })
     expect(gateway.events.map(([name]) => name)).toEqual([
-      'cordis/request-run', 'cordis/dynamic-package', 'cordis/request-run-resolved',
+      '@deepseek-ai/cordis/request-run', '@deepseek-ai/cordis/dynamic-package', '@deepseek-ai/cordis/request-run-resolved',
     ])
     expect(gateway.events.at(-1)?.[1]).toMatchObject({ outcome: 'approved' })
   })
@@ -220,7 +220,7 @@ describe('dynamic runner dispatch', () => {
     await gateway.answering
     expect(ctx.get('dynDoubler')).toBeUndefined()
     expect(running(runner, AGENT_A)).toEqual([{ id: pluginId, running: false }])
-    expect(gateway.events.at(-1)).toMatchObject(['cordis/request-run-resolved', { outcome: 'rejected' }])
+    expect(gateway.events.at(-1)).toMatchObject(['@deepseek-ai/cordis/request-run-resolved', { outcome: 'rejected' }])
   })
 
   it('records an asynchronous Client failure and unwinds the Host half it started', async () => {
@@ -335,7 +335,7 @@ describe('dynamic runner dispatch', () => {
     const pending = await runner.run(AGENT_A, pluginId, packageId, 'run')
     expect(pending).toMatchObject({ ok: true, status: 'awaiting-approval' })
     await Promise.resolve()
-    const asked = gateway.events.find(([name]) => name === 'cordis/request-run')?.[1]
+    const asked = gateway.events.find(([name]) => name === '@deepseek-ai/cordis/request-run')?.[1]
     const requestId = (asked as { requestId: ApprovalRequestIdType }).requestId
     const first = await runner.runHostHalf(AGENT_A, pluginId, packageId, 'run', requestId, false)
     if (!first.ok) throw new Error(first.message)
@@ -346,7 +346,7 @@ describe('dynamic runner dispatch', () => {
     await expect(runner.resolveRequestRun(requestId, { ok: true, pluginRunId: first.pluginRunId }))
       .resolves.toEqual({ accepted: false })
     expect(gateway.events).toContainEqual([
-      'cordis/request-run-resolved',
+      '@deepseek-ai/cordis/request-run-resolved',
       { requestId, outcome: 'cancelled' },
     ])
     await expect(runner.runHostHalf(AGENT_A, pluginId, packageId, 'run', null, false))
@@ -362,7 +362,7 @@ describe('dynamic runner dispatch', () => {
     const pending = await runner.run(AGENT_A, pluginId, packageId, 'run', controller.signal)
     expect(pending).toMatchObject({ ok: true, status: 'awaiting-approval' })
     await Promise.resolve()
-    const asked = gateway.events.find(([name]) => name === 'cordis/request-run')?.[1]
+    const asked = gateway.events.find(([name]) => name === '@deepseek-ai/cordis/request-run')?.[1]
     const requestId = (asked as { requestId: ApprovalRequestIdType }).requestId
     const started = await runner.runHostHalf(AGENT_A, pluginId, packageId, 'run', requestId, false)
     if (!started.ok) throw new Error(started.message)
@@ -372,7 +372,7 @@ describe('dynamic runner dispatch', () => {
       .resolves.toEqual({ accepted: false })
     controller.abort()
     expect(gateway.events).toContainEqual([
-      'cordis/request-run-resolved',
+      '@deepseek-ai/cordis/request-run-resolved',
       { requestId, outcome: 'cancelled' },
     ])
   })
@@ -390,7 +390,7 @@ describe('dynamic runner dispatch', () => {
     controller.abort()
 
     expect(pending).toMatchObject({ ok: true, status: 'awaiting-approval' })
-    const asked = gateway.events.find(([name]) => name === 'cordis/request-run')?.[1]
+    const asked = gateway.events.find(([name]) => name === '@deepseek-ai/cordis/request-run')?.[1]
     const requestId = (asked as { requestId: ApprovalRequestIdType }).requestId
     const started = await runner.runHostHalf(AGENT_A, pluginId, packageId, 'run', requestId, false)
     if (!started.ok) throw new Error(started.message)
@@ -434,7 +434,7 @@ describe('dynamic runner teardown', () => {
     expect(ctx.get('dynDoubler')).toBeUndefined()
     await expect(runner.invoke(pluginId, first.pluginRunId, 'double', { value: 1 }))
       .resolves.toMatchObject({ code: 'plugin-not-running' })
-    expect(gateway.events.at(-1)).toEqual(['cordis/dynamic-retract', {
+    expect(gateway.events.at(-1)).toEqual(['@deepseek-ai/cordis/dynamic-retract', {
       pluginId, packageId, pluginRunId: first.pluginRunId,
     }])
     expect(running(runner, AGENT_A)).toEqual([{ id: pluginId, running: false }])
@@ -455,8 +455,8 @@ describe('dynamic runner teardown', () => {
     // The retract mirrors the start announcement: a run-control surface tracks
     // "is it running", which is independent of whether a browser half existed.
     expect(gateway.events).toEqual([
-      ['cordis/dynamic-package', { pluginId, packageId, pluginRunId: 'run-1', name: 'doubler' }],
-      ['cordis/dynamic-retract', { pluginId, packageId, pluginRunId: 'run-1' }],
+      ['@deepseek-ai/cordis/dynamic-package', { pluginId, packageId, pluginRunId: 'run-1', name: 'doubler' }],
+      ['@deepseek-ai/cordis/dynamic-retract', { pluginId, packageId, pluginRunId: 'run-1' }],
     ])
   })
 
@@ -481,7 +481,7 @@ describe('dynamic runner teardown', () => {
     expect(ctx.get('dynDoubler')).toBeUndefined()
     expect(running(runner, AGENT_A)).toEqual([])
     expect(gateway.events.map(([name]) => name))
-      .toEqual(['cordis/dynamic-package', 'cordis/dynamic-retract'])
+      .toEqual(['@deepseek-ai/cordis/dynamic-package', '@deepseek-ai/cordis/dynamic-retract'])
     await expect(runner.run(AGENT_A, pluginId, packageId, 'run'))
       .resolves.toMatchObject({ ok: false, reason: 'plugin-missing' })
   })

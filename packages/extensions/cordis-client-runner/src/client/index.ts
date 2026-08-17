@@ -292,17 +292,17 @@ export function apply(ctx: Context): void {
 
   // Forwarded Host events: `$on` hands the listener the Host's own argument list,
   // so these read the request itself rather than a transport envelope.
-  ctx.remote.$on('cordis/request-run', (request) => {
+  ctx.remote.$on('@deepseek-ai/cordis/request-run', (request) => {
     orchestrator.open(request)
   })
-  ctx.remote.$on('cordis/request-run-resolved', (resolved) => { orchestrator.close(resolved.requestId) })
-  ctx.remote.$on('cordis/dynamic-retract', (retracted) => {
+  ctx.remote.$on('@deepseek-ai/cordis/request-run-resolved', (resolved) => { orchestrator.close(resolved.requestId) })
+  ctx.remote.$on('@deepseek-ai/cordis/dynamic-retract', (retracted) => {
     runner.retract(retracted.pluginId, retracted.pluginRunId)
   })
-  ctx.remote.$on('cordis/inspect-query', (request) => {
+  ctx.remote.$on('@deepseek-ai/cordis/inspect-query', (request) => {
     void inspect.query(request).catch((error: unknown) => {
       console.error(`[cordis-client-runner] inspect query ${request.provider}.${request.method} failed:`, error)
     })
   })
-  ctx.remote.$on('cordis/inspect-query-resolved', (resolved) => { inspect.close(resolved.requestId) })
+  ctx.remote.$on('@deepseek-ai/cordis/inspect-query-resolved', (resolved) => { inspect.close(resolved.requestId) })
 }

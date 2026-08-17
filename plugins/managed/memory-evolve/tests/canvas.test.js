@@ -38,6 +38,21 @@ function tempConfig() {
 
 const OWNER = { sessionId: 's1', projectId: 'p1', projectLabel: 'p', sessionLabel: 's' }
 
+/** 捕获系统打开请求，确保单元测试永不启动真实 GUI 应用。 */
+function fakeOpen() {
+  const calls = []
+  return {
+    calls,
+    deps: {
+      platform: 'darwin',
+      spawn(command, args, options) {
+        calls.push({ command, args, options })
+        return { unref() {} }
+      },
+    },
+  }
+}
+
 test('空板读取：nodes=[] rev=0', () => {
   const { config } = tempConfig()
   const empty = readCanvas(config)
@@ -133,13 +148,19 @@ test('文件代理：无路径节点拒绝', () => {
 
 test('打开：真实文件可打开（darwin 返回 ok，spawn 不阻塞）', () => {
   const { dir, config } = tempConfig()
+  const opener = fakeOpen()
   const realFile = join(dir, 'open-me.txt')
   writeFileSync(realFile, 'hello')
   const node = normalizeNode({ type: 'file', title: '打开', scope: 'session', path: realFile }, OWNER)
   writeCanvas(config, { nodes: [node] }, 0)
-  const res = openNodeFile(config, node.id)
+  const res = openNodeFile(config, node.id, opener.deps)
   assert.equal(res.error, undefined)
   assert.equal(res.ok, true)
+  assert.deepEqual(opener.calls, [{
+    command: 'open',
+    args: [realpathSync(realFile)],
+    options: { detached: true, stdio: 'ignore' },
+  }])
 })
 
 test('打开：敏感路径拒绝', () => {
@@ -168,25 +189,29 @@ test('打开：无路径节点拒绝', () => {
 
 test('打开所在文件夹：真实文件打开其父目录（darwin 返回 ok，spawn 不阻塞）', () => {
   const { dir, config } = tempConfig()
+  const opener = fakeOpen()
   const realFile = join(dir, 'sub', 'open-me.txt')
   mkdirSync(join(dir, 'sub'))
   writeFileSync(realFile, 'hello')
   const node = normalizeNode({ type: 'file', title: '打开', scope: 'session', path: realFile }, OWNER)
   writeCanvas(config, { nodes: [node] }, 0)
-  const res = openNodeFolder(config, node.id)
+  const res = openNodeFolder(config, node.id, opener.deps)
   assert.equal(res.error, undefined)
   assert.equal(res.ok, true)
+  assert.deepEqual(opener.calls[0]?.args, [realpathSync(join(dir, 'sub'))])
 })
 
 test('打开所在文件夹：节点路径是目录时打开自身（不取上级）', () => {
   const { dir, config } = tempConfig()
+  const opener = fakeOpen()
   const realDir = join(dir, 'sub')
   mkdirSync(realDir)
   const node = normalizeNode({ type: 'file', title: '目录', scope: 'session', path: realDir }, OWNER)
   writeCanvas(config, { nodes: [node] }, 0)
-  const res = openNodeFolder(config, node.id)
+  const res = openNodeFolder(config, node.id, opener.deps)
   assert.equal(res.error, undefined)
   assert.equal(res.ok, true)
+  assert.deepEqual(opener.calls[0]?.args, [realpathSync(realDir)])
 })
 
 test('打开所在文件夹：敏感路径拒绝', () => {

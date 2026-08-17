@@ -1184,6 +1184,18 @@ function collectEventRelations(): Map<string, EventRelation> {
   return new EventRelationCollector(project, collectPackageSources(project)).collect()
 }
 
+/**
+ * Compare event names by their semantic namespace, independent of an npm
+ * package scope added by repository rescoping.
+ * @param left - the first event name.
+ * @param right - the second event name.
+ * @returns a stable lexical comparison for generated event tables.
+ */
+export function compareEventNames(left: string, right: string): number {
+  const orderKey = (name: string): string => name.replace(/^@[^/]+\//, '')
+  return orderKey(left).localeCompare(orderKey(right)) || left.localeCompare(right)
+}
+
 function relationPackages(map: Map<string, Set<string>>, pkgsByShort: Map<string, Pkg>): string {
   if (map.size === 0) return '-'
   return [...map.entries()]
@@ -1208,7 +1220,7 @@ function renderEventRelations(pkgs: Pkg[], events: readonly EventEntry[]): strin
     '| Event | Mode | Declared in | Dispatchers | Listeners |',
     '| --- | --- | --- | --- | --- |',
   )
-  for (const event of [...events].sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const event of [...events].sort((a, b) => compareEventNames(a.name, b.name))) {
     const relation = relations.get(event.name) ?? { dispatchers: new Map<string, Set<string>>(), listeners: new Set<string>() }
     lines.push(`| \`${event.name}\` | \`${event.mode}\` | ${sourceLink(event.source)} | ${relationPackages(relation.dispatchers, pkgsByShort)} | ${listenerPackages(relation.listeners, pkgsByShort)} |`)
   }
