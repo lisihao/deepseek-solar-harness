@@ -5,7 +5,7 @@ import { parseDesktopClientEnvironment } from '../src/client/environment.ts'
 import {
   computeDesktopColumns, DesktopLayoutState, MACOS_SIDEBAR_COLLAPSED, SIDEBAR_COLLAPSED,
 } from '../src/client/layout-state.ts'
-import { installAdvancedStyles } from '../src/client/styles.ts'
+import { installAdvancedStyles, installSolarBrandStyles } from '../src/client/styles.ts'
 import {
   MACOS_DRAG_REGION_HEIGHT,
   MACOS_TITLEBAR_HEIGHT,
@@ -35,6 +35,31 @@ describe('desktop client environment', () => {
 })
 
 describe('advanced desktop layout', () => {
+  it('uses an opaque light/dark surface for the collaboration popover', () => {
+    let css = ''
+    const style = {
+      dataset: {},
+      get textContent() { return css },
+      set textContent(value: string) { css = value },
+      remove: vi.fn(),
+    }
+    vi.stubGlobal('document', {
+      createElement: () => style,
+      head: { appendChild: vi.fn() },
+    })
+
+    try {
+      installSolarBrandStyles()
+      expect(css).toMatch(/:root \{ --dsh-desktop-popup-opaque-bg: var\(--dsw-static-neutral-bluish-00, #fff\); \}/)
+      expect(css).toMatch(/body\[data-ds-dark-theme\] \{ --dsh-desktop-popup-opaque-bg: var\(--dsw-static-neutral-bluish-950, #151517\); \}/)
+      expect(css).toMatch(/\.dshDesktopOperatorStrategyPanel \{[^}]*background: var\(--dsh-desktop-popup-opaque-bg\);/)
+      expect(css).not.toMatch(/\.dshDesktopOperatorStrategyPanel \{[^}]*background: var\(--dsw-alias-bg-base\);/)
+    }
+    finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('owns native caption geometry without targeting feature headers', () => {
     expect(MACOS_TITLEBAR_HEIGHT).toBe(20)
     expect(MACOS_DRAG_REGION_HEIGHT).toBe(32)
