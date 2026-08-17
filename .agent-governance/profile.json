@@ -36,7 +36,7 @@
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
-        ".github/**",
+        ".github/workflows/**",
         "vendor/**"
       ],
       "expands": ["source", "tooling"]
@@ -47,7 +47,9 @@
         ".agent-governance/**",
         "AGENTS.md",
         "CLAUDE.md",
-        ".agents/skills/**"
+        ".agents/skills/**",
+        ".github/CODEOWNERS",
+        ".github/pull_request_template.md"
       ],
       "expands": ["documentation"]
     }
@@ -94,7 +96,7 @@
     {
       "id": "related-tests",
       "label": "Vitest tests related to the outgoing branch diff",
-      "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/master", "--maxWorkers=4"],
+      "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/solar", "--maxWorkers=4"],
       "cwd": ".",
       "scopes": ["source", "tooling", "release"],
       "levels": ["full"],

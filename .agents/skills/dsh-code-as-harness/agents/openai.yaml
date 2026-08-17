@@ -1,0 +1,4 @@
+interface:
+  display_name: "DSH Code-as-Harness"
+  short_description: "Enforce Codex governance for every DSH change"
+  default_prompt: "Use $dsh-code-as-harness to audit, plan, verify, attest, and deliver this DSH change."
