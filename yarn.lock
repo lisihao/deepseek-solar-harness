@@ -7208,7 +7208,7 @@ __metadata:
     "@types/react": "npm:^18"
     "@types/react-dom": "npm:^18"
     "@ycp424c/dsh-luna-vision-bridge": "file:vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.2.tgz"
-    dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.0.tgz"
+    dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.1.tgz"
     electron: "npm:43.4.0"
     electron-builder: "npm:26.15.3"
     node-addon-require-builtin: "npm:^0.1.4"
@@ -7229,16 +7229,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.0.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
-  version: 1.1.0
-  resolution: "dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.0.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.0.tgz::hash=245eaa&locator=deepseek-harness-desktop%40workspace%3A."
+"dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.1.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 1.1.1
+  resolution: "dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.1.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.1.tgz::hash=3352c8&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-home-paths": "npm:^0.1.0-rc.6"
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-invariants": ">=0.1.0-rc.6 <0.2.0"
-  checksum: 10c0/d10999f2e762e9d62f7ff8ee1ef5452764e2e9f71ad15448470cd603943fa470238010f5fc74c9d0d396aeb57a3ff6e4eabc0303656d16ef80d1f6fcf0bd7793
+  checksum: 10c0/dd3f26445cc68b378b7dfbeec9a0dc418418d438c3ccaca3c8c77a7115d191207b99b6c8f360b39be712cc33b0c9813ffd59a83ba842865c1e5ebdfdd684c07d
   languageName: node
   linkType: hard
 
