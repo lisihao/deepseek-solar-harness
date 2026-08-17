@@ -99,6 +99,16 @@ function providerValue(provider: ResidentProviderStatus): DesktopResidentProvide
     ...provider.unavailableReason === undefined ? {} : { unavailableReason: provider.unavailableReason },
     authentication: provider.authentication,
     productVersion: provider.productVersion,
+    models: provider.models.map(model => ({
+      model: model.model,
+      ...model.resolvedModel === undefined ? {} : { resolvedModel: model.resolvedModel },
+      displayName: model.displayName,
+      description: model.description,
+      supportedEfforts: [...model.supportedEfforts],
+      ...model.defaultEffort === undefined ? {} : { defaultEffort: model.defaultEffort },
+      isDefault: model.isDefault,
+      supportsAdaptiveThinking: model.supportsAdaptiveThinking,
+    })),
   }
 }
 
@@ -112,6 +122,12 @@ function sessionValue(session: ResidentSessionSnapshot): DesktopResidentSession 
     ...session.healthReason === undefined ? {} : { healthReason: session.healthReason },
     stateRevision: session.stateRevision,
     ...session.activeTurnId === undefined ? {} : { activeTurnId: String(session.activeTurnId) },
+    ...session.executionProfile === undefined ? {} : {
+      executionProfile: { ...session.executionProfile },
+    },
+    ...session.executionProfileSource === undefined ? {} : {
+      executionProfileSource: session.executionProfileSource,
+    },
     ...session.latestTurn === undefined ? {} : { latestTurn: turnSummaryValue(session.latestTurn) },
     ...session.latestEvent === undefined ? {} : { latestEvent: eventValue(session.latestEvent) },
     updatedAt: session.updatedAt,

@@ -55,9 +55,16 @@ describe('Solar desktop branding', () => {
     expect(visibleText(entry?.component({ wide: true }))).toBe(`DSH Desktop v2.0.1${SOLAR_BRAND}`)
     expect(visibleText(entry?.component({ wide: false }))).toBe('v2.0.1')
 
-    const injected = routing?.options.inject?.('session-1') as { select: (policy: 'codex') => Promise<string | null> }
+    const injected = routing?.options.inject?.('session-1') as {
+      select: (policy: 'codex') => Promise<string | null>
+      selectProfile: (operatorId: 'codex', model?: string, effort?: 'high') => Promise<string | null>
+    }
     await expect(injected.select('codex')).resolves.toBeNull()
     expect(execute).toHaveBeenCalledWith('session-1', '/operator codex')
+    await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBeNull()
+    expect(execute).toHaveBeenCalledWith('session-1', '/operator-profile codex gpt-5.6-sol high')
+    await expect(injected.selectProfile('codex')).resolves.toBeNull()
+    expect(execute).toHaveBeenCalledWith('session-1', '/operator-profile codex auto auto')
     expect(physicalOperatorRoutingLabel('auto')).toBe('智能自动')
   })
 })

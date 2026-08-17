@@ -9,6 +9,18 @@ export interface DesktopResidentProvider {
   unavailableReason?: string
   authentication: 'native-subscription' | 'unqualified'
   productVersion: string
+  models: DesktopResidentModel[]
+}
+
+export interface DesktopResidentModel {
+  model: string
+  resolvedModel?: string
+  displayName: string
+  description: string
+  supportedEfforts: string[]
+  defaultEffort?: string
+  isDefault: boolean
+  supportsAdaptiveThinking: boolean
 }
 
 export interface DesktopResidentEvent {
@@ -36,6 +48,8 @@ export interface DesktopResidentSession {
   healthReason?: string
   stateRevision: number
   activeTurnId?: string
+  executionProfile?: { model: string; effort?: string }
+  executionProfileSource?: 'smart-auto' | 'mixed' | 'manual'
   latestTurn?: DesktopResidentTurn
   latestEvent?: DesktopResidentEvent
   updatedAt: string

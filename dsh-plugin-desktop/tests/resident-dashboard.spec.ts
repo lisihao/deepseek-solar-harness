@@ -26,6 +26,15 @@ describe('Resident Operator Desktop projection', () => {
         authentication: 'native-subscription' as const,
         productVersion: '0.147.0',
         protocolHash: 'schema',
+        models: [{
+          model: 'gpt-5.6-sol',
+          displayName: 'GPT-5.6 Sol',
+          description: 'Frontier agentic coding model',
+          supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+          defaultEffort: 'medium',
+          isDefault: true,
+          supportsAdaptiveThinking: false,
+        }],
       }]),
       list: vi.fn(async () => [{
         sessionId,
@@ -36,6 +45,8 @@ describe('Resident Operator Desktop projection', () => {
         control: 'automation' as const,
         stateRevision: 4,
         activeTurnId: turnId,
+        executionProfile: { model: 'gpt-5.6-sol', effort: 'high' },
+        executionProfileSource: 'manual' as const,
         latestTurn: {
           commandId,
           turnId,
@@ -58,10 +69,16 @@ describe('Resident Operator Desktop projection', () => {
 
     const dashboard = await readResidentDashboard({ residentOperators } as unknown as Context, String(sessionId))
 
-    expect(dashboard.providers).toEqual([expect.objectContaining({ operatorId: 'codex', available: true })])
+    expect(dashboard.providers).toEqual([expect.objectContaining({
+      operatorId: 'codex',
+      available: true,
+      models: [expect.objectContaining({ model: 'gpt-5.6-sol', defaultEffort: 'medium' })],
+    })])
     expect(dashboard.sessions).toEqual([expect.objectContaining({
       sessionId: 'session-1',
       activeTurnId: 'turn-1',
+      executionProfile: { model: 'gpt-5.6-sol', effort: 'high' },
+      executionProfileSource: 'manual',
       latestTurn: expect.objectContaining({ state: 'running' }),
       latestEvent: expect.objectContaining({ data: expect.objectContaining({ phase: 'reasoning' }) }),
     })])

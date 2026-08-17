@@ -106,7 +106,10 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
                   {dashboard?.providers.map(provider => (
                     <div key={provider.operatorId} className="dshDesktopResidentProvider" data-ok={provider.available || undefined}>
                       <span className="dshDesktopResidentDot" />
-                      <div><strong>{provider.product === 'claude-code' ? 'Claude Code' : 'Codex'}</strong><small>{provider.productVersion}</small></div>
+                      <div>
+                        <strong>{provider.product === 'claude-code' ? 'Claude Code' : 'Codex'}</strong>
+                        <small>{provider.productVersion} · {String(provider.models.length)} 个模型</small>
+                      </div>
                       <em>{provider.available ? '订阅可用' : '不可用'}</em>
                     </div>
                   )) ?? <p>正在连接 daemon…</p>}
@@ -159,10 +162,25 @@ function SessionRow(props: { session: DesktopResidentSession; selected: boolean;
       title={props.session.workspace}
     >
       <span className="dshDesktopResidentDot" />
-      <span><strong>{props.session.operatorId}</strong><small>{workspace}</small></span>
+      <span>
+        <strong>{props.session.operatorId}</strong>
+        <small>{workspace}</small>
+        <small>{profileLabel(props.session)}</small>
+      </span>
       <span><em>{props.session.lifecycle}</em><small>{phase}</small></span>
     </button>
   )
+}
+
+function profileLabel(session: DesktopResidentSession): string {
+  const profile = session.executionProfile
+  if (profile === undefined) return '模型待首轮锁定'
+  const source = session.executionProfileSource === 'manual'
+    ? '手动'
+    : session.executionProfileSource === 'mixed'
+      ? '混合'
+      : '智能'
+  return `${profile.model} · ${profile.effort ?? '默认强度'} · ${source}`
 }
 
 function EventTimeline({ events }: { events: DesktopResidentEvent[] }) {

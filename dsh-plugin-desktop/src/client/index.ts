@@ -56,6 +56,15 @@ export function apply(ctx: ClientContext): void {
         if (result.value === undefined) return 'unknown command: /operator'
         return null
       },
+      selectProfile: async (operatorId, model, effort) => {
+        const result = await ctx.remote.commands.execute(
+          sessionId,
+          `/operator-profile ${operatorId} ${model ?? 'auto'} ${effort ?? 'auto'}`,
+        )
+        if (!result.ok) return `${result.error.message} (${result.error.code})`
+        if (result.value === undefined) return 'unknown command: /operator-profile'
+        return null
+      },
     }),
   }, PhysicalOperatorRoutingControl))
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)

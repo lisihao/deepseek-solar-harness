@@ -4,7 +4,7 @@
     {
       "name": "Resident Physical Operators, deterministic routing, and session activity refresh",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "5c893877675e658cfca1bfb13700bc6eca74757e"
+      "commit": "42e888641d31b1541cb1117a5c49803374c4b62d"
     },
     {
       "name": "GenesisPod and ThunderOMLX Remote Modules",
@@ -46,16 +46,16 @@
     "agent-presets/anchored-standard/preset.yml": "4c11b065bc9ae7f2fc8fb80f3163bae884ca308d8c8f27f1b7c5549dd0cb7549",
     "agent-presets/anchored-standard/skill-search.mjs": "3276149046fd610ca7a3c06dab522354856d74215af16e8395b0176f222c13d7",
     "agent-presets/anchored-standard/tool-bootstrap.mjs": "ee0090ea53f03bed1d454820372ec153968e9e684c9ccace702211c13f9930d0",
-    "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "0164ee4ef77e28ed511bfa4498bda53611a5fbbceebce9d591f612faa942c66f",
-    "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "3b6b98708e6b5593a3162f3496570c4c0840a1a2b3e31d21e977ef3192a00981",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "c7461185ea313c281f89cdf1617d531fff26b067909e5e163eac526c4b7fe6c5",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "d0fa9cbc02b9c027d912ea10029a2480f17b702ffebaf3c9756e79fc42b91563",
-    "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "0bbeaedb999afb783514efce7da0b2ab2cfcfd3b2957621d5bd0dcd691e4e524",
-    "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "21874e802cb99ce3a635c0f66fe664a2048c76aea366d157d8cbab8209944223",
-    "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "2884d19568e4be645780522f7d26dc06c2246daf57b14b00b77f37ff371dd03d",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "4f9650e70e1d8764a9a96080a5185113e3042c3f80ca419d9c2c9ad76a381247",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "72c8c7d850db5ee362bd39a395f67bf6e7f386a7fae592a2f0dabd2a7af5fdf8",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "48e5fb75e2c1f9bbe7dfc12c5abb203cc8ffd9c47e6c4021b2f613850915ed95",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "fc1b5e3d3b72210a4f8b7e2a7ad7efd34def72f701e86f4bbc32852d233add0c",
+    "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "a4a193d5f6bc71285cca7b726636122357a00045055672f713d5216a8b594dac",
+    "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "d975fd0a8d363fd8825fe2ecf96132c996cd1cc03c0ca4020b3c858b6ee098d1",
+    "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "8fbf1c1ea4d44e65408fe9c77a752cd9439aa364f4b943b76f18a7357062998c",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "1e474b894f4d956c42574abc12b83557d0d381d06baddd84666916809d8e4238",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "471a232245ccfc4e5a26a734ede1f63485b42d28195508a5e13d909b96d0618b",
-    "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "bb9a44e47a83d0a0e0ec354255553ac832c577ed87a3db32568debf62c0dd14e",
+    "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
     "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03",
     "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
     "dsh-packages/dsh-web-billing-1.1.0.tgz": "565808ed954bc78595b852079f6e4b72140bff5568bd37ff44ee289090140ceb",
