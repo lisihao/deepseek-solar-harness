@@ -1421,7 +1421,7 @@ export interface OperatorConfig {
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-resident/src/index.ts:40`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+Source: [`packages/physical-operator/physical-operator-resident/src/index.ts:41`](../packages/physical-operator/physical-operator-resident/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 

@@ -115,6 +115,7 @@ export class ResidentDaemonClient {
     supersedesCommandId?: string
     operatorId: string
     workspace: string
+    taskLabel?: string
     prompt: readonly unknown[]
     profile?: PhysicalOperatorExecutionPreference
     signal: AbortSignal
@@ -133,6 +134,7 @@ export class ResidentDaemonClient {
       ...request.supersedesCommandId === undefined ? {} : { supersedes_command_id: request.supersedesCommandId },
       operator_id: request.operatorId,
       workspace,
+      ...request.taskLabel === undefined ? {} : { task_label: request.taskLabel },
       prompt: request.prompt,
       ...request.profile === undefined ? {} : { profile: request.profile },
     }, request.signal)

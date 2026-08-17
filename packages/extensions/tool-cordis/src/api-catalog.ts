@@ -3609,7 +3609,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperator',
-    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(): PhysicalOperatorAvailability;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
+    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
   },
   {
     name: 'PhysicalOperatorAvailability',
@@ -3809,7 +3809,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ResidentExecutionProfile',
@@ -3889,7 +3889,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentTurnSummary',
-    declaration: 'export interface ResidentTurnSummary {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly turnId: ResidentOperatorTurnId;\n    readonly state: ResidentReceiptState;\n    readonly nativeTurnId?: string;\n    readonly stopReason?: ResidentStopReason;\n    readonly resultRef?: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface ResidentTurnSummary {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly turnId: ResidentOperatorTurnId;\n    readonly state: ResidentReceiptState;\n    readonly taskLabel?: string;\n    readonly nativeTurnId?: string;\n    readonly stopReason?: ResidentStopReason;\n    readonly resultRef?: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'ResolvedAlwaysRetryPolicy',

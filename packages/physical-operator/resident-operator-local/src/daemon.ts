@@ -28,7 +28,7 @@ import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v2 method set advertised by daemon handshake. */
+/** Public protocol-v3 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
   'operator.list',
@@ -61,6 +61,18 @@ function stringParam(params: Record<string, unknown>, name: string): string {
     throw new ResidentOperatorError(`resident protocol requires non-empty ${name}`, 'INVALID_RESULT')
   }
   return value
+}
+
+function taskLabelParam(params: Record<string, unknown>): string | undefined {
+  const value = params.task_label
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') {
+    throw new ResidentOperatorError('resident protocol task_label must be a string', 'INVALID_RESULT')
+  }
+  const normalized = value.replace(/[\p{Cc}\p{Cf}]+/gu, ' ').replace(/\s+/gu, ' ').trim()
+  if (normalized.length === 0) return undefined
+  const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(normalized)
+  return Array.from(graphemes, part => part.segment).slice(0, 160).join('')
 }
 
 function integerParam(params: Record<string, unknown>, name: string): number {
@@ -251,7 +263,7 @@ export class ResidentDaemon {
       }
       case 'turn.resolve_indeterminate': {
         if (params.decision !== 'abandon') {
-          throw new ResidentOperatorError('protocol v2 only permits abandoning an indeterminate command', 'INVALID_RESULT')
+          throw new ResidentOperatorError('protocol v3 only permits abandoning an indeterminate command', 'INVALID_RESULT')
         }
         this.store.resolveIndeterminate(
           stringParam(params, 'command_id'),
@@ -306,6 +318,7 @@ export class ResidentDaemon {
     const commandId = stringParam(params, 'command_id')
     const operatorId = stringParam(params, 'operator_id')
     const configuredWorkspace = stringParam(params, 'workspace')
+    const taskLabel = taskLabelParam(params)
     const prompt = promptParam(params)
     const requestedProfile = profileParam(params)
     const supersedesCommandId = params.supersedes_command_id === undefined
@@ -350,6 +363,7 @@ export class ResidentDaemon {
       resolved.profile,
       resolved.source,
       supersedesCommandId,
+      taskLabel,
     )
     if (accepted.state === 'accepted' && !this.active.has(accepted.turnId)) {
       const controller = new AbortController()

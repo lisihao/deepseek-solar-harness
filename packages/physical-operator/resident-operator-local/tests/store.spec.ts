@@ -36,6 +36,18 @@ describe('ResidentStore', () => {
     store.close()
   })
 
+  it('persists only a bounded task label for user-facing reconnect projections', () => {
+    const store = new ResidentStore(root())
+    const accepted = store.accept(
+      'labeled-command', 'hash', 'claude-code', '/workspace', PROFILE, PROFILE_SOURCE, undefined, 'Review the runtime boundary',
+    )
+    expect(store.inspectTurn(accepted.turnId)).toMatchObject({ taskLabel: 'Review the runtime boundary' })
+    expect(store.inspectSession(accepted.sessionId).latestTurn).toMatchObject({ taskLabel: 'Review the runtime boundary' })
+    const event = store.readEvents(accepted.sessionId).events.find(value => value.type === 'turn.accepted')
+    expect(event?.data.taskLabel).toBe('Review the runtime boundary')
+    store.close()
+  })
+
   it('holds one session lease, settles durably, and advances revisions', () => {
     const store = new ResidentStore(root())
     const first = store.accept('one', 'hash-one', 'claude-code', '/workspace', PROFILE, PROFILE_SOURCE)
@@ -87,6 +99,7 @@ describe('ResidentStore', () => {
       ALTER TABLE resident_sessions DROP COLUMN model_id;
       ALTER TABLE resident_sessions DROP COLUMN reasoning_effort;
       ALTER TABLE resident_sessions DROP COLUMN profile_source;
+      ALTER TABLE command_receipts DROP COLUMN task_label;
       PRAGMA user_version = 1;
     `)
     legacy.close()
@@ -99,6 +112,25 @@ describe('ResidentStore', () => {
       executionProfile: PROFILE,
       executionProfileSource: PROFILE_SOURCE,
     })
+    migrated.close()
+  })
+
+  it('migrates a schema-v2 database additively and records new task labels', () => {
+    const path = root()
+    const bootstrap = new ResidentStore(path)
+    bootstrap.close()
+    const legacy = new DatabaseSync(join(path, 'state.sqlite'))
+    legacy.exec(`
+      ALTER TABLE command_receipts DROP COLUMN task_label;
+      PRAGMA user_version = 2;
+    `)
+    legacy.close()
+
+    const migrated = new ResidentStore(path)
+    const accepted = migrated.accept(
+      'v2-command', 'v2-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE, undefined, 'Resume repository analysis',
+    )
+    expect(migrated.inspectTurn(accepted.turnId).taskLabel).toBe('Resume repository analysis')
     migrated.close()
   })
 

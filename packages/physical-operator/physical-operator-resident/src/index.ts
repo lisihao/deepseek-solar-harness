@@ -7,6 +7,7 @@ import {
   PhysicalOperatorId,
   type PhysicalOperator,
   type PhysicalOperatorDescriptor,
+  type PhysicalOperatorExecutionMode,
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorProviderStartRequest,
 } from '@deepseek-ai/dsh-physical-operator'
@@ -81,11 +82,17 @@ class DualModePhysicalOperator implements PhysicalOperator {
     }
   }
 
-  availability() {
+  availability(mode?: PhysicalOperatorExecutionMode) {
     const reason = subagentReason(
       this.config.ephemeralProvider,
       this.ctx.subagents.getProvider(this.config.ephemeralProvider),
     )
+    if (mode === 'resident') {
+      return this.config.residentProvider === undefined
+        ? { available: false as const, reason: `physical operator "${this.config.id}" has no resident provider` }
+        : { available: true as const }
+    }
+    if (mode === undefined && this.config.residentProvider !== undefined) return { available: true as const }
     return reason === undefined
       ? { available: true as const }
       : { available: false as const, reason }
@@ -127,6 +134,7 @@ class DualModePhysicalOperator implements PhysicalOperator {
       commandId: ResidentOperatorCommandId(String(request.executionId)),
       operatorId: residentProvider,
       workspace,
+      ...request.label === undefined ? {} : { taskLabel: request.label },
       prompt: request.prompt,
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       signal: request.signal,

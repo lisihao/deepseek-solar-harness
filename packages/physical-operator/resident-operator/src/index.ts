@@ -17,9 +17,9 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 2
+export const RESIDENT_PROTOCOL_VERSION = 3
 /** Current forward-only daemon state schema version. */
-export const RESIDENT_STATE_SCHEMA_VERSION = 2
+export const RESIDENT_STATE_SCHEMA_VERSION = 3
 
 /** Opaque identity for one operator/workspace Resident Session. */
 export type ResidentOperatorSessionId = Branded<'ResidentOperatorSessionId'>
@@ -131,6 +131,8 @@ export interface ResidentTurnSummary {
   readonly commandId: ResidentOperatorCommandId
   readonly turnId: ResidentOperatorTurnId
   readonly state: ResidentReceiptState
+  /** Bounded display-only task summary; raw prompt content is never persisted. */
+  readonly taskLabel?: string
   readonly nativeTurnId?: string
   readonly stopReason?: ResidentStopReason
   readonly resultRef?: string
@@ -152,6 +154,8 @@ export interface ResidentExecuteRequest {
   readonly supersedesCommandId?: ResidentOperatorCommandId
   readonly operatorId: string
   readonly workspace: string
+  /** Optional bounded display summary persisted independently of the raw prompt. */
+  readonly taskLabel?: string
   readonly prompt: readonly ContentBlock[]
   /** Optional caller preference; omitted fields are resolved from task complexity and the live catalog. */
   readonly profile?: PhysicalOperatorExecutionPreference

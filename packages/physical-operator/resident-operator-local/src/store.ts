@@ -48,6 +48,7 @@ interface ReceiptRow {
   session_id: string
   turn_id: string
   state: ResidentReceiptState
+  task_label: string | null
   native_turn_id: string | null
   result_json: string | null
   result_ref: string | null
@@ -147,7 +148,7 @@ export class ResidentStore {
   private configure(): void {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    if (version !== 0 && version !== 1 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
+    if (version !== 0 && version !== 1 && version !== 2 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
       throw new ResidentOperatorError(
         `resident state schema ${version} is incompatible with ${RESIDENT_STATE_SCHEMA_VERSION}`,
         'PROTOCOL_MISMATCH',
@@ -177,6 +178,7 @@ export class ResidentStore {
         session_id TEXT NOT NULL REFERENCES resident_sessions(id),
         turn_id TEXT NOT NULL UNIQUE,
         state TEXT NOT NULL,
+        task_label TEXT,
         native_turn_id TEXT,
         result_json TEXT,
         result_ref TEXT,
@@ -211,6 +213,9 @@ export class ResidentStore {
         ALTER TABLE resident_sessions ADD COLUMN reasoning_effort TEXT;
         ALTER TABLE resident_sessions ADD COLUMN profile_source TEXT;
       `)
+    }
+    if (version === 1 || version === 2) {
+      this.db.exec('ALTER TABLE command_receipts ADD COLUMN task_label TEXT;')
     }
     this.db.exec(`PRAGMA user_version = ${RESIDENT_STATE_SCHEMA_VERSION};`)
   }
@@ -248,6 +253,7 @@ export class ResidentStore {
    * @param profile - fully resolved execution profile to lock or validate.
    * @param profileSource - whether automatic or explicit selection produced the profile.
    * @param supersedesCommandId - optional uniquely linked abandoned indeterminate command.
+   * @param taskLabel - bounded display-only summary, never the raw prompt.
    * @returns accepted or existing receipt projection.
    */
   accept(
@@ -258,6 +264,7 @@ export class ResidentStore {
     profile: ResidentExecutionProfile,
     profileSource: ResidentExecutionProfileSource,
     supersedesCommandId?: string,
+    taskLabel?: string,
   ): AcceptedTurn {
     return this.transaction(() => {
       const existing = this.receiptByCommand(commandId)
@@ -267,6 +274,9 @@ export class ResidentStore {
             `command ${commandId} was already accepted with different content`,
             'COMMAND_CONFLICT',
           )
+        }
+        if (existing.task_label === null && taskLabel !== undefined) {
+          this.db.prepare('UPDATE command_receipts SET task_label = ? WHERE command_id = ?').run(taskLabel, commandId)
         }
         return this.acceptedFrom(existing)
       }
@@ -337,9 +347,9 @@ export class ResidentStore {
       const turnId = randomUUID()
       this.db.prepare(`
         INSERT INTO command_receipts
-          (command_id, supersedes_command_id, request_hash, session_id, turn_id, state, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'accepted', ?, ?)
-      `).run(commandId, supersedesCommandId ?? null, requestHash, session.id, turnId, now, now)
+          (command_id, supersedes_command_id, request_hash, session_id, turn_id, state, task_label, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'accepted', ?, ?, ?)
+      `).run(commandId, supersedesCommandId ?? null, requestHash, session.id, turnId, taskLabel ?? null, now, now)
       this.db.prepare(
         'INSERT INTO session_leases (session_id, turn_id, acquired_at, heartbeat_at) VALUES (?, ?, ?, ?)',
       ).run(session.id, turnId, now, now)
@@ -352,6 +362,7 @@ export class ResidentStore {
       this.appendEvent(session.id, 'turn.accepted', {
         commandId,
         turnId,
+        taskLabel: taskLabel ?? null,
         profile,
         supersedesCommandId: superseded?.command_id ?? null,
       }, now)
@@ -521,6 +532,7 @@ export class ResidentStore {
       sessionId: ResidentOperatorSessionId(receipt.session_id),
       stateRevision: session.revision,
       state: receipt.state,
+      ...receipt.task_label === null ? {} : { taskLabel: receipt.task_label },
       ...receipt.native_turn_id === null ? {} : { nativeTurnId: receipt.native_turn_id },
       ...parsedStopReason === undefined ? {} : { stopReason: parsedStopReason },
       ...receipt.result_ref === null ? {} : { resultRef: receipt.result_ref },
@@ -686,6 +698,7 @@ export class ResidentStore {
       turnId: receipt.turn_id,
       stateRevision: this.sessionRow(receipt.session_id).revision,
       state: receipt.state,
+      ...receipt.task_label === null ? {} : { taskLabel: receipt.task_label },
     }
   }
 
@@ -752,6 +765,7 @@ export class ResidentStore {
       commandId: ResidentOperatorCommandId(receipt.command_id),
       turnId: ResidentOperatorTurnId(receipt.turn_id),
       state: receipt.state,
+      ...receipt.task_label === null ? {} : { taskLabel: receipt.task_label },
       ...receipt.native_turn_id === null ? {} : { nativeTurnId: receipt.native_turn_id },
       ...result?.stopReason === undefined ? {} : { stopReason: result.stopReason },
       ...receipt.result_ref === null ? {} : { resultRef: receipt.result_ref },

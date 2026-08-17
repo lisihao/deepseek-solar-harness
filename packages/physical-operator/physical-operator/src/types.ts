@@ -154,8 +154,8 @@ export interface PhysicalOperatorRun extends PhysicalOperatorProviderRun {
 export interface PhysicalOperator {
   /** Immutable discovery and capacity contract. */
   readonly descriptor: PhysicalOperatorDescriptor
-  /** Resolve current transport or deployment availability without starting work. */
-  availability(): PhysicalOperatorAvailability
+  /** Resolve current transport or deployment availability, optionally for one requested lifetime. */
+  availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability
   /** Establish one run; fulfillment transfers ownership to the caller. */
   start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>
 }

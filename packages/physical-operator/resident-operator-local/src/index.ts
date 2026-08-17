@@ -74,6 +74,7 @@ class LocalResidentOperatorService extends ResidentOperatorService {
       ...request.supersedesCommandId === undefined ? {} : { supersedesCommandId: request.supersedesCommandId },
       operatorId: request.operatorId,
       workspace: request.workspace,
+      ...request.taskLabel === undefined ? {} : { taskLabel: request.taskLabel },
       prompt: request.prompt,
       ...request.profile === undefined ? {} : { profile: request.profile },
       signal: request.signal,

@@ -156,6 +156,7 @@ describe('ResidentDaemon', () => {
     const firstClient = client(root)
     const first = await firstClient.execute({
       commandId: 'command-1', operatorId: 'codex', workspace,
+      taskLabel: '  Analyze\n 🐳 runtime\u0000  ',
       prompt: [{ type: 'text', text: 'first' }], signal: new AbortController().signal,
     })
     expect(await first.result).toMatchObject({ output: [{ text: 'session=native-1;count=1' }] })
@@ -165,7 +166,12 @@ describe('ResidentDaemon', () => {
       executionProfile: { model: 'gpt-test', effort: 'medium' },
       executionProfileSource: 'smart-auto',
     })
-    expect(reconnected.latestTurn).toMatchObject({ turnId: first.turnId, state: 'settled', stopReason: 'completed' })
+    expect(reconnected.latestTurn).toMatchObject({
+      turnId: first.turnId,
+      state: 'settled',
+      stopReason: 'completed',
+      taskLabel: 'Analyze 🐳 runtime',
+    })
     expect(reconnected.latestEvent).toMatchObject({ type: 'turn.settled' })
     expect(await firstClient.inspectTurn(first.turnId)).toMatchObject({
       commandId: 'command-1',
@@ -338,6 +344,13 @@ describe('ResidentDaemon', () => {
       operator_id: 'codex',
       workspace,
       prompt: [{ type: 'text', text: 42 }],
+    })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+    await expect(raw.rawRequest('turn.execute', {
+      command_id: 'invalid-label',
+      operator_id: 'codex',
+      workspace,
+      task_label: { unsafe: true },
+      prompt: [{ type: 'text', text: 'valid' }],
     })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
     expect(driver.counts.size).toBe(0)
     await daemon.close()
