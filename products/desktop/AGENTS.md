@@ -57,9 +57,16 @@ final report.
   `/Applications/DSH Desktop.app` on this MacBook. It must not stop at a `dist/`
   directory or ask the user to copy the application manually.
 - Installation MUST be recoverable: request an orderly quit, stage and verify
-  the candidate, preserve the prior application at a timestamped backup path,
-  move the verified candidate into place, and retain the backup until a later
-  explicit cleanup request. Never recursively delete the prior application.
+  the candidate, and preserve the prior application outside `/Applications` at
+  `/Users/sihaoli/Library/Application Support/DSH Desktop/Backups/<timestamp>/DSH Desktop.app`
+  before moving the verified candidate into place. `/Applications` MUST contain
+  exactly one DSH application, `/Applications/DSH Desktop.app`; never leave
+  `DSH Desktop.app.backup*`, `DSH Desktop.app.failed*`, or similarly named app
+  bundles beside it because Finder presents every bundle as an installed app.
+- Retain at most one last-known-good backup in the external backup root. After
+  the new installation passes D07, move every older backup and failed candidate
+  to the macOS Trash so cleanup remains recoverable. Never recursively delete
+  the prior application, and never accumulate one backup per delivery.
 - A local development artifact may be ad-hoc signed only after packaging; a
   formal release must retain its Developer ID signature and notarization.
   Codex MUST verify the installed signature after copying.
@@ -77,7 +84,9 @@ Every applicable Codex final report MUST include:
 
 - assigned version and SemVer increment reason;
 - source version, packaged version, and running installed version;
-- installed application path and recoverable backup path;
+- installed application path and recoverable backup path (or `N/A` for a clean
+  install), plus evidence that `/Applications` contains no DSH backup/failed
+  app bundles and the external backup root contains at most one rollback copy;
 - test/build/package results, installed process and listener evidence, and HTTP
   probe result;
 - local commit, remote branch SHA, and GitHub PR or release URL;
