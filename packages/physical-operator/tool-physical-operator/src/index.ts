@@ -250,7 +250,7 @@ export function apply(ctx: Context): void {
         if (event.data.profile === null) {
           return Object.fromEntries(
             Object.entries(state).filter(([operatorId]) => operatorId !== event.data.operatorId),
-          ) as PhysicalOperatorProfilePreferences
+          )
         }
         return { ...state, [event.data.operatorId]: { ...event.data.profile } }
       },
@@ -719,7 +719,7 @@ export function profilePreferencesSelect(
   return {
     profiles: Object.fromEntries(
       Object.entries(profiles).map(([operatorId, profile]) => [operatorId, { ...profile }]),
-    ) as PhysicalOperatorProfilePreferences,
+    ),
     efforts: [...PROFILE_EFFORTS],
   }
 }

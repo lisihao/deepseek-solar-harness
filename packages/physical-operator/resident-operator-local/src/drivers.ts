@@ -357,7 +357,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
               : !exactSchema
                 ? `Codex app-server schema ${schemaHash} does not match ${EXPECTED_CODEX_SCHEMA_SHA256}`
                 : transportError !== undefined
-                  ? `Codex app-server daemon unavailable: ${transportError instanceof Error ? transportError.message : String(transportError)}`
+                  ? `Codex app-server daemon unavailable: ${transportError instanceof Error ? transportError.message : 'unknown failure'}`
                   : 'Codex app-server reported no selectable models',
         },
         authentication: subscription ? 'native-subscription' : 'unqualified',
