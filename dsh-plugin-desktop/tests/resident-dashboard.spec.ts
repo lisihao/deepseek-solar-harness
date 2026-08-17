@@ -16,7 +16,7 @@ describe('Resident Operator Desktop projection', () => {
       sequence: 7,
       type: 'turn.progress',
       time: '2026-08-16T10:00:00.000Z',
-      data: { commandId, turnId, phase: 'reasoning' },
+      data: { commandId, turnId, phase: 'reasoning', taskLabel: 'Check the runtime boundary' },
     }
     const residentOperators = {
       providers: vi.fn(async () => [{
@@ -51,6 +51,7 @@ describe('Resident Operator Desktop projection', () => {
           commandId,
           turnId,
           state: 'running' as const,
+          taskLabel: 'Check the runtime boundary',
           updatedAt: latestEvent.time,
         },
         latestEvent,
@@ -80,9 +81,36 @@ describe('Resident Operator Desktop projection', () => {
       executionProfile: { model: 'gpt-5.6-sol', effort: 'high' },
       executionProfileSource: 'manual',
       latestTurn: expect.objectContaining({ state: 'running' }),
+      workspaceDisplay: '/tmp/research',
       latestEvent: expect.objectContaining({ data: expect.objectContaining({ phase: 'reasoning' }) }),
     })])
     expect(dashboard.selectedTurn).toEqual(expect.objectContaining({ turnId: 'turn-1', state: 'running' }))
     expect(dashboard.events).toEqual([expect.objectContaining({ type: 'turn.progress' })])
+    expect(dashboard.activities).toEqual([expect.objectContaining({
+      taskLabel: 'Check the runtime boundary',
+      status: 'running',
+    })])
+  })
+
+  it('keeps development canary sessions out of the user task list', async () => {
+    const residentOperators = {
+      providers: vi.fn(async () => []),
+      list: vi.fn(async () => [{
+        sessionId: ResidentOperatorSessionId('diagnostic'),
+        operatorId: 'codex',
+        workspace: '/Users/me/.dsh/artifacts/resident-dev-canary/workspace',
+        lifecycle: 'idle' as const,
+        health: 'ok' as const,
+        control: 'automation' as const,
+        stateRevision: 1,
+        updatedAt: '2026-08-16T10:00:00.000Z',
+      }]),
+      readEvents: vi.fn(),
+      inspectTurn: vi.fn(),
+    }
+
+    const dashboard = await readResidentDashboard({ residentOperators } as unknown as Context)
+    expect(dashboard.sessions).toEqual([])
+    expect(dashboard.hiddenDiagnosticSessions).toBe(1)
   })
 })

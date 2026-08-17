@@ -84,7 +84,7 @@ const SOLAR_BRAND_STYLES = `
 .dshDesktopResidentPanel h2, .dshDesktopResidentPanel h3, .dshDesktopResidentPanel p { margin: 0; }
 .dshDesktopResidentPanel h2 { font-size: 20px; line-height: 28px; }
 .dshDesktopResidentPanel h3 { margin-bottom: 10px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
-.dshDesktopResidentPanel > header p, .dshDesktopResidentEmpty { margin-top: 3px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.dshDesktopResidentPanel > header p, .dshDesktopResidentPanel > header small, .dshDesktopResidentEmpty { display: block; margin-top: 3px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
 .dshDesktopResidentPanel > header > button { width: 32px; height: 32px; border: 0; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); cursor: pointer; font-size: 22px; }
 .dshDesktopResidentGrid { display: grid; grid-template-columns: 1.05fr 1.25fr 1fr; height: calc(100% - 82px); min-height: 0; }
 .dshDesktopResidentColumn { min-width: 0; overflow: auto; padding: 18px; border-right: 1px solid var(--dsw-alias-border-l2); }
@@ -98,11 +98,11 @@ const SOLAR_BRAND_STYLES = `
 .dshDesktopResidentHelp code { display: block; padding: 8px 10px; overflow-wrap: anywhere; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-size: 10px; }
 .dshDesktopResidentSession { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; margin-bottom: 8px; padding: 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); cursor: pointer; text-align: left; }
 .dshDesktopResidentSession[data-selected] { border-color: #f5a623; box-shadow: 0 0 0 1px color-mix(in srgb, #f5a623 40%, transparent); }
-.dshDesktopResidentSession strong, .dshDesktopResidentSession small, .dshDesktopResidentSession em { display: block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dshDesktopResidentSession strong, .dshDesktopResidentSession small, .dshDesktopResidentSession em { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dshDesktopResidentSession small { color: var(--dsw-alias-label-secondary); font-size: 9px; }
 .dshDesktopResidentSession em { color: var(--dsw-alias-label-secondary); font-size: 9px; font-style: normal; text-align: right; }
 .dshDesktopResidentEvents ol { margin: 0; padding: 0; list-style: none; }
-.dshDesktopResidentEvents li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 3px 8px; padding: 9px 0; border-bottom: 1px solid var(--dsw-alias-border-l2); font-size: 10px; }
+.dshDesktopResidentEvents li { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 3px 8px; padding: 10px 0; border-bottom: 1px solid var(--dsw-alias-border-l2); font-size: 10px; }
 .dshDesktopResidentEvents time { grid-row: 1 / 3; color: var(--dsw-alias-label-secondary); }
 .dshDesktopResidentEvents li span { color: var(--dsw-alias-label-secondary); }
 .dshDesktopResidentError { margin: 12px 24px 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, #ff453a 45%, transparent); border-radius: 8px; background: color-mix(in srgb, #ff453a 12%, transparent); color: #ff6961; font-size: 11px; }

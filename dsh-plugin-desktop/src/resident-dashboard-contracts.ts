@@ -34,6 +34,7 @@ export interface DesktopResidentTurn {
   commandId: string
   turnId: string
   state: 'accepted' | 'running' | 'settled' | 'indeterminate'
+  taskLabel?: string
   stopReason?: 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
   resultRef?: string
   updatedAt: string
@@ -43,6 +44,7 @@ export interface DesktopResidentSession {
   sessionId: string
   operatorId: string
   workspace: string
+  workspaceDisplay: string
   lifecycle: 'starting' | 'idle' | 'running' | 'draining' | 'stopped'
   health: 'ok' | 'degraded' | 'unavailable'
   healthReason?: string
@@ -55,12 +57,24 @@ export interface DesktopResidentSession {
   updatedAt: string
 }
 
+export interface DesktopResidentActivity {
+  commandId: string
+  turnId: string
+  taskLabel: string
+  status: 'queued' | 'running' | 'completed' | 'interrupted' | 'failed' | 'indeterminate'
+  phase?: string
+  startedAt: string
+  updatedAt: string
+}
+
 export interface DesktopResidentDashboard {
   generatedAt: string
   providers: DesktopResidentProvider[]
   sessions: DesktopResidentSession[]
   selectedSessionId?: string
   events: DesktopResidentEvent[]
+  activities: DesktopResidentActivity[]
+  hiddenDiagnosticSessions: number
   selectedTurn?: DesktopResidentTurn & {
     sessionId: string
     stateRevision: number

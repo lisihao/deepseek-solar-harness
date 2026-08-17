@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { DesktopSidebarFooterActionOwnerProps } from './contracts.ts'
 import type {
   DesktopResidentDashboard,
+  DesktopResidentActivity,
   DesktopResidentEvent,
   DesktopResidentSession,
 } from '../resident-dashboard-contracts.ts'
 import { RESIDENT_DASHBOARD_PATH } from '../resident-dashboard-contracts.ts'
+import { formatResidentTimestamp } from '../resident-presentation.ts'
 
 /** Load one same-origin daemon projection for the Desktop Resident panel. */
 export async function loadResidentDashboard(
@@ -55,6 +57,12 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
   }, [open, selectedSessionId])
 
   useEffect(() => {
+    if (!open || dashboard === undefined) return
+    const selectionExists = dashboard.sessions.some(session => session.sessionId === selectedSessionId)
+    if (!selectionExists) setSelectedSessionId(dashboard.sessions[0]?.sessionId)
+  }, [dashboard, open, selectedSessionId])
+
+  useEffect(() => {
     if (!open) return
     const close = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') setOpen(false)
@@ -67,6 +75,10 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
   const unavailable = dashboard?.providers.filter(provider => !provider.available).length ?? 0
   const status = error !== undefined ? 'error' : unavailable > 0 ? 'warn' : running > 0 ? 'running' : 'idle'
   const label = `物理算子：${String(running)} 个运行中${error === undefined ? '' : '，状态不可用'}`
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const generatedTime = dashboard === undefined
+    ? undefined
+    : formatResidentTimestamp(dashboard.generatedAt, dashboard.generatedAt, timeZone)
 
   return (
     <>
@@ -94,7 +106,8 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
             <header>
               <div>
                 <h2>Resident 物理算子</h2>
-                <p>任务和原生会话由独立 daemon 持有，DSH 重启后仍可重新查看。</p>
+                <p>这里展示持久任务，而不是底层 daemon 日志；DSH 重启后仍可继续查看。</p>
+                <small>本机时区：{timeZone} · {generatedTime === undefined ? '正在刷新' : `${generatedTime.absolute} 更新`}</small>
               </div>
               <button type="button" aria-label="关闭物理算子面板" onClick={() => { setOpen(false) }}>×</button>
             </header>
@@ -123,7 +136,7 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
                 </div>
               </div>
               <div className="dshDesktopResidentColumn dshDesktopResidentSessions">
-                <h3>执行状态</h3>
+                <h3>持久任务</h3>
                 {(dashboard?.sessions.length ?? 0) === 0 && <p className="dshDesktopResidentEmpty">还没有 Resident 执行。</p>}
                 {dashboard?.sessions.map(session => (
                   <SessionRow
@@ -135,10 +148,14 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
                 ))}
               </div>
               <div className="dshDesktopResidentColumn dshDesktopResidentEvents">
-                <h3>最新进展</h3>
+                <h3>任务记录</h3>
                 {selectedSessionId === undefined
-                  ? <p className="dshDesktopResidentEmpty">选择一个会话查看事件。</p>
-                  : <EventTimeline events={dashboard?.events ?? []} />}
+                  ? <p className="dshDesktopResidentEmpty">选择一个持久任务查看记录。</p>
+                  : <ActivityTimeline
+                      activities={dashboard?.activities ?? []}
+                      generatedAt={dashboard?.generatedAt ?? new Date().toISOString()}
+                      timeZone={timeZone}
+                    />}
               </div>
             </div>
           </section>
@@ -151,7 +168,7 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
 
 function SessionRow(props: { session: DesktopResidentSession; selected: boolean; onSelect: () => void }) {
   const phase = progressLabel(props.session.latestEvent)
-  const workspace = useMemo(() => props.session.workspace.split(/[\\/]/u).filter(Boolean).at(-1) ?? props.session.workspace, [props.session.workspace])
+  const taskLabel = props.session.latestTurn?.taskLabel ?? '历史任务（升级前未记录摘要）'
   return (
     <button
       type="button"
@@ -163,11 +180,11 @@ function SessionRow(props: { session: DesktopResidentSession; selected: boolean;
     >
       <span className="dshDesktopResidentDot" />
       <span>
-        <strong>{props.session.operatorId}</strong>
-        <small>{workspace}</small>
+        <strong>{operatorLabel(props.session.operatorId)} · {taskLabel}</strong>
+        <small>{props.session.workspaceDisplay}</small>
         <small>{profileLabel(props.session)}</small>
       </span>
-      <span><em>{props.session.lifecycle}</em><small>{phase}</small></span>
+      <span><em>{lifecycleLabel(props.session.lifecycle)}</em><small>{phase}</small></span>
     </button>
   )
 }
@@ -183,32 +200,41 @@ function profileLabel(session: DesktopResidentSession): string {
   return `${profile.model} · ${profile.effort ?? '默认强度'} · ${source}`
 }
 
-function EventTimeline({ events }: { events: DesktopResidentEvent[] }) {
-  if (events.length === 0) return <p className="dshDesktopResidentEmpty">还没有结构化事件。</p>
+function ActivityTimeline(props: { activities: DesktopResidentActivity[]; generatedAt: string; timeZone: string }) {
+  if (props.activities.length === 0) return <p className="dshDesktopResidentEmpty">还没有任务记录。</p>
   return (
     <ol>
-      {[...events].reverse().slice(0, 40).map(event => (
-        <li key={event.sequence}>
-          <time>{new Date(event.time).toLocaleTimeString()}</time>
-          <strong>{event.type}</strong>
-          <span>{progressLabel(event)}</span>
+      {props.activities.slice(0, 20).map(activity => {
+        const time = formatResidentTimestamp(activity.updatedAt, props.generatedAt, props.timeZone)
+        return <li key={activity.turnId}>
+          <time title={time.absolute}>{time.relative}</time>
+          <strong>{activity.taskLabel}</strong>
+          <span>{activityLabel(activity)}</span>
         </li>
-      ))}
+      })}
     </ol>
   )
+}
+
+function activityLabel(activity: DesktopResidentActivity): string {
+  if (activity.status === 'running' && activity.phase !== undefined) {
+    return progressPhaseLabel(activity.phase)
+  }
+  return ({
+    queued: '等待启动',
+    running: '正在执行',
+    completed: '已完成',
+    interrupted: '已中断，可继续或重置',
+    failed: '执行失败',
+    indeterminate: '状态待人工确认，未自动重放',
+  } as const)[activity.status]
 }
 
 function progressLabel(event: DesktopResidentEvent | undefined): string {
   if (event === undefined) return '等待执行'
   const phase = typeof event.data.phase === 'string' ? event.data.phase : undefined
   if (phase !== undefined) {
-    return ({
-      connecting: '连接原生产品',
-      session_ready: '原生会话已接通',
-      reasoning: '正在推理/执行',
-      tool_activity: '正在使用工具',
-      finalizing: '正在整理结果',
-    } as Record<string, string>)[phase] ?? phase
+    return progressPhaseLabel(phase)
   }
   return ({
     'session.created': '会话已创建',
@@ -217,5 +243,29 @@ function progressLabel(event: DesktopResidentEvent | undefined): string {
     'turn.settled': '任务已完成',
     'turn.failed': '任务失败',
     'turn.indeterminate': '结果待人工确认',
-  } as Record<string, string>)[event.type] ?? event.type
+  } as Record<string, string>)[event.type] ?? '状态已更新'
+}
+
+function progressPhaseLabel(phase: string): string {
+  return ({
+    connecting: '正在连接原生产品',
+    session_ready: '原生会话已接通',
+    reasoning: '正在推理与执行',
+    tool_activity: '正在使用工具',
+    finalizing: '正在整理结果',
+  } as Record<string, string>)[phase] ?? '正在执行'
+}
+
+function operatorLabel(operatorId: string): string {
+  return operatorId === 'claude-code' ? 'Claude Code' : operatorId === 'codex' ? 'Codex' : operatorId
+}
+
+function lifecycleLabel(lifecycle: DesktopResidentSession['lifecycle']): string {
+  return ({
+    starting: '启动中',
+    idle: '空闲',
+    running: '运行中',
+    draining: '收尾中',
+    stopped: '已停止',
+  } as const)[lifecycle]
 }
