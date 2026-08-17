@@ -455,7 +455,13 @@ describe('Git hooks', () => {
         (job: unknown) => isRecord(job) && job.name === 'translation pairing (staged records)',
       )
 
-      expect(pairing).toMatchObject({ exclude: ['.agents/notes/archived/**'] })
+      expect(pairing).toMatchObject({
+        exclude: [
+          '.agents/notes/archived/**',
+          'products/desktop/**',
+          'plugins/managed/**',
+        ],
+      })
     }
   })
 })

@@ -87,7 +87,7 @@ If you prefer to run Harness from the command line or contribute to its core fun
 
 ## Special Thanks
 
-Special thanks to the [original DeepSeek Harness repository](https://github.com/deepseek-ai/deepseek-harness) and the DeepSeek AI team. DSH Desktop is built from a pinned upstream checkout, and its core agents, models, tools, sessions, Web UI, and plugin ecosystem come from that project.
+Special thanks to the [original DeepSeek Harness repository](https://github.com/deepseek-ai/deepseek-harness) and the DeepSeek AI team. DSH Desktop is developed with the Solar Harness source in this monorepo, and its core agents, models, tools, sessions, Web UI, and plugin ecosystem originate from that project.
 
 We also thank [Cordis](https://github.com/cordiverse/cordis) for the plugin foundation that makes this composition possible. DSH Desktop would not exist without these open-source projects.
 
@@ -99,10 +99,9 @@ Also, and you.
 
 ## Development
 
-Desktop source lives in `dsh-plugin-desktop/`. The outer repository uses Yarn, while the pinned `deepseek-harness/` submodule keeps its own pnpm workspace. From the repository root:
+Desktop source lives in `products/desktop/dsh-plugin-desktop/`. The Desktop directory uses Yarn, while the Solar Harness monorepo root keeps its pnpm workspace. From `products/desktop/`:
 
 ```sh
-git submodule update --init --recursive
 corepack yarn install --immutable
 corepack yarn dev
 ```

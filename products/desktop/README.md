@@ -87,7 +87,7 @@ Desktop 的插件能力已经可以使用。开发者可以通过两个公开接
 
 ## 特别感谢
 
-特别感谢 [DeepSeek Harness 原始仓库](https://github.com/deepseek-ai/deepseek-harness) 和 DeepSeek AI 团队。DSH Desktop 基于固定版本的上游源码构建，核心的智能体、模型、工具、会话、Web UI 和插件生态都来自这个项目。
+特别感谢 [DeepSeek Harness 原始仓库](https://github.com/deepseek-ai/deepseek-harness) 和 DeepSeek AI 团队。DSH Desktop 与本 monorepo 中的 Solar Harness 源码共同开发，核心的智能体、模型、工具、会话、Web UI 和插件生态都源自这个项目。
 
 同时感谢 [Cordis](https://github.com/cordiverse/cordis) 项目提供的插件化基础。没有这些开源项目，就不会有 DSH Desktop。
 
@@ -99,10 +99,9 @@ And you.
 
 ## 开发
 
-桌面端代码位于 `dsh-plugin-desktop/`，外层仓库使用 Yarn，固定的 `deepseek-harness/` 子模块继续使用自己的 pnpm workspace。从仓库根目录执行：
+桌面端代码位于 `products/desktop/dsh-plugin-desktop/`，Desktop 目录使用 Yarn，Solar Harness monorepo 根目录保留 pnpm workspace。从 `products/desktop/` 执行：
 
 ```sh
-git submodule update --init --recursive
 corepack yarn install --immutable
 corepack yarn dev
 ```

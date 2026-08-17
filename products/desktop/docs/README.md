@@ -25,7 +25,7 @@
 
 `README.i18n.yaml` 只记录这两个正式入口的双语 hash，不是用户指南。`dsh-plugin-desktop/README.md` 和 `dsh-plugin-desktop/README.zh.md` 是 npm 包随包发布的包级参考；它们比根 README 更技术化。`dsh-plugin-desktop/docs/` 是稳定 API 合同，不是营销页。`.agents/notes/implemented/` 是日期化的维护者决策记录，适合追溯取舍，不替代用户文档。
 
-`deepseek-harness/` 是固定版本的官方上游子模块。它自己的 README 和 `docs/` 属于上游项目，不能当作 Desktop 文档，也不在本仓库的产品文档统计中。
+Solar Harness 源码位于本目录向上两级的 monorepo 根目录。根 Harness 文档与 Desktop 产品文档保持独立归属，并分别执行各自的原生门禁；禁止再嵌套 Harness checkout。
 
 ## 状态约定
 

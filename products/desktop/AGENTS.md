@@ -1,15 +1,16 @@
-# DSH Desktop repository rules
+# DSH Desktop product rules
 
-This repository owns the desktop product around an unmodified DeepSeek Harness checkout.
+This directory owns the macOS-first Desktop product inside the DeepSeek-Solar-Harness monorepo.
 
-- `deepseek-harness/` is a pinned upstream Git submodule. Never edit files inside it from a desktop feature branch.
 - `dsh-plugin-desktop/` owns the Cordis Host and Client faces, Electron bootstrap, packaging, and release tests.
-- The outer repository and all owned packages use the root Yarn release with `nodeLinker: node-modules`.
-- The upstream submodule keeps its own pnpm workspace. Run upstream commands through the root `upstream:*` scripts, whose Yarn portable-shell commands enter the submodule before invoking Corepack.
+- `products/desktop/` and its owned packages use the local Yarn release with `nodeLinker: node-modules`.
+- The Solar Harness source is the monorepo root two levels above this directory. A nested `deepseek-harness/` checkout or submodule is forbidden.
+- Run core commands through the local `solar:*` scripts. They enter the monorepo root and invoke its pinned pnpm release through Corepack.
+- During P1-P2 migration, Desktop continues to resolve published DSH packages and sealed product tarballs. Source co-location alone does not change the runtime dependency boundary; source consumption requires a later qualified integration phase.
 - Compatibility mode must run the upstream default client without overrides. Advanced presentation belongs to desktop-owned client plugins and may replace documented slots or services through profile composition.
 - Keep graphical application launch explicit. Builds, typechecks, unit tests, and Loader smokes must remain headless-safe.
-- Commit before major changes of direction and keep the submodule pin update separate from desktop behavior changes.
-- Keep the repository topology and package-manager split consistent with the [owning Agent Note](.agents/notes/implemented/process/2026-08-15-pinned-upstream-and-isolated-yarn-workspace.md).
+- Commit before major changes of direction and keep package-input changes separate from desktop behavior changes.
+- Keep the topology and package-manager split consistent with [ADR-002](../../docs/architecture/adr-002-monorepo.md) and the [Desktop boundary Agent Note](.agents/notes/implemented/process/2026-08-15-pinned-upstream-and-isolated-yarn-workspace.md).
 
 ## Mandatory Codex Desktop delivery protocol
 

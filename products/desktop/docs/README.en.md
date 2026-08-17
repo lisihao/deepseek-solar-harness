@@ -25,7 +25,7 @@ The outer repository has two formal product READMEs plus one legacy compatibilit
 
 `README.i18n.yaml` records the bilingual blob hashes for those two formal entry points; it is not a user guide. `dsh-plugin-desktop/README.md` and `dsh-plugin-desktop/README.zh.md` ship with the npm package and are the more technical package reference. `dsh-plugin-desktop/docs/` contains stable API contracts rather than marketing copy. `.agents/notes/implemented/` contains dated maintainer decision records and does not replace user documentation.
 
-`deepseek-harness/` is the pinned upstream submodule. Its README and `docs/` belong to the upstream project, not to the Desktop product, and are excluded from the outer documentation inventory.
+The Solar Harness source lives at the monorepo root two levels above this directory. Root Harness documentation and Desktop product documentation retain separate ownership and native validation rules; a nested Harness checkout is forbidden.
 
 ## Status convention
 

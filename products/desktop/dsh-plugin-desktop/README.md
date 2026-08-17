@@ -77,7 +77,7 @@ On macOS the advanced window uses a transparent hidden-inset title bar, position
 
 ## Development
 
-This package is managed by the Yarn workspace at the repository root. The sibling `deepseek-harness/` checkout remains an independent upstream pnpm project and is not part of the Yarn workspace. Install and verify DSH Desktop from the repository root:
+This package is managed by the Yarn workspace in `products/desktop/`. The Solar Harness source is the monorepo root two levels above that workspace and retains its independent pnpm graph. Install and verify DSH Desktop from `products/desktop/`:
 
 ```sh
 yarn install
@@ -156,7 +156,6 @@ Closing the window hides it while the Host Cordis tree continues running. The tr
 Use a native Windows x64 machine with Git and x64 Node `22.23.2` (the same release used by CI). The packaging command accepts Node `22.19+` and Node `24.x`, whose official distributions include the required Corepack command. From PowerShell in a fresh `v2` checkout, run:
 
 ```powershell
-git submodule update --init --recursive
 corepack.cmd yarn install --immutable
 corepack.cmd yarn dist:win
 ```
@@ -186,5 +185,5 @@ The Desktop composition does not add a second model-request pipeline. Anchored S
 - `dshmarket@1.2.3` remains an optional user-installed third-party package, not a bundled marketplace. Preinstallation is deferred until an audited release consumes the optional Desktop services while preserving ordinary DSH fallback and includes the complete license notice required for redistribution.
 - The update handoff validates the download container, not publisher identity. macOS still requires the user to replace the application from the opened DMG; Windows runs the downloaded NSIS installer but the local `dist:win` artifact is unsigned. Signed artifacts, Authenticode/publisher verification, SmartScreen reputation, and native upgrade testing remain release gates.
 - The shared carrier is loopback HTTP and WebSocket, not Electron IPC. Replacing it requires transport extension points in upstream DSH and is outside this standalone package.
-- This project currently pins the published DSH `0.1.0-rc.6` family, while the sibling `deepseek-harness/` source checkout predates that release. Tests therefore validate the published package interfaces rather than unpublished upstream sources.
+- During P1-P2 migration this product pins the published DSH `0.1.0-rc.6` family, while the imported Solar core has its own source version and provenance. Tests continue to validate the published package interfaces until a later source-integration phase qualifies and changes that dependency boundary.
 - `package:dir` is an unpacked smoke artifact. `dist:win` adds an unsigned NSIS test installer but does not establish Authenticode identity or SmartScreen reputation. Installation and upgrade behavior, native notifications and terminals, the Windows ACL sandbox, and native-material appearance remain target-platform verification boundaries.

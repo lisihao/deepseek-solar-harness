@@ -8,6 +8,8 @@ pre-commit:
       glob: '*.i18n.yaml'
       exclude:
         - '.agents/notes/archived/**'
+        - 'products/desktop/**'
+        - 'plugins/managed/**'
       run: node_modules/.bin/tsx scripts/verify-translation-pairing.ts --cached {staged_files}
 
     - name: archived agent notes
@@ -43,6 +45,8 @@ pre-merge-commit:
       glob: '*.i18n.yaml'
       exclude:
         - '.agents/notes/archived/**'
+        - 'products/desktop/**'
+        - 'plugins/managed/**'
       run: node_modules/.bin/tsx scripts/verify-translation-pairing.ts --cached {staged_files}
 
     - name: archived agent notes

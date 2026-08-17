@@ -51,12 +51,12 @@ The launcher-private `desktopRuntime`, `desktopPnpmBootstrap`, Electron executab
 
 Release artifacts use Electron Builder and `app.asar`, while dependencies that must be physical (for example pnpm, node-pty, and Windows ACL/native files) live under `app.asar.unpacked`. The packaged-runtime gate checks both archive entries and physical runtime entries; profile fallback links must not target virtual ASAR paths that Node cannot resolve.
 
-The outer workspace uses Yarn. The pinned `deepseek-harness/` submodule keeps its own pnpm workspace. Desktop source, tests, packaging, and release scripts belong to `dsh-plugin-desktop/`; the upstream submodule is not edited from Desktop branches.
+The Desktop workspace uses Yarn. The Solar Harness monorepo root keeps its pnpm workspace. Desktop source, tests, packaging, and release scripts belong to `products/desktop/dsh-plugin-desktop/`; core changes belong to the monorepo root and pass the root governance contract.
 
 ## Maintainer reading
 
 - [Desktop service contract](../dsh-plugin-desktop/docs/plugin-services.md)
 - [Package README](../dsh-plugin-desktop/README.md)
-- [Pinned upstream and isolated Yarn workspace](../.agents/notes/implemented/process/2026-08-15-pinned-upstream-and-isolated-yarn-workspace.md)
+- [Solar monorepo and isolated Desktop Yarn workspace](../.agents/notes/implemented/process/2026-08-15-pinned-upstream-and-isolated-yarn-workspace.md)
 - [Profile and pnpm services decision](../.agents/notes/implemented/architecture/2026-08-15-desktop-profile-and-pnpm-services.md)
 - [Advanced shell decision](../.agents/notes/implemented/architecture/2026-08-15-desktop-advanced-shell.md)

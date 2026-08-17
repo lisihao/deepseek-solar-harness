@@ -17,7 +17,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          submodules: recursive
       - uses: actions/setup-node@v6
         with:
           node-version: 22.23.2
@@ -25,16 +24,15 @@ jobs:
       - run: yarn install --immutable
       - run: yarn check
 
-  upstream-command-windows:
+  solar-command-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          submodules: recursive
       - uses: actions/setup-node@v6
         with:
           node-version: 22.23.2
       - run: corepack enable
       - run: yarn check:layout
-      - run: yarn upstream:version
+      - run: yarn solar:version

@@ -77,7 +77,7 @@ desktop sidebar surface 会把上游 sidebar-fill token 局部设为透明，因
 
 ## 开发
 
-该包由仓库根目录的 Yarn workspace 管理。相邻的 `deepseek-harness/` checkout 仍是独立的上游 pnpm 项目，不属于 Yarn workspace。请从仓库根目录安装并验证 DSH Desktop：
+该包由 `products/desktop/` 中的 Yarn workspace 管理。Solar Harness 源码位于该 workspace 向上两级的 monorepo 根目录，并保留独立的 pnpm 依赖图。请从 `products/desktop/` 安装并验证 DSH Desktop：
 
 ```sh
 yarn install
@@ -156,7 +156,6 @@ Release operator 必须先发布两个平台产物，再让版本可被发现。
 请使用原生 Windows x64 电脑，并安装 Git 与 x64 Node `22.23.2`（与 CI 使用的版本相同）。打包命令接受官方发行版仍包含所需 Corepack 命令的 Node `22.19+` 与 Node `24.x`。在一个最新的 `v2` checkout 中打开 PowerShell，然后执行：
 
 ```powershell
-git submodule update --init --recursive
 corepack.cmd yarn install --immutable
 corepack.cmd yarn dist:win
 ```
@@ -186,5 +185,5 @@ Desktop 没有创建第二套模型请求管线。Anchored Standard 与 AgentTea
 - `dshmarket@1.2.3` 仍是用户可选安装的第三方 package，而不是内置 marketplace。只有重新审计的版本同时消费可选 Desktop service、保留普通 DSH fallback，并包含再分发所需的完整 license notice 后，才会重新评估预装。
 - 更新交接只验证下载容器，不验证 publisher 身份。macOS 仍要求用户从已打开的 DMG 替换应用；Windows 会运行已下载的 NSIS 安装器，但本地 `dist:win` 产物没有签名。签名产物、Authenticode/publisher 校验、SmartScreen 信誉与原生升级测试仍是发布 gate。
 - 共享 carrier 使用 loopback HTTP 与 WebSocket，而不是 Electron IPC。替换它需要上游 DSH 提供 transport 扩展点，不属于该独立包的范围。
-- 该项目目前固定使用已发布的 DSH `0.1.0-rc.6` family，而相邻的 `deepseek-harness/` 源码 checkout 早于该版本。因此，测试验证的是已发布包接口，而非上游未发布源码。
+- P1-P2 迁移期间，本产品固定使用已发布的 DSH `0.1.0-rc.6` family，而已导入的 Solar 核心保留自己的源码版本和来源。测试继续验证已发布包接口，直到后续源码集成阶段完成资格审查并明确改变该依赖边界。
 - `package:dir` 是用于 smoke 的未封装产物。`dist:win` 会额外生成未签名的 NSIS 测试安装包，但不会建立 Authenticode 身份或 SmartScreen 信誉。安装与升级行为、原生通知与终端、Windows ACL sandbox，以及每台目标机器上的原生材质外观仍属于目标平台验证边界。

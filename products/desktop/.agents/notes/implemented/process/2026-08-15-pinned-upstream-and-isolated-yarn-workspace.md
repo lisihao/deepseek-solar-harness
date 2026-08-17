@@ -1,4 +1,4 @@
-# Agent Note: Pinned upstream source and isolated Yarn workspace
+# Agent Note: Solar monorepo and isolated Desktop Yarn workspace
 
 Status: implemented
 
@@ -6,40 +6,32 @@ English | [中文](2026-08-15-pinned-upstream-and-isolated-yarn-workspace.zh.md)
 
 ## Problem
 
-DSH Desktop needs the exact official DeepSeek Harness source for review while the desktop product evolves independently. Tracking that source as ordinary files lets desktop commits rewrite upstream implementation and obscures ownership. A shared package-manager graph would also mix upstream pnpm rules with the desktop product's Yarn release.
+DSH Desktop originally carried an official DeepSeek Harness checkout as a nested Git submodule. That topology preserved source provenance, but it split the Solar product across repositories and made coordinated Desktop, core, and managed-plugin development harder. The migration must unify source ownership without coupling the Desktop Yarn dependency graph to the core pnpm workspace or silently changing the packaged runtime inputs.
 
 ## Decision
 
-[`deepseek-harness/`](../../../../deepseek-harness/) is a Git submodule pinned to the official repository and exact commit recorded in [`upstream.json`](../../../../upstream.json). Desktop branches treat the submodule as read-only. An upstream update changes the gitlink and metadata in a dedicated commit.
+[`products/desktop/`](../../../../) is now the Desktop product directory in the DeepSeek-Solar-Harness monorepo. The Solar Harness source is the [monorepo root](../../../../../..); a nested `deepseek-harness/` checkout and Desktop-local `.gitmodules` file are forbidden. [ADR-002](../../../../../../docs/architecture/adr-002-monorepo.md) owns the repository topology.
 
-The outer README files and assets are product-owned and preserve the established DSH Desktop landing page from `anywhere-labs/deepseek-harness-desktop`. They are not derived from the official source submodule. Package-level setup and release documentation belongs to [`dsh-plugin-desktop/README.md`](../../../../dsh-plugin-desktop/README.md).
+Desktop remains a Yarn 4 workspace using the `node_modules` linker, and its only workspace member is [`dsh-plugin-desktop/`](../../../../dsh-plugin-desktop/). The Solar root retains its pinned pnpm release and workspace. Local `solar:*` scripts cross that boundary explicitly by entering the monorepo root before invoking Corepack.
 
-The outer repository is a Yarn 4 workspace using the `node_modules` linker, and its only workspace member is [`dsh-plugin-desktop`](../../../../dsh-plugin-desktop/). The upstream checkout remains an independent pnpm workspace under its own [package-manager decision](../../../../deepseek-harness/.agents/notes/implemented/process/2026-06-16-pnpm-over-yarn.md). Root `upstream:*` scripts use Yarn's portable shell to enter the submodule before invoking its pinned pnpm release through Corepack.
+P1-P2 source co-location does not by itself change product dependency resolution. Normal Desktop builds continue to use the published DSH `0.1.0-rc.6` family recorded in [`upstream.json`](../../../../upstream.json), while sealed product extensions continue to use hash-checked tarballs under `dsh-plugin-desktop/vendor/dsh-packages/`. A later qualified integration phase must change package inputs explicitly and prove runtime compatibility before Desktop consumes same-repository sources.
 
-Normal desktop builds resolve the base DSH runtime from published npm packages instead of linking source from the submodule. `upstream.json` records the source version and the runtime package family independently. The pinned public GitHub source reports `0.1.0-rc.5`, while the desktop base runtime uses the published `0.1.0-rc.6` family; the repository does not invent a source commit for an npm artifact that does not publish one.
-
-Product extensions that have not been published upstream are a narrow sealed-artifact exception, not source links. The seven Resident Physical Operator packages live as exact tarballs below `dsh-plugin-desktop/vendor/dsh-packages/`, identify the fork commit in `vendor/manifest.json`, and are hash-verified before every check. Root resolutions force all transitive references to those same bytes. No Desktop package imports or builds the submodule workspace, and every other `@deepseek-ai/dsh-*` dependency must still equal the recorded published runtime family.
-
-`yarn check:layout` rejects a changed submodule URL, commit, working tree, package-manager boundary, workspace member list, base DSH runtime family, or unsealed Resident package reference. CI initializes submodules, installs the outer workspace immutably, runs the desktop checks, and exercises the upstream command path on Windows.
+`yarn check:layout` rejects a nested Harness checkout, a changed package-manager boundary, an expanded Desktop workspace, an invalid Solar root, a changed runtime family, or an unsealed extension reference. The check also binds this decision record to its bilingual hash record.
 
 ## Verification
 
-The shipped layout passes `yarn check:layout`, `yarn upstream:version`, `yarn install --immutable`, and `yarn check`. The Loader smoke in `yarn check` activates the built desktop package through Cordis without opening an Electron window.
+The migration validates the Desktop boundary with `corepack yarn install --immutable`, `corepack yarn check:layout`, and the headless `corepack yarn check` suite from `products/desktop/`. Core and governance validation run independently at the monorepo root. No migration-only verification launches Electron or mutates `/Applications/DSH Desktop.app`.
 
 ## Alternatives considered
 
-**Continue carrying upstream as editable root files.** This preserves one checkout but cannot mechanically distinguish official source from desktop-owned changes, which is the ownership failure this structure prevents.
+**Keep the nested submodule.** Rejected because it preserves the repository split that the Solar monorepo is intended to remove and duplicates the core source location.
 
-**Vendor the upstream tree with a subtree or copied snapshot.** A copy can record provenance, but it still presents upstream files as ordinary product-owned files and makes accidental patches easy to commit.
+**Add the Solar root packages to the Desktop Yarn workspace immediately.** Rejected because co-location is not evidence that the pnpm and Yarn graphs can be merged safely, and it would change packaged runtime inputs during a structural migration.
 
-**Add the upstream checkout to the Yarn workspace or use source links.** This couples desktop dependency resolution to an unmodified pnpm monorepo and makes product builds depend on unpublished source layout rather than the packages users install.
+**Copy the core into the Desktop directory.** Rejected because it creates two editable authorities for the same source and obscures which copy owns releases and governance.
 
-**Convert the upstream checkout to Yarn.** Package-manager conversion modifies official source and invalidates its lockfile and repository checks. Upstream commands therefore retain pnpm.
-
-**Treat the npm runtime version as proof of a matching source revision.** The published package metadata does not identify such a revision. Keeping source and artifact versions explicit avoids a false provenance claim.
+**Delete published and sealed package inputs as part of P1.** Rejected because that combines topology migration with runtime integration and makes failures impossible to attribute cleanly.
 
 ## Consequences
 
-Desktop changes have one owned package tree, and the official checkout remains directly comparable with its remote commit. The outer landing page presents DSH Desktop while the plugin README owns package usage. Product installs and checks are reproducible from the outer Yarn lockfile, while upstream verification continues to use its own pnpm lockfile.
-
-Clones must initialize the submodule, and contributors maintain two intentionally separate package-manager caches. Source-pin updates and runtime-family updates require separate evidence because a public GitHub revision and a published npm family may not correspond.
+Core, Desktop, and managed plugin sources can evolve in one Solar repository while retaining explicit product boundaries. Contributors use pnpm at the monorepo root and Yarn in `products/desktop/`. The existing packaged dependency family remains unchanged during P1-P2, so a later source-integration phase still has to qualify and record any dependency-boundary change.
