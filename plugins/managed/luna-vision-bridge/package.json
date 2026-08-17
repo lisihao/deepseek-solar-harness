@@ -1,0 +1,81 @@
+{
+  "name": "@ycp424c/dsh-luna-vision-bridge",
+  "description": "DSH LLM adapter that transcribes native image attachments with Codex Luna before delegating to DeepSeek",
+  "version": "0.1.2",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "bin": {
+    "dsh-read-image-luna": "scripts/read-image-luna.sh"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "scripts/read-image-luna.sh",
+    "dsh.plugin.json",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-connection"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "setup:dsh": "node scripts/link-dsh-source.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-client.mjs",
+    "build:host": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.client.json",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "schemastery": "^3.18.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-attachment": ">=0.1.0-rc.5 <0.2.0",
+    "@deepseek-ai/dsh-llm": ">=0.1.0-rc.5 <0.2.0",
+    "@deepseek-ai/dsh-settings": ">=0.1.0-rc.5 <0.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-attachment": "link:.dsh/source/current/packages/attachment/attachment",
+    "@deepseek-ai/dsh-client-connection": "link:.dsh/source/current/packages/client/connection",
+    "@deepseek-ai/dsh-client-runtime": "link:.dsh/source/current/packages/client/runtime",
+    "@deepseek-ai/dsh-client-ui-settings": "link:.dsh/source/current/packages/client/ui-settings",
+    "@deepseek-ai/dsh-client-ui-slots": "link:.dsh/source/current/packages/client/ui-slots",
+    "@deepseek-ai/dsh-host-apiproxy": "link:.dsh/source/current/packages/host/apiproxy",
+    "@deepseek-ai/dsh-llm": "link:.dsh/source/current/packages/llm/llm",
+    "@deepseek-ai/dsh-settings": "link:.dsh/source/current/packages/settings/settings",
+    "@types/node": "^22.0.0",
+    "@types/react": "~18.3.1",
+    "@types/react-test-renderer": "^18.3.1",
+    "@deepseek-ai/cordis": "link:.dsh/source/current/vendor/cordis",
+    "react": "^18.2.0",
+    "react-test-renderer": "^18.2.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "license": "MIT"
+}
