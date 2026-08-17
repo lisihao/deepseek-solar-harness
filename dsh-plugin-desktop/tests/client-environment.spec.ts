@@ -35,7 +35,7 @@ describe('desktop client environment', () => {
 })
 
 describe('advanced desktop layout', () => {
-  it('uses an opaque light/dark surface for the collaboration popover', () => {
+  it('composites the active theme over an opaque light/dark collaboration underlay', () => {
     let css = ''
     const style = {
       dataset: {},
@@ -50,10 +50,9 @@ describe('advanced desktop layout', () => {
 
     try {
       installSolarBrandStyles()
-      expect(css).toMatch(/:root \{ --dsh-desktop-popup-opaque-bg: var\(--dsw-static-neutral-bluish-00, #fff\); \}/)
-      expect(css).toMatch(/body\[data-ds-dark-theme\] \{ --dsh-desktop-popup-opaque-bg: var\(--dsw-static-neutral-bluish-950, #151517\); \}/)
-      expect(css).toMatch(/\.dshDesktopOperatorStrategyPanel \{[^}]*background: var\(--dsh-desktop-popup-opaque-bg\);/)
-      expect(css).not.toMatch(/\.dshDesktopOperatorStrategyPanel \{[^}]*background: var\(--dsw-alias-bg-base\);/)
+      expect(css).toMatch(/:root \{ --dsh-desktop-popup-underlay: #fff; \}/)
+      expect(css).toMatch(/body\[data-ds-dark-theme\] \{ --dsh-desktop-popup-underlay: #151517; \}/)
+      expect(css).toMatch(/\.dshDesktopOperatorStrategyPanel \{[^}]*background: linear-gradient\(var\(--dsw-alias-bg-base, transparent\), var\(--dsw-alias-bg-base, transparent\)\), var\(--dsh-desktop-popup-underlay\);/)
     }
     finally {
       vi.unstubAllGlobals()

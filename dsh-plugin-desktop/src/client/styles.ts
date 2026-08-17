@@ -61,8 +61,8 @@ body[data-dsh-desktop-mode="advanced"] .mt-panel .me-form .me-field-label { flex
 
 /** Root-scoped product marker shared by compatibility and advanced shells. */
 const SOLAR_BRAND_STYLES = `
-:root { --dsh-desktop-popup-opaque-bg: var(--dsw-static-neutral-bluish-00, #fff); }
-body[data-ds-dark-theme] { --dsh-desktop-popup-opaque-bg: var(--dsw-static-neutral-bluish-950, #151517); }
+:root { --dsh-desktop-popup-underlay: #fff; }
+body[data-ds-dark-theme] { --dsh-desktop-popup-underlay: #151517; }
 .dshDesktopSolarBrand { position: relative; flex: none; box-sizing: border-box; width: calc(100% + 8px); margin: 4px -4px 6px; padding: 8px 10px 8px 12px; overflow: hidden; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: linear-gradient(135deg, var(--dsw-alias-bg-layer-2), var(--dsw-alias-bg-base)); color: var(--dsw-alias-label-primary); }
 .dshDesktopSolarBrand::before { position: absolute; inset: 7px auto 7px 0; width: 3px; border-radius: 0 3px 3px 0; background: #f5a623; content: ""; }
 .dshDesktopSolarBrandPrimary, .dshDesktopSolarBrandTagline { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -114,7 +114,7 @@ body[data-ds-dark-theme] { --dsh-desktop-popup-opaque-bg: var(--dsw-static-neutr
 .dshDesktopOperatorRoutingChip:disabled { cursor: default; opacity: .48; }
 .dshDesktopOperatorRoutingChip > span { overflow: hidden; text-overflow: ellipsis; }
 .dshDesktopOperatorStrategyBackdrop { position: fixed; z-index: 2147482990; inset: 0; background: transparent; }
-.dshDesktopOperatorStrategyPanel { position: fixed; box-sizing: border-box; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 72px); overflow: auto; border: 1px solid var(--dsw-alias-border-l1); border-radius: 14px; background: var(--dsh-desktop-popup-opaque-bg); color: var(--dsw-alias-label-primary); box-shadow: 0 18px 54px rgb(0 0 0 / 38%); }
+.dshDesktopOperatorStrategyPanel { position: fixed; box-sizing: border-box; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 72px); overflow: auto; border: 1px solid var(--dsw-alias-border-l1); border-radius: 14px; background: linear-gradient(var(--dsw-alias-bg-base, transparent), var(--dsw-alias-bg-base, transparent)), var(--dsh-desktop-popup-underlay); color: var(--dsw-alias-label-primary); box-shadow: 0 18px 54px rgb(0 0 0 / 38%); }
 .dshDesktopOperatorStrategyPanel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 16px 12px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .dshDesktopOperatorStrategyPanel > header div, .dshDesktopOperatorProfilePreferences > div { display: grid; gap: 3px; }
 .dshDesktopOperatorStrategyPanel strong { font-size: 12px; }
