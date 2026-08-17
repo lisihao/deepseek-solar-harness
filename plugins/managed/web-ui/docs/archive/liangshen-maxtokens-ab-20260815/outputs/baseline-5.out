@@ -1,0 +1,22 @@
+setup ctx symbols: 
+mount OK: liangshen-baseline
+(node:12172) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Under `/Users/zcl/code/dsh-web-ui/packages/` there are **12 top-level package directories** (each with its own `package.json`):
+
+| # | Directory |
+|---|-----------|
+| 1 | `dsh-aionui-panel` |
+| 2 | `dsh-git-graph` |
+| 3 | `dsh-liangshen` |
+| 4 | `dsh-live-stats` |
+| 5 | `dsh-pet` |
+| 6 | `dsh-remote-web-ui` |
+| 7 | `dsh-skins` |
+| 8 | `dsh-ssh` |
+| 9 | `dsh-task-board` |
+| 10 | `dsh-tool-describe-image` |
+| 11 | `dsh-web-ui-all` |
+| 12 | `dsh-web-ui-settings` |
+
+Note: there are actually **13** first-level directories in total — the extra one, `skins/`, is **not a package itself** (no `package.json` at its top level); it's a plain container whose 11 subdirectories (`blue-fantasy`, `dragon-heir`, `harbor`, `miku`, `minecraft`, `qq98`, `skin-center`, `ths`, `trading`, `whale-song`, `xp`) are the individual skin packages. So the answer is **12 top-level package directories**.

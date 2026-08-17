@@ -1,0 +1,28 @@
+setup ctx symbols: 
+mount OK: liangshen
+(node:8796) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+## Top-level directories under `packages/`
+
+Listing `/Users/zcl/code/dsh-web-ui/packages/` directly yields **13 top-level directories** (plus one file, `AGENTS.md`):
+
+| # | Directory | Has `package.json` at top level |
+|---|---|---|
+| 1 | `dsh-aionui-panel` | [OK] |
+| 2 | `dsh-git-graph` | [OK] |
+| 3 | `dsh-liangshen` | [OK] |
+| 4 | `dsh-live-stats` | [OK] |
+| 5 | `dsh-pet` | [OK] |
+| 6 | `dsh-remote-web-ui` | [OK] |
+| 7 | `dsh-skins` | [OK] |
+| 8 | `dsh-ssh` | [OK] |
+| 9 | `dsh-task-board` | [OK] |
+| 10 | `dsh-tool-describe-image` | [OK] |
+| 11 | `dsh-web-ui-all` | [OK] |
+| 12 | `dsh-web-ui-settings` | [OK] |
+| 13 | `skins` | [X] (container, no package.json of its own) |
+
+### Count
+
+- **12 top-level package directories** — each has its own `package.json`.
+- **13 top-level directories total** — the extra one is `skins/`, which is a grouping folder (per `pnpm-workspace.yaml`'s `packages/skins/*` entry) containing 11 skin packages (`blue-fantasy`, `dragon-heir`, `harbor`, `miku`, `minecraft`, `qq98`, `skin-center`, `ths`, `trading`, `whale-song`, `xp`), each with its own `package.json`.

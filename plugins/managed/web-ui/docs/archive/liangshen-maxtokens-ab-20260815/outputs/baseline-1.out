@@ -1,0 +1,22 @@
+setup ctx symbols: 
+mount OK: liangshen-baseline
+(node:10735) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Inspected `/Users/zcl/code/dsh-web-ui`. Per `pnpm-workspace.yaml` (`packages: ['shared', 'packages/*', 'packages/skins/*']`), the top-level package directories directly under `packages/` (each containing a `package.json`) are **12**:
+
+| # | Directory |
+|---|-----------|
+| 1 | `packages/dsh-aionui-panel` |
+| 2 | `packages/dsh-git-graph` |
+| 3 | `packages/dsh-liangshen` |
+| 4 | `packages/dsh-live-stats` |
+| 5 | `packages/dsh-pet` |
+| 6 | `packages/dsh-remote-web-ui` |
+| 7 | `packages/dsh-skins` |
+| 8 | `packages/dsh-ssh` |
+| 9 | `packages/dsh-task-board` |
+| 10 | `packages/dsh-tool-describe-image` |
+| 11 | `packages/dsh-web-ui-all` |
+| 12 | `packages/dsh-web-ui-settings` |
+
+Note: `packages/skins/` itself is **not** a package (no `package.json` at its root) — it's a container holding 11 nested skin packages matched by the `packages/skins/*` workspace glob. So the count of top-level package directories under `packages/` is **12**.

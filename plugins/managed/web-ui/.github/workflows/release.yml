@@ -1,0 +1,120 @@
+name: Release
+
+# Tag-triggered publish pipeline: pushing a vX.Y.Z tag is the single release
+# switch. The workflow verifies every package version equals the tag version
+# (the tag is the version source of truth), runs the full gate, publishes all
+# packages to npm in dependency order, and creates the GitHub Release.
+#
+# Requires the repository secret NPM_TOKEN (npm automation token for the
+# @linxin666 scope) to publish.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, test, publish, release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Full history so scripts/release-notes.mjs can walk back to the
+          # previous v* tag and build the release notes commit range.
+          fetch-depth: 0
+
+      - name: Lint GitHub Actions workflows
+        uses: docker://rhysd/actionlint:latest
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # --ignore-scripts: the gallery consistency check compares COMMITTED
+      # bundle artifacts against committed gallery assets; a fresh build
+      # embeds the checkout's absolute path into every bundle (CSS-module
+      # hashes and \0dsh-css region markers), so rebuilt bytes differ per
+      # machine. The explicit Build step still verifies everything builds.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Gallery consistency
+        run: pnpm gallery:check
+
+      - name: Skin center consistency
+        run: pnpm skin-center:check
+
+      - name: Build
+        run: pnpm build
+
+      - name: Tests
+        run: pnpm test
+
+      - name: Script tests
+        run: pnpm test:scripts
+
+      - name: Aggregate package consistency
+        run: pnpm aggregate:check
+
+      - name: Extract tag version
+        id: tag
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify package versions match the tag
+        run: node scripts/verify-version.mjs "${{ steps.tag.outputs.version }}"
+
+      # Generated before publish: a notes failure must abort the run
+      # before anything reaches npm (a failed publish cannot be re-run
+      # for an already-published version).
+      - name: Generate release notes
+        run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
+
+      # Publish with the explicit "latest" dist-tag so that installing the
+      # package without a version (or with @latest) always resolves to the
+      # newest release, never a stale earlier one.
+      - name: Publish packages to npm
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+          pnpm -r publish --no-git-checks --access public --registry=https://registry.npmjs.org/ --tag latest
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --title "dsh-web-ui $GITHUB_REF_NAME"
+
+      # A bare `gh release create` carries only GitHub's auto-generated
+      # source archives. Pack the published tarballs back from the npm
+      # registry (byte-identical to what pnpm -r publish pushed above) and
+      # attach them as real installable release artifacts.
+      - name: Upload npm tarballs to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-assets.mjs "$GITHUB_REF_NAME" "$RUNNER_TEMP/release-assets"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release-assets/*.tgz --clobber

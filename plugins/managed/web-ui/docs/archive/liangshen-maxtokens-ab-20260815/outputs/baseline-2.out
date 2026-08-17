@@ -1,0 +1,25 @@
+setup ctx symbols: 
+mount OK: liangshen-baseline
+(node:11119) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+There are **13 top-level package directories** under `packages/`:
+
+| # | Directory |
+|---|-----------|
+| 1 | `packages/dsh-aionui-panel` |
+| 2 | `packages/dsh-git-graph` |
+| 3 | `packages/dsh-liangshen` |
+| 4 | `packages/dsh-live-stats` |
+| 5 | `packages/dsh-pet` |
+| 6 | `packages/dsh-remote-web-ui` |
+| 7 | `packages/dsh-skins` |
+| 8 | `packages/dsh-ssh` |
+| 9 | `packages/dsh-task-board` |
+| 10 | `packages/dsh-tool-describe-image` |
+| 11 | `packages/dsh-web-ui-all` |
+| 12 | `packages/dsh-web-ui-settings` |
+| 13 | `packages/skins` |
+
+**Count: 13 directories.**
+
+One nuance worth noting: 12 of them are packages in their own right (each has its own `package.json`). `packages/skins` has no `package.json` of its own — it's a grouping directory containing 11 skin sub-packages (`blue-fantasy`, `dragon-heir`, `harbor`, `miku`, `minecraft`, `qq98`, `skin-center`, `ths`, `trading`, `whale-song`, `xp`). This matches `pnpm-workspace.yaml`, which declares both `packages/*` and `packages/skins/*` as workspace packages.

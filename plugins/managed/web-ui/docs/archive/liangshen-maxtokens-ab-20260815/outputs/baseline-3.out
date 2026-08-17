@@ -1,0 +1,25 @@
+setup ctx symbols: 
+mount OK: liangshen-baseline
+(node:11506) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+The `packages/` directory contains **13** top-level directories:
+
+| # | Directory |
+|---|-----------|
+| 1 | `packages/dsh-aionui-panel` |
+| 2 | `packages/dsh-git-graph` |
+| 3 | `packages/dsh-liangshen` |
+| 4 | `packages/dsh-live-stats` |
+| 5 | `packages/dsh-pet` |
+| 6 | `packages/dsh-remote-web-ui` |
+| 7 | `packages/dsh-skins` |
+| 8 | `packages/dsh-ssh` |
+| 9 | `packages/dsh-task-board` |
+| 10 | `packages/dsh-tool-describe-image` |
+| 11 | `packages/dsh-web-ui-all` |
+| 12 | `packages/dsh-web-ui-settings` |
+| 13 | `packages/skins` |
+
+**Count: 13 top-level package directories.**
+
+One caveat: `packages/skins` is a container directory for skin sub-packages (`packages/skins/*`, each with its own `package.json`) rather than a package itself — it has no `package.json` at its own root. The other 12 directories each have a root-level `package.json` (confirmed by the `pnpm-workspace.yaml` globs `packages/*` and `packages/skins/*`).
