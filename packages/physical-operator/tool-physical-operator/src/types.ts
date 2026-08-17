@@ -1,9 +1,13 @@
 /** Client-safe physical-operator routing policy and projection types. */
 
-import type {
-  PhysicalOperatorExecutionPreference,
-  PhysicalOperatorReasoningEffort,
-} from '@deepseek-ai/dsh-physical-operator'
+/** Client-safe reasoning levels structurally equivalent to the Host seam. */
+export type PhysicalOperatorProfileReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
+
+/** Optional native model and reasoning fields selected for one Resident product. */
+export interface PhysicalOperatorProfilePreference {
+  readonly model?: string
+  readonly effort?: PhysicalOperatorProfileReasoningEffort
+}
 
 /** User-selected policy controlling whether the main Agent delegates work. */
 export type PhysicalOperatorRoutingPolicy = 'auto' | 'direct' | 'codex' | 'claude-code'
@@ -31,13 +35,13 @@ export type PhysicalOperatorProfileOwner = 'codex' | 'claude-code'
 
 /** Per-product manual fields; absent products and fields remain Smart Auto. */
 export type PhysicalOperatorProfilePreferences = Partial<
-  Record<PhysicalOperatorProfileOwner, PhysicalOperatorExecutionPreference>
+  Record<PhysicalOperatorProfileOwner, PhysicalOperatorProfilePreference>
 >
 
 /** Browser projection of the current Session's model and reasoning preferences. */
 export interface PhysicalOperatorProfilePreferencesSelect {
   readonly profiles: PhysicalOperatorProfilePreferences
-  readonly efforts: readonly PhysicalOperatorReasoningEffort[]
+  readonly efforts: readonly PhysicalOperatorProfileReasoningEffort[]
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
