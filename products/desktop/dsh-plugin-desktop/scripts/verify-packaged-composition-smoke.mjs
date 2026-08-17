@@ -1,0 +1,177 @@
+import { execFileSync } from 'node:child_process'
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+const scriptPath = fileURLToPath(import.meta.url)
+const defaultAppRoot = resolve(import.meta.dirname, '../dist/mac-arm64/DSH Desktop.app')
+const appRoot = resolve(process.argv[2] ?? defaultAppRoot)
+const appExecutable = join(appRoot, 'Contents', 'MacOS', 'DSH Desktop')
+
+if (process.versions.electron === undefined) {
+  if (!existsSync(appExecutable)) {
+    throw new Error(`verify-packaged-composition-smoke: packaged application is missing at ${appExecutable}`)
+  }
+  execFileSync(appExecutable, [scriptPath, appRoot], {
+    env: {
+      ELECTRON_RUN_AS_NODE: '1',
+      HOME: process.env.HOME ?? '',
+      PATH: '/usr/bin:/bin',
+    },
+    stdio: 'inherit',
+  })
+  process.exit(0)
+}
+
+const unpackedRoot = join(appRoot, 'Contents', 'Resources', 'app.asar.unpacked')
+const temporaryHome = mkdtempSync('/tmp/dsh-c-')
+
+try {
+  const profileModule = pathToFileURL(join(unpackedRoot, 'lib', 'profile.js')).href
+  const appBootModule = pathToFileURL(join(
+    unpackedRoot,
+    'node_modules',
+    '@deepseek-ai',
+    'dsh-app-boot',
+    'lib',
+    'index.js',
+  )).href
+  const epochModule = pathToFileURL(join(
+    unpackedRoot,
+    'vendor',
+    'agent-presets',
+    'anchored-standard',
+    'compaction-epoch.mjs',
+  )).href
+  const lunaConfigModule = pathToFileURL(join(
+    appRoot,
+    'Contents',
+    'Resources',
+    'app.asar',
+    'node_modules',
+    '@ycp424c',
+    'dsh-luna-vision-bridge',
+    'lib',
+    'config.js',
+  )).href
+  const anchoredConfig = join(
+    unpackedRoot,
+    'vendor',
+    'agent-presets',
+    'anchored-standard',
+    'agent.cordis.yml',
+  )
+
+  const [{ prepareDesktopProfile }, { composeEntries }, { createEpochPromotion }, { resolveConfig }] = await Promise.all([
+    import(profileModule),
+    import(appBootModule),
+    import(epochModule),
+    import(lunaConfigModule),
+  ])
+  const lunaCommand = resolveConfig({}).lunaCommand
+  const expectedLunaCommand = join(
+    unpackedRoot,
+    'node_modules',
+    '@ycp424c',
+    'dsh-luna-vision-bridge',
+    'scripts',
+    'read-image-luna.sh',
+  )
+  if (lunaCommand !== expectedLunaCommand) {
+    throw new Error(`verify-packaged-composition-smoke: Luna launcher resolved to ${lunaCommand}`)
+  }
+  accessSync(lunaCommand, constants.X_OK)
+  const prepared = prepareDesktopProfile(undefined, temporaryHome, 'darwin')
+  const rows = composeEntries([prepared.patches])
+  const rowsWithId = id => rows.filter(row => row.id === id)
+
+  const residentRows = rowsWithId('resident-operators')
+  const dualModeRows = rowsWithId('physical-operator-dual-mode')
+  const teamRows = rowsWithId('agent-teams')
+  const remoteRows = rowsWithId('remote-web-ui')
+  const billingRows = rowsWithId('web-billing')
+  const lunaRows = rowsWithId('luna-vision-bridge')
+  const remoteModuleRows = rowsWithId('ui-remote-modules')
+  if (residentRows.length !== 1 || residentRows[0].name !== '@deepseek-ai/dsh-resident-operator-local') {
+    throw new Error('verify-packaged-composition-smoke: Resident bundle is not composed exactly once')
+  }
+  if (dualModeRows.length !== 1 || dualModeRows[0].name !== '@deepseek-ai/dsh-physical-operator-resident') {
+    throw new Error('verify-packaged-composition-smoke: physical operator dual-mode router is missing')
+  }
+  if (teamRows.length !== 1 || teamRows[0].name !== '@nanmicoder/dsh-agent-teams') {
+    throw new Error('verify-packaged-composition-smoke: AgentTeams bundle is not composed exactly once')
+  }
+  if (teamRows[0].config?.memberPersonaPlacement !== 'prompt') {
+    throw new Error('verify-packaged-composition-smoke: AgentTeams member persona is not prompt-scoped')
+  }
+  if (remoteRows.length !== 1 || remoteRows[0].name !== '@linxin666/dsh-remote-web-ui') {
+    throw new Error('verify-packaged-composition-smoke: Remote Web UI bundle is not composed exactly once')
+  }
+  if (billingRows.length !== 1 || billingRows[0].name !== 'dsh-web-billing') {
+    throw new Error('verify-packaged-composition-smoke: Billing bundle is not composed exactly once')
+  }
+  if (lunaRows.length !== 1 || lunaRows[0].name !== '@ycp424c/dsh-luna-vision-bridge') {
+    throw new Error('verify-packaged-composition-smoke: Luna Vision Bridge bundle is not composed exactly once')
+  }
+  if (remoteModuleRows.length !== 1
+    || remoteModuleRows[0].name !== '@deepseek-ai/dsh-client-ui-remote-modules'
+    || remoteModuleRows[0].disabled === true) {
+    throw new Error('verify-packaged-composition-smoke: GenesisPod/ThunderOMLX bundle is not enabled exactly once')
+  }
+  const remoteInstances = remoteModuleRows[0].config?.instances
+  if (!Array.isArray(remoteInstances)
+    || remoteInstances.map(instance => instance.id).join(',') !== 'genesispod,thunder-omlx') {
+    throw new Error('verify-packaged-composition-smoke: GenesisPod/ThunderOMLX defaults are incomplete')
+  }
+
+  const presetRow = rowsWithId('agent-presets')[0]
+  const roots = presetRow?.config?.roots
+  if (!Array.isArray(roots) || !String(roots[0]?.path).includes('vendor/agent-presets')) {
+    throw new Error('verify-packaged-composition-smoke: packaged presets do not precede shipped presets')
+  }
+
+  const subagent = {
+    session: {
+      id: 'packaged-worker',
+      header: { delegationDepth: 1 },
+      events: [],
+    },
+  }
+  const anchoredTracker = createEpochPromotion(['tool/call'], { includeSubagents: true })
+  const legacyTracker = createEpochPromotion(['tool/call'])
+  if (anchoredTracker.status(subagent).promoted !== false) {
+    throw new Error('verify-packaged-composition-smoke: Anchored Standard does not gate worker request one')
+  }
+  if (legacyTracker.status(subagent).promoted !== true) {
+    throw new Error('verify-packaged-composition-smoke: smoke fixture cannot distinguish the old worker behavior')
+  }
+
+  const configText = readFileSync(anchoredConfig, 'utf8')
+  if (!configText.includes('bootstrapTools: [bash, str_replace_editor]')) {
+    throw new Error('verify-packaged-composition-smoke: Anchored Standard bootstrap tool pair changed')
+  }
+
+  process.stdout.write(`${JSON.stringify({
+    electron: process.versions.electron,
+    executable: process.execPath,
+    productRows: {
+      resident: residentRows[0].name,
+      physicalRouter: dualModeRows[0].name,
+      agentTeams: teamRows[0].name,
+      memberPersonaPlacement: teamRows[0].config.memberPersonaPlacement,
+      remoteWebUi: remoteRows[0].name,
+      billing: billingRows[0].name,
+      lunaVisionBridge: lunaRows[0].name,
+      lunaCommand,
+      remoteModules: remoteModuleRows[0].name,
+      remoteModuleInstances: remoteInstances.map(instance => instance.id),
+    },
+    anchoredStandard: {
+      presetRoot: roots[0].path,
+      workerFirstTurnPromoted: anchoredTracker.status(subagent).promoted,
+      bootstrapTools: ['bash', 'str_replace_editor'],
+    },
+  }, undefined, 2)}\n`)
+} finally {
+  rmSync(temporaryHome, { recursive: true, force: true })
+}
