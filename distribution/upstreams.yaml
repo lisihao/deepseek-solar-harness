@@ -7,5 +7,5 @@ core:
 desktop:
   imported_from: https://github.com/lisihao/deepseek-harness-desktop.git
   historical_upstream: https://github.com/anywhere-labs/deepseek-harness-desktop.git
-  accepted_sha: c4485d5a8b73b5fecc6b6424187a3524b4b2890c
+  accepted_sha: eba83294443784aae1da1d8ffbf5d6d741d9613e
   path: products/desktop
