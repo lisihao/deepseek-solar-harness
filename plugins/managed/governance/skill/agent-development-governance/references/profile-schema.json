@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/agent-development-governance/profile-v1.schema.json",
+  "title": "Agent Development Governance Profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["profile_version", "name", "project_markers", "scope_rules", "gates"],
+  "properties": {
+    "profile_version": {"const": 1},
+    "name": {"type": "string", "minLength": 1},
+    "project_markers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "instruction_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["required", "kind"],
+        "properties": {
+          "path": {"type": "string"},
+          "glob": {"type": "string"},
+          "required": {"type": "boolean"},
+          "kind": {"type": "string"}
+        },
+        "oneOf": [{"required": ["path"]}, {"required": ["glob"]}]
+      }
+    },
+    "scope_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["scope", "patterns"],
+        "properties": {
+          "scope": {"type": "string", "minLength": 1},
+          "patterns": {"type": "array", "items": {"type": "string"}},
+          "expands": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "hooks": {"type": "array", "items": {"type": "object"}},
+    "ci_contracts": {"type": "array", "items": {"type": "object"}},
+    "harness_bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest"],
+      "properties": {
+        "manifest": {"type": "string", "minLength": 1}
+      }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "command", "cwd", "scopes", "levels"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "label": {"type": "string"},
+          "command": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          },
+          "cwd": {"type": "string"},
+          "scopes": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "levels": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"enum": ["quick", "full"]}
+          },
+          "timeout_seconds": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

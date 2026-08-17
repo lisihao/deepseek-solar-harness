@@ -1,0 +1,221 @@
+[data-slot='sidebar.footer.action'] {
+  display: flex !important;
+  flex-direction: column;
+  width: 100%;
+}
+
+.dsh-governance-trigger {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  display: flex;
+  flex: none;
+  font: inherit;
+  gap: 8px;
+  margin-left: -4px;
+  min-height: 34px;
+  padding: 6px 2px 6px 10px;
+  width: calc(100% + 8px);
+}
+
+.dsh-governance-trigger:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.dsh-governance-trigger-rail {
+  justify-content: center;
+  padding: 7px;
+}
+
+.dsh-governance-overlay {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.dsh-governance-mask {
+  background: var(--dsw-alias-bg-mask-drop);
+  border: 0;
+  inset: 0;
+  position: absolute;
+  width: 100%;
+}
+
+.dsh-governance-panel {
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
+  box-sizing: border-box;
+  box-shadow: 0 20px 56px var(--dsw-alias-bg-mask-2);
+  color: var(--dsw-alias-label-primary);
+  display: flex;
+  flex-direction: column;
+  max-height: min(720px, calc(100vh - 48px));
+  max-width: 720px;
+  min-height: 320px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+  z-index: 1;
+}
+
+.dsh-governance-header {
+  align-items: center;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  display: flex;
+  justify-content: space-between;
+  padding: 18px 20px;
+}
+
+.dsh-governance-header h2,
+.dsh-governance-header p {
+  margin: 0;
+}
+
+.dsh-governance-header h2 {
+  font-size: 17px;
+}
+
+.dsh-governance-header p {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.dsh-governance-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.dsh-governance-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+}
+
+.dsh-governance-actions button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.dsh-governance-summary {
+  align-items: center;
+  background: var(--dsw-alias-bg-layer-2);
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+  padding: 10px 20px;
+}
+
+.dsh-governance-phase {
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.dsh-governance-phase-accepted {
+  background: var(--dsw-alias-state-success-secondary);
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.dsh-governance-phase-blocked {
+  background: var(--dsw-alias-state-error-secondary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.dsh-governance-phase-rejected,
+.dsh-governance-phase-invalidated {
+  background: var(--dsw-alias-state-error-secondary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.dsh-governance-error {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+  color: var(--dsw-alias-state-error-primary);
+  margin: 16px 20px 0;
+  padding: 10px 12px;
+}
+
+.dsh-governance-events {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  max-height: min(560px, 60vh);
+  overflow: auto;
+  padding: 16px 20px 24px;
+}
+
+.dsh-governance-event {
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.dsh-governance-event[data-decision='denied'] {
+  border-color: var(--dsw-alias-state-error-primary);
+}
+
+.dsh-governance-event-head {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto 1fr auto;
+}
+
+.dsh-governance-sequence,
+.dsh-governance-event-status {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+.dsh-governance-event-meta,
+.dsh-governance-event-detail,
+.dsh-governance-event-message {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  margin-top: 7px;
+}
+
+.dsh-governance-empty {
+  align-items: center;
+  color: var(--dsw-alias-label-tertiary);
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-height: 200px;
+  padding: 24px 20px;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .dsh-governance-overlay {
+    padding: 0;
+  }
+
+  .dsh-governance-panel {
+    border-radius: 0;
+    height: 100%;
+    max-height: none;
+    max-width: none;
+    min-height: 0;
+    width: 100%;
+  }
+}
