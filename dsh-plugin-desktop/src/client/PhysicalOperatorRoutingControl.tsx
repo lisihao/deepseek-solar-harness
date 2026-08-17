@@ -49,6 +49,11 @@ export function physicalOperatorRoutingSummary(policy: PhysicalOperatorRoutingPo
   } as const)[policy]
 }
 
+/** Refresh quickly while the collaboration panel is visible, conservatively while closed. */
+export function physicalOperatorDashboardRefreshMs(open: boolean): number {
+  return open ? 10_000 : 60_000
+}
+
 /** Render the logged collaboration policy next to the primary chat-model selector. */
 export function PhysicalOperatorRoutingControl({
   useProjection,
@@ -76,7 +81,7 @@ export function PhysicalOperatorRoutingControl({
       } catch {
         // The Resident status panel owns availability diagnostics; selection remains fail-closed.
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(() => { void refresh() }, 60_000)
+        if (!controller.signal.aborted) timer = setTimeout(() => { void refresh() }, physicalOperatorDashboardRefreshMs(open))
       }
     }
     void refresh()
@@ -84,7 +89,7 @@ export function PhysicalOperatorRoutingControl({
       controller.abort()
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [])
+  }, [open])
   useEffect(() => {
     if (!open) return
     const place = (): void => {

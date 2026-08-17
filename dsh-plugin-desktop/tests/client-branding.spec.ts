@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply } from '../src/client/index.ts'
 import {
+  physicalOperatorDashboardRefreshMs,
   physicalOperatorEffortLabel,
   physicalOperatorRoutingDescription,
   physicalOperatorRoutingLabel,
@@ -75,5 +76,7 @@ describe('Solar desktop branding', () => {
     expect(physicalOperatorRoutingSummary('claude-code')).toBe('Claude Code')
     expect(physicalOperatorRoutingDescription('codex')).toContain('短问答仍由主模型处理')
     expect(physicalOperatorEffortLabel('high')).toBe('高 · 复杂任务的深度推理')
+    expect(physicalOperatorDashboardRefreshMs(false)).toBe(60_000)
+    expect(physicalOperatorDashboardRefreshMs(true)).toBe(10_000)
   })
 })
