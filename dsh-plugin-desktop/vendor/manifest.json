@@ -4,7 +4,7 @@
     {
       "name": "Resident Physical Operators, mode-aware subscription qualification, and task presentation",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "c7f2d2b892f5bd40a88d632d2c3b474776266262"
+      "commit": "830bc68a05eb021f055425e05c6b1d36dee8be2d"
     },
     {
       "name": "GenesisPod and ThunderOMLX Remote Modules",
@@ -49,10 +49,10 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "067d8b19f61292fbc56d91ace731ce392c0909474f8e2f3790feb1b89aefe922",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "96d5c311c71398200b9ff2357d02c4ea6b25073e1b7ca255a50578a309021d42",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "7233efee9683b7e6f4d8ce1c78aeaeffeb3fe8d5d67f517ffab44870c154ab6a",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "409a8f7c091c8eeefc9aead20cec30dcaba7b6bfd527b1c94ed19fa649c35362",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "f767e71dab3d777219e3c7ee1e18f2929885bfa7bcade5c5818a573b398d366a",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "dbc5a3ab9f3b7c4e0f5debdda6795e80203a45e0051679632039fd10f5d698fc",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "9c7ad84bb62df1a2c6703a5a2ff339571d47fd1ff13683a7d0c1a16ce7ce18f1",
-    "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "8db3feb16a48313a41f362a35fbe097ca68df0eaefc481ba387344a871712116",
+    "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "3bf07e79bcbbdc863b133d810ac0a507eb9df9ac53674f47bc3c3454e54e06d6",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "1e474b894f4d956c42574abc12b83557d0d381d06baddd84666916809d8e4238",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "471a232245ccfc4e5a26a734ede1f63485b42d28195508a5e13d909b96d0618b",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",

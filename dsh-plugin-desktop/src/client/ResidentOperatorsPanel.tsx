@@ -129,9 +129,10 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
                 </div>
                 <h3>如何调用</h3>
                 <div className="dshDesktopResidentHelp">
-                  <p>模型选择旁的“算子”菜单缺省为“智能自动”。主 Agent 会在每个非简单任务开始时主动判断，不再要求你点名 Codex 或 Claude Code。</p>
-                  <code>智能自动：实现/调试/测试通常交给 Codex；架构/审查/长上下文通常交给 Claude Code。</code>
-                  <code>手动覆盖：可选择 Codex、Claude Code 或“仅当前模型”。策略按当前对话持久保存。</code>
+                  <p>主模型选择旁的“协作”入口缺省为“智能协作”。主模型负责对话，并在非简单任务中决定是否调用 Codex 或 Claude Code。</p>
+                  <code>智能协作：实现/调试/测试通常交给 Codex；架构/审查/长上下文通常交给 Claude Code。</code>
+                  <code>手动覆盖：可选择“仅主模型”、优先 Codex 或优先 Claude Code；短问答仍由主模型处理。</code>
+                  <p>原生模型和推理强度属于执行助手的高级偏好，不是右侧主聊天模型。通常保持“按任务推荐”即可。</p>
                   <p>仓库修改、多轮任务和需要跨 DSH 重启继续的工作会优先使用 <code>mode=resident</code>。插件仍只依赖 <code>ctx.physicalOperators</code>，无需知道 daemon 或 CLI。</p>
                 </div>
               </div>

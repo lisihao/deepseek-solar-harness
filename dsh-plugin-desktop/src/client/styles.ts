@@ -107,14 +107,29 @@ const SOLAR_BRAND_STYLES = `
 .dshDesktopResidentEvents li span { color: var(--dsw-alias-label-secondary); }
 .dshDesktopResidentError { margin: 12px 24px 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, #ff453a 45%, transparent); border-radius: 8px; background: color-mix(in srgb, #ff453a 12%, transparent); color: #ff6961; font-size: 11px; }
 .dshDesktopOperatorRoutingWrap { position: relative; display: inline-flex; align-items: center; min-width: 0; }
-.dshDesktopOperatorRoutingChip { display: inline-flex; align-items: center; gap: 2px; max-width: 148px; height: 26px; padding: 0 5px 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; font-size: 11px; white-space: nowrap; }
+.dshDesktopOperatorRoutingChip { display: inline-flex; align-items: center; gap: 2px; max-width: 132px; height: 26px; padding: 0 5px 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; font-size: 11px; white-space: nowrap; }
 .dshDesktopOperatorRoutingChip:hover:not(:disabled), .dshDesktopOperatorRoutingChip[aria-expanded="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .dshDesktopOperatorRoutingChip:disabled { cursor: default; opacity: .48; }
 .dshDesktopOperatorRoutingChip > span { overflow: hidden; text-overflow: ellipsis; }
-.dshDesktopOperatorRoutingItem { display: grid; max-width: 270px; gap: 2px; }
-.dshDesktopOperatorRoutingItem strong { font-size: 11px; font-weight: 600; }
-.dshDesktopOperatorRoutingItem small { color: var(--dsw-alias-label-secondary); font-size: 9px; line-height: 13px; white-space: normal; }
-.dshDesktopOperatorRoutingError { position: absolute; right: 0; bottom: 100%; margin-bottom: 4px; padding: 3px 5px; border-radius: 5px; background: #ff453a; color: white; font-size: 9px; white-space: nowrap; }
+.dshDesktopOperatorStrategyBackdrop { position: fixed; z-index: 2147482990; inset: 0; background: transparent; }
+.dshDesktopOperatorStrategyPanel { position: fixed; box-sizing: border-box; width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 72px); overflow: auto; border: 1px solid var(--dsw-alias-border-l1); border-radius: 14px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); box-shadow: 0 18px 54px rgb(0 0 0 / 38%); }
+.dshDesktopOperatorStrategyPanel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 16px 12px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.dshDesktopOperatorStrategyPanel > header div, .dshDesktopOperatorProfilePreferences > div { display: grid; gap: 3px; }
+.dshDesktopOperatorStrategyPanel strong { font-size: 12px; }
+.dshDesktopOperatorStrategyPanel small, .dshDesktopOperatorStrategyPanel p { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 10px; line-height: 15px; }
+.dshDesktopOperatorStrategyPanel > header > button { flex: none; width: 26px; height: 26px; border: 0; border-radius: 7px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); cursor: pointer; font-size: 18px; }
+.dshDesktopOperatorStrategyOptions { display: grid; gap: 5px; padding: 10px; }
+.dshDesktopOperatorStrategyOptions > button { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: start; gap: 9px; width: 100%; padding: 9px 10px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--dsw-alias-label-primary); cursor: pointer; text-align: left; }
+.dshDesktopOperatorStrategyOptions > button:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); }
+.dshDesktopOperatorStrategyOptions > button[data-selected] { border-color: color-mix(in srgb, #f5a623 55%, transparent); background: color-mix(in srgb, #f5a623 10%, transparent); }
+.dshDesktopOperatorStrategyOptions > button:disabled { cursor: default; opacity: .58; }
+.dshDesktopOperatorStrategyOptions > button > span:last-child { display: grid; gap: 2px; }
+.dshDesktopOperatorStrategyRadio { box-sizing: border-box; width: 12px; height: 12px; margin-top: 2px; border: 1px solid var(--dsw-alias-label-tertiary); border-radius: 50%; }
+.dshDesktopOperatorStrategyOptions > button[data-selected] .dshDesktopOperatorStrategyRadio { border: 3px solid #f5a623; }
+.dshDesktopOperatorProfilePreferences { display: grid; gap: 10px; margin: 0 10px 10px; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); }
+.dshDesktopOperatorProfilePreferences label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 1.1fr); align-items: center; gap: 12px; color: var(--dsw-alias-label-secondary); font-size: 10px; }
+.dshDesktopOperatorProfilePreferences select { min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 7px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font-size: 10px; }
+.dshDesktopOperatorStrategyError { margin: 0 12px 12px !important; padding: 7px 9px; border-radius: 7px; background: color-mix(in srgb, #ff453a 12%, transparent); color: #ff6961 !important; }
 @media (max-width: 900px) { .dshDesktopResidentGrid { grid-template-columns: 1fr; overflow: auto; } .dshDesktopResidentColumn { overflow: visible; border-right: 0; border-bottom: 1px solid var(--dsw-alias-border-l2); } }
 `
 

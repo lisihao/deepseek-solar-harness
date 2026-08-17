@@ -2,7 +2,12 @@ import { isValidElement, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply } from '../src/client/index.ts'
-import { physicalOperatorRoutingLabel } from '../src/client/PhysicalOperatorRoutingControl.tsx'
+import {
+  physicalOperatorEffortLabel,
+  physicalOperatorRoutingDescription,
+  physicalOperatorRoutingLabel,
+  physicalOperatorRoutingSummary,
+} from '../src/client/PhysicalOperatorRoutingControl.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Menu: () => null,
@@ -65,6 +70,10 @@ describe('Solar desktop branding', () => {
     expect(execute).toHaveBeenCalledWith('session-1', '/operator-profile codex gpt-5.6-sol high')
     await expect(injected.selectProfile('codex')).resolves.toBeNull()
     expect(execute).toHaveBeenCalledWith('session-1', '/operator-profile codex auto auto')
-    expect(physicalOperatorRoutingLabel('auto')).toBe('智能自动')
+    expect(physicalOperatorRoutingLabel('auto')).toBe('智能协作')
+    expect(physicalOperatorRoutingLabel('codex')).toBe('优先 Codex')
+    expect(physicalOperatorRoutingSummary('claude-code')).toBe('Claude Code')
+    expect(physicalOperatorRoutingDescription('codex')).toContain('短问答仍由主模型处理')
+    expect(physicalOperatorEffortLabel('high')).toBe('高 · 复杂任务的深度推理')
   })
 })

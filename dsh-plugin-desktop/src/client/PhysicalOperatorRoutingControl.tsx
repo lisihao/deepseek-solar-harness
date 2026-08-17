@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { IconChevronDownOutline14, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {
   PhysicalOperatorProfileOwner,
@@ -27,10 +28,10 @@ export type PhysicalOperatorRoutingControlProps =
   PropsRuntime<'conversation.input.right'> & InjectFace<PhysicalOperatorRoutingInjected>
 
 const LABELS: Record<PhysicalOperatorRoutingPolicy, string> = {
-  auto: '智能自动',
-  direct: '仅当前模型',
-  codex: 'Codex',
-  'claude-code': 'Claude Code',
+  auto: '智能协作',
+  direct: '仅主模型',
+  codex: '优先 Codex',
+  'claude-code': '优先 Claude Code',
 }
 
 /** Stable Chinese display label for one host-owned routing value. */
@@ -38,7 +39,17 @@ export function physicalOperatorRoutingLabel(policy: PhysicalOperatorRoutingPoli
   return LABELS[policy]
 }
 
-/** Render the logged execution policy next to the ordinary model selector. */
+/** Compact composer summary that distinguishes collaboration from the primary chat model. */
+export function physicalOperatorRoutingSummary(policy: PhysicalOperatorRoutingPolicy): string {
+  return ({
+    auto: '智能协作',
+    direct: '仅主模型',
+    codex: 'Codex',
+    'claude-code': 'Claude Code',
+  } as const)[policy]
+}
+
+/** Render the logged collaboration policy next to the primary chat-model selector. */
 export function PhysicalOperatorRoutingControl({
   useProjection,
   session,
@@ -48,12 +59,12 @@ export function PhysicalOperatorRoutingControl({
 }: PhysicalOperatorRoutingControlProps) {
   const routing = useProjection('physicalOperatorRouting')
   const [open, setOpen] = useState(false)
-  const [modelOpen, setModelOpen] = useState(false)
-  const [effortOpen, setEffortOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dashboard, setDashboard] = useState<DesktopResidentDashboard>()
+  const [panelPosition, setPanelPosition] = useState({ right: 12, bottom: 44 })
   const alive = useRef(true)
+  const trigger = useRef<HTMLButtonElement>(null)
 
   useEffect(() => () => { alive.current = false }, [])
   useEffect(() => {
@@ -74,11 +85,32 @@ export function PhysicalOperatorRoutingControl({
       if (timer !== undefined) clearTimeout(timer)
     }
   }, [])
+  useEffect(() => {
+    if (!open) return
+    const place = (): void => {
+      const rect = trigger.current?.getBoundingClientRect()
+      if (rect === undefined) return
+      setPanelPosition({
+        right: Math.max(12, window.innerWidth - rect.right),
+        bottom: Math.max(44, window.innerHeight - rect.top + 8),
+      })
+    }
+    const close = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    place()
+    window.addEventListener('resize', place)
+    document.addEventListener('keydown', close)
+    return () => {
+      window.removeEventListener('resize', place)
+      document.removeEventListener('keydown', close)
+    }
+  }, [open])
   const profileProjection = useProjection('physicalOperatorProfiles')
   if (routing === undefined) return null
 
   const locked = session.removed || input.phase !== 'plain' || saving
-  const currentLabel = physicalOperatorRoutingLabel(routing.currentValue)
+  const currentLabel = physicalOperatorRoutingSummary(routing.currentValue)
   const profileOwner = routing.currentValue === 'codex' || routing.currentValue === 'claude-code'
     ? routing.currentValue
     : undefined
@@ -91,9 +123,11 @@ export function PhysicalOperatorRoutingControl({
     ? provider?.models.find(candidate => candidate.isDefault) ?? provider?.models[0]
     : provider?.models.find(candidate => candidate.model === selectedModel)
   const selectedEffort = preference?.effort
+  const availableEfforts = selectedModel === undefined
+    ? [...new Set(provider?.models.flatMap(option => option.supportedEfforts) ?? profileProjection?.efforts ?? [])]
+    : model?.supportedEfforts ?? []
   const choose = (id: string): void => {
     const policy = routing.options.find(option => option.value === id)?.value
-    setOpen(false)
     if (policy === undefined || policy === routing.currentValue) return
     setSaving(true)
     setError(null)
@@ -125,17 +159,18 @@ export function PhysicalOperatorRoutingControl({
     })
   }
   const chooseModel = (id: string): void => {
-    setModelOpen(false)
     if (profileOwner === undefined) return
     const nextModel = id === 'auto' ? undefined : provider?.models.find(candidate => candidate.model === id)?.model
     const nextOption = nextModel === undefined ? undefined : provider?.models.find(candidate => candidate.model === nextModel)
-    const nextEffort = selectedEffort !== undefined && nextOption?.supportedEfforts.includes(selectedEffort)
+    const effortSupported = selectedEffort !== undefined && (nextOption === undefined
+      ? provider?.models.some(candidate => candidate.supportedEfforts.includes(selectedEffort)) === true
+      : nextOption.supportedEfforts.includes(selectedEffort))
+    const nextEffort = effortSupported
       ? selectedEffort
       : undefined
     saveProfile(profileOwner, nextModel, nextEffort as PhysicalOperatorProfileReasoningEffort | undefined)
   }
   const chooseEffort = (id: string): void => {
-    setEffortOpen(false)
     if (profileOwner === undefined) return
     const nextEffort = id === 'auto' ? undefined : id as PhysicalOperatorProfileReasoningEffort
     saveProfile(profileOwner, selectedModel, nextEffort)
@@ -143,119 +178,102 @@ export function PhysicalOperatorRoutingControl({
 
   return (
     <span className="dshDesktopOperatorRoutingWrap">
-      <Menu
-        open={open}
-        onClose={() => { setOpen(false) }}
-        selectedId={routing.currentValue}
-        onSelect={choose}
-        align="end"
-        side="top"
-        portal
-        compact
-        items={routing.options.map(option => ({
-          id: option.value,
-          label: (
-            <span className="dshDesktopOperatorRoutingItem">
-              <strong>{physicalOperatorRoutingLabel(option.value)}</strong>
-              <small>{option.description}</small>
-            </span>
-          ),
-        }))}
-        anchor={(
-          <button
-            type="button"
-            className="dshDesktopOperatorRoutingChip"
-            aria-haspopup="menu"
-            aria-expanded={open}
-            disabled={locked}
-            title={error ?? '选择主模型处理任务时是否自动调用订阅态 Codex 或 Claude Code'}
-            onClick={() => { setOpen(value => !value) }}
+      <button
+        ref={trigger}
+        type="button"
+        className="dshDesktopOperatorRoutingChip"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        disabled={locked}
+        title={error ?? '设置主模型是否邀请订阅态 Codex 或 Claude Code 协作'}
+        onClick={() => { setOpen(value => !value) }}
+      >
+        <span>协作 · {saving ? '保存中' : currentLabel}</span>
+        <IconChevronDownOutline14 />
+      </button>
+      {open && createPortal(
+        <div className="dshDesktopOperatorStrategyBackdrop" role="presentation" onMouseDown={() => { setOpen(false) }}>
+          <section
+            className="dshDesktopOperatorStrategyPanel"
+            role="dialog"
+            aria-label="协作方式"
+            style={panelPosition}
+            onMouseDown={event => { event.stopPropagation() }}
           >
-            <span>算子 · {saving ? '保存中' : currentLabel}</span>
-            <IconChevronDownOutline14 />
-          </button>
-        )}
-      />
-      {profileOwner !== undefined && (
-        <Menu
-          open={modelOpen}
-          onClose={() => { setModelOpen(false) }}
-          selectedId={selectedModel ?? 'auto'}
-          onSelect={chooseModel}
-          align="end"
-          side="top"
-          portal
-          compact
-          items={[
-            {
-              id: 'auto',
-              label: (
-                <span className="dshDesktopOperatorRoutingItem">
-                  <strong>智能模型</strong><small>按任务复杂度从原生订阅目录选择</small>
-                </span>
-              ),
-            },
-            ...(provider?.models.map(option => ({
-              id: option.model,
-              label: (
-                <span className="dshDesktopOperatorRoutingItem">
-                  <strong>{option.displayName}</strong><small>{option.description}</small>
-                </span>
-              ),
-            })) ?? []),
-          ]}
-          anchor={(
-            <button
-              type="button"
-              className="dshDesktopOperatorRoutingChip"
-              aria-haspopup="menu"
-              aria-expanded={modelOpen}
-              disabled={locked || provider === undefined}
-              title={provider === undefined ? '正在读取原生订阅模型目录' : '选择 Resident Session 使用的原生模型'}
-              onClick={() => { setModelOpen(value => !value) }}
-            >
-              <span>模型 · {selectedModel === undefined ? `智能（${model?.displayName ?? '读取中'}）` : model?.displayName ?? selectedModel}</span>
-              <IconChevronDownOutline14 />
-            </button>
-          )}
-        />
+            <header>
+              <div><strong>协作方式</strong><small>主模型负责对话；Codex 和 Claude Code 只在需要时作为执行助手。</small></div>
+              <button type="button" aria-label="关闭协作方式" onClick={() => { setOpen(false) }}>×</button>
+            </header>
+            <div className="dshDesktopOperatorStrategyOptions">
+              {routing.options.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  data-selected={option.value === routing.currentValue || undefined}
+                  disabled={saving}
+                  onClick={() => { choose(option.value) }}
+                >
+                  <span className="dshDesktopOperatorStrategyRadio" aria-hidden="true" />
+                  <span><strong>{physicalOperatorRoutingLabel(option.value)}</strong><small>{physicalOperatorRoutingDescription(option.value)}</small></span>
+                </button>
+              ))}
+            </div>
+            {profileOwner !== undefined && (
+              <div className="dshDesktopOperatorProfilePreferences">
+                <div><strong>{profileOwner === 'codex' ? 'Codex' : 'Claude Code'} 高级偏好</strong><small>通常保持“按任务推荐”即可。</small></div>
+                <label>
+                  <span>执行模型</span>
+                  <select
+                    aria-label="执行模型"
+                    value={selectedModel ?? 'auto'}
+                    disabled={saving || provider === undefined || !provider.available}
+                    onChange={event => { chooseModel(event.currentTarget.value) }}
+                  >
+                    <option value="auto">按任务推荐</option>
+                    {provider?.models.map(option => <option key={option.model} value={option.model}>{option.displayName}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>推理强度</span>
+                  <select
+                    aria-label="推理强度"
+                    value={selectedEffort ?? 'auto'}
+                    disabled={saving || provider === undefined || !provider.available || availableEfforts.length === 0}
+                    onChange={event => { chooseEffort(event.currentTarget.value) }}
+                  >
+                    <option value="auto">按任务推荐</option>
+                    {availableEfforts.map(effort => <option key={effort} value={effort}>{physicalOperatorEffortLabel(effort)}</option>)}
+                  </select>
+                </label>
+                {provider === undefined
+                  ? <p>正在读取原生订阅模型目录…</p>
+                  : !provider.available
+                    ? <p>当前不可用：{provider.unavailableReason ?? '订阅资格未通过'}</p>
+                    : <p>偏好按当前对话保存。持久任务首次运行后，本工作区会固定实际模型和强度以保证重启连续；如需更换，请先在左侧“物理算子”中重置该会话。</p>}
+              </div>
+            )}
+            {error !== null && <p className="dshDesktopOperatorStrategyError" role="status">更新失败：{error}</p>}
+          </section>
+        </div>,
+        document.body,
       )}
-      {profileOwner !== undefined && (
-        <Menu
-          open={effortOpen}
-          onClose={() => { setEffortOpen(false) }}
-          selectedId={selectedEffort ?? 'auto'}
-          onSelect={chooseEffort}
-          align="end"
-          side="top"
-          portal
-          compact
-          items={[
-            { id: 'auto', label: <span className="dshDesktopOperatorRoutingItem"><strong>智能强度</strong><small>按任务复杂度选择支持的推理等级</small></span> },
-            ...((model?.supportedEfforts ?? profileProjection?.efforts ?? []).map(effort => ({
-              id: effort,
-              label: <span className="dshDesktopOperatorRoutingItem"><strong>{effort}</strong><small>{effortDescription(effort)}</small></span>,
-            }))),
-          ]}
-          anchor={(
-            <button
-              type="button"
-              className="dshDesktopOperatorRoutingChip"
-              aria-haspopup="menu"
-              aria-expanded={effortOpen}
-              disabled={locked || provider === undefined || (model?.supportedEfforts.length ?? 0) === 0}
-              title={(model?.supportedEfforts.length ?? 0) === 0 ? '这个模型不提供可调推理强度' : '选择 Resident Session 的推理或思考强度'}
-              onClick={() => { setEffortOpen(value => !value) }}
-            >
-              <span>强度 · {selectedEffort ?? `智能（${model?.defaultEffort ?? '自动'}）`}</span>
-              <IconChevronDownOutline14 />
-            </button>
-          )}
-        />
-      )}
-      {error !== null && <span className="dshDesktopOperatorRoutingError" role="status" title={error}>策略更新失败</span>}
     </span>
   )
+}
+
+/** Human-facing consequence of one collaboration policy. */
+export function physicalOperatorRoutingDescription(policy: PhysicalOperatorRoutingPolicy): string {
+  return ({
+    auto: '推荐。按任务类型在主模型、Codex 与 Claude Code 之间选择。',
+    direct: '始终由当前主聊天模型回答，不调用执行助手。',
+    codex: '代码、调试和测试任务优先交给 Codex；短问答仍由主模型处理。',
+    'claude-code': '分析、架构和长上下文任务优先交给 Claude Code；短问答仍由主模型处理。',
+  } as const)[policy]
+}
+
+/** Chinese effort label with an outcome-oriented explanation. */
+export function physicalOperatorEffortLabel(effort: string): string {
+  return `${({ low: '低', medium: '中', high: '高', xhigh: '很高', max: '最大', ultra: '极限' } as Record<string, string>)[effort] ?? effort} · ${effortDescription(effort)}`
 }
 
 function effortDescription(effort: string): string {
