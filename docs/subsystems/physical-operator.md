@@ -6,6 +6,8 @@ The physical-operator seam gives DSH a stable, deployment-defined identity for b
 
 [`ctx.residentOperators`](../../packages/physical-operator/resident-operator/README.md) defines trusted management for workspace-scoped native product continuity. Its [local Provider](../../packages/physical-operator/resident-operator-local/README.md) is a disposable client for an independent Unix-socket daemon that uniquely owns receipts, leases, session associations, events, and artifacts. Session snapshots and turn inspection let a newly connected DSH or Desktop client recover the latest bounded progress and settled result without copying state. Native Claude Code sessions and Codex threads remain product authority. DSH Session, Jobs, Web UI, tmux, and plugin lifetime are projections or clients, never alternate writers.
 
+Resident Provider qualification also publishes the live native model catalog for Claude Code and Codex, including supported reasoning or effort levels. A caller may leave both fields unset for Smart Auto selection or choose either field explicitly. The daemon resolves the effective pair before accepting the command and locks it to `operator_id + realpath(workspace)`; later turns reuse the same native model and effort until an idle, revision-checked session reset. A conflicting explicit choice fails with `EXECUTION_PROFILE_CONFLICT` instead of silently changing the ongoing native conversation.
+
 This subsystem does not import the AI4Research scheduler, state store, TaskGraph, filesystem inbox, or operator catalog. The extraction rationale and deferred execution-substrate work are recorded in the [physical-operator capability seam Agent Note](../../.agents/notes/implemented/architecture/2026-08-15-physical-operator-capability-seam.md).
 
 Sources: [`packages/physical-operator/physical-operator/src/types.ts`](../../packages/physical-operator/physical-operator/src/types.ts), [`packages/physical-operator/physical-operator/src/index.ts`](../../packages/physical-operator/physical-operator/src/index.ts), and [`packages/physical-operator/resident-operator-local/src/daemon.ts`](../../packages/physical-operator/resident-operator-local/src/daemon.ts)
@@ -16,7 +18,7 @@ One `PhysicalOperator` publishes an immutable descriptor, normalized execution m
 
 Registration lifetime and execution lifetime are intentionally separate. Removing or hot-reloading a provider prevents new discovery through that registration but does not revoke an accepted run. Re-registering the same stable id observes outstanding capacity from the previous registration until the old execution settles.
 
-Only `completed` is successful. Cancellation, refusal, token exhaustion, and provider failure remain explicit stop reasons or infrastructure rejections. The physical Service Definition does not queue, retry, persist, or roll back work. Resident persistence is isolated behind its own Service Definition and single-writer daemon; protocol v1 remains fail-fast and never auto-replays indeterminate commands.
+Only `completed` is successful. Cancellation, refusal, token exhaustion, and provider failure remain explicit stop reasons or infrastructure rejections. The physical Service Definition does not queue, retry, persist, or roll back work. Resident persistence is isolated behind its own Service Definition and single-writer daemon; protocol v2 remains fail-fast and never auto-replays indeterminate commands.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -71,7 +73,7 @@ status(id: string): PhysicalOperatorStatus
 async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun>
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:83`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:85`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="ctxresidentoperators--residentoperatorservice-abstract-seam"></a>
 
@@ -142,7 +144,7 @@ abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:195`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:227`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 
@@ -163,7 +165,7 @@ A stable operator became discoverable.
 'physical-operator/added'(operator: PhysicalOperator): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:60`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:62`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorend--emit"></a>
 
@@ -180,7 +182,7 @@ A published execution settled.
 'physical-operator/end'(info: PhysicalOperatorExecutionEndInfo): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:78`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:80`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorremoved--emit"></a>
 
@@ -197,7 +199,7 @@ An operator stopped accepting new executions. Accepted runs survive.
 'physical-operator/removed'(id: PhysicalOperatorId): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:66`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:68`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorstart--emit"></a>
 
@@ -214,5 +216,5 @@ A provider published an accepted execution.
 'physical-operator/start'(info: PhysicalOperatorExecutionInfo): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:72`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:74`](../../packages/physical-operator/physical-operator/src/index.ts)
 <!-- END GENERATED cordis-surface -->

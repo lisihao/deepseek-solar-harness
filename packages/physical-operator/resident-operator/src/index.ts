@@ -8,14 +8,18 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {
+  PhysicalOperatorExecutionPreference,
+  PhysicalOperatorReasoningEffort,
+} from '@deepseek-ai/dsh-physical-operator'
 import { ResidentOperatorError } from './error.ts'
 
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 1
+export const RESIDENT_PROTOCOL_VERSION = 2
 /** Current forward-only daemon state schema version. */
-export const RESIDENT_STATE_SCHEMA_VERSION = 1
+export const RESIDENT_STATE_SCHEMA_VERSION = 2
 
 /** Opaque identity for one operator/workspace Resident Session. */
 export type ResidentOperatorSessionId = Branded<'ResidentOperatorSessionId'>
@@ -66,6 +70,27 @@ export type ResidentProgressPhase =
   | 'tool_activity'
   | 'finalizing'
 
+/** One native model advertised by a qualified subscription product. */
+export interface ResidentModelOption {
+  readonly model: string
+  readonly resolvedModel?: string
+  readonly displayName: string
+  readonly description: string
+  readonly supportedEfforts: readonly PhysicalOperatorReasoningEffort[]
+  readonly defaultEffort?: PhysicalOperatorReasoningEffort
+  readonly isDefault: boolean
+  readonly supportsAdaptiveThinking: boolean
+}
+
+/** Fully resolved model and optional reasoning intensity locked to one Resident Session. */
+export interface ResidentExecutionProfile {
+  readonly model: string
+  readonly effort?: PhysicalOperatorReasoningEffort
+}
+
+/** How the daemon obtained a Session's effective profile. */
+export type ResidentExecutionProfileSource = 'smart-auto' | 'mixed' | 'manual'
+
 /** Current qualification result for one native product Driver. */
 export interface ResidentProviderStatus {
   readonly operatorId: string
@@ -75,6 +100,7 @@ export interface ResidentProviderStatus {
   readonly authentication: 'native-subscription' | 'unqualified'
   readonly productVersion: string
   readonly protocolHash: string
+  readonly models: readonly ResidentModelOption[]
 }
 
 /** Current daemon-owned projection of one Resident Session. */
@@ -88,6 +114,10 @@ export interface ResidentSessionSnapshot {
   readonly control: 'automation'
   readonly stateRevision: number
   readonly nativeSessionId?: string
+  /** Daemon-resolved model and reasoning intensity locked for this Session. */
+  readonly executionProfile?: ResidentExecutionProfile
+  /** Whether Smart Auto or a caller preference produced the locked profile. */
+  readonly executionProfileSource?: ResidentExecutionProfileSource
   readonly activeTurnId?: ResidentOperatorTurnId
   /** Most recently updated durable receipt for reconnecting clients. */
   readonly latestTurn?: ResidentTurnSummary
@@ -123,6 +153,8 @@ export interface ResidentExecuteRequest {
   readonly operatorId: string
   readonly workspace: string
   readonly prompt: readonly ContentBlock[]
+  /** Optional caller preference; omitted fields are resolved from task complexity and the live catalog. */
+  readonly profile?: PhysicalOperatorExecutionPreference
   readonly signal: AbortSignal
 }
 

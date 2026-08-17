@@ -530,10 +530,11 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   turn: number
   step: number
   recovered: boolean
+  residentProfile?: PhysicalOperatorExecutionPreference
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:46`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:57`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -547,7 +548,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:56`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:68`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -561,7 +562,21 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:44`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:50`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatorprofile--log-only"></a>
+
+#### `physical-operator/profile` — log-only
+
+```ts persistence-catalog
+/** Whole-value preference update for one native Resident product. */
+'physical-operator/profile': {
+  operatorId: PhysicalOperatorProfileOwner
+  profile: PhysicalOperatorExecutionPreference | null
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:52`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

@@ -40,6 +40,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'physical-operator/dispatch',
   'physical-operator/dispatch-terminal',
   'physical-operator/policy',
+  'physical-operator/profile',
   'plan/mode',
   'request/context',
   'request/header',

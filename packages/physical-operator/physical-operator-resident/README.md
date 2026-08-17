@@ -10,7 +10,7 @@ The package owns routing only. It stores no session, receipt, prompt, result, sc
 
 Each mapping declares a stable physical `id`, its existing `ephemeralProvider`, optional `residentProvider`, presentation metadata, and shared `maxConcurrency`. Omitting `residentProvider` publishes only `ephemeral`; including it publishes both modes. The router rejects blank fields, duplicate ids, unavailable subscription attestations, missing workspaces, and unsupported modes without fallback.
 
-The ephemeral leg calls `ctx.subagents`. The resident leg calls only the `ctx.residentOperators` Service Definition; it never imports the local daemon Provider. Provider and Consumer therefore remain independently replaceable behind capability seams.
+The ephemeral leg calls `ctx.subagents`. The resident leg calls only the `ctx.residentOperators` Service Definition; it forwards an optional provider-neutral model/effort preference but never imports the local daemon Provider. Provider and Consumer therefore remain independently replaceable behind capability seams.
 
 ## Model Experience
 
@@ -22,6 +22,6 @@ The added optional `mode` field changes the tool schema once when this Consumer 
 
 ## Known Limitations and Deferred Work
 
-- Capacity is shared across both modes for a stable operator id; protocol version 1 does not queue.
+- Capacity is shared across both modes for a stable operator id; protocol version 2 does not queue.
 - Availability is summarized at the stable operator level; product qualification still fails loud at resident execution time.
 - Model callers cannot invoke Resident management methods; those remain trusted-plugin and CLI surfaces.

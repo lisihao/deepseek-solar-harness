@@ -162,6 +162,31 @@ describe('host physical-operator routing', () => {
     expect(automatic.deepseek.requests).toHaveLength(0)
   })
 
+  it('persists manual model and effort preferences and replays them with the durable dispatch', async () => {
+    const { ctx, agent, codex } = await setup()
+    await ctx.commands.execute(agent, '/operator codex', new AbortController().signal)
+    await ctx.commands.execute(
+      agent,
+      '/operator-profile codex gpt-5.6-sol xhigh',
+      new AbortController().signal,
+    )
+
+    send(agent, '实现一个完整的 TypeScript 功能并补齐测试')
+    await agent.whenIdle()
+
+    expect(codex.requests[0]).toMatchObject({
+      mode: 'resident',
+      residentProfile: { model: 'gpt-5.6-sol', effort: 'xhigh' },
+    })
+    expect(agent.session.events.find(event => event.type === 'physical-operator/profile')).toMatchObject({
+      ignorable: true,
+      data: { operatorId: 'codex', profile: { model: 'gpt-5.6-sol', effort: 'xhigh' } },
+    })
+    expect(agent.session.events.find(event => event.type === 'physical-operator/dispatch')).toMatchObject({
+      data: { residentProfile: { model: 'gpt-5.6-sol', effort: 'xhigh' } },
+    })
+  })
+
   it('rejects an auxiliary title call without duplicating or terminating the active Resident command', async () => {
     const { ctx, agent, codex } = await setup({ codexImmediate: false })
     send(agent, '用 Codex 深度检查这个仓库并持续执行')

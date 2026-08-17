@@ -3636,6 +3636,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PhysicalOperatorExecutionMode = \'ephemeral\' | \'resident\';',
   },
   {
+    name: 'PhysicalOperatorExecutionPreference',
+    declaration: 'export interface PhysicalOperatorExecutionPreference {\n    readonly model?: string;\n    readonly effort?: PhysicalOperatorReasoningEffort;\n}',
+  },
+  {
     name: 'PhysicalOperatorId',
     declaration: 'export type PhysicalOperatorId = Branded<\'PhysicalOperatorId\'>;',
   },
@@ -3648,6 +3652,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorProviderStartRequest extends PhysicalOperatorStartRequest {\n    readonly executionId: PhysicalOperatorExecutionId;\n    readonly mode: PhysicalOperatorExecutionMode;\n}',
   },
   {
+    name: 'PhysicalOperatorReasoningEffort',
+    declaration: 'export type PhysicalOperatorReasoningEffort = \'low\' | \'medium\' | \'high\' | \'xhigh\' | \'max\' | \'ultra\';',
+  },
+  {
     name: 'PhysicalOperatorResult',
     declaration: 'export interface PhysicalOperatorResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n    readonly continuity?: {\n        readonly sessionId: string;\n        readonly stateRevision: number;\n    };\n}',
   },
@@ -3657,7 +3665,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',
@@ -3801,7 +3809,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
+    name: 'ResidentExecutionProfile',
+    declaration: 'export interface ResidentExecutionProfile {\n    readonly model: string;\n    readonly effort?: PhysicalOperatorReasoningEffort;\n}',
+  },
+  {
+    name: 'ResidentExecutionProfileSource',
+    declaration: 'export type ResidentExecutionProfileSource = \'smart-auto\' | \'mixed\' | \'manual\';',
   },
   {
     name: 'ResidentHealth',
@@ -3824,6 +3840,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ResidentLifecycle = \'starting\' | \'idle\' | \'running\' | \'draining\' | \'stopped\';',
   },
   {
+    name: 'ResidentModelOption',
+    declaration: 'export interface ResidentModelOption {\n    readonly model: string;\n    readonly resolvedModel?: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly supportedEfforts: readonly PhysicalOperatorReasoningEffort[];\n    readonly defaultEffort?: PhysicalOperatorReasoningEffort;\n    readonly isDefault: boolean;\n    readonly supportsAdaptiveThinking: boolean;\n}',
+  },
+  {
     name: 'ResidentOperatorCommandId',
     declaration: 'export type ResidentOperatorCommandId = Branded<\'ResidentOperatorCommandId\'>;',
   },
@@ -3837,7 +3857,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentProviderStatus',
-    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: \'claude-code\' | \'codex\';\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n}',
+    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: \'claude-code\' | \'codex\';\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n}',
   },
   {
     name: 'ResidentReceiptState',
@@ -3849,7 +3869,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentSessionSnapshot',
-    declaration: 'export interface ResidentSessionSnapshot {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly lifecycle: ResidentLifecycle;\n    readonly health: ResidentHealth;\n    readonly healthReason?: ResidentHealthReason;\n    readonly control: \'automation\';\n    readonly stateRevision: number;\n    readonly nativeSessionId?: string;\n    readonly activeTurnId?: ResidentOperatorTurnId;\n    readonly latestTurn?: ResidentTurnSummary;\n    readonly latestEvent?: ResidentEvent;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface ResidentSessionSnapshot {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly lifecycle: ResidentLifecycle;\n    readonly health: ResidentHealth;\n    readonly healthReason?: ResidentHealthReason;\n    readonly control: \'automation\';\n    readonly stateRevision: number;\n    readonly nativeSessionId?: string;\n    readonly executionProfile?: ResidentExecutionProfile;\n    readonly executionProfileSource?: ResidentExecutionProfileSource;\n    readonly activeTurnId?: ResidentOperatorTurnId;\n    readonly latestTurn?: ResidentTurnSummary;\n    readonly latestEvent?: ResidentEvent;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'ResidentStopReason',

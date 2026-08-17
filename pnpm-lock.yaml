@@ -5741,6 +5741,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../physical-operator
 
   packages/physical-operator/resident-operator-local:
     dependencies:
@@ -5775,6 +5778,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../physical-operator
       '@deepseek-ai/dsh-resident-operator':
         specifier: workspace:^
         version: link:../resident-operator

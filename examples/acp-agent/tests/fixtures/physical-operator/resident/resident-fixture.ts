@@ -29,6 +29,15 @@ class FixtureResidentOperatorService extends ResidentOperatorService {
       authentication: 'native-subscription',
       productVersion: 'fixture',
       protocolHash: 'fixture',
+      models: [{
+        model: 'fixture',
+        displayName: 'Fixture',
+        description: 'Deterministic fixture model',
+        supportedEfforts: ['medium'],
+        defaultEffort: 'medium',
+        isDefault: true,
+        supportsAdaptiveThinking: false,
+      }],
     }])
   }
 

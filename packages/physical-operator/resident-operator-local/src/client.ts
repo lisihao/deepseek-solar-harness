@@ -6,6 +6,7 @@ import { realpath } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import type { PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
 import {
   ResidentOperatorError,
   ResidentOperatorSessionId,
@@ -115,6 +116,7 @@ export class ResidentDaemonClient {
     operatorId: string
     workspace: string
     prompt: readonly unknown[]
+    profile?: PhysicalOperatorExecutionPreference
     signal: AbortSignal
   }): Promise<{
     turnId: string
@@ -132,6 +134,7 @@ export class ResidentDaemonClient {
       operator_id: request.operatorId,
       workspace,
       prompt: request.prompt,
+      ...request.profile === undefined ? {} : { profile: request.profile },
     }, request.signal)
     let settled = false
     const observation = new AbortController()

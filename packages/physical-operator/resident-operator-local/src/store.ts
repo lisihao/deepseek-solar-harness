@@ -12,6 +12,8 @@ import {
   ResidentOperatorTurnId,
   RESIDENT_STATE_SCHEMA_VERSION,
   type ResidentEventPage,
+  type ResidentExecutionProfile,
+  type ResidentExecutionProfileSource,
   type ResidentProgressPhase,
   type ResidentReceiptState,
   type ResidentSessionSnapshot,
@@ -32,6 +34,9 @@ interface SessionRow {
   health_reason: string | null
   revision: number
   native_session_id: string | null
+  model_id: string | null
+  reasoning_effort: string | null
+  profile_source: string | null
   active_turn_id: string | null
   updated_at: string
 }
@@ -68,6 +73,7 @@ export type TurnInspection = ResidentTurnSnapshot
  * @param operatorId - selected native product Driver.
  * @param workspace - canonical realpath workspace.
  * @param prompt - validated text content blocks.
+ * @param profile - daemon-resolved model and reasoning profile.
  * @param supersedesCommandId - optional explicitly abandoned receipt lineage.
  * @returns lowercase SHA-256 digest.
  */
@@ -75,10 +81,11 @@ export function canonicalRequestHash(
   operatorId: string,
   workspace: string,
   prompt: readonly ContentBlock[],
+  profile: ResidentExecutionProfile,
   supersedesCommandId?: string,
 ): string {
   return createHash('sha256')
-    .update(JSON.stringify({ operatorId, workspace, prompt, supersedesCommandId: supersedesCommandId ?? null }))
+    .update(JSON.stringify({ operatorId, workspace, prompt, profile, supersedesCommandId: supersedesCommandId ?? null }))
     .digest('hex')
 }
 
@@ -112,10 +119,35 @@ export class ResidentStore {
     this.db.close()
   }
 
+  /**
+   * Read an existing Session's locked profile without creating or mutating state.
+   * @param operatorId - stable native product identity.
+   * @param workspace - canonical realpath workspace.
+   * @returns the locked profile and provenance, or undefined before first admission.
+   */
+  lockedProfile(operatorId: string, workspace: string): {
+    readonly profile: ResidentExecutionProfile
+    readonly source: ResidentExecutionProfileSource
+  } | undefined {
+    const row = this.db.prepare(
+      'SELECT * FROM resident_sessions WHERE operator_id = ? AND workspace = ?',
+    ).get(operatorId, workspace) as unknown as SessionRow | undefined
+    if (row?.model_id === null || row?.model_id === undefined) return undefined
+    return {
+      profile: {
+        model: row.model_id,
+        ...row.reasoning_effort === null ? {} : {
+          effort: row.reasoning_effort as NonNullable<ResidentExecutionProfile['effort']>,
+        },
+      },
+      source: (row.profile_source ?? 'smart-auto') as ResidentExecutionProfileSource,
+    }
+  }
+
   private configure(): void {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    if (version !== 0 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
+    if (version !== 0 && version !== 1 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
       throw new ResidentOperatorError(
         `resident state schema ${version} is incompatible with ${RESIDENT_STATE_SCHEMA_VERSION}`,
         'PROTOCOL_MISMATCH',
@@ -131,6 +163,9 @@ export class ResidentStore {
         health_reason TEXT,
         revision INTEGER NOT NULL,
         native_session_id TEXT,
+        model_id TEXT,
+        reasoning_effort TEXT,
+        profile_source TEXT,
         active_turn_id TEXT,
         updated_at TEXT NOT NULL,
         UNIQUE(operator_id, workspace)
@@ -169,8 +204,15 @@ export class ResidentStore {
         byte_length INTEGER NOT NULL,
         created_at TEXT NOT NULL
       ) STRICT;
-      PRAGMA user_version = ${RESIDENT_STATE_SCHEMA_VERSION};
     `)
+    if (version === 1) {
+      this.db.exec(`
+        ALTER TABLE resident_sessions ADD COLUMN model_id TEXT;
+        ALTER TABLE resident_sessions ADD COLUMN reasoning_effort TEXT;
+        ALTER TABLE resident_sessions ADD COLUMN profile_source TEXT;
+      `)
+    }
+    this.db.exec(`PRAGMA user_version = ${RESIDENT_STATE_SCHEMA_VERSION};`)
   }
 
   /** Any pre-crash accepted/running command is unsafe to replay automatically. */
@@ -203,6 +245,8 @@ export class ResidentStore {
    * @param requestHash - canonical request conflict detector.
    * @param operatorId - selected native product Driver.
    * @param workspace - canonical realpath workspace.
+   * @param profile - fully resolved execution profile to lock or validate.
+   * @param profileSource - whether automatic or explicit selection produced the profile.
    * @param supersedesCommandId - optional uniquely linked abandoned indeterminate command.
    * @returns accepted or existing receipt projection.
    */
@@ -211,6 +255,8 @@ export class ResidentStore {
     requestHash: string,
     operatorId: string,
     workspace: string,
+    profile: ResidentExecutionProfile,
+    profileSource: ResidentExecutionProfileSource,
     supersedesCommandId?: string,
   ): AcceptedTurn {
     return this.transaction(() => {
@@ -262,11 +308,24 @@ export class ResidentStore {
         const id = randomUUID()
         this.db.prepare(`
           INSERT INTO resident_sessions
-            (id, operator_id, workspace, lifecycle, health, health_reason, revision, native_session_id, active_turn_id, updated_at)
-          VALUES (?, ?, ?, 'idle', 'ok', NULL, 0, NULL, NULL, ?)
-        `).run(id, operatorId, workspace, now)
+            (id, operator_id, workspace, lifecycle, health, health_reason, revision, native_session_id,
+             model_id, reasoning_effort, profile_source, active_turn_id, updated_at)
+          VALUES (?, ?, ?, 'idle', 'ok', NULL, 0, NULL, ?, ?, ?, NULL, ?)
+        `).run(id, operatorId, workspace, profile.model, profile.effort ?? null, profileSource, now)
         session = this.sessionRow(id)
-        this.appendEvent(id, 'session.created', { operatorId }, now)
+        this.appendEvent(id, 'session.created', { operatorId, profile, profileSource }, now)
+      } else if (session.model_id === null) {
+        this.db.prepare(`
+          UPDATE resident_sessions SET model_id = ?, reasoning_effort = ?, profile_source = ?,
+            revision = revision + 1, updated_at = ? WHERE id = ?
+        `).run(profile.model, profile.effort ?? null, profileSource, now, session.id)
+        this.appendEvent(session.id, 'session.profile_locked', { profile, profileSource }, now)
+        session = this.sessionRow(session.id)
+      } else if (session.model_id !== profile.model || (session.reasoning_effort ?? undefined) !== profile.effort) {
+        throw new ResidentOperatorError(
+          `resident session ${session.id} is locked to ${session.model_id}/${session.reasoning_effort ?? 'default'}`,
+          'EXECUTION_PROFILE_CONFLICT',
+        )
       }
       if (session.active_turn_id !== null) {
         throw new ResidentOperatorError(
@@ -293,6 +352,7 @@ export class ResidentStore {
       this.appendEvent(session.id, 'turn.accepted', {
         commandId,
         turnId,
+        profile,
         supersedesCommandId: superseded?.command_id ?? null,
       }, now)
       return {
@@ -561,7 +621,8 @@ export class ResidentStore {
       }
       const now = new Date().toISOString()
       this.db.prepare(`
-        UPDATE resident_sessions SET native_session_id = NULL, health = 'ok', health_reason = NULL,
+        UPDATE resident_sessions SET native_session_id = NULL, model_id = NULL, reasoning_effort = NULL,
+          profile_source = NULL, health = 'ok', health_reason = NULL,
           revision = revision + 1, updated_at = ? WHERE id = ?
       `).run(now, sessionId)
       this.appendEvent(sessionId, 'session.reset', { reason }, now)
@@ -662,6 +723,15 @@ export class ResidentStore {
       control: 'automation',
       stateRevision: row.revision,
       ...row.native_session_id === null ? {} : { nativeSessionId: row.native_session_id },
+      ...row.model_id === null ? {} : {
+        executionProfile: {
+          model: row.model_id,
+          ...row.reasoning_effort === null ? {} : {
+            effort: row.reasoning_effort as NonNullable<ResidentExecutionProfile['effort']>,
+          },
+        },
+        executionProfileSource: (row.profile_source ?? 'smart-auto') as ResidentExecutionProfileSource,
+      },
       ...row.active_turn_id === null ? {} : { activeTurnId: ResidentOperatorTurnId(row.active_turn_id) },
       ...latestTurn === undefined ? {} : { latestTurn },
       ...latestEvent === undefined ? {} : { latestEvent },

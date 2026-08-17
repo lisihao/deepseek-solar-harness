@@ -1,5 +1,10 @@
 /** Client-safe physical-operator routing policy and projection types. */
 
+import type {
+  PhysicalOperatorExecutionPreference,
+  PhysicalOperatorReasoningEffort,
+} from '@deepseek-ai/dsh-physical-operator'
+
 /** User-selected policy controlling whether the main Agent delegates work. */
 export type PhysicalOperatorRoutingPolicy = 'auto' | 'direct' | 'codex' | 'claude-code'
 
@@ -21,6 +26,20 @@ export interface PhysicalOperatorRoutingSelect {
   currentValue: PhysicalOperatorRoutingPolicy
 }
 
+/** Native subscription products with Resident execution-profile selection. */
+export type PhysicalOperatorProfileOwner = 'codex' | 'claude-code'
+
+/** Per-product manual fields; absent products and fields remain Smart Auto. */
+export type PhysicalOperatorProfilePreferences = Partial<
+  Record<PhysicalOperatorProfileOwner, PhysicalOperatorExecutionPreference>
+>
+
+/** Browser projection of the current Session's model and reasoning preferences. */
+export interface PhysicalOperatorProfilePreferencesSelect {
+  readonly profiles: PhysicalOperatorProfilePreferences
+  readonly efforts: readonly PhysicalOperatorReasoningEffort[]
+}
+
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
     /**
@@ -28,5 +47,7 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
      * not composed; a composed Consumer projects `auto` for an untouched log.
      */
     physicalOperatorRouting: PhysicalOperatorRoutingSelect
+    /** Logged per-product model and reasoning preferences for Resident execution. */
+    physicalOperatorProfiles: PhysicalOperatorProfilePreferencesSelect
   }
 }

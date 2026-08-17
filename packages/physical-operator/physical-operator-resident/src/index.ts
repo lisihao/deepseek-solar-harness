@@ -128,6 +128,7 @@ class DualModePhysicalOperator implements PhysicalOperator {
       operatorId: residentProvider,
       workspace,
       prompt: request.prompt,
+      ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       signal: request.signal,
     })
     return {

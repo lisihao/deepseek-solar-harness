@@ -75,6 +75,7 @@ class LocalResidentOperatorService extends ResidentOperatorService {
       operatorId: request.operatorId,
       workspace: request.workspace,
       prompt: request.prompt,
+      ...request.profile === undefined ? {} : { profile: request.profile },
       signal: request.signal,
     })
     return {

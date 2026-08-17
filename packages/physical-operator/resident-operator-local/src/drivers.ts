@@ -9,17 +9,25 @@ import { promisify } from 'node:util'
 import {
   query as claudeQuery,
   type CanUseTool,
+  type ModelInfo,
   type SDKResultMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { PhysicalOperatorReasoningEffort } from '@deepseek-ai/dsh-physical-operator'
 import type {
+  ResidentExecutionProfile,
+  ResidentModelOption,
   ResidentProviderStatus,
   ResidentProgressPhase,
   ResidentStopReason,
   ResidentTurnResult,
 } from '@deepseek-ai/dsh-resident-operator'
 import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
-import { CodexApprovalRequiredError, CodexAppServerWire } from '@deepseek-ai/dsh-subagent-codex'
+import {
+  CodexApprovalRequiredError,
+  CodexAppServerWire,
+  type CodexAppServerModel,
+} from '@deepseek-ai/dsh-subagent-codex'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { openCodexDaemonStream } from './codex-transport.ts'
 
@@ -38,11 +46,90 @@ export const EXPECTED_CODEX_SCHEMA_SHA256 = 'f3dec1e031d99a420b137b903f02196d432
 export interface DriverExecuteRequest {
   readonly workspace: string
   readonly prompt: readonly ContentBlock[]
+  readonly profile: ResidentExecutionProfile
   readonly nativeSessionId?: string
   readonly signal: AbortSignal
   readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
   /** Persist a bounded product-neutral progress phase for reconnecting observers. */
   readonly onProgress: (phase: ResidentProgressPhase) => void
+}
+
+const EFFORTS = new Set<PhysicalOperatorReasoningEffort>(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+
+function reasoningEffort(value: string | undefined): PhysicalOperatorReasoningEffort | undefined {
+  return value !== undefined && EFFORTS.has(value as PhysicalOperatorReasoningEffort)
+    ? value as PhysicalOperatorReasoningEffort
+    : undefined
+}
+
+function claudeModelOption(model: ModelInfo, index: number): ResidentModelOption {
+  const efforts: PhysicalOperatorReasoningEffort[] = [...(model.supportedEffortLevels ?? [])]
+  return {
+    model: model.value,
+    ...model.resolvedModel === undefined ? {} : { resolvedModel: model.resolvedModel },
+    displayName: model.displayName,
+    description: model.description,
+    supportedEfforts: efforts,
+    ...efforts.includes('high') ? { defaultEffort: 'high' as const } : {},
+    isDefault: model.value === 'default' || index === 0,
+    supportsAdaptiveThinking: model.supportsAdaptiveThinking === true,
+  }
+}
+
+function codexModelOption(model: CodexAppServerModel): ResidentModelOption {
+  const efforts = model.supportedReasoningEfforts
+    .map(option => reasoningEffort(option.reasoningEffort))
+    .filter((value): value is PhysicalOperatorReasoningEffort => value !== undefined)
+  const defaultEffort = reasoningEffort(model.defaultReasoningEffort)
+  return {
+    model: model.model,
+    displayName: model.displayName,
+    description: model.description,
+    supportedEfforts: efforts,
+    ...defaultEffort === undefined ? {} : { defaultEffort },
+    isDefault: model.isDefault,
+    supportsAdaptiveThinking: false,
+  }
+}
+
+async function claudeModels(): Promise<ResidentModelOption[]> {
+  async function* idleInput(): AsyncGenerator<never> {
+    await new Promise<never>(() => {})
+  }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => { controller.abort(new Error('Claude model catalog timed out')) }, 15_000)
+  const query = claudeQuery({
+    prompt: idleInput(),
+    options: {
+      abortController: controller,
+      cwd: process.cwd(),
+      env: scrubbedParentEnv(),
+      persistSession: false,
+      disallowedTools: ['AskUserQuestion'],
+    },
+  })
+  try {
+    return (await query.supportedModels()).map(claudeModelOption)
+  } finally {
+    clearTimeout(timeout)
+    query.close()
+  }
+}
+
+async function codexModels(): Promise<ResidentModelOption[]> {
+  const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
+  if (!existsSync(socketPath)) throw new Error('Codex app-server control socket is unavailable')
+  const signal = AbortSignal.timeout(15_000)
+  const stream = await openCodexDaemonStream(socketPath, signal)
+  const wire = new CodexAppServerWire(stream, stream, 'require')
+  try {
+    wire.start()
+    await wire.initialize(signal)
+    return (await wire.listModels(signal)).map(codexModelOption)
+  } finally {
+    wire.close()
+    stream.destroy()
+  }
 }
 
 /** Native product qualification and resumable turn adapter. */
@@ -102,9 +189,10 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
 
   async qualify(): Promise<ResidentProviderStatus> {
     try {
-      const [{ stdout: version }, { stdout: auth }] = await Promise.all([
+      const [{ stdout: version }, { stdout: auth }, models] = await Promise.all([
         command('claude', ['--version']),
         command('claude', ['auth', 'status', '--json']),
+        claudeModels(),
       ])
       const parsed = JSON.parse(auth) as Record<string, unknown>
       const subscription = parsed.loggedIn === true
@@ -112,18 +200,22 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
         && typeof parsed.subscriptionType === 'string'
         && parsed.subscriptionType.length > 0
       const exactVersion = version.trim() === EXPECTED_CLAUDE_CLI_VERSION
+      const catalogReady = models.length > 0
       return {
         operatorId: this.operatorId,
         product: this.operatorId,
-        available: subscription && exactVersion,
-        ...subscription && exactVersion ? {} : {
+        available: subscription && exactVersion && catalogReady,
+        ...subscription && exactVersion && catalogReady ? {} : {
           unavailableReason: !subscription
             ? 'Claude Code is not authenticated with a claude.ai subscription'
-            : `Claude Code version ${version.trim()} does not match ${EXPECTED_CLAUDE_CLI_VERSION}`,
+            : !exactVersion
+              ? `Claude Code version ${version.trim()} does not match ${EXPECTED_CLAUDE_CLI_VERSION}`
+              : 'Claude Code reported no selectable models',
         },
         authentication: subscription ? 'native-subscription' : 'unqualified',
         productVersion: version.trim(),
         protocolHash: createHash('sha256').update(`claude-agent-sdk@${EXPECTED_CLAUDE_SDK_VERSION}`).digest('hex'),
+        models,
       }
     } catch (error) {
       return unavailable(this.operatorId, error)
@@ -165,6 +257,13 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
         cwd: request.workspace,
         env: scrubbedParentEnv(),
         persistSession: true,
+        model: request.profile.model,
+        ...request.profile.effort === undefined ? {} : {
+          effort: request.profile.effort as Exclude<PhysicalOperatorReasoningEffort, 'ultra'>,
+        },
+        ...qualification.models.find(model => model.model === request.profile.model)?.supportsAdaptiveThinking === true
+          ? { thinking: { type: 'adaptive' as const } }
+          : {},
         ...nativeSessionId === undefined ? {} : { resume: nativeSessionId },
         disallowedTools: ['AskUserQuestion'],
         canUseTool,
@@ -241,7 +340,11 @@ export class CodexResidentDriver implements ResidentProductDriver {
         transportError = error
       }
       const transportReady = transportError === undefined
-      const available = subscription && exactVersion && exactSchema && transportReady
+      const models = transportReady ? await codexModels().catch((error: unknown) => {
+        transportError = error
+        return []
+      }) : []
+      const available = subscription && exactVersion && exactSchema && transportReady && models.length > 0
       return {
         operatorId: this.operatorId,
         product: this.operatorId,
@@ -253,11 +356,14 @@ export class CodexResidentDriver implements ResidentProductDriver {
               ? `Codex version ${version.trim()} does not match ${EXPECTED_CODEX_CLI_VERSION}`
               : !exactSchema
                 ? `Codex app-server schema ${schemaHash} does not match ${EXPECTED_CODEX_SCHEMA_SHA256}`
-                : `Codex app-server daemon unavailable: ${transportError instanceof Error ? transportError.message : String(transportError)}`,
+                : transportError !== undefined
+                  ? `Codex app-server daemon unavailable: ${transportError instanceof Error ? transportError.message : String(transportError)}`
+                  : 'Codex app-server reported no selectable models',
         },
         authentication: subscription ? 'native-subscription' : 'unqualified',
         productVersion: version.trim(),
         protocolHash: schemaHash,
+        models,
       }
     } catch (error) {
       return unavailable(this.operatorId, error)
@@ -295,9 +401,9 @@ export class CodexResidentDriver implements ResidentProductDriver {
       wire.start()
       await wire.initialize(request.signal)
       if (request.nativeSessionId === undefined) {
-        await wire.startThread(request.workspace, request.signal, false)
+        await wire.startThread(request.workspace, request.signal, false, request.profile)
       } else {
-        await wire.resumeThread(request.nativeSessionId, request.workspace, request.signal)
+        await wire.resumeThread(request.nativeSessionId, request.workspace, request.signal, request.profile)
       }
       const threadId = wire.currentThreadId
       if (threadId === undefined) {
@@ -308,7 +414,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
       request.onProgress('reasoning')
       const result = await wire.runTurn(texts, request.signal, (turnId) => {
         request.onRunning(threadId, turnId)
-      }).catch((error: unknown) => {
+      }, request.profile).catch((error: unknown) => {
         if (error instanceof CodexApprovalRequiredError) {
           throw new ResidentOperatorError(error.message, 'APPROVAL_REQUIRED')
         }
@@ -347,5 +453,6 @@ function unavailable(
     authentication: 'unqualified',
     productVersion: 'unavailable',
     protocolHash: 'unavailable',
+    models: [],
   }
 }

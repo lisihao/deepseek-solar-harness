@@ -13,6 +13,15 @@ import {
 } from '../src/drivers.ts'
 
 const roots: string[] = []
+const MODELS = [{
+  model: 'gpt-test',
+  displayName: 'GPT Test',
+  description: 'Balanced everyday test model',
+  supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'] as const,
+  defaultEffort: 'medium' as const,
+  isDefault: true,
+  supportsAdaptiveThinking: false,
+}]
 const temporaryRoot = (): string => {
   const value = mkdtempSync(join(tmpdir(), 'dsh-resident-daemon-'))
   roots.push(value)
@@ -25,6 +34,7 @@ afterEach(() => {
 
 class MemoryDriver implements ResidentProductDriver {
   readonly operatorId = 'codex' as const
+  readonly profiles: DriverExecuteRequest['profile'][] = []
   constructor(readonly counts = new Map<string, number>()) {}
 
   qualify(): Promise<ResidentProviderStatus> {
@@ -35,10 +45,12 @@ class MemoryDriver implements ResidentProductDriver {
       authentication: 'native-subscription',
       productVersion: 'test',
       protocolHash: 'test',
+      models: MODELS,
     })
   }
 
   async execute(request: DriverExecuteRequest) {
+    this.profiles.push(request.profile)
     request.onProgress('connecting')
     const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
     const count = (this.counts.get(session) ?? 0) + 1
@@ -122,6 +134,7 @@ class UnavailableTransportDriver extends MemoryDriver {
       authentication: 'native-subscription',
       productVersion: EXPECTED_CODEX_CLI_VERSION,
       protocolHash: EXPECTED_CODEX_SCHEMA_SHA256,
+      models: MODELS,
     })
   }
 }
@@ -146,7 +159,12 @@ describe('ResidentDaemon', () => {
       prompt: [{ type: 'text', text: 'first' }], signal: new AbortController().signal,
     })
     expect(await first.result).toMatchObject({ output: [{ text: 'session=native-1;count=1' }] })
+    expect(driver.profiles[0]).toEqual({ model: 'gpt-test', effort: 'medium' })
     const reconnected = await firstClient.inspect(first.sessionId)
+    expect(reconnected).toMatchObject({
+      executionProfile: { model: 'gpt-test', effort: 'medium' },
+      executionProfileSource: 'smart-auto',
+    })
     expect(reconnected.latestTurn).toMatchObject({ turnId: first.turnId, state: 'settled', stopReason: 'completed' })
     expect(reconnected.latestEvent).toMatchObject({ type: 'turn.settled' })
     expect(await firstClient.inspectTurn(first.turnId)).toMatchObject({

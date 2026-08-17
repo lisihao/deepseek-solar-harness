@@ -8,9 +8,9 @@ The provider is the only state writer. A resident session is keyed by stable ope
 
 ## Contract
 
-`execute()` accepts a caller-generated durable command id, operator id, workspace, content blocks, and cancellation signal. An explicitly authorized retry may name one already-abandoned indeterminate command; it must use a new command id. `list()`, `inspect()`, `inspectTurn()`, `readEvents()`, `interrupt()`, `reset()`, and `resolveIndeterminate()` are management operations for trusted plugins and CLI consumers.
+`execute()` accepts a caller-generated durable command id, operator id, workspace, content blocks, optional model/effort preference, and cancellation signal. The Provider resolves omitted profile fields against its live product catalog and locks the effective profile to the Session. An explicitly authorized retry may name one already-abandoned indeterminate command; it must use a new command id. `list()`, `inspect()`, `inspectTurn()`, `readEvents()`, `interrupt()`, `reset()`, and `resolveIndeterminate()` are management operations for trusted plugins and CLI consumers.
 
-The lifecycle, health, reason, receipt, event, and artifact-reference types are provider-neutral. Session snapshots include the latest durable turn summary and latest structured event, while `inspectTurn()` recovers the current or settled receipt result after a client restart. `reset` uses optimistic state revision and changes only the native-session association. It never deletes product history or artifacts.
+The lifecycle, health, reason, receipt, event, model catalog, effective profile, and artifact-reference types are provider-neutral. Session snapshots include the locked model/effort and selection source beside the latest durable turn summary and structured event, while `inspectTurn()` recovers the current or settled receipt result after a client restart. `reset` uses optimistic state revision and clears the native-session association and effective profile. It never deletes product history or artifacts.
 
 ## Model Experience
 
@@ -22,6 +22,6 @@ No direct invalidation; the physical-operator Consumer owns its request schema.
 
 ## Known Limitations and Deferred Work
 
-- Human write takeover and control leases are not part of protocol version 1.
+- Human write takeover and control leases are not part of protocol version 2.
 - A durable Jobs projection and affinity scheduler are intentionally separate consumers.
-- Version 1 is local-provider oriented; remote transports and Windows named pipes are deferred.
+- Version 2 is local-provider oriented; remote transports and Windows named pipes are deferred.

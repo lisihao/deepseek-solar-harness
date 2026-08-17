@@ -21,6 +21,8 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { z as zod } from 'zod'
 import type {
+  PhysicalOperatorExecutionPreference,
+  PhysicalOperatorReasoningEffort,
   PhysicalOperatorResult,
   PhysicalOperatorRun,
   PhysicalOperatorStatus,
@@ -32,6 +34,9 @@ import type {
   PhysicalOperatorRoutingOption,
   PhysicalOperatorRoutingPolicy,
   PhysicalOperatorRoutingSelect,
+  PhysicalOperatorProfileOwner,
+  PhysicalOperatorProfilePreferences,
+  PhysicalOperatorProfilePreferencesSelect,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -43,6 +48,11 @@ declare module '@deepseek-ai/dsh-session/types' {
      * @param policy The selected automatic, direct, Codex, or Claude Code policy.
      */
     'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
+    /** Whole-value preference update for one native Resident product. */
+    'physical-operator/profile': {
+      operatorId: PhysicalOperatorProfileOwner
+      profile: PhysicalOperatorExecutionPreference | null
+    }
     /** Durable host decision that binds one DSH message to one Resident command. */
     'physical-operator/dispatch': {
       commandId: string
@@ -52,6 +62,7 @@ declare module '@deepseek-ai/dsh-session/types' {
       turn: number
       step: number
       recovered: boolean
+      residentProfile?: PhysicalOperatorExecutionPreference
     }
     /** Non-cancellation terminal failure; prevents an endless cold-resume loop. */
     'physical-operator/dispatch-terminal': {
@@ -73,6 +84,7 @@ interface PendingHostRoute {
   readonly promptMessageId: string
   readonly requestedByMessageId: string
   readonly recovered: boolean
+  readonly residentProfile?: PhysicalOperatorExecutionPreference
 }
 
 interface DispatchRecord extends PendingHostRoute {
@@ -154,6 +166,18 @@ const routingProjectionSchema = zod.object({
   currentValue: zod.enum(PHYSICAL_OPERATOR_ROUTING_POLICIES),
 })
 
+const PROFILE_EFFORTS = [
+  'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
+] as const satisfies readonly PhysicalOperatorReasoningEffort[]
+
+const profileProjectionSchema = zod.object({
+  profiles: zod.record(zod.string(), zod.object({
+    model: zod.string().optional(),
+    effort: zod.enum(PROFILE_EFFORTS).optional(),
+  })),
+  efforts: zod.array(zod.enum(PROFILE_EFFORTS)),
+})
+
 /** Register the fixed discovery-and-execution tool. */
 export function apply(ctx: Context): void {
   const pending = new WeakMap<Agent, Map<string, PendingHostRoute>>()
@@ -217,6 +241,22 @@ export function apply(ctx: Context): void {
       view: routingSelect,
       stateVersion: 1,
     })
+    projectionCtx.sessionProjections.register<'physicalOperatorProfiles', PhysicalOperatorProfilePreferences>({
+      key: 'physicalOperatorProfiles',
+      schema: profileProjectionSchema,
+      init: () => ({}),
+      apply: (state, event) => {
+        if (event.type !== 'physical-operator/profile') return state
+        if (event.data.profile === null) {
+          return Object.fromEntries(
+            Object.entries(state).filter(([operatorId]) => operatorId !== event.data.operatorId),
+          ) as PhysicalOperatorProfilePreferences
+        }
+        return { ...state, [event.data.operatorId]: { ...event.data.profile } }
+      },
+      view: profilePreferencesSelect,
+      stateVersion: 1,
+    })
   })
 
   ctx.inject(['commands'], (commandCtx) => {
@@ -242,6 +282,28 @@ export function apply(ctx: Context): void {
           agent.session.append('physical-operator/policy', { policy: value }, { ignorable: true })
         }
         return { kind: 'success', text: `routing ${value}` }
+      },
+    })
+    commandCtx.commands.register({
+      name: 'operator-profile',
+      description: 'Select a Resident model and reasoning effort for Codex or Claude Code',
+      input: { hint: '<codex|claude-code> <model|auto> <effort|auto>' },
+      handler: ({ agent, rawInput }) => {
+        const parsed = parseProfileCommand(rawInput)
+        if ('error' in parsed) return { kind: 'error', text: parsed.error }
+        const current = foldPhysicalOperatorProfiles(agent.session.events)[parsed.operatorId]
+        if (!profileEquals(current, parsed.profile ?? undefined)) {
+          agent.session.append('physical-operator/profile', {
+            operatorId: parsed.operatorId,
+            profile: parsed.profile,
+          }, { ignorable: true })
+        }
+        return {
+          kind: 'success',
+          text: parsed.profile === null
+            ? `${parsed.operatorId} profile smart-auto`
+            : `${parsed.operatorId} profile ${parsed.profile.model ?? 'auto'}/${parsed.profile.effort ?? 'auto'}`,
+        }
       },
     })
   })
@@ -430,6 +492,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         parent: agent,
         signal,
         mode: 'resident',
+        ...dispatch.residentProfile === undefined ? {} : { residentProfile: dispatch.residentProfile },
       })
       const result = await run.result
       yield* resultChunks(result)
@@ -465,6 +528,7 @@ function selectHostRoute(
       promptMessageId: recoverable.promptMessageId,
       requestedByMessageId: resume.id,
       recovered: true,
+      ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
     }
   }
   if (current === undefined) return undefined
@@ -481,6 +545,7 @@ function selectHostRoute(
         promptMessageId: recoverable.promptMessageId,
         requestedByMessageId: current.id,
         recovered: true,
+        ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
       }
   }
   const policy = foldPhysicalOperatorRouting(agent.session.events)
@@ -493,12 +558,16 @@ function selectHostRoute(
 }
 
 function newHostRoute(agent: Agent, messageId: string, operatorId: string): PendingHostRoute {
+  const residentProfile = isPhysicalOperatorProfileOwner(operatorId)
+    ? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
+    : undefined
   return {
     commandId: `resident-${createHash('sha256').update(`${agent.id}\0${messageId}`).digest('hex').slice(0, 32)}`,
     operatorId,
     promptMessageId: messageId,
     requestedByMessageId: messageId,
     recovered: false,
+    ...residentProfile === undefined ? {} : { residentProfile },
   }
 }
 
@@ -554,8 +623,15 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
   const found = [...events].reverse().find(event => event.type === 'physical-operator/dispatch'
     && event.data.turn === turn && event.data.step === step)
   if (found?.type !== 'physical-operator/dispatch') return undefined
-  const { commandId, operatorId, promptMessageId, requestedByMessageId, recovered } = found.data
-  return { commandId, operatorId, promptMessageId, requestedByMessageId, recovered }
+  const { commandId, operatorId, promptMessageId, requestedByMessageId, recovered, residentProfile } = found.data
+  return {
+    commandId,
+    operatorId,
+    promptMessageId,
+    requestedByMessageId,
+    recovered,
+    ...residentProfile === undefined ? {} : { residentProfile },
+  }
 }
 
 function promptForMessage(events: readonly SessionEvent[], messageId: string): ContentBlock[] | undefined {
@@ -613,6 +689,73 @@ export function foldPhysicalOperatorRouting(events: readonly SessionEvent[]): Ph
  */
 export function routingSelect(policy: PhysicalOperatorRoutingPolicy): PhysicalOperatorRoutingSelect {
   return { options: ROUTING_OPTIONS.map(option => ({ ...option })), currentValue: policy }
+}
+
+/**
+ * Fold the most recent per-product Resident execution preferences.
+ * @param events - current DSH Session event log.
+ * @returns the latest non-cleared preference for each supported native product.
+ */
+export function foldPhysicalOperatorProfiles(events: readonly SessionEvent[]): PhysicalOperatorProfilePreferences {
+  const profiles: PhysicalOperatorProfilePreferences = {}
+  const seen = new Set<PhysicalOperatorProfileOwner>()
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as SessionEvent
+    if (event.type !== 'physical-operator/profile' || seen.has(event.data.operatorId)) continue
+    seen.add(event.data.operatorId)
+    if (event.data.profile !== null) profiles[event.data.operatorId] = { ...event.data.profile }
+  }
+  return profiles
+}
+
+/**
+ * Build the browser-safe per-product preference projection.
+ * @param profiles - folded product preference map.
+ * @returns copied preferences plus the complete provider-neutral effort vocabulary.
+ */
+export function profilePreferencesSelect(
+  profiles: PhysicalOperatorProfilePreferences,
+): PhysicalOperatorProfilePreferencesSelect {
+  return {
+    profiles: Object.fromEntries(
+      Object.entries(profiles).map(([operatorId, profile]) => [operatorId, { ...profile }]),
+    ) as PhysicalOperatorProfilePreferences,
+    efforts: [...PROFILE_EFFORTS],
+  }
+}
+
+function parseProfileCommand(rawInput: string): {
+  readonly operatorId: PhysicalOperatorProfileOwner
+  readonly profile: PhysicalOperatorExecutionPreference | null
+} | { readonly error: string } {
+  const [operatorId, model, effort, ...extra] = rawInput.trim().split(/\s+/u)
+  if (!isPhysicalOperatorProfileOwner(operatorId) || model === undefined || extra.length > 0) {
+    return { error: 'usage: /operator-profile <codex|claude-code> <model|auto> <effort|auto>' }
+  }
+  if (model === 'auto' && (effort === undefined || effort === 'auto')) {
+    return { operatorId, profile: null }
+  }
+  if (effort !== undefined && effort !== 'auto' && !PROFILE_EFFORTS.some(value => value === effort)) {
+    return { error: `unsupported effort "${effort}" (available: ${PROFILE_EFFORTS.join(', ')})` }
+  }
+  return {
+    operatorId,
+    profile: {
+      ...model === 'auto' ? {} : { model },
+      ...effort === undefined || effort === 'auto' ? {} : { effort: effort as PhysicalOperatorReasoningEffort },
+    },
+  }
+}
+
+function isPhysicalOperatorProfileOwner(value: string | undefined): value is PhysicalOperatorProfileOwner {
+  return value === 'codex' || value === 'claude-code'
+}
+
+function profileEquals(
+  left: PhysicalOperatorExecutionPreference | undefined,
+  right: PhysicalOperatorExecutionPreference | undefined,
+): boolean {
+  return left?.model === right?.model && left?.effort === right?.effort
 }
 
 /** Whether a command argument is one supported routing policy. */
