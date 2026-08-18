@@ -339,7 +339,10 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     name: windows node 24 / wine blocking
-    timeout-minutes: 15
+    # A cold hosted runner can spend more than 13 minutes downloading and
+    # installing Wine before the actual gates start. Keep enough headroom for
+    # that first run; warm-cache runs still finish much sooner.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
