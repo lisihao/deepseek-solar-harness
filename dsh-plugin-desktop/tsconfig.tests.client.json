@@ -9,6 +9,7 @@
     "src/client/**/*.ts",
     "src/client/**/*.tsx",
     "tests/client-branding.spec.ts",
-    "tests/client-environment.spec.ts"
+    "tests/client-environment.spec.ts",
+    "tests/orchestration-panel.spec.ts"
   ]
 }

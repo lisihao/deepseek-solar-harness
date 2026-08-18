@@ -30,6 +30,14 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-client-ui-remote-modules',
   '@deepseek-ai/dsh-host-apiproxy',
   '@deepseek-ai/dsh-session-projection-cache',
+  '@deepseek-ai/dsh-intent-compiler',
+  '@deepseek-ai/dsh-context-compiler',
+  '@deepseek-ai/dsh-capability-capsule',
+  '@deepseek-ai/dsh-orchestration',
+  '@deepseek-ai/dsh-orchestration-local',
+  '@deepseek-ai/dsh-tool-orchestration',
+  '@deepseek-ai/dsh-ui-orchestration',
+  '@deepseek-ai/dsh-orchestrations',
 ])
 
 if (workspace.packageManager !== 'yarn@4.18.0') {

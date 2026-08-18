@@ -159,6 +159,16 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'physical-operator-dual-mode')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-physical-operator-resident',
     }))
+    expect(rows.find(row => row.id === 'orchestration-local')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-orchestration-local',
+      config: expect.objectContaining({ autoStart: true }),
+    }))
+    expect(rows.find(row => row.id === 'tool-orchestration')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-tool-orchestration',
+    }))
+    expect(rows.find(row => row.id === 'ui-orchestration')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-ui-orchestration',
+    }))
     expect(rows.find(row => row.id === 'agent-teams')).toEqual(expect.objectContaining({
       name: '@nanmicoder/dsh-agent-teams',
       config: expect.objectContaining({ memberPersonaPlacement: 'prompt' }),
@@ -239,6 +249,7 @@ describe('desktop profile composition', () => {
       config: expect.objectContaining({ memberPersonaPlacement: 'prompt' }),
     }))
     expect(rows.filter(row => row.id === 'resident-operators')).toHaveLength(1)
+    expect(rows.filter(row => row.id === 'orchestration-local')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'remote-web-ui')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'ui-remote-modules')).toHaveLength(1)
   })

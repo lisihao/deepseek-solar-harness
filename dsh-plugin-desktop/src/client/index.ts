@@ -9,6 +9,7 @@ import { applyAdvancedShell } from './advanced-shell.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { SolarBrand, solarBrandLabel } from './SolarBrand.tsx'
 import { ResidentOperatorsPanel } from './ResidentOperatorsPanel.tsx'
+import { OrchestrationsPanel } from './OrchestrationsPanel.tsx'
 import {
   PhysicalOperatorRoutingControl,
   type PhysicalOperatorRoutingInjected,
@@ -44,6 +45,12 @@ export function apply(ctx: ClientContext): void {
     order: -900,
     label: 'Resident 物理算子',
   }, props => ResidentOperatorsPanel(props)))
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action',
+    id: 'durable-orchestrations',
+    order: -850,
+    label: '持久化任务编排',
+  }, props => OrchestrationsPanel(props)))
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'physical-operator-routing',

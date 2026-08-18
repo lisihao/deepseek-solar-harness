@@ -3,6 +3,7 @@
 This directory contains immutable release inputs that are installed into the Desktop application dependency tree or exposed as a system-trust agent preset.
 
 - Resident Physical Operator tarballs are built from `lisihao/deepseek-solar-harness` commit `c7f2d2b892f5bd40a88d632d2c3b474776266262`. This revision qualifies subscription authentication per execution mode, carries a sanitized display-only task label into durable receipts, preserves deterministic Resident routing and keeps client disconnects from interrupting native turns.
+- Persistent TaskGraph orchestration tarballs are built from `lisihao/deepseek-solar-harness` commit `df1e2d75bb34c7b828d8a4bc7f4172cb4e7f3df0`. They retain Intent, Context, Capsule, Graph and execution contracts as separate capability seams while the local daemon remains their only state writer.
 - AgentTeams is built from `lisihao/dsh-agent-teams` commit `ff3369241dbf9763e34e11292823d5d78a9d8713`; Desktop forces `memberPersonaPlacement: prompt` so the worker inherits its selected preset persona.
 - Anchored Standard is the accepted eight-file snapshot whose promotion trackers pass `includeSubagents: true`, keeping delegated workers on the same two-tool first turn as their captain.
 - Remote Web UI is built from `lisihao/dsh-web-ui` commit `7b99d9eb69202199fffe378b289425b224691d23` and restores a visible expanded-sidebar entry.
