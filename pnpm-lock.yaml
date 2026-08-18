@@ -18,9 +18,15 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: 0.25.1
         version: 0.25.1(zod@4.4.3)
+      '@deepseek-ai/dsh-orchestration':
+        specifier: workspace:^
+        version: link:packages/orchestration/orchestration
       '@deepseek-ai/dsh-physical-operator':
         specifier: workspace:^
         version: link:packages/physical-operator/physical-operator
+      '@deepseek-ai/dsh-tool-orchestration':
+        specifier: workspace:^
+        version: link:packages/orchestration/tool-orchestration
       '@deepseek-ai/dsh-tool-physical-operator':
         specifier: workspace:^
         version: link:packages/physical-operator/tool-physical-operator
@@ -1282,6 +1288,31 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+
+  packages/bundle/orchestrations:
+    dependencies:
+      '@deepseek-ai/dsh-orchestration-local':
+        specifier: workspace:^
+        version: link:../../orchestration/orchestration-local
+      '@deepseek-ai/dsh-tool-orchestration':
+        specifier: workspace:^
+        version: link:../../orchestration/tool-orchestration
+      '@deepseek-ai/dsh-ui-orchestration':
+        specifier: workspace:^
+        version: link:../../orchestration/ui-orchestration
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: workspace:^
+        version: link:../../../vendor/include
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      js-yaml:
+        specifier: ^4.2.0
+        version: 4.2.0
 
   packages/bundle/resident-operators:
     dependencies:
@@ -5643,6 +5674,154 @@ importers:
       '@modelcontextprotocol/server-filesystem':
         specifier: ^2026.7.4
         version: 2026.7.10(zod@4.4.3)
+
+  packages/orchestration/capability-capsule:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-brand':
+        specifier: workspace:^
+        version: link:../../util/brand
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+
+  packages/orchestration/context-compiler:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+
+  packages/orchestration/intent-compiler:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-brand':
+        specifier: workspace:^
+        version: link:../../util/brand
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+
+  packages/orchestration/orchestration:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-brand':
+        specifier: workspace:^
+        version: link:../../util/brand
+      '@deepseek-ai/dsh-capability-capsule':
+        specifier: workspace:^
+        version: link:../capability-capsule
+      '@deepseek-ai/dsh-context-compiler':
+        specifier: workspace:^
+        version: link:../context-compiler
+      '@deepseek-ai/dsh-intent-compiler':
+        specifier: workspace:^
+        version: link:../intent-compiler
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../../physical-operator/physical-operator
+
+  packages/orchestration/orchestration-local:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:^
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-capability-capsule':
+        specifier: workspace:^
+        version: link:../capability-capsule
+      '@deepseek-ai/dsh-context-compiler':
+        specifier: workspace:^
+        version: link:../context-compiler
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../util/home-paths
+      '@deepseek-ai/dsh-intent-compiler':
+        specifier: workspace:^
+        version: link:../intent-compiler
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-orchestration':
+        specifier: workspace:^
+        version: link:../orchestration
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../../physical-operator/physical-operator
+      '@deepseek-ai/dsh-resident-operator-local':
+        specifier: workspace:^
+        version: link:../../physical-operator/resident-operator-local
+      '@deepseek-ai/dsh-sdk-protocol':
+        specifier: workspace:^
+        version: link:../../sdk/protocol
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+
+  packages/orchestration/tool-orchestration:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-orchestration':
+        specifier: workspace:^
+        version: link:../orchestration
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../../core/system-prompt
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
+
+  packages/orchestration/ui-orchestration:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:^
+        version: link:../../host/webserver
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-orchestration':
+        specifier: workspace:^
+        version: link:../orchestration
 
   packages/physical-operator/physical-operator:
     devDependencies:

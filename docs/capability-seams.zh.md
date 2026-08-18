@@ -64,6 +64,17 @@ flowchart LR
   pkg_resident_operator["resident-operator"]
   svc_residentOperators["ctx.residentOperators<br/>Resident operator control"]
   pkg_resident_operator_local["resident-operator-local"]
+  pkg_intent_compiler["intent-compiler"]
+  svc_intentCompiler["ctx.intentCompiler<br/>Immutable Intent IR compiler"]
+  pkg_orchestration_local["orchestration-local"]
+  pkg_context_compiler["context-compiler"]
+  svc_contextCompiler["ctx.contextCompiler<br/>Bounded Context Packet compiler"]
+  pkg_capability_capsule["capability-capsule"]
+  svc_capabilityCapsules["ctx.capabilityCapsules<br/>Capability Capsule registry and resolver"]
+  pkg_orchestration["orchestration"]
+  svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
+  pkg_tool_orchestration["tool-orchestration"]
+  pkg_ui_orchestration["ui-orchestration"]
   pkg_storage["storage"]
   svc_storage["ctx.storage<br/>Non-session storage hub"]
   pkg_storage_json["storage-json"]
@@ -215,12 +226,14 @@ flowchart LR
   pkg_attachment_local --> svc_attachments
   pkg_bash_local --> svc_shell
   pkg_bash_sandbox --> svc_shell
+  pkg_capability_capsule --> svc_capabilityCapsules
   pkg_code_runtime --> svc_codeRuntime
   pkg_code_runtime_worker --> svc_codeRuntime
   pkg_commands --> svc_commands
   pkg_compaction --> svc_compaction
   pkg_compaction_basic --> svc_compaction
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
+  pkg_context_compiler --> svc_contextCompiler
   pkg_cordis_host_runner --> svc_cordisInspect
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
@@ -234,6 +247,7 @@ flowchart LR
   pkg_fs_local --> svc_fs
   pkg_fs_sandbox --> svc_fs
   pkg_goal --> svc_goals
+  pkg_intent_compiler --> svc_intentCompiler
   pkg_invariants --> svc_invariants
   pkg_jobs --> svc_jobs
   pkg_jobs_local --> svc_jobs
@@ -245,6 +259,11 @@ flowchart LR
   pkg_lsp_local --> svc_lsp
   pkg_message_feedback --> svc_messageFeedback
   pkg_modules --> svc_clientModules
+  pkg_orchestration --> svc_orchestrations
+  pkg_orchestration_local --> svc_capabilityCapsules
+  pkg_orchestration_local --> svc_contextCompiler
+  pkg_orchestration_local --> svc_intentCompiler
+  pkg_orchestration_local --> svc_orchestrations
   pkg_permission_presets --> svc_permissionPresets
   pkg_physical_operator --> svc_physicalOperators
   pkg_physical_operator_resident --> svc_physicalOperators
@@ -343,6 +362,8 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_orchestrations --> pkg_tool_orchestration
+  svc_orchestrations --> pkg_ui_orchestration
   svc_physicalOperators --> pkg_tool_physical_operator
   svc_residentOperators --> pkg_physical_operator_resident
   svc_sandbox --> pkg_bash_sandbox
@@ -442,6 +463,10 @@ flowchart LR
 | `ctx.sessionTelemetry` | `seam` | [`session-telemetry`](../packages/session/session-telemetry) | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | - | - | 该 seam 捕获会话记录、进行脱敏并交给一个后端；没有其他组件消费该服务，其输出会离开当前进程。 |
 | `ctx.physicalOperators` | `seam` | [`physical-operator`](../packages/physical-operator/physical-operator) | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent), [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | - | 提供部署方拥有的稳定算子 ID、显式执行生命周期、实时可用性、快速失败容量准入和成对生命周期事件；Provider 将 subagent 与 Resident 传输保持在 Consumer 边界之外。 |
 | `ctx.residentOperators` | `seam` | [`resident-operator`](../packages/physical-operator/resident-operator) | [`resident-operator-local`](../packages/physical-operator/resident-operator-local) | [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | - | 通过 daemon 唯一持有的 Session、Receipt、Lease、Event 和 Artifact 存储提供可信管理与持久 turn 执行；模型执行仍从 ctx.physicalOperators 进入。 |
+| `ctx.intentCompiler` | `seam` | [`intent-compiler`](../packages/orchestration/intent-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 把不可变原始请求编译为带确定性溯源的版本化 Intent IR；它们不能创建 Run 或派发算子。 |
+| `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 在 token、溯源、脱敏和降级策略下投影认证过的来源，但不成为事实源。 |
+| `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | 在 Graph Certificate 下晚绑定内容寻址的能力 Manifest；绑定只能实现或缩小权限。 |
+| `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | 持有与 Provider 无关的编译、运行、事件、控制、审批、不确定结果处置和能力更新 API；本地 daemon 是唯一写者。 |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | 等待所有已配置后端就绪，然后将领域形态发布为一个受生命周期约束的服务，用于类型化持久状态。 |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | 拥有本地逐 assistant 消息反馈、生命周期与目标校验、逐条目 compare-and-set 及 Host 一元 Remote 契约，且不进入 Session 历史或遥测。 |
