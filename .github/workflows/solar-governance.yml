@@ -1,0 +1,51 @@
+name: Solar Code-as-Harness
+
+on:
+  pull_request:
+    branches: [solar]
+  push:
+    branches: [solar]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  governance:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.2
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack yarn install --immutable
+        working-directory: products/desktop
+      - run: corepack pnpm install --ignore-workspace --frozen-lockfile
+        working-directory: plugins/managed/agent-teams
+      - run: node scripts/link-dsh-source.mjs "$GITHUB_WORKSPACE"
+        working-directory: plugins/managed/luna-vision-bridge
+      - run: corepack pnpm@8.15.9 install --ignore-workspace --frozen-lockfile
+        working-directory: plugins/managed/luna-vision-bridge
+      - run: corepack pnpm install --ignore-workspace --frozen-lockfile
+        working-directory: plugins/managed/memory-evolve
+      - run: corepack pnpm install --frozen-lockfile
+        working-directory: plugins/managed/web-ui
+      - run: python3 tools/agent-development-governance/governance.py audit --project . --strict-warnings
+      - run: python3 tools/agent-development-governance/governance.py plan --project . --scope auto --level full --changed-from origin/solar
+      - run: mkdir -p .artifacts
+      - run: python3 tools/agent-development-governance/governance.py verify --project . --scope auto --level full --changed-from origin/solar --report .artifacts/solar-governance.json
+      - run: python3 tools/agent-development-governance/governance.py attest --project . --report .artifacts/solar-governance.json --require-level full
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: solar-governance-attestation
+          path: .artifacts/solar-governance.json
+          if-no-files-found: warn

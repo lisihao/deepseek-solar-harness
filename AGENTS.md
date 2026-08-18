@@ -1,6 +1,6 @@
 # AGENTS.md
 
-DeepSeek Harness is a plugin-based agent harness on vendored Cordis: **everything is a plugin**. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
+DeepSeek Solar Harness (DSH) is the downstream, macOS-first product branch of DeepSeek Harness and remains plugin-based on vendored Cordis: **everything is a plugin**. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
 
 ## Pre-release stance: foundation over blast radius
 
@@ -11,6 +11,9 @@ DeepSeek Harness is a plugin-based agent harness on vendored Cordis: **everythin
 ```
 vendor/      Vendored Cordis source — manifest + sync procedure in vendor/README.md
 packages/    @deepseek-ai/dsh-<pkg> workspaces; group and package map in packages/README.md
+products/    Product shells; products/desktop owns the macOS Desktop source
+plugins/     Solar-managed external plugin source and its provenance registry
+distribution/ Product version, upstream, capability, and artifact manifests
 python/      Python SDK and bundled runtime (see python/README.md)
 native/      @deepseek-ai/node-addon-landlock-run source of record (see native/README.md)
 examples/    Runnable cordis.yml leaves over packages/examples bundles (see examples/AGENTS.md)
@@ -20,15 +23,20 @@ scripts/     repo gates and generators
 website/     VitePress projection of selected bilingual docs/ sources
 ```
 
-## MacBook development and runtime copies
+## Source and generated runtime
 
-- The only development repository and source of edits, commits, builds, and pushes is `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness`.
-- The login-time runtime deployment is `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness`. Treat it as a generated deployment copy: never edit files there, never commit from it, and never copy changes from it back into the development repository.
-- `/Users/sihaoli/Library/LaunchAgents/com.lisihao.deepseek-solar-harness.plist` starts the runtime deployment. `/Users/sihaoli/Library/LaunchAgents/com.lisihao.deepseek-solar-harness.tunnels.plist` owns only the Mac mini forwards required by the Remote Modules plugin.
-- Deploy only an identified development commit to the runtime copy after relevant checks pass. Record that commit in the runtime copy, then verify the LaunchAgent, port `3081`, the four SSH forwards, GenesisPod, and ThunderOMLX. A loaded LaunchAgent is not runtime-health evidence.
-- When the two copies differ, preserve the development repository as authoritative and redeploy the runtime copy. Do not merge, reset, or overwrite the development repository from runtime state.
+- Physical source and worktrees live only under `/Users/sihaoli/Projects`; `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness` is a compatibility symlink, never worktree or build storage.
+- `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness` is generated runtime. Never edit, commit, or reverse-copy it. Deploy only a verified source commit; on drift, redeploy from source.
+- The `com.lisihao.deepseek-solar-harness` LaunchAgents own runtime and tunnels. Acceptance verifies the recorded commit, process, port `3081`, forwards, GenesisPod, and ThunderOMLX; a loaded agent alone is insufficient.
 
 Package groups: [packages/README.md](packages/README.md).
+
+## Solar product governance
+
+- `solar` is protected. Use a separate branch and worktree; never commit directly to `solar` or edit another task's worktree. Upstreams are fetch-only: no upstream push, PR, package, or credential use.
+- **Code-as-Harness means only the Codex-created `agent-development-governance`** imported at `plugins/managed/governance`. Every task MUST invoke [dsh-code-as-harness](.agents/skills/dsh-code-as-harness/SKILL.md) and complete its audit, plan, full verify, attestation, admission, push, and remote-SHA checks; prose is not evidence.
+- Stable Desktop releases use annotated tags matching `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$`, such as `DSH-desktop-v2.4.3`; lowercase, prerelease, and display-only variants are invalid.
+- Desktop application, runtime, or artifact changes also follow `products/desktop/AGENTS.md`; migration-only imports never authorize changing `/Applications/DSH Desktop.app`.
 
 ## Commands
 

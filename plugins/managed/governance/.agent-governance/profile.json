@@ -1,0 +1,132 @@
+{
+  "profile_version": 1,
+  "name": "agent-development-governance",
+  "project_markers": [
+    "README.md",
+    "scripts/governance.py",
+    "skill/agent-development-governance/SKILL.md",
+    "plugins/deepseek-solar-harness-governance/package.json"
+  ],
+  "instruction_sources": [
+    {"path": "README.md", "required": true, "kind": "project-contract"},
+    {"glob": "docs/*.md", "required": true, "kind": "architecture-and-analysis"},
+    {
+      "path": "skill/agent-development-governance/SKILL.md",
+      "required": true,
+      "kind": "agent-adapter"
+    }
+  ],
+  "scope_rules": [
+    {"scope": "harness", "patterns": ["scripts/**", "tests/**"]},
+    {"scope": "skill", "patterns": ["skill/**", "README.md", "docs/**"]},
+    {
+      "scope": "dsh-plugin",
+      "patterns": ["plugins/deepseek-solar-harness-governance/**"]
+    },
+    {
+      "scope": "governance",
+      "patterns": ["*", ".agent-governance/**", ".github/**", "integrations/**"],
+      "expands": ["harness", "skill", "dsh-plugin"]
+    }
+  ],
+  "hooks": [],
+  "ci_contracts": [
+    {
+      "path": ".github/workflows/governance.yml",
+      "required_text": [
+        "name: Governance Harness",
+        "python3 scripts/governance.py audit --project . --strict-warnings",
+        "python3 scripts/governance.py verify",
+        "python3 scripts/governance.py attest",
+        "actions/upload-artifact@v4"
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "id": "diff-check",
+      "label": "Whitespace and conflict check",
+      "command": ["python3", "scripts/check_changed_text.py", "--project", "."],
+      "cwd": ".",
+      "scopes": ["always"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "python-compile",
+      "label": "Python syntax compilation",
+      "command": [
+        "python3",
+        "-m",
+        "py_compile",
+        "scripts/governance.py",
+        "scripts/check_changed_text.py",
+        "scripts/check_changed_format.py",
+        "scripts/export_bundle.py",
+        "scripts/validate_skill.py",
+        "scripts/build_dsh_plugin.py",
+        "scripts/verify_dsh_plugin.py",
+        "scripts/verify_dsh_host.py",
+        "tests/test_governance.py"
+      ],
+      "cwd": ".",
+      "scopes": ["harness", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "unit-tests",
+      "label": "Code Harness regression tests",
+      "command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+      "cwd": ".",
+      "scopes": ["harness", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "dsh-plugin-runtime",
+      "label": "Packaged DSH runtime provenance",
+      "command": ["python3", "scripts/build_dsh_plugin.py", "--check"],
+      "cwd": ".",
+      "scopes": ["dsh-plugin", "harness", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "dsh-plugin-contract",
+      "label": "DSH Cordis bundle contract",
+      "command": ["python3", "scripts/verify_dsh_plugin.py"],
+      "cwd": ".",
+      "scopes": ["dsh-plugin", "harness", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "dsh-plugin-tests",
+      "label": "DSH governance plugin regression tests",
+      "command": ["npm", "test", "--prefix", "plugins/deepseek-solar-harness-governance"],
+      "cwd": ".",
+      "scopes": ["dsh-plugin", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "skill-contract",
+      "label": "Shared Skill and profile contract",
+      "command": ["python3", "scripts/validate_skill.py"],
+      "cwd": ".",
+      "scopes": ["harness", "skill", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "self-audit",
+      "label": "Self-governance wiring audit",
+      "command": ["python3", "scripts/governance.py", "audit", "--project", "."],
+      "cwd": ".",
+      "scopes": ["harness", "skill", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 120
+    }
+  ]
+}

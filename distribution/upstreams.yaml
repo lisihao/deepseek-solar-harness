@@ -1,0 +1,11 @@
+schema_version: 1
+policy: docs/architecture/adr-004-upstream-qualification.md
+core:
+  upstream: https://github.com/deepseek-ai/deepseek-harness.git
+  solar_fork: https://github.com/lisihao/deepseek-solar-harness.git
+  accepted_solar_baseline: 830bc68a05eb021f055425e05c6b1d36dee8be2d
+desktop:
+  imported_from: https://github.com/lisihao/deepseek-harness-desktop.git
+  historical_upstream: https://github.com/anywhere-labs/deepseek-harness-desktop.git
+  accepted_sha: eba83294443784aae1da1d8ffbf5d6d741d9613e
+  path: products/desktop

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "name": "Resident Physical Operators, mode-aware subscription qualification, and task presentation",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "830bc68a05eb021f055425e05c6b1d36dee8be2d"
+    },
+    {
+      "name": "GenesisPod and ThunderOMLX Remote Modules",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "23722c1b749b37d7aaf5e65f9bf309e446eea296"
+    },
+    {
+      "name": "AgentTeams preset preservation",
+      "repository": "https://github.com/lisihao/dsh-agent-teams",
+      "commit": "ff3369241dbf9763e34e11292823d5d78a9d8713"
+    },
+    {
+      "name": "Anchored Standard delegated-worker bootstrap",
+      "repository": "local accepted preset snapshot",
+      "commit": "N/A"
+    },
+    {
+      "name": "Remote Web UI",
+      "repository": "https://github.com/lisihao/dsh-web-ui",
+      "commit": "7b99d9eb69202199fffe378b289425b224691d23"
+    },
+    {
+      "name": "DSH Web Billing",
+      "repository": "https://github.com/lisihao/dsh-web-billing",
+      "commit": "690fdb1172366e139e590c4a8fe3f11c95b7ac90"
+    },
+    {
+      "name": "Luna Vision Bridge",
+      "repository": "https://github.com/lisihao/dsh-luna-vision-bridge",
+      "commit": "0173d93fab9f480d9a7548ac65cf04c3488fb8bb"
+    }
+  ],
+  "files": {
+    "agent-presets/anchored-standard/agent.cordis.yml": "3e223fa8db1f2fba7568e5beb88fefe84fe40e2096bf68c0a9b27a089a370bc4",
+    "agent-presets/anchored-standard/compaction-epoch.mjs": "a235a9904fc7435a5e61830d0624628d06121049a7549813a8f13017ddca0770",
+    "agent-presets/anchored-standard/custom-bash.mjs": "76acbed05588b7fb3db57bc16c626b49265278af74cd0224bd873c09a83b7ad6",
+    "agent-presets/anchored-standard/dev-tool-search.mjs": "29d2fb7ee6be57e0aca58eb205939f0b463e4e2631ee55192c95ef6af6bb76d9",
+    "agent-presets/anchored-standard/instruction-hint.mjs": "d4da4775b3fcebf698518c2831b4c31e6384cf067bb215e95e6a7990e0628df6",
+    "agent-presets/anchored-standard/preset.yml": "4c11b065bc9ae7f2fc8fb80f3163bae884ca308d8c8f27f1b7c5549dd0cb7549",
+    "agent-presets/anchored-standard/skill-search.mjs": "3276149046fd610ca7a3c06dab522354856d74215af16e8395b0176f222c13d7",
+    "agent-presets/anchored-standard/tool-bootstrap.mjs": "ee0090ea53f03bed1d454820372ec153968e9e684c9ccace702211c13f9930d0",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "067d8b19f61292fbc56d91ace731ce392c0909474f8e2f3790feb1b89aefe922",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "96d5c311c71398200b9ff2357d02c4ea6b25073e1b7ca255a50578a309021d42",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "7233efee9683b7e6f4d8ce1c78aeaeffeb3fe8d5d67f517ffab44870c154ab6a",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "f767e71dab3d777219e3c7ee1e18f2929885bfa7bcade5c5818a573b398d366a",
+    "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "dbc5a3ab9f3b7c4e0f5debdda6795e80203a45e0051679632039fd10f5d698fc",
+    "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "9c7ad84bb62df1a2c6703a5a2ff339571d47fd1ff13683a7d0c1a16ce7ce18f1",
+    "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "3bf07e79bcbbdc863b133d810ac0a507eb9df9ac53674f47bc3c3454e54e06d6",
+    "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "1e474b894f4d956c42574abc12b83557d0d381d06baddd84666916809d8e4238",
+    "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "471a232245ccfc4e5a26a734ede1f63485b42d28195508a5e13d909b96d0618b",
+    "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
+    "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03",
+    "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
+    "dsh-packages/dsh-web-billing-1.1.3.tgz": "7b2c7b85d74b4c16dec9d0bcecf87b818e5b071a01949765749a5c240f7fc209",
+    "dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.2.tgz": "8fbe4f744bc0b43db9d076fdd7aafb2e15c09a99066f42207530de0b8dda1d0e"
+  }
+}

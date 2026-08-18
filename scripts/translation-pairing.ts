@@ -141,6 +141,10 @@ const NON_SOURCE_DIRECTORIES = new Set([
   '.artifacts',
   'vendor',
 ])
+const COMPONENT_OWNED_DOCUMENTATION_PREFIXES = [
+  'products/desktop/',
+  'plugins/managed/',
+]
 
 /** Glob traversal exclusions corresponding to the non-source path predicate. */
 export const TRANSLATION_SCOPE_GLOB_EXCLUDES = [
@@ -163,12 +167,15 @@ export const TRANSLATION_SCOPE_GLOB_EXCLUDES = [
   'python/sdk-runtime/src/deepseek_harness_runtime/runtime/dsh-jsonrpc-agent-*/**',
   'python/sdk-runtime/src/deepseek_harness_runtime/runtime/node/**',
   'vendor/**',
+  'products/desktop/**',
+  'plugins/managed/**',
 ]
 
 /** Whether a repository-relative path belongs to a dependency or generated tree. */
 function isTranslationSourceExcluded(file: string): boolean {
   const segments = file.split('/')
-  return segments.some(segment => NON_SOURCE_DIRECTORIES.has(segment)
+  return COMPONENT_OWNED_DOCUMENTATION_PREFIXES.some(prefix => file.startsWith(prefix))
+    || segments.some(segment => NON_SOURCE_DIRECTORIES.has(segment)
       || segment.startsWith('.doc-typecheck-')
     || segment.startsWith('.node-next-types-'))
     || file.startsWith('apps/web/dist/')

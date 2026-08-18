@@ -301,7 +301,7 @@ export class DynamicCordisPackageRunner {
   }
 
   /**
-   * Unload one package (`cordis/dynamic-retract`: a stop, or an undefine
+   * Unload one package (`@deepseek-ai/cordis/dynamic-retract`: a stop, or an undefine
    * that stops first).
    * @param pluginId - stable Plugin identity.
    * @param pluginRunId - exact activation being retracted; a newer run survives.

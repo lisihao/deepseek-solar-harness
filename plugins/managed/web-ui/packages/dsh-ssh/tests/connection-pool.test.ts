@@ -1,0 +1,181 @@
+/**
+ * Unit tests for the connection-pool connectClient / connectChain failure
+ * paths, driving a mocked ssh2 Client so no real SSH server is needed.
+ *
+ * Two regressions for issue #224:
+ *   - connectClient uses a persistent 'error' listener (not a one-shot
+ *     once-listener), destroys the failed client, and ignores a second
+ *     'error' emission after the promise has settled.
+ *   - connectChain ends every hop and the failed target client is destroyed.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildConnectConfig, connectChain, connectClient } from '../src/engine/connection-pool.ts'
+import type { SshHostEntry } from '../src/protocol.ts'
+import type { HostStore } from '../src/store.ts'
+
+/** Controllable state shared between the tests and the mocked Client class. */
+const sshMock = vi.hoisted(() => {
+  interface RecordedClient {
+    emit: (event: string, ...args: unknown[]) => boolean
+    destroyCalls: number
+    endCalls: number
+    forwardOutCalls: number
+    connectConfig?: Record<string, unknown>
+  }
+  const instances: RecordedClient[] = []
+  const behaviors: Array<(client: RecordedClient, config: Record<string, unknown>) => void> = []
+  let nextStream: unknown
+  return { instances, behaviors, nextStreamSet: (s: unknown) => { nextStream = s }, nextStream }
+})
+
+vi.mock('ssh2', () => {
+  class MockClient {
+    connectConfig: Record<string, unknown> | undefined
+    destroyCalls = 0
+    endCalls = 0
+    forwardOutCalls = 0
+    private readonly listeners = new Map<string, Array<(...args: unknown[]) => void>>()
+
+    on(event: string, listener: (...args: unknown[]) => void): this {
+      const arr = this.listeners.get(event) ?? []
+      arr.push(listener)
+      this.listeners.set(event, arr)
+      return this
+    }
+
+    once(event: string, listener: (...args: unknown[]) => void): this {
+      const wrapped = (...args: unknown[]): void => {
+        this.removeListener(event, wrapped)
+        listener(...args)
+      }
+      return this.on(event, wrapped)
+    }
+
+    removeListener(event: string, listener: (...args: unknown[]) => void): this {
+      const arr = this.listeners.get(event)
+      if (arr !== undefined) this.listeners.set(event, arr.filter((l) => l !== listener))
+      return this
+    }
+
+    emit(event: string, ...args: unknown[]): boolean {
+      const arr = this.listeners.get(event)
+      if (arr === undefined || arr.length === 0) return false
+      for (const listener of [...arr]) listener(...args)
+      return true
+    }
+
+    connect(config: Record<string, unknown>): void {
+      this.connectConfig = config
+      sshMock.instances.push(this as never)
+      const behavior = sshMock.behaviors.shift()
+      if (behavior !== undefined) behavior(this as never, config)
+    }
+
+    destroy(): void {
+      this.destroyCalls += 1
+      this.emit('close')
+    }
+
+    end(): void {
+      this.endCalls += 1
+    }
+
+    forwardOut(_src: string, _srcPort: number, _dst: string, _dstPort: number, cb: (error: Error | undefined, stream?: unknown) => void): void {
+      this.forwardOutCalls += 1
+      cb(undefined, sshMock.nextStream)
+    }
+  }
+  return { Client: MockClient }
+})
+
+/** A minimal pool engine whose store lookups are controlled per test. */
+function fakeStore(entries: SshHostEntry[]): HostStore {
+  return {
+    list: () => entries,
+    find: (alias: string) => entries.find((e) => e.alias === alias),
+  } as unknown as HostStore
+}
+
+function passwordEntry(alias: string, overrides: Partial<SshHostEntry> = {}): SshHostEntry {
+  return {
+    alias,
+    host: alias + '.test',
+    port: 22,
+    user: 'tester',
+    auth: { kind: 'password', password: 'secret' },
+    proxyJump: [],
+    tags: [],
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  } as SshHostEntry
+}
+
+describe('connectClient', () => {
+  beforeEach(() => {
+    sshMock.instances.length = 0
+    sshMock.behaviors.length = 0
+  })
+
+  it('destroys the client on the first error and ignores a second error emission', async () => {
+    sshMock.behaviors.push((client) => {
+      client.emit('error', new Error('handshake dropped'))
+    })
+    const config = buildConnectConfig(passwordEntry('a'))
+
+    await expect(connectClient(config)).rejects.toThrow('handshake dropped')
+
+    const instance = sshMock.instances[0]
+    expect(instance).toBeDefined()
+    expect(instance.destroyCalls).toBe(1)
+    // A second 'error' after settlement must be a no-op: no throw, no repeat destroy.
+    expect(() => instance.emit('error', new Error('Connection lost before handshake'))).not.toThrow()
+    expect(instance.destroyCalls).toBe(1)
+  })
+
+  it('resolves on ready', async () => {
+    sshMock.behaviors.push((client) => {
+      client.emit('ready')
+    })
+    const client = await connectClient(buildConnectConfig(passwordEntry('a')))
+    expect(client).toBeDefined()
+    const instance = sshMock.instances[0]
+    expect(instance.destroyCalls).toBe(0)
+  })
+})
+
+describe('connectChain', () => {
+  beforeEach(() => {
+    sshMock.instances.length = 0
+    sshMock.behaviors.length = 0
+    sshMock.nextStreamSet({})
+  })
+
+  it('ends every hop and destroys the failed target on a broken handshake', async () => {
+    const hop = passwordEntry('hop', { proxyJump: [] })
+    const target = passwordEntry('target', { proxyJump: ['hop'] })
+    const store = fakeStore([hop, target])
+    // First client (hop) connects and forwards; second client (target) fails.
+    sshMock.behaviors.push((client) => { client.emit('ready') })
+    sshMock.behaviors.push((client) => { client.emit('error', new Error('Connection lost before handshake')) })
+
+    const engine = {
+      store,
+      opts: { idleTimeoutMs: 1, connectTimeoutMs: 1, keepaliveIntervalMs: 1, maxOutputBytes: 1, defaultExecTimeoutMs: 1, defaultMaxWorkers: 1, sftpConcurrency: 1 },
+      pool: new Map(),
+      acquireQueue: new Map(),
+    }
+
+    await expect(connectChain(engine as never, target)).rejects.toThrow('Connection lost before handshake')
+
+    const hopInstance = sshMock.instances[0]
+    const targetInstance = sshMock.instances[1]
+    expect(hopInstance).toBeDefined()
+    expect(targetInstance).toBeDefined()
+    expect(hopInstance.forwardOutCalls).toBe(1)
+    expect(hopInstance.endCalls).toBe(1)
+    // The failed target is destroyed (connectClient does it on failure).
+    expect(targetInstance.destroyCalls).toBe(1)
+  })
+})

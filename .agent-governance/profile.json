@@ -5,41 +5,36 @@
     "AGENTS.md",
     "package.json",
     "pnpm-lock.yaml",
-    "apps/cli/src/bin.ts"
+    "apps/cli/src/bin.ts",
+    "distribution/product.json",
+    "plugins/registry.yaml"
   ],
   "instruction_sources": [
     {"path": "AGENTS.md", "required": true, "kind": "agent-instructions"},
     {"path": "CONTRIBUTING.md", "required": true, "kind": "development-policy"},
     {"path": "docs/testing.md", "required": true, "kind": "testing-policy"},
-    {
-      "path": ".agents/skills/dsh-pre-push-checks/SKILL.md",
-      "required": true,
-      "kind": "delivery-policy"
-    }
+    {"path": ".agents/skills/dsh-pre-push-checks/SKILL.md", "required": true, "kind": "delivery-policy"},
+    {"path": ".agents/skills/dsh-code-as-harness/SKILL.md", "required": true, "kind": "solar-agent-entrypoint"},
+    {"path": "plugins/managed/governance/skill/agent-development-governance/SKILL.md", "required": true, "kind": "code-as-harness-authority"},
+    {"path": "plugins/managed/governance/skill/agent-development-governance/references/governance-contract.md", "required": true, "kind": "governance-contract"},
+    {"path": "docs/architecture/adr-005-ai-agent-authority.md", "required": true, "kind": "authority-decision"}
   ],
   "scope_rules": [
-    {
-      "scope": "source",
-      "patterns": ["packages/**", "apps/**", "examples/**", "python/**", "native/**"]
-    },
-    {
-      "scope": "documentation",
-      "patterns": ["docs/**", "website/**", ".agents/notes/**"]
-    },
-    {
-      "scope": "tooling",
-      "patterns": ["scripts/**", "tsconfig*.json", "vitest*.ts", "*.config.*"]
-    },
+    {"scope": "source", "patterns": ["packages/**", "apps/**", "examples/**", "python/**", "native/**"]},
+    {"scope": "documentation", "patterns": ["README.md", "README.zh.md", "README.i18n.yaml", "docs/**", "website/**", ".agents/notes/**"]},
+    {"scope": "tooling", "patterns": ["scripts/**", "tsconfig*.json", "vitest*.ts", "*.config.*"]},
+    {"scope": "desktop", "patterns": ["products/desktop/**"]},
+    {"scope": "managed-governance", "patterns": ["plugins/managed/governance/**"]},
+    {"scope": "managed-agent-teams", "patterns": ["plugins/managed/agent-teams/**"]},
+    {"scope": "managed-luna", "patterns": ["plugins/managed/luna-vision-bridge/**"]},
+    {"scope": "managed-memory", "patterns": ["plugins/managed/memory-evolve/**"]},
+    {"scope": "managed-billing", "patterns": ["plugins/managed/web-billing/**"]},
+    {"scope": "managed-web-ui", "patterns": ["plugins/managed/web-ui/**"]},
+    {"scope": "product-metadata", "patterns": ["plugins/registry.yaml", "distribution/**"]},
     {
       "scope": "release",
-      "patterns": [
-        "package.json",
-        "pnpm-lock.yaml",
-        "pnpm-workspace.yaml",
-        ".github/**",
-        "vendor/**"
-      ],
-      "expands": ["source", "tooling"]
+      "patterns": ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".github/workflows/**", "vendor/**"],
+      "expands": ["source", "tooling", "product-metadata"]
     },
     {
       "scope": "governance",
@@ -47,13 +42,30 @@
         ".agent-governance/**",
         "AGENTS.md",
         "CLAUDE.md",
-        ".agents/skills/**"
+        ".agents/skills/**",
+        ".github/CODEOWNERS",
+        ".github/pull_request_template.md",
+        "tools/agent-development-governance/**"
       ],
-      "expands": ["documentation"]
+      "expands": ["documentation", "product-metadata"]
     }
   ],
   "hooks": [],
-  "ci_contracts": [],
+  "ci_contracts": [
+    {
+      "path": ".github/workflows/solar-governance.yml",
+      "required_text": [
+        "name: Solar Code-as-Harness",
+        "python3 tools/agent-development-governance/governance.py audit --project . --strict-warnings",
+        "python3 tools/agent-development-governance/governance.py verify",
+        "python3 tools/agent-development-governance/governance.py attest",
+        "actions/upload-artifact@v4"
+      ]
+    }
+  ],
+  "harness_bundle": {
+    "manifest": "tools/agent-development-governance/manifest.json"
+  },
   "gates": [
     {
       "id": "diff-check",
@@ -68,6 +80,24 @@
       "id": "profile-json",
       "label": "Governance Profile JSON syntax",
       "command": ["python3", "-m", "json.tool", ".agent-governance/profile.json"],
+      "cwd": ".",
+      "scopes": ["always"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "monorepo-contract-tests",
+      "label": "Solar monorepo invalid-case tests",
+      "command": ["node", "--test", "scripts/solar/verify-monorepo.test.mjs"],
+      "cwd": ".",
+      "scopes": ["tooling", "product-metadata", "governance", "release"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "monorepo-contract",
+      "label": "Solar identity, provenance, and tag contract",
+      "command": ["node", "scripts/solar/verify-monorepo.mjs"],
       "cwd": ".",
       "scopes": ["always"],
       "levels": ["quick", "full"],
@@ -93,8 +123,8 @@
     },
     {
       "id": "related-tests",
-      "label": "Vitest tests related to the outgoing branch diff",
-      "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/master", "--maxWorkers=4"],
+      "label": "Vitest tests related to the outgoing Solar diff",
+      "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/solar", "--maxWorkers=1"],
       "cwd": ".",
       "scopes": ["source", "tooling", "release"],
       "levels": ["full"],
@@ -102,7 +132,7 @@
     },
     {
       "id": "doc-sync",
-      "label": "Documentation synchronization checks",
+      "label": "Root documentation synchronization checks",
       "command": ["pnpm", "run", "doc-sync"],
       "cwd": ".",
       "scopes": ["documentation", "governance"],
@@ -126,6 +156,159 @@
       "scopes": ["release"],
       "levels": ["full"],
       "timeout_seconds": 1800
+    },
+    {
+      "id": "desktop-check",
+      "label": "DSH Desktop headless product suite",
+      "command": ["corepack", "yarn", "check"],
+      "cwd": "products/desktop",
+      "scopes": ["desktop", "release"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "governance-tests",
+      "label": "Code-as-Harness core regression tests",
+      "command": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+      "cwd": "plugins/managed/governance",
+      "scopes": ["managed-governance", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "governance-skill",
+      "label": "Code-as-Harness skill contract",
+      "command": ["python3", "scripts/validate_skill.py"],
+      "cwd": "plugins/managed/governance",
+      "scopes": ["managed-governance", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "governance-plugin",
+      "label": "DSH governance bundle contract",
+      "command": ["python3", "scripts/verify_dsh_plugin.py"],
+      "cwd": "plugins/managed/governance",
+      "scopes": ["managed-governance", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "governance-plugin-tests",
+      "label": "DSH governance plugin regression tests",
+      "command": ["npm", "test", "--prefix", "plugins/deepseek-solar-harness-governance"],
+      "cwd": "plugins/managed/governance",
+      "scopes": ["managed-governance", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "agent-teams-build",
+      "label": "Agent Teams build",
+      "command": ["corepack", "pnpm", "--ignore-workspace", "run", "build"],
+      "cwd": "plugins/managed/agent-teams",
+      "scopes": ["managed-agent-teams"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "agent-teams-verify",
+      "label": "Agent Teams package contract",
+      "command": ["corepack", "pnpm", "--ignore-workspace", "run", "verify"],
+      "cwd": "plugins/managed/agent-teams",
+      "scopes": ["managed-agent-teams"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "agent-teams-typecheck",
+      "label": "Agent Teams typecheck",
+      "command": ["corepack", "pnpm", "--ignore-workspace", "run", "typecheck"],
+      "cwd": "plugins/managed/agent-teams",
+      "scopes": ["managed-agent-teams"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "luna-check",
+      "label": "Luna Vision Bridge package suite",
+      "command": ["corepack", "pnpm@8.15.9", "--ignore-workspace", "run", "check"],
+      "cwd": "plugins/managed/luna-vision-bridge",
+      "scopes": ["managed-luna"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "memory-test",
+      "label": "Memory Evolve regression tests",
+      "command": ["corepack", "pnpm", "--ignore-workspace", "run", "test"],
+      "cwd": "plugins/managed/memory-evolve",
+      "scopes": ["managed-memory"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "memory-build",
+      "label": "Memory Evolve build",
+      "command": ["corepack", "pnpm", "--ignore-workspace", "run", "build"],
+      "cwd": "plugins/managed/memory-evolve",
+      "scopes": ["managed-memory"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "billing-check",
+      "label": "Web Billing syntax contract",
+      "command": ["npm", "run", "check"],
+      "cwd": "plugins/managed/web-billing",
+      "scopes": ["managed-billing"],
+      "levels": ["full"],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "billing-tests",
+      "label": "Web Billing regression tests",
+      "command": ["npm", "test"],
+      "cwd": "plugins/managed/web-billing",
+      "scopes": ["managed-billing"],
+      "levels": ["full"],
+      "timeout_seconds": 300
+    },
+    {
+      "id": "web-ui-typecheck",
+      "label": "Web UI monorepo typecheck",
+      "command": ["pnpm", "typecheck"],
+      "cwd": "plugins/managed/web-ui",
+      "scopes": ["managed-web-ui"],
+      "levels": ["full"],
+      "timeout_seconds": 1200
+    },
+    {
+      "id": "web-ui-tests",
+      "label": "Web UI monorepo tests",
+      "command": ["pnpm", "test"],
+      "cwd": "plugins/managed/web-ui",
+      "scopes": ["managed-web-ui"],
+      "levels": ["full"],
+      "timeout_seconds": 1200
+    },
+    {
+      "id": "web-ui-script-tests",
+      "label": "Web UI build-script regression tests",
+      "command": ["pnpm", "test:scripts"],
+      "cwd": "plugins/managed/web-ui",
+      "scopes": ["managed-web-ui"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
+      "id": "web-ui-docs",
+      "label": "Web UI native documentation contract",
+      "command": ["pnpm", "docs:check"],
+      "cwd": "plugins/managed/web-ui",
+      "scopes": ["managed-web-ui"],
+      "levels": ["full"],
+      "timeout_seconds": 600
     }
   ]
 }

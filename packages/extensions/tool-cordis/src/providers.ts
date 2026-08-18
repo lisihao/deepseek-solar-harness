@@ -16,7 +16,7 @@ const SERVICE_OUTPUT = {
 const EVENT_OUTPUT = {
   description: 'Compact Event directory, or one exact Event contract with only its referenced type declarations.',
 } as const
-const HOST_EVENTS = EVENT_API.filter(event => !event.name.startsWith('cordis/'))
+const HOST_EVENTS = EVENT_API.filter(event => !event.name.startsWith('@deepseek-ai/cordis/'))
 
 /**
  * Construct Host providers over generated Catalogs, evaluator declarations, and live Tool scope.

@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": false
+  },
+  "include": [
+    "src/client/**/*.ts",
+    "src/client/**/*.tsx",
+    "tests/client-section.spec.tsx"
+  ]
+}

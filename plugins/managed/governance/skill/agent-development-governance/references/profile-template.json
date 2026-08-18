@@ -1,0 +1,26 @@
+{
+  "profile_version": 1,
+  "name": "replace-me",
+  "project_markers": ["package.json"],
+  "instruction_sources": [
+    {"path": "AGENTS.md", "required": false, "kind": "agent-instructions"},
+    {"path": "CONTRIBUTING.md", "required": false, "kind": "development-policy"}
+  ],
+  "scope_rules": [
+    {"scope": "source", "patterns": ["src/**", "tests/**"]},
+    {"scope": "governance", "patterns": [".github/**", "package.json"], "expands": ["source"]}
+  ],
+  "hooks": [],
+  "ci_contracts": [],
+  "gates": [
+    {
+      "id": "diff-check",
+      "label": "Git whitespace and conflict check",
+      "command": ["git", "diff", "--check"],
+      "cwd": ".",
+      "scopes": ["always"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    }
+  ]
+}

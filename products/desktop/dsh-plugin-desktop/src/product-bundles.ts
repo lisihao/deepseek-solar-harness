@@ -1,0 +1,52 @@
+/** Desktop-owned product bundles whose executable code is sealed into the App. */
+
+export const RESIDENT_BUNDLE_PACKAGE = '@deepseek-ai/dsh-resident-operators'
+export const AGENT_TEAMS_PACKAGE = '@nanmicoder/dsh-agent-teams'
+export const AGENT_TEAMS_ROW_ID = 'agent-teams'
+export const REMOTE_WEB_UI_PACKAGE = '@linxin666/dsh-remote-web-ui'
+export const WEB_BILLING_PACKAGE = 'dsh-web-billing'
+export const LUNA_VISION_BRIDGE_PACKAGE = '@ycp424c/dsh-luna-vision-bridge'
+export const UI_REMOTE_MODULES_PACKAGE = '@deepseek-ai/dsh-client-ui-remote-modules'
+export const UI_REMOTE_MODULES_ROW_ID = 'ui-remote-modules'
+export const HOST_APIPROXY_PACKAGE = '@deepseek-ai/dsh-host-apiproxy'
+
+export const DEFAULT_REMOTE_MODULE_INSTANCES = [
+  {
+    id: 'genesispod',
+    label: 'GenesisPod',
+    url: 'http://127.0.0.1:13000/',
+    relayPort: 3000,
+    order: 100,
+  },
+  {
+    id: 'thunder-omlx',
+    label: 'ThunderOMLX',
+    url: 'http://127.0.0.1:18002/admin/',
+    relayPort: 18102,
+    order: 200,
+  },
+] as const
+
+export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
+  [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
+  [AGENT_TEAMS_PACKAGE, AGENT_TEAMS_ROW_ID],
+  [REMOTE_WEB_UI_PACKAGE, 'remote-web-ui'],
+  [WEB_BILLING_PACKAGE, 'web-billing'],
+  [LUNA_VISION_BRIDGE_PACKAGE, 'luna-vision-bridge'],
+  [UI_REMOTE_MODULES_PACKAGE, UI_REMOTE_MODULES_ROW_ID],
+])
+
+export const PRODUCT_BUNDLE_PACKAGES = [
+  RESIDENT_BUNDLE_PACKAGE,
+  AGENT_TEAMS_PACKAGE,
+  REMOTE_WEB_UI_PACKAGE,
+  WEB_BILLING_PACKAGE,
+  LUNA_VISION_BRIDGE_PACKAGE,
+  UI_REMOTE_MODULES_PACKAGE,
+] as const
+
+/** App-sealed runtime packages that must stay version-aligned with product bundles. */
+export const SEALED_RUNTIME_PACKAGES = [
+  ...PRODUCT_BUNDLE_PACKAGES,
+  HOST_APIPROXY_PACKAGE,
+] as const

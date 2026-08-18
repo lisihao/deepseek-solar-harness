@@ -6,17 +6,17 @@ English | [中文](2026-08-15-project-local-code-harness-profile.zh.md)
 
 ## Problem
 
-The installed Code-as-Harness plugin derives its governed project from the Session working directory and asks the shared executor to discover a project Profile. DeepSeek-Solar-Harness had no `.agent-governance/profile.json`, so a Session opened in this repository could enter the fail-closed state machine but could not pass its first audit. A Session opened above the repository could also be mislabeled as governed by older plugin versions even though the parent directory had neither one Git worktree nor one applicable rule set.
+Code-as-Harness derives its governed project from the Session working directory and asks the shared executor to discover a project Profile. A governed Session needs repository-owned instructions, executable gates, and an exact governance implementation; otherwise it can enter a fail-closed state machine without an admissible completion path. A Session opened above the repository must not inherit governance when the parent directory has neither one Git worktree nor one applicable rule set.
 
 A repository-wide test command would make the Profile deterministic but would conflict with the repository policy that selects the narrowest behavior evidence for an outgoing diff. A Profile that omits behavior tests would instead allow type-correct but defective source changes to produce an attestation.
 
 ## Decision
 
-DeepSeek-Solar-Harness owns `.agent-governance/profile.json`. The Profile identifies this repository by its root instructions, workspace manifest, lockfile, and CLI entry; records the root instructions, contribution guide, testing policy, and pre-push skill as required instruction sources; and maps source, documentation, tooling, release, and governance paths to native commands.
+DeepSeek-Solar-Harness owns `.agent-governance/profile.json`. The Profile identifies this repository by its root instructions, workspace manifest, lockfile, CLI entry, product manifest, and managed-plugin registry. Its required instruction sources include the root policies, the repository `dsh-code-as-harness` entry skill, and the authoritative skill and contract imported from the user-created Codex project at `plugins/managed/governance`.
 
-Quick verification runs the Git whitespace check and parses the Profile JSON. Full verification adds repository type checking and linting for source, tooling, or release changes, then runs Vitest with `--changed=origin/master` so behavior coverage follows the complete outgoing branch diff without defaulting to every test. Documentation and governance changes run `doc-sync`. Release changes additionally run the build and package-hygiene commands.
+Quick verification checks Git whitespace, parses the Profile JSON, and validates Solar product identity, imported-source provenance, licenses, Code-as-Harness identity, and the `DSH-desktop-v<major>.<minor>.<patch>` tag contract. Full verification adds root type checking, linting, related Vitest coverage against `origin/solar`, documentation synchronization, and release gates where applicable. Desktop and each managed component run their native package-manager, test, type, build, or documentation commands instead of being treated as root packages.
 
-The external Cordis plugin remains the state-machine and attestation adapter. It anchors a nested Session working directory at the nearest Git root and activates only when that root contains a project Profile or the deployment explicitly supplies one. Remote CI and branch protection remain independent authorities.
+The Code-as-Harness implementation is exactly the user-created `agent-development-governance` repository imported at `plugins/managed/governance`. Its own exporter installs a digest-checked executable bundle under `tools/agent-development-governance`; the repository skill is only a routing adapter. The Cordis governance plugin remains the Session state-machine and attestation adapter. Remote CI and protected `solar` branch review remain independent authorities.
 
 ## Alternatives considered
 
@@ -24,12 +24,14 @@ The external Cordis plugin remains the state-machine and attestation adapter. It
 
 **Apply governance to every Git worktree and report audit failure later.** Rejected because ordinary repositories without an adopted Profile would be forced into corrective continuations that cannot succeed.
 
-**Run the complete Vitest suite for every source change.** Rejected because the repository's pre-push policy requires the narrowest relevant evidence. `--changed=origin/master` includes committed and working-tree changes related to the outgoing branch while leaving exhaustive platform coverage to CI.
+**Run the complete Vitest suite for every source change.** Rejected because the repository's pre-push policy requires the narrowest relevant evidence. `--changed=origin/solar` includes committed and working-tree changes related to the outgoing branch while component-owned source uses its native test suite.
+
+**Use a generic or third-party project named Code-as-Harness.** Rejected because only the user's Codex-created `agent-development-governance` project owns this product's governance semantics and completion evidence.
 
 **Omit local behavior tests.** Rejected because type checking and linting do not prove runtime behavior and cannot justify an attestation for source changes.
 
 ## Consequences
 
-A DSH coding Session can now discover its rules and produce a project-bound full attestation. Sessions outside an adopted Git worktree remain unmanaged instead of entering an impossible completion loop. Nested working directories certify the repository root rather than a package subdirectory.
+A DSH coding Session can discover its rules, verify the exported implementation by digest, select root and component-native commands from the outgoing diff, and produce a project-bound full attestation. Sessions outside an adopted Git worktree remain unmanaged instead of entering an impossible completion loop. Nested working directories certify the repository root rather than a package subdirectory.
 
-Full source verification depends on a fetched `origin/master` reference and may run a broad related-test set when shared files affect many packages. Stacked branches can include tests from lower layers because the stable base is the protected default branch; this costs additional local time but does not omit outgoing behavior. Remote CI still decides merge readiness and may run broader checks than the local Profile.
+Full source verification depends on a fetched `origin/solar` reference and may run a broad related-test set when shared files affect many packages. Stacked branches can include tests from lower layers because the stable base is the protected integration branch; this costs additional local time but does not omit outgoing behavior. Remote CI still decides merge readiness and may run broader checks than the local Profile.

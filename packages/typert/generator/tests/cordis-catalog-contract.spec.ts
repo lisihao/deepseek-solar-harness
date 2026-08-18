@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   collectEvents as collectEventsWithPolicy,
   collectServices as collectServicesWithPolicy,
+  eventScope,
   renderPageRegion,
 } from '../src/cordis-catalog.ts'
 import type {
@@ -122,6 +123,13 @@ const makeService = (classSource: string): string => {
 
 afterEach(() => {
   while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true })
+})
+
+describe('eventScope', () => {
+  it('preserves npm-style scoped namespaces and ordinary event prefixes', () => {
+    expect(eventScope('@deepseek-ai/cordis/request-run')).toBe('@deepseek-ai/cordis')
+    expect(eventScope('agent/request')).toBe('agent')
+  })
 })
 
 describe.skip('gen-cordis-catalog collectEvents', { timeout: 60_000 }, () => {

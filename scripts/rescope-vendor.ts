@@ -92,6 +92,17 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   { file: 'packages/client/ui-agent-preset/tests/apply.client.spec.ts', upstream: ['cordis'] },
   { file: 'packages/client/ui-agent-preset/tests/locales.client.spec.ts', upstream: ['cordis'] },
   { file: 'packages/client/ui-agent-preset/tests/section.client.spec.tsx', upstream: ['cordis'] },
+  // `cordis` is a locale key here, not a package reference. Rewriting it
+  // silently renders an empty label while leaving the component type-correct.
+  { file: 'packages/client/ui-settings-plugin-inventory/src/client/PluginInventorySettingsTab.tsx', upstream: ['cordis'] },
+  // ui-cordis also uses `cordis` as its locale namespace and input-trigger id.
+  // The mixed index file's real event-name rewrites are owned by EXACT_EDITS.
+  { file: 'packages/extensions/ui-cordis/src/client/CordisActionRow.tsx', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/CordisDefineRow.tsx', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/CordisPanel.tsx', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/CordisRunRow.tsx', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/locales.ts', upstream: ['cordis'] },
+  { file: 'packages/extensions/ui-cordis/src/client/index.ts', upstream: ['cordis'] },
   { file: 'apps/cli/tests/web-agent-presets.e2e.ts', upstream: ['cordis'] },
   { file: 'apps/web/tests/agent-preset-authoring.e2e.ts', upstream: ['cordis'] },
   { file: 'packages/preset/agent-presets/tests/session.spec.ts', upstream: ['cordis'] },
@@ -104,6 +115,8 @@ const GENERIC_SKIPS: readonly GenericSkip[] = [
   // GROUP_ORDER holds `packages/<group>/` directory names, not package names.
   { file: 'scripts/gen-module-graph.ts', upstream: ['cordis'] },
   { file: 'scripts/gen-doc-graphs.ts', upstream: ['cordis'] },
+  // Contract tests name the pre-rescope token as input to the classifier.
+  { file: 'scripts/rescope-vendor.spec.ts', upstream: RENAMES.map(rename => rename.upstream) },
 ]
 
 /** A string that must appear exactly `count` times once the rescope has run. */
@@ -133,6 +146,8 @@ const POSTCONDITIONS: readonly PostCondition[] = [
   { file: 'apps/cli/config/agent-presets/cordis/agent.cordis.yml', text: 'The `cordis` agent preset', count: 1 },
   { file: 'apps/cli/config/agent-presets/cordis/agent.cordis.yml', text: 'corrupting the `cordis` preset', count: 1 },
   { file: 'packages/examples/acp-demo/tests/built-bin.e2e.ts', text: '\'cordis\', \'loader\', \'include\', \'timer\', \'hmr\', \'logger-console\',', count: 1 },
+  { file: 'packages/extensions/ui-cordis/src/client/locales.ts', text: "export const NS = 'cordis'", count: 1 },
+  { file: 'packages/extensions/ui-cordis/src/client/index.ts', text: "    name: 'cordis',", count: 1 },
 ]
 
 /**
@@ -141,6 +156,26 @@ const POSTCONDITIONS: readonly PostCondition[] = [
  * quote a neighbouring line the generic pass would rewrite.
  */
 const EXACT_EDITS: readonly ExactEdit[] = [
+  {
+    // This file mixes the product-level `cordis` locale/source id with event
+    // names whose namespace follows the rescoped Cordis module. Keep the file
+    // out of the generic pass and move only the typed Remote event block.
+    id: 'ui-cordis-remote-event-namespace',
+    file: 'packages/extensions/ui-cordis/src/client/index.ts',
+    find: `  ctx.remote.$on('cordis/dynamic-package', () => { inventory.refresh() })
+  ctx.remote.$on('cordis/dynamic-retract', () => { inventory.refresh() })
+  ctx.remote.$on('cordis/request-run', (request) => {
+    if (!inventory.getSnapshot().rows.some(row => row.pluginId === request.pluginId)) inventory.refresh()
+  })
+  ctx.remote.$on('cordis/request-run-resolved', () => { inventory.refresh() })`,
+    replace: `  ctx.remote.$on('@deepseek-ai/cordis/dynamic-package', () => { inventory.refresh() })
+  ctx.remote.$on('@deepseek-ai/cordis/dynamic-retract', () => { inventory.refresh() })
+  ctx.remote.$on('@deepseek-ai/cordis/request-run', (request) => {
+    if (!inventory.getSnapshot().rows.some(row => row.pluginId === request.pluginId)) inventory.refresh()
+  })
+  ctx.remote.$on('@deepseek-ai/cordis/request-run-resolved', () => { inventory.refresh() })`,
+    expect: 1,
+  },
   {
     id: 'cordis-walk-merge-head',
     file: 'scripts/cordis-walk.ts',
@@ -460,9 +495,11 @@ const VENDORED_LIBRARY = /^@deepseek-ai\\/(cosmokit|schemastery)(\\/|$)/
   })),
 ]
 
-/** Files the rescope must never rewrite. */
-function excluded(file: string): boolean {
+/** Files the root rescope must never rewrite. */
+export function excluded(file: string): boolean {
   if (file === 'scripts/rescope-vendor.ts') return true // the mapping itself
+  if (file.startsWith('products/desktop/')) return true // independent Yarn product with its own dependency contract
+  if (file.startsWith('plugins/managed/')) return true // imported components retain their own package identity
   if (file.startsWith('.agents/notes/')) return true // notes record what was true when written
   // Recorded model payloads quote documentation verbatim, so they must mirror the
   // sources on disk — including the notes this rescope leaves alone.
@@ -503,8 +540,19 @@ function patterns(reverse: boolean): Pattern[] {
     }))
 }
 
+/**
+ * Report whether a bare upstream token is product data in one file rather than
+ * a package reference eligible for generic rescoping.
+ * @param file - repository-relative candidate path.
+ * @param upstream - upstream package name being considered.
+ * @returns whether the generic replacement must leave this token untouched.
+ */
+export function genericRenameSkipped(file: string, upstream: string): boolean {
+  return GENERIC_SKIPS.some(skip => skip.file === file && skip.upstream.includes(upstream))
+}
+
 function skipped(file: string, pattern: Pattern): boolean {
-  return GENERIC_SKIPS.some(skip => skip.file === file && skip.upstream.includes(pattern.upstream))
+  return genericRenameSkipped(file, pattern.upstream)
 }
 
 function rewriteLine(line: string, file: string, all: readonly Pattern[]): string {

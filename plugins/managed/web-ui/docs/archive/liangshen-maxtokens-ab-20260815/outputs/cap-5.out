@@ -1,0 +1,26 @@
+setup ctx symbols: 
+mount OK: liangshen
+(node:13869) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+## Result
+
+Under `/Users/zcl/code/dsh-web-ui/packages/` there are **12 top-level package directories** (each with its own `package.json`):
+
+| # | Package |
+|---|---------|
+| 1 | `packages/dsh-aionui-panel` |
+| 2 | `packages/dsh-git-graph` |
+| 3 | `packages/dsh-liangshen` |
+| 4 | `packages/dsh-live-stats` |
+| 5 | `packages/dsh-pet` |
+| 6 | `packages/dsh-remote-web-ui` |
+| 7 | `packages/dsh-skins` |
+| 8 | `packages/dsh-ssh` |
+| 9 | `packages/dsh-task-board` |
+| 10 | `packages/dsh-tool-describe-image` |
+| 11 | `packages/dsh-web-ui-all` |
+| 12 | `packages/dsh-web-ui-settings` |
+
+**How I verified:** listed the directory tree of `packages/` and cross-checked with `pnpm-workspace.yaml`, whose workspace globs are `shared`, `packages/*`, and `packages/skins/*`.
+
+One note: there are 13 directories directly under `packages/`, but `packages/skins/` is a grouping directory **without its own `package.json`** — it merely contains 11 skin packages (`blue-fantasy`, `dragon-heir`, `harbor`, `miku`, `minecraft`, `qq98`, `skin-center`, `ths`, `trading`, `whale-song`, `xp`). So the count of top-level *package* directories is **12**.

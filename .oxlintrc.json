@@ -24,6 +24,8 @@
     "website/.generated/**",
     "vendor/**", // Vendored source keeps upstream style and idioms.
     "native/**", // The imported landlock-run subtree has its own gates; see native/README.md.
+    "products/desktop/**", // Independent Yarn product; products/desktop/AGENTS.md owns its check contract.
+    "plugins/managed/**", // Imported Solar components retain their native package-manager and lint/test gates.
     "**/*.js",
     "**/*.mjs",
     "**/*.config.ts", // Tool and app configs are outside the repository TypeScript programs.

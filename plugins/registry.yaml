@@ -1,0 +1,88 @@
+schema_version: 1
+policy: docs/architecture/adr-003-managed-plugin-lifecycle.md
+managed:
+  - id: governance
+    path: plugins/managed/governance
+    package: '@lisihao/dsh-code-harness-governance@0.3.8'
+    source: https://github.com/lisihao/agent-development-governance.git
+    upstream: null
+    source_branch: codex/fix-dsh-governance-trace
+    accepted_sha: 9b315f75299b8b677a08c844cf294e35cdd366b9
+    license: MIT
+    license_status: package-declared
+    license_evidence: plugins/managed/governance/plugins/deepseek-solar-harness-governance/package.json
+    tests:
+      - python3 -m unittest discover -s tests -v
+      - python3 scripts/validate_skill.py
+      - python3 scripts/verify_dsh_plugin.py
+      - npm test --prefix plugins/deepseek-solar-harness-governance
+  - id: agent-teams
+    path: plugins/managed/agent-teams
+    package: '@nanmicoder/dsh-agent-teams@0.1.5'
+    source: https://github.com/lisihao/dsh-agent-teams.git
+    upstream: https://github.com/NanmiCoder/dsh-agent-teams.git
+    source_branch: codex/preserve-member-preset-persona
+    accepted_sha: ff3369241dbf9763e34e11292823d5d78a9d8713
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/agent-teams/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run build
+      - corepack pnpm --ignore-workspace run verify
+      - corepack pnpm --ignore-workspace run typecheck
+  - id: luna-vision-bridge
+    path: plugins/managed/luna-vision-bridge
+    package: '@ycp424c/dsh-luna-vision-bridge@0.1.2'
+    source: https://github.com/lisihao/dsh-luna-vision-bridge.git
+    upstream: https://github.com/ycp424c/dsh-luna-vision-bridge.git
+    source_branch: codex/fix-stable-model-id
+    accepted_sha: 0173d93fab9f480d9a7548ac65cf04c3488fb8bb
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/luna-vision-bridge/LICENSE
+    setup: node scripts/link-dsh-source.mjs <monorepo-root>
+    tests:
+      - corepack pnpm@8.15.9 --ignore-workspace run check
+  - id: memory-evolve
+    path: plugins/managed/memory-evolve
+    package: dsh-memory-evolve@0.1.0
+    source: https://github.com/csyangwen/dsh-memory-evolve.git
+    upstream: https://github.com/csyangwen/dsh-memory-evolve.git
+    source_branch: main
+    accepted_sha: ce7f0faa0e0240f117c29795e9224c0d9ed18183
+    discovered_sha: 8ede93752149ede3a28bc551b5a19a0233b33b04
+    update_status: pending-qualification
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/memory-evolve/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run test
+      - corepack pnpm --ignore-workspace run build
+  - id: web-billing
+    path: plugins/managed/web-billing
+    package: dsh-web-billing@1.1.3
+    source: https://github.com/lisihao/dsh-web-billing.git
+    upstream: https://github.com/bpc-oss/dsh-web-billing.git
+    source_branch: codex/expose-billing-scope
+    accepted_sha: 690fdb1172366e139e590c4a8fe3f11c95b7ac90
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/web-billing/LICENSE
+    tests:
+      - npm run check
+      - npm test
+  - id: web-ui
+    path: plugins/managed/web-ui
+    package: dsh-web-ui@0.1.1
+    source: https://github.com/lisihao/dsh-web-ui.git
+    upstream: https://github.com/zhu1090093659/dsh-web-ui.git
+    source_branch: codex/restore-visible-remote-entry
+    accepted_sha: 7b99d9eb69202199fffe378b289425b224691d23
+    license: Apache-2.0
+    license_status: license-file
+    license_evidence: plugins/managed/web-ui/LICENSE
+    tests:
+      - pnpm typecheck
+      - pnpm test
+      - pnpm test:scripts
+      - pnpm docs:check
