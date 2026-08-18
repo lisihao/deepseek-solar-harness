@@ -155,7 +155,16 @@ describe('orchestration daemon', () => {
     const started = await client.start({ compilationId: compilation.compilationId })
     const settled = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
     expect(settled.nodes.map(value => value.state)).toEqual(['passed', 'passed'])
+    expect(settled.nodes).toEqual([
+      expect.objectContaining({ id: 'code', role: 'implementation', dependsOn: [] }),
+      expect.objectContaining({ id: 'review', role: 'review', dependsOn: ['code'] }),
+    ])
     expect(settled.nodes.every(value => value.evidenceRefs.length === 1)).toBe(true)
+    expect(settled.nodes.every(value => (
+      value.capabilityPlanRef !== undefined
+      && value.contextPacketRef !== undefined
+      && value.executionPlanRef !== undefined
+    ))).toBe(true)
     expect(fake.starts).toEqual([
       `codex:orch:${String(started.runId)}:code:1`,
       `claude-code:orch:${String(started.runId)}:review:1`,

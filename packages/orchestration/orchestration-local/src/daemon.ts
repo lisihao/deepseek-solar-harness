@@ -398,6 +398,8 @@ export class OrchestrationDaemon {
       nodes: compilation.graph.nodes.map(node => ({
         id: node.id,
         title: node.title,
+        role: node.role,
+        dependsOn: [...node.dependsOn],
         state: 'pending',
         attempt: 0,
         capabilityGeneration: 1,
@@ -740,6 +742,9 @@ export class OrchestrationDaemon {
       ...value,
       attempt,
       operatorId,
+      ...spec.operator?.profile === undefined ? {} : { operatorProfile: spec.operator.profile },
+      capabilityPlanRef,
+      contextPacketRef,
       executionPlanRef: planRef,
       updatedAt: now(),
     } : value)

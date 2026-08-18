@@ -159,5 +159,5 @@ abstract resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promi
 abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:306`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:311`](../../packages/orchestration/orchestration/src/index.ts)
 <!-- END GENERATED cordis-surface -->

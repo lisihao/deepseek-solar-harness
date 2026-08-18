@@ -181,10 +181,15 @@ export interface NodeExecutionPlanV1 {
 export interface OrchestrationNodeSnapshot {
   readonly id: string
   readonly title: string
+  readonly role: string
+  readonly dependsOn: readonly string[]
   readonly state: OrchestrationNodeState
   readonly attempt: number
   readonly capabilityGeneration: number
   readonly operatorId?: string
+  readonly operatorProfile?: PhysicalOperatorExecutionPreference
+  readonly capabilityPlanRef?: OrchestrationArtifactRef
+  readonly contextPacketRef?: OrchestrationArtifactRef
   readonly executionPlanRef?: OrchestrationArtifactRef
   readonly evidenceRefs: readonly OrchestrationArtifactRef[]
   readonly blockers: readonly OrchestrationBlocker[]
