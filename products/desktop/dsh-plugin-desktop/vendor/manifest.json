@@ -7,6 +7,11 @@
       "commit": "830bc68a05eb021f055425e05c6b1d36dee8be2d"
     },
     {
+      "name": "Persistent TaskGraph orchestration and compiler capability seams",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "df1e2d75bb34c7b828d8a4bc7f4172cb4e7f3df0"
+    },
+    {
       "name": "GenesisPod and ThunderOMLX Remote Modules",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "23722c1b749b37d7aaf5e65f9bf309e446eea296"
@@ -56,6 +61,14 @@
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "1e474b894f4d956c42574abc12b83557d0d381d06baddd84666916809d8e4238",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "471a232245ccfc4e5a26a734ede1f63485b42d28195508a5e13d909b96d0618b",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
+    "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "0b19f48fc167abd9b2b2dc22fd483a7cd3c755f9053fce772593ae26eeaeb689",
+    "dsh-packages/deepseek-ai-dsh-context-compiler-0.1.0-rc.5.tgz": "08e6ceb3ea1085b513dee645ba50f6be26bcf5d1eea506c01e66aa8f50e10b54",
+    "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "e85b26a1c68a88b3821b455d3ee8f2a03b287b2bd6f978e3df85d7f3df9fe79b",
+    "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "36dccc73a2c6909a815d6eec638d5e927fc15660e96514ff0f949e5cc3f08748",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "15be9b1e5301ebe2fed3ac3fd06e8f4c1a6e998d993028d8f42703e61a01da0a",
+    "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "7d71c74fe4e6827cd973dd7de1944d94a9d401c49b5d68c96bbcc1de2653ff8d",
+    "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "107936a2367cc91ade439fd80c8e48db79ba9855412eabd189505c797830e624",
+    "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "c7d152150ef35513a3817a1f401d8421443b85e119b690ed610178a0ddeaeccb",
     "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03",
     "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
     "dsh-packages/dsh-web-billing-1.1.3.tgz": "7b2c7b85d74b4c16dec9d0bcecf87b818e5b071a01949765749a5c240f7fc209",

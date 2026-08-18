@@ -54,9 +54,11 @@ describe('Solar desktop branding', () => {
 
     const entry = registrations.find(({ options }) => options.id === 'solar-desktop-brand')
     const resident = registrations.find(({ options }) => options.id === 'resident-physical-operators')
+    const orchestration = registrations.find(({ options }) => options.id === 'durable-orchestrations')
     const routing = registrations.find(({ options }) => options.id === 'physical-operator-routing')
     expect(entry).toBeDefined()
     expect(resident).toBeDefined()
+    expect(orchestration).toBeDefined()
     expect(routing).toBeDefined()
     expect(visibleText(entry?.component({ wide: true }))).toBe(`DSH Desktop v2.0.1${SOLAR_BRAND}`)
     expect(visibleText(entry?.component({ wide: false }))).toBe('v2.0.1')

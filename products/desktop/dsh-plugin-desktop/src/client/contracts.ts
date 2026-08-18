@@ -1,3 +1,5 @@
+import type {} from '@deepseek-ai/dsh-client-ui-slots'
+
 /** Sidebar geometry passed by the desktop root slot. */
 export interface DesktopSidebarOwnerProps {
   /** Whether the sidebar is showing its compact rail. */

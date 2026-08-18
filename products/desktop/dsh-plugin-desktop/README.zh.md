@@ -18,6 +18,8 @@ Desktop 产品层还会提供 Resident Physical Operators 与 AgentTeams，但�
 
 普通 sidebar 会在两种呈现模式下增加一个纯新增的 **物理算子** action。它会打开同源、只读的状态面板，显示 Provider 资格、持久 Session、最新 Receipt 状态与有界进度事件。Host route 按需读取 `ctx.residentOperators`，不会创建 Desktop 自有的 Resident 状态库。面板还会说明智能协作与插件能力契约：模型工作使用 `physical_operator` 工具，Host 插件通过注入 `ctx.physicalOperators` 执行，可信管理/状态插件则可注入 `ctx.residentOperators` 检查状态。基于实时 descriptor、tag 与 execution mode 的指引会主动触发委派；策略可见且已记录，不会引入隐藏分类器或第二调度权威。
 
+产品层还会把封装后的 `@deepseek-ai/dsh-orchestrations` Bundle 作为独立插件能力挂载。Service Definition 分别拥有 Intent、Context、Capsule、TaskGraph 和 Orchestration 契约；Local Provider 拥有持久 daemon、SQLite 状态、Artifact Store 与调度写入；Tool 和 Web UI 只消费 `ctx.orchestrations`。新增的 **编排** sidebar 工作台通过同源投影展示 Run、DAG 依赖、Compiler/Capsule/Context 阶段、已封印 ExecutionPlan、算子选择、Attempt、Generation、Evidence、Blocker 与事件。暂停、恢复、取消、批准、拒绝和不确定执行处置都调用公共 Service seam，不直接修改 daemon 存储。移除该 Bundle 就会完整移除这组能力，不改变聊天、Workflow 或物理算子。
+
 打包内的 `anchored-standard` preset 是 system-trust 产品输入，并排在同名上游 preset root 之前。它的首轮 gate 会覆盖 delegated agent，因此 AgentTeams worker 会与主 agent 一样从 `bash` 和 `str_replace_editor` 两个 bootstrap 工具开始，而不是被当作已经 promoted。AgentTeams 还会把 member protocol 放入首条 user prompt，不再替换所选 preset 的 persona。若用户 profile 已声明 AgentTeams，产品层不会重复加载；最终 patch 仍会强制这一 prompt placement。
 
 Profile 选择保存在 Electron user data 下的 desktop 自有状态中，而不是被选 profile 内的另一个字段。切换会先记为 pending，再通过有序重启生效。只有 Cordis 树与原生窗口成功挂载后，新 profile 才会成为 last-known-good；托盘会在 Web surface 加载后才创建，而且该状态提交会在托盘命令能够运行前同步完成。Pending generation 启动失败时会回滚并自动重启一次。官方 profile 默认共用同一个 DSH home 中的 sessions、settings 与 storage，因此切换不会复制或迁移记录；自定义 profile patch 仍可主动重定向其中某个持久化根。
