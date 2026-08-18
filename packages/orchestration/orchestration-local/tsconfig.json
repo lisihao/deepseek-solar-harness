@@ -1,0 +1,22 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cosmokit" },
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../util/home-paths" },
+    { "path": "../../llm/llm" },
+    { "path": "../../core/agent" },
+    { "path": "../../core/session" },
+    { "path": "../../sdk/protocol" },
+    { "path": "../intent-compiler" },
+    { "path": "../context-compiler" },
+    { "path": "../capability-capsule" },
+    { "path": "../orchestration" },
+    { "path": "../../physical-operator/physical-operator" },
+    { "path": "../../physical-operator/resident-operator-local" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

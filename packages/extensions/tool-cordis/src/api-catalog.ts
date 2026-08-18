@@ -379,6 +379,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'capabilityCapsules',
+    summary: 'Provider-neutral Capsule registry and late-binding resolver.',
+    description: 'Provider-neutral Capsule registry and late-binding resolver.',
+    methods: [
+      {
+        signature: 'abstract snapshot(request: CapsuleSnapshotRequest): Promise<CapsuleCatalogSnapshot>',
+        description: 'Snapshot the live immutable catalog.',
+        parameters: [{ name: 'request', description: 'optional capability-tag catalog filter.' }],
+        returns: 'one revisioned content-addressed catalog snapshot.',
+      },
+      {
+        signature: 'abstract get(ref: CapabilityCapsuleRef): Promise<CapabilityCapsuleManifestV1>',
+        description: 'Read and digest-verify one immutable manifest.',
+        parameters: [{ name: 'ref', description: 'exact content-addressed Capsule reference.' }],
+        returns: 'the validated version-one manifest.',
+      },
+      {
+        signature: 'abstract resolve(request: CapsuleResolutionRequest): Promise<CapabilityBindingPlanV1>',
+        description: 'Resolve bindings without mutating the source Graph.',
+        parameters: [{ name: 'request', description: 'attempt identity, requirements, budgets, and operator support.' }],
+        returns: 'an immutable binding plan or structured blockers.',
+      },
+    ],
+  },
+  {
     key: 'clientModules',
     summary: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index tap.',
     description: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index tap. Construction runs the activation scan synchronously — a malformed declaration or missing bundle among the already-loaded entries aggregates into one loud throw (FAILED fiber; the boot activation audit reports it).',
@@ -493,6 +518,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'start', description: 'first surface seq, inclusive.' }, { name: 'end', description: 'last surface seq, inclusive.' }, { name: 'agent', description: 'context whose session is mutated and whose routing options guide summarization.' }, { name: 'signal', description: 'optional cancellation; model-backed implementations must forward it.' }],
         returns: 'the appended event seqs, summary, replaced range, and token accounting.',
         throws: ['when compaction is active or the range is missing, reversed, or unbalanced.'],
+      },
+    ],
+  },
+  {
+    key: 'contextCompiler',
+    summary: 'Provider-neutral context projection compiler.',
+    description: 'Provider-neutral context projection compiler.',
+    methods: [
+      {
+        signature: 'abstract compile(request: ContextCompileRequest): Promise<ContextPacketV1>',
+        description: 'Compile one bounded, lineage-bearing node context packet.',
+        parameters: [{ name: 'request', description: 'certified node inputs, sources, and context policy.' }],
+        returns: 'one immutable Context Packet for a sealed attempt.',
       },
     ],
   },
@@ -710,6 +748,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'intentCompiler',
+    summary: 'Provider-neutral Intent compilation service.',
+    description: 'Provider-neutral Intent compilation service.',
+    methods: [
+      {
+        signature: 'abstract compile(request: IntentCompileRequest): Promise<IntentIRV1>',
+        description: 'Compile immutable request input into one content-verifiable Intent IR.',
+        parameters: [{ name: 'request', description: 'immutable raw request and source identities.' }],
+        returns: 'one versioned Intent IR with deterministic provenance.',
+      },
+    ],
+  },
+  {
     key: 'invariants',
     summary: 'Package-owned invariant registry with global and regex-based selection.',
     description: 'Package-owned invariant registry with global and regex-based selection.',
@@ -903,6 +954,67 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Delete one feedback item. Absence is successful regardless of the supplied version; an existing item requires an exact version match.',
         parameters: [{ name: 'request', description: 'Session, message, and observed item version.' }],
         returns: 'the stable absent postcondition, or an explicit failure.',
+      },
+    ],
+  },
+  {
+    key: 'orchestrations',
+    summary: 'Provider-neutral durable orchestration control service.',
+    description: 'Provider-neutral durable orchestration control service.',
+    methods: [
+      {
+        signature: 'abstract compile(request: OrchestrationCompileRequest): Promise<OrchestrationCompilationV1>',
+        description: 'Compile immutable Intent and Graph inputs.',
+        parameters: [{ name: 'request', description: 'immutable compilation input.' }],
+        returns: 'the certified compilation.',
+      },
+      {
+        signature: 'abstract start(request: OrchestrationStartRequest): Promise<OrchestrationRunSnapshot>',
+        description: 'Start one accepted certified compilation.',
+        parameters: [{ name: 'request', description: 'accepted compilation identity and optional approval.' }],
+        returns: 'the new durable run.',
+      },
+      {
+        signature: 'abstract list(): Promise<OrchestrationRunSnapshot[]>',
+        description: 'List known durable runs.',
+        parameters: [],
+        returns: 'bounded snapshots for known runs.',
+      },
+      {
+        signature: 'abstract inspect(runId: OrchestrationRunId): Promise<OrchestrationRunSnapshot>',
+        description: 'Inspect one durable run.',
+        parameters: [{ name: 'runId', description: 'durable run identity.' }],
+        returns: 'the current bounded run snapshot.',
+      },
+      {
+        signature: 'abstract readEvents(request: OrchestrationEventReadRequest): Promise<OrchestrationEventPage>',
+        description: 'Read append-only orchestration events.',
+        parameters: [{ name: 'request', description: 'run cursor and page bounds.' }],
+        returns: 'an ordered event page.',
+      },
+      {
+        signature: 'abstract control(request: OrchestrationControlRequest): Promise<OrchestrationRunSnapshot>',
+        description: 'Apply a revision-checked run control.',
+        parameters: [{ name: 'request', description: 'revision-checked run control.' }],
+        returns: 'the updated run snapshot.',
+      },
+      {
+        signature: 'abstract decide(request: OrchestrationDecisionRequest): Promise<OrchestrationRunSnapshot>',
+        description: 'Apply a revision-checked human decision.',
+        parameters: [{ name: 'request', description: 'revision-checked human decision.' }],
+        returns: 'the updated run snapshot.',
+      },
+      {
+        signature: 'abstract resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promise<OrchestrationRunSnapshot>',
+        description: 'Resolve an indeterminate physical outcome explicitly.',
+        parameters: [{ name: 'request', description: 'explicit indeterminate resolution.' }],
+        returns: 'the updated run snapshot.',
+      },
+      {
+        signature: 'abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>',
+        description: 'Propose one late-bound capability change.',
+        parameters: [{ name: 'request', description: 'requested capability change.' }],
+        returns: 'the durable update receipt.',
       },
     ],
   },
@@ -2868,6 +2980,42 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CancelOptions {\n    keepInbox?: boolean | undefined;\n}',
   },
   {
+    name: 'CapabilityBindingPlanV1',
+    declaration: 'export interface CapabilityBindingPlanV1 {\n    readonly version: 1;\n    readonly catalogRevision: number;\n    readonly catalogSha256: string;\n    readonly capsuleRefs: readonly CapabilityCapsuleRef[];\n    readonly instructions: readonly {\n        readonly ref: CapabilityCapsuleRef;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly resourceRefs: readonly string[];\n    readonly dataRefs: readonly string[];\n    readonly toolsAllow: readonly string[];\n    readonly toolsDeny: readonly string[];\n    readonly mcpServers: readonly string[];\n    readonly secretRefs: readonly string[];\n    readonly guardRefs: readonly string[];\n    readonly resolvedCapabilities: readonly string[];\n    readonly effectiveEffects: CapabilityEffectSet;\n    readonly effectiveReadScopes: readonly string[];\n    readonly effectiveWriteScopes: readonly string[];\n    readonly verification: readonly string[];\n    readonly blockers: readonly {\n        readonly code: string;\n        readonly message: string;\n    }[];\n    readonly planSha256: string;\n}',
+  },
+  {
+    name: 'CapabilityCapsuleManifestV1',
+    declaration: 'export interface CapabilityCapsuleManifestV1 {\n    readonly version: 1;\n    readonly id: string;\n    readonly capsuleVersion: string;\n    readonly kind: \'instruction\' | \'skill\' | \'tool\' | \'mcp\' | \'resource\' | \'data\' | \'secret\' | \'guard\';\n    readonly digest: string;\n    readonly provenance: {\n        readonly publisher: string;\n        readonly sourceRef: string;\n    };\n    readonly applicability: readonly string[];\n    readonly capabilityTags: readonly string[];\n    readonly inputs: readonly string[];\n    readonly outputs: readonly string[];\n    readonly preconditions: readonly string[];\n    readonly postconditions: readonly string[];\n    readonly invariants: readonly string[];\n    readonly consumes: readonly string[];\n    readonly produces: readonly string[];\n    readonly requires: readonly string[];\n    readonly compatible: readonly string[];\n    readonly incompatible: readonly string[];\n    readonly effects: CapabilityEffectSet;\n    readonly bindings: {\n        readonly instructions: readonly string[];\n        readonly skills: readonly string[];\n        readonly toolsAllow: readonly string[];\n        readonly toolsDeny: readonly string[];\n        readonly mcpServers: readonly string[];\n        readonly resourceRefs: readonly string[];\n        readonly dataRefs: readonly string[];\n        readonly secretRefs: readonly string[];\n        readonly guardRefs: readonly string[];\n    };\n    readonly verification: readonly string[];\n    readonly operatorCompatibility: readonly st /* …truncated — full shape in source */',
+  },
+  {
+    name: 'CapabilityEffectSet',
+    declaration: 'export interface CapabilityEffectSet {\n    readonly read: readonly string[];\n    readonly write: readonly string[];\n    readonly execute: readonly string[];\n    readonly network: readonly string[];\n    readonly cost: readonly string[];\n    readonly risk: readonly string[];\n}',
+  },
+  {
+    name: 'CapabilityRequirement',
+    declaration: 'export interface CapabilityRequirement {\n    readonly capability: string;\n    readonly minimumLevel?: number;\n    readonly required: boolean;\n    readonly preferredCapsuleIds?: readonly string[];\n}',
+  },
+  {
+    name: 'CapabilityUpdateReceipt',
+    declaration: 'export interface CapabilityUpdateReceipt {\n    readonly updateId: string;\n    readonly state: \'queued\' | \'awaiting_approval\' | \'rejected\';\n    readonly generation: number;\n    readonly updateSha256: string;\n    readonly errorCode?: string;\n}',
+  },
+  {
+    name: 'CapabilityUpdateRequest',
+    declaration: 'export interface CapabilityUpdateRequest {\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly requestedCapabilities: readonly string[];\n    readonly applyAt: \'next-turn\' | \'immediate\';\n}',
+  },
+  {
+    name: 'CapsuleCatalogSnapshot',
+    declaration: 'export interface CapsuleCatalogSnapshot {\n    readonly revision: number;\n    readonly generatedAt: string;\n    readonly refs: readonly CapabilityCapsuleRef[];\n    readonly catalogSha256: string;\n}',
+  },
+  {
+    name: 'CapsuleResolutionRequest',
+    declaration: 'export interface CapsuleResolutionRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly attempt: number;\n    readonly generation: number;\n    readonly requirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly operatorId?: string;\n    readonly operatorInjectionKinds?: readonly string[];\n}',
+  },
+  {
+    name: 'CapsuleSnapshotRequest',
+    declaration: 'export interface CapsuleSnapshotRequest {\n    readonly capabilityTags?: readonly string[];\n}',
+  },
+  {
     name: 'ClientResponse',
     declaration: 'export interface ClientResponse {\n    type: \'client-response\';\n    rpcId: RpcId;\n    result: RpcResult<unknown>;\n}',
   },
@@ -2968,12 +3116,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ContentBlockType = keyof ContentBlockMap;',
   },
   {
+    name: 'ContextCompileRequest',
+    declaration: 'export interface ContextCompileRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly sourceRefs: readonly ContextSourceRef[];\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly acceptance: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly policy: ContextPolicy;\n}',
+  },
+  {
     name: 'ContextFormed',
     declaration: 'export type ContextFormed = {\n    readonly form?: never;\n} | {\n    readonly form: \'instructions\';\n} | {\n    readonly form: \'catalog\';\n} | {\n    readonly form: \'snapshot\';\n    readonly sections: readonly ContextSnapshotSection[];\n} | {\n    readonly form: \'notice\';\n    readonly summary: string;\n} | {\n    readonly form: \'relay\';\n} | {\n    readonly form: \'recall\';\n};',
   },
   {
+    name: 'ContextPacketV1',
+    declaration: 'export interface ContextPacketV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly included: readonly ContextSourceRef[];\n    readonly summarized: readonly ContextSourceRef[];\n    readonly dropped: readonly {\n        readonly source: ContextSourceRef;\n        readonly reason: string;\n    }[];\n    readonly estimatedTokens: number;\n    readonly tokenBudget: number;\n    readonly truncationReason?: string;\n    readonly lineage: readonly string[];\n    readonly degradedSources: readonly string[];\n    readonly redactions: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly compilerId: string;\n    readonly compilerVersion: string;\n    readonly packetSha256: string;\n}',
+  },
+  {
+    name: 'ContextPolicy',
+    declaration: 'export interface ContextPolicy {\n    readonly maxTokens: number;\n    readonly allowedSourceKinds: readonly ContextSourceRef[\'kind\'][];\n    readonly unavailableSource: \'degrade\' | \'block\';\n}',
+  },
+  {
     name: 'ContextSnapshotSection',
     declaration: 'export interface ContextSnapshotSection {\n    readonly name: string;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'ContextSourceRef',
+    declaration: 'export interface ContextSourceRef {\n    readonly ref: string;\n    readonly kind: \'intent\' | \'requirement\' | \'task\' | \'artifact\' | \'session\' | \'knowledge\' | \'capsule\';\n    readonly required: boolean;\n}',
   },
   {
     name: 'ContinuableCreateRequest',
@@ -3288,6 +3452,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type InboxTarget = \'next-turn\' | \'next-step\';',
   },
   {
+    name: 'IntentCompileRequest',
+    declaration: 'export interface IntentCompileRequest {\n    readonly request: string;\n    readonly sourceRefs?: readonly string[];\n    readonly attachmentRefs?: readonly string[];\n    readonly compilerHint?: string;\n}',
+  },
+  {
+    name: 'IntentCompilerProvenanceV1',
+    declaration: 'export interface IntentCompilerProvenanceV1 {\n    readonly compilerId: string;\n    readonly compilerVersion: string;\n    readonly inputSha256: string;\n    readonly outputSha256: string;\n}',
+  },
+  {
+    name: 'IntentIRV1',
+    declaration: 'export interface IntentIRV1 {\n    readonly version: 1;\n    readonly objective: string;\n    readonly expectedOutcomes: readonly string[];\n    readonly constraints: readonly string[];\n    readonly nonGoals: readonly string[];\n    readonly acceptanceRequirements: readonly string[];\n    readonly sourceRefs: readonly string[];\n    readonly attachmentRefs: readonly string[];\n    readonly riskHints: readonly string[];\n    readonly ambiguities: readonly string[];\n    readonly requiresClarification: boolean;\n    readonly provenance: IntentCompilerProvenanceV1;\n}',
+  },
+  {
     name: 'InvariantFailure',
     declaration: 'export type InvariantFailure = (message: string) => never;',
   },
@@ -3448,6 +3624,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export class LlmRuntime extends Service {\n    constructor(ctx: Context);\n    registerAdapter(providers: string[], adapter: LlmAdapter): AdapterRegistrationHandle;\n    listProviders(): LlmProviderInfo[];\n    registerConfigurableProviders(entries: readonly LlmConfigurableProvider[]): DirectoryRegistrationHandle;\n    listConfigurableProviders(): LlmConfigurableProvider[];\n    registerModelDiscovery(settingsNs: string, discover: (request: LlmModelDiscoveryRequest) => Promise<readonly LlmDiscoveredModel[]>): () => void;\n    async discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest): Promise<LlmDiscoveredModel[]>;\n    providerRetryPolicy(provider: string): ResolvedRetryPolicy;\n    async listModels(provider: string): Promise<LlmModelInfo[]>;\n    async resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    async resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>;\n    async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>;\n    stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
   },
   {
+    name: 'LogicalTaskGraphV1',
+    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
+  },
+  {
     name: 'LspHover',
     declaration: 'export interface LspHover {\n    readonly contents: string;\n    readonly range?: LspRange;\n}',
   },
@@ -3604,6 +3784,82 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
   },
   {
+    name: 'OrchestrationAcceptanceRequirement',
+    declaration: 'export interface OrchestrationAcceptanceRequirement {\n    readonly id: string;\n    readonly description: string;\n    readonly kind: \'operator-completed\' | \'artifact-present\' | \'human-review\';\n}',
+  },
+  {
+    name: 'OrchestrationArtifactRef',
+    declaration: 'export type OrchestrationArtifactRef = Branded<\'OrchestrationArtifactRef\'>;',
+  },
+  {
+    name: 'OrchestrationBlocker',
+    declaration: 'export interface OrchestrationBlocker {\n    readonly code: string;\n    readonly message: string;\n    readonly nodeId?: string;\n}',
+  },
+  {
+    name: 'OrchestrationCompilationV1',
+    declaration: 'export interface OrchestrationCompilationV1 {\n    readonly version: 1;\n    readonly compilationId: string;\n    readonly intent: IntentIRV1;\n    readonly intentRef: OrchestrationArtifactRef;\n    readonly requirementRef?: OrchestrationArtifactRef;\n    readonly graphRef: OrchestrationArtifactRef;\n    readonly graph: LogicalTaskGraphV1;\n    readonly certificate: PlanCertificateV1;\n    readonly requiresClarification: boolean;\n    readonly blockers: readonly OrchestrationBlocker[];\n}',
+  },
+  {
+    name: 'OrchestrationCompileRequest',
+    declaration: 'export interface OrchestrationCompileRequest {\n    readonly intent: IntentCompileRequest;\n    readonly graph: LogicalTaskGraphV1;\n    readonly requirement?: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'OrchestrationControlRequest',
+    declaration: 'export interface OrchestrationControlRequest {\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly action: \'pause\' | \'resume\' | \'cancel\';\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'OrchestrationDecisionRequest',
+    declaration: 'export interface OrchestrationDecisionRequest {\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly nodeId?: string;\n    readonly decision: \'approve\' | \'reject\';\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'OrchestrationEvent',
+    declaration: 'export interface OrchestrationEvent {\n    readonly sequence: number;\n    readonly runId: OrchestrationRunId;\n    readonly nodeId?: string;\n    readonly attempt?: number;\n    readonly generation?: number;\n    readonly type: string;\n    readonly time: string;\n    readonly data: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'OrchestrationEventPage',
+    declaration: 'export interface OrchestrationEventPage {\n    readonly events: readonly OrchestrationEvent[];\n    readonly nextSequence: number;\n}',
+  },
+  {
+    name: 'OrchestrationEventReadRequest',
+    declaration: 'export interface OrchestrationEventReadRequest {\n    readonly runId: OrchestrationRunId;\n    readonly afterSequence?: number;\n    readonly limit?: number;\n}',
+  },
+  {
+    name: 'OrchestrationIndeterminateRequest',
+    declaration: 'export interface OrchestrationIndeterminateRequest {\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly decision: \'abandon\' | \'retry\';\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'OrchestrationNodeSnapshot',
+    declaration: 'export interface OrchestrationNodeSnapshot {\n    readonly id: string;\n    readonly title: string;\n    readonly state: OrchestrationNodeState;\n    readonly attempt: number;\n    readonly capabilityGeneration: number;\n    readonly operatorId?: string;\n    readonly executionPlanRef?: OrchestrationArtifactRef;\n    readonly evidenceRefs: readonly OrchestrationArtifactRef[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'OrchestrationNodeSpecV1',
+    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
+  },
+  {
+    name: 'OrchestrationNodeState',
+    declaration: 'export type OrchestrationNodeState = \'pending\' | \'ready\' | \'awaiting_recompile\' | \'awaiting_approval\' | \'running\' | \'retry_wait\' | \'passed\' | \'failed\' | \'blocked\' | \'indeterminate\' | \'cancelled\';',
+  },
+  {
+    name: 'OrchestrationRetryPolicy',
+    declaration: 'export interface OrchestrationRetryPolicy {\n    readonly maxAttempts: number;\n    readonly backoffMs: number;\n    readonly retryableCodes: readonly string[];\n}',
+  },
+  {
+    name: 'OrchestrationRunId',
+    declaration: 'export type OrchestrationRunId = Branded<\'OrchestrationRunId\'>;',
+  },
+  {
+    name: 'OrchestrationRunSnapshot',
+    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'OrchestrationRunState',
+    declaration: 'export type OrchestrationRunState = \'awaiting_clarification\' | \'awaiting_approval\' | \'running\' | \'paused\' | \'completed\' | \'failed\' | \'cancelled\' | \'indeterminate\';',
+  },
+  {
+    name: 'OrchestrationStartRequest',
+    declaration: 'export interface OrchestrationStartRequest {\n    readonly compilationId: string;\n    readonly approvalRef?: string;\n}',
+  },
+  {
     name: 'PermissionSelect',
     declaration: 'export interface PermissionSelect {\n    options: PresetOption[];\n    currentValue: string;\n}',
   },
@@ -3678,6 +3934,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PhysicalOperatorStopReasonMap',
     declaration: 'export interface PhysicalOperatorStopReasonMap {\n    completed: \'completed\';\n    aborted: \'aborted\';\n    error: \'error\';\n    \'max-tokens\': \'max-tokens\';\n    refusal: \'refusal\';\n}',
+  },
+  {
+    name: 'PlanCertificateV1',
+    declaration: 'export interface PlanCertificateV1 {\n    readonly version: 1;\n    readonly graphSha256: string;\n    readonly certificateSha256: string;\n    readonly nodeIds: readonly string[];\n    readonly maximumRisk: LogicalTaskGraphV1[\'risk\'];\n    readonly requiresApproval: boolean;\n    readonly generatedAt: string;\n}',
   },
   {
     name: 'PostToolDecision',
