@@ -58,6 +58,7 @@ function setupRepo() {
   const dev = join(root, 'dev')
   const consumer = join(root, 'consumer')
   sh(root, ['init', '--bare', '-q', origin])
+  sh(origin, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
   mkdirSync(dev)
   sh(dev, ['init', '-q'])
   sh(dev, ['config', 'user.email', 't@t'])
@@ -66,6 +67,9 @@ function setupRepo() {
   writeFileSync(join(dev, 'a.txt'), 'v1')
   sh(dev, ['add', '.'])
   sh(dev, ['commit', '-q', '-m', 'c1'])
+  // 不继承开发机或 CI runner 的 init.defaultBranch。GitHub macOS runner
+  // 仍可能默认创建 master，而测试夹具的远端契约固定使用 main。
+  sh(dev, ['branch', '-M', 'main'])
   sh(dev, ['tag', '-a', 'v1.0.0', '-m', 'first release\nline2'])
   sh(dev, ['push', '-q', 'origin', 'main', 'v1.0.0'])
   writeFileSync(join(dev, 'a.txt'), 'v2')
@@ -167,6 +171,7 @@ test('no-release：远端没有 v* tag', async () => {
   const origin = join(root, 'origin.git')
   const consumer = join(root, 'consumer')
   sh(root, ['init', '--bare', '-q', origin])
+  sh(origin, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
   mkdirSync(join(root, 'dev'))
   sh(join(root, 'dev'), ['init', '-q'])
   sh(join(root, 'dev'), ['config', 'user.email', 't@t'])
@@ -175,6 +180,7 @@ test('no-release：远端没有 v* tag', async () => {
   writeFileSync(join(root, 'dev', 'a.txt'), 'x')
   sh(join(root, 'dev'), ['add', '.'])
   sh(join(root, 'dev'), ['commit', '-q', '-m', 'c'])
+  sh(join(root, 'dev'), ['branch', '-M', 'main'])
   // 只打非语义 tag（compat-*），不算发布版本。
   sh(join(root, 'dev'), ['tag', '-a', 'compat-260805', '-m', 'compat'])
   sh(join(root, 'dev'), ['push', '-q', 'origin', 'main', 'compat-260805'])
@@ -920,6 +926,7 @@ function setupRepoLateTag() {
   const dev = join(root, 'dev')
   const consumer = join(root, 'consumer')
   sh(root, ['init', '--bare', '-q', origin])
+  sh(origin, ['symbolic-ref', 'HEAD', 'refs/heads/main'])
   mkdirSync(dev)
   sh(dev, ['init', '-q'])
   sh(dev, ['config', 'user.email', 't@t'])
@@ -928,6 +935,7 @@ function setupRepoLateTag() {
   writeFileSync(join(dev, 'a.txt'), 'v1')
   sh(dev, ['add', '.'])
   sh(dev, ['commit', '-q', '-m', 'c1'])
+  sh(dev, ['branch', '-M', 'main'])
   sh(dev, ['tag', '-a', 'v1.0.0', '-m', 'first release'])
   sh(dev, ['push', '-q', 'origin', 'main', 'v1.0.0'])
   // —— 设备在旧版时代 clone（本地 tags 只有 v1.0.0）——

@@ -21,6 +21,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
+      - name: Bind trusted policy to this repository
+        env:
+          DSH_REPOSITORY: ${{ github.repository }}
+        run: >-
+          node -e 'const fs=require("node:fs"); const [organization,repository]=process.env.DSH_REPOSITORY.split("/");
+          const path=".github/issue-management/config.json"; const config=JSON.parse(fs.readFileSync(path,"utf8"));
+          fs.writeFileSync(path,JSON.stringify({...config,organization,repository},null,2)+"\n")'
       - name: Validate pull request
         env:
           GITHUB_TOKEN: ${{ github.token }}

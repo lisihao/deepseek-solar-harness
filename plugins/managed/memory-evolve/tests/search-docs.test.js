@@ -11,7 +11,7 @@ import {
   SearchAborted, contentCandidateLimit, createSearchDocsController, createSearcher,
   defaultRoots, isAllTypes, matchContentInText, matchQuery, normalizeExts,
   nodeSearchFileContents, parseRgContentOutput, probeContentFile,
-  renderSearchResult, resolveContentSearchArgs, resolveProviders,
+  registerSearchProvider, renderSearchResult, resolveContentSearchArgs, resolveProviders,
   searchDocsCommand, searchDocsToolDefinition, searchFileContents,
 } from '../lib/search-docs.js'
 
@@ -71,9 +71,16 @@ test('resolveProviders：auto 按平台排序并探测（本机 darwin → mdfin
   const names = chain.map((p) => p.name)
   assert.ok(names[0] === 'mdfind', `期望 mdfind 优先，实际 ${names.join(',')}`)
   assert.ok(names.includes('walk'))
-  // 显式顺序
-  const explicit = resolveProviders(baseConfig({ searchDocsProviders: ['rg', 'walk'] }), 'darwin')
-  assert.deepEqual(explicit.map((p) => p.name), ['rg', 'walk'])
+  // rg 是可选外部命令：安装时位于 walk 前，未安装时必须被探测过滤。
+  assert.ok(
+    ['mdfind,rg,walk', 'mdfind,walk'].includes(names.join(',')),
+    `意外的 auto provider 链：${names.join(',')}`,
+  )
+  // 用自包含 provider 验证显式顺序，不依赖 runner 是否安装 rg。
+  registerSearchProvider('test-available', () => ({ name: 'test-available', probe: () => true, search: async () => [] }))
+  registerSearchProvider('test-unavailable', () => ({ name: 'test-unavailable', probe: () => false, search: async () => [] }))
+  const explicit = resolveProviders(baseConfig({ searchDocsProviders: ['test-available', 'test-unavailable', 'walk'] }), 'darwin')
+  assert.deepEqual(explicit.map((p) => p.name), ['test-available', 'walk'])
   // 未知 provider 报错
   assert.throws(() => resolveProviders(baseConfig({ searchDocsProviders: ['nope'] }), 'darwin'))
 })
@@ -212,7 +219,7 @@ test('控制器：启用注册、禁用注销、状态', () => {
   assert.equal(registered?.name, 'memory_evolve_search_local_files', '启用后注册工具')
   const status = ctrl.status()
   assert.equal(status.enabled, true)
-  assert.deepEqual(status.providers, ['mdfind', 'rg', 'walk'])
+  assert.deepEqual(status.providers, resolveProviders(baseConfig()).map((provider) => provider.name))
   enabled = false
   ctrl.sync()
   assert.equal(registered, null, '禁用后注销工具')
