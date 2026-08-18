@@ -87,6 +87,9 @@ try {
 
   const residentRows = rowsWithId('resident-operators')
   const dualModeRows = rowsWithId('physical-operator-dual-mode')
+  const orchestrationRows = rowsWithId('orchestration-local')
+  const orchestrationToolRows = rowsWithId('tool-orchestration')
+  const orchestrationUiRows = rowsWithId('ui-orchestration')
   const teamRows = rowsWithId('agent-teams')
   const remoteRows = rowsWithId('remote-web-ui')
   const billingRows = rowsWithId('web-billing')
@@ -97,6 +100,19 @@ try {
   }
   if (dualModeRows.length !== 1 || dualModeRows[0].name !== '@deepseek-ai/dsh-physical-operator-resident') {
     throw new Error('verify-packaged-composition-smoke: physical operator dual-mode router is missing')
+  }
+  if (orchestrationRows.length !== 1
+    || orchestrationRows[0].name !== '@deepseek-ai/dsh-orchestration-local'
+    || orchestrationRows[0].config?.autoStart !== true) {
+    throw new Error('verify-packaged-composition-smoke: durable orchestration Provider is not composed exactly once')
+  }
+  if (orchestrationToolRows.length !== 1
+    || orchestrationToolRows[0].name !== '@deepseek-ai/dsh-tool-orchestration') {
+    throw new Error('verify-packaged-composition-smoke: orchestration tool Consumer is not composed exactly once')
+  }
+  if (orchestrationUiRows.length !== 1
+    || orchestrationUiRows[0].name !== '@deepseek-ai/dsh-ui-orchestration') {
+    throw new Error('verify-packaged-composition-smoke: orchestration Web Consumer is not composed exactly once')
   }
   if (teamRows.length !== 1 || teamRows[0].name !== '@nanmicoder/dsh-agent-teams') {
     throw new Error('verify-packaged-composition-smoke: AgentTeams bundle is not composed exactly once')
@@ -157,6 +173,9 @@ try {
     productRows: {
       resident: residentRows[0].name,
       physicalRouter: dualModeRows[0].name,
+      orchestrationProvider: orchestrationRows[0].name,
+      orchestrationTool: orchestrationToolRows[0].name,
+      orchestrationUi: orchestrationUiRows[0].name,
       agentTeams: teamRows[0].name,
       memberPersonaPlacement: teamRows[0].config.memberPersonaPlacement,
       remoteWebUi: remoteRows[0].name,
