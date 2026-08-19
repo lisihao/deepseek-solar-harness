@@ -1,6 +1,6 @@
 ---
 name: dsh-code-as-harness
-description: Enforce the complete Codex-created Code-as-Harness workflow for every DeepSeek Solar Harness task, including planning, coding, debugging, review, managed-plugin changes, upstream synchronization, Desktop delivery, release, and completion claims. Use before any repository mutation and again before commit, push, merge, release, deployment, or reporting completion.
+description: Apply the Codex-created Code-as-Harness workflow to governed DeepSeek Solar Harness work such as governance, security, migration, repository-wide, Desktop delivery, release, and explicitly requested verification tasks. Use before governed mutation and once on the stable outgoing change set.
 ---
 
 # DSH Code-as-Harness
@@ -11,7 +11,7 @@ Treat Code-as-Harness as exactly the user-created `agent-development-governance`
 
 Before acting, read the complete authoritative skill at `plugins/managed/governance/skill/agent-development-governance/SKILL.md` and its directly required governance contract. This DSH skill adds repository-specific routing; it does not weaken or restate the authoritative skill.
 
-## Start every task
+## Start governed work
 
 1. Resolve the repository root with `git rev-parse --show-toplevel`. Refuse generated runtime directories, iCloud physical storage, another task's worktree, or a dirty worktree whose changes are not owned by the task.
 2. Read root and nearest nested `AGENTS.md`, the owning Agent Note or ADR, and the affected component's test and release policies.
@@ -38,7 +38,9 @@ For Desktop code or package changes, read and execute `products/desktop/AGENTS.m
 
 ## Verify and admit completion
 
-Run the selected full gates against the complete outgoing diff and write evidence into the worktree Git directory:
+During implementation, run only the narrowest checks that can change the next action. Run full verification once for the stable outgoing change set. If delivery includes a commit, commit the intended files after focused checks, then run the one final full verification against that exact commit. Do not run full verification both before and after an unchanged commit. If the task does not create a commit, run it once after the worktree is stable.
+
+Write final evidence into the worktree Git directory:
 
 ```bash
 ROOT=$(git rev-parse --show-toplevel)
@@ -47,10 +49,10 @@ python3 "$HARNESS" verify --project "$ROOT" --scope auto --level full --changed-
 python3 "$HARNESS" attest --project "$ROOT" --report @git --require-level full
 ```
 
-Fix failures at their source and rerun the invalidated gates. Never call skipped, pending, or stale evidence successful. When the DSH governance tools are available, only `governance_submit_completion` may request accepted completion; inspect `governance_trace` for the durable decision.
+Fix failures at their source and rerun only invalidated gates while iterating; produce a single final full report after the resulting bytes are stable. Never call skipped, pending, or stale evidence successful. When the DSH governance tools are available and admission is required, only `governance_submit_completion` may request accepted completion; inspect `governance_trace` for the durable decision.
 
-After the implementation commit, rerun full verification and attestation for the exact committed bytes before delivery. Push only after acceptance, fetch the remote branch, and prove the remote SHA equals the local delivered SHA. Branch protection, required CI, runtime acceptance, and Desktop installation evidence remain independent authorities.
+Push only when the user requested delivery or the task's accepted workflow explicitly includes a remote update. After a push, fetch the remote branch and prove the remote SHA equals the local delivered SHA. Branch protection, required CI, runtime acceptance, and Desktop installation evidence remain independent authorities.
 
 ## Report evidence
 
-Report each selected gate as `gate | command | result | duration | evidence`, followed by local SHA, remote SHA, PR or release URL, runtime evidence when applicable, and every `warn`, `error`, or `pending` item. Never claim completion from code generation, a local build, a created PR, or an observed process alone.
+Report each selected gate as `gate | command | result | duration | evidence`, followed by local SHA and, only when delivery occurred, remote SHA, PR or release URL, and runtime evidence. Include every `warn`, `error`, or `pending` item. Never claim completion from code generation, a local build, a created PR, or an observed process alone.

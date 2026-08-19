@@ -39,14 +39,16 @@ For GenesisPod-specific routing and commands, read [genesispod-profile.md](refer
 
 ### 3. Verify before claiming completion
 
-Plan the final gate set, then execute it:
+Use narrow relevant gates during implementation. When the project or user requires full governance, run full verification once for the stable outgoing change set. If the task creates a commit, commit after focused checks and run the final full verification on that exact commit; do not run full verification both before and after an unchanged commit.
+
+Plan the final gate set, then execute it once:
 
 ```bash
 python3 "$SKILL_DIR/scripts/governance.py" plan --project "$PROJECT_ROOT" --scope auto --level full
 python3 "$SKILL_DIR/scripts/governance.py" verify --project "$PROJECT_ROOT" --scope auto --level full
 ```
 
-For a machine-checkable completion record, write and re-check an attestation bound to the profile, HEAD, changed paths, and current file bytes:
+For a machine-checkable completion record when full governance is required, write and re-check an attestation bound to the profile, HEAD, changed paths, and current file bytes:
 
 ```bash
 python3 "$SKILL_DIR/scripts/governance.py" verify --project "$PROJECT_ROOT" --scope auto --level full --report "$PROJECT_ROOT/.git/governance-attestation.json"
@@ -55,7 +57,7 @@ python3 "$SKILL_DIR/scripts/governance.py" attest --project "$PROJECT_ROOT" --re
 
 Use `--dry-run` first when the repository is large. Use an explicit `--scope frontend`, `--scope backend`, or `--scope full` if the change range cannot be derived from the current worktree. Use `--changed-from <ref>` for committed branch changes.
 
-Completion requires fresh output from every selected gate. Record:
+Completion requires fresh output from every selected gate that applies to the task. Record:
 
 - gate ID and exact command;
 - result and duration;
@@ -66,16 +68,16 @@ Completion requires fresh output from every selected gate. Record:
 
 Do not equate local hooks with CI or a successful command with full project compliance. Branch protection and external CI settings require separate evidence.
 
-### 4. Push after verified functionality
+### 4. Push only when delivery requires it
 
-When every selected required gate passes and the requested functionality has passed its relevant acceptance probe, push the current development branch. Functional acceptance must be backed by a test, executable probe, or inspected user-facing result; an agent statement that the feature looks correct is not evidence.
+Push only when the user requested delivery or the accepted task workflow explicitly includes a remote update. Functional acceptance must be backed by a test, executable probe, or inspected user-facing result; an agent statement that the feature looks correct is not evidence.
 
 1. Commit only the intended files. Preserve unrelated user changes and follow the repository's branch policy; do not turn this rule into a direct default-branch push when the repository requires a development branch or pull request.
-2. Because a commit changes `HEAD`, run the required post-commit verification and re-attest the exact commit before delivery. In DeepSeek-Solar-Harness, request `governance_submit_completion` after the fresh full attestation so the delivery guard can observe accepted status.
-3. Push the current branch with a normal non-force push as soon as the gates, functional acceptance, and fresh attestation are all `ok`. Do not ask for confirmation before this push.
+2. Run the required final verification once on the exact committed change set and attest it before delivery. Do not repeat a passing full verification when HEAD and governed inputs are unchanged. In DeepSeek-Solar-Harness, request `governance_submit_completion` after a required fresh full attestation so the delivery guard can observe accepted status.
+3. When remote delivery is in scope, push the current branch with a normal non-force push after the gates, functional acceptance, and required attestation are all `ok`.
 4. Read back the remote branch SHA and require it to equal the local SHA. Observe the required remote CI when available; if it fails, continue fixing and re-verifying instead of reporting delivery as successful.
 
-Stop before pushing only for a concrete credential, permission, protected-branch, remote-divergence, network, or safety failure. Report the exact failing command and retain the verified local evidence; never bypass the failed authority.
+When delivery is in scope, stop before pushing only for a concrete credential, permission, protected-branch, remote-divergence, network, or safety failure. Report the exact failing command and retain the verified local evidence; never bypass the failed authority.
 
 ### 5. Review governance changes as production code
 

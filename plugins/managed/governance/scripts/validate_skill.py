@@ -57,10 +57,12 @@ def validate_frontmatter() -> None:
 def validate_delivery_rule() -> None:
     content = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     required = (
-        "### 4. Push after verified functionality",
+        "run full verification once for the stable outgoing change set",
+        "do not run full verification both before and after an unchanged commit",
+        "### 4. Push only when delivery requires it",
+        "Push only when the user requested delivery",
         "Functional acceptance must be backed by a test, executable probe, or inspected user-facing result",
-        "run the required post-commit verification and re-attest the exact commit before delivery",
-        "Do not ask for confirmation before this push",
+        "Do not repeat a passing full verification when HEAD and governed inputs are unchanged",
         "Read back the remote branch SHA and require it to equal the local SHA",
         "if it fails, continue fixing and re-verifying",
     )
