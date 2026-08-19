@@ -68,6 +68,7 @@ const styles = {
     background: 'var(--ds-color-primary, #2563eb)', color: '#fff', cursor: 'pointer', fontSize: '13px',
   } as const,
   error: { color: 'var(--ds-color-danger, #dc2626)', fontSize: '13px' },
+  success: { color: 'var(--ds-color-success, #15803d)', fontSize: '13px' },
   select: {
     width: '100%', boxSizing: 'border-box', padding: '7px 10px', borderRadius: '8px',
     border: '1px solid var(--ds-color-border, #d1d5db)', background: 'var(--ds-color-bg, #fff)',
@@ -87,6 +88,7 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
   const [draft, setDraft] = useState<LunaDraft>({ providerName: '', targets: [] })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
+  const [notice, setNotice] = useState<string | undefined>(undefined)
 
   const describe = async (syncDraft: boolean): Promise<boolean> => {
     const response = await api.settings.describe({})
@@ -150,6 +152,7 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
   )
 
   const setRow = (index: number, key: keyof TargetDraft, value: string): void => {
+    setNotice(undefined)
     setDraft(current => ({
       ...current,
       targets: current.targets.map((row, i) => (
@@ -177,9 +180,11 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
     }))
   }
   const addRow = (): void => {
+    setNotice(undefined)
     setDraft(current => ({ ...current, targets: [...current.targets, blankTarget()] }))
   }
   const removeRow = (index: number): void => {
+    setNotice(undefined)
     setDraft(current => ({
       ...current,
       targets: current.targets.filter((_, i) => i !== index),
@@ -191,6 +196,7 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
     if (namespace === undefined || blockers.length > 0 || writeDisabled) return
     setBusy(true)
     setError(undefined)
+    setNotice(undefined)
     try {
       const response = await api.settings.update({
         ns: NS,
@@ -211,7 +217,9 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
         return
       }
       setNamespace(response.result.value)
+      setDraft(draftFromValue(response.result.value.value))
       setError(undefined)
+      setNotice('设置已保存并即时生效')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -223,6 +231,7 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
     if (namespace === undefined || writeDisabled) return
     setBusy(true)
     setError(undefined)
+    setNotice(undefined)
     try {
       const response = await api.settings.mutate({
         ns: NS,
@@ -246,6 +255,7 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
       setNamespace(response.result.value)
       setDraft(draftFromValue(response.result.value.value))
       setError(undefined)
+      setNotice('已恢复默认设置并即时生效')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -268,7 +278,10 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
           value={draft.providerName}
           placeholder="Luna Vision Bridge"
           disabled={writeDisabled}
-          onChange={event => setDraft(current => ({ ...current, providerName: event.target.value }))}
+          onChange={event => {
+            setNotice(undefined)
+            setDraft(current => ({ ...current, providerName: event.target.value }))
+          }}
         />
       </div>
       <div style={styles.field}>
@@ -373,6 +386,7 @@ export function LunaSection(props: LunaSectionProps): ReactNode {
         ? <p style={styles.error}>{blockers.join('；')}</p>
         : null}
       {error === undefined ? null : <p style={styles.error}>{error}</p>}
+      {notice === undefined ? null : <p role="status" style={styles.success}>{notice}</p>}
       <div style={styles.actions}>
         <button
           type="button"
