@@ -17,7 +17,8 @@ type ToolArgs = {
   readonly run_id?: string
 }
 
-const GUIDANCE = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
+/** Model-visible policy for durable graphs and per-node Resident operator routing. */
+export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds. Both native-subscription Resident operators are available to the Scheduler: Codex is normally suited to implementation, debugging, and tests; Claude Code is normally suited to architecture, review, analysis, research, and long-context work. Leave operator.preferredIds unset for intelligent per-node routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
 
 const VALUE_SCHEMA = {
   type: 'object',
@@ -60,7 +61,7 @@ function parseGraph(value: string | undefined): LogicalTaskGraphV1 {
 
 /** Register one compact orchestration tool and its automatic-entry policy. */
 export function apply(ctx: Context): void {
-  ctx.systemPrompt.section({ name: 'tool:orchestration', order: 118, text: GUIDANCE })
+  ctx.systemPrompt.section({ name: 'tool:orchestration', order: 118, text: orchestrationGuidance })
   ctx.tools.register(defineTool({
     name: 'orchestration',
     description: 'Compile/start a durable Resident TaskGraph, list runs, or inspect one run. Complex low-risk work may be started automatically; risky work remains awaiting human approval.',
