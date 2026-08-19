@@ -4,7 +4,7 @@
     {
       "name": "Resident Physical Operators, mode-aware subscription qualification, and task presentation",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "7b87464619b4527cd77cb6cc925406db17fdcdb4"
+      "commit": "fbc6e844b4c01e91a872b2c4cf7b7c95daaa7b3e"
     },
     {
       "name": "Persistent TaskGraph orchestration and compiler capability seams",
@@ -54,7 +54,7 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "067d8b19f61292fbc56d91ace731ce392c0909474f8e2f3790feb1b89aefe922",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "96d5c311c71398200b9ff2357d02c4ea6b25073e1b7ca255a50578a309021d42",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "7233efee9683b7e6f4d8ce1c78aeaeffeb3fe8d5d67f517ffab44870c154ab6a",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "8815be244d994fad12e9181c27c91815c052fbd37bceda06e059436ea032f02e",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "8c6b19c05733fe9311b95c4512f9756f0cef693e17522629184d9c4ca31e1c3f",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "dbc5a3ab9f3b7c4e0f5debdda6795e80203a45e0051679632039fd10f5d698fc",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "9c7ad84bb62df1a2c6703a5a2ff339571d47fd1ff13683a7d0c1a16ce7ce18f1",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "3bf07e79bcbbdc863b133d810ac0a507eb9df9ac53674f47bc3c3454e54e06d6",
