@@ -121,7 +121,7 @@ describe('terminal-bash real shell', () => {
     try {
       const { ctx, root, agent } = await harness('danger-full-access')
       const created = await ctx.terminals.spawn(agent, { type: 'shell', name: 'main', cwd: root })
-      expect(created.motd).toContain('dsh> ')
+      expect(created.motd).toContain('__DSH_PERSISTENT_BASH_PROMPT__ ')
 
       const first = ctx.terminals.startSend(agent, created.sessionId, { text: 'export KEEP=ok; cd /', submit: true })
       expect((await first.done).waitReason).toBe('stdin_read')
