@@ -8,6 +8,6 @@ This directory contains immutable release inputs that are installed into the Des
 - Anchored Standard is the accepted eight-file snapshot whose promotion trackers pass `includeSubagents: true`, keeping delegated workers on the same two-tool first turn as their captain.
 - Remote Web UI is built from `lisihao/dsh-web-ui` commit `7b99d9eb69202199fffe378b289425b224691d23` and restores a visible expanded-sidebar entry.
 - Billing is built from `lisihao/dsh-web-billing` commit `5b3974f386fc744f7d099f85273c3136636e9026`, keeps cumulative usage visible in the sidebar without crowding composer controls, and separates local DSH usage estimates from the official DeepSeek balance.
-- Luna Vision Bridge is built from `lisihao/dsh-luna-vision-bridge` commit `0173d93fab9f480d9a7548ac65cf04c3488fb8bb`; version `0.1.2` keeps generated bridge model IDs aligned and maps Electron ASAR launchers to their executable unpacked paths.
+- Luna Vision Bridge is built from this monorepo's managed source at commit `363c8915bd2acaed6e311cb960de2e574b5ff918`; version `0.1.3` runs subscription-authenticated vision turns without the surrounding Codex developer harness and makes successful settings writes visible.
 
 `manifest.json` is the authority for every vendored byte. `yarn verify:vendor` rejects missing, extra, or changed files and rejects an Anchored Standard snapshot that drops the delegated-worker gate. The tarballs remain out of the packaged `.app`; Electron Builder packages their installed modules instead.
