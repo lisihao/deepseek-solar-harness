@@ -26,6 +26,7 @@ export function validateMonorepo({
   desktopVersion,
   governanceManifest,
   governanceProfile,
+  governanceWorkflow,
   pathExists,
   subtreeImports,
   gitlinks,
@@ -84,6 +85,11 @@ export function validateMonorepo({
   if (!Array.isArray(relatedTests?.command) || !relatedTests.command.includes('--maxWorkers=1')) {
     errors.push('related-tests gate must use --maxWorkers=1 for deterministic SDK timing')
   }
+  const sourceBuild = governanceWorkflow?.indexOf('- run: corepack pnpm run build:lib') ?? -1
+  const fullVerification = governanceWorkflow?.indexOf('- run: python3 tools/agent-development-governance/governance.py verify') ?? -1
+  if (sourceBuild < 0 || fullVerification < 0 || sourceBuild > fullVerification) {
+    errors.push('Solar governance CI must build source libraries before full verification')
+  }
   for (const required of [
     '.agents/skills/dsh-code-as-harness/SKILL.md',
     'plugins/managed/governance/skill/agent-development-governance/SKILL.md',
@@ -133,6 +139,7 @@ export function verifyRepository(root) {
     desktopVersion: readJson('products/desktop/package.json').version,
     governanceManifest: readJson('tools/agent-development-governance/manifest.json'),
     governanceProfile: readJson('.agent-governance/profile.json'),
+    governanceWorkflow: readFileSync(resolve(root, '.github/workflows/solar-governance.yml'), 'utf8'),
     pathExists: path => existsSync(resolve(root, path)),
     subtreeImports: parseSubtreeImports(log),
     gitlinks,

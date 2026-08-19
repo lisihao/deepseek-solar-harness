@@ -16,6 +16,8 @@ DeepSeek-Solar-Harness 自有 `.agent-governance/profile.json`。Profile 用根�
 
 Quick 验证会检查 Git 空白、解析 Profile JSON，并校验 Solar 产品身份、导入源码来源、许可证、Code-as-Harness 身份和 `DSH-desktop-v<major>.<minor>.<patch>` 标签合同。Full 验证会按需增加根 typecheck、lint、基于 `origin/solar` 的相关 Vitest、文档同步和发布门禁。Desktop 与每个受管组件执行自己的包管理、测试、类型、构建或文档命令，不会被误当成根 package。
 
+Solar CI 在 full 验证前构建根 Host 与 Client 库，因为以源码链接的受管插件会从 `lib/` 解析对外发布的 package export。组件命令仍使用自身原生方式，不依赖较早验证命令的构建副作用。Monorepo 校验器会拒绝遗漏这一准备步骤，或将其放在 full 验证之后的 CI 连线。
+
 Code-as-Harness 实现就是用户创建的 `agent-development-governance` 仓库，该仓库已导入 `plugins/managed/governance`。它自己的导出器把经过 digest 校验的可执行 bundle 安装到 `tools/agent-development-governance`；仓库 skill 只是路由适配器。Cordis 治理插件继续承担 Session 状态机与 attestation 适配。远端 CI 和受保护 `solar` 分支评审仍是独立权威。
 
 ## Alternatives considered
@@ -30,8 +32,12 @@ Code-as-Harness 实现就是用户创建的 `agent-development-governance` 仓�
 
 **省略本地行为测试。** 拒绝，因为 typecheck 与 lint 不能证明运行时行为，也不能为源码变更的 attestation 提供充分依据。
 
+**依赖文档验证准备源码链接的 package。** 拒绝，因为文档验证只构建 Host 库，并使后续组件检查依赖执行顺序；全新 CI checkout 中的 Client package export 仍不可用。
+
 ## Consequences
 
 DSH 编码 Session 可以发现自身规则、按 digest 校验导出的实现、根据待交付差异选择根命令与组件原生命令，并生成绑定项目的 full attestation。未处于已采用治理的 Git worktree 内的 Session 保持 unmanaged，不再进入无法完成的循环。嵌套工作目录证明仓库根，而非某个 package 子目录。
 
 Full 源码验证依赖已 fetch 的 `origin/solar` 引用；共享文件影响多个包时，相关测试集可能较大。堆叠分支可能包含下层分支的测试，因为稳定基线是受保护的集成分支；这会增加本地耗时，但不会遗漏待交付行为。远端 CI 仍决定能否合并，并可能执行比本地 Profile 更广的检查。
+
+Solar CI job 在组件验证前付出一次完整的根库构建成本。这使全新 checkout 中以源码链接的插件保持确定性；本地 checkout 已有最新产物时，组件检查可直接复用。
