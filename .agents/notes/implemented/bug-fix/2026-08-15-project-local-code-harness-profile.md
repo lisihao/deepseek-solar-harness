@@ -16,6 +16,8 @@ DeepSeek-Solar-Harness owns `.agent-governance/profile.json`. The Profile identi
 
 Quick verification checks Git whitespace, parses the Profile JSON, and validates Solar product identity, imported-source provenance, licenses, Code-as-Harness identity, and the `DSH-desktop-v<major>.<minor>.<patch>` tag contract. Full verification adds root type checking, linting, related Vitest coverage against `origin/solar`, documentation synchronization, and release gates where applicable. Desktop and each managed component run their native package-manager, test, type, build, or documentation commands instead of being treated as root packages.
 
+Solar CI builds the root Host and Client libraries before full verification because source-linked managed plugins resolve published package exports from `lib/`. Component commands remain native and do not depend on build side effects from an earlier verification command. The monorepo validator rejects CI wiring that omits this preparation or places it after full verification.
+
 The Code-as-Harness implementation is exactly the user-created `agent-development-governance` repository imported at `plugins/managed/governance`. Its own exporter installs a digest-checked executable bundle under `tools/agent-development-governance`; the repository skill is only a routing adapter. The Cordis governance plugin remains the Session state-machine and attestation adapter. Remote CI and protected `solar` branch review remain independent authorities.
 
 ## Alternatives considered
@@ -30,8 +32,12 @@ The Code-as-Harness implementation is exactly the user-created `agent-developmen
 
 **Omit local behavior tests.** Rejected because type checking and linting do not prove runtime behavior and cannot justify an attestation for source changes.
 
+**Rely on documentation verification to prepare source-linked packages.** Rejected because documentation verification builds only the Host libraries and makes later component checks order-dependent; Client package exports remain unavailable in a clean CI checkout.
+
 ## Consequences
 
 A DSH coding Session can discover its rules, verify the exported implementation by digest, select root and component-native commands from the outgoing diff, and produce a project-bound full attestation. Sessions outside an adopted Git worktree remain unmanaged instead of entering an impossible completion loop. Nested working directories certify the repository root rather than a package subdirectory.
 
 Full source verification depends on a fetched `origin/solar` reference and may run a broad related-test set when shared files affect many packages. Stacked branches can include tests from lower layers because the stable base is the protected integration branch; this costs additional local time but does not omit outgoing behavior. Remote CI still decides merge readiness and may run broader checks than the local Profile.
+
+The Solar CI job pays for one complete root library build before component verification. This keeps fresh checkouts deterministic for source-linked plugins at the cost of setup time that local component checks can reuse when their checkout already has current artifacts.

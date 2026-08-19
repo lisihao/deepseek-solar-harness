@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-15-project-local-code-harness-profile.md
-2026-08-15-project-local-code-harness-profile.md: dbdc196cf57d22173393fd5f33e0a284a931a117
-2026-08-15-project-local-code-harness-profile.zh.md: 3b51ca70e78e035b331577782d5cdd0e18979870
+2026-08-15-project-local-code-harness-profile.md: 5302db8f77054edd1205eb0dfef150dd8aff3a66
+2026-08-15-project-local-code-harness-profile.zh.md: f0ea79861295db9f7cbcd9c0ff913ecb1fbf80bf

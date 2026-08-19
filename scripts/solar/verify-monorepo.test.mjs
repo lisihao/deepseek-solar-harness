@@ -37,6 +37,10 @@ function validInput() {
     governanceProfile: {
       gates: [{ id: 'related-tests', command: ['pnpm', 'exec', 'vitest', 'run', '--maxWorkers=1'] }],
     },
+    governanceWorkflow: [
+      '- run: corepack pnpm run build:lib',
+      '- run: python3 tools/agent-development-governance/governance.py verify --project .',
+    ].join('\n'),
     pathExists: () => true,
     subtreeImports: new Set([
       ...managed.map(entry => `${entry.path}\0${entry.accepted_sha}`),
@@ -68,4 +72,10 @@ test('rejects the nondeterministic related-test worker count', () => {
   const input = validInput()
   input.governanceProfile.gates[0].command = ['pnpm', 'exec', 'vitest', 'run', '--maxWorkers=4']
   assert.match(validateMonorepo(input).join('\n'), /maxWorkers=1/u)
+})
+
+test('rejects full governance verification before source libraries are built', () => {
+  const input = validInput()
+  input.governanceWorkflow = '- run: python3 tools/agent-development-governance/governance.py verify --project .'
+  assert.match(validateMonorepo(input).join('\n'), /build source libraries before full verification/u)
 })
