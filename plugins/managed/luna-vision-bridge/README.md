@@ -38,7 +38,7 @@ target provider / target model（任意纯文本下游，按所选模型路由�
 - 每个下游 target 的 provider 已在 DSH 注册且纯文本可用（如 `deepseek-official`）。
 - `codex` CLI 可以从启动 DSH 的 Host 环境执行，并已完成认证。
 
-插件自带 `scripts/read-image-luna.sh`，不读取或依赖全局 `~/.dsh/scripts/read-image-luna.sh`。内置脚本复用现有识图 skill 背后的 Codex Luna 调用方式，执行 `codex exec --json`；Host adapter 负责解析最终 `agent_message`，不依赖终端文本格式，也不让下游模型再决定是否触发 skill。这样图片发送一定会先经过 Luna，且不会被下游模型的 text-only capability gate 拒绝。
+插件自带 `scripts/read-image-luna.sh`，不读取或依赖全局 `~/.dsh/scripts/read-image-luna.sh`。内置脚本使用当前 Codex 登录订阅执行 `codex exec --json`，同时关闭用户配置、项目说明、skills、plugins、apps 和工具，使识图成为只接收图片与转写提示词的隔离轮次。Host adapter 负责解析最终 `agent_message`，不依赖终端文本格式，也不让下游模型再决定是否触发 skill。这样图片发送一定会先经过 Luna，不会把用户的 Codex 开发环境注入视觉转写，也不会被下游模型的 text-only capability gate 拒绝。
 
 ## 本地开发
 
@@ -110,7 +110,7 @@ dsh plugin --profile web add "link:/absolute/path/to/dsh-luna-vision-bridge"
      - `高级`（可选折叠）：`桥接模型 id`；零配置默认项为稳定 id `deepseek-v4-flash`，新组合留空时自动生成 `<provider>-<model>`，必须互不相同
    - 用"＋ 添加下游模型"增加组合、"删除"移除、"恢复默认"清空用户覆盖
    - 模型目录不可用时自动降级为手动输入框
-3. 点击**保存**即生效（无需重启，模型选择器立即出现新组合）
+3. 点击**保存**即生效（无需重启，模型选择器立即出现新组合），表单会显示“设置已保存并即时生效”；恢复默认后也会显示相应确认
 
 浏览器端表单通过 `settings.update` 写入用户设置层，Host 端仍会做完整校验（重复 `bridgeModel`、`provider` 与 `bridgeProvider` 相同等会被拒绝并提示）。表单字段也可在 `settings.yaml` 的 `luna-vision-bridge:` 段手动编辑，两者等价。其余字段（Luna 转写、缓存等）与下游无关，全局共用，一般保持默认即可。
 
@@ -182,7 +182,7 @@ dsh plugin --profile web add "link:/absolute/path/to/dsh-luna-vision-bridge"
 - 识图发生在 adapter 层，因此首次发送会等待 Luna 完成后才开始下游模型流式输出。
 - 一个请求包含多张新图时目前按顺序识别，优先控制 Codex 并发和失败语义。
 - 描述缓存是插件自己的派生数据，不会显示为额外聊天消息；原始图片仍保留在会话历史中。
-- 设置表单里的 `provider`/`model` 是文本输入：需要填写下游 provider 和模型的确切 id。
+- 设置表单优先从实时模型目录提供 `provider`/`model` 下拉选择；目录不可用或所选 provider 没有模型条目时降级为手动输入确切 id。
 
 ## 退出条件
 

@@ -54,6 +54,26 @@ exec "$CODEX_COMMAND" exec \
   --sandbox read-only \
   --skip-git-repo-check \
   --ignore-rules \
+  --ignore-user-config \
+  -c 'skills.include_instructions=false' \
+  -c 'project_doc_max_bytes=0' \
+  -c 'include_apps_instructions=false' \
+  -c 'include_collaboration_mode_instructions=false' \
+  -c 'include_environment_context=false' \
+  -c 'include_permissions_instructions=false' \
+  --disable plugins \
+  --disable apps \
+  --disable skill_search \
+  --disable shell_tool \
+  --disable unified_exec \
+  --disable view_image \
+  --disable multi_agent \
+  --disable browser_use \
+  --disable in_app_browser \
+  --disable computer_use \
+  --disable image_generation \
+  --disable hooks \
+  --disable memories \
   --ephemeral \
   --color never \
   --cd "$(dirname "$IMAGE_PATH")" \

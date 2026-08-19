@@ -1,6 +1,6 @@
 {
   "name": "@ycp424c/dsh-luna-vision-bridge",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Transcribe DSH native image attachments with Codex Luna, then delegate the text-enriched request to configurable text-only providers",
   "host": "lib/index.js",
   "client": "lib/client.js",
