@@ -6230,9 +6230,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@ycp424c/dsh-luna-vision-bridge@file:./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.2.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
-  version: 0.1.2
-  resolution: "@ycp424c/dsh-luna-vision-bridge@file:./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.2.tgz#./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.2.tgz::hash=2f2c26&locator=deepseek-harness-desktop%40workspace%3A."
+"@ycp424c/dsh-luna-vision-bridge@file:./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.3.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.3
+  resolution: "@ycp424c/dsh-luna-vision-bridge@file:./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.3.tgz#./dsh-plugin-desktop/vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.3.tgz::hash=f18bd9&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     schemastery: "npm:^3.18.0"
   peerDependencies:
@@ -6242,7 +6242,7 @@ __metadata:
     "@deepseek-ai/dsh-settings": ">=0.1.0-rc.5 <0.2.0"
   bin:
     dsh-read-image-luna: scripts/read-image-luna.sh
-  checksum: 10c0/6b866a3f81b676fb36345594bd90eec8413ef1bfe4a8347d1a763544644571a24049eacb136ba29a0f49cd6ce4ac0f9d515942ecc9427b6fb0f284ae90519749
+  checksum: 10c0/95c417f65af54e0b527dd2998a0636b5696ab86ba55628a5f93463aee1bad2aa4e410e3ec961c76d3b181b4d39305b16a5ec6a59a40623409f16d11a2b0230dd
   languageName: node
   linkType: hard
 
@@ -7328,7 +7328,7 @@ __metadata:
     "@types/node": "npm:^22.20.0"
     "@types/react": "npm:^18"
     "@types/react-dom": "npm:^18"
-    "@ycp424c/dsh-luna-vision-bridge": "file:vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.2.tgz"
+    "@ycp424c/dsh-luna-vision-bridge": "file:vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.3.tgz"
     dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.3.tgz"
     electron: "npm:43.4.0"
     electron-builder: "npm:26.15.3"
