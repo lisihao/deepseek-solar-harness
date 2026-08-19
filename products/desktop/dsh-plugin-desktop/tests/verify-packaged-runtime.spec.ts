@@ -1,17 +1,21 @@
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  FORBIDDEN_PACKAGED_CLIENT_BRANDING_MARKERS,
   REQUIRED_PACKAGED_RUNTIME_ENTRIES,
+  REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS,
   REQUIRED_UNPACKED_PACKAGE_SPECIFIERS,
   REQUIRED_UNPACKED_RUNTIME_ENTRIES,
   REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES,
   resolvePackagedAsarPath,
   resolvePackagedUnpackedRoot,
   verifyPackagedRuntime,
+  verifyPackagedClientBranding,
   type ArchiveLister,
   type FileProbe,
   type PackageResolver,
   type PackagedRuntimeContext,
+  type TextReader,
 } from '../scripts/verify-packaged-runtime.ts'
 
 function context(appOutDir: string, electronPlatformName: string): PackagedRuntimeContext {
@@ -30,6 +34,12 @@ function completePackageResolver(unpackedRoot: string): PackageResolver {
   return specifier => join(unpackedRoot, 'resolved', `${specifier.replaceAll('/', '-')}.js`)
 }
 
+function validClientBundle(): string {
+  return REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS.join('\n')
+}
+
+const readValidClient = vi.fn<TextReader>(() => validClientBundle())
+
 describe('packaged desktop runtime verification', () => {
   it.each([
     [
@@ -47,7 +57,7 @@ describe('packaged desktop runtime verification', () => {
     const unpackedRoot = `${expectedPath}.unpacked`
     const resolvePackage = vi.fn<PackageResolver>(completePackageResolver(unpackedRoot))
 
-    verifyPackagedRuntime(context('/build', platform), list, exists, resolvePackage)
+    verifyPackagedRuntime(context('/build', platform), list, exists, resolvePackage, readValidClient)
 
     expect(resolvePackagedAsarPath(context('/build', platform))).toBe(expectedPath)
     expect(list).toHaveBeenCalledOnce()
@@ -101,6 +111,7 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       filename => filename !== missingPath,
       completePackageResolver(unpackedRoot),
+      readValidClient,
     )).toThrow(`missing required physical entries: ${missing}`)
   })
 
@@ -119,6 +130,7 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       () => true,
       resolvePackage,
+      readValidClient,
     )).toThrow(
       `packaged runtime at ${unpackedRoot} cannot resolve required package export dsh-plugin-desktop/profiles`,
     )
@@ -138,8 +150,39 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       () => true,
       resolvePackage,
+      readValidClient,
     )).toThrow(
       `required package export @deepseek-ai/dsh-base/package.json resolved outside ${unpackedRoot}: ${escapedPath}`,
     )
   })
+
+  it('accepts a packaged Client that mounts the bottom product marker', () => {
+    const unpackedRoot = '/build/app.asar.unpacked'
+    const readText = vi.fn<TextReader>(() => validClientBundle())
+
+    expect(() => verifyPackagedClientBranding(unpackedRoot, readText)).not.toThrow()
+    expect(readText).toHaveBeenCalledWith(join(unpackedRoot, 'lib/client.js'))
+  })
+
+  it.each(REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS)(
+    'fails loud when packaged Client bottom-bar marker %s is absent',
+    (missing) => {
+      const source = REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS
+        .filter(marker => marker !== missing)
+        .join('\n')
+
+      expect(() => verifyPackagedClientBranding('/build/app.asar.unpacked', () => source))
+        .toThrow(`missing bottom-bar markers: ${missing}`)
+    },
+  )
+
+  it.each(FORBIDDEN_PACKAGED_CLIENT_BRANDING_MARKERS)(
+    'fails loud when packaged Client contains legacy sidebar marker %s',
+    (forbidden) => {
+      const source = `${validClientBundle()}\n${forbidden}`
+
+      expect(() => verifyPackagedClientBranding('/build/app.asar.unpacked', () => source))
+        .toThrow(`contains legacy sidebar markers: ${forbidden}`)
+    },
+  )
 })
