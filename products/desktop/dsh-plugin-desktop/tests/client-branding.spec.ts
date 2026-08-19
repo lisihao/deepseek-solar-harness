@@ -94,9 +94,9 @@ describe('Solar desktop branding', () => {
     })
 
     try {
-      const dispose = installSolarBrand('2.5.1')
-      const label = `DSH Desktop v2.5.1 · ${SOLAR_BRAND}`
-      expect(solarBrandLabel('2.5.1')).toBe(label)
+      const dispose = installSolarBrand('2.5.2')
+      const label = `DSH Desktop v2.5.2 · ${SOLAR_BRAND}`
+      expect(solarBrandLabel('2.5.2')).toBe(label)
       expect(marker.className).toBe('dshDesktopSolarBrand')
       expect(marker.textContent).toBe(label)
       expect(marker.title).toBe(label)

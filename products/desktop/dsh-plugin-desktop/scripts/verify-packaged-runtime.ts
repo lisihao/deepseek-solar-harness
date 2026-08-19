@@ -1,6 +1,6 @@
 /** Fail-loud verification of the runtime entries sealed into Electron's app.asar. */
 
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import { listPackage } from '@electron/asar'
@@ -134,8 +134,22 @@ export type ArchiveLister = (archivePath: string, options: { isPack: boolean }) 
 /** Injectable physical-file probe used by focused tests. */
 export type FileProbe = (filename: string) => boolean
 
+/** Injectable UTF-8 reader used to inspect the emitted Client bundle. */
+export type TextReader = (filename: string) => string
+
 /** Injectable Node package resolver used by focused tests. */
 export type PackageResolver = (specifier: string) => string
+
+/** Markers that prove the packaged Client mounts the product identity below the application. */
+export const REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS = [
+  'installSolarBrand',
+  'dshDesktopBrandBar',
+] as const
+
+/** Legacy sidebar-only marker forbidden from every accepted Desktop package. */
+export const FORBIDDEN_PACKAGED_CLIENT_BRANDING_MARKERS = [
+  'dshDesktopSolarBrandRail',
+] as const
 
 /**
  * Resolve the platform-specific archive produced by Electron Builder.
@@ -239,11 +253,51 @@ export function verifyUnpackedPackageResolution(
 }
 
 /**
+ * Verify the emitted Client bundle carries the bottom product marker and no legacy sidebar rail.
+ * @param unpackedRoot - absolute path to app.asar.unpacked.
+ * @param readText - UTF-8 reader for the emitted Client bundle.
+ * @returns Nothing; failure rejects stale or regressed branding before signing.
+ */
+export function verifyPackagedClientBranding(
+  unpackedRoot: string,
+  readText: TextReader = filename => readFileSync(filename, 'utf8'),
+): void {
+  const clientPath = join(unpackedRoot, 'lib/client.js')
+  let clientSource: string
+  try {
+    clientSource = readText(clientPath)
+  }
+  catch (cause) {
+    throw new Error(
+      `dsh-plugin-desktop: failed to inspect packaged Client branding at ${clientPath}`,
+      { cause },
+    )
+  }
+
+  const missing = REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS.filter(
+    marker => !clientSource.includes(marker),
+  )
+  const forbidden = FORBIDDEN_PACKAGED_CLIENT_BRANDING_MARKERS.filter(
+    marker => clientSource.includes(marker),
+  )
+  if (missing.length > 0 || forbidden.length > 0) {
+    const failures = [
+      missing.length > 0 ? `missing bottom-bar markers: ${missing.join(', ')}` : '',
+      forbidden.length > 0 ? `contains legacy sidebar markers: ${forbidden.join(', ')}` : '',
+    ].filter(Boolean)
+    throw new Error(
+      `dsh-plugin-desktop: packaged Client branding at ${clientPath} is invalid: ${failures.join('; ')}`,
+    )
+  }
+}
+
+/**
  * Verify Electron Builder's completed application before signing begins.
  * @param context - Electron Builder's afterPack context.
  * @param list - ASAR listing implementation.
  * @param exists - physical-file probe for the unpacked CLI dependency tree.
  * @param resolvePackage - package resolver anchored at the physical root manifest.
+ * @param readText - UTF-8 reader for the emitted Client bundle.
  * @returns Nothing; failure rejects the package before signing.
  */
 export function verifyPackagedRuntime(
@@ -251,6 +305,7 @@ export function verifyPackagedRuntime(
   list: ArchiveLister = listPackage,
   exists: FileProbe = existsSync,
   resolvePackage?: PackageResolver,
+  readText?: TextReader,
 ): void {
   verifyPackagedAsar(resolvePackagedAsarPath(context), list)
   const unpackedRoot = resolvePackagedUnpackedRoot(context)
@@ -263,6 +318,7 @@ export function verifyPackagedRuntime(
       `dsh-plugin-desktop: packaged runtime at ${unpackedRoot} is missing required physical entries: ${missing.join(', ')}`,
     )
   }
+  verifyPackagedClientBranding(unpackedRoot, readText)
   verifyUnpackedPackageResolution(unpackedRoot, resolvePackage)
 }
 
