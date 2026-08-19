@@ -4,12 +4,12 @@
     {
       "name": "Resident Physical Operators, mode-aware subscription qualification, and task presentation",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "830bc68a05eb021f055425e05c6b1d36dee8be2d"
+      "commit": "fbc6e844b4c01e91a872b2c4cf7b7c95daaa7b3e"
     },
     {
       "name": "Persistent TaskGraph orchestration and compiler capability seams",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "df1e2d75bb34c7b828d8a4bc7f4172cb4e7f3df0"
+      "commit": "7b87464619b4527cd77cb6cc925406db17fdcdb4"
     },
     {
       "name": "GenesisPod and ThunderOMLX Remote Modules",
@@ -54,7 +54,7 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "067d8b19f61292fbc56d91ace731ce392c0909474f8e2f3790feb1b89aefe922",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "96d5c311c71398200b9ff2357d02c4ea6b25073e1b7ca255a50578a309021d42",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "7233efee9683b7e6f4d8ce1c78aeaeffeb3fe8d5d67f517ffab44870c154ab6a",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "f767e71dab3d777219e3c7ee1e18f2929885bfa7bcade5c5818a573b398d366a",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "8c6b19c05733fe9311b95c4512f9756f0cef693e17522629184d9c4ca31e1c3f",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "dbc5a3ab9f3b7c4e0f5debdda6795e80203a45e0051679632039fd10f5d698fc",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "9c7ad84bb62df1a2c6703a5a2ff339571d47fd1ff13683a7d0c1a16ce7ce18f1",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "3bf07e79bcbbdc863b133d810ac0a507eb9df9ac53674f47bc3c3454e54e06d6",
@@ -65,8 +65,8 @@
     "dsh-packages/deepseek-ai-dsh-context-compiler-0.1.0-rc.5.tgz": "08e6ceb3ea1085b513dee645ba50f6be26bcf5d1eea506c01e66aa8f50e10b54",
     "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "e85b26a1c68a88b3821b455d3ee8f2a03b287b2bd6f978e3df85d7f3df9fe79b",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "36dccc73a2c6909a815d6eec638d5e927fc15660e96514ff0f949e5cc3f08748",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "15be9b1e5301ebe2fed3ac3fd06e8f4c1a6e998d993028d8f42703e61a01da0a",
-    "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "7d71c74fe4e6827cd973dd7de1944d94a9d401c49b5d68c96bbcc1de2653ff8d",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "aadb51946dd6efb4cc14e6ee64a5756a7d1f7f0ca967feb73434d1801b3545d7",
+    "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "b03dabafccd0fe854dae81b337c87b7d224c807ad1fb57fa7a9764c8dea0ffbb",
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "107936a2367cc91ade439fd80c8e48db79ba9855412eabd189505c797830e624",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "c7d152150ef35513a3817a1f401d8421443b85e119b690ed610178a0ddeaeccb",
     "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "2d164f0d9be7b6013848002194913a6ef1cdb3ffa2e181447f9f705a402c3a03",
