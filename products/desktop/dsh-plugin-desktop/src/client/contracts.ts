@@ -41,7 +41,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'details': { kind: 'single'; scope: 'session'; owner: Record<never, never> }
     /** Frame-wide additive overlays. */
     'shell.overlay': { kind: 'list'; scope: 'root' }
-    /** Standard additive footer seat used by the visible Solar product marker. */
+    /** Standard additive footer seat used by Desktop status actions. */
     'sidebar.footer.action': { kind: 'list'; scope: 'root'; owner: DesktopSidebarFooterActionOwnerProps }
   }
 }

@@ -52,6 +52,8 @@ describe('advanced desktop layout', () => {
       installSolarBrandStyles()
       expect(css).toMatch(/:root \{ --dsh-desktop-popup-underlay: #fff; \}/)
       expect(css).toMatch(/body\[data-ds-dark-theme\] \{ --dsh-desktop-popup-underlay: #151517; \}/)
+      expect(css).toMatch(/body\[data-dsh-desktop-brand-bar\] \{[^}]*padding-bottom: var\(--dsh-desktop-brand-bar-height\);/)
+      expect(css).toMatch(/\.dshDesktopSolarBrand \{[^}]*position: fixed;[^}]*bottom: 0;[^}]*height: var\(--dsh-desktop-brand-bar-height\);[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/)
       expect(css).toMatch(/\.dshDesktopOperatorStrategyPanel \{[^}]*background: linear-gradient\(var\(--dsw-alias-bg-base, transparent\), var\(--dsw-alias-bg-base, transparent\)\), var\(--dsh-desktop-popup-underlay\);/)
     }
     finally {

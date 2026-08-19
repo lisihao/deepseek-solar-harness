@@ -1,7 +1,8 @@
-import { isValidElement, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply } from '../src/client/index.ts'
+import { installSolarBrand, solarBrandLabel } from '../src/client/SolarBrand.tsx'
 import {
   physicalOperatorDashboardRefreshMs,
   physicalOperatorEffortLabel,
@@ -16,13 +17,6 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 }))
 
 const SOLAR_BRAND = 'DSH - DeepSeek Harness的Solar分支，目标是您的All-in-One AI工作台'
-
-function visibleText(node: ReactNode): string {
-  if (typeof node === 'string' || typeof node === 'number') return String(node)
-  if (Array.isArray(node)) return node.map(visibleText).join('')
-  if (isValidElement<{ children?: ReactNode }>(node)) return visibleText(node.props.children)
-  return ''
-}
 
 describe('Solar desktop branding', () => {
   it('renders product surfaces and executes the logged operator routing command', async () => {
@@ -56,12 +50,11 @@ describe('Solar desktop branding', () => {
     const resident = registrations.find(({ options }) => options.id === 'resident-physical-operators')
     const orchestration = registrations.find(({ options }) => options.id === 'durable-orchestrations')
     const routing = registrations.find(({ options }) => options.id === 'physical-operator-routing')
-    expect(entry).toBeDefined()
+    expect(entry).toBeUndefined()
     expect(resident).toBeDefined()
     expect(orchestration).toBeDefined()
     expect(routing).toBeDefined()
-    expect(visibleText(entry?.component({ wide: true }))).toBe(`DSH Desktop v2.0.1${SOLAR_BRAND}`)
-    expect(visibleText(entry?.component({ wide: false }))).toBe('v2.0.1')
+    expect(effect).toHaveBeenCalledWith(expect.any(Function), 'desktop: Solar brand bar')
 
     const injected = routing?.options.inject?.('session-1') as {
       select: (policy: 'codex') => Promise<string | null>
@@ -80,5 +73,43 @@ describe('Solar desktop branding', () => {
     expect(physicalOperatorEffortLabel('high')).toBe('高 · 复杂任务的深度推理')
     expect(physicalOperatorDashboardRefreshMs(false)).toBe(60_000)
     expect(physicalOperatorDashboardRefreshMs(true)).toBe(10_000)
+  })
+
+  it('mounts one complete versioned line below the window content and retracts it', () => {
+    const marker = {
+      className: '',
+      dataset: {} as Record<string, string>,
+      setAttribute: vi.fn(),
+      title: '',
+      textContent: '',
+      remove: vi.fn(),
+    }
+    const body = {
+      dataset: {} as Record<string, string>,
+      appendChild: vi.fn(),
+    }
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => marker),
+      body,
+    })
+
+    try {
+      const dispose = installSolarBrand('2.5.1')
+      const label = `DSH Desktop v2.5.1 · ${SOLAR_BRAND}`
+      expect(solarBrandLabel('2.5.1')).toBe(label)
+      expect(marker.className).toBe('dshDesktopSolarBrand')
+      expect(marker.textContent).toBe(label)
+      expect(marker.title).toBe(label)
+      expect(marker.setAttribute).toHaveBeenCalledWith('aria-label', label)
+      expect(body.dataset.dshDesktopBrandBar).toBe('')
+      expect(body.appendChild).toHaveBeenCalledWith(marker)
+
+      dispose()
+      expect(marker.remove).toHaveBeenCalledOnce()
+      expect(body.dataset.dshDesktopBrandBar).toBeUndefined()
+    }
+    finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
