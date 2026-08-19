@@ -55,6 +55,32 @@ export interface ResidentDaemonOptions {
   readonly heartbeatIntervalMs?: number
 }
 
+/**
+ * Normalize trusted product Driver failures at the daemon authority boundary.
+ *
+ * This boundary classification is intentionally duplicated from product-level
+ * parsing so bundled class identity or a Driver regression cannot collapse an
+ * actionable native-subscription failure into a generic result error.
+ *
+ * @param error Driver failure caught by the daemon.
+ * @param aborted Whether caller-owned interruption was already requested.
+ * @returns One stable Resident protocol error for durable receipt storage.
+ */
+export function normalizeResidentDriverError(error: unknown, aborted: boolean): ResidentOperatorError {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/claude code.*(?:oauth access token has expired|re-authenticate to continue|\b401\b)/isu.test(message)) {
+    return new ResidentOperatorError(
+      'Claude Code subscription authentication expired; run `claude auth login` and retry the node.',
+      'AUTH_MODE_MISMATCH',
+    )
+  }
+  if (/claude code.*(?:certificate verification|unable to connect to api)/isu.test(message)) {
+    return new ResidentOperatorError(message, 'RUNTIME_UNAVAILABLE')
+  }
+  if (error instanceof ResidentOperatorError) return error
+  return new ResidentOperatorError(message, aborted ? 'RUNTIME_UNAVAILABLE' : 'INVALID_RESULT')
+}
+
 function stringParam(params: Record<string, unknown>, name: string): string {
   const value = params[name]
   if (typeof value !== 'string' || value.length === 0) {
@@ -416,12 +442,7 @@ export class ResidentDaemon {
       this.store.settle(commandId, result)
     } catch (error) {
       const aborted = controller.signal.aborted
-      const normalized = error instanceof ResidentOperatorError
-        ? error
-        : new ResidentOperatorError(
-          error instanceof Error ? error.message : String(error),
-          aborted ? 'RUNTIME_UNAVAILABLE' : 'INVALID_RESULT',
-        )
+      const normalized = normalizeResidentDriverError(error, aborted)
       this.store.fail(
         commandId,
         normalized.code,
