@@ -56,6 +56,28 @@ export interface DriverExecuteRequest {
 
 const EFFORTS = new Set<PhysicalOperatorReasoningEffort>(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
 
+/**
+ * Build the credential-scrubbed Claude subprocess environment.
+ *
+ * Claude Code's standalone macOS runtime otherwise uses only its bundled CA
+ * set. Native subscription traffic must honor certificates trusted by the
+ * owner's macOS system store, while preserving an explicit caller override.
+ *
+ * @param parent Credential-scrubbed parent environment to extend.
+ * @param platform Platform whose native trust behavior should be selected.
+ * @returns A new subprocess environment without mutating the supplied parent.
+ */
+export function claudeEnvironment(
+  parent: NodeJS.ProcessEnv = scrubbedParentEnv(),
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const environment = { ...parent }
+  if (platform === 'darwin' && environment.NODE_USE_SYSTEM_CA === undefined) {
+    environment.NODE_USE_SYSTEM_CA = '1'
+  }
+  return environment
+}
+
 function reasoningEffort(value: string | undefined): PhysicalOperatorReasoningEffort | undefined {
   return value !== undefined && EFFORTS.has(value as PhysicalOperatorReasoningEffort)
     ? value as PhysicalOperatorReasoningEffort
@@ -103,7 +125,7 @@ async function claudeModels(): Promise<ResidentModelOption[]> {
     options: {
       abortController: controller,
       cwd: process.cwd(),
-      env: scrubbedParentEnv(),
+      env: claudeEnvironment(),
       persistSession: false,
       disallowedTools: ['AskUserQuestion'],
     },
@@ -183,6 +205,29 @@ function claudeStopReason(result: SDKResultMessage): ResidentStopReason {
   return 'error'
 }
 
+/**
+ * Convert a terminal Claude API result into the stable Resident error taxonomy.
+ *
+ * @param result Terminal result emitted by the Claude Agent SDK.
+ * @returns A classified Resident error, or undefined for a successful result.
+ */
+export function claudeResultFailure(result: SDKResultMessage): ResidentOperatorError | undefined {
+  if (!result.is_error) return undefined
+  const detail = 'result' in result && typeof result.result === 'string' && result.result.trim().length > 0
+    ? result.result.trim()
+    : 'Claude Code returned an unspecified error result'
+  if (/(?:oauth access token has expired|re-authenticate to continue|\b401\b)/iu.test(detail)) {
+    return new ResidentOperatorError(
+      'Claude Code subscription authentication expired; run `claude auth login` and retry the node.',
+      'AUTH_MODE_MISMATCH',
+    )
+  }
+  if (/(?:certificate verification|unable to connect to api)/iu.test(detail)) {
+    return new ResidentOperatorError(`Claude Code runtime is unavailable: ${detail}`, 'RUNTIME_UNAVAILABLE')
+  }
+  return new ResidentOperatorError(`Claude Code returned an error result: ${detail}`, 'INVALID_RESULT')
+}
+
 /** Claude Code Agent SDK Driver using persisted native subscription Sessions. */
 export class ClaudeCodeResidentDriver implements ResidentProductDriver {
   readonly operatorId = 'claude-code' as const
@@ -255,7 +300,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
       options: {
         abortController: controller,
         cwd: request.workspace,
-        env: scrubbedParentEnv(),
+        env: claudeEnvironment(),
         persistSession: true,
         model: request.profile.model,
         ...request.profile.effort === undefined ? {} : {
@@ -311,6 +356,8 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
         'APPROVAL_REQUIRED',
       )
     }
+    const resultFailure = claudeResultFailure(final)
+    if (resultFailure !== undefined) throw resultFailure
     const stopReason = claudeStopReason(final)
     const output = final.subtype === 'success' && final.result.trim().length > 0
       ? [{ type: 'text' as const, text: final.result }]

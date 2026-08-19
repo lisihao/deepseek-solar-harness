@@ -18,6 +18,7 @@ type TestResult = { output: Array<{ type: 'text'; text: string }>; stopReason: '
 class FakeResidentClient {
   starts: string[] = []
   available = true
+  unavailableOperators = new Set<string>()
   defer = false
   failNext = 0
   private readonly deferredResolvers: Array<() => void> = []
@@ -27,7 +28,7 @@ class FakeResidentClient {
     return ['codex', 'claude-code'].map(operatorId => ({
       operatorId,
       product: operatorId,
-      available: this.available,
+      available: this.available && !this.unavailableOperators.has(operatorId),
       authentication: 'native-subscription',
       productVersion: 'test',
       protocolHash: 'test',
@@ -387,6 +388,26 @@ describe('orchestration daemon', () => {
     fake.defer = false
     fake.resolveAllDeferred()
     await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+  })
+
+  it('does not replace an unavailable explicitly preferred operator', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-pinned-'))
+    const root = join(home, 'o')
+    const fake = new FakeResidentClient()
+    fake.unavailableOperators.add('claude-code')
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const compilation = await client.compile({ intent: { request: 'Pinned provider fixture.' }, graph: graph(home) })
+    const started = await client.start({ compilationId: compilation.compilationId })
+    const failed = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'failed')
+    expect(fake.starts).toHaveLength(1)
+    expect(fake.starts[0]).toMatch(/^codex:/u)
+    expect(failed.nodes.find(node => node.id === 'review')).toMatchObject({
+      state: 'blocked',
+      blockers: [{ code: 'ORCHESTRATION_UNAVAILABLE' }],
+    })
   })
 
   it('serializes conflicting scopes and retries only an explicitly retryable failure', async () => {

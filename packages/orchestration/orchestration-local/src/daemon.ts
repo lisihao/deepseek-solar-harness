@@ -962,6 +962,12 @@ export class OrchestrationDaemon {
     const available = new Set(providers.filter(value => value.available && value.authentication === 'native-subscription').map(value => value.operatorId))
     const preferred = spec.operator?.preferredIds ?? []
     for (const id of preferred) if (available.has(id)) return id
+    if (preferred.length > 0) {
+      throw new OrchestrationError(
+        `none of the explicitly preferred Resident physical operators are available: ${preferred.join(', ')}`,
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
     const role = `${spec.role} ${spec.task}`.toLowerCase()
     const inferred = /architect|review|analysis|research|long.context/u.test(role) ? 'claude-code' : 'codex'
     if (available.has(inferred)) return inferred
