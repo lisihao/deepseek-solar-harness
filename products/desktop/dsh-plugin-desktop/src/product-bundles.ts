@@ -1,6 +1,7 @@
 /** Desktop-owned product bundles whose executable code is sealed into the App. */
 
 export const RESIDENT_BUNDLE_PACKAGE = '@deepseek-ai/dsh-resident-operators'
+export const ORCHESTRATION_BUNDLE_PACKAGE = '@deepseek-ai/dsh-orchestrations'
 export const AGENT_TEAMS_PACKAGE = '@nanmicoder/dsh-agent-teams'
 export const AGENT_TEAMS_ROW_ID = 'agent-teams'
 export const REMOTE_WEB_UI_PACKAGE = '@linxin666/dsh-remote-web-ui'
@@ -29,6 +30,7 @@ export const DEFAULT_REMOTE_MODULE_INSTANCES = [
 
 export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
+  [ORCHESTRATION_BUNDLE_PACKAGE, 'orchestration-local'],
   [AGENT_TEAMS_PACKAGE, AGENT_TEAMS_ROW_ID],
   [REMOTE_WEB_UI_PACKAGE, 'remote-web-ui'],
   [WEB_BILLING_PACKAGE, 'web-billing'],
@@ -38,6 +40,7 @@ export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
 
 export const PRODUCT_BUNDLE_PACKAGES = [
   RESIDENT_BUNDLE_PACKAGE,
+  ORCHESTRATION_BUNDLE_PACKAGE,
   AGENT_TEAMS_PACKAGE,
   REMOTE_WEB_UI_PACKAGE,
   WEB_BILLING_PACKAGE,

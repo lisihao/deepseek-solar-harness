@@ -10,13 +10,15 @@ Electron 可执行文件只包含最小启动代码。它获取单实例锁、�
 
 两种呈现模式都复用现有 loopback Web carrier。profile 挂载普通 `dsh-base` 与 `dsh-web-app` bundle；Host 把 HTTP 与 WebSocket surface 绑定到 `127.0.0.1` 的临时端口；Electron 在沙箱 renderer 中加载该同源页面。Electron 不维护自有插件 roster，不使用 preload bridge，renderer 也不会获得原始 Electron API。
 
-desktop package 拥有普通 Host 与 Web Client 两个 face。它的 Client face 会在两种模式下校验 Host 提供的模式与平台 marker。兼容模式随后直接返回，不注册 service、slot、样式或呈现；高级模式则安装下文所述的 desktop layout service 与 root 呈现。两种模式下，第三方 Web client 都继续使用普通 DSH 模块图。
+desktop package 拥有普通 Host 与 Web Client 两个 face。它的 Client face 会校验 Host 提供的模式、平台与产品版本 marker。两种模式都会在窗口内容下方的保留区域挂载一条不可交互的单行产品标记，并继续把 Desktop 操作放在普通 additive slot 中；兼容模式随后停止，不提供 layout service 或 root 呈现，高级模式则安装下文所述的 desktop layout service 与 root 呈现。两种模式下，第三方 Web client 都继续使用普通 DSH 模块图。
 
 托盘中的 profile 选择器会列出现有 profile，以及可延迟创建的 `desktop` 与 `web` 默认项。可选 profile 必须直接按顺序组合 `dsh-base` 与 `dsh-web-app`；headless、损坏或已经内嵌 desktop bundle 的 profile 仍会显示，但不可选择。只有 `desktop` 是 Launcher 管理的 profile：它会修复安装方拥有的前缀，同时保留第三方 bundle 的相对顺序。其他被选 profile 的 manifest、用户 patch 与依赖均保持不变。Launcher 只会为当前 generation 在 `dsh-web-app` 后插入自有 desktop layer，不会把该 layer 持久化到被选 bundle 列表。
 
 Desktop 产品层还会提供 Resident Physical Operators 与 AgentTeams，但不会把任一 bundle 持久化到用户选择的 profile。普通聊天模型选择旁只显示一个“协作”控件，不再把算子、原生模型和强度呈现为三个同级选择器。每个未配置的 Session 使用“智能协作”：主模型负责对话，并在非简单任务中判断是否委派给 Codex 或 Claude Code。人工策略按 Session 记录，可关闭委派或让符合条件的任务优先使用某个产品；短问答仍留在主模型。产品专属的原生模型和推理/思考强度统一收进该控件的高级偏好，两者缺省都按任务推荐；首轮实际采用的组合会按“算子 + 规范化工作区”锁定到 Resident Session，只有 idle 且 revision 匹配的 reset 才能改变。每次打开控件都会立即刷新原生订阅模型目录，并在面板可见时缩短刷新周期，避免启动初期竞态让选项持续禁用一分钟。Desktop 会识别旧版未标记的策略事件，而新版策略与 profile 事件带有可忽略扩展标记，因此旧 reader 也能冷加载同一 Session，不会拒绝日志。底层 physical-operator 请求在调用方省略 `mode` 时仍缺省为 `ephemeral`，从而保持 Provider 兼容；智能协作会对仓库、多轮和需要跨重启连续的工作显式优先使用 `resident`。在 macOS 上，launcher 会把用户原生的 `claude` 与 `codex` 命令解析为仅 owner 可访问的私有 wrapper，Resident daemon 使用产品订阅登录态和原生 session 连续性，禁止 API key fallback。Daemon 独立于 Electron generation，因此应用重启只会断开客户端，不会删除 receipt、lease、artifact 或原生产品 session。
 
 普通 sidebar 会在两种呈现模式下增加一个纯新增的 **物理算子** action。它会打开同源、只读的状态面板，显示 Provider 资格、持久 Session、最新 Receipt 状态与有界进度事件。Host route 按需读取 `ctx.residentOperators`，不会创建 Desktop 自有的 Resident 状态库。面板还会说明智能协作与插件能力契约：模型工作使用 `physical_operator` 工具，Host 插件通过注入 `ctx.physicalOperators` 执行，可信管理/状态插件则可注入 `ctx.residentOperators` 检查状态。基于实时 descriptor、tag 与 execution mode 的指引会主动触发委派；策略可见且已记录，不会引入隐藏分类器或第二调度权威。
+
+产品层还会把封装后的 `@deepseek-ai/dsh-orchestrations` Bundle 作为独立插件能力挂载。Service Definition 分别拥有 Intent、Context、Capsule、TaskGraph 和 Orchestration 契约；Local Provider 拥有持久 daemon、SQLite 状态、Artifact Store 与调度写入；Tool 和 Web UI 只消费 `ctx.orchestrations`。新增的 **编排** sidebar 工作台通过同源投影展示 Run、DAG 依赖、Compiler/Capsule/Context 阶段、已封印 ExecutionPlan、算子选择、Attempt、Generation、Evidence、Blocker 与事件。暂停、恢复、取消、批准、拒绝和不确定执行处置都调用公共 Service seam，不直接修改 daemon 存储。移除该 Bundle 就会完整移除这组能力，不改变聊天、Workflow 或物理算子。
 
 打包内的 `anchored-standard` preset 是 system-trust 产品输入，并排在同名上游 preset root 之前。它的首轮 gate 会覆盖 delegated agent，因此 AgentTeams worker 会与主 agent 一样从 `bash` 和 `str_replace_editor` 两个 bootstrap 工具开始，而不是被当作已经 promoted。AgentTeams 还会把 member protocol 放入首条 user prompt，不再替换所选 preset 的 persona。若用户 profile 已声明 AgentTeams，产品层不会重复加载；最终 patch 仍会强制这一 prompt placement。
 

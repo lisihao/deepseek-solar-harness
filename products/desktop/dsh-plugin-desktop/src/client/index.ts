@@ -7,8 +7,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
-import { SolarBrand, solarBrandLabel } from './SolarBrand.tsx'
+import { installSolarBrand } from './SolarBrand.tsx'
 import { ResidentOperatorsPanel } from './ResidentOperatorsPanel.tsx'
+import { OrchestrationsPanel } from './OrchestrationsPanel.tsx'
 import {
   PhysicalOperatorRoutingControl,
   type PhysicalOperatorRoutingInjected,
@@ -32,18 +33,19 @@ export const inject = [
 export function apply(ctx: ClientContext): void {
   const environment = parseDesktopClientEnvironment(window.location.search)
   ctx.effect(() => installSolarBrandStyles(), 'desktop: Solar brand styles')
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
-    id: 'solar-desktop-brand',
-    order: -1000,
-    label: solarBrandLabel(environment.productVersion),
-  }, props => SolarBrand({ ...props, productVersion: environment.productVersion })))
+  ctx.effect(() => installSolarBrand(environment.productVersion), 'desktop: Solar brand bar')
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'resident-physical-operators',
     order: -900,
     label: 'Resident 物理算子',
   }, props => ResidentOperatorsPanel(props)))
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action',
+    id: 'durable-orchestrations',
+    order: -850,
+    label: '持久化任务编排',
+  }, props => OrchestrationsPanel(props)))
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'physical-operator-routing',
