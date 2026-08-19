@@ -6,6 +6,7 @@ import { realpath } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import type { PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
 import {
   ResidentOperatorError,
   ResidentOperatorSessionId,
@@ -15,6 +16,7 @@ import {
   type ResidentEventPage,
   type ResidentProviderStatus,
   type ResidentSessionSnapshot,
+  type ResidentTurnSnapshot,
   type ResidentTurnResult,
 } from '@deepseek-ai/dsh-resident-operator'
 import { unwrapWire } from './protocol.ts'
@@ -31,6 +33,8 @@ const REQUIRED_METHODS = Object.freeze([
   'session.reset',
   'event.read',
 ] as const)
+
+const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 
 interface ListResponse {
   readonly providers: ResidentProviderStatus[]
@@ -93,6 +97,15 @@ export class ResidentDaemonClient {
   }
 
   /**
+   * Inspect one durable turn after the original caller disconnected.
+   * @param turnId - daemon turn identity from execution, Session projection, or events.
+   * @returns current receipt state and bounded terminal result when available.
+   */
+  inspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
+    return this.request('turn.inspect', { turn_id: turnId })
+  }
+
+  /**
    * Admit or replay one durable command and poll its result.
    * @param request - command identity, retry lineage, operator, workspace, prompt, and signal.
    * @returns holder-owned raw turn identities, revision, result, and disposal.
@@ -102,7 +115,9 @@ export class ResidentDaemonClient {
     supersedesCommandId?: string
     operatorId: string
     workspace: string
+    taskLabel?: string
     prompt: readonly unknown[]
+    profile?: PhysicalOperatorExecutionPreference
     signal: AbortSignal
   }): Promise<{
     turnId: string
@@ -119,16 +134,20 @@ export class ResidentDaemonClient {
       ...request.supersedesCommandId === undefined ? {} : { supersedes_command_id: request.supersedesCommandId },
       operator_id: request.operatorId,
       workspace,
+      ...request.taskLabel === undefined ? {} : { task_label: request.taskLabel },
       prompt: request.prompt,
+      ...request.profile === undefined ? {} : { profile: request.profile },
     }, request.signal)
     let settled = false
-    const abort = (): void => {
-      void this.interrupt(accepted.sessionId, accepted.turnId).catch(() => {})
+    const observation = new AbortController()
+    const detach = (): void => {
+      observation.abort(request.signal.reason ?? new Error('resident caller detached'))
     }
-    request.signal.addEventListener('abort', abort, { once: true })
-    const result = this.poll(accepted.turnId, request.signal).finally(() => {
+    if (request.signal.aborted) detach()
+    else request.signal.addEventListener('abort', detach, { once: true })
+    const result = this.poll(accepted.turnId, observation.signal).finally(() => {
       settled = true
-      request.signal.removeEventListener('abort', abort)
+      request.signal.removeEventListener('abort', detach)
     })
     return {
       turnId: accepted.turnId,
@@ -136,7 +155,7 @@ export class ResidentDaemonClient {
       stateRevision: accepted.stateRevision,
       result,
       dispose: async () => {
-        if (!settled) await this.interrupt(accepted.sessionId, accepted.turnId)
+        if (!settled) observation.abort(new Error('resident caller disposed'))
         await result.catch(() => {})
       },
     }
@@ -333,13 +352,35 @@ export function startDetachedResidentDaemon(root: string): number {
   const child = spawn(process.execPath, [...process.execArgv, entry, '--root', root], {
     detached: true,
     stdio: 'ignore',
-    env: process.env,
+    env: residentDaemonEnvironment(process.env, process.versions.electron),
   })
   child.unref()
   if (child.pid === undefined) {
     throw new ResidentOperatorError('resident daemon process did not publish a pid', 'RUNTIME_UNAVAILABLE')
   }
   return child.pid
+}
+
+/**
+ * Build the detached daemon environment without changing the current host.
+ * Electron must re-enter its executable in Node mode for the daemon entry;
+ * ordinary Node hosts must remove any inherited marker instead of forwarding it.
+ * @param environment - host environment to copy.
+ * @param electronVersion - Electron runtime marker, injectable for focused tests.
+ * @returns a fresh child-only environment.
+ */
+export function residentDaemonEnvironment(
+  environment: NodeJS.ProcessEnv,
+  electronVersion: string | undefined,
+): NodeJS.ProcessEnv {
+  const childEnvironment = { ...environment }
+  for (const key of Object.keys(childEnvironment)) {
+    if (key.toUpperCase() === ELECTRON_RUN_AS_NODE) Reflect.deleteProperty(childEnvironment, key)
+  }
+  if (electronVersion !== undefined && electronVersion.length > 0) {
+    childEnvironment[ELECTRON_RUN_AS_NODE] = '1'
+  }
+  return childEnvironment
 }
 
 /**

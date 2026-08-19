@@ -14,6 +14,27 @@ import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 
 type JsonObject = Record<string, unknown>
 
+/** Model catalog row returned by the qualified app-server. */
+export interface CodexAppServerModel {
+  readonly id: string
+  readonly model: string
+  readonly displayName: string
+  readonly description: string
+  readonly hidden: boolean
+  readonly isDefault: boolean
+  readonly defaultReasoningEffort: string
+  readonly supportedReasoningEfforts: readonly {
+    readonly reasoningEffort: string
+    readonly description: string
+  }[]
+}
+
+/** Explicit model and reasoning overrides accepted by one Codex Resident turn. */
+export interface CodexAppServerExecutionProfile {
+  readonly model: string
+  readonly effort?: string
+}
+
 function object(value: unknown, label: string): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`subagent-codex: app-server returned invalid ${label}`)
@@ -147,15 +168,59 @@ export class CodexAppServerWire {
   }
 
   /**
+   * Read the current subscription-visible model catalog without starting a turn.
+   * @param signal - cancellation for the catalog control request.
+   * @returns the validated app-server model rows.
+   */
+  async listModels(signal: AbortSignal): Promise<CodexAppServerModel[]> {
+    const response = object(await this.guarded(this.transport.request('model/list', {
+      limit: 100,
+      includeHidden: false,
+    }, signal), signal), 'model/list response')
+    if (!Array.isArray(response.data)) {
+      throw new Error('subagent-codex: app-server returned invalid model/list data')
+    }
+    return response.data.map((value, index) => {
+      const model = object(value, `model/list model ${String(index)}`)
+      if (!Array.isArray(model.supportedReasoningEfforts)) {
+        throw new Error(`subagent-codex: app-server returned invalid model/list efforts ${String(index)}`)
+      }
+      return {
+        id: string(model.id, 'model/list id'),
+        model: string(model.model, 'model/list model'),
+        displayName: string(model.displayName, 'model/list displayName'),
+        description: string(model.description, 'model/list description'),
+        hidden: model.hidden === true,
+        isDefault: model.isDefault === true,
+        defaultReasoningEffort: string(model.defaultReasoningEffort, 'model/list default effort'),
+        supportedReasoningEfforts: model.supportedReasoningEfforts.map((entry, effortIndex) => {
+          const effort = object(entry, `model/list effort ${String(effortIndex)}`)
+          return {
+            reasoningEffort: string(effort.reasoningEffort, 'model/list reasoning effort'),
+            description: string(effort.description, 'model/list effort description'),
+          }
+        }),
+      }
+    })
+  }
+
+  /**
    * Create the requested private thread and retain its identity.
    * @param cwd - parent Session workspace.
    * @param signal - unpublished-start cancellation.
    * @param ephemeral - whether product history may discard the thread after this run.
+   * @param profile - optional native model override for the new thread.
    */
-  async startThread(cwd: string, signal: AbortSignal, ephemeral = true): Promise<void> {
+  async startThread(
+    cwd: string,
+    signal: AbortSignal,
+    ephemeral = true,
+    profile?: CodexAppServerExecutionProfile,
+  ): Promise<void> {
     const response = object(await this.guarded(this.transport.request('thread/start', {
       cwd,
       ephemeral,
+      ...profile === undefined ? {} : { model: profile.model },
     }, signal), signal), 'thread/start response')
     const thread = object(response.thread, 'thread/start thread')
     const id = string(thread.id, 'thread/start thread id')
@@ -172,11 +237,18 @@ export class CodexAppServerWire {
    * @param threadId - authoritative non-ephemeral product thread identity.
    * @param cwd - canonical workspace for the resumed turn.
    * @param signal - unpublished-start cancellation.
+   * @param profile - optional native model override for the resumed thread.
    */
-  async resumeThread(threadId: string, cwd: string, signal: AbortSignal): Promise<void> {
+  async resumeThread(
+    threadId: string,
+    cwd: string,
+    signal: AbortSignal,
+    profile?: CodexAppServerExecutionProfile,
+  ): Promise<void> {
     const response = object(await this.guarded(this.transport.request('thread/resume', {
       threadId,
       cwd,
+      ...profile === undefined ? {} : { model: profile.model },
     }, signal), signal), 'thread/resume response')
     const thread = object(response.thread, 'thread/resume thread')
     const id = string(thread.id, 'thread/resume thread id')
@@ -205,12 +277,14 @@ export class CodexAppServerWire {
    * @param texts - already validated task text blocks.
    * @param signal - local cancellation for the published run.
    * @param onStarted - optional callback receiving the authoritative native turn identity.
+   * @param profile - optional model and reasoning override for this turn.
    * @returns the shared subagent result.
    */
   async runTurn(
     texts: readonly string[],
     signal: AbortSignal,
     onStarted?: (turnId: string) => void,
+    profile?: CodexAppServerExecutionProfile,
   ): Promise<SubagentResult> {
     const completion = Promise.withResolvers<JsonObject>()
     this.turnCompleted = completion
@@ -218,6 +292,10 @@ export class CodexAppServerWire {
     const response = object(await this.guarded(this.transport.request('turn/start', {
       threadId,
       input: texts.map(text => ({ type: 'text', text, text_elements: [] })),
+      ...profile === undefined ? {} : {
+        model: profile.model,
+        ...profile.effort === undefined ? {} : { effort: profile.effort },
+      },
     }, signal), signal), 'turn/start response')
     const turn = object(response.turn, 'turn/start turn')
     const startedTurnId = string(turn.id, 'turn/start turn id')

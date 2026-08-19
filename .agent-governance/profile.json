@@ -1,0 +1,131 @@
+{
+  "profile_version": 1,
+  "name": "deepseek-solar-harness",
+  "project_markers": [
+    "AGENTS.md",
+    "package.json",
+    "pnpm-lock.yaml",
+    "apps/cli/src/bin.ts"
+  ],
+  "instruction_sources": [
+    {"path": "AGENTS.md", "required": true, "kind": "agent-instructions"},
+    {"path": "CONTRIBUTING.md", "required": true, "kind": "development-policy"},
+    {"path": "docs/testing.md", "required": true, "kind": "testing-policy"},
+    {
+      "path": ".agents/skills/dsh-pre-push-checks/SKILL.md",
+      "required": true,
+      "kind": "delivery-policy"
+    }
+  ],
+  "scope_rules": [
+    {
+      "scope": "source",
+      "patterns": ["packages/**", "apps/**", "examples/**", "python/**", "native/**"]
+    },
+    {
+      "scope": "documentation",
+      "patterns": ["docs/**", "website/**", ".agents/notes/**"]
+    },
+    {
+      "scope": "tooling",
+      "patterns": ["scripts/**", "tsconfig*.json", "vitest*.ts", "*.config.*"]
+    },
+    {
+      "scope": "release",
+      "patterns": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        ".github/**",
+        "vendor/**"
+      ],
+      "expands": ["source", "tooling"]
+    },
+    {
+      "scope": "governance",
+      "patterns": [
+        ".agent-governance/**",
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".agents/skills/**"
+      ],
+      "expands": ["documentation"]
+    }
+  ],
+  "hooks": [],
+  "ci_contracts": [],
+  "gates": [
+    {
+      "id": "diff-check",
+      "label": "Git whitespace and conflict check",
+      "command": ["git", "diff", "--check"],
+      "cwd": ".",
+      "scopes": ["always"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "profile-json",
+      "label": "Governance Profile JSON syntax",
+      "command": ["python3", "-m", "json.tool", ".agent-governance/profile.json"],
+      "cwd": ".",
+      "scopes": ["always"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "typecheck",
+      "label": "Repository TypeScript typecheck",
+      "command": ["pnpm", "run", "typecheck"],
+      "cwd": ".",
+      "scopes": ["source", "tooling", "release"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "lint",
+      "label": "Repository lint",
+      "command": ["pnpm", "run", "lint"],
+      "cwd": ".",
+      "scopes": ["source", "tooling", "release"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "related-tests",
+      "label": "Vitest tests related to the outgoing branch diff",
+      "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/master", "--maxWorkers=4"],
+      "cwd": ".",
+      "scopes": ["source", "tooling", "release"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "doc-sync",
+      "label": "Documentation synchronization checks",
+      "command": ["pnpm", "run", "doc-sync"],
+      "cwd": ".",
+      "scopes": ["documentation", "governance"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "build",
+      "label": "Published runtime build",
+      "command": ["pnpm", "run", "build"],
+      "cwd": ".",
+      "scopes": ["release"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
+      "id": "hygiene",
+      "label": "Published package hygiene",
+      "command": ["pnpm", "run", "hygiene"],
+      "cwd": ".",
+      "scopes": ["release"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    }
+  ]
+}

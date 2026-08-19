@@ -107,6 +107,17 @@ describe('Web page browser plugin', () => {
     expect(fetchMock).toHaveBeenCalledWith('/remote-webpages/v1/instances', expect.any(Object))
     expect(instance.store.getSnapshot()).toMatchObject({ phase: 'ready', instances })
   })
+
+  it('ignores stale roster results and preserves the latest controller outcome', () => {
+    const instance = createWebpageModulesStore().create()
+    instance.actions.begin(2)
+    instance.actions.succeed(1, instances)
+    expect(instance.store.getSnapshot()).toMatchObject({ phase: 'loading', requestId: 2, instances: [] })
+    instance.actions.fail(1, 'stale failure')
+    expect(instance.store.getSnapshot()).toMatchObject({ phase: 'loading', error: null })
+    instance.actions.fail(2, 'current failure')
+    expect(instance.store.getSnapshot()).toMatchObject({ phase: 'error', error: 'current failure' })
+  })
 })
 
 describe('Web page instance UI', () => {

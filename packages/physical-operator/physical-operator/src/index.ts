@@ -35,7 +35,9 @@ export type {
   PhysicalOperatorDescriptor,
   PhysicalOperatorExecutionEndInfo,
   PhysicalOperatorExecutionMode,
+  PhysicalOperatorExecutionPreference,
   PhysicalOperatorExecutionInfo,
+  PhysicalOperatorReasoningEffort,
   PhysicalOperatorProviderRun,
   PhysicalOperatorProviderStartRequest,
   PhysicalOperatorResult,
@@ -159,9 +161,10 @@ export class PhysicalOperatorRuntime extends Service {
         'OPERATOR_MODE_UNSUPPORTED',
       )
     }
-    if (status.state === 'unavailable') {
+    const availability = operator.availability(mode)
+    if (!availability.available) {
       throw new PhysicalOperatorError(
-        `physical operator "${id}" is unavailable: ${status.unavailableReason ?? 'no reason reported'}`,
+        `physical operator "${id}" is unavailable: ${availability.reason}`,
         'OPERATOR_UNAVAILABLE',
       )
     }
@@ -174,7 +177,7 @@ export class PhysicalOperatorRuntime extends Service {
 
     const stableId = operator.descriptor.id
     const identity: PhysicalOperatorExecutionInfo = {
-      executionId: executionId(randomUUID()),
+      executionId: request.executionId ?? executionId(randomUUID()),
       operatorId: stableId,
     }
     this.active.set(stableId, status.active + 1)

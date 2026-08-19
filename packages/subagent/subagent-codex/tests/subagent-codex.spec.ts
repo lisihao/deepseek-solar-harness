@@ -443,6 +443,51 @@ describe('CodexAppServerWire', () => {
     wire.close()
   })
 
+  it('reads the native model catalog and sends explicit model and effort overrides', async () => {
+    const child = fakeChild()
+    const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!)
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    child.peer.respond(initialize, { userAgent: 'codex-cli 0.147.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+
+    const listing = wire.listModels(new AbortController().signal)
+    const modelList = await child.peer.nextMethod('model/list')
+    expect(modelList.params).toEqual({ limit: 100, includeHidden: false })
+    child.peer.respond(modelList, {
+      data: [{
+        id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test', description: 'Fixture',
+        hidden: false, isDefault: true, defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
+      }],
+    })
+    await expect(listing).resolves.toEqual([expect.objectContaining({ model: 'gpt-test', isDefault: true })])
+
+    const profile = { model: 'gpt-test', effort: 'medium' }
+    const starting = wire.startThread('/workspace', new AbortController().signal, false, profile)
+    const threadStart = await child.peer.nextMethod('thread/start')
+    expect(threadStart.params).toEqual({ cwd: '/workspace', ephemeral: false, model: 'gpt-test' })
+    child.peer.respond(threadStart, { thread: { id: 'thread-profile', ephemeral: false } })
+    await starting
+
+    const result = wire.runTurn(['task'], new AbortController().signal, undefined, profile)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    expect(turnStart.params).toMatchObject({
+      threadId: 'thread-profile',
+      model: 'gpt-test',
+      effort: 'medium',
+    })
+    child.peer.respond(turnStart, { turn: { id: 'turn-profile' } })
+    child.peer.send(
+      agentMessage('profile result', 'final_answer', 'turn-profile', 'thread-profile'),
+      turnCompleted('completed', 'turn-profile', 'thread-profile'),
+    )
+    await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    wire.close()
+  })
+
   it('uses the last nullable-phase answer when no explicit final exists', async () => {
     const { child, wire } = await initializeWire()
     const result = wire.runTurn(['task'], new AbortController().signal)

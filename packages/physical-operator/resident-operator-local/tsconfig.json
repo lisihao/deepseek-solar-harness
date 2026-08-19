@@ -10,6 +10,7 @@
     { "path": "../../subprocess/subprocess" },
     { "path": "../../subagent/subagent" },
     { "path": "../../subagent/subagent-codex" },
+    { "path": "../physical-operator" },
     { "path": "../resident-operator" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]

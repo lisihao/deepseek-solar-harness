@@ -6,7 +6,7 @@
 
 ## 约定与生命周期
 
-Provider 使用稳定的小写 ID、展示元数据、选择标签、正数 `maxConcurrency` 和可选执行模式注册 `PhysicalOperator`。省略执行模式表示只支持 `ephemeral`。`list()` 与 `status()` 返回规范化后的模式、实时可用性以及由服务维护的活动容量。`start()` 默认使用 `ephemeral`，拒绝不受支持的模式且不会回退，在 Provider 启动前预留容量并分配执行 ID，最后返回由 Provider 持有的结果与释放句柄。Resident Provider 会把该 ID 用作持久化命令身份，因此断线调用方可以重试，而不会启动重复工作。
+Provider 使用稳定的小写 ID、展示元数据、选择标签、正数 `maxConcurrency` 和可选执行模式注册 `PhysicalOperator`。省略执行模式表示只支持 `ephemeral`。`list()` 与 `status()` 返回规范化后的模式、实时可用性以及由服务维护的活动容量。`start()` 默认使用 `ephemeral`，拒绝不受支持的模式且不会回退，在 Provider 启动前预留容量并返回由 Provider 持有的结果与释放句柄。普通调用方会获得生成的执行 ID；可信持久路由器可以提供从已持久化消息身份派生的 ID，以及可选的 Resident 模型/强度偏好。Resident Provider 会把该 ID 用作持久化命令身份，并把偏好转发给自己的权威，因此断线调用方可以重试，而不会启动重复工作。
 
 已经接受的执行可以在 Provider 插件释放后继续完成。HMR 期间重新注册同一算子 ID 时，替代实现会继续看到旧运行占用的容量，直至旧运行结束。服务会围绕每个已发布的执行恰好发出一次 `physical-operator/start` 与 `physical-operator/end`。监听器失败会被隔离，不能改变执行结果。
 

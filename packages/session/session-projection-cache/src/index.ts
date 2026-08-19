@@ -19,6 +19,7 @@ import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-
 // Empty type import: applies the package's cordis Context merge
 // (`ctx.sessionPersistence`), which this service reads on the cold path.
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import type { SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
 import type { ProjectionCheckpoint, ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { projectionCacheDomainSpec } from './spec.ts'
@@ -113,12 +114,16 @@ export class SessionProjectionCache extends Service {
    * paths (the history tail baseline, {@link coldSnapshot}) supersede these
    * values whenever a session is actually opened.
    * @param meta - the listed session's header (identity witness; no log read).
+   * @param expectedRevision - when supplied, require a cold-read checkpoint
+   *   bound to this exact persistence revision; live checkpoints without a
+   *   revision deliberately miss so the caller repairs them once.
    * @returns the cut (`asOfSeq` = lowest served-row watermark), or
    *   `undefined` when no usable row exists for this lifecycle.
    */
-  cachedSnapshot(meta: SessionHeader): ProjectionSnapshot | undefined {
+  cachedSnapshot(meta: SessionHeader, expectedRevision?: SessionPersistenceRevision): ProjectionSnapshot | undefined {
     const record = this.recordFor(meta.id, identityOf(meta))
     if (record === undefined) return undefined
+    if (expectedRevision !== undefined && record.sourceRevision !== expectedRevision) return undefined
     const values = this.ctx.sessionProjections.viewCheckpoint(record.rows)
     const keys = Object.keys(values)
     if (keys.length === 0) return undefined
@@ -161,9 +166,15 @@ export class SessionProjectionCache extends Service {
    * persisted log (`not found` from the persistence seam).
    * @param id - the persisted session to read.
    * @param signal - optional cancellation for the persistence reads.
+   * @param sourceRevision - persistence revision observed by the caller; it is
+   *   stored with the refreshed checkpoint for future zero-I/O validation.
    * @returns the snapshot cut at the stored log end.
    */
-  async coldSnapshot(id: SessionId, signal?: AbortSignal): Promise<ProjectionSnapshot> {
+  async coldSnapshot(
+    id: SessionId,
+    signal?: AbortSignal,
+    sourceRevision?: SessionPersistenceRevision,
+  ): Promise<ProjectionSnapshot> {
     const record = this.requireTable().get(id)
     const cached = record?.rows ?? {}
     const floor = this.ctx.sessionProjections.restoreFloor(cached)
@@ -192,7 +203,7 @@ export class SessionProjectionCache extends Service {
       const whole = await persistence.readFrom(id, 0, signal)
       restored = this.ctx.sessionProjections.restore({}, whole.events, 0)
     }
-    await this.putSoft(id, identityOf(tail.meta), restored.checkpoint, 'cold-read write-back')
+    await this.putSoft(id, identityOf(tail.meta), restored.checkpoint, 'cold-read write-back', sourceRevision)
     return restored.snapshot
   }
 
@@ -263,18 +274,33 @@ export class SessionProjectionCache extends Service {
   }
 
   /** Replace one session's stored record with its log identity and a detached snapshot of `rows`. */
-  private async put(id: SessionId, identity: CheckpointIdentity, rows: ProjectionCheckpoint): Promise<void> {
+  private async put(
+    id: SessionId,
+    identity: CheckpointIdentity,
+    rows: ProjectionCheckpoint,
+    sourceRevision?: SessionPersistenceRevision,
+  ): Promise<void> {
     const detached = snapshotJsonValue(rows)
     if (detached === undefined) {
       throw new TypeError('projection checkpoint is not losslessly JSON-serializable (a unit state violates the plain-JSON contract)')
     }
-    await this.requireTable().put(id, { identity, rows: detached as CheckpointRecord['rows'] })
+    await this.requireTable().put(id, {
+      identity,
+      ...sourceRevision === undefined ? {} : { sourceRevision },
+      rows: detached as CheckpointRecord['rows'],
+    })
   }
 
   /** Fail-soft {@link put}: cache writes must never fail their caller's read or event path. */
-  private async putSoft(id: SessionId, identity: CheckpointIdentity, rows: ProjectionCheckpoint, what: string): Promise<void> {
+  private async putSoft(
+    id: SessionId,
+    identity: CheckpointIdentity,
+    rows: ProjectionCheckpoint,
+    what: string,
+    sourceRevision?: SessionPersistenceRevision,
+  ): Promise<void> {
     try {
-      await this.put(id, identity, rows)
+      await this.put(id, identity, rows, sourceRevision)
     } catch (error) {
       this.ctx.logger.warn(`session projection cache: ${what} for "${id}" failed (cache stays stale): ${String(error)}`)
     }

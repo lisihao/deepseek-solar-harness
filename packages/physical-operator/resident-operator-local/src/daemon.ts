@@ -6,6 +6,10 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {
+  PhysicalOperatorExecutionPreference,
+  PhysicalOperatorReasoningEffort,
+} from '@deepseek-ai/dsh-physical-operator'
 import {
   ResidentOperatorError,
   RESIDENT_PROTOCOL_VERSION,
@@ -22,8 +26,9 @@ import {
 } from './drivers.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalRequestHash, ResidentStore } from './store.ts'
+import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v1 method set advertised by daemon handshake. */
+/** Public protocol-v3 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
   'operator.list',
@@ -50,12 +55,50 @@ export interface ResidentDaemonOptions {
   readonly heartbeatIntervalMs?: number
 }
 
+/**
+ * Normalize trusted product Driver failures at the daemon authority boundary.
+ *
+ * This boundary classification is intentionally duplicated from product-level
+ * parsing so bundled class identity or a Driver regression cannot collapse an
+ * actionable native-subscription failure into a generic result error.
+ *
+ * @param error Driver failure caught by the daemon.
+ * @param aborted Whether caller-owned interruption was already requested.
+ * @returns One stable Resident protocol error for durable receipt storage.
+ */
+export function normalizeResidentDriverError(error: unknown, aborted: boolean): ResidentOperatorError {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/claude code.*(?:oauth access token has expired|re-authenticate to continue|\b401\b)/isu.test(message)) {
+    return new ResidentOperatorError(
+      'Claude Code subscription authentication expired; run `claude auth login` and retry the node.',
+      'AUTH_MODE_MISMATCH',
+    )
+  }
+  if (/claude code.*(?:certificate verification|unable to connect to api)/isu.test(message)) {
+    return new ResidentOperatorError(message, 'RUNTIME_UNAVAILABLE')
+  }
+  if (error instanceof ResidentOperatorError) return error
+  return new ResidentOperatorError(message, aborted ? 'RUNTIME_UNAVAILABLE' : 'INVALID_RESULT')
+}
+
 function stringParam(params: Record<string, unknown>, name: string): string {
   const value = params[name]
   if (typeof value !== 'string' || value.length === 0) {
     throw new ResidentOperatorError(`resident protocol requires non-empty ${name}`, 'INVALID_RESULT')
   }
   return value
+}
+
+function taskLabelParam(params: Record<string, unknown>): string | undefined {
+  const value = params.task_label
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') {
+    throw new ResidentOperatorError('resident protocol task_label must be a string', 'INVALID_RESULT')
+  }
+  const normalized = value.replace(/[\p{Cc}\p{Cf}]+/gu, ' ').replace(/\s+/gu, ' ').trim()
+  if (normalized.length === 0) return undefined
+  const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(normalized)
+  return Array.from(graphemes, part => part.segment).slice(0, 160).join('')
 }
 
 function integerParam(params: Record<string, unknown>, name: string): number {
@@ -81,6 +124,32 @@ function promptParam(params: Record<string, unknown>): ContentBlock[] {
     }
     return { type: 'text', text: record.text }
   })
+}
+
+const PROFILE_EFFORTS = new Set<PhysicalOperatorReasoningEffort>([
+  'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
+])
+
+function profileParam(params: Record<string, unknown>): PhysicalOperatorExecutionPreference | undefined {
+  const value = params.profile
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ResidentOperatorError('resident protocol profile must be an object', 'INVALID_RESULT')
+  }
+  const record = value as Record<string, unknown>
+  const model = record.model
+  const effort = record.effort
+  if (model !== undefined && (typeof model !== 'string' || model.length === 0 || model.trim() !== model)) {
+    throw new ResidentOperatorError('resident protocol profile.model must be non-blank and trimmed', 'INVALID_RESULT')
+  }
+  if (effort !== undefined && (typeof effort !== 'string' || !PROFILE_EFFORTS.has(effort as PhysicalOperatorReasoningEffort))) {
+    throw new ResidentOperatorError('resident protocol profile.effort is unsupported', 'INVALID_RESULT')
+  }
+  if (model === undefined && effort === undefined) return undefined
+  return {
+    ...model === undefined ? {} : { model },
+    ...effort === undefined ? {} : { effort: effort as PhysicalOperatorReasoningEffort },
+  }
 }
 
 function safeDiagnostic(message: string, prompt: readonly ContentBlock[]): string {
@@ -220,7 +289,7 @@ export class ResidentDaemon {
       }
       case 'turn.resolve_indeterminate': {
         if (params.decision !== 'abandon') {
-          throw new ResidentOperatorError('protocol v1 only permits abandoning an indeterminate command', 'INVALID_RESULT')
+          throw new ResidentOperatorError('protocol v3 only permits abandoning an indeterminate command', 'INVALID_RESULT')
         }
         this.store.resolveIndeterminate(
           stringParam(params, 'command_id'),
@@ -275,7 +344,9 @@ export class ResidentDaemon {
     const commandId = stringParam(params, 'command_id')
     const operatorId = stringParam(params, 'operator_id')
     const configuredWorkspace = stringParam(params, 'workspace')
+    const taskLabel = taskLabelParam(params)
     const prompt = promptParam(params)
+    const requestedProfile = profileParam(params)
     const supersedesCommandId = params.supersedes_command_id === undefined
       ? undefined
       : stringParam(params, 'supersedes_command_id')
@@ -293,11 +364,44 @@ export class ResidentDaemon {
         unavailableProviderCode(qualification),
       )
     }
-    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, supersedesCommandId)
-    const accepted = this.store.accept(commandId, requestHash, operatorId, workspace, supersedesCommandId)
+    const locked = this.store.lockedProfile(operatorId, workspace)
+    const resolved = locked !== undefined && requestedProfile === undefined
+      ? locked
+      : resolveResidentExecutionProfile(
+        driver.operatorId,
+        qualification.models,
+        prompt,
+        locked === undefined || requestedProfile === undefined
+          ? requestedProfile
+          : {
+            model: requestedProfile.model ?? locked.profile.model,
+            ...(requestedProfile.effort ?? locked.profile.effort) === undefined
+              ? {}
+              : { effort: requestedProfile.effort ?? locked.profile.effort },
+          },
+      )
+    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId)
+    const accepted = this.store.accept(
+      commandId,
+      requestHash,
+      operatorId,
+      workspace,
+      resolved.profile,
+      resolved.source,
+      supersedesCommandId,
+      taskLabel,
+    )
     if (accepted.state === 'accepted' && !this.active.has(accepted.turnId)) {
       const controller = new AbortController()
-      const done = this.runDriver(driver, commandId, accepted.sessionId, workspace, prompt, controller)
+      const done = this.runDriver(
+        driver,
+        commandId,
+        accepted.sessionId,
+        workspace,
+        prompt,
+        resolved.profile,
+        controller,
+      )
       this.active.set(accepted.turnId, { commandId, controller, done })
       void done.finally(() => { this.active.delete(accepted.turnId) })
     }
@@ -310,6 +414,7 @@ export class ResidentDaemon {
     sessionId: string,
     workspace: string,
     prompt: ContentBlock[],
+    profile: Parameters<ResidentProductDriver['execute']>[0]['profile'],
     controller: AbortController,
   ): Promise<void> {
     const heartbeat = setInterval(
@@ -323,22 +428,21 @@ export class ResidentDaemon {
       const result = await driver.execute({
         workspace,
         prompt,
+        profile,
         ...nativeSessionId === undefined ? {} : { nativeSessionId },
         signal: controller.signal,
         onRunning: (nativeSessionId, nativeTurnId) => {
           this.store.markRunning(commandId, nativeSessionId, nativeTurnId)
+        },
+        onProgress: (phase) => {
+          this.store.progress(commandId, phase)
         },
       })
       this.store.markRunning(commandId, result.nativeSessionId)
       this.store.settle(commandId, result)
     } catch (error) {
       const aborted = controller.signal.aborted
-      const normalized = error instanceof ResidentOperatorError
-        ? error
-        : new ResidentOperatorError(
-          error instanceof Error ? error.message : String(error),
-          aborted ? 'RUNTIME_UNAVAILABLE' : 'INVALID_RESULT',
-        )
+      const normalized = normalizeResidentDriverError(error, aborted)
       this.store.fail(
         commandId,
         normalized.code,

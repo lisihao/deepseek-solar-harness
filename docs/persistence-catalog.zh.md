@@ -514,6 +514,71 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/interaction/permission-presets/src/index.ts:50`](../packages/interaction/permission-presets/src/index.ts)
 
+### `physical-operator/*`
+
+<a id="physical-operatordispatch--log-only"></a>
+
+#### `physical-operator/dispatch` — log-only
+
+```ts persistence-catalog
+/** Durable host decision that binds one DSH message to one Resident command. */
+'physical-operator/dispatch': {
+  commandId: string
+  operatorId: string
+  promptMessageId: string
+  requestedByMessageId: string
+  turn: number
+  step: number
+  recovered: boolean
+  residentProfile?: PhysicalOperatorExecutionPreference
+  fallbackConfig?: LlmCallConfig
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:58`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatordispatch-terminal--log-only"></a>
+
+#### `physical-operator/dispatch-terminal` — log-only
+
+```ts persistence-catalog
+/** Non-cancellation terminal failure; prevents an endless cold-resume loop. */
+'physical-operator/dispatch-terminal': {
+  commandId: string
+  code: string
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:70`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatorpolicy--log-only"></a>
+
+#### `physical-operator/policy` — log-only
+
+```ts persistence-catalog
+/**
+ * Whole-value physical-operator routing preference for subsequent model requests.
+ * @param policy The selected automatic, direct, Codex, or Claude Code policy.
+ */
+'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:51`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatorprofile--log-only"></a>
+
+#### `physical-operator/profile` — log-only
+
+```ts persistence-catalog
+/** Whole-value preference update for one native Resident product. */
+'physical-operator/profile': {
+  operatorId: PhysicalOperatorProfileOwner
+  profile: PhysicalOperatorExecutionPreference | null
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:53`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
 ### `plan/*`
 
 <a id="planmode--log-only"></a>

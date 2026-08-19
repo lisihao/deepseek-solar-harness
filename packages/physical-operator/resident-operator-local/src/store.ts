@@ -7,14 +7,20 @@ import { DatabaseSync } from 'node:sqlite'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import {
   ResidentOperatorError,
+  ResidentOperatorCommandId,
   ResidentOperatorSessionId,
   ResidentOperatorTurnId,
   RESIDENT_STATE_SCHEMA_VERSION,
   type ResidentEventPage,
+  type ResidentExecutionProfile,
+  type ResidentExecutionProfileSource,
+  type ResidentProgressPhase,
   type ResidentReceiptState,
   type ResidentSessionSnapshot,
   type ResidentStopReason,
   type ResidentTurnResult,
+  type ResidentTurnSnapshot,
+  type ResidentTurnSummary,
 } from '@deepseek-ai/dsh-resident-operator'
 
 const MAX_INLINE_RESULT_BYTES = 64 * 1024
@@ -28,6 +34,9 @@ interface SessionRow {
   health_reason: string | null
   revision: number
   native_session_id: string | null
+  model_id: string | null
+  reasoning_effort: string | null
+  profile_source: string | null
   active_turn_id: string | null
   updated_at: string
 }
@@ -39,12 +48,14 @@ interface ReceiptRow {
   session_id: string
   turn_id: string
   state: ResidentReceiptState
+  task_label: string | null
   native_turn_id: string | null
   result_json: string | null
   result_ref: string | null
   error_code: string | null
   error_message: string | null
   resolution: string | null
+  updated_at: string
 }
 
 /** Durable receipt projection returned immediately after admission or replay. */
@@ -56,16 +67,14 @@ export interface AcceptedTurn {
 }
 
 /** Receipt projection enriched with settled result or coded failure. */
-export interface TurnInspection extends AcceptedTurn {
-  readonly result?: ResidentTurnResult
-  readonly error?: { readonly code: string; readonly message: string }
-}
+export type TurnInspection = ResidentTurnSnapshot
 
 /**
  * Hash the behaviorally relevant command request independently of its identity.
  * @param operatorId - selected native product Driver.
  * @param workspace - canonical realpath workspace.
  * @param prompt - validated text content blocks.
+ * @param profile - daemon-resolved model and reasoning profile.
  * @param supersedesCommandId - optional explicitly abandoned receipt lineage.
  * @returns lowercase SHA-256 digest.
  */
@@ -73,10 +82,11 @@ export function canonicalRequestHash(
   operatorId: string,
   workspace: string,
   prompt: readonly ContentBlock[],
+  profile: ResidentExecutionProfile,
   supersedesCommandId?: string,
 ): string {
   return createHash('sha256')
-    .update(JSON.stringify({ operatorId, workspace, prompt, supersedesCommandId: supersedesCommandId ?? null }))
+    .update(JSON.stringify({ operatorId, workspace, prompt, profile, supersedesCommandId: supersedesCommandId ?? null }))
     .digest('hex')
 }
 
@@ -110,10 +120,35 @@ export class ResidentStore {
     this.db.close()
   }
 
+  /**
+   * Read an existing Session's locked profile without creating or mutating state.
+   * @param operatorId - stable native product identity.
+   * @param workspace - canonical realpath workspace.
+   * @returns the locked profile and provenance, or undefined before first admission.
+   */
+  lockedProfile(operatorId: string, workspace: string): {
+    readonly profile: ResidentExecutionProfile
+    readonly source: ResidentExecutionProfileSource
+  } | undefined {
+    const row = this.db.prepare(
+      'SELECT * FROM resident_sessions WHERE operator_id = ? AND workspace = ?',
+    ).get(operatorId, workspace) as unknown as SessionRow | undefined
+    if (row?.model_id === null || row?.model_id === undefined) return undefined
+    return {
+      profile: {
+        model: row.model_id,
+        ...row.reasoning_effort === null ? {} : {
+          effort: row.reasoning_effort as NonNullable<ResidentExecutionProfile['effort']>,
+        },
+      },
+      source: (row.profile_source ?? 'smart-auto') as ResidentExecutionProfileSource,
+    }
+  }
+
   private configure(): void {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    if (version !== 0 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
+    if (version !== 0 && version !== 1 && version !== 2 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
       throw new ResidentOperatorError(
         `resident state schema ${version} is incompatible with ${RESIDENT_STATE_SCHEMA_VERSION}`,
         'PROTOCOL_MISMATCH',
@@ -129,6 +164,9 @@ export class ResidentStore {
         health_reason TEXT,
         revision INTEGER NOT NULL,
         native_session_id TEXT,
+        model_id TEXT,
+        reasoning_effort TEXT,
+        profile_source TEXT,
         active_turn_id TEXT,
         updated_at TEXT NOT NULL,
         UNIQUE(operator_id, workspace)
@@ -140,6 +178,7 @@ export class ResidentStore {
         session_id TEXT NOT NULL REFERENCES resident_sessions(id),
         turn_id TEXT NOT NULL UNIQUE,
         state TEXT NOT NULL,
+        task_label TEXT,
         native_turn_id TEXT,
         result_json TEXT,
         result_ref TEXT,
@@ -167,8 +206,18 @@ export class ResidentStore {
         byte_length INTEGER NOT NULL,
         created_at TEXT NOT NULL
       ) STRICT;
-      PRAGMA user_version = ${RESIDENT_STATE_SCHEMA_VERSION};
     `)
+    if (version === 1) {
+      this.db.exec(`
+        ALTER TABLE resident_sessions ADD COLUMN model_id TEXT;
+        ALTER TABLE resident_sessions ADD COLUMN reasoning_effort TEXT;
+        ALTER TABLE resident_sessions ADD COLUMN profile_source TEXT;
+      `)
+    }
+    if (version === 1 || version === 2) {
+      this.db.exec('ALTER TABLE command_receipts ADD COLUMN task_label TEXT;')
+    }
+    this.db.exec(`PRAGMA user_version = ${RESIDENT_STATE_SCHEMA_VERSION};`)
   }
 
   /** Any pre-crash accepted/running command is unsafe to replay automatically. */
@@ -201,7 +250,10 @@ export class ResidentStore {
    * @param requestHash - canonical request conflict detector.
    * @param operatorId - selected native product Driver.
    * @param workspace - canonical realpath workspace.
+   * @param profile - fully resolved execution profile to lock or validate.
+   * @param profileSource - whether automatic or explicit selection produced the profile.
    * @param supersedesCommandId - optional uniquely linked abandoned indeterminate command.
+   * @param taskLabel - bounded display-only summary, never the raw prompt.
    * @returns accepted or existing receipt projection.
    */
   accept(
@@ -209,7 +261,10 @@ export class ResidentStore {
     requestHash: string,
     operatorId: string,
     workspace: string,
+    profile: ResidentExecutionProfile,
+    profileSource: ResidentExecutionProfileSource,
     supersedesCommandId?: string,
+    taskLabel?: string,
   ): AcceptedTurn {
     return this.transaction(() => {
       const existing = this.receiptByCommand(commandId)
@@ -219,6 +274,9 @@ export class ResidentStore {
             `command ${commandId} was already accepted with different content`,
             'COMMAND_CONFLICT',
           )
+        }
+        if (existing.task_label === null && taskLabel !== undefined) {
+          this.db.prepare('UPDATE command_receipts SET task_label = ? WHERE command_id = ?').run(taskLabel, commandId)
         }
         return this.acceptedFrom(existing)
       }
@@ -260,11 +318,24 @@ export class ResidentStore {
         const id = randomUUID()
         this.db.prepare(`
           INSERT INTO resident_sessions
-            (id, operator_id, workspace, lifecycle, health, health_reason, revision, native_session_id, active_turn_id, updated_at)
-          VALUES (?, ?, ?, 'idle', 'ok', NULL, 0, NULL, NULL, ?)
-        `).run(id, operatorId, workspace, now)
+            (id, operator_id, workspace, lifecycle, health, health_reason, revision, native_session_id,
+             model_id, reasoning_effort, profile_source, active_turn_id, updated_at)
+          VALUES (?, ?, ?, 'idle', 'ok', NULL, 0, NULL, ?, ?, ?, NULL, ?)
+        `).run(id, operatorId, workspace, profile.model, profile.effort ?? null, profileSource, now)
         session = this.sessionRow(id)
-        this.appendEvent(id, 'session.created', { operatorId }, now)
+        this.appendEvent(id, 'session.created', { operatorId, profile, profileSource }, now)
+      } else if (session.model_id === null) {
+        this.db.prepare(`
+          UPDATE resident_sessions SET model_id = ?, reasoning_effort = ?, profile_source = ?,
+            revision = revision + 1, updated_at = ? WHERE id = ?
+        `).run(profile.model, profile.effort ?? null, profileSource, now, session.id)
+        this.appendEvent(session.id, 'session.profile_locked', { profile, profileSource }, now)
+        session = this.sessionRow(session.id)
+      } else if (session.model_id !== profile.model || (session.reasoning_effort ?? undefined) !== profile.effort) {
+        throw new ResidentOperatorError(
+          `resident session ${session.id} is locked to ${session.model_id}/${session.reasoning_effort ?? 'default'}`,
+          'EXECUTION_PROFILE_CONFLICT',
+        )
       }
       if (session.active_turn_id !== null) {
         throw new ResidentOperatorError(
@@ -276,9 +347,9 @@ export class ResidentStore {
       const turnId = randomUUID()
       this.db.prepare(`
         INSERT INTO command_receipts
-          (command_id, supersedes_command_id, request_hash, session_id, turn_id, state, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'accepted', ?, ?)
-      `).run(commandId, supersedesCommandId ?? null, requestHash, session.id, turnId, now, now)
+          (command_id, supersedes_command_id, request_hash, session_id, turn_id, state, task_label, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'accepted', ?, ?, ?)
+      `).run(commandId, supersedesCommandId ?? null, requestHash, session.id, turnId, taskLabel ?? null, now, now)
       this.db.prepare(
         'INSERT INTO session_leases (session_id, turn_id, acquired_at, heartbeat_at) VALUES (?, ?, ?, ?)',
       ).run(session.id, turnId, now, now)
@@ -291,6 +362,8 @@ export class ResidentStore {
       this.appendEvent(session.id, 'turn.accepted', {
         commandId,
         turnId,
+        taskLabel: taskLabel ?? null,
+        profile,
         supersedesCommandId: superseded?.command_id ?? null,
       }, now)
       return {
@@ -342,6 +415,23 @@ export class ResidentStore {
     if (receipt.state !== 'accepted' && receipt.state !== 'running') return
     this.db.prepare('UPDATE session_leases SET heartbeat_at = ? WHERE session_id = ?')
       .run(new Date().toISOString(), receipt.session_id)
+  }
+
+  /**
+   * Append one bounded product-neutral progress event for reconnecting observers.
+   * @param commandId - admitted durable command identity.
+   * @param phase - stable progress phase with no prompt or transcript content.
+   */
+  progress(commandId: string, phase: ResidentProgressPhase): void {
+    const receipt = this.requireReceipt(commandId)
+    if (receipt.state !== 'accepted' && receipt.state !== 'running') return
+    const now = new Date().toISOString()
+    this.db.prepare('UPDATE session_leases SET heartbeat_at = ? WHERE session_id = ?').run(now, receipt.session_id)
+    this.appendEvent(receipt.session_id, 'turn.progress', {
+      commandId,
+      turnId: receipt.turn_id,
+      phase,
+    }, now)
   }
 
   /**
@@ -422,20 +512,34 @@ export class ResidentStore {
    * @param turnId - daemon-generated turn identity.
    * @returns current receipt projection.
    */
-  inspectTurn(turnId: string): TurnInspection {
+  inspectTurn(turnId: string): ResidentTurnSnapshot {
     const receipt = this.db.prepare('SELECT * FROM command_receipts WHERE turn_id = ?')
       .get(turnId) as unknown as ReceiptRow | undefined
     if (receipt === undefined) {
       throw new ResidentOperatorError(`unknown resident turn ${turnId}`, 'SESSION_UNAVAILABLE')
     }
-    const accepted = this.acceptedFrom(receipt)
+    const session = this.sessionRow(receipt.session_id)
     const result = receipt.result_json === null
       ? undefined
       : JSON.parse(receipt.result_json) as ResidentTurnResult
     const error = receipt.error_code === null
       ? undefined
       : { code: receipt.error_code, message: receipt.error_message ?? receipt.error_code }
-    return { ...accepted, ...result === undefined ? {} : { result }, ...error === undefined ? {} : { error } }
+    const parsedStopReason = result?.stopReason
+    return {
+      commandId: ResidentOperatorCommandId(receipt.command_id),
+      turnId: ResidentOperatorTurnId(receipt.turn_id),
+      sessionId: ResidentOperatorSessionId(receipt.session_id),
+      stateRevision: session.revision,
+      state: receipt.state,
+      ...receipt.task_label === null ? {} : { taskLabel: receipt.task_label },
+      ...receipt.native_turn_id === null ? {} : { nativeTurnId: receipt.native_turn_id },
+      ...parsedStopReason === undefined ? {} : { stopReason: parsedStopReason },
+      ...receipt.result_ref === null ? {} : { resultRef: receipt.result_ref },
+      updatedAt: receipt.updated_at,
+      ...result === undefined ? {} : { result },
+      ...error === undefined ? {} : { error },
+    }
   }
 
   /**
@@ -529,7 +633,8 @@ export class ResidentStore {
       }
       const now = new Date().toISOString()
       this.db.prepare(`
-        UPDATE resident_sessions SET native_session_id = NULL, health = 'ok', health_reason = NULL,
+        UPDATE resident_sessions SET native_session_id = NULL, model_id = NULL, reasoning_effort = NULL,
+          profile_source = NULL, health = 'ok', health_reason = NULL,
           revision = revision + 1, updated_at = ? WHERE id = ?
       `).run(now, sessionId)
       this.appendEvent(sessionId, 'session.reset', { reason }, now)
@@ -593,6 +698,7 @@ export class ResidentStore {
       turnId: receipt.turn_id,
       stateRevision: this.sessionRow(receipt.session_id).revision,
       state: receipt.state,
+      ...receipt.task_label === null ? {} : { taskLabel: receipt.task_label },
     }
   }
 
@@ -618,6 +724,8 @@ export class ResidentStore {
   }
 
   private snapshot(row: SessionRow): ResidentSessionSnapshot {
+    const latestTurn = this.latestTurn(row.id)
+    const latestEvent = this.latestEvent(row.id)
     return {
       sessionId: ResidentOperatorSessionId(row.id),
       operatorId: row.operator_id,
@@ -628,8 +736,61 @@ export class ResidentStore {
       control: 'automation',
       stateRevision: row.revision,
       ...row.native_session_id === null ? {} : { nativeSessionId: row.native_session_id },
+      ...row.model_id === null ? {} : {
+        executionProfile: {
+          model: row.model_id,
+          ...row.reasoning_effort === null ? {} : {
+            effort: row.reasoning_effort as NonNullable<ResidentExecutionProfile['effort']>,
+          },
+        },
+        executionProfileSource: (row.profile_source ?? 'smart-auto') as ResidentExecutionProfileSource,
+      },
       ...row.active_turn_id === null ? {} : { activeTurnId: ResidentOperatorTurnId(row.active_turn_id) },
+      ...latestTurn === undefined ? {} : { latestTurn },
+      ...latestEvent === undefined ? {} : { latestEvent },
       updatedAt: row.updated_at,
+    }
+  }
+
+  private latestTurn(sessionId: string): ResidentTurnSummary | undefined {
+    const receipt = this.db.prepare(`
+      SELECT * FROM command_receipts
+      WHERE session_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT 1
+    `).get(sessionId) as unknown as ReceiptRow | undefined
+    if (receipt === undefined) return undefined
+    const result = receipt.result_json === null
+      ? undefined
+      : JSON.parse(receipt.result_json) as ResidentTurnResult
+    return {
+      commandId: ResidentOperatorCommandId(receipt.command_id),
+      turnId: ResidentOperatorTurnId(receipt.turn_id),
+      state: receipt.state,
+      ...receipt.task_label === null ? {} : { taskLabel: receipt.task_label },
+      ...receipt.native_turn_id === null ? {} : { nativeTurnId: receipt.native_turn_id },
+      ...result?.stopReason === undefined ? {} : { stopReason: result.stopReason },
+      ...receipt.result_ref === null ? {} : { resultRef: receipt.result_ref },
+      updatedAt: receipt.updated_at,
+    }
+  }
+
+  private latestEvent(sessionId: string) {
+    const row = this.db.prepare(`
+      SELECT sequence, session_id, type, time, data_json FROM resident_events
+      WHERE session_id = ? ORDER BY sequence DESC LIMIT 1
+    `).get(sessionId) as {
+      sequence: number
+      session_id: string
+      type: string
+      time: string
+      data_json: string
+    } | undefined
+    if (row === undefined) return undefined
+    return {
+      sequence: row.sequence,
+      sessionId: ResidentOperatorSessionId(row.session_id),
+      type: row.type,
+      time: row.time,
+      data: JSON.parse(row.data_json) as Record<string, unknown>,
     }
   }
 
