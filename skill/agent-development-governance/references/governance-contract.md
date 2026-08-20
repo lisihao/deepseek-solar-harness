@@ -32,7 +32,7 @@ Every important rule should have:
 ## Fail-closed rules
 
 - Preserve subprocess exit codes and treat timeouts or unreadable output as failures.
-- Run independent checks concurrently only through declared profile bounds. A dependent check starts after every declared prerequisite passes; an absent, cyclic, or failed prerequisite blocks completion.
+- Run independent checks concurrently only through declared profile bounds. A dependent check starts after every declared prerequisite passes; an absent, cyclic, or failed prerequisite blocks completion. A gate marked `exclusive` drains active work and runs alone when its measured resource demand would invalidate timing-sensitive evidence.
 - Include staged, unstaged, untracked, renamed, and committed branch changes when selecting scope.
 - Avoid `|| true`, parser fallbacks to zero, and path filters that hide governance changes unless an independent required gate covers them.
 - A hook is advisory when it can be bypassed or is not executable. CI must independently enforce merge-critical controls.

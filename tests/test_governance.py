@@ -133,6 +133,13 @@ class GovernanceTests(unittest.TestCase):
         with self.assertRaisesRegex(governance.GovernanceError, "max_concurrency"):
             governance.validate_profile(invalid, self.profile_path)
 
+    def test_profile_rejects_non_boolean_exclusive_gate(self):
+        invalid = dict(self.profile)
+        invalid["gates"] = [dict(gate) for gate in self.profile["gates"]]
+        invalid["gates"][0]["exclusive"] = "yes"
+        with self.assertRaisesRegex(governance.GovernanceError, "exclusive must be a boolean"):
+            governance.validate_profile(invalid, self.profile_path)
+
     def test_verify_propagates_failure(self):
         gate = dict(self.profile["gates"][0])
         gate["command"] = [sys.executable, "-c", "raise SystemExit(7)"]
@@ -166,6 +173,44 @@ class GovernanceTests(unittest.TestCase):
             self.root, gates, False, False, max_concurrency=2
         )
         self.assertEqual([result["status"] for result in results], ["ok", "ok"])
+
+    def test_exclusive_gate_runs_without_other_active_gates(self):
+        trace = self.root / "exclusive.trace"
+        script = (
+            "from pathlib import Path; import sys, time; "
+            "trace = Path(sys.argv[1]); label = sys.argv[2]; "
+            "trace.write_text(trace.read_text() + label + ':start\\n'); "
+            "time.sleep(0.05); "
+            "trace.write_text(trace.read_text() + label + ':end\\n')"
+        )
+        trace.write_text("")
+        gates = []
+        for gate_id in ("first", "exclusive", "last"):
+            gates.append({
+                "id": gate_id,
+                "label": gate_id,
+                "command": [sys.executable, "-c", script, str(trace), gate_id],
+                "cwd": ".",
+                "scopes": ["always"],
+                "levels": ["full"],
+                "exclusive": gate_id == "exclusive",
+            })
+
+        results = governance.execute_gates(
+            self.root, gates, False, False, max_concurrency=2
+        )
+        self.assertEqual([result["status"] for result in results], ["ok", "ok", "ok"])
+        self.assertEqual(
+            trace.read_text().splitlines(),
+            [
+                "first:start",
+                "first:end",
+                "exclusive:start",
+                "exclusive:end",
+                "last:start",
+                "last:end",
+            ],
+        )
 
     def test_failed_dependency_blocks_its_consumer(self):
         marker = self.root / "consumer-ran"
