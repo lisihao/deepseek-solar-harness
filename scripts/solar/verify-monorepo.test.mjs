@@ -40,7 +40,7 @@ function validInput() {
         { id: 'source-build', command: ['pnpm', 'run', 'build:lib'] },
         { id: 'typecheck', command: ['pnpm', 'run', 'typecheck:contracts-ready'], needs: ['source-build'] },
         { id: 'lint', command: ['pnpm', 'run', 'lint:contracts-ready'], needs: ['source-build'] },
-        { id: 'related-tests', command: ['pnpm', 'exec', 'vitest', 'run', '--changed=origin/solar'] },
+        { id: 'related-tests', command: ['pnpm', 'exec', 'vitest', 'run', '--changed=origin/solar'], exclusive: true },
         { id: 'doc-sync', command: ['pnpm', 'run', 'doc-sync:contracts-ready'], needs: ['source-build'] },
       ],
     },
@@ -86,6 +86,12 @@ test('rejects an unbounded or unsplit related-test worker contract', () => {
   const input = validInput()
   input.vitestConfig = "name: 'thread-safe',\nmaxWorkers: 2,"
   assert.match(validateMonorepo(input).join('\n'), /process-bound/u)
+})
+
+test('rejects a related-test gate that can overlap other resource-heavy gates', () => {
+  const input = validInput()
+  delete input.governanceProfile.gates.find(gate => gate.id === 'related-tests').exclusive
+  assert.match(validateMonorepo(input).join('\n'), /exclusive gate/u)
 })
 
 test('rejects repeated source preparation inside governance consumers', () => {

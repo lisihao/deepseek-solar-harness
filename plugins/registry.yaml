@@ -7,7 +7,7 @@ managed:
     source: https://github.com/lisihao/agent-development-governance.git
     upstream: null
     source_branch: codex/parallel-governance-v031
-    accepted_sha: 88dbf7d39e0c746c496053daf107cceda7024dd4
+    accepted_sha: 7505f99e24bfdf52af55ca2b67ec4c22818e65ad
     license: MIT
     license_status: package-declared
     license_evidence: plugins/managed/governance/plugins/deepseek-solar-harness-governance/package.json

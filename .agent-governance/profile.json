@@ -140,6 +140,7 @@
       "cwd": ".",
       "scopes": ["source", "tooling", "release"],
       "levels": ["full"],
+      "exclusive": true,
       "timeout_seconds": 1800
     },
     {

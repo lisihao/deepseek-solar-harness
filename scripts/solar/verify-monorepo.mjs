@@ -102,8 +102,9 @@ export function validateMonorepo({
     }
   }
   const relatedTests = governanceGates.get('related-tests')
-  if (JSON.stringify(relatedTests?.command) !== JSON.stringify(['pnpm', 'exec', 'vitest', 'run', '--changed=origin/solar'])) {
-    errors.push('related-tests must use the bounded Vitest project worker budgets')
+  if (JSON.stringify(relatedTests?.command) !== JSON.stringify(['pnpm', 'exec', 'vitest', 'run', '--changed=origin/solar'])
+    || relatedTests?.exclusive !== true) {
+    errors.push('related-tests must use the bounded Vitest project worker budgets as an exclusive gate')
   }
   const threadSafeWorkers = /name: 'thread-safe',[\s\S]{0,300}maxWorkers: 2,/u.test(vitestConfig ?? '')
   const processBoundWorkers = /name: 'process-bound',[\s\S]{0,200}maxWorkers: 1,/u.test(vitestConfig ?? '')
