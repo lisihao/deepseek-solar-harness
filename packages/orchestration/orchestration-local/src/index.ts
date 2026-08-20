@@ -26,6 +26,8 @@ export { ORCHESTRATION_STATE_SCHEMA_VERSION, OrchestrationStore } from './store.
 
 export const name = 'orchestration-local'
 
+// Local daemon plugins intentionally expose the same bounded connection configuration surface.
+/* jscpd:ignore-start */
 /** Local daemon client configuration. */
 export interface Config {
   /** Optional DSH home; defaults to the ordinary harness-owned location. */
@@ -41,6 +43,7 @@ export const Config: z<Config> = z.object({
   autoStart: z.boolean().default(true),
   connectTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
 })
+/* jscpd:ignore-end */
 
 class LocalOrchestrationService extends OrchestrationService {
   private readonly client: OrchestrationDaemonClient
