@@ -170,7 +170,7 @@ describe('host physical-operator routing', () => {
   it('routes preferred and smart-auto non-trivial work at the host boundary', async () => {
     const preferred = await setup()
     await preferred.ctx.commands.execute(preferred.agent, '/operator codex', new AbortController().signal)
-    send(preferred.agent, '请全面分析这个复杂架构并给出可执行改造建议')
+    send(preferred.agent, '请修复这个 TypeScript 构建 bug')
     await preferred.agent.whenIdle()
     expect(preferred.codex.requests).toHaveLength(1)
     expect(preferred.deepseek.requests).toHaveLength(0)
@@ -180,6 +180,40 @@ describe('host physical-operator routing', () => {
     await automatic.agent.whenIdle()
     expect(automatic.codex.requests).toHaveLength(1)
     expect(automatic.deepseek.requests).toHaveLength(0)
+  })
+
+  it('keeps a parallel Smart Auto task on the main model for TaskGraph admission and logs the decision', async () => {
+    const { agent, deepseek, codex, claude } = await setup()
+    send(agent, '请并行安排多个子任务，分别研究三个独立模块，最后综合验证结论。')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(1)
+    expect(codex.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(0)
+    expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+      ignorable: true,
+      data: {
+        policy: 'auto',
+        route: 'taskgraph-candidate',
+      },
+    })
+  })
+
+  it('keeps parallel preferred-product work on the main model with the selected TaskGraph operator hint', async () => {
+    const { ctx, agent, deepseek, codex } = await setup()
+    await ctx.commands.execute(agent, '/operator codex', new AbortController().signal)
+    send(agent, '请并行安排多个模块的实现与测试，并综合验证结果。')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(1)
+    expect(codex.requests).toHaveLength(0)
+    expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+      data: {
+        policy: 'codex',
+        route: 'taskgraph-candidate',
+        operatorId: 'codex',
+      },
+    })
   })
 
   it('restores the primary model after one routed turn instead of replaying the settled Resident result', async () => {

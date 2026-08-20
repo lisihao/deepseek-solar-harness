@@ -7,5 +7,7 @@ describe('orchestration model guidance', () => {
     expect(orchestrationGuidance).toContain('Claude Code')
     expect(orchestrationGuidance).toContain('intelligent per-node routing')
     expect(orchestrationGuidance).toContain('fail rather than silently switch products')
+    expect(orchestrationGuidance).toContain('clean-task Context Capsule')
+    expect(orchestrationGuidance).toContain('without a phase barrier')
   })
 })

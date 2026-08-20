@@ -29,6 +29,7 @@ interface SessionRow {
   id: string
   operator_id: string
   workspace: string
+  lane_id: string
   lifecycle: string
   health: string
   health_reason: string | null
@@ -76,6 +77,7 @@ export type TurnInspection = ResidentTurnSnapshot
  * @param prompt - validated text content blocks.
  * @param profile - daemon-resolved model and reasoning profile.
  * @param supersedesCommandId - optional explicitly abandoned receipt lineage.
+ * @param laneId - caller-owned native-context isolation lane.
  * @returns lowercase SHA-256 digest.
  */
 export function canonicalRequestHash(
@@ -84,9 +86,10 @@ export function canonicalRequestHash(
   prompt: readonly ContentBlock[],
   profile: ResidentExecutionProfile,
   supersedesCommandId?: string,
+  laneId = 'legacy',
 ): string {
   return createHash('sha256')
-    .update(JSON.stringify({ operatorId, workspace, prompt, profile, supersedesCommandId: supersedesCommandId ?? null }))
+    .update(JSON.stringify({ operatorId, workspace, laneId, prompt, profile, supersedesCommandId: supersedesCommandId ?? null }))
     .digest('hex')
 }
 
@@ -124,15 +127,16 @@ export class ResidentStore {
    * Read an existing Session's locked profile without creating or mutating state.
    * @param operatorId - stable native product identity.
    * @param workspace - canonical realpath workspace.
+   * @param laneId - caller-owned native-context isolation lane.
    * @returns the locked profile and provenance, or undefined before first admission.
    */
-  lockedProfile(operatorId: string, workspace: string): {
+  lockedProfile(operatorId: string, workspace: string, laneId = 'legacy'): {
     readonly profile: ResidentExecutionProfile
     readonly source: ResidentExecutionProfileSource
   } | undefined {
     const row = this.db.prepare(
-      'SELECT * FROM resident_sessions WHERE operator_id = ? AND workspace = ?',
-    ).get(operatorId, workspace) as unknown as SessionRow | undefined
+      'SELECT * FROM resident_sessions WHERE operator_id = ? AND workspace = ? AND lane_id = ?',
+    ).get(operatorId, workspace, laneId) as unknown as SessionRow | undefined
     if (row?.model_id === null || row?.model_id === undefined) return undefined
     return {
       profile: {
@@ -148,7 +152,7 @@ export class ResidentStore {
   private configure(): void {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    if (version !== 0 && version !== 1 && version !== 2 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
+    if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
       throw new ResidentOperatorError(
         `resident state schema ${version} is incompatible with ${RESIDENT_STATE_SCHEMA_VERSION}`,
         'PROTOCOL_MISMATCH',
@@ -159,6 +163,7 @@ export class ResidentStore {
         id TEXT PRIMARY KEY,
         operator_id TEXT NOT NULL,
         workspace TEXT NOT NULL,
+        lane_id TEXT NOT NULL,
         lifecycle TEXT NOT NULL,
         health TEXT NOT NULL,
         health_reason TEXT,
@@ -169,7 +174,7 @@ export class ResidentStore {
         profile_source TEXT,
         active_turn_id TEXT,
         updated_at TEXT NOT NULL,
-        UNIQUE(operator_id, workspace)
+        UNIQUE(operator_id, workspace, lane_id)
       ) STRICT;
       CREATE TABLE IF NOT EXISTS command_receipts (
         command_id TEXT PRIMARY KEY,
@@ -217,7 +222,82 @@ export class ResidentStore {
     if (version === 1 || version === 2) {
       this.db.exec('ALTER TABLE command_receipts ADD COLUMN task_label TEXT;')
     }
+    if (version >= 1 && version <= 3) this.migrateLaneSchema()
     this.db.exec(`PRAGMA user_version = ${RESIDENT_STATE_SCHEMA_VERSION};`)
+  }
+
+  /** Rebuild Session-owned tables so one workspace can host independent concurrent lanes. */
+  private migrateLaneSchema(): void {
+    this.db.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN IMMEDIATE;
+      ALTER TABLE command_receipts RENAME TO command_receipts_v3;
+      ALTER TABLE session_leases RENAME TO session_leases_v3;
+      ALTER TABLE resident_events RENAME TO resident_events_v3;
+      ALTER TABLE resident_sessions RENAME TO resident_sessions_v3;
+      CREATE TABLE resident_sessions (
+        id TEXT PRIMARY KEY,
+        operator_id TEXT NOT NULL,
+        workspace TEXT NOT NULL,
+        lane_id TEXT NOT NULL,
+        lifecycle TEXT NOT NULL,
+        health TEXT NOT NULL,
+        health_reason TEXT,
+        revision INTEGER NOT NULL,
+        native_session_id TEXT,
+        model_id TEXT,
+        reasoning_effort TEXT,
+        profile_source TEXT,
+        active_turn_id TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(operator_id, workspace, lane_id)
+      ) STRICT;
+      INSERT INTO resident_sessions
+        (id, operator_id, workspace, lane_id, lifecycle, health, health_reason, revision,
+         native_session_id, model_id, reasoning_effort, profile_source, active_turn_id, updated_at)
+      SELECT id, operator_id, workspace, 'legacy', lifecycle, health, health_reason, revision,
+        native_session_id, model_id, reasoning_effort, profile_source, active_turn_id, updated_at
+      FROM resident_sessions_v3;
+      CREATE TABLE command_receipts (
+        command_id TEXT PRIMARY KEY,
+        supersedes_command_id TEXT UNIQUE REFERENCES command_receipts(command_id),
+        request_hash TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES resident_sessions(id),
+        turn_id TEXT NOT NULL UNIQUE,
+        state TEXT NOT NULL,
+        task_label TEXT,
+        native_turn_id TEXT,
+        result_json TEXT,
+        result_ref TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        resolution TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO command_receipts SELECT * FROM command_receipts_v3;
+      CREATE TABLE session_leases (
+        session_id TEXT PRIMARY KEY REFERENCES resident_sessions(id),
+        turn_id TEXT NOT NULL UNIQUE,
+        acquired_at TEXT NOT NULL,
+        heartbeat_at TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO session_leases SELECT * FROM session_leases_v3;
+      CREATE TABLE resident_events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL REFERENCES resident_sessions(id),
+        type TEXT NOT NULL,
+        time TEXT NOT NULL,
+        data_json TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO resident_events SELECT * FROM resident_events_v3;
+      DROP TABLE resident_events_v3;
+      DROP TABLE session_leases_v3;
+      DROP TABLE command_receipts_v3;
+      DROP TABLE resident_sessions_v3;
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `)
   }
 
   /** Any pre-crash accepted/running command is unsafe to replay automatically. */
@@ -250,10 +330,11 @@ export class ResidentStore {
    * @param requestHash - canonical request conflict detector.
    * @param operatorId - selected native product Driver.
    * @param workspace - canonical realpath workspace.
-   * @param profile - fully resolved execution profile to lock or validate.
+ * @param profile - fully resolved execution profile to lock or validate.
    * @param profileSource - whether automatic or explicit selection produced the profile.
-   * @param supersedesCommandId - optional uniquely linked abandoned indeterminate command.
-   * @param taskLabel - bounded display-only summary, never the raw prompt.
+ * @param supersedesCommandId - optional uniquely linked abandoned indeterminate command.
+ * @param taskLabel - bounded display-only summary, never the raw prompt.
+ * @param laneId - caller-owned native-context isolation lane.
    * @returns accepted or existing receipt projection.
    */
   accept(
@@ -265,6 +346,7 @@ export class ResidentStore {
     profileSource: ResidentExecutionProfileSource,
     supersedesCommandId?: string,
     taskLabel?: string,
+    laneId = 'legacy',
   ): AcceptedTurn {
     return this.transaction(() => {
       const existing = this.receiptByCommand(commandId)
@@ -295,7 +377,7 @@ export class ResidentStore {
           )
         }
         const priorSession = this.sessionRow(superseded.session_id)
-        if (priorSession.operator_id !== operatorId || priorSession.workspace !== workspace) {
+        if (priorSession.operator_id !== operatorId || priorSession.workspace !== workspace || priorSession.lane_id !== laneId) {
           throw new ResidentOperatorError(
             `command ${supersedesCommandId} belongs to a different resident session`,
             'COMMAND_CONFLICT',
@@ -312,18 +394,18 @@ export class ResidentStore {
         }
       }
       let session = this.db.prepare(
-        'SELECT * FROM resident_sessions WHERE operator_id = ? AND workspace = ?',
-      ).get(operatorId, workspace) as unknown as SessionRow | undefined
+        'SELECT * FROM resident_sessions WHERE operator_id = ? AND workspace = ? AND lane_id = ?',
+      ).get(operatorId, workspace, laneId) as unknown as SessionRow | undefined
       if (session === undefined) {
         const id = randomUUID()
         this.db.prepare(`
           INSERT INTO resident_sessions
-            (id, operator_id, workspace, lifecycle, health, health_reason, revision, native_session_id,
+            (id, operator_id, workspace, lane_id, lifecycle, health, health_reason, revision, native_session_id,
              model_id, reasoning_effort, profile_source, active_turn_id, updated_at)
-          VALUES (?, ?, ?, 'idle', 'ok', NULL, 0, NULL, ?, ?, ?, NULL, ?)
-        `).run(id, operatorId, workspace, profile.model, profile.effort ?? null, profileSource, now)
+          VALUES (?, ?, ?, ?, 'idle', 'ok', NULL, 0, NULL, ?, ?, ?, NULL, ?)
+        `).run(id, operatorId, workspace, laneId, profile.model, profile.effort ?? null, profileSource, now)
         session = this.sessionRow(id)
-        this.appendEvent(id, 'session.created', { operatorId, profile, profileSource }, now)
+        this.appendEvent(id, 'session.created', { operatorId, laneId, profile, profileSource }, now)
       } else if (session.model_id === null) {
         this.db.prepare(`
           UPDATE resident_sessions SET model_id = ?, reasoning_effort = ?, profile_source = ?,
@@ -730,6 +812,7 @@ export class ResidentStore {
       sessionId: ResidentOperatorSessionId(row.id),
       operatorId: row.operator_id,
       workspace: row.workspace,
+      laneId: row.lane_id,
       lifecycle: row.lifecycle as ResidentSessionSnapshot['lifecycle'],
       health: row.health as ResidentSessionSnapshot['health'],
       ...row.health_reason === null ? {} : { healthReason: row.health_reason as NonNullable<ResidentSessionSnapshot['healthReason']> },

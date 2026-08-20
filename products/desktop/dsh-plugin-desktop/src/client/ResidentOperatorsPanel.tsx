@@ -71,10 +71,11 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
     return () => { document.removeEventListener('keydown', close) }
   }, [open])
 
-  const running = dashboard?.sessions.filter(session => session.lifecycle === 'running').length ?? 0
+  const running = dashboard?.activeWorkers ?? 0
+  const residentHosts = new Set(dashboard?.providers.filter(provider => provider.available).map(provider => provider.product) ?? []).size
   const unavailable = dashboard?.providers.filter(provider => !provider.available).length ?? 0
   const status = error !== undefined ? 'error' : unavailable > 0 ? 'warn' : running > 0 ? 'running' : 'idle'
-  const label = `物理算子：${String(running)} 个运行中${error === undefined ? '' : '，状态不可用'}`
+  const label = `物理算子：${String(residentHosts)} 个常驻宿主，${String(running)} 个 worker 运行中${error === undefined ? '' : '，状态不可用'}`
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const generatedTime = dashboard === undefined
     ? undefined
@@ -92,7 +93,7 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
         onClick={() => { setOpen(true) }}
       >
         <span className="dshDesktopResidentDot" aria-hidden="true" />
-        {wide ? <><span>物理算子</span><span>{running > 0 ? `${String(running)} 运行中` : 'Claude · Codex'}</span></> : <span>OP</span>}
+        {wide ? <><span>物理算子</span><span>{running > 0 ? `${String(running)} worker` : `${String(residentHosts)} 宿主`}</span></> : <span>OP</span>}
       </button>
       {open && createPortal(
         <div className="dshDesktopResidentBackdrop" role="presentation" onMouseDown={() => { setOpen(false) }}>
@@ -115,6 +116,10 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
             <div className="dshDesktopResidentGrid">
               <div className="dshDesktopResidentColumn">
                 <h3>可用算子</h3>
+                <div className="dshDesktopResidentHelp">
+                  <p><strong>{String(residentHosts)} 个常驻宿主 · {String(running)} 个活动 worker</strong></p>
+                  <p>一个 Codex 或 Claude Code 宿主可承载多个隔离执行 lane；worker 数表示实际并行任务，不表示安装了多个应用。</p>
+                </div>
                 <div className="dshDesktopResidentProviders">
                   {dashboard?.providers.map(provider => (
                     <div key={provider.operatorId} className="dshDesktopResidentProvider" data-ok={provider.available || undefined}>
@@ -183,11 +188,16 @@ function SessionRow(props: { session: DesktopResidentSession; selected: boolean;
       <span>
         <strong>{operatorLabel(props.session.operatorId)} · {taskLabel}</strong>
         <small>{props.session.workspaceDisplay}</small>
+        <small>执行 lane · {shortLane(props.session.laneId)}</small>
         <small>{profileLabel(props.session)}</small>
       </span>
       <span><em>{lifecycleLabel(props.session.lifecycle)}</em><small>{phase}</small></span>
     </button>
   )
+}
+
+function shortLane(laneId: string): string {
+  return laneId.length <= 28 ? laneId : `${laneId.slice(0, 27)}…`
 }
 
 function profileLabel(session: DesktopResidentSession): string {

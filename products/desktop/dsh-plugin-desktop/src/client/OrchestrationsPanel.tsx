@@ -209,6 +209,9 @@ function GraphView(props: {
   if (run === undefined) {
     return <div className="dshDesktopOrchestrationColumn"><p className="dshDesktopOrchestrationEmpty">选择任务查看 DAG。</p></div>
   }
+  const activeWorkers = run.nodes.filter(node => node.state === 'running').length
+  const readyWorkers = run.nodes.filter(node => node.state === 'ready').length
+  const cleanContext = props.events.some(event => event.type === 'capsule.resolved' && event.data.cleanContext === true)
   return <div className="dshDesktopOrchestrationColumn dshDesktopOrchestrationGraph">
     <div className="dshDesktopOrchestrationRunHeader">
       <div>
@@ -216,6 +219,16 @@ function GraphView(props: {
         <small>Run {shortRef(run.runId)} · rev {String(run.revision)} · Graph rev {String(run.graphRevision)}</small>
       </div>
       <RunControls run={run} disabled={props.controlPending} onControl={props.onControl} />
+    </div>
+    <div
+      className="dshDesktopCollaborationTrace"
+      data-policy={run.admission?.policy ?? 'legacy'}
+      aria-label="智能协作 Trace 摘要"
+    >
+      <p><strong>协作 Trace · {collaborationPolicyLabel(run.admission?.policy)}</strong></p>
+      <p>路由：{run.admission?.route === 'taskgraph' ? '持久 TaskGraph' : '历史任务（无 admission 记录）'}</p>
+      <p>并行：{String(activeWorkers)}/{String(run.maxParallel ?? 1)} worker 运行中 · {String(readyWorkers)} 个可派发</p>
+      <p>上下文：{cleanContext ? 'Clean-task Capsule 已注入 · fresh native lane' : '等待 Capsule 解析'}</p>
     </div>
     <div className="dshDesktopOrchestrationPipeline" aria-label="编译流水线">
       <Stage label="Intent" complete={eventTypes.has('intent.compiled')} />
@@ -262,6 +275,9 @@ function NodeCard(props: {
     <div className="dshDesktopOrchestrationDependencies">
       {node.dependsOn.length === 0 ? '起点' : `依赖 ${node.dependsOn.join(' → ')}`}
     </div>
+    {node.waitReason !== undefined && <div className="dshDesktopOrchestrationDependencies">
+      调度等待 · {waitReasonLabel(node.waitReason.code)}
+    </div>}
     <div className="dshDesktopOrchestrationMeta">
       <span>Attempt {String(node.attempt)}</span>
       <span>Generation {String(node.capabilityGeneration)}</span>
@@ -333,9 +349,36 @@ function EventTimeline(props: {
             <time title={time.absolute}>{time.relative}</time>
             <strong>{eventLabel(event.type)}</strong>
             <span>{event.nodeId === undefined ? `Run · #${String(event.sequence)}` : `${event.nodeId} · A${String(event.attempt ?? 0)} · G${String(event.generation ?? 0)}`}</span>
+            <small>{eventDetail(event)}</small>
           </li>
         })}</ol>}
   </div>
+}
+
+/** Present the exact collaboration preference persisted at TaskGraph admission. */
+export function collaborationPolicyLabel(policy: 'auto' | 'direct' | 'codex' | 'claude-code' | undefined): string {
+  return ({
+    auto: '智能协作',
+    direct: '仅主模型',
+    codex: '优先 Codex',
+    'claude-code': '优先 Claude Code',
+  } as Record<string, string>)[String(policy)] ?? '历史策略 N/A'
+}
+
+/** Summarize collaboration decisions that matter in the visible Trace. */
+export function eventDetail(event: DesktopOrchestrationEvent): string {
+  if (event.type === 'run.started') {
+    const admission = event.data.admission as { policy?: string } | null | undefined
+    const policy = admission?.policy
+    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
+  }
+  if (event.type === 'capsule.resolved') {
+    return event.data.cleanContext === true ? 'Clean-task Context Capsule 已注入' : 'Capsule 未确认干净上下文'
+  }
+  if (event.type === 'node.dispatched') {
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.contextIsolation ?? 'N/A')} · lane ${shortRef(String(event.data.laneId ?? 'N/A'))}`
+  }
+  return ''
 }
 
 function control(
@@ -372,6 +415,14 @@ function nodeStateLabel(state: DesktopOrchestrationNode['state']): string {
   } as const)[state]
 }
 
+function waitReasonLabel(code: string): string {
+  return ({
+    DEPENDENCIES_PENDING: '依赖尚未完成',
+    SCOPE_CONFLICT: '读写或 effect 冲突，串行执行',
+    MAX_PARALLEL_REACHED: '已达到并行上限',
+  } as Record<string, string>)[code] ?? code
+}
+
 function eventLabel(type: string): string {
   return ({
     'intent.compiled': 'Intent 已编译', 'graph.compiled': 'Graph 已认证', 'capsule.resolved': 'Capsule 已解析',
@@ -379,5 +430,6 @@ function eventLabel(type: string): string {
     'node.dispatched': '已派发 Resident 算子', 'node.evidence.accepted': 'Evidence 已验收',
     'node.failed': '节点失败', 'node.retry_scheduled': '已安排重试', 'run.completed': '任务已完成',
     'capability_update.proposed': '能力更新已提出', 'capability_update.applied': '能力更新已应用',
+    'scheduler.waiting.updated': '调度等待已更新',
   } as Record<string, string>)[type] ?? type
 }

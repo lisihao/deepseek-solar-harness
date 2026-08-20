@@ -46,6 +46,7 @@ export interface DesktopOrchestrationNode {
   executionPlanRef?: string
   evidenceRefs: string[]
   blockers: DesktopOrchestrationBlocker[]
+  waitReason?: DesktopOrchestrationBlocker
   updatedAt: string
 }
 
@@ -56,6 +57,12 @@ export interface DesktopOrchestrationRun {
   state: DesktopOrchestrationRunState
   revision: number
   graphRevision: number
+  maxParallel?: number
+  admission?: {
+    policy: 'auto' | 'direct' | 'codex' | 'claude-code'
+    route: 'taskgraph'
+    sourceSessionId: string
+  }
   certificate: {
     certificateSha256: string
     graphSha256: string

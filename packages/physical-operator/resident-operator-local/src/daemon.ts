@@ -360,6 +360,7 @@ export class ResidentDaemon {
     const commandId = stringParam(params, 'command_id')
     const operatorId = stringParam(params, 'operator_id')
     const configuredWorkspace = stringParam(params, 'workspace')
+    const laneId = stringParam(params, 'lane_id')
     const taskLabel = taskLabelParam(params)
     const prompt = promptParam(params)
     const requestedProfile = profileParam(params)
@@ -380,7 +381,7 @@ export class ResidentDaemon {
         unavailableProviderCode(qualification),
       )
     }
-    const locked = this.store.lockedProfile(operatorId, workspace)
+    const locked = this.store.lockedProfile(operatorId, workspace, laneId)
     const resolved = locked !== undefined && requestedProfile === undefined
       ? locked
       : resolveResidentExecutionProfile(
@@ -396,7 +397,7 @@ export class ResidentDaemon {
               : { effort: requestedProfile.effort ?? locked.profile.effort },
           },
       )
-    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId)
+    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId, laneId)
     const accepted = this.store.accept(
       commandId,
       requestHash,
@@ -406,6 +407,7 @@ export class ResidentDaemon {
       resolved.source,
       supersedesCommandId,
       taskLabel,
+      laneId,
     )
     if (accepted.state === 'accepted' && !this.active.has(accepted.turnId)) {
       const controller = new AbortController()

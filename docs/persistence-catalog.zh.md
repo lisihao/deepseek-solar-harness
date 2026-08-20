@@ -496,6 +496,24 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src/types.ts)
 
+### `orchestration/*`
+
+<a id="orchestrationadmission--log-only"></a>
+
+#### `orchestration/admission` — log-only
+
+```ts persistence-catalog
+/** Durable link from one DSH collaboration decision to its TaskGraph run. */
+'orchestration/admission': {
+  policy: CollaborationPolicy
+  route: 'taskgraph'
+  runId: string
+  maxParallel: number
+}
+```
+
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:15`](../packages/orchestration/tool-orchestration/src/index.ts)
+
 ### `permission/*`
 
 <a id="permissionpreset--log-only"></a>
@@ -535,7 +553,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:58`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:66`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -549,7 +567,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:70`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:78`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -578,6 +596,23 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```
 
 来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:53`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatorrouting-decision--log-only"></a>
+
+#### `physical-operator/routing-decision` — log-only
+
+```ts persistence-catalog
+/** Durable collaboration admission decision for one user request. */
+'physical-operator/routing-decision': {
+  policy: PhysicalOperatorRoutingPolicy
+  route: 'primary-model' | 'resident' | 'taskgraph-candidate'
+  requestedByMessageId: string
+  reason: string
+  operatorId?: string
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:58`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

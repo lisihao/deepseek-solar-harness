@@ -54,6 +54,14 @@ declare module '@deepseek-ai/dsh-session/types' {
       operatorId: PhysicalOperatorProfileOwner
       profile: PhysicalOperatorExecutionPreference | null
     }
+    /** Durable collaboration admission decision for one user request. */
+    'physical-operator/routing-decision': {
+      policy: PhysicalOperatorRoutingPolicy
+      route: 'primary-model' | 'resident' | 'taskgraph-candidate'
+      requestedByMessageId: string
+      reason: string
+      operatorId?: string
+    }
     /** Durable host decision that binds one DSH message to one Resident command. */
     'physical-operator/dispatch': {
       commandId: string
@@ -100,6 +108,15 @@ interface HostRouteMessage {
   readonly id: string
   readonly content: readonly ContentBlock[]
   readonly source: { readonly kind: string; readonly plugin?: string }
+}
+
+interface HostRoutingDecision {
+  readonly policy: PhysicalOperatorRoutingPolicy
+  readonly route: 'primary-model' | 'resident' | 'taskgraph-candidate'
+  readonly requestedByMessageId: string
+  readonly reason: string
+  readonly operatorId?: string
+  readonly hostRoute?: PendingHostRoute
 }
 
 type ToolRequest = {
@@ -188,7 +205,17 @@ export function apply(ctx: Context): void {
   ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx))
 
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
-    const route = selectHostRoute(agent, messages)
+    const decision = decideHostRoute(agent, messages)
+    const route = decision?.hostRoute
+    if (decision !== undefined && !hasRoutingDecision(agent.session.events, decision.requestedByMessageId)) {
+      agent.session.append('physical-operator/routing-decision', {
+        policy: decision.policy,
+        route: decision.route,
+        requestedByMessageId: decision.requestedByMessageId,
+        reason: decision.reason,
+        ...decision.operatorId === undefined ? {} : { operatorId: decision.operatorId },
+      }, { ignorable: true })
+    }
     if (route !== undefined) {
       const byPosition = pending.get(agent) ?? new Map<string, PendingHostRoute>()
       byPosition.set(`${turn}:${step}`, route)
@@ -534,18 +561,17 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
 }
 
 /** Resolve explicit, continuation, preferred, and smart-auto routing in strict priority order. */
-function selectHostRoute(
-  agent: Agent,
-  messages: readonly HostRouteMessage[],
-): PendingHostRoute | undefined {
+function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): HostRoutingDecision | undefined {
   const current = [...messages].reverse().find(message => message.source.kind === 'user')
   const resume = [...messages].reverse().find(message => (
     message.source.kind === 'plugin' && message.source.plugin === RESUME_SOURCE
   ))
   const previous = latestDispatch(agent.session.events)
+  const policy = foldPhysicalOperatorRouting(agent.session.events)
   if (resume !== undefined) {
     const recoverable = recoverableDispatch(agent.session.events)
-    return recoverable === undefined ? undefined : {
+    if (recoverable === undefined) return undefined
+    const hostRoute: PendingHostRoute = {
       commandId: recoverable.commandId,
       operatorId: recoverable.operatorId,
       promptMessageId: recoverable.promptMessageId,
@@ -553,14 +579,22 @@ function selectHostRoute(
       recovered: true,
       ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
     }
+    return {
+      policy,
+      route: 'resident',
+      operatorId: recoverable.operatorId,
+      requestedByMessageId: resume.id,
+      reason: '恢复尚未交付的 Resident receipt',
+      hostRoute,
+    }
   }
   if (current === undefined) return undefined
   const text = textContent(current.content)
   const explicit = explicitOperator(text)
-  if (explicit !== undefined) return newHostRoute(agent, current.id, explicit)
+  if (explicit !== undefined) return residentDecision(agent, current.id, policy, explicit, '当前请求显式指定物理算子')
   if (isContinuation(text) && previous !== undefined) {
     const recoverable = recoverableDispatch(agent.session.events)
-    return recoverable === undefined
+    const hostRoute = recoverable === undefined
       ? newHostRoute(agent, current.id, previous.operatorId)
       : {
         commandId: recoverable.commandId,
@@ -570,14 +604,72 @@ function selectHostRoute(
         recovered: true,
         ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
       }
+    return {
+      policy,
+      route: 'resident',
+      operatorId: previous.operatorId,
+      requestedByMessageId: current.id,
+      reason: '继续上一条物理算子任务',
+      hostRoute,
+    }
   }
-  const policy = foldPhysicalOperatorRouting(agent.session.events)
-  if (policy === 'direct') return undefined
+  if (policy === 'direct') return primaryDecision(current.id, policy, '用户选择仅主模型')
   if (policy === 'codex' || policy === 'claude-code') {
-    return isDelegable(text) ? newHostRoute(agent, current.id, policy) : undefined
+    if (isParallelCandidate(text)) {
+      return {
+        policy,
+        route: 'taskgraph-candidate',
+        operatorId: policy,
+        requestedByMessageId: current.id,
+        reason: `任务包含可并行分支，交由主模型构造优先 ${policy === 'codex' ? 'Codex' : 'Claude Code'} 的持久 TaskGraph`,
+      }
+    }
+    return isDelegable(text)
+      ? residentDecision(agent, current.id, policy, policy, `用户策略为优先 ${policy === 'codex' ? 'Codex' : 'Claude Code'}`)
+      : primaryDecision(current.id, policy, '请求过小，不值得启动物理算子')
+  }
+  if (isParallelCandidate(text)) {
+    return {
+      policy,
+      route: 'taskgraph-candidate',
+      requestedByMessageId: current.id,
+      reason: '任务包含可并行分支或显式多角色协作，交由主模型构造持久 TaskGraph',
+    }
   }
   const automatic = automaticOperator(text)
-  return automatic === undefined ? undefined : newHostRoute(agent, current.id, automatic)
+  return automatic === undefined
+    ? primaryDecision(current.id, policy, '未发现需要物理算子或 TaskGraph 的工作')
+    : residentDecision(agent, current.id, policy, automatic, '智能协作选择一个有界 Resident worker')
+}
+
+function residentDecision(
+  agent: Agent,
+  messageId: string,
+  policy: PhysicalOperatorRoutingPolicy,
+  operatorId: 'codex' | 'claude-code',
+  reason: string,
+): HostRoutingDecision {
+  return {
+    policy,
+    route: 'resident',
+    requestedByMessageId: messageId,
+    reason,
+    operatorId,
+    hostRoute: newHostRoute(agent, messageId, operatorId),
+  }
+}
+
+function primaryDecision(
+  messageId: string,
+  policy: PhysicalOperatorRoutingPolicy,
+  reason: string,
+): HostRoutingDecision {
+  return { policy, route: 'primary-model', requestedByMessageId: messageId, reason }
+}
+
+function hasRoutingDecision(events: readonly SessionEvent[], requestedByMessageId: string): boolean {
+  return events.some(event => event.type === 'physical-operator/routing-decision'
+    && event.data.requestedByMessageId === requestedByMessageId)
 }
 
 function newHostRoute(agent: Agent, messageId: string, operatorId: string): PendingHostRoute {
@@ -613,6 +705,19 @@ function automaticOperator(text: string): 'codex' | 'claude-code' | undefined {
 function isDelegable(text: string): boolean {
   const value = text.trim()
   return value.length >= 12 || automaticOperator(value) !== undefined
+}
+
+/**
+ * Detect work whose independent branches should remain visible to the durable Scheduler.
+ * @param text - current user-request text.
+ * @returns whether Smart Collaboration should leave the request for TaskGraph admission.
+ */
+export function isParallelCandidate(text: string): boolean {
+  const value = text.trim()
+  return value.length >= 180
+    || /(?:并行|多个(?:任务|方向|模块|子任务)|分别(?:分析|研究|实现|验证)|多(?:角色|智能体|代理))/u.test(value)
+    || /(?:跨(?:学科|模块|仓库)|全面(?:分析|研究|调研)|系统性(?:分析|研究))/u.test(value)
+    || /(?:parallel|multi[- ](?:agent|stage|module)|independent branches)/iu.test(value)
 }
 
 function isContinuation(text: string): boolean {
@@ -841,13 +946,13 @@ function selectionGuidance(
 function routingPolicyGuidance(policy: PhysicalOperatorRoutingPolicy): string {
   switch (policy) {
     case 'auto':
-      return 'Physical-operator routing policy: SMART AUTO. At the start of every non-trivial request, explicitly decide whether delegation improves implementation quality, independent verification, or continuity. Invoke a suitable available operator without waiting for the user to name Claude Code or Codex. Multi-file coding, debugging, refactoring, tests/builds, repository review, and long-running work normally qualify.'
+      return 'Physical-operator routing policy: SMART AUTO. At the start of every non-trivial request, explicitly decide whether durable TaskGraph orchestration or one physical operator improves the result. Use orchestration for work with parallel independent branches, explicit dependencies, recovery, or multiple roles; use one suitable operator for bounded single-worker work. Multi-file coding, debugging, refactoring, tests/builds, repository review, and long-running work normally qualify for collaboration.'
     case 'direct':
       return 'Physical-operator routing policy: CURRENT MODEL ONLY. Do not call physical_operator unless the current user message explicitly requests an operator.'
     case 'codex':
-      return 'Physical-operator routing policy: CODEX PREFERRED. For every delegable non-trivial task, invoke the available codex operator without waiting for the user to repeat the preference; use resident mode for continuing repository work.'
+      return 'Physical-operator routing policy: CODEX PREFERRED. Use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["codex"] on each delegable node. Invoke one codex Resident directly for bounded single-worker work without waiting for the user to repeat the preference.'
     case 'claude-code':
-      return 'Physical-operator routing policy: CLAUDE CODE PREFERRED. For every delegable non-trivial task, invoke the available claude-code operator without waiting for the user to repeat the preference; use resident mode for continuing repository work.'
+      return 'Physical-operator routing policy: CLAUDE CODE PREFERRED. Use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["claude-code"] on each delegable node. Invoke one Claude Code Resident directly for bounded single-worker work without waiting for the user to repeat the preference.'
   }
 }
 

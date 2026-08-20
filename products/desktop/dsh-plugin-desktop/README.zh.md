@@ -18,7 +18,11 @@ Desktop 产品层还会提供 Resident Physical Operators 与 AgentTeams，但�
 
 普通 sidebar 会在两种呈现模式下增加一个纯新增的 **物理算子** action。它会打开同源、只读的状态面板，显示 Provider 资格、持久 Session、最新 Receipt 状态与有界进度事件。Host route 按需读取 `ctx.residentOperators`，不会创建 Desktop 自有的 Resident 状态库。面板还会说明智能协作与插件能力契约：模型工作使用 `physical_operator` 工具，Host 插件通过注入 `ctx.physicalOperators` 执行，可信管理/状态插件则可注入 `ctx.residentOperators` 检查状态。基于实时 descriptor、tag 与 execution mode 的指引会主动触发委派；策略可见且已记录，不会引入隐藏分类器或第二调度权威。
 
+“物理算子”action 会区分已安装 Resident 宿主与活动 worker，并显示每个 worker 的隔离 lane。Codex 与 Claude Code 各自最多接纳四个并发 lane；一个原生产品宿主因此可以执行多个独立 TaskGraph 节点，而不会把重复应用错误呈现为多个算子。
+
 产品层还会把封装后的 `@deepseek-ai/dsh-orchestrations` Bundle 作为独立插件能力挂载。Service Definition 分别拥有 Intent、Context、Capsule、TaskGraph 和 Orchestration 契约；Local Provider 拥有持久 daemon、SQLite 状态、Artifact Store 与调度写入；Tool 和 Web UI 只消费 `ctx.orchestrations`。新增的 **编排** sidebar 工作台通过同源投影展示 Run、DAG 依赖、Compiler/Capsule/Context 阶段、已封印 ExecutionPlan、算子选择、Attempt、Generation、Evidence、Blocker 与事件。暂停、恢复、取消、批准、拒绝和不确定执行处置都调用公共 Service seam，不直接修改 daemon 存储。移除该 Bundle 就会完整移除这组能力，不改变聊天、Workflow 或物理算子。
+
+每个编排工作台 Run 顶部都有“协作 Trace”摘要。它会标出准入的“智能协作”“仅主模型”“优先 Codex”或“优先 Claude Code”策略、TaskGraph 路由、活动与最大 worker 数、可派发节点、clean-task Capsule 状态和 fresh-lane 隔离。事件时间线保留相同的准入信息、Capsule 解析、算子派发、lane 与调度等待原因，因此任务完成并重启后仍可解释。
 
 打包内的 `anchored-standard` preset 是 system-trust 产品输入，并排在同名上游 preset root 之前。它的首轮 gate 会覆盖 delegated agent，因此 AgentTeams worker 会与主 agent 一样从 `bash` 和 `str_replace_editor` 两个 bootstrap 工具开始，而不是被当作已经 promoted。AgentTeams 还会把 member protocol 放入首条 user prompt，不再替换所选 preset 的 persona。若用户 profile 已声明 AgentTeams，产品层不会重复加载；最终 patch 仍会强制这一 prompt placement。
 

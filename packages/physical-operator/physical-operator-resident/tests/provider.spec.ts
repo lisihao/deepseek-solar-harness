@@ -98,6 +98,7 @@ describe('physical-operator-resident', () => {
       commandId: ResidentOperatorCommandId(String(resident.id)),
       operatorId: 'codex',
       workspace: '/workspace',
+      laneId: 'parent',
       taskLabel: 'Continue the proof',
     })
     expect(oneShot.starts).toBe(1)

@@ -89,8 +89,8 @@ Abstract provider-neutral resident session/control surface.
 abstract providers(): Promise<ResidentProviderStatus[]>
 
 /**
- * Admit or replay one durable command for its operator/workspace Session.
- * @param request - command identity, optional retry lineage, prompt, workspace, and cancellation signal.
+ * Admit or replay one durable command for its operator/workspace/lane Session.
+ * @param request - command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.
  * @returns a holder-owned turn whose result settles independently.
  */
 abstract execute(request: ResidentExecuteRequest): Promise<ResidentTurn>
@@ -144,7 +144,7 @@ abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:231`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:235`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

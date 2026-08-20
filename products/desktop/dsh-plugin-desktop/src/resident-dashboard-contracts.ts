@@ -45,6 +45,7 @@ export interface DesktopResidentSession {
   operatorId: string
   workspace: string
   workspaceDisplay: string
+  laneId: string
   lifecycle: 'starting' | 'idle' | 'running' | 'draining' | 'stopped'
   health: 'ok' | 'degraded' | 'unavailable'
   healthReason?: string
@@ -75,6 +76,7 @@ export interface DesktopResidentDashboard {
   events: DesktopResidentEvent[]
   activities: DesktopResidentActivity[]
   hiddenDiagnosticSessions: number
+  activeWorkers: number
   selectedTurn?: DesktopResidentTurn & {
     sessionId: string
     stateRevision: number
