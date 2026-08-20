@@ -119,7 +119,7 @@ jobs:
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-24.04' }}
-    name: node 24 / coverage
+    name: node 24 / coverage and semantic snapshots
     env:
       # The standard four-core runner uses two coverage workers. The failover pool
       # shares one 64-core VM across six always-on runner instances, so each
@@ -131,6 +131,10 @@ jobs:
       # repository Oxlint contract's child process from consuming every core
       # and starving its unchanged five-second responsiveness assertion.
       DSH_OXLINT_THREADS: '1'
+      # Semantic snapshots run only after coverage on this same runner. Two
+      # workers leave capacity for their real child processes and timer-based
+      # transport contracts on the standard four-core host.
+      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '2' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -163,6 +167,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
 
+      - uses: actions/cache/restore@v4
+        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event.pull_request.user.login == 'dependabot[bot]'
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       - name: Install dependencies and prepare bubblewrap
         run: |
           pnpm install --frozen-lockfile &
@@ -179,6 +191,17 @@ jobs:
       - name: Run exhaustive coverage
         run: pnpm run check:ci:coverage
 
+      - name: Install Playwright Chromium and hosted dependencies
+        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event.pull_request.user.login == 'dependabot[bot]'
+        run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium on the failover VM
+        if: vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]'
+        run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install chromium
+
+      - name: Run isolated semantic snapshots
+        run: pnpm run check:ci:snapshot
+
   node-24-consumers:
     if: github.event_name == 'pull_request'
     runs-on: >-
@@ -192,8 +215,6 @@ jobs:
       DSH_NODE_COMPAT_SKIP_TYPECHECK: '1'
       DSH_OXLINT_THREADS: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '4' }}
       DSH_PUBLINT_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '4' }}
-      # Failover halves snapshot concurrency for the shared 64-core VM.
-      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '4' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -257,7 +278,7 @@ jobs:
         if: vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]'
         run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install chromium
 
-      - name: Run compatibility, snapshot, and artifact gates
+      - name: Run compatibility, web snapshot, and artifact gates
         run: pnpm run check:ci:consumers
 
 

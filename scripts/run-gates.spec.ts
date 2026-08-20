@@ -271,7 +271,7 @@ describe('Node 24 lane ownership', () => {
     const subject = withPnpmEntrypoint(() => gatesForMode('ci-consumers'))
 
     expect(defaultConcurrency('ci-consumers', subject.length, 4)).toEqual({
-      workers: 10,
+      workers: 9,
       source: 'ci-consumers gate count',
     })
     expect(subject.map(item => item.id)).toEqual([
@@ -280,7 +280,6 @@ describe('Node 24 lane ownership', () => {
       'publint',
       'built-package-invariants',
       'lint-and-duplication',
-      'snapshot',
       'web-snapshot',
       'doc-typecheck',
       'node-next-types',
@@ -290,7 +289,6 @@ describe('Node 24 lane ownership', () => {
     expect(subject.find(item => item.id === 'built-package-invariants')?.needs).toEqual(['publint'])
     expect(subject.find(item => item.id === 'lint-and-duplication')?.needs).toEqual(['built-package-invariants'])
     for (const id of [
-      'snapshot',
       'web-snapshot',
       'doc-typecheck',
       'node-next-types',
@@ -298,7 +296,6 @@ describe('Node 24 lane ownership', () => {
     ]) {
       expect(subject.find(item => item.id === id)?.needs).toEqual(['built-package-invariants'])
     }
-    expect(subject.find(item => item.id === 'snapshot')?.env).toEqual({ DSH_EXAMPLE_MODE: 'lib' })
     expect(subject.find(item => item.id === 'doc-typecheck')?.env).toEqual({
       DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1',
     })
@@ -311,6 +308,16 @@ describe('Node 24 lane ownership', () => {
     expect(subject.find(item => item.id === 'web-snapshot')).toMatchObject({
       displayCommand: 'DSH_SNAPSHOT=replay pnpm run test:web:built',
       env: { DSH_SNAPSHOT: 'replay' },
+    })
+  })
+
+  it('keeps semantic snapshots in their isolated build-backed aggregate', () => {
+    const subject = withPnpmEntrypoint(() => gatesForMode('ci-snapshot'))
+
+    expect(subject.map(item => item.id)).toEqual(['build', 'snapshot'])
+    expect(subject.find(item => item.id === 'snapshot')).toMatchObject({
+      env: { DSH_EXAMPLE_MODE: 'lib' },
+      needs: ['build'],
     })
   })
 })

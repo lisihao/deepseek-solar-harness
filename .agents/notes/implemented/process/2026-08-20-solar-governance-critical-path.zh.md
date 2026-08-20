@@ -16,6 +16,8 @@ Solar 仓库没有注册任何自定义 runner，也没有故障切换变量。�
 
 把这些作业迁移到标准四核 runner 后，覆盖率通道暴露出最后一处嵌套预算：instrumented 与 exempt 套件各用一个 worker 并行运行，而 Oxlint 响应时间契约会在剩余的共享 CPU 压力下启动子进程。仅把 Oxlint 自身限制为单线程仍不够：final-diagnostics 用例耗时 5.228 秒，超过保持不变的五秒限制；instrumented 覆盖率套件和其余 216 个 exempt 测试全部通过。
 
+第一次完整的标准 runner 消费方通道又暴露出“逻辑独立”与“资源独立”的差别。四个外层消费方 gate 叠加 Vitest 未受约束的快照文件 worker，使一个 150 ms keep-alive 契约饥饿并触发了不应发生的 provider 重试。另一边，滚动场景的 120 个定速 chunk 在刻意较重的历史与锚点准备完成前已经全部结束，导致 fixture 不再具备它要验证的并发前提。两个聚焦场景在隔离运行时都通过。
+
 ## Decision
 
 Solar profile 采用 `max_concurrency: 2` 的有界依赖图。这样在 GitHub macOS 的三 CPU runner 上为子进程池保留一个 CPU，避免三个顶层门禁再分别乘以三个内部 worker。唯一的 `source-build` 门禁准备共享 TypeScript 输出；typecheck、lint、文档同步与 Web 构建通过各自的 `*:contracts-ready` 入口复用输出，并声明 `needs: [source-build]`。治理运行时展开传递依赖，只调度已就绪门禁；依赖失败时阻断消费者。
@@ -25,6 +27,8 @@ Vitest 在项目配置中拥有 worker 预算：线程安全测试最多使用�
 工作流使用部分 blob checkout、pnpm 与 Yarn 缓存，并取消已被新提交取代的运行。Solar 的必需拉取请求作业默认使用可移植的 `ubuntu-24.04` 与 `windows-2025` runner，并按标准四核容量限制内部并发。已有的仓库变量选择器仍允许显式配置自托管池，但日常正确性不再依赖上游组织的 runner 标签。拉取请求 CI 继续作为自动、绑定提交的权威结论。完整的 [fork 适配器](2026-08-15-fork-branch-push-ci.md) 保留手工调度能力，供跨平台诊断使用，但不再重复每次 `codex/**` 分支推送。
 
 覆盖率通道还固定 `DSH_OXLINT_THREADS=1`，并只把 `scripts/oxlint-contract.spec.ts` 移入依赖尾节点。instrumented 与其余 exempt 套件仍然并行；两者结束后，Oxlint 响应时间契约在空闲 runner 上运行。这样只增加一个聚焦尾节点，不会把两条长覆盖率路径整体串行化。测试选择、覆盖率阈值与五秒契约均未改变。
+
+语义快照聚合现在在同一 runner 的完整覆盖率结束后运行，不再与浏览器、lint 和文档消费方竞争。`DSH_SNAPSHOT_MAX_CONCURRENCY` 同时约束文件 worker 与文件内并发；标准四核主机使用两个 worker，为真实子进程和基于定时器的传输契约保留 CPU。浏览器消费方通道仍在自己的 runner 上并行；其滚动 fixture 提供足够多的定速 chunk，保证在受支持的托管容量下历史加载与流式输出确实重叠，同时不增加任何断言超时。
 
 ## Alternatives considered
 

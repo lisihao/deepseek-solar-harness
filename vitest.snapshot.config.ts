@@ -63,6 +63,7 @@ export default defineConfig({
     testTimeout: 120_000,
     hookTimeout: 30_000,
     fileParallelism: (process.env.DSH_SNAPSHOT || 'replay') === 'replay' && snapshotMaxConcurrency > 1,
+    maxWorkers: snapshotMaxConcurrency,
     maxConcurrency: snapshotMaxConcurrency,
   },
 })

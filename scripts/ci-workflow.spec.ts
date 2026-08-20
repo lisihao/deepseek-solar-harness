@@ -103,7 +103,10 @@ describe('CI workflow', () => {
       expect(job['runs-on']).toContain('ubuntu-24.04')
       expect(job['runs-on']).not.toContain('dsh-ubuntu-24-04-16core')
     }
-    expect(node24Coverage.env).toMatchObject({ DSH_OXLINT_THREADS: '1' })
+    expect(node24Coverage.name).toBe('node 24 / coverage and semantic snapshots')
+    if (!isRecord(node24Coverage.env)) throw new TypeError('Node 24 coverage job must define env')
+    expect(node24Coverage.env.DSH_OXLINT_THREADS).toBe('1')
+    expect(node24Coverage.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain("|| '2'")
     expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
     expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
     expect(aggregate['runs-on']).toContain('vm-backup')

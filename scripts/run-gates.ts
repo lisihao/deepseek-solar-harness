@@ -407,7 +407,6 @@ function ciConsumerGates(): Gate[] {
       label: 'lint and duplication',
       needs: validatedBuild,
     }),
-    snapshotGate(validatedBuild),
     webSnapshotGate(validatedBuild),
     pnpmScript('doc-typecheck', 'doc-typecheck:contracts-ready', {
       needs: validatedBuild,
