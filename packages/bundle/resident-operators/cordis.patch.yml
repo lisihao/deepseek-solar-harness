@@ -35,14 +35,14 @@
             displayName: Codex
             description: Implements, debugs, tests, and reviews repository changes through the user's native ChatGPT subscription.
             tags: [coding, implementation, debugging, testing, review, subscription]
-            maxConcurrency: 1
+            maxConcurrency: 4
           - id: claude-code
             ephemeralProvider: claude-code
             residentProvider: claude-code
             displayName: Claude Code
             description: Analyzes codebases, architecture, and long-context reviews through the user's native Claude subscription.
             tags: [analysis, architecture, review, long-context, coding, subscription]
-            maxConcurrency: 1
+            maxConcurrency: 4
 
     - id: tool-physical-operator
       name: '@deepseek-ai/dsh-tool-physical-operator'

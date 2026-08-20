@@ -18,7 +18,7 @@ Resident Provider 资格审查还会发布 Claude Code 与 Codex 的实时原生
 
 注册生命周期与执行生命周期有意分离。移除或热重载 Provider 后，该注册不再接受新发现，但不会撤销已接受的运行。使用同一稳定 ID 重新注册时，替代实现仍会看到旧注册的未结束执行所占容量，直至旧执行结束。
 
-只有 `completed` 表示成功。取消、拒绝、token 耗尽与 Provider 失败会保留为明确停止原因或基础设施 rejection。Physical Service Definition 不负责排队、重试、持久化或回滚；Resident 持久化隔离在独立 Service Definition 与单写 daemon 后。协议 v3 仍为快速失败，且永不自动重放 indeterminate command。
+只有 `completed` 表示成功。取消、拒绝、token 耗尽与 Provider 失败会保留为明确停止原因或基础设施 rejection。Physical Service Definition 不负责排队、重试、持久化或回滚；Resident 持久化隔离在独立 Service Definition 与单写 daemon 后。协议 v4 仍为快速失败，且永不自动重放 indeterminate command。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -89,8 +89,8 @@ Abstract provider-neutral resident session/control surface.
 abstract providers(): Promise<ResidentProviderStatus[]>
 
 /**
- * Admit or replay one durable command for its operator/workspace Session.
- * @param request - command identity, optional retry lineage, prompt, workspace, and cancellation signal.
+ * Admit or replay one durable command for its operator/workspace/lane Session.
+ * @param request - command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.
  * @returns a holder-owned turn whose result settles independently.
  */
 abstract execute(request: ResidentExecuteRequest): Promise<ResidentTurn>
@@ -144,7 +144,7 @@ abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:231`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:235`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

@@ -70,6 +70,19 @@ describe('ResidentStore', () => {
     store.close()
   })
 
+  it('admits independent lanes concurrently while keeping each lane single-flight', () => {
+    const store = new ResidentStore(root())
+    const first = store.accept('lane-one', 'hash-one', 'codex', '/workspace', PROFILE, PROFILE_SOURCE, undefined, undefined, 'run:A')
+    const second = store.accept('lane-two', 'hash-two', 'codex', '/workspace', PROFILE, PROFILE_SOURCE, undefined, undefined, 'run:B')
+    expect(first.sessionId).not.toBe(second.sessionId)
+    expect(store.inspectSession(first.sessionId)).toMatchObject({ laneId: 'run:A', lifecycle: 'running' })
+    expect(store.inspectSession(second.sessionId)).toMatchObject({ laneId: 'run:B', lifecycle: 'running' })
+    expect(() => store.accept(
+      'lane-one-conflict', 'hash-three', 'codex', '/workspace', PROFILE, PROFILE_SOURCE, undefined, undefined, 'run:A',
+    )).toThrow(expect.objectContaining({ code: 'SESSION_BUSY' }))
+    store.close()
+  })
+
   it('locks one effective profile per operator/workspace Session until reset', () => {
     const store = new ResidentStore(root())
     const first = store.accept('profile-one', 'hash-one', 'codex', '/workspace', PROFILE, 'smart-auto')
@@ -131,6 +144,70 @@ describe('ResidentStore', () => {
       'v2-command', 'v2-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE, undefined, 'Resume repository analysis',
     )
     expect(migrated.inspectTurn(accepted.turnId).taskLabel).toBe('Resume repository analysis')
+    migrated.close()
+  })
+
+  it('migrates schema v3 sessions into the legacy lane without losing settled history', () => {
+    const path = root()
+    const bootstrap = new ResidentStore(path)
+    bootstrap.close()
+    const legacy = new DatabaseSync(join(path, 'state.sqlite'))
+    legacy.exec(`
+      PRAGMA foreign_keys = OFF;
+      DROP TABLE resident_events;
+      DROP TABLE session_leases;
+      DROP TABLE command_receipts;
+      DROP TABLE resident_sessions;
+      CREATE TABLE resident_sessions (
+        id TEXT PRIMARY KEY, operator_id TEXT NOT NULL, workspace TEXT NOT NULL,
+        lifecycle TEXT NOT NULL, health TEXT NOT NULL, health_reason TEXT,
+        revision INTEGER NOT NULL, native_session_id TEXT, model_id TEXT,
+        reasoning_effort TEXT, profile_source TEXT, active_turn_id TEXT,
+        updated_at TEXT NOT NULL, UNIQUE(operator_id, workspace)
+      ) STRICT;
+      CREATE TABLE command_receipts (
+        command_id TEXT PRIMARY KEY, supersedes_command_id TEXT UNIQUE REFERENCES command_receipts(command_id),
+        request_hash TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES resident_sessions(id),
+        turn_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, native_turn_id TEXT,
+        result_json TEXT, result_ref TEXT, error_code TEXT, error_message TEXT, resolution TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, task_label TEXT
+      ) STRICT;
+      CREATE TABLE session_leases (
+        session_id TEXT PRIMARY KEY REFERENCES resident_sessions(id), turn_id TEXT NOT NULL UNIQUE,
+        acquired_at TEXT NOT NULL, heartbeat_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE resident_events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES resident_sessions(id),
+        type TEXT NOT NULL, time TEXT NOT NULL, data_json TEXT NOT NULL
+      ) STRICT;
+      INSERT INTO resident_sessions VALUES (
+        'old-session', 'codex', '/workspace', 'idle', 'ok', NULL, 3, 'old-native',
+        'test-model', 'high', 'manual', NULL, '2026-08-19T00:00:00.000Z'
+      );
+      INSERT INTO command_receipts VALUES (
+        'old-command', NULL, 'old-hash', 'old-session', 'old-turn', 'settled',
+        'old-native-turn', '{"output":[],"stopReason":"completed"}', NULL, NULL, NULL, NULL,
+        '2026-08-19T00:00:00.000Z', '2026-08-19T00:01:00.000Z', 'Old task'
+      );
+      INSERT INTO resident_events (session_id, type, time, data_json) VALUES (
+        'old-session', 'turn.settled', '2026-08-19T00:01:00.000Z', '{}'
+      );
+      PRAGMA user_version = 3;
+    `)
+    legacy.close()
+
+    const migrated = new ResidentStore(path)
+    expect(migrated.inspectSession('old-session')).toMatchObject({
+      laneId: 'legacy',
+      nativeSessionId: 'old-native',
+      latestTurn: { turnId: 'old-turn', state: 'settled', taskLabel: 'Old task' },
+    })
+    expect(migrated.readEvents('old-session').events).toContainEqual(expect.objectContaining({ type: 'turn.settled' }))
+    const independent = migrated.accept(
+      'new-command', 'new-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE, undefined, 'New task', 'run:new',
+    )
+    expect(independent.sessionId).not.toBe('old-session')
+    expect(migrated.inspectSession(independent.sessionId).laneId).toBe('run:new')
     migrated.close()
   })
 

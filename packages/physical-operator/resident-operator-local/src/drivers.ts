@@ -234,17 +234,15 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
 
   async qualify(): Promise<ResidentProviderStatus> {
     try {
-      const [{ stdout: version }, { stdout: auth }, models] = await Promise.all([
-        command('claude', ['--version']),
-        command('claude', ['auth', 'status', '--json']),
-        claudeModels(),
-      ])
+      const { stdout: version } = await command('claude', ['--version'])
+      const { stdout: auth } = await command('claude', ['auth', 'status', '--json'])
       const parsed = JSON.parse(auth) as Record<string, unknown>
       const subscription = parsed.loggedIn === true
         && parsed.authMethod === 'claude.ai'
         && typeof parsed.subscriptionType === 'string'
         && parsed.subscriptionType.length > 0
       const exactVersion = version.trim() === EXPECTED_CLAUDE_CLI_VERSION
+      const models = subscription && exactVersion ? await claudeModels() : []
       const catalogReady = models.length > 0
       return {
         operatorId: this.operatorId,

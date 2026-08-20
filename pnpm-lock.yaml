@@ -5801,6 +5801,9 @@ importers:
       '@deepseek-ai/dsh-orchestration':
         specifier: workspace:^
         version: link:../orchestration
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:^
         version: link:../../core/system-prompt

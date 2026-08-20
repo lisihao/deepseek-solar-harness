@@ -10,7 +10,7 @@ The model-facing Consumer for `ctx.orchestrations`. It registers one `orchestrat
 
 #### What the model sees
 
-The `orchestration` tool schema and one stable policy section describing complex-task admission, explicit Graph authority, automatic low-risk start, human approval for risky work, and restart-safe inspection.
+The `orchestration` tool schema and one stable policy section describing complex-task admission, explicit Graph authority, automatic low-risk start, human approval for risky work, restart-safe inspection, and parallel fan-out without a phase-wide barrier. Each compilation records the current `auto | direct | codex | claude-code` collaboration policy as TaskGraph admission metadata; the normal parallel bound is four workers.
 
 #### Token effect
 

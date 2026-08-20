@@ -25,6 +25,7 @@ import type { AcceptedTurn, TurnInspection } from './store.ts'
 const REQUIRED_METHODS = Object.freeze([
   'system.handshake',
   'operator.list',
+  'session.list',
   'session.inspect',
   'turn.execute',
   'turn.inspect',
@@ -37,8 +38,11 @@ const REQUIRED_METHODS = Object.freeze([
 const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 
 interface ListResponse {
-  readonly providers: ResidentProviderStatus[]
   readonly sessions: ResidentSessionSnapshot[]
+}
+
+interface ProviderResponse {
+  readonly providers: ResidentProviderStatus[]
 }
 
 /** Connection, startup, and polling policy for one daemon client. */
@@ -76,7 +80,7 @@ export class ResidentDaemonClient {
    * @returns one status per configured product Driver.
    */
   async providers(): Promise<ResidentProviderStatus[]> {
-    return (await this.request<ListResponse>('operator.list', {})).providers
+    return (await this.request<ProviderResponse>('operator.list', {})).providers
   }
 
   /**
@@ -84,7 +88,7 @@ export class ResidentDaemonClient {
    * @returns current Session snapshots in daemon order.
    */
   async list(): Promise<ResidentSessionSnapshot[]> {
-    return (await this.request<ListResponse>('operator.list', {})).sessions
+    return (await this.request<ListResponse>('session.list', {})).sessions
   }
 
   /**
@@ -115,6 +119,7 @@ export class ResidentDaemonClient {
     supersedesCommandId?: string
     operatorId: string
     workspace: string
+    laneId?: string
     taskLabel?: string
     prompt: readonly unknown[]
     profile?: PhysicalOperatorExecutionPreference
@@ -134,6 +139,7 @@ export class ResidentDaemonClient {
       ...request.supersedesCommandId === undefined ? {} : { supersedes_command_id: request.supersedesCommandId },
       operator_id: request.operatorId,
       workspace,
+      lane_id: request.laneId ?? 'legacy',
       ...request.taskLabel === undefined ? {} : { task_label: request.taskLabel },
       prompt: request.prompt,
       ...request.profile === undefined ? {} : { profile: request.profile },
@@ -259,11 +265,17 @@ export class ResidentDaemonClient {
   }
 
   private async ensureReady(): Promise<void> {
+    let initialError: unknown
     try {
       await this.handshake()
       return
     } catch (error) {
+      initialError = error
       if (!this.options.autoStart) throw error
+    }
+    if (initialError instanceof ResidentOperatorError
+      && (initialError.code === 'PROTOCOL_MISMATCH' || initialError.code === 'PROVIDER_VERSION_MISMATCH')) {
+      await this.retireIncompatibleDaemon(initialError)
     }
     startDetachedResidentDaemon(this.options.root)
     const deadline = Date.now() + this.options.connectTimeoutMs
@@ -281,6 +293,31 @@ export class ResidentDaemonClient {
       `resident daemon did not become ready: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
       'RUNTIME_UNAVAILABLE',
     )
+  }
+
+  /** Drain an older detached daemon before starting the protocol/schema-compatible build. */
+  private async retireIncompatibleDaemon(initialError: ResidentOperatorError): Promise<void> {
+    try {
+      await this.rawRequest('system.shutdown', {})
+    } catch (shutdownError) {
+      if (existsSync(this.socketPath)) {
+        throw new ResidentOperatorError(
+          `resident daemon upgrade is blocked: ${initialError.message}; shutdown failed: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
+          'PROTOCOL_MISMATCH',
+        )
+      }
+      return
+    }
+    const deadline = Date.now() + this.options.connectTimeoutMs
+    while (existsSync(this.socketPath) && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    if (existsSync(this.socketPath)) {
+      throw new ResidentOperatorError(
+        `resident daemon upgrade is blocked because the old daemon did not drain: ${initialError.message}`,
+        'PROTOCOL_MISMATCH',
+      )
+    }
   }
 
   private async handshake(): Promise<void> {

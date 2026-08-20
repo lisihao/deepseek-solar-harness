@@ -28,10 +28,11 @@ import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v3 method set advertised by daemon handshake. */
+/** Public protocol-v4 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
   'operator.list',
+  'session.list',
   'session.inspect',
   'turn.execute',
   'turn.inspect',
@@ -189,6 +190,7 @@ export class ResidentDaemon {
   private readonly drivers = new Map<string, ResidentProductDriver>()
   private readonly transports = new Set<JsonRpcLineTransport>()
   private readonly active = new Map<string, ActiveTurn>()
+  private readonly qualifications = new Map<string, Promise<ResidentProviderStatus>>()
   private lockDescriptor: number | undefined
   private closing = false
   private readonly closedResolver = Promise.withResolvers<void>()
@@ -273,6 +275,8 @@ export class ResidentDaemon {
         const providers = await this.providerStatuses()
         return { providers, sessions: this.store.list() }
       }
+      case 'session.list':
+        return { sessions: this.store.list() }
       case 'session.inspect':
         return this.store.inspectSession(stringParam(params, 'session_id'))
       case 'turn.execute':
@@ -289,7 +293,7 @@ export class ResidentDaemon {
       }
       case 'turn.resolve_indeterminate': {
         if (params.decision !== 'abandon') {
-          throw new ResidentOperatorError('protocol v3 only permits abandoning an indeterminate command', 'INVALID_RESULT')
+          throw new ResidentOperatorError('protocol v4 only permits abandoning an indeterminate command', 'INVALID_RESULT')
         }
         this.store.resolveIndeterminate(
           stringParam(params, 'command_id'),
@@ -336,7 +340,19 @@ export class ResidentDaemon {
   }
 
   private providerStatuses(): Promise<ResidentProviderStatus[]> {
-    return Promise.all([...this.drivers.values()].map(driver => driver.qualify()))
+    return Promise.all([...this.drivers.values()].map(driver => this.qualify(driver)))
+  }
+
+  private qualify(driver: ResidentProductDriver): Promise<ResidentProviderStatus> {
+    const current = this.qualifications.get(driver.operatorId)
+    if (current !== undefined) return current
+    const pending = driver.qualify().finally(() => {
+      if (this.qualifications.get(driver.operatorId) === pending) {
+        this.qualifications.delete(driver.operatorId)
+      }
+    })
+    this.qualifications.set(driver.operatorId, pending)
+    return pending
   }
 
   private async execute(params: Record<string, unknown>): Promise<unknown> {
@@ -344,6 +360,7 @@ export class ResidentDaemon {
     const commandId = stringParam(params, 'command_id')
     const operatorId = stringParam(params, 'operator_id')
     const configuredWorkspace = stringParam(params, 'workspace')
+    const laneId = stringParam(params, 'lane_id')
     const taskLabel = taskLabelParam(params)
     const prompt = promptParam(params)
     const requestedProfile = profileParam(params)
@@ -357,14 +374,14 @@ export class ResidentDaemon {
     if (driver === undefined) {
       throw new ResidentOperatorError(`no resident provider for ${operatorId}`, 'SESSION_UNAVAILABLE')
     }
-    const qualification = await driver.qualify()
+    const qualification = await this.qualify(driver)
     if (!qualification.available || qualification.authentication !== 'native-subscription') {
       throw new ResidentOperatorError(
         qualification.unavailableReason ?? `${operatorId} has no qualified subscription`,
         unavailableProviderCode(qualification),
       )
     }
-    const locked = this.store.lockedProfile(operatorId, workspace)
+    const locked = this.store.lockedProfile(operatorId, workspace, laneId)
     const resolved = locked !== undefined && requestedProfile === undefined
       ? locked
       : resolveResidentExecutionProfile(
@@ -380,7 +397,7 @@ export class ResidentDaemon {
               : { effort: requestedProfile.effort ?? locked.profile.effort },
           },
       )
-    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId)
+    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId, laneId)
     const accepted = this.store.accept(
       commandId,
       requestHash,
@@ -390,6 +407,7 @@ export class ResidentDaemon {
       resolved.source,
       supersedesCommandId,
       taskLabel,
+      laneId,
     )
     if (accepted.state === 'accepted' && !this.active.has(accepted.turnId)) {
       const controller = new AbortController()

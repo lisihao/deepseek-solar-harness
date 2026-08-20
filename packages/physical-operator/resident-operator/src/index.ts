@@ -17,11 +17,11 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 3
+export const RESIDENT_PROTOCOL_VERSION = 5
 /** Current forward-only daemon state schema version. */
-export const RESIDENT_STATE_SCHEMA_VERSION = 3
+export const RESIDENT_STATE_SCHEMA_VERSION = 4
 
-/** Opaque identity for one operator/workspace Resident Session. */
+/** Opaque identity for one operator/workspace/lane Resident Session. */
 export type ResidentOperatorSessionId = Branded<'ResidentOperatorSessionId'>
 /**
  * Brand a validated Resident Session identity.
@@ -108,6 +108,8 @@ export interface ResidentSessionSnapshot {
   readonly sessionId: ResidentOperatorSessionId
   readonly operatorId: string
   readonly workspace: string
+  /** Caller-owned execution lane; lanes isolate native conversational state within one workspace. */
+  readonly laneId: string
   readonly lifecycle: ResidentLifecycle
   readonly health: ResidentHealth
   readonly healthReason?: ResidentHealthReason
@@ -154,6 +156,8 @@ export interface ResidentExecuteRequest {
   readonly supersedesCommandId?: ResidentOperatorCommandId
   readonly operatorId: string
   readonly workspace: string
+  /** Stable task lane. Distinct lanes may execute concurrently without sharing native conversation history. */
+  readonly laneId: string
   /** Optional bounded display summary persisted independently of the raw prompt. */
   readonly taskLabel?: string
   readonly prompt: readonly ContentBlock[]
@@ -240,8 +244,8 @@ export abstract class ResidentOperatorService extends Service {
   abstract providers(): Promise<ResidentProviderStatus[]>
 
   /**
-   * Admit or replay one durable command for its operator/workspace Session.
-   * @param request - command identity, optional retry lineage, prompt, workspace, and cancellation signal.
+   * Admit or replay one durable command for its operator/workspace/lane Session.
+   * @param request - command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.
    * @returns a holder-owned turn whose result settles independently.
    */
   abstract execute(request: ResidentExecuteRequest): Promise<ResidentTurn>

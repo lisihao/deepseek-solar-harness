@@ -82,6 +82,46 @@ class MemoryDriver implements ResidentProductDriver {
   }
 }
 
+class BlockingQualificationDriver extends MemoryDriver {
+  qualificationCount = 0
+  activeQualifications = 0
+  maximumActiveQualifications = 0
+  readonly blockingQualificationEntered: Promise<void>
+  readonly releaseQualification: () => void
+  private readonly markBlockingQualificationEntered: () => void
+  private readonly qualificationReleased: Promise<void>
+  private blockQualifications = false
+
+  constructor() {
+    super()
+    let markBlockingQualificationEntered = (): void => {}
+    let releaseQualification = (): void => {}
+    this.blockingQualificationEntered = new Promise<void>((resolve) => { markBlockingQualificationEntered = resolve })
+    this.qualificationReleased = new Promise<void>((resolve) => { releaseQualification = resolve })
+    this.markBlockingQualificationEntered = markBlockingQualificationEntered
+    this.releaseQualification = releaseQualification
+  }
+
+  beginBlocking(): void {
+    this.blockQualifications = true
+  }
+
+  override async qualify(): Promise<ResidentProviderStatus> {
+    this.qualificationCount += 1
+    this.activeQualifications += 1
+    this.maximumActiveQualifications = Math.max(this.maximumActiveQualifications, this.activeQualifications)
+    try {
+      if (this.blockQualifications) {
+        this.markBlockingQualificationEntered()
+        await this.qualificationReleased
+      }
+      return await super.qualify()
+    } finally {
+      this.activeQualifications -= 1
+    }
+  }
+}
+
 class BlockingDriver extends MemoryDriver {
   override async execute(request: DriverExecuteRequest) {
     const session = request.nativeSessionId ?? 'native-blocking'
@@ -154,6 +194,44 @@ function client(root: string): ResidentDaemonClient {
 }
 
 describe('ResidentDaemon', () => {
+  it('lists durable sessions without requalifying native subscription products', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    try {
+      await connected.ready()
+      expect(driver.qualificationCount).toBe(1)
+      expect(await connected.list()).toEqual([])
+      expect(driver.qualificationCount).toBe(1)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('coalesces concurrent qualification requests for the same native product', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    await connected.ready()
+    driver.beginBlocking()
+    const first = connected.providers()
+    const second = connected.providers()
+    try {
+      await driver.blockingQualificationEntered
+      await new Promise<void>(resolve => setTimeout(resolve, 25))
+      expect(driver.qualificationCount).toBe(2)
+      expect(driver.maximumActiveQualifications).toBe(1)
+    } finally {
+      driver.releaseQualification()
+      await Promise.all([first, second])
+      await daemon.close()
+    }
+  })
+
   it('continues one operator+realpath workspace across client restart and isolates workspaces', async () => {
     const root = temporaryRoot()
     const workspace = join(root, 'workspace')

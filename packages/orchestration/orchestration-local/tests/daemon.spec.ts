@@ -17,6 +17,7 @@ type TestResult = { output: Array<{ type: 'text'; text: string }>; stopReason: '
 
 class FakeResidentClient {
   starts: string[] = []
+  requests: Array<{ commandId: string; operatorId: string; laneId?: string; prompt?: Array<{ type: string; text?: string }> }> = []
   available = true
   unavailableOperators = new Set<string>()
   defer = false
@@ -36,7 +37,8 @@ class FakeResidentClient {
     }))
   }
 
-  async execute(request: { commandId: string; operatorId: string }) {
+  async execute(request: { commandId: string; operatorId: string; laneId?: string; prompt?: Array<{ type: string; text?: string }> }) {
+    this.requests.push(request)
     this.starts.push(`${request.operatorId}:${request.commandId}`)
     const turnId = `turn:${request.commandId}`
     const result = { output: [{ type: 'text' as const, text: `completed ${request.commandId}` }], stopReason: 'completed' as const }
@@ -385,6 +387,15 @@ describe('orchestration daemon', () => {
     const run = await client.start({ compilationId: compilation.compilationId })
     await eventually(() => client.inspect(String(run.runId)), value => value.nodes.every(node => node.state === 'running'))
     expect(fake.starts).toHaveLength(2)
+    expect(fake.requests.map(request => request.laneId)).toEqual([
+      `orch:${String(run.runId)}:code:1`,
+      `orch:${String(run.runId)}:review:1`,
+    ])
+    expect(fake.requests.every(request => request.prompt?.[0]?.text?.includes('fork_turns: "none"') === true)).toBe(true)
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    const capsuleEvent = events.events.find(event => event.type === 'capsule.resolved')
+    expect(capsuleEvent).toBeDefined()
+    expect((capsuleEvent?.data as { cleanContext?: boolean } | undefined)?.cleanContext).toBe(true)
     fake.defer = false
     fake.resolveAllDeferred()
     await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
@@ -429,8 +440,12 @@ describe('orchestration daemon', () => {
     }
     const compilation = await client.compile({ intent: { request: 'Conflict fixture.' }, graph: conflicting })
     const run = await client.start({ compilationId: compilation.compilationId })
-    await eventually(() => client.inspect(String(run.runId)), value => value.nodes.some(node => node.state === 'running'))
+    const waiting = await eventually(
+      () => client.inspect(String(run.runId)),
+      value => value.nodes.some(node => node.state === 'running') && value.nodes.some(node => node.waitReason?.code === 'SCOPE_CONFLICT'),
+    )
     expect(fake.starts).toHaveLength(1)
+    expect(waiting.nodes.find(node => node.state === 'ready')?.waitReason?.code).toBe('SCOPE_CONFLICT')
     fake.resolveDeferred()
     await eventually(() => client.inspect(String(run.runId)), () => fake.starts.length === 2)
     fake.resolveDeferred()

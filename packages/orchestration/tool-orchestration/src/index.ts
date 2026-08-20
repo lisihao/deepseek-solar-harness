@@ -7,6 +7,20 @@ import {
   type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
 
+type CollaborationPolicy = 'auto' | 'direct' | 'codex' | 'claude-code'
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /** Durable link from one DSH collaboration decision to its TaskGraph run. */
+    'orchestration/admission': {
+      policy: CollaborationPolicy
+      route: 'taskgraph'
+      runId: string
+      maxParallel: number
+    }
+  }
+}
+
 export const name = 'tool-orchestration'
 export const inject = ['orchestrations', 'tools', 'systemPrompt']
 
@@ -18,7 +32,7 @@ type ToolArgs = {
 }
 
 /** Model-visible policy for durable graphs and per-node Resident operator routing. */
-export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds. Both native-subscription Resident operators are available to the Scheduler: Codex is normally suited to implementation, debugging, and tests; Claude Code is normally suited to architecture, review, analysis, research, and long-context work. Leave operator.preferredIds unset for intelligent per-node routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
+export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Under Smart Auto, prefer this durable TaskGraph path over directly handing a parallelizable task to one Resident operator. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds and the smallest useful maxParallel ceiling (normally at most 4). Independent nodes run without a phase barrier; dependencies and overlapping write/effect scopes serialize explicitly. Both native-subscription Resident operators are available to the Scheduler: Codex is normally suited to implementation, debugging, and tests; Claude Code is normally suited to architecture, review, analysis, research, and long-context work. Leave operator.preferredIds unset for intelligent per-node routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Every node receives the mandatory clean-task Context Capsule and a fresh native execution lane. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
 
 const VALUE_SCHEMA = {
   type: 'object',
@@ -59,6 +73,16 @@ function parseGraph(value: string | undefined): LogicalTaskGraphV1 {
   return parsed as LogicalTaskGraphV1
 }
 
+function collaborationPolicy(events: readonly { readonly type: string; readonly data: unknown }[]): CollaborationPolicy {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'physical-operator/policy') continue
+    const policy = (event.data as { policy?: unknown }).policy
+    if (policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code') return policy
+  }
+  return 'auto'
+}
+
 /** Register one compact orchestration tool and its automatic-entry policy. */
 export function apply(ctx: Context): void {
   ctx.systemPrompt.section({ name: 'tool:orchestration', order: 118, text: orchestrationGuidance })
@@ -75,18 +99,30 @@ export function apply(ctx: Context): void {
       schema: VALUE_SCHEMA,
       render: (_args, value) => [{ type: 'text' as const, text: JSON.stringify(value) }],
     },
-    async execute(args: ToolArgs) {
+    async execute(args: ToolArgs, exec) {
       if (args.action === 'list') return jsonObject({ kind: 'list', runs: (await ctx.orchestrations.list()).map(bounded) })
       if (args.action === 'inspect') {
         if (args.run_id === undefined || args.run_id.length === 0) throw new Error('run_id is required for action=inspect')
         return jsonObject({ kind: 'inspect', run: bounded(await ctx.orchestrations.inspect(OrchestrationRunId(args.run_id))) })
       }
       if (args.objective === undefined || args.objective.trim().length === 0) throw new Error('objective is required for action=start')
+      const graph = parseGraph(args.graph_json)
+      const agent = exec.agent
+      const policy = agent === undefined ? 'auto' : collaborationPolicy(agent.session.events)
       const compilation = await ctx.orchestrations.compile({
         intent: { request: args.objective },
-        graph: parseGraph(args.graph_json),
+        graph,
+        ...agent === undefined ? {} : {
+          admission: { policy, route: 'taskgraph', sourceSessionId: String(agent.id) },
+        },
       })
       const run = await ctx.orchestrations.start({ compilationId: compilation.compilationId })
+      agent?.session.append('orchestration/admission', {
+        policy,
+        route: 'taskgraph',
+        runId: String(run.runId),
+        maxParallel: graph.maxParallel,
+      }, { ignorable: true })
       return jsonObject({
         kind: 'start',
         compilationId: compilation.compilationId,

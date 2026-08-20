@@ -104,8 +104,10 @@ describe('immutable compilation foundations', () => {
       constructor(value: Context) { super(value, capsuleRoot) }
     })
     const snapshot = await ctx.capabilityCapsules.snapshot({})
-    expect(snapshot.refs).toHaveLength(1)
-    await expect(ctx.capabilityCapsules.get(CapabilityCapsuleRef(String(snapshot.refs[0])))).resolves.toMatchObject({ id: 'network-reader' })
+    expect(snapshot.refs).toHaveLength(2)
+    const networkRef = snapshot.refs.find(ref => String(ref).startsWith('network-reader@'))
+    expect(networkRef).toBeDefined()
+    await expect(ctx.capabilityCapsules.get(CapabilityCapsuleRef(String(networkRef)))).resolves.toMatchObject({ id: 'network-reader' })
     const plan = await ctx.capabilityCapsules.resolve({
       runId: 'run', nodeId: 'A', attempt: 1, generation: 1,
       requirements: [{ capability: 'read.web', required: true }], capabilityBudget: ['read.web'],

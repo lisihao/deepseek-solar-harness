@@ -38,7 +38,12 @@ import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { canonicalSha256 } from './canonical.ts'
 import { graphCertificate, nodesConflict, validateGraph } from './graph.ts'
-import { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from './providers.ts'
+import {
+  BasicContextCompiler,
+  CLEAN_TASK_CONTEXT_CAPABILITY,
+  DirectIntentCompiler,
+  LocalCapabilityCapsuleService,
+} from './providers.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
 import {
   ORCHESTRATION_STATE_SCHEMA_VERSION,
@@ -95,7 +100,7 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       tags: operatorId === 'codex'
         ? ['coding', 'implementation', 'debugging', 'testing', 'review']
         : ['analysis', 'architecture', 'review', 'long-context', 'coding'],
-      maxConcurrency: 1,
+      maxConcurrency: 4,
       executionModes: ['resident'] as const,
     }
   }
@@ -111,6 +116,7 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       commandId: String(request.executionId),
       operatorId: this.operatorId,
       workspace,
+      laneId: String(request.executionId),
       ...request.label === undefined ? {} : { taskLabel: request.label },
       prompt: request.prompt,
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
@@ -157,6 +163,11 @@ function requiredInteger(params: Record<string, unknown>, name: string): number 
 
 function now(): string {
   return new Date().toISOString()
+}
+
+function clearWaitReason(node: OrchestrationNodeSnapshot): OrchestrationNodeSnapshot {
+  const { waitReason: _discarded, ...rest } = node
+  return rest
 }
 
 function authorityContains(value: string, budget: readonly string[]): boolean {
@@ -361,7 +372,7 @@ export class OrchestrationDaemon {
     const blockers: OrchestrationBlocker[] = intent.requiresClarification
       ? [{ code: 'INTENT_CLARIFICATION_REQUIRED', message: intent.ambiguities.join('; ') }]
       : []
-    const compilationId = `cmp-${canonicalSha256({ intentRef, requirementRef, graphRef, certificate }).slice(0, 32)}`
+    const compilationId = `cmp-${canonicalSha256({ intentRef, requirementRef, graphRef, certificate, admission: request.admission }).slice(0, 32)}`
     const compilation: OrchestrationCompilationV1 = {
       version: 1,
       compilationId,
@@ -370,6 +381,7 @@ export class OrchestrationDaemon {
       ...requirementRef === undefined ? {} : { requirementRef },
       graphRef,
       graph,
+      ...request.admission === undefined ? {} : { admission: structuredClone(request.admission) },
       certificate,
       requiresClarification: intent.requiresClarification,
       blockers,
@@ -397,6 +409,8 @@ export class OrchestrationDaemon {
       state,
       revision: 1,
       graphRevision: 1,
+      maxParallel: compilation.graph.maxParallel,
+      ...compilation.admission === undefined ? {} : { admission: structuredClone(compilation.admission) },
       certificate: compilation.certificate,
       nodes: compilation.graph.nodes.map(node => ({
         id: node.id,
@@ -427,7 +441,11 @@ export class OrchestrationDaemon {
     this.store.createRun(record, [
       event(runId, 'intent.compiled', { ref: String(compilation.intentRef), sha256: compilation.intent.provenance.outputSha256 }),
       event(runId, 'graph.compiled', { ref: String(compilation.graphRef), certificateSha256: compilation.certificate.certificateSha256 }),
-      event(runId, 'run.started', { state }),
+      event(runId, 'run.started', {
+        state,
+        maxParallel: compilation.graph.maxParallel,
+        admission: compilation.admission ?? null,
+      }),
     ])
     void this.tick()
     return snapshot
@@ -598,7 +616,22 @@ export class OrchestrationDaemon {
         } : value)
         changed = true
       } else if (dependencies.every(value => value?.state === 'passed')) {
-        nodes = nodes.map(value => value.id === node.id ? { ...value, state: 'ready' as const, updatedAt: now() } : value)
+        nodes = nodes.map(value => value.id === node.id ? {
+          ...clearWaitReason(value),
+          state: 'ready' as const,
+          updatedAt: now(),
+        } : value)
+        changed = true
+      } else if (node.waitReason?.code !== 'DEPENDENCIES_PENDING') {
+        nodes = nodes.map(value => value.id === node.id ? {
+          ...value,
+          waitReason: {
+            code: 'DEPENDENCIES_PENDING',
+            message: `waiting for dependencies: ${spec.dependsOn.filter(id => !dependencies.find(value => value?.id === id && value.state === 'passed')).join(', ')}`,
+            nodeId: node.id,
+          },
+          updatedAt: now(),
+        } : value)
         changed = true
       }
     }
@@ -608,21 +641,58 @@ export class OrchestrationDaemon {
     }
     const liveNodes = record.snapshot.nodes.filter(node => node.state === 'running')
     const slots = Math.max(0, record.graph.maxParallel - liveNodes.length)
-    if (slots > 0) {
-      const selected: OrchestrationNodeSnapshot[] = []
-      const readyNodes = record.snapshot.nodes.filter(node => node.state === 'ready')
-      for (const candidate of readyNodes) {
-        const candidateSpec = byId.get(candidate.id)
-        if (candidateSpec === undefined) continue
-        const conflicts = [...liveNodes, ...selected].some((active) => {
-          const activeSpec = byId.get(active.id)
-          return activeSpec !== undefined && nodesConflict(candidateSpec, activeSpec)
+    const selected: OrchestrationNodeSnapshot[] = []
+    const readyNodes = record.snapshot.nodes.filter(node => node.state === 'ready')
+    const waitReasons = new Map<string, OrchestrationBlocker | undefined>()
+    for (const candidate of readyNodes) {
+      if (slots === 0) {
+        waitReasons.set(candidate.id, {
+          code: 'MAX_PARALLEL_REACHED',
+          message: `waiting for one of ${String(record.graph.maxParallel)} graph worker slots`,
+          nodeId: candidate.id,
         })
-        if (!conflicts) selected.push(candidate)
-        if (selected.length >= slots) break
+        continue
       }
-      await Promise.all(selected.map(node => this.prepareAndDispatch(String(record.snapshot.runId), node.id)))
+      const candidateSpec = byId.get(candidate.id)
+      if (candidateSpec === undefined) continue
+      const conflicts = [...liveNodes, ...selected].some((active) => {
+        const activeSpec = byId.get(active.id)
+        return activeSpec !== undefined && nodesConflict(candidateSpec, activeSpec)
+      })
+      if (conflicts) {
+        waitReasons.set(candidate.id, {
+          code: 'SCOPE_CONFLICT',
+          message: 'waiting for an overlapping write or effect scope to finish',
+          nodeId: candidate.id,
+        })
+      } else if (selected.length < slots) {
+        selected.push(candidate)
+        waitReasons.set(candidate.id, undefined)
+      } else {
+        waitReasons.set(candidate.id, {
+          code: 'MAX_PARALLEL_REACHED',
+          message: `waiting for one of ${String(record.graph.maxParallel)} graph worker slots`,
+          nodeId: candidate.id,
+        })
+      }
     }
+    const schedulerChanged = readyNodes.some(node => node.waitReason?.code !== waitReasons.get(node.id)?.code)
+    if (schedulerChanged) {
+      const current = this.store.getRun(String(record.snapshot.runId))
+      const scheduledNodes = current.snapshot.nodes.map((node): OrchestrationNodeSnapshot => {
+        if (node.state !== 'ready') return node
+        const waitReason = waitReasons.get(node.id)
+        return waitReason === undefined
+          ? { ...clearWaitReason(node), updatedAt: now() }
+          : { ...node, waitReason, updatedAt: now() }
+      })
+      record = withRevision(current, { ...current.snapshot, nodes: scheduledNodes })
+      this.store.saveRun(record, [event(record.snapshot.runId, 'scheduler.waiting.updated', {
+        activeWorkers: liveNodes.length,
+        maxParallel: record.graph.maxParallel,
+      })])
+    }
+    await Promise.all(selected.map(node => this.prepareAndDispatch(String(record.snapshot.runId), node.id)))
     record = this.store.getRun(String(record.snapshot.runId))
     const required = record.graph.nodes.filter(node => node.requiredForCompletion)
     const requiredStates = required.map(spec => record.snapshot.nodes.find(node => node.id === spec.id)?.state)
@@ -663,8 +733,12 @@ export class OrchestrationDaemon {
       nodeId,
       attempt,
       generation: node.capabilityGeneration,
-      requirements: [...spec.capabilityRequirements, ...updateRequirements],
-      capabilityBudget: spec.capabilityBudget,
+      requirements: [
+        { capability: CLEAN_TASK_CONTEXT_CAPABILITY, required: true },
+        ...spec.capabilityRequirements,
+        ...updateRequirements,
+      ],
+      capabilityBudget: [...new Set([CLEAN_TASK_CONTEXT_CAPABILITY, ...spec.capabilityBudget])],
       effectBudget: spec.effectBudget,
       readScopes: spec.readScopes,
       writeScopes: spec.writeScopes,
@@ -674,7 +748,11 @@ export class OrchestrationDaemon {
     const capabilityPlanRef = this.store.putArtifact(capabilityPlan)
     this.store.recordArtifact('capability_bindings', { ref: String(capabilityPlanRef), runId, nodeId, attempt, generation: node.capabilityGeneration })
     this.store.saveRun(record, [event(record.snapshot.runId, 'capsule.resolved', {
-      ref: String(capabilityPlanRef), blockers: capabilityPlan.blockers,
+      ref: String(capabilityPlanRef),
+      capsuleRefs: capabilityPlan.capsuleRefs.map(String),
+      resolvedCapabilities: capabilityPlan.resolvedCapabilities,
+      cleanContext: capabilityPlan.resolvedCapabilities.includes(CLEAN_TASK_CONTEXT_CAPABILITY),
+      blockers: capabilityPlan.blockers,
     }, node)])
     if (capabilityPlan.blockers.length > 0 || capabilityPlan.guardRefs.length > 0) {
       const blockers = [...capabilityPlan.blockers, ...capabilityPlan.guardRefs.length > 0 ? [{
@@ -806,6 +884,9 @@ export class OrchestrationDaemon {
       const next = withRevision(current, current.snapshot)
       this.store.saveRun(next, [event(next.snapshot.runId, 'node.dispatched', {
         executionId: String(plan.executionId), turnId: receipt.turnId,
+        operatorId: plan.operatorPlan.operatorId,
+        laneId: String(plan.executionId),
+        contextIsolation: 'fresh-native-thread',
       }, next.snapshot.nodes.find(value => value.id === spec.id))])
       const key = `${String(record.snapshot.runId)}\0${spec.id}`
       const active: ActiveAttempt = {
