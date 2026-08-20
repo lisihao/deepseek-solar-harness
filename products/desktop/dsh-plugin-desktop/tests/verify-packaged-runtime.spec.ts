@@ -9,8 +9,9 @@ import {
   REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES,
   resolvePackagedAsarPath,
   resolvePackagedUnpackedRoot,
-  verifyPackagedRuntime,
   verifyPackagedClientBranding,
+  verifyPackagedPersistentBashPrompt,
+  verifyPackagedRuntime,
   type ArchiveLister,
   type FileProbe,
   type PackageResolver,
@@ -38,7 +39,20 @@ function validClientBundle(): string {
   return REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS.join('\n')
 }
 
-const readValidClient = vi.fn<TextReader>(() => validClientBundle())
+const persistentPrompt = '__DSH_PERSISTENT_BASH_PROMPT__ '
+
+function validRuntimeText(filename: string): string {
+  if (filename.endsWith('/lib/client.js')) return validClientBundle()
+  if (filename.includes('/dsh-terminal-bash/')) {
+    return `const CONTROLLED_PROMPT = ${JSON.stringify(persistentPrompt)};`
+  }
+  if (filename.includes('/dsh-tool-bash-persistent/')) {
+    return `const SHELL_PROMPT = ${JSON.stringify(persistentPrompt)};`
+  }
+  throw new Error(`unexpected runtime text path: ${filename}`)
+}
+
+const readValidRuntime = vi.fn<TextReader>(validRuntimeText)
 
 describe('packaged desktop runtime verification', () => {
   it.each([
@@ -57,7 +71,7 @@ describe('packaged desktop runtime verification', () => {
     const unpackedRoot = `${expectedPath}.unpacked`
     const resolvePackage = vi.fn<PackageResolver>(completePackageResolver(unpackedRoot))
 
-    verifyPackagedRuntime(context('/build', platform), list, exists, resolvePackage, readValidClient)
+    verifyPackagedRuntime(context('/build', platform), list, exists, resolvePackage, readValidRuntime)
 
     expect(resolvePackagedAsarPath(context('/build', platform))).toBe(expectedPath)
     expect(list).toHaveBeenCalledOnce()
@@ -111,7 +125,7 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       filename => filename !== missingPath,
       completePackageResolver(unpackedRoot),
-      readValidClient,
+      readValidRuntime,
     )).toThrow(`missing required physical entries: ${missing}`)
   })
 
@@ -130,7 +144,7 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       () => true,
       resolvePackage,
-      readValidClient,
+      readValidRuntime,
     )).toThrow(
       `packaged runtime at ${unpackedRoot} cannot resolve required package export dsh-plugin-desktop/profiles`,
     )
@@ -150,7 +164,7 @@ describe('packaged desktop runtime verification', () => {
       () => completeArchiveEntries(),
       () => true,
       resolvePackage,
-      readValidClient,
+      readValidRuntime,
     )).toThrow(
       `required package export @deepseek-ai/dsh-base/package.json resolved outside ${unpackedRoot}: ${escapedPath}`,
     )
@@ -185,4 +199,18 @@ describe('packaged desktop runtime verification', () => {
         .toThrow(`contains legacy sidebar markers: ${forbidden}`)
     },
   )
+
+  it('accepts the shared persistent Bash prompt in the packaged runtime', () => {
+    expect(() => verifyPackagedPersistentBashPrompt('/app.asar.unpacked', validRuntimeText))
+      .not.toThrow()
+  })
+
+  it('rejects the published terminal prompt mismatch', () => {
+    const mismatchedPromptReader: TextReader = filename => filename.includes('/dsh-terminal-bash/')
+      ? 'const CONTROLLED_PROMPT = "dsh> ";'
+      : `const SHELL_PROMPT = ${JSON.stringify(persistentPrompt)};`
+
+    expect(() => verifyPackagedPersistentBashPrompt('/app.asar.unpacked', mismatchedPromptReader))
+      .toThrow('packaged persistent Bash prompt contract is not aligned')
+  })
 })

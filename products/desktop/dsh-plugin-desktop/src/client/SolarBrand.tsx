@@ -6,20 +6,22 @@ export function solarBrandLabel(productVersion: string): string {
   return `DSH Desktop v${productVersion} · ${SOLAR_BRAND}`
 }
 
-/** Mount the persistent, non-interactive product marker below the application content. @returns the marker disposer. */
-export function installSolarBrand(productVersion: string): () => void {
+/** Mount the persistent one-line product marker below the complete application surface. */
+export function mountSolarBrandFooter(productVersion: string): () => void {
   const label = solarBrandLabel(productVersion)
-  const marker = document.createElement('div')
-  marker.className = 'dshDesktopSolarBrand'
-  marker.dataset.testid = 'solar-desktop-brand'
-  marker.setAttribute('role', 'note')
-  marker.setAttribute('aria-label', label)
-  marker.title = label
-  marker.textContent = label
-  document.body.dataset.dshDesktopBrandBar = ''
-  document.body.appendChild(marker)
+  const footer = document.createElement('footer')
+  footer.className = 'dshDesktopSolarFooter'
+  footer.dataset.testid = 'solar-desktop-brand'
+  footer.setAttribute('role', 'note')
+  footer.setAttribute('aria-label', label)
+  footer.title = label
+  footer.textContent = label
+
+  document.body.dataset.dshDesktopProductFooter = 'true'
+  document.body.appendChild(footer)
+
   return () => {
-    marker.remove()
-    delete document.body.dataset.dshDesktopBrandBar
+    footer.remove()
+    delete document.body.dataset.dshDesktopProductFooter
   }
 }

@@ -50,7 +50,9 @@ DeepSeek-Solar-Harness
 
 The core stays at the repository root so its pnpm workspace remains valid. Desktop lives at [`products/desktop`](products/desktop) as an independent Yarn workspace and must not contain another Harness checkout. Solar-owned components live under [`plugins/managed`](plugins/managed); [`plugins/registry.yaml`](plugins/registry.yaml) is their machine-readable source, revision, license, and test registry. Product and upstream metadata lives under [`distribution`](distribution).
 
-Source co-location does not automatically change runtime dependency resolution. Desktop continues to use its accepted published and sealed package inputs until a later integration phase explicitly changes those inputs and passes the Desktop delivery contract.
+Desktop installs accepted sealed package inputs during its Yarn build, and every sealed package is mapped back to a tracked source package in [`products/desktop/dsh-plugin-desktop/vendor/manifest.json`](products/desktop/dsh-plugin-desktop/vendor/manifest.json). `yarn verify:vendor` extracts each archive manifest and rejects an untracked, missing, or name/version-mismatched source. A fresh clone therefore contains the source for every package sealed into the default Desktop application.
+
+Optional plugins that a user installs into `~/.dsh` are profile extensions, not default Desktop build inputs. They stay external while unmodified; a plugin enters [`plugins/managed`](plugins/managed) with provenance and native tests when Solar changes or bundles it. Personal Remote Modules page names, URLs, and relay ports also stay in local profile settings: the public application ships the configuration surface with an empty instance list.
 
 ## Relationship with upstream projects
 
@@ -129,6 +131,8 @@ corepack yarn dev
 
 Managed components use the commands recorded in [`plugins/registry.yaml`](plugins/registry.yaml). Do not install every plugin into one package-manager workspace: component lockfiles and native checks remain part of their accepted provenance.
 
+Configure personal Web pages after launch under **Settings → Plugins → Remote Modules**. Those values are written to the local DSH profile and are intentionally absent from Git, vendor archives, and public product defaults.
+
 ## Branches, commits, and pull requests
 
 - `solar` is the protected integration branch. All changes enter through a task branch in an isolated worktree; direct pushes, force pushes, and branch deletion are forbidden.
@@ -140,7 +144,7 @@ Managed components use the commands recorded in [`plugins/registry.yaml`](plugin
 
 ## Release identity
 
-DSH Desktop versions independently from DeepSeek Harness and every plugin. A stable release uses an annotated tag that matches exactly `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$`, for example `DSH-desktop-v2.4.3`. The old `desktop-v2.4.3` shape is invalid.
+DSH Desktop versions independently from DeepSeek Harness and every plugin. A stable release uses an annotated tag that matches exactly `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$`, for example `DSH-desktop-v2.6.0`. The old `desktop-v2.4.3` shape is invalid.
 
 A release identifies the Solar commit, Desktop version, accepted core and managed-plugin revisions, test and attestation evidence, artifact checksums, supported platform, and rollback target. Building `dist/`, observing an Electron process, or pushing a tag without installed-version acceptance does not constitute a Desktop delivery.
 

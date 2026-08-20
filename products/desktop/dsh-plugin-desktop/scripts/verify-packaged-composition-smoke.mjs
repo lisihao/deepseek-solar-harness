@@ -132,12 +132,11 @@ try {
   if (remoteModuleRows.length !== 1
     || remoteModuleRows[0].name !== '@deepseek-ai/dsh-client-ui-remote-modules'
     || remoteModuleRows[0].disabled === true) {
-    throw new Error('verify-packaged-composition-smoke: GenesisPod/ThunderOMLX bundle is not enabled exactly once')
+    throw new Error('verify-packaged-composition-smoke: configurable Remote Modules bundle is not enabled exactly once')
   }
   const remoteInstances = remoteModuleRows[0].config?.instances
-  if (!Array.isArray(remoteInstances)
-    || remoteInstances.map(instance => instance.id).join(',') !== 'genesispod,thunder-omlx') {
-    throw new Error('verify-packaged-composition-smoke: GenesisPod/ThunderOMLX defaults are incomplete')
+  if (!Array.isArray(remoteInstances) || remoteInstances.length !== 0) {
+    throw new Error('verify-packaged-composition-smoke: public Desktop must ship without private Remote Module targets')
   }
 
   const presetRow = rowsWithId('agent-presets')[0]

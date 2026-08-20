@@ -50,7 +50,9 @@ DeepSeek-Solar-Harness
 
 核心保留在仓库根目录，使其 pnpm workspace 继续有效。Desktop 位于 [`products/desktop`](products/desktop)，它是独立 Yarn workspace，禁止再包含一份 Harness checkout。Solar 自有组件位于 [`plugins/managed`](plugins/managed)；[`plugins/registry.yaml`](plugins/registry.yaml) 是其源码、版本、许可证与测试的机器可读注册表。产品与上游元数据位于 [`distribution`](distribution)。
 
-源码共置不会自动改变运行时依赖解析。Desktop 继续使用已接受的公开 package 和 sealed package 输入，直到后续集成阶段显式改变这些输入并通过 Desktop 交付合同。
+Desktop 在 Yarn 构建期间安装已接受的 sealed package 输入，并通过 [`products/desktop/dsh-plugin-desktop/vendor/manifest.json`](products/desktop/dsh-plugin-desktop/vendor/manifest.json) 把每个 sealed package 映射回仓库中已跟踪的源码包。`yarn verify:vendor` 会提取每个归档的 manifest，并拒绝未跟踪、缺失或名称/版本不一致的源码。因此，fresh clone 已包含默认 Desktop 应用中每个 sealed package 的源码。
+
+用户自行安装到 `~/.dsh` 的可选插件属于 profile 扩展，并非默认 Desktop 构建输入。未修改插件保持 external；只有 Solar 修改或打包插件时，才会携带来源与原生测试进入 [`plugins/managed`](plugins/managed)。个人 Remote Modules 的网页名称、URL 和中继端口同样只保存在本机 profile 设置中；公开应用只发布配置界面与空实例列表。
 
 ## 与上游项目的关系
 
@@ -129,6 +131,8 @@ corepack yarn dev
 
 受管组件使用 [`plugins/registry.yaml`](plugins/registry.yaml) 中记录的命令。不要把所有插件装入同一个包管理 workspace；组件 lockfile 与原生检查是其接受来源的一部分。
 
+应用启动后，可在**设置 → 插件 → 远程模块**中配置个人网页。这些值写入本机 DSH profile，并有意排除在 Git、vendor 归档和公开产品默认值之外。
+
 ## 分支、提交与 Pull Request
 
 - `solar` 是受保护的集成分支。全部改动从隔离 worktree 的任务分支进入；禁止直接 push、force push 或删除该分支。
@@ -140,7 +144,7 @@ corepack yarn dev
 
 ## 发布身份
 
-DSH Desktop 的版本独立于 DeepSeek Harness 和每个插件。Stable release 使用 annotated tag，并且必须精确匹配 `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$`，例如 `DSH-desktop-v2.4.3`。旧格式 `desktop-v2.4.3` 无效。
+DSH Desktop 的版本独立于 DeepSeek Harness 和每个插件。Stable release 使用 annotated tag，并且必须精确匹配 `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$`，例如 `DSH-desktop-v2.6.0`。旧格式 `desktop-v2.4.3` 无效。
 
 每次发布都要标识 Solar commit、Desktop version、接受的核心与受管插件 revision、测试与 attestation 证据、artifact checksum、支持平台和回滚目标。只生成 `dist/`、只看到 Electron process，或在没有 installed-version 验收时 push 标签，都不构成 Desktop 交付。
 

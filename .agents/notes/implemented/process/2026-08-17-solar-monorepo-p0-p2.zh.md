@@ -40,6 +40,6 @@ Code-as-Harness 精确表示用户在 Codex 中创建、并导入 [`plugins/mana
 
 ## 后果
 
-Fresh clone 可以检查完整 Solar 自有源码集合，把每个导入组件追溯到接受 revision，并通过一个受保护集成分支路由改动。组件包管理边界保持显式，因此后续源码集成仍必须审查从公开或 sealed Desktop 输入迁移到同仓构建的任何变化。
+Fresh clone 可以检查完整 Solar 自有源码集合，把每个导入组件追溯到接受 revision，并通过一个受保护集成分支路由改动。组件包管理边界保持显式；后续的 [Desktop 打包源码闭包](2026-08-20-desktop-source-closure.md) 已把每个 sealed 应用 package 映射到同仓已跟踪源码，而不改变这些边界。
 
 必需人类评审会阻止本 migration 分支自行合并进 `solar`。上游发现与资格审查自动化、Desktop 源码输入集成、打包产品验收和发布自动化仍属于独立开发阶段，由根 README 路线图与上游资格审查 ADR 管理。

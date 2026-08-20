@@ -79,6 +79,8 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'node_modules/@deepseek-ai/dsh/package.json',
   'node_modules/@deepseek-ai/dsh/lib/bin.js',
   'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js',
+  'node_modules/@deepseek-ai/dsh-terminal-bash/lib/index.js',
+  'node_modules/@deepseek-ai/dsh-tool-bash-persistent/lib/index.js',
   'node_modules/@deepseek-ai/dsh-resident-operator-local/lib/startup.js',
   'node_modules/@deepseek-ai/dsh-resident-operators/cordis.patch.yml',
   'node_modules/@deepseek-ai/dsh-client-ui-remote-modules/cordis.patch.yml',
@@ -142,14 +144,40 @@ export type PackageResolver = (specifier: string) => string
 
 /** Markers that prove the packaged Client mounts the product identity below the application. */
 export const REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS = [
-  'installSolarBrand',
-  'dshDesktopBrandBar',
+  'mountSolarBrandFooter',
+  'dshDesktopProductFooter',
+  'dshDesktopSolarFooter',
 ] as const
 
 /** Legacy sidebar-only marker forbidden from every accepted Desktop package. */
 export const FORBIDDEN_PACKAGED_CLIENT_BRANDING_MARKERS = [
   'dshDesktopSolarBrandRail',
+  'dshDesktopSolarBrand',
 ] as const
+
+const PERSISTENT_BASH_PROMPT = '__DSH_PERSISTENT_BASH_PROMPT__ '
+
+/** Reject a package where the terminal backend and persistent Bash tool disagree on PS1. */
+export function verifyPackagedPersistentBashPrompt(
+  unpackedRoot: string,
+  readText: TextReader = filename => readFileSync(filename, 'utf8'),
+): void {
+  const terminalBash = readText(join(
+    unpackedRoot,
+    'node_modules/@deepseek-ai/dsh-terminal-bash/lib/index.js',
+  ))
+  const persistentTool = readText(join(
+    unpackedRoot,
+    'node_modules/@deepseek-ai/dsh-tool-bash-persistent/lib/index.js',
+  ))
+  const expectedTerminal = `const CONTROLLED_PROMPT = ${JSON.stringify(PERSISTENT_BASH_PROMPT)};`
+  const expectedTool = `const SHELL_PROMPT = ${JSON.stringify(PERSISTENT_BASH_PROMPT)};`
+  if (!terminalBash.includes(expectedTerminal) || !persistentTool.includes(expectedTool)) {
+    throw new Error(
+      `dsh-plugin-desktop: packaged persistent Bash prompt contract is not aligned at ${unpackedRoot}`,
+    )
+  }
+}
 
 /**
  * Resolve the platform-specific archive produced by Electron Builder.
@@ -320,6 +348,7 @@ export function verifyPackagedRuntime(
   }
   verifyPackagedClientBranding(unpackedRoot, readText)
   verifyUnpackedPackageResolution(unpackedRoot, resolvePackage)
+  verifyPackagedPersistentBashPrompt(unpackedRoot, readText)
 }
 
 /**

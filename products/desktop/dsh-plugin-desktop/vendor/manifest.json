@@ -12,7 +12,7 @@
       "commit": "7b87464619b4527cd77cb6cc925406db17fdcdb4"
     },
     {
-      "name": "GenesisPod and ThunderOMLX Remote Modules",
+      "name": "Configurable Remote Web Modules",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "23722c1b749b37d7aaf5e65f9bf309e446eea296"
     },
@@ -42,6 +42,30 @@
       "commit": "0173d93fab9f480d9a7548ac65cf04c3488fb8bb"
     }
   ],
+  "sourcePackages": {
+    "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "packages/orchestration/capability-capsule/package.json",
+    "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "packages/client/ui-remote-modules/package.json",
+    "dsh-packages/deepseek-ai-dsh-context-compiler-0.1.0-rc.5.tgz": "packages/orchestration/context-compiler/package.json",
+    "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "packages/host/apiproxy/package.json",
+    "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "packages/orchestration/intent-compiler/package.json",
+    "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "packages/orchestration/orchestration/package.json",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "packages/orchestration/orchestration-local/package.json",
+    "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "packages/bundle/orchestrations/package.json",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "packages/physical-operator/physical-operator/package.json",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "packages/physical-operator/physical-operator-resident/package.json",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "packages/physical-operator/resident-operator/package.json",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "packages/physical-operator/resident-operator-local/package.json",
+    "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "packages/bundle/resident-operators/package.json",
+    "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "packages/session/session-projection-cache/package.json",
+    "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "packages/subagent/subagent-codex/package.json",
+    "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "packages/orchestration/tool-orchestration/package.json",
+    "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "packages/physical-operator/tool-physical-operator/package.json",
+    "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "packages/orchestration/ui-orchestration/package.json",
+    "dsh-packages/dsh-web-billing-1.1.3.tgz": "plugins/managed/web-billing/package.json",
+    "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "plugins/managed/web-ui/packages/dsh-remote-web-ui/package.json",
+    "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz": "plugins/managed/agent-teams/package.json",
+    "dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.3.tgz": "plugins/managed/luna-vision-bridge/package.json"
+  },
   "files": {
     "agent-presets/anchored-standard/agent.cordis.yml": "3e223fa8db1f2fba7568e5beb88fefe84fe40e2096bf68c0a9b27a089a370bc4",
     "agent-presets/anchored-standard/compaction-epoch.mjs": "a235a9904fc7435a5e61830d0624628d06121049a7549813a8f13017ddca0770",

@@ -63,9 +63,8 @@ body[data-dsh-desktop-mode="advanced"] .mt-panel .me-form .me-field-label { flex
 const SOLAR_BRAND_STYLES = `
 :root { --dsh-desktop-popup-underlay: #fff; }
 body[data-ds-dark-theme] { --dsh-desktop-popup-underlay: #151517; }
-:root { --dsh-desktop-brand-bar-height: 24px; }
-body[data-dsh-desktop-brand-bar] { box-sizing: border-box; padding-bottom: var(--dsh-desktop-brand-bar-height); }
-.dshDesktopSolarBrand { position: fixed; z-index: 2147482000; right: 0; bottom: 0; left: 0; box-sizing: border-box; height: var(--dsh-desktop-brand-bar-height); padding: 0 16px; overflow: hidden; border-top: 1px solid var(--dsw-alias-border-l2); background: color-mix(in srgb, var(--dsw-alias-bg-base) 94%, transparent); color: var(--dsw-alias-label-secondary); font-size: 11px; font-weight: 500; line-height: var(--dsh-desktop-brand-bar-height); text-align: center; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; user-select: none; -webkit-app-region: no-drag; }
+body[data-dsh-desktop-product-footer="true"] #root { height: calc(100% - 24px); }
+.dshDesktopSolarFooter { position: fixed; z-index: 2147482000; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; height: 24px; padding: 0 16px; overflow: hidden; border-top: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-secondary); font-size: 10px; font-weight: 500; line-height: 23px; text-overflow: ellipsis; user-select: none; white-space: nowrap; -webkit-app-region: no-drag; }
 .dshDesktopResidentAction { display: grid; grid-template-columns: 9px minmax(0, 1fr); align-items: center; gap: 8px; box-sizing: border-box; width: calc(100% + 8px); margin: 2px -4px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 11px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); cursor: pointer; text-align: left; }
 .dshDesktopResidentAction > span:nth-child(2) { overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .dshDesktopResidentAction > span:nth-child(3) { grid-column: 2; color: var(--dsw-alias-label-secondary); font-size: 9px; }
