@@ -168,6 +168,8 @@ describe('LunaSection', () => {
         targets: [{ provider: 'pi-ai', model: 'pi-coder' }],
       },
     })
+    expect(root.root.findAll(node => node.props.role === 'status').map(node => textOf(node.props.children)))
+      .toContain('设置已保存并即时生效')
   })
 
   it('filters the model options by the selected provider', async () => {
@@ -267,5 +269,7 @@ describe('LunaSection', () => {
         { op: 'unset', path: ['targets'] },
       ],
     })
+    expect(root.root.findAll(node => node.props.role === 'status').map(node => textOf(node.props.children)))
+      .toContain('已恢复默认设置并即时生效')
   })
 })

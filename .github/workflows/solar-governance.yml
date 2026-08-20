@@ -38,6 +38,7 @@ jobs:
         working-directory: plugins/managed/memory-evolve
       - run: corepack pnpm install --frozen-lockfile
         working-directory: plugins/managed/web-ui
+      - run: corepack pnpm run build:lib
       - run: python3 tools/agent-development-governance/governance.py audit --project . --strict-warnings
       - run: python3 tools/agent-development-governance/governance.py plan --project . --scope auto --level full --changed-from origin/solar
       - run: mkdir -p .artifacts
