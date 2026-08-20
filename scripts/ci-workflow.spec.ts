@@ -7,6 +7,19 @@ const root = resolve(import.meta.dirname, '..')
 const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
 
 describe('CI workflow', () => {
+  it('runs the dynamic Cordis browser lifecycle in a fresh Vitest process', () => {
+    const packageJson: unknown = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+    if (!isRecord(packageJson) || !isRecord(packageJson.scripts)) {
+      throw new TypeError('Root package must define scripts')
+    }
+
+    expect(packageJson.scripts['test:web:built']).toBe(
+      'npm run test:web:built:main && npm run test:web:built:cordis',
+    )
+    expect(packageJson.scripts['test:web:built:main']).toContain('DSH_WEB_SUITE=main')
+    expect(packageJson.scripts['test:web:built:cordis']).toContain('DSH_WEB_SUITE=isolated')
+  })
+
   it('isolates every pnpm action setup destination per runner', () => {
     const workflow: unknown = yaml.load(readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8'))
     if (!isRecord(workflow) || !isRecord(workflow.jobs)) throw new TypeError('CI workflow must define jobs')

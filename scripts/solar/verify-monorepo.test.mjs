@@ -46,7 +46,7 @@ function validInput() {
     },
     vitestConfig: [
       "name: 'thread-safe',",
-      'maxWorkers: 3,',
+      'maxWorkers: 2,',
       "name: 'process-bound',",
       'maxWorkers: 1,',
     ].join('\n'),
@@ -84,7 +84,7 @@ test('rejects unbound source provenance and nested gitlinks', () => {
 
 test('rejects an unbounded or unsplit related-test worker contract', () => {
   const input = validInput()
-  input.vitestConfig = "name: 'thread-safe',\nmaxWorkers: 3,"
+  input.vitestConfig = "name: 'thread-safe',\nmaxWorkers: 2,"
   assert.match(validateMonorepo(input).join('\n'), /process-bound/u)
 })
 

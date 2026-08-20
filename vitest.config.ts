@@ -134,7 +134,9 @@ export default defineConfig({
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         test: {
           name: 'thread-safe',
-          maxWorkers: 3,
+          // The process-bound project runs beside this one. Two plus its one
+          // worker leaves one standard-runner CPU for fixture subprocesses.
+          maxWorkers: 2,
           execArgv: vitestExecArgv,
           // Node 24 has aborted in its CJS lexer (v8::ToLocalChecked Empty
           // MaybeLocal in cjs_lexer::Parse) from worker threads on macOS,

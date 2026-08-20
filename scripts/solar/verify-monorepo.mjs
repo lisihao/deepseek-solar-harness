@@ -105,7 +105,7 @@ export function validateMonorepo({
   if (JSON.stringify(relatedTests?.command) !== JSON.stringify(['pnpm', 'exec', 'vitest', 'run', '--changed=origin/solar'])) {
     errors.push('related-tests must use the bounded Vitest project worker budgets')
   }
-  const threadSafeWorkers = /name: 'thread-safe',[\s\S]{0,200}maxWorkers: 3,/u.test(vitestConfig ?? '')
+  const threadSafeWorkers = /name: 'thread-safe',[\s\S]{0,300}maxWorkers: 2,/u.test(vitestConfig ?? '')
   const processBoundWorkers = /name: 'process-bound',[\s\S]{0,200}maxWorkers: 1,/u.test(vitestConfig ?? '')
   if (!threadSafeWorkers || !processBoundWorkers) {
     errors.push('Vitest must keep thread-safe work bounded and process-bound work serial')
