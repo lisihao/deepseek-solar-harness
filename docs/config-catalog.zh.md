@@ -1344,7 +1344,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/orchestration/orchestration-local/src/index.ts:30`](../packages/orchestration/orchestration-local/src/index.ts)
+来源：[`packages/orchestration/orchestration-local/src/index.ts:32`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -1441,7 +1441,7 @@ export interface OperatorConfig {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:40`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:43`](../packages/physical-operator/physical-operator-resident/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 
