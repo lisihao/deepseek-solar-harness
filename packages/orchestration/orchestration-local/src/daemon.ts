@@ -1,0 +1,1061 @@
+/** Independent durable orchestration daemon and Scheduler authority. */
+import { randomUUID } from 'node:crypto'
+import { chmodSync, closeSync, existsSync, lstatSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
+import { createServer, type Server, type Socket } from 'node:net'
+import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
+import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import {
+  OrchestrationError,
+  OrchestrationRunId,
+  type CapabilityUpdateReceipt,
+  type CapabilityUpdateRequest,
+  type NodeExecutionPlanV1,
+  type OrchestrationBlocker,
+  type OrchestrationCompilationV1,
+  type OrchestrationControlRequest,
+  type OrchestrationDecisionRequest,
+  type OrchestrationEvent,
+  type OrchestrationIndeterminateRequest,
+  type OrchestrationNodeSnapshot,
+  type OrchestrationNodeSpecV1,
+  type OrchestrationRunSnapshot,
+} from '@deepseek-ai/dsh-orchestration'
+import PhysicalOperatorRuntime, {
+  PhysicalOperatorExecutionId,
+  PhysicalOperatorId,
+  type PhysicalOperator,
+  type PhysicalOperatorProviderRun,
+  type PhysicalOperatorProviderStartRequest,
+  type PhysicalOperatorResult,
+} from '@deepseek-ai/dsh-physical-operator'
+import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
+import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { canonicalSha256 } from './canonical.ts'
+import { graphCertificate, nodesConflict, validateGraph } from './graph.ts'
+import { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from './providers.ts'
+import { wireFailure, wireSuccess } from './protocol.ts'
+import {
+  ORCHESTRATION_STATE_SCHEMA_VERSION,
+  OrchestrationStore,
+  type AttemptRecord,
+  type RuntimeRunRecord,
+} from './store.ts'
+
+/** Local orchestration control protocol version. */
+export const ORCHESTRATION_PROTOCOL_VERSION = 1
+
+/** Methods required by the strict client handshake. */
+export const ORCHESTRATION_METHODS = Object.freeze([
+  'system.handshake',
+  'orchestration.compile',
+  'orchestration.start',
+  'orchestration.list',
+  'orchestration.inspect',
+  'event.read',
+  'orchestration.control',
+  'orchestration.decide',
+  'orchestration.resolve_indeterminate',
+  'capability.propose_update',
+] as const)
+
+interface ActiveAttempt {
+  readonly runId: string
+  readonly nodeId: string
+  readonly attempt: number
+  readonly generation: number
+  readonly executionId: string
+  readonly sessionId: string
+  readonly turnId: string
+  readonly run: { readonly result: Promise<PhysicalOperatorResult>; dispose(): Promise<void> }
+}
+
+interface ResidentReceiptIdentity {
+  readonly sessionId: string
+  readonly turnId: string
+}
+
+class OrchestrationResidentOperator implements PhysicalOperator {
+  readonly descriptor
+  private readonly receipts = new Map<string, ResidentReceiptIdentity>()
+
+  constructor(
+    private readonly resident: ResidentDaemonClient,
+    readonly operatorId: 'codex' | 'claude-code',
+  ) {
+    this.descriptor = {
+      id: PhysicalOperatorId(operatorId),
+      displayName: operatorId === 'codex' ? 'Codex' : 'Claude Code',
+      description: 'Resident native-subscription physical operator for durable TaskGraph nodes.',
+      tags: operatorId === 'codex'
+        ? ['coding', 'implementation', 'debugging', 'testing', 'review']
+        : ['analysis', 'architecture', 'review', 'long-context', 'coding'],
+      maxConcurrency: 1,
+      executionModes: ['resident'] as const,
+    }
+  }
+
+  availability() {
+    return { available: true as const }
+  }
+
+  async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
+    const workspace = request.parent.session.header.cwd
+    if (workspace === undefined) throw new OrchestrationError('orchestration operator requires a workspace', 'GRAPH_INVALID')
+    const turn = await this.resident.execute({
+      commandId: String(request.executionId),
+      operatorId: this.operatorId,
+      workspace,
+      ...request.label === undefined ? {} : { taskLabel: request.label },
+      prompt: request.prompt,
+      ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
+      signal: request.signal,
+    })
+    this.receipts.set(String(request.executionId), { sessionId: turn.sessionId, turnId: turn.turnId })
+    return {
+      result: turn.result.then(result => ({
+        ...result,
+        continuity: { sessionId: turn.sessionId, stateRevision: turn.stateRevision },
+      })),
+      dispose: () => turn.dispose(),
+    }
+  }
+
+  takeReceipt(executionId: string): ResidentReceiptIdentity {
+    const receipt = this.receipts.get(executionId)
+    if (receipt === undefined) throw new OrchestrationError(`resident receipt was not published for ${executionId}`, 'ORCHESTRATION_UNAVAILABLE')
+    this.receipts.delete(executionId)
+    return receipt
+  }
+}
+
+/** Daemon construction policy. */
+export interface OrchestrationDaemonOptions {
+  readonly root: string
+  readonly dshHome: string
+  readonly buildCommit?: string
+  readonly schedulerIntervalMs?: number
+  readonly residentClient?: ResidentDaemonClient
+}
+
+function requiredString(params: Record<string, unknown>, name: string): string {
+  const value = params[name]
+  if (typeof value !== 'string' || value.length === 0) throw new OrchestrationError(`protocol requires ${name}`, 'GRAPH_INVALID')
+  return value
+}
+
+function requiredInteger(params: Record<string, unknown>, name: string): number {
+  const value = params[name]
+  if (!Number.isSafeInteger(value) || Number(value) < 0) throw new OrchestrationError(`protocol requires non-negative ${name}`, 'GRAPH_INVALID')
+  return Number(value)
+}
+
+function now(): string {
+  return new Date().toISOString()
+}
+
+function authorityContains(value: string, budget: readonly string[]): boolean {
+  return budget.includes('*') || budget.includes(value) || budget.some(entry => value.startsWith(`${entry}/`))
+}
+
+function event(
+  runId: OrchestrationRunId,
+  type: string,
+  data: Readonly<Record<string, unknown>>,
+  node?: OrchestrationNodeSnapshot,
+): Omit<OrchestrationEvent, 'sequence'> {
+  return {
+    runId,
+    ...node === undefined ? {} : { nodeId: node.id, attempt: node.attempt, generation: node.capabilityGeneration },
+    type,
+    time: now(),
+    data,
+  }
+}
+
+function withRevision(record: RuntimeRunRecord, snapshot: OrchestrationRunSnapshot): RuntimeRunRecord {
+  return { ...record, snapshot: { ...snapshot, revision: record.snapshot.revision + 1, updatedAt: now() } }
+}
+
+function fakeParent(workspace: string, runId: string): Agent {
+  return {
+    id: SessionId(`orchestration-${runId}`),
+    session: { header: { cwd: workspace } },
+  } as unknown as Agent
+}
+
+function promptFromPlan(node: OrchestrationNodeSpecV1, context: ContextPacketV1, capabilities: CapabilityBindingPlanV1): ContentBlock[] {
+  const instructions = capabilities.instructions.map(value => `- ${value.text}`).join('\n')
+  const upstream = context.included.filter(value => value.kind === 'artifact').map(value => `- ${value.ref}`).join('\n')
+  return [{
+    type: 'text',
+    text: [
+      `TaskGraph node ${node.id}: ${node.title}`,
+      '',
+      context.task,
+      '',
+      `Workspace: ${context.workspace}`,
+      `Read scopes: ${node.readScopes.join(', ') || 'none'}`,
+      `Write scopes: ${node.writeScopes.join(', ') || 'none'}`,
+      `Acceptance: ${node.acceptance.map(value => value.description).join('; ') || 'operator completion'}`,
+      ...(instructions.length === 0 ? [] : ['', 'Capability instructions:', instructions]),
+      ...(upstream.length === 0 ? [] : ['', 'Upstream artifact references:', upstream]),
+      '',
+      'Return a concise result. Do not expand authority beyond the listed scopes and effects.',
+    ].join('\n'),
+  }]
+}
+
+/** Single-writer Scheduler, compiler host, and physical-attempt reconciler. */
+export class OrchestrationDaemon {
+  /** Owner-local Unix control socket path. */
+  readonly socketPath: string
+  /** Sole-writer durable state and content-addressed artifact store. */
+  readonly store: OrchestrationStore
+  /** Client for the independently durable Resident physical-operator authority. */
+  readonly resident: ResidentDaemonClient
+  private readonly server: Server
+  private readonly transports = new Set<JsonRpcLineTransport>()
+  private readonly ctx = new Context()
+  private readonly physical = new Map<string, OrchestrationResidentOperator>()
+  private readonly active = new Map<string, ActiveAttempt>()
+  private lockDescriptor: number | undefined
+  private ticker: ReturnType<typeof setInterval> | undefined
+  private ticking = false
+  private closing = false
+  private readonly closedResolver = Promise.withResolvers<void>()
+  /** Resolves after all local resources and the single-instance lock are released. */
+  readonly closed = this.closedResolver.promise
+
+  constructor(private readonly options: OrchestrationDaemonOptions) {
+    this.socketPath = join(options.root, 'control.sock')
+    this.store = new OrchestrationStore(options.root)
+    this.resident = options.residentClient ?? new ResidentDaemonClient({
+      root: join(options.dshHome, 'resident-operators'),
+      autoStart: true,
+      connectTimeoutMs: 5_000,
+      pollIntervalMs: 250,
+    })
+    this.server = createServer((socket) => { this.acceptSocket(socket) })
+  }
+
+  // Local resident daemons intentionally share socket startup, draining, and transport ownership.
+  /* jscpd:ignore-start */
+  /** Start the headless compiler composition, recovery pass, socket, and Scheduler. */
+  async start(): Promise<void> {
+    this.acquireLock()
+    const thisRoot = this.options.root
+    await this.ctx.plugin(PhysicalOperatorRuntime)
+    await this.ctx.plugin(DirectIntentCompiler)
+    await this.ctx.plugin(BasicContextCompiler)
+    await this.ctx.plugin(class extends LocalCapabilityCapsuleService {
+      constructor(ctx: Context) { super(ctx, join(thisRoot, 'capsules')) }
+    })
+    for (const operatorId of ['codex', 'claude-code'] as const) {
+      const operator = new OrchestrationResidentOperator(this.resident, operatorId)
+      this.physical.set(operatorId, operator)
+      this.ctx.physicalOperators.registerOperator(operator)
+    }
+    this.removeStaleSocket()
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error): void => { reject(error) }
+      this.server.once('error', onError)
+      this.server.listen(this.socketPath, () => {
+        this.server.off('error', onError)
+        chmodSync(this.socketPath, 0o600)
+        writeFileSync(join(this.options.root, 'daemon.pid'), `${String(process.pid)}\n`, { mode: 0o600 })
+        resolve()
+      })
+    })
+    await this.reconcile()
+    this.ticker = setInterval(() => { void this.tick() }, this.options.schedulerIntervalMs ?? 250)
+    this.ticker.unref()
+    void this.tick()
+  }
+
+  /** Stop scheduling and release daemon-owned resources without stopping Resident sessions. */
+  async close(): Promise<void> {
+    if (this.closing) return this.closed
+    this.closing = true
+    if (this.ticker !== undefined) clearInterval(this.ticker)
+    this.ticker = undefined
+    for (const transport of this.transports) transport.close()
+    await Promise.allSettled([...this.active.values()].map(value => value.run.dispose()))
+    await this.ctx.root.fiber.dispose()
+    await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
+    this.store.close()
+    this.safeUnlink(this.socketPath)
+    this.safeUnlink(join(this.options.root, 'daemon.pid'))
+    this.releaseLock()
+    this.closedResolver.resolve()
+  }
+
+  private acceptSocket(socket: Socket): void {
+    socket.setEncoding('utf8')
+    const transport = new JsonRpcLineTransport(socket, socket)
+    this.transports.add(transport)
+    transport.onRequest(async (method, params) => {
+      try { return wireSuccess(await this.dispatch(method, params)) } catch (error) { return wireFailure(error) }
+    })
+    const remove = (): void => { transport.close(); this.transports.delete(transport) }
+    socket.once('close', remove)
+    socket.once('error', remove)
+    transport.start()
+  }
+  /* jscpd:ignore-end */
+
+  private async dispatch(method: string, params: Record<string, unknown>): Promise<unknown> {
+    switch (method) {
+      case 'system.handshake': return this.handshake(params)
+      case 'orchestration.compile': return this.compile(params.request as never)
+      case 'orchestration.start': return this.startRun(requiredString(params, 'compilation_id'), params.approval_ref as string | undefined)
+      case 'orchestration.list': return this.store.listRuns().map(value => value.snapshot)
+      case 'orchestration.inspect': return this.store.getRun(requiredString(params, 'run_id')).snapshot
+      case 'event.read': return this.store.readEvents(
+        requiredString(params, 'run_id'),
+        params.after_sequence === undefined ? 0 : requiredInteger(params, 'after_sequence'),
+        params.limit === undefined ? 100 : requiredInteger(params, 'limit'),
+      )
+      case 'orchestration.control': return this.control(params.request as never)
+      case 'orchestration.decide': return this.decide(params.request as never)
+      case 'orchestration.resolve_indeterminate': return this.resolveIndeterminate(params.request as never)
+      case 'capability.propose_update': return this.proposeCapabilityUpdate(params.request as never)
+      case 'system.shutdown':
+        setTimeout(() => { void this.close() }, 10)
+        return { draining: true }
+      default: throw new OrchestrationError(`orchestration protocol method not found: ${method}`, 'ORCHESTRATION_UNAVAILABLE')
+    }
+  }
+
+  private handshake(params: Record<string, unknown>) {
+    const protocol = requiredInteger(params, 'protocol_version')
+    const schema = requiredInteger(params, 'state_schema_version')
+    if (protocol !== ORCHESTRATION_PROTOCOL_VERSION || schema !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
+      throw new OrchestrationError('orchestration protocol or state schema mismatch', 'ORCHESTRATION_UNAVAILABLE')
+    }
+    return {
+      protocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
+      stateSchemaVersion: ORCHESTRATION_STATE_SCHEMA_VERSION,
+      buildCommit: this.options.buildCommit ?? process.env.DSH_BUILD_COMMIT ?? 'development',
+      methods: ORCHESTRATION_METHODS,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'],
+    }
+  }
+
+  private async compile(request: Parameters<Context['orchestrations']['compile']>[0]): Promise<OrchestrationCompilationV1> {
+    validateGraph(request.graph)
+    const workspace = await realpath(request.graph.workspace).catch(() => {
+      throw new OrchestrationError(`graph workspace does not exist: ${request.graph.workspace}`, 'GRAPH_INVALID')
+    })
+    const graph = structuredClone({ ...request.graph, workspace })
+    const intent = await this.ctx.intentCompiler.compile(structuredClone(request.intent))
+    const intentRef = this.store.putArtifact(intent)
+    const requirementRef = request.requirement === undefined ? undefined : this.store.putArtifact(request.requirement)
+    const graphRef = this.store.putArtifact(graph)
+    const certificate = graphCertificate(graph)
+    const blockers: OrchestrationBlocker[] = intent.requiresClarification
+      ? [{ code: 'INTENT_CLARIFICATION_REQUIRED', message: intent.ambiguities.join('; ') }]
+      : []
+    const compilationId = `cmp-${canonicalSha256({ intentRef, requirementRef, graphRef, certificate }).slice(0, 32)}`
+    const compilation: OrchestrationCompilationV1 = {
+      version: 1,
+      compilationId,
+      intent,
+      intentRef,
+      ...requirementRef === undefined ? {} : { requirementRef },
+      graphRef,
+      graph,
+      certificate,
+      requiresClarification: intent.requiresClarification,
+      blockers,
+    }
+    this.store.saveCompilation(compilation)
+    for (const ref of [intentRef, requirementRef, graphRef].filter(value => value !== undefined)) {
+      this.store.recordArtifact('compilation_artifacts', { ref: String(ref) })
+    }
+    return compilation
+  }
+
+  private startRun(compilationId: string, approvalRef?: string): OrchestrationRunSnapshot {
+    const compilation = this.store.getCompilation(compilationId)
+    const runId = OrchestrationRunId(`run-${randomUUID()}`)
+    const createdAt = now()
+    const state = compilation.requiresClarification
+      ? 'awaiting_clarification' as const
+      : compilation.certificate.requiresApproval && approvalRef === undefined
+        ? 'awaiting_approval' as const
+        : 'running' as const
+    const snapshot: OrchestrationRunSnapshot = {
+      runId,
+      title: compilation.graph.title,
+      workspace: compilation.graph.workspace,
+      state,
+      revision: 1,
+      graphRevision: 1,
+      certificate: compilation.certificate,
+      nodes: compilation.graph.nodes.map(node => ({
+        id: node.id,
+        title: node.title,
+        role: node.role,
+        dependsOn: [...node.dependsOn],
+        state: 'pending',
+        attempt: 0,
+        capabilityGeneration: 1,
+        evidenceRefs: [],
+        blockers: [],
+        updatedAt: createdAt,
+      })),
+      blockers: compilation.blockers,
+      createdAt,
+      updatedAt: createdAt,
+    }
+    const record: RuntimeRunRecord = {
+      snapshot,
+      graph: compilation.graph,
+      intent: compilation.intent,
+      intentRef: compilation.intentRef,
+      ...compilation.requirementRef === undefined ? {} : { requirementRef: compilation.requirementRef },
+      graphRef: compilation.graphRef,
+      ...approvalRef === undefined ? {} : { approvalRef },
+      retryAfter: {},
+    }
+    this.store.createRun(record, [
+      event(runId, 'intent.compiled', { ref: String(compilation.intentRef), sha256: compilation.intent.provenance.outputSha256 }),
+      event(runId, 'graph.compiled', { ref: String(compilation.graphRef), certificateSha256: compilation.certificate.certificateSha256 }),
+      event(runId, 'run.started', { state }),
+    ])
+    void this.tick()
+    return snapshot
+  }
+
+  private control(request: OrchestrationControlRequest): OrchestrationRunSnapshot {
+    const record = this.expectRevision(request.runId, request.expectedRevision)
+    const current = record.snapshot.state
+    let state = current
+    if (request.action === 'pause' && current === 'running') state = 'paused'
+    else if (request.action === 'resume' && current === 'paused') state = 'running'
+    else if (request.action === 'cancel' && !['completed', 'failed', 'cancelled'].includes(current)) state = 'cancelled'
+    else throw new OrchestrationError(`cannot ${request.action} run in state ${current}`, 'RUN_STATE_CONFLICT')
+    const nodes = request.action === 'cancel'
+      ? record.snapshot.nodes.map(node => ['pending', 'ready', 'retry_wait', 'awaiting_recompile', 'awaiting_approval'].includes(node.state)
+        ? { ...node, state: 'cancelled' as const, updatedAt: now() }
+        : node)
+      : record.snapshot.nodes
+    const next = withRevision(record, { ...record.snapshot, state, nodes })
+    this.store.saveRun(next, [event(request.runId, `run.${request.action}`, { reason: request.reason })])
+    if (request.action === 'cancel') void this.interruptActive(String(request.runId))
+    void this.tick()
+    return next.snapshot
+  }
+
+  private decide(request: OrchestrationDecisionRequest): OrchestrationRunSnapshot {
+    const record = this.expectRevision(request.runId, request.expectedRevision)
+    if (request.nodeId === undefined) {
+      if (record.snapshot.state !== 'awaiting_approval') throw new OrchestrationError('run is not awaiting approval', 'RUN_STATE_CONFLICT')
+      if (request.decision === 'approve' && record.snapshot.nodes.some(value => value.state === 'awaiting_recompile')) {
+        throw new OrchestrationError('capability expansion requires a newly compiled Graph revision and Plan Certificate', 'RUN_STATE_CONFLICT')
+      }
+      const state = request.decision === 'approve' ? 'running' as const : 'cancelled' as const
+      const next = withRevision({ ...record, ...(request.decision === 'approve' ? { approvalRef: `approval:${randomUUID()}` } : {}) }, {
+        ...record.snapshot,
+        state,
+        blockers: request.decision === 'approve' ? [] : [{ code: 'APPROVAL_REJECTED', message: request.reason }],
+      })
+      this.store.saveRun(next, [event(request.runId, `approval.${request.decision}`, { reason: request.reason })])
+      void this.tick()
+      return next.snapshot
+    }
+    const node = record.snapshot.nodes.find(value => value.id === request.nodeId)
+    if (node?.state !== 'awaiting_approval') throw new OrchestrationError('node is not awaiting approval', 'RUN_STATE_CONFLICT')
+    const nodes = record.snapshot.nodes.map(value => value.id === request.nodeId
+      ? { ...value, state: request.decision === 'approve' ? 'passed' as const : 'failed' as const, updatedAt: now() }
+      : value)
+    const next = withRevision(record, { ...record.snapshot, state: 'running', nodes })
+    this.store.saveRun(next, [event(request.runId, `node.approval.${request.decision}`, { reason: request.reason }, nodes.find(value => value.id === request.nodeId))])
+    void this.tick()
+    return next.snapshot
+  }
+
+  private resolveIndeterminate(request: OrchestrationIndeterminateRequest): OrchestrationRunSnapshot {
+    const record = this.expectRevision(request.runId, request.expectedRevision)
+    const node = record.snapshot.nodes.find(value => value.id === request.nodeId)
+    if (node?.state !== 'indeterminate') throw new OrchestrationError('node is not indeterminate', 'RUN_STATE_CONFLICT')
+    const spec = record.graph.nodes.find(value => value.id === request.nodeId)
+    if (spec === undefined) throw new OrchestrationError('node specification is missing', 'GRAPH_INVALID')
+    const state = request.decision === 'retry' && node.attempt < spec.retryPolicy.maxAttempts ? 'ready' as const : 'failed' as const
+    const nodes = record.snapshot.nodes.map(value => value.id === request.nodeId
+      ? { ...value, state, blockers: [], updatedAt: now() }
+      : value)
+    const next = withRevision(record, { ...record.snapshot, state: 'running', nodes })
+    this.store.saveRun(next, [event(request.runId, `node.indeterminate.${request.decision}`, { reason: request.reason }, nodes.find(value => value.id === request.nodeId))])
+    void this.tick()
+    return next.snapshot
+  }
+
+  private proposeCapabilityUpdate(request: CapabilityUpdateRequest): CapabilityUpdateReceipt {
+    const record = this.expectRevision(request.runId, request.expectedRevision)
+    const node = record.snapshot.nodes.find(value => value.id === request.nodeId)
+    if (node === undefined) throw new OrchestrationError(`node not found: ${request.nodeId}`, 'RUN_NOT_FOUND')
+    const spec = record.graph.nodes.find(value => value.id === request.nodeId)
+    if (spec === undefined) throw new OrchestrationError(`node specification is missing: ${request.nodeId}`, 'GRAPH_INVALID')
+    if (['passed', 'failed', 'blocked', 'cancelled', 'indeterminate'].includes(node.state)) {
+      throw new OrchestrationError(`capability update cannot target node in state ${node.state}`, 'RUN_STATE_CONFLICT')
+    }
+    const updateId = `cap-${randomUUID()}`
+    const updateSha256 = canonicalSha256(request)
+    if (request.applyAt === 'immediate' && node.state === 'running') {
+      const receipt: CapabilityUpdateReceipt = {
+        updateId,
+        state: 'rejected',
+        generation: node.capabilityGeneration,
+        updateSha256,
+        errorCode: 'CAPABILITY_HOTSWAP_UNSUPPORTED',
+      }
+      this.store.saveCapabilityUpdate({ ...receipt, runId: String(request.runId), nodeId: request.nodeId, payload: request })
+      this.store.saveRun(record, [event(request.runId, 'capability_update.rejected', { updateId, code: receipt.errorCode }, node)])
+      return receipt
+    }
+    const outsideBudget = request.requestedCapabilities.filter(value => !authorityContains(value, spec.capabilityBudget))
+    if (outsideBudget.length > 0) {
+      const receipt: CapabilityUpdateReceipt = {
+        updateId, state: 'awaiting_approval', generation: node.capabilityGeneration, updateSha256,
+        errorCode: 'CAPABILITY_RECOMPILE_REQUIRED',
+      }
+      const blocker = {
+        code: 'CAPABILITY_RECOMPILE_REQUIRED',
+        message: `capabilities exceed the certified Graph budget: ${outsideBudget.join(', ')}`,
+        nodeId: node.id,
+      }
+      const nodes = record.snapshot.nodes.map(value => value.id === node.id
+        ? { ...value, state: 'awaiting_recompile' as const, blockers: [blocker], updatedAt: now() }
+        : value)
+      const next = withRevision(record, { ...record.snapshot, state: 'awaiting_approval', nodes, blockers: [blocker] })
+      this.store.saveCapabilityUpdate({ ...receipt, runId: String(request.runId), nodeId: request.nodeId, payload: request })
+      this.store.saveRun(next, [event(request.runId, 'capability_update.proposed', {
+        updateId, state: receipt.state, requiresGraphRevision: true, outsideBudget,
+      }, nodes.find(value => value.id === node.id))])
+      return receipt
+    }
+    const updateGenerations = this.store
+      .capabilityUpdates(String(request.runId), request.nodeId)
+      .map(value => value.generation)
+    const existingGeneration = Math.max(node.capabilityGeneration, ...updateGenerations)
+    const generation = existingGeneration + 1
+    const nodes = node.state === 'running'
+      ? record.snapshot.nodes
+      : record.snapshot.nodes.map(value => value.id === node.id ? { ...value, capabilityGeneration: generation, updatedAt: now() } : value)
+    const next = withRevision(record, { ...record.snapshot, nodes })
+    const receipt: CapabilityUpdateReceipt = { updateId, state: 'queued', generation, updateSha256 }
+    this.store.saveCapabilityUpdate({ ...receipt, runId: String(request.runId), nodeId: request.nodeId, payload: request })
+    this.store.saveRun(next, [event(request.runId, 'capability_update.proposed', { updateId, generation, applyAt: request.applyAt }, nodes.find(value => value.id === node.id))])
+    return receipt
+  }
+
+  private expectRevision(runId: OrchestrationRunId, revision: number): RuntimeRunRecord {
+    const record = this.store.getRun(String(runId))
+    if (record.snapshot.revision !== revision) {
+      throw new OrchestrationError(`run revision ${String(revision)} is stale; current revision is ${String(record.snapshot.revision)}`, 'REVISION_CONFLICT')
+    }
+    return record
+  }
+
+  private async tick(): Promise<void> {
+    if (this.ticking || this.closing) return
+    this.ticking = true
+    try {
+      await this.reconcile()
+      for (const record of this.store.listRuns()) {
+        if (record.snapshot.state !== 'running') continue
+        await this.advance(record)
+      }
+    } finally {
+      this.ticking = false
+    }
+  }
+
+  private async advance(initial: RuntimeRunRecord): Promise<void> {
+    let record = this.store.getRun(String(initial.snapshot.runId))
+    const byId = new Map(record.graph.nodes.map(node => [node.id, node]))
+    let nodes = [...record.snapshot.nodes]
+    let changed = false
+    for (const node of nodes) {
+      if (node.state !== 'pending' && node.state !== 'retry_wait') continue
+      if (node.state === 'retry_wait' && Date.parse(record.retryAfter[node.id] ?? '') > Date.now()) continue
+      const spec = byId.get(node.id)
+      if (spec === undefined) continue
+      const dependencies = spec.dependsOn.map(id => nodes.find(value => value.id === id))
+      if (dependencies.some(value => value === undefined || ['failed', 'blocked', 'cancelled', 'indeterminate'].includes(value.state))) {
+        nodes = nodes.map(value => value.id === node.id ? {
+          ...value,
+          state: 'blocked' as const,
+          blockers: [{ code: 'DEPENDENCY_FAILED', message: 'one or more dependencies did not pass', nodeId: node.id }],
+          updatedAt: now(),
+        } : value)
+        changed = true
+      } else if (dependencies.every(value => value?.state === 'passed')) {
+        nodes = nodes.map(value => value.id === node.id ? { ...value, state: 'ready' as const, updatedAt: now() } : value)
+        changed = true
+      }
+    }
+    if (changed) {
+      record = withRevision(record, { ...record.snapshot, nodes })
+      this.store.saveRun(record, [event(record.snapshot.runId, 'graph.readiness.updated', {})])
+    }
+    const liveNodes = record.snapshot.nodes.filter(node => node.state === 'running')
+    const slots = Math.max(0, record.graph.maxParallel - liveNodes.length)
+    if (slots > 0) {
+      const selected: OrchestrationNodeSnapshot[] = []
+      const readyNodes = record.snapshot.nodes.filter(node => node.state === 'ready')
+      for (const candidate of readyNodes) {
+        const candidateSpec = byId.get(candidate.id)
+        if (candidateSpec === undefined) continue
+        const conflicts = [...liveNodes, ...selected].some((active) => {
+          const activeSpec = byId.get(active.id)
+          return activeSpec !== undefined && nodesConflict(candidateSpec, activeSpec)
+        })
+        if (!conflicts) selected.push(candidate)
+        if (selected.length >= slots) break
+      }
+      await Promise.all(selected.map(node => this.prepareAndDispatch(String(record.snapshot.runId), node.id)))
+    }
+    record = this.store.getRun(String(record.snapshot.runId))
+    const required = record.graph.nodes.filter(node => node.requiredForCompletion)
+    const requiredStates = required.map(spec => record.snapshot.nodes.find(node => node.id === spec.id)?.state)
+    const anyLive = record.snapshot.nodes.some(node => ['pending', 'ready', 'running', 'retry_wait', 'awaiting_approval'].includes(node.state))
+    if (requiredStates.every(state => state === 'passed') && !anyLive) this.finishRun(record, 'completed')
+    else if (!anyLive && requiredStates.some(state => ['failed', 'blocked', 'cancelled', 'indeterminate'].includes(state ?? 'blocked'))) {
+      this.finishRun(record, requiredStates.includes('indeterminate') ? 'indeterminate' : 'failed')
+    }
+  }
+
+  private async prepareAndDispatch(runId: string, nodeId: string): Promise<void> {
+    try {
+      await this.prepareAndDispatchUnchecked(runId, nodeId)
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error
+        ? String(error.code)
+        : 'ORCHESTRATION_UNAVAILABLE'
+      const message = error instanceof Error ? error.message : String(error)
+      const current = this.store.getRun(runId).snapshot.nodes.find(value => value.id === nodeId)
+      if (current?.state === 'ready') this.blockNode(runId, nodeId, [{ code, message, nodeId }])
+    }
+  }
+
+  private async prepareAndDispatchUnchecked(runId: string, nodeId: string): Promise<void> {
+    let record = this.store.getRun(runId)
+    const node = record.snapshot.nodes.find(value => value.id === nodeId)
+    const spec = record.graph.nodes.find(value => value.id === nodeId)
+    if (node?.state !== 'ready' || spec === undefined) return
+    const attempt = node.attempt + 1
+    const upstreamRefs = spec.dependsOn.flatMap(id => record.snapshot.nodes.find(value => value.id === id)?.evidenceRefs ?? [])
+    const applicableUpdates = this.store.capabilityUpdates(runId, nodeId)
+      .filter(value => ['queued', 'applied'].includes(value.state) && value.generation <= node.capabilityGeneration)
+    const updateRequirements = applicableUpdates
+      .flatMap(value => value.payload.requestedCapabilities)
+      .map(capability => ({ capability, required: true as const }))
+    const capabilityPlan = await this.ctx.capabilityCapsules.resolve({
+      runId,
+      nodeId,
+      attempt,
+      generation: node.capabilityGeneration,
+      requirements: [...spec.capabilityRequirements, ...updateRequirements],
+      capabilityBudget: spec.capabilityBudget,
+      effectBudget: spec.effectBudget,
+      readScopes: spec.readScopes,
+      writeScopes: spec.writeScopes,
+      approvedSecretRefs: spec.approvedSecretRefs,
+      operatorInjectionKinds: ['instruction', 'resource', 'data'],
+    })
+    const capabilityPlanRef = this.store.putArtifact(capabilityPlan)
+    this.store.recordArtifact('capability_bindings', { ref: String(capabilityPlanRef), runId, nodeId, attempt, generation: node.capabilityGeneration })
+    this.store.saveRun(record, [event(record.snapshot.runId, 'capsule.resolved', {
+      ref: String(capabilityPlanRef), blockers: capabilityPlan.blockers,
+    }, node)])
+    if (capabilityPlan.blockers.length > 0 || capabilityPlan.guardRefs.length > 0) {
+      const blockers = [...capabilityPlan.blockers, ...capabilityPlan.guardRefs.length > 0 ? [{
+        code: 'CAPABILITY_UNSATISFIED', message: 'no Guard Capsule executor is available in the baseline Provider',
+      }] : []]
+      this.blockNode(runId, nodeId, blockers)
+      return
+    }
+    const sourceRefs: ContextSourceRef[] = [
+      { ref: String(record.intentRef), kind: 'intent', required: true },
+      ...record.requirementRef === undefined ? [] : [{ ref: String(record.requirementRef), kind: 'requirement' as const, required: true }],
+      ...upstreamRefs.map(ref => ({ ref: String(ref), kind: 'artifact' as const, required: true })),
+      ...capabilityPlan.resourceRefs.map(ref => ({ ref, kind: 'capsule' as const, required: true })),
+    ]
+    const contextPacket = await this.ctx.contextCompiler.compile({
+      runId,
+      nodeId,
+      objective: record.intent.objective,
+      workspace: record.snapshot.workspace,
+      task: spec.task,
+      sourceRefs,
+      readScopes: spec.readScopes,
+      writeScopes: spec.writeScopes,
+      acceptance: spec.acceptance.map(value => value.description),
+      capsuleInstructions: capabilityPlan.instructions.map(value => ({ ref: String(value.ref), digest: value.digest, text: value.text })),
+      policy: spec.contextPolicy,
+    })
+    const contextPacketRef = this.store.putArtifact(contextPacket)
+    this.store.recordArtifact('context_packets', { ref: String(contextPacketRef), runId, nodeId, attempt, generation: node.capabilityGeneration })
+    this.store.saveRun(record, [event(record.snapshot.runId, 'context.compiled', {
+      ref: String(contextPacketRef), sha256: contextPacket.packetSha256, degradedSources: contextPacket.degradedSources,
+    }, node)])
+    const operatorId = await this.selectOperator(spec)
+    const executionId = PhysicalOperatorExecutionId(`orch:${runId}:${nodeId}:${String(attempt)}`)
+    const taskRef = this.store.putArtifact({ title: spec.title, task: spec.task })
+    const base = {
+      version: 1 as const,
+      runId: record.snapshot.runId,
+      nodeId,
+      attempt,
+      executionId,
+      graphCertificateHash: record.snapshot.certificate.certificateSha256,
+      intentRef: record.intentRef,
+      ...record.requirementRef === undefined ? {} : { requirementRef: record.requirementRef },
+      taskRef,
+      capabilityPlanRef,
+      capabilityGeneration: node.capabilityGeneration,
+      contextPacketRef,
+      operatorPlan: {
+        operatorId,
+        mode: 'resident' as const,
+        ...spec.operator?.profile === undefined ? {} : { profile: spec.operator.profile },
+        injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
+      },
+      effectiveReadScopes: capabilityPlan.effectiveReadScopes,
+      effectiveWriteScopes: capabilityPlan.effectiveWriteScopes,
+      effectiveEffects: capabilityPlan.effectiveEffects,
+      verificationPlan: spec.acceptance,
+      ...record.approvalRef === undefined ? {} : { approvalRef: record.approvalRef },
+    }
+    const executionPlan: NodeExecutionPlanV1 = { ...base, planSha256: canonicalSha256(base) }
+    const planRef = this.store.putArtifact(executionPlan)
+    this.store.recordArtifact('node_execution_plans', { ref: String(planRef), runId, nodeId, attempt, generation: node.capabilityGeneration })
+    record = this.store.getRun(runId)
+    const current = record.snapshot.nodes.find(value => value.id === nodeId)
+    if (current?.state !== 'ready') return
+    const sealed = record.snapshot.nodes.map(value => value.id === nodeId ? {
+      ...value,
+      attempt,
+      operatorId,
+      ...spec.operator?.profile === undefined ? {} : { operatorProfile: spec.operator.profile },
+      capabilityPlanRef,
+      contextPacketRef,
+      executionPlanRef: planRef,
+      updatedAt: now(),
+    } : value)
+    record = withRevision(record, { ...record.snapshot, nodes: sealed })
+    const queuedUpdates = applicableUpdates.filter(value => value.state === 'queued')
+    this.store.markCapabilityUpdates(queuedUpdates.map(value => value.updateId), 'applied')
+    this.store.saveRun(record, [
+      event(record.snapshot.runId, 'execution_plan.sealed', { ref: String(planRef), sha256: executionPlan.planSha256 }, sealed.find(value => value.id === nodeId)),
+      ...queuedUpdates.length > 0 ? [event(record.snapshot.runId, 'capability_update.applied', {
+        updateIds: queuedUpdates.map(value => value.updateId), generation: node.capabilityGeneration, boundary: 'pre-dispatch',
+      }, sealed.find(value => value.id === nodeId))] : [],
+    ])
+    await this.dispatchPlan(record, spec, executionPlan, contextPacket, capabilityPlan)
+  }
+
+  private async dispatchPlan(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    contextPacket: ContextPacketV1,
+    capabilityPlan: CapabilityBindingPlanV1,
+  ): Promise<void> {
+    const controller = new AbortController()
+    const operator = this.physical.get(plan.operatorPlan.operatorId)
+    if (operator === undefined) throw new OrchestrationError(`physical operator is unavailable: ${plan.operatorPlan.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
+    const createdAt = now()
+    const acceptedAttempt: AttemptRecord = {
+      runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
+      generation: plan.capabilityGeneration, executionId: String(plan.executionId), state: 'accepted',
+      executionPlanRef: String(record.snapshot.nodes.find(value => value.id === spec.id)?.executionPlanRef),
+      createdAt, updatedAt: createdAt,
+    }
+    this.store.saveAttempt(acceptedAttempt)
+    const acceptedRecord = this.store.getRun(String(record.snapshot.runId))
+    const acceptedNodes = acceptedRecord.snapshot.nodes.map(value => value.id === spec.id
+      ? { ...value, state: 'running' as const, updatedAt: now() }
+      : value)
+    const acceptedRun = withRevision(acceptedRecord, { ...acceptedRecord.snapshot, nodes: acceptedNodes })
+    this.store.saveRun(acceptedRun, [event(acceptedRun.snapshot.runId, 'node.dispatch.accepted', {
+      executionId: String(plan.executionId),
+    }, acceptedNodes.find(value => value.id === spec.id))])
+    try {
+      const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
+        executionId: plan.executionId,
+        mode: 'resident',
+        label: `${spec.id}: ${spec.title}`,
+        prompt: promptFromPlan(spec, contextPacket, capabilityPlan),
+        parent: fakeParent(record.snapshot.workspace, String(record.snapshot.runId)),
+        signal: controller.signal,
+        ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
+      })
+      const receipt = operator.takeReceipt(String(plan.executionId))
+      const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', turnId: receipt.turnId, updatedAt: now() }
+      this.store.saveAttempt(attempt)
+      const current = this.store.getRun(String(record.snapshot.runId))
+      const next = withRevision(current, current.snapshot)
+      this.store.saveRun(next, [event(next.snapshot.runId, 'node.dispatched', {
+        executionId: String(plan.executionId), turnId: receipt.turnId,
+      }, next.snapshot.nodes.find(value => value.id === spec.id))])
+      const key = `${String(record.snapshot.runId)}\0${spec.id}`
+      const active: ActiveAttempt = {
+        runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
+        generation: plan.capabilityGeneration, executionId: String(plan.executionId),
+        sessionId: receipt.sessionId, turnId: receipt.turnId, run,
+      }
+      this.active.set(key, active)
+      void run.result.then(
+        (result) => { if (!this.closing) this.settleAttempt(active, result) },
+        (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
+      ).finally(() => { this.active.delete(key); void this.tick() })
+    } catch (error) {
+      const attempt: AttemptRecord = {
+        ...acceptedAttempt,
+        state: 'failed',
+        errorCode: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        updatedAt: now(),
+      }
+      this.store.saveAttempt(attempt)
+      this.applyFailure(attempt)
+    }
+  }
+
+  private settleAttempt(active: ActiveAttempt, result: PhysicalOperatorResult): void {
+    const attempt = this.store.attempts().find(value => (
+      value.runId === active.runId
+      && value.nodeId === active.nodeId
+      && value.attempt === active.attempt
+    ))
+    if (attempt === undefined || !['accepted', 'running'].includes(attempt.state)) return
+    const record = this.store.getRun(active.runId)
+    const node = record.snapshot.nodes.find(value => value.id === active.nodeId)
+    if (node === undefined || node.attempt !== active.attempt || node.capabilityGeneration !== active.generation) {
+      this.store.saveAttempt({ ...attempt, state: 'failed', errorCode: 'GENERATION_FENCED', errorMessage: 'late result belongs to an older attempt or capability generation', updatedAt: now() })
+      return
+    }
+    const evidenceRef = this.store.putArtifact({
+      executionId: active.executionId,
+      stopReason: result.stopReason,
+      output: result.output,
+      ...result.continuity === undefined ? {} : { continuity: result.continuity },
+    })
+    const spec = record.graph.nodes.find(value => value.id === active.nodeId)
+    const humanReview = spec?.acceptance.some(value => value.kind === 'human-review') ?? false
+    const passed = result.stopReason === 'completed'
+    const pendingUpdates = this.store.capabilityUpdates(active.runId, active.nodeId)
+      .filter(value => value.state === 'queued' && value.generation > active.generation)
+    const nextGeneration = pendingUpdates.reduce((maximum, value) => Math.max(maximum, value.generation), active.generation)
+    const continueNextTurn = passed && pendingUpdates.length > 0
+    const state = continueNextTurn
+      ? 'ready' as const
+      : passed ? (humanReview ? 'awaiting_approval' as const : 'passed' as const) : 'failed' as const
+    const nodes = record.snapshot.nodes.map(value => value.id === active.nodeId ? {
+      ...value,
+      state,
+      capabilityGeneration: continueNextTurn ? nextGeneration : value.capabilityGeneration,
+      evidenceRefs: [...value.evidenceRefs, evidenceRef],
+      blockers: passed ? [] : [{ code: 'OPERATOR_STOPPED', message: `operator stopped with ${result.stopReason}`, nodeId: active.nodeId }],
+      updatedAt: now(),
+    } : value)
+    const next = withRevision(record, {
+      ...record.snapshot,
+      state: humanReview && passed && !continueNextTurn ? 'awaiting_approval' : record.snapshot.state,
+      nodes,
+    })
+    this.store.saveAttempt({ ...attempt, state: 'settled', updatedAt: now() })
+    const settledNode = nodes.find(value => value.id === active.nodeId)
+    this.store.saveRun(next, [
+      event(next.snapshot.runId, passed ? 'node.evidence.accepted' : 'node.failed', { evidenceRef: String(evidenceRef), stopReason: result.stopReason }, settledNode),
+    ])
+  }
+
+  private failAttempt(active: ActiveAttempt, error: unknown): void {
+    const attempt = this.store.attempts().find(value => (
+      value.runId === active.runId
+      && value.nodeId === active.nodeId
+      && value.attempt === active.attempt
+    ))
+    if (attempt === undefined) return
+    const code = error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE'
+    const indeterminate = code === 'COMMAND_INDETERMINATE'
+    const next = {
+      ...attempt,
+      state: indeterminate ? 'indeterminate' as const : 'failed' as const,
+      errorCode: code,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      updatedAt: now(),
+    }
+    this.store.saveAttempt(next)
+    if (indeterminate) this.applyIndeterminate(next)
+    else this.applyFailure(next)
+  }
+
+  private applyFailure(attempt: AttemptRecord): void {
+    const record = this.store.getRun(attempt.runId)
+    const node = record.snapshot.nodes.find(value => value.id === attempt.nodeId)
+    const spec = record.graph.nodes.find(value => value.id === attempt.nodeId)
+    if (node === undefined || spec === undefined || node.attempt !== attempt.attempt) return
+    const retry = attempt.attempt < spec.retryPolicy.maxAttempts && spec.retryPolicy.retryableCodes.includes(attempt.errorCode ?? '')
+    const retryAfter = retry ? new Date(Date.now() + spec.retryPolicy.backoffMs).toISOString() : undefined
+    const nodes = record.snapshot.nodes.map(value => value.id === attempt.nodeId ? {
+      ...value,
+      state: retry ? 'retry_wait' as const : 'failed' as const,
+      blockers: retry
+        ? []
+        : [{
+          code: attempt.errorCode ?? 'ORCHESTRATION_UNAVAILABLE',
+          message: attempt.errorMessage ?? 'physical operator failed',
+          nodeId: attempt.nodeId,
+        }],
+      updatedAt: now(),
+    } : value)
+    const retryState = retryAfter === undefined
+      ? record.retryAfter
+      : { ...record.retryAfter, [attempt.nodeId]: retryAfter }
+    const next = withRevision({ ...record, retryAfter: retryState }, { ...record.snapshot, nodes })
+    this.store.saveRun(next, [event(
+      next.snapshot.runId,
+      retry ? 'node.retry_scheduled' : 'node.failed',
+      { code: attempt.errorCode, retryAfter },
+      nodes.find(value => value.id === attempt.nodeId),
+    )])
+  }
+
+  private applyIndeterminate(attempt: AttemptRecord): void {
+    const record = this.store.getRun(attempt.runId)
+    const node = record.snapshot.nodes.find(value => value.id === attempt.nodeId)
+    if (node === undefined || node.attempt !== attempt.attempt) return
+    const nodes = record.snapshot.nodes.map(value => value.id === attempt.nodeId ? {
+      ...value,
+      state: 'indeterminate' as const,
+      blockers: [{ code: 'NODE_INDETERMINATE', message: attempt.errorMessage ?? 'physical outcome cannot be proven', nodeId: attempt.nodeId }],
+      updatedAt: now(),
+    } : value)
+    const next = withRevision(record, { ...record.snapshot, state: 'indeterminate', nodes })
+    this.store.saveRun(next, [event(next.snapshot.runId, 'node.indeterminate', { executionId: attempt.executionId }, nodes.find(value => value.id === attempt.nodeId))])
+  }
+
+  private blockNode(runId: string, nodeId: string, blockers: readonly OrchestrationBlocker[]): void {
+    const record = this.store.getRun(runId)
+    const nodes = record.snapshot.nodes.map(value => value.id === nodeId ? { ...value, state: 'blocked' as const, blockers, updatedAt: now() } : value)
+    const next = withRevision(record, { ...record.snapshot, nodes })
+    this.store.saveRun(next, [event(next.snapshot.runId, 'node.blocked', { blockers }, nodes.find(value => value.id === nodeId))])
+  }
+
+  private finishRun(record: RuntimeRunRecord, state: 'completed' | 'failed' | 'indeterminate'): void {
+    const current = this.store.getRun(String(record.snapshot.runId))
+    if (current.snapshot.state !== 'running') return
+    const next = withRevision(current, { ...current.snapshot, state })
+    this.store.saveRun(next, [event(next.snapshot.runId, `run.${state}`, {})])
+  }
+
+  private async selectOperator(spec: OrchestrationNodeSpecV1): Promise<string> {
+    const providers = await this.resident.providers()
+    const available = new Set(providers.filter(value => value.available && value.authentication === 'native-subscription').map(value => value.operatorId))
+    const preferred = spec.operator?.preferredIds ?? []
+    for (const id of preferred) if (available.has(id)) return id
+    if (preferred.length > 0) {
+      throw new OrchestrationError(
+        `none of the explicitly preferred Resident physical operators are available: ${preferred.join(', ')}`,
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
+    const role = `${spec.role} ${spec.task}`.toLowerCase()
+    const inferred = /architect|review|analysis|research|long.context/u.test(role) ? 'claude-code' : 'codex'
+    if (available.has(inferred)) return inferred
+    const fallback = providers.find(value => available.has(value.operatorId))?.operatorId
+    if (fallback === undefined) throw new OrchestrationError('no qualified Resident physical operator is available', 'ORCHESTRATION_UNAVAILABLE')
+    return fallback
+  }
+
+  private async reconcile(): Promise<void> {
+    for (const attempt of this.store.attempts(['accepted', 'running'])) {
+      if (this.active.has(`${attempt.runId}\0${attempt.nodeId}`)) continue
+      if (attempt.turnId === undefined) {
+        this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: 'daemon restarted before a Resident turn identity was recorded', updatedAt: now() })
+        continue
+      }
+      try {
+        const inspection = await this.resident.inspectTurn(attempt.turnId)
+        if (inspection.state === 'settled' && inspection.result !== undefined) {
+          this.settleAttempt({
+            runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
+            generation: attempt.generation, executionId: attempt.executionId,
+            sessionId: String(inspection.sessionId), turnId: attempt.turnId,
+            run: { result: Promise.resolve(inspection.result), dispose: async () => {} },
+          }, inspection.result)
+        } else if (inspection.state === 'indeterminate') {
+          this.applyIndeterminate({
+            ...attempt,
+            state: 'indeterminate',
+            ...inspection.error?.code === undefined ? {} : { errorCode: inspection.error.code },
+            ...inspection.error?.message === undefined ? {} : { errorMessage: inspection.error.message },
+            updatedAt: now(),
+          })
+        }
+      } catch (error) {
+        this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: error instanceof Error ? error.message : String(error), updatedAt: now() })
+      }
+    }
+  }
+
+  // Daemon lock and resident-run teardown plumbing is shared across the two durable services.
+  /* jscpd:ignore-start */
+  private async interruptActive(runId: string): Promise<void> {
+    const active = [...this.active.values()].filter(value => value.runId === runId)
+    await Promise.allSettled(active.map(async (value) => {
+      await this.resident.interrupt(value.sessionId, value.turnId)
+      await value.run.dispose()
+    }))
+  }
+
+  private acquireLock(): void {
+    const lockPath = join(this.options.root, 'daemon.lock')
+    try { this.lockDescriptor = openSync(lockPath, 'wx', 0o600) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const pidPath = join(this.options.root, 'daemon.pid')
+      const pid = existsSync(pidPath) ? Number(readFileSync(pidPath, 'utf8').trim()) : Number.NaN
+      if (Number.isSafeInteger(pid) && pid > 0) {
+        try {
+          process.kill(pid, 0)
+          throw new OrchestrationError(`orchestration daemon already runs as pid ${String(pid)}`, 'ORCHESTRATION_UNAVAILABLE')
+        } catch (probe) {
+          if (probe instanceof OrchestrationError) throw probe
+          if ((probe as NodeJS.ErrnoException).code !== 'ESRCH') throw probe
+        }
+      }
+      this.safeUnlink(lockPath)
+      this.lockDescriptor = openSync(lockPath, 'wx', 0o600)
+    }
+  }
+
+  private releaseLock(): void {
+    if (this.lockDescriptor !== undefined) closeSync(this.lockDescriptor)
+    this.lockDescriptor = undefined
+    this.safeUnlink(join(this.options.root, 'daemon.lock'))
+  }
+
+  private removeStaleSocket(): void {
+    if (!existsSync(this.socketPath)) return
+    if (!lstatSync(this.socketPath).isSocket()) throw new OrchestrationError(`orchestration control path is not a socket: ${this.socketPath}`, 'ORCHESTRATION_UNAVAILABLE')
+    unlinkSync(this.socketPath)
+  }
+
+  private safeUnlink(path: string): void {
+    try { unlinkSync(path) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  /* jscpd:ignore-end */
+}

@@ -1328,6 +1328,24 @@ export interface Config {
 
 来源：[`packages/feedback/message-feedback/src/index.ts:49`](../packages/feedback/message-feedback/src/index.ts)
 
+<a id="deepseek-aidsh-orchestration-local"></a>
+
+## `@deepseek-ai/dsh-orchestration-local`
+
+```ts config-catalog
+/** Local daemon client configuration. */
+export interface Config {
+  /** Optional DSH home; defaults to the ordinary harness-owned location. */
+  readonly dshHome?: string
+  /** Start an independent daemon when no compatible socket is available. */
+  readonly autoStart?: boolean
+  /** Maximum handshake and per-request connection wait in milliseconds. */
+  readonly connectTimeoutMs?: number
+}
+```
+
+来源：[`packages/orchestration/orchestration-local/src/index.ts:32`](../packages/orchestration/orchestration-local/src/index.ts)
+
 <a id="deepseek-aidsh-permission-presets"></a>
 
 ## `@deepseek-ai/dsh-permission-presets`
@@ -1423,7 +1441,7 @@ export interface OperatorConfig {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:40`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:43`](../packages/physical-operator/physical-operator-resident/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 
@@ -3194,6 +3212,7 @@ export interface Config {
 - `@deepseek-ai/dsh-host-plugin-inventory` — 需要 `loader`（[`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts)）
 - `@deepseek-ai/dsh-llm`（[`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts)）
 - `@deepseek-ai/dsh-lsp`（[`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts)）
+- `@deepseek-ai/dsh-orchestrations`（[`packages/bundle/orchestrations/src/index.ts`](../packages/bundle/orchestrations/src/index.ts)）
 - `@deepseek-ai/dsh-physical-operator`（[`packages/physical-operator/physical-operator/src/index.ts`](../packages/physical-operator/physical-operator/src/index.ts)）
 - `@deepseek-ai/dsh-resident-operators`（[`packages/bundle/resident-operators/src/index.ts`](../packages/bundle/resident-operators/src/index.ts)）
 - `@deepseek-ai/dsh-schedule` — 需要 `agents` · `sessions` · `tools` · `sessionPersistence`（[`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts)）
@@ -3210,8 +3229,10 @@ export interface Config {
 - `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userInteraction`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
 - `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect`（[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
+- `@deepseek-ai/dsh-tool-orchestration` — 需要 `orchestrations` · `tools` · `systemPrompt`（[`packages/orchestration/tool-orchestration/src/index.ts`](../packages/orchestration/tool-orchestration/src/index.ts)）
 - `@deepseek-ai/dsh-tool-physical-operator` — 需要 `tools` · `physicalOperators` · `systemPrompt` · `llm` · `agents`（[`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts)）
 - `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents`（[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）
+- `@deepseek-ai/dsh-ui-orchestration` — 需要 `orchestrations` · `webServer`（[`packages/orchestration/ui-orchestration/src/index.ts`](../packages/orchestration/ui-orchestration/src/index.ts)）
 - `@deepseek-ai/dsh-user-questions`（[`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-workspace` — 需要 `storageDomain` · `sessionPersistence`（[`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts)）
 
@@ -3220,12 +3241,16 @@ export interface Config {
 抽象服务类——部署时应改为加载具体的实现包（参见[能力 seam](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)）。
 
 - `@deepseek-ai/dsh-attachment` — 抽象 `AttachmentStore`（[`packages/attachment/attachment/src/index.ts`](../packages/attachment/attachment/src/index.ts)）
+- `@deepseek-ai/dsh-capability-capsule` — 抽象 `CapabilityCapsuleService`（[`packages/orchestration/capability-capsule/src/index.ts`](../packages/orchestration/capability-capsule/src/index.ts)）
 - `@deepseek-ai/dsh-code-runtime` — 抽象 `CodeRuntime`（[`packages/code-runtime/code-runtime/src/index.ts`](../packages/code-runtime/code-runtime/src/index.ts)）
 - `@deepseek-ai/dsh-compaction` — 抽象 `CompactionEngine`（[`packages/compaction/compaction/src/index.ts`](../packages/compaction/compaction/src/index.ts)）
+- `@deepseek-ai/dsh-context-compiler` — 抽象 `ContextCompilerService`（[`packages/orchestration/context-compiler/src/index.ts`](../packages/orchestration/context-compiler/src/index.ts)）
 - `@deepseek-ai/dsh-credentials` — 抽象 `Credentials`（[`packages/credentials/credentials/src/index.ts`](../packages/credentials/credentials/src/index.ts)）
 - `@deepseek-ai/dsh-fs` — 抽象 `FileSystem`（[`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts)）
 - `@deepseek-ai/dsh-host-directory-picker` — 抽象 `DirectoryPicker`（[`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts)）
+- `@deepseek-ai/dsh-intent-compiler` — 抽象 `IntentCompilerService`（[`packages/orchestration/intent-compiler/src/index.ts`](../packages/orchestration/intent-compiler/src/index.ts)）
 - `@deepseek-ai/dsh-jobs` — 抽象 `JobRegistry`（[`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts)）
+- `@deepseek-ai/dsh-orchestration` — 抽象 `OrchestrationService`（[`packages/orchestration/orchestration/src/index.ts`](../packages/orchestration/orchestration/src/index.ts)）
 - `@deepseek-ai/dsh-resident-operator` — 抽象 `ResidentOperatorService`（[`packages/physical-operator/resident-operator/src/index.ts`](../packages/physical-operator/resident-operator/src/index.ts)）
 - `@deepseek-ai/dsh-sandbox` — 抽象 `SandboxProvider`（[`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts)）
 - `@deepseek-ai/dsh-session-persistence` — 抽象 `SessionPersistence`（[`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts)）

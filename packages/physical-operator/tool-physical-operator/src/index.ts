@@ -883,6 +883,8 @@ function statusValue(status: PhysicalOperatorStatus): OperatorListValue {
   }
 }
 
+// Foreground physical-operator and subagent tools share the same result/disposal ownership rule.
+/* jscpd:ignore-start */
 /** Await one foreground result and dispose independently without hiding either failure. */
 async function settleForeground(run: PhysicalOperatorRun): Promise<PhysicalOperatorResult> {
   const [execution] = await Promise.allSettled([run.result.then((result) => {
@@ -903,6 +905,7 @@ async function settleForeground(run: PhysicalOperatorRun): Promise<PhysicalOpera
   if (disposal.status === 'rejected') throw disposal.reason
   return execution.value
 }
+/* jscpd:ignore-end */
 
 /** Translate non-success terminals into model-visible failures. */
 function stopReasonError(result: PhysicalOperatorResult): string | undefined {

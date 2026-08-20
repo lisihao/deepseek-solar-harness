@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ResidentProviderStatus } from '@deepseek-ai/dsh-resident-operator'
 import { ResidentDaemonClient } from '../src/client.ts'
-import { ResidentDaemon } from '../src/daemon.ts'
+import { normalizeResidentDriverError, ResidentDaemon } from '../src/daemon.ts'
 import {
   EXPECTED_CODEX_CLI_VERSION,
   EXPECTED_CODEX_SCHEMA_SHA256,
@@ -30,6 +30,16 @@ const temporaryRoot = (): string => {
 
 afterEach(() => {
   for (const value of roots.splice(0)) rmSync(value, { recursive: true, force: true })
+})
+
+describe('Resident daemon Driver error boundary', () => {
+  it('preserves actionable Claude subscription expiry across the daemon boundary', () => {
+    const error = new Error('Claude Code returned an error result: Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.')
+    expect(normalizeResidentDriverError(error, false)).toMatchObject({
+      code: 'AUTH_MODE_MISMATCH',
+      message: 'Claude Code subscription authentication expired; run `claude auth login` and retry the node.',
+    })
+  })
 })
 
 class MemoryDriver implements ResidentProductDriver {

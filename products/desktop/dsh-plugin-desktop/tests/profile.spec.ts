@@ -186,11 +186,30 @@ describe('desktop profile composition', () => {
       name: '@deepseek-ai/dsh-client-ui-remote-modules',
       disabled: false,
       config: expect.objectContaining({
-        instances: [
-          expect.objectContaining({ id: 'genesispod', label: 'GenesisPod', relayPort: 3000 }),
-          expect.objectContaining({ id: 'thunder-omlx', label: 'ThunderOMLX', relayPort: 18102 }),
-        ],
+        instances: [],
       }),
+    }))
+  })
+
+  it('preserves user-owned Remote Module targets without supplying public defaults', () => {
+    const home = temporaryHome()
+    const profileDir = ensureDesktopProfile(home)
+    writeFileSync(join(profileDir, 'cordis.patch.yml'), [
+      '- id: ui-remote-modules',
+      '  config:',
+      '    instances:',
+      '      - id: private-workspace',
+      '        label: Private Workspace',
+      '        url: http://127.0.0.1:19001/',
+      '        relayPort: 29001',
+      '        order: 100',
+      '',
+    ].join('\n'))
+
+    const prepared = prepareDesktopProfile(undefined, home, 'darwin')
+    const rows = composeEntries([prepared.patches])
+    expect(rows.find(row => row.id === 'ui-remote-modules')?.config).toEqual(expect.objectContaining({
+      instances: [expect.objectContaining({ id: 'private-workspace', relayPort: 29001 })],
     }))
   })
 

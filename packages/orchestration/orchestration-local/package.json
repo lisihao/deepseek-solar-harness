@@ -1,0 +1,50 @@
+{
+  "name": "@deepseek-ai/dsh-orchestration-local",
+  "description": "Local persistent TaskGraph daemon and baseline compiler Providers",
+  "version": "0.1.0-rc.5",
+  "publishConfig": { "access": "public" },
+  "repository": { "type": "git", "url": "git+https://github.com/deepseek-ai/deepseek-harness.git", "directory": "packages/orchestration/orchestration-local" },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./invariant": { "types": "./lib/types/invariant.d.ts", "default": "./lib/invariant.js" },
+    "./startup": { "types": "./lib/types/startup.d.ts", "default": "./lib/startup.js" },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": ["lib/index.js", "lib/invariant.js", "lib/startup.js", "lib/daemon-*.js", "lib/types/**/*.d.ts"],
+  "license": "MIT",
+  "dependencies": { "@deepseek-ai/schemastery": "workspace:^" },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-agent": "workspace:^",
+    "@deepseek-ai/dsh-capability-capsule": "workspace:^",
+    "@deepseek-ai/dsh-context-compiler": "workspace:^",
+    "@deepseek-ai/dsh-home-paths": "workspace:^",
+    "@deepseek-ai/dsh-intent-compiler": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-orchestration": "workspace:^",
+    "@deepseek-ai/dsh-physical-operator": "workspace:^",
+    "@deepseek-ai/dsh-resident-operator-local": "workspace:^",
+    "@deepseek-ai/dsh-sdk-protocol": "workspace:^",
+    "@deepseek-ai/dsh-session": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-agent": "workspace:^",
+    "@deepseek-ai/dsh-capability-capsule": "workspace:^",
+    "@deepseek-ai/dsh-context-compiler": "workspace:^",
+    "@deepseek-ai/dsh-home-paths": "workspace:^",
+    "@deepseek-ai/dsh-intent-compiler": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-orchestration": "workspace:^",
+    "@deepseek-ai/dsh-physical-operator": "workspace:^",
+    "@deepseek-ai/dsh-resident-operator-local": "workspace:^",
+    "@deepseek-ai/dsh-sdk-protocol": "workspace:^",
+    "@deepseek-ai/dsh-session": "workspace:^"
+  }
+}

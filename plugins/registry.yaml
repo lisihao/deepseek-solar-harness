@@ -50,7 +50,7 @@ managed:
     upstream: https://github.com/csyangwen/dsh-memory-evolve.git
     source_branch: main
     accepted_sha: ce7f0faa0e0240f117c29795e9224c0d9ed18183
-    discovered_sha: 8ede93752149ede3a28bc551b5a19a0233b33b04
+    discovered_sha: a08fff7f5c0228bf7a9dbf21d917579ccc08a5a8
     update_status: pending-qualification
     license: MIT
     license_status: license-file

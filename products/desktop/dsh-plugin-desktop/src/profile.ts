@@ -40,7 +40,6 @@ import { unpackedAsarPath } from './packaged-runtime-path.ts'
 import {
   AGENT_TEAMS_PACKAGE,
   AGENT_TEAMS_ROW_ID,
-  DEFAULT_REMOTE_MODULE_INSTANCES,
   PRODUCT_BUNDLE_PACKAGES,
   PRODUCT_BUNDLE_ROW_IDS,
   SEALED_RUNTIME_PACKAGES,
@@ -410,9 +409,8 @@ export function prepareDesktopProfile(
       memberPersonaPlacement: 'prompt',
     },
   })
-  // GenesisPod/ThunderOMLX are first-party embedded application modules. A
-  // selected profile may provide its own instances, but the Desktop product
-  // always supplies the executable package name and usable local defaults.
+  // Remote Web pages are user-owned profile data. The public Desktop ships the
+  // configuration surface but never embeds one operator's private targets.
   const remoteModules = rows.get(UI_REMOTE_MODULES_ROW_ID)
   const remoteModuleConfig = rowConfig(remoteModules)
   const configuredInstances = remoteModuleConfig.instances
@@ -422,9 +420,7 @@ export function prepareDesktopProfile(
     disabled: false,
     config: {
       ...remoteModuleConfig,
-      instances: Array.isArray(configuredInstances) && configuredInstances.length > 0
-        ? configuredInstances
-        : DEFAULT_REMOTE_MODULE_INSTANCES,
+      instances: Array.isArray(configuredInstances) ? configuredInstances : [],
     },
   })
   if (!rows.has('webserver')) {

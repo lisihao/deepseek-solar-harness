@@ -11,23 +11,6 @@ export const UI_REMOTE_MODULES_PACKAGE = '@deepseek-ai/dsh-client-ui-remote-modu
 export const UI_REMOTE_MODULES_ROW_ID = 'ui-remote-modules'
 export const HOST_APIPROXY_PACKAGE = '@deepseek-ai/dsh-host-apiproxy'
 
-export const DEFAULT_REMOTE_MODULE_INSTANCES = [
-  {
-    id: 'genesispod',
-    label: 'GenesisPod',
-    url: 'http://127.0.0.1:13000/',
-    relayPort: 3000,
-    order: 100,
-  },
-  {
-    id: 'thunder-omlx',
-    label: 'ThunderOMLX',
-    url: 'http://127.0.0.1:18002/admin/',
-    relayPort: 18102,
-    order: 200,
-  },
-] as const
-
 export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
   [ORCHESTRATION_BUNDLE_PACKAGE, 'orchestration-local'],

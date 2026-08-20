@@ -1,8 +1,7 @@
-import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply } from '../src/client/index.ts'
-import { installSolarBrand, solarBrandLabel } from '../src/client/SolarBrand.tsx'
+import { mountSolarBrandFooter, solarBrandLabel } from '../src/client/SolarBrand.tsx'
 import {
   physicalOperatorDashboardRefreshMs,
   physicalOperatorEffortLabel,
@@ -16,13 +15,11 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   IconChevronDownOutline14: () => null,
 }))
 
-const SOLAR_BRAND = 'DSH - DeepSeek Harness的Solar分支，目标是您的All-in-One AI工作台'
-
 describe('Solar desktop branding', () => {
-  it('renders product surfaces and executes the logged operator routing command', async () => {
+  it('keeps product branding out of the sidebar and executes the logged operator routing command', async () => {
     const registrations: Array<{
       options: { id?: string; inject?: (sessionId: string) => unknown }
-      component: (props: { wide: boolean }) => ReactNode
+      component: (props: { wide: boolean }) => unknown
     }> = []
     const slots = {
       inject: vi.fn((_name: string, install: () => unknown) => install()),
@@ -54,7 +51,7 @@ describe('Solar desktop branding', () => {
     expect(resident).toBeDefined()
     expect(orchestration).toBeDefined()
     expect(routing).toBeDefined()
-    expect(effect).toHaveBeenCalledWith(expect.any(Function), 'desktop: Solar brand bar')
+    expect(effect).toHaveBeenCalledWith(expect.any(Function), 'desktop: Solar product footer')
 
     const injected = routing?.options.inject?.('session-1') as {
       select: (policy: 'codex') => Promise<string | null>
@@ -75,8 +72,8 @@ describe('Solar desktop branding', () => {
     expect(physicalOperatorDashboardRefreshMs(true)).toBe(10_000)
   })
 
-  it('mounts one complete versioned line below the window content and retracts it', () => {
-    const marker = {
+  it('mounts one complete version label in a window-bottom footer', () => {
+    const footer = {
       className: '',
       dataset: {} as Record<string, string>,
       setAttribute: vi.fn(),
@@ -89,24 +86,24 @@ describe('Solar desktop branding', () => {
       appendChild: vi.fn(),
     }
     vi.stubGlobal('document', {
-      createElement: vi.fn(() => marker),
+      createElement: vi.fn(() => footer),
       body,
     })
 
     try {
-      const dispose = installSolarBrand('2.5.3')
-      const label = `DSH Desktop v2.5.3 · ${SOLAR_BRAND}`
-      expect(solarBrandLabel('2.5.3')).toBe(label)
-      expect(marker.className).toBe('dshDesktopSolarBrand')
-      expect(marker.textContent).toBe(label)
-      expect(marker.title).toBe(label)
-      expect(marker.setAttribute).toHaveBeenCalledWith('aria-label', label)
-      expect(body.dataset.dshDesktopBrandBar).toBe('')
-      expect(body.appendChild).toHaveBeenCalledWith(marker)
+      const dispose = mountSolarBrandFooter('2.6.0')
+      const label = solarBrandLabel('2.6.0')
+      expect(body.appendChild).toHaveBeenCalledWith(footer)
+      expect(body.dataset.dshDesktopProductFooter).toBe('true')
+      expect(footer.className).toBe('dshDesktopSolarFooter')
+      expect(footer.dataset.testid).toBe('solar-desktop-brand')
+      expect(footer.textContent).toBe(label)
+      expect(footer.title).toBe(label)
+      expect(footer.setAttribute).toHaveBeenCalledWith('aria-label', label)
 
       dispose()
-      expect(marker.remove).toHaveBeenCalledOnce()
-      expect(body.dataset.dshDesktopBrandBar).toBeUndefined()
+      expect(footer.remove).toHaveBeenCalledOnce()
+      expect(body.dataset.dshDesktopProductFooter).toBeUndefined()
     }
     finally {
       vi.unstubAllGlobals()

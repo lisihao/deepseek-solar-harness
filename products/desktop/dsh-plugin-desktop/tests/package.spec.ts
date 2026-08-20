@@ -103,6 +103,21 @@ describe('published package surface', () => {
     expect(manifest.optionalDependencies ?? {}).not.toHaveProperty('dshmarket')
   })
 
+  it('aligns the terminal backend with the persistent Bash tool prompt', () => {
+    const prompt = '__DSH_PERSISTENT_BASH_PROMPT__ '
+    const terminalBash = readFileSync(
+      new URL('node_modules/@deepseek-ai/dsh-terminal-bash/lib/index.js', packageRoot),
+      'utf8',
+    )
+    const persistentTool = readFileSync(
+      new URL('node_modules/@deepseek-ai/dsh-tool-bash-persistent/lib/index.js', packageRoot),
+      'utf8',
+    )
+
+    expect(terminalBash).toContain(`const CONTROLLED_PROMPT = ${JSON.stringify(prompt)};`)
+    expect(persistentTool).toContain(`const SHELL_PROMPT = ${JSON.stringify(prompt)};`)
+  })
+
   it('builds public Host plugins and their private native bootstraps', () => {
     const config = readFileSync(new URL('tsdown.config.ts', packageRoot), 'utf8')
 

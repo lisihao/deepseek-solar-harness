@@ -52,13 +52,13 @@ try {
     },
     ...prepared.patches,
     // Smoke generations may run beside the installed App. Use ephemeral relay
-    // ports so verification never collides with the product's stable 3000/18102.
+    // ports so verification never collides with user-owned stable relays.
     {
       id: 'ui-remote-modules',
       config: {
         instances: [
-          { id: 'genesispod', label: 'GenesisPod', url: 'http://127.0.0.1:13000/', relayPort: 0, order: 100 },
-          { id: 'thunder-omlx', label: 'ThunderOMLX', url: 'http://127.0.0.1:18002/admin/', relayPort: 0, order: 200 },
+          { id: 'research-workspace', label: 'Research Workspace', url: 'http://127.0.0.1:19001/', relayPort: 0, order: 100 },
+          { id: 'model-console', label: 'Model Console', url: 'http://127.0.0.1:19002/console/', relayPort: 0, order: 200 },
         ],
       },
     },

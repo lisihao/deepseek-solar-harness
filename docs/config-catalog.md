@@ -1326,6 +1326,24 @@ export interface Config {
 
 Source: [`packages/feedback/message-feedback/src/index.ts:49`](../packages/feedback/message-feedback/src/index.ts)
 
+<a id="deepseek-aidsh-orchestration-local"></a>
+
+## `@deepseek-ai/dsh-orchestration-local`
+
+```ts config-catalog
+/** Local daemon client configuration. */
+export interface Config {
+  /** Optional DSH home; defaults to the ordinary harness-owned location. */
+  readonly dshHome?: string
+  /** Start an independent daemon when no compatible socket is available. */
+  readonly autoStart?: boolean
+  /** Maximum handshake and per-request connection wait in milliseconds. */
+  readonly connectTimeoutMs?: number
+}
+```
+
+Source: [`packages/orchestration/orchestration-local/src/index.ts:32`](../packages/orchestration/orchestration-local/src/index.ts)
+
 <a id="deepseek-aidsh-permission-presets"></a>
 
 ## `@deepseek-ai/dsh-permission-presets`
@@ -1421,7 +1439,7 @@ export interface OperatorConfig {
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-resident/src/index.ts:41`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+Source: [`packages/physical-operator/physical-operator-resident/src/index.ts:43`](../packages/physical-operator/physical-operator-resident/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 
@@ -3192,6 +3210,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-host-plugin-inventory` — requires `loader` ([`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts))
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-lsp` ([`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts))
+- `@deepseek-ai/dsh-orchestrations` ([`packages/bundle/orchestrations/src/index.ts`](../packages/bundle/orchestrations/src/index.ts))
 - `@deepseek-ai/dsh-physical-operator` ([`packages/physical-operator/physical-operator/src/index.ts`](../packages/physical-operator/physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-resident-operators` ([`packages/bundle/resident-operators/src/index.ts`](../packages/bundle/resident-operators/src/index.ts))
 - `@deepseek-ai/dsh-schedule` — requires `agents` · `sessions` · `tools` · `sessionPersistence` ([`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts))
@@ -3208,8 +3227,10 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
+- `@deepseek-ai/dsh-tool-orchestration` — requires `orchestrations` · `tools` · `systemPrompt` ([`packages/orchestration/tool-orchestration/src/index.ts`](../packages/orchestration/tool-orchestration/src/index.ts))
 - `@deepseek-ai/dsh-tool-physical-operator` — requires `tools` · `physicalOperators` · `systemPrompt` · `llm` · `agents` ([`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
+- `@deepseek-ai/dsh-ui-orchestration` — requires `orchestrations` · `webServer` ([`packages/orchestration/ui-orchestration/src/index.ts`](../packages/orchestration/ui-orchestration/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-workspace` — requires `storageDomain` · `sessionPersistence` ([`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts))
 
@@ -3218,12 +3239,16 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 Abstract service classes — a deployment loads a concrete implementation package instead ([capability seams](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)).
 
 - `@deepseek-ai/dsh-attachment` — abstract `AttachmentStore` ([`packages/attachment/attachment/src/index.ts`](../packages/attachment/attachment/src/index.ts))
+- `@deepseek-ai/dsh-capability-capsule` — abstract `CapabilityCapsuleService` ([`packages/orchestration/capability-capsule/src/index.ts`](../packages/orchestration/capability-capsule/src/index.ts))
 - `@deepseek-ai/dsh-code-runtime` — abstract `CodeRuntime` ([`packages/code-runtime/code-runtime/src/index.ts`](../packages/code-runtime/code-runtime/src/index.ts))
 - `@deepseek-ai/dsh-compaction` — abstract `CompactionEngine` ([`packages/compaction/compaction/src/index.ts`](../packages/compaction/compaction/src/index.ts))
+- `@deepseek-ai/dsh-context-compiler` — abstract `ContextCompilerService` ([`packages/orchestration/context-compiler/src/index.ts`](../packages/orchestration/context-compiler/src/index.ts))
 - `@deepseek-ai/dsh-credentials` — abstract `CredentialProvider` ([`packages/credentials/credentials/src/index.ts`](../packages/credentials/credentials/src/index.ts))
 - `@deepseek-ai/dsh-fs` — abstract `FileSystem` ([`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker` — abstract `DirectoryPicker` ([`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts))
+- `@deepseek-ai/dsh-intent-compiler` — abstract `IntentCompilerService` ([`packages/orchestration/intent-compiler/src/index.ts`](../packages/orchestration/intent-compiler/src/index.ts))
 - `@deepseek-ai/dsh-jobs` — abstract `JobRegistry` ([`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts))
+- `@deepseek-ai/dsh-orchestration` — abstract `OrchestrationService` ([`packages/orchestration/orchestration/src/index.ts`](../packages/orchestration/orchestration/src/index.ts))
 - `@deepseek-ai/dsh-resident-operator` — abstract `ResidentOperatorService` ([`packages/physical-operator/resident-operator/src/index.ts`](../packages/physical-operator/resident-operator/src/index.ts))
 - `@deepseek-ai/dsh-sandbox` — abstract `SandboxProvider` ([`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts))
 - `@deepseek-ai/dsh-session-persistence` — abstract `SessionPersistence` ([`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts))

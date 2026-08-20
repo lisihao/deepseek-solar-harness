@@ -7,7 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import { applyAdvancedShell } from './advanced-shell.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
-import { installSolarBrand } from './SolarBrand.tsx'
+import { mountSolarBrandFooter } from './SolarBrand.tsx'
 import { ResidentOperatorsPanel } from './ResidentOperatorsPanel.tsx'
 import { OrchestrationsPanel } from './OrchestrationsPanel.tsx'
 import {
@@ -32,8 +32,14 @@ export const inject = [
 /** Register desktop-owned client surfaces for the current BrowserWindow mode. @param ctx - browser Cordis context. */
 export function apply(ctx: ClientContext): void {
   const environment = parseDesktopClientEnvironment(window.location.search)
-  ctx.effect(() => installSolarBrandStyles(), 'desktop: Solar brand styles')
-  ctx.effect(() => installSolarBrand(environment.productVersion), 'desktop: Solar brand bar')
+  ctx.effect(() => {
+    const removeStyles = installSolarBrandStyles()
+    const removeFooter = mountSolarBrandFooter(environment.productVersion)
+    return () => {
+      removeFooter()
+      removeStyles()
+    }
+  }, 'desktop: Solar product footer')
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'resident-physical-operators',

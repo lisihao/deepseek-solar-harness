@@ -17,15 +17,15 @@ Enable and configure the `ui-remote-modules` row in a profile patch. [`examples/
   disabled: false
   config:
     instances:
-      - id: genesispod
-        label: GenesisPod
-        url: http://127.0.0.1:13000/
-        relayPort: 3000
+      - id: research-workspace
+        label: Research Workspace
+        url: http://127.0.0.1:19001/
+        relayPort: 29001
         order: 100
-      - id: thunder-omlx
-        label: ThunderOMLX
-        url: http://127.0.0.1:18002/admin/
-        relayPort: 18102
+      - id: model-console
+        label: Model Console
+        url: http://127.0.0.1:19002/console/
+        relayPort: 29002
         order: 200
 ```
 
@@ -33,7 +33,7 @@ After the plugin starts, open **Settings → Plugins → Remote Modules** to add
 
 | Config | Meaning |
 |---|---|
-| `instances` | Non-empty array. Each item is one independently started Web page instance. |
+| `instances` | Array of independently started Web page instances. An empty array keeps the feature available without shipping private deployment targets. |
 | `instances[].id` | Unique kebab-case instance key. |
 | `instances[].label` | Sidebar button and dialog label. |
 | `instances[].url` | Full HTTP(S) target page. Paths, queries, and fragments are supported; embedded credentials and active URL schemes are rejected. |
@@ -44,7 +44,7 @@ After the plugin starts, open **Settings → Plugins → Remote Modules** to add
 
 Each instance starts a local-only, fixed-target relay. All paths stay on the single configured origin, so it is not an open proxy. The relay preserves the target HTML, JavaScript, CSS, cookies, redirects, methods, streaming bodies, and WebSocket upgrades. It removes `X-Frame-Options` and only the `frame-ancestors` CSP directive because those headers otherwise prevent an operator-authorized application from appearing in Harness. Other CSP directives remain intact. The Host publishes only the instance roster at `/remote-webpages/v1/instances`; React then loads each relay URL directly in an iframe.
 
-For Mac mini loopback services, SSH remains deployment-owned. The example expects `13000 → Mac mini:3000` for the GenesisPod frontend and `18002 → Mac mini:8002` for ThunderOMLX. GenesisPod's relay deliberately uses `localhost:3000`, while its fixed browser API origins require `localhost:3001 → Mac mini:3001` and `localhost:4000 → Mac mini:4000`. Keep every SSH listener and relay port on MacBook loopback.
+For remote services forwarded to loopback, SSH remains deployment-owned. Point each `url` at the corresponding local forward and keep both SSH listener ports and relay ports on MacBook loopback. Private hostnames, addresses, and credentials belong only in the user's profile settings and are never product defaults.
 
 Stable relay ports preserve the browser origin across Harness restarts, which lets service-owned cookies and local storage survive. Authentication still belongs to the target application; this plugin neither collects nor stores target credentials.
 

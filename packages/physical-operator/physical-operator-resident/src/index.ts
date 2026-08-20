@@ -19,6 +19,8 @@ export const inject = ['physicalOperators', 'residentOperators', 'subagents']
 
 const SUBSCRIPTION_PRODUCTS = new Set(['codex', 'claude-code'])
 
+// Resident and ephemeral providers intentionally share the public operator-mapping contract.
+/* jscpd:ignore-start */
 /** One stable dual-mode physical-operator deployment mapping. */
 export interface OperatorConfig {
   /** Stable model-selected physical operator identity. */
@@ -54,6 +56,7 @@ export const Config: z<Config> = z.object({
     maxConcurrency: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(1),
   })).min(1),
 })
+/* jscpd:ignore-end */
 
 function subagentReason(name: string, provider: SubagentProvider | undefined): string | undefined {
   if (provider === undefined) return `subagent provider "${name}" is not registered`
@@ -66,6 +69,8 @@ function subagentReason(name: string, provider: SubagentProvider | undefined): s
 class DualModePhysicalOperator implements PhysicalOperator {
   readonly descriptor: PhysicalOperatorDescriptor
 
+  // Both provider forms project the same immutable discovery descriptor.
+  /* jscpd:ignore-start */
   constructor(
     private readonly ctx: Context,
     private readonly config: OperatorConfig,
@@ -81,6 +86,7 @@ class DualModePhysicalOperator implements PhysicalOperator {
         : ['ephemeral', 'resident'],
     }
   }
+  /* jscpd:ignore-end */
 
   availability(mode?: PhysicalOperatorExecutionMode) {
     const reason = subagentReason(

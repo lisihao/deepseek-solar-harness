@@ -77,13 +77,13 @@ describe('fixed-target Web page relay', () => {
 
   it('validates every user-settings field before accepting a remote-module configuration', () => {
     const valid = {
-      id: 'genesispod', label: '  GenesisPod  ', url: 'https://example.test/app', relayPort: 0, order: 20,
+      id: 'research-workspace', label: '  Research Workspace  ', url: 'https://example.test/app', relayPort: 0, order: 20,
     }
     expect(parseRemoteModulesConfig({ instances: [valid] })).toEqual({
-      instances: [{ ...valid, label: 'GenesisPod' }],
+      instances: [{ ...valid, label: 'Research Workspace' }],
     })
     expect(parseRemoteModulesConfig({ instances: [valid, {
-      id: 'thunder-omlx', label: 'ThunderOMLX', url: 'http://127.0.0.1:8002/docs', relayPort: 0, order: 30,
+      id: 'model-console', label: 'Model Console', url: 'http://127.0.0.1:19002/console', relayPort: 0, order: 30,
     }] })?.instances).toHaveLength(2)
 
     const invalid: unknown[] = [
@@ -108,7 +108,7 @@ describe('fixed-target Web page relay', () => {
       { instances: [{ ...valid, relayPort: 65536 }] },
       { instances: [
         { ...valid, relayPort: 39191 },
-        { ...valid, id: 'thunder-omlx', relayPort: 39191 },
+        { ...valid, id: 'model-console', relayPort: 39191 },
       ] },
       { instances: [{ ...valid, order: '20' }] },
       { instances: [{ ...valid, order: 20.5 }] },
@@ -118,17 +118,17 @@ describe('fixed-target Web page relay', () => {
 
   it('rejects malformed Host rosters and returns deterministic browser ordering', () => {
     const valid = {
-      id: 'genesispod', label: '  GenesisPod  ', targetUrl: 'https://example.test/app',
+      id: 'research-workspace', label: '  Research Workspace  ', targetUrl: 'https://example.test/app',
       embedUrl: 'http://localhost:39191/app', order: 20,
     }
     expect(parseWebpageInstances({ instances: [
-      { ...valid, id: 'thunder-omlx', label: 'ThunderOMLX', order: 30 },
+      { ...valid, id: 'model-console', label: 'Model Console', order: 30 },
       valid,
       { ...valid, id: 'alpha', label: 'Alpha', order: 20 },
     ] })).toEqual([
       { ...valid, id: 'alpha', label: 'Alpha' },
-      { ...valid, label: 'GenesisPod' },
-      { ...valid, id: 'thunder-omlx', label: 'ThunderOMLX', order: 30 },
+      { ...valid, label: 'Research Workspace' },
+      { ...valid, id: 'model-console', label: 'Model Console', order: 30 },
     ])
 
     const invalidEntries: unknown[] = [
@@ -159,10 +159,10 @@ describe('fixed-target Web page relay', () => {
         'content-security-policy': "default-src 'self'; frame-ancestors 'self'; img-src 'self' data:",
         'set-cookie': 'session=real-page; Domain=example.test; Path=/; HttpOnly',
       })
-      res.end('<main>Actual GenesisPod application</main>')
+      res.end('<main>Actual research workspace</main>')
     })
     const app = await harness({ instances: [{
-      id: 'genesispod', label: 'GenesisPod', url: `${origin}/app?fixture=1#workspace`, relayPort: 0, order: 20,
+      id: 'research-workspace', label: 'Research Workspace', url: `${origin}/app?fixture=1#workspace`, relayPort: 0, order: 20,
     }] })
     const rosterResponse = await fetch(`${app.base}/remote-webpages/v1/instances`)
     expect(rosterResponse.headers.get('cache-control')).toBe('no-store')
@@ -170,23 +170,23 @@ describe('fixed-target Web page relay', () => {
     expect(roster.instances[0]!.targetUrl).toBe(`${origin}/app?fixture=1#workspace`)
     expect(roster.instances[0]!.embedUrl).toMatch(/^http:\/\/localhost:\d+\/app\?fixture=1#workspace$/)
     const page = await fetch(roster.instances[0]!.embedUrl)
-    expect(await page.text()).toContain('Actual GenesisPod application')
+    expect(await page.text()).toContain('Actual research workspace')
     expect(page.headers.get('x-frame-options')).toBeNull()
     expect(page.headers.get('content-security-policy')).toBe("default-src 'self'; img-src 'self' data:")
     expect(page.headers.get('set-cookie')).toBe('session=real-page; Path=/; HttpOnly')
-    expect(page.headers.get('x-dsh-webpage-instance')).toBe('genesispod')
+    expect(page.headers.get('x-dsh-webpage-instance')).toBe('research-workspace')
   })
 
   it('publishes multiple independently ordered instances and disposes routes plus relays', async () => {
-    const genesis = await target((_req, res) => { res.end('GenesisPod page') })
-    const thunder = await target((_req, res) => { res.end('ThunderOMLX page') })
+    const workspace = await target((_req, res) => { res.end('Research Workspace page') })
+    const console = await target((_req, res) => { res.end('Model Console page') })
     const app = await harness({ instances: [
-      { id: 'thunder-omlx', label: 'ThunderOMLX', url: `${thunder}/docs`, relayPort: 0, order: 200 },
-      { id: 'genesispod', label: 'GenesisPod', url: genesis, relayPort: 0, order: 100 },
+      { id: 'model-console', label: 'Model Console', url: `${console}/docs`, relayPort: 0, order: 200 },
+      { id: 'research-workspace', label: 'Research Workspace', url: workspace, relayPort: 0, order: 100 },
     ] })
     const response = await fetch(`${app.base}/remote-webpages/v1/instances`)
     const roster = await response.json() as { instances: Array<{ id: string; embedUrl: string }> }
-    expect(roster.instances.map(item => item.id)).toEqual(['genesispod', 'thunder-omlx'])
+    expect(roster.instances.map(item => item.id)).toEqual(['research-workspace', 'model-console'])
     expect((await fetch(roster.instances[0]!.embedUrl)).status).toBe(200)
     expect((await fetch(`${app.base}/remote-webpages/v1/instances`, { method: 'POST' })).status).toBe(405)
     const head = await fetch(`${app.base}/remote-webpages/v1/instances`, { method: 'HEAD' })

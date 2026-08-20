@@ -40,6 +40,6 @@ The source repositories used for import remain independent checkouts. The migrat
 
 ## Consequences
 
-A fresh clone can inspect the complete Solar-owned source set, trace each imported component to an accepted revision, and route changes through one protected integration branch. Component package-manager boundaries remain explicit, so later source integration must still qualify any change from published or sealed Desktop inputs to same-repository builds.
+A fresh clone can inspect the complete Solar-owned source set, trace each imported component to an accepted revision, and route changes through one protected integration branch. Component package-manager boundaries remain explicit; the later [Desktop packaged-source closure](2026-08-20-desktop-source-closure.md) maps every sealed application package to tracked same-repository source without changing those boundaries.
 
 Required human review prevents this migration branch from self-merging into `solar`. Upstream discovery and qualification automation, Desktop source-input integration, packaged product acceptance, and release automation remain separate development phases governed by the root README roadmap and the upstream qualification ADR.

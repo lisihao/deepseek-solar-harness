@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-13-mac-mini-remote-sidebar-modules.md
-2026-08-13-mac-mini-remote-sidebar-modules.md: a4c2cb5151a9ebfc7d92f12286f11630d480d4de
-2026-08-13-mac-mini-remote-sidebar-modules.zh.md: f96f60e07a4f0add4d337f0c60ed6e0520a76eb7
+2026-08-13-mac-mini-remote-sidebar-modules.md: ad91397b5c81e953212ef684e377c770e983a6e3
+2026-08-13-mac-mini-remote-sidebar-modules.zh.md: 9b8b2f678d606df28c79b3e1e8a50de1f2a4e3db

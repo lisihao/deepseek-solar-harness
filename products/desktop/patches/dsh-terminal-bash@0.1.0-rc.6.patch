@@ -1,0 +1,12 @@
+diff --git a/lib/index.js b/lib/index.js
+index 946e6b8..7ee8f27 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -39,6 +39,6 @@ function validateConfig(config) {
+ }
+ /** Exact printable prompt emitted after the private marker. */
+-const CONTROLLED_PROMPT = "dsh> ";
++const CONTROLLED_PROMPT = "__DSH_PERSISTENT_BASH_PROMPT__ ";
+ /**
+ * Remove CSI/OSC/short escape sequences while preserving split-sequence carry.
+ * Full terminal emulation is deliberately deferred; ordinary line output and
