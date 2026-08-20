@@ -125,6 +125,9 @@ def validate_profile(profile: dict[str, Any], source: Path) -> None:
         timeout = gate.get("timeout_seconds", 1800)
         if not isinstance(timeout, int) or timeout < 1:
             raise GovernanceError(f"gate '{gate_id}' timeout_seconds must be a positive integer")
+        exclusive = gate.get("exclusive", False)
+        if not isinstance(exclusive, bool):
+            raise GovernanceError(f"gate '{gate_id}' exclusive must be a boolean")
     gates_by_id = {gate["id"]: gate for gate in profile["gates"]}
     for gate_id, gate in gates_by_id.items():
         needs = gate.get("needs", [])
@@ -671,6 +674,13 @@ def execute_gates(
                         continue
                     if not all(dependency in results_by_id for dependency in dependencies):
                         continue
+                    if gate.get("exclusive", False) and running:
+                        # Preserve profile order and let active work drain. If
+                        # later gates started here, a ready exclusive gate could
+                        # be starved indefinitely by a stream of ordinary work.
+                        break
+                    if any(gates_by_id[running_id].get("exclusive", False) for running_id in running.values()):
+                        break
                     command = gate["command"]
                     cwd = (project / gate.get("cwd", ".")).resolve()
                     environment = gate.get("env", {})
@@ -681,6 +691,8 @@ def execute_gates(
                     running[future] = gate_id
                     del pending[gate_id]
                     made_progress = True
+                    if gate.get("exclusive", False):
+                        break
             if not running:
                 if fail_fast and failure_seen:
                     break
