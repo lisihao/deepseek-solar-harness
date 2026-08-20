@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-15-physical-operator-capability-seam.md
-2026-08-15-physical-operator-capability-seam.md: 7c68078a4ad46440d76a3eaaf640738d49234428
-2026-08-15-physical-operator-capability-seam.zh.md: 467717b67d77d2ae0bac90021f9920c6aebce391
+2026-08-15-physical-operator-capability-seam.md: 3264107774974c71a053c2f4c9ea7676d3794004
+2026-08-15-physical-operator-capability-seam.zh.md: a22c144261e078f30ad588246913d08c3a622dd0

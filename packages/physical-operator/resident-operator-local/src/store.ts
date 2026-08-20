@@ -275,7 +275,12 @@ export class ResidentStore {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       ) STRICT;
-      INSERT INTO command_receipts SELECT * FROM command_receipts_v3;
+      INSERT INTO command_receipts
+        (command_id, supersedes_command_id, request_hash, session_id, turn_id, state, task_label,
+         native_turn_id, result_json, result_ref, error_code, error_message, resolution, created_at, updated_at)
+      SELECT command_id, supersedes_command_id, request_hash, session_id, turn_id, state, task_label,
+        native_turn_id, result_json, result_ref, error_code, error_message, resolution, created_at, updated_at
+      FROM command_receipts_v3;
       CREATE TABLE session_leases (
         session_id TEXT PRIMARY KEY REFERENCES resident_sessions(id),
         turn_id TEXT NOT NULL UNIQUE,

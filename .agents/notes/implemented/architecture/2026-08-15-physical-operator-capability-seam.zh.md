@@ -16,7 +16,7 @@ AI4Research 包含有价值的物理算子概念，但若把整个项目作为�
 
 1. `@deepseek-ai/dsh-physical-operator` 负责 `ctx.physicalOperators`、规范化的 `ephemeral | resident` 模式发现、快速失败容量、Provider 调用前生成的 execution identity、类型化错误与成对生命周期事件。缺省仍为 `ephemeral`；不支持的模式明确失败，不回退。
 2. `@deepseek-ai/dsh-resident-operator` 增加与 Provider 无关的 `ctx.residentOperators` 控制 seam。Session 由算子 ID、规范化工作区与调用方拥有的 lane 共同确定，只允许一个 active turn，并为可信方提供管理操作；不同 lane 可以并发执行，不共享原生产品 thread。模型仍只能通过 physical-operator Consumer 执行。
-3. `@deepseek-ai/dsh-resident-operator-local` 运行独立、仅属主可访问的 Unix-socket daemon，作为 Session/Receipt/Lease/Event/Artifact 的唯一写者。Command identity 与 canonical request hash 分离：相同重放返回同一 Receipt，内容改变则冲突；崩溃变为 `indeterminate`；获授权的重试使用新 ID，并唯一关联已 abandon 的旧 Receipt。
+3. `@deepseek-ai/dsh-resident-operator-local` 运行独立、仅属主可访问的 Unix-socket daemon，作为 Session/Receipt/Lease/Event/Artifact 的唯一写者。Command identity 与 canonical request hash 分离：相同重放返回同一 Receipt，内容改变则冲突；崩溃变为 `indeterminate`；获授权的重试使用新 ID，并唯一关联已 abandon 的旧 Receipt。只向前迁移的表重建会按列名复制每个历史字段，因为 SQLite 会保留 `ALTER TABLE` 追加列的物理位置。
 4. 原生产品连续性保持权威。Claude Code 使用官方 Agent SDK 的持久 Session 与 resume；Codex 使用固定 app-server schema 的非临时 thread start/resume。两者都在当前 CLI、版本、协议与原生订阅资格无法证明时默认拒绝，且只接收凭据清理后的环境，不提供 API fallback。
 5. `@deepseek-ai/dsh-physical-operator-resident` 在现有 ephemeral subagent 与 Resident seam 之间路由同一稳定 ID。`@deepseek-ai/dsh-tool-physical-operator` 仍是唯一模型 Consumer，并根据实时 descriptor/tag/mode 目录注册动态选择指引，而不是引入隐藏分类器；`@deepseek-ai/dsh-resident-operators` 则提供 opt-in composition Bundle。
 6. Consumer 持有每个 Session 一份已记录的路由策略：`auto | direct | codex | claude-code`。未配置的 Session 使用 `auto`，它会把可并行的复杂工作留在主 Agent 轮次，由 [TaskGraph 原生智能协作](../feature/2026-08-20-taskgraph-smart-collaboration.md)处理，并直接派发有界算子工作。`/operator` 修改持久事件；Session 投影向客户端提供同一值，使 Desktop 能在模型选择旁显示独立的执行策略选择器，而不会把两者混为一谈。直接宿主 dispatch 是单 step 覆盖：它记录被替换的主模型配置，在 HMR 或进程恢复后的下一条未匹配消息中恢复该配置，并且在 assistant message 已交付该 dispatch 后不能再次提供结果。
@@ -56,5 +56,6 @@ Electron 打包不会改变 daemon 权威。Electron 宿主仅在 child-only Run
 - 全新沙箱 profile 通过 `dsh plugin` 安装预构建 Bundle，`--dump-config` 显示双模式路由，随后可完整移除 composition layer。Packed-import 验证发现并修复了带 hash daemon chunk 的发布白名单与 Claude Agent SDK peer 闭包问题。
 - Codex daemon transport 会在仅属主可访问的 Unix socket 上执行真实 WebSocket upgrade。真实 canary 在发布前拒绝了先前把 NDJSON 直接接到 `proxy` 的错误假设。
 - Electron bootstrap 聚焦测试证明：当前宿主环境不被修改、detached Electron 子进程收到 RunAsNode、daemon 与产品环境会不区分大小写地移除该标记。打包后 `.app` 的真实验收属于 Desktop 发布门禁，不由 daemon 单元测试代替。
+- schema-v3 迁移 fixture 使用历史上追加于末尾的 `task_label` 位置并包含一条 Receipt；MacBook 状态副本升级到 schema v4 后仍保留 7 个 Session 与 21 条 Receipt。
 - 路由回归测试先交付一次 Claude 结果，再重新挂载 Consumer，并验证短追问只调用一次主适配器，不启动或重放第二次 Claude 请求。持久 dispatch 会保留用于恢复的主模型配置。
 - Mac mini 尚不满足 canary 准入：Claude Code 报告未登录订阅；Codex launcher 因 Homebrew `simdjson` 动态库缺失而损坏；standalone daemon 尚未安装；DSH runtime 也未部署。默认 profile 没有修改。

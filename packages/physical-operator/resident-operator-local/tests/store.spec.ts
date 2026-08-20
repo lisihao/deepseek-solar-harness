@@ -168,9 +168,9 @@ describe('ResidentStore', () => {
       CREATE TABLE command_receipts (
         command_id TEXT PRIMARY KEY, supersedes_command_id TEXT UNIQUE REFERENCES command_receipts(command_id),
         request_hash TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES resident_sessions(id),
-        turn_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, task_label TEXT, native_turn_id TEXT,
+        turn_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, native_turn_id TEXT,
         result_json TEXT, result_ref TEXT, error_code TEXT, error_message TEXT, resolution TEXT,
-        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, task_label TEXT
       ) STRICT;
       CREATE TABLE session_leases (
         session_id TEXT PRIMARY KEY REFERENCES resident_sessions(id), turn_id TEXT NOT NULL UNIQUE,
@@ -185,9 +185,9 @@ describe('ResidentStore', () => {
         'test-model', 'high', 'manual', NULL, '2026-08-19T00:00:00.000Z'
       );
       INSERT INTO command_receipts VALUES (
-        'old-command', NULL, 'old-hash', 'old-session', 'old-turn', 'settled', 'Old task',
+        'old-command', NULL, 'old-hash', 'old-session', 'old-turn', 'settled',
         'old-native-turn', '{"output":[],"stopReason":"completed"}', NULL, NULL, NULL, NULL,
-        '2026-08-19T00:00:00.000Z', '2026-08-19T00:01:00.000Z'
+        '2026-08-19T00:00:00.000Z', '2026-08-19T00:01:00.000Z', 'Old task'
       );
       INSERT INTO resident_events (session_id, type, time, data_json) VALUES (
         'old-session', 'turn.settled', '2026-08-19T00:01:00.000Z', '{}'
