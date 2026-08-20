@@ -10,11 +10,13 @@ Solar governance repeated the same TypeScript source preparation in typecheck, l
 
 Two native HMR suites occasionally lost filesystem events only inside the long, shared 833-file run. Thirty focused repetitions passed, and direct Chokidar experiments confirmed that ancestor watching is required for an initially missing exact path. The evidence therefore identified shared native-watcher pressure, not an insufficient timeout or incorrect application behavior.
 
+The first optimized pull-request run exposed a second resource boundary: the three-CPU macOS runner multiplied three outer governance gates by their inner worker pools. The read-card suite's dynamic imports of every lazy Shiki grammar then exceeded its unchanged five-second responsiveness contract, while 13,588 other tests passed. This was nested parallelism oversubscription, not missing coverage or a reason to increase the timeout.
+
 ## Decision
 
-The Solar profile is a bounded dependency graph with `max_concurrency: 3`. A single `source-build` gate prepares shared TypeScript outputs. Typecheck, lint, documentation synchronization, and web build consume those outputs through their `*:contracts-ready` entry points and declare `needs: [source-build]`. The governance runtime expands transitive dependencies, schedules only ready gates, and blocks a consumer when its dependency fails.
+The Solar profile is a bounded dependency graph with `max_concurrency: 2`. This leaves one CPU available for child-process pools on the three-CPU GitHub macOS runner instead of multiplying three top-level gates by three inner workers. A single `source-build` gate prepares shared TypeScript outputs. Typecheck, lint, documentation synchronization, and web build consume those outputs through their `*:contracts-ready` entry points and declare `needs: [source-build]`. The governance runtime expands transitive dependencies, schedules only ready gates, and blocks a consumer when its dependency fails.
 
-Vitest owns its worker budgets in project configuration: thread-safe tests use at most three workers and process-bound tests use one. The two native HMR suites run only in the process-bound project; their behavior and timeouts are unchanged. Related-test selection remains `vitest run --changed=origin/solar`, so the governance profile does not override project-level isolation.
+Vitest owns its worker budgets in project configuration: thread-safe tests use at most three workers and process-bound tests use one. The two native HMR suites and the CPU-bound read-card lazy-grammar suite run only in the process-bound project; their behavior and timeouts are unchanged. The grammar suite must preserve its existing five-second responsiveness contract while the outer governance DAG is active. Related-test selection remains `vitest run --changed=origin/solar`, so the governance profile does not override project-level isolation.
 
 The workflow uses a partial blob checkout, pnpm and Yarn caches, and cancellation of superseded runs. Pull-request CI remains the automatic commit-bound authority. The complete [fork adapter](2026-08-15-fork-branch-push-ci.md) remains available through manual dispatch for cross-platform diagnosis, but no longer duplicates every `codex/**` branch push.
 
@@ -30,7 +32,7 @@ The workflow uses a partial blob checkout, pnpm and Yarn caches, and cancellatio
 
 ## Consequences
 
-Independent gates can use up to three runner cores, while native-watcher tests remain serialized. Gate output is emitted after each task completes, so concurrent logs remain readable. A branch push without a pull request no longer receives the fork adapter's automatic verdict; opening or updating a pull request supplies the required authority, and the diagnostic matrix can still be dispatched manually.
+Independent gates use a two-slot outer budget, while native-watcher and lazy-grammar tests remain serialized inside Vitest. Gate output is emitted after each task completes, so concurrent logs remain readable. A branch push without a pull request no longer receives the fork adapter's automatic verdict; opening or updating a pull request supplies the required authority, and the diagnostic matrix can still be dispatched manually.
 
 ## Verification
 

@@ -113,6 +113,10 @@ const processBoundTests = [
   'packages/boot/app-boot/tests/app-boot.spec.ts',
   'packages/boot/app-boot/tests/hmr-config.spec.ts',
   'packages/boot/app-boot/tests/user-patches.spec.ts',
+  // Loading every lazy Shiki grammar is CPU-bound and has a real 5s
+  // responsiveness contract. Keep it off the shared fork pool so a small CI
+  // runner cannot spend that contract competing with aggregate build gates.
+  'packages/client/ui-primitives/tests/code-block.client.spec.tsx',
   'packages/workflow/workflow-worker-thread/tests/session.spec.ts',
 ]
 

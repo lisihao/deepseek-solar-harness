@@ -35,7 +35,7 @@ function validInput() {
       source_commit: governance.accepted_sha,
     },
     governanceProfile: {
-      max_concurrency: 3,
+      max_concurrency: 2,
       gates: [
         { id: 'source-build', command: ['pnpm', 'run', 'build:lib'] },
         { id: 'typecheck', command: ['pnpm', 'run', 'typecheck:contracts-ready'], needs: ['source-build'] },

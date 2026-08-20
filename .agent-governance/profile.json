@@ -1,7 +1,7 @@
 {
   "profile_version": 1,
   "name": "deepseek-solar-harness",
-  "max_concurrency": 3,
+  "max_concurrency": 2,
   "project_markers": [
     "AGENTS.md",
     "package.json",

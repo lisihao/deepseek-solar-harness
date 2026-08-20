@@ -212,9 +212,11 @@ describe('CI workflow', () => {
 
     expect(config).toContain("'packages/boot/app-boot/tests/hmr-config.spec.ts'")
     expect(config).toContain("'packages/boot/app-boot/tests/user-patches.spec.ts'")
+    expect(config).toContain("'packages/client/ui-primitives/tests/code-block.client.spec.tsx'")
     const processBound = config.slice(config.indexOf('const processBoundTests = ['), config.indexOf('export default defineConfig'))
     expect(processBound).toContain("'packages/boot/app-boot/tests/hmr-config.spec.ts'")
     expect(processBound).toContain("'packages/boot/app-boot/tests/user-patches.spec.ts'")
+    expect(processBound).toContain("'packages/client/ui-primitives/tests/code-block.client.spec.tsx'")
   })
 })
 

@@ -4,7 +4,7 @@
   "source_repository": "agent-development-governance",
   "source_commit": "88dbf7d39e0c746c496053daf107cceda7024dd4",
   "files": {
-    ".agent-governance/profile.json": "c72184a04422338384bb4a80f686c9a06d5a208da379c1e62814ee0962cdec28",
+    ".agent-governance/profile.json": "46a94961c316e87ed1a6d1fa9b5f77229da2580cf8cea4ba9f7df43018288968",
     "tools/agent-development-governance/check_changed_format.py": "09b21ca31496ebbda894a8600f53faac74f97ab32ef8c34fb80d5f96673b42a3",
     "tools/agent-development-governance/check_changed_text.py": "8e76fe7f23d01abaab8c8566fc14605c07b0d6108e24a6e980f2ad2f6911d4eb",
     "tools/agent-development-governance/governance.py": "30cf38c0477b9ff219a89cfccba1fa2ca625d298ee5a065bb7d5660cc4422884"

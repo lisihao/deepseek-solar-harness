@@ -83,8 +83,8 @@ export function validateMonorepo({
     errors.push('governance bundle source commit must equal the accepted governance SHA')
   }
   const governanceGates = new Map(governanceProfile?.gates?.map(gate => [gate?.id, gate]) ?? [])
-  if (governanceProfile?.max_concurrency !== 3) {
-    errors.push('Solar governance max_concurrency must match the three-core macOS runner budget')
+  if (governanceProfile?.max_concurrency !== 2) {
+    errors.push('Solar governance max_concurrency must reserve one of the three macOS runner CPUs for child pools')
   }
   const sourceBuild = governanceGates.get('source-build')
   if (JSON.stringify(sourceBuild?.command) !== JSON.stringify(['pnpm', 'run', 'build:lib'])) {
