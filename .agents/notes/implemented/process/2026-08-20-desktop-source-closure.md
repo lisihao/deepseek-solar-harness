@@ -10,15 +10,17 @@ The [Solar monorepo](2026-08-17-solar-monorepo-p0-p2.md) co-locates core, Deskto
 
 ## Decision
 
-`products/desktop/dsh-plugin-desktop/vendor/manifest.json` owns a `sourcePackages` map covering every `dsh-packages/*.tgz` archive. Each value is a repository-relative tracked `package.json` under the core workspace or `plugins/managed`. The Desktop vendor verifier requires the archive set and source-map keys to be identical, rejects paths outside the repository or absent from the Git index, extracts each archive manifest, and requires its package name and version to equal the mapped source manifest.
+`products/desktop/dsh-plugin-desktop/vendor/manifest.json` owns a `sourcePackages` map covering every `dsh-packages/*.tgz` archive. Each value is a repository-relative tracked `package.json` under the core workspace or `plugins/managed`. The Desktop vendor verifier requires the archive set and source-map keys to be identical, rejects paths outside the repository or absent from the Git index, extracts each archive manifest, and requires its package name and version to equal the mapped source manifest. It also compares every archived non-generated file with the corresponding tracked source, using the repository license only for package-manager-injected `LICENSE` files.
 
-The default Desktop product contains source for every sealed application package and verifies this mapping before build. Sealed archives remain immutable build inputs so the independent Yarn product graph does not silently switch resolution mode. Their existing digests continue to protect the accepted bytes; the source map establishes editable source presence and identity rather than claiming byte-for-byte archive regeneration.
+The Remote Modules archive is rebuilt from the generic tracked package so deployment-specific historical examples are absent from the accepted product input. A content change updates both the immutable digest manifest and the Desktop lockfile locator.
+
+The default Desktop product contains source for every sealed application package and verifies this mapping before build. Sealed archives remain immutable build inputs so the independent Yarn product graph does not silently switch resolution mode. Their digests protect the accepted bytes, while the verifier proves exact tracked provenance for prose, configuration, scripts, and other non-generated package contents. Generated `lib/` output remains build-derived and is not claimed to be byte-for-byte reproducible from a clean checkout.
 
 Optional plugins installed into `~/.dsh` remain user-owned profile extensions unless Solar modifies or bundles them. A modified or bundled plugin enters `plugins/managed` with imported provenance and native checks before it can become a product input. The public Remote Modules row is enabled with an empty `instances` array; private names, URLs, and relay ports live only in local profile settings.
 
 ## Verification
 
-`yarn verify:vendor` verifies the complete vendor file set, immutable digests, all tracked source mappings, and the Anchored Standard delegated-worker gate. `yarn check` then builds and typechecks Desktop, runs its focused and package suites, and verifies runtime closure, CLI, loader, and profile boot. A clean clone must pass immutable root and Desktop installs before building the macOS application.
+`yarn verify:vendor` verifies the complete vendor file set, immutable digests, all tracked source mappings, exact non-generated archive contents, and the Anchored Standard delegated-worker gate. `yarn check` then builds and typechecks Desktop, runs its focused and package suites, and verifies runtime closure, CLI, loader, and profile boot. A clean clone must pass immutable root and Desktop installs before building the macOS application.
 
 ## Alternatives considered
 

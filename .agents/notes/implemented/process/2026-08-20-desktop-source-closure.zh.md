@@ -10,15 +10,17 @@ Status: implemented
 
 ## Decision
 
-`products/desktop/dsh-plugin-desktop/vendor/manifest.json` 通过 `sourcePackages` map 覆盖全部 `dsh-packages/*.tgz` 归档。每个值都是仓库内相对路径，指向核心 workspace 或 `plugins/managed` 中已被 Git 跟踪的 `package.json`。Desktop vendor 校验器要求归档集合与源码 map key 完全相同，拒绝逃逸仓库或未进入 Git index 的路径，提取每个归档 manifest，并要求 package 名称与版本和对应源码 manifest 一致。
+`products/desktop/dsh-plugin-desktop/vendor/manifest.json` 通过 `sourcePackages` map 覆盖全部 `dsh-packages/*.tgz` 归档。每个值都是仓库内相对路径，指向核心 workspace 或 `plugins/managed` 中已被 Git 跟踪的 `package.json`。Desktop vendor 校验器要求归档集合与源码 map key 完全相同，拒绝逃逸仓库或未进入 Git index 的路径，提取每个归档 manifest，并要求 package 名称与版本和对应源码 manifest 一致。它还会把归档内每个非生成文件与对应的已跟踪源码逐字节比较；只有包管理器自动注入的 `LICENSE` 可以对应仓库根许可证。
 
-默认 Desktop 产品包含每个 sealed 应用 package 的源码，并在构建前验证映射。Sealed 归档继续作为不可变构建输入，使独立 Yarn 产品依赖图不会静默切换解析模式。既有摘要继续保护已接受字节；源码 map 证明可编辑源码存在且身份一致，但不宣称能够逐字节再生成归档。
+Remote Modules 归档由通用的已跟踪 package 重新构建，使已接受产品输入不再包含部署专用的历史示例。内容变化会同时更新不可变摘要 manifest 与 Desktop lockfile locator。
+
+默认 Desktop 产品包含每个 sealed 应用 package 的源码，并在构建前验证映射。Sealed 归档继续作为不可变构建输入，使独立 Yarn 产品依赖图不会静默切换解析模式。摘要保护已接受字节，校验器则为说明、配置、脚本和其他非生成包内容证明精确的已跟踪来源。生成的 `lib/` 输出仍来自构建，不宣称可以从 clean checkout 逐字节复现。
 
 安装在 `~/.dsh` 的可选插件继续属于用户 profile 扩展，除非 Solar 修改或打包它们。修改或打包的插件必须先携带导入来源与原生检查进入 `plugins/managed`，才能成为产品输入。公开 Remote Modules 行以空 `instances` 数组启用；私人名称、URL 与中继端口只保存在本机 profile 设置中。
 
 ## Verification
 
-`yarn verify:vendor` 校验完整 vendor 文件集、不可变摘要、全部已跟踪源码映射，以及 Anchored Standard delegated-worker 门禁。随后 `yarn check` 构建并类型检查 Desktop，运行聚焦与 package 套件，并校验 runtime closure、CLI、loader 和 profile boot。Clean clone 必须通过根与 Desktop 的 immutable install，才能构建 macOS 应用。
+`yarn verify:vendor` 校验完整 vendor 文件集、不可变摘要、全部已跟踪源码映射、非生成归档内容精确一致，以及 Anchored Standard delegated-worker 门禁。随后 `yarn check` 构建并类型检查 Desktop，运行聚焦与 package 套件，并校验 runtime closure、CLI、loader 和 profile boot。Clean clone 必须通过根与 Desktop 的 immutable install，才能构建 macOS 应用。
 
 ## Alternatives considered
 

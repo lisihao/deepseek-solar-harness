@@ -82,7 +82,7 @@
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "dbc5a3ab9f3b7c4e0f5debdda6795e80203a45e0051679632039fd10f5d698fc",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "9c7ad84bb62df1a2c6703a5a2ff339571d47fd1ff13683a7d0c1a16ce7ce18f1",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "3bf07e79bcbbdc863b133d810ac0a507eb9df9ac53674f47bc3c3454e54e06d6",
-    "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "1e474b894f4d956c42574abc12b83557d0d381d06baddd84666916809d8e4238",
+    "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "161ca978098481b385aa8818871c2dc833f47fcc054a0090d17abd896299e86b",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "471a232245ccfc4e5a26a734ede1f63485b42d28195508a5e13d909b96d0618b",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
     "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "0b19f48fc167abd9b2b2dc22fd483a7cd3c755f9053fce772593ae26eeaeb689",

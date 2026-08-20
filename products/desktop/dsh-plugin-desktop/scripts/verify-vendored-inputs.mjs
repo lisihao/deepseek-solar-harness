@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readdir, readFile } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 const vendorRoot = resolve(import.meta.dirname, '../vendor')
 const repositoryRoot = resolve(vendorRoot, '../../../..')
@@ -69,6 +69,46 @@ for (const archivePath of packageArchives) {
     throw new Error(
       `verify-vendored-inputs: ${archivePath} is ${archivedPackage.name}@${archivedPackage.version} but ${sourcePath} is ${sourcePackage.name}@${sourcePackage.version}`,
     )
+  }
+
+  const sourcePackageRoot = dirname(sourceManifestPath)
+  const archiveMembers = execFileSync('tar', ['-tf', join(vendorRoot, archivePath)], { encoding: 'utf8' })
+    .split('\n')
+    .filter(member => member.startsWith('package/') && !member.endsWith('/'))
+  for (const member of archiveMembers) {
+    const packageRelative = member.slice('package/'.length)
+    if (packageRelative === 'package.json' || packageRelative.startsWith('lib/')) continue
+    let sourceFile = resolve(sourcePackageRoot, packageRelative)
+    let sourceFileRelative = relative(repositoryRoot, sourceFile)
+    try {
+      execFileSync('git', ['ls-files', '--error-unmatch', '--', sourceFileRelative], {
+        cwd: repositoryRoot,
+        stdio: 'pipe',
+      })
+    }
+    catch (cause) {
+      if (packageRelative === 'LICENSE') {
+        sourceFile = resolve(repositoryRoot, 'LICENSE')
+        sourceFileRelative = 'LICENSE'
+        execFileSync('git', ['ls-files', '--error-unmatch', '--', sourceFileRelative], {
+          cwd: repositoryRoot,
+          stdio: 'pipe',
+        })
+      }
+      else {
+        throw new Error(
+          `verify-vendored-inputs: ${archivePath} contains ${packageRelative} without tracked source at ${sourceFileRelative}`,
+          { cause },
+        )
+      }
+    }
+    const sourceContents = await readFile(sourceFile)
+    const archivedContents = execFileSync('tar', ['-xOf', join(vendorRoot, archivePath), member])
+    if (!sourceContents.equals(archivedContents)) {
+      throw new Error(
+        `verify-vendored-inputs: ${archivePath} contains stale ${packageRelative} relative to ${sourceFileRelative}`,
+      )
+    }
   }
 }
 

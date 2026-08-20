@@ -50,7 +50,7 @@ DeepSeek-Solar-Harness
 
 核心保留在仓库根目录，使其 pnpm workspace 继续有效。Desktop 位于 [`products/desktop`](products/desktop)，它是独立 Yarn workspace，禁止再包含一份 Harness checkout。Solar 自有组件位于 [`plugins/managed`](plugins/managed)；[`plugins/registry.yaml`](plugins/registry.yaml) 是其源码、版本、许可证与测试的机器可读注册表。产品与上游元数据位于 [`distribution`](distribution)。
 
-Desktop 在 Yarn 构建期间安装已接受的 sealed package 输入，并通过 [`products/desktop/dsh-plugin-desktop/vendor/manifest.json`](products/desktop/dsh-plugin-desktop/vendor/manifest.json) 把每个 sealed package 映射回仓库中已跟踪的源码包。`yarn verify:vendor` 会提取每个归档的 manifest，并拒绝未跟踪、缺失或名称/版本不一致的源码。因此，fresh clone 已包含默认 Desktop 应用中每个 sealed package 的源码。
+Desktop 在 Yarn 构建期间安装已接受的 sealed package 输入，并通过 [`products/desktop/dsh-plugin-desktop/vendor/manifest.json`](products/desktop/dsh-plugin-desktop/vendor/manifest.json) 把每个 sealed package 映射回仓库中已跟踪的源码包。`yarn verify:vendor` 会提取每个归档的 manifest，把所有非生成文件与已跟踪源码逐字节比较，并拒绝未跟踪、缺失、陈旧或名称/版本不一致的输入。因此，fresh clone 已包含默认 Desktop 应用中每个 sealed package 的源码。
 
 用户自行安装到 `~/.dsh` 的可选插件属于 profile 扩展，并非默认 Desktop 构建输入。未修改插件保持 external；只有 Solar 修改或打包插件时，才会携带来源与原生测试进入 [`plugins/managed`](plugins/managed)。个人 Remote Modules 的网页名称、URL 和中继端口同样只保存在本机 profile 设置中；公开应用只发布配置界面与空实例列表。
 
