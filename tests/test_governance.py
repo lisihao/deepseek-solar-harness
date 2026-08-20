@@ -102,12 +102,92 @@ class GovernanceTests(unittest.TestCase):
         )
         self.assertEqual(payload["gates"], ["always", "source"])
 
+    def test_plan_includes_gate_dependencies(self):
+        prerequisite = dict(self.profile["gates"][0])
+        prerequisite["id"] = "prerequisite"
+        prerequisite["scopes"] = ["governance"]
+        self.profile["gates"].insert(1, prerequisite)
+        self.profile["gates"][2]["needs"] = ["prerequisite"]
+        payload = governance.plan_payload(
+            self.root, self.profile, self.profile_path, "source", "full", None
+        )
+        self.assertEqual(payload["gates"], ["always", "prerequisite", "source"])
+
+    def test_profile_rejects_unknown_or_cyclic_gate_dependencies(self):
+        unknown = dict(self.profile)
+        unknown["gates"] = [dict(gate) for gate in self.profile["gates"]]
+        unknown["gates"][1]["needs"] = ["missing"]
+        with self.assertRaisesRegex(governance.GovernanceError, "unknown gate"):
+            governance.validate_profile(unknown, self.profile_path)
+
+        cyclic = dict(self.profile)
+        cyclic["gates"] = [dict(gate) for gate in self.profile["gates"]]
+        cyclic["gates"][0]["needs"] = ["source"]
+        cyclic["gates"][1]["needs"] = ["always"]
+        with self.assertRaisesRegex(governance.GovernanceError, "dependency cycle"):
+            governance.validate_profile(cyclic, self.profile_path)
+
+    def test_profile_rejects_invalid_max_concurrency(self):
+        invalid = dict(self.profile)
+        invalid["max_concurrency"] = 0
+        with self.assertRaisesRegex(governance.GovernanceError, "max_concurrency"):
+            governance.validate_profile(invalid, self.profile_path)
+
     def test_verify_propagates_failure(self):
         gate = dict(self.profile["gates"][0])
         gate["command"] = [sys.executable, "-c", "raise SystemExit(7)"]
         result = governance.execute_gates(self.root, [gate], False, False)
         self.assertEqual(result[0]["status"], "error")
         self.assertEqual(result[0]["returncode"], 7)
+
+    def test_independent_gates_execute_concurrently(self):
+        first = self.root / "first.ready"
+        second = self.root / "second.ready"
+        script = (
+            "import pathlib, sys, time; "
+            "own, peer = map(pathlib.Path, sys.argv[1:]); "
+            "own.write_text('ready'); "
+            "deadline = time.monotonic() + 2; "
+            "exec(\"while not peer.exists() and time.monotonic() < deadline:\\n time.sleep(0.01)\"); "
+            "raise SystemExit(0 if peer.exists() else 9)"
+        )
+        gates = []
+        for gate_id, own, peer in (("first", first, second), ("second", second, first)):
+            gates.append({
+                "id": gate_id,
+                "label": gate_id,
+                "command": [sys.executable, "-c", script, str(own), str(peer)],
+                "cwd": ".",
+                "scopes": ["always"],
+                "levels": ["full"],
+            })
+
+        results = governance.execute_gates(
+            self.root, gates, False, False, max_concurrency=2
+        )
+        self.assertEqual([result["status"] for result in results], ["ok", "ok"])
+
+    def test_failed_dependency_blocks_its_consumer(self):
+        marker = self.root / "consumer-ran"
+        producer = dict(self.profile["gates"][0])
+        producer["id"] = "producer"
+        producer["command"] = [sys.executable, "-c", "raise SystemExit(7)"]
+        consumer = dict(self.profile["gates"][1])
+        consumer["id"] = "consumer"
+        consumer["needs"] = ["producer"]
+        consumer["command"] = [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('ran')",
+            str(marker),
+        ]
+
+        results = governance.execute_gates(
+            self.root, [producer, consumer], False, False, max_concurrency=2
+        )
+        self.assertEqual([result["status"] for result in results], ["error", "error"])
+        self.assertIn("blocked by failed dependencies", results[1]["detail"])
+        self.assertFalse(marker.exists())
 
     def test_gate_environment_is_injected_without_shell(self):
         gate = dict(self.profile["gates"][0])

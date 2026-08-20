@@ -16,6 +16,7 @@
 - attestation 绑定 profile bytes、Git HEAD、changed paths 和当前文件内容；变化后自动失效。
 - `--report @git` 让 Git 解析普通 checkout 或 linked worktree 各自的 attestation 路径。
 - `export_bundle.py` 将 Harness 与项目 Profile 导出为带版本和 SHA-256 清单的仓内 bundle，供远端 CI 使用。
+- Profile 可用 `max_concurrency` 限制并发，并用 gate `needs` 声明依赖；Harness 会传递选择依赖，拒绝缺失或成环的依赖，并阻断失败依赖的消费者。
 
 ## 强制执行
 
