@@ -1,6 +1,7 @@
 {
   "profile_version": 1,
   "name": "deepseek-solar-harness",
+  "max_concurrency": 2,
   "project_markers": [
     "AGENTS.md",
     "package.json",
@@ -104,48 +105,62 @@
       "timeout_seconds": 120
     },
     {
+      "id": "source-build",
+      "label": "Shared source library build",
+      "command": ["pnpm", "run", "build:lib"],
+      "cwd": ".",
+      "scopes": ["source", "tooling", "documentation", "governance", "release"],
+      "levels": ["full"],
+      "timeout_seconds": 1800
+    },
+    {
       "id": "typecheck",
       "label": "Repository TypeScript typecheck",
-      "command": ["pnpm", "run", "typecheck"],
+      "command": ["pnpm", "run", "typecheck:contracts-ready"],
       "cwd": ".",
       "scopes": ["source", "tooling", "release"],
       "levels": ["full"],
+      "needs": ["source-build"],
       "timeout_seconds": 1800
     },
     {
       "id": "lint",
       "label": "Repository lint",
-      "command": ["pnpm", "run", "lint"],
+      "command": ["pnpm", "run", "lint:contracts-ready"],
       "cwd": ".",
       "scopes": ["source", "tooling", "release"],
       "levels": ["full"],
+      "needs": ["source-build"],
       "timeout_seconds": 1800
     },
     {
       "id": "related-tests",
       "label": "Vitest tests related to the outgoing Solar diff",
-      "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/solar", "--maxWorkers=1"],
+      "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/solar"],
       "cwd": ".",
       "scopes": ["source", "tooling", "release"],
       "levels": ["full"],
+      "exclusive": true,
       "timeout_seconds": 1800
     },
     {
       "id": "doc-sync",
       "label": "Root documentation synchronization checks",
-      "command": ["pnpm", "run", "doc-sync"],
+      "command": ["pnpm", "run", "doc-sync:contracts-ready"],
       "cwd": ".",
       "scopes": ["documentation", "governance"],
       "levels": ["full"],
+      "needs": ["source-build"],
       "timeout_seconds": 1800
     },
     {
       "id": "build",
       "label": "Published runtime build",
-      "command": ["pnpm", "run", "build"],
+      "command": ["pnpm", "run", "build:web"],
       "cwd": ".",
       "scopes": ["release"],
       "levels": ["full"],
+      "needs": ["source-build"],
       "timeout_seconds": 1800
     },
     {
@@ -155,6 +170,7 @@
       "cwd": ".",
       "scopes": ["release"],
       "levels": ["full"],
+      "needs": ["build"],
       "timeout_seconds": 1800
     },
     {

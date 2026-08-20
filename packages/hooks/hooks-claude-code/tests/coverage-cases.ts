@@ -609,7 +609,7 @@ export function defineCoverageCases(group: CoverageGroup): void {
       expect(result?.type === 'tool/result' && result.data.message.content[0].content.some(b => b.type === 'text' && b.text.includes('downstream-block'))).toBe(true)
       // the bridge's context still landed (folded onto the block)
       expect(events(agent).some(e => e.type === 'user/message' && e.data.source.kind !== 'user' && e.data.content.some(b => b.type === 'text' && b.text.includes('bridge-note')))).toBe(true)
-    })
+    }, 15_000) // Real agent and hook subprocess startup can exceed Vitest's default under aggregate load.
 
   })
 

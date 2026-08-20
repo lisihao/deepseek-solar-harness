@@ -98,7 +98,7 @@ verify  Execute the selected native gates; stop only after collecting all result
 attest  Reject missing, failed, or stale evidence after HEAD, files, or profile changes.
 ```
 
-All commands accept `--json`. `verify` also accepts `--dry-run` and `--fail-fast`. Profiles contain argument arrays rather than shell strings, so the runner does not evaluate shell syntax.
+All commands accept `--json`. `verify` also accepts `--dry-run` and `--fail-fast`. Profiles contain argument arrays rather than shell strings, so the runner does not evaluate shell syntax. A profile may set a positive `max_concurrency`, declare gate `needs`, and mark a resource-saturating gate `exclusive`; verification runs only dependency-ready gates, includes dependencies transitively in the plan, blocks consumers when a prerequisite fails, and drains all ordinary work before an exclusive gate runs alone.
 
 ## Evidence format
 

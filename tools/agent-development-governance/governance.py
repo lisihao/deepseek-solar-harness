@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import concurrent.futures
 import datetime as dt
 import fnmatch
 import hashlib
@@ -88,6 +89,9 @@ def validate_profile(profile: dict[str, Any], source: Path) -> None:
         manifest = Path(bundle["manifest"])
         if manifest.is_absolute() or ".." in manifest.parts:
             raise GovernanceError("harness_bundle manifest must remain inside the project")
+    max_concurrency = profile.get("max_concurrency", 1)
+    if isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or max_concurrency < 1:
+        raise GovernanceError("max_concurrency must be a positive integer")
     seen: set[str] = set()
     for gate in profile["gates"]:
         gate_id = gate.get("id")
@@ -121,6 +125,38 @@ def validate_profile(profile: dict[str, Any], source: Path) -> None:
         timeout = gate.get("timeout_seconds", 1800)
         if not isinstance(timeout, int) or timeout < 1:
             raise GovernanceError(f"gate '{gate_id}' timeout_seconds must be a positive integer")
+        exclusive = gate.get("exclusive", False)
+        if not isinstance(exclusive, bool):
+            raise GovernanceError(f"gate '{gate_id}' exclusive must be a boolean")
+    gates_by_id = {gate["id"]: gate for gate in profile["gates"]}
+    for gate_id, gate in gates_by_id.items():
+        needs = gate.get("needs", [])
+        if not isinstance(needs, list) or not all(isinstance(item, str) and item for item in needs):
+            raise GovernanceError(f"gate '{gate_id}' needs must be a string array")
+        if len(needs) != len(set(needs)):
+            raise GovernanceError(f"gate '{gate_id}' needs contains duplicates")
+        if gate_id in needs:
+            raise GovernanceError(f"gate '{gate_id}' cannot depend on itself")
+        unknown = set(needs) - gates_by_id.keys()
+        if unknown:
+            raise GovernanceError(f"gate '{gate_id}' needs unknown gate(s): {sorted(unknown)}")
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(gate_id: str) -> None:
+        if gate_id in visiting:
+            raise GovernanceError(f"gate dependency cycle includes '{gate_id}'")
+        if gate_id in visited:
+            return
+        visiting.add(gate_id)
+        for dependency in gates_by_id[gate_id].get("needs", []):
+            visit(dependency)
+        visiting.remove(gate_id)
+        visited.add(gate_id)
+
+    for gate_id in gates_by_id:
+        visit(gate_id)
 
 
 def resolve_profile(project: Path, requested: str | None) -> tuple[dict[str, Any], Path]:
@@ -292,15 +328,24 @@ def infer_scopes(profile: dict[str, Any], files: list[str], requested: str) -> l
 def select_gates(
     profile: dict[str, Any], scopes: list[str], level: str
 ) -> list[dict[str, Any]]:
-    selected: list[dict[str, Any]] = []
     active = set(scopes)
     active.add("always")
+    selected_ids: set[str] = set()
     for gate in profile["gates"]:
         if level not in gate["levels"]:
             continue
         if active.intersection(gate["scopes"]):
-            selected.append(gate)
-    return selected
+            selected_ids.add(gate["id"])
+    gates_by_id = {gate["id"]: gate for gate in profile["gates"]}
+    pending = list(selected_ids)
+    while pending:
+        gate_id = pending.pop()
+        for dependency in gates_by_id[gate_id].get("needs", []):
+            if dependency in selected_ids:
+                continue
+            selected_ids.add(dependency)
+            pending.append(dependency)
+    return [gate for gate in profile["gates"] if gate["id"] in selected_ids]
 
 
 def plan_payload(
@@ -508,80 +553,165 @@ def audit_project(
     }
 
 
+def execute_gate(
+    project: Path,
+    gate: dict[str, Any],
+    context_env: dict[str, str] | None,
+) -> tuple[dict[str, Any], str]:
+    command = gate["command"]
+    cwd = (project / gate.get("cwd", ".")).resolve()
+    environment = gate.get("env", {})
+    env_note = f" env={sorted(environment)}" if environment else ""
+    detail = f"(cd {cwd}){env_note} {shlex.join(command)}"
+    started = time.monotonic()
+    output_digest = hashlib.sha256()
+    tail: collections.deque[str] = collections.deque(maxlen=40)
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            env={**os.environ, **(context_env or {}), **environment},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=gate.get("timeout_seconds", 1800),
+        )
+        output = completed.stdout or ""
+        output_digest.update(output.encode("utf-8", errors="replace"))
+        tail.extend(output.splitlines())
+        returncode = completed.returncode
+        elapsed = round(time.monotonic() - started, 2)
+        return ({
+            "id": gate["id"],
+            "label": gate.get("label", gate["id"]),
+            "status": "ok" if returncode == 0 else "error",
+            "returncode": returncode,
+            "duration_seconds": elapsed,
+            "output_sha256": output_digest.hexdigest(),
+            "output_tail": list(tail),
+            "detail": f"{detail}; exit={returncode}; duration={elapsed}s",
+        }, output)
+    except subprocess.TimeoutExpired as exc:
+        elapsed = round(time.monotonic() - started, 2)
+        partial = exc.stdout or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", errors="replace")
+        output_digest.update(partial.encode("utf-8", errors="replace"))
+        tail.extend(partial.splitlines())
+        return ({
+            "id": gate["id"],
+            "label": gate.get("label", gate["id"]),
+            "status": "error",
+            "returncode": None,
+            "duration_seconds": elapsed,
+            "output_sha256": output_digest.hexdigest(),
+            "output_tail": list(tail),
+            "detail": f"{detail}; timed out after {elapsed}s",
+        }, partial)
+
+
 def execute_gates(
     project: Path,
     gates: list[dict[str, Any]],
     dry_run: bool,
     fail_fast: bool,
     context_env: dict[str, str] | None = None,
+    max_concurrency: int = 1,
 ) -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
+    if isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or max_concurrency < 1:
+        raise GovernanceError("max_concurrency must be a positive integer")
+    selected_ids = {gate["id"] for gate in gates}
     for gate in gates:
-        command = gate["command"]
-        cwd = (project / gate.get("cwd", ".")).resolve()
-        environment = gate.get("env", {})
-        env_note = f" env={sorted(environment)}" if environment else ""
-        detail = f"(cd {cwd}){env_note} {shlex.join(command)}"
-        if dry_run:
-            results.append(
-                {"id": gate["id"], "label": gate.get("label", gate["id"]), "status": "pending", "detail": detail}
-            )
-            continue
-        print(f"\n==> {gate['id']}: {detail}", flush=True)
-        started = time.monotonic()
-        output_digest = hashlib.sha256()
-        tail: collections.deque[str] = collections.deque(maxlen=40)
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=cwd,
-                env={**os.environ, **(context_env or {}), **environment},
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                check=False,
-                timeout=gate.get("timeout_seconds", 1800),
-            )
-            output = completed.stdout or ""
-            print(output, end="" if output.endswith("\n") or not output else "\n", flush=True)
-            output_digest.update(output.encode("utf-8", errors="replace"))
-            tail.extend(output.splitlines())
-            returncode = completed.returncode
-            elapsed = round(time.monotonic() - started, 2)
-            status = "ok" if returncode == 0 else "error"
-            result = {
+        missing = set(gate.get("needs", [])) - selected_ids
+        if missing:
+            raise GovernanceError(f"selected gate '{gate['id']}' is missing dependencies: {sorted(missing)}")
+    if dry_run:
+        results: list[dict[str, Any]] = []
+        for gate in gates:
+            command = gate["command"]
+            cwd = (project / gate.get("cwd", ".")).resolve()
+            environment = gate.get("env", {})
+            env_note = f" env={sorted(environment)}" if environment else ""
+            detail = f"(cd {cwd}){env_note} {shlex.join(command)}"
+            results.append({
                 "id": gate["id"],
                 "label": gate.get("label", gate["id"]),
-                "status": status,
-                "returncode": returncode,
-                "duration_seconds": elapsed,
-                "output_sha256": output_digest.hexdigest(),
-                "output_tail": list(tail),
-                "detail": f"{detail}; exit={returncode}; duration={elapsed}s",
-            }
-        except subprocess.TimeoutExpired as exc:
-            elapsed = round(time.monotonic() - started, 2)
-            partial = exc.stdout or ""
-            if isinstance(partial, bytes):
-                partial = partial.decode("utf-8", errors="replace")
-            if partial:
-                print(partial, end="" if partial.endswith("\n") else "\n", flush=True)
-                output_digest.update(partial.encode("utf-8", errors="replace"))
-                tail.extend(partial.splitlines())
-            result = {
-                "id": gate["id"],
-                "label": gate.get("label", gate["id"]),
-                "status": "error",
-                "returncode": None,
-                "duration_seconds": elapsed,
-                "output_sha256": output_digest.hexdigest(),
-                "output_tail": list(tail),
-                "detail": f"{detail}; timed out after {elapsed}s",
-            }
-        results.append(result)
-        if result["status"] == "error" and fail_fast:
-            break
-    return results
+                "status": "pending",
+                "detail": detail,
+            })
+        return results
+
+    gates_by_id = {gate["id"]: gate for gate in gates}
+    pending = dict(gates_by_id)
+    results_by_id: dict[str, dict[str, Any]] = {}
+    running: dict[concurrent.futures.Future[tuple[dict[str, Any], str]], str] = {}
+    failure_seen = False
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+        while pending or running:
+            made_progress = False
+            if not (fail_fast and failure_seen):
+                for gate in gates:
+                    gate_id = gate["id"]
+                    if gate_id not in pending or len(running) >= max_concurrency:
+                        continue
+                    dependencies = gate.get("needs", [])
+                    failed = [dependency for dependency in dependencies if results_by_id.get(dependency, {}).get("status") == "error"]
+                    if failed:
+                        results_by_id[gate_id] = {
+                            "id": gate_id,
+                            "label": gate.get("label", gate_id),
+                            "status": "error",
+                            "returncode": None,
+                            "duration_seconds": 0.0,
+                            "output_sha256": hashlib.sha256(b"").hexdigest(),
+                            "output_tail": [],
+                            "detail": f"blocked by failed dependencies: {failed}",
+                        }
+                        del pending[gate_id]
+                        failure_seen = True
+                        made_progress = True
+                        continue
+                    if not all(dependency in results_by_id for dependency in dependencies):
+                        continue
+                    if gate.get("exclusive", False) and running:
+                        # Preserve profile order and let active work drain. If
+                        # later gates started here, a ready exclusive gate could
+                        # be starved indefinitely by a stream of ordinary work.
+                        break
+                    if any(gates_by_id[running_id].get("exclusive", False) for running_id in running.values()):
+                        break
+                    command = gate["command"]
+                    cwd = (project / gate.get("cwd", ".")).resolve()
+                    environment = gate.get("env", {})
+                    env_note = f" env={sorted(environment)}" if environment else ""
+                    detail = f"(cd {cwd}){env_note} {shlex.join(command)}"
+                    print(f"\n==> {gate_id}: {detail}", flush=True)
+                    future = executor.submit(execute_gate, project, gate, context_env)
+                    running[future] = gate_id
+                    del pending[gate_id]
+                    made_progress = True
+                    if gate.get("exclusive", False):
+                        break
+            if not running:
+                if fail_fast and failure_seen:
+                    break
+                if pending and not made_progress:
+                    raise GovernanceError(f"selected gate dependency cycle: {sorted(pending)}")
+                continue
+            completed, _ = concurrent.futures.wait(
+                running, return_when=concurrent.futures.FIRST_COMPLETED
+            )
+            for future in completed:
+                gate_id = running.pop(future)
+                result, output = future.result()
+                if output:
+                    print(f"\n<== {gate_id}\n{output}", end="" if output.endswith("\n") else "\n", flush=True)
+                results_by_id[gate_id] = result
+                if result["status"] == "error":
+                    failure_seen = True
+
+    return [results_by_id[gate["id"]] for gate in gates if gate["id"] in results_by_id]
 
 
 def write_attestation(
@@ -794,6 +924,7 @@ def main() -> int:
         args.dry_run,
         args.fail_fast,
         context_env=context_env,
+        max_concurrency=profile.get("max_concurrency", 1),
     )
     output = {
         "title": "Governance verification",

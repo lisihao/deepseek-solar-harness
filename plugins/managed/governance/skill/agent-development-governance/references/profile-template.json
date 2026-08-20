@@ -1,6 +1,7 @@
 {
   "profile_version": 1,
   "name": "replace-me",
+  "max_concurrency": 2,
   "project_markers": ["package.json"],
   "instruction_sources": [
     {"path": "AGENTS.md", "required": false, "kind": "agent-instructions"},
@@ -20,6 +21,7 @@
       "cwd": ".",
       "scopes": ["always"],
       "levels": ["quick", "full"],
+      "exclusive": false,
       "timeout_seconds": 120
     }
   ]

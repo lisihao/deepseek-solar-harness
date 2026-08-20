@@ -1,0 +1,59 @@
+# Agent Note: Solar 治理关键路径
+
+Status: implemented
+
+[English](2026-08-20-solar-governance-critical-path.md) | 中文
+
+## Problem
+
+Solar 治理在 typecheck、lint、文档和 Web 构建门禁中重复执行相同的 TypeScript 源码准备。完整 related-test 门禁随后用单个 worker 运行 833 个文件，在 GitHub macOS runner 上耗时 757 秒；文档同步又耗时 173 秒，完整治理任务接近 20 分钟。同一提交还可能同时触发拉取请求 CI 与 fork 的完整推送适配器。
+
+两个原生 HMR 测试套件仅在包含 833 个文件的长时间共享运行中偶发丢失文件系统事件。30 轮定向重复全部通过，直接 Chokidar 实验也确认：对于最初不存在的精确路径，必须监听其祖先目录。因此证据指向共享的原生 watcher 压力，而不是超时不足或应用行为错误。
+
+第一次优化后的拉取请求运行暴露了第二个资源边界：三 CPU 的 macOS runner 把三个外层治理门禁与各自的内部 worker 池相乘。read-card 套件动态导入全部 Shiki 懒加载语法时，超过了保持不变的五秒响应契约，而其余 13,588 个测试全部通过。这是嵌套并行超卖，不是覆盖缺失，也不构成增加超时的理由。
+
+Solar 仓库没有注册任何自定义 runner，也没有故障切换变量。三个必需 Linux 作业和独立的原生 Windows 作业从上游继承了仅供组织内部使用的 runner 标签，排队超过两小时仍未获得 runner。这段延迟是无上限的资源分配等待，不是构建执行时间。
+
+把这些作业迁移到标准四核 runner 后，覆盖率通道暴露出最后一处嵌套预算：instrumented 与 exempt 套件各用一个 worker 并行运行，而 Oxlint 响应时间契约会在剩余的共享 CPU 压力下启动子进程。仅把 Oxlint 自身限制为单线程仍不够：final-diagnostics 用例耗时 5.228 秒，超过保持不变的五秒限制；instrumented 覆盖率套件和其余 216 个 exempt 测试全部通过。
+
+第一次完整的标准 runner 消费方通道又暴露出“逻辑独立”与“资源独立”的差别。四个外层消费方 gate 叠加 Vitest 未受约束的快照文件 worker，使一个 150 ms keep-alive 契约饥饿并触发了不应发生的 provider 重试。另一边，滚动场景的 120 个定速 chunk 在刻意较重的历史与锚点准备完成前已经全部结束，导致 fixture 不再具备它要验证的并发前提。两个聚焦场景在隔离运行时都通过。
+
+修正这些资源预算后，远端 76 个普通浏览器文件和调整后的滚动契约全部通过，但 Cordis 动态插件生命周期只有在与前述浏览器套件共享长生命周期 Vitest 进程后，第二轮才以错误结束。本地完整 77 文件通道与聚焦 Cordis 文件都通过，因此证据指向跨文件进程状态，而不是产品行为或 golden 发生变化。
+
+最终的 macOS 治理运行还证明，仅限制 worker 并不能让整机级门禁获得资源独立性。`related-tests` 与源码构建和文档任务重叠时，HMR 配置、Oxlint 诊断和 ACP 持久化三个互不相关的时序契约同时失败，尽管 832 个文件中有 824 个通过，而且完全相同的套件在本地通过。共同信号是外层门禁竞争，因此修改这些产品超时只会掩盖调度器缺陷。
+
+标准 Windows 上的第一次原生运行也暴露了继承下来的平台边界。三个套件试图绑定 Unix-domain socket 路径，一个 POSIX 权限断言比较了 Windows 合成的 mode bits，另有两个集成 fixture 在完整 instrumented 清单运行时耗尽默认测试框架时序。这些不是 Windows 产品回归：本地编排与 Resident authority 尚未提供 named-pipe transport，而且仓库已经维护显式的 Windows 不支持测试清单。
+
+## Decision
+
+Solar profile 采用 `max_concurrency: 2` 的有界依赖图。这样在 GitHub macOS 的三 CPU runner 上为子进程池保留一个 CPU，避免三个顶层门禁再分别乘以三个内部 worker。唯一的 `source-build` 门禁准备共享 TypeScript 输出；typecheck、lint、文档同步与 Web 构建通过各自的 `*:contracts-ready` 入口复用输出，并声明 `needs: [source-build]`。治理运行时展开传递依赖，只调度已就绪门禁；依赖失败时阻断消费者。
+
+Vitest 在项目配置中拥有 worker 预算：线程安全测试最多使用两个 worker，进程约束测试使用一个。两个项目并发运行，因此三个 worker 的总预算会在标准四核 runner 上为 fixture 子进程保留一个 CPU；此前的 `3 + 1` 总预算在连续两次完整运行中触发了互不相关的五秒契约失败，而每个聚焦文件均通过。两个原生 HMR 套件和 CPU 密集型 read-card 懒加载语法套件只在进程约束项目运行，其行为与超时保持不变；语法套件仍必须遵守既有五秒响应契约。相关测试继续由 `vitest run --changed=origin/solar` 选择，同时 profile 把该门禁标记为 `exclusive: true`：Code-as-Harness 会先排空正在运行的普通门禁，再启动它，并在它结束前不接纳新任务。这样普通检查仍保留双槽 DAG，而完整的时序敏感套件获得整机独占权。
+
+工作流使用部分 blob checkout、pnpm 与 Yarn 缓存，并取消已被新提交取代的运行。Solar 的必需拉取请求作业默认使用可移植的 `ubuntu-24.04` 与 `windows-2025` runner，并按标准四核容量限制内部并发。已有的仓库变量选择器仍允许显式配置自托管池，但日常正确性不再依赖上游组织的 runner 标签。拉取请求 CI 继续作为自动、绑定提交的权威结论。完整的 [fork 适配器](2026-08-15-fork-branch-push-ci.md) 保留手工调度能力，供跨平台诊断使用，但不再重复每次 `codex/**` 分支推送。
+
+覆盖率通道还固定 `DSH_OXLINT_THREADS=1`，并只把 `scripts/oxlint-contract.spec.ts` 移入依赖尾节点。instrumented 与其余 exempt 套件仍然并行；两者结束后，Oxlint 响应时间契约在空闲 runner 上运行。这样只增加一个聚焦尾节点，不会把两条长覆盖率路径整体串行化。测试选择、覆盖率阈值与五秒契约均未改变。
+
+语义快照聚合现在在同一 runner 的完整覆盖率结束后运行，不再与浏览器、lint 和文档消费方竞争。`DSH_SNAPSHOT_MAX_CONCURRENCY` 同时约束文件 worker 与文件内并发；标准四核主机使用两个 worker，为真实子进程和基于定时器的传输契约保留 CPU。浏览器消费方通道仍在自己的 runner 上并行；其滚动 fixture 提供足够多的定速 chunk，保证在受支持的托管容量下历史加载与流式输出确实重叠，同时不增加任何断言超时。
+
+Web 聚合保留全部 77 个文件，但在其余 76 个文件之后，用第二个 Vitest 进程运行 Cordis 动态插件生命周期。这样 define、mount、stop 与持久日志断言获得全新的 runtime 边界，同时真实浏览器交互和精确 golden 比较保持不变。
+
+原生 Windows 清单现在只把三个 Unix-socket 文件加入既有不支持清单。Resident SQLite 生命周期测试继续运行；只有 POSIX 权限位断言在 POSIX 主机上执行。完整 invariant topology 测试与真实 Claude hook 子进程集成都获得明确的集成测试预算；单个 ACP closed-turn fixture 使用 250 ms 场景超时，避免 Windows 的定时器粒度把预期的领域错误替换成 Vitest 通用等待错误。应用超时、重试、fallback、覆盖率阈值和受支持产品路径均未改变。
+
+## Alternatives considered
+
+**增加 HMR 超时。** 不采用，因为定向压力测试通过，失败来自聚合 watcher 压力下的事件丢失；延长等待只能掩盖竞争，不能消除竞争。
+
+**使用轮询或允许项目选择为空。** 不采用，因为轮询会持续增加文件系统负载，`--passWithNoTests` 还可能把错误的测试分区变成表面成功。
+
+**跳过完整 Code-as-Harness 验证。** 不采用，因为性能优化必须保留相同的可证明门禁集合与证据语义。
+
+**同时自动运行 fork push CI 和拉取请求 CI。** 不采用，因为两者会为同一提交重复完整证据。手工适配器保留诊断矩阵，又不占用日常关键路径。
+
+## Consequences
+
+普通独立门禁使用两个外层并发槽位，`related-tests` 是基于实测确定的独占资源门禁，原生 watcher 与懒加载语法测试仍在 Vitest 内保持串行。每个任务完成后再输出其日志，使并发日志仍可阅读。标准 runner 通道可能比组织专用的大型 runner 执行更久，但无需仓库外部配置即可开始运行，使公开仓保持可复现。没有拉取请求的分支推送不再自动获得 fork 适配器结论；创建或更新拉取请求会提供所需权威结论，诊断矩阵仍可手工调度。
+
+## Verification
+
+契约测试固定共享构建依赖、复用产物的消费者命令、精确且独占的 related-test 命令、worker 预算、Windows Unix-socket 排除、部分 checkout、缓存，以及工作流不再执行第二次源码构建。治理运行时测试覆盖无效与循环依赖、传递选择、有界独立执行、独占执行和依赖失败。验收要求依次通过严格审计、monorepo 校验器、完整 Code-as-Harness 验证与证明，并取得精确提交对应的远端拉取请求 CI 结论。

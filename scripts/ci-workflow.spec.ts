@@ -7,6 +7,19 @@ const root = resolve(import.meta.dirname, '..')
 const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
 
 describe('CI workflow', () => {
+  it('runs the dynamic Cordis browser lifecycle in a fresh Vitest process', () => {
+    const packageJson: unknown = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+    if (!isRecord(packageJson) || !isRecord(packageJson.scripts)) {
+      throw new TypeError('Root package must define scripts')
+    }
+
+    expect(packageJson.scripts['test:web:built']).toBe(
+      'npm run test:web:built:main && npm run test:web:built:cordis',
+    )
+    expect(packageJson.scripts['test:web:built:main']).toContain('DSH_WEB_SUITE=main')
+    expect(packageJson.scripts['test:web:built:cordis']).toContain('DSH_WEB_SUITE=isolated')
+  })
+
   it('isolates every pnpm action setup destination per runner', () => {
     const workflow: unknown = yaml.load(readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8'))
     if (!isRecord(workflow) || !isRecord(workflow.jobs)) throw new TypeError('CI workflow must define jobs')
@@ -69,7 +82,8 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).not.toContain('DSH_CI_FAILOVER_LINUX')
     expect(windowsNative['runs-on']).toContain('self-hosted')
     expect(windowsNative['runs-on']).toContain('dsh-win-ci')
-    expect(windowsNative['runs-on']).toContain('dsh-windows-2025-16core')
+    expect(windowsNative['runs-on']).toContain('windows-2025')
+    expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
     expect(windowsNative.name).toBe('windows node 24 / native complete')
     expect(windowsNative.if).toBe("github.event_name == 'pull_request'")
     const nativeCommandSteps = (windowsNative.steps as unknown[]).filter((step): step is Record<string, unknown> & { run: string } => (
@@ -82,7 +96,7 @@ describe('CI workflow', () => {
     expect(wineAptCache['runs-on']).toBe('ubuntu-latest')
 
     // serial-windows: master-only standby, self-hosted, non-blocking.
-    expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+    expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'")
     expect(serialWindows['runs-on']).toEqual(['self-hosted', 'dsh-win-ci', 'windows'])
     expect(serialWindows.name).toBe('serial / windows (self-hosted standby)')
 
@@ -99,7 +113,13 @@ describe('CI workflow', () => {
       expect(job['runs-on'], `${jobName} runs-on must use the Linux failover switch`).toContain('DSH_CI_FAILOVER_LINUX')
       expect(job['runs-on'], `${jobName} runs-on must not use the Windows failover switch`).not.toContain('DSH_CI_FAILOVER_WINDOWS')
       expect(job['runs-on']).toContain('vm-backup')
+      expect(job['runs-on']).toContain('ubuntu-24.04')
+      expect(job['runs-on']).not.toContain('dsh-ubuntu-24-04-16core')
     }
+    expect(node24Coverage.name).toBe('node 24 / coverage and semantic snapshots')
+    if (!isRecord(node24Coverage.env)) throw new TypeError('Node 24 coverage job must define env')
+    expect(node24Coverage.env.DSH_OXLINT_THREADS).toBe('1')
+    expect(node24Coverage.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain("|| '2'")
     expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
     expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
     expect(aggregate['runs-on']).toContain('vm-backup')
@@ -128,8 +148,9 @@ describe('CI workflow', () => {
       const job = workflow.jobs[name]
       if (!isRecord(job)) throw new TypeError(`${name} must be defined`)
       expect(job.concurrency).toBeUndefined()
-      // Both stay master-push-only; that is what makes the push carve-out safe.
-      expect(job.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+      // Both stay master-push-only and only allocate when their pool is configured.
+      expect(job.if).toContain("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+      expect(job.if).toContain(name === 'serial-linux-selfhosted' ? 'DSH_CI_FAILOVER_LINUX' : 'DSH_CI_FAILOVER_WINDOWS')
     }
 
     // What bounds the cost of exempting push: a master push may only carry the
@@ -206,12 +227,32 @@ describe('CI workflow', () => {
     expect(config).not.toContain("pool: process.platform === 'win32' ? 'threads' : 'forks'")
     expect(config.match(/pool: 'forks'/g)).toHaveLength(2)
   })
+
+  it('keeps Unix-socket authorities outside the native Windows inventory', () => {
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).toContain("'packages/orchestration/orchestration-local/tests/daemon.spec.ts'")
+    expect(config).toContain("'packages/physical-operator/resident-operator-local/tests/daemon.spec.ts'")
+    expect(config).toContain("'packages/physical-operator/resident-operator-local/tests/codex-transport.spec.ts'")
+  })
+
+  it('keeps native HMR watcher suites in the process-bound project', () => {
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).toContain("'packages/boot/app-boot/tests/hmr-config.spec.ts'")
+    expect(config).toContain("'packages/boot/app-boot/tests/user-patches.spec.ts'")
+    expect(config).toContain("'packages/client/ui-primitives/tests/code-block.client.spec.tsx'")
+    const processBound = config.slice(config.indexOf('const processBoundTests = ['), config.indexOf('export default defineConfig'))
+    expect(processBound).toContain("'packages/boot/app-boot/tests/hmr-config.spec.ts'")
+    expect(processBound).toContain("'packages/boot/app-boot/tests/user-patches.spec.ts'")
+    expect(processBound).toContain("'packages/client/ui-primitives/tests/code-block.client.spec.tsx'")
+  })
 })
 
 describe('fork branch CI workflow', () => {
-  it('maps codex branch pushes to the repository-native required gates', () => {
+  it('keeps the duplicate fork matrix manual while pull-request CI owns automatic validation', () => {
     const workflow = loadWorkflow('.github/workflows/fork-ci.yml')
-    const push = workflowEvent(workflow, 'push')
+    const dispatch = workflowEvent(workflow, 'workflow_dispatch')
     const linux = workflowJob(workflow, 'linux-primary')
     const compat = workflowJob(workflow, 'node-compat')
     const pythonSdk = workflowJob(workflow, 'python-sdk')
@@ -226,7 +267,8 @@ describe('fork branch CI workflow', () => {
       throw new TypeError('fork CI jobs must define executable steps and aggregate dependencies')
     }
 
-    expect(push).toEqual({ branches: ['codex/**'] })
+    expect(dispatch).toEqual({})
+    expect(workflow.on).not.toHaveProperty('push')
     expect(workflow.permissions).toEqual({ contents: 'read' })
     expect(linux['runs-on']).toBe('ubuntu-latest')
     expect(JSON.stringify(linux.steps)).toContain('pnpm run check:ci:linux-primary')

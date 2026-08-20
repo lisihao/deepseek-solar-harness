@@ -25,8 +25,8 @@ export interface CoverageExemptSuite {
  */
 export const COVERAGE_EXEMPT_ENV = 'DSH_COVERAGE_EXEMPT_HEAVY'
 
-/** Coverage-exempt heavy suites; keep filter and exclude selecting the same files. */
-export const coverageExemptHeavySuites: readonly CoverageExemptSuite[] = [
+/** Coverage-exempt suites that can run beside instrumented coverage. */
+export const coverageExemptParallelSuites: readonly CoverageExemptSuite[] = [
   // Whole-workspace compiler analysis per case — the lane's longest tail.
   // Generator src is threshold-excluded; tools-catalog's registry and
   // tool-cordis imports are fully covered by those packages' own tests.
@@ -36,6 +36,16 @@ export const coverageExemptHeavySuites: readonly CoverageExemptSuite[] = [
   },
   // Real child-process fixtures over scripts/ sources, which coverage never measures.
   { filter: 'scripts/install-lefthook.spec.ts', exclude: 'scripts/install-lefthook.spec.ts' },
-  { filter: 'scripts/oxlint-contract.spec.ts', exclude: 'scripts/oxlint-contract.spec.ts' },
   { filter: 'scripts/change-scope.spec.ts', exclude: 'scripts/change-scope.spec.ts' },
+]
+
+/** Coverage-exempt responsiveness contracts that require an idle runner. */
+export const coverageExemptTailSuites: readonly CoverageExemptSuite[] = [
+  { filter: 'scripts/oxlint-contract.spec.ts', exclude: 'scripts/oxlint-contract.spec.ts' },
+]
+
+/** Complete coverage-exempt roster; keep every filter and exclude paired. */
+export const coverageExemptHeavySuites: readonly CoverageExemptSuite[] = [
+  ...coverageExemptParallelSuites,
+  ...coverageExemptTailSuites,
 ]

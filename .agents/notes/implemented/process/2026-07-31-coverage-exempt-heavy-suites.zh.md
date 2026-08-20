@@ -12,10 +12,11 @@ CI 覆盖率 lane（`check:ci:coverage`）的墙钟被少数几个重型测试�
 
 ## Decision
 
-`ci-coverage` 聚合拆成两个并行 gate，全部测试仍然执行，只有重型套件不再交插桩税：
+`ci-coverage` 聚合拆成两个并行主 gate 与一个短依赖尾节点，全部测试仍然执行，只有重型套件不再交插桩税：
 
 - **插桩 gate**（`test:coverage`）：设 `DSH_COVERAGE_EXEMPT_HEAVY=1`，`vitest.config.ts` 据此从两个 project 的 exclude 中剔除豁免套件，其余全部文件照旧插桩并承担全部阈值证明。经 gate 自带 env 注入（既有 `Gate.env` 机制），不进 workflow 全局环境，因此并排的无插桩 gate 和本地直跑 `vitest run` 都看不到该变量、行为不变。
-- **无插桩 gate**（`test:coverage-exempt-heavy`）：用配对的 positional filter 恰好运行豁免套件，保证正确性信号不缩水。
+- **无插桩并行 gate**（`test:coverage-exempt-heavy`）：用配对的 positional filter 运行编译器与 fixture 密集型豁免套件，在插桩覆盖率旁并行时保持完整正确性信号。
+- **无插桩尾 gate**（`test:coverage-exempt-tail`）：等两个主 gate 都结束后运行 Oxlint 响应时间契约。在标准四核 runner 上，即使 Oxlint 只用一个线程，与插桩 gate 共享 CPU 仍会使该契约超过保持不变的五秒断言；依赖尾节点既保留断言，也不把两条长路径串行化。
 
 `scripts/coverage-exempt.ts` 是唯一名单点，集中持有成员资格约定与 filter/exclude 配对，防止两侧漂移。
 
@@ -51,11 +52,11 @@ per-file 100% 阈值本身就是豁免名单的守卫，名单错误无法静默
 
 ## Verification
 
-CI 实测（16 核 runner）：拆分前 gate 段 424 秒，拆分后两 gate 并行 `test:coverage` 95.9 秒 + `test:coverage-exempt-heavy` 71.1 秒，lane 收敛于较慢者约 96 秒；拆分前后插桩 gate 阈值错误均为零。`vitest list` 验证 env 开关两态恰好增删豁免集；`run-gates.spec.ts` 覆盖聚合图构造。
+CI 实测（16 核 runner）：最初拆分前 gate 段 424 秒，拆分后两个主 gate 并行 `test:coverage` 95.9 秒 + `test:coverage-exempt-heavy` 71.1 秒，主路径收敛于较慢者约 96 秒；拆分前后插桩 gate 阈值错误均为零。在标准四核 runner 上，聚焦的 Oxlint 尾节点随后运行。`vitest list` 验证 env 开关两态恰好增删豁免集；`run-gates.spec.ts` 覆盖聚合图构造与尾节点依赖。
 
 ## Consequences
 
 - 覆盖率 lane 的 gate 段从约 7 分钟降到约 96 秒，阈值结果与执行测试集均无变化。
-- `DSH_GATE_CONCURRENCY` 在本 lane 重新拥有两个可调度对象，聚合调度器不再是直通。
+- `DSH_GATE_CONCURRENCY` 在本 lane 拥有两个并行主 gate 与一个依赖尾节点，聚合调度器既保持长路径并行，也不会饿死响应时间契约。
 - 向名单新增重型套件必须完成上述成员资格对账；错误条目会让插桩 gate 大声失败，而不是静默侵蚀覆盖率。
 - 豁免套件不再出现在覆盖率报告的贡献文件列表中；其正确性信号完全由无插桩 gate 的红绿承载。

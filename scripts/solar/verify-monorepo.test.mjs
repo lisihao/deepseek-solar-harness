@@ -35,10 +35,24 @@ function validInput() {
       source_commit: governance.accepted_sha,
     },
     governanceProfile: {
-      gates: [{ id: 'related-tests', command: ['pnpm', 'exec', 'vitest', 'run', '--maxWorkers=1'] }],
+      max_concurrency: 2,
+      gates: [
+        { id: 'source-build', command: ['pnpm', 'run', 'build:lib'] },
+        { id: 'typecheck', command: ['pnpm', 'run', 'typecheck:contracts-ready'], needs: ['source-build'] },
+        { id: 'lint', command: ['pnpm', 'run', 'lint:contracts-ready'], needs: ['source-build'] },
+        { id: 'related-tests', command: ['pnpm', 'exec', 'vitest', 'run', '--changed=origin/solar'], exclusive: true },
+        { id: 'doc-sync', command: ['pnpm', 'run', 'doc-sync:contracts-ready'], needs: ['source-build'] },
+      ],
     },
+    vitestConfig: [
+      "name: 'thread-safe',",
+      'maxWorkers: 2,',
+      "name: 'process-bound',",
+      'maxWorkers: 1,',
+    ].join('\n'),
     governanceWorkflow: [
-      '- run: corepack pnpm run build:lib',
+      'filter: blob:none',
+      'cache: pnpm',
       '- run: python3 tools/agent-development-governance/governance.py verify --project .',
     ].join('\n'),
     pathExists: () => true,
@@ -68,14 +82,26 @@ test('rejects unbound source provenance and nested gitlinks', () => {
   assert.match(validateMonorepo(input).join('\n'), /nested gitlinks/u)
 })
 
-test('rejects the nondeterministic related-test worker count', () => {
+test('rejects an unbounded or unsplit related-test worker contract', () => {
   const input = validInput()
-  input.governanceProfile.gates[0].command = ['pnpm', 'exec', 'vitest', 'run', '--maxWorkers=4']
-  assert.match(validateMonorepo(input).join('\n'), /maxWorkers=1/u)
+  input.vitestConfig = "name: 'thread-safe',\nmaxWorkers: 2,"
+  assert.match(validateMonorepo(input).join('\n'), /process-bound/u)
 })
 
-test('rejects full governance verification before source libraries are built', () => {
+test('rejects a related-test gate that can overlap other resource-heavy gates', () => {
+  const input = validInput()
+  delete input.governanceProfile.gates.find(gate => gate.id === 'related-tests').exclusive
+  assert.match(validateMonorepo(input).join('\n'), /exclusive gate/u)
+})
+
+test('rejects repeated source preparation inside governance consumers', () => {
+  const input = validInput()
+  input.governanceProfile.gates.find(gate => gate.id === 'lint').command = ['pnpm', 'run', 'lint']
+  assert.match(validateMonorepo(input).join('\n'), /prepared source build/u)
+})
+
+test('rejects uncached or full-history-blob Solar governance checkout', () => {
   const input = validInput()
   input.governanceWorkflow = '- run: python3 tools/agent-development-governance/governance.py verify --project .'
-  assert.match(validateMonorepo(input).join('\n'), /build source libraries before full verification/u)
+  assert.match(validateMonorepo(input).join('\n'), /partial history|pnpm cache/u)
 })

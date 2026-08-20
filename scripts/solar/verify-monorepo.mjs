@@ -27,6 +27,7 @@ export function validateMonorepo({
   governanceManifest,
   governanceProfile,
   governanceWorkflow,
+  vitestConfig,
   pathExists,
   subtreeImports,
   gitlinks,
@@ -81,14 +82,43 @@ export function validateMonorepo({
   if (governanceManifest?.source_commit !== governance?.accepted_sha) {
     errors.push('governance bundle source commit must equal the accepted governance SHA')
   }
-  const relatedTests = governanceProfile?.gates?.find(gate => gate?.id === 'related-tests')
-  if (!Array.isArray(relatedTests?.command) || !relatedTests.command.includes('--maxWorkers=1')) {
-    errors.push('related-tests gate must use --maxWorkers=1 for deterministic SDK timing')
+  const governanceGates = new Map(governanceProfile?.gates?.map(gate => [gate?.id, gate]) ?? [])
+  if (governanceProfile?.max_concurrency !== 2) {
+    errors.push('Solar governance max_concurrency must reserve one of the three macOS runner CPUs for child pools')
   }
-  const sourceBuild = governanceWorkflow?.indexOf('- run: corepack pnpm run build:lib') ?? -1
-  const fullVerification = governanceWorkflow?.indexOf('- run: python3 tools/agent-development-governance/governance.py verify') ?? -1
-  if (sourceBuild < 0 || fullVerification < 0 || sourceBuild > fullVerification) {
-    errors.push('Solar governance CI must build source libraries before full verification')
+  const sourceBuild = governanceGates.get('source-build')
+  if (JSON.stringify(sourceBuild?.command) !== JSON.stringify(['pnpm', 'run', 'build:lib'])) {
+    errors.push('Solar governance must own one shared source library build')
+  }
+  for (const [id, script] of [
+    ['typecheck', 'typecheck:contracts-ready'],
+    ['lint', 'lint:contracts-ready'],
+    ['doc-sync', 'doc-sync:contracts-ready'],
+  ]) {
+    const gate = governanceGates.get(id)
+    if (JSON.stringify(gate?.command) !== JSON.stringify(['pnpm', 'run', script])
+      || JSON.stringify(gate?.needs) !== JSON.stringify(['source-build'])) {
+      errors.push(`${id} must consume the prepared source build`)
+    }
+  }
+  const relatedTests = governanceGates.get('related-tests')
+  if (JSON.stringify(relatedTests?.command) !== JSON.stringify(['pnpm', 'exec', 'vitest', 'run', '--changed=origin/solar'])
+    || relatedTests?.exclusive !== true) {
+    errors.push('related-tests must use the bounded Vitest project worker budgets as an exclusive gate')
+  }
+  const threadSafeWorkers = /name: 'thread-safe',[\s\S]{0,300}maxWorkers: 2,/u.test(vitestConfig ?? '')
+  const processBoundWorkers = /name: 'process-bound',[\s\S]{0,200}maxWorkers: 1,/u.test(vitestConfig ?? '')
+  if (!threadSafeWorkers || !processBoundWorkers) {
+    errors.push('Vitest must keep thread-safe work bounded and process-bound work serial')
+  }
+  if (!governanceWorkflow?.includes('filter: blob:none')) {
+    errors.push('Solar governance checkout must use partial history blobs')
+  }
+  if (!governanceWorkflow?.includes('cache: pnpm')) {
+    errors.push('Solar governance must restore the pnpm cache')
+  }
+  if (governanceWorkflow?.includes('- run: corepack pnpm run build:lib')) {
+    errors.push('Solar governance workflow must not rebuild source outside the attested DAG')
   }
   for (const required of [
     '.agents/skills/dsh-code-as-harness/SKILL.md',
@@ -140,6 +170,7 @@ export function verifyRepository(root) {
     governanceManifest: readJson('tools/agent-development-governance/manifest.json'),
     governanceProfile: readJson('.agent-governance/profile.json'),
     governanceWorkflow: readFileSync(resolve(root, '.github/workflows/solar-governance.yml'), 'utf8'),
+    vitestConfig: readFileSync(resolve(root, 'vitest.config.ts'), 'utf8'),
     pathExists: path => existsSync(resolve(root, path)),
     subtreeImports: parseSubtreeImports(log),
     gitlinks,

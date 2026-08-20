@@ -12,10 +12,11 @@ The decisive waste: the instrumentation tax these suites paid contributed **noth
 
 ## Decision
 
-The `ci-coverage` aggregate splits into two parallel gates; every test still runs, and only the heavy suites stop paying the instrumentation tax:
+The `ci-coverage` aggregate splits into two parallel primary gates and one short dependent tail; every test still runs, and only the heavy suites stop paying the instrumentation tax:
 
 - **Instrumented gate** (`test:coverage`): sets `DSH_COVERAGE_EXEMPT_HEAVY=1`, which makes `vitest.config.ts` drop the exempt suites from both projects' excludes; every remaining file runs instrumented and carries the entire threshold proof. The variable is injected through the gate's own env (the existing `Gate.env` mechanism), not the workflow-global environment, so the uninstrumented gate beside it and any local `vitest run` never see it and behave unchanged.
-- **Uninstrumented gate** (`test:coverage-exempt-heavy`): runs exactly the exempt suites through paired positional filters, keeping the correctness signal whole.
+- **Uninstrumented parallel gate** (`test:coverage-exempt-heavy`): runs the compiler- and fixture-heavy exempt suites through paired positional filters, keeping their correctness signal whole while instrumented coverage runs beside it.
+- **Uninstrumented tail gate** (`test:coverage-exempt-tail`): runs the Oxlint responsiveness contract after both primary gates finish. On a standard four-core runner, sharing CPU with the instrumented gate pushed that contract past its unchanged five-second assertion even with one Oxlint thread; the dependent tail preserves the assertion without serializing the two long paths.
 
 `scripts/coverage-exempt.ts` is the single roster point, holding the membership contract and the filter/exclude pairs so the two sides cannot drift.
 
@@ -51,11 +52,11 @@ Coverage-result invariance therefore does not rest on humans maintaining the ros
 
 ## Verification
 
-Measured on CI (16-core runner): the gate segment went from 424 seconds to the two gates in parallel — `test:coverage` 95.9 s + `test:coverage-exempt-heavy` 71.1 s — with the lane converging on the slower at about 96 seconds; the instrumented gate reported zero threshold errors both before and after the split. `vitest list` verifies the env toggle adds and removes exactly the exempt set; `run-gates.spec.ts` covers the aggregate graph construction.
+Measured on CI (16-core runner): the original gate segment went from 424 seconds to the two primary gates in parallel — `test:coverage` 95.9 s + `test:coverage-exempt-heavy` 71.1 s — with the primary paths converging on the slower at about 96 seconds; the instrumented gate reported zero threshold errors both before and after the split. On standard four-core runners, the focused Oxlint tail follows those paths. `vitest list` verifies the env toggle adds and removes exactly the exempt set; `run-gates.spec.ts` covers the aggregate graph construction and tail dependencies.
 
 ## Consequences
 
 - The coverage lane's gate segment drops from about 7 minutes to about 96 seconds with no change in threshold outcome or executed test set.
-- `DSH_GATE_CONCURRENCY` has two schedulable gates in this lane again, so the aggregate scheduler is no longer a pass-through.
+- `DSH_GATE_CONCURRENCY` has two parallel primary gates plus one dependent tail in this lane, so the aggregate scheduler keeps the long paths concurrent without starving the responsiveness contract.
 - Adding a heavy suite to the roster requires the membership audit above; a wrong entry fails the instrumented gate loudly rather than eroding coverage silently.
 - The exempt suites no longer appear in the coverage report's file list of contributors; their correctness signal lives solely in the uninstrumented gate's pass/fail.

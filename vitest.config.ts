@@ -42,6 +42,12 @@ const windowsUnsupportedTests = process.platform === 'win32'
       'packages/subprocess/subprocess-local/tests/process-inspector.spec.ts',
       'packages/subprocess/subprocess-local/tests/spawn.spec.ts',
       'packages/subprocess/subprocess-local/tests/terminal.spec.ts',
+      // These local authorities intentionally expose Unix-domain sockets.
+      // Windows product support does not provide a named-pipe transport yet,
+      // so the native lane must not treat a filesystem path as a pipe name.
+      'packages/orchestration/orchestration-local/tests/daemon.spec.ts',
+      'packages/physical-operator/resident-operator-local/tests/daemon.spec.ts',
+      'packages/physical-operator/resident-operator-local/tests/codex-transport.spec.ts',
     ]
   : []
 
@@ -111,6 +117,12 @@ const processBoundTests = [
   'packages/context/time-context/tests/time-context.spec.ts',
   'packages/llm/llm-pi-ai/tests/adapter.spec.ts',
   'packages/boot/app-boot/tests/app-boot.spec.ts',
+  'packages/boot/app-boot/tests/hmr-config.spec.ts',
+  'packages/boot/app-boot/tests/user-patches.spec.ts',
+  // Loading every lazy Shiki grammar is CPU-bound and has a real 5s
+  // responsiveness contract. Keep it off the shared fork pool so a small CI
+  // runner cannot spend that contract competing with aggregate build gates.
+  'packages/client/ui-primitives/tests/code-block.client.spec.tsx',
   'packages/workflow/workflow-worker-thread/tests/session.spec.ts',
 ]
 
@@ -128,6 +140,9 @@ export default defineConfig({
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         test: {
           name: 'thread-safe',
+          // The process-bound project runs beside this one. Two plus its one
+          // worker leaves one standard-runner CPU for fixture subprocesses.
+          maxWorkers: 2,
           execArgv: vitestExecArgv,
           // Node 24 has aborted in its CJS lexer (v8::ToLocalChecked Empty
           // MaybeLocal in cjs_lexer::Parse) from worker threads on macOS,
@@ -146,6 +161,7 @@ export default defineConfig({
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         test: {
           name: 'process-bound',
+          maxWorkers: 1,
           execArgv: vitestExecArgv,
           pool: 'forks',
           setupFiles: ['./scripts/test-invariants.ts'],
