@@ -22,6 +22,8 @@ Solar 仓库没有注册任何自定义 runner，也没有故障切换变量。�
 
 最终的 macOS 治理运行还证明，仅限制 worker 并不能让整机级门禁获得资源独立性。`related-tests` 与源码构建和文档任务重叠时，HMR 配置、Oxlint 诊断和 ACP 持久化三个互不相关的时序契约同时失败，尽管 832 个文件中有 824 个通过，而且完全相同的套件在本地通过。共同信号是外层门禁竞争，因此修改这些产品超时只会掩盖调度器缺陷。
 
+标准 Windows 上的第一次原生运行也暴露了继承下来的平台边界。三个套件试图绑定 Unix-domain socket 路径，一个 POSIX 权限断言比较了 Windows 合成的 mode bits，另有两个集成 fixture 在完整 instrumented 清单运行时耗尽默认测试框架时序。这些不是 Windows 产品回归：本地编排与 Resident authority 尚未提供 named-pipe transport，而且仓库已经维护显式的 Windows 不支持测试清单。
+
 ## Decision
 
 Solar profile 采用 `max_concurrency: 2` 的有界依赖图。这样在 GitHub macOS 的三 CPU runner 上为子进程池保留一个 CPU，避免三个顶层门禁再分别乘以三个内部 worker。唯一的 `source-build` 门禁准备共享 TypeScript 输出；typecheck、lint、文档同步与 Web 构建通过各自的 `*:contracts-ready` 入口复用输出，并声明 `needs: [source-build]`。治理运行时展开传递依赖，只调度已就绪门禁；依赖失败时阻断消费者。
@@ -35,6 +37,8 @@ Vitest 在项目配置中拥有 worker 预算：线程安全测试最多使用�
 语义快照聚合现在在同一 runner 的完整覆盖率结束后运行，不再与浏览器、lint 和文档消费方竞争。`DSH_SNAPSHOT_MAX_CONCURRENCY` 同时约束文件 worker 与文件内并发；标准四核主机使用两个 worker，为真实子进程和基于定时器的传输契约保留 CPU。浏览器消费方通道仍在自己的 runner 上并行；其滚动 fixture 提供足够多的定速 chunk，保证在受支持的托管容量下历史加载与流式输出确实重叠，同时不增加任何断言超时。
 
 Web 聚合保留全部 77 个文件，但在其余 76 个文件之后，用第二个 Vitest 进程运行 Cordis 动态插件生命周期。这样 define、mount、stop 与持久日志断言获得全新的 runtime 边界，同时真实浏览器交互和精确 golden 比较保持不变。
+
+原生 Windows 清单现在只把三个 Unix-socket 文件加入既有不支持清单。Resident SQLite 生命周期测试继续运行；只有 POSIX 权限位断言在 POSIX 主机上执行。完整 invariant topology 测试与真实 Claude hook 子进程集成都获得明确的集成测试预算；单个 ACP closed-turn fixture 使用 250 ms 场景超时，避免 Windows 的定时器粒度把预期的领域错误替换成 Vitest 通用等待错误。应用超时、重试、fallback、覆盖率阈值和受支持产品路径均未改变。
 
 ## Alternatives considered
 
@@ -52,4 +56,4 @@ Web 聚合保留全部 77 个文件，但在其余 76 个文件之后，用第�
 
 ## Verification
 
-契约测试固定共享构建依赖、复用产物的消费者命令、精确且独占的 related-test 命令、worker 预算、部分 checkout、缓存，以及工作流不再执行第二次源码构建。治理运行时测试覆盖无效与循环依赖、传递选择、有界独立执行、独占执行和依赖失败。验收要求依次通过严格审计、monorepo 校验器、完整 Code-as-Harness 验证与证明，并取得精确提交对应的远端拉取请求 CI 结论。
+契约测试固定共享构建依赖、复用产物的消费者命令、精确且独占的 related-test 命令、worker 预算、Windows Unix-socket 排除、部分 checkout、缓存，以及工作流不再执行第二次源码构建。治理运行时测试覆盖无效与循环依赖、传递选择、有界独立执行、独占执行和依赖失败。验收要求依次通过严格审计、monorepo 校验器、完整 Code-as-Harness 验证与证明，并取得精确提交对应的远端拉取请求 CI 结论。

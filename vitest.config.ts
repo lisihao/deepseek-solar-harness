@@ -42,6 +42,12 @@ const windowsUnsupportedTests = process.platform === 'win32'
       'packages/subprocess/subprocess-local/tests/process-inspector.spec.ts',
       'packages/subprocess/subprocess-local/tests/spawn.spec.ts',
       'packages/subprocess/subprocess-local/tests/terminal.spec.ts',
+      // These local authorities intentionally expose Unix-domain sockets.
+      // Windows product support does not provide a named-pipe transport yet,
+      // so the native lane must not treat a filesystem path as a pipe name.
+      'packages/orchestration/orchestration-local/tests/daemon.spec.ts',
+      'packages/physical-operator/resident-operator-local/tests/daemon.spec.ts',
+      'packages/physical-operator/resident-operator-local/tests/codex-transport.spec.ts',
     ]
   : []
 

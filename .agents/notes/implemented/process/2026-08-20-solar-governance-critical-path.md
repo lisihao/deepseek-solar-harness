@@ -22,6 +22,8 @@ After those resource budgets were fixed, all 76 ordinary browser files and the r
 
 The final macOS governance run showed that worker bounds alone do not make a machine-wide gate resource-independent. While `related-tests` overlapped source build and documentation work, three unrelated timing contracts failed across HMR configuration, Oxlint diagnostics, and ACP persistence, although 824 of 832 files passed and the exact suite passed locally. The shared signal was outer-gate contention, so changing those product timeouts would have hidden the scheduler defect.
 
+The first native run on standard Windows also made an inherited platform boundary visible. Three suites attempted to bind Unix-domain socket paths, a POSIX mode assertion compared Windows' synthesized bits, and two integration fixtures exhausted default test-harness timing while the complete instrumented inventory was active. These were not Windows product regressions: the local orchestration and Resident authorities have no named-pipe transport, and the repository already maintains an explicit Windows-unsupported test roster.
+
 ## Decision
 
 The Solar profile is a bounded dependency graph with `max_concurrency: 2`. This leaves one CPU available for child-process pools on the three-CPU GitHub macOS runner instead of multiplying three top-level gates by three inner workers. A single `source-build` gate prepares shared TypeScript outputs. Typecheck, lint, documentation synchronization, and web build consume those outputs through their `*:contracts-ready` entry points and declare `needs: [source-build]`. The governance runtime expands transitive dependencies, schedules only ready gates, and blocks a consumer when its dependency fails.
@@ -35,6 +37,8 @@ The coverage lane additionally fixes `DSH_OXLINT_THREADS=1` and moves only `scri
 The semantic snapshot aggregate now follows exhaustive coverage on the same runner instead of competing with the browser, lint, and documentation consumers. `DSH_SNAPSHOT_MAX_CONCURRENCY` controls both file workers and in-file concurrency, with two workers on a standard four-core host so real child processes and timer-based transport contracts retain CPU. The browser consumer lane still runs in parallel on its own runner; its scroll fixture carries enough paced chunks to guarantee that history loading and streaming overlap on supported hosted capacity without increasing any assertion timeout.
 
 The Web aggregate preserves all 77 files but runs the Cordis dynamic-plugin lifecycle in a second Vitest process after the other 76 files. This gives define, mount, stop, and durable-log assertions a fresh runtime boundary while keeping the real browser interaction and exact golden comparison unchanged.
+
+The native Windows inventory now extends its existing unsupported roster with only the three Unix-socket files. Resident SQLite lifecycle tests remain active; only their POSIX permission-bit assertions are conditional on a POSIX host. The exhaustive invariant topology and the real Claude hook subprocess integration each receive an explicit integration-test budget, and the one ACP closed-turn fixture uses a 250 ms scenario timeout so Windows timer granularity cannot replace the intended domain error with Vitest's generic wait error. No application timeout, retry, fallback, coverage threshold, or supported product path changes.
 
 ## Alternatives considered
 
@@ -52,4 +56,4 @@ Independent ordinary gates use a two-slot outer budget, while `related-tests` is
 
 ## Verification
 
-Contract tests pin the shared build dependency, prepared consumer commands, exact exclusive related-test command, worker budgets, partial checkout, caches, and absence of a second workflow-level source build. Governance runtime tests cover invalid and cyclic dependencies, transitive selection, bounded independent execution, exclusive execution, and dependency failure. Acceptance requires the full strict audit, monorepo verifier, complete Code-as-Harness verification and attestation, followed by the remote pull-request CI verdict for the exact commit.
+Contract tests pin the shared build dependency, prepared consumer commands, exact exclusive related-test command, worker budgets, Windows Unix-socket exclusions, partial checkout, caches, and absence of a second workflow-level source build. Governance runtime tests cover invalid and cyclic dependencies, transitive selection, bounded independent execution, exclusive execution, and dependency failure. Acceptance requires the full strict audit, monorepo verifier, complete Code-as-Harness verification and attestation, followed by the remote pull-request CI verdict for the exact commit.

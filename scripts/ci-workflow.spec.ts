@@ -228,6 +228,14 @@ describe('CI workflow', () => {
     expect(config.match(/pool: 'forks'/g)).toHaveLength(2)
   })
 
+  it('keeps Unix-socket authorities outside the native Windows inventory', () => {
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).toContain("'packages/orchestration/orchestration-local/tests/daemon.spec.ts'")
+    expect(config).toContain("'packages/physical-operator/resident-operator-local/tests/daemon.spec.ts'")
+    expect(config).toContain("'packages/physical-operator/resident-operator-local/tests/codex-transport.spec.ts'")
+  })
+
   it('keeps native HMR watcher suites in the process-bound project', () => {
     const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
 

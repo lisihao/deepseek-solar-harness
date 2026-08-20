@@ -141,9 +141,13 @@ describe('ResidentStore', () => {
     store.markRunning('refused', 'native-session')
     store.settle('refused', { output: [], stopReason: 'refusal' })
     expect(store.inspectSession(accepted.sessionId)).toMatchObject({ lifecycle: 'idle', health: 'ok' })
-    expect(lstatSync(path).mode & 0o777).toBe(0o700)
-    for (const file of ['state.sqlite', 'state.sqlite-wal', 'state.sqlite-shm']) {
-      expect(lstatSync(join(path, file)).mode & 0o777).toBe(0o600)
+    // Windows reports synthesized mode bits and uses ACLs rather than POSIX
+    // permission bits; the mode contract applies only where chmod owns it.
+    if (process.platform !== 'win32') {
+      expect(lstatSync(path).mode & 0o777).toBe(0o700)
+      for (const file of ['state.sqlite', 'state.sqlite-wal', 'state.sqlite-shm']) {
+        expect(lstatSync(join(path, file)).mode & 0o777).toBe(0o600)
+      }
     }
     store.close()
   })
