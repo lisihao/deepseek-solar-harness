@@ -22,6 +22,6 @@ The added optional `mode` field changes the tool schema once when this Consumer 
 
 ## Known Limitations and Deferred Work
 
-- 两种模式共享同一稳定算子 ID 的容量；协议 v3 不排队。
+- 两种模式共享同一稳定算子 ID 的容量；协议 v4 不排队。
 - 稳定算子层只汇总可用性；Resident 执行时仍会再次严格校验产品资格。
 - 模型调用方不能使用 Resident 管理接口；这些接口只供可信插件和 CLI 使用。

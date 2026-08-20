@@ -22,6 +22,6 @@ The added optional `mode` field changes the tool schema once when this Consumer 
 
 ## Known Limitations and Deferred Work
 
-- Capacity is shared across both modes for a stable operator id; protocol version 3 does not queue.
+- Capacity is shared across both modes for a stable operator id; protocol version 4 does not queue.
 - Availability is summarized at the stable operator level; product qualification still fails loud at resident execution time.
 - Model callers cannot invoke Resident management methods; those remain trusted-plugin and CLI surfaces.

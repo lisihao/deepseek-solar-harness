@@ -22,6 +22,6 @@ No direct invalidation; the physical-operator Consumer owns its request schema.
 
 ## Known Limitations and Deferred Work
 
-- 协议 v3 不包含人工写接管与 control lease。
+- 协议 v4 不包含人工写接管与 control lease。
 - Durable Jobs 投影与亲和调度器是独立的后续 Consumer。
 - v3 面向本地 Provider；远程传输和 Windows named pipe 后置。

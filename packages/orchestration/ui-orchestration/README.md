@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-This trusted Host Consumer exposes the daemon-owned bounded run projection at `/api/orchestrations`. GET reads run/DAG/event state. POST accepts pause, resume, cancel, approval, rejection, and explicit indeterminate resolution only with the same-origin control header used by the Desktop panel.
+This trusted Host Consumer exposes the daemon-owned bounded run projection at `/api/orchestrations`. GET reads run/DAG/event state. The default list excludes local acceptance fixtures whose normalized workspace is under `/tmp/dsh-orchestration-*` or `/private/tmp/dsh-orchestration-*`; an explicit `run_id` still inspects the retained run. POST accepts pause, resume, cancel, approval, rejection, and explicit indeterminate resolution only with the same-origin control header used by the Desktop panel.
 
 ## Model Experience
 

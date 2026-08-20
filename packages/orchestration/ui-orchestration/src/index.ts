@@ -11,6 +11,17 @@ export const ORCHESTRATION_DASHBOARD_PATH = '/api/orchestrations'
 
 const MAX_CONTROL_BYTES = 64 * 1024
 
+/**
+ * Keep local orchestration acceptance fixtures out of the user task surface.
+ *
+ * @param workspace - Workspace path recorded by the orchestration run.
+ * @returns Whether the workspace belongs to the local acceptance-test namespace.
+ */
+export function isDiagnosticOrchestrationWorkspace(workspace: string): boolean {
+  const normalized = workspace.replaceAll('\\', '/')
+  return /\/(?:private\/)?tmp\/dsh-orchestration-/u.test(normalized)
+}
+
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   const body = JSON.stringify(value)
   response.writeHead(status, {
@@ -58,7 +69,11 @@ function requiredRevision(body: Record<string, unknown>): number {
 
 async function readProjection(ctx: Context, url: URL) {
   const runId = url.searchParams.get('run_id')
-  if (runId === null) return { generatedAt: new Date().toISOString(), runs: await ctx.orchestrations.list() }
+  if (runId === null) {
+    const runs = (await ctx.orchestrations.list())
+      .filter(run => !isDiagnosticOrchestrationWorkspace(run.workspace))
+    return { generatedAt: new Date().toISOString(), runs }
+  }
   const run = await ctx.orchestrations.inspect(OrchestrationRunId(runId))
   const events = await ctx.orchestrations.readEvents({
     runId: run.runId,

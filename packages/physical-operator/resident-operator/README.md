@@ -22,6 +22,6 @@ No direct invalidation; the physical-operator Consumer owns its request schema.
 
 ## Known Limitations and Deferred Work
 
-- Human write takeover and control leases are not part of protocol version 3.
+- Human write takeover and control leases are not part of protocol version 4.
 - A durable Jobs projection and affinity scheduler are intentionally separate consumers.
 - Version 3 is local-provider oriented; remote transports and Windows named pipes are deferred.

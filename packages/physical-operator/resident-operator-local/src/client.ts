@@ -25,6 +25,7 @@ import type { AcceptedTurn, TurnInspection } from './store.ts'
 const REQUIRED_METHODS = Object.freeze([
   'system.handshake',
   'operator.list',
+  'session.list',
   'session.inspect',
   'turn.execute',
   'turn.inspect',
@@ -37,8 +38,11 @@ const REQUIRED_METHODS = Object.freeze([
 const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 
 interface ListResponse {
-  readonly providers: ResidentProviderStatus[]
   readonly sessions: ResidentSessionSnapshot[]
+}
+
+interface ProviderResponse {
+  readonly providers: ResidentProviderStatus[]
 }
 
 /** Connection, startup, and polling policy for one daemon client. */
@@ -76,7 +80,7 @@ export class ResidentDaemonClient {
    * @returns one status per configured product Driver.
    */
   async providers(): Promise<ResidentProviderStatus[]> {
-    return (await this.request<ListResponse>('operator.list', {})).providers
+    return (await this.request<ProviderResponse>('operator.list', {})).providers
   }
 
   /**
@@ -84,7 +88,7 @@ export class ResidentDaemonClient {
    * @returns current Session snapshots in daemon order.
    */
   async list(): Promise<ResidentSessionSnapshot[]> {
-    return (await this.request<ListResponse>('operator.list', {})).sessions
+    return (await this.request<ListResponse>('session.list', {})).sessions
   }
 
   /**
