@@ -12,13 +12,15 @@ Solar 治理在 typecheck、lint、文档和 Web 构建门禁中重复执行相�
 
 第一次优化后的拉取请求运行暴露了第二个资源边界：三 CPU 的 macOS runner 把三个外层治理门禁与各自的内部 worker 池相乘。read-card 套件动态导入全部 Shiki 懒加载语法时，超过了保持不变的五秒响应契约，而其余 13,588 个测试全部通过。这是嵌套并行超卖，不是覆盖缺失，也不构成增加超时的理由。
 
+Solar 仓库没有注册任何自定义 runner，也没有故障切换变量。三个必需 Linux 作业和独立的原生 Windows 作业从上游继承了仅供组织内部使用的 runner 标签，排队超过两小时仍未获得 runner。这段延迟是无上限的资源分配等待，不是构建执行时间。
+
 ## Decision
 
 Solar profile 采用 `max_concurrency: 2` 的有界依赖图。这样在 GitHub macOS 的三 CPU runner 上为子进程池保留一个 CPU，避免三个顶层门禁再分别乘以三个内部 worker。唯一的 `source-build` 门禁准备共享 TypeScript 输出；typecheck、lint、文档同步与 Web 构建通过各自的 `*:contracts-ready` 入口复用输出，并声明 `needs: [source-build]`。治理运行时展开传递依赖，只调度已就绪门禁；依赖失败时阻断消费者。
 
 Vitest 在项目配置中拥有 worker 预算：线程安全测试最多使用三个 worker，进程约束测试使用一个。两个原生 HMR 套件和 CPU 密集型 read-card 懒加载语法套件只在进程约束项目运行，其行为与超时保持不变；语法套件在外层治理 DAG 活跃时仍必须遵守既有五秒响应契约。相关测试仍由 `vitest run --changed=origin/solar` 选择，因此治理 profile 不会覆盖项目级隔离。
 
-工作流使用部分 blob checkout、pnpm 与 Yarn 缓存，并取消已被新提交取代的运行。拉取请求 CI 继续作为自动、绑定提交的权威结论。完整的 [fork 适配器](2026-08-15-fork-branch-push-ci.md) 保留手工调度能力，供跨平台诊断使用，但不再重复每次 `codex/**` 分支推送。
+工作流使用部分 blob checkout、pnpm 与 Yarn 缓存，并取消已被新提交取代的运行。Solar 的必需拉取请求作业默认使用可移植的 `ubuntu-24.04` 与 `windows-2025` runner，并按标准四核容量限制内部并发。已有的仓库变量选择器仍允许显式配置自托管池，但日常正确性不再依赖上游组织的 runner 标签。拉取请求 CI 继续作为自动、绑定提交的权威结论。完整的 [fork 适配器](2026-08-15-fork-branch-push-ci.md) 保留手工调度能力，供跨平台诊断使用，但不再重复每次 `codex/**` 分支推送。
 
 ## Alternatives considered
 
@@ -32,7 +34,7 @@ Vitest 在项目配置中拥有 worker 预算：线程安全测试最多使用�
 
 ## Consequences
 
-独立门禁使用两个外层并发槽位，原生 watcher 与懒加载语法测试在 Vitest 内保持串行。每个任务完成后再输出其日志，使并发日志仍可阅读。没有拉取请求的分支推送不再自动获得 fork 适配器结论；创建或更新拉取请求会提供所需权威结论，诊断矩阵仍可手工调度。
+独立门禁使用两个外层并发槽位，原生 watcher 与懒加载语法测试在 Vitest 内保持串行。每个任务完成后再输出其日志，使并发日志仍可阅读。标准 runner 通道可能比组织专用的大型 runner 执行更久，但无需仓库外部配置即可开始运行，使公开仓保持可复现。没有拉取请求的分支推送不再自动获得 fork 适配器结论；创建或更新拉取请求会提供所需权威结论，诊断矩阵仍可手工调度。
 
 ## Verification
 

@@ -12,13 +12,15 @@ Two native HMR suites occasionally lost filesystem events only inside the long, 
 
 The first optimized pull-request run exposed a second resource boundary: the three-CPU macOS runner multiplied three outer governance gates by their inner worker pools. The read-card suite's dynamic imports of every lazy Shiki grammar then exceeded its unchanged five-second responsiveness contract, while 13,588 other tests passed. This was nested parallelism oversubscription, not missing coverage or a reason to increase the timeout.
 
+The Solar repository has no registered custom runners or failover variables. Three required Linux jobs and the independent native Windows job inherited organization-only runner labels from upstream and remained queued for more than two hours without receiving a runner. That latency was unbounded allocation wait, not build execution.
+
 ## Decision
 
 The Solar profile is a bounded dependency graph with `max_concurrency: 2`. This leaves one CPU available for child-process pools on the three-CPU GitHub macOS runner instead of multiplying three top-level gates by three inner workers. A single `source-build` gate prepares shared TypeScript outputs. Typecheck, lint, documentation synchronization, and web build consume those outputs through their `*:contracts-ready` entry points and declare `needs: [source-build]`. The governance runtime expands transitive dependencies, schedules only ready gates, and blocks a consumer when its dependency fails.
 
 Vitest owns its worker budgets in project configuration: thread-safe tests use at most three workers and process-bound tests use one. The two native HMR suites and the CPU-bound read-card lazy-grammar suite run only in the process-bound project; their behavior and timeouts are unchanged. The grammar suite must preserve its existing five-second responsiveness contract while the outer governance DAG is active. Related-test selection remains `vitest run --changed=origin/solar`, so the governance profile does not override project-level isolation.
 
-The workflow uses a partial blob checkout, pnpm and Yarn caches, and cancellation of superseded runs. Pull-request CI remains the automatic commit-bound authority. The complete [fork adapter](2026-08-15-fork-branch-push-ci.md) remains available through manual dispatch for cross-platform diagnosis, but no longer duplicates every `codex/**` branch push.
+The workflow uses a partial blob checkout, pnpm and Yarn caches, and cancellation of superseded runs. Required Solar pull-request jobs default to portable `ubuntu-24.04` and `windows-2025` runners, with their inner concurrency bounded for standard four-core capacity. The existing repository-variable selectors still permit an explicitly configured self-hosted pool, but normal correctness no longer depends on upstream organization runner labels. Pull-request CI remains the automatic commit-bound authority. The complete [fork adapter](2026-08-15-fork-branch-push-ci.md) remains available through manual dispatch for cross-platform diagnosis, but no longer duplicates every `codex/**` branch push.
 
 ## Alternatives considered
 
@@ -32,7 +34,7 @@ The workflow uses a partial blob checkout, pnpm and Yarn caches, and cancellatio
 
 ## Consequences
 
-Independent gates use a two-slot outer budget, while native-watcher and lazy-grammar tests remain serialized inside Vitest. Gate output is emitted after each task completes, so concurrent logs remain readable. A branch push without a pull request no longer receives the fork adapter's automatic verdict; opening or updating a pull request supplies the required authority, and the diagnostic matrix can still be dispatched manually.
+Independent gates use a two-slot outer budget, while native-watcher and lazy-grammar tests remain serialized inside Vitest. Gate output is emitted after each task completes, so concurrent logs remain readable. Standard runner lanes may execute longer than organization-specific larger runners, but they start without external runner provisioning and keep the public repository reproducible. A branch push without a pull request no longer receives the fork adapter's automatic verdict; opening or updating a pull request supplies the required authority, and the diagnostic matrix can still be dispatched manually.
 
 ## Verification
 
