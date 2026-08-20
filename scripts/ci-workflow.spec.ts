@@ -206,12 +206,22 @@ describe('CI workflow', () => {
     expect(config).not.toContain("pool: process.platform === 'win32' ? 'threads' : 'forks'")
     expect(config.match(/pool: 'forks'/g)).toHaveLength(2)
   })
+
+  it('keeps native HMR watcher suites in the process-bound project', () => {
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).toContain("'packages/boot/app-boot/tests/hmr-config.spec.ts'")
+    expect(config).toContain("'packages/boot/app-boot/tests/user-patches.spec.ts'")
+    const processBound = config.slice(config.indexOf('const processBoundTests = ['), config.indexOf('export default defineConfig'))
+    expect(processBound).toContain("'packages/boot/app-boot/tests/hmr-config.spec.ts'")
+    expect(processBound).toContain("'packages/boot/app-boot/tests/user-patches.spec.ts'")
+  })
 })
 
 describe('fork branch CI workflow', () => {
-  it('maps codex branch pushes to the repository-native required gates', () => {
+  it('keeps the duplicate fork matrix manual while pull-request CI owns automatic validation', () => {
     const workflow = loadWorkflow('.github/workflows/fork-ci.yml')
-    const push = workflowEvent(workflow, 'push')
+    const dispatch = workflowEvent(workflow, 'workflow_dispatch')
     const linux = workflowJob(workflow, 'linux-primary')
     const compat = workflowJob(workflow, 'node-compat')
     const pythonSdk = workflowJob(workflow, 'python-sdk')
@@ -226,7 +236,8 @@ describe('fork branch CI workflow', () => {
       throw new TypeError('fork CI jobs must define executable steps and aggregate dependencies')
     }
 
-    expect(push).toEqual({ branches: ['codex/**'] })
+    expect(dispatch).toEqual({})
+    expect(workflow.on).not.toHaveProperty('push')
     expect(workflow.permissions).toEqual({ contents: 'read' })
     expect(linux['runs-on']).toBe('ubuntu-latest')
     expect(JSON.stringify(linux.steps)).toContain('pnpm run check:ci:linux-primary')

@@ -27,6 +27,7 @@ export type Mode =
   | 'node-compat'
   | 'check-all'
   | 'doc-sync'
+  | 'doc-sync:contracts-ready'
 
 type GateResultStatus = 'passed' | 'failed' | 'skipped'
 type GateState = 'pending' | 'running' | GateResultStatus
@@ -112,10 +113,11 @@ function parseMode(raw: string | undefined): Mode {
     case 'node-compat':
     case 'check-all':
     case 'doc-sync':
+    case 'doc-sync:contracts-ready':
       return raw
     default:
       throw new Error(
-        `run-gates: expected mode ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-observational | node-compat | check-all | doc-sync, got ${JSON.stringify(raw)}.`,
+        `run-gates: expected mode ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-observational | node-compat | check-all | doc-sync | doc-sync:contracts-ready, got ${JSON.stringify(raw)}.`,
       )
   }
 }
@@ -135,7 +137,7 @@ export function defaultConcurrency(
   if (selectedMode === 'ci-consumers') return { workers: total, source: 'ci-consumers gate count' }
   // Local modes cap workers: several doc gates each build a full ts.Program,
   // so an uncapped default on a large host trades wall clock for memory blowups.
-  const localCap = selectedMode === 'check-all' || selectedMode === 'doc-sync'
+  const localCap = selectedMode === 'check-all' || selectedMode === 'doc-sync' || selectedMode === 'doc-sync:contracts-ready'
   const modeLimit = localCap ? Math.min(4, available) : available
   return {
     workers: Math.min(total, modeLimit),
@@ -239,6 +241,11 @@ export function gatesForMode(selected: Mode): Gate[] {
       ]
     case 'doc-sync':
       return docSyncLeafGates()
+    case 'doc-sync:contracts-ready':
+      return docSyncLeafGates({
+        docTypecheckEnv: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },
+        docTypecheckScript: 'doc-typecheck:contracts-ready',
+      })
   }
 }
 

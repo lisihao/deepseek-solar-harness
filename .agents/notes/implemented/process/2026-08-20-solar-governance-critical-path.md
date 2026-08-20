@@ -1,0 +1,37 @@
+# Agent Note: Solar governance critical path
+
+Status: implemented
+
+English | [中文](2026-08-20-solar-governance-critical-path.zh.md)
+
+## Problem
+
+Solar governance repeated the same TypeScript source preparation in typecheck, lint, documentation, and web-build gates. The complete related-test gate then ran 833 files with one worker. On GitHub's macOS runner it consumed 757 seconds, while documentation synchronization consumed another 173 seconds and the complete governance job approached 20 minutes. The same commit could also start both pull-request CI and the fork's full push adapter.
+
+Two native HMR suites occasionally lost filesystem events only inside the long, shared 833-file run. Thirty focused repetitions passed, and direct Chokidar experiments confirmed that ancestor watching is required for an initially missing exact path. The evidence therefore identified shared native-watcher pressure, not an insufficient timeout or incorrect application behavior.
+
+## Decision
+
+The Solar profile is a bounded dependency graph with `max_concurrency: 3`. A single `source-build` gate prepares shared TypeScript outputs. Typecheck, lint, documentation synchronization, and web build consume those outputs through their `*:contracts-ready` entry points and declare `needs: [source-build]`. The governance runtime expands transitive dependencies, schedules only ready gates, and blocks a consumer when its dependency fails.
+
+Vitest owns its worker budgets in project configuration: thread-safe tests use at most three workers and process-bound tests use one. The two native HMR suites run only in the process-bound project; their behavior and timeouts are unchanged. Related-test selection remains `vitest run --changed=origin/solar`, so the governance profile does not override project-level isolation.
+
+The workflow uses a partial blob checkout, pnpm and Yarn caches, and cancellation of superseded runs. Pull-request CI remains the automatic commit-bound authority. The complete [fork adapter](2026-08-15-fork-branch-push-ci.md) remains available through manual dispatch for cross-platform diagnosis, but no longer duplicates every `codex/**` branch push.
+
+## Alternatives considered
+
+**Increase HMR timeouts.** Rejected because focused stress passed and the failure was event loss under aggregate watcher pressure; waiting longer would hide rather than remove contention.
+
+**Use polling or allow empty project selections.** Rejected because polling adds constant filesystem load and `--passWithNoTests` could turn an incorrect test partition into apparent success.
+
+**Skip complete Code-as-Harness verification.** Rejected because optimization must preserve the same attested gate set and evidence semantics.
+
+**Run both automatic fork push CI and pull-request CI.** Rejected because they repeat the same full evidence for one commit. The manual adapter preserves the diagnostic matrix without taxing the normal path.
+
+## Consequences
+
+Independent gates can use up to three runner cores, while native-watcher tests remain serialized. Gate output is emitted after each task completes, so concurrent logs remain readable. A branch push without a pull request no longer receives the fork adapter's automatic verdict; opening or updating a pull request supplies the required authority, and the diagnostic matrix can still be dispatched manually.
+
+## Verification
+
+Contract tests pin the shared build dependency, prepared consumer commands, exact related-test command, worker budgets, partial checkout, caches, and absence of a second workflow-level source build. Governance runtime tests cover invalid and cyclic dependencies, transitive selection, bounded independent execution, and dependency failure. Acceptance requires the full strict audit, monorepo verifier, complete Code-as-Harness verification and attestation, followed by the remote pull-request CI verdict for the exact commit.

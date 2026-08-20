@@ -70,6 +70,7 @@ describe('gate graph validation', () => {
     'node-compat',
     'check-all',
     'doc-sync',
+    'doc-sync:contracts-ready',
   ] as const)('constructs and executes preflight for a valid non-empty %s graph', async (mode) => {
     const subject = withPnpmEntrypoint(() => gatesForMode(mode))
     const execute = vi.fn(async (item: Gate) => resultFor(item))
@@ -204,6 +205,16 @@ describe('Typert contract preparation', () => {
       gatesForMode('doc-sync').find(item => item.id === 'doc-typecheck'))
 
     expect(docTypecheck?.displayCommand).toBe('pnpm run doc-typecheck')
+  })
+
+  it('reuses prepared contracts in the governance documentation aggregate', () => {
+    const docTypecheck = withPnpmEntrypoint(() =>
+      gatesForMode('doc-sync:contracts-ready').find(item => item.id === 'doc-typecheck'))
+
+    expect(docTypecheck).toMatchObject({
+      displayCommand: 'pnpm run doc-typecheck:contracts-ready',
+      env: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },
+    })
   })
 })
 

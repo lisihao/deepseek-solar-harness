@@ -111,6 +111,8 @@ const processBoundTests = [
   'packages/context/time-context/tests/time-context.spec.ts',
   'packages/llm/llm-pi-ai/tests/adapter.spec.ts',
   'packages/boot/app-boot/tests/app-boot.spec.ts',
+  'packages/boot/app-boot/tests/hmr-config.spec.ts',
+  'packages/boot/app-boot/tests/user-patches.spec.ts',
   'packages/workflow/workflow-worker-thread/tests/session.spec.ts',
 ]
 
@@ -128,6 +130,7 @@ export default defineConfig({
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         test: {
           name: 'thread-safe',
+          maxWorkers: 3,
           execArgv: vitestExecArgv,
           // Node 24 has aborted in its CJS lexer (v8::ToLocalChecked Empty
           // MaybeLocal in cjs_lexer::Parse) from worker threads on macOS,
@@ -146,6 +149,7 @@ export default defineConfig({
         plugins: [pathsPlugin(), standardDecoratorPlugin()],
         test: {
           name: 'process-bound',
+          maxWorkers: 1,
           execArgv: vitestExecArgv,
           pool: 'forks',
           setupFiles: ['./scripts/test-invariants.ts'],

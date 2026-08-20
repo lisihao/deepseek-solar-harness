@@ -6,8 +6,8 @@ managed:
     package: '@lisihao/dsh-code-harness-governance@0.3.8'
     source: https://github.com/lisihao/agent-development-governance.git
     upstream: null
-    source_branch: codex/fix-dsh-governance-trace
-    accepted_sha: 9b315f75299b8b677a08c844cf294e35cdd366b9
+    source_branch: codex/parallel-governance-v031
+    accepted_sha: 88dbf7d39e0c746c496053daf107cceda7024dd4
     license: MIT
     license_status: package-declared
     license_evidence: plugins/managed/governance/plugins/deepseek-solar-harness-governance/package.json
