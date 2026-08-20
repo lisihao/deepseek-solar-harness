@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-20-solar-governance-critical-path.md
-2026-08-20-solar-governance-critical-path.md: 1fffa7a8b652e8d533efdaf53abab879e29cfd7e
-2026-08-20-solar-governance-critical-path.zh.md: 174fae4e425c9c5993ec1d03c3279e54628d7114
+2026-08-20-solar-governance-critical-path.md: af91af81903585db86c3f5b7c8f958026be01e80
+2026-08-20-solar-governance-critical-path.zh.md: 2b5f59f6db896d6b2604e02221f75e0b18e79697

@@ -9,7 +9,11 @@ import { spawn } from 'node:child_process'
 import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { COVERAGE_EXEMPT_ENV, coverageExemptHeavySuites } from './coverage-exempt.ts'
+import {
+  COVERAGE_EXEMPT_ENV,
+  coverageExemptParallelSuites,
+  coverageExemptTailSuites,
+} from './coverage-exempt.ts'
 
 /** A named aggregate exposed by the gate runner. */
 export type Mode =
@@ -482,12 +486,14 @@ function lintGate(options: { needs?: string[] } = {}): Gate {
 // under v8 instrumentation while contributing nothing the thresholds need
 // (membership rules in scripts/coverage-exempt.ts).
 //
-// DSH_COVERAGE_MAX_WORKERS is the lane's worker budget, so the two parallel
+// DSH_COVERAGE_MAX_WORKERS is the lane's worker budget, so the two primary
 // gates split it instead of each claiming it whole (the failover pool's
 // 8 x 6-instance bound assumes one lane never exceeds its value). The exempt
-// gate's wall clock is dominated by its longest single file, so it takes the
-// small share. A budget of 1 gives each gate 1 worker; lanes that need a
-// strict total of one (the serial reference jobs) also set
+// parallel gate's wall clock is dominated by its longest single file, so it
+// takes the small share. The responsiveness-contract tail waits for both
+// primary gates and therefore does not add to their concurrent worker budget.
+// A budget of 1 gives each primary gate 1 worker; lanes that need a strict
+// total of one (the serial reference jobs) also set
 // DSH_GATE_CONCURRENCY=1, which keeps the gates from overlapping at all.
 function coverageWorkerArgs(): { instrumented: string[]; exempt: string[] } {
   const [flag] = positiveIntArg('DSH_COVERAGE_MAX_WORKERS', '--maxWorkers')
@@ -516,10 +522,19 @@ function coverageGates(): Gate[] {
     pnpmExec('coverage-exempt-heavy', [
       'vitest',
       'run',
-      ...coverageExemptHeavySuites.map(suite => suite.filter),
+      ...coverageExemptParallelSuites.map(suite => suite.filter),
       ...workers.exempt,
     ], {
       label: 'test:coverage-exempt-heavy',
+    }),
+    pnpmExec('coverage-exempt-tail', [
+      'vitest',
+      'run',
+      ...coverageExemptTailSuites.map(suite => suite.filter),
+      ...workers.exempt,
+    ], {
+      label: 'test:coverage-exempt-tail',
+      needs: ['coverage', 'coverage-exempt-heavy'],
     }),
   ]
 }

@@ -14,7 +14,7 @@ The first optimized pull-request run exposed a second resource boundary: the thr
 
 The Solar repository has no registered custom runners or failover variables. Three required Linux jobs and the independent native Windows job inherited organization-only runner labels from upstream and remained queued for more than two hours without receiving a runner. That latency was unbounded allocation wait, not build execution.
 
-After moving those jobs to standard four-core runners, the coverage lane exposed one final nested budget: its instrumented and exempt suites each used one worker, while the Oxlint contract spawned a child process that defaulted to every available core. That contention alone pushed the contract's final-diagnostics case beyond its unchanged five-second limit; the instrumented coverage suite and the other 216 exempt tests passed.
+After moving those jobs to standard four-core runners, the coverage lane exposed one final nested budget: its instrumented and exempt suites each used one worker, while the Oxlint responsiveness contract spawned child processes under the remaining shared CPU pressure. Limiting Oxlint itself to one thread was insufficient: the contract's final-diagnostics case still reached 5.228 seconds against its unchanged five-second limit, while the instrumented coverage suite and the other 216 exempt tests passed.
 
 ## Decision
 
@@ -24,7 +24,7 @@ Vitest owns its worker budgets in project configuration: thread-safe tests use a
 
 The workflow uses a partial blob checkout, pnpm and Yarn caches, and cancellation of superseded runs. Required Solar pull-request jobs default to portable `ubuntu-24.04` and `windows-2025` runners, with their inner concurrency bounded for standard four-core capacity. The existing repository-variable selectors still permit an explicitly configured self-hosted pool, but normal correctness no longer depends on upstream organization runner labels. Pull-request CI remains the automatic commit-bound authority. The complete [fork adapter](2026-08-15-fork-branch-push-ci.md) remains available through manual dispatch for cross-platform diagnosis, but no longer duplicates every `codex/**` branch push.
 
-The coverage lane additionally fixes `DSH_OXLINT_THREADS=1`. Its two coverage suites already run concurrently, so the Oxlint subprocess remains responsive without oversubscribing the standard runner. Test selection, coverage thresholds, and the five-second contract are unchanged.
+The coverage lane additionally fixes `DSH_OXLINT_THREADS=1` and moves only `scripts/oxlint-contract.spec.ts` into a dependent tail gate. The instrumented and remaining exempt suites still run concurrently; after both finish, the Oxlint responsiveness contract runs on the idle runner. This adds only the focused tail rather than serializing the two long coverage paths. Test selection, coverage thresholds, and the five-second contract are unchanged.
 
 ## Alternatives considered
 

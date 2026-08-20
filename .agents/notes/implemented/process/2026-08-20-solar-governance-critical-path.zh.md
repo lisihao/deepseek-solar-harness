@@ -14,7 +14,7 @@ Solar 治理在 typecheck、lint、文档和 Web 构建门禁中重复执行相�
 
 Solar 仓库没有注册任何自定义 runner，也没有故障切换变量。三个必需 Linux 作业和独立的原生 Windows 作业从上游继承了仅供组织内部使用的 runner 标签，排队超过两小时仍未获得 runner。这段延迟是无上限的资源分配等待，不是构建执行时间。
 
-把这些作业迁移到标准四核 runner 后，覆盖率通道暴露出最后一处嵌套预算：instrumented 与 exempt 套件各用一个 worker 并行运行，而 Oxlint 契约会再启动一个默认占用全部可用核心的子进程。只有这处竞争把 final-diagnostics 用例推过了保持不变的五秒限制；instrumented 覆盖率套件和其余 216 个 exempt 测试全部通过。
+把这些作业迁移到标准四核 runner 后，覆盖率通道暴露出最后一处嵌套预算：instrumented 与 exempt 套件各用一个 worker 并行运行，而 Oxlint 响应时间契约会在剩余的共享 CPU 压力下启动子进程。仅把 Oxlint 自身限制为单线程仍不够：final-diagnostics 用例耗时 5.228 秒，超过保持不变的五秒限制；instrumented 覆盖率套件和其余 216 个 exempt 测试全部通过。
 
 ## Decision
 
@@ -24,7 +24,7 @@ Vitest 在项目配置中拥有 worker 预算：线程安全测试最多使用�
 
 工作流使用部分 blob checkout、pnpm 与 Yarn 缓存，并取消已被新提交取代的运行。Solar 的必需拉取请求作业默认使用可移植的 `ubuntu-24.04` 与 `windows-2025` runner，并按标准四核容量限制内部并发。已有的仓库变量选择器仍允许显式配置自托管池，但日常正确性不再依赖上游组织的 runner 标签。拉取请求 CI 继续作为自动、绑定提交的权威结论。完整的 [fork 适配器](2026-08-15-fork-branch-push-ci.md) 保留手工调度能力，供跨平台诊断使用，但不再重复每次 `codex/**` 分支推送。
 
-覆盖率通道还固定 `DSH_OXLINT_THREADS=1`。它的两条覆盖率套件已经并行执行，因此限制 Oxlint 子进程可在不超卖标准 runner 的前提下维持响应。测试选择、覆盖率阈值与五秒契约均未改变。
+覆盖率通道还固定 `DSH_OXLINT_THREADS=1`，并只把 `scripts/oxlint-contract.spec.ts` 移入依赖尾节点。instrumented 与其余 exempt 套件仍然并行；两者结束后，Oxlint 响应时间契约在空闲 runner 上运行。这样只增加一个聚焦尾节点，不会把两条长覆盖率路径整体串行化。测试选择、覆盖率阈值与五秒契约均未改变。
 
 ## Alternatives considered
 

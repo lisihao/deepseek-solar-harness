@@ -99,6 +99,7 @@ describe('gate graph validation', () => {
 
     expect(byId.get('coverage')?.allowFailure).not.toBe(true)
     expect(byId.get('coverage-exempt-heavy')?.allowFailure).not.toBe(true)
+    expect(byId.get('coverage-exempt-tail')?.allowFailure).not.toBe(true)
     expect(byId.get('duplication')?.allowFailure).toBe(true)
   })
 
@@ -131,6 +132,29 @@ describe('gate graph validation', () => {
     expect(execute).toHaveBeenCalledOnce()
     expect(execute).toHaveBeenCalledWith(root)
     expect(results[0]).toMatchObject({ gate: dependent, status: 'skipped', error: 'dependency failed or skipped: root' })
+  })
+})
+
+describe('coverage gate resource graph', () => {
+  it('runs the Oxlint responsiveness contract only after both primary coverage gates', () => {
+    const subject = withEnv('DSH_COVERAGE_MAX_WORKERS', '2', () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-coverage')))
+    const byId = new Map(subject.map(gate => [gate.id, gate]))
+
+    expect(subject.map(gate => gate.id)).toEqual([
+      'coverage',
+      'coverage-exempt-heavy',
+      'coverage-exempt-tail',
+    ])
+    expect(byId.get('coverage-exempt-heavy')?.args).not.toContain('scripts/oxlint-contract.spec.ts')
+    expect(byId.get('coverage-exempt-tail')).toMatchObject({
+      label: 'test:coverage-exempt-tail',
+      needs: ['coverage', 'coverage-exempt-heavy'],
+    })
+    expect(byId.get('coverage-exempt-tail')?.args).toEqual(expect.arrayContaining([
+      'scripts/oxlint-contract.spec.ts',
+      '--maxWorkers=1',
+    ]))
   })
 })
 
