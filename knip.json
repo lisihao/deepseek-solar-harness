@@ -814,6 +814,36 @@
         "@deepseek-ai/.+"
       ]
     },
+    "packages/bundle/orchestrations": {
+      "ignoreDependencies": [
+        "@deepseek-ai/.+"
+      ]
+    },
+    "packages/orchestration/capability-capsule": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/orchestration/context-compiler": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/orchestration/intent-compiler": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/orchestration/orchestration": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/orchestration/ui-orchestration": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
     "packages/bundle/headless": {
       "ignoreDependencies": [
         "@deepseek-ai/dsh-code-runtime-worker-thread"
