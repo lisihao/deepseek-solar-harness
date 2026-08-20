@@ -127,6 +127,10 @@ jobs:
       # workers; process-bound suites remain isolated in forks.
       DSH_COVERAGE_MAX_WORKERS: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '2' }}
       DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '3' || '2' }}
+      # The coverage and exempt suites already run concurrently. Keep the
+      # repository Oxlint contract's child process from consuming every core
+      # and starving its unchanged five-second responsiveness assertion.
+      DSH_OXLINT_THREADS: '1'
     steps:
       - uses: actions/checkout@v6
         with:

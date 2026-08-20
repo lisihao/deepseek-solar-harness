@@ -103,6 +103,7 @@ describe('CI workflow', () => {
       expect(job['runs-on']).toContain('ubuntu-24.04')
       expect(job['runs-on']).not.toContain('dsh-ubuntu-24-04-16core')
     }
+    expect(node24Coverage.env).toMatchObject({ DSH_OXLINT_THREADS: '1' })
     expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
     expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
     expect(aggregate['runs-on']).toContain('vm-backup')

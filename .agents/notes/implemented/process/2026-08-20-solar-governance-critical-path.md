@@ -14,6 +14,8 @@ The first optimized pull-request run exposed a second resource boundary: the thr
 
 The Solar repository has no registered custom runners or failover variables. Three required Linux jobs and the independent native Windows job inherited organization-only runner labels from upstream and remained queued for more than two hours without receiving a runner. That latency was unbounded allocation wait, not build execution.
 
+After moving those jobs to standard four-core runners, the coverage lane exposed one final nested budget: its instrumented and exempt suites each used one worker, while the Oxlint contract spawned a child process that defaulted to every available core. That contention alone pushed the contract's final-diagnostics case beyond its unchanged five-second limit; the instrumented coverage suite and the other 216 exempt tests passed.
+
 ## Decision
 
 The Solar profile is a bounded dependency graph with `max_concurrency: 2`. This leaves one CPU available for child-process pools on the three-CPU GitHub macOS runner instead of multiplying three top-level gates by three inner workers. A single `source-build` gate prepares shared TypeScript outputs. Typecheck, lint, documentation synchronization, and web build consume those outputs through their `*:contracts-ready` entry points and declare `needs: [source-build]`. The governance runtime expands transitive dependencies, schedules only ready gates, and blocks a consumer when its dependency fails.
@@ -21,6 +23,8 @@ The Solar profile is a bounded dependency graph with `max_concurrency: 2`. This 
 Vitest owns its worker budgets in project configuration: thread-safe tests use at most three workers and process-bound tests use one. The two native HMR suites and the CPU-bound read-card lazy-grammar suite run only in the process-bound project; their behavior and timeouts are unchanged. The grammar suite must preserve its existing five-second responsiveness contract while the outer governance DAG is active. Related-test selection remains `vitest run --changed=origin/solar`, so the governance profile does not override project-level isolation.
 
 The workflow uses a partial blob checkout, pnpm and Yarn caches, and cancellation of superseded runs. Required Solar pull-request jobs default to portable `ubuntu-24.04` and `windows-2025` runners, with their inner concurrency bounded for standard four-core capacity. The existing repository-variable selectors still permit an explicitly configured self-hosted pool, but normal correctness no longer depends on upstream organization runner labels. Pull-request CI remains the automatic commit-bound authority. The complete [fork adapter](2026-08-15-fork-branch-push-ci.md) remains available through manual dispatch for cross-platform diagnosis, but no longer duplicates every `codex/**` branch push.
+
+The coverage lane additionally fixes `DSH_OXLINT_THREADS=1`. Its two coverage suites already run concurrently, so the Oxlint subprocess remains responsive without oversubscribing the standard runner. Test selection, coverage thresholds, and the five-second contract are unchanged.
 
 ## Alternatives considered
 
