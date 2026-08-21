@@ -43,14 +43,14 @@ const residentModule = pathToFileURL(join(
   'lib',
   'index.js',
 )).href
-const primeDriverModule = pathToFileURL(join(
+const primeDriverModule = join(
   unpackedRoot,
   'node_modules',
   '@deepseek-ai',
   'dsh-resident-operator-prime-agent',
   'lib',
   'index.js',
-)).href
+)
 const { installNativeProductRuntime } = await import(runtimeModule)
 const { ResidentDaemonClient } = await import(residentModule)
 // macOS caps Unix-domain socket paths; keep the real control path below 104 bytes.

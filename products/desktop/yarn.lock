@@ -2955,7 +2955,7 @@ __metadata:
 
 "@deepseek-ai/dsh-resident-operator-prime-agent@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-prime-agent-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-resident-operator-prime-agent@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-prime-agent-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-prime-agent-0.1.0-rc.5.tgz::hash=b6d235&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-resident-operator-prime-agent@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-prime-agent-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-prime-agent-0.1.0-rc.5.tgz::hash=59b4c6&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     prime-agent: "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/releases/v0.7.4/prime-agent-0.7.4.tgz"
   peerDependencies:
@@ -2965,7 +2965,7 @@ __metadata:
     "@deepseek-ai/dsh-physical-operator": ^0.1.0-rc.5
     "@deepseek-ai/dsh-resident-operator": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
-  checksum: 10c0/ea1f29211cc240787adde72be15f3e661082ced4a29ff56330e5224a3e589d7602ba93a5f74e7f98de9d22bd5acbfa5e892f1156573fe269a9568a6b1962d070
+  checksum: 10c0/50813e2683fc4f37d66c4fee33aa6af7d99bbc5f845a6020a7f34e9edd6fa9720ea8262eb432f02354929ceca4cf1e658f90a318113b2093b67bf6c46e3bde2c
   languageName: node
   linkType: hard
 

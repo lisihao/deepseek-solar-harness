@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { PrimeAgentResidentDriver } from '../src/index.ts'
+import { PrimeAgentResidentDriver, primeAgentChildEnvironment } from '../src/index.ts'
 
 const roots: string[] = []
 const fixture = fileURLToPath(new URL('./fixtures/fake-prime-agent.mjs', import.meta.url))
@@ -25,6 +25,11 @@ afterEach(() => {
 })
 
 describe('PrimeAgentResidentDriver', () => {
+  it('re-enters Electron as Node only for the packaged Prime CLI child', () => {
+    expect(primeAgentChildEnvironment(undefined)).not.toHaveProperty('ELECTRON_RUN_AS_NODE')
+    expect(primeAgentChildEnvironment('43.4.0')).toMatchObject({ ELECTRON_RUN_AS_NODE: '1' })
+  })
+
   it('resolves the pinned ESM package CLI without a CommonJS export', async () => {
     const stateRoot = root()
     const driver = new PrimeAgentResidentDriver({ stateRoot, authPath: auth(stateRoot, 'api_key') })

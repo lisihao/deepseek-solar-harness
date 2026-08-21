@@ -28,6 +28,7 @@ import {
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 
 const execFileAsync = promisify(execFile)
+const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 
 /** Exact Prime Agent release qualified by this Driver. */
 export const EXPECTED_PRIME_AGENT_VERSION = '0.7.4'
@@ -102,6 +103,24 @@ function baseStatus(overrides: Partial<ResidentProviderStatus>): ResidentProvide
   }
 }
 
+/**
+ * Build the credential-scrubbed environment used to execute the bundled Prime CLI.
+ * @param electronVersion - Electron host version requiring RunAsNode, or undefined for Node.
+ * @returns a fresh child-only environment with the correct Electron execution mode.
+ */
+export function primeAgentChildEnvironment(
+  electronVersion: string | undefined = process.versions.electron,
+): Record<string, string> {
+  const environment = scrubbedParentEnv()
+  for (const key of Object.keys(environment)) {
+    if (key.toUpperCase() === ELECTRON_RUN_AS_NODE) Reflect.deleteProperty(environment, key)
+  }
+  if (electronVersion !== undefined && electronVersion.length > 0) {
+    environment[ELECTRON_RUN_AS_NODE] = '1'
+  }
+  return environment
+}
+
 function textPrompt(prompt: readonly ContentBlock[]): string {
   if (prompt.length === 0) throw new ResidentOperatorError('Prime Agent prompt must not be empty', 'INVALID_RESULT')
   const texts = prompt.map((block) => {
@@ -161,7 +180,7 @@ class PrimeRpcProcess {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
-        ...scrubbedParentEnv(),
+        ...primeAgentChildEnvironment(),
         RLM_MAX_DEPTH: '1',
       },
     })
@@ -284,7 +303,7 @@ export class PrimeAgentResidentDriver implements ResidentProductDriver {
     try {
       const { stdout, stderr } = await execFileAsync(process.execPath, [this.cliPath, '--version'], {
         encoding: 'utf8',
-        env: scrubbedParentEnv(),
+        env: primeAgentChildEnvironment(),
         timeout: 15_000,
         maxBuffer: 1024 * 1024,
       })
