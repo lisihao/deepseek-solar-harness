@@ -39,7 +39,7 @@ interface ToolProviderResult {
 
 ## Prompt sections
 
-`PromptSection` is a readonly same-process registration contract. Its text may be static or resolved from the current assembly context. One effective `complete` section becomes the sole prompt section after cooperative assembly.
+`PromptSection` is a readonly same-process registration contract. Its text may be static or resolved from the current assembly context, and generated literal text can disable DSH variable interpolation. One effective `complete` section becomes the sole prompt section after cooperative assembly.
 
 ```ts type-equiv
 /** One contributed section of the system prompt (registry input). */
@@ -58,6 +58,11 @@ interface PromptSection {
    * interpolated later, by {@link renderPrompt}.
    */
   readonly text: string | ((context: AssembleContext) => string)
+  /**
+   * Whether {@link renderPrompt} interprets `{{variable}}` references. Defaults
+   * to true; generated text that documents another template language sets false.
+   */
+  readonly interpolate?: boolean
   /**
    * Treat this contribution as the complete system prompt. Assembly still
    * runs the cooperative waterfall so tools, contexts, and variables can be
@@ -156,7 +161,7 @@ variable(name: string, provider: (context: AssembleContext) => string | undefine
 async assemble(context: AssembleContext = {}): Promise<PromptAssembly>
 ```
 
-Source: [`packages/core/system-prompt/src/index.ts:338`](../../packages/core/system-prompt/src/index.ts)
+Source: [`packages/core/system-prompt/src/index.ts:347`](../../packages/core/system-prompt/src/index.ts)
 
 <a id="system-prompt-events"></a>
 

@@ -44,6 +44,17 @@ async function isolatedSkillsConfig(catalogDescriptionMaxLength?: number): Promi
   }
 }
 
+async function withIsolatedWorkingDirectory<T>(run: () => Promise<T>): Promise<T> {
+  const previous = process.cwd()
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-acp-demo-cwd-'))
+  process.chdir(directory)
+  try {
+    return await run()
+  } finally {
+    process.chdir(previous)
+  }
+}
+
 async function composePrefix(ctx: Context): Promise<Message[]> {
   const agent = ctx.agentLoop.create(SessionId(`acp-demo-prefix-${randomUUID()}`), {}, { cwd: '/tmp' })
   const signal = new AbortController().signal
@@ -87,7 +98,6 @@ describe('dsh-acp-demo composition', () => {
       provider: 'mock',
       model: 'mock',
       persona: 'hi',
-      persistenceRoot: '/tmp/dsh-acp-demo-test',
       persistenceCompression: 'none',
       skills: await isolatedSkillsConfig(),
       workspaceContext: false,
@@ -126,16 +136,18 @@ describe('dsh-acp-demo composition', () => {
     // bypasses the schema's `.default(...)`: call `apply` directly (not via
     // `ctx.plugin`, which validates+defaults the config first) with no
     // persistenceRoot, so the runtime fallback is the one that fires.
-    const ctx = new Context()
-    // No persona: covers the omitted-persona forwarding branch too.
-    await acpAgent.apply(ctx, {
-      provider: 'mock',
-      model: 'mock',
-      skills: await isolatedSkillsConfig(),
-      workspaceContext: false,
+    await withIsolatedWorkingDirectory(async () => {
+      const ctx = new Context()
+      // No persona: covers the omitted-persona forwarding branch too.
+      await acpAgent.apply(ctx, {
+        provider: 'mock',
+        model: 'mock',
+        skills: await isolatedSkillsConfig(),
+        workspaceContext: false,
+      })
+      expect(ctx.get('sessionPersistence')).toBeDefined()
+      await ctx.fiber.dispose()
     })
-    expect(ctx.get('sessionPersistence')).toBeDefined()
-    await ctx.fiber.dispose()
   })
 
   it('forwards explicit project-instruction controls to the bundled spine', async () => {
@@ -143,7 +155,6 @@ describe('dsh-acp-demo composition', () => {
       provider: 'mock',
       model: 'mock',
       persona: 'hi',
-      persistenceRoot: '/tmp/dsh-acp-demo-workspace-context',
       workspaceContext: false,
     })
     expect(ctx.get('agents')).toBeDefined()
@@ -174,7 +185,6 @@ describe('dsh-acp-demo composition', () => {
       provider: 'mock',
       model: 'mock',
       maxParallelToolCalls: 3,
-      persistenceRoot: '/tmp/dsh-acp-demo-test-parallel',
       skills: await isolatedSkillsConfig(),
       workspaceContext: false,
     })
@@ -232,7 +242,6 @@ describe('dsh-acp-demo composition', () => {
       provider: 'mock',
       model: 'mock',
       toolOrder: ['zulu', TOOL_ORDER_REST],
-      persistenceRoot: '/tmp/dsh-acp-demo-test-tool-order',
       workspaceContext: false,
     })
     // The bundle's own bash tools pend on the absent `ctx.shell` executor in
