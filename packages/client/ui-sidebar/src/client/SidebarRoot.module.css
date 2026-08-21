@@ -242,33 +242,53 @@
 }
 
 /* Footer seats: additive actions stack above Settings. Each occupant owns its
-   button geometry and hover chrome. */
+   button geometry and hover chrome. The action list is independently bounded
+   so a plugin-heavy profile cannot squeeze the Workspace/Session browser out
+   of the column. */
 .footArea {
   flex: none;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.settingsArea,
-.footerActions {
+.settingsArea {
   flex: none;
   min-width: 0;
   width: 100%;
 }
 
 .footerActions {
+  flex: none;
+  min-width: 0;
+  width: 100%;
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  max-height: min(40vh, 320px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .collapsed .footArea {
   align-items: center;
 }
 
-.collapsed .settingsArea,
-.collapsed .footerActions {
+.collapsed .settingsArea {
   display: flex;
+  align-items: center;
   justify-content: center;
   width: auto;
+}
+
+.collapsed .footerActions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  scrollbar-gutter: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
