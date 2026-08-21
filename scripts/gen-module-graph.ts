@@ -15,6 +15,7 @@ import {
 
 const root = resolve(import.meta.dirname, '..')
 const OUT = 'docs/module-graph.md'
+const OUT_ZH = 'docs/module-graph.zh.md'
 type Pkg = PackageGraphNode
 
 const GROUP_ORDER = [
@@ -96,24 +97,49 @@ function render(pkgs: Pkg[]): string {
   ].join('\n')
 }
 
+/** Render the reviewed Chinese counterpart over the same generated graph body. */
+function renderZh(pkgs: Pkg[]): string {
+  const english = render(pkgs)
+  const graphStart = english.indexOf('```mermaid')
+  if (graphStart < 0) throw new Error('generated module graph is missing its Mermaid block')
+  const graph = english.slice(graphStart)
+    .replace('| Package | Group | Depends on |', '| 包 | 分组 | 依赖 |')
+  return [
+    '<!-- 由 scripts/gen-module-graph.ts 生成，请勿手工编辑。',
+    '     运行 `pnpm run gen-module-graph` 重新生成。 -->',
+    '',
+    '# 模块依赖关系图',
+    '',
+    '[English](module-graph.md) | 中文',
+    '',
+    '`@deepseek-ai/dsh-*` harness 包之间的依赖关系。该关系图根据各包的 `peerDependencies`（规范的运行时依赖信号）生成，并按 `packages/<group>/<pkg>` 层级分组。边 `a --> b` 表示包 `a` 依赖包 `b`。名称中的 `@deepseek-ai/dsh-` 前缀已移除。',
+    '',
+    graph,
+  ].join('\n')
+}
+
 const content = render(collectPackageGraph(root, GROUP_ORDER, 'gen-module-graph'))
+const contentZh = renderZh(collectPackageGraph(root, GROUP_ORDER, 'gen-module-graph'))
 
 if (process.argv.includes('--check')) {
-  let committed: string | null = null
-  try {
-    committed = readFileSync(resolve(root, OUT), 'utf8')
-  } catch {
-    // A missing artifact is the expected read failure. Any read failure has the
-    // same remedy here—regenerate—so it is reported as stale below.
-    committed = null
+  for (const [path, expected] of [[OUT, content], [OUT_ZH, contentZh]] as const) {
+    let committed: string | null = null
+    try {
+      committed = readFileSync(resolve(root, path), 'utf8')
+    } catch {
+      // A missing artifact is the expected read failure. Any read failure has
+      // the same remedy here—regenerate—so it is reported as stale below.
+      committed = null
+    }
+    if (committed !== expected) {
+      console.error(`gen-module-graph: ${path} is stale. Run \`pnpm run gen-module-graph\` and commit ${path}.`)
+      process.exit(1)
+    }
   }
-  if (committed === content) {
-    console.log(`gen-module-graph: ${OUT} is up to date.`)
-    process.exit(0)
-  }
-  console.error(`gen-module-graph: ${OUT} is stale. Run \`pnpm run gen-module-graph\` and commit ${OUT}.`)
-  process.exit(1)
+  console.log(`gen-module-graph: ${OUT} and ${OUT_ZH} are up to date.`)
+  process.exit(0)
 }
 
 writeFileSync(resolve(root, OUT), content)
-console.log(`gen-module-graph: wrote ${OUT}.`)
+writeFileSync(resolve(root, OUT_ZH), contentZh)
+console.log(`gen-module-graph: wrote ${OUT} and ${OUT_ZH}.`)

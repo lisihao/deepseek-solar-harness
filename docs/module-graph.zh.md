@@ -1,5 +1,5 @@
-<!-- 英文源文件由 scripts/gen-module-graph.ts 生成；本中文文件是通过双语配对维护的经评审对侧。
-     更新时先运行 `pnpm run gen-module-graph` 更新英文，再更新本文件并运行 `pnpm run verify-translation-pairing --write docs/module-graph.md` 重新记录配对。 -->
+<!-- 由 scripts/gen-module-graph.ts 生成，请勿手工编辑。
+     运行 `pnpm run gen-module-graph` 重新生成。 -->
 
 # 模块依赖关系图
 
@@ -243,9 +243,17 @@ flowchart TD
   subgraph group_orchestration["packages/orchestration"]
     pkg_capability_capsule["capability-capsule"]
     pkg_context_compiler["context-compiler"]
+    pkg_continual_harness["continual-harness"]
+    pkg_continual_harness_local["continual-harness-local"]
     pkg_intent_compiler["intent-compiler"]
+    pkg_model_allocation["model-allocation"]
+    pkg_model_allocation_local["model-allocation-local"]
+    pkg_model_worker["model-worker"]
+    pkg_model_worker_deepseek["model-worker-deepseek"]
     pkg_orchestration["orchestration"]
     pkg_orchestration_local["orchestration-local"]
+    pkg_rlm_strategy["rlm-strategy"]
+    pkg_rlm_strategy_local["rlm-strategy-local"]
     pkg_tool_orchestration["tool-orchestration"]
     pkg_ui_orchestration["ui-orchestration"]
   end
@@ -467,6 +475,8 @@ flowchart TD
   pkg_capability_capsule --> pkg_llm
   pkg_context_compiler --> pkg_invariants
   pkg_context_compiler --> pkg_llm
+  pkg_continual_harness --> pkg_invariants
+  pkg_continual_harness --> pkg_llm
   pkg_intent_compiler --> pkg_brand
   pkg_intent_compiler --> pkg_invariants
   pkg_intent_compiler --> pkg_llm
@@ -499,6 +509,8 @@ flowchart TD
   pkg_code_runtime_worker_thread --> pkg_invariants
   pkg_code_runtime_worker_thread --> pkg_session
   pkg_code_runtime_worker_thread --> pkg_timeout
+  pkg_continual_harness_local --> pkg_continual_harness
+  pkg_continual_harness_local --> pkg_invariants
   pkg_persona --> pkg_invariants
   pkg_persona --> pkg_system_prompt
   pkg_sandbox --> pkg_invariants
@@ -719,13 +731,9 @@ flowchart TD
   pkg_lsp_stdio --> pkg_lsp
   pkg_lsp_stdio --> pkg_subprocess
   pkg_lsp_stdio --> pkg_timeout
-  pkg_orchestration --> pkg_brand
-  pkg_orchestration --> pkg_capability_capsule
-  pkg_orchestration --> pkg_context_compiler
-  pkg_orchestration --> pkg_intent_compiler
-  pkg_orchestration --> pkg_invariants
-  pkg_orchestration --> pkg_llm
-  pkg_orchestration --> pkg_physical_operator
+  pkg_model_allocation --> pkg_invariants
+  pkg_model_allocation --> pkg_llm
+  pkg_model_allocation --> pkg_physical_operator
   pkg_resident_operator --> pkg_brand
   pkg_resident_operator --> pkg_invariants
   pkg_resident_operator --> pkg_llm
@@ -921,14 +929,11 @@ flowchart TD
   pkg_mcp_client --> pkg_subprocess
   pkg_mcp_client --> pkg_timeout
   pkg_mcp_client --> pkg_tools
-  pkg_tool_orchestration --> pkg_invariants
-  pkg_tool_orchestration --> pkg_orchestration
-  pkg_tool_orchestration --> pkg_session
-  pkg_tool_orchestration --> pkg_system_prompt
-  pkg_tool_orchestration --> pkg_tools
-  pkg_ui_orchestration --> pkg_host_webserver
-  pkg_ui_orchestration --> pkg_invariants
-  pkg_ui_orchestration --> pkg_orchestration
+  pkg_model_allocation_local --> pkg_invariants
+  pkg_model_allocation_local --> pkg_model_allocation
+  pkg_rlm_strategy --> pkg_invariants
+  pkg_rlm_strategy --> pkg_llm
+  pkg_rlm_strategy --> pkg_model_allocation
   pkg_tool_physical_operator --> pkg_agent
   pkg_tool_physical_operator --> pkg_commands
   pkg_tool_physical_operator --> pkg_invariants
@@ -1091,6 +1096,21 @@ flowchart TD
   pkg_host_apiproxy --> pkg_agent_presets
   pkg_host_apiproxy --> pkg_cordis_host_runner
   pkg_host_apiproxy --> pkg_invariants
+  pkg_model_worker --> pkg_invariants
+  pkg_model_worker --> pkg_llm
+  pkg_model_worker --> pkg_model_allocation
+  pkg_model_worker --> pkg_rlm_strategy
+  pkg_orchestration --> pkg_brand
+  pkg_orchestration --> pkg_capability_capsule
+  pkg_orchestration --> pkg_context_compiler
+  pkg_orchestration --> pkg_intent_compiler
+  pkg_orchestration --> pkg_invariants
+  pkg_orchestration --> pkg_llm
+  pkg_orchestration --> pkg_model_allocation
+  pkg_orchestration --> pkg_physical_operator
+  pkg_orchestration --> pkg_rlm_strategy
+  pkg_rlm_strategy_local --> pkg_invariants
+  pkg_rlm_strategy_local --> pkg_rlm_strategy
   pkg_physical_operator_resident --> pkg_invariants
   pkg_physical_operator_resident --> pkg_physical_operator
   pkg_physical_operator_resident --> pkg_resident_operator
@@ -1188,6 +1208,23 @@ flowchart TD
   pkg_agent_spine_demo --> pkg_tool_jobs
   pkg_agent_spine_demo --> pkg_tool_skill
   pkg_agent_spine_demo --> pkg_tools
+  pkg_model_worker_deepseek --> pkg_credentials
+  pkg_model_worker_deepseek --> pkg_invariants
+  pkg_model_worker_deepseek --> pkg_llm
+  pkg_model_worker_deepseek --> pkg_model_allocation
+  pkg_model_worker_deepseek --> pkg_model_worker
+  pkg_model_worker_deepseek --> pkg_rlm_strategy
+  pkg_tool_orchestration --> pkg_commands
+  pkg_tool_orchestration --> pkg_invariants
+  pkg_tool_orchestration --> pkg_model_allocation
+  pkg_tool_orchestration --> pkg_orchestration
+  pkg_tool_orchestration --> pkg_session
+  pkg_tool_orchestration --> pkg_session_projection
+  pkg_tool_orchestration --> pkg_system_prompt
+  pkg_tool_orchestration --> pkg_tools
+  pkg_ui_orchestration --> pkg_host_webserver
+  pkg_ui_orchestration --> pkg_invariants
+  pkg_ui_orchestration --> pkg_orchestration
   pkg_sdk_client --> pkg_invariants
   pkg_sdk_client --> pkg_llm
   pkg_sdk_client --> pkg_sdk_protocol
@@ -1256,13 +1293,23 @@ flowchart TD
   pkg_orchestration_local --> pkg_agent
   pkg_orchestration_local --> pkg_capability_capsule
   pkg_orchestration_local --> pkg_context_compiler
+  pkg_orchestration_local --> pkg_continual_harness
+  pkg_orchestration_local --> pkg_continual_harness_local
+  pkg_orchestration_local --> pkg_credentials_local
   pkg_orchestration_local --> pkg_home_paths
   pkg_orchestration_local --> pkg_intent_compiler
   pkg_orchestration_local --> pkg_invariants
   pkg_orchestration_local --> pkg_llm
+  pkg_orchestration_local --> pkg_llm_deepseek
+  pkg_orchestration_local --> pkg_model_allocation
+  pkg_orchestration_local --> pkg_model_allocation_local
+  pkg_orchestration_local --> pkg_model_worker
+  pkg_orchestration_local --> pkg_model_worker_deepseek
   pkg_orchestration_local --> pkg_orchestration
   pkg_orchestration_local --> pkg_physical_operator
   pkg_orchestration_local --> pkg_resident_operator_local
+  pkg_orchestration_local --> pkg_rlm_strategy
+  pkg_orchestration_local --> pkg_rlm_strategy_local
   pkg_orchestration_local --> pkg_sdk_protocol
   pkg_orchestration_local --> pkg_session
   pkg_client_ui_input_trigger --> pkg_client_locale
@@ -1516,7 +1563,7 @@ flowchart TD
   pkg_client_ui_cordis --> pkg_invariants
 ```
 
-| Package | Group | Depends on |
+| 包 | 分组 | 依赖 |
 | --- | --- | --- |
 | [`invariants`](../packages/runtime-diagnostics/invariants) | `runtime-diagnostics` | — |
 | [`atomic-write`](../packages/util/atomic-write) | `util` | [`invariants`](../packages/runtime-diagnostics/invariants) |
@@ -1580,6 +1627,7 @@ flowchart TD
 | [`lsp`](../packages/lsp/lsp) | `lsp` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`capability-capsule`](../packages/orchestration/capability-capsule) | `orchestration` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`context-compiler`](../packages/orchestration/context-compiler) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`continual-harness`](../packages/orchestration/continual-harness) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`intent-compiler`](../packages/orchestration/intent-compiler) | `orchestration` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`agent`](../packages/core/agent) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt), [`typert-protocol`](../packages/typert/protocol) |
 | [`skill-badge`](../packages/skill/skill-badge) | `skill` | [`invariants`](../packages/runtime-diagnostics/invariants), [`skill`](../packages/skill/skill) |
@@ -1589,6 +1637,7 @@ flowchart TD
 | [`spill`](../packages/spill/spill) | `spill` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session) |
 | [`app-boot`](../packages/boot/app-boot) | `boot` | [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`launch-environment`](../packages/util/launch-environment), [`system-prompt`](../packages/core/system-prompt) |
 | [`code-runtime-worker-thread`](../packages/code-runtime/code-runtime-worker-thread) | `code-runtime` | [`code-runtime`](../packages/code-runtime/code-runtime), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session), [`timeout`](../packages/util/timeout) |
+| [`continual-harness-local`](../packages/orchestration/continual-harness-local) | `orchestration` | [`continual-harness`](../packages/orchestration/continual-harness), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`persona`](../packages/preset/persona) | `preset` | [`invariants`](../packages/runtime-diagnostics/invariants), [`system-prompt`](../packages/core/system-prompt) |
 | [`sandbox`](../packages/sandbox/sandbox) | `sandbox` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session) |
 | [`session-persistence`](../packages/session/session-persistence) | `session` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session), [`timeout`](../packages/util/timeout) |
@@ -1638,7 +1687,7 @@ flowchart TD
 | [`permission-presets`](../packages/interaction/permission-presets) | `interaction` | [`commands`](../packages/interaction/commands), [`invariants`](../packages/runtime-diagnostics/invariants), [`sandbox`](../packages/sandbox/sandbox), [`sandbox-policy`](../packages/sandbox/sandbox-policy), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`settings`](../packages/settings/settings), [`shell`](../packages/shell/shell), [`user-approval`](../packages/interaction/user-approval) |
 | [`jobs-local`](../packages/jobs/jobs-local) | `jobs` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs`](../packages/jobs/jobs), [`scope`](../packages/core/scope), [`timeout`](../packages/util/timeout) |
 | [`lsp-stdio`](../packages/lsp/lsp-stdio) | `lsp` | [`brand`](../packages/util/brand), [`fs`](../packages/fs/fs), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`lsp`](../packages/lsp/lsp), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
-| [`orchestration`](../packages/orchestration/orchestration) | `orchestration` | [`brand`](../packages/util/brand), [`capability-capsule`](../packages/orchestration/capability-capsule), [`context-compiler`](../packages/orchestration/context-compiler), [`intent-compiler`](../packages/orchestration/intent-compiler), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator) |
+| [`model-allocation`](../packages/orchestration/model-allocation) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator) |
 | [`resident-operator`](../packages/physical-operator/resident-operator) | `physical-operator` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator) |
 | [`session-title-llm`](../packages/session/session-title-llm) | `session` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-title`](../packages/session/session-title), [`timeout`](../packages/util/timeout) |
 | [`bash-local`](../packages/shell/bash-local) | `shell` | [`invariants`](../packages/runtime-diagnostics/invariants), [`settings`](../packages/settings/settings), [`shell`](../packages/shell/shell), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
@@ -1671,8 +1720,8 @@ flowchart TD
 | [`tool-jobs`](../packages/jobs/tool-jobs) | `jobs` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs`](../packages/jobs/jobs), [`llm`](../packages/llm/llm), [`output-retention`](../packages/util/output-retention), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`tool-lsp`](../packages/lsp/tool-lsp) | `lsp` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`lsp`](../packages/lsp/lsp), [`system-prompt`](../packages/core/system-prompt), [`timeout`](../packages/util/timeout), [`tools`](../packages/core/tools) |
 | [`mcp-client`](../packages/mcp/mcp-client) | `mcp` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout), [`tools`](../packages/core/tools) |
-| [`tool-orchestration`](../packages/orchestration/tool-orchestration) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`orchestration`](../packages/orchestration/orchestration), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
-| [`ui-orchestration`](../packages/orchestration/ui-orchestration) | `orchestration` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`orchestration`](../packages/orchestration/orchestration) |
+| [`model-allocation-local`](../packages/orchestration/model-allocation-local) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`model-allocation`](../packages/orchestration/model-allocation) |
+| [`rlm-strategy`](../packages/orchestration/rlm-strategy) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation) |
 | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | `physical-operator` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`schedule`](../packages/schedule/schedule) | `schedule` | [`agent`](../packages/core/agent), [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`tools`](../packages/core/tools) |
 | [`session-checkpoint-policy`](../packages/session/session-checkpoint-policy) | `session` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`tools`](../packages/core/tools) |
@@ -1699,6 +1748,9 @@ flowchart TD
 | [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner) | `compaction` | [`compaction`](../packages/compaction/compaction), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`token-meter`](../packages/llm/token-meter) |
 | [`tool-cordis`](../packages/extensions/tool-cordis) | `extensions` | [`agent`](../packages/core/agent), [`cordis-host-runner`](../packages/extensions/cordis-host-runner), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`host-apiproxy`](../packages/host/apiproxy) | `host` | [`agent-presets`](../packages/preset/agent-presets), [`cordis-host-runner`](../packages/extensions/cordis-host-runner), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`model-worker`](../packages/orchestration/model-worker) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`rlm-strategy`](../packages/orchestration/rlm-strategy) |
+| [`orchestration`](../packages/orchestration/orchestration) | `orchestration` | [`brand`](../packages/util/brand), [`capability-capsule`](../packages/orchestration/capability-capsule), [`context-compiler`](../packages/orchestration/context-compiler), [`intent-compiler`](../packages/orchestration/intent-compiler), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`physical-operator`](../packages/physical-operator/physical-operator), [`rlm-strategy`](../packages/orchestration/rlm-strategy) |
+| [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`rlm-strategy`](../packages/orchestration/rlm-strategy) |
 | [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | `physical-operator` | [`invariants`](../packages/runtime-diagnostics/invariants), [`physical-operator`](../packages/physical-operator/physical-operator), [`resident-operator`](../packages/physical-operator/resident-operator), [`subagent`](../packages/subagent/subagent) |
 | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent) | `physical-operator` | [`invariants`](../packages/runtime-diagnostics/invariants), [`physical-operator`](../packages/physical-operator/physical-operator), [`subagent`](../packages/subagent/subagent) |
 | [`sdk-protocol`](../packages/sdk/protocol) | `sdk` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent) |
@@ -1712,6 +1764,9 @@ flowchart TD
 | [`client-runtime`](../packages/client/runtime) | `client` | [`api-remotes`](../packages/api/remotes), [`invariants`](../packages/runtime-diagnostics/invariants), [`typert-protocol`](../packages/typert/protocol), [`typert-registry`](../packages/typert/registry) |
 | [`compaction-basic`](../packages/compaction/compaction-basic) | `compaction` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`compaction`](../packages/compaction/compaction), [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`token-meter`](../packages/llm/token-meter) |
 | [`agent-spine-demo`](../packages/examples/agent-spine-demo) | `examples` | [`agent`](../packages/core/agent), [`agent-instructions`](../packages/context/agent-instructions), [`agent-loop`](../packages/core/agent-loop), [`goal`](../packages/goal/goal), [`goal-round-driver`](../packages/goal/goal-round-driver), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs-local`](../packages/jobs/jobs-local), [`llm`](../packages/llm/llm), [`llm-retry`](../packages/llm/llm-retry), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`session-title`](../packages/session/session-title), [`shell-env`](../packages/shell/shell-env), [`skill`](../packages/skill/skill), [`skill-filesystem`](../packages/skill/skill-filesystem), [`system-prompt`](../packages/core/system-prompt), [`tool-bash`](../packages/shell/tool-bash), [`tool-goal`](../packages/goal/tool-goal), [`tool-jobs`](../packages/jobs/tool-jobs), [`tool-skill`](../packages/skill/tool-skill), [`tools`](../packages/core/tools) |
+| [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | `orchestration` | [`credentials`](../packages/credentials/credentials), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`model-worker`](../packages/orchestration/model-worker), [`rlm-strategy`](../packages/orchestration/rlm-strategy) |
+| [`tool-orchestration`](../packages/orchestration/tool-orchestration) | `orchestration` | [`commands`](../packages/interaction/commands), [`invariants`](../packages/runtime-diagnostics/invariants), [`model-allocation`](../packages/orchestration/model-allocation), [`orchestration`](../packages/orchestration/orchestration), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
+| [`ui-orchestration`](../packages/orchestration/ui-orchestration) | `orchestration` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`orchestration`](../packages/orchestration/orchestration) |
 | [`sdk-client`](../packages/sdk/client) | `sdk` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session) |
 | [`sdk-jsonrpc-server`](../packages/sdk/server) | `sdk` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`llm-deepseek`](../packages/llm/llm-deepseek), [`scope`](../packages/core/scope), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent) |
 | [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | `subagent` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-client`](../packages/sdk/client), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent), [`subprocess`](../packages/subprocess/subprocess) |
@@ -1721,7 +1776,7 @@ flowchart TD
 | [`resident-operator-local`](../packages/physical-operator/resident-operator-local) | `physical-operator` | [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator), [`resident-operator`](../packages/physical-operator/resident-operator), [`sdk-protocol`](../packages/sdk/protocol), [`subagent`](../packages/subagent/subagent), [`subagent-codex`](../packages/subagent/subagent-codex), [`subprocess`](../packages/subprocess/subprocess) |
 | [`client-test-runtime`](../packages/test-support/client-runtime) | `test-support` | [`client-runtime`](../packages/client/runtime), [`client-ui-slots`](../packages/client/ui-slots), [`client-web-react`](../packages/client/web-react), [`host-apiproxy`](../packages/host/apiproxy), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-locale`](../packages/client/locale) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants) |
-| [`orchestration-local`](../packages/orchestration/orchestration-local) | `orchestration` | [`agent`](../packages/core/agent), [`capability-capsule`](../packages/orchestration/capability-capsule), [`context-compiler`](../packages/orchestration/context-compiler), [`home-paths`](../packages/util/home-paths), [`intent-compiler`](../packages/orchestration/intent-compiler), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`orchestration`](../packages/orchestration/orchestration), [`physical-operator`](../packages/physical-operator/physical-operator), [`resident-operator-local`](../packages/physical-operator/resident-operator-local), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session) |
+| [`orchestration-local`](../packages/orchestration/orchestration-local) | `orchestration` | [`agent`](../packages/core/agent), [`capability-capsule`](../packages/orchestration/capability-capsule), [`context-compiler`](../packages/orchestration/context-compiler), [`continual-harness`](../packages/orchestration/continual-harness), [`continual-harness-local`](../packages/orchestration/continual-harness-local), [`credentials-local`](../packages/credentials/credentials-local), [`home-paths`](../packages/util/home-paths), [`intent-compiler`](../packages/orchestration/intent-compiler), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`llm-deepseek`](../packages/llm/llm-deepseek), [`model-allocation`](../packages/orchestration/model-allocation), [`model-allocation-local`](../packages/orchestration/model-allocation-local), [`model-worker`](../packages/orchestration/model-worker), [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek), [`orchestration`](../packages/orchestration/orchestration), [`physical-operator`](../packages/physical-operator/physical-operator), [`resident-operator-local`](../packages/physical-operator/resident-operator-local), [`rlm-strategy`](../packages/orchestration/rlm-strategy), [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session) |
 | [`client-ui-input-trigger`](../packages/client/ui-input-trigger) | `client` | [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-settings-plugin-inventory`](../packages/client/ui-settings-plugin-inventory) | `client` | [`api-remotes`](../packages/api/remotes), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-settings-plugins`](../packages/client/ui-settings-plugins) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-slots`](../packages/client/ui-slots), [`client-web-react`](../packages/client/web-react), [`invariants`](../packages/runtime-diagnostics/invariants) |

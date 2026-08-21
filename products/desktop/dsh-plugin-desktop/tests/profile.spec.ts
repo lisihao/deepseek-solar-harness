@@ -156,6 +156,7 @@ describe('desktop profile composition', () => {
       name: '@deepseek-ai/dsh-resident-operator-local',
       config: expect.objectContaining({
         autoStart: true,
+        connectTimeoutMs: 15_000,
         driverModules: [],
       }),
     }))
