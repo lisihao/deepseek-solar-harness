@@ -190,6 +190,13 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'luna-vision-bridge')).toEqual(expect.objectContaining({
       name: '@ycp424c/dsh-luna-vision-bridge',
     }))
+    expect(rows.find(row => row.id === 'code-harness-governance')).toEqual(expect.objectContaining({
+      name: '@lisihao/dsh-code-harness-governance',
+      config: expect.objectContaining({ strict: true }),
+    }))
+    expect(rows.find(row => row.id === 'code-harness-governance-invariant')).toEqual(expect.objectContaining({
+      name: '@lisihao/dsh-code-harness-governance/invariant',
+    }))
     expect(rows.find(row => row.id === 'ui-remote-modules')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-client-ui-remote-modules',
       disabled: false,

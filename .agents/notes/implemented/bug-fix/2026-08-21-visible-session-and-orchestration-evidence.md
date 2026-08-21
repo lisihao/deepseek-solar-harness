@@ -18,11 +18,13 @@ The orchestration daemon copies bounded, product-neutral Resident progress phase
 
 Code-as-Harness governance plugin 0.3.9 registers `治理 Trace` as an order-15 `conversation.view` entry. The slot passes the exact `sessionId`; the view fetches and refreshes only that Session's live or persisted governance projection. The left-sidebar entry and modal are absent. Empty copy states that external Codex tasks and GitHub Actions are independent authorities and do not automatically enter the selected DSH Session Log.
 
+Desktop seals that 0.3.9 package as a product bundle, loads its Host and invariant rows from the package patch, and resolves its browser entry from the application dependency tree. The per-Session Trace therefore belongs to a clean Desktop build rather than to an older plugin left in the machine's generated profile.
+
 This note supersedes only the default-hidden presentation decision in [Resident qualification and diagnostic projection isolation](2026-08-20-resident-qualification-and-diagnostic-projection.md). Its Resident qualification, serialized probes, and temporary-workspace classifier remain in force.
 
 ## Verification
 
-Provider tests pin visible diagnostic classification, optional hiding, Resident progress transfer, Codex and Claude Code dispatch, bounded output projection, and Evidence retention. Client tests pin the per-Session view slot, exact Session id request, absence from the sidebar, diagnostic controls, progress labels, and final output rendering. Packaged acceptance runs both native subscription products and observes their corresponding progress, result, and Evidence events through the installed Desktop projection.
+Provider tests pin visible diagnostic classification, optional hiding, Resident progress transfer, Codex and Claude Code dispatch, bounded output projection, and Evidence retention. Client tests pin the per-Session view slot, exact Session id request, absence from the sidebar, diagnostic controls, progress labels, and final output rendering. Desktop profile tests require both governance rows from the sealed package, and packaged acceptance runs both native subscription products and observes their corresponding progress, result, and Evidence events through the installed Desktop projection.
 
 ## Alternatives considered
 

@@ -18,11 +18,13 @@ Status: implemented
 
 Code-as-Harness 治理插件 0.3.9 将“治理 Trace”注册为 order-15 的 `conversation.view` 配置项。slot 传入确切的 `sessionId`；视图只获取并刷新该会话的实时或持久治理投影。左侧栏入口和模态窗口不再存在。空状态文案会说明，外部 Codex 任务和 GitHub Actions 是独立权威，不会自动进入所选 DSH 会话日志。
 
+Desktop 将该 0.3.9 package 固化为产品 bundle，从 package patch 加载 Host 与 invariant 行，并从应用依赖树解析其浏览器入口。因此，每会话 Trace 属于 clean Desktop 构建，不再依赖机器生成 profile 中残留的旧插件。
+
 本记录仅取代 [Resident 资格探测与诊断投影隔离](2026-08-20-resident-qualification-and-diagnostic-projection.md) 中的默认隐藏展示决策。其 Resident 资格探测、串行探测和临时工作区分类仍然有效。
 
 ## 验证
 
-提供方测试固定了可见的诊断分类、可选隐藏、Resident 进度传递、Codex 与 Claude Code 派发、有界输出投影和 Evidence 保留。客户端测试固定了每会话视图 slot、确切会话 id 请求、不出现在左侧栏、诊断控制、进度标签和最终输出渲染。打包验收会运行两种原生订阅产品，并通过已安装 Desktop 投影观察它们对应的进度、结果和 Evidence 事件。
+提供方测试固定了可见的诊断分类、可选隐藏、Resident 进度传递、Codex 与 Claude Code 派发、有界输出投影和 Evidence 保留。客户端测试固定了每会话视图 slot、确切会话 id 请求、不出现在左侧栏、诊断控制、进度标签和最终输出渲染。Desktop profile 测试要求 sealed package 中的两个治理行，打包验收会运行两种原生订阅产品，并通过已安装 Desktop 投影观察它们对应的进度、结果和 Evidence 事件。
 
 ## 考虑过的替代方案
 
