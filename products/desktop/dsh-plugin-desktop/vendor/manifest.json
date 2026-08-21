@@ -45,11 +45,17 @@
       "name": "Code-as-Harness governance and per-session collaboration Trace",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "541817425a794b70fe50adf2b779d6e97332aa75"
+    },
+    {
+      "name": "Solar sidebar footer layout",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "4d7c1e068c9024aec5d349b2c8a85bfd1056f224"
     }
   ],
   "sourcePackages": {
     "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "packages/orchestration/capability-capsule/package.json",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "packages/client/ui-remote-modules/package.json",
+    "dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz": "packages/client/ui-sidebar/package.json",
     "dsh-packages/deepseek-ai-dsh-context-compiler-0.1.0-rc.5.tgz": "packages/orchestration/context-compiler/package.json",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "packages/host/apiproxy/package.json",
     "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "packages/orchestration/intent-compiler/package.json",
@@ -93,6 +99,7 @@
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "9c7ad84bb62df1a2c6703a5a2ff339571d47fd1ff13683a7d0c1a16ce7ce18f1",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "bd42957281eca86a48be35ca6b980e6d4d6283db74e03432e042b5f2caf05cb9",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "161ca978098481b385aa8818871c2dc833f47fcc054a0090d17abd896299e86b",
+    "dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz": "0471c58bdcd6e0898b10191c1e91137dcb5256282cc215b0eee01514bac75c75",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "471a232245ccfc4e5a26a734ede1f63485b42d28195508a5e13d909b96d0618b",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
     "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "0b19f48fc167abd9b2b2dc22fd483a7cd3c755f9053fce772593ae26eeaeb689",

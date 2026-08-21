@@ -1865,20 +1865,20 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@deepseek-ai/dsh-client-ui-sidebar@npm:0.1.0-rc.6, @deepseek-ai/dsh-client-ui-sidebar@npm:^0.1.0-rc.6":
-  version: 0.1.0-rc.6
-  resolution: "@deepseek-ai/dsh-client-ui-sidebar@npm:0.1.0-rc.6"
+"@deepseek-ai/dsh-client-ui-sidebar@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.0-rc.5
+  resolution: "@deepseek-ai/dsh-client-ui-sidebar@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz::hash=76c83a&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     clsx: "npm:^2.0.0"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
-    "@deepseek-ai/dsh-client-locale": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.6
-    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.6
+    "@deepseek-ai/dsh-client-locale": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-runtime": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-ui-primitives": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.5
+    "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     react: ^18.2.0
-  checksum: 10c0/55717d4baa3a4ef17f3e37352a408625f826b2cfcc00082fb52f3a0fb96f6cb6128aa3084f939903c774f478b4b869782167aaf02d6aad84ca2c0695ad10f823
+  checksum: 10c0/4c97466d12a35747a8f994456e000d089b0e8c32ce0bee622fc9a4de4e6c9336c3443facc54265e854b64760ecfb810e830b81c3532b0118e549b3dad16fbd32
   languageName: node
   linkType: hard
 
@@ -7905,7 +7905,7 @@ __metadata:
     "@deepseek-ai/dsh-client-ui-remote-modules": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-client-ui-settings": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-client-ui-settings-plugins": "npm:0.1.0-rc.6"
-    "@deepseek-ai/dsh-client-ui-sidebar": "npm:0.1.0-rc.6"
+    "@deepseek-ai/dsh-client-ui-sidebar": "file:vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz"
     "@deepseek-ai/dsh-client-ui-slots": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-client-ui-theme": "npm:0.1.0-rc.6"
     "@deepseek-ai/dsh-client-ui-tool": "npm:0.1.0-rc.6"

@@ -22,6 +22,7 @@
     "@deepseek-ai/dsh-subagent-codex": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-tool-physical-operator": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-ui-remote-modules": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-client-ui-sidebar": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-host-apiproxy": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-session-projection-cache": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-intent-compiler": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz",
