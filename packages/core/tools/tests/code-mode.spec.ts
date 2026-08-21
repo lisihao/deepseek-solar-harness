@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, CallId  } from '@deepseek-ai/dsh-llm'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import type { Scope } from '@deepseek-ai/dsh-scope'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { CodeRuntime } from '@deepseek-ai/dsh-code-runtime'
 import type { CodeRunRequest, CodeRunResult } from '@deepseek-ai/dsh-code-runtime'
 import ToolRuntime, { CodeRunFailedError, RUN_CODE_NAME, TOOL_ABORTED_BEFORE_DISPATCH, defineContentToolFixture, defineTool } from '@deepseek-ai/dsh-tools'
@@ -354,6 +354,23 @@ describe('mode-aware wire contribution', () => {
     const second = await systemPrompt.assemble()
     const text = (assembly: typeof first) => assembly.sections.find(section => section.name === 'tools:sdk')?.text
     expect(text(first)).toBe(text(second))
+  })
+
+  it('renders literal prompt-variable examples from generated tool SDK descriptions', async () => {
+    const { ctx, systemPrompt } = await setup({ mode: 'code' })
+    ctx.tools.register(defineTool({
+      name: 'template_reference',
+      description: 'Accepts literal {{date}} and {{time}} template examples.',
+      parameters: {},
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      execute: () => Promise.resolve('ok'),
+    }))
+
+    expect(renderPrompt(await systemPrompt.assemble()))
+      .toContain('Accepts literal {{date}} and {{time}} template examples.')
   })
 
   it('rejects every assembly when a non-native mode has no code runtime', async () => {

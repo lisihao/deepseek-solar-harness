@@ -26,6 +26,8 @@
     "@deepseek-ai/dsh-client-ui-sidebar": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-host-apiproxy": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-session-projection-cache": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-system-prompt": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-tools": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-intent-compiler": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-context-compiler": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-context-compiler-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-capability-capsule": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz",
