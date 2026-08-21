@@ -223,8 +223,11 @@ function setupSession(rig, sessionId = 'session-1', userText = '帮我写个函�
 test('装配：启用后 agent/created 建运行时，turn/end 触发评审并 steer', async (t) => {
   const rig = rigFor(t)
   const { agent } = setupSession(rig)
-  // 等 drain
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  // 等待真实投递结果，避免机器繁忙时用固定睡眠猜 drain 已完成。
+  await waitUntil(
+    () => rig.ctrl.queryRecords({ sessionId: 'session-1' }).records.length === 1,
+    'advisor delivery record was not persisted',
+  )
   // 状态
   const status = rig.ctrl.status('session-1')
   assert.equal(status.effectiveEnabled, true)

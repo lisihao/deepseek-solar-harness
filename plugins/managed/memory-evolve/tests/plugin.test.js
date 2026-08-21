@@ -38,7 +38,7 @@ function clean(dir) {
  *  cordis semantics: the callback only runs when every declared service
  *  exists in the fake service table. */
 function fakeCtx(overrides = {}) {
-  const state = { tools: [], contexts: [], commands: [], listeners: [], routes: [] }
+  const state = { tools: [], contexts: [], commands: [], listeners: [], listenerOptions: [], routes: [] }
   const services = {
     tools: {
       register: (def) => {
@@ -63,8 +63,9 @@ function fakeCtx(overrides = {}) {
     systemPrompt: services.systemPrompt,
     commands: services.commands,
     webServer: services.webServer,
-    on: (name, listener) => {
+    on: (name, listener, options) => {
       ;(state.listeners[name] ??= []).push(listener)
+      ;(state.listenerOptions[name] ??= []).push(options)
       return () => {}
     },
     inject: (deps, callback) => {
@@ -84,6 +85,16 @@ function fakeCtx(overrides = {}) {
   }
   return ctx
 }
+
+test('turn closure and review counter observe preset-scoped Agent completion globally', () => {
+  const ctx = fakeCtx()
+  apply(ctx)
+  assert.equal(ctx.state.listeners['agent/settled'].length, 2)
+  assert.deepEqual(ctx.state.listenerOptions['agent/settled'], [
+    { global: true },
+    { global: true },
+  ])
+})
 
 const fakeExec = () => ({ agent: undefined, callId: 'c1', signal: new AbortController().signal })
 

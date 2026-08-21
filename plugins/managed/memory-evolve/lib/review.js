@@ -51,7 +51,7 @@ export function reviewTurnCounter(ctx, getRuntime, turnState) {
 
   // 显式挂到 ctx 生命周期（P2-7）：ctx.on 返回的 disposer 交给 ctx.effect
   // 管理，插件卸载/热重载时自动移除监听器，避免重复注册导致重复计数
-  ctx.effect(() => ctx.on('agent/settled', onSettled))
+  ctx.effect(() => ctx.on('agent/settled', onSettled, { global: true }))
 
   return {
     turnsOf: (agent) => turnState.turnsOf(agent),
