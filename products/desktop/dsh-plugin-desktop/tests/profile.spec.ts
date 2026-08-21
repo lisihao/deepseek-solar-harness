@@ -187,6 +187,9 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'web-billing')).toEqual(expect.objectContaining({
       name: 'dsh-web-billing',
     }))
+    expect(rows.find(row => row.id === 'dsh-memory-evolve')).toEqual(expect.objectContaining({
+      name: 'dsh-memory-evolve',
+    }))
     expect(rows.find(row => row.id === 'luna-vision-bridge')).toEqual(expect.objectContaining({
       name: '@ycp424c/dsh-luna-vision-bridge',
     }))
@@ -272,6 +275,10 @@ describe('desktop profile composition', () => {
       '- insert:',
       '    - id: remote-web-ui',
       "      name: '@linxin666/dsh-remote-web-ui'",
+      '    - id: dsh-memory-evolve',
+      '      name: dsh-memory-evolve',
+      '      config:',
+      '        reviewEnabled: true',
       '',
     ].join('\n'))
 
@@ -286,6 +293,8 @@ describe('desktop profile composition', () => {
     expect(rows.filter(row => row.id === 'orchestration-local')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'remote-web-ui')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'ui-remote-modules')).toHaveLength(1)
+    expect(rows.filter(row => row.id === 'dsh-memory-evolve')).toHaveLength(1)
+    expect(rows.find(row => row.id === 'dsh-memory-evolve')?.config).toEqual({ reviewEnabled: true })
   })
 
   it('projects advanced YAML settings into the Host and client Loader rows', () => {

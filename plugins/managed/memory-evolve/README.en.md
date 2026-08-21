@@ -27,11 +27,11 @@ An AI's conversation is "one-shot": switch projects, wait a few days, or open a 
 - **User profile**: your preferences, company, communication habits — the AI sees these every turn;
 - **Global facts**: long-term knowledge about environments, tools, and conventions;
 - **Project key memory**: the current project's conventions, decisions, architecture, and gotchas, auto-injected into context; important conclusions can be tagged to apply **only on a specific git branch**;
-- **Project log / daily log**: progress is auto-recorded every turn, read on demand, history traceable.
+- **Project log / daily log**: progress is auto-recorded every turn, read on demand, and traceable; if the model does not write successfully, the Host adds the completed-turn summary and records an inspectable closure receipt.
 
 **How to use it**:
 
-1. Just talk to the AI normally — at the end of each turn it automatically writes progress into the project log and daily log;
+1. Just talk to the AI normally — at the end of each turn the model writes the project and daily logs; if it misses them, the Host writes a summary of the final reply, and `memory_review_status` shows the latest closed turn, source, and result without duplicating it after an application restart;
 2. When you hit an important fact, say "**Note this down: this project's deployment port is 8080**" — it writes to project key memory, effective **only after you confirm** — the AI never writes to memory on its own;
 3. Days later, in another session, just ask "**Check memory: what architecture decision did we settle on last time?**" — it picks up seamlessly;
 4. Once memory grows, tell the AI to "**archive that XX memory entry**" — archived entries no longer get injected into context and can be restored anytime;

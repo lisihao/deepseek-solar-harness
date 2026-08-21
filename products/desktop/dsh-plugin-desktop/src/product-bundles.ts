@@ -11,6 +11,7 @@ export const CODE_HARNESS_GOVERNANCE_PACKAGE = '@lisihao/dsh-code-harness-govern
 export const UI_REMOTE_MODULES_PACKAGE = '@deepseek-ai/dsh-client-ui-remote-modules'
 export const UI_REMOTE_MODULES_ROW_ID = 'ui-remote-modules'
 export const HOST_APIPROXY_PACKAGE = '@deepseek-ai/dsh-host-apiproxy'
+export const MEMORY_EVOLVE_PACKAGE = 'dsh-memory-evolve'
 
 export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
@@ -21,6 +22,7 @@ export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [LUNA_VISION_BRIDGE_PACKAGE, 'luna-vision-bridge'],
   [CODE_HARNESS_GOVERNANCE_PACKAGE, 'code-harness-governance'],
   [UI_REMOTE_MODULES_PACKAGE, UI_REMOTE_MODULES_ROW_ID],
+  [MEMORY_EVOLVE_PACKAGE, 'dsh-memory-evolve'],
 ])
 
 export const PRODUCT_BUNDLE_PACKAGES = [
@@ -32,6 +34,7 @@ export const PRODUCT_BUNDLE_PACKAGES = [
   LUNA_VISION_BRIDGE_PACKAGE,
   CODE_HARNESS_GOVERNANCE_PACKAGE,
   UI_REMOTE_MODULES_PACKAGE,
+  MEMORY_EVOLVE_PACKAGE,
 ] as const
 
 /** App-sealed runtime packages that must stay version-aligned with product bundles. */
