@@ -14,6 +14,9 @@ import ContinualHarnessService, {
 
 export const name = 'continual-harness-local'
 
+/** Owner-local directory that contains the bounded Continuous Harness state. */
+export type Config = string
+
 interface StoreDocument {
   readonly version: 1
   readonly generation: number
@@ -50,7 +53,7 @@ export class LocalContinualHarness extends ContinualHarnessService {
   private readonly filename: string
   private document: StoreDocument
 
-  constructor(ctx: Context, root: string) {
+  constructor(ctx: Context, root: Config) {
     super(ctx)
     mkdirSync(root, { recursive: true, mode: 0o700 })
     chmodSync(root, 0o700)

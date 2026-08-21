@@ -564,6 +564,17 @@ export interface ToolResultPruneConfig {
 
 Source: [`packages/compaction/compaction-tool-result-pruner/src/types.ts:4`](../packages/compaction/compaction-tool-result-pruner/src/types.ts)
 
+<a id="deepseek-aidsh-continual-harness-local"></a>
+
+## `@deepseek-ai/dsh-continual-harness-local`
+
+```ts config-catalog
+/** Owner-local directory that contains the bounded Continuous Harness state. */
+export type Config = string
+```
+
+Source: [`packages/orchestration/continual-harness-local/src/index.ts:18`](../packages/orchestration/continual-harness-local/src/index.ts)
+
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
 ## `@deepseek-ai/dsh-cordis-host-runner`
@@ -2255,7 +2266,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/subagent/subagent-codex/src/index.ts:38`](../packages/subagent/subagent-codex/src/index.ts)
+Source: [`packages/subagent/subagent-codex/src/index.ts:40`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 
@@ -3214,9 +3225,12 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-host-plugin-inventory` — requires `loader` ([`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts))
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-lsp` ([`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts))
+- `@deepseek-ai/dsh-model-allocation-local` ([`packages/orchestration/model-allocation-local/src/index.ts`](../packages/orchestration/model-allocation-local/src/index.ts))
+- `@deepseek-ai/dsh-model-worker` ([`packages/orchestration/model-worker/src/index.ts`](../packages/orchestration/model-worker/src/index.ts))
 - `@deepseek-ai/dsh-orchestrations` ([`packages/bundle/orchestrations/src/index.ts`](../packages/bundle/orchestrations/src/index.ts))
 - `@deepseek-ai/dsh-physical-operator` ([`packages/physical-operator/physical-operator/src/index.ts`](../packages/physical-operator/physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-resident-operators` ([`packages/bundle/resident-operators/src/index.ts`](../packages/bundle/resident-operators/src/index.ts))
+- `@deepseek-ai/dsh-rlm-strategy-local` ([`packages/orchestration/rlm-strategy-local/src/index.ts`](../packages/orchestration/rlm-strategy-local/src/index.ts))
 - `@deepseek-ai/dsh-schedule` — requires `agents` · `sessions` · `tools` · `sessionPersistence` ([`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts))
 - `@deepseek-ai/dsh-session` ([`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts))
 - `@deepseek-ai/dsh-session-checkpoint-policy` — requires `llm` · `sessionPersistence` · `sessions` · `tools` ([`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts))
@@ -3247,13 +3261,16 @@ Abstract service classes — a deployment loads a concrete implementation packag
 - `@deepseek-ai/dsh-code-runtime` — abstract `CodeRuntime` ([`packages/code-runtime/code-runtime/src/index.ts`](../packages/code-runtime/code-runtime/src/index.ts))
 - `@deepseek-ai/dsh-compaction` — abstract `CompactionEngine` ([`packages/compaction/compaction/src/index.ts`](../packages/compaction/compaction/src/index.ts))
 - `@deepseek-ai/dsh-context-compiler` — abstract `ContextCompilerService` ([`packages/orchestration/context-compiler/src/index.ts`](../packages/orchestration/context-compiler/src/index.ts))
+- `@deepseek-ai/dsh-continual-harness` — abstract `ContinualHarnessService` ([`packages/orchestration/continual-harness/src/index.ts`](../packages/orchestration/continual-harness/src/index.ts))
 - `@deepseek-ai/dsh-credentials` — abstract `CredentialProvider` ([`packages/credentials/credentials/src/index.ts`](../packages/credentials/credentials/src/index.ts))
 - `@deepseek-ai/dsh-fs` — abstract `FileSystem` ([`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker` — abstract `DirectoryPicker` ([`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts))
 - `@deepseek-ai/dsh-intent-compiler` — abstract `IntentCompilerService` ([`packages/orchestration/intent-compiler/src/index.ts`](../packages/orchestration/intent-compiler/src/index.ts))
 - `@deepseek-ai/dsh-jobs` — abstract `JobRegistry` ([`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts))
+- `@deepseek-ai/dsh-model-allocation` — abstract `ModelAllocationService` ([`packages/orchestration/model-allocation/src/index.ts`](../packages/orchestration/model-allocation/src/index.ts))
 - `@deepseek-ai/dsh-orchestration` — abstract `OrchestrationService` ([`packages/orchestration/orchestration/src/index.ts`](../packages/orchestration/orchestration/src/index.ts))
 - `@deepseek-ai/dsh-resident-operator` — abstract `ResidentOperatorService` ([`packages/physical-operator/resident-operator/src/index.ts`](../packages/physical-operator/resident-operator/src/index.ts))
+- `@deepseek-ai/dsh-rlm-strategy` — abstract `RlmStrategyService` ([`packages/orchestration/rlm-strategy/src/index.ts`](../packages/orchestration/rlm-strategy/src/index.ts))
 - `@deepseek-ai/dsh-sandbox` — abstract `SandboxProvider` ([`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts))
 - `@deepseek-ai/dsh-session-persistence` — abstract `SessionPersistence` ([`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts))
 - `@deepseek-ai/dsh-session-query` — abstract `SessionQueryEngine` ([`packages/session-query/session-query/src/index.ts`](../packages/session-query/session-query/src/index.ts))
@@ -3287,9 +3304,9 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-launch-environment` ([`packages/util/launch-environment/src/index.ts`](../packages/util/launch-environment/src/index.ts))
 - `@deepseek-ai/dsh-llm-mock-server` ([`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts))
 - `@deepseek-ai/dsh-loader-smoke` ([`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts))
+- `@deepseek-ai/dsh-model-worker-deepseek` ([`packages/orchestration/model-worker-deepseek/src/index.ts`](../packages/orchestration/model-worker-deepseek/src/index.ts))
 - `@deepseek-ai/dsh-native-command` ([`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts))
 - `@deepseek-ai/dsh-output-retention` ([`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts))
-- `@deepseek-ai/dsh-resident-operator-prime-agent` ([`packages/physical-operator/resident-operator-prime-agent/src/index.ts`](../packages/physical-operator/resident-operator-prime-agent/src/index.ts))
 - `@deepseek-ai/dsh-sandbox-windows-acl` ([`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts))
 - `@deepseek-ai/dsh-scope` ([`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts))
 - `@deepseek-ai/dsh-sdk-client` ([`packages/sdk/client/src/index.ts`](../packages/sdk/client/src/index.ts))

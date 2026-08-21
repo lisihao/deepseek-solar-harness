@@ -43,6 +43,11 @@ export class ModelWorkerRuntime extends Service {
 
   constructor(ctx: Context) { super(ctx, 'modelWorkers') }
 
+  /**
+   * Register a model worker Provider for the lifetime of the current plugin effect.
+   * @param provider Provider that exposes offers and executes sealed requests.
+   * @returns An effect disposer that unregisters the Provider.
+   */
   register(provider: ModelWorkerProvider): () => Promise<void> {
     return this.ctx.effect(function* (this: ModelWorkerRuntime) {
       if (this.providers.has(provider.id)) throw new ModelWorkerError(`duplicate model worker: ${provider.id}`, 'MODEL_WORKER_DUPLICATE')
@@ -51,10 +56,19 @@ export class ModelWorkerRuntime extends Service {
     }.bind(this), 'modelWorkers.register()')
   }
 
+  /**
+   * List the currently available model execution offers from every Provider.
+   * @returns A flattened snapshot of qualified execution offers.
+   */
   async offers(): Promise<ModelExecutionOffer[]> {
     return (await Promise.all([...this.providers.values()].map(provider => provider.offers()))).flat()
   }
 
+  /**
+   * Dispatch a sealed worker request to its selected Provider.
+   * @param request Selected worker, model, sealed prompt, and optional RLM plan.
+   * @returns The bounded model output and usage metadata.
+   */
   execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
     const provider = this.providers.get(request.workerId)
     if (provider === undefined) throw new ModelWorkerError(`unknown model worker: ${request.workerId}`, 'MODEL_WORKER_UNAVAILABLE')

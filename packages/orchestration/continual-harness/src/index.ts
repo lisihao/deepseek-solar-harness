@@ -68,7 +68,17 @@ export abstract class ContinualHarnessService extends Service {
     super(ctx, 'continualHarness')
   }
 
+  /**
+   * Compile a bounded immutable snapshot for one session or workspace scope.
+   * @param request Scope, task, and entry-limit policy for the snapshot.
+   * @returns The content-addressed Continuous Harness snapshot.
+   */
   abstract snapshot(request: ContinualHarnessSnapshotRequest): Promise<ContinualHarnessSnapshotV1>
+  /**
+   * Record a bounded task outcome after an orchestration node settles.
+   * @param request Bounded outcome summary and Evidence references.
+   * @returns The idempotently stored harness entry.
+   */
   abstract recordOutcome(request: ContinualHarnessOutcomeRequest): Promise<ContinualHarnessEntryV1>
 }
 

@@ -49,6 +49,11 @@ export abstract class RlmStrategyService extends Service {
     super(ctx, 'rlmStrategy')
   }
 
+  /**
+   * Resolve a bounded node-local RLM plan without modifying the global TaskGraph.
+   * @param request User mode, node phase, task, and optional resource budget.
+   * @returns An immutable, content-addressed RLM execution plan.
+   */
   abstract resolve(request: RlmStrategyRequest): Promise<RlmExecutionPlanV1>
 }
 

@@ -95,6 +95,11 @@ export abstract class ModelAllocationService extends Service {
     super(ctx, 'modelAllocation')
   }
 
+  /**
+   * Select one qualified execution offer and recommend safe parallelism.
+   * @param request Node phase, policy, quota, and currently qualified offers.
+   * @returns The selected model plan and parallelism recommendation.
+   */
   abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
 }
 
