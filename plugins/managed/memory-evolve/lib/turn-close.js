@@ -211,7 +211,11 @@ export function installTurnClosure(ctx, getRuntime, store, turnState) {
     else ctx.logger.error(`dsh-memory-evolve: turn ${turn} memory closure failed: ${JSON.stringify(receipt)}`)
   }
 
-  ctx.effect(() => ctx.on('agent/settled', onSettled))
+  // Memory Evolve is mounted at the Host product scope, while each Agent
+  // preset runs in a tagged descendant scope. A local listener never sees
+  // those scoped Agent events; the closure is intentionally Host-wide and
+  // filters subagents itself above.
+  ctx.effect(() => ctx.on('agent/settled', onSettled, { global: true }))
 }
 
 /** Default location for the durable turn state. */
