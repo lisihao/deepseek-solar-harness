@@ -10,6 +10,7 @@ export const LUNA_VISION_BRIDGE_PACKAGE = '@ycp424c/dsh-luna-vision-bridge'
 export const UI_REMOTE_MODULES_PACKAGE = '@deepseek-ai/dsh-client-ui-remote-modules'
 export const UI_REMOTE_MODULES_ROW_ID = 'ui-remote-modules'
 export const HOST_APIPROXY_PACKAGE = '@deepseek-ai/dsh-host-apiproxy'
+export const MEMORY_EVOLVE_PACKAGE = 'dsh-memory-evolve'
 
 export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
@@ -19,6 +20,7 @@ export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [WEB_BILLING_PACKAGE, 'web-billing'],
   [LUNA_VISION_BRIDGE_PACKAGE, 'luna-vision-bridge'],
   [UI_REMOTE_MODULES_PACKAGE, UI_REMOTE_MODULES_ROW_ID],
+  [MEMORY_EVOLVE_PACKAGE, 'dsh-memory-evolve'],
 ])
 
 export const PRODUCT_BUNDLE_PACKAGES = [
@@ -29,6 +31,7 @@ export const PRODUCT_BUNDLE_PACKAGES = [
   WEB_BILLING_PACKAGE,
   LUNA_VISION_BRIDGE_PACKAGE,
   UI_REMOTE_MODULES_PACKAGE,
+  MEMORY_EVOLVE_PACKAGE,
 ] as const
 
 /** App-sealed runtime packages that must stay version-aligned with product bundles. */

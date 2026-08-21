@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 const vendorRoot = resolve(import.meta.dirname, '../vendor')
 const repositoryRoot = resolve(vendorRoot, '../../../..')
+const ARCHIVE_MEMBER_MAX_BYTES = 16 * 1024 * 1024
 const manifest = JSON.parse(await readFile(join(vendorRoot, 'manifest.json'), 'utf8'))
 if (manifest.schemaVersion !== 1
   || manifest.files === null || typeof manifest.files !== 'object'
@@ -103,7 +104,9 @@ for (const archivePath of packageArchives) {
       }
     }
     const sourceContents = await readFile(sourceFile)
-    const archivedContents = execFileSync('tar', ['-xOf', join(vendorRoot, archivePath), member])
+    const archivedContents = execFileSync('tar', ['-xOf', join(vendorRoot, archivePath), member], {
+      maxBuffer: ARCHIVE_MEMBER_MAX_BYTES,
+    })
     if (!sourceContents.equals(archivedContents)) {
       throw new Error(
         `verify-vendored-inputs: ${archivePath} contains stale ${packageRelative} relative to ${sourceFileRelative}`,

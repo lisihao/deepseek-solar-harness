@@ -1,0 +1,5 @@
+# Product/default profile row. User profile patches may replace this row's
+# config while Desktop keeps the executable package sealed in the application.
+- insert:
+    - id: dsh-memory-evolve
+      name: dsh-memory-evolve
