@@ -69,6 +69,18 @@ flowchart LR
   svc_contextCompiler["ctx.contextCompiler<br/>Bounded Context Packet compiler"]
   pkg_capability_capsule["capability-capsule"]
   svc_capabilityCapsules["ctx.capabilityCapsules<br/>Capability Capsule registry and resolver"]
+  pkg_continual_harness["continual-harness"]
+  svc_continualHarness["ctx.continualHarness<br/>Continuous Harness snapshot and outcome seam"]
+  pkg_continual_harness_local["continual-harness-local"]
+  pkg_model_allocation["model-allocation"]
+  svc_modelAllocation["ctx.modelAllocation<br/>Quota-aware model allocation seam"]
+  pkg_model_allocation_local["model-allocation-local"]
+  pkg_model_worker["model-worker"]
+  svc_modelWorkers["ctx.modelWorkers<br/>One-shot model worker registry"]
+  pkg_model_worker_deepseek["model-worker-deepseek"]
+  pkg_rlm_strategy["rlm-strategy"]
+  svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
+  pkg_rlm_strategy_local["rlm-strategy-local"]
   pkg_orchestration["orchestration"]
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
@@ -232,6 +244,8 @@ flowchart LR
   pkg_compaction_basic --> svc_compaction
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
   pkg_context_compiler --> svc_contextCompiler
+  pkg_continual_harness --> svc_continualHarness
+  pkg_continual_harness_local --> svc_continualHarness
   pkg_cordis_host_runner --> svc_cordisInspect
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
@@ -256,6 +270,10 @@ flowchart LR
   pkg_lsp --> svc_lsp
   pkg_lsp_local --> svc_lsp
   pkg_message_feedback --> svc_messageFeedback
+  pkg_model_allocation --> svc_modelAllocation
+  pkg_model_allocation_local --> svc_modelAllocation
+  pkg_model_worker --> svc_modelWorkers
+  pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
   pkg_orchestration --> svc_orchestrations
   pkg_orchestration_local --> svc_capabilityCapsules
@@ -270,6 +288,8 @@ flowchart LR
   pkg_pwsh_local --> svc_shell
   pkg_resident_operator --> svc_residentOperators
   pkg_resident_operator_local --> svc_residentOperators
+  pkg_rlm_strategy --> svc_rlmStrategy
+  pkg_rlm_strategy_local --> svc_rlmStrategy
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
@@ -340,6 +360,7 @@ flowchart LR
   svc_clientModules --> pkg_hmr
   svc_codeRuntime --> pkg_tools
   svc_compaction --> pkg_compaction_basic
+  svc_continualHarness --> pkg_orchestration_local
   svc_cordisInspect --> pkg_tool_cordis
   svc_credentials --> pkg_apiproxy
   svc_credentials --> pkg_llm_deepseek
@@ -360,10 +381,13 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_modelAllocation --> pkg_orchestration_local
+  svc_modelWorkers --> pkg_orchestration_local
   svc_orchestrations --> pkg_tool_orchestration
   svc_orchestrations --> pkg_ui_orchestration
   svc_physicalOperators --> pkg_tool_physical_operator
   svc_residentOperators --> pkg_physical_operator_resident
+  svc_rlmStrategy --> pkg_orchestration_local
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -464,6 +488,10 @@ flowchart LR
 | `ctx.intentCompiler` | `seam` | [`intent-compiler`](../packages/orchestration/intent-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers compile immutable raw requests into versioned Intent IR with deterministic lineage; they cannot create runs or dispatch operators. |
 | `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers project certified sources under token, lineage, redaction, and degradation policy without becoming a source of record. |
 | `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Late-binds content-addressed capability manifests under the Graph certificate; bindings may only implement or narrow authority. |
+| `ctx.continualHarness` | `seam` | [`continual-harness`](../packages/orchestration/continual-harness) | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Provides bounded session/workspace outcome context while the TaskGraph daemon remains the only orchestration state authority. |
+| `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Selects qualified subscription-first execution offers and recommends parallelism without dispatching work. |
+| `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path. |
+| `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph. |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | Waits for every configured backend, then publishes the domain form as one lifecycle-bound service for typed durable state. |

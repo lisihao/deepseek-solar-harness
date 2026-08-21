@@ -106,6 +106,11 @@ function collaborationPolicy(events: readonly { readonly type: string; readonly 
   return 'auto'
 }
 
+/**
+ * Fold the latest orchestration strategy selection from a Session event stream.
+ * @param events Ordered Session events.
+ * @returns The latest valid selection, or the product defaults.
+ */
 export function foldOrchestrationPreferences(
   events: readonly { readonly type: string; readonly data: unknown }[],
 ): OrchestrationExecutionPreferences {

@@ -3,14 +3,22 @@ import type {
   ContinualHarnessMode,
   ModelAllocationObjective,
   RlmExecutionMode,
-} from '@deepseek-ai/dsh-model-allocation'
+} from '@deepseek-ai/dsh-model-allocation/strategy-types'
 
+export type {
+  ContinualHarnessMode,
+  ModelAllocationObjective,
+  RlmExecutionMode,
+} from '@deepseek-ai/dsh-model-allocation/strategy-types'
+
+/** User-selected orchestration strategy persisted in the current Session. */
 export interface OrchestrationExecutionPreferences {
   readonly rlm: RlmExecutionMode
   readonly continualHarness: ContinualHarnessMode
   readonly optimization: ModelAllocationObjective
 }
 
+/** Strategy preferences plus the complete UI option lists. */
 export interface OrchestrationExecutionPreferencesSelect extends OrchestrationExecutionPreferences {
   readonly rlmOptions: readonly RlmExecutionMode[]
   readonly continualHarnessOptions: readonly ContinualHarnessMode[]

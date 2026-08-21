@@ -29,7 +29,7 @@ function canonical(value: unknown): string {
     return `{${Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right))
       .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`).join(',')}}`
   }
-  return JSON.stringify(value) ?? 'null'
+  return JSON.stringify(value)
 }
 
 function sha256(value: unknown): string {

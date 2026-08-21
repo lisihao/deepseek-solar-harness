@@ -12,7 +12,7 @@ import type {
   ContinualHarnessMode,
   ModelAllocationObjective,
   RlmExecutionMode,
-} from '@deepseek-ai/dsh-model-allocation'
+} from '@deepseek-ai/dsh-tool-orchestration/client'
 import type { DesktopResidentDashboard } from '../resident-dashboard-contracts.ts'
 import { loadResidentDashboard } from './ResidentOperatorsPanel.tsx'
 

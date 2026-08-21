@@ -13,6 +13,7 @@
   "files": [
     "cordis.patch.yml",
     "lib/**/*.js",
+    "lib/**/*.json",
     "scripts/*.mjs",
     "skills/**",
     "vendor/mermaid.min.js",

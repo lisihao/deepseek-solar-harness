@@ -5,6 +5,7 @@ import { HarnessError, type ContentBlock, type TokenUsage } from '@deepseek-ai/d
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 
+/** Sealed one-shot request dispatched to a selected model worker. */
 export interface ModelWorkerExecuteRequest {
   readonly commandId: string
   readonly workerId: string
@@ -14,18 +15,21 @@ export interface ModelWorkerExecuteRequest {
   readonly signal: AbortSignal
 }
 
+/** Bounded model-worker result returned to the Scheduler. */
 export interface ModelWorkerResult {
   readonly output: readonly ContentBlock[]
   readonly stopReason: 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
   readonly usage?: TokenUsage
 }
 
+/** Replaceable Provider that exposes offers and executes one-shot model work. */
 export interface ModelWorkerProvider {
   readonly id: string
   offers(): Promise<readonly ModelExecutionOffer[]>
   execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
 }
 
+/** Structured model-worker registration or dispatch failure. */
 export class ModelWorkerError extends HarnessError {
   constructor(message: string, code: 'MODEL_WORKER_UNAVAILABLE' | 'MODEL_WORKER_DUPLICATE' | 'MODEL_WORKER_INVALID') {
     super(message, code)

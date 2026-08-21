@@ -66,7 +66,7 @@ function score(offer: ModelExecutionOffer, request: ModelAllocationRequest, nowS
 
 /** Public deterministic Provider, separately mountable from the Scheduler. */
 export class SubscriptionFirstModelAllocation extends ModelAllocationService {
-  async allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan> {
+  allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan> {
     const available = request.offers.filter(offer => offer.available && offer.activeCount < offer.maxConcurrency)
     const explicit = request.preferredOperatorIds.length === 0
       ? available
@@ -106,7 +106,7 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
     const urgentCapacity = candidates.filter(offer => offer.quotaPool !== undefined && (
       resetUrgency(offer.quotaPool.primary, nowSeconds) > 0 || resetUrgency(offer.quotaPool.secondary, nowSeconds) > 0
     )).length
-    return {
+    return Promise.resolve({
       offerId: selected.offerId,
       operatorId: selected.operatorId,
       provider: selected.provider,
@@ -122,7 +122,7 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
         ...selected.quotaPool === undefined ? [] : [`quota-pool:${selected.quotaPool.poolId}`],
         ...urgentCapacity === 0 ? [] : ['accelerate-before-quota-reset'],
       ],
-    }
+    })
   }
 }
 

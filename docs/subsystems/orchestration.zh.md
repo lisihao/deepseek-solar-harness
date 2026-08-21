@@ -94,7 +94,7 @@ abstract snapshot(request: ContinualHarnessSnapshotRequest): Promise<ContinualHa
 abstract recordOutcome(request: ContinualHarnessOutcomeRequest): Promise<ContinualHarnessEntryV1>
 ```
 
-Source: [`packages/orchestration/continual-harness/src/index.ts:65`](../../packages/orchestration/continual-harness/src/index.ts)
+Source: [`packages/orchestration/continual-harness/src/index.ts:72`](../../packages/orchestration/continual-harness/src/index.ts)
 
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 
@@ -158,7 +158,7 @@ async offers(): Promise<ModelExecutionOffer[]>
 execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
 ```
 
-Source: [`packages/orchestration/model-worker/src/index.ts:41`](../../packages/orchestration/model-worker/src/index.ts)
+Source: [`packages/orchestration/model-worker/src/index.ts:45`](../../packages/orchestration/model-worker/src/index.ts)
 
 <a id="ctxorchestrations--orchestrationservice-abstract-seam"></a>
 
@@ -247,5 +247,5 @@ Replaceable RLM policy Provider; the Scheduler consumes only its immutable plan.
 abstract resolve(request: RlmStrategyRequest): Promise<RlmExecutionPlanV1>
 ```
 
-Source: [`packages/orchestration/rlm-strategy/src/index.ts:46`](../../packages/orchestration/rlm-strategy/src/index.ts)
+Source: [`packages/orchestration/rlm-strategy/src/index.ts:49`](../../packages/orchestration/rlm-strategy/src/index.ts)
 <!-- END GENERATED cordis-surface -->

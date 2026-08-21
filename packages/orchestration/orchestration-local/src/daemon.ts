@@ -1078,7 +1078,7 @@ export class OrchestrationDaemon {
     }
   }
 
-  private async dispatchModelWorker(
+  private dispatchModelWorker(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
@@ -1132,7 +1132,7 @@ export class OrchestrationDaemon {
           }
           return { output: [...workerResult.output], stopReason: workerResult.stopReason }
         }),
-        dispose: async (): Promise<void> => { controller.abort() },
+        dispose: (): Promise<void> => { controller.abort(); return Promise.resolve() },
       }
       const active: ActiveAttempt = {
         kind: 'model-worker', runId: String(record.snapshot.runId), nodeId: spec.id,
@@ -1144,7 +1144,7 @@ export class OrchestrationDaemon {
       this.active.set(key, active)
       void run.result.then(
         async (value) => { if (!this.closing) await this.settleAttempt(active, value) },
-        (error) => { if (!this.closing) this.failAttempt(active, error) },
+        (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
       ).finally(() => { this.active.delete(key); void this.tick() })
     } catch (error) {
       const attempt: AttemptRecord = {
@@ -1157,6 +1157,7 @@ export class OrchestrationDaemon {
       this.store.saveAttempt(attempt)
       this.applyFailure(attempt)
     }
+    return Promise.resolve()
   }
 
   private async syncActiveProgress(active: ActiveAttempt): Promise<void> {

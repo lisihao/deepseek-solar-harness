@@ -4,12 +4,14 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { ModelTaskPhase, RlmExecutionMode } from '@deepseek-ai/dsh-model-allocation'
 
+/** Hard recursion and turn limits for one node-local RLM plan. */
 export interface RlmBudgetV1 {
   readonly maxDepth: number
   readonly maxChildren: number
   readonly maxTurns: number
 }
 
+/** Complete deterministic input to the RLM strategy Provider. */
 export interface RlmStrategyRequest {
   readonly runId: string
   readonly nodeId: string
@@ -31,6 +33,7 @@ export interface RlmExecutionPlanV1 extends RlmBudgetV1 {
   readonly planSha256: string
 }
 
+/** Structured rejection of an invalid RLM strategy request. */
 export class RlmStrategyError extends HarnessError {
   constructor(message: string) {
     super(message, 'RLM_STRATEGY_INVALID')

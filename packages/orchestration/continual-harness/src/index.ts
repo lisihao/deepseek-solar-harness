@@ -3,9 +3,12 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 
+/** Durable scope used to select Continuous Harness entries. */
 export type ContinualHarnessScope = 'session' | 'workspace'
+/** Supported bounded entry categories. */
 export type ContinualHarnessEntryKind = 'instruction' | 'memory' | 'skill' | 'subagent-pattern' | 'outcome'
 
+/** One bounded, content-addressed Continuous Harness entry. */
 export interface ContinualHarnessEntryV1 {
   readonly version: 1
   readonly entryId: string
@@ -19,6 +22,7 @@ export interface ContinualHarnessEntryV1 {
   readonly digest: string
 }
 
+/** Input used to compile a node-local Continuous Harness snapshot. */
 export interface ContinualHarnessSnapshotRequest {
   readonly workspace: string
   readonly sessionId?: string
@@ -28,6 +32,7 @@ export interface ContinualHarnessSnapshotRequest {
   readonly limit: number
 }
 
+/** Immutable entry snapshot sealed into one node attempt. */
 export interface ContinualHarnessSnapshotV1 {
   readonly version: 1
   readonly scope: ContinualHarnessScope
@@ -38,6 +43,7 @@ export interface ContinualHarnessSnapshotV1 {
   readonly snapshotSha256: string
 }
 
+/** Bounded outcome written after a node settles. */
 export interface ContinualHarnessOutcomeRequest {
   readonly runId: string
   readonly nodeId: string
@@ -50,6 +56,7 @@ export interface ContinualHarnessOutcomeRequest {
   readonly evidenceRefs: readonly string[]
 }
 
+/** Structured Continuous Harness validation or availability failure. */
 export class ContinualHarnessError extends HarnessError {
   constructor(message: string, code: 'HARNESS_INVALID' | 'HARNESS_UNAVAILABLE') {
     super(message, code)

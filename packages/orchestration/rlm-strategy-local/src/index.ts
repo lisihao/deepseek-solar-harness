@@ -17,7 +17,7 @@ function canonical(value: unknown): string {
   if (value !== null && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`).join(',')}}`
-  return JSON.stringify(value) ?? 'null'
+  return JSON.stringify(value)
 }
 
 function enabledByAuto(request: RlmStrategyRequest): boolean {
@@ -38,8 +38,9 @@ function budgetOf(request: RlmStrategyRequest): RlmBudgetV1 {
   return budget
 }
 
+/** Deterministic owner-local RLM policy Provider. */
 export class LocalRlmStrategy extends RlmStrategyService {
-  async resolve(request: RlmStrategyRequest): Promise<RlmExecutionPlanV1> {
+  resolve(request: RlmStrategyRequest): Promise<RlmExecutionPlanV1> {
     const budget = budgetOf(request)
     const enabled = request.requestedMode === 'enabled'
       || (request.requestedMode === 'auto' && enabledByAuto(request))
@@ -58,7 +59,7 @@ export class LocalRlmStrategy extends RlmStrategyService {
         : 'Execute this sealed node directly without recursive child decomposition.',
     }
     const planSha256 = createHash('sha256').update(canonical(base)).digest('hex')
-    return { ...base, planSha256 }
+    return Promise.resolve({ ...base, planSha256 })
   }
 }
 

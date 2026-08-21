@@ -8,12 +8,14 @@ import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult 
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 
 export const name = 'model-worker-deepseek'
+/** Stable allocator identity for the metered DeepSeek API worker. */
 export const DEEPSEEK_WORKER_ID = 'deepseek-api'
 const MODELS = Object.freeze([
   { model: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', tier: 'low' as const },
   { model: 'deepseek-v4-pro', displayName: 'DeepSeek V4 Pro', tier: 'high' as const },
 ])
 
+/** Last-resort DeepSeek API Provider used only after subscription offers. */
 export class DeepSeekModelWorker implements ModelWorkerProvider {
   readonly id = DEEPSEEK_WORKER_ID
   private activeCount = 0

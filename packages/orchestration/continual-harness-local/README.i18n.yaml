@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/orchestration/continual-harness-local/README.md
-README.md: ee21cb6ccfd3711725c0e3964be72409c5d3ab3f
-README.zh.md: ce5d6c374b070322e6978223cb6e15caa1f6c06b
+README.md: 7f30c204948340f606edcf5bd3214aebbd44707b
+README.zh.md: c461cb9070d9a38b50696032a0be6fdc29ae8668

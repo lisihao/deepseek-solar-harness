@@ -3,13 +3,12 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
+import type {
+  ModelAllocationObjective,
+  RlmExecutionMode,
+} from './strategy-types.ts'
 
-/** User-visible optimization intent. */
-export type ModelAllocationObjective = 'balanced' | 'quality' | 'speed' | 'economy'
-/** Node-local recursive execution strategy; this is not a physical operator. */
-export type RlmExecutionMode = 'auto' | 'enabled' | 'disabled'
-/** Durable Continuous Harness participation. */
-export type ContinualHarnessMode = 'auto' | 'off' | 'session' | 'workspace'
+export type * from './strategy-types.ts'
 /** Position of a node in a quality-gated TaskGraph. */
 export type ModelTaskPhase = 'planning' | 'execution' | 'verification' | 'synthesis'
 
@@ -77,6 +76,7 @@ export interface ModelAllocationPlan {
   readonly rationale: readonly string[]
 }
 
+/** Structured model-capacity or explicit-selection failure. */
 export class ModelAllocationError extends HarnessError {
   constructor(message: string, code: 'NO_MODEL_CAPACITY' | 'EXPLICIT_MODEL_UNAVAILABLE') {
     super(message, code)
