@@ -26,7 +26,7 @@ const SAVE_DEBOUNCE_MS = 2000
 export class PresenceTracker {
   /**
    * @param {object} ctx - cordis ctx（需可监听 harness 事件；
-   *   review.js 已用 ctx.on('agent/settled') 同款模式）。
+   *   review.js 已用 ctx.on('session/event') 同款模式）。
    * @param {string} [storageDir] - 可选：持久化目录（传则落盘
    *   presence.json；不传 = 纯内存，测试/临时场景用）。
    */
