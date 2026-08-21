@@ -77,6 +77,7 @@ const DESKTOP_SETTINGS_NAMESPACE = 'dsh-desktop'
 const UI_LAYOUT_PACKAGE = '@deepseek-ai/dsh-client-ui-layout'
 const UI_SIDEBAR_PACKAGE = '@deepseek-ai/dsh-client-ui-sidebar'
 const UI_CONVERSATION_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
+const RESIDENT_OPERATOR_STARTUP_TIMEOUT_MS = 15_000
 /**
  * Parse desktop presentation state and reject corrupted values.
  * @param value - untrusted settings value.
@@ -360,6 +361,17 @@ export function prepareDesktopProfile(
   if (settings?.name !== SETTINGS_FILE_PACKAGE) {
     throw new Error(`${BIN_NAME}: desktop profile must use ${SETTINGS_FILE_PACKAGE} in the settings row`)
   }
+  const residentOperators = rows.get('resident-operators')
+  if (residentOperators?.name !== '@deepseek-ai/dsh-resident-operator-local') {
+    throw new Error(`${BIN_NAME}: desktop profile must provide the Resident operator row`)
+  }
+  patches.push({
+    id: 'resident-operators',
+    config: {
+      ...rowConfig(residentOperators),
+      connectTimeoutMs: RESIDENT_OPERATOR_STARTUP_TIMEOUT_MS,
+    },
+  })
   const settingsConfig = FileSettingsProvider.Config({
     dshHome: home,
     ...rowConfig(settings),
