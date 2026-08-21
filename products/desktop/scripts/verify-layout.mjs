@@ -29,6 +29,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-resident-operators',
   '@deepseek-ai/dsh-subagent-codex',
   '@deepseek-ai/dsh-tool-physical-operator',
+  '@deepseek-ai/dsh-client-ui-sidebar',
   '@deepseek-ai/dsh-client-ui-remote-modules',
   '@deepseek-ai/dsh-host-apiproxy',
   '@deepseek-ai/dsh-session-projection-cache',
