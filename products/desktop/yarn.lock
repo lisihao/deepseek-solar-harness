@@ -5257,12 +5257,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.9.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
-  version: 0.3.9
-  resolution: "@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.9.tgz#./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.9.tgz::hash=4943f6&locator=deepseek-harness-desktop%40workspace%3A."
+"@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.3.10
+  resolution: "@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz#./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz::hash=c0e001&locator=deepseek-harness-desktop%40workspace%3A."
   bin:
     dsh-governed: ./bin/dsh-governed.mjs
-  checksum: 10c0/47ddf13670e1a776c21f7651ec54a56710e2f531e2e1dc9760a10ad697235de0a89d6b0a8c5cd0791ac6192610cc756a0043970fb64d5c03c6ead990c4b9382c
+  checksum: 10c0/9f09becd7ab1f7b108c20bb9bf1157c2bff3319ed9e4eefb0ba41438b1ef4c68b4c90362f3d5b026ae7ee932bb53a206aecbf040548842b59ae0289b4dc74124
   languageName: node
   linkType: hard
 
@@ -7995,7 +7995,7 @@ __metadata:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     "@electron/asar": "npm:3.4.1"
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz"
-    "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.9.tgz"
+    "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz"
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz"
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^22.20.0"
