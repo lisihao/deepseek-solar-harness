@@ -6,6 +6,7 @@ import {
   apply,
   Config,
   DESKTOP_SETTINGS_NAMESPACE,
+  desktopAssetPath,
   desktopRendererUrl,
   DesktopSettingsSchema,
   inject,
@@ -128,6 +129,13 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
 }
 
 describe('desktop Host plugin', () => {
+  it('maps packaged native images to the physical app.asar.unpacked tree', () => {
+    expect(desktopAssetPath(
+      'file:///Applications/DSH%20Desktop.app/Contents/Resources/app.asar/lib/index.js',
+      'tray-iconTemplate.png',
+    )).toBe('/Applications/DSH Desktop.app/Contents/Resources/app.asar.unpacked/build/tray-iconTemplate.png')
+  })
+
   it('defaults to compatibility mode and validates both schemas', () => {
     expect(Config({} as DesktopConfig)).toEqual(config)
     expect(Config({ mode: 'advanced' } as DesktopConfig)).toEqual({ ...config, mode: 'advanced' })

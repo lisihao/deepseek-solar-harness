@@ -154,10 +154,19 @@ describe('desktop profile composition', () => {
     }))
     expect(rows.find(row => row.id === 'resident-operators')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-resident-operator-local',
-      config: expect.objectContaining({ autoStart: true }),
+      config: expect.objectContaining({
+        autoStart: true,
+        connectTimeoutMs: 15_000,
+        driverModules: ['@deepseek-ai/dsh-resident-operator-prime-agent'],
+      }),
     }))
     expect(rows.find(row => row.id === 'physical-operator-dual-mode')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-physical-operator-resident',
+      config: expect.objectContaining({
+        operators: expect.arrayContaining([
+          expect.objectContaining({ id: 'prime-agent', residentProvider: 'prime-agent' }),
+        ]),
+      }),
     }))
     expect(rows.find(row => row.id === 'orchestration-local')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-orchestration-local',
@@ -179,8 +188,18 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'web-billing')).toEqual(expect.objectContaining({
       name: 'dsh-web-billing',
     }))
+    expect(rows.find(row => row.id === 'dsh-memory-evolve')).toEqual(expect.objectContaining({
+      name: 'dsh-memory-evolve',
+    }))
     expect(rows.find(row => row.id === 'luna-vision-bridge')).toEqual(expect.objectContaining({
       name: '@ycp424c/dsh-luna-vision-bridge',
+    }))
+    expect(rows.find(row => row.id === 'code-harness-governance')).toEqual(expect.objectContaining({
+      name: '@lisihao/dsh-code-harness-governance',
+      config: expect.objectContaining({ strict: true }),
+    }))
+    expect(rows.find(row => row.id === 'code-harness-governance-invariant')).toEqual(expect.objectContaining({
+      name: '@lisihao/dsh-code-harness-governance/invariant',
     }))
     expect(rows.find(row => row.id === 'ui-remote-modules')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-client-ui-remote-modules',
@@ -257,6 +276,10 @@ describe('desktop profile composition', () => {
       '- insert:',
       '    - id: remote-web-ui',
       "      name: '@linxin666/dsh-remote-web-ui'",
+      '    - id: dsh-memory-evolve',
+      '      name: dsh-memory-evolve',
+      '      config:',
+      '        reviewEnabled: true',
       '',
     ].join('\n'))
 
@@ -271,6 +294,8 @@ describe('desktop profile composition', () => {
     expect(rows.filter(row => row.id === 'orchestration-local')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'remote-web-ui')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'ui-remote-modules')).toHaveLength(1)
+    expect(rows.filter(row => row.id === 'dsh-memory-evolve')).toHaveLength(1)
+    expect(rows.find(row => row.id === 'dsh-memory-evolve')?.config).toEqual({ reviewEnabled: true })
   })
 
   it('projects advanced YAML settings into the Host and client Loader rows', () => {

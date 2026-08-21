@@ -15,9 +15,11 @@ import { formatResidentTimestamp } from '../resident-presentation.ts'
 export async function loadOrchestrationDashboard(
   runId?: string,
   signal?: AbortSignal,
+  includeDiagnostics = true,
 ): Promise<DesktopOrchestrationDashboard> {
   const url = new URL(ORCHESTRATION_DASHBOARD_PATH, window.location.origin)
   if (runId !== undefined) url.searchParams.set('run_id', runId)
+  url.searchParams.set('include_diagnostics', includeDiagnostics ? '1' : '0')
   const response = await fetch(url, { cache: 'no-store', ...(signal === undefined ? {} : { signal }) })
   if (!response.ok) {
     throw new Error(`编排状态读取失败 (${String(response.status)}): ${await response.text()}`)
@@ -52,12 +54,13 @@ export function OrchestrationsPanel({ wide }: DesktopSidebarFooterActionOwnerPro
   const [dashboard, setDashboard] = useState<DesktopOrchestrationDashboard>()
   const [error, setError] = useState<string>()
   const [controlPending, setControlPending] = useState(false)
+  const [includeDiagnostics, setIncludeDiagnostics] = useState(true)
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    const next = await loadOrchestrationDashboard(open ? selectedRunId : undefined, signal)
+    const next = await loadOrchestrationDashboard(open ? selectedRunId : undefined, signal, includeDiagnostics)
     setDashboard(next)
     setError(undefined)
-  }, [open, selectedRunId])
+  }, [includeDiagnostics, open, selectedRunId])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -94,10 +97,11 @@ export function OrchestrationsPanel({ wide }: DesktopSidebarFooterActionOwnerPro
   }, [open])
 
   const selectedRun = dashboard?.runs.find(run => run.runId === selectedRunId)
-  const active = dashboard?.runs.filter(run => ['running', 'paused'].includes(run.state)).length ?? 0
-  const attention = dashboard?.runs.filter(run => (
+  const userRuns = dashboard?.runs.filter(run => run.diagnostic !== true) ?? []
+  const active = userRuns.filter(run => ['running', 'paused'].includes(run.state)).length
+  const attention = userRuns.filter(run => (
     ['awaiting_approval', 'awaiting_clarification', 'indeterminate', 'failed'].includes(run.state)
-  )).length ?? 0
+  )).length
   const status = error !== undefined ? 'error' : attention > 0 ? 'warn' : active > 0 ? 'running' : 'idle'
 
   const submit = useCallback(async (request: DesktopOrchestrationControlRequest) => {
@@ -152,6 +156,9 @@ export function OrchestrationsPanel({ wide }: DesktopSidebarFooterActionOwnerPro
                 selectedRunId={selectedRunId}
                 onSelect={setSelectedRunId}
                 generatedAt={dashboard?.generatedAt}
+                diagnosticRunCount={dashboard?.diagnosticRunCount ?? 0}
+                diagnosticsIncluded={includeDiagnostics}
+                onToggleDiagnostics={() => { setIncludeDiagnostics(value => !value) }}
               />
               <GraphView
                 run={selectedRun}
@@ -174,12 +181,28 @@ function RunList(props: {
   selectedRunId?: string | undefined
   onSelect: (runId: string) => void
   generatedAt?: string | undefined
+  diagnosticRunCount: number
+  diagnosticsIncluded: boolean
+  onToggleDiagnostics: () => void
 }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   return <div className="dshDesktopOrchestrationColumn dshDesktopOrchestrationRuns">
     <h3>编排任务</h3>
     {props.generatedAt !== undefined && <small>本机时区 {timeZone}</small>}
-    {props.runs.length === 0 && <p className="dshDesktopOrchestrationEmpty">还没有持久化 TaskGraph。</p>}
+    {props.diagnosticRunCount > 0 && <button
+      type="button"
+      className="dshDesktopOrchestrationDiagnosticToggle"
+      onClick={props.onToggleDiagnostics}
+    >
+      {props.diagnosticsIncluded
+        ? `隐藏验收记录 (${String(props.diagnosticRunCount)})`
+        : `显示验收记录 (${String(props.diagnosticRunCount)})`}
+    </button>}
+    {props.runs.length === 0 && <p className="dshDesktopOrchestrationEmpty">
+      {props.diagnosticRunCount > 0 && !props.diagnosticsIncluded
+        ? `没有用户任务；${String(props.diagnosticRunCount)} 条验收记录已隐藏。`
+        : '还没有持久化 TaskGraph。'}
+    </p>}
     {props.runs.map(run => {
       const time = formatResidentTimestamp(run.updatedAt, props.generatedAt ?? run.updatedAt, timeZone)
       return <button
@@ -191,7 +214,7 @@ function RunList(props: {
         onClick={() => { props.onSelect(run.runId) }}
       >
         <span className="dshDesktopOrchestrationDot" />
-        <span><strong>{run.title}</strong><small>{run.workspace}</small><small>{time.relative}</small></span>
+        <span><strong>{run.title}{run.diagnostic === true && <b className="dshDesktopOrchestrationDiagnosticBadge">验收</b>}</strong><small>{run.workspace}</small><small>{time.relative}</small></span>
         <em>{runStateLabel(run.state)}</em>
       </button>
     })}
@@ -209,6 +232,9 @@ function GraphView(props: {
   if (run === undefined) {
     return <div className="dshDesktopOrchestrationColumn"><p className="dshDesktopOrchestrationEmpty">选择任务查看 DAG。</p></div>
   }
+  const activeWorkers = run.nodes.filter(node => node.state === 'running').length
+  const readyWorkers = run.nodes.filter(node => node.state === 'ready').length
+  const cleanContext = props.events.some(event => event.type === 'capsule.resolved' && event.data.cleanContext === true)
   return <div className="dshDesktopOrchestrationColumn dshDesktopOrchestrationGraph">
     <div className="dshDesktopOrchestrationRunHeader">
       <div>
@@ -216,6 +242,16 @@ function GraphView(props: {
         <small>Run {shortRef(run.runId)} · rev {String(run.revision)} · Graph rev {String(run.graphRevision)}</small>
       </div>
       <RunControls run={run} disabled={props.controlPending} onControl={props.onControl} />
+    </div>
+    <div
+      className="dshDesktopCollaborationTrace"
+      data-policy={run.admission?.policy ?? 'legacy'}
+      aria-label="智能协作 Trace 摘要"
+    >
+      <p><strong>协作 Trace · {collaborationPolicyLabel(run.admission?.policy)}</strong></p>
+      <p>路由：{run.admission?.route === 'taskgraph' ? '持久 TaskGraph' : '历史任务（无 admission 记录）'}</p>
+      <p>并行：{String(activeWorkers)}/{String(run.maxParallel ?? 1)} worker 运行中 · {String(readyWorkers)} 个可派发</p>
+      <p>上下文：{cleanContext ? 'Clean-task Capsule 已注入 · fresh native lane' : '等待 Capsule 解析'}</p>
     </div>
     <div className="dshDesktopOrchestrationPipeline" aria-label="编译流水线">
       <Stage label="Intent" complete={eventTypes.has('intent.compiled')} />
@@ -262,6 +298,9 @@ function NodeCard(props: {
     <div className="dshDesktopOrchestrationDependencies">
       {node.dependsOn.length === 0 ? '起点' : `依赖 ${node.dependsOn.join(' → ')}`}
     </div>
+    {node.waitReason !== undefined && <div className="dshDesktopOrchestrationDependencies">
+      调度等待 · {waitReasonLabel(node.waitReason.code)}
+    </div>}
     <div className="dshDesktopOrchestrationMeta">
       <span>Attempt {String(node.attempt)}</span>
       <span>Generation {String(node.capabilityGeneration)}</span>
@@ -333,9 +372,55 @@ function EventTimeline(props: {
             <time title={time.absolute}>{time.relative}</time>
             <strong>{eventLabel(event.type)}</strong>
             <span>{event.nodeId === undefined ? `Run · #${String(event.sequence)}` : `${event.nodeId} · A${String(event.attempt ?? 0)} · G${String(event.generation ?? 0)}`}</span>
+            <small>{eventDetail(event)}</small>
           </li>
         })}</ol>}
   </div>
+}
+
+/** Present the exact collaboration preference persisted at TaskGraph admission. */
+export function collaborationPolicyLabel(policy: 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent' | undefined): string {
+  return ({
+    auto: '智能协作',
+    direct: '仅主模型',
+    codex: '优先 Codex',
+    'claude-code': '优先 Claude Code',
+    'prime-agent': '优先 Prime Agent',
+  } as Record<string, string>)[String(policy)] ?? '历史策略 N/A'
+}
+
+/** Summarize collaboration decisions that matter in the visible Trace. */
+export function eventDetail(event: DesktopOrchestrationEvent): string {
+  if (event.type === 'run.started') {
+    const admission = event.data.admission as { policy?: string } | null | undefined
+    const policy = admission?.policy
+    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' || policy === 'prime-agent' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
+  }
+  if (event.type === 'capsule.resolved') {
+    return event.data.cleanContext === true ? 'Clean-task Context Capsule 已注入' : 'Capsule 未确认干净上下文'
+  }
+  if (event.type === 'node.dispatched') {
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.contextIsolation ?? 'N/A')} · lane ${shortRef(String(event.data.laneId ?? 'N/A'))}`
+  }
+  if (event.type === 'node.operator.progress') {
+    return `${String(event.data.operatorId ?? 'N/A')} · ${operatorProgressLabel(String(event.data.phase ?? 'unknown'))}`
+  }
+  if (event.type === 'node.evidence.accepted' || (event.type === 'node.failed' && typeof event.data.outputPreview === 'string')) {
+    const output = String(event.data.outputPreview ?? '')
+    const truncated = event.data.outputTruncated === true ? '\n…输出已截断，完整结果保留在 Evidence 产物中。' : ''
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.stopReason ?? 'N/A')} · Evidence ${shortRef(String(event.data.evidenceRef ?? 'N/A'))}\n${output}${truncated}`
+  }
+  return ''
+}
+
+function operatorProgressLabel(phase: string): string {
+  return ({
+    connecting: '正在连接原生产品',
+    session_ready: '原生会话已接通',
+    reasoning: '正在推理与执行',
+    tool_activity: '正在使用工具',
+    finalizing: '正在整理结果',
+  } as Record<string, string>)[phase] ?? '正在执行'
 }
 
 function control(
@@ -372,12 +457,22 @@ function nodeStateLabel(state: DesktopOrchestrationNode['state']): string {
   } as const)[state]
 }
 
+function waitReasonLabel(code: string): string {
+  return ({
+    DEPENDENCIES_PENDING: '依赖尚未完成',
+    SCOPE_CONFLICT: '读写或 effect 冲突，串行执行',
+    MAX_PARALLEL_REACHED: '已达到并行上限',
+  } as Record<string, string>)[code] ?? code
+}
+
 function eventLabel(type: string): string {
   return ({
     'intent.compiled': 'Intent 已编译', 'graph.compiled': 'Graph 已认证', 'capsule.resolved': 'Capsule 已解析',
     'context.compiled': 'Context 已编译', 'execution_plan.sealed': 'ExecutionPlan 已封存',
-    'node.dispatched': '已派发 Resident 算子', 'node.evidence.accepted': 'Evidence 已验收',
+    'node.dispatched': '已派发 Resident 算子', 'node.operator.progress': 'Resident 执行进度',
+    'node.evidence.accepted': 'Evidence 已验收',
     'node.failed': '节点失败', 'node.retry_scheduled': '已安排重试', 'run.completed': '任务已完成',
     'capability_update.proposed': '能力更新已提出', 'capability_update.applied': '能力更新已应用',
+    'scheduler.waiting.updated': '调度等待已更新',
   } as Record<string, string>)[type] ?? type
 }

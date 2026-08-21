@@ -32,6 +32,7 @@ const LABELS: Record<PhysicalOperatorRoutingPolicy, string> = {
   direct: '仅主模型',
   codex: '优先 Codex',
   'claude-code': '优先 Claude Code',
+  'prime-agent': '优先 Prime Agent',
 }
 
 /** Stable Chinese display label for one host-owned routing value. */
@@ -46,6 +47,7 @@ export function physicalOperatorRoutingSummary(policy: PhysicalOperatorRoutingPo
     direct: '仅主模型',
     codex: 'Codex',
     'claude-code': 'Claude Code',
+    'prime-agent': 'Prime Agent',
   } as const)[policy]
 }
 
@@ -116,7 +118,9 @@ export function PhysicalOperatorRoutingControl({
 
   const locked = session.removed || input.phase !== 'plain' || saving
   const currentLabel = physicalOperatorRoutingSummary(routing.currentValue)
-  const profileOwner = routing.currentValue === 'codex' || routing.currentValue === 'claude-code'
+  const profileOwner = routing.currentValue === 'codex'
+    || routing.currentValue === 'claude-code'
+    || routing.currentValue === 'prime-agent'
     ? routing.currentValue
     : undefined
   const provider = profileOwner === undefined
@@ -190,7 +194,7 @@ export function PhysicalOperatorRoutingControl({
         aria-haspopup="dialog"
         aria-expanded={open}
         disabled={locked}
-        title={error ?? '设置主模型是否邀请订阅态 Codex 或 Claude Code 协作'}
+        title={error ?? '设置主模型是否邀请订阅态 Codex、Claude Code 或 Prime Agent 协作'}
         onClick={() => { setOpen(value => !value) }}
       >
         <span>协作 · {saving ? '保存中' : currentLabel}</span>
@@ -206,7 +210,7 @@ export function PhysicalOperatorRoutingControl({
             onMouseDown={event => { event.stopPropagation() }}
           >
             <header>
-              <div><strong>协作方式</strong><small>主模型负责对话；Codex 和 Claude Code 只在需要时作为执行助手。</small></div>
+              <div><strong>协作方式</strong><small>主模型负责对话；Codex、Claude Code 和 Prime Agent 只在需要时作为执行助手。</small></div>
               <button type="button" aria-label="关闭协作方式" onClick={() => { setOpen(false) }}>×</button>
             </header>
             <div className="dshDesktopOperatorStrategyOptions">
@@ -225,7 +229,7 @@ export function PhysicalOperatorRoutingControl({
             </div>
             {profileOwner !== undefined && (
               <div className="dshDesktopOperatorProfilePreferences">
-                <div><strong>{profileOwner === 'codex' ? 'Codex' : 'Claude Code'} 高级偏好</strong><small>通常保持“按任务推荐”即可。</small></div>
+                <div><strong>{profileOwner === 'codex' ? 'Codex' : profileOwner === 'claude-code' ? 'Claude Code' : 'Prime Agent'} 高级偏好</strong><small>通常保持“按任务推荐”即可。</small></div>
                 <label>
                   <span>执行模型</span>
                   <select
@@ -269,10 +273,11 @@ export function PhysicalOperatorRoutingControl({
 /** Human-facing consequence of one collaboration policy. */
 export function physicalOperatorRoutingDescription(policy: PhysicalOperatorRoutingPolicy): string {
   return ({
-    auto: '推荐。按任务类型在主模型、Codex 与 Claude Code 之间选择。',
+    auto: '推荐。按任务类型在主模型、Codex、Claude Code 与 Prime Agent 之间选择。',
     direct: '始终由当前主聊天模型回答，不调用执行助手。',
     codex: '代码、调试和测试任务优先交给 Codex；短问答仍由主模型处理。',
     'claude-code': '分析、架构和长上下文任务优先交给 Claude Code；短问答仍由主模型处理。',
+    'prime-agent': '递归探索、多智能体综合与长周期节点优先交给 Prime Agent；全局编排仍由 DSH 负责。',
   } as const)[policy]
 }
 

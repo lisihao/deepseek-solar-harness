@@ -4,7 +4,12 @@ export const RESIDENT_DASHBOARD_PATH = '/api/desktop/resident-operators'
 
 export interface DesktopResidentProvider {
   operatorId: string
-  product: 'claude-code' | 'codex'
+  product: string
+  displayName: string
+  description: string
+  tags: string[]
+  maxConcurrency: number
+  injectionBoundaries: Array<'pre-dispatch' | 'next-turn' | 'checkpoint'>
   available: boolean
   unavailableReason?: string
   authentication: 'native-subscription' | 'unqualified'
@@ -45,6 +50,7 @@ export interface DesktopResidentSession {
   operatorId: string
   workspace: string
   workspaceDisplay: string
+  laneId: string
   lifecycle: 'starting' | 'idle' | 'running' | 'draining' | 'stopped'
   health: 'ok' | 'degraded' | 'unavailable'
   healthReason?: string
@@ -75,6 +81,7 @@ export interface DesktopResidentDashboard {
   events: DesktopResidentEvent[]
   activities: DesktopResidentActivity[]
   hiddenDiagnosticSessions: number
+  activeWorkers: number
   selectedTurn?: DesktopResidentTurn & {
     sessionId: string
     stateRevision: number

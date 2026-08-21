@@ -34,11 +34,17 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
+import type { ResidentProviderStatus } from '@deepseek-ai/dsh-resident-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { canonicalSha256 } from './canonical.ts'
 import { graphCertificate, nodesConflict, validateGraph } from './graph.ts'
-import { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from './providers.ts'
+import {
+  BasicContextCompiler,
+  CLEAN_TASK_CONTEXT_CAPABILITY,
+  DirectIntentCompiler,
+  LocalCapabilityCapsuleService,
+} from './providers.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
 import {
   ORCHESTRATION_STATE_SCHEMA_VERSION,
@@ -72,6 +78,9 @@ interface ActiveAttempt {
   readonly executionId: string
   readonly sessionId: string
   readonly turnId: string
+  readonly operatorId: string
+  progressCursor: number
+  progressSync?: Promise<void>
   readonly run: { readonly result: Promise<PhysicalOperatorResult>; dispose(): Promise<void> }
 }
 
@@ -86,16 +95,15 @@ class OrchestrationResidentOperator implements PhysicalOperator {
 
   constructor(
     private readonly resident: ResidentDaemonClient,
-    readonly operatorId: 'codex' | 'claude-code',
+    readonly provider: ResidentProviderStatus,
   ) {
+    const operatorId = provider.operatorId
     this.descriptor = {
       id: PhysicalOperatorId(operatorId),
-      displayName: operatorId === 'codex' ? 'Codex' : 'Claude Code',
-      description: 'Resident native-subscription physical operator for durable TaskGraph nodes.',
-      tags: operatorId === 'codex'
-        ? ['coding', 'implementation', 'debugging', 'testing', 'review']
-        : ['analysis', 'architecture', 'review', 'long-context', 'coding'],
-      maxConcurrency: 1,
+      displayName: provider.displayName,
+      description: provider.description,
+      tags: provider.tags,
+      maxConcurrency: provider.maxConcurrency,
       executionModes: ['resident'] as const,
     }
   }
@@ -109,8 +117,9 @@ class OrchestrationResidentOperator implements PhysicalOperator {
     if (workspace === undefined) throw new OrchestrationError('orchestration operator requires a workspace', 'GRAPH_INVALID')
     const turn = await this.resident.execute({
       commandId: String(request.executionId),
-      operatorId: this.operatorId,
+      operatorId: this.provider.operatorId,
       workspace,
+      laneId: String(request.executionId),
       ...request.label === undefined ? {} : { taskLabel: request.label },
       prompt: request.prompt,
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
@@ -141,6 +150,7 @@ export interface OrchestrationDaemonOptions {
   readonly buildCommit?: string
   readonly schedulerIntervalMs?: number
   readonly residentClient?: ResidentDaemonClient
+  readonly residentDriverModules?: readonly string[]
 }
 
 function requiredString(params: Record<string, unknown>, name: string): string {
@@ -159,6 +169,11 @@ function now(): string {
   return new Date().toISOString()
 }
 
+function clearWaitReason(node: OrchestrationNodeSnapshot): OrchestrationNodeSnapshot {
+  const { waitReason: _discarded, ...rest } = node
+  return rest
+}
+
 function authorityContains(value: string, budget: readonly string[]): boolean {
   return budget.includes('*') || budget.includes(value) || budget.some(entry => value.startsWith(`${entry}/`))
 }
@@ -175,6 +190,20 @@ function event(
     type,
     time: now(),
     data,
+  }
+}
+
+const MAX_OPERATOR_OUTPUT_PREVIEW = 8_000
+
+/** Project the operator's user-facing result without copying unbounded output into the event index. */
+function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview: string; outputTruncated: boolean } {
+  const text = output.map((block) => {
+    if (block.type === 'text') return block.text
+    return JSON.stringify(block)
+  }).join('\n')
+  return {
+    outputPreview: text.slice(0, MAX_OPERATOR_OUTPUT_PREVIEW),
+    outputTruncated: text.length > MAX_OPERATOR_OUTPUT_PREVIEW,
   }
 }
 
@@ -240,6 +269,7 @@ export class OrchestrationDaemon {
       autoStart: true,
       connectTimeoutMs: 5_000,
       pollIntervalMs: 250,
+      driverModules: options.residentDriverModules ?? [],
     })
     this.server = createServer((socket) => { this.acceptSocket(socket) })
   }
@@ -256,9 +286,9 @@ export class OrchestrationDaemon {
     await this.ctx.plugin(class extends LocalCapabilityCapsuleService {
       constructor(ctx: Context) { super(ctx, join(thisRoot, 'capsules')) }
     })
-    for (const operatorId of ['codex', 'claude-code'] as const) {
-      const operator = new OrchestrationResidentOperator(this.resident, operatorId)
-      this.physical.set(operatorId, operator)
+    for (const provider of await this.resident.providers()) {
+      const operator = new OrchestrationResidentOperator(this.resident, provider)
+      this.physical.set(provider.operatorId, operator)
       this.ctx.physicalOperators.registerOperator(operator)
     }
     this.removeStaleSocket()
@@ -361,7 +391,7 @@ export class OrchestrationDaemon {
     const blockers: OrchestrationBlocker[] = intent.requiresClarification
       ? [{ code: 'INTENT_CLARIFICATION_REQUIRED', message: intent.ambiguities.join('; ') }]
       : []
-    const compilationId = `cmp-${canonicalSha256({ intentRef, requirementRef, graphRef, certificate }).slice(0, 32)}`
+    const compilationId = `cmp-${canonicalSha256({ intentRef, requirementRef, graphRef, certificate, admission: request.admission }).slice(0, 32)}`
     const compilation: OrchestrationCompilationV1 = {
       version: 1,
       compilationId,
@@ -370,6 +400,7 @@ export class OrchestrationDaemon {
       ...requirementRef === undefined ? {} : { requirementRef },
       graphRef,
       graph,
+      ...request.admission === undefined ? {} : { admission: structuredClone(request.admission) },
       certificate,
       requiresClarification: intent.requiresClarification,
       blockers,
@@ -397,6 +428,8 @@ export class OrchestrationDaemon {
       state,
       revision: 1,
       graphRevision: 1,
+      maxParallel: compilation.graph.maxParallel,
+      ...compilation.admission === undefined ? {} : { admission: structuredClone(compilation.admission) },
       certificate: compilation.certificate,
       nodes: compilation.graph.nodes.map(node => ({
         id: node.id,
@@ -427,7 +460,11 @@ export class OrchestrationDaemon {
     this.store.createRun(record, [
       event(runId, 'intent.compiled', { ref: String(compilation.intentRef), sha256: compilation.intent.provenance.outputSha256 }),
       event(runId, 'graph.compiled', { ref: String(compilation.graphRef), certificateSha256: compilation.certificate.certificateSha256 }),
-      event(runId, 'run.started', { state }),
+      event(runId, 'run.started', {
+        state,
+        maxParallel: compilation.graph.maxParallel,
+        admission: compilation.admission ?? null,
+      }),
     ])
     void this.tick()
     return snapshot
@@ -568,6 +605,7 @@ export class OrchestrationDaemon {
     if (this.ticking || this.closing) return
     this.ticking = true
     try {
+      await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
       await this.reconcile()
       for (const record of this.store.listRuns()) {
         if (record.snapshot.state !== 'running') continue
@@ -598,7 +636,22 @@ export class OrchestrationDaemon {
         } : value)
         changed = true
       } else if (dependencies.every(value => value?.state === 'passed')) {
-        nodes = nodes.map(value => value.id === node.id ? { ...value, state: 'ready' as const, updatedAt: now() } : value)
+        nodes = nodes.map(value => value.id === node.id ? {
+          ...clearWaitReason(value),
+          state: 'ready' as const,
+          updatedAt: now(),
+        } : value)
+        changed = true
+      } else if (node.waitReason?.code !== 'DEPENDENCIES_PENDING') {
+        nodes = nodes.map(value => value.id === node.id ? {
+          ...value,
+          waitReason: {
+            code: 'DEPENDENCIES_PENDING',
+            message: `waiting for dependencies: ${spec.dependsOn.filter(id => !dependencies.find(value => value?.id === id && value.state === 'passed')).join(', ')}`,
+            nodeId: node.id,
+          },
+          updatedAt: now(),
+        } : value)
         changed = true
       }
     }
@@ -608,21 +661,58 @@ export class OrchestrationDaemon {
     }
     const liveNodes = record.snapshot.nodes.filter(node => node.state === 'running')
     const slots = Math.max(0, record.graph.maxParallel - liveNodes.length)
-    if (slots > 0) {
-      const selected: OrchestrationNodeSnapshot[] = []
-      const readyNodes = record.snapshot.nodes.filter(node => node.state === 'ready')
-      for (const candidate of readyNodes) {
-        const candidateSpec = byId.get(candidate.id)
-        if (candidateSpec === undefined) continue
-        const conflicts = [...liveNodes, ...selected].some((active) => {
-          const activeSpec = byId.get(active.id)
-          return activeSpec !== undefined && nodesConflict(candidateSpec, activeSpec)
+    const selected: OrchestrationNodeSnapshot[] = []
+    const readyNodes = record.snapshot.nodes.filter(node => node.state === 'ready')
+    const waitReasons = new Map<string, OrchestrationBlocker | undefined>()
+    for (const candidate of readyNodes) {
+      if (slots === 0) {
+        waitReasons.set(candidate.id, {
+          code: 'MAX_PARALLEL_REACHED',
+          message: `waiting for one of ${String(record.graph.maxParallel)} graph worker slots`,
+          nodeId: candidate.id,
         })
-        if (!conflicts) selected.push(candidate)
-        if (selected.length >= slots) break
+        continue
       }
-      await Promise.all(selected.map(node => this.prepareAndDispatch(String(record.snapshot.runId), node.id)))
+      const candidateSpec = byId.get(candidate.id)
+      if (candidateSpec === undefined) continue
+      const conflicts = [...liveNodes, ...selected].some((active) => {
+        const activeSpec = byId.get(active.id)
+        return activeSpec !== undefined && nodesConflict(candidateSpec, activeSpec)
+      })
+      if (conflicts) {
+        waitReasons.set(candidate.id, {
+          code: 'SCOPE_CONFLICT',
+          message: 'waiting for an overlapping write or effect scope to finish',
+          nodeId: candidate.id,
+        })
+      } else if (selected.length < slots) {
+        selected.push(candidate)
+        waitReasons.set(candidate.id, undefined)
+      } else {
+        waitReasons.set(candidate.id, {
+          code: 'MAX_PARALLEL_REACHED',
+          message: `waiting for one of ${String(record.graph.maxParallel)} graph worker slots`,
+          nodeId: candidate.id,
+        })
+      }
     }
+    const schedulerChanged = readyNodes.some(node => node.waitReason?.code !== waitReasons.get(node.id)?.code)
+    if (schedulerChanged) {
+      const current = this.store.getRun(String(record.snapshot.runId))
+      const scheduledNodes = current.snapshot.nodes.map((node): OrchestrationNodeSnapshot => {
+        if (node.state !== 'ready') return node
+        const waitReason = waitReasons.get(node.id)
+        return waitReason === undefined
+          ? { ...clearWaitReason(node), updatedAt: now() }
+          : { ...node, waitReason, updatedAt: now() }
+      })
+      record = withRevision(current, { ...current.snapshot, nodes: scheduledNodes })
+      this.store.saveRun(record, [event(record.snapshot.runId, 'scheduler.waiting.updated', {
+        activeWorkers: liveNodes.length,
+        maxParallel: record.graph.maxParallel,
+      })])
+    }
+    await Promise.all(selected.map(node => this.prepareAndDispatch(String(record.snapshot.runId), node.id)))
     record = this.store.getRun(String(record.snapshot.runId))
     const required = record.graph.nodes.filter(node => node.requiredForCompletion)
     const requiredStates = required.map(spec => record.snapshot.nodes.find(node => node.id === spec.id)?.state)
@@ -663,8 +753,12 @@ export class OrchestrationDaemon {
       nodeId,
       attempt,
       generation: node.capabilityGeneration,
-      requirements: [...spec.capabilityRequirements, ...updateRequirements],
-      capabilityBudget: spec.capabilityBudget,
+      requirements: [
+        { capability: CLEAN_TASK_CONTEXT_CAPABILITY, required: true },
+        ...spec.capabilityRequirements,
+        ...updateRequirements,
+      ],
+      capabilityBudget: [...new Set([CLEAN_TASK_CONTEXT_CAPABILITY, ...spec.capabilityBudget])],
       effectBudget: spec.effectBudget,
       readScopes: spec.readScopes,
       writeScopes: spec.writeScopes,
@@ -674,7 +768,11 @@ export class OrchestrationDaemon {
     const capabilityPlanRef = this.store.putArtifact(capabilityPlan)
     this.store.recordArtifact('capability_bindings', { ref: String(capabilityPlanRef), runId, nodeId, attempt, generation: node.capabilityGeneration })
     this.store.saveRun(record, [event(record.snapshot.runId, 'capsule.resolved', {
-      ref: String(capabilityPlanRef), blockers: capabilityPlan.blockers,
+      ref: String(capabilityPlanRef),
+      capsuleRefs: capabilityPlan.capsuleRefs.map(String),
+      resolvedCapabilities: capabilityPlan.resolvedCapabilities,
+      cleanContext: capabilityPlan.resolvedCapabilities.includes(CLEAN_TASK_CONTEXT_CAPABILITY),
+      blockers: capabilityPlan.blockers,
     }, node)])
     if (capabilityPlan.blockers.length > 0 || capabilityPlan.guardRefs.length > 0) {
       const blockers = [...capabilityPlan.blockers, ...capabilityPlan.guardRefs.length > 0 ? [{
@@ -707,7 +805,8 @@ export class OrchestrationDaemon {
     this.store.saveRun(record, [event(record.snapshot.runId, 'context.compiled', {
       ref: String(contextPacketRef), sha256: contextPacket.packetSha256, degradedSources: contextPacket.degradedSources,
     }, node)])
-    const operatorId = await this.selectOperator(spec)
+    const selectedProvider = await this.selectOperator(spec)
+    const operatorId = selectedProvider.operatorId
     const executionId = PhysicalOperatorExecutionId(`orch:${runId}:${nodeId}:${String(attempt)}`)
     const taskRef = this.store.putArtifact({ title: spec.title, task: spec.task })
     const base = {
@@ -727,7 +826,7 @@ export class OrchestrationDaemon {
         operatorId,
         mode: 'resident' as const,
         ...spec.operator?.profile === undefined ? {} : { profile: spec.operator.profile },
-        injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
+        injectionBoundaries: selectedProvider.injectionBoundaries,
       },
       effectiveReadScopes: capabilityPlan.effectiveReadScopes,
       effectiveWriteScopes: capabilityPlan.effectiveWriteScopes,
@@ -806,17 +905,29 @@ export class OrchestrationDaemon {
       const next = withRevision(current, current.snapshot)
       this.store.saveRun(next, [event(next.snapshot.runId, 'node.dispatched', {
         executionId: String(plan.executionId), turnId: receipt.turnId,
+        operatorId: plan.operatorPlan.operatorId,
+        laneId: String(plan.executionId),
+        contextIsolation: 'fresh-native-thread',
       }, next.snapshot.nodes.find(value => value.id === spec.id))])
       const key = `${String(record.snapshot.runId)}\0${spec.id}`
       const active: ActiveAttempt = {
         runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
         generation: plan.capabilityGeneration, executionId: String(plan.executionId),
-        sessionId: receipt.sessionId, turnId: receipt.turnId, run,
+        sessionId: receipt.sessionId, turnId: receipt.turnId,
+        operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
       }
       this.active.set(key, active)
       void run.result.then(
-        (result) => { if (!this.closing) this.settleAttempt(active, result) },
-        (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
+        async (result) => {
+          if (this.closing) return
+          await this.syncActiveProgress(active)
+          this.settleAttempt(active, result)
+        },
+        async (error: unknown) => {
+          if (this.closing) return
+          await this.syncActiveProgress(active)
+          this.failAttempt(active, error)
+        },
       ).finally(() => { this.active.delete(key); void this.tick() })
     } catch (error) {
       const attempt: AttemptRecord = {
@@ -828,6 +939,40 @@ export class OrchestrationDaemon {
       }
       this.store.saveAttempt(attempt)
       this.applyFailure(attempt)
+    }
+  }
+
+  private async syncActiveProgress(active: ActiveAttempt): Promise<void> {
+    if (active.progressSync !== undefined) return active.progressSync
+    const operation = this.syncActiveProgressUnchecked(active).finally(() => {
+      if (active.progressSync === operation) delete active.progressSync
+    })
+    active.progressSync = operation
+    return operation
+  }
+
+  private async syncActiveProgressUnchecked(active: ActiveAttempt): Promise<void> {
+    try {
+      const page = await this.resident.readEvents(active.sessionId, active.progressCursor, 200)
+      const progress = page.events.filter(value => (
+        value.type === 'turn.progress'
+        && value.data.turnId === active.turnId
+        && typeof value.data.phase === 'string'
+      ))
+      if (progress.length > 0) {
+        const record = this.store.getRun(active.runId)
+        const node = record.snapshot.nodes.find(value => value.id === active.nodeId)
+        this.store.appendEvents(progress.map(value => event(record.snapshot.runId, 'node.operator.progress', {
+          operatorId: active.operatorId,
+          turnId: active.turnId,
+          phase: value.data.phase,
+          residentSequence: value.sequence,
+          residentTime: value.time,
+        }, node)))
+      }
+      active.progressCursor = page.nextSequence
+    } catch (error) {
+      this.ctx.logger.warn(`orchestration progress projection failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -875,8 +1020,14 @@ export class OrchestrationDaemon {
     })
     this.store.saveAttempt({ ...attempt, state: 'settled', updatedAt: now() })
     const settledNode = nodes.find(value => value.id === active.nodeId)
+    const output = operatorOutputPreview(result.output)
     this.store.saveRun(next, [
-      event(next.snapshot.runId, passed ? 'node.evidence.accepted' : 'node.failed', { evidenceRef: String(evidenceRef), stopReason: result.stopReason }, settledNode),
+      event(next.snapshot.runId, passed ? 'node.evidence.accepted' : 'node.failed', {
+        evidenceRef: String(evidenceRef),
+        operatorId: active.operatorId,
+        stopReason: result.stopReason,
+        ...output,
+      }, settledNode),
     ])
   }
 
@@ -960,11 +1111,16 @@ export class OrchestrationDaemon {
     this.store.saveRun(next, [event(next.snapshot.runId, `run.${state}`, {})])
   }
 
-  private async selectOperator(spec: OrchestrationNodeSpecV1): Promise<string> {
+  private async selectOperator(spec: OrchestrationNodeSpecV1): Promise<ResidentProviderStatus> {
     const providers = await this.resident.providers()
-    const available = new Set(providers.filter(value => value.available && value.authentication === 'native-subscription').map(value => value.operatorId))
+    const available = new Map(providers
+      .filter(value => value.available && value.authentication === 'native-subscription')
+      .map(value => [value.operatorId, value]))
     const preferred = spec.operator?.preferredIds ?? []
-    for (const id of preferred) if (available.has(id)) return id
+    for (const id of preferred) {
+      const provider = available.get(id)
+      if (provider !== undefined) return provider
+    }
     if (preferred.length > 0) {
       throw new OrchestrationError(
         `none of the explicitly preferred Resident physical operators are available: ${preferred.join(', ')}`,
@@ -972,9 +1128,14 @@ export class OrchestrationDaemon {
       )
     }
     const role = `${spec.role} ${spec.task}`.toLowerCase()
-    const inferred = /architect|review|analysis|research|long.context/u.test(role) ? 'claude-code' : 'codex'
-    if (available.has(inferred)) return inferred
-    const fallback = providers.find(value => available.has(value.operatorId))?.operatorId
+    const inferred = /recursive|recursion|rlm|multi.agent|synthesi[sz]|explor|long.horizon|递归|多智能体|综合探索/u.test(role)
+      ? 'prime-agent'
+      : /architect|review|analysis|research|long.context|架构|审查|长上下文/u.test(role)
+        ? 'claude-code'
+        : 'codex'
+    const inferredProvider = available.get(inferred)
+    if (inferredProvider !== undefined) return inferredProvider
+    const fallback = providers.find(value => available.has(value.operatorId))
     if (fallback === undefined) throw new OrchestrationError('no qualified Resident physical operator is available', 'ORCHESTRATION_UNAVAILABLE')
     return fallback
   }
@@ -989,12 +1150,17 @@ export class OrchestrationDaemon {
       try {
         const inspection = await this.resident.inspectTurn(attempt.turnId)
         if (inspection.state === 'settled' && inspection.result !== undefined) {
-          this.settleAttempt({
+          const record = this.store.getRun(attempt.runId)
+          const recovered: ActiveAttempt = {
             runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
             generation: attempt.generation, executionId: attempt.executionId,
             sessionId: String(inspection.sessionId), turnId: attempt.turnId,
             run: { result: Promise.resolve(inspection.result), dispose: async () => {} },
-          }, inspection.result)
+            operatorId: record.snapshot.nodes.find(value => value.id === attempt.nodeId)?.operatorId ?? 'unknown',
+            progressCursor: 0,
+          }
+          await this.syncActiveProgress(recovered)
+          this.settleAttempt(recovered, inspection.result)
         } else if (inspection.state === 'indeterminate') {
           this.applyIndeterminate({
             ...attempt,

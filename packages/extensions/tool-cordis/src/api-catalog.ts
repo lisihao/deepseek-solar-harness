@@ -1125,8 +1125,8 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract execute(request: ResidentExecuteRequest): Promise<ResidentTurn>',
-        description: 'Admit or replay one durable command for its operator/workspace Session.',
-        parameters: [{ name: 'request', description: 'command identity, optional retry lineage, prompt, workspace, and cancellation signal.' }],
+        description: 'Admit or replay one durable command for its operator/workspace/lane Session.',
+        parameters: [{ name: 'request', description: 'command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.' }],
         returns: 'a holder-owned turn whose result settles independently.',
       },
       {
@@ -3788,6 +3788,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OrchestrationAcceptanceRequirement {\n    readonly id: string;\n    readonly description: string;\n    readonly kind: \'operator-completed\' | \'artifact-present\' | \'human-review\';\n}',
   },
   {
+    name: 'OrchestrationAdmissionTraceV1',
+    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\' | \'prime-agent\';\n    readonly route: \'taskgraph\';\n    readonly sourceSessionId: string;\n}',
+  },
+  {
     name: 'OrchestrationArtifactRef',
     declaration: 'export type OrchestrationArtifactRef = Branded<\'OrchestrationArtifactRef\'>;',
   },
@@ -3797,11 +3801,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationCompilationV1',
-    declaration: 'export interface OrchestrationCompilationV1 {\n    readonly version: 1;\n    readonly compilationId: string;\n    readonly intent: IntentIRV1;\n    readonly intentRef: OrchestrationArtifactRef;\n    readonly requirementRef?: OrchestrationArtifactRef;\n    readonly graphRef: OrchestrationArtifactRef;\n    readonly graph: LogicalTaskGraphV1;\n    readonly certificate: PlanCertificateV1;\n    readonly requiresClarification: boolean;\n    readonly blockers: readonly OrchestrationBlocker[];\n}',
+    declaration: 'export interface OrchestrationCompilationV1 {\n    readonly version: 1;\n    readonly compilationId: string;\n    readonly intent: IntentIRV1;\n    readonly intentRef: OrchestrationArtifactRef;\n    readonly requirementRef?: OrchestrationArtifactRef;\n    readonly graphRef: OrchestrationArtifactRef;\n    readonly graph: LogicalTaskGraphV1;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly requiresClarification: boolean;\n    readonly blockers: readonly OrchestrationBlocker[];\n}',
   },
   {
     name: 'OrchestrationCompileRequest',
-    declaration: 'export interface OrchestrationCompileRequest {\n    readonly intent: IntentCompileRequest;\n    readonly graph: LogicalTaskGraphV1;\n    readonly requirement?: Readonly<Record<string, unknown>>;\n}',
+    declaration: 'export interface OrchestrationCompileRequest {\n    readonly intent: IntentCompileRequest;\n    readonly graph: LogicalTaskGraphV1;\n    readonly requirement?: Readonly<Record<string, unknown>>;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n}',
   },
   {
     name: 'OrchestrationControlRequest',
@@ -3829,7 +3833,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationNodeSnapshot',
-    declaration: 'export interface OrchestrationNodeSnapshot {\n    readonly id: string;\n    readonly title: string;\n    readonly role: string;\n    readonly dependsOn: readonly string[];\n    readonly state: OrchestrationNodeState;\n    readonly attempt: number;\n    readonly capabilityGeneration: number;\n    readonly operatorId?: string;\n    readonly operatorProfile?: PhysicalOperatorExecutionPreference;\n    readonly capabilityPlanRef?: OrchestrationArtifactRef;\n    readonly contextPacketRef?: OrchestrationArtifactRef;\n    readonly executionPlanRef?: OrchestrationArtifactRef;\n    readonly evidenceRefs: readonly OrchestrationArtifactRef[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface OrchestrationNodeSnapshot {\n    readonly id: string;\n    readonly title: string;\n    readonly role: string;\n    readonly dependsOn: readonly string[];\n    readonly state: OrchestrationNodeState;\n    readonly attempt: number;\n    readonly capabilityGeneration: number;\n    readonly operatorId?: string;\n    readonly operatorProfile?: PhysicalOperatorExecutionPreference;\n    readonly capabilityPlanRef?: OrchestrationArtifactRef;\n    readonly contextPacketRef?: OrchestrationArtifactRef;\n    readonly executionPlanRef?: OrchestrationArtifactRef;\n    readonly evidenceRefs: readonly OrchestrationArtifactRef[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly waitReason?: OrchestrationBlocker;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'OrchestrationNodeSpecV1',
@@ -3849,7 +3853,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationRunSnapshot',
-    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly maxParallel?: number;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'OrchestrationRunState',
@@ -4069,7 +4073,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ResidentExecutionProfile',
@@ -4117,7 +4121,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentProviderStatus',
-    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: \'claude-code\' | \'codex\';\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n}',
+    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n}',
   },
   {
     name: 'ResidentReceiptState',
@@ -4129,7 +4133,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentSessionSnapshot',
-    declaration: 'export interface ResidentSessionSnapshot {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly lifecycle: ResidentLifecycle;\n    readonly health: ResidentHealth;\n    readonly healthReason?: ResidentHealthReason;\n    readonly control: \'automation\';\n    readonly stateRevision: number;\n    readonly nativeSessionId?: string;\n    readonly executionProfile?: ResidentExecutionProfile;\n    readonly executionProfileSource?: ResidentExecutionProfileSource;\n    readonly activeTurnId?: ResidentOperatorTurnId;\n    readonly latestTurn?: ResidentTurnSummary;\n    readonly latestEvent?: ResidentEvent;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface ResidentSessionSnapshot {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly lifecycle: ResidentLifecycle;\n    readonly health: ResidentHealth;\n    readonly healthReason?: ResidentHealthReason;\n    readonly control: \'automation\';\n    readonly stateRevision: number;\n    readonly nativeSessionId?: string;\n    readonly executionProfile?: ResidentExecutionProfile;\n    readonly executionProfileSource?: ResidentExecutionProfileSource;\n    readonly activeTurnId?: ResidentOperatorTurnId;\n    readonly latestTurn?: ResidentTurnSummary;\n    readonly latestEvent?: ResidentEvent;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'ResidentStopReason',

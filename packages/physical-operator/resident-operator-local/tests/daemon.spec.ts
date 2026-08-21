@@ -2,14 +2,17 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ResidentProviderStatus } from '@deepseek-ai/dsh-resident-operator'
+import type {
+  ResidentDriverExecuteRequest,
+  ResidentProductDriver,
+  ResidentProviderStatus,
+} from '@deepseek-ai/dsh-resident-operator'
 import { ResidentDaemonClient } from '../src/client.ts'
 import { normalizeResidentDriverError, ResidentDaemon } from '../src/daemon.ts'
+import { residentDriverManifestSha256 } from '../src/driver-modules.ts'
 import {
   EXPECTED_CODEX_CLI_VERSION,
   EXPECTED_CODEX_SCHEMA_SHA256,
-  type DriverExecuteRequest,
-  type ResidentProductDriver,
 } from '../src/drivers.ts'
 
 const roots: string[] = []
@@ -44,13 +47,18 @@ describe('Resident daemon Driver error boundary', () => {
 
 class MemoryDriver implements ResidentProductDriver {
   readonly operatorId = 'codex' as const
-  readonly profiles: DriverExecuteRequest['profile'][] = []
+  readonly profiles: ResidentDriverExecuteRequest['profile'][] = []
   constructor(readonly counts = new Map<string, number>()) {}
 
   qualify(): Promise<ResidentProviderStatus> {
     return Promise.resolve({
       operatorId: 'codex',
       product: 'codex',
+      displayName: 'Codex',
+      description: 'Test Resident Provider.',
+      tags: ['coding'],
+      maxConcurrency: 4,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'],
       available: true,
       authentication: 'native-subscription',
       productVersion: 'test',
@@ -59,7 +67,7 @@ class MemoryDriver implements ResidentProductDriver {
     })
   }
 
-  async execute(request: DriverExecuteRequest) {
+  async execute(request: ResidentDriverExecuteRequest) {
     this.profiles.push(request.profile)
     request.onProgress('connecting')
     const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
@@ -82,8 +90,48 @@ class MemoryDriver implements ResidentProductDriver {
   }
 }
 
+class BlockingQualificationDriver extends MemoryDriver {
+  qualificationCount = 0
+  activeQualifications = 0
+  maximumActiveQualifications = 0
+  readonly blockingQualificationEntered: Promise<void>
+  readonly releaseQualification: () => void
+  private readonly markBlockingQualificationEntered: () => void
+  private readonly qualificationReleased: Promise<void>
+  private blockQualifications = false
+
+  constructor() {
+    super()
+    let markBlockingQualificationEntered = (): void => {}
+    let releaseQualification = (): void => {}
+    this.blockingQualificationEntered = new Promise<void>((resolve) => { markBlockingQualificationEntered = resolve })
+    this.qualificationReleased = new Promise<void>((resolve) => { releaseQualification = resolve })
+    this.markBlockingQualificationEntered = markBlockingQualificationEntered
+    this.releaseQualification = releaseQualification
+  }
+
+  beginBlocking(): void {
+    this.blockQualifications = true
+  }
+
+  override async qualify(): Promise<ResidentProviderStatus> {
+    this.qualificationCount += 1
+    this.activeQualifications += 1
+    this.maximumActiveQualifications = Math.max(this.maximumActiveQualifications, this.activeQualifications)
+    try {
+      if (this.blockQualifications) {
+        this.markBlockingQualificationEntered()
+        await this.qualificationReleased
+      }
+      return await super.qualify()
+    } finally {
+      this.activeQualifications -= 1
+    }
+  }
+}
+
 class BlockingDriver extends MemoryDriver {
-  override async execute(request: DriverExecuteRequest) {
+  override async execute(request: ResidentDriverExecuteRequest) {
     const session = request.nativeSessionId ?? 'native-blocking'
     request.onRunning(session, 'turn-blocking')
     await new Promise<void>((resolve, reject) => {
@@ -111,7 +159,7 @@ class ReconnectDriver extends MemoryDriver {
 
   private readonly released: Promise<void>
 
-  override async execute(request: DriverExecuteRequest) {
+  override async execute(request: ResidentDriverExecuteRequest) {
     request.onProgress('connecting')
     request.onRunning('native-reconnect', 'turn-reconnect')
     request.onProgress('reasoning')
@@ -127,7 +175,7 @@ class ReconnectDriver extends MemoryDriver {
 }
 
 class FailingDriver extends MemoryDriver {
-  override async execute(request: DriverExecuteRequest): Promise<never> {
+  override async execute(request: ResidentDriverExecuteRequest): Promise<never> {
     const prompt = request.prompt[0]
     const text = prompt?.type === 'text' ? prompt.text : 'missing'
     throw new Error(`failure echoed ${text}; OPENAI_API_KEY=sk-test-secret-token-123456789`)
@@ -139,6 +187,11 @@ class UnavailableTransportDriver extends MemoryDriver {
     return Promise.resolve({
       operatorId: 'codex',
       product: 'codex',
+      displayName: 'Codex',
+      description: 'Test Resident Provider.',
+      tags: ['coding'],
+      maxConcurrency: 4,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'],
       available: false,
       unavailableReason: 'managed app-server daemon is unavailable',
       authentication: 'native-subscription',
@@ -154,6 +207,44 @@ function client(root: string): ResidentDaemonClient {
 }
 
 describe('ResidentDaemon', () => {
+  it('lists durable sessions without requalifying native subscription products', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    try {
+      await connected.ready()
+      expect(driver.qualificationCount).toBe(1)
+      expect(await connected.list()).toEqual([])
+      expect(driver.qualificationCount).toBe(1)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('coalesces concurrent qualification requests for the same native product', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    await connected.ready()
+    driver.beginBlocking()
+    const first = connected.providers()
+    const second = connected.providers()
+    try {
+      await driver.blockingQualificationEntered
+      await new Promise<void>(resolve => setTimeout(resolve, 25))
+      expect(driver.qualificationCount).toBe(2)
+      expect(driver.maximumActiveQualifications).toBe(1)
+    } finally {
+      driver.releaseQualification()
+      await Promise.all([first, second])
+      await daemon.close()
+    }
+  })
+
   it('continues one operator+realpath workspace across client restart and isolates workspaces', async () => {
     const root = temporaryRoot()
     const workspace = join(root, 'workspace')
@@ -348,6 +439,7 @@ describe('ResidentDaemon', () => {
     await expect(raw.rawRequest('system.handshake', {
       protocol_version: 99,
       state_schema_version: 1,
+      driver_manifest_sha256: residentDriverManifestSha256([]),
     })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
     await expect(raw.rawRequest('turn.execute', {
       command_id: 'invalid-prompt',

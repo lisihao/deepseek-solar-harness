@@ -11,6 +11,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-theme'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-resident-operator'
+import { unpackedAsarPath } from './packaged-runtime-path.ts'
 import { registerResidentDashboard } from './resident-dashboard.ts'
 import type { DesktopShellMode } from './runtime.ts'
 import type {} from './runtime.ts'
@@ -81,6 +82,11 @@ export function desktopRendererUrl(
   return url.href
 }
 
+/** Resolve a native image to the physical Electron Builder asset tree. */
+export function desktopAssetPath(moduleUrl: string, filename: string): string {
+  return unpackedAsarPath(fileURLToPath(new URL(`../build/${filename}`, moduleUrl)))
+}
+
 /**
  * Register the Electron shell from active Web carrier values.
  * @param ctx - Host context carrying the Electron adapter and Web carrier.
@@ -101,10 +107,10 @@ export function apply(ctx: Context, config: Config): void {
   const iconFilename = ctx.desktopRuntime.platform === 'darwin'
     ? 'app-icon-mac.png'
     : 'app-icon.png'
-  const iconPath = fileURLToPath(new URL(`../build/${iconFilename}`, import.meta.url))
+  const iconPath = desktopAssetPath(import.meta.url, iconFilename)
   const trayIcons = {
-    templatePath: fileURLToPath(new URL('../build/tray-iconTemplate.png', import.meta.url)),
-    bluePath: fileURLToPath(new URL('../build/tray-icon-blue.png', import.meta.url)),
+    templatePath: desktopAssetPath(import.meta.url, 'tray-iconTemplate.png'),
+    bluePath: desktopAssetPath(import.meta.url, 'tray-icon-blue.png'),
   }
   const settings = ctx.settings.register(
     DESKTOP_SETTINGS_NAMESPACE,

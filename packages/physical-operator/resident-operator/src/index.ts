@@ -17,11 +17,11 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 3
+export const RESIDENT_PROTOCOL_VERSION = 6
 /** Current forward-only daemon state schema version. */
-export const RESIDENT_STATE_SCHEMA_VERSION = 3
+export const RESIDENT_STATE_SCHEMA_VERSION = 4
 
-/** Opaque identity for one operator/workspace Resident Session. */
+/** Opaque identity for one operator/workspace/lane Resident Session. */
 export type ResidentOperatorSessionId = Branded<'ResidentOperatorSessionId'>
 /**
  * Brand a validated Resident Session identity.
@@ -94,7 +94,12 @@ export type ResidentExecutionProfileSource = 'smart-auto' | 'mixed' | 'manual'
 /** Current qualification result for one native product Driver. */
 export interface ResidentProviderStatus {
   readonly operatorId: string
-  readonly product: 'claude-code' | 'codex'
+  readonly product: string
+  readonly displayName: string
+  readonly description: string
+  readonly tags: readonly string[]
+  readonly maxConcurrency: number
+  readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
   readonly available: boolean
   readonly unavailableReason?: string
   readonly authentication: 'native-subscription' | 'unqualified'
@@ -103,11 +108,49 @@ export interface ResidentProviderStatus {
   readonly models: readonly ResidentModelOption[]
 }
 
+/** One native product invocation after durable daemon admission. */
+export interface ResidentDriverExecuteRequest {
+  readonly workspace: string
+  readonly prompt: readonly ContentBlock[]
+  readonly profile: ResidentExecutionProfile
+  readonly nativeSessionId?: string
+  readonly signal: AbortSignal
+  readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
+  /** Persist a bounded product-neutral progress phase for reconnecting observers. */
+  readonly onProgress: (phase: ResidentProgressPhase) => void
+}
+
+/** Native product qualification and resumable-turn adapter loaded by a daemon Provider. */
+export interface ResidentProductDriver {
+  /** Stable physical product identity. */
+  readonly operatorId: string
+  /** @returns current version, protocol, and native-subscription qualification. */
+  qualify(): Promise<ResidentProviderStatus>
+  /**
+   * Execute or resume one native product turn.
+   * @param request - canonical workspace, prompt, prior native Session, signal, and progress callbacks.
+   * @returns bounded final result and authoritative native Session identity.
+   */
+  execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId: string }>
+}
+
+/** Construction inputs supplied to a configured out-of-process Driver module. */
+export interface ResidentProductDriverFactoryOptions {
+  readonly stateRoot: string
+}
+
+/** Factory export implemented by an independently packaged Resident product Driver. */
+export type ResidentProductDriverFactory = (
+  options: ResidentProductDriverFactoryOptions,
+) => ResidentProductDriver | Promise<ResidentProductDriver>
+
 /** Current daemon-owned projection of one Resident Session. */
 export interface ResidentSessionSnapshot {
   readonly sessionId: ResidentOperatorSessionId
   readonly operatorId: string
   readonly workspace: string
+  /** Caller-owned execution lane; lanes isolate native conversational state within one workspace. */
+  readonly laneId: string
   readonly lifecycle: ResidentLifecycle
   readonly health: ResidentHealth
   readonly healthReason?: ResidentHealthReason
@@ -154,6 +197,8 @@ export interface ResidentExecuteRequest {
   readonly supersedesCommandId?: ResidentOperatorCommandId
   readonly operatorId: string
   readonly workspace: string
+  /** Stable task lane. Distinct lanes may execute concurrently without sharing native conversation history. */
+  readonly laneId: string
   /** Optional bounded display summary persisted independently of the raw prompt. */
   readonly taskLabel?: string
   readonly prompt: readonly ContentBlock[]
@@ -240,8 +285,8 @@ export abstract class ResidentOperatorService extends Service {
   abstract providers(): Promise<ResidentProviderStatus[]>
 
   /**
-   * Admit or replay one durable command for its operator/workspace Session.
-   * @param request - command identity, optional retry lineage, prompt, workspace, and cancellation signal.
+   * Admit or replay one durable command for its operator/workspace/lane Session.
+   * @param request - command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.
    * @returns a holder-owned turn whose result settles independently.
    */
   abstract execute(request: ResidentExecuteRequest): Promise<ResidentTurn>

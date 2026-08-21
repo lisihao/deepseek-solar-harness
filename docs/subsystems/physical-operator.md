@@ -18,7 +18,7 @@ One `PhysicalOperator` publishes an immutable descriptor, normalized execution m
 
 Registration lifetime and execution lifetime are intentionally separate. Removing or hot-reloading a provider prevents new discovery through that registration but does not revoke an accepted run. Re-registering the same stable id observes outstanding capacity from the previous registration until the old execution settles.
 
-Only `completed` is successful. Cancellation, refusal, token exhaustion, and provider failure remain explicit stop reasons or infrastructure rejections. The physical Service Definition does not queue, retry, persist, or roll back work. Resident persistence is isolated behind its own Service Definition and single-writer daemon; protocol v3 remains fail-fast and never auto-replays indeterminate commands.
+Only `completed` is successful. Cancellation, refusal, token exhaustion, and provider failure remain explicit stop reasons or infrastructure rejections. The physical Service Definition does not queue, retry, persist, or roll back work. Resident persistence is isolated behind its own Service Definition and single-writer daemon; protocol v4 remains fail-fast and never auto-replays indeterminate commands.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -89,8 +89,8 @@ Abstract provider-neutral resident session/control surface.
 abstract providers(): Promise<ResidentProviderStatus[]>
 
 /**
- * Admit or replay one durable command for its operator/workspace Session.
- * @param request - command identity, optional retry lineage, prompt, workspace, and cancellation signal.
+ * Admit or replay one durable command for its operator/workspace/lane Session.
+ * @param request - command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.
  * @returns a holder-owned turn whose result settles independently.
  */
 abstract execute(request: ResidentExecuteRequest): Promise<ResidentTurn>
@@ -144,7 +144,7 @@ abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:231`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:276`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

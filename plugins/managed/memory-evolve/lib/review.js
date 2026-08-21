@@ -29,6 +29,7 @@
  */
 
 import { todayStamp } from './store.js'
+import { isMessageTurn } from './turn-close.js'
 
 /**
  * Install the per-session review turn counter.
@@ -38,31 +39,14 @@ import { todayStamp } from './store.js'
  *   the counter handle: `turnsOf` reads the count for one agent,
  *   `complete` resets it (called by the model after a finished review).
  */
-export function reviewTurnCounter(ctx, getRuntime) {
-  /** agentId → number of completed user turns since the last review. */
-  const perSession = new Map()
-
+export function reviewTurnCounter(ctx, getRuntime, turnState) {
   const onSettled = (agent, turn, reason) => {
     if (agent.session.header.origin === 'subagent') return
     if (!getRuntime().reviewEnabled) return
     if (reason.kind !== 'completed') return
-    // Count only message-triggered turns (retries and injections are not user turns).
     const events = agent.session.events
-    let messageTurn = false
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index]
-      if (event?.type === 'turn/start' && event.data.turn === turn) {
-        messageTurn = event.data.trigger.kind === 'message'
-        break
-      }
-    }
-    if (!messageTurn) return
-    const state = perSession.get(agent.id) ?? { turns: 0 }
-    state.turns += 1
-    // Never reset here: due stays sticky until the model completes the review
-    // via `memory_review_status complete`, so a missed turn cannot silently
-    // drop the review.
-    perSession.set(agent.id, state)
+    if (!isMessageTurn(events, turn)) return
+    turnState.count(agent, turn)
   }
 
   // 显式挂到 ctx 生命周期（P2-7）：ctx.on 返回的 disposer 交给 ctx.effect
@@ -70,8 +54,9 @@ export function reviewTurnCounter(ctx, getRuntime) {
   ctx.effect(() => ctx.on('agent/settled', onSettled))
 
   return {
-    turnsOf: (agent) => perSession.get(agent?.id)?.turns ?? 0,
-    complete: (agent) => { perSession.delete(agent?.id) },
+    turnsOf: (agent) => turnState.turnsOf(agent),
+    complete: (agent) => turnState.completeReview(agent),
+    receiptOf: (agent) => turnState.receiptOf(agent),
   }
 }
 
@@ -112,20 +97,29 @@ export function reviewStatusTool(getRuntime, counter) {
           interval: { type: 'integer' },
           mode: { type: 'string' },
           skillReviewEnabled: { type: 'boolean' },
+          lastClosedTurn: { type: 'integer' },
+          lastClosureStatus: { type: 'string' },
+          lastClosureTargets: { type: 'array', items: { type: 'string' } },
         },
         required: ['ok'],
       },
       render: (_args, value) => [{ type: 'text', text: value.message ?? '' }],
     },
     async execute(args, exec) {
+      const receipt = counter.receiptOf(exec?.agent)
+      const closure = receipt === null ? {} : {
+        lastClosedTurn: receipt.turn,
+        lastClosureStatus: receipt.status,
+        lastClosureTargets: receipt.targets.map((target) => `${target.target}:${target.source}:${target.status}`),
+      }
       if (args.action === 'complete') {
         const runtime = getRuntime()
         const turns = counter.turnsOf(exec?.agent)
         if (turns < runtime.reviewInterval) {
-          return { ok: true, message: `审查未到期（${turns}/${runtime.reviewInterval}），无需复位，计数保持不变。` }
+          return { ok: true, message: `审查未到期（${turns}/${runtime.reviewInterval}），无需复位，计数保持不变。`, ...closure }
         }
         counter.complete(exec?.agent)
-        return { ok: true, message: '审查计数已复位（下次到期按新间隔重新计数）。' }
+        return { ok: true, message: '审查计数已复位（下次到期按新间隔重新计数）。', ...closure }
       }
       const runtime = getRuntime()
       const turns = counter.turnsOf(exec?.agent)
@@ -141,6 +135,7 @@ export function reviewStatusTool(getRuntime, counter) {
         interval: runtime.reviewInterval,
         mode: runtime.reviewMode,
         skillReviewEnabled: !!runtime.skillReviewEnabled,
+        ...closure,
       }
     },
   }

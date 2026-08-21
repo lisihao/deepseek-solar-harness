@@ -271,6 +271,7 @@
     { "path": "./packages/physical-operator/physical-operator-subagent" },
     { "path": "./packages/physical-operator/resident-operator" },
     { "path": "./packages/physical-operator/resident-operator-local" },
+    { "path": "./packages/physical-operator/resident-operator-prime-agent" },
     { "path": "./packages/physical-operator/tool-physical-operator" },
     { "path": "./packages/orchestration/intent-compiler" },
     { "path": "./packages/orchestration/context-compiler" },

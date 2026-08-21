@@ -21,10 +21,13 @@ import {
 } from '@deepseek-ai/dsh-resident-operator'
 import { unwrapWire } from './protocol.ts'
 import type { AcceptedTurn, TurnInspection } from './store.ts'
+import { residentDriverManifestSha256 } from './driver-modules.ts'
 
 const REQUIRED_METHODS = Object.freeze([
   'system.handshake',
+  'system.shutdown',
   'operator.list',
+  'session.list',
   'session.inspect',
   'turn.execute',
   'turn.inspect',
@@ -37,8 +40,11 @@ const REQUIRED_METHODS = Object.freeze([
 const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 
 interface ListResponse {
-  readonly providers: ResidentProviderStatus[]
   readonly sessions: ResidentSessionSnapshot[]
+}
+
+interface ProviderResponse {
+  readonly providers: ResidentProviderStatus[]
 }
 
 /** Connection, startup, and polling policy for one daemon client. */
@@ -47,6 +53,7 @@ export interface ResidentClientOptions {
   readonly autoStart: boolean
   readonly connectTimeoutMs: number
   readonly pollIntervalMs: number
+  readonly driverModules?: readonly string[]
 }
 
 /** Stateless-per-request Unix-socket client for trusted Resident consumers. */
@@ -76,7 +83,7 @@ export class ResidentDaemonClient {
    * @returns one status per configured product Driver.
    */
   async providers(): Promise<ResidentProviderStatus[]> {
-    return (await this.request<ListResponse>('operator.list', {})).providers
+    return (await this.request<ProviderResponse>('operator.list', {})).providers
   }
 
   /**
@@ -84,7 +91,7 @@ export class ResidentDaemonClient {
    * @returns current Session snapshots in daemon order.
    */
   async list(): Promise<ResidentSessionSnapshot[]> {
-    return (await this.request<ListResponse>('operator.list', {})).sessions
+    return (await this.request<ListResponse>('session.list', {})).sessions
   }
 
   /**
@@ -115,6 +122,7 @@ export class ResidentDaemonClient {
     supersedesCommandId?: string
     operatorId: string
     workspace: string
+    laneId?: string
     taskLabel?: string
     prompt: readonly unknown[]
     profile?: PhysicalOperatorExecutionPreference
@@ -134,6 +142,7 @@ export class ResidentDaemonClient {
       ...request.supersedesCommandId === undefined ? {} : { supersedes_command_id: request.supersedesCommandId },
       operator_id: request.operatorId,
       workspace,
+      lane_id: request.laneId ?? 'legacy',
       ...request.taskLabel === undefined ? {} : { task_label: request.taskLabel },
       prompt: request.prompt,
       ...request.profile === undefined ? {} : { profile: request.profile },
@@ -259,13 +268,19 @@ export class ResidentDaemonClient {
   }
 
   private async ensureReady(): Promise<void> {
+    let initialError: unknown
     try {
       await this.handshake()
       return
     } catch (error) {
+      initialError = error
       if (!this.options.autoStart) throw error
     }
-    startDetachedResidentDaemon(this.options.root)
+    if (initialError instanceof ResidentOperatorError
+      && (initialError.code === 'PROTOCOL_MISMATCH' || initialError.code === 'PROVIDER_VERSION_MISMATCH')) {
+      await this.retireIncompatibleDaemon(initialError)
+    }
+    startDetachedResidentDaemon(this.options.root, this.options.driverModules ?? [])
     const deadline = Date.now() + this.options.connectTimeoutMs
     let lastError: unknown
     while (Date.now() < deadline) {
@@ -283,15 +298,42 @@ export class ResidentDaemonClient {
     )
   }
 
+  /** Drain an older detached daemon before starting the protocol/schema-compatible build. */
+  private async retireIncompatibleDaemon(initialError: ResidentOperatorError): Promise<void> {
+    try {
+      await this.rawRequest('system.shutdown', {})
+    } catch (shutdownError) {
+      if (existsSync(this.socketPath)) {
+        throw new ResidentOperatorError(
+          `resident daemon upgrade is blocked: ${initialError.message}; shutdown failed: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
+          'PROTOCOL_MISMATCH',
+        )
+      }
+      return
+    }
+    const deadline = Date.now() + this.options.connectTimeoutMs
+    while (existsSync(this.socketPath) && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    if (existsSync(this.socketPath)) {
+      throw new ResidentOperatorError(
+        `resident daemon upgrade is blocked because the old daemon did not drain: ${initialError.message}`,
+        'PROTOCOL_MISMATCH',
+      )
+    }
+  }
+
   private async handshake(): Promise<void> {
     const response = await this.rawRequest<{
       protocolVersion: number
       stateSchemaVersion: number
       buildCommit: string
       methods: string[]
+      driverManifestSha256: string
     }>('system.handshake', {
       protocol_version: RESIDENT_PROTOCOL_VERSION,
       state_schema_version: RESIDENT_STATE_SCHEMA_VERSION,
+      driver_manifest_sha256: residentDriverManifestSha256(this.options.driverModules ?? []),
     })
     if (response.protocolVersion !== RESIDENT_PROTOCOL_VERSION
       || response.stateSchemaVersion !== RESIDENT_STATE_SCHEMA_VERSION) {
@@ -301,6 +343,13 @@ export class ResidentDaemonClient {
     if (response.buildCommit !== expectedBuildCommit) {
       throw new ResidentOperatorError(
         `resident daemon build ${response.buildCommit} does not match client ${expectedBuildCommit}`,
+        'PROVIDER_VERSION_MISMATCH',
+      )
+    }
+    const expectedDriverManifest = residentDriverManifestSha256(this.options.driverModules ?? [])
+    if (response.driverManifestSha256 !== expectedDriverManifest) {
+      throw new ResidentOperatorError(
+        `resident daemon Driver manifest ${response.driverManifestSha256} does not match client ${expectedDriverManifest}`,
         'PROVIDER_VERSION_MISMATCH',
       )
     }
@@ -343,13 +392,15 @@ export class ResidentDaemonClient {
 /**
  * Start a daemon process that is independent of the current DSH lifecycle.
  * @param root - owner-only daemon state root.
+ * @param driverModules - absolute independent product Driver entries loaded by the daemon.
  * @returns detached child process id.
  */
-export function startDetachedResidentDaemon(root: string): number {
+export function startDetachedResidentDaemon(root: string, driverModules: readonly string[] = []): number {
   const builtEntry = fileURLToPath(new URL('./startup.js', import.meta.url))
   const sourceEntry = fileURLToPath(new URL('./startup.ts', import.meta.url))
   const entry = existsSync(builtEntry) ? builtEntry : sourceEntry
-  const child = spawn(process.execPath, [...process.execArgv, entry, '--root', root], {
+  const driverArgs = driverModules.flatMap(module => ['--driver-module', module])
+  const child = spawn(process.execPath, [...process.execArgv, entry, '--root', root, ...driverArgs], {
     detached: true,
     stdio: 'ignore',
     env: residentDaemonEnvironment(process.env, process.versions.electron),

@@ -106,7 +106,7 @@ describe('physical_operator tool', () => {
       .find(candidate => candidate.name === 'tool:physical-operator')
     expect(section?.text).toContain('SMART AUTO')
     expect(section?.text).toContain('Choose resident mode for repository implementation')
-    expect(section?.text).toContain('without waiting for the user to name Claude Code or Codex')
+    expect(section?.text).toContain('Use orchestration for work with parallel independent branches')
     expect(section?.text).toContain('physics-solver: Solves bounded physics problems. [physics, reasoning]')
   })
 
@@ -122,6 +122,7 @@ describe('physical_operator tool', () => {
       ['direct', 'Current Model Only'],
       ['codex', 'Codex'],
       ['claude-code', 'Claude Code'],
+      ['prime-agent', 'Prime Agent'],
     ])
     const automatic = (await ctx.systemPrompt.assemble({ agent })).sections
       .find(candidate => candidate.name === 'tool:physical-operator')?.text

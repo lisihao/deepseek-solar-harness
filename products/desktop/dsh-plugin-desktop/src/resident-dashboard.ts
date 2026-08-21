@@ -61,6 +61,7 @@ async function assembleResidentDashboard(
     events: events.map(eventValue),
     activities: buildResidentActivities(events.map(eventValue)),
     hiddenDiagnosticSessions: sessions.length - visibleSessions.length,
+    activeWorkers: visibleSessions.filter(session => session.lifecycle === 'running').length,
     ...selectedTurn === undefined ? {} : { selectedTurn: turnValue(selectedTurn) },
   }
 }
@@ -105,6 +106,11 @@ function providerValue(provider: ResidentProviderStatus): DesktopResidentProvide
   return {
     operatorId: provider.operatorId,
     product: provider.product,
+    displayName: provider.displayName,
+    description: provider.description,
+    tags: [...provider.tags],
+    maxConcurrency: provider.maxConcurrency,
+    injectionBoundaries: [...provider.injectionBoundaries],
     available: provider.available,
     ...provider.unavailableReason === undefined ? {} : { unavailableReason: provider.unavailableReason },
     authentication: provider.authentication,
@@ -128,6 +134,7 @@ function sessionValue(session: ResidentSessionSnapshot): DesktopResidentSession 
     operatorId: session.operatorId,
     workspace: session.workspace,
     workspaceDisplay: displayWorkspace(session.workspace),
+    laneId: session.laneId,
     lifecycle: session.lifecycle,
     health: session.health,
     ...session.healthReason === undefined ? {} : { healthReason: session.healthReason },

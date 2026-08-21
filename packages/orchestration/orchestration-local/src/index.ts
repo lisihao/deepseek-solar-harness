@@ -1,4 +1,5 @@
 /** Local `ctx.orchestrations` Provider over dsh-orchestratord. */
+import { createRequire } from 'node:module'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -36,12 +37,15 @@ export interface Config {
   readonly autoStart?: boolean
   /** Maximum handshake and per-request connection wait in milliseconds. */
   readonly connectTimeoutMs?: number
+  /** Independently packaged Resident Driver modules required by headless execution. */
+  readonly residentDriverModules?: string[]
 }
 
 export const Config: z<Config> = z.object({
   dshHome: z.string(),
   autoStart: z.boolean().default(true),
   connectTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
+  residentDriverModules: z.array(z.string()).default([]),
 })
 /* jscpd:ignore-end */
 
@@ -56,6 +60,10 @@ class LocalOrchestrationService extends OrchestrationService {
       dshHome,
       autoStart: config.autoStart,
       connectTimeoutMs: config.connectTimeoutMs,
+      residentDriverModules: config.residentDriverModules.map((module) => {
+        if (ctx.baseUrl === undefined) throw new Error('orchestration-local requires ctx.baseUrl to resolve Resident Driver modules')
+        return createRequire(ctx.baseUrl).resolve(module)
+      }),
     })
   }
 

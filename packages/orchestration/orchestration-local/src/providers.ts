@@ -29,6 +29,39 @@ const EMPTY_EFFECTS: CapabilityEffectSet = Object.freeze({
   read: [], write: [], execute: [], network: [], cost: [], risk: [],
 })
 
+/** Mandatory instruction capability that isolates every durable TaskGraph node from resident history. */
+export const CLEAN_TASK_CONTEXT_CAPABILITY = 'context.clean-task'
+
+function cleanTaskContextCapsule(): CapabilityCapsuleManifestV1 {
+  const manifest: CapabilityCapsuleManifestV1 = {
+    version: 1,
+    id: 'dsh.clean-task-context',
+    capsuleVersion: '1.0.0',
+    kind: 'instruction',
+    digest: '',
+    provenance: { publisher: 'DeepSeek-Solar-Harness', sourceRef: 'builtin:orchestration-local' },
+    applicability: ['durable TaskGraph node execution through a resident physical operator'],
+    capabilityTags: [CLEAN_TASK_CONTEXT_CAPABILITY],
+    inputs: ['sealed ContextPacketV1'],
+    outputs: ['task-scoped resident execution'],
+    preconditions: ['A sealed TaskGraph node context is available.'],
+    postconditions: ['Unrelated resident history is not propagated to the node or its children.'],
+    invariants: ['Only the current Context Packet and its explicit upstream artifact references are authoritative.'],
+    consumes: [], produces: [], requires: [], compatible: ['codex', 'claude-code', 'prime-agent'], incompatible: [],
+    effects: EMPTY_EFFECTS,
+    bindings: {
+      instructions: [
+        'Treat this node as a fresh task context. Do not rely on, quote, or propagate unrelated history from a reused Resident host. Use only this Context Packet and its explicit upstream artifact references. If you create child agents, give them empty or bounded task-specific context (fork_turns: "none" or an equivalent fresh-context mechanism); never clone the full Resident history with fork_turns: "all".',
+      ],
+      skills: [], toolsAllow: [], toolsDeny: [], mcpServers: [], resourceRefs: [], dataRefs: [],
+      secretRefs: [], guardRefs: [],
+    },
+    verification: ['Context Packet contains the clean-context instruction before dispatch.'],
+    operatorCompatibility: ['codex', 'claude-code', 'prime-agent'],
+  }
+  return { ...manifest, digest: canonicalSha256(manifest) }
+}
+
 function cleaned(values: readonly string[] | undefined): string[] {
   return [...new Set((values ?? []).map(value => value.trim()).filter(Boolean))].sort()
 }
@@ -318,6 +351,8 @@ export class LocalCapabilityCapsuleService extends CapabilityCapsuleService {
 
   private refresh(): void {
     const next = new Map<string, CapabilityCapsuleManifestV1>()
+    const builtin = cleanTaskContextCapsule()
+    next.set(`${builtin.id}@${builtin.capsuleVersion}#${builtin.digest}`, builtin)
     if (existsSync(this.root)) {
       for (const filename of readdirSync(this.root).filter(value => value.endsWith('.json')).sort()) {
         const manifest = validateManifest(JSON.parse(readFileSync(join(this.root, filename), 'utf8')), filename)

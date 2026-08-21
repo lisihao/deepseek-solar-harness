@@ -35,7 +35,11 @@ describe('resident-operators bundle', () => {
       operators: [
         { id: 'codex', ephemeralProvider: 'codex', residentProvider: 'codex' },
         { id: 'claude-code', ephemeralProvider: 'claude-code', residentProvider: 'claude-code' },
+        { id: 'prime-agent', residentProvider: 'prime-agent' },
       ],
+    })
+    expect(rows.find(row => row.id === 'resident-operators')?.config).toMatchObject({
+      driverModules: ['@deepseek-ai/dsh-resident-operator-prime-agent'],
     })
   })
 })

@@ -4,6 +4,8 @@
 import { fileURLToPath } from 'node:url'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { ResidentDaemon } from './daemon.ts'
+import { ClaudeCodeResidentDriver, CodexResidentDriver } from './drivers.ts'
+import { loadResidentProductDrivers, residentDriverManifestSha256 } from './driver-modules.ts'
 
 const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 
@@ -20,11 +22,17 @@ export function clearElectronRunAsNode(environment: NodeJS.ProcessEnv): void {
 /**
  * Run one signal-aware Resident daemon until graceful closure.
  * @param root - owner-only daemon state root.
+ * @param driverModules - absolute independent product Driver entries loaded before startup.
  * @returns after the daemon closes and signal listeners are removed.
  */
-export async function runResidentDaemon(root: string): Promise<void> {
+export async function runResidentDaemon(root: string, driverModules: readonly string[] = []): Promise<void> {
   clearElectronRunAsNode(process.env)
-  const daemon = new ResidentDaemon({ root })
+  const external = await loadResidentProductDrivers(root, driverModules)
+  const daemon = new ResidentDaemon({
+    root,
+    drivers: [new ClaudeCodeResidentDriver(), new CodexResidentDriver(), ...external],
+    driverManifestHash: residentDriverManifestSha256(driverModules),
+  })
   await daemon.start()
   const stop = (): void => { void daemon.close() }
   process.once('SIGINT', stop)
@@ -35,6 +43,18 @@ export async function runResidentDaemon(root: string): Promise<void> {
     process.off('SIGINT', stop)
     process.off('SIGTERM', stop)
   }
+}
+
+function argumentValues(argv: readonly string[], name: string): string[] {
+  const values: string[] = []
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== name) continue
+    const value = argv[index + 1]
+    if (value === undefined || value.length === 0) throw new Error(`${name} needs a value`)
+    values.push(value)
+    index += 1
+  }
+  return values
 }
 
 function argumentRoot(argv: readonly string[]): string {
@@ -49,5 +69,6 @@ function argumentRoot(argv: readonly string[]): string {
 
 const invoked = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]
 if (invoked) {
-  await runResidentDaemon(argumentRoot(process.argv.slice(2)))
+  const argv = process.argv.slice(2)
+  await runResidentDaemon(argumentRoot(argv), argumentValues(argv, '--driver-module'))
 }

@@ -30,6 +30,7 @@ export interface OrchestrationClientOptions {
   readonly dshHome: string
   readonly autoStart: boolean
   readonly connectTimeoutMs: number
+  readonly residentDriverModules?: readonly string[]
 }
 
 /** Stateless-per-request client for the durable local Scheduler. */
@@ -158,7 +159,11 @@ export class OrchestrationDaemonClient {
     } catch (error) {
       if (!this.options.autoStart) throw error
     }
-    startDetachedOrchestrationDaemon(this.options.root, this.options.dshHome)
+    startDetachedOrchestrationDaemon(
+      this.options.root,
+      this.options.dshHome,
+      this.options.residentDriverModules ?? [],
+    )
     const deadline = Date.now() + this.options.connectTimeoutMs
     let lastError: unknown
     while (Date.now() < deadline) {
@@ -240,9 +245,14 @@ export class OrchestrationDaemonClient {
  * Start an orchestration daemon independent of the current DSH/Electron generation.
  * @param root - owner-private orchestration state root.
  * @param dshHome - DSH home shared with the Resident daemon.
+ * @param residentDriverModules - absolute independent Resident Driver entries for the headless composition.
  * @returns detached child process identity.
  */
-export function startDetachedOrchestrationDaemon(root: string, dshHome: string): number {
+export function startDetachedOrchestrationDaemon(
+  root: string,
+  dshHome: string,
+  residentDriverModules: readonly string[] = [],
+): number {
   const builtEntry = fileURLToPath(new URL('./startup.js', import.meta.url))
   const sourceEntry = fileURLToPath(new URL('./startup.ts', import.meta.url))
   const entry = existsSync(builtEntry) ? builtEntry : sourceEntry
@@ -251,7 +261,13 @@ export function startDetachedOrchestrationDaemon(root: string, dshHome: string):
     if (key.toUpperCase() === ELECTRON_RUN_AS_NODE) Reflect.deleteProperty(environment, key)
   }
   if (process.versions.electron !== undefined) environment[ELECTRON_RUN_AS_NODE] = '1'
-  const child = spawn(process.execPath, [...process.execArgv, entry, '--root', root, '--dsh-home', dshHome], {
+  const child = spawn(process.execPath, [
+    ...process.execArgv,
+    entry,
+    '--root', root,
+    '--dsh-home', dshHome,
+    ...residentDriverModules.flatMap(module => ['--resident-driver-module', module]),
+  ], {
     detached: true,
     stdio: 'ignore',
     env: environment,

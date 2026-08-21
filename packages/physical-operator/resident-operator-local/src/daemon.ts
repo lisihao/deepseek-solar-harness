@@ -15,6 +15,7 @@ import {
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
   type ResidentProviderStatus,
+  type ResidentProductDriver,
 } from '@deepseek-ai/dsh-resident-operator'
 import {
   ClaudeCodeResidentDriver,
@@ -22,16 +23,18 @@ import {
   EXPECTED_CLAUDE_CLI_VERSION,
   EXPECTED_CODEX_CLI_VERSION,
   EXPECTED_CODEX_SCHEMA_SHA256,
-  type ResidentProductDriver,
 } from './drivers.ts'
+import { residentDriverManifestSha256 } from './driver-modules.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v3 method set advertised by daemon handshake. */
+/** Public protocol-v6 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
+  'system.shutdown',
   'operator.list',
+  'session.list',
   'session.inspect',
   'turn.execute',
   'turn.inspect',
@@ -52,6 +55,7 @@ export interface ResidentDaemonOptions {
   readonly root: string
   readonly buildCommit?: string
   readonly drivers?: readonly ResidentProductDriver[]
+  readonly driverManifestHash?: string
   readonly heartbeatIntervalMs?: number
 }
 
@@ -187,8 +191,10 @@ export class ResidentDaemon {
   readonly store: ResidentStore
   private readonly server: Server
   private readonly drivers = new Map<string, ResidentProductDriver>()
+  private readonly driverManifestHash: string
   private readonly transports = new Set<JsonRpcLineTransport>()
   private readonly active = new Map<string, ActiveTurn>()
+  private readonly qualifications = new Map<string, Promise<ResidentProviderStatus>>()
   private lockDescriptor: number | undefined
   private closing = false
   private readonly closedResolver = Promise.withResolvers<void>()
@@ -204,6 +210,7 @@ export class ResidentDaemon {
       }
       this.drivers.set(driver.operatorId, driver)
     }
+    this.driverManifestHash = options.driverManifestHash ?? residentDriverManifestSha256([])
     this.server = createServer((socket) => { this.acceptSocket(socket) })
   }
 
@@ -273,6 +280,8 @@ export class ResidentDaemon {
         const providers = await this.providerStatuses()
         return { providers, sessions: this.store.list() }
       }
+      case 'session.list':
+        return { sessions: this.store.list() }
       case 'session.inspect':
         return this.store.inspectSession(stringParam(params, 'session_id'))
       case 'turn.execute':
@@ -289,7 +298,7 @@ export class ResidentDaemon {
       }
       case 'turn.resolve_indeterminate': {
         if (params.decision !== 'abandon') {
-          throw new ResidentOperatorError('protocol v3 only permits abandoning an indeterminate command', 'INVALID_RESULT')
+          throw new ResidentOperatorError('protocol v4 only permits abandoning an indeterminate command', 'INVALID_RESULT')
         }
         this.store.resolveIndeterminate(
           stringParam(params, 'command_id'),
@@ -320,23 +329,43 @@ export class ResidentDaemon {
   private async handshake(params: Record<string, unknown>): Promise<unknown> {
     const requestedProtocol = integerParam(params, 'protocol_version')
     const requestedSchema = integerParam(params, 'state_schema_version')
+    const requestedDriverManifest = stringParam(params, 'driver_manifest_sha256')
     if (requestedProtocol !== RESIDENT_PROTOCOL_VERSION || requestedSchema !== RESIDENT_STATE_SCHEMA_VERSION) {
       throw new ResidentOperatorError(
         `resident daemon protocol ${RESIDENT_PROTOCOL_VERSION}/schema ${RESIDENT_STATE_SCHEMA_VERSION} does not match client ${requestedProtocol}/${requestedSchema}`,
         'PROTOCOL_MISMATCH',
       )
     }
+    if (requestedDriverManifest !== this.driverManifestHash) {
+      throw new ResidentOperatorError(
+        `resident daemon Driver manifest ${this.driverManifestHash} does not match client ${requestedDriverManifest}`,
+        'PROVIDER_VERSION_MISMATCH',
+      )
+    }
     return {
       protocolVersion: RESIDENT_PROTOCOL_VERSION,
       stateSchemaVersion: RESIDENT_STATE_SCHEMA_VERSION,
       buildCommit: this.options.buildCommit ?? process.env.DSH_BUILD_COMMIT ?? 'development',
+      driverManifestSha256: this.driverManifestHash,
       methods: RESIDENT_METHODS,
       providers: await this.providerStatuses(),
     }
   }
 
   private providerStatuses(): Promise<ResidentProviderStatus[]> {
-    return Promise.all([...this.drivers.values()].map(driver => driver.qualify()))
+    return Promise.all([...this.drivers.values()].map(driver => this.qualify(driver)))
+  }
+
+  private qualify(driver: ResidentProductDriver): Promise<ResidentProviderStatus> {
+    const current = this.qualifications.get(driver.operatorId)
+    if (current !== undefined) return current
+    const pending = driver.qualify().finally(() => {
+      if (this.qualifications.get(driver.operatorId) === pending) {
+        this.qualifications.delete(driver.operatorId)
+      }
+    })
+    this.qualifications.set(driver.operatorId, pending)
+    return pending
   }
 
   private async execute(params: Record<string, unknown>): Promise<unknown> {
@@ -344,6 +373,7 @@ export class ResidentDaemon {
     const commandId = stringParam(params, 'command_id')
     const operatorId = stringParam(params, 'operator_id')
     const configuredWorkspace = stringParam(params, 'workspace')
+    const laneId = stringParam(params, 'lane_id')
     const taskLabel = taskLabelParam(params)
     const prompt = promptParam(params)
     const requestedProfile = profileParam(params)
@@ -357,14 +387,14 @@ export class ResidentDaemon {
     if (driver === undefined) {
       throw new ResidentOperatorError(`no resident provider for ${operatorId}`, 'SESSION_UNAVAILABLE')
     }
-    const qualification = await driver.qualify()
+    const qualification = await this.qualify(driver)
     if (!qualification.available || qualification.authentication !== 'native-subscription') {
       throw new ResidentOperatorError(
         qualification.unavailableReason ?? `${operatorId} has no qualified subscription`,
         unavailableProviderCode(qualification),
       )
     }
-    const locked = this.store.lockedProfile(operatorId, workspace)
+    const locked = this.store.lockedProfile(operatorId, workspace, laneId)
     const resolved = locked !== undefined && requestedProfile === undefined
       ? locked
       : resolveResidentExecutionProfile(
@@ -380,7 +410,7 @@ export class ResidentDaemon {
               : { effort: requestedProfile.effort ?? locked.profile.effort },
           },
       )
-    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId)
+    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId, laneId)
     const accepted = this.store.accept(
       commandId,
       requestHash,
@@ -390,6 +420,7 @@ export class ResidentDaemon {
       resolved.source,
       supersedesCommandId,
       taskLabel,
+      laneId,
     )
     if (accepted.state === 'accepted' && !this.active.has(accepted.turnId)) {
       const controller = new AbortController()

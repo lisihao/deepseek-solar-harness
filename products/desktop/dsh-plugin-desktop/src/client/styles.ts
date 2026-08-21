@@ -131,6 +131,8 @@ body[data-dsh-desktop-product-footer="true"] #root { height: calc(100% - 24px); 
 .dshDesktopOrchestrationColumn { min-width: 0; overflow: auto; padding: 18px; border-right: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-base); }
 .dshDesktopOrchestrationColumn:last-child { border-right: 0; }
 .dshDesktopOrchestrationRuns > small { display: block; margin: -4px 0 12px; color: var(--dsw-alias-label-secondary); font-size: 9px; }
+.dshDesktopOrchestrationDiagnosticToggle { width: 100%; margin: 0 0 10px; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); cursor: pointer; font: inherit; font-size: 10px; }
+.dshDesktopOrchestrationDiagnosticBadge { display: inline-block; margin-left: 6px; padding: 1px 5px; border-radius: 999px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font-size: 9px; font-weight: 500; vertical-align: 1px; }
 .dshDesktopOrchestrationRun { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 9px; width: 100%; margin-bottom: 8px; padding: 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); cursor: pointer; text-align: left; }
 .dshDesktopOrchestrationRun[data-selected] { border-color: #4d6bfe; box-shadow: 0 0 0 1px color-mix(in srgb, #4d6bfe 40%, transparent); }
 .dshDesktopOrchestrationRun strong, .dshDesktopOrchestrationRun small, .dshDesktopOrchestrationRun em { display: block; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -138,6 +140,13 @@ body[data-dsh-desktop-product-footer="true"] #root { height: calc(100% - 24px); 
 .dshDesktopOrchestrationRun em { text-align: right; }
 .dshDesktopOrchestrationRunHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
 .dshDesktopOrchestrationRunHeader small { color: var(--dsw-alias-label-secondary); font-size: 9px; }
+.dshDesktopCollaborationTrace { display: grid; gap: 4px; margin-bottom: 14px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #4d6bfe 38%, var(--dsw-alias-border-l2)); border-left: 4px solid #4d6bfe; border-radius: 10px; background: color-mix(in srgb, #4d6bfe 7%, var(--dsw-alias-bg-layer-1)); font-size: 10px; line-height: 15px; }
+.dshDesktopCollaborationTrace p { color: var(--dsw-alias-label-secondary); }
+.dshDesktopCollaborationTrace strong { color: var(--dsw-alias-label-primary); font-size: 11px; }
+.dshDesktopCollaborationTrace[data-policy="direct"] { border-color: color-mix(in srgb, #7d8799 40%, var(--dsw-alias-border-l2)); border-left-color: #7d8799; background: var(--dsw-alias-bg-layer-1); }
+.dshDesktopCollaborationTrace[data-policy="codex"] { border-left-color: #34c759; }
+.dshDesktopCollaborationTrace[data-policy="claude-code"] { border-left-color: #f5a623; }
+.dshDesktopCollaborationTrace[data-policy="prime-agent"] { border-left-color: #8b5cf6; }
 .dshDesktopOrchestrationPipeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin-bottom: 14px; }
 .dshDesktopOrchestrationPipeline span { position: relative; padding: 6px 4px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); font-size: 8px; text-align: center; }
 .dshDesktopOrchestrationPipeline span[data-complete] { border-color: color-mix(in srgb, #34c759 38%, var(--dsw-alias-border-l2)); color: var(--dsw-alias-label-primary); }
@@ -163,6 +172,7 @@ body[data-dsh-desktop-product-footer="true"] #root { height: calc(100% - 24px); 
 .dshDesktopOrchestrationEvents li { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 3px 7px; padding: 9px 0; border-bottom: 1px solid var(--dsw-alias-border-l2); font-size: 9px; }
 .dshDesktopOrchestrationEvents time { grid-row: 1 / 3; color: var(--dsw-alias-label-secondary); }
 .dshDesktopOrchestrationEvents li span { color: var(--dsw-alias-label-secondary); }
+.dshDesktopOrchestrationEvents li small { grid-column: 2; color: var(--dsw-alias-label-tertiary); overflow-wrap: anywhere; white-space: pre-wrap; }
 .dshDesktopOrchestrationError { margin: 12px 24px 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, #ff453a 45%, transparent); border-radius: 8px; background: color-mix(in srgb, #ff453a 12%, var(--dsw-alias-bg-base)); color: #ff6961; font-size: 11px; }
 .dshDesktopOperatorRoutingWrap { position: relative; display: inline-flex; align-items: center; min-width: 0; }
 .dshDesktopOperatorRoutingChip { display: inline-flex; align-items: center; gap: 2px; max-width: 132px; height: 26px; padding: 0 5px 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; font-size: 11px; white-space: nowrap; }

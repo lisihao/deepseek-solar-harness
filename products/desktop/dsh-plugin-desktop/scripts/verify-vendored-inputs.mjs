@@ -4,7 +4,10 @@ import { readdir, readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 const vendorRoot = resolve(import.meta.dirname, '../vendor')
+const desktopPackageRoot = resolve(vendorRoot, '..')
+const installedPackagesRoot = join(desktopPackageRoot, 'node_modules')
 const repositoryRoot = resolve(vendorRoot, '../../../..')
+const ARCHIVE_MEMBER_MAX_BYTES = 16 * 1024 * 1024
 const manifest = JSON.parse(await readFile(join(vendorRoot, 'manifest.json'), 'utf8'))
 if (manifest.schemaVersion !== 1
   || manifest.files === null || typeof manifest.files !== 'object'
@@ -72,11 +75,35 @@ for (const archivePath of packageArchives) {
   }
 
   const sourcePackageRoot = dirname(sourceManifestPath)
+  const installedPackageRoot = resolve(installedPackagesRoot, ...archivedPackage.name.split('/'))
   const archiveMembers = execFileSync('tar', ['-tf', join(vendorRoot, archivePath)], { encoding: 'utf8' })
     .split('\n')
     .filter(member => member.startsWith('package/') && !member.endsWith('/'))
   for (const member of archiveMembers) {
     const packageRelative = member.slice('package/'.length)
+    const archivedContents = execFileSync('tar', ['-xOf', join(vendorRoot, archivePath), member], {
+      maxBuffer: ARCHIVE_MEMBER_MAX_BYTES,
+    })
+    const installedFile = resolve(installedPackageRoot, packageRelative)
+    const installedRelative = relative(installedPackagesRoot, installedFile)
+    if (installedRelative === '..' || installedRelative.startsWith(`..${sep}`) || isAbsolute(installedRelative)) {
+      throw new Error(`verify-vendored-inputs: installed package path escapes node_modules for ${archivePath}`)
+    }
+    let installedContents
+    try {
+      installedContents = await readFile(installedFile)
+    }
+    catch (cause) {
+      throw new Error(
+        `verify-vendored-inputs: installed ${archivedPackage.name} is missing ${packageRelative}; run yarn install`,
+        { cause },
+      )
+    }
+    if (!installedContents.equals(archivedContents)) {
+      throw new Error(
+        `verify-vendored-inputs: installed ${archivedPackage.name} has stale ${packageRelative}; refresh yarn.lock and run yarn install`,
+      )
+    }
     if (packageRelative === 'package.json' || packageRelative.startsWith('lib/')) continue
     let sourceFile = resolve(sourcePackageRoot, packageRelative)
     let sourceFileRelative = relative(repositoryRoot, sourceFile)
@@ -103,7 +130,6 @@ for (const archivePath of packageArchives) {
       }
     }
     const sourceContents = await readFile(sourceFile)
-    const archivedContents = execFileSync('tar', ['-xOf', join(vendorRoot, archivePath), member])
     if (!sourceContents.equals(archivedContents)) {
       throw new Error(
         `verify-vendored-inputs: ${archivePath} contains stale ${packageRelative} relative to ${sourceFileRelative}`,

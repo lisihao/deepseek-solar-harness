@@ -11,6 +11,37 @@ export const ORCHESTRATION_DASHBOARD_PATH = '/api/orchestrations'
 
 const MAX_CONTROL_BYTES = 64 * 1024
 
+/**
+ * Classify the dedicated local acceptance-test workspace namespace.
+ * @param workspace - normalized or platform-native workspace path.
+ * @returns whether the workspace belongs to the acceptance-test namespace.
+ */
+export function isDiagnosticOrchestrationWorkspace(workspace: string): boolean {
+  const normalized = workspace.replaceAll('\\', '/')
+  return /\/(?:private\/)?tmp\/dsh-orchestration-/u.test(normalized)
+}
+
+/**
+ * Mark retained acceptance runs and optionally remove them from one list projection.
+ * @param source - durable run summaries to project.
+ * @param includeDiagnostics - whether diagnostic runs remain in the returned list.
+ * @returns projected runs and the retained diagnostic-run count.
+ */
+export function projectOrchestrationRuns<T extends { workspace: string }>(
+  source: readonly T[],
+  includeDiagnostics: boolean,
+): { runs: Array<T & { diagnostic: boolean }>; diagnosticRunCount: number } {
+  const projected = source.map(run => ({
+    ...run,
+    diagnostic: isDiagnosticOrchestrationWorkspace(run.workspace),
+  }))
+  const diagnosticRunCount = projected.filter(run => run.diagnostic).length
+  return {
+    runs: includeDiagnostics ? projected : projected.filter(run => !run.diagnostic),
+    diagnosticRunCount,
+  }
+}
+
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   const body = JSON.stringify(value)
   response.writeHead(status, {
@@ -58,14 +89,42 @@ function requiredRevision(body: Record<string, unknown>): number {
 
 async function readProjection(ctx: Context, url: URL) {
   const runId = url.searchParams.get('run_id')
-  if (runId === null) return { generatedAt: new Date().toISOString(), runs: await ctx.orchestrations.list() }
-  const run = await ctx.orchestrations.inspect(OrchestrationRunId(runId))
+  const includeDiagnostics = url.searchParams.get('include_diagnostics') !== '0'
+  const listedRuns = await ctx.orchestrations.list()
+  let runs = projectOrchestrationRuns(listedRuns, true).runs
+
+  if (runId === null) {
+    const projection = projectOrchestrationRuns(listedRuns, includeDiagnostics)
+    return {
+      generatedAt: new Date().toISOString(),
+      runs: projection.runs,
+      diagnosticRunCount: projection.diagnosticRunCount,
+      diagnosticsIncluded: includeDiagnostics,
+    }
+  }
+
+  const inspectedRun = await ctx.orchestrations.inspect(OrchestrationRunId(runId))
+  const projectedRun = {
+    ...inspectedRun,
+    diagnostic: isDiagnosticOrchestrationWorkspace(inspectedRun.workspace),
+  }
+  const listedIndex = runs.findIndex(run => run.runId === inspectedRun.runId)
+  if (listedIndex === -1) runs = [...runs, projectedRun]
+  else runs = runs.with(listedIndex, projectedRun)
+  const diagnosticRunCount = runs.filter(run => run.diagnostic).length
   const events = await ctx.orchestrations.readEvents({
-    runId: run.runId,
+    runId: inspectedRun.runId,
     afterSequence: Number(url.searchParams.get('after_sequence') ?? 0),
     limit: 200,
   })
-  return { generatedAt: new Date().toISOString(), runs: [run], selectedRunId: runId, events: events.events }
+  return {
+    generatedAt: new Date().toISOString(),
+    runs: includeDiagnostics ? runs : runs.filter(run => !run.diagnostic),
+    diagnosticRunCount,
+    diagnosticsIncluded: includeDiagnostics,
+    selectedRunId: runId,
+    events: events.events,
+  }
 }
 
 async function executeControl(ctx: Context, body: Record<string, unknown>) {

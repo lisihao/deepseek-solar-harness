@@ -92,6 +92,15 @@ export interface OrchestrationCompileRequest {
   readonly intent: IntentCompileRequest
   readonly graph: LogicalTaskGraphV1
   readonly requirement?: Readonly<Record<string, unknown>>
+  /** Durable trace of the DSH collaboration policy that admitted this graph. */
+  readonly admission?: OrchestrationAdmissionTraceV1
+}
+
+/** User-selected collaboration policy and route captured before TaskGraph compilation. */
+export interface OrchestrationAdmissionTraceV1 {
+  readonly policy: 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent'
+  readonly route: 'taskgraph'
+  readonly sourceSessionId: string
 }
 
 /** Immutable compilation result that may be started after approval. */
@@ -103,6 +112,7 @@ export interface OrchestrationCompilationV1 {
   readonly requirementRef?: OrchestrationArtifactRef
   readonly graphRef: OrchestrationArtifactRef
   readonly graph: LogicalTaskGraphV1
+  readonly admission?: OrchestrationAdmissionTraceV1
   readonly certificate: PlanCertificateV1
   readonly requiresClarification: boolean
   readonly blockers: readonly OrchestrationBlocker[]
@@ -193,6 +203,8 @@ export interface OrchestrationNodeSnapshot {
   readonly executionPlanRef?: OrchestrationArtifactRef
   readonly evidenceRefs: readonly OrchestrationArtifactRef[]
   readonly blockers: readonly OrchestrationBlocker[]
+  /** Non-terminal scheduler reason while this node is pending or ready. */
+  readonly waitReason?: OrchestrationBlocker
   readonly updatedAt: string
 }
 
@@ -204,6 +216,10 @@ export interface OrchestrationRunSnapshot {
   readonly state: OrchestrationRunState
   readonly revision: number
   readonly graphRevision: number
+  /** Certified graph-wide concurrency ceiling. */
+  readonly maxParallel?: number
+  /** Collaboration policy and route that created this run, absent on legacy runs. */
+  readonly admission?: OrchestrationAdmissionTraceV1
   readonly certificate: PlanCertificateV1
   readonly nodes: readonly OrchestrationNodeSnapshot[]
   readonly blockers: readonly OrchestrationBlocker[]

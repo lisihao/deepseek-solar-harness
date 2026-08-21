@@ -22,6 +22,11 @@ describe('Resident Operator Desktop projection', () => {
       providers: vi.fn(async () => [{
         operatorId: 'codex',
         product: 'codex' as const,
+        displayName: 'Codex',
+        description: 'Test Resident provider.',
+        tags: ['coding'],
+        maxConcurrency: 4,
+        injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
         available: true,
         authentication: 'native-subscription' as const,
         productVersion: '0.147.0',
@@ -73,6 +78,7 @@ describe('Resident Operator Desktop projection', () => {
     expect(dashboard.providers).toEqual([expect.objectContaining({
       operatorId: 'codex',
       available: true,
+      displayName: 'Codex',
       models: [expect.objectContaining({ model: 'gpt-5.6-sol', defaultEffort: 'medium' })],
     })])
     expect(dashboard.sessions).toEqual([expect.objectContaining({

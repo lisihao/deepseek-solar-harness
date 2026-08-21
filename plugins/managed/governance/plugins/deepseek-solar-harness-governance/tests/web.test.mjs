@@ -43,6 +43,37 @@ test('trace HTTP projection returns one live session without mutating it', async
   assert.equal(body.events[0].type, 'governance/work-opened')
 })
 
+test('trace HTTP projection includes only safe collaboration events and Resident final text from the same session', async () => {
+  const session = { id: 'session-collaboration', events: [{
+    type: 'physical-operator/routing-decision', seq: 3, time: Date.parse('2026-08-21T01:00:00.000Z'),
+    data: { policy: 'auto', route: 'resident', reason: 'bounded implementation', operatorId: 'codex' },
+  }, {
+    type: 'physical-operator/dispatch', seq: 4, time: Date.parse('2026-08-21T01:00:01.000Z'),
+    data: { commandId: 'resident-1', operatorId: 'codex' },
+  }, {
+    type: 'assistant/message', seq: 5, time: Date.parse('2026-08-21T01:00:02.000Z'),
+    data: { message: { source: { provider: 'dsh-physical-operator', model: 'codex' }, content: [
+      { type: 'reasoning', text: 'private reasoning must stay hidden' },
+      { type: 'text', text: 'bounded final result' },
+    ] } },
+  }, {
+    type: 'orchestration/admission', seq: 6, time: Date.parse('2026-08-21T01:00:03.000Z'),
+    data: { policy: 'auto', route: 'taskgraph', runId: 'run-1', maxParallel: 2 },
+  }] }
+  const ctx = context(session)
+  const handler = createGovernanceTraceHandler(ctx, new GovernanceService(ctx, {}))
+  const res = response()
+  await handler({ method: 'GET', url: `${GOVERNANCE_TRACE_PATH}?sessionId=${session.id}` }, res)
+  assert.equal(res.status, 200)
+  const body = JSON.parse(res.body)
+  assert.equal(body.sessionId, session.id)
+  assert.equal(body.collaboration.totalEvents, 4)
+  assert.equal(body.collaboration.events[2].type, 'physical-operator/output')
+  assert.equal(body.collaboration.events[2].outputPreview, 'bounded final result')
+  assert.doesNotMatch(JSON.stringify(body.collaboration), /private reasoning/u)
+  assert.equal(body.collaboration.events[3].runId, 'run-1')
+})
+
 test('trace HTTP projection rejects missing and unknown sessions', async () => {
   const ctx = context(undefined, { inspect: async () => { throw new Error('session not found') } })
   const handler = createGovernanceTraceHandler(ctx, new GovernanceService(ctx, {}))

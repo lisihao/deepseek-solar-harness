@@ -17,17 +17,30 @@ type TestResult = { output: Array<{ type: 'text'; text: string }>; stopReason: '
 
 class FakeResidentClient {
   starts: string[] = []
+  requests: Array<{ commandId: string; operatorId: string; laneId?: string; prompt?: Array<{ type: string; text?: string }> }> = []
   available = true
   unavailableOperators = new Set<string>()
   defer = false
   failNext = 0
   private readonly deferredResolvers: Array<() => void> = []
   turns = new Map<string, { state: 'running' | 'settled'; result?: TestResult }>()
+  residentEvents = new Map<string, Array<{
+    sequence: number
+    sessionId: string
+    type: string
+    time: string
+    data: Record<string, unknown>
+  }>>()
 
   async providers() {
-    return ['codex', 'claude-code'].map(operatorId => ({
+    return ['codex', 'claude-code', 'prime-agent'].map(operatorId => ({
       operatorId,
       product: operatorId,
+      displayName: operatorId === 'codex' ? 'Codex' : operatorId === 'claude-code' ? 'Claude Code' : 'Prime Agent',
+      description: 'Test Resident provider.',
+      tags: operatorId === 'codex' ? ['coding'] : operatorId === 'claude-code' ? ['analysis'] : ['recursive', 'rlm'],
+      maxConcurrency: operatorId === 'prime-agent' ? 2 : 4,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
       available: this.available && !this.unavailableOperators.has(operatorId),
       authentication: 'native-subscription',
       productVersion: 'test',
@@ -36,9 +49,18 @@ class FakeResidentClient {
     }))
   }
 
-  async execute(request: { commandId: string; operatorId: string }) {
+  async execute(request: { commandId: string; operatorId: string; laneId?: string; prompt?: Array<{ type: string; text?: string }> }) {
+    this.requests.push(request)
     this.starts.push(`${request.operatorId}:${request.commandId}`)
     const turnId = `turn:${request.commandId}`
+    const sessionId = `session:${request.operatorId}`
+    this.residentEvents.set(sessionId, ['reasoning', 'tool_activity', 'finalizing'].map((phase, index) => ({
+      sequence: index + 1,
+      sessionId,
+      type: 'turn.progress',
+      time: `2026-08-21T00:00:0${String(index)}.000Z`,
+      data: { turnId, phase },
+    })))
     const result = { output: [{ type: 'text' as const, text: `completed ${request.commandId}` }], stopReason: 'completed' as const }
     const resultPromise = this.failNext > 0
       ? (() => {
@@ -58,7 +80,7 @@ class FakeResidentClient {
     if (!this.defer && this.failNext === 0) this.turns.set(turnId, { state: 'settled', result })
     return {
       turnId,
-      sessionId: `session:${request.operatorId}`,
+      sessionId,
       stateRevision: 1,
       result: resultPromise,
       dispose: async () => {},
@@ -69,6 +91,13 @@ class FakeResidentClient {
     const turn = this.turns.get(turnId)
     if (turn === undefined) throw new Error('unknown turn')
     return { turnId, sessionId: 'session:recovered', commandId: 'command', stateRevision: 1, updatedAt: new Date().toISOString(), ...turn }
+  }
+
+  async readEvents(sessionId: string, afterSequence = 0, limit = 100) {
+    const events = (this.residentEvents.get(sessionId) ?? [])
+      .filter(value => value.sequence > afterSequence)
+      .slice(0, limit)
+    return { events, nextSequence: events.at(-1)?.sequence ?? afterSequence }
   }
 
   async interrupt() {}
@@ -144,6 +173,33 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('selects Prime Agent only for a bounded recursive node while DSH owns the graph', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...primeNode } = fixture.nodes[0]!
+    const primeGraph: LogicalTaskGraphV1 = {
+      ...fixture,
+      nodes: [{
+        ...primeNode,
+        role: 'recursive synthesis',
+        task: 'Use bounded RLM recursion to synthesize the alternatives.',
+      }],
+    }
+    const compilation = await client.compile({ intent: { request: 'Synthesize alternatives.' }, graph: primeGraph })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ operatorId: 'prime-agent', state: 'passed' })
+    expect(fake.requests[0]).toMatchObject({ operatorId: 'prime-agent' })
+  })
+
   it('compiles, seals, dispatches Resident nodes, records Evidence, and completes a graph', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
     const root = join(home, 'orchestrations')
@@ -173,8 +229,18 @@ describe('orchestration daemon', () => {
     const events = await client.readEvents({ runId: started.runId, limit: 200 })
     expect(events.events.map(value => value.type)).toEqual(expect.arrayContaining([
       'intent.compiled', 'graph.compiled', 'capsule.resolved', 'context.compiled',
-      'execution_plan.sealed', 'node.dispatched', 'node.evidence.accepted', 'run.completed',
+      'execution_plan.sealed', 'node.dispatched', 'node.operator.progress',
+      'node.evidence.accepted', 'run.completed',
     ]))
+    const codexEvidence = events.events.find(value => value.type === 'node.evidence.accepted' && value.nodeId === 'code')
+    expect(codexEvidence?.data).toMatchObject({
+      operatorId: 'codex',
+      outputTruncated: false,
+      stopReason: 'completed',
+    })
+    expect(String(codexEvidence?.data.outputPreview)).toContain('completed orch:')
+    expect(events.events.filter(value => value.type === 'node.operator.progress').map(value => value.data.phase))
+      .toEqual(expect.arrayContaining(['reasoning', 'tool_activity', 'finalizing']))
   })
 
   it('does not dispatch an intent that requires clarification', async () => {
@@ -385,6 +451,15 @@ describe('orchestration daemon', () => {
     const run = await client.start({ compilationId: compilation.compilationId })
     await eventually(() => client.inspect(String(run.runId)), value => value.nodes.every(node => node.state === 'running'))
     expect(fake.starts).toHaveLength(2)
+    expect(fake.requests.map(request => request.laneId)).toEqual([
+      `orch:${String(run.runId)}:code:1`,
+      `orch:${String(run.runId)}:review:1`,
+    ])
+    expect(fake.requests.every(request => request.prompt?.[0]?.text?.includes('fork_turns: "none"') === true)).toBe(true)
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    const capsuleEvent = events.events.find(event => event.type === 'capsule.resolved')
+    expect(capsuleEvent).toBeDefined()
+    expect((capsuleEvent?.data as { cleanContext?: boolean } | undefined)?.cleanContext).toBe(true)
     fake.defer = false
     fake.resolveAllDeferred()
     await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
@@ -429,8 +504,12 @@ describe('orchestration daemon', () => {
     }
     const compilation = await client.compile({ intent: { request: 'Conflict fixture.' }, graph: conflicting })
     const run = await client.start({ compilationId: compilation.compilationId })
-    await eventually(() => client.inspect(String(run.runId)), value => value.nodes.some(node => node.state === 'running'))
+    const waiting = await eventually(
+      () => client.inspect(String(run.runId)),
+      value => value.nodes.some(node => node.state === 'running') && value.nodes.some(node => node.waitReason?.code === 'SCOPE_CONFLICT'),
+    )
     expect(fake.starts).toHaveLength(1)
+    expect(waiting.nodes.find(node => node.state === 'ready')?.waitReason?.code).toBe('SCOPE_CONFLICT')
     fake.resolveDeferred()
     await eventually(() => client.inspect(String(run.runId)), () => fake.starts.length === 2)
     fake.resolveDeferred()
