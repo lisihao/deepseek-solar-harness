@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-resident-qualification-and-diagnostic-projection.md
-2026-08-20-resident-qualification-and-diagnostic-projection.md: 313683012a8048088abe3024d34654b95912df9c
-2026-08-20-resident-qualification-and-diagnostic-projection.zh.md: cfe7b58049c48ae5da71656dafcb4e955d5497be
+2026-08-20-resident-qualification-and-diagnostic-projection.md: 77d3c58175c30bb24645e11b7d483954afe3f285
+2026-08-20-resident-qualification-and-diagnostic-projection.zh.md: 8a701efdef43ea3f74e68f283b1fbec6609850b8

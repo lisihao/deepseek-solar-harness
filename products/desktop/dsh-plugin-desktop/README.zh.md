@@ -24,6 +24,10 @@ Desktop 产品层还会提供 Resident Physical Operators 与 AgentTeams，但�
 
 每个编排工作台 Run 顶部都有“协作 Trace”摘要。它会标出准入的“智能协作”“仅主模型”“优先 Codex”或“优先 Claude Code”策略、TaskGraph 路由、活动与最大 worker 数、可派发节点、clean-task Capsule 状态和 fresh-lane 隔离。事件时间线保留相同的准入信息、Capsule 解析、算子派发、lane 与调度等待原因，因此任务完成并重启后仍可解释。
 
+Resident 派发还会将提供方无关的连接、推理／执行、工具活动和结果整理阶段投影到协作 Trace。终态事件会显示所选 Codex 或 Claude Code 算子、停止原因、有界的面向用户输出和不可变 Evidence 引用。私有推理文本、提示词、终端屏幕和产品本地 transcript 仍不进入该投影。
+
+位于 `/tmp/dsh-orchestration-*` 或 `/private/tmp/dsh-orchestration-*` 下的本地验收 Run 仍持久化保留，并带有**验收**标签。工作台默认包含它们，同时提供仅影响展示的隐藏控制，并保持已存储数量可见。
+
 打包内的 `anchored-standard` preset 是 system-trust 产品输入，并排在同名上游 preset root 之前。它的首轮 gate 会覆盖 delegated agent，因此 AgentTeams worker 会与主 agent 一样从 `bash` 和 `str_replace_editor` 两个 bootstrap 工具开始，而不是被当作已经 promoted。AgentTeams 还会把 member protocol 放入首条 user prompt，不再替换所选 preset 的 persona。若用户 profile 已声明 AgentTeams，产品层不会重复加载；最终 patch 仍会强制这一 prompt placement。
 
 Profile 选择保存在 Electron user data 下的 desktop 自有状态中，而不是被选 profile 内的另一个字段。切换会先记为 pending，再通过有序重启生效。只有 Cordis 树与原生窗口成功挂载后，新 profile 才会成为 last-known-good；托盘会在 Web surface 加载后才创建，而且该状态提交会在托盘命令能够运行前同步完成。Pending generation 启动失败时会回滚并自动重启一次。官方 profile 默认共用同一个 DSH home 中的 sessions、settings 与 storage，因此切换不会复制或迁移记录；自定义 profile patch 仍可主动重定向其中某个持久化根。

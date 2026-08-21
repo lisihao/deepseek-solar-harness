@@ -73,6 +73,7 @@ export interface DesktopOrchestrationRun {
   blockers: DesktopOrchestrationBlocker[]
   createdAt: string
   updatedAt: string
+  diagnostic?: boolean
 }
 
 export interface DesktopOrchestrationEvent {
@@ -89,6 +90,8 @@ export interface DesktopOrchestrationEvent {
 export interface DesktopOrchestrationDashboard {
   generatedAt: string
   runs: DesktopOrchestrationRun[]
+  diagnosticRunCount: number
+  diagnosticsIncluded: boolean
   selectedRunId?: string
   events?: DesktopOrchestrationEvent[]
 }

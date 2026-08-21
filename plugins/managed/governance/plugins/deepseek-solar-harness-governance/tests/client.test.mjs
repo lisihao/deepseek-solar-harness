@@ -14,7 +14,7 @@ function findByTestId(node, testId) {
   return null
 }
 
-test('built browser plugin registers a visible governance Trace sidebar entry', async () => {
+test('built browser plugin registers governance Trace as a per-session view tab', async () => {
   const code = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   let client
   const styles = []
@@ -29,10 +29,7 @@ test('built browser plugin registers a visible governance Trace sidebar entry', 
     useState(value) { return [value, () => {}] },
   }
   const primitives = {
-    IconCloseOutline16: () => null,
-    IconCodeOutline16: () => null,
     IconRefreshOutline16: () => null,
-    Tooltip: ({ children }) => children,
   }
   const sandbox = {
     URL,
@@ -55,19 +52,20 @@ test('built browser plugin registers a visible governance Trace sidebar entry', 
   let registration
   const ctx = {
     slots: {
-      inject(name, callback) { assert.equal(name, 'sidebar.footer.action'); callback() },
+      inject(name, callback) { assert.equal(name, 'conversation.view'); callback() },
       register(options, component) { registration = { options, component }; return () => {} },
     },
   }
   client.apply(ctx)
   assert.equal(registration.options.id, 'code-harness-governance-trace')
-  const tree = registration.component({ wide: true, useSessions: selector => selector({ current: 'session-1' }) })
-  const entry = findByTestId(tree, 'governance-trace-entry')
-  assert.ok(entry)
-  assert.equal(entry.props['aria-label'], '治理 Trace')
+  assert.equal(registration.options.order, 15)
+  assert.equal(registration.options.label, '治理 Trace')
+  const tree = registration.component({ sessionId: 'session-1' })
+  const view = findByTestId(tree, 'governance-trace-view')
+  assert.ok(view)
   assert.equal(styles[0].dataset.plugin, '@lisihao/dsh-code-harness-governance')
-  assert.match(styles[0].textContent, /\[data-slot='sidebar\.footer\.action'\]\s*\{[^}]*flex-direction:\s*column/iu)
-  assert.match(styles[0].textContent, /\.dsh-governance-overlay\s*\{[^}]*align-items:\s*center/iu)
+  assert.doesNotMatch(styles[0].textContent, /sidebar\.footer\.action|dsh-governance-overlay/iu)
+  assert.match(styles[0].textContent, /\.dsh-governance-view\s*\{[^}]*height:\s*100%/iu)
   assert.match(styles[0].textContent, /\.dsh-governance-panel\s*\{[^}]*max-width:\s*720px/iu)
 })
 
@@ -77,4 +75,7 @@ test('trace source distinguishes rejected and invalidated work from unmanaged se
   assert.match(source, /case 'invalidated': return '证明失效'/u)
   assert.match(source, /case 'candidate': return '待验收'/u)
   assert.match(source, /治理事件/u)
+  assert.match(source, /encodeURIComponent\(sessionId\)/u)
+  assert.doesNotMatch(source, /useSessions|currentSession/u)
+  assert.match(source, /外部 Codex 任务与 GitHub Actions 不会自动写入/u)
 })

@@ -8,6 +8,8 @@ The daemon hosts the deterministic direct Intent Provider, basic Context Provide
 
 The Scheduler starts independent nodes up to the Graph's `maxParallel` bound without a phase-wide barrier. Dependencies, overlapping write/effect scopes, and the worker bound serialize only affected nodes; each wait reason is persisted with the run. Every attempt receives the built-in `context.clean-task` instruction Capsule and a fresh Resident lane, so a reused Codex or Claude Code host does not inherit an earlier native thread or fork the parent conversation history.
 
+While an attempt runs, the daemon copies bounded Resident progress phases into the orchestration event stream. Settlement keeps the complete operator result in its Evidence artifact and adds a bounded user-facing output preview to the terminal event. These projections expose execution and results without copying prompts, private reasoning, terminal screens, or product-local transcripts.
+
 ## Model Experience
 
 Indirectly, through `@deepseek-ai/dsh-tool-orchestration`. The daemon stores compiler artifacts and returns bounded projections but adds no prompt section itself.

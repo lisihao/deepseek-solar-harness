@@ -24,6 +24,13 @@ class FakeResidentClient {
   failNext = 0
   private readonly deferredResolvers: Array<() => void> = []
   turns = new Map<string, { state: 'running' | 'settled'; result?: TestResult }>()
+  residentEvents = new Map<string, Array<{
+    sequence: number
+    sessionId: string
+    type: string
+    time: string
+    data: Record<string, unknown>
+  }>>()
 
   async providers() {
     return ['codex', 'claude-code'].map(operatorId => ({
@@ -41,6 +48,14 @@ class FakeResidentClient {
     this.requests.push(request)
     this.starts.push(`${request.operatorId}:${request.commandId}`)
     const turnId = `turn:${request.commandId}`
+    const sessionId = `session:${request.operatorId}`
+    this.residentEvents.set(sessionId, ['reasoning', 'tool_activity', 'finalizing'].map((phase, index) => ({
+      sequence: index + 1,
+      sessionId,
+      type: 'turn.progress',
+      time: `2026-08-21T00:00:0${String(index)}.000Z`,
+      data: { turnId, phase },
+    })))
     const result = { output: [{ type: 'text' as const, text: `completed ${request.commandId}` }], stopReason: 'completed' as const }
     const resultPromise = this.failNext > 0
       ? (() => {
@@ -60,7 +75,7 @@ class FakeResidentClient {
     if (!this.defer && this.failNext === 0) this.turns.set(turnId, { state: 'settled', result })
     return {
       turnId,
-      sessionId: `session:${request.operatorId}`,
+      sessionId,
       stateRevision: 1,
       result: resultPromise,
       dispose: async () => {},
@@ -71,6 +86,13 @@ class FakeResidentClient {
     const turn = this.turns.get(turnId)
     if (turn === undefined) throw new Error('unknown turn')
     return { turnId, sessionId: 'session:recovered', commandId: 'command', stateRevision: 1, updatedAt: new Date().toISOString(), ...turn }
+  }
+
+  async readEvents(sessionId: string, afterSequence = 0, limit = 100) {
+    const events = (this.residentEvents.get(sessionId) ?? [])
+      .filter(value => value.sequence > afterSequence)
+      .slice(0, limit)
+    return { events, nextSequence: events.at(-1)?.sequence ?? afterSequence }
   }
 
   async interrupt() {}
@@ -175,8 +197,18 @@ describe('orchestration daemon', () => {
     const events = await client.readEvents({ runId: started.runId, limit: 200 })
     expect(events.events.map(value => value.type)).toEqual(expect.arrayContaining([
       'intent.compiled', 'graph.compiled', 'capsule.resolved', 'context.compiled',
-      'execution_plan.sealed', 'node.dispatched', 'node.evidence.accepted', 'run.completed',
+      'execution_plan.sealed', 'node.dispatched', 'node.operator.progress',
+      'node.evidence.accepted', 'run.completed',
     ]))
+    const codexEvidence = events.events.find(value => value.type === 'node.evidence.accepted' && value.nodeId === 'code')
+    expect(codexEvidence?.data).toMatchObject({
+      operatorId: 'codex',
+      outputTruncated: false,
+      stopReason: 'completed',
+    })
+    expect(String(codexEvidence?.data.outputPreview)).toContain('completed orch:')
+    expect(events.events.filter(value => value.type === 'node.operator.progress').map(value => value.data.phase))
+      .toEqual(expect.arrayContaining(['reasoning', 'tool_activity', 'finalizing']))
   })
 
   it('does not dispatch an intent that requires clarification', async () => {

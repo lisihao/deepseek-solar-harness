@@ -77,6 +77,9 @@ interface ActiveAttempt {
   readonly executionId: string
   readonly sessionId: string
   readonly turnId: string
+  readonly operatorId: string
+  progressCursor: number
+  progressSync?: Promise<void>
   readonly run: { readonly result: Promise<PhysicalOperatorResult>; dispose(): Promise<void> }
 }
 
@@ -186,6 +189,20 @@ function event(
     type,
     time: now(),
     data,
+  }
+}
+
+const MAX_OPERATOR_OUTPUT_PREVIEW = 8_000
+
+/** Project the operator's user-facing result without copying unbounded output into the event index. */
+function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview: string; outputTruncated: boolean } {
+  const text = output.map((block) => {
+    if (block.type === 'text') return block.text
+    return JSON.stringify(block)
+  }).join('\n')
+  return {
+    outputPreview: text.slice(0, MAX_OPERATOR_OUTPUT_PREVIEW),
+    outputTruncated: text.length > MAX_OPERATOR_OUTPUT_PREVIEW,
   }
 }
 
@@ -586,6 +603,7 @@ export class OrchestrationDaemon {
     if (this.ticking || this.closing) return
     this.ticking = true
     try {
+      await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
       await this.reconcile()
       for (const record of this.store.listRuns()) {
         if (record.snapshot.state !== 'running') continue
@@ -892,12 +910,21 @@ export class OrchestrationDaemon {
       const active: ActiveAttempt = {
         runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
         generation: plan.capabilityGeneration, executionId: String(plan.executionId),
-        sessionId: receipt.sessionId, turnId: receipt.turnId, run,
+        sessionId: receipt.sessionId, turnId: receipt.turnId,
+        operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
       }
       this.active.set(key, active)
       void run.result.then(
-        (result) => { if (!this.closing) this.settleAttempt(active, result) },
-        (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
+        async (result) => {
+          if (this.closing) return
+          await this.syncActiveProgress(active)
+          this.settleAttempt(active, result)
+        },
+        async (error: unknown) => {
+          if (this.closing) return
+          await this.syncActiveProgress(active)
+          this.failAttempt(active, error)
+        },
       ).finally(() => { this.active.delete(key); void this.tick() })
     } catch (error) {
       const attempt: AttemptRecord = {
@@ -909,6 +936,40 @@ export class OrchestrationDaemon {
       }
       this.store.saveAttempt(attempt)
       this.applyFailure(attempt)
+    }
+  }
+
+  private async syncActiveProgress(active: ActiveAttempt): Promise<void> {
+    if (active.progressSync !== undefined) return active.progressSync
+    const operation = this.syncActiveProgressUnchecked(active).finally(() => {
+      if (active.progressSync === operation) delete active.progressSync
+    })
+    active.progressSync = operation
+    return operation
+  }
+
+  private async syncActiveProgressUnchecked(active: ActiveAttempt): Promise<void> {
+    try {
+      const page = await this.resident.readEvents(active.sessionId, active.progressCursor, 200)
+      const progress = page.events.filter(value => (
+        value.type === 'turn.progress'
+        && value.data.turnId === active.turnId
+        && typeof value.data.phase === 'string'
+      ))
+      if (progress.length > 0) {
+        const record = this.store.getRun(active.runId)
+        const node = record.snapshot.nodes.find(value => value.id === active.nodeId)
+        this.store.appendEvents(progress.map(value => event(record.snapshot.runId, 'node.operator.progress', {
+          operatorId: active.operatorId,
+          turnId: active.turnId,
+          phase: value.data.phase,
+          residentSequence: value.sequence,
+          residentTime: value.time,
+        }, node)))
+      }
+      active.progressCursor = page.nextSequence
+    } catch (error) {
+      this.ctx.logger.warn(`orchestration progress projection failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -956,8 +1017,14 @@ export class OrchestrationDaemon {
     })
     this.store.saveAttempt({ ...attempt, state: 'settled', updatedAt: now() })
     const settledNode = nodes.find(value => value.id === active.nodeId)
+    const output = operatorOutputPreview(result.output)
     this.store.saveRun(next, [
-      event(next.snapshot.runId, passed ? 'node.evidence.accepted' : 'node.failed', { evidenceRef: String(evidenceRef), stopReason: result.stopReason }, settledNode),
+      event(next.snapshot.runId, passed ? 'node.evidence.accepted' : 'node.failed', {
+        evidenceRef: String(evidenceRef),
+        operatorId: active.operatorId,
+        stopReason: result.stopReason,
+        ...output,
+      }, settledNode),
     ])
   }
 
@@ -1070,12 +1137,17 @@ export class OrchestrationDaemon {
       try {
         const inspection = await this.resident.inspectTurn(attempt.turnId)
         if (inspection.state === 'settled' && inspection.result !== undefined) {
-          this.settleAttempt({
+          const record = this.store.getRun(attempt.runId)
+          const recovered: ActiveAttempt = {
             runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
             generation: attempt.generation, executionId: attempt.executionId,
             sessionId: String(inspection.sessionId), turnId: attempt.turnId,
             run: { result: Promise.resolve(inspection.result), dispose: async () => {} },
-          }, inspection.result)
+            operatorId: record.snapshot.nodes.find(value => value.id === attempt.nodeId)?.operatorId ?? 'unknown',
+            progressCursor: 0,
+          }
+          await this.syncActiveProgress(recovered)
+          this.settleAttempt(recovered, inspection.result)
         } else if (inspection.state === 'indeterminate') {
           this.applyIndeterminate({
             ...attempt,

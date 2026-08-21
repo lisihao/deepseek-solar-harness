@@ -1,9 +1,6 @@
 const React = require('react')
 const {
-  IconCloseOutline16,
-  IconCodeOutline16,
   IconRefreshOutline16,
-  Tooltip,
 } = require('@deepseek-ai/dsh-client-ui-primitives')
 
 const { useCallback, useEffect, useRef, useState } = React
@@ -55,9 +52,7 @@ function TraceEvent({ event }) {
   )
 }
 
-function GovernanceTraceEntry({ wide, useSessions }) {
-  const currentSession = useSessions(state => state.current)
-  const [open, setOpen] = useState(false)
+function GovernanceTraceView({ sessionId }) {
   const [trace, setTrace] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -65,14 +60,9 @@ function GovernanceTraceEntry({ wide, useSessions }) {
 
   const refresh = useCallback(async () => {
     const request = ++requestSequence.current
-    if (currentSession === undefined) {
-      setTrace(null)
-      setError('请先打开一个开发任务')
-      return
-    }
     setLoading(true)
     try {
-      const response = await fetch(`${TRACE_PATH}?sessionId=${encodeURIComponent(currentSession)}`)
+      const response = await fetch(`${TRACE_PATH}?sessionId=${encodeURIComponent(sessionId)}`)
       const body = await response.json()
       if (!response.ok) throw new Error(body?.error?.message ?? `HTTP ${String(response.status)}`)
       if (request !== requestSequence.current) return
@@ -84,76 +74,55 @@ function GovernanceTraceEntry({ wide, useSessions }) {
     } finally {
       if (request === requestSequence.current) setLoading(false)
     }
-  }, [currentSession])
+  }, [sessionId])
 
   useEffect(() => {
-    if (!open) return undefined
     void refresh()
     const timer = window.setInterval(() => { void refresh() }, 3000)
     return () => { window.clearInterval(timer) }
-  }, [open, refresh])
+  }, [refresh])
 
-  const close = useCallback(() => { setOpen(false) }, [])
-  return h(React.Fragment, null,
-    h(Tooltip, { label: '治理 Trace', delayMs: 500, disabled: wide },
-      h('button', {
-        type: 'button',
-        className: `dsh-governance-trigger${wide ? '' : ' dsh-governance-trigger-rail'}`,
-        'aria-haspopup': 'dialog',
-        'aria-expanded': open,
-        'aria-label': '治理 Trace',
-        'data-testid': 'governance-trace-entry',
-        onClick: () => { setOpen(true) },
-      },
-      h(IconCodeOutline16, { size: wide ? 16 : 18 }),
-      wide ? h('span', null, '治理 Trace') : null,
-      ),
-    ),
-    open ? h('div', { className: 'dsh-governance-overlay', role: 'presentation' },
-      h('button', { className: 'dsh-governance-mask', type: 'button', 'aria-label': '关闭治理 Trace', onClick: close }),
-      h('section', {
+  return h('div', { className: 'dsh-governance-view', 'data-testid': 'governance-trace-view' },
+    h('section', {
         className: 'dsh-governance-panel',
-        role: 'dialog',
-        'aria-modal': 'true',
+        role: 'region',
         'aria-label': 'Code-as-Harness 治理 Trace',
         'data-testid': 'governance-trace-panel',
       },
       h('header', { className: 'dsh-governance-header' },
         h('div', null,
           h('h2', null, 'Code-as-Harness 治理 Trace'),
-          h('p', null, currentSession === undefined ? '未选择任务' : `任务 ${String(currentSession)}`),
+          h('p', null, `DSH 会话 ${String(sessionId)}`),
         ),
         h('div', { className: 'dsh-governance-actions' },
           h('button', { type: 'button', 'aria-label': '刷新治理 Trace', onClick: () => { void refresh() }, disabled: loading },
             h(IconRefreshOutline16, { size: 16 }),
-          ),
-          h('button', { type: 'button', 'aria-label': '关闭治理 Trace', onClick: close },
-            h(IconCloseOutline16, { size: 16 }),
           ),
         ),
       ),
       h('div', { className: 'dsh-governance-summary' },
         h('span', { className: `dsh-governance-phase dsh-governance-phase-${String(trace?.phase ?? 'unmanaged')}` }, phaseLabel(trace?.phase)),
         h('span', null, trace === null ? '治理事件 N/A' : `治理事件 ${String(trace.returnedEvents)}/${String(trace.totalEvents)}`),
+        h('span', null, `来源 ${String(trace?.source ?? 'N/A')}`),
         loading ? h('span', null, '刷新中…') : null,
       ),
       error === null ? null : h('div', { className: 'dsh-governance-error', role: 'alert' }, error),
       trace !== null && trace.events.length === 0
-        ? h('div', { className: 'dsh-governance-empty' }, '当前任务还没有治理事件。')
+        ? h('div', { className: 'dsh-governance-empty' },
+          '当前 DSH 会话尚未产生治理事件。治理 Trace 只记录本会话内的 governance_* 工具调用和交付守卫；外部 Codex 任务与 GitHub Actions 不会自动写入这里。')
         : h('ol', { className: 'dsh-governance-events' },
           ...(trace?.events ?? []).slice().reverse().map(event => h(TraceEvent, { event, key: event.sequence })),
         ),
       ),
-    ) : null,
-  )
+    )
 }
 
 exports.inject = ['slots']
 exports.apply = function apply(ctx) {
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+    name: 'conversation.view',
     id: 'code-harness-governance-trace',
-    order: 80,
+    order: 15,
     label: '治理 Trace',
-  }, GovernanceTraceEntry))
+  }, GovernanceTraceView))
 }

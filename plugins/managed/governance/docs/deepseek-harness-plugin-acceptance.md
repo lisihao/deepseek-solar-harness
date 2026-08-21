@@ -24,7 +24,7 @@ Application Support runtime as source code.
 | Full local lifecycle | ok | Eight gates recorded; last event is completion-accepted |
 | Visible trace | ok | Denied delivery is projected from the durable session log with phase, reason, tool, and command digest |
 | Browser plugin | ok | Installed package declares `dsh.client`, exports `lib/client.js`, and appears in the real Web boot graph |
-| Sidebar entry | ok | Real Chromium locates the full-width `治理 Trace` row in a single-column footer and opens the compact centered `governance-trace-panel` without browser errors |
+| Session view tab | ok | Browser bundle test registers order-15 `治理 Trace` in `conversation.view`, passes the selected `sessionId`, and contains no sidebar or overlay selector |
 | Trace HTTP API | ok | Same-origin `/code-harness/v1/trace` reads live or persisted sessions and never publishes or mutates the inspected log |
 | Project admission | ok | Nested sessions bind to the nearest Git root; repositories without an adopted Profile remain unmanaged |
 | Failure durability | ok | Audit and planning process failures append specific rejection events before the tool returns an error |
@@ -48,10 +48,10 @@ Verified host snapshot:
 - Unaccepted push: denied
 - Trace event: `governance/milestone-evaluated`, `decision=denied`, `reasonCode=missing-acceptance`
 - Client boot entry: `@lisihao/dsh-code-harness-governance/client.js`
-- Browser entry: `治理 Trace`
-- Browser panel: `Code-as-Harness 治理 Trace`
+- Browser entry: per-Session `治理 Trace` conversation tab
+- Browser panel: `Code-as-Harness 治理 Trace`, keyed by the selected Session id
 - Project-local Profile: `.agent-governance/profile.json`
-- Plugin regression suite: `36/36`
+- Plugin regression suite: `37/37`
 
 ## Repository authority evidence
 

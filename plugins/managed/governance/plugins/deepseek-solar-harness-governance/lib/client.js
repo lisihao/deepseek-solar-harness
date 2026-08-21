@@ -1,6 +1,6 @@
 window.__ModuleLoader__.load({ id: "@lisihao/dsh-code-harness-governance", factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
-const __governanceCss = "[data-slot='sidebar.footer.action'] {\n  display: flex !important;\n  flex-direction: column;\n  width: 100%;\n}\n\n.dsh-governance-trigger {\n  align-items: center;\n  background: transparent;\n  border: 0;\n  border-radius: 12px;\n  box-sizing: border-box;\n  color: var(--dsw-alias-label-secondary);\n  cursor: pointer;\n  display: flex;\n  flex: none;\n  font: inherit;\n  gap: 8px;\n  margin-left: -4px;\n  min-height: 34px;\n  padding: 6px 2px 6px 10px;\n  width: calc(100% + 8px);\n}\n\n.dsh-governance-trigger:hover {\n  background: var(--dsw-alias-interactive-bg-hover);\n  color: var(--dsw-alias-label-primary);\n}\n\n.dsh-governance-trigger-rail {\n  justify-content: center;\n  padding: 7px;\n}\n\n.dsh-governance-overlay {\n  align-items: center;\n  display: flex;\n  inset: 0;\n  justify-content: center;\n  padding: 24px;\n  position: fixed;\n  z-index: 1000;\n}\n\n.dsh-governance-mask {\n  background: var(--dsw-alias-bg-mask-drop);\n  border: 0;\n  inset: 0;\n  position: absolute;\n  width: 100%;\n}\n\n.dsh-governance-panel {\n  background: var(--dsw-alias-bg-layer-1);\n  border: 1px solid var(--dsw-alias-border-l2);\n  border-radius: 14px;\n  box-sizing: border-box;\n  box-shadow: 0 20px 56px var(--dsw-alias-bg-mask-2);\n  color: var(--dsw-alias-label-primary);\n  display: flex;\n  flex-direction: column;\n  max-height: min(720px, calc(100vh - 48px));\n  max-width: 720px;\n  min-height: 320px;\n  overflow: hidden;\n  position: relative;\n  width: 100%;\n  z-index: 1;\n}\n\n.dsh-governance-header {\n  align-items: center;\n  border-bottom: 1px solid var(--dsw-alias-border-l2);\n  display: flex;\n  justify-content: space-between;\n  padding: 18px 20px;\n}\n\n.dsh-governance-header h2,\n.dsh-governance-header p {\n  margin: 0;\n}\n\n.dsh-governance-header h2 {\n  font-size: 17px;\n}\n\n.dsh-governance-header p {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n  margin-top: 4px;\n}\n\n.dsh-governance-actions {\n  display: flex;\n  gap: 6px;\n}\n\n.dsh-governance-actions button {\n  align-items: center;\n  background: transparent;\n  border: 0;\n  border-radius: 8px;\n  color: var(--dsw-alias-label-secondary);\n  cursor: pointer;\n  display: flex;\n  justify-content: center;\n  padding: 8px;\n}\n\n.dsh-governance-actions button:hover {\n  background: var(--dsw-alias-interactive-bg-hover);\n}\n\n.dsh-governance-summary {\n  align-items: center;\n  background: var(--dsw-alias-bg-layer-2);\n  border-bottom: 1px solid var(--dsw-alias-border-l2);\n  color: var(--dsw-alias-label-secondary);\n  display: flex;\n  font-size: 12px;\n  gap: 12px;\n  padding: 10px 20px;\n}\n\n.dsh-governance-phase {\n  border-radius: 999px;\n  padding: 3px 8px;\n}\n\n.dsh-governance-phase-accepted {\n  background: var(--dsw-alias-state-success-secondary);\n  color: var(--dsw-alias-state-success-primary);\n}\n\n.dsh-governance-phase-blocked {\n  background: var(--dsw-alias-state-error-secondary);\n  color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-phase-rejected,\n.dsh-governance-phase-invalidated {\n  background: var(--dsw-alias-state-error-secondary);\n  color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-error {\n  background: var(--dsw-alias-interactive-bg-hover-danger);\n  color: var(--dsw-alias-state-error-primary);\n  margin: 16px 20px 0;\n  padding: 10px 12px;\n}\n\n.dsh-governance-events {\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  list-style: none;\n  margin: 0;\n  max-height: min(560px, 60vh);\n  overflow: auto;\n  padding: 16px 20px 24px;\n}\n\n.dsh-governance-event {\n  background: var(--dsw-alias-bg-layer-2);\n  border: 1px solid var(--dsw-alias-border-l2);\n  border-radius: 10px;\n  padding: 12px;\n}\n\n.dsh-governance-event[data-decision='denied'] {\n  border-color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-event-head {\n  align-items: center;\n  display: grid;\n  gap: 10px;\n  grid-template-columns: auto 1fr auto;\n}\n\n.dsh-governance-sequence,\n.dsh-governance-event-status {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n}\n\n.dsh-governance-event-meta,\n.dsh-governance-event-detail,\n.dsh-governance-event-message {\n  color: var(--dsw-alias-label-secondary);\n  font-size: 12px;\n  margin-top: 7px;\n}\n\n.dsh-governance-empty {\n  align-items: center;\n  color: var(--dsw-alias-label-tertiary);\n  display: flex;\n  flex: 1;\n  justify-content: center;\n  min-height: 200px;\n  padding: 24px 20px;\n  text-align: center;\n}\n\n@media (max-width: 720px) {\n  .dsh-governance-overlay {\n    padding: 0;\n  }\n\n  .dsh-governance-panel {\n    border-radius: 0;\n    height: 100%;\n    max-height: none;\n    max-width: none;\n    min-height: 0;\n    width: 100%;\n  }\n}\n";
+const __governanceCss = ".dsh-governance-view {\n  box-sizing: border-box;\n  height: 100%;\n  overflow: auto;\n  padding: 20px;\n  width: 100%;\n}\n\n.dsh-governance-panel {\n  background: var(--dsw-alias-bg-layer-1);\n  border: 1px solid var(--dsw-alias-border-l2);\n  border-radius: 14px;\n  box-sizing: border-box;\n  color: var(--dsw-alias-label-primary);\n  display: flex;\n  flex-direction: column;\n  margin: 0 auto;\n  max-width: 720px;\n  min-height: 320px;\n  overflow: hidden;\n  width: 100%;\n}\n\n.dsh-governance-header {\n  align-items: center;\n  border-bottom: 1px solid var(--dsw-alias-border-l2);\n  display: flex;\n  justify-content: space-between;\n  padding: 18px 20px;\n}\n\n.dsh-governance-header h2,\n.dsh-governance-header p {\n  margin: 0;\n}\n\n.dsh-governance-header h2 {\n  font-size: 17px;\n}\n\n.dsh-governance-header p {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n  margin-top: 4px;\n}\n\n.dsh-governance-actions {\n  display: flex;\n  gap: 6px;\n}\n\n.dsh-governance-actions button {\n  align-items: center;\n  background: transparent;\n  border: 0;\n  border-radius: 8px;\n  color: var(--dsw-alias-label-secondary);\n  cursor: pointer;\n  display: flex;\n  justify-content: center;\n  padding: 8px;\n}\n\n.dsh-governance-actions button:hover {\n  background: var(--dsw-alias-interactive-bg-hover);\n}\n\n.dsh-governance-summary {\n  align-items: center;\n  background: var(--dsw-alias-bg-layer-2);\n  border-bottom: 1px solid var(--dsw-alias-border-l2);\n  color: var(--dsw-alias-label-secondary);\n  display: flex;\n  font-size: 12px;\n  gap: 12px;\n  padding: 10px 20px;\n}\n\n.dsh-governance-phase {\n  border-radius: 999px;\n  padding: 3px 8px;\n}\n\n.dsh-governance-phase-accepted {\n  background: var(--dsw-alias-state-success-secondary);\n  color: var(--dsw-alias-state-success-primary);\n}\n\n.dsh-governance-phase-blocked {\n  background: var(--dsw-alias-state-error-secondary);\n  color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-phase-rejected,\n.dsh-governance-phase-invalidated {\n  background: var(--dsw-alias-state-error-secondary);\n  color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-error {\n  background: var(--dsw-alias-interactive-bg-hover-danger);\n  color: var(--dsw-alias-state-error-primary);\n  margin: 16px 20px 0;\n  padding: 10px 12px;\n}\n\n.dsh-governance-events {\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  list-style: none;\n  margin: 0;\n  max-height: min(560px, 60vh);\n  overflow: auto;\n  padding: 16px 20px 24px;\n}\n\n.dsh-governance-event {\n  background: var(--dsw-alias-bg-layer-2);\n  border: 1px solid var(--dsw-alias-border-l2);\n  border-radius: 10px;\n  padding: 12px;\n}\n\n.dsh-governance-event[data-decision='denied'] {\n  border-color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-event-head {\n  align-items: center;\n  display: grid;\n  gap: 10px;\n  grid-template-columns: auto 1fr auto;\n}\n\n.dsh-governance-sequence,\n.dsh-governance-event-status {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n}\n\n.dsh-governance-event-meta,\n.dsh-governance-event-detail,\n.dsh-governance-event-message {\n  color: var(--dsw-alias-label-secondary);\n  font-size: 12px;\n  margin-top: 7px;\n}\n\n.dsh-governance-empty {\n  align-items: center;\n  color: var(--dsw-alias-label-tertiary);\n  display: flex;\n  flex: 1;\n  justify-content: center;\n  min-height: 200px;\n  padding: 24px 20px;\n  text-align: center;\n}\n\n@media (max-width: 720px) {\n  .dsh-governance-view {\n    padding: 0;\n  }\n\n  .dsh-governance-panel {\n    border-radius: 0;\n    height: 100%;\n    max-height: none;\n    max-width: none;\n    min-height: 0;\n    width: 100%;\n  }\n}\n";
 const __governanceStyleId = "@lisihao/dsh-code-harness-governance/client.css";
 if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css=' + JSON.stringify(__governanceStyleId) + ']') === null) {
   const tag = document.createElement('style');
@@ -11,10 +11,7 @@ if (typeof document !== 'undefined' && document.querySelector('style[data-plugin
 }
 const React = require('react')
 const {
-  IconCloseOutline16,
-  IconCodeOutline16,
   IconRefreshOutline16,
-  Tooltip,
 } = require('@deepseek-ai/dsh-client-ui-primitives')
 
 const { useCallback, useEffect, useRef, useState } = React
@@ -66,9 +63,7 @@ function TraceEvent({ event }) {
   )
 }
 
-function GovernanceTraceEntry({ wide, useSessions }) {
-  const currentSession = useSessions(state => state.current)
-  const [open, setOpen] = useState(false)
+function GovernanceTraceView({ sessionId }) {
   const [trace, setTrace] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -76,14 +71,9 @@ function GovernanceTraceEntry({ wide, useSessions }) {
 
   const refresh = useCallback(async () => {
     const request = ++requestSequence.current
-    if (currentSession === undefined) {
-      setTrace(null)
-      setError('请先打开一个开发任务')
-      return
-    }
     setLoading(true)
     try {
-      const response = await fetch(`${TRACE_PATH}?sessionId=${encodeURIComponent(currentSession)}`)
+      const response = await fetch(`${TRACE_PATH}?sessionId=${encodeURIComponent(sessionId)}`)
       const body = await response.json()
       if (!response.ok) throw new Error(body?.error?.message ?? `HTTP ${String(response.status)}`)
       if (request !== requestSequence.current) return
@@ -95,77 +85,56 @@ function GovernanceTraceEntry({ wide, useSessions }) {
     } finally {
       if (request === requestSequence.current) setLoading(false)
     }
-  }, [currentSession])
+  }, [sessionId])
 
   useEffect(() => {
-    if (!open) return undefined
     void refresh()
     const timer = window.setInterval(() => { void refresh() }, 3000)
     return () => { window.clearInterval(timer) }
-  }, [open, refresh])
+  }, [refresh])
 
-  const close = useCallback(() => { setOpen(false) }, [])
-  return h(React.Fragment, null,
-    h(Tooltip, { label: '治理 Trace', delayMs: 500, disabled: wide },
-      h('button', {
-        type: 'button',
-        className: `dsh-governance-trigger${wide ? '' : ' dsh-governance-trigger-rail'}`,
-        'aria-haspopup': 'dialog',
-        'aria-expanded': open,
-        'aria-label': '治理 Trace',
-        'data-testid': 'governance-trace-entry',
-        onClick: () => { setOpen(true) },
-      },
-      h(IconCodeOutline16, { size: wide ? 16 : 18 }),
-      wide ? h('span', null, '治理 Trace') : null,
-      ),
-    ),
-    open ? h('div', { className: 'dsh-governance-overlay', role: 'presentation' },
-      h('button', { className: 'dsh-governance-mask', type: 'button', 'aria-label': '关闭治理 Trace', onClick: close }),
-      h('section', {
+  return h('div', { className: 'dsh-governance-view', 'data-testid': 'governance-trace-view' },
+    h('section', {
         className: 'dsh-governance-panel',
-        role: 'dialog',
-        'aria-modal': 'true',
+        role: 'region',
         'aria-label': 'Code-as-Harness 治理 Trace',
         'data-testid': 'governance-trace-panel',
       },
       h('header', { className: 'dsh-governance-header' },
         h('div', null,
           h('h2', null, 'Code-as-Harness 治理 Trace'),
-          h('p', null, currentSession === undefined ? '未选择任务' : `任务 ${String(currentSession)}`),
+          h('p', null, `DSH 会话 ${String(sessionId)}`),
         ),
         h('div', { className: 'dsh-governance-actions' },
           h('button', { type: 'button', 'aria-label': '刷新治理 Trace', onClick: () => { void refresh() }, disabled: loading },
             h(IconRefreshOutline16, { size: 16 }),
-          ),
-          h('button', { type: 'button', 'aria-label': '关闭治理 Trace', onClick: close },
-            h(IconCloseOutline16, { size: 16 }),
           ),
         ),
       ),
       h('div', { className: 'dsh-governance-summary' },
         h('span', { className: `dsh-governance-phase dsh-governance-phase-${String(trace?.phase ?? 'unmanaged')}` }, phaseLabel(trace?.phase)),
         h('span', null, trace === null ? '治理事件 N/A' : `治理事件 ${String(trace.returnedEvents)}/${String(trace.totalEvents)}`),
+        h('span', null, `来源 ${String(trace?.source ?? 'N/A')}`),
         loading ? h('span', null, '刷新中…') : null,
       ),
       error === null ? null : h('div', { className: 'dsh-governance-error', role: 'alert' }, error),
       trace !== null && trace.events.length === 0
-        ? h('div', { className: 'dsh-governance-empty' }, '当前任务还没有治理事件。')
+        ? h('div', { className: 'dsh-governance-empty' },
+          '当前 DSH 会话尚未产生治理事件。治理 Trace 只记录本会话内的 governance_* 工具调用和交付守卫；外部 Codex 任务与 GitHub Actions 不会自动写入这里。')
         : h('ol', { className: 'dsh-governance-events' },
           ...(trace?.events ?? []).slice().reverse().map(event => h(TraceEvent, { event, key: event.sequence })),
         ),
       ),
-    ) : null,
-  )
+    )
 }
 
 exports.inject = ['slots']
 exports.apply = function apply(ctx) {
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+    name: 'conversation.view',
     id: 'code-harness-governance-trace',
-    order: 80,
+    order: 15,
     label: '治理 Trace',
-  }, GovernanceTraceEntry))
+  }, GovernanceTraceView))
 }
 return module.exports; } });
