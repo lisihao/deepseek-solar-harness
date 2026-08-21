@@ -155,6 +155,14 @@ function codexQuotaPool(
   }
 }
 
+/**
+ * Read the required Codex model catalog and optional subscription quota snapshot.
+ *
+ * @param listModels Reads the native product model catalog and rejects when it is unavailable.
+ * @param readRateLimits Reads advisory quota telemetry; failures leave quota pools unknown.
+ * @param observedAt Timestamp attached to successfully observed quota pools.
+ * @returns Qualified models plus either mapped quota pools or a non-fatal telemetry reason.
+ */
 export async function collectCodexModelsAndQuota(
   listModels: () => Promise<readonly CodexAppServerModel[]>,
   readRateLimits: () => Promise<readonly CodexAppServerRateLimit[]>,
