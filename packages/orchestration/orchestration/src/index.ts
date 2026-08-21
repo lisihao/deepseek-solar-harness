@@ -98,7 +98,7 @@ export interface OrchestrationCompileRequest {
 
 /** User-selected collaboration policy and route captured before TaskGraph compilation. */
 export interface OrchestrationAdmissionTraceV1 {
-  readonly policy: 'auto' | 'direct' | 'codex' | 'claude-code'
+  readonly policy: 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent'
   readonly route: 'taskgraph'
   readonly sourceSessionId: string
 }

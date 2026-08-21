@@ -98,8 +98,19 @@ try {
   if (residentRows.length !== 1 || residentRows[0].name !== '@deepseek-ai/dsh-resident-operator-local') {
     throw new Error('verify-packaged-composition-smoke: Resident bundle is not composed exactly once')
   }
+  if (JSON.stringify(residentRows[0].config?.driverModules)
+    !== JSON.stringify(['@deepseek-ai/dsh-resident-operator-prime-agent'])) {
+    throw new Error('verify-packaged-composition-smoke: independent Prime Agent Driver is not configured')
+  }
   if (dualModeRows.length !== 1 || dualModeRows[0].name !== '@deepseek-ai/dsh-physical-operator-resident') {
     throw new Error('verify-packaged-composition-smoke: physical operator dual-mode router is missing')
+  }
+  const physicalOperators = dualModeRows[0].config?.operators
+  if (!Array.isArray(physicalOperators)
+    || !physicalOperators.some(operator => operator.id === 'prime-agent'
+      && operator.residentProvider === 'prime-agent'
+      && operator.ephemeralProvider === undefined)) {
+    throw new Error('verify-packaged-composition-smoke: resident-only Prime physical operator is missing')
   }
   if (orchestrationRows.length !== 1
     || orchestrationRows[0].name !== '@deepseek-ai/dsh-orchestration-local'
@@ -171,7 +182,9 @@ try {
     executable: process.execPath,
     productRows: {
       resident: residentRows[0].name,
+      residentDriverModules: residentRows[0].config.driverModules,
       physicalRouter: dualModeRows[0].name,
+      physicalOperators: physicalOperators.map(operator => operator.id),
       orchestrationProvider: orchestrationRows[0].name,
       orchestrationTool: orchestrationToolRows[0].name,
       orchestrationUi: orchestrationUiRows[0].name,

@@ -43,6 +43,14 @@ const residentModule = pathToFileURL(join(
   'lib',
   'index.js',
 )).href
+const primeDriverModule = pathToFileURL(join(
+  unpackedRoot,
+  'node_modules',
+  '@deepseek-ai',
+  'dsh-resident-operator-prime-agent',
+  'lib',
+  'index.js',
+)).href
 const { installNativeProductRuntime } = await import(runtimeModule)
 const { ResidentDaemonClient } = await import(residentModule)
 // macOS caps Unix-domain socket paths; keep the real control path below 104 bytes.
@@ -66,6 +74,7 @@ try {
     autoStart: true,
     connectTimeoutMs: 15_000,
     pollIntervalMs: 50,
+    driverModules: [primeDriverModule],
   })
   const providers = await client.providers()
   for (const operatorId of ['claude-code', 'codex']) {
@@ -75,6 +84,15 @@ try {
         `verify-packaged-resident-smoke: ${operatorId} failed native-subscription qualification: ${provider?.unavailableReason ?? 'missing provider'}`,
       )
     }
+  }
+  const primeProvider = providers.find(candidate => candidate.operatorId === 'prime-agent')
+  if (primeProvider === undefined || primeProvider.productVersion !== '0.7.4') {
+    throw new Error(
+      `verify-packaged-resident-smoke: packaged Prime Agent Driver is missing or has the wrong product version: ${primeProvider?.productVersion ?? 'missing'}`,
+    )
+  }
+  if (primeProvider.available && primeProvider.authentication !== 'native-subscription') {
+    throw new Error('verify-packaged-resident-smoke: available Prime Agent Driver lacks native-subscription authentication')
   }
 
   const executions = []

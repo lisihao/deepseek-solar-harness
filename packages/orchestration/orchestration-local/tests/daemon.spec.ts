@@ -33,9 +33,14 @@ class FakeResidentClient {
   }>>()
 
   async providers() {
-    return ['codex', 'claude-code'].map(operatorId => ({
+    return ['codex', 'claude-code', 'prime-agent'].map(operatorId => ({
       operatorId,
       product: operatorId,
+      displayName: operatorId === 'codex' ? 'Codex' : operatorId === 'claude-code' ? 'Claude Code' : 'Prime Agent',
+      description: 'Test Resident provider.',
+      tags: operatorId === 'codex' ? ['coding'] : operatorId === 'claude-code' ? ['analysis'] : ['recursive', 'rlm'],
+      maxConcurrency: operatorId === 'prime-agent' ? 2 : 4,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
       available: this.available && !this.unavailableOperators.has(operatorId),
       authentication: 'native-subscription',
       productVersion: 'test',
@@ -168,6 +173,33 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('selects Prime Agent only for a bounded recursive node while DSH owns the graph', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...primeNode } = fixture.nodes[0]!
+    const primeGraph: LogicalTaskGraphV1 = {
+      ...fixture,
+      nodes: [{
+        ...primeNode,
+        role: 'recursive synthesis',
+        task: 'Use bounded RLM recursion to synthesize the alternatives.',
+      }],
+    }
+    const compilation = await client.compile({ intent: { request: 'Synthesize alternatives.' }, graph: primeGraph })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ operatorId: 'prime-agent', state: 'passed' })
+    expect(fake.requests[0]).toMatchObject({ operatorId: 'prime-agent' })
+  })
+
   it('compiles, seals, dispatches Resident nodes, records Evidence, and completes a graph', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
     const root = join(home, 'orchestrations')

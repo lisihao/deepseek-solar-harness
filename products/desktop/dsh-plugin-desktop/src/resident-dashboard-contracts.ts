@@ -4,7 +4,12 @@ export const RESIDENT_DASHBOARD_PATH = '/api/desktop/resident-operators'
 
 export interface DesktopResidentProvider {
   operatorId: string
-  product: 'claude-code' | 'codex'
+  product: string
+  displayName: string
+  description: string
+  tags: string[]
+  maxConcurrency: number
+  injectionBoundaries: Array<'pre-dispatch' | 'next-turn' | 'checkpoint'>
   available: boolean
   unavailableReason?: string
   authentication: 'native-subscription' | 'unqualified'

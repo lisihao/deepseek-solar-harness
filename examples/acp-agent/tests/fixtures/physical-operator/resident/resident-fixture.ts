@@ -25,6 +25,11 @@ class FixtureResidentOperatorService extends ResidentOperatorService {
     return Promise.resolve([{
       operatorId: 'scripted-resident',
       product: 'codex',
+      displayName: 'Scripted Resident',
+      description: 'Deterministic Resident fixture Provider',
+      tags: ['fixture'],
+      maxConcurrency: 1,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'],
       available: true,
       authentication: 'native-subscription',
       productVersion: 'fixture',

@@ -379,12 +379,13 @@ function EventTimeline(props: {
 }
 
 /** Present the exact collaboration preference persisted at TaskGraph admission. */
-export function collaborationPolicyLabel(policy: 'auto' | 'direct' | 'codex' | 'claude-code' | undefined): string {
+export function collaborationPolicyLabel(policy: 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent' | undefined): string {
   return ({
     auto: '智能协作',
     direct: '仅主模型',
     codex: '优先 Codex',
     'claude-code': '优先 Claude Code',
+    'prime-agent': '优先 Prime Agent',
   } as Record<string, string>)[String(policy)] ?? '历史策略 N/A'
 }
 
@@ -393,7 +394,7 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
   if (event.type === 'run.started') {
     const admission = event.data.admission as { policy?: string } | null | undefined
     const policy = admission?.policy
-    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
+    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' || policy === 'prime-agent' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
   }
   if (event.type === 'capsule.resolved') {
     return event.data.cleanContext === true ? 'Clean-task Context Capsule 已注入' : 'Capsule 未确认干净上下文'

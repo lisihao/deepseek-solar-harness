@@ -26,7 +26,7 @@ export interface OperatorConfig {
   /** Stable model-selected physical operator identity. */
   readonly id: string
   /** Existing `ctx.subagents` Provider used by the default ephemeral mode. */
-  readonly ephemeralProvider: string
+  readonly ephemeralProvider?: string
   /** Native product Driver id used by explicit Resident execution. */
   readonly residentProvider?: string
   /** Human-readable discovery name. */
@@ -48,7 +48,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   operators: z.array(z.object({
     id: z.string().required(),
-    ephemeralProvider: z.string().required(),
+    ephemeralProvider: z.string(),
     residentProvider: z.string(),
     displayName: z.string().required(),
     description: z.string().required(),
@@ -81,24 +81,26 @@ class DualModePhysicalOperator implements PhysicalOperator {
       description: config.description,
       tags: Object.freeze([...(config.tags ?? [])]),
       maxConcurrency: config.maxConcurrency ?? 1,
-      executionModes: config.residentProvider === undefined
-        ? ['ephemeral']
-        : ['ephemeral', 'resident'],
+      executionModes: [
+        ...config.ephemeralProvider === undefined ? [] : ['ephemeral' as const],
+        ...config.residentProvider === undefined ? [] : ['resident' as const],
+      ],
     }
   }
   /* jscpd:ignore-end */
 
   availability(mode?: PhysicalOperatorExecutionMode) {
-    const reason = subagentReason(
-      this.config.ephemeralProvider,
-      this.ctx.subagents.getProvider(this.config.ephemeralProvider),
-    )
     if (mode === 'resident') {
       return this.config.residentProvider === undefined
         ? { available: false as const, reason: `physical operator "${this.config.id}" has no resident provider` }
         : { available: true as const }
     }
     if (mode === undefined && this.config.residentProvider !== undefined) return { available: true as const }
+    const ephemeralProvider = this.config.ephemeralProvider
+    if (ephemeralProvider === undefined) {
+      return { available: false as const, reason: `physical operator "${this.config.id}" has no ephemeral provider` }
+    }
+    const reason = subagentReason(ephemeralProvider, this.ctx.subagents.getProvider(ephemeralProvider))
     return reason === undefined
       ? { available: true as const }
       : { available: false as const, reason }
@@ -110,12 +112,16 @@ class DualModePhysicalOperator implements PhysicalOperator {
   }
 
   private async startEphemeral(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
-    const reason = subagentReason(
-      this.config.ephemeralProvider,
-      this.ctx.subagents.getProvider(this.config.ephemeralProvider),
-    )
+    const ephemeralProvider = this.config.ephemeralProvider
+    if (ephemeralProvider === undefined) {
+      throw new PhysicalOperatorError(
+        `physical operator "${this.config.id}" has no ephemeral provider`,
+        'OPERATOR_MODE_UNSUPPORTED',
+      )
+    }
+    const reason = subagentReason(ephemeralProvider, this.ctx.subagents.getProvider(ephemeralProvider))
     if (reason !== undefined) throw new PhysicalOperatorError(reason, 'OPERATOR_UNAVAILABLE')
-    const run: SubagentRun = await this.ctx.subagents.start(this.config.ephemeralProvider, {
+    const run: SubagentRun = await this.ctx.subagents.start(ephemeralProvider, {
       ...request.label === undefined ? {} : { label: request.label },
       prompt: request.prompt,
       parent: request.parent,
@@ -176,15 +182,21 @@ export function apply(ctx: Context, config: Config): void {
 }
 
 function validate(config: OperatorConfig, index: number): void {
+  if (config.ephemeralProvider === undefined && config.residentProvider === undefined) {
+    throw new Error(`physical-operator-resident: operators[${index}] must configure an ephemeral or resident provider`)
+  }
   for (const [field, value] of [
     ['id', config.id],
-    ['ephemeralProvider', config.ephemeralProvider],
     ['displayName', config.displayName],
     ['description', config.description],
   ] as const) {
     if (typeof value !== 'string' || value.length === 0 || value.trim() !== value) {
       throw new Error(`physical-operator-resident: operators[${index}].${field} must be non-blank and trimmed`)
     }
+  }
+  if (config.ephemeralProvider !== undefined
+    && (config.ephemeralProvider.length === 0 || config.ephemeralProvider.trim() !== config.ephemeralProvider)) {
+    throw new Error(`physical-operator-resident: operators[${index}].ephemeralProvider must be non-blank and trimmed`)
   }
   if (config.residentProvider !== undefined
     && (config.residentProvider.length === 0 || config.residentProvider.trim() !== config.residentProvider)) {

@@ -59,7 +59,7 @@ export interface DesktopOrchestrationRun {
   graphRevision: number
   maxParallel?: number
   admission?: {
-    policy: 'auto' | 'direct' | 'codex' | 'claude-code'
+    policy: 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent'
     route: 'taskgraph'
     sourceSessionId: string
   }

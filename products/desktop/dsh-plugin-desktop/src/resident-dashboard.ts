@@ -106,6 +106,11 @@ function providerValue(provider: ResidentProviderStatus): DesktopResidentProvide
   return {
     operatorId: provider.operatorId,
     product: provider.product,
+    displayName: provider.displayName,
+    description: provider.description,
+    tags: [...provider.tags],
+    maxConcurrency: provider.maxConcurrency,
+    injectionBoundaries: [...provider.injectionBoundaries],
     available: provider.available,
     ...provider.unavailableReason === undefined ? {} : { unavailableReason: provider.unavailableReason },
     authentication: provider.authentication,

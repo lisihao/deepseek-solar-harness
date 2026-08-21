@@ -64,6 +64,34 @@ class ResidentStub extends ResidentOperatorService {
 }
 
 describe('physical-operator-resident', () => {
+  it('registers a resident-only product and fails loud when ephemeral mode is requested', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(PhysicalOperatorRuntime)
+    new ResidentStub(ctx)
+    await ctx.plugin(provider, {
+      operators: [{
+        id: 'prime-agent', residentProvider: 'prime-agent',
+        displayName: 'Prime Agent', description: 'Runs bounded RLM recursion through the user subscription.',
+      }],
+    })
+
+    expect(ctx.physicalOperators.status('prime-agent')).toMatchObject({
+      state: 'available',
+      executionModes: ['resident'],
+    })
+    await expect(ctx.physicalOperators.start('prime-agent', {
+      prompt: [{ type: 'text', text: 'default mode remains ephemeral' }],
+      parent: parent(), signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'OPERATOR_MODE_UNSUPPORTED' })
+    const resident = await ctx.physicalOperators.start('prime-agent', {
+      mode: 'resident', prompt: [{ type: 'text', text: 'explore recursively' }],
+      parent: parent(), signal: new AbortController().signal,
+    })
+    await expect(resident.result).resolves.toMatchObject({ stopReason: 'completed' })
+    expect((ctx.residentOperators as ResidentStub).requests[0]).toMatchObject({ operatorId: 'prime-agent' })
+  })
+
   it('keeps ephemeral as default and routes only explicit resident calls to the durable seam', async () => {
     const ctx = new Context()
     await ctx.plugin(SubagentRuntime)

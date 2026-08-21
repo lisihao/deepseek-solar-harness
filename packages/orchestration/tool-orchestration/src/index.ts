@@ -7,7 +7,7 @@ import {
   type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
 
-type CollaborationPolicy = 'auto' | 'direct' | 'codex' | 'claude-code'
+type CollaborationPolicy = 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -32,7 +32,7 @@ type ToolArgs = {
 }
 
 /** Model-visible policy for durable graphs and per-node Resident operator routing. */
-export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Under Smart Auto, prefer this durable TaskGraph path over directly handing a parallelizable task to one Resident operator. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds and the smallest useful maxParallel ceiling (normally at most 4). Independent nodes run without a phase barrier; dependencies and overlapping write/effect scopes serialize explicitly. Both native-subscription Resident operators are available to the Scheduler: Codex is normally suited to implementation, debugging, and tests; Claude Code is normally suited to architecture, review, analysis, research, and long-context work. Leave operator.preferredIds unset for intelligent per-node routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Every node receives the mandatory clean-task Context Capsule and a fresh native execution lane. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
+export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Under Smart Auto, prefer this durable TaskGraph path over directly handing a parallelizable task to one Resident operator. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds and the smallest useful maxParallel ceiling (normally at most 4). Independent nodes run without a phase barrier; dependencies and overlapping write/effect scopes serialize explicitly. Qualified native-subscription Resident operators are selected per node: Codex for implementation/debugging/tests, Claude Code for architecture/review/long-context analysis, and Prime Agent for bounded node-local RLM recursion, exploration, or synthesis. DSH remains the only global Scheduler and acceptance authority. Leave operator.preferredIds unset for intelligent routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Every node receives the mandatory clean-task Context Capsule and a fresh native execution lane. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
 
 const VALUE_SCHEMA = {
   type: 'object',
@@ -78,7 +78,7 @@ function collaborationPolicy(events: readonly { readonly type: string; readonly 
     const event = events[index]
     if (event?.type !== 'physical-operator/policy') continue
     const policy = (event.data as { policy?: unknown }).policy
-    if (policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code') return policy
+    if (policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' || policy === 'prime-agent') return policy
   }
   return 'auto'
 }

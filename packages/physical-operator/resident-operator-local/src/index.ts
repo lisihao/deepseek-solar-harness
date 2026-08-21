@@ -1,5 +1,6 @@
 /** Local resident-operator Service Provider over a durable Unix-socket daemon. @module @deepseek-ai/dsh-resident-operator-local */
 
+import { createRequire } from 'node:module'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -26,8 +27,8 @@ export {
   EXPECTED_CLAUDE_SDK_VERSION,
   EXPECTED_CODEX_CLI_VERSION,
   EXPECTED_CODEX_SCHEMA_SHA256,
-  type ResidentProductDriver,
 } from './drivers.ts'
+export type { ResidentProductDriver } from '@deepseek-ai/dsh-resident-operator'
 export { ResidentStore, canonicalRequestHash } from './store.ts'
 
 export const name = 'resident-operator-local'
@@ -42,6 +43,8 @@ export interface Config {
   readonly connectTimeoutMs?: number
   /** Turn-settlement polling interval in milliseconds. */
   readonly pollIntervalMs?: number
+  /** Independently packaged Driver modules loaded by the detached daemon. */
+  readonly driverModules?: string[]
 }
 
 export const Config: z<Config> = z.object({
@@ -49,23 +52,34 @@ export const Config: z<Config> = z.object({
   autoStart: z.boolean().default(true),
   connectTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
   pollIntervalMs: z.number().step(1).min(10).max(10_000).default(250),
+  driverModules: z.array(z.string()).default([]),
 })
 
 class LocalResidentOperatorService extends ResidentOperatorService {
   private readonly client: ResidentDaemonClient
 
-  constructor(ctx: Context, config: Required<Omit<Config, 'dshHome'>> & Pick<Config, 'dshHome'>) {
+  constructor(
+    ctx: Context,
+    config: Required<Omit<Config, 'dshHome'>> & Pick<Config, 'dshHome'>,
+    driverModules: readonly string[],
+  ) {
     super(ctx)
     this.client = new ResidentDaemonClient({
       root: `${resolveDshHome(config.dshHome)}/resident-operators`,
       autoStart: config.autoStart,
       connectTimeoutMs: config.connectTimeoutMs,
       pollIntervalMs: config.pollIntervalMs,
+      driverModules,
     })
   }
 
   providers(): Promise<ResidentProviderStatus[]> {
     return this.client.providers()
+  }
+
+  /** Ensure the configured detached daemon owns the socket before dependants start. */
+  ready(): Promise<void> {
+    return this.client.ready()
   }
 
   async execute(request: ResidentExecuteRequest): Promise<ResidentTurn> {
@@ -123,7 +137,22 @@ class LocalResidentOperatorService extends ResidentOperatorService {
   }
 }
 
-export function apply(ctx: Context, config: Config): void {
+export async function apply(ctx: Context, config: Config): Promise<void> {
   const resolved = config as Required<Omit<Config, 'dshHome'>> & Pick<Config, 'dshHome'>
-  new LocalResidentOperatorService(ctx, resolved)
+  const modules = resolved.driverModules
+  let driverModules: string[] = []
+  if (modules.length > 0) {
+    if (ctx.baseUrl === undefined) {
+      throw new Error('resident-operator-local: ctx.baseUrl is required to resolve Driver modules')
+    }
+    const require = createRequire(ctx.baseUrl)
+    driverModules = modules.map((module, index) => {
+      if (module.length === 0 || module.trim() !== module) {
+        throw new Error(`resident-operator-local: driverModules[${String(index)}] must be non-blank and trimmed`)
+      }
+      return require.resolve(module)
+    })
+  }
+  const service = new LocalResidentOperatorService(ctx, resolved, driverModules)
+  await service.ready()
 }

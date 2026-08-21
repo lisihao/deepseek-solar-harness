@@ -15,10 +15,10 @@ import {
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { PhysicalOperatorReasoningEffort } from '@deepseek-ai/dsh-physical-operator'
 import type {
-  ResidentExecutionProfile,
+  ResidentDriverExecuteRequest,
   ResidentModelOption,
+  ResidentProductDriver,
   ResidentProviderStatus,
-  ResidentProgressPhase,
   ResidentStopReason,
   ResidentTurnResult,
 } from '@deepseek-ai/dsh-resident-operator'
@@ -41,18 +41,6 @@ export const EXPECTED_CLAUDE_SDK_VERSION = '0.3.220'
 export const EXPECTED_CODEX_CLI_VERSION = 'codex-cli 0.147.0'
 /** SHA-256 of the qualified Codex app-server v2 JSON Schema. */
 export const EXPECTED_CODEX_SCHEMA_SHA256 = 'f3dec1e031d99a420b137b903f02196d4325eece57620c925bb7130b25f168d2'
-
-/** One native product invocation after durable daemon admission. */
-export interface DriverExecuteRequest {
-  readonly workspace: string
-  readonly prompt: readonly ContentBlock[]
-  readonly profile: ResidentExecutionProfile
-  readonly nativeSessionId?: string
-  readonly signal: AbortSignal
-  readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
-  /** Persist a bounded product-neutral progress phase for reconnecting observers. */
-  readonly onProgress: (phase: ResidentProgressPhase) => void
-}
 
 const EFFORTS = new Set<PhysicalOperatorReasoningEffort>(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
 
@@ -154,20 +142,6 @@ async function codexModels(): Promise<ResidentModelOption[]> {
   }
 }
 
-/** Native product qualification and resumable turn adapter. */
-export interface ResidentProductDriver {
-  /** Stable physical product identity. */
-  readonly operatorId: 'claude-code' | 'codex'
-  /** @returns current version, protocol, and native-subscription qualification. */
-  qualify(): Promise<ResidentProviderStatus>
-  /**
-   * Execute or resume one native product turn.
-   * @param request - canonical workspace, prompt, prior native Session, signal, and running callback.
-   * @returns bounded final result and authoritative native Session identity.
-   */
-  execute(request: DriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId: string }>
-}
-
 function textPrompt(prompt: readonly ContentBlock[], product: string): string[] {
   if (prompt.length === 0) throw new ResidentOperatorError(`${product} prompt must not be empty`, 'INVALID_RESULT')
   const texts: string[] = []
@@ -247,6 +221,11 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
       return {
         operatorId: this.operatorId,
         product: this.operatorId,
+        displayName: 'Claude Code',
+        description: 'Persistent native Claude Code analysis, architecture, review, and implementation.',
+        tags: ['analysis', 'architecture', 'review', 'long-context', 'coding', 'subscription'],
+        maxConcurrency: 4,
+        injectionBoundaries: ['pre-dispatch', 'next-turn'],
         available: subscription && exactVersion && catalogReady,
         ...subscription && exactVersion && catalogReady ? {} : {
           unavailableReason: !subscription
@@ -265,7 +244,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     }
   }
 
-  async execute(request: DriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
+  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
     const qualification = await this.qualify()
     if (!qualification.available) {
       throw new ResidentOperatorError(
@@ -393,6 +372,11 @@ export class CodexResidentDriver implements ResidentProductDriver {
       return {
         operatorId: this.operatorId,
         product: this.operatorId,
+        displayName: 'Codex',
+        description: 'Persistent native Codex implementation, debugging, testing, and repository review.',
+        tags: ['coding', 'implementation', 'debugging', 'testing', 'review', 'subscription'],
+        maxConcurrency: 4,
+        injectionBoundaries: ['pre-dispatch', 'next-turn'],
         available,
         ...available ? {} : {
           unavailableReason: !subscription
@@ -415,7 +399,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
     }
   }
 
-  async execute(request: DriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
+  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
     const qualification = await this.qualify()
     if (!qualification.available) {
       const code = qualification.authentication !== 'native-subscription'
@@ -486,13 +470,20 @@ export class CodexResidentDriver implements ResidentProductDriver {
   }
 }
 
-function unavailable(
-  product: 'claude-code' | 'codex',
-  error: unknown,
-): ResidentProviderStatus {
+function unavailable(product: 'claude-code' | 'codex', error: unknown): ResidentProviderStatus {
+  const claude = product === 'claude-code'
   return {
     operatorId: product,
     product,
+    displayName: claude ? 'Claude Code' : 'Codex',
+    description: claude
+      ? 'Persistent native Claude Code analysis, architecture, review, and implementation.'
+      : 'Persistent native Codex implementation, debugging, testing, and repository review.',
+    tags: claude
+      ? ['analysis', 'architecture', 'review', 'long-context', 'coding', 'subscription']
+      : ['coding', 'implementation', 'debugging', 'testing', 'review', 'subscription'],
+    maxConcurrency: 4,
+    injectionBoundaries: ['pre-dispatch', 'next-turn'],
     available: false,
     unavailableReason: error instanceof Error ? error.message : String(error),
     authentication: 'unqualified',

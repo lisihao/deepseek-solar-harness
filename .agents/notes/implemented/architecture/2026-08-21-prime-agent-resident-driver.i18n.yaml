@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-21-prime-agent-resident-driver.md
+2026-08-21-prime-agent-resident-driver.md: 51fb23ee54c9bda48ce12b69e4a8752ce7e2e028
+2026-08-21-prime-agent-resident-driver.zh.md: d178aa7b476f69feb2e632fb67cd0dfd5efab4aa

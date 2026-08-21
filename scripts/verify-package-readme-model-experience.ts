@@ -53,6 +53,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/physical-operator/physical-operator-subagent': { kind: 'indirect', reason: 'The provider adapter delegates model rendering to dsh-tool-physical-operator.' },
   'packages/physical-operator/resident-operator': { kind: 'indirect', reason: 'The trusted control service delegates model execution and rendering to the physical-operator consumer.' },
   'packages/physical-operator/resident-operator-local': { kind: 'indirect', reason: 'The daemon provider delegates model rendering to dsh-tool-physical-operator.' },
+  'packages/physical-operator/resident-operator-prime-agent': { kind: 'indirect', reason: 'The product Driver delegates model rendering to dsh-tool-physical-operator.' },
   'packages/bundle/resident-operators': { kind: 'indirect', reason: 'The patch carrier mounts dsh-tool-physical-operator, which owns the model-facing schema and results.' },
   'packages/bundle/orchestrations': { kind: 'indirect', reason: 'The patch carrier mounts dsh-tool-orchestration, which owns the model-facing schema, policy, and bounded results.' },
   'packages/orchestration/intent-compiler': { kind: 'none', reason: 'The abstract compiler seam emits an artifact only; Consumers decide whether it enters a model request.' },

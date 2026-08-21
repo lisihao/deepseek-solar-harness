@@ -2,14 +2,17 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ResidentProviderStatus } from '@deepseek-ai/dsh-resident-operator'
+import type {
+  ResidentDriverExecuteRequest,
+  ResidentProductDriver,
+  ResidentProviderStatus,
+} from '@deepseek-ai/dsh-resident-operator'
 import { ResidentDaemonClient } from '../src/client.ts'
 import { normalizeResidentDriverError, ResidentDaemon } from '../src/daemon.ts'
+import { residentDriverManifestSha256 } from '../src/driver-modules.ts'
 import {
   EXPECTED_CODEX_CLI_VERSION,
   EXPECTED_CODEX_SCHEMA_SHA256,
-  type DriverExecuteRequest,
-  type ResidentProductDriver,
 } from '../src/drivers.ts'
 
 const roots: string[] = []
@@ -44,13 +47,18 @@ describe('Resident daemon Driver error boundary', () => {
 
 class MemoryDriver implements ResidentProductDriver {
   readonly operatorId = 'codex' as const
-  readonly profiles: DriverExecuteRequest['profile'][] = []
+  readonly profiles: ResidentDriverExecuteRequest['profile'][] = []
   constructor(readonly counts = new Map<string, number>()) {}
 
   qualify(): Promise<ResidentProviderStatus> {
     return Promise.resolve({
       operatorId: 'codex',
       product: 'codex',
+      displayName: 'Codex',
+      description: 'Test Resident Provider.',
+      tags: ['coding'],
+      maxConcurrency: 4,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'],
       available: true,
       authentication: 'native-subscription',
       productVersion: 'test',
@@ -59,7 +67,7 @@ class MemoryDriver implements ResidentProductDriver {
     })
   }
 
-  async execute(request: DriverExecuteRequest) {
+  async execute(request: ResidentDriverExecuteRequest) {
     this.profiles.push(request.profile)
     request.onProgress('connecting')
     const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
@@ -123,7 +131,7 @@ class BlockingQualificationDriver extends MemoryDriver {
 }
 
 class BlockingDriver extends MemoryDriver {
-  override async execute(request: DriverExecuteRequest) {
+  override async execute(request: ResidentDriverExecuteRequest) {
     const session = request.nativeSessionId ?? 'native-blocking'
     request.onRunning(session, 'turn-blocking')
     await new Promise<void>((resolve, reject) => {
@@ -151,7 +159,7 @@ class ReconnectDriver extends MemoryDriver {
 
   private readonly released: Promise<void>
 
-  override async execute(request: DriverExecuteRequest) {
+  override async execute(request: ResidentDriverExecuteRequest) {
     request.onProgress('connecting')
     request.onRunning('native-reconnect', 'turn-reconnect')
     request.onProgress('reasoning')
@@ -167,7 +175,7 @@ class ReconnectDriver extends MemoryDriver {
 }
 
 class FailingDriver extends MemoryDriver {
-  override async execute(request: DriverExecuteRequest): Promise<never> {
+  override async execute(request: ResidentDriverExecuteRequest): Promise<never> {
     const prompt = request.prompt[0]
     const text = prompt?.type === 'text' ? prompt.text : 'missing'
     throw new Error(`failure echoed ${text}; OPENAI_API_KEY=sk-test-secret-token-123456789`)
@@ -179,6 +187,11 @@ class UnavailableTransportDriver extends MemoryDriver {
     return Promise.resolve({
       operatorId: 'codex',
       product: 'codex',
+      displayName: 'Codex',
+      description: 'Test Resident Provider.',
+      tags: ['coding'],
+      maxConcurrency: 4,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'],
       available: false,
       unavailableReason: 'managed app-server daemon is unavailable',
       authentication: 'native-subscription',
@@ -426,6 +439,7 @@ describe('ResidentDaemon', () => {
     await expect(raw.rawRequest('system.handshake', {
       protocol_version: 99,
       state_schema_version: 1,
+      driver_manifest_sha256: residentDriverManifestSha256([]),
     })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
     await expect(raw.rawRequest('turn.execute', {
       command_id: 'invalid-prompt',

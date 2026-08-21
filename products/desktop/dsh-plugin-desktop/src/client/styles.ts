@@ -146,6 +146,7 @@ body[data-dsh-desktop-product-footer="true"] #root { height: calc(100% - 24px); 
 .dshDesktopCollaborationTrace[data-policy="direct"] { border-color: color-mix(in srgb, #7d8799 40%, var(--dsw-alias-border-l2)); border-left-color: #7d8799; background: var(--dsw-alias-bg-layer-1); }
 .dshDesktopCollaborationTrace[data-policy="codex"] { border-left-color: #34c759; }
 .dshDesktopCollaborationTrace[data-policy="claude-code"] { border-left-color: #f5a623; }
+.dshDesktopCollaborationTrace[data-policy="prime-agent"] { border-left-color: #8b5cf6; }
 .dshDesktopOrchestrationPipeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; margin-bottom: 14px; }
 .dshDesktopOrchestrationPipeline span { position: relative; padding: 6px 4px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-tertiary); font-size: 8px; text-align: center; }
 .dshDesktopOrchestrationPipeline span[data-complete] { border-color: color-mix(in srgb, #34c759 38%, var(--dsw-alias-border-l2)); color: var(--dsw-alias-label-primary); }

@@ -25,6 +25,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-physical-operator-resident',
   '@deepseek-ai/dsh-resident-operator',
   '@deepseek-ai/dsh-resident-operator-local',
+  '@deepseek-ai/dsh-resident-operator-prime-agent',
   '@deepseek-ai/dsh-resident-operators',
   '@deepseek-ai/dsh-subagent-codex',
   '@deepseek-ai/dsh-tool-physical-operator',

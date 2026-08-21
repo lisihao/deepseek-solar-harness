@@ -17,7 +17,7 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 5
+export const RESIDENT_PROTOCOL_VERSION = 6
 /** Current forward-only daemon state schema version. */
 export const RESIDENT_STATE_SCHEMA_VERSION = 4
 
@@ -94,7 +94,12 @@ export type ResidentExecutionProfileSource = 'smart-auto' | 'mixed' | 'manual'
 /** Current qualification result for one native product Driver. */
 export interface ResidentProviderStatus {
   readonly operatorId: string
-  readonly product: 'claude-code' | 'codex'
+  readonly product: string
+  readonly displayName: string
+  readonly description: string
+  readonly tags: readonly string[]
+  readonly maxConcurrency: number
+  readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
   readonly available: boolean
   readonly unavailableReason?: string
   readonly authentication: 'native-subscription' | 'unqualified'
@@ -102,6 +107,42 @@ export interface ResidentProviderStatus {
   readonly protocolHash: string
   readonly models: readonly ResidentModelOption[]
 }
+
+/** One native product invocation after durable daemon admission. */
+export interface ResidentDriverExecuteRequest {
+  readonly workspace: string
+  readonly prompt: readonly ContentBlock[]
+  readonly profile: ResidentExecutionProfile
+  readonly nativeSessionId?: string
+  readonly signal: AbortSignal
+  readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
+  /** Persist a bounded product-neutral progress phase for reconnecting observers. */
+  readonly onProgress: (phase: ResidentProgressPhase) => void
+}
+
+/** Native product qualification and resumable-turn adapter loaded by a daemon Provider. */
+export interface ResidentProductDriver {
+  /** Stable physical product identity. */
+  readonly operatorId: string
+  /** @returns current version, protocol, and native-subscription qualification. */
+  qualify(): Promise<ResidentProviderStatus>
+  /**
+   * Execute or resume one native product turn.
+   * @param request - canonical workspace, prompt, prior native Session, signal, and progress callbacks.
+   * @returns bounded final result and authoritative native Session identity.
+   */
+  execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId: string }>
+}
+
+/** Construction inputs supplied to a configured out-of-process Driver module. */
+export interface ResidentProductDriverFactoryOptions {
+  readonly stateRoot: string
+}
+
+/** Factory export implemented by an independently packaged Resident product Driver. */
+export type ResidentProductDriverFactory = (
+  options: ResidentProductDriverFactoryOptions,
+) => ResidentProductDriver | Promise<ResidentProductDriver>
 
 /** Current daemon-owned projection of one Resident Session. */
 export interface ResidentSessionSnapshot {

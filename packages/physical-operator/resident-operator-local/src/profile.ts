@@ -33,7 +33,7 @@ export interface ResolvedResidentExecutionProfile {
  * @returns one complete profile and its selection source.
  */
 export function resolveResidentExecutionProfile(
-  operatorId: 'claude-code' | 'codex',
+  operatorId: string,
   models: readonly ResidentModelOption[],
   prompt: readonly ContentBlock[],
   preference?: PhysicalOperatorExecutionPreference,
@@ -95,7 +95,7 @@ function classifyTask(prompt: readonly ContentBlock[]): ResidentTaskClass {
 }
 
 function automaticModel(
-  operatorId: 'claude-code' | 'codex',
+  operatorId: string,
   models: readonly ResidentModelOption[],
   taskClass: ResidentTaskClass,
 ): ResidentModelOption {
@@ -107,18 +107,24 @@ function automaticModel(
         : taskClass === 'extreme'
           ? /fable|most capable|hardest|longest-running/iu
           : /opus|recommended|complex/iu
-    : taskClass === 'quick'
-      ? /luna|spark|affordable|small|ultra-fast/iu
-      : taskClass === 'standard'
-        ? /terra|balanced|everyday/iu
-        : /sol|frontier/iu
+    : operatorId === 'prime-agent'
+      ? taskClass === 'quick'
+        ? /mini|fast|small/iu
+        : taskClass === 'standard'
+          ? /default|balanced|gpt-5\.5/iu
+          : /gpt-5\.6|frontier|most capable/iu
+      : taskClass === 'quick'
+        ? /luna|spark|affordable|small|ultra-fast/iu
+        : taskClass === 'standard'
+          ? /terra|balanced|everyday/iu
+          : /sol|frontier/iu
   return models.find(model => pattern.test(`${model.model} ${model.displayName} ${model.description}`))
     ?? models.find(model => model.isDefault)
     ?? models[0] as ResidentModelOption
 }
 
 function automaticEffort(
-  operatorId: 'claude-code' | 'codex',
+  operatorId: string,
   model: ResidentModelOption,
   taskClass: ResidentTaskClass,
 ): PhysicalOperatorReasoningEffort | undefined {
@@ -140,7 +146,7 @@ function automaticEffort(
 }
 
 function validateEffort(
-  operatorId: 'claude-code' | 'codex',
+  operatorId: string,
   model: ResidentModelOption,
   effort: PhysicalOperatorReasoningEffort,
 ): PhysicalOperatorReasoningEffort {

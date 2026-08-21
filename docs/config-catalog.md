@@ -1339,10 +1339,12 @@ export interface Config {
   readonly autoStart?: boolean
   /** Maximum handshake and per-request connection wait in milliseconds. */
   readonly connectTimeoutMs?: number
+  /** Independently packaged Resident Driver modules required by headless execution. */
+  readonly residentDriverModules?: string[]
 }
 ```
 
-Source: [`packages/orchestration/orchestration-local/src/index.ts:32`](../packages/orchestration/orchestration-local/src/index.ts)
+Source: [`packages/orchestration/orchestration-local/src/index.ts:33`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -1425,7 +1427,7 @@ export interface OperatorConfig {
   /** Stable model-selected physical operator identity. */
   readonly id: string
   /** Existing `ctx.subagents` Provider used by the default ephemeral mode. */
-  readonly ephemeralProvider: string
+  readonly ephemeralProvider?: string
   /** Native product Driver id used by explicit Resident execution. */
   readonly residentProvider?: string
   /** Human-readable discovery name. */
@@ -1593,10 +1595,12 @@ export interface Config {
   readonly connectTimeoutMs?: number
   /** Turn-settlement polling interval in milliseconds. */
   readonly pollIntervalMs?: number
+  /** Independently packaged Driver modules loaded by the detached daemon. */
+  readonly driverModules?: string[]
 }
 ```
 
-Source: [`packages/physical-operator/resident-operator-local/src/index.ts:36`](../packages/physical-operator/resident-operator-local/src/index.ts)
+Source: [`packages/physical-operator/resident-operator-local/src/index.ts:37`](../packages/physical-operator/resident-operator-local/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -3285,6 +3289,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-loader-smoke` ([`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts))
 - `@deepseek-ai/dsh-native-command` ([`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts))
 - `@deepseek-ai/dsh-output-retention` ([`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts))
+- `@deepseek-ai/dsh-resident-operator-prime-agent` ([`packages/physical-operator/resident-operator-prime-agent/src/index.ts`](../packages/physical-operator/resident-operator-prime-agent/src/index.ts))
 - `@deepseek-ai/dsh-sandbox-windows-acl` ([`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts))
 - `@deepseek-ai/dsh-scope` ([`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts))
 - `@deepseek-ai/dsh-sdk-client` ([`packages/sdk/client/src/index.ts`](../packages/sdk/client/src/index.ts))

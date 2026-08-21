@@ -15,6 +15,7 @@ import {
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
   type ResidentProviderStatus,
+  type ResidentProductDriver,
 } from '@deepseek-ai/dsh-resident-operator'
 import {
   ClaudeCodeResidentDriver,
@@ -22,15 +23,16 @@ import {
   EXPECTED_CLAUDE_CLI_VERSION,
   EXPECTED_CODEX_CLI_VERSION,
   EXPECTED_CODEX_SCHEMA_SHA256,
-  type ResidentProductDriver,
 } from './drivers.ts'
+import { residentDriverManifestSha256 } from './driver-modules.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v4 method set advertised by daemon handshake. */
+/** Public protocol-v6 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
+  'system.shutdown',
   'operator.list',
   'session.list',
   'session.inspect',
@@ -53,6 +55,7 @@ export interface ResidentDaemonOptions {
   readonly root: string
   readonly buildCommit?: string
   readonly drivers?: readonly ResidentProductDriver[]
+  readonly driverManifestHash?: string
   readonly heartbeatIntervalMs?: number
 }
 
@@ -188,6 +191,7 @@ export class ResidentDaemon {
   readonly store: ResidentStore
   private readonly server: Server
   private readonly drivers = new Map<string, ResidentProductDriver>()
+  private readonly driverManifestHash: string
   private readonly transports = new Set<JsonRpcLineTransport>()
   private readonly active = new Map<string, ActiveTurn>()
   private readonly qualifications = new Map<string, Promise<ResidentProviderStatus>>()
@@ -206,6 +210,7 @@ export class ResidentDaemon {
       }
       this.drivers.set(driver.operatorId, driver)
     }
+    this.driverManifestHash = options.driverManifestHash ?? residentDriverManifestSha256([])
     this.server = createServer((socket) => { this.acceptSocket(socket) })
   }
 
@@ -324,16 +329,24 @@ export class ResidentDaemon {
   private async handshake(params: Record<string, unknown>): Promise<unknown> {
     const requestedProtocol = integerParam(params, 'protocol_version')
     const requestedSchema = integerParam(params, 'state_schema_version')
+    const requestedDriverManifest = stringParam(params, 'driver_manifest_sha256')
     if (requestedProtocol !== RESIDENT_PROTOCOL_VERSION || requestedSchema !== RESIDENT_STATE_SCHEMA_VERSION) {
       throw new ResidentOperatorError(
         `resident daemon protocol ${RESIDENT_PROTOCOL_VERSION}/schema ${RESIDENT_STATE_SCHEMA_VERSION} does not match client ${requestedProtocol}/${requestedSchema}`,
         'PROTOCOL_MISMATCH',
       )
     }
+    if (requestedDriverManifest !== this.driverManifestHash) {
+      throw new ResidentOperatorError(
+        `resident daemon Driver manifest ${this.driverManifestHash} does not match client ${requestedDriverManifest}`,
+        'PROVIDER_VERSION_MISMATCH',
+      )
+    }
     return {
       protocolVersion: RESIDENT_PROTOCOL_VERSION,
       stateSchemaVersion: RESIDENT_STATE_SCHEMA_VERSION,
       buildCommit: this.options.buildCommit ?? process.env.DSH_BUILD_COMMIT ?? 'development',
+      driverManifestSha256: this.driverManifestHash,
       methods: RESIDENT_METHODS,
       providers: await this.providerStatuses(),
     }

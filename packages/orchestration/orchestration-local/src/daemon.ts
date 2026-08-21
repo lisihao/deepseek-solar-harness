@@ -34,6 +34,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
+import type { ResidentProviderStatus } from '@deepseek-ai/dsh-resident-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { canonicalSha256 } from './canonical.ts'
@@ -94,16 +95,15 @@ class OrchestrationResidentOperator implements PhysicalOperator {
 
   constructor(
     private readonly resident: ResidentDaemonClient,
-    readonly operatorId: 'codex' | 'claude-code',
+    readonly provider: ResidentProviderStatus,
   ) {
+    const operatorId = provider.operatorId
     this.descriptor = {
       id: PhysicalOperatorId(operatorId),
-      displayName: operatorId === 'codex' ? 'Codex' : 'Claude Code',
-      description: 'Resident native-subscription physical operator for durable TaskGraph nodes.',
-      tags: operatorId === 'codex'
-        ? ['coding', 'implementation', 'debugging', 'testing', 'review']
-        : ['analysis', 'architecture', 'review', 'long-context', 'coding'],
-      maxConcurrency: 4,
+      displayName: provider.displayName,
+      description: provider.description,
+      tags: provider.tags,
+      maxConcurrency: provider.maxConcurrency,
       executionModes: ['resident'] as const,
     }
   }
@@ -117,7 +117,7 @@ class OrchestrationResidentOperator implements PhysicalOperator {
     if (workspace === undefined) throw new OrchestrationError('orchestration operator requires a workspace', 'GRAPH_INVALID')
     const turn = await this.resident.execute({
       commandId: String(request.executionId),
-      operatorId: this.operatorId,
+      operatorId: this.provider.operatorId,
       workspace,
       laneId: String(request.executionId),
       ...request.label === undefined ? {} : { taskLabel: request.label },
@@ -150,6 +150,7 @@ export interface OrchestrationDaemonOptions {
   readonly buildCommit?: string
   readonly schedulerIntervalMs?: number
   readonly residentClient?: ResidentDaemonClient
+  readonly residentDriverModules?: readonly string[]
 }
 
 function requiredString(params: Record<string, unknown>, name: string): string {
@@ -268,6 +269,7 @@ export class OrchestrationDaemon {
       autoStart: true,
       connectTimeoutMs: 5_000,
       pollIntervalMs: 250,
+      driverModules: options.residentDriverModules ?? [],
     })
     this.server = createServer((socket) => { this.acceptSocket(socket) })
   }
@@ -284,9 +286,9 @@ export class OrchestrationDaemon {
     await this.ctx.plugin(class extends LocalCapabilityCapsuleService {
       constructor(ctx: Context) { super(ctx, join(thisRoot, 'capsules')) }
     })
-    for (const operatorId of ['codex', 'claude-code'] as const) {
-      const operator = new OrchestrationResidentOperator(this.resident, operatorId)
-      this.physical.set(operatorId, operator)
+    for (const provider of await this.resident.providers()) {
+      const operator = new OrchestrationResidentOperator(this.resident, provider)
+      this.physical.set(provider.operatorId, operator)
       this.ctx.physicalOperators.registerOperator(operator)
     }
     this.removeStaleSocket()
@@ -803,7 +805,8 @@ export class OrchestrationDaemon {
     this.store.saveRun(record, [event(record.snapshot.runId, 'context.compiled', {
       ref: String(contextPacketRef), sha256: contextPacket.packetSha256, degradedSources: contextPacket.degradedSources,
     }, node)])
-    const operatorId = await this.selectOperator(spec)
+    const selectedProvider = await this.selectOperator(spec)
+    const operatorId = selectedProvider.operatorId
     const executionId = PhysicalOperatorExecutionId(`orch:${runId}:${nodeId}:${String(attempt)}`)
     const taskRef = this.store.putArtifact({ title: spec.title, task: spec.task })
     const base = {
@@ -823,7 +826,7 @@ export class OrchestrationDaemon {
         operatorId,
         mode: 'resident' as const,
         ...spec.operator?.profile === undefined ? {} : { profile: spec.operator.profile },
-        injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
+        injectionBoundaries: selectedProvider.injectionBoundaries,
       },
       effectiveReadScopes: capabilityPlan.effectiveReadScopes,
       effectiveWriteScopes: capabilityPlan.effectiveWriteScopes,
@@ -1108,11 +1111,16 @@ export class OrchestrationDaemon {
     this.store.saveRun(next, [event(next.snapshot.runId, `run.${state}`, {})])
   }
 
-  private async selectOperator(spec: OrchestrationNodeSpecV1): Promise<string> {
+  private async selectOperator(spec: OrchestrationNodeSpecV1): Promise<ResidentProviderStatus> {
     const providers = await this.resident.providers()
-    const available = new Set(providers.filter(value => value.available && value.authentication === 'native-subscription').map(value => value.operatorId))
+    const available = new Map(providers
+      .filter(value => value.available && value.authentication === 'native-subscription')
+      .map(value => [value.operatorId, value]))
     const preferred = spec.operator?.preferredIds ?? []
-    for (const id of preferred) if (available.has(id)) return id
+    for (const id of preferred) {
+      const provider = available.get(id)
+      if (provider !== undefined) return provider
+    }
     if (preferred.length > 0) {
       throw new OrchestrationError(
         `none of the explicitly preferred Resident physical operators are available: ${preferred.join(', ')}`,
@@ -1120,9 +1128,14 @@ export class OrchestrationDaemon {
       )
     }
     const role = `${spec.role} ${spec.task}`.toLowerCase()
-    const inferred = /architect|review|analysis|research|long.context/u.test(role) ? 'claude-code' : 'codex'
-    if (available.has(inferred)) return inferred
-    const fallback = providers.find(value => available.has(value.operatorId))?.operatorId
+    const inferred = /recursive|recursion|rlm|multi.agent|synthesi[sz]|explor|long.horizon|递归|多智能体|综合探索/u.test(role)
+      ? 'prime-agent'
+      : /architect|review|analysis|research|long.context|架构|审查|长上下文/u.test(role)
+        ? 'claude-code'
+        : 'codex'
+    const inferredProvider = available.get(inferred)
+    if (inferredProvider !== undefined) return inferredProvider
+    const fallback = providers.find(value => available.has(value.operatorId))
     if (fallback === undefined) throw new OrchestrationError('no qualified Resident physical operator is available', 'ORCHESTRATION_UNAVAILABLE')
     return fallback
   }

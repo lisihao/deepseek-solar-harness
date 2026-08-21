@@ -12,6 +12,8 @@
         autoStart: true
         connectTimeoutMs: 5000
         pollIntervalMs: 250
+        driverModules:
+          - '@deepseek-ai/dsh-resident-operator-prime-agent'
 
     - id: subagent-codex-native-subscription
       name: '@deepseek-ai/dsh-subagent-codex'
@@ -43,6 +45,12 @@
             description: Analyzes codebases, architecture, and long-context reviews through the user's native Claude subscription.
             tags: [analysis, architecture, review, long-context, coding, subscription]
             maxConcurrency: 4
+          - id: prime-agent
+            residentProvider: prime-agent
+            displayName: Prime Agent
+            description: Performs bounded node-local RLM recursion, multi-agent exploration, and synthesis through the user's ChatGPT subscription.
+            tags: [recursive, rlm, multi-agent, research, synthesis, long-horizon, subscription]
+            maxConcurrency: 2
 
     - id: tool-physical-operator
       name: '@deepseek-ai/dsh-tool-physical-operator'
