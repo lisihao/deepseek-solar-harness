@@ -125,7 +125,6 @@ export const REQUIRED_UNPACKED_PACKAGE_SPECIFIERS = [
   '@deepseek-ai/dsh-base/package.json',
   '@deepseek-ai/dsh-resident-operator-local/startup',
   '@deepseek-ai/dsh-resident-operator-prime-agent',
-  'prime-agent',
   '@deepseek-ai/dsh-resident-operators/cordis.patch.yml',
   '@deepseek-ai/dsh-client-ui-remote-modules/package.json',
   '@deepseek-ai/dsh-host-apiproxy/package.json',
