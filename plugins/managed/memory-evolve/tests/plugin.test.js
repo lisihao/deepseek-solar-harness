@@ -86,14 +86,20 @@ function fakeCtx(overrides = {}) {
   return ctx
 }
 
-test('turn closure and review counter observe preset-scoped Agent completion globally', () => {
+function emitTurnEnd(ctx, agent, turn, reason = { kind: 'completed' }) {
+  const session = agent.session
+  session.id ??= agent.id
+  const event = { type: 'turn/end', data: { turn, reason } }
+  session.events.push(event)
+  for (const listener of ctx.state.listeners['session/event'] ?? []) listener(session, event)
+}
+
+test('turn closure and review counter observe authoritative session completion globally', () => {
   const ctx = fakeCtx()
   apply(ctx)
-  assert.equal(ctx.state.listeners['agent/settled'].length, 2)
-  assert.deepEqual(ctx.state.listenerOptions['agent/settled'], [
-    { global: true },
-    { global: true },
-  ])
+  const globalTurnObservers = ctx.state.listenerOptions['session/event'].filter((options) => options?.global)
+  assert.ok(globalTurnObservers.length >= 2)
+  assert.equal(ctx.state.listeners['agent/settled'], undefined)
 })
 
 const fakeExec = () => ({ agent: undefined, callId: 'c1', signal: new AbortController().signal })
@@ -345,7 +351,6 @@ test('review status tool counts message turns and stays due until complete', asy
   const tool = ctx.state.tools.find((t) => t.name === 'memory_review_status')
   assert.ok(tool, 'review status tool registered when review enabled')
   assert.ok(ctx.state.tools.some((t) => t.name === 'memory_suggest'), 'suggest tool registered when review enabled')
-  const settled = ctx.state.listeners['agent/settled'][0]
   const agent = (id, turns) => ({
     id,
     session: {
@@ -361,7 +366,7 @@ test('review status tool counts message turns and stays due until complete', asy
   const exec = (id) => ({ agent: { id }, callId: 'c1', signal: new AbortController().signal })
 
   // turn 1: count 1, below the interval → not due
-  settled(agent('s1', [1]), 1, { kind: 'completed' })
+  emitTurnEnd(ctx, agent('s1', [1]), 1)
   let check = await tool.execute({ action: 'check' }, exec('s1'))
   assert.equal(check.due, false)
   assert.equal(check.turnsSinceReview, 1)
@@ -369,13 +374,13 @@ test('review status tool counts message turns and stays due until complete', asy
   assert.equal(check.mode, 'suggest')
 
   // turn 2: count 2 → due
-  settled(agent('s1', [1, 2]), 2, { kind: 'completed' })
+  emitTurnEnd(ctx, agent('s1', [1, 2]), 2)
   check = await tool.execute({ action: 'check' }, exec('s1'))
   assert.equal(check.due, true)
 
   // Due is sticky: another turn without complete keeps it due — a missed or
   // interrupted review is never silently dropped.
-  settled(agent('s1', [1, 2, 3]), 3, { kind: 'completed' })
+  emitTurnEnd(ctx, agent('s1', [1, 2, 3]), 3)
   check = await tool.execute({ action: 'check' }, exec('s1'))
   assert.equal(check.due, true)
   assert.equal(check.turnsSinceReview, 3)
@@ -388,7 +393,7 @@ test('review status tool counts message turns and stays due until complete', asy
   assert.equal(check.turnsSinceReview, 0)
 
   // complete before due does NOT reset — due=false must not silently delay the review
-  settled(agent('s3', [1]), 1, { kind: 'completed' })
+  emitTurnEnd(ctx, agent('s3', [1]), 1)
   const premature = await tool.execute({ action: 'complete' }, exec('s3'))
   assert.equal(premature.ok, true)
   assert.ok(premature.message.includes('未到期'))
@@ -397,9 +402,9 @@ test('review status tool counts message turns and stays due until complete', asy
 
   // non-message turns and subagent origins never count
   const retryAgent = { id: 's2', session: { header: { origin: undefined }, events: [{ type: 'turn/start', data: { turn: 1, trigger: { kind: 'retry' } } }] } }
-  settled(retryAgent, 1, { kind: 'completed' })
+  emitTurnEnd(ctx, retryAgent, 1)
   const childAgent = { id: 'child', session: { header: { origin: 'subagent' }, events: [{ type: 'turn/start', data: { turn: 1, trigger: { kind: 'message' } } }] } }
-  settled(childAgent, 1, { kind: 'completed' })
+  emitTurnEnd(ctx, childAgent, 1)
   check = await tool.execute({ action: 'check' }, exec('s2'))
   assert.equal(check.turnsSinceReview, 0)
   check = await tool.execute({ action: 'check' }, exec('child'))
@@ -407,7 +412,7 @@ test('review status tool counts message turns and stays due until complete', asy
   clean(dir)
 })
 
-test('review turn count survives reload and ignores duplicate settled delivery', async () => {
+test('review turn count survives reload and ignores duplicate turn/end delivery', async () => {
   const dir = tempDir()
   const events = [
     { type: 'turn/start', data: { turn: 1 } },
@@ -417,7 +422,7 @@ test('review turn count survives reload and ignores duplicate settled delivery',
 
   const first = fakeCtx()
   apply(first, { memoryDir: dir, reviewEnabled: true, reviewInterval: 2 })
-  first.state.listeners['agent/settled'][0](agent, 1, { kind: 'completed' })
+  emitTurnEnd(first, agent, 1)
 
   const reloaded = fakeCtx()
   apply(reloaded, { memoryDir: dir, reviewEnabled: true, reviewInterval: 2 })
@@ -426,7 +431,7 @@ test('review turn count survives reload and ignores duplicate settled delivery',
   let result = await status.execute({ action: 'check' }, exec)
   assert.equal(result.turnsSinceReview, 1)
 
-  reloaded.state.listeners['agent/settled'][0](agent, 1, { kind: 'completed' })
+  emitTurnEnd(reloaded, agent, 1)
   result = await status.execute({ action: 'check' }, exec)
   assert.equal(result.turnsSinceReview, 1)
   clean(dir)
@@ -449,13 +454,13 @@ test('host closes daily and project memory once and exposes a durable receipt', 
     },
   }
 
-  for (const settled of ctx.state.listeners['agent/settled']) settled(agent, 1, { kind: 'completed' })
+  emitTurnEnd(ctx, agent, 1)
   const store = new MemoryStore(dir)
   assert.equal(store.entriesOf('daily', agent).length, 1)
   assert.equal(store.entriesOf('project', agent).length, 1)
   assert.match(store.entriesOf('daily', agent)[0], /闭环已经实现并通过测试/)
 
-  for (const settled of ctx.state.listeners['agent/settled']) settled(agent, 1, { kind: 'completed' })
+  emitTurnEnd(ctx, agent, 1)
   assert.equal(store.entriesOf('daily', agent).length, 1)
   assert.equal(store.entriesOf('project', agent).length, 1)
 
@@ -513,7 +518,7 @@ test('accepted model log writes satisfy host closure without fallback duplicates
     data: { turn: 1, message: { role: 'assistant', content: [{ type: 'text', text: '模型已经记录。' }] } },
   })
 
-  for (const settled of ctx.state.listeners['agent/settled']) settled(agent, 1, { kind: 'completed' })
+  emitTurnEnd(ctx, agent, 1)
   const store = new MemoryStore(dir)
   assert.equal(store.entriesOf('daily', agent).length, 1)
   assert.equal(store.entriesOf('project', agent).length, 1)
