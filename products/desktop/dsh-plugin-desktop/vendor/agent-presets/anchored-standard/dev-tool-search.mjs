@@ -3,7 +3,7 @@
  * pattern for the anchored preset.
  *
  * The promoted phase keeps only a minimal resident set (shell +
- * str_replace_editor + the discovery tools) instead of dumping the whole
+ * str_replace_editor + discovery + memory turn-closure tools) instead of dumping the whole
  * Standard catalog at once. This plugin registers ONE small tool:
  *
  *  - `dev_tool_search` — search the FULL assembled catalog by keyword and
@@ -41,7 +41,8 @@ function toJsonSchema(spec) {
 
 /**
  * The capability index: resident minimal tools (bash / str_replace_editor /
- * skill_search / skill_load) cannot cover these, so the model must search
+ * skill_search / skill_load / memory / memory_suggest /
+ * memory_review_status / dtodo) cannot cover these, so the model must search
  * and unlock them on demand. Kept in the description so the model KNOWS what
  * exists without a full catalog dump.
  */
@@ -65,7 +66,7 @@ export function apply(ctx) {
     description: [
       'Discover and unlock tools that are NOT currently available.',
       '',
-      'This session starts with a minimal resident set: bash, str_replace_editor, skill_search, skill_load. Everything else is unlocked on demand through this tool.',
+      'After bootstrap this session keeps a small resident set: bash, str_replace_editor, skill_search, skill_load, memory, memory_suggest, memory_review_status, dtodo. Everything else is unlocked on demand through this tool.',
       '',
       'If the current task needs any of the following, call dev_tool_search FIRST — do not try to work around them with bash:',
       ...UNLOCKABLE_INDEX.map((line) => `- ${line}`),

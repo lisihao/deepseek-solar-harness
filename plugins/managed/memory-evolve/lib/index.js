@@ -24,6 +24,7 @@ import { ArchiveStore, MemoryStore, SuggestionQueue, extractEntryDate, gitBranch
 import { stripEntryId } from './sync/entryid.js'
 import { readAliases } from './aliases.js'
 import { reviewCommand, reviewStatusTool, reviewTurnCounter, enqueueSuggestion, suggestToolDefinition } from './review.js'
+import { DurableTurnState, installTurnClosure, toolCallTurn, turnStatePath } from './turn-close.js'
 import { skillManageTool } from './skills.js'
 import { installApi } from './api.js'
 import { installSkillsManager } from './skills-manager.js'
@@ -776,7 +777,7 @@ function outcomeOnly(result) {
  *   主轨条目移动到对应归档文件）。
  * @returns {object} a ToolDefinition-shaped object.
  */
-export function memoryTool(ctx, config, store, queue, getRuntime, archive) {
+export function memoryTool(ctx, config, store, queue, getRuntime, archive, turnState) {
   /**
    * 程序拼接【反馈】行（用户情绪反馈记录，2026-08-10 上线）。
    * sentiment 必填（positive/negative）；category/quote/note 可缺省
@@ -828,6 +829,10 @@ export function memoryTool(ctx, config, store, queue, getRuntime, archive) {
       return outcomeOnly(rest)
     }
     const addResult = store.add(target, finalContent, exec.agent)
+    if (addResult.ok && (target === 'daily' || target === 'project')) {
+      const turn = toolCallTurn(exec?.agent, exec?.callId)
+      if (Number.isSafeInteger(turn)) turnState?.recordModelWrite(exec.agent, turn, target)
+    }
     return outcomeOnly(addResult)
   }
 
@@ -1374,7 +1379,9 @@ export function apply(ctx, rawConfig = {}) {
   // Review turn counter: created once, shared by the snapshot (due warning)
   // and the memory_review_status tool. Zero-cost when review is disabled
   // (the settled listener returns early unless reviewEnabled).
-  const counter = reviewTurnCounter(ctx, getRuntime)
+  const turnState = new DurableTurnState(turnStatePath(config.memoryDir))
+  const counter = reviewTurnCounter(ctx, getRuntime, turnState)
+  installTurnClosure(ctx, getRuntime, store, turnState)
   const updateRuntime = (patch) => {
     for (const [key, value] of Object.entries(patch)) {
       validateRuntimePatch(key, value)
@@ -1426,7 +1433,7 @@ export function apply(ctx, rawConfig = {}) {
   }
 
   // 2. The memory tool (always registered; subagent writes are gated).
-  ctx.effect(() => ctx.tools.register(memoryTool(ctx, config, store, queue, getRuntime, archive)), 'dsh-memory-evolve: memory tool')
+  ctx.effect(() => ctx.tools.register(memoryTool(ctx, config, store, queue, getRuntime, archive, turnState)), 'dsh-memory-evolve: memory tool')
 
   // 2b. The skill management tool (always registered: useful in ordinary
   //     sessions too — "把这个流程做成技能" — and required by the review
@@ -1437,7 +1444,9 @@ export function apply(ctx, rawConfig = {}) {
   //     directly; model-authored ones go through the suggestion queue).
   ctx.effect(() => ctx.tools.register(todoToolDefinition(config, todoStore)), 'dsh-memory-evolve: todo tool')
 
-  // 3. In-turn review (opt-in): suggest tool + turn counter + status tool.
+  // 3. In-turn review: the durable status tool is always present so the host
+  // closure receipt remains inspectable. The suggestion write path is only
+  // present when review is enabled.
   // Machinery is installed whenever the plugin loads (config reviewEnabled OR
   // the runtime state), but the counter consults the live runtime — the
   // settings panel can flip it without a reload. The review itself runs
@@ -1445,8 +1454,8 @@ export function apply(ctx, rawConfig = {}) {
   const reviewWanted = config.reviewEnabled || runtime.reviewEnabled
   if (reviewWanted) {
     ctx.effect(() => ctx.tools.register(suggestToolDefinition(config, queue)), 'dsh-memory-evolve: suggest tool')
-    ctx.effect(() => ctx.tools.register(reviewStatusTool(getRuntime, counter)), 'dsh-memory-evolve: review status tool')
   }
+  ctx.effect(() => ctx.tools.register(reviewStatusTool(getRuntime, counter)), 'dsh-memory-evolve: review status tool')
 
   // 3b. 模型配置模块（de_models 工具 + 「模型设置」Tab 数据面）：**独立
   //     子模块**，与其他模块同款独立开关 modelsEnabled（默认关）。开启时

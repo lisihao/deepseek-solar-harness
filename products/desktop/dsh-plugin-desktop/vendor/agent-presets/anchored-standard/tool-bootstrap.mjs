@@ -57,8 +57,9 @@
  * the trajectory back to standard-like behavior (the root cause of the
  * post-promotion regression measured on the zero variant). Instead the
  * catalog narrows to the bootstrap tool pair PLUS the three discovery tools
- * (`dev_tool_search`, `skill_search`, `skill_load`) plus whatever the model
- * explicitly unlocked via `dev_tool_search`. Heavier Standard tools
+ * (`dev_tool_search`, `skill_search`, `skill_load`), the memory turn-closure
+ * tools (`memory`, `memory_suggest`, `memory_review_status`, `dtodo`), and
+ * whatever the model explicitly unlocked via `dev_tool_search`. Heavier Standard tools
  * (web_search, subagent, workflow, …) are one `dev_tool_search` call away;
  * unlocked names are derived from durable `tool/call` events, so resume and
  * reload keep them. read/write/edit/glob/grep/todo/ask are deliberately NOT
@@ -135,6 +136,9 @@ const DEFAULT_BOOTSTRAP_TOOLS = ['bash', 'str_replace_editor']
 /** Discovery tools always resident after promotion (the tool-search pattern). */
 const RESIDENT_DISCOVERY_TOOLS = ['dev_tool_search', 'skill_search', 'skill_load']
 
+/** Memory tools remain reachable after promotion so turn closure can finish. */
+const RESIDENT_MEMORY_TOOLS = ['memory', 'memory_suggest', 'memory_review_status', 'dtodo']
+
 function stringList(value, field) {
   if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== 'string' || item.length === 0)) {
     throw new TypeError(`${name}: ${field} must be a non-empty array of non-empty strings`)
@@ -144,6 +148,7 @@ function stringList(value, field) {
 
 function stringListOrEmpty(value, field) {
   if (value === undefined) return []
+  if (Array.isArray(value) && value.length === 0) return []
   return stringList(value, field)
 }
 
@@ -267,7 +272,12 @@ export function apply(ctx, config) {
         // discovery tools + whatever the model explicitly unlocked via
         // dev_tool_search — instead of dumping the whole Standard catalog at
         // once (the post-promotion regression fix; see the header note).
-        const keep = new Set([...bootstrapTools, ...RESIDENT_DISCOVERY_TOOLS, ...unlockedFor(context.agent?.session)])
+        const keep = new Set([
+          ...bootstrapTools,
+          ...RESIDENT_DISCOVERY_TOOLS,
+          ...RESIDENT_MEMORY_TOOLS,
+          ...unlockedFor(context.agent?.session),
+        ])
         return keepTools(assembled, keep, false)
       }
       // Controlled phase: the bootstrap pair; after a compaction, plus the

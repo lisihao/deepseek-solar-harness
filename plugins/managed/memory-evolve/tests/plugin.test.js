@@ -396,6 +396,125 @@ test('review status tool counts message turns and stays due until complete', asy
   clean(dir)
 })
 
+test('review turn count survives reload and ignores duplicate settled delivery', async () => {
+  const dir = tempDir()
+  const events = [
+    { type: 'turn/start', data: { turn: 1 } },
+    { type: 'user/message', data: { turn: 1, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] } },
+  ]
+  const agent = { id: 'persisted', session: { id: 'persisted', header: {}, events } }
+
+  const first = fakeCtx()
+  apply(first, { memoryDir: dir, reviewEnabled: true, reviewInterval: 2 })
+  first.state.listeners['agent/settled'][0](agent, 1, { kind: 'completed' })
+
+  const reloaded = fakeCtx()
+  apply(reloaded, { memoryDir: dir, reviewEnabled: true, reviewInterval: 2 })
+  const status = reloaded.state.tools.find((tool) => tool.name === 'memory_review_status')
+  const exec = { agent, callId: 'status', signal: new AbortController().signal }
+  let result = await status.execute({ action: 'check' }, exec)
+  assert.equal(result.turnsSinceReview, 1)
+
+  reloaded.state.listeners['agent/settled'][0](agent, 1, { kind: 'completed' })
+  result = await status.execute({ action: 'check' }, exec)
+  assert.equal(result.turnsSinceReview, 1)
+  clean(dir)
+})
+
+test('host closes daily and project memory once and exposes a durable receipt', async () => {
+  const dir = tempDir()
+  const ctx = fakeCtx()
+  apply(ctx, { memoryDir: dir, reviewEnabled: false })
+  const agent = {
+    id: 'closed',
+    session: {
+      id: 'closed',
+      header: { cwd: '/project/closed' },
+      events: [
+        { type: 'turn/start', data: { turn: 1 } },
+        { type: 'user/message', data: { turn: 1, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '实现闭环' }] } },
+        { type: 'assistant/message', data: { turn: 1, message: { role: 'assistant', content: [{ type: 'text', text: '闭环已经实现并通过测试。' }] } } },
+      ],
+    },
+  }
+
+  for (const settled of ctx.state.listeners['agent/settled']) settled(agent, 1, { kind: 'completed' })
+  const store = new MemoryStore(dir)
+  assert.equal(store.entriesOf('daily', agent).length, 1)
+  assert.equal(store.entriesOf('project', agent).length, 1)
+  assert.match(store.entriesOf('daily', agent)[0], /闭环已经实现并通过测试/)
+
+  for (const settled of ctx.state.listeners['agent/settled']) settled(agent, 1, { kind: 'completed' })
+  assert.equal(store.entriesOf('daily', agent).length, 1)
+  assert.equal(store.entriesOf('project', agent).length, 1)
+
+  const status = ctx.state.tools.find((tool) => tool.name === 'memory_review_status')
+  const result = await status.execute(
+    { action: 'check' },
+    { agent, callId: 'status', signal: new AbortController().signal },
+  )
+  assert.equal(result.lastClosedTurn, 1)
+  assert.equal(result.lastClosureStatus, 'ok')
+  assert.deepEqual(result.lastClosureTargets, ['daily:host:ok', 'project:host:ok'])
+  assert.ok(existsSync(join(dir, 'turn-state.json')))
+
+  const reloaded = fakeCtx()
+  apply(reloaded, { memoryDir: dir, reviewEnabled: false })
+  const reloadedStatus = reloaded.state.tools.find((tool) => tool.name === 'memory_review_status')
+  const persisted = await reloadedStatus.execute(
+    { action: 'check' },
+    { agent, callId: 'status', signal: new AbortController().signal },
+  )
+  assert.equal(persisted.lastClosedTurn, 1)
+  assert.deepEqual(persisted.lastClosureTargets, ['daily:host:ok', 'project:host:ok'])
+  clean(dir)
+})
+
+test('accepted model log writes satisfy host closure without fallback duplicates', async () => {
+  const dir = tempDir()
+  const ctx = fakeCtx()
+  apply(ctx, { memoryDir: dir, reviewEnabled: false })
+  const callId = 'model-write'
+  const agent = {
+    id: 'model-closed',
+    session: {
+      id: 'model-closed',
+      header: { cwd: '/project/model-closed' },
+      events: [
+        { type: 'turn/start', data: { turn: 1 } },
+        { type: 'user/message', data: { turn: 1, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '记录模型写入' }] } },
+        { type: 'tool/call', data: { turn: 1, callId, name: 'memory' } },
+      ],
+    },
+  }
+  const memory = ctx.state.tools.find((tool) => tool.name === 'memory')
+  const write = await memory.execute({
+    action: 'add',
+    target: 'daily',
+    entries: [
+      { target: 'daily', content: '模型写入每日进展' },
+      { target: 'project', content: '模型写入项目进展' },
+    ],
+  }, { agent, callId, signal: new AbortController().signal })
+  assert.equal(write.ok, true)
+  agent.session.events.push({
+    type: 'assistant/message',
+    data: { turn: 1, message: { role: 'assistant', content: [{ type: 'text', text: '模型已经记录。' }] } },
+  })
+
+  for (const settled of ctx.state.listeners['agent/settled']) settled(agent, 1, { kind: 'completed' })
+  const store = new MemoryStore(dir)
+  assert.equal(store.entriesOf('daily', agent).length, 1)
+  assert.equal(store.entriesOf('project', agent).length, 1)
+  const status = ctx.state.tools.find((tool) => tool.name === 'memory_review_status')
+  const result = await status.execute(
+    { action: 'check' },
+    { agent, callId: 'status', signal: new AbortController().signal },
+  )
+  assert.deepEqual(result.lastClosureTargets, ['daily:model:ok', 'project:model:ok'])
+  clean(dir)
+})
+
 
 test('suggest tool appends to the queue; command approves/rejects', async () => {
   const dir = tempDir()

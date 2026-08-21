@@ -7,6 +7,7 @@ const vendorRoot = resolve(import.meta.dirname, '../vendor')
 const desktopPackageRoot = resolve(vendorRoot, '..')
 const installedPackagesRoot = join(desktopPackageRoot, 'node_modules')
 const repositoryRoot = resolve(vendorRoot, '../../../..')
+const ARCHIVE_MEMBER_MAX_BYTES = 16 * 1024 * 1024
 const manifest = JSON.parse(await readFile(join(vendorRoot, 'manifest.json'), 'utf8'))
 if (manifest.schemaVersion !== 1
   || manifest.files === null || typeof manifest.files !== 'object'
@@ -80,7 +81,9 @@ for (const archivePath of packageArchives) {
     .filter(member => member.startsWith('package/') && !member.endsWith('/'))
   for (const member of archiveMembers) {
     const packageRelative = member.slice('package/'.length)
-    const archivedContents = execFileSync('tar', ['-xOf', join(vendorRoot, archivePath), member])
+    const archivedContents = execFileSync('tar', ['-xOf', join(vendorRoot, archivePath), member], {
+      maxBuffer: ARCHIVE_MEMBER_MAX_BYTES,
+    })
     const installedFile = resolve(installedPackageRoot, packageRelative)
     const installedRelative = relative(installedPackagesRoot, installedFile)
     if (installedRelative === '..' || installedRelative.startsWith(`..${sep}`) || isAbsolute(installedRelative)) {
