@@ -66,7 +66,7 @@ test('built browser plugin registers governance Trace as a per-session view tab'
   assert.equal(styles[0].dataset.plugin, '@lisihao/dsh-code-harness-governance')
   assert.doesNotMatch(styles[0].textContent, /sidebar\.footer\.action|dsh-governance-overlay/iu)
   assert.match(styles[0].textContent, /\.dsh-governance-view\s*\{[^}]*height:\s*100%/iu)
-  assert.match(styles[0].textContent, /\.dsh-governance-panel\s*\{[^}]*max-width:\s*720px/iu)
+  assert.match(styles[0].textContent, /\.dsh-governance-panel\s*\{[^}]*max-width:\s*900px/iu)
 })
 
 test('trace source distinguishes rejected and invalidated work from unmanaged sessions', async () => {
@@ -77,5 +77,8 @@ test('trace source distinguishes rejected and invalidated work from unmanaged se
   assert.match(source, /治理事件/u)
   assert.match(source, /encodeURIComponent\(sessionId\)/u)
   assert.doesNotMatch(source, /useSessions|currentSession/u)
-  assert.match(source, /外部 Codex 任务与 GitHub Actions 不会自动写入/u)
+  assert.match(source, /run\.admission\?\.sourceSessionId === sessionId/u)
+  assert.match(source, /node\.operator\.progress/u)
+  assert.match(source, /outputPreview/u)
+  assert.match(source, /智能协作与 Resident 子代理/u)
 })

@@ -15,7 +15,7 @@
   display: flex;
   flex-direction: column;
   margin: 0 auto;
-  max-width: 720px;
+  max-width: 900px;
   min-height: 320px;
   overflow: hidden;
   width: 100%;
@@ -156,6 +156,41 @@
   min-height: 200px;
   padding: 24px 20px;
   text-align: center;
+}
+
+.dsh-collaboration-section {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.dsh-collaboration-section > h3 {
+  font-size: 15px;
+  margin: 0;
+  padding: 16px 20px 10px;
+}
+
+.dsh-collaboration-empty {
+  min-height: 120px;
+}
+
+.dsh-collaboration-event .dsh-governance-event-message {
+  white-space: pre-wrap;
+}
+
+.dsh-orchestration-run {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.dsh-orchestration-run > header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 14px 20px 0;
+}
+
+.dsh-orchestration-run > header span {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
 }
 
 @media (max-width: 720px) {
