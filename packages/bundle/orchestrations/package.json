@@ -17,6 +17,14 @@
   "license": "MIT",
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "dependencies": {
+    "@deepseek-ai/dsh-continual-harness": "workspace:^",
+    "@deepseek-ai/dsh-continual-harness-local": "workspace:^",
+    "@deepseek-ai/dsh-model-allocation": "workspace:^",
+    "@deepseek-ai/dsh-model-allocation-local": "workspace:^",
+    "@deepseek-ai/dsh-model-worker": "workspace:^",
+    "@deepseek-ai/dsh-model-worker-deepseek": "workspace:^",
+    "@deepseek-ai/dsh-rlm-strategy": "workspace:^",
+    "@deepseek-ai/dsh-rlm-strategy-local": "workspace:^",
     "@deepseek-ai/dsh-orchestration-local": "workspace:^",
     "@deepseek-ai/dsh-tool-orchestration": "workspace:^",
     "@deepseek-ai/dsh-ui-orchestration": "workspace:^"

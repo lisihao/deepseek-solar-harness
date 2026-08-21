@@ -33,9 +33,7 @@
         "scripts/**/*.mjs",
         "scripts/**/*.cjs"
       ],
-      "ignoreDependencies": [
-        "prime-agent"
-      ]
+      "ignoreDependencies": []
     },
     "examples": {
       "entry": [
@@ -289,18 +287,6 @@
       "project": [
         "src/**/*.ts",
         "tests/**/*.ts"
-      ]
-    },
-    "packages/physical-operator/resident-operator-prime-agent": {
-      "entry": [
-        "tests/**/*.spec.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
-      ],
-      "ignoreDependencies": [
-        "prime-agent"
       ]
     },
     "packages/core/tools": {

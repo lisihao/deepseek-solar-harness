@@ -45,12 +45,12 @@ class DurableOperator implements PhysicalOperator {
   readonly receipts = new Map<string, Receipt>()
   productStarts = 0
 
-  constructor(readonly id: 'codex' | 'claude-code' | 'prime-agent', private readonly immediate = true) {
+  constructor(readonly id: 'codex' | 'claude-code', private readonly immediate = true) {
     this.descriptor = {
       id: PhysicalOperatorId(id),
-      displayName: id === 'codex' ? 'Codex' : id === 'claude-code' ? 'Claude Code' : 'Prime Agent',
+      displayName: id === 'codex' ? 'Codex' : 'Claude Code',
       description: `Resident ${id} fixture.`,
-      tags: id === 'codex' ? ['coding'] : id === 'claude-code' ? ['analysis'] : ['recursive', 'rlm'],
+      tags: id === 'codex' ? ['coding'] : ['analysis'],
       maxConcurrency: 1,
       executionModes: ['ephemeral', 'resident'] as const,
     }
@@ -108,13 +108,11 @@ async function setup(options: { codexImmediate?: boolean } = {}) {
   ctx.llm.registerAdapter(['deepseek'], deepseek)
   const codex = new DurableOperator('codex', options.codexImmediate ?? true)
   const claude = new DurableOperator('claude-code')
-  const prime = new DurableOperator('prime-agent')
   ctx.physicalOperators.registerOperator(codex)
   ctx.physicalOperators.registerOperator(claude)
-  ctx.physicalOperators.registerOperator(prime)
   const mounted = await ctx.plugin(tool)
   const agent = ctx.agentLoop.create(SessionId('router-session'), { provider: 'deepseek', model: 'deepseek' })
-  return { ctx, deepseek, codex, claude, prime, mounted, agent }
+  return { ctx, deepseek, codex, claude, mounted, agent }
 }
 
 function send(agent: Agent, text: string): void {
@@ -132,16 +130,9 @@ function lastAssistantMessage(agent: Agent) {
 }
 
 describe('host physical-operator routing', () => {
-  it('routes an explicit Prime Agent request to the resident RLM worker', async () => {
-    const { agent, deepseek, codex, claude, prime } = await setup()
-    send(agent, '用 Prime Agent 对这些候选方案做递归探索和综合')
-    await agent.whenIdle()
-
-    expect(deepseek.requests).toHaveLength(0)
-    expect(codex.requests).toHaveLength(0)
-    expect(claude.requests).toHaveLength(0)
-    expect(prime.requests).toHaveLength(1)
-    expect(prime.requests[0]).toMatchObject({ mode: 'resident' })
+  it('keeps the physical product directory limited to Codex and Claude Code', async () => {
+    const { ctx } = await setup()
+    expect(ctx.physicalOperators.list().map(value => String(value.id))).toEqual(['codex', 'claude-code'])
   })
 
   it('lets an explicit current-message Codex request override a Claude preference without calling DeepSeek', async () => {

@@ -19,6 +19,8 @@ import type {
   ResidentModelOption,
   ResidentProductDriver,
   ResidentProviderStatus,
+  ResidentQuotaPool,
+  ResidentQuotaWindow,
   ResidentStopReason,
   ResidentTurnResult,
 } from '@deepseek-ai/dsh-resident-operator'
@@ -27,6 +29,7 @@ import {
   CodexApprovalRequiredError,
   CodexAppServerWire,
   type CodexAppServerModel,
+  type CodexAppServerRateLimit,
 } from '@deepseek-ai/dsh-subagent-codex'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { openCodexDaemonStream } from './codex-transport.ts'
@@ -126,7 +129,36 @@ async function claudeModels(): Promise<ResidentModelOption[]> {
   }
 }
 
-async function codexModels(): Promise<ResidentModelOption[]> {
+function codexQuotaPool(
+  limit: CodexAppServerRateLimit,
+  models: readonly ResidentModelOption[],
+  observedAt: string,
+): ResidentQuotaPool {
+  const label = limit.limitName ?? limit.limitId
+  const spark = /spark|bengalfox/iu.test(`${limit.limitId} ${label}`)
+  const mappedModels = models
+    .filter(model => /spark/iu.test(`${model.model} ${model.displayName}`) === spark)
+    .map(model => model.model)
+  const window = (value: NonNullable<CodexAppServerRateLimit['primary']>): ResidentQuotaWindow => ({
+    usedPercent: value.usedPercent,
+    ...value.resetsAt === undefined ? {} : { resetsAt: value.resetsAt },
+    ...value.windowDurationMins === undefined ? {} : { windowDurationMinutes: value.windowDurationMins },
+  })
+  return {
+    poolId: limit.limitId,
+    displayName: label,
+    models: mappedModels,
+    meter: 'native-subscription',
+    ...limit.primary === undefined ? {} : { primary: window(limit.primary) },
+    ...limit.secondary === undefined ? {} : { secondary: window(limit.secondary) },
+    observedAt,
+  }
+}
+
+async function codexModelsAndQuota(): Promise<{
+  readonly models: ResidentModelOption[]
+  readonly quotaPools: ResidentQuotaPool[]
+}> {
   const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
   if (!existsSync(socketPath)) throw new Error('Codex app-server control socket is unavailable')
   const signal = AbortSignal.timeout(15_000)
@@ -135,7 +167,10 @@ async function codexModels(): Promise<ResidentModelOption[]> {
   try {
     wire.start()
     await wire.initialize(signal)
-    return (await wire.listModels(signal)).map(codexModelOption)
+    const models = (await wire.listModels(signal)).map(codexModelOption)
+    const observedAt = new Date().toISOString()
+    const limits = await wire.readRateLimits(signal)
+    return { models, quotaPools: limits.map(limit => codexQuotaPool(limit, models, observedAt)) }
   } finally {
     wire.close()
     stream.destroy()
@@ -364,10 +399,11 @@ export class CodexResidentDriver implements ResidentProductDriver {
         transportError = error
       }
       const transportReady = transportError === undefined
-      const models = transportReady ? await codexModels().catch((error: unknown) => {
+      const catalog = transportReady ? await codexModelsAndQuota().catch((error: unknown) => {
         transportError = error
-        return []
-      }) : []
+        return { models: [], quotaPools: [] }
+      }) : { models: [], quotaPools: [] }
+      const { models, quotaPools } = catalog
       const available = subscription && exactVersion && exactSchema && transportReady && models.length > 0
       return {
         operatorId: this.operatorId,
@@ -393,6 +429,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
         productVersion: version.trim(),
         protocolHash: schemaHash,
         models,
+        quotaPools,
       }
     } catch (error) {
       return unavailable(this.operatorId, error)

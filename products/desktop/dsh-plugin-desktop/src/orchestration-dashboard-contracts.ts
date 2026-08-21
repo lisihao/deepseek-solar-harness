@@ -41,6 +41,10 @@ export interface DesktopOrchestrationNode {
   capabilityGeneration: number
   operatorId?: string
   operatorProfile?: { model?: string; effort?: string }
+  model?: string
+  modelSource?: 'native-subscription' | 'metered-api'
+  quotaPoolId?: string
+  rlm?: 'auto' | 'enabled' | 'disabled'
   capabilityPlanRef?: string
   contextPacketRef?: string
   executionPlanRef?: string
@@ -59,9 +63,12 @@ export interface DesktopOrchestrationRun {
   graphRevision: number
   maxParallel?: number
   admission?: {
-    policy: 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent'
+    policy: 'auto' | 'direct' | 'codex' | 'claude-code'
     route: 'taskgraph'
     sourceSessionId: string
+    rlm?: 'auto' | 'enabled' | 'disabled'
+    continualHarness?: 'auto' | 'off' | 'session' | 'workspace'
+    optimization?: 'balanced' | 'quality' | 'speed' | 'economy'
   }
   certificate: {
     certificateSha256: string

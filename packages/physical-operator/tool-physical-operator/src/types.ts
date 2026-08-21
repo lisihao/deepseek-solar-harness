@@ -10,7 +10,7 @@ export interface PhysicalOperatorProfilePreference {
 }
 
 /** User-selected policy controlling whether the main Agent delegates work. */
-export type PhysicalOperatorRoutingPolicy = 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent'
+export type PhysicalOperatorRoutingPolicy = 'auto' | 'direct' | 'codex' | 'claude-code'
 
 /** One routing choice displayed by a client. */
 export interface PhysicalOperatorRoutingOption {
@@ -31,7 +31,7 @@ export interface PhysicalOperatorRoutingSelect {
 }
 
 /** Native subscription products with Resident execution-profile selection. */
-export type PhysicalOperatorProfileOwner = 'codex' | 'claude-code' | 'prime-agent'
+export type PhysicalOperatorProfileOwner = 'codex' | 'claude-code'
 
 /** Per-product manual fields; absent products and fields remain Smart Auto. */
 export type PhysicalOperatorProfilePreferences = Partial<

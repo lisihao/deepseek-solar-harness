@@ -35,6 +35,21 @@ export interface CodexAppServerExecutionProfile {
   readonly effort?: string
 }
 
+/** One Codex account rate-limit window returned by app-server. */
+export interface CodexAppServerRateLimitWindow {
+  readonly usedPercent: number
+  readonly resetsAt?: number
+  readonly windowDurationMins?: number
+}
+
+/** One independently metered Codex subscription pool. */
+export interface CodexAppServerRateLimit {
+  readonly limitId: string
+  readonly limitName?: string
+  readonly primary?: CodexAppServerRateLimitWindow
+  readonly secondary?: CodexAppServerRateLimitWindow
+}
+
 function object(value: unknown, label: string): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`subagent-codex: app-server returned invalid ${label}`)
@@ -47,6 +62,38 @@ function string(value: unknown, label: string): string {
     throw new Error(`subagent-codex: app-server returned invalid ${label}`)
   }
   return value
+}
+
+function rateLimitWindow(value: unknown, label: string): CodexAppServerRateLimitWindow {
+  const window = object(value, `rate limit ${label} window`)
+  if (!Number.isInteger(window.usedPercent) || Number(window.usedPercent) < 0 || Number(window.usedPercent) > 100) {
+    throw new Error(`subagent-codex: app-server returned invalid rate limit ${label} usedPercent`)
+  }
+  if (window.resetsAt !== undefined && window.resetsAt !== null && !Number.isSafeInteger(window.resetsAt)) {
+    throw new Error(`subagent-codex: app-server returned invalid rate limit ${label} resetsAt`)
+  }
+  if (window.windowDurationMins !== undefined && window.windowDurationMins !== null
+    && (!Number.isSafeInteger(window.windowDurationMins) || Number(window.windowDurationMins) <= 0)) {
+    throw new Error(`subagent-codex: app-server returned invalid rate limit ${label} windowDurationMins`)
+  }
+  return {
+    usedPercent: Number(window.usedPercent),
+    ...window.resetsAt === undefined || window.resetsAt === null ? {} : { resetsAt: Number(window.resetsAt) },
+    ...window.windowDurationMins === undefined || window.windowDurationMins === null
+      ? {}
+      : { windowDurationMins: Number(window.windowDurationMins) },
+  }
+}
+
+function rateLimitSnapshot(value: unknown, fallbackId: string): CodexAppServerRateLimit {
+  const limit = object(value, `rate limit ${fallbackId}`)
+  const limitId = typeof limit.limitId === 'string' && limit.limitId.length > 0 ? limit.limitId : fallbackId
+  return {
+    limitId,
+    ...typeof limit.limitName === 'string' && limit.limitName.length > 0 ? { limitName: limit.limitName } : {},
+    ...limit.primary === undefined || limit.primary === null ? {} : { primary: rateLimitWindow(limit.primary, 'primary') },
+    ...limit.secondary === undefined || limit.secondary === null ? {} : { secondary: rateLimitWindow(limit.secondary, 'secondary') },
+  }
 }
 
 function unattendedDecision(params: JsonObject): 'cancel' | 'decline' {
@@ -202,6 +249,20 @@ export class CodexAppServerWire {
         }),
       }
     })
+  }
+
+  /**
+   * Read the native account's independently metered allowance pools.
+   * @param signal - cancellation for this subscription control request.
+   * @returns validated standard and model-specific pools as reported by Codex.
+   */
+  async readRateLimits(signal: AbortSignal): Promise<CodexAppServerRateLimit[]> {
+    const response = object(await this.guarded(this.transport.request('account/rateLimits/read', {}, signal), signal), 'account/rateLimits/read response')
+    if (response.rateLimitsByLimitId === null || response.rateLimitsByLimitId === undefined) {
+      return [rateLimitSnapshot(response.rateLimits, 'codex')]
+    }
+    const buckets = object(response.rateLimitsByLimitId, 'account/rateLimits/read buckets')
+    return Object.entries(buckets).map(([limitId, value]) => rateLimitSnapshot(value, limitId))
   }
 
   /**

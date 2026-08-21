@@ -73,6 +73,15 @@ export function apply(ctx: ClientContext): void {
         if (result.value === undefined) return 'unknown command: /operator-profile'
         return null
       },
+      selectOrchestrationStrategy: async (rlm, continualHarness, optimization) => {
+        const result = await ctx.remote.commands.execute(
+          sessionId,
+          `/orchestration-strategy ${rlm} ${continualHarness} ${optimization}`,
+        )
+        if (!result.ok) return `${result.error.message} (${result.error.code})`
+        if (result.value === undefined) return 'unknown command: /orchestration-strategy'
+        return null
+      },
     }),
   }, PhysicalOperatorRoutingControl))
   if (environment.mode === 'advanced') applyAdvancedShell(ctx, environment)

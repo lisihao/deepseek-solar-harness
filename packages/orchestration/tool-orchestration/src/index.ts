@@ -6,8 +6,26 @@ import {
   type LogicalTaskGraphV1,
   type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
+import type {
+  ContinualHarnessMode,
+  ModelAllocationObjective,
+  RlmExecutionMode,
+} from '@deepseek-ai/dsh-model-allocation'
+import { z as zod } from 'zod'
+import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-session-projection'
+import type { OrchestrationExecutionPreferences, OrchestrationExecutionPreferencesSelect } from './types.ts'
 
-type CollaborationPolicy = 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent'
+export type * from './types.ts'
+
+type CollaborationPolicy = 'auto' | 'direct' | 'codex' | 'claude-code'
+
+const RLM_OPTIONS = ['auto', 'enabled', 'disabled'] as const satisfies readonly RlmExecutionMode[]
+const HARNESS_OPTIONS = ['auto', 'off', 'session', 'workspace'] as const satisfies readonly ContinualHarnessMode[]
+const OPTIMIZATION_OPTIONS = ['balanced', 'quality', 'speed', 'economy'] as const satisfies readonly ModelAllocationObjective[]
+const DEFAULT_PREFERENCES: OrchestrationExecutionPreferences = {
+  rlm: 'auto', continualHarness: 'auto', optimization: 'balanced',
+}
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -17,7 +35,12 @@ declare module '@deepseek-ai/dsh-session/types' {
       route: 'taskgraph'
       runId: string
       maxParallel: number
+      rlm: RlmExecutionMode
+      continualHarness: ContinualHarnessMode
+      optimization: ModelAllocationObjective
     }
+    /** Whole-value strategy preference for future TaskGraph admissions. */
+    'orchestration/preferences': OrchestrationExecutionPreferences
   }
 }
 
@@ -32,7 +55,7 @@ type ToolArgs = {
 }
 
 /** Model-visible policy for durable graphs and per-node Resident operator routing. */
-export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Under Smart Auto, prefer this durable TaskGraph path over directly handing a parallelizable task to one Resident operator. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds and the smallest useful maxParallel ceiling (normally at most 4). Independent nodes run without a phase barrier; dependencies and overlapping write/effect scopes serialize explicitly. Qualified native-subscription Resident operators are selected per node: Codex for implementation/debugging/tests, Claude Code for architecture/review/long-context analysis, and Prime Agent for bounded node-local RLM recursion, exploration, or synthesis. DSH remains the only global Scheduler and acceptance authority. Leave operator.preferredIds unset for intelligent routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Every node receives the mandatory clean-task Context Capsule and a fresh native execution lane. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
+export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Under Smart Auto, prefer this durable TaskGraph path over directly handing a parallelizable task to one Resident operator. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds and the smallest useful maxParallel ceiling (normally at most 4). Independent nodes run without a phase barrier; dependencies and overlapping write/effect scopes serialize explicitly. Mark planning and verification nodes with phase="planning" or phase="verification" so the allocator requires a high-tier model; execution leaves normally use phase="execution" and low/mid-tier models. RLM is a bounded node strategy declared with node.rlm, not an operator id or another global Scheduler. Continuous Harness is an admission preference that supplies versioned workspace/session context without mutating the Graph. Allocation is native-subscription first: Codex and Claude Code capacity is consumed before billed DeepSeek API workers; Codex standard and Spark are independent quota pools, and unused quota nearing reset increases safe parallelism. DeepSeek V4 Flash/Pro are the final text-only fallback and cannot receive file-writing nodes. DSH remains the only global Scheduler and acceptance authority. Leave operator.preferredIds unset for intelligent routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Every node receives the mandatory clean-task Context Capsule and a fresh native execution lane. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
 
 const VALUE_SCHEMA = {
   type: 'object',
@@ -78,14 +101,62 @@ function collaborationPolicy(events: readonly { readonly type: string; readonly 
     const event = events[index]
     if (event?.type !== 'physical-operator/policy') continue
     const policy = (event.data as { policy?: unknown }).policy
-    if (policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' || policy === 'prime-agent') return policy
+    if (policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code') return policy
   }
   return 'auto'
+}
+
+export function foldOrchestrationPreferences(
+  events: readonly { readonly type: string; readonly data: unknown }[],
+): OrchestrationExecutionPreferences {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type === 'orchestration/preferences') return { ...(event.data as OrchestrationExecutionPreferences) }
+  }
+  return { ...DEFAULT_PREFERENCES }
+}
+
+function preferenceProjection(value: OrchestrationExecutionPreferences): OrchestrationExecutionPreferencesSelect {
+  return { ...value, rlmOptions: RLM_OPTIONS, continualHarnessOptions: HARNESS_OPTIONS, optimizationOptions: OPTIMIZATION_OPTIONS }
 }
 
 /** Register one compact orchestration tool and its automatic-entry policy. */
 export function apply(ctx: Context): void {
   ctx.systemPrompt.section({ name: 'tool:orchestration', order: 118, text: orchestrationGuidance })
+  ctx.inject(['sessionProjections'], (projectionCtx) => {
+    projectionCtx.sessionProjections.register<'orchestrationExecutionPreferences', OrchestrationExecutionPreferences>({
+      key: 'orchestrationExecutionPreferences',
+      schema: zod.object({
+        rlm: zod.enum(RLM_OPTIONS), continualHarness: zod.enum(HARNESS_OPTIONS), optimization: zod.enum(OPTIMIZATION_OPTIONS),
+        rlmOptions: zod.array(zod.enum(RLM_OPTIONS)),
+        continualHarnessOptions: zod.array(zod.enum(HARNESS_OPTIONS)),
+        optimizationOptions: zod.array(zod.enum(OPTIMIZATION_OPTIONS)),
+      }),
+      init: () => ({ ...DEFAULT_PREFERENCES }),
+      apply: (state, event) => event.type === 'orchestration/preferences' ? { ...event.data } : state,
+      view: preferenceProjection,
+      stateVersion: 1,
+    })
+  })
+  ctx.inject(['commands'], (commandCtx) => {
+    commandCtx.commands.register({
+      name: 'orchestration-strategy',
+      description: 'Select RLM, Continuous Harness, and quality/cost optimization for future TaskGraphs',
+      input: { hint: '<auto|enabled|disabled> <auto|off|session|workspace> <balanced|quality|speed|economy>' },
+      handler: ({ agent, rawInput }) => {
+        const [rlm, continualHarness, optimization, ...extra] = rawInput.trim().split(/\s+/u)
+        if (!RLM_OPTIONS.some(value => value === rlm)
+          || !HARNESS_OPTIONS.some(value => value === continualHarness)
+          || !OPTIMIZATION_OPTIONS.some(value => value === optimization)
+          || extra.length > 0) {
+          return { kind: 'error', text: 'usage: /orchestration-strategy <auto|enabled|disabled> <auto|off|session|workspace> <balanced|quality|speed|economy>' }
+        }
+        const preferences = { rlm, continualHarness, optimization } as OrchestrationExecutionPreferences
+        agent.session.append('orchestration/preferences', preferences, { ignorable: true })
+        return { kind: 'success', text: `orchestration strategy ${rlm}/${continualHarness}/${optimization}` }
+      },
+    })
+  })
   ctx.tools.register(defineTool({
     name: 'orchestration',
     description: 'Compile/start a durable Resident TaskGraph, list runs, or inspect one run. Complex low-risk work may be started automatically; risky work remains awaiting human approval.',
@@ -109,11 +180,12 @@ export function apply(ctx: Context): void {
       const graph = parseGraph(args.graph_json)
       const agent = exec.agent
       const policy = agent === undefined ? 'auto' : collaborationPolicy(agent.session.events)
+      const preferences = agent === undefined ? DEFAULT_PREFERENCES : foldOrchestrationPreferences(agent.session.events)
       const compilation = await ctx.orchestrations.compile({
         intent: { request: args.objective },
         graph,
         ...agent === undefined ? {} : {
-          admission: { policy, route: 'taskgraph', sourceSessionId: String(agent.id) },
+          admission: { policy, route: 'taskgraph', sourceSessionId: String(agent.id), ...preferences },
         },
       })
       const run = await ctx.orchestrations.start({ compilationId: compilation.compilationId })
@@ -122,6 +194,7 @@ export function apply(ctx: Context): void {
         route: 'taskgraph',
         runId: String(run.runId),
         maxParallel: graph.maxParallel,
+        ...preferences,
       }, { ignorable: true })
       return jsonObject({
         kind: 'start',

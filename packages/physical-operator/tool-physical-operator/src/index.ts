@@ -151,7 +151,7 @@ type ToolValue =
 
 /** Routing values accepted by the durable command and projected to clients. */
 export const PHYSICAL_OPERATOR_ROUTING_POLICIES = [
-  'auto', 'direct', 'codex', 'claude-code', 'prime-agent',
+  'auto', 'direct', 'codex', 'claude-code',
 ] as const satisfies readonly PhysicalOperatorRoutingPolicy[]
 
 const ROUTING_OPTIONS: readonly PhysicalOperatorRoutingOption[] = [
@@ -174,11 +174,6 @@ const ROUTING_OPTIONS: readonly PhysicalOperatorRoutingOption[] = [
     value: 'claude-code',
     name: 'Claude Code',
     description: 'Prefer Claude Code automatically for delegable analysis, architecture, review, and long-context work.',
-  },
-  {
-    value: 'prime-agent',
-    name: 'Prime Agent',
-    description: 'Prefer Prime Agent for bounded recursive exploration, multi-agent synthesis, and long-horizon node work.',
   },
 ]
 
@@ -318,7 +313,7 @@ export function apply(ctx: Context): void {
     commandCtx.commands.register({
       name: 'operator',
       description: 'Select automatic physical-operator routing or a preferred native worker',
-      input: { hint: '<auto|direct|codex|claude-code|prime-agent>' },
+      input: { hint: '<auto|direct|codex|claude-code>' },
       handler: ({ agent, rawInput }) => {
         const value = rawInput.trim()
         if (value === '') {
@@ -341,8 +336,8 @@ export function apply(ctx: Context): void {
     })
     commandCtx.commands.register({
       name: 'operator-profile',
-      description: 'Select a Resident model and reasoning effort for Codex, Claude Code, or Prime Agent',
-      input: { hint: '<codex|claude-code|prime-agent> <model|auto> <effort|auto>' },
+      description: 'Select a Resident model and reasoning effort for Codex or Claude Code',
+      input: { hint: '<codex|claude-code> <model|auto> <effort|auto>' },
       handler: ({ agent, rawInput }) => {
         const parsed = parseProfileCommand(rawInput)
         if ('error' in parsed) return { kind: 'error', text: parsed.error }
@@ -619,7 +614,7 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
     }
   }
   if (policy === 'direct') return primaryDecision(current.id, policy, '用户选择仅主模型')
-  if (policy === 'codex' || policy === 'claude-code' || policy === 'prime-agent') {
+  if (policy === 'codex' || policy === 'claude-code') {
     if (isParallelCandidate(text)) {
       return {
         policy,
@@ -692,19 +687,17 @@ function newHostRoute(agent: Agent, messageId: string, operatorId: string): Pend
 }
 
 function explicitOperator(text: string): PhysicalOperatorProfileOwner | undefined {
-  if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*prime(?:\s+agent)?\b|\bprime(?:\s+agent)?\s*(?:来|去|帮我|执行|处理|分析|研究|综合)/iu.test(text)) return 'prime-agent'
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*codex\b|\bcodex\s*(?:来|去|帮我|执行|处理|分析|研究|实现|修复)/iu.test(text)) return 'codex'
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*gpt[-\s]?5(?:\.\d+)?(?:[-\s]?(?:codex|sol|terra))?\b/iu.test(text)) return 'codex'
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*claude(?:\s+code)?\b|\bclaude(?:\s+code)?\s*(?:来|去|帮我|执行|处理|分析|研究|实现|修复)/iu.test(text)) return 'claude-code'
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*(?:sonnet|opus|haiku|fable)\b/iu.test(text)) return 'claude-code'
   if (/\b(?:use|ask|have|let)\s+(?:the\s+)?codex\b/iu.test(text)) return 'codex'
   if (/\b(?:use|ask|have|let)\s+(?:the\s+)?claude(?:\s+code)?\b/iu.test(text)) return 'claude-code'
-  if (/\b(?:use|ask|have|let)\s+(?:the\s+)?prime(?:\s+agent)?\b/iu.test(text)) return 'prime-agent'
   return undefined
 }
 
 function automaticOperator(text: string): PhysicalOperatorProfileOwner | undefined {
-  if (/(?:递归探索|递归推理|多智能体综合|多代理综合|综合探索|超长任务|rlm\b|recursive|multi[- ]agent synthesis|long[- ]horizon)/iu.test(text)) return 'prime-agent'
+  // RLM and multi-agent requests stay on the TaskGraph path; they are strategies, not products.
   if (/(?:代码|开发|实现|修复|调试|bug|测试|构建|编译|仓库|提交|重构|typescript|javascript|python|git\b|code\b)/iu.test(text)) return 'codex'
   if (/(?:深度分析|研究|架构|评审|审查|长文|论文|报告|方案|规划|对比|法律|法案|政策|analysis|architecture|research|review)/iu.test(text)) return 'claude-code'
   return undefined
@@ -898,7 +891,7 @@ function parseProfileCommand(rawInput: string): {
 } | { readonly error: string } {
   const [operatorId, model, effort, ...extra] = rawInput.trim().split(/\s+/u)
   if (!isPhysicalOperatorProfileOwner(operatorId) || model === undefined || extra.length > 0) {
-    return { error: 'usage: /operator-profile <codex|claude-code|prime-agent> <model|auto> <effort|auto>' }
+    return { error: 'usage: /operator-profile <codex|claude-code> <model|auto> <effort|auto>' }
   }
   if (model === 'auto' && (effort === undefined || effort === 'auto')) {
     return { operatorId, profile: null }
@@ -916,7 +909,7 @@ function parseProfileCommand(rawInput: string): {
 }
 
 function isPhysicalOperatorProfileOwner(value: string | undefined): value is PhysicalOperatorProfileOwner {
-  return value === 'codex' || value === 'claude-code' || value === 'prime-agent'
+  return value === 'codex' || value === 'claude-code'
 }
 
 function profileEquals(
@@ -942,9 +935,9 @@ function selectionGuidance(
   if (available.length === 0) return ''
   return [
     routingPolicyGuidance(policy),
-    'Physical operators are separate native Claude Code, Codex, or Prime Agent workers using the user subscription, never an API fallback.',
+    'Physical operators are separate native Claude Code or Codex workers using the user subscription, never an API fallback.',
     'Choose resident mode for repository implementation, multi-turn work, work that must remain inspectable across a DSH restart, or work that should continue in the same native product session. Keep ephemeral mode for one bounded independent check.',
-    'When routing automatically, prefer implementation/debugging/testing tags for code changes, analysis/architecture/review/long-context tags for broad reasoning, and recursive/rlm/multi-agent/synthesis tags for bounded node-local exploration. Call action=list if the suitable stable id is not already evident from the catalog below.',
+    'When routing automatically, prefer implementation/debugging/testing tags for code changes and analysis/architecture/review/long-context tags for broad reasoning. RLM and Continuous Harness are TaskGraph strategies, never operator ids. Call action=list if the suitable stable id is not already evident from the catalog below.',
     'Send one complete standalone prompt. Do not delegate trivial questions, translation, or a tiny direct edit whose coordination cost exceeds the work.',
     ...available.map(operator => `- ${operator}`),
   ].join('\n')
@@ -961,13 +954,11 @@ function routingPolicyGuidance(policy: PhysicalOperatorRoutingPolicy): string {
       return 'Physical-operator routing policy: CODEX PREFERRED. Use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["codex"] on each delegable node. Invoke one codex Resident directly for bounded single-worker work without waiting for the user to repeat the preference.'
     case 'claude-code':
       return 'Physical-operator routing policy: CLAUDE CODE PREFERRED. Use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["claude-code"] on each delegable node. Invoke one Claude Code Resident directly for bounded single-worker work without waiting for the user to repeat the preference.'
-    case 'prime-agent':
-      return 'Physical-operator routing policy: PRIME AGENT PREFERRED. Use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["prime-agent"] only on nodes that benefit from bounded RLM recursion or synthesis. Invoke one Prime Agent Resident directly for bounded single-node exploration without letting it replace DSH global scheduling or acceptance.'
   }
 }
 
 function operatorDisplayName(operatorId: PhysicalOperatorProfileOwner): string {
-  return operatorId === 'codex' ? 'Codex' : operatorId === 'claude-code' ? 'Claude Code' : 'Prime Agent'
+  return operatorId === 'codex' ? 'Codex' : 'Claude Code'
 }
 
 /** Reject run-only keys on list so accidental work requests are never ignored. */
