@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-20-desktop-source-closure.md
-2026-08-20-desktop-source-closure.md: a74e1750d1c57f1a1aecff4de238d5a4ac6e60c2
-2026-08-20-desktop-source-closure.zh.md: 304c5e4b3f9dd1ece6214dcd9fa69f151a951ca2
+2026-08-20-desktop-source-closure.md: 9723b762efa332ddefd44434be809e2cb8d84200
+2026-08-20-desktop-source-closure.zh.md: 5751c2eb826f763ee475f5b2648f9c4ad4c2fc8d

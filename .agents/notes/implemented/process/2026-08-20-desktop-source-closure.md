@@ -14,13 +14,13 @@ The [Solar monorepo](2026-08-17-solar-monorepo-p0-p2.md) co-locates core, Deskto
 
 The Remote Modules archive is rebuilt from the generic tracked package so deployment-specific historical examples are absent from the accepted product input. A content change updates both the immutable digest manifest and the Desktop lockfile locator.
 
-The default Desktop product contains source for every sealed application package and verifies this mapping before build. Sealed archives remain immutable build inputs so the independent Yarn product graph does not silently switch resolution mode. Their digests protect the accepted bytes, while the verifier proves exact tracked provenance for prose, configuration, scripts, and other non-generated package contents. Generated `lib/` output remains build-derived and is not claimed to be byte-for-byte reproducible from a clean checkout.
+The default Desktop product contains source for every sealed application package and verifies this mapping before build. Sealed archives remain immutable build inputs so the independent Yarn product graph does not silently switch resolution mode. Their digests protect the accepted bytes, while the verifier proves exact tracked provenance for prose, configuration, scripts, and other non-generated package contents. Generated `lib/` output remains build-derived and is not claimed to be byte-for-byte reproducible from a clean checkout. The same verifier also compares every installed package member with its archive member, so refreshing a tarball without refreshing the Yarn file locator and installed dependency fails before packaging rather than producing an application containing stale generated code.
 
 Optional plugins installed into `~/.dsh` remain user-owned profile extensions unless Solar modifies or bundles them. A modified or bundled plugin enters `plugins/managed` with imported provenance and native checks before it can become a product input. The public Remote Modules row is enabled with an empty `instances` array; private names, URLs, and relay ports live only in local profile settings.
 
 ## Verification
 
-`yarn verify:vendor` verifies the complete vendor file set, immutable digests, all tracked source mappings, exact non-generated archive contents, and the Anchored Standard delegated-worker gate. `yarn check` then builds and typechecks Desktop, runs its focused and package suites, and verifies runtime closure, CLI, loader, and profile boot. A clean clone must pass immutable root and Desktop installs before building the macOS application.
+`yarn verify:vendor` verifies the complete vendor file set, immutable digests, all tracked source mappings, exact non-generated archive contents, exact archive-to-installed-package contents, and the Anchored Standard delegated-worker gate. `yarn check` then builds and typechecks Desktop, runs its focused and package suites, and verifies runtime closure, CLI, loader, and profile boot. A clean clone must pass immutable root and Desktop installs before building the macOS application.
 
 ## Alternatives considered
 

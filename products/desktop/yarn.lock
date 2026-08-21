@@ -2447,7 +2447,7 @@ __metadata:
 
 "@deepseek-ai/dsh-orchestration-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-orchestration-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz::hash=e480ed&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-orchestration-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz::hash=2ea49c&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -2464,7 +2464,7 @@ __metadata:
     "@deepseek-ai/dsh-resident-operator-local": ^0.1.0-rc.5
     "@deepseek-ai/dsh-sdk-protocol": ^0.1.0-rc.5
     "@deepseek-ai/dsh-session": ^0.1.0-rc.5
-  checksum: 10c0/acc1bbb6a1767685bc1e3eba64c8b9033fd27f577061d45888b08c7429e77d5782f4a9d497d55bc4935682602dc4dd9e76edb2cf56e2420eb898f952c58ac674
+  checksum: 10c0/afeb3d16bb0af164510162f37bd005e9494b8004c1484b4c4c1c979c6a3a3f229b7794a9e29ffdee05432f47c4b5e3e0f6e34ce86ed0c92c97e02ca5dc6f4574
   languageName: node
   linkType: hard
 
@@ -3945,13 +3945,13 @@ __metadata:
 
 "@deepseek-ai/dsh-ui-orchestration@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-ui-orchestration@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz::hash=4e0b43&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-ui-orchestration@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz::hash=d28e4c&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-host-webserver": ^0.1.0-rc.5
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/dsh-orchestration": ^0.1.0-rc.5
-  checksum: 10c0/4b6d330493100ad0879322e81031655d41f65f6fb497b8b0e71824ae1213a4e541c9abe550efd09ce837c0c3bae92c5100a08da282025e32de94572241f5cae0
+  checksum: 10c0/ff126c8abbcd35dd5bc9fe346abeacf27ddee867a21a24e3a2446caad8ec13388d70e5ce7c4d17af9e0ae7fd2670188b1cc314414c31bf86cbcfaffebb4a3bc9
   languageName: node
   linkType: hard
 
@@ -4898,6 +4898,15 @@ __metadata:
     react: ^18.2.0
     react-dom: ^18.2.0
   checksum: 10c0/b131c6a3b109ca56b03ed663e74123dcac64fbc367589a8b6da92f0de8133927a65b1b7adceb109afa93f7d308e7f8be96732fe717e7873fb688977e1ed79952
+  languageName: node
+  linkType: hard
+
+"@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.9.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.3.9
+  resolution: "@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.9.tgz#./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.9.tgz::hash=4943f6&locator=deepseek-harness-desktop%40workspace%3A."
+  bin:
+    dsh-governed: ./bin/dsh-governed.mjs
+  checksum: 10c0/47ddf13670e1a776c21f7651ec54a56710e2f531e2e1dc9760a10ad697235de0a89d6b0a8c5cd0791ac6192610cc756a0043970fb64d5c03c6ead990c4b9382c
   languageName: node
   linkType: hard
 
@@ -7342,6 +7351,7 @@ __metadata:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     "@electron/asar": "npm:3.4.1"
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz"
+    "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.9.tgz"
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz"
     "@types/js-yaml": "npm:^4.0.9"
     "@types/node": "npm:^22.20.0"
