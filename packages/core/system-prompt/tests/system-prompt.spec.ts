@@ -345,6 +345,20 @@ describe('SystemPrompt', () => {
     expect(result).toBe('content')
   })
 
+  it('preserves literal variable examples in sections that opt out of interpolation', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    ctx.systemPrompt.section({
+      name: 'generated-reference',
+      order: 10,
+      text: 'Template examples: {{date}} and {{time}}.',
+      interpolate: false,
+    })
+
+    expect(renderPrompt(await ctx.systemPrompt.assemble()))
+      .toContain('Template examples: {{date}} and {{time}}.')
+  })
+
   it('filters empty context, interpolates variables, and returns empty without active context', async () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)

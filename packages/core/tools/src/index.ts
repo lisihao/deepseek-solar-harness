@@ -872,10 +872,13 @@ export class ToolRuntime extends Service {
    * dropped from the rendered prompt.
    * @returns the section registration.
    */
-  private sdkSection(): { name: string; order: number; text: (context: { scope?: ScopeKey }) => string } {
+  private sdkSection(): { name: string; order: number; interpolate: false; text: (context: { scope?: ScopeKey }) => string } {
     return {
       name: 'tools:sdk',
       order: SDK_SECTION_ORDER,
+      // Tool schemas may document literal template syntax such as
+      // `{{date}}`; generated SDK text is not a system-prompt template.
+      interpolate: false,
       // Regenerate from the calling scope's visible tools in stable order.
       text: (context) => {
         const mode = this.modeFor(context.scope)

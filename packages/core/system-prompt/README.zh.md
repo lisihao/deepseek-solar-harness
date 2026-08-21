@@ -33,9 +33,9 @@
 ### 关键类型
 
 - `AssembleContext`：说明一次 `assemble()` 调用的用途。它可通过合并扩展；此处声明 `scope?: ScopeKey`（层选择器）与 `signal?: AbortSignal`（显式请求控制能力），而 `dsh-agent` 声明 `agent?: Agent`（类型化 DX 字段；绝不能在没有 `scope` 时设置，应使用 `assembleContextFor(agent, signal)`）。提供方必须容忍字段缺席，因为裸 `assemble()` 携带的是无作用域、无信号的空上下文。`signal` 是请求值，不是环境 Agent 执行 frame 的一部分。
-- `PromptSection`：`{ name, order, text, complete? }`。各段按 `order` 升序拼接。顺序区间：`-100` 是 harness 身份，`0` 是部署 persona，工具引导使用 `100–199`。协作式组装完成后，一个有效的 `complete` 段会抑制其他所有段。
+- `PromptSection`：`{ name, order, text, interpolate?, complete? }`。各段按 `order` 升序拼接。顺序区间：`-100` 是 harness 身份，`0` 是部署 persona，工具引导使用 `100–199`。`interpolate` 默认为 true；记录另一种模板语言的生成文本将其设为 false。协作式组装完成后，一个有效的 `complete` 段会抑制其他所有段。
 - `PromptAssembly`：`{ sections: AssembledSection[], tools: ToolSchema[], variables: Record<string, string | undefined> }`。各段文本到达时已求值，但尚未插值；`variables` 保存所有已注册变量在当前上下文中求得的值。工具 schema 按设计属于组装结果：「模型获知自己能做什么」是一个连贯整体，尽管适配器把 schema 作为独立 wire 字段传输。
-- `renderPrompt(assembly)`：插值每个段中的 `{{variable}}` 引用，删除空段，并用空行连接。严格规则：未知引用（使用 `Object.hasOwn` 查找，因此 `{{constructor}}` 等原型名称未知）、已注册但无值的引用、格式错误的完整 `{{…}}` 组，或出现 `{{` 却没有形成完整组、而后文仍有 `}}`（`{{{model}}}`），都会抛出异常；明确失败胜过交付格式错误的提示词。孤立的 `{{` 如果后面任何位置都没有 `}}`，会按字面量通过；替换值绝不再次扫描。
+- `renderPrompt(assembly)`：只插值 `interpolate` 不为 false 的段中的 `{{variable}}` 引用，删除空段，并用空行连接。严格规则：未知引用（使用 `Object.hasOwn` 查找，因此 `{{constructor}}` 等原型名称未知）、已注册但无值的引用、格式错误的完整 `{{…}}` 组，或出现 `{{` 却没有形成完整组、而后文仍有 `}}`（`{{{model}}}`），都会抛出异常；明确失败胜过交付格式错误的提示词。孤立的 `{{` 如果后面任何位置都没有 `}}`，会按字面量通过；替换值绝不再次扫描。`interpolate: false` 的段按贡献时的原文通过。
 
 可通过合并扩展：插件可以借助声明合并，为 `PromptAssembly` 和 `AssembleContext` 声明额外字段。
 
@@ -87,6 +87,6 @@ schema token 在每次请求中重复。限制工具会为该 agent 移除其全
 ## 已知限制与暂缓事项
 
 - **部署方编写的提示词文本只来自配置／组合**：此插件拥有全局 persona 默认值；创建方插件可以注册 agent 作用域的遮蔽项；其他段来自拥有相应事实的插件。不存在终端用户提示词编辑 API。
-- **没有表示字面量 `{{…}}` 花括号的转义语法**：每个完整组都会按已注册变量插值；只有实际提示词需要转义时才会实现。
+- **插值段内部没有转义语法**：每个完整 `{{…}}` 组都会针对已注册变量进行解析。记录另一种模板语言的生成段使用 `interpolate: false` 退出插值；同一段中混用字面组和 DSH 变量组不受支持。
 - **`toolOrder` 配置错误在提示词组装（首轮）时出现，而不是启动时**：只有形状违规会在配置加载时抛出。
 - **共享同一 `order` 值的段按注册顺序打破平局**：这是插件加载产物；确定性依赖在顺序分段内使用不同值的约定，与已规范化的工具顺序不同。

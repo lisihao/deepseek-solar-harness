@@ -33,6 +33,8 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-client-ui-remote-modules',
   '@deepseek-ai/dsh-host-apiproxy',
   '@deepseek-ai/dsh-session-projection-cache',
+  '@deepseek-ai/dsh-system-prompt',
+  '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-intent-compiler',
   '@deepseek-ai/dsh-context-compiler',
   '@deepseek-ai/dsh-capability-capsule',
