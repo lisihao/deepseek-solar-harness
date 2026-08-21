@@ -1,5 +1,14 @@
 export const GOVERNANCE_TRACE_PATH = '/code-harness/v1/trace'
 
+const DIRECT_OPERATOR_PROVIDER = 'dsh-physical-operator'
+const COLLABORATION_EVENT_TYPES = new Set([
+  'physical-operator/routing-decision',
+  'physical-operator/dispatch',
+  'physical-operator/dispatch-terminal',
+  'orchestration/admission',
+])
+const MAX_OUTPUT_PREVIEW = 4_000
+
 function isLegacyGovernanceRefusal(error) {
   return error instanceof Error
     && /event type "governance\/[^"]+"/u.test(error.message)
@@ -21,13 +30,72 @@ function rawGovernanceSession(raw, sessionId) {
     } catch (error) {
       throw new Error(`raw session ${sessionId} contains invalid JSON at line ${String(index + 1)}`, { cause: error })
     }
-    if (typeof record?.type !== 'string' || !record.type.startsWith('governance/')) continue
+    if (typeof record?.type !== 'string') continue
+    const traceEvent = record.type.startsWith('governance/')
+      || COLLABORATION_EVENT_TYPES.has(record.type)
+      || record.type === 'assistant/message'
+    if (!traceEvent) continue
     if (!Number.isSafeInteger(record.seq) || record.seq < 0 || record.data === null || typeof record.data !== 'object') {
-      throw new Error(`raw session ${sessionId} contains an invalid governance event at line ${String(index + 1)}`)
+      throw new Error(`raw session ${sessionId} contains an invalid trace event at line ${String(index + 1)}`)
     }
     events.push(record)
   }
   return { events }
+}
+
+function eventTimestamp(event) {
+  if (typeof event.time === 'number' && Number.isFinite(event.time)) return new Date(event.time).toISOString()
+  if (typeof event.time === 'string') return event.time
+  return null
+}
+
+function directOperatorOutput(event) {
+  if (event.type !== 'assistant/message') return undefined
+  const message = event.data?.message
+  if (message?.source?.provider !== DIRECT_OPERATOR_PROVIDER || !Array.isArray(message.content)) return undefined
+  const text = message.content
+    .filter(block => block?.type === 'text' && typeof block.text === 'string')
+    .map(block => block.text)
+    .join('\n')
+    .trim()
+  if (text === '') return undefined
+  return {
+    outputPreview: text.slice(0, MAX_OUTPUT_PREVIEW),
+    outputTruncated: text.length > MAX_OUTPUT_PREVIEW,
+    operatorId: typeof message.source.model === 'string' ? message.source.model : undefined,
+  }
+}
+
+function projectCollaborationEvent(event, index) {
+  const output = directOperatorOutput(event)
+  if (!COLLABORATION_EVENT_TYPES.has(event.type) && output === undefined) return undefined
+  const data = event.data ?? {}
+  return {
+    sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
+    type: output === undefined ? event.type : 'physical-operator/output',
+    timestamp: eventTimestamp(event),
+    ...typeof data.policy === 'string' ? { policy: data.policy } : {},
+    ...typeof data.route === 'string' ? { route: data.route } : {},
+    ...typeof data.reason === 'string' ? { reason: data.reason } : {},
+    ...typeof data.operatorId === 'string' ? { operatorId: data.operatorId } : {},
+    ...typeof data.commandId === 'string' ? { commandId: data.commandId } : {},
+    ...typeof data.code === 'string' ? { code: data.code } : {},
+    ...typeof data.runId === 'string' ? { runId: data.runId } : {},
+    ...Number.isSafeInteger(data.maxParallel) ? { maxParallel: data.maxParallel } : {},
+    ...output,
+  }
+}
+
+function projectCollaboration(session, requestedLimit) {
+  const limit = requestedLimit ?? 200
+  const events = session.events
+    .map(projectCollaborationEvent)
+    .filter(event => event !== undefined)
+  return {
+    totalEvents: events.length,
+    returnedEvents: Math.min(events.length, limit),
+    events: events.slice(-limit),
+  }
 }
 
 function sendJson(res, status, payload, head = false, extraHeaders = {}) {
@@ -99,6 +167,7 @@ export function createGovernanceTraceHandler(ctx, governance) {
         sessionId,
         source,
         ...governance.traceSession(session, limit),
+        collaboration: projectCollaboration(session, limit),
       }, req.method === 'HEAD')
     } catch (error) {
       const invalidLimit = error instanceof RangeError
