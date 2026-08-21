@@ -4,7 +4,7 @@
 
 `ctx.residentOperators` 的本地 Service Provider 与独立 daemon。DSH 插件只是可释放的 Unix socket 客户端；`dsh-resident-operatord` 是唯一 SQLite 写者，并跨 DSH/HMR 释放继续存在。它负责 command receipt、单 Session lease、state revision、有界结构化事件及大结果的内容寻址 Artifact。
 
-Claude Code 使用官方 Agent SDK 持久化与恢复 Session，并通过不提交 prompt 的 SDK 控制通道读取订阅可见模型。Codex 通过固定版本 app-server daemon 的本机属主 Unix WebSocket 控制 socket 使用非临时 thread，并通过 `model/list` 读取目录；CLI `proxy` 只是 WebSocket 原始字节桥，不是 NDJSON transport。两个 Driver 都会在本机 CLI 无法证明原生订阅登录时默认拒绝，且不支持 API-key fallback。
+Claude Code 使用官方 Agent SDK 持久化与恢复 Session，并通过不提交 prompt 的 SDK 控制通道读取订阅可见模型。资格审查会解析一个绝对路径的用户自有 `claude` 可执行文件，SDK 模型发现与真实回合也使用同一个文件，而不是 SDK 自带的后备程序；因此版本、钥匙串刷新行为、TLS 信任和订阅状态不会在资格与执行路径之间分叉。Codex 通过固定版本 app-server daemon 的本机属主 Unix WebSocket 控制 socket 使用非临时 thread，并通过 `model/list` 读取目录；CLI `proxy` 只是 WebSocket 原始字节桥，不是 NDJSON transport。两个 Driver 都会在本机 CLI 无法证明原生订阅登录时默认拒绝，且不支持 API-key fallback。
 
 ## 协议、存储与恢复
 

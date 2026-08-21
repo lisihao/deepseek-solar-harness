@@ -2,9 +2,9 @@
 
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, extname, isAbsolute, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import {
   query as claudeQuery,
@@ -69,6 +69,50 @@ export function claudeEnvironment(
   return environment
 }
 
+function environmentValue(environment: NodeJS.ProcessEnv, name: string): string | undefined {
+  const exact = environment[name]
+  if (exact !== undefined || process.platform !== 'win32') return exact
+  const entry = Object.entries(environment).find(([key]) => key.toUpperCase() === name)
+  return entry?.[1]
+}
+
+/**
+ * Resolve the exact native product executable that qualification and SDK execution must share.
+ *
+ * @param command Absolute executable or bare product command.
+ * @param environment Child environment whose PATH owns command selection.
+ * @param platform Platform used for PATH extension rules.
+ * @returns An absolute executable path.
+ */
+export function resolveProductExecutable(
+  command: string,
+  environment: NodeJS.ProcessEnv = scrubbedParentEnv(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (command.length === 0) throw new Error('resident product executable must be non-empty')
+  const absolute = isAbsolute(command)
+  if (!absolute && (command.includes('/') || (platform === 'win32' && command.includes('\\')))) {
+    throw new Error(`resident product executable ${JSON.stringify(command)} must be absolute or a bare PATH name`)
+  }
+  const extensions = platform === 'win32' && extname(command) === ''
+    ? (environmentValue(environment, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';')
+    : ['']
+  const candidates = absolute
+    ? [command]
+    : (environmentValue(environment, 'PATH') ?? '').split(delimiter).flatMap(directory =>
+      extensions.map(extension => resolve(process.cwd(), directory, command + extension)))
+  for (const candidate of candidates) {
+    try {
+      if (!statSync(candidate).isFile()) continue
+      accessSync(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // Try the next PATH candidate; the final miss receives one stable error.
+    }
+  }
+  throw new Error(`resident product executable ${JSON.stringify(command)} was not found`)
+}
+
 function reasoningEffort(value: string | undefined): PhysicalOperatorReasoningEffort | undefined {
   return value !== undefined && EFFORTS.has(value as PhysicalOperatorReasoningEffort)
     ? value as PhysicalOperatorReasoningEffort
@@ -105,7 +149,7 @@ function codexModelOption(model: CodexAppServerModel): ResidentModelOption {
   }
 }
 
-async function claudeModels(): Promise<ResidentModelOption[]> {
+async function claudeModels(claudeExecutable: string): Promise<ResidentModelOption[]> {
   async function* idleInput(): AsyncGenerator<never> {
     await new Promise<never>(() => {})
   }
@@ -117,6 +161,7 @@ async function claudeModels(): Promise<ResidentModelOption[]> {
       abortController: controller,
       cwd: process.cwd(),
       env: claudeEnvironment(),
+      pathToClaudeCodeExecutable: claudeExecutable,
       persistSession: false,
       disallowedTools: ['AskUserQuestion'],
     },
@@ -223,14 +268,16 @@ function textPrompt(prompt: readonly ContentBlock[], product: string): string[] 
   return texts
 }
 
-async function command(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+async function command(command: string, args: string[]): Promise<{ stdout: string; stderr: string; executable: string }> {
   try {
-    return await execFileAsync(command, args, {
+    const executable = resolveProductExecutable(command)
+    const result = await execFileAsync(executable, args, {
       encoding: 'utf8',
       env: scrubbedParentEnv(),
       timeout: 15_000,
       maxBuffer: 2 * 1024 * 1024,
     })
+    return { ...result, executable }
   } catch (error) {
     throw new ResidentOperatorError(
       `${command} qualification failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -274,15 +321,15 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
 
   async qualify(): Promise<ResidentProviderStatus> {
     try {
-      const { stdout: version } = await command('claude', ['--version'])
-      const { stdout: auth } = await command('claude', ['auth', 'status', '--json'])
+      const { stdout: version, executable } = await command('claude', ['--version'])
+      const { stdout: auth } = await command(executable, ['auth', 'status', '--json'])
       const parsed = JSON.parse(auth) as Record<string, unknown>
       const subscription = parsed.loggedIn === true
         && parsed.authMethod === 'claude.ai'
         && typeof parsed.subscriptionType === 'string'
         && parsed.subscriptionType.length > 0
       const exactVersion = version.trim() === EXPECTED_CLAUDE_CLI_VERSION
-      const models = subscription && exactVersion ? await claudeModels() : []
+      const models = subscription && exactVersion ? await claudeModels(executable) : []
       const catalogReady = models.length > 0
       return {
         operatorId: this.operatorId,
@@ -321,6 +368,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
       )
     }
     const texts = textPrompt(request.prompt, 'Claude Code')
+    const claudeExecutable = resolveProductExecutable('claude')
     request.onProgress('connecting')
     const controller = new AbortController()
     const abort = (): void => { controller.abort(request.signal.reason) }
@@ -344,6 +392,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
         abortController: controller,
         cwd: request.workspace,
         env: claudeEnvironment(),
+        pathToClaudeCodeExecutable: claudeExecutable,
         persistSession: true,
         model: request.profile.model,
         ...request.profile.effort === undefined ? {} : {

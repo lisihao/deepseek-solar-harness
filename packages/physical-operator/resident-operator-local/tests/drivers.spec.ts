@@ -1,9 +1,13 @@
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
   claudeEnvironment,
   claudeResultFailure,
   collectCodexModelsAndQuota,
+  resolveProductExecutable,
 } from '../src/drivers.ts'
 
 const model = {
@@ -30,6 +34,27 @@ describe('Claude Code resident driver environment', () => {
   it('preserves an explicit caller CA policy and does not change other platforms', () => {
     expect(claudeEnvironment({ NODE_USE_SYSTEM_CA: '0' }, 'darwin')).toEqual({ NODE_USE_SYSTEM_CA: '0' })
     expect(claudeEnvironment({ PATH: '/usr/bin' }, 'linux')).toEqual({ PATH: '/usr/bin' })
+  })
+
+  it('pins SDK execution to the same first user-owned CLI selected for qualification', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-claude-cli-'))
+    const preferred = join(root, 'preferred')
+    const legacy = join(root, 'legacy')
+    const preferredClaude = join(preferred, 'claude')
+    const legacyClaude = join(legacy, 'claude')
+    try {
+      mkdirSync(preferred)
+      mkdirSync(legacy)
+      writeFileSync(preferredClaude, '#!/bin/sh\nexit 0\n')
+      writeFileSync(legacyClaude, '#!/bin/sh\nexit 0\n')
+      chmodSync(preferredClaude, 0o700)
+      chmodSync(legacyClaude, 0o700)
+
+      expect(resolveProductExecutable('claude', { PATH: `${preferred}:${legacy}` }, 'darwin'))
+        .toBe(preferredClaude)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 
