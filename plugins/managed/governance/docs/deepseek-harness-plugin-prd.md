@@ -64,12 +64,14 @@ external authority.
   candidate events commit.
 - Store full command output outside the model-visible log; persist bounded
   summaries, digests, and artifact locations in events.
-- Ship a `dsh.client` browser half that registers additively in
-  `sidebar.footer.action`; do not replace the sidebar.
-- Expose a same-origin, no-store, read-only HTTP projection for the selected
-  session and render it in a user-visible `治理 Trace` panel. Prefer the live
-  Session and fall back to immutable persistence inspection for historical
-  tasks; viewing a trace must not publish a cold Session.
+- Ship a `dsh.client` browser half that registers additively in the
+  Session-scoped `conversation.view` ring and consumes no sidebar space.
+- Expose a same-origin, no-store, read-only HTTP projection for the exact
+  Session id supplied by the selected conversation view and render it in a
+  user-visible `治理 Trace` tab. Prefer the live Session and fall back to
+  immutable persistence inspection for historical tasks; viewing a trace must
+  not publish a cold Session. External Codex tasks and GitHub Actions remain
+  separate authorities and never appear as this DSH Session's events.
 
 ## State machine
 
@@ -137,8 +139,10 @@ config still contains both the policy plugin and invariant companion.
 8. The bundle installs and appears in a real DeepSeek-Harness composed config.
 9. CI independently runs the full profile and publishes its attestation.
 10. A denied delivery appears in `governance_trace` with its phase and reason.
-11. The installed package appears in the real Web boot graph, the sidebar entry
-    is visible, and clicking it opens the Trace panel without browser errors.
+11. The installed package appears in the real Web boot graph, every selected
+    Session exposes the `治理 Trace` conversation tab without a sidebar entry,
+    and switching Sessions reads the corresponding Session id without browser
+    errors or cross-Session results.
 12. A nested DSH session resolves to the repository root and a Git repository
     without a governance Profile stays unmanaged.
 13. Audit and planning process failures remain visible as durable rejection

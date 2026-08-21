@@ -10,7 +10,7 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 describe('orchestration Desktop panel transport', () => {
   it('loads a selected run from the same-origin bounded projection', async () => {
-    const dashboard = { generatedAt: '2026-08-18T00:00:00.000Z', runs: [], selectedRunId: 'run-1', events: [] }
+    const dashboard = { generatedAt: '2026-08-18T00:00:00.000Z', runs: [], diagnosticRunCount: 0, diagnosticsIncluded: true, selectedRunId: 'run-1', events: [] }
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => (
       new Response(JSON.stringify(dashboard), { status: 200 })
     ))
@@ -19,7 +19,19 @@ describe('orchestration Desktop panel transport', () => {
 
     await expect(loadOrchestrationDashboard('run-1')).resolves.toEqual(dashboard)
     const url = fetch.mock.calls[0]?.[0]
-    expect(String(url)).toBe('http://127.0.0.1:3080/api/orchestrations?run_id=run-1')
+    expect(String(url)).toBe('http://127.0.0.1:3080/api/orchestrations?run_id=run-1&include_diagnostics=1')
+  })
+
+  it('can hide acceptance runs without deleting their persisted count', async () => {
+    const dashboard = { generatedAt: '2026-08-18T00:00:00.000Z', runs: [], diagnosticRunCount: 8, diagnosticsIncluded: false }
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => (
+      new Response(JSON.stringify(dashboard), { status: 200 })
+    ))
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:3080' } })
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(loadOrchestrationDashboard(undefined, undefined, false)).resolves.toEqual(dashboard)
+    expect(String(fetch.mock.calls[0]?.[0])).toBe('http://127.0.0.1:3080/api/orchestrations?include_diagnostics=0')
   })
 
   it('sends revision-checked controls with the trusted local header', async () => {
@@ -66,5 +78,25 @@ describe('orchestration Desktop panel transport', () => {
       time: '2026-08-20T00:00:02.000Z',
       data: { operatorId: 'codex', contextIsolation: 'fresh-native-thread', laneId: 'orch:run:node:1' },
     })).toBe('codex · fresh-native-thread · lane 1')
+    expect(eventDetail({
+      sequence: 4,
+      runId: 'run-1',
+      type: 'node.operator.progress',
+      time: '2026-08-20T00:00:03.000Z',
+      data: { operatorId: 'claude-code', phase: 'tool_activity' },
+    })).toBe('claude-code · 正在使用工具')
+    expect(eventDetail({
+      sequence: 5,
+      runId: 'run-1',
+      type: 'node.evidence.accepted',
+      time: '2026-08-20T00:00:04.000Z',
+      data: {
+        operatorId: 'codex',
+        stopReason: 'completed',
+        evidenceRef: 'sha256:12345678901234567890',
+        outputPreview: 'implemented and tested',
+        outputTruncated: false,
+      },
+    })).toBe('codex · completed · Evidence 1234567890\nimplemented and tested')
   })
 })

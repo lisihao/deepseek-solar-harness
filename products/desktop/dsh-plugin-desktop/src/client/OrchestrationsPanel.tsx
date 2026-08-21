@@ -15,9 +15,11 @@ import { formatResidentTimestamp } from '../resident-presentation.ts'
 export async function loadOrchestrationDashboard(
   runId?: string,
   signal?: AbortSignal,
+  includeDiagnostics = true,
 ): Promise<DesktopOrchestrationDashboard> {
   const url = new URL(ORCHESTRATION_DASHBOARD_PATH, window.location.origin)
   if (runId !== undefined) url.searchParams.set('run_id', runId)
+  url.searchParams.set('include_diagnostics', includeDiagnostics ? '1' : '0')
   const response = await fetch(url, { cache: 'no-store', ...(signal === undefined ? {} : { signal }) })
   if (!response.ok) {
     throw new Error(`编排状态读取失败 (${String(response.status)}): ${await response.text()}`)
@@ -52,12 +54,13 @@ export function OrchestrationsPanel({ wide }: DesktopSidebarFooterActionOwnerPro
   const [dashboard, setDashboard] = useState<DesktopOrchestrationDashboard>()
   const [error, setError] = useState<string>()
   const [controlPending, setControlPending] = useState(false)
+  const [includeDiagnostics, setIncludeDiagnostics] = useState(true)
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    const next = await loadOrchestrationDashboard(open ? selectedRunId : undefined, signal)
+    const next = await loadOrchestrationDashboard(open ? selectedRunId : undefined, signal, includeDiagnostics)
     setDashboard(next)
     setError(undefined)
-  }, [open, selectedRunId])
+  }, [includeDiagnostics, open, selectedRunId])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -94,10 +97,11 @@ export function OrchestrationsPanel({ wide }: DesktopSidebarFooterActionOwnerPro
   }, [open])
 
   const selectedRun = dashboard?.runs.find(run => run.runId === selectedRunId)
-  const active = dashboard?.runs.filter(run => ['running', 'paused'].includes(run.state)).length ?? 0
-  const attention = dashboard?.runs.filter(run => (
+  const userRuns = dashboard?.runs.filter(run => run.diagnostic !== true) ?? []
+  const active = userRuns.filter(run => ['running', 'paused'].includes(run.state)).length
+  const attention = userRuns.filter(run => (
     ['awaiting_approval', 'awaiting_clarification', 'indeterminate', 'failed'].includes(run.state)
-  )).length ?? 0
+  )).length
   const status = error !== undefined ? 'error' : attention > 0 ? 'warn' : active > 0 ? 'running' : 'idle'
 
   const submit = useCallback(async (request: DesktopOrchestrationControlRequest) => {
@@ -152,6 +156,9 @@ export function OrchestrationsPanel({ wide }: DesktopSidebarFooterActionOwnerPro
                 selectedRunId={selectedRunId}
                 onSelect={setSelectedRunId}
                 generatedAt={dashboard?.generatedAt}
+                diagnosticRunCount={dashboard?.diagnosticRunCount ?? 0}
+                diagnosticsIncluded={includeDiagnostics}
+                onToggleDiagnostics={() => { setIncludeDiagnostics(value => !value) }}
               />
               <GraphView
                 run={selectedRun}
@@ -174,12 +181,28 @@ function RunList(props: {
   selectedRunId?: string | undefined
   onSelect: (runId: string) => void
   generatedAt?: string | undefined
+  diagnosticRunCount: number
+  diagnosticsIncluded: boolean
+  onToggleDiagnostics: () => void
 }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   return <div className="dshDesktopOrchestrationColumn dshDesktopOrchestrationRuns">
     <h3>编排任务</h3>
     {props.generatedAt !== undefined && <small>本机时区 {timeZone}</small>}
-    {props.runs.length === 0 && <p className="dshDesktopOrchestrationEmpty">还没有持久化 TaskGraph。</p>}
+    {props.diagnosticRunCount > 0 && <button
+      type="button"
+      className="dshDesktopOrchestrationDiagnosticToggle"
+      onClick={props.onToggleDiagnostics}
+    >
+      {props.diagnosticsIncluded
+        ? `隐藏验收记录 (${String(props.diagnosticRunCount)})`
+        : `显示验收记录 (${String(props.diagnosticRunCount)})`}
+    </button>}
+    {props.runs.length === 0 && <p className="dshDesktopOrchestrationEmpty">
+      {props.diagnosticRunCount > 0 && !props.diagnosticsIncluded
+        ? `没有用户任务；${String(props.diagnosticRunCount)} 条验收记录已隐藏。`
+        : '还没有持久化 TaskGraph。'}
+    </p>}
     {props.runs.map(run => {
       const time = formatResidentTimestamp(run.updatedAt, props.generatedAt ?? run.updatedAt, timeZone)
       return <button
@@ -191,7 +214,7 @@ function RunList(props: {
         onClick={() => { props.onSelect(run.runId) }}
       >
         <span className="dshDesktopOrchestrationDot" />
-        <span><strong>{run.title}</strong><small>{run.workspace}</small><small>{time.relative}</small></span>
+        <span><strong>{run.title}{run.diagnostic === true && <b className="dshDesktopOrchestrationDiagnosticBadge">验收</b>}</strong><small>{run.workspace}</small><small>{time.relative}</small></span>
         <em>{runStateLabel(run.state)}</em>
       </button>
     })}
@@ -378,7 +401,25 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
   if (event.type === 'node.dispatched') {
     return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.contextIsolation ?? 'N/A')} · lane ${shortRef(String(event.data.laneId ?? 'N/A'))}`
   }
+  if (event.type === 'node.operator.progress') {
+    return `${String(event.data.operatorId ?? 'N/A')} · ${operatorProgressLabel(String(event.data.phase ?? 'unknown'))}`
+  }
+  if (event.type === 'node.evidence.accepted' || (event.type === 'node.failed' && typeof event.data.outputPreview === 'string')) {
+    const output = String(event.data.outputPreview ?? '')
+    const truncated = event.data.outputTruncated === true ? '\n…输出已截断，完整结果保留在 Evidence 产物中。' : ''
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.stopReason ?? 'N/A')} · Evidence ${shortRef(String(event.data.evidenceRef ?? 'N/A'))}\n${output}${truncated}`
+  }
   return ''
+}
+
+function operatorProgressLabel(phase: string): string {
+  return ({
+    connecting: '正在连接原生产品',
+    session_ready: '原生会话已接通',
+    reasoning: '正在推理与执行',
+    tool_activity: '正在使用工具',
+    finalizing: '正在整理结果',
+  } as Record<string, string>)[phase] ?? '正在执行'
 }
 
 function control(
@@ -427,7 +468,8 @@ function eventLabel(type: string): string {
   return ({
     'intent.compiled': 'Intent 已编译', 'graph.compiled': 'Graph 已认证', 'capsule.resolved': 'Capsule 已解析',
     'context.compiled': 'Context 已编译', 'execution_plan.sealed': 'ExecutionPlan 已封存',
-    'node.dispatched': '已派发 Resident 算子', 'node.evidence.accepted': 'Evidence 已验收',
+    'node.dispatched': '已派发 Resident 算子', 'node.operator.progress': 'Resident 执行进度',
+    'node.evidence.accepted': 'Evidence 已验收',
     'node.failed': '节点失败', 'node.retry_scheduled': '已安排重试', 'run.completed': '任务已完成',
     'capability_update.proposed': '能力更新已提出', 'capability_update.applied': '能力更新已应用',
     'scheduler.waiting.updated': '调度等待已更新',

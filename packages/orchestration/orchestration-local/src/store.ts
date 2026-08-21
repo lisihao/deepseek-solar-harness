@@ -220,6 +220,17 @@ export class OrchestrationStore {
   }
 
   /**
+   * Append observation-only events without rewriting a concurrently advancing Run snapshot.
+   * @param events - observation events to append.
+   */
+  appendEvents(events: readonly Omit<OrchestrationEvent, 'sequence'>[]): void {
+    if (events.length === 0) return
+    this.transaction(() => {
+      for (const event of events) this.insertEvent(event)
+    })
+  }
+
+  /**
    * Read daemon-private continuation state.
    * @param runId - durable run identity.
    * @returns daemon-private continuation state.
