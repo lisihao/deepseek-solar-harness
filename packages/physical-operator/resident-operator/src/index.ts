@@ -128,6 +128,8 @@ export interface ResidentProviderStatus {
   readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
   readonly available: boolean
   readonly unavailableReason?: string
+  /** Non-fatal quota telemetry failure; execution remains available with unknown allowance. */
+  readonly quotaUnavailableReason?: string
   readonly authentication: 'native-subscription' | 'unqualified'
   readonly productVersion: string
   readonly protocolHash: string

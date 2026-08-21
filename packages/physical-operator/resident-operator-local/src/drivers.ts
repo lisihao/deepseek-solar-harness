@@ -155,9 +155,32 @@ function codexQuotaPool(
   }
 }
 
+export async function collectCodexModelsAndQuota(
+  listModels: () => Promise<readonly CodexAppServerModel[]>,
+  readRateLimits: () => Promise<readonly CodexAppServerRateLimit[]>,
+  observedAt = new Date().toISOString(),
+): Promise<{
+  readonly models: ResidentModelOption[]
+  readonly quotaPools: ResidentQuotaPool[]
+  readonly quotaUnavailableReason?: string
+}> {
+  const models = (await listModels()).map(codexModelOption)
+  try {
+    const limits = await readRateLimits()
+    return { models, quotaPools: limits.map(limit => codexQuotaPool(limit, models, observedAt)) }
+  } catch (error) {
+    return {
+      models,
+      quotaPools: [],
+      quotaUnavailableReason: `Codex subscription quota telemetry unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+}
+
 async function codexModelsAndQuota(): Promise<{
   readonly models: ResidentModelOption[]
   readonly quotaPools: ResidentQuotaPool[]
+  readonly quotaUnavailableReason?: string
 }> {
   const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
   if (!existsSync(socketPath)) throw new Error('Codex app-server control socket is unavailable')
@@ -167,10 +190,10 @@ async function codexModelsAndQuota(): Promise<{
   try {
     wire.start()
     await wire.initialize(signal)
-    const models = (await wire.listModels(signal)).map(codexModelOption)
-    const observedAt = new Date().toISOString()
-    const limits = await wire.readRateLimits(signal)
-    return { models, quotaPools: limits.map(limit => codexQuotaPool(limit, models, observedAt)) }
+    return await collectCodexModelsAndQuota(
+      () => wire.listModels(signal),
+      () => wire.readRateLimits(signal),
+    )
   } finally {
     wire.close()
     stream.destroy()
@@ -401,9 +424,9 @@ export class CodexResidentDriver implements ResidentProductDriver {
       const transportReady = transportError === undefined
       const catalog = transportReady ? await codexModelsAndQuota().catch((error: unknown) => {
         transportError = error
-        return { models: [], quotaPools: [] }
-      }) : { models: [], quotaPools: [] }
-      const { models, quotaPools } = catalog
+        return { models: [], quotaPools: [], quotaUnavailableReason: undefined }
+      }) : { models: [], quotaPools: [], quotaUnavailableReason: undefined }
+      const { models, quotaPools, quotaUnavailableReason } = catalog
       const available = subscription && exactVersion && exactSchema && transportReady && models.length > 0
       return {
         operatorId: this.operatorId,
@@ -430,6 +453,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
         protocolHash: schemaHash,
         models,
         quotaPools,
+        ...quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason },
       }
     } catch (error) {
       return unavailable(this.operatorId, error)

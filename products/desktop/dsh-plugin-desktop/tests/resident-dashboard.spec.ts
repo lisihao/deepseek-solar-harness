@@ -28,6 +28,7 @@ describe('Resident Operator Desktop projection', () => {
         maxConcurrency: 4,
         injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
         available: true,
+        quotaUnavailableReason: 'Codex subscription quota telemetry unavailable: test outage',
         authentication: 'native-subscription' as const,
         productVersion: '0.147.0',
         protocolHash: 'schema',
@@ -79,6 +80,7 @@ describe('Resident Operator Desktop projection', () => {
       operatorId: 'codex',
       available: true,
       displayName: 'Codex',
+      quotaUnavailableReason: 'Codex subscription quota telemetry unavailable: test outage',
       models: [expect.objectContaining({ model: 'gpt-5.6-sol', defaultEffort: 'medium' })],
     })])
     expect(dashboard.sessions).toEqual([expect.objectContaining({

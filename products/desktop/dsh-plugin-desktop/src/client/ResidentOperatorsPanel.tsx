@@ -127,6 +127,7 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
                       <div>
                         <strong>{provider.displayName}</strong>
                         <small>{provider.productVersion} · {String(provider.models.length)} 个模型</small>
+                        {provider.quotaUnavailableReason !== undefined && <small>配额状态暂不可用，执行仍可继续</small>}
                       </div>
                       <em>{provider.available ? '订阅可用' : '不可用'}</em>
                     </div>

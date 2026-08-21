@@ -3,7 +3,19 @@ import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
   claudeEnvironment,
   claudeResultFailure,
+  collectCodexModelsAndQuota,
 } from '../src/drivers.ts'
+
+const model = {
+  id: 'sol',
+  model: 'gpt-5.6-sol',
+  displayName: 'Sol',
+  description: 'Frontier coding model',
+  hidden: false,
+  isDefault: true,
+  defaultReasoningEffort: 'medium',
+  supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
+} as const
 
 describe('Claude Code resident driver environment', () => {
   it('uses the macOS system CA store without changing the parent environment', () => {
@@ -43,5 +55,36 @@ describe('Claude Code resident terminal failures', () => {
     expect(claudeResultFailure({
       type: 'result', subtype: 'success', is_error: false, result: 'ok',
     } as SDKResultMessage)).toBeUndefined()
+  })
+})
+
+describe('Codex Resident catalog qualification', () => {
+  it('keeps execution qualified when only quota telemetry is unavailable', async () => {
+    const result = await collectCodexModelsAndQuota(
+      async () => [model],
+      async () => { throw new Error('usage endpoint unavailable') },
+      '2026-08-22T00:00:00.000Z',
+    )
+
+    expect(result.models).toEqual([expect.objectContaining({ model: 'gpt-5.6-sol', isDefault: true })])
+    expect(result.quotaPools).toEqual([])
+    expect(result.quotaUnavailableReason).toContain('usage endpoint unavailable')
+  })
+
+  it('maps independently metered standard and Spark pools when telemetry is available', async () => {
+    const result = await collectCodexModelsAndQuota(
+      async () => [model, { ...model, id: 'spark', model: 'gpt-5.3-codex-spark', displayName: 'Spark' }],
+      async () => [
+        { limitId: 'codex', primary: { usedPercent: 20 } },
+        { limitId: 'codex_bengalfox', limitName: 'Spark', primary: { usedPercent: 10 } },
+      ],
+      '2026-08-22T00:00:00.000Z',
+    )
+
+    expect(result.quotaUnavailableReason).toBeUndefined()
+    expect(result.quotaPools).toEqual([
+      expect.objectContaining({ poolId: 'codex', models: ['gpt-5.6-sol'] }),
+      expect.objectContaining({ poolId: 'codex_bengalfox', models: ['gpt-5.3-codex-spark'] }),
+    ])
   })
 })

@@ -64,7 +64,7 @@ describe('native product runtime', () => {
     expect(environment.PATH).toBe('/usr/bin:/bin')
   })
 
-  it('prefers an inherited absolute command and leaves unsupported platforms unchanged', () => {
+  it('prefers a user-owned product command over an inherited legacy command', () => {
     const root = temporaryRoot()
     const inherited = join(root, 'inherited')
     const homeDir = join(root, 'home')
@@ -78,7 +78,14 @@ describe('native product runtime', () => {
       homeDir,
       environment: { PATH: `${inherited}:relative:` },
     })
-    expect(resolved.codex).toBe(inheritedCodex)
+    expect(resolved.codex).toBe(standardCodex)
+
+    rmSync(standardCodex)
+    expect(resolveNativeProductCommands({
+      platform: 'darwin',
+      homeDir,
+      environment: { PATH: `${inherited}:relative:` },
+    }).codex).toBe(inheritedCodex)
 
     const environment = { PATH: '/windows/path' }
     const installed = installNativeProductRuntime({
