@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "2.9.4",
+  "version": "2.9.6",
   "private": true,
   "description": "DSH Desktop product workspace",
   "license": "MIT",
@@ -94,6 +94,7 @@
     "package:dir": "yarn workspace dsh-plugin-desktop package:dir",
     "dist:mac": "yarn workspace dsh-plugin-desktop dist:mac",
     "dist:win": "yarn workspace dsh-plugin-desktop dist:win",
+    "verify:orchestration-e2e": "yarn workspace dsh-plugin-desktop verify:orchestration-e2e",
     "solar:version": "cd ../.. && corepack pnpm --version",
     "solar:install": "cd ../.. && corepack pnpm install --frozen-lockfile",
     "solar:build": "cd ../.. && corepack pnpm run build"

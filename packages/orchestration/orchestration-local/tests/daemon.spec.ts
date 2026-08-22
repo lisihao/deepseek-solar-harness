@@ -1,4 +1,6 @@
+import { once } from 'node:events'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -181,6 +183,20 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('closes accepted control sockets before shutdown settles', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-close-'))
+    const root = join(home, 'orchestrations')
+    const daemon = createDaemon(root, home, new FakeResidentClient(), 10)
+    await daemon.start()
+    const socket = createConnection(daemon.socketPath)
+    await once(socket, 'connect')
+
+    await daemon.close()
+
+    expect(socket.destroyed).toBe(true)
+    await rm(home, { recursive: true, force: true })
+  })
+
   it('classifies an older daemon build as a version mismatch', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-upgrade-'))
     const root = join(home, 'orchestrations')

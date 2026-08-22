@@ -307,6 +307,7 @@ function NodeCard(props: {
       <span>Attempt {String(node.attempt)}</span>
       <span>Generation {String(node.capabilityGeneration)}</span>
       <span>RLM {node.rlm ?? 'auto'}</span>
+      <span>模型层级 {modelTierLabel(node.modelTier)}</span>
       <span>{node.modelSource === 'native-subscription' ? '订阅' : node.modelSource === 'metered-api' ? 'API 计费' : '来源待解析'} · {node.quotaPoolId ?? '配额池 N/A'}</span>
       <span>Evidence {String(node.evidenceRefs.length)}</span>
     </div>
@@ -400,7 +401,7 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
     return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
   }
   if (event.type === 'model.allocated') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${String(event.data.source ?? 'N/A')} · 配额池 ${String(event.data.quotaPoolId ?? 'N/A')}`
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${modelTierLabel(event.data.tier)} · ${String(event.data.source ?? 'N/A')} · 配额池 ${String(event.data.quotaPoolId ?? 'N/A')}`
   }
   if (event.type === 'harness.snapshot') {
     return `${String(event.data.scope ?? 'N/A')} · generation ${String(event.data.generation ?? 'N/A')} · ${String(event.data.entryCount ?? 0)} 条`
@@ -422,7 +423,25 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
     const truncated = event.data.outputTruncated === true ? '\n…输出已截断，完整结果保留在 Evidence 产物中。' : ''
     return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.stopReason ?? 'N/A')} · Evidence ${shortRef(String(event.data.evidenceRef ?? 'N/A'))}\n${output}${truncated}`
   }
+  if (event.type === 'scheduler.waiting.updated') {
+    const waiting = Array.isArray(event.data.waiting)
+      ? event.data.waiting.flatMap((entry) => {
+        if (entry === null || typeof entry !== 'object') return []
+        const value = entry as { nodeId?: unknown; code?: unknown }
+        return typeof value.nodeId === 'string' && typeof value.code === 'string'
+          ? [`${value.nodeId}：${waitReasonLabel(value.code)}`]
+          : []
+      })
+      : []
+    return waiting.length > 0
+      ? waiting.join('；')
+      : `运行中 ${String(event.data.activeWorkers ?? 0)}/${String(event.data.maxParallel ?? 'N/A')}`
+  }
   return ''
+}
+
+function modelTierLabel(value: unknown): string {
+  return ({ low: '低阶', medium: '中阶', high: '高阶' } as Record<string, string>)[String(value)] ?? '待解析'
 }
 
 function operatorProgressLabel(phase: string): string {

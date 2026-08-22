@@ -99,6 +99,7 @@
     "verify-node-next-types": "tsx scripts/verify-node-next-types.ts",
     "verify-runtime-closure": "tsx scripts/verify-runtime-closure.ts",
     "verify-vendored-links": "tsx scripts/verify-vendored-links.ts",
+    "verify-desktop-vendor-build": "tsx scripts/verify-desktop-vendor-build.ts",
     "verify-cordis-config": "tsx scripts/verify-cordis-config.ts",
     "rescope-vendor": "tsx scripts/rescope-vendor.ts",
     "rescope-vendor:check": "tsx scripts/rescope-vendor.ts --check",

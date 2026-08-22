@@ -315,6 +315,21 @@ export function claudeResultFailure(result: SDKResultMessage): ResidentOperatorE
   return new ResidentOperatorError(`Claude Code returned an error result: ${detail}`, 'INVALID_RESULT')
 }
 
+/**
+ * Convert Codex transport and terminal failures into the stable Resident taxonomy.
+ * @param error - product protocol or terminal failure.
+ * @returns a retryable runtime failure for transient transport loss, otherwise an invalid result.
+ */
+export function codexExecutionFailure(error: unknown): ResidentOperatorError {
+  if (error instanceof ResidentOperatorError) return error
+  const message = error instanceof Error ? error.message : String(error)
+  const unavailable = /stream disconnected before completion/iu.test(message)
+    || /error sending request for url/iu.test(message)
+    || /app-server protocol stream closed/iu.test(message)
+    || /\b(?:ECONNRESET|ETIMEDOUT|EPIPE)\b/iu.test(message)
+  return new ResidentOperatorError(message, unavailable ? 'RUNTIME_UNAVAILABLE' : 'INVALID_RESULT')
+}
+
 /** Claude Code Agent SDK Driver using persisted native subscription Sessions. */
 export class ClaudeCodeResidentDriver implements ResidentProductDriver {
   readonly operatorId = 'claude-code' as const
@@ -561,14 +576,14 @@ export class CodexResidentDriver implements ResidentProductDriver {
       request.onProgress('reasoning')
       const result = await wire.runTurn(texts, request.signal, (turnId) => {
         request.onRunning(threadId, turnId)
-      }, request.profile).catch((error: unknown) => {
-        if (error instanceof CodexApprovalRequiredError) {
-          throw new ResidentOperatorError(error.message, 'APPROVAL_REQUIRED')
-        }
-        throw error
-      })
+      }, request.profile)
       request.onProgress('finalizing')
       return { ...result, nativeSessionId: threadId }
+    } catch (error) {
+      if (error instanceof CodexApprovalRequiredError) {
+        throw new ResidentOperatorError(error.message, 'APPROVAL_REQUIRED')
+      }
+      throw codexExecutionFailure(error)
     } finally {
       request.signal.removeEventListener('abort', abort)
       wire.close()

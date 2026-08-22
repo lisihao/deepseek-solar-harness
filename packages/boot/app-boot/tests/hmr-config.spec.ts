@@ -131,7 +131,9 @@ describe('HMR exact config paths', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-config-'))
     const filename = join(dir, 'plugins.yml')
     writeFileSync(filename, 'one')
-    const ctx = await bootHmr(dir)
+    // Other cases in this file own native event delivery. Poll here so this
+    // case tests refresh serialization and disposal draining deterministically.
+    const ctx = await bootHmr(dir, [], true)
     const started = Promise.withResolvers<undefined>()
     const release = Promise.withResolvers<undefined>()
     const observed: string[] = []

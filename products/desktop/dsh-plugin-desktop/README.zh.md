@@ -161,6 +161,8 @@ Release operator 必须先发布两个平台产物，再让版本可被发现。
 
 `yarn package:dir` 为当前宿主平台创建未封装目录。如果应用归档缺少 desktop 更新与终端模块、DSH CLI bootstrap、内置 pnpm 入口、Resident/AgentTeams runtime package、Code-as-Harness 治理、修复后的 Anchored Standard preset 或物理 deployment package，packaged-runtime gate 会拒绝该产物。Electron Builder 会把根 manifest、desktop runtime 与完整依赖树输出到 `app.asar.unpacked`；Host profile boot 与 CLI bootstrap 都会使用这棵物理树，因此 DSH profile fallback 的符号链接不会指向虚拟 ASAR 目录。`verify:vendor` 会在打包前拒绝过期的已安装 file dependency，`verify:composition-package` 会从打包后的 Electron 目录组合这些产品输入，`verify:resident-package` 会从打包 daemon 审查原生订阅 Provider，`verify:resident-execution` 则会显式执行无工具的真实产品 turn。`build/app-icon.png` 保持为未经修改的 iOS Default 源图，并继续作为 Windows 与 Linux 应用图标。构建过程会运行 `scripts/generate-mac-app-icon.mjs`，把该图缩放为 824 × 824 像素并居中放入透明的 1024 × 1024 画布；macOS 打包与运行中的 Dock 都使用生成的 `build/app-icon-mac.png`。`build/tray-icon.svg` 是品牌蓝托盘源文件：构建过程会派生由 macOS 系统自动着色的模板图，以及固定品牌蓝的 Windows 与 Linux 托盘图。
 
+`yarn verify:orchestration-e2e` 是持久化编排的安装态产品验收。它通过打包后的 daemon client 建立连接，只使用通过资格审查的 Claude Code 与 Codex 原生订阅；拒绝循环 Graph；执行质量、综合与成本分配；证明两个独立 DAG 叶节点并行重叠；证明冲突 scope 会串行且不发生死锁；封存并执行启用的节点级 RLM 计划；回忆一条先前的 Continuous Harness outcome；查询运行中 Host 的投影；并通过 CDP 打开真实 Desktop 工作台。该命令会在 `dist/acceptance/` 下写入 JSON 证据 Artifact；模块 mock 无法满足这道门禁。
+
 ### Windows x64 本地安装包
 
 请使用原生 Windows x64 电脑，并安装 Git 与 x64 Node `22.23.2`（与 CI 使用的版本相同）。打包命令接受官方发行版仍包含所需 Corepack 命令的 Node `22.19+` 与 Node `24.x`。在一个最新的 `v2` checkout 中打开 PowerShell，然后执行：

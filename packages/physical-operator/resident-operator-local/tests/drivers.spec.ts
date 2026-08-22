@@ -1,11 +1,12 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
   claudeEnvironment,
   claudeResultFailure,
+  codexExecutionFailure,
   collectCodexModelsAndQuota,
   resolveProductExecutable,
 } from '../src/drivers.ts'
@@ -40,8 +41,9 @@ describe('Claude Code resident driver environment', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-claude-cli-'))
     const preferred = join(root, 'preferred')
     const legacy = join(root, 'legacy')
-    const preferredClaude = join(preferred, 'claude')
-    const legacyClaude = join(legacy, 'claude')
+    const executableName = process.platform === 'win32' ? 'claude.CMD' : 'claude'
+    const preferredClaude = join(preferred, executableName)
+    const legacyClaude = join(legacy, executableName)
     try {
       mkdirSync(preferred)
       mkdirSync(legacy)
@@ -50,7 +52,7 @@ describe('Claude Code resident driver environment', () => {
       chmodSync(preferredClaude, 0o700)
       chmodSync(legacyClaude, 0o700)
 
-      expect(resolveProductExecutable('claude', { PATH: `${preferred}:${legacy}` }, 'darwin'))
+      expect(resolveProductExecutable('claude', { PATH: `${preferred}${delimiter}${legacy}` }))
         .toBe(preferredClaude)
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -84,6 +86,12 @@ describe('Claude Code resident terminal failures', () => {
 })
 
 describe('Codex Resident catalog qualification', () => {
+  it('classifies a disconnected response stream as retryable runtime unavailability', () => {
+    expect(codexExecutionFailure(new Error(
+      'subagent-codex: Codex turn ended with status failed: {"message":"stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)"}',
+    ))).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+  })
+
   it('keeps execution qualified when only quota telemetry is unavailable', async () => {
     const result = await collectCodexModelsAndQuota(
       async () => [model],

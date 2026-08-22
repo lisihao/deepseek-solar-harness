@@ -13,6 +13,7 @@ import type {
   ContinualHarnessMode,
   ModelAllocationObjective,
   ModelAllocationPlan,
+  ModelExecutionOffer,
   ModelTaskPhase,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation'
@@ -226,6 +227,8 @@ export interface OrchestrationNodeSnapshot {
   readonly operatorId?: string
   readonly operatorProfile?: PhysicalOperatorExecutionPreference
   readonly model?: string
+  /** Allocator tier retained so the completed run remains explainable. */
+  readonly modelTier?: ModelExecutionOffer['tier']
   readonly modelSource?: 'native-subscription' | 'metered-api'
   readonly quotaPoolId?: string
   readonly rlm?: RlmExecutionMode
