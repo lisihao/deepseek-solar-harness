@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { delimiter, extname, isAbsolute, join, resolve } from 'node:path'
+import { extname, isAbsolute, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import {
   query as claudeQuery,
@@ -99,7 +99,7 @@ export function resolveProductExecutable(
     : ['']
   const candidates = absolute
     ? [command]
-    : (environmentValue(environment, 'PATH') ?? '').split(delimiter).flatMap(directory =>
+    : (environmentValue(environment, 'PATH') ?? '').split(platform === 'win32' ? ';' : ':').flatMap(directory =>
       extensions.map(extension => resolve(process.cwd(), directory, command + extension)))
   for (const candidate of candidates) {
     try {
