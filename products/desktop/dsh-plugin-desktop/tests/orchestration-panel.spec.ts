@@ -81,12 +81,26 @@ describe('orchestration Desktop panel transport', () => {
     expect(eventDetail({
       sequence: 4,
       runId: 'run-1',
+      type: 'model.allocated',
+      time: '2026-08-20T00:00:02.000Z',
+      data: { operatorId: 'codex', model: 'gpt-5.6-luna', tier: 'low', source: 'native-subscription', quotaPoolId: 'codex-standard' },
+    })).toBe('codex · gpt-5.6-luna · 低阶 · native-subscription · 配额池 codex-standard')
+    expect(eventDetail({
+      sequence: 5,
+      runId: 'run-1',
+      type: 'scheduler.waiting.updated',
+      time: '2026-08-20T00:00:02.000Z',
+      data: { activeWorkers: 1, maxParallel: 2, waiting: [{ nodeId: 'review', code: 'SCOPE_CONFLICT' }] },
+    })).toBe('review：读写或 effect 冲突，串行执行')
+    expect(eventDetail({
+      sequence: 6,
+      runId: 'run-1',
       type: 'node.operator.progress',
       time: '2026-08-20T00:00:03.000Z',
       data: { operatorId: 'claude-code', phase: 'tool_activity' },
     })).toBe('claude-code · 正在使用工具')
     expect(eventDetail({
-      sequence: 5,
+      sequence: 7,
       runId: 'run-1',
       type: 'node.evidence.accepted',
       time: '2026-08-20T00:00:04.000Z',

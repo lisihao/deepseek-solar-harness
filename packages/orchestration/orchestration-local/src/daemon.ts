@@ -771,6 +771,10 @@ export class OrchestrationDaemon {
       this.store.saveRun(record, [event(record.snapshot.runId, 'scheduler.waiting.updated', {
         activeWorkers: liveNodes.length,
         maxParallel: record.graph.maxParallel,
+        waiting: scheduledNodes.flatMap(node => node.waitReason === undefined ? [] : [{
+          nodeId: node.id,
+          code: node.waitReason.code,
+        }]),
       })])
     }
     // Preparation writes the shared Run projection. Seal and accept each selected
@@ -924,7 +928,7 @@ export class OrchestrationDaemon {
       ref: String(allocationPlanRef), runId, nodeId, attempt, generation: node.capabilityGeneration,
     })
     this.store.saveRun(record, [event(record.snapshot.runId, 'model.allocated', {
-      ref: String(allocationPlanRef), operatorId, model: allocation.model, source: allocation.source,
+      ref: String(allocationPlanRef), operatorId, model: allocation.model, tier: allocation.tier, source: allocation.source,
       quotaPoolId: allocation.quotaPoolId ?? null,
       suggestedParallelism: allocation.suggestedParallelism,
       rationale: allocation.rationale,
@@ -972,6 +976,7 @@ export class OrchestrationDaemon {
       operatorId,
       ...allocation.profile === undefined ? {} : { operatorProfile: allocation.profile },
       model: allocation.model,
+      modelTier: allocation.tier,
       modelSource: allocation.source,
       ...allocation.quotaPoolId === undefined ? {} : { quotaPoolId: allocation.quotaPoolId },
       rlm: rlmPlan.enabled ? 'enabled' as const : 'disabled' as const,

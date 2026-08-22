@@ -42,6 +42,7 @@ export interface DesktopOrchestrationNode {
   operatorId?: string
   operatorProfile?: { model?: string; effort?: string }
   model?: string
+  modelTier?: 'low' | 'medium' | 'high'
   modelSource?: 'native-subscription' | 'metered-api'
   quotaPoolId?: string
   rlm?: 'auto' | 'enabled' | 'disabled'
