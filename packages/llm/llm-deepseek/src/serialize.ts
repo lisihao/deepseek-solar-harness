@@ -6,7 +6,7 @@
  * @module dsh-llm-deepseek/serialize
  */
 
-import { contentHasImage, LlmError } from '@deepseek-ai/dsh-llm'
+import { contentHasImage, LlmError, offloadRequestImages } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
 import { AttachmentError } from '@deepseek-ai/dsh-attachment'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
@@ -40,69 +40,6 @@ export interface ImageSerializationOptions {
 }
 
 const TOOL_RESULT_IMAGE_TEXT = 'Attached image(s) from tool result:'
-const OFFLOADED_IMAGE_TEXT
-  = '[image omitted to keep the request within its image limit; older images are omitted first. If this image is still needed, read its file again when a path is available; otherwise ask the user to attach it again.]'
-
-function base64Length(bytes: number): number {
-  return Math.ceil(bytes / 3) * 4
-}
-
-function collectImageLengths(blocks: readonly ContentBlock[], lengths: number[]): void {
-  for (const block of blocks) {
-    if (block.type === 'image') {
-      lengths.push(base64Length(block.attachment.bytes))
-    } else if (block.type === 'tool-result') {
-      collectImageLengths(block.content, lengths)
-    }
-  }
-}
-
-function replaceOldestImages(
-  blocks: readonly ContentBlock[],
-  remaining: { count: number },
-): ContentBlock[] {
-  let next: ContentBlock[] | undefined
-  for (const [index, block] of blocks.entries()) {
-    if (block.type === 'image' && remaining.count > 0) {
-      remaining.count -= 1
-      next ??= blocks.slice(0, index)
-      next.push({ type: 'text', text: OFFLOADED_IMAGE_TEXT })
-      continue
-    }
-    if (block.type === 'tool-result') {
-      const content = replaceOldestImages(block.content, remaining)
-      if (content !== block.content) {
-        next ??= blocks.slice(0, index)
-        next.push({ ...block, content })
-        continue
-      }
-    }
-    next?.push(block)
-  }
-  return next ?? blocks as ContentBlock[]
-}
-
-/** Keep image request bounding local so this provider remains compatible with Desktop's rc.6 LLM seam. */
-function offloadRequestImages(
-  messages: readonly Message[],
-  maxRequestImageBytes: number,
-): readonly Message[] {
-  const lengths: number[] = []
-  for (const message of messages) collectImageLengths(message.content, lengths)
-  let total = lengths.reduce((sum, bytes) => sum + bytes, 0)
-  let count = 0
-  for (const bytes of lengths) {
-    if (total <= maxRequestImageBytes) break
-    total -= bytes
-    count += 1
-  }
-  if (count === 0) return messages
-  const remaining = { count }
-  return messages.map((message) => {
-    const content = replaceOldestImages(message.content, remaining)
-    return content === message.content ? message : { ...message, content }
-  })
-}
 
 /** Validate the adapter-owned effort before resolving its DeepSeek wire fields. */
 function reasoningEffort(effort: NonNullable<GenerateOptions['reasoningEffort']>): 'off' | 'high' | 'max' {
@@ -211,9 +148,9 @@ async function contentParts(
 
 /** Keep text-only user messages on the compact string wire form. */
 function userContent(parts: readonly WireUserContentPart[]): string | WireUserContentPart[] {
-  return parts.some(part => part.type === 'image_url')
-    ? [...parts]
-    : parts.map(part => part.type === 'text' ? part.text : '').join('')
+  if (parts.some(part => part.type === 'image_url')) return [...parts]
+  const textParts = parts as readonly Extract<WireUserContentPart, { type: 'text' }>[]
+  return textParts.map(part => part.text).join('')
 }
 
 /** Serialize one assistant message (text + reasoning + tool calls). */

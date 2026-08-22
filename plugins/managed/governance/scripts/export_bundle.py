@@ -67,7 +67,8 @@ def export_bundle(
         shutil.copy2(source, target)
         target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         installed.append(target)
-    shutil.copy2(profile, profile_target)
+    if profile != profile_target:
+        shutil.copy2(profile, profile_target)
     installed.append(profile_target)
 
     manifest = {

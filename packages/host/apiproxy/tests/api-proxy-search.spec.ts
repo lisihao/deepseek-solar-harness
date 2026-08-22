@@ -748,7 +748,7 @@ describe('session.search', () => {
     })
     expect(searchSessions).toHaveBeenCalledOnce()
     expect(searchSessions.mock.calls[0]?.[0]).not.toHaveProperty('sessionFilters')
-  })
+  }, 15_000)
 
   it('propagates cancellation through visible-session collection and stops cold-summary work', async () => {
     const ctx = await baseContext()

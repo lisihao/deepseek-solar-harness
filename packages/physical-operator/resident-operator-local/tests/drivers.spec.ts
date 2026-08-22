@@ -65,18 +65,24 @@ describe('Claude Code resident driver environment', () => {
     const preferred = join(root, 'preferred')
     const legacy = join(root, 'legacy')
     const executableName = process.platform === 'win32' ? 'claude.CMD' : 'claude'
+    const executable = process.platform === 'win32' ? '@exit /b 0\r\n' : '#!/bin/sh\nexit 0\n'
     const preferredClaude = join(preferred, executableName)
     const legacyClaude = join(legacy, executableName)
     try {
       mkdirSync(preferred)
       mkdirSync(legacy)
-      writeFileSync(preferredClaude, '#!/bin/sh\nexit 0\n')
-      writeFileSync(legacyClaude, '#!/bin/sh\nexit 0\n')
+      writeFileSync(preferredClaude, executable)
+      writeFileSync(legacyClaude, executable)
       chmodSync(preferredClaude, 0o700)
       chmodSync(legacyClaude, 0o700)
 
-      expect(resolveProductExecutable('claude', { PATH: `${preferred}${delimiter}${legacy}` }))
-        .toBe(preferredClaude)
+      const resolved = resolveProductExecutable(
+        'claude',
+        { PATH: `${preferred}${delimiter}${legacy}` },
+        process.platform,
+      )
+      expect(process.platform === 'win32' ? resolved.toLowerCase() : resolved)
+        .toBe(process.platform === 'win32' ? preferredClaude.toLowerCase() : preferredClaude)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
