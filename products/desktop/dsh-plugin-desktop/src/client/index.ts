@@ -1,6 +1,7 @@
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type convergence only: locale/theme declarations expose settings slot rows.
 // The desktop client does not load or register a settings surface.
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -40,18 +41,18 @@ export function apply(ctx: ClientContext): void {
       removeStyles()
     }
   }, 'desktop: Solar product footer')
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+    name: 'conversation.session.header.actions',
     id: 'resident-physical-operators',
-    order: -900,
+    order: 70,
     label: 'Resident 物理算子',
-  }, props => ResidentOperatorsPanel(props)))
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
+  }, ResidentOperatorsPanel))
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+    name: 'conversation.session.header.actions',
     id: 'durable-orchestrations',
-    order: -850,
+    order: 80,
     label: '持久化任务编排',
-  }, props => OrchestrationsPanel(props)))
+  }, OrchestrationsPanel))
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right',
     id: 'physical-operator-routing',

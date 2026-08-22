@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "candidateDocs": [
+    "docs/current/README.md",
+    "docs/current/AEGIS_TARGET_STATE.md",
+    "docs/current/AEGIS_RUNTIME_READY_BOUNDARY.md"
+  ],
+  "whyRelevant": "These docs define the public current authority map, the target state, and the runtime-ready boundary.",
+  "missingAuthority": []
+}

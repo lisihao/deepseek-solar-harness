@@ -1,0 +1,817 @@
+# Aegis Known Limitations
+
+Status: `Reviewed`
+
+## 1. Document Scope
+
+This document records the current known limitations, compatibility fallbacks, retention reasons, and retirement triggers of the `Aegis Method Pack`.
+
+It only records limitations supported by current fresh evidence and does not speculate about the future.
+
+---
+
+## 2. Current Known Limitations
+
+### 2.1 Current Repository Is Not a Complete Platform
+
+**Retained Item**
+- The layered boundary between `Method Pack` and future `Host Adapters + Runtime Core`
+
+**Retention Reason**
+- The current repository's formal scope is `Aegis Method Pack (runtime-ready)`, not a full platform
+
+**Observation Metric**
+- Whether current docs still constrain outputs to `draft / hint / projection`
+
+**Retirement Trigger**
+- Only when a future complete platform is independently unfolded in a new approved plan does this enter the next layer; this is not about "deleting this limitation"
+
+---
+
+### 2.2 Real-Environment Regression Is Deferred
+
+**Retained Item**
+- Multi-host release-level fresh install regression
+- Real team task live sample verification
+
+**Retention Reason**
+- The current priority is method-pack strengthening and open-source preparation, not immediately declaring daily production rollout
+
+**Observation Metric**
+- Whether the release checklist and host compatibility snapshot still clearly distinguish method-pack readiness from production rollout readiness
+
+**Retirement Trigger**
+- When the user explicitly requests entry into production rollout preparation
+
+---
+
+### 2.3 OpenCode Config Fallback Is Still Retained
+
+**Retained Item**
+- OpenCode `config.skills.paths` compatibility fallback
+
+**Retention Reason**
+- The current canonical chain has already switched to the host's officially supported global skills path, but cross-version evidence that the fallback has zero compatibility value is still lacking
+- When `~/.config/aegis/config.toml` declares `method_pack_root`, the OpenCode
+  plugin now treats that configured checkout as the canonical Aegis source and
+  generates the OpenCode-visible skills tree from it; the host-visible skills
+  directory is still a compatibility view rather than a second editable owner,
+  and `config.skills.paths` remains only a fallback exposure layer
+
+**Observation Metric**
+- `bash tests/opencode/run-tests.sh --integration`
+- Real fresh install verification
+
+**Retirement Trigger**
+- When the target OpenCode version set has proven that the native global skills path is sufficiently stable
+
+---
+
+### 2.4 Current Host Snapshot Is Not a Full-Host Release Verdict
+
+**Retained Item**
+- Currently only `Codex` and `OpenCode` have fresh-evidence-driven mainline verdicts
+
+**Retention Reason**
+- Other hosts are currently outside the verification scope of this slice
+
+**Observation Metric**
+- Whether `AEGIS_HOST_COMPATIBILITY_MATRIX_SNAPSHOT.md` still clearly distinguishes "has fresh evidence" from "current verdict not yet formed"
+
+**Retirement Trigger**
+- When other hosts enter a separate approved slice and complete fresh closeout
+
+---
+
+### 2.5 Codex Smoke Under Git Bash: Latency and Stability Require Separate Observation
+
+**Retained Item**
+- Codex representative smoke under Git Bash / MSYS2 environment
+
+**Retention Reason**
+- It has been confirmed that the working-dir / cmd bridge issues under Git Bash can be converged, but representative Codex smoke may still exhibit:
+  - explicit skill requests may pass but take longer than expected
+  - naive prompt smoke is unstable within the current timeout window
+  - on some Windows Codex installations, the default workspace sandbox may
+    fail before routing when it cannot spawn the configured PowerShell process
+    (`CreateProcessAsUserW` access denied); an environment-controlled rerun can
+    distinguish that host failure from an Aegis trigger regression
+
+**Observation Metric**
+- `env AEGIS_TEST_CLI=codex bash tests/explicit-skill-requests/run-test.sh brainstorming ...`
+- `env AEGIS_TEST_CLI=codex bash tests/skill-triggering/run-test.sh brainstorming ...`
+- Bridge and parser behavior of `tests/helpers/codex-cli.sh`
+- Whether the same smoke reaches skill discovery with and without the failing
+  Windows sandbox boundary
+
+**Retirement Trigger**
+- When representative Codex smoke under Git Bash passes stably within the
+  current runner timeout window and the Windows sandbox can reliably spawn its
+  configured shell
+
+---
+
+### 2.6 INDEX.md Append Dependency on Workflow Steps
+
+**Retained Item**
+- The completeness of `docs/aegis/INDEX.md` still depends on workflows using the shared workspace helper or explicitly performing the append operation
+
+**Retention Reason**
+- `scripts/aegis-workspace.py` now provides lifecycle commands (`new-work`, `add-checkpoint`, `add-evidence`, `add-drift-check`, `bundle`) and `append-index`, and `check` detects unindexed markdown. A workflow that writes to `docs/aegis/` must still call the helper or manually append the entry
+
+**Observation Metric**
+- `bash tests/e2e/aegis-workspace-check.sh`
+- `bash tests/e2e/workspace-helper-wiring-check.sh`
+- During code review of new skills, check whether workspace helper usage or equivalent INDEX.md append logic is included
+
+**Retirement Trigger**
+- When all skills that write to docs/aegis/ invoke the shared workspace helper and verification-before-completion checks helper output for touched workspaces in real target-project usage
+
+---
+
+### 2.7 Lazy Workspace Support Depends on Correct Triggering
+
+**Retained Item**
+- Workspace records are created lazily, not for every Aegis-assisted turn
+
+**Retention Reason**
+- Normal Q&A, simple explanation, version/status checks, and low-risk small edits should not create project files. Baseline/spec/plan/work records are written only when the workflow needs persistent project evidence
+
+**Observation Metric**
+- `bash tests/e2e/project-bootstrap-policy-check.sh`
+- Actual hit rate of mid-stream escalation into baseline/spec/plan/work records
+
+**Retirement Trigger**
+- When a future runtime core can observe task state and trigger workspace support without relying on method-layer judgment
+
+---
+
+### 2.8 Project Baseline Bootstrap Depends on Sufficient Project Content
+
+**Retained Item**
+- Initial project baseline semantic quality depends on bounded repo scan results and sufficient project content
+
+**Retention Reason**
+- Aegis can index files, read key docs, infer owners/contracts, and create a structured baseline, but sparse repos or placeholder-only projects do not contain enough evidence for a useful baseline
+
+**Observation Metric**
+- Whether agents skip empty baselines when content is too sparse
+- Whether generated baseline snapshots cite concrete files and commands instead of generic guesses
+
+**Retirement Trigger**
+- When real target-project usage shows the bootstrap consistently creates useful baseline snapshots or correctly declines sparse projects
+
+---
+
+### 2.9 BASELINE-GOVERNANCE.md Template Depends on Correct Agent Execution
+
+**Retained Item**
+- The content quality of BASELINE-GOVERNANCE.md still depends on the agent or workflow choosing the correct target project and preserving project-specific review
+
+**Retention Reason**
+- `<aegis-workspace-helper> init` now writes the standard baseline governance template and `check` verifies required headings and boundary phrases, but it cannot judge whether a target project's later edits are semantically sufficient
+
+**Observation Metric**
+- `bash tests/e2e/aegis-workspace-check.sh`
+- Field fill rate and semantic usefulness in actually created BASELINE-GOVERNANCE.md files
+
+**Retirement Trigger**
+- When verification-before-completion consistently runs the helper check for touched workspaces and real target-project usage shows the generated template is semantically sufficient
+
+---
+
+### 2.10 Copy-Only or Skills-Only Installs Do Not Prove Complete Workspace Support
+
+**Retained Item**
+- Copy-only / skills-only install paths can prove skill discovery but may not prove complete project workspace support
+
+**Retention Reason**
+- Some hosts support only copying `skills/` into a native discovery directory. That keeps workflows usable, but the repo-local workspace support scripts may not be discoverable unless the method-pack root remains available or is configured
+
+**Observation Metric**
+- `cd <aegis-method-pack-root> && python scripts/aegis-doctor.py --write-config --json`
+- JSON readback includes `"workspaceSupport": "available"` and
+  `"configStatus": "configured"`
+- Host docs distinguish recommended complete install from compatibility fallback
+
+**Retirement Trigger**
+- When each supported host has a verified install path that preserves both skill discovery and project workspace support
+
+---
+
+### 2.11 Architecture Review: 7 Dimensions Partially Depend on Agent Qualitative Judgment
+
+**Retained Item**
+- Some dimensions among the 7 (especially Entropy flow, Cascade proliferation) depend on agent qualitative judgment and have no quantitative measurement tools
+
+**Retention Reason**
+- Quantitative architecture measurement requires specialized static analysis toolchains, currently beyond the method-pack scope
+
+**Observation Metric**
+- Consistency of qualitative judgments in actual architecture reviews; if contentious judgments appear frequently, quantitative baselines need to be introduced
+
+**Retirement Trigger**
+- When integrable quantitative architecture measurement tools become available
+
+---
+
+### 2.12 Host-Loaded Skill Freshness Depends on Install Chain
+
+**Retained Item**
+- A repository-local skill update does not prove the current AI coding host is
+  already loading that updated skill content
+
+**Retention Reason**
+- Some hosts scan skills at startup, use a copied skills directory, or resolve a
+  host-specific discovery path. Aegis can verify the method-pack checkout and
+  optional discovery root, but the host may still require restart/reload before
+  the updated hot path is active.
+
+**Observation Metric**
+- `cd <aegis-method-pack-root> && python scripts/aegis-update.py status --json`
+- `cd <aegis-method-pack-root> && python scripts/aegis-update.py update --host <host> --json`
+- `cd <aegis-method-pack-root> && python scripts/aegis-doctor.py --write-config --json`
+- `cd <aegis-method-pack-root> && python scripts/aegis-doctor.py --discovery-root <host-skill-discovery-root>`
+- Host-specific restart/reload plus skill discovery smoke where available
+
+For copy-based and direct-child link compatibility exposures, the current
+updater can refresh the direct-child skill directories from the canonical
+`skills/` tree, prune stale Aegis-managed exposure entries, and run the same
+discovery-root structural readback through `aegis-doctor.py`. This remains
+method-pack-side structural verification only; host restart/reload may still be
+required before the running host loads the refreshed content.
+
+When `~/.config/aegis/config.toml` declares `method_pack_root`, the shared
+updater now prefers that canonical root for new host registration defaults.
+Multiple registered hosts may therefore share one method-pack checkout while
+keeping different discovery roots, discovery shapes, reload hints, and
+host-managed adapter behaviors.
+
+When a host-scoped updater registration needs both transport and visibility
+semantics, keep them separate:
+
+- `syncMode` describes how Aegis reaches the host surface
+- `discoveryShape` describes what the host should see there, such as
+  `umbrella-root` or `direct-child`
+- `discoveryNamePrefix` describes an optional host-visible direct-child
+  directory name prefix, such as Copilot's repository skill view using
+  `aegis-<skill-name>/SKILL.md`
+
+Do not overload `syncMode` alone to carry transport, shape, and naming
+semantics.
+
+The update registry is host-scoped. Plain `aegis:update` should update the
+current host installation only; all-host updates require an explicit `--all`
+request.
+
+**Retirement Trigger**
+- When each supported host has a verified install/update path that proves both
+  skill discovery and current hot-path content after reload
+
+---
+
+### 2.13 Hot-Path Budget Requires Continuous Guardrails
+
+**Retained Item**
+- `using-aegis` must stay a compact router instead of becoming the container for
+  every Aegis workflow detail
+
+**Retention Reason**
+- Overloading the always-loaded entrypoint increases context pressure and can
+  reduce task quality. Detailed rules belong in task-specific skills or
+  references, not the hot path.
+
+**Observation Metric**
+- `bash tests/e2e/context-budget-check.sh`
+- `using-aegis` hot-path character count
+- Absence of helper command details and universal design/spec ceremony wording
+  in the hot path
+
+**Retirement Trigger**
+- This is an ongoing guardrail rather than a defect to delete; future runtime
+  support may replace the method-layer budget check with host/runtime telemetry.
+
+---
+
+### 2.14 ADR Auto Backfill Helper Exists, But Baseline Sync Still Depends On Workflow Judgment
+
+**Retained Item**
+- Helper-backed `new-adr`, `amend-adr`, and `supersede-adr` commands now exist,
+  but they only scaffold target-project `docs/aegis/adr/` records and validate
+  structure
+- The semantic decision to create, amend, supersede, or skip an ADR, plus the
+  truth of baseline sync closure, still depends on workflow judgment against the
+  current authority docs
+
+**Retention Reason**
+- The repository now has helper-backed ADR lifecycle commands, owner-surface
+  skill wiring, and e2e coverage, but those commands intentionally stop at
+  structural method-pack support. `recording-architecture-decisions` and
+  `verification-before-completion` still own ADR trigger judgment, owner-surface
+  choice, and baseline sync closure
+
+**Observation Metric**
+- `docs/current/AEGIS_ADR_AUTO_BACKFILL.md`
+- `bash tests/e2e/aegis-workspace-check.sh`
+- `bash tests/e2e/workspace-helper-wiring-check.sh`
+- `bash tests/e2e/workflow-quality-check.sh`
+- Review of actual completion notes for explicit ADR Backfill and Baseline Sync
+  closure when durable architecture surfaces changed
+
+**Retirement Trigger**
+- When real target-project usage shows helper-backed ADR writeback and baseline
+  sync closure happen reliably without stale docs, skipped routing, or
+  authority confusion
+
+---
+
+### 2.15 Antigravity CLI Is The Active Closeout Target, But Fresh Host Closeout Is Still Pending
+
+**Retained Item**
+- `Antigravity CLI` is the active Google-host closeout target, but still has no
+  fresh Aegis host closeout verdict
+- `Antigravity CLI` remains the active closeout target inside the current
+  Google-host slice
+- `Antigravity IDE` and `Antigravity App` remain structural target surfaces,
+  not release-level fresh smoke verdicts
+
+**Retention Reason**
+- Google positions Antigravity as the successor Google agent platform and
+  documents public capabilities such as Skills, MCP, JSON Hooks, plugins,
+  slash commands, subagents, and the `agy` executable. The public docs now show
+  `agy plugin list`, `agy plugin install /path/to/local/plugin`, and
+  `agy plugin import gemini`. The public Antigravity CLI `1.0.1` changelog says
+  plugin discovery for skills and agents from installed plugin directories
+  exists, and the public `1.0.8` changelog also says custom skills and system
+  slash commands reload dynamically on conversation switch or `/add-dir`.
+- Those signals make `Antigravity CLI` the best next closeout target, but the
+  stable local install / discovery contract for this Aegis method pack still
+  needs current release verification before Aegis can claim host closeout.
+
+**Observation Metric**
+- `docs/README.antigravity.md`
+- `bash tests/e2e/antigravity-host-boundary-check.sh`
+- `bash tests/antigravity/run-tests.sh`
+- `bash tests/antigravity/run-tests.sh --integration`
+- Future Antigravity CLI install smoke that proves skill discovery, restart or
+  reload behavior, and
+  `cd <aegis-method-pack-root> && python scripts/aegis-doctor.py --write-config --json`
+
+**Retirement Trigger**
+- When `Antigravity CLI` has a verified install/update path that proves both
+  skill discovery and project workspace support without turning Aegis into an
+  authoritative runtime core
+- `Antigravity IDE` and `Antigravity App` should retire or reclassify through
+  their own fresh evidence slices rather than piggybacking on CLI proof
+
+---
+
+### 2.16 Gemini CLI Support Is Retired
+
+**Retired Item**
+- The root `GEMINI.md`, `gemini-extension.json`, and Gemini-specific tool
+  mapping have been removed from the supported distribution surface
+
+**Retirement Reason**
+- Google announced on `2026-05-19` that consumer Gemini CLI and Gemini Code
+  Assist IDE extension usage is transitioning to Antigravity CLI and
+  Antigravity 2.0. On `2026-06-18`, requests stop being served for free usage,
+  Google AI Pro / Ultra, and Gemini Code Assist for individuals. Enterprise
+  Standard / Enterprise, Google Cloud-backed Gemini Code Assist for GitHub, and
+  paid Gemini / Gemini Enterprise Agent Platform API key paths remain outside
+  that consumer stop boundary.
+- Aegis has nevertheless chosen to stop carrying a separate Gemini CLI host
+  adapter and to focus new Google-host work on Antigravity surfaces.
+
+**Compatibility Impact**
+- Existing enterprise, Google Cloud, or paid API-key Gemini CLI users may still
+  be able to run Gemini CLI itself, but Aegis no longer publishes or verifies a
+  Gemini CLI install path for them.
+- This retirement does not establish a fresh Antigravity host closeout verdict.
+
+**Verification**
+- `docs/current/AEGIS_HOST_COMPATIBILITY_MATRIX_SNAPSHOT.md`
+- `docs/README.antigravity.md`
+- `bash tests/e2e/antigravity-host-boundary-check.sh`
+- Repository scans show no current Gemini adapter, manifest, or tool-map owner
+
+---
+
+### 2.17 OpenClaw and Hermes Agent Structural Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- OpenClaw and Hermes Agent are structural host targets, not release-level fresh
+  smoke verdicts
+
+**Retention Reason**
+- OpenClaw documents `openclaw skills install` for Git and local skill
+  directories whose source root contains `SKILL.md`. That supports Aegis
+  individual skill-directory installs, but not a canonical whole-repo
+  `git:GanyuanRan/Aegis` install because Aegis is a multi-skill method pack.
+- Hermes Agent exposes a Skills Hub, a documented `~/.hermes/skills/` local
+  skill path, GitHub path installs such as
+  `hermes skills install owner/repo/skills/my-workflow`, and built-in
+  coding-agent delegation skills. Aegis still needs current release live smoke
+  before claiming host closeout.
+
+**Observation Metric**
+- `docs/README.openclaw.md`
+- `docs/README.hermes-agent.md`
+- `bash tests/e2e/popular-agent-host-boundary-check.sh`
+- Future OpenClaw and Hermes Agent install smoke that proves skill discovery,
+  restart or reload behavior, and
+  `cd <aegis-method-pack-root> && python scripts/aegis-doctor.py --write-config --json`
+
+**Retirement Trigger**
+- When OpenClaw and Hermes Agent each have a verified install/update path that
+  proves both skill discovery and project workspace support without turning
+  Aegis into an authoritative runtime core
+
+---
+
+### 2.18 Pi CLI Structural Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- Pi CLI is a structural host target, not release-level fresh smoke verdict
+
+**Retention Reason**
+- Pi documents Agent Skills discovery from `~/.pi/agent/skills/`,
+  `~/.agents/skills/`, `.pi/skills/`, package `skills/` directories or
+  `pi.skills` entries in `package.json`, and explicit CLI skill paths.
+- Pi package management supports git package installs such as
+  `pi install git:github.com/GanyuanRan/Aegis`. Aegis now exposes `./skills`
+  through the repository root `package.json`, but a current Pi runtime smoke is
+  still required before claiming host closeout.
+
+**Observation Metric**
+- `docs/README.pi.md`
+- `bash tests/e2e/pi-host-boundary-check.sh`
+- Future Pi install smoke that proves `pi install git:github.com/GanyuanRan/Aegis`,
+  skill discovery after restart or `/reload`, and
+  `cd <aegis-method-pack-root> && python scripts/aegis-doctor.py --write-config --json`
+
+**Retirement Trigger**
+- When Pi CLI has a verified install/update path that proves both skill
+  discovery and project workspace support without turning Aegis into an
+  authoritative runtime core
+
+---
+
+### 2.19 OMP Structural Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- OMP (Oh My Pi) is a structural host target, not release-level fresh smoke
+  verdict
+
+**Retention Reason**
+- OMP is a fork of Pi that keeps Agent Skills discovery. Its `agents` provider
+  reads `~/.agents/skills/`, so the shared Aegis copy-based skill view is
+  visible to OMP without OMP-specific packaging.
+- OMP honors `alwaysApply: true` skill frontmatter (full content injected into
+  the system prompt), which Aegis now uses for `using-aegis`.
+- OMP auto-discovers extensions under `~/.omp/agent/extensions/` and accepts
+  `omp.extensions` / `pi.extensions` package manifests; Aegis ships an
+  `extensions/` bundle (`extensions/shared/` core + `extensions/omp/` adapter)
+  shared with the Pi extension.
+- A current OMP runtime smoke is still required before claiming host closeout.
+
+**Observation Metric**
+- `docs/README.omp.md`
+- `bash tests/e2e/omp-host-boundary-check.sh`
+- Future OMP install smoke that proves `~/.agents/skills/` discovery,
+  `alwaysApply` injection of `using-aegis`, and extension loading from
+  `~/.omp/agent/extensions/`
+
+**Retirement Trigger**
+- When OMP has a verified install path that proves both skill discovery and
+  `alwaysApply` / extension injection without turning Aegis into an
+  authoritative runtime core
+
+---
+
+### 2.20 CC GUI Structural Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- CC GUI is a structural JetBrains IDEA host target, not release-level fresh
+  smoke verdict
+
+**Retention Reason**
+- CC GUI wraps Claude Code and an OpenAI/GPT provider path behind an IDE plugin
+  UI. Its OpenAI/Codex provider skill scanner uses `.agents/skills/` style
+  roots and expects each direct child skill directory to contain `SKILL.md`.
+- Aegis is a multi-skill method pack. For CC GUI's OpenAI/GPT provider path,
+  expose individual skills as `~/.agents/skills/<skill-name>/SKILL.md` rather
+  than relying only on an umbrella `~/.agents/skills/aegis` directory.
+- When this direct-child exposure is needed, the method-pack `skills/` tree
+  remains the canonical source of truth. Any additional exposure under
+  `~/.agents/skills/` is a generated compatibility view, not a second editable
+  skill owner.
+- Selecting a specific GPT model profile inside CC GUI does not by itself
+  change this skill discovery shape.
+- User-visible entries such as `Tool: exec_command` are host adapter event
+  rendering / host adapter event normalization concerns. Aegis can reduce
+  unnecessary tool fan-out through workflow discipline, but it does not own CC
+  GUI's visual folding, grouping, suppression, or live IDE event model.
+
+**Observation Metric**
+- `docs/README.cc-gui.md`
+- `bash tests/e2e/cc-gui-host-boundary-check.sh`
+- Future CC GUI install smoke that proves direct skill discovery, restart or
+  reload behavior, OpenAI/GPT and Claude Code provider behavior where relevant,
+  and
+  `cd <aegis-method-pack-root> && python scripts/aegis-doctor.py --write-config --json`
+
+**Retirement Trigger**
+- When CC GUI has a verified install/update path that proves both skill
+  discovery and project workspace support, and when any IDE rendering claims
+  are backed by direct CC GUI evidence rather than Aegis method-pack tests
+  alone
+
+---
+
+### 2.21 GitHub Copilot Structural Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- GitHub Copilot is a structural host target, not a release-level fresh smoke
+  verdict
+
+**Retention Reason**
+- GitHub Copilot documents repository-scoped agent skills under
+  `.github/skills/`, repository custom instructions under
+  `.github/copilot-instructions.md`, repository hooks under
+  `.github/hooks/*.json`, and project guidance through `AGENTS.md`.
+- Those surfaces are enough for Aegis method-pack exposure, but current
+  release-level live host smoke is still required before claiming host
+  closeout.
+
+**Observation Metric**
+- `docs/README.copilot.md`
+- `bash tests/e2e/copilot-qoder-host-boundary-check.sh`
+- Future GitHub Copilot install smoke that proves skill discovery, repository
+  instruction visibility, and
+  `cd <aegis-method-pack-root> && python scripts/aegis-doctor.py --write-config --json`
+
+**Retirement Trigger**
+- When GitHub Copilot has a verified install/update path that proves both skill
+  discovery and project workspace support without turning Aegis into an
+  authoritative runtime core
+
+---
+
+### 2.22 Qoder Structural Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- Qoder is a structural host target, not a release-level fresh smoke verdict
+
+**Retention Reason**
+- Qoder documents native skills under `~/.qoder/skills/` and `.qoder/skills/`,
+  project rules under `.qoder/rules/`, and repository guidance through
+  `AGENTS.md`.
+- Those surfaces are enough for Aegis method-pack exposure, but current
+  release-level live host smoke is still required before claiming host
+  closeout.
+
+**Observation Metric**
+- `docs/README.qoder.md`
+- `bash tests/e2e/copilot-qoder-host-boundary-check.sh`
+- Future Qoder install smoke that proves skill discovery, rules visibility, and
+  `cd <aegis-method-pack-root> && python scripts/aegis-doctor.py --write-config --json`
+
+**Retirement Trigger**
+- When Qoder has a verified install/update path that proves both skill
+  discovery and project workspace support without turning Aegis into an
+  authoritative runtime core
+
+---
+
+### 2.23 Kimi Code CLI Structural Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- Kimi Code CLI is a structural host target, not a release-level fresh smoke
+  verdict
+- The default automatic path is the Kimi-managed plugin with
+  `sessionStart.skill = using-aegis`; deterministic tests verify its manifest,
+  doctor profile, and duplicate-exposure rejection, but not live model routing
+- Updater-managed `$KIMI_CODE_HOME/skills/` direct-child exposure is retained
+  as explicit compatibility installation, not as the default automatic path
+- The generic `~/.agents/skills/` Kimi scan root is retained only as an
+  official fallback, not as the Aegis Kimi canonical install path
+
+**Retention Reason**
+- Official Kimi Code CLI Agent Skills docs list user-level skill roots as
+  `$KIMI_CODE_HOME/skills/` (`~/.kimi-code/skills/` by default) and
+  `~/.agents/skills/`. They also list project-level `.kimi-code/skills/` and
+  `.agents/skills/`.
+- Kimi's plugin contract provides a stable session-start owner that plain skill
+  discovery does not provide. The thin manifest reuses the canonical `skills/`
+  tree rather than copying Kimi-only skill bodies.
+- For explicit compatibility installs, expose individual skills as
+  `$KIMI_CODE_HOME/skills/<skill-name>/SKILL.md` rather than relying on the
+  Codex umbrella symlink
+  `~/.agents/skills/aegis -> ~/.codex/aegis/skills`.
+- The method-pack `skills/` tree remains the canonical source of truth. Kimi
+  plugin content and compatibility directories are host-managed or generated
+  views, not second editable skill owners.
+
+**Observation Metric**
+- `docs/README.kimi-code.md`
+- `bash tests/kimi-code/run-tests.sh`
+- `bash tests/kimi-code/run-tests.sh --integration`
+- `bash tests/kimi-code/run-live-smoke.sh`
+- `cd <aegis-method-pack-root> && python scripts/aegis-update.py register --host kimi-code --sync-mode junction --json`
+  remains the explicit compatibility registration path
+- `python scripts/aegis-doctor.py --json --host-profile kimi-code-auto` verifies
+  the managed plugin owner, version, session-start entry, and absence of
+  direct-child collisions without mutating Kimi state
+- Release-level live Kimi Code CLI smoke is still required to prove automatic
+  task routing after `/reload` or `/new`, resumed-session routing, and
+  acceptable false-positive behavior
+
+**Retirement Trigger**
+- When a fresh release-level Kimi run proves plugin install/update, new and
+  resumed session routing, false-positive control, and project workspace
+  support without turning Aegis into an authoritative runtime core
+
+---
+
+### 2.24 ZCode Structural Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- ZCode is a structural host target, not release-level fresh smoke verdict
+
+**Retention Reason**
+- ZCode's skill scanner reads each root's direct subdirectories and expects
+  `~/.agents/skills/<skill-name>/SKILL.md` (depth-1, like CC GUI and Windsurf).
+  An umbrella `~/.agents/skills/aegis/` directory does not expose Aegis skills
+  to ZCode. Use the updater-managed direct-child install documented in
+  `docs/README.zcode.md`.
+- ZCode also documents a plugin marketplace that natively reads
+  `.claude-plugin/marketplace.json` (Claude Code plugin format), `SKILL.md`
+  skills invoked through the `@`-prefix picker, and repository guidance
+  through `AGENTS.md`.
+- Because ZCode natively reads the Claude Code plugin format, Aegis's existing
+  `.claude-plugin/` skeleton works with zero code changes. Current
+  release-level live host smoke is still required before claiming host
+  closeout.
+
+**Observation Metric**
+- `docs/README.zcode.md`
+- `bash tests/e2e/zcode-host-boundary-check.sh`
+- `cd <aegis-method-pack-root> && python scripts/aegis-update.py register --host zcode --sync-mode junction --discovery-root ~/.agents/skills --json`
+  now performs register-time direct-child link creation, registry write, and
+  method-pack-side doctor verification
+- Release-level live ZCode smoke is still required to prove plugin marketplace
+  install, `@`-prefix skill discovery after reload, and current hot-path loading
+  inside the running host
+
+**Retirement Trigger**
+- When ZCode has a verified install/update path that proves both skill
+  discovery and project workspace support without turning Aegis into an
+  authoritative runtime core
+
+---
+
+### 2.25 Grok Build Structural Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- Grok Build is a structural host target, not a release-level fresh smoke
+  verdict
+- Grok's native skills, extra `[skills] paths`, shared Agent Skills, and
+  Claude-compatible plugin scanners can expose duplicate Aegis skill names
+
+**Retention Reason**
+- Grok documents native user skills under `$GROK_HOME/skills/`
+  (`~/.grok/skills/` by default), project `.grok/skills/`, extra skill paths in
+  `~/.grok/config.toml`, `~/.agents/skills/`, `AGENTS.md`, and Claude Code
+  compatibility surfaces.
+- Aegis now recommends updater-managed direct-child skill exposure under the
+  Grok native user root. The method-pack `skills/` tree remains canonical; the
+  Grok-visible entries are generated links, not a second editable owner.
+- An explicit `[skills] paths` entry or Claude-compatible Aegis plugin remains
+  a valid alternative. Enabling more than one Aegis exposure route can produce
+  duplicate skill names with different freshness.
+- Local `grok inspect --json` evidence confirms that Grok Build can enumerate
+  Aegis skills and project instructions, but it is not a clean-install,
+  restart/reload, automatic-trigger, and update closeout for the release.
+
+**Observation Metric**
+- `docs/README.grok-build.md`
+- `bash tests/e2e/grok-build-host-boundary-check.sh`
+- `python tests/helpers/test_aegis_update.py -k grok`
+- `cd <aegis-method-pack-root> && python scripts/aegis-update.py register --host grok-build --sync-mode junction --json`
+  uses `$GROK_HOME/skills` or `~/.grok/skills` as the default discovery root,
+  performs register-time direct-child link creation, writes the host registry
+  entry, and runs method-pack-side doctor verification
+- `grok inspect --json` reports one canonical source for each Aegis skill name
+
+**Retirement Trigger**
+- When a clean Grok Build install has a verified install/update path that
+  proves current Aegis skill discovery, representative live triggering after
+  restart, no duplicate Aegis exposure, and project workspace support
+  without turning Aegis into an authoritative runtime core
+
+---
+
+### 2.26 DeepSeek Harness Bundle Support Is Not Yet Fresh Host Closeout
+
+**Retained Item**
+- The official DeepSeek Harness (`deepseek-ai/deepseek-harness`) is a structural
+  host target, not a release-level fresh smoke verdict
+- DeepSeek Harness and the community DeepSeek-TUI remain separate host surfaces
+- Deterministic tests cover native lifecycle bootstrap wiring, but not live
+  model routing quality in a fresh installed DSH profile
+- The updater-managed direct-child install remains an explicit compatibility
+  path rather than the default DSH installation
+
+**Retention Reason**
+- The default DSH path is a thin package bundle declared through
+  `dsh.bundle.patch`. It registers the canonical package-owned `skills/` tree
+  through Harness's native filesystem provider. In `auto` mode it preloads the
+  compact router text while applying the plugin and defers its injection to
+  the session's first durable promotion signal (`tool/call` or
+  `assistant/message`) after each native `agent/session-start` boundary
+  (`startup`, `resume`, `clear`, `compact`), keeping the first model request
+  of every gated epoch free of injected context while avoiding a first-step
+  asynchronous read race.
+- The bootstrap skips subagents and does not install a hard pre-tool guard:
+- DeepSeek Harness's native filesystem provider discovers direct child skill
+  bundles from project `.dsh/skills`, project `.agents/skills`, configured
+  custom directories, `$DSH_HOME/skills` (`~/.dsh/skills` by default), and
+  `$DSH_AGENTS_HOME/skills`.
+- Direct-child exposure remains necessary when the developer-preview bundle API
+  is unavailable, local policy forbids third-party profile plugins, or `pnpm`
+  cannot be provided to the DSH plugin manager. The method-pack `skills/` tree
+  remains canonical; DSH-visible entries are generated links rather than a
+  second editable owner.
+- Enabling project, native user, shared Agent Skills, or custom Aegis exposure
+  at the same time as the bundle can produce duplicate skill names with
+  different freshness.
+- The official host is a developer preview and explicitly warns that
+  compatibility-breaking changes are expected. Native catalog discovery and
+  lifecycle entry are structurally covered; automatic task-specific routing,
+  false-positive behavior, session refresh, and update behavior still need
+  fresh live verification.
+
+**Observation Metric**
+- `docs/README.deepseek-harness.md`
+- `bash tests/deepseek-harness/run-tests.sh`
+- `bash tests/deepseek-harness/run-tests.sh --integration`
+- a clean `dsh plugin --profile web add github:GanyuanRan/Aegis` readback lists
+  `aegis` in `dsh.profile.bundles` and `dsh --profile web --dump-config` contains
+  exactly one enabled `aegis-method-pack` row
+- `python tests/helpers/test_aegis_update.py -k deepseek_harness`
+- `cd <aegis-method-pack-root> && python scripts/aegis-update.py register --host deepseek-harness --compatibility-mode --sync-mode junction --json`
+  uses `$DSH_HOME/skills` or `~/.dsh/skills` as the default discovery root,
+  performs register-time direct-child link creation, writes the host registry
+  entry, and runs method-pack-side doctor verification
+- A fresh DeepSeek Harness Standard-mode session receives the native bootstrap
+  and either loads the appropriate task-specific skill or declares
+  `Route: fast-path`, from exactly one canonical exposure
+
+**Retirement Trigger**
+- Re-evaluate the direct-child compatibility path after a stable DeepSeek
+  Harness release and two consecutive Aegis releases have verified bundle
+  install/update, representative live triggering, session refresh, no duplicate
+  exposure, and project workspace support. Until then it remains an explicit
+  compatibility path, not a co-active fallback.
+
+### 2.27 Six-Topology Diagnosis Assumes Acyclic Convergence On Discrete Mechanisms
+
+**Retained Item**
+- The `systematic-debugging` Causal Topology Gate classifies root claims into
+  six acyclic shapes over discrete causes (`single-root`,
+  `single-root-multi-symptom`, `chain`, `independent-compound`,
+  `conjunctive-cluster`, `disjunctive-or`)
+- Cyclic / feedback causation such as race conditions, retry storms, or cache
+  invalidation loops, and emergent causes where the root is a relation between
+  components rather than a mechanism node, are not yet first-class topology
+  categories; current guidance force-fits such cases into `chain` or
+  `conjunctive-cluster`
+- Diagnostic layers L1-L7 are observation altitudes and remain valid entry
+  points for these cases; only the topology vocabulary is incomplete
+
+**Mitigation Today**
+- When member-by-member repair keeps regenerating the symptom, the
+  three-failed-fixes architecture escalation (`advanced-debugging-governance.md`)
+  is the intended exit rather than adding another cluster member
+
+**Promotion Trigger**
+- A seventh topology becomes eligible only with a real worked replay case
+  showing that force-fit classification caused a misrepair, plus the same
+  matrix-sample and validator evidence standard the existing six topologies met
+
+## 3. Default Reading Rule
+
+If a limitation appears simultaneously in README, host docs, or test descriptions, use this document as the current reading entry point.
+
+---
+
+## 4. Architecture Review
+
+The core requirements for current limitation management are:
+
+1. Do not conceal limitations
+2. Do not write limitations as permanent defects
+3. Do not add fallbacks without retirement plans in order to mask limitations
+
+For the 7-dimension operational definitions and defect/drift judgment criteria for architecture review, see `AEGIS_PROCESS_BASELINE.md` §15-§17.

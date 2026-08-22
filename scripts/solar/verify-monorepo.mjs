@@ -8,11 +8,20 @@ import yaml from 'js-yaml'
 
 export const DESKTOP_TAG_PATTERN = '^DSH-desktop-v[0-9]+\\.[0-9]+\\.[0-9]+$'
 export const MANAGED_IDS = [
+  'aegis',
   'agent-teams',
+  'better-sidebar',
+  'codegraph',
+  'genui',
   'governance',
-  'luna-vision-bridge',
-  'memory-evolve',
+  'llm-fallbacks',
+  'mnemon',
+  'plugin-check',
   'plugin-console',
+  'tool-markdown',
+  'tool-regex',
+  'tool-stat',
+  'tool-time',
   'web-billing',
   'web-ui',
 ]
@@ -117,6 +126,26 @@ export function validateMonorepo({
   }
   if (!governanceWorkflow?.includes('cache: pnpm')) {
     errors.push('Solar governance must restore the pnpm cache')
+  }
+  for (const retired of ['plugins/managed/luna-vision-bridge', 'plugins/managed/memory-evolve']) {
+    if (governanceWorkflow?.includes(retired)) {
+      errors.push(`Solar governance must not install retired component ${retired}`)
+    }
+  }
+  for (const required of [
+    'plugins/managed/better-sidebar/pnpm-lock.yaml',
+    'plugins/managed/genui/pnpm-lock.yaml',
+    'plugins/managed/llm-fallbacks/pnpm-lock.yaml',
+    'plugins/managed/mnemon/pnpm-lock.yaml',
+    'for plugin in better-sidebar genui llm-fallbacks mnemon',
+    'for plugin in plugin-check tool-markdown tool-regex tool-stat tool-time',
+  ]) {
+    if (!governanceWorkflow?.includes(required)) {
+      errors.push(`Solar governance controlled-plugin setup is missing ${required}`)
+    }
+  }
+  if (/for plugin in better-sidebar genui llm-fallbacks mnemon;[\s\S]{0,240}pnpm --ignore-workspace install/u.test(governanceWorkflow ?? '')) {
+    errors.push('Solar governance must preserve each controlled pnpm plugin workspace build policy')
   }
   if (governanceWorkflow?.includes('- run: corepack pnpm run build:lib')) {
     errors.push('Solar governance workflow must not rebuild source outside the attested DAG')

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { DesktopSidebarFooterActionOwnerProps } from './contracts.ts'
 import type {
   DesktopOrchestrationControlRequest,
   DesktopOrchestrationDashboard,
@@ -47,8 +46,8 @@ export async function controlOrchestration(
   return await response.json() as DesktopOrchestrationRun
 }
 
-/** Sidebar entry and theme-coherent control surface for durable TaskGraphs. */
-export function OrchestrationsPanel({ wide }: DesktopSidebarFooterActionOwnerProps) {
+/** Session-header entry and theme-coherent control surface for durable TaskGraphs. */
+export function OrchestrationsPanel() {
   const [open, setOpen] = useState(false)
   const [selectedRunId, setSelectedRunId] = useState<string>()
   const [dashboard, setDashboard] = useState<DesktopOrchestrationDashboard>()
@@ -122,16 +121,14 @@ export function OrchestrationsPanel({ wide }: DesktopSidebarFooterActionOwnerPro
       <button
         type="button"
         className="dshDesktopOrchestrationAction"
-        data-wide={wide || undefined}
+        data-surface="session-header"
         data-status={status}
         aria-label={label}
         title={label}
         onClick={() => { setOpen(true) }}
       >
         <span className="dshDesktopOrchestrationDot" aria-hidden="true" />
-        {wide
-          ? <><span>任务编排</span><span>{active > 0 ? `${String(active)} 运行中` : attention > 0 ? `${String(attention)} 待处理` : 'TaskGraph'}</span></>
-          : <span>OG</span>}
+        <span>编排</span>
       </button>
       {open && createPortal(
         <div className="dshDesktopOrchestrationBackdrop" role="presentation" onMouseDown={() => { setOpen(false) }}>

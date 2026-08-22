@@ -18,7 +18,7 @@ managed:
       - npm test --prefix plugins/deepseek-solar-harness-governance
   - id: agent-teams
     path: plugins/managed/agent-teams
-    package: '@nanmicoder/dsh-agent-teams@0.1.5'
+    package: '@nanmicoder/dsh-agent-teams@0.1.5-solar.1'
     source: https://github.com/lisihao/dsh-agent-teams.git
     upstream: https://github.com/NanmiCoder/dsh-agent-teams.git
     source_branch: codex/preserve-member-preset-persona
@@ -30,34 +30,143 @@ managed:
       - corepack pnpm --ignore-workspace run build
       - corepack pnpm --ignore-workspace run verify
       - corepack pnpm --ignore-workspace run typecheck
-  - id: luna-vision-bridge
-    path: plugins/managed/luna-vision-bridge
-    package: '@ycp424c/dsh-luna-vision-bridge@0.1.2'
-    source: https://github.com/lisihao/dsh-luna-vision-bridge.git
-    upstream: https://github.com/ycp424c/dsh-luna-vision-bridge.git
-    source_branch: codex/fix-stable-model-id
-    accepted_sha: 0173d93fab9f480d9a7548ac65cf04c3488fb8bb
-    license: MIT
-    license_status: license-file
-    license_evidence: plugins/managed/luna-vision-bridge/LICENSE
-    setup: node scripts/link-dsh-source.mjs <monorepo-root>
-    tests:
-      - corepack pnpm@8.15.9 --ignore-workspace run check
-  - id: memory-evolve
-    path: plugins/managed/memory-evolve
-    package: dsh-memory-evolve@0.1.0
-    source: https://github.com/csyangwen/dsh-memory-evolve.git
-    upstream: https://github.com/csyangwen/dsh-memory-evolve.git
+  - id: genui
+    path: plugins/managed/genui
+    package: '@omdsh-dev/dsh-genui@0.9.1-solar.2'
+    source: https://github.com/omdsh-dev/dsh-genui.git
+    upstream: https://github.com/omdsh-dev/dsh-genui.git
     source_branch: main
-    accepted_sha: ce7f0faa0e0240f117c29795e9224c0d9ed18183
-    discovered_sha: a08fff7f5c0228bf7a9dbf21d917579ccc08a5a8
-    update_status: pending-qualification
+    accepted_sha: a1b7be130eae439c643a345b2806be7fbf8a499e
     license: MIT
     license_status: license-file
-    license_evidence: plugins/managed/memory-evolve/LICENSE
+    license_evidence: plugins/managed/genui/LICENSE
     tests:
+      - corepack pnpm --ignore-workspace run check
+  - id: plugin-check
+    path: plugins/managed/plugin-check
+    package: '@omdsh-dev/dsh-plugin-check@0.1.0'
+    source: https://github.com/omdsh-dev/dsh-plugin-check.git
+    upstream: https://github.com/omdsh-dev/dsh-plugin-check.git
+    source_branch: main
+    accepted_sha: 16fa22316f11d06476bc2f57fdc0a62843d0c5d5
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/plugin-check/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run check
+  - id: llm-fallbacks
+    path: plugins/managed/llm-fallbacks
+    package: dsh-llm-fallbacks@0.3.3-solar.1
+    source: https://github.com/btspoony/dsh-llm-fallbacks.git
+    upstream: https://github.com/btspoony/dsh-llm-fallbacks.git
+    source_branch: main
+    accepted_sha: f0d4c91c6cfad9b9aba781bef2e77d7f04193686
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/llm-fallbacks/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run typecheck
       - corepack pnpm --ignore-workspace run test
       - corepack pnpm --ignore-workspace run build
+  - id: tool-stat
+    path: plugins/managed/tool-stat
+    package: '@deepseek-ai/dsh-tool-stat@0.0.1'
+    source: https://github.com/omdsh-dev/dsh-tool-stat.git
+    upstream: https://github.com/omdsh-dev/dsh-tool-stat.git
+    source_branch: main
+    accepted_sha: 9b1e9ad8091f1177bb1ef93211a41318fc472214
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/tool-stat/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run check
+  - id: tool-time
+    path: plugins/managed/tool-time
+    package: '@deepseek-ai/dsh-tool-time@0.0.1'
+    source: https://github.com/omdsh-dev/dsh-tool-time.git
+    upstream: https://github.com/omdsh-dev/dsh-tool-time.git
+    source_branch: main
+    accepted_sha: 8b7a2137f516f9d9179663f5aa58928034c90377
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/tool-time/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run check
+  - id: tool-regex
+    path: plugins/managed/tool-regex
+    package: '@deepseek-ai/dsh-tool-regex@0.0.1'
+    source: https://github.com/omdsh-dev/dsh-tool-regex.git
+    upstream: https://github.com/omdsh-dev/dsh-tool-regex.git
+    source_branch: main
+    accepted_sha: 5afda86cd6862a25f6684056b378c330a5aa86b3
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/tool-regex/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run check
+  - id: tool-markdown
+    path: plugins/managed/tool-markdown
+    package: '@deepseek-ai/dsh-tool-markdown@0.0.1'
+    source: https://github.com/omdsh-dev/dsh-tool-markdown.git
+    upstream: https://github.com/omdsh-dev/dsh-tool-markdown.git
+    source_branch: main
+    accepted_sha: 267871b115c49c5cde072d05d0d2cef6982ae8f8
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/tool-markdown/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run check
+  - id: codegraph
+    path: plugins/managed/codegraph
+    package: dsh-codegraph@0.1.0-solar.1
+    source: https://github.com/JohnXu22786/codegraph.git
+    upstream: https://github.com/JohnXu22786/codegraph.git
+    source_branch: main
+    accepted_sha: c6c91179df6ff3d1804c3ae6481f58981688ca07
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/codegraph/LICENSE
+    tests:
+      - npm test
+      - npm pack --dry-run
+  - id: mnemon
+    path: plugins/managed/mnemon
+    package: dsh-mnemon@0.2.15-solar.1
+    source: https://github.com/omdsh-dev/dsh-mnemon.git
+    upstream: https://github.com/omdsh-dev/dsh-mnemon.git
+    source_branch: main
+    accepted_sha: 7def5b2bddd4ecb746f09b0c8dee8032e72c690d
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/mnemon/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run verify
+  - id: aegis
+    path: plugins/managed/aegis
+    package: aegis@2.8.5-solar.1
+    source: https://github.com/GanyuanRan/Aegis.git
+    upstream: https://github.com/GanyuanRan/Aegis.git
+    source_branch: main
+    accepted_sha: fea84dd545385ebdbe1c7ceab0d2afb8fe9d4600
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/aegis/LICENSE
+    tests:
+      - node extensions/dsh/verify.mjs
+  - id: better-sidebar
+    path: plugins/managed/better-sidebar
+    package: dsh-better-sidebar@0.15.0-solar.1
+    source: https://github.com/omdsh-dev/DSH-better-sidebar.git
+    upstream: https://github.com/omdsh-dev/DSH-better-sidebar.git
+    source_branch: main
+    accepted_sha: 7dbd9b75e2fd65758d4e55f750319399b91255a2
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/better-sidebar/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run build
+      - corepack pnpm --ignore-workspace run typecheck
+      - corepack pnpm --ignore-workspace run test
   - id: web-billing
     path: plugins/managed/web-billing
     package: dsh-web-billing@1.1.3

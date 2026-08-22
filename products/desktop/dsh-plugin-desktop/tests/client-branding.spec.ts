@@ -18,7 +18,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 describe('Solar desktop branding', () => {
   it('keeps product branding out of the sidebar and executes the logged operator routing command', async () => {
     const registrations: Array<{
-      options: { id?: string; inject?: (sessionId: string) => unknown }
+      options: { name?: string; id?: string; inject?: (sessionId: string) => unknown }
       component: (props: { wide: boolean }) => unknown
     }> = []
     const slots = {
@@ -50,6 +50,8 @@ describe('Solar desktop branding', () => {
     expect(entry).toBeUndefined()
     expect(resident).toBeDefined()
     expect(orchestration).toBeDefined()
+    expect(resident?.options.name).toBe('conversation.session.header.actions')
+    expect(orchestration?.options.name).toBe('conversation.session.header.actions')
     expect(routing).toBeDefined()
     expect(effect).toHaveBeenCalledWith(expect.any(Function), 'desktop: Solar product footer')
 

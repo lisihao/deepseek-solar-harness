@@ -46,16 +46,6 @@ html:has([aria-modal="true"]) .dshDesktopWindowsCaptionRow::before,
 html:has([aria-modal="true"]) .dshDesktopMacCaptionRow::before,
 html:has([aria-modal="true"]) .dshDesktopSidebarSurface,
 html:has([aria-modal="true"]) .dshDesktopSidebarSurface::before { -webkit-app-region: no-drag !important; }
-/* Memory Evolve renders save feedback before a long, internally scrolling
-   form.  Keep the notice visible after the bottom action is clicked so a
-   successful save cannot look like a no-op in the Desktop shell. */
-body[data-dsh-desktop-mode="advanced"] .mt-panel .me-notice { position: sticky; top: 0; z-index: 2; }
-/* Its value controls otherwise sit at the extreme right edge of every row,
-   where fixed workbench affordances and pets can intercept the pointer.
-   Use a compact label column so the actual controls stay in the unobscured
-   conversation surface even when those optional plugins are visible. */
-body[data-dsh-desktop-mode="advanced"] .mt-panel .me-form .me-field { justify-content: flex-start; }
-body[data-dsh-desktop-mode="advanced"] .mt-panel .me-form .me-field-label { flex: 0 1 320px; }
 @media (prefers-reduced-motion: reduce) { .dshDesktopFrame { transition: none !important; } }
 `
 
@@ -65,11 +55,8 @@ const SOLAR_BRAND_STYLES = `
 body[data-ds-dark-theme] { --dsh-desktop-popup-underlay: #151517; }
 body[data-dsh-desktop-product-footer="true"] #root { height: calc(100% - 24px); }
 .dshDesktopSolarFooter { position: fixed; z-index: 2147482000; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; height: 24px; padding: 0 16px; overflow: hidden; border-top: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-secondary); font-size: 10px; font-weight: 500; line-height: 23px; text-overflow: ellipsis; user-select: none; white-space: nowrap; -webkit-app-region: no-drag; }
-.dshDesktopResidentAction { display: grid; grid-template-columns: 9px minmax(0, 1fr); align-items: center; gap: 8px; box-sizing: border-box; width: calc(100% + 8px); margin: 2px -4px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 11px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); cursor: pointer; text-align: left; }
-.dshDesktopResidentAction > span:nth-child(2) { overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.dshDesktopResidentAction > span:nth-child(3) { grid-column: 2; color: var(--dsw-alias-label-secondary); font-size: 9px; }
-.dshDesktopResidentAction:not([data-wide]) { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 2px 0; padding: 0; border-radius: 50%; font-size: 9px; font-weight: 700; }
-.dshDesktopResidentAction:not([data-wide]) .dshDesktopResidentDot { position: absolute; margin: -24px -25px 0 0; }
+.dshDesktopResidentAction, .dshDesktopOrchestrationAction { display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; height: 26px; padding: 0 9px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); cursor: pointer; font: inherit; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.dshDesktopResidentAction:hover, .dshDesktopOrchestrationAction:hover { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .dshDesktopResidentDot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: #7d8799; box-shadow: 0 0 0 2px color-mix(in srgb, #7d8799 20%, transparent); }
 .dshDesktopResidentAction[data-status="running"] .dshDesktopResidentDot, .dshDesktopResidentSession[data-health="ok"] .dshDesktopResidentDot, .dshDesktopResidentProvider[data-ok] .dshDesktopResidentDot { background: #34c759; box-shadow: 0 0 0 2px color-mix(in srgb, #34c759 20%, transparent); }
 .dshDesktopResidentAction[data-status="warn"] .dshDesktopResidentDot, .dshDesktopResidentSession[data-health="degraded"] .dshDesktopResidentDot { background: #f5a623; }
@@ -102,11 +89,6 @@ body[data-dsh-desktop-product-footer="true"] #root { height: calc(100% - 24px); 
 .dshDesktopResidentEvents time { grid-row: 1 / 3; color: var(--dsw-alias-label-secondary); }
 .dshDesktopResidentEvents li span { color: var(--dsw-alias-label-secondary); }
 .dshDesktopResidentError { margin: 12px 24px 0; padding: 9px 12px; border: 1px solid color-mix(in srgb, #ff453a 45%, transparent); border-radius: 8px; background: color-mix(in srgb, #ff453a 12%, transparent); color: #ff6961; font-size: 11px; }
-.dshDesktopOrchestrationAction { display: grid; grid-template-columns: 9px minmax(0, 1fr); align-items: center; gap: 8px; box-sizing: border-box; width: calc(100% + 8px); margin: 2px -4px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 11px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); cursor: pointer; text-align: left; }
-.dshDesktopOrchestrationAction > span:nth-child(2) { overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.dshDesktopOrchestrationAction > span:nth-child(3) { grid-column: 2; color: var(--dsw-alias-label-secondary); font-size: 9px; }
-.dshDesktopOrchestrationAction:not([data-wide]) { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 2px 0; padding: 0; border-radius: 50%; font-size: 9px; font-weight: 700; }
-.dshDesktopOrchestrationAction:not([data-wide]) .dshDesktopOrchestrationDot { position: absolute; margin: -24px -25px 0 0; }
 .dshDesktopOrchestrationDot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: #7d8799; box-shadow: 0 0 0 2px color-mix(in srgb, #7d8799 20%, transparent); }
 .dshDesktopOrchestrationAction[data-status="running"] .dshDesktopOrchestrationDot,
 .dshDesktopOrchestrationRun[data-state="running"] .dshDesktopOrchestrationDot,

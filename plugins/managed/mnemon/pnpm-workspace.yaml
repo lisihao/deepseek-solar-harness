@@ -1,0 +1,14 @@
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': false
+  esbuild: true
+  koffi: true
+  lightningcss: true
+  node-pty: true
+  protobufjs: false
+
+# Mnemon intentionally tests against the freshly published DSH release-candidate
+# family pinned in its lockfile. Keep the age exception scoped to official DSH
+# packages instead of disabling the workspace supply-chain policy.
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/*'

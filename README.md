@@ -23,7 +23,8 @@ DSH aims to make one local application the daily control center for conversation
 - A macOS Desktop application with compatibility and advanced presentation modes, native lifecycle integration, isolated profiles, an embedded DSH terminal, update discovery, and explicit product-version display.
 - The DeepSeek Harness agent, model, tool, session, Web, sandbox, workflow, and plugin foundations, developed on the protected `solar` integration line.
 - A two-tool first-turn bootstrap for the accepted Anchored Standard product preset, including delegated AgentTeams workers, followed by on-demand capability discovery.
-- Smart and resident operator paths, AgentTeams collaboration, managed memory, Luna vision bridging, Web billing, and the managed Web UI collection.
+- Smart and resident operator paths, AgentTeams collaboration, Mnemon memory, native DeepSeek V4 Flash Vision, Web billing, and the managed Web UI collection.
+- A sealed controlled-plugin suite for the Better Sidebar, GenUI, plugin diagnostics, model fallbacks, code graphs, and bounded stat, time, regex, and Markdown tools.
 - A repository-owned Code-as-Harness completion authority that selects native checks from the outgoing diff, records attestation evidence, and fails closed on missing or stale governance wiring.
 - One source repository for coordinated core, Desktop, and managed-plugin changes, while each component retains its native package manager and test contract.
 
@@ -40,8 +41,9 @@ DeepSeek-Solar-Harness
 │   └── Electron shell, profiles, native lifecycle, packaging, product UI
 ├── plugins/managed
 │   ├── governance (the user-created Code-as-Harness project)
-│   ├── agent-teams, luna-vision-bridge, memory-evolve
-│   └── web-billing, web-ui
+│   ├── agent-teams, mnemon, aegis, better-sidebar, genui
+│   ├── plugin-check, llm-fallbacks, codegraph, tool plugins
+│   └── web-billing, web-ui, plugin-console
 ├── distribution
 │   └── product identity, Desktop version, tag contract, upstream records
 └── protected solar branch

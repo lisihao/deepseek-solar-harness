@@ -30,6 +30,9 @@ describe('desktop profile composition', () => {
     expect(desktopBundleList([
       '@deepseek-ai/dsh-base',
       'third-party-one',
+      '@liustack/modlens',
+      'dsh-memory-evolve',
+      '@ycp424c/dsh-luna-vision-bridge',
       DESKTOP_PACKAGE_NAME,
       'third-party-two',
     ])).toEqual([
@@ -191,12 +194,24 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'web-billing')).toEqual(expect.objectContaining({
       name: 'dsh-web-billing',
     }))
-    expect(rows.find(row => row.id === 'dsh-memory-evolve')).toEqual(expect.objectContaining({
-      name: 'dsh-memory-evolve',
-    }))
-    expect(rows.find(row => row.id === 'luna-vision-bridge')).toEqual(expect.objectContaining({
-      name: '@ycp424c/dsh-luna-vision-bridge',
-    }))
+    for (const [id, name] of [
+      ['genui', '@omdsh-dev/dsh-genui'],
+      ['tool-plugin-check', '@omdsh-dev/dsh-plugin-check'],
+      ['llm-fallbacks', 'dsh-llm-fallbacks'],
+      ['tool-stat', '@deepseek-ai/dsh-tool-stat'],
+      ['tool-time', '@deepseek-ai/dsh-tool-time'],
+      ['tool-regex', '@deepseek-ai/dsh-tool-regex'],
+      ['tool-markdown', '@deepseek-ai/dsh-tool-markdown'],
+      ['codegraph', 'dsh-codegraph'],
+      ['mnemon', 'dsh-mnemon'],
+      ['aegis-method-pack', 'aegis/extensions/dsh/index.js'],
+      ['better-sidebar', 'dsh-better-sidebar'],
+    ] as const) {
+      expect(rows.find(row => row.id === id)).toEqual(expect.objectContaining({ name }))
+    }
+    expect(rows.map(row => row.id)).not.toContain('dsh-memory-evolve')
+    expect(rows.map(row => row.id)).not.toContain('luna-vision-bridge')
+    expect(rows.map(row => row.id)).not.toContain('modlens')
     expect(rows.find(row => row.id === 'code-harness-governance')).toEqual(expect.objectContaining({
       name: '@lisihao/dsh-code-harness-governance',
       config: expect.objectContaining({ strict: true }),
@@ -289,6 +304,8 @@ describe('desktop profile composition', () => {
       '      name: dsh-memory-evolve',
       '      config:',
       '        reviewEnabled: true',
+      '    - id: modlens',
+      "      name: '@liustack/modlens'",
       '',
     ].join('\n'))
 
@@ -304,7 +321,14 @@ describe('desktop profile composition', () => {
     expect(rows.filter(row => row.id === 'remote-web-ui')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'ui-remote-modules')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'dsh-memory-evolve')).toHaveLength(1)
-    expect(rows.find(row => row.id === 'dsh-memory-evolve')?.config).toEqual({ reviewEnabled: true })
+    expect(rows.find(row => row.id === 'dsh-memory-evolve')).toEqual(expect.objectContaining({
+      disabled: true,
+      config: { reviewEnabled: true },
+    }))
+    expect(rows.find(row => row.id === 'modlens')).toEqual(expect.objectContaining({
+      name: '@liustack/modlens',
+      disabled: true,
+    }))
   })
 
   it('projects advanced YAML settings into the Host and client Loader rows', () => {

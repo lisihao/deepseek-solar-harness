@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import collections
 import concurrent.futures
+import contextlib
 import datetime as dt
 import fnmatch
 import hashlib
@@ -270,6 +271,56 @@ def resolve_report_path(project: Path, requested: str) -> Path:
         )
     path = Path(result.stdout.strip())
     return path.resolve() if path.is_absolute() else (project / path).resolve()
+
+
+@contextlib.contextmanager
+def verify_lock(project: Path):
+    """Reject concurrent verification in one checkout; the OS releases the lock on exit."""
+    lock_path = resolve_report_path(project, "@git").with_name("governance-verify.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+b")
+    locked = False
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            if lock_path.stat().st_size == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                raise GovernanceError(
+                    f"another governance verify is already running for this worktree: {lock_path}"
+                ) from exc
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise GovernanceError(
+                    f"another governance verify is already running for this worktree: {lock_path}"
+                ) from exc
+        locked = True
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{os.getpid()}\n".encode())
+        handle.flush()
+        yield
+    finally:
+        if locked:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def change_fingerprint(project: Path, files: list[str], profile_sha256: str) -> str:
@@ -918,38 +969,40 @@ def main() -> int:
         if args.changed_from
         else None
     )
-    results = execute_gates(
-        project,
-        gates,
-        args.dry_run,
-        args.fail_fast,
-        context_env=context_env,
-        max_concurrency=profile.get("max_concurrency", 1),
-    )
-    output = {
-        "title": "Governance verification",
-        "project": str(project),
-        "profile": profile["name"],
-        "level": args.level,
-        "scopes": payload["scopes"],
-        "changed_files": payload["changed_files"],
-        "items": results,
-        "summary": f"{sum(item['status'] == 'ok' for item in results)}/{len(results)} gates passed",
-    }
-    if args.report and not args.dry_run:
-        report_path = resolve_report_path(project, args.report)
-        attestation = write_attestation(
-            report_path,
+    lock = contextlib.nullcontext() if args.dry_run else verify_lock(project)
+    with lock:
+        results = execute_gates(
             project,
-            profile,
-            profile_path,
-            payload,
-            results,
-            args.changed_from,
+            gates,
+            args.dry_run,
+            args.fail_fast,
+            context_env=context_env,
+            max_concurrency=profile.get("max_concurrency", 1),
         )
-        output["attestation"] = str(report_path)
-        output["attestation_overall"] = attestation["overall"]
-    emit(output, args.json)
+        output = {
+            "title": "Governance verification",
+            "project": str(project),
+            "profile": profile["name"],
+            "level": args.level,
+            "scopes": payload["scopes"],
+            "changed_files": payload["changed_files"],
+            "items": results,
+            "summary": f"{sum(item['status'] == 'ok' for item in results)}/{len(results)} gates passed",
+        }
+        if args.report and not args.dry_run:
+            report_path = resolve_report_path(project, args.report)
+            attestation = write_attestation(
+                report_path,
+                project,
+                profile,
+                profile_path,
+                payload,
+                results,
+                args.changed_from,
+            )
+            output["attestation"] = str(report_path)
+            output["attestation_overall"] = attestation["overall"]
+        emit(output, args.json)
     return 1 if any(item["status"] == "error" for item in results) else 0
 
 

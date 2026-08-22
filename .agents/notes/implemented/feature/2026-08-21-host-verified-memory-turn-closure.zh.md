@@ -14,9 +14,9 @@ Memory Evolve 会要求模型在每个用户轮次结束时写入项目进展和
 
 插件会在 `turn-state.json` 中为每个会话保存一条持久记录：模型成功写入的日志轨、最后计入审查的轮次、距上次审查的轮次数、最后闭环轮次，以及标明每个轨采用 `model | host` 来源和 `ok | unavailable` 结果的收据。只有存储接受写入后，memory 工具才会记录一次模型写入。轮次编号使重复投递的 `turn/end` 保持幂等。`memory_review_status` 始终注册并投影最后一张收据；只有启用审查时才提供审查建议工具。完成审查只会复位持久计数，不会删除闭环收据。
 
-Anchored Standard 保留严格的双工具引导请求。在首个持久的 assistant 消息或工具调用之后，常驻工具目录会在发现工具旁加入 `memory`、`memory_suggest`、`memory_review_status` 和 `dtodo`。缺失的可选工具会被忽略，因此没有安装 Memory Evolve 的配置仍可工作；安装后则无需先发现或解锁工具，即可完成注入的记忆约定。
+Anchored Standard 保留严格的双工具引导请求，并在首个持久 assistant 消息或工具调用之后只让发现工具常驻。独立安装 Memory Evolve 的 profile 必须按需发现其工具；默认 Desktop 组合改用 Mnemon。
 
-DSH Desktop 会把 `dsh-memory-evolve` 作为产品组合包封装，并映射到受跟踪的 managed 源码。用户配置中具有相同 id 的配置项继续保留其配置，而产品优先的模块解析会提供已验收的封装实现，不再依赖外部开发 link。
+DSH Desktop 不会封装或加载 `dsh-memory-evolve`。[受控 Desktop 组合](../architecture/2026-08-22-controlled-desktop-plugin-composition.md)会禁用陈旧显式 row，但不会删除其中的用户数据，并把 Mnemon 作为唯一产品记忆实现。本 Agent Note 的闭环语义只适用于默认产品组合之外独立安装 Memory Evolve 的环境。
 
 ## 考虑过的替代方案
 
@@ -32,8 +32,8 @@ DSH Desktop 会把 `dsh-memory-evolve` 作为产品组合包封装，并映射�
 
 每个完成的顶层用户轮次都有可检查的记忆结果，同一轮次在回放或重启后也不会重复添加。宿主摘要有意限制长度，其语义精选程度低于模型编写的条目；每日和项目日志只按需读取且不会进入提示词快照，因此接受这项成本。精选记忆仍由模型与用户共同治理。
 
-持久文件会为每个会话增加一条小记录，并且只保留最新的闭环收据。审查节奏可以跨应用重载恢复；无法读取或版本不受支持的轮次状态文件会带着路径使插件启动失败，而不是静默丢弃证据。安装相应工具时，Anchored Standard 晋级后的目录最多增加 4 个工具；第一次模型请求仍严格使用 Minimal 的双工具组合。
+持久文件会为每个会话增加一条小记录，并且只保留最新的闭环收据。审查节奏可以跨应用重载恢复；无法读取或版本不受支持的轮次状态文件会带着路径使插件启动失败，而不是静默丢弃证据。默认 Desktop 产品不会加载 Memory Evolve，因此不会创建该记录；Anchored Standard 的第一次请求使用 Minimal 工具对，晋级后的常驻目录只保留发现工具。
 
 ## 验证
 
-记忆插件测试固定了全局持久 `session/event` 约定、`user/message` 同时缺少 `data.turn` 与 `turn/start.trigger` 时的真实用户消息检测、持久审查计数、重复 `turn/end` 投递、宿主补写、收据投影和重启恢复。真实的空白 preset 会话还必须实际生成 `turn-state.json`；这能捕获隔离的伪事件总线无法发现的虚构事件约定或作用域路由故障。Desktop 测试固定了严格的首次请求双工具组合，以及晋级后的记忆工具面。封装输入检查会把密封归档映射到 managed 源码，并比较其中受跟踪的包内容。
+独立 Memory Evolve 实现拥有其持久闭环行为的验证。在本仓库中，Desktop 测试固定了准确的首次请求工具对、只包含发现工具的晋级目录、默认组合中不存在 Memory Evolve，以及陈旧显式 row 会被禁用。封装输入检查会拒绝已退役的 Memory Evolve 归档。

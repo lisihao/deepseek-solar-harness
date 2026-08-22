@@ -419,7 +419,9 @@ describe('anchored-tool-bootstrap', () => {
     const listeners = register({ promotedPresentation: 'code', anchorGate: true })
     const assembleListener = listener(listeners, 'system-prompt/assemble')
     const calls: string[] = []
-    const sessionObj = { events: [stepEvent(), reasoningEvent('We need inspect the repo.'), { type: 'tool/call' }] }
+    const sessionObj = {
+      events: [stepEvent(), reasoningEvent('We need inspect the repo.'), { type: 'tool/call' }, turnEndEvent(1)],
+    }
     const agent = { session: sessionObj, ctx: { tools: { presentAs: (mode: string) => calls.push(mode) } } }
     const tools = [{ name: 'bash' }, { name: 'read' }, { name: 'edit' }]
 
@@ -428,7 +430,43 @@ describe('anchored-tool-bootstrap', () => {
     expect(calls).toEqual(['code'])
   })
 
-  test('session/event applies the PTC switch at step/end, not mid-step', async () => {
+  test('agent/created restores Code Mode before a resumed driver starts', async () => {
+    const listeners = register({ promotedPresentation: 'code', anchorGate: true })
+    const createdListener = listener(listeners, 'agent/created')
+    const calls: string[] = []
+    const agent = {
+      session: {
+        events: [stepEvent(), reasoningEvent('We need inspect the repo.'), { type: 'tool/call' }, turnEndEvent(1)],
+      },
+      ctx: { tools: { presentAs: (mode: string) => calls.push(mode) } },
+    }
+
+    await createdListener({ agent }, async () => undefined)
+    expect(calls).toEqual(['code'])
+  })
+
+  test('agent/request restores Code Mode before downstream request derivation', async () => {
+    const listeners = register({ promotedPresentation: 'code', anchorGate: true })
+    const requestListener = listener(listeners, 'agent/request')
+    const calls: string[] = []
+    const agent = {
+      session: {
+        events: [stepEvent(), reasoningEvent('We need inspect the repo.'), { type: 'tool/call' }, turnEndEvent(1)],
+      },
+      ctx: { tools: { presentAs: (mode: string) => calls.push(mode) } },
+    }
+
+    await requestListener(
+      { agent, turn: 2, step: 1, signal: {} },
+      async () => {
+        expect(calls).toEqual(['code'])
+        return { provider: 'p', model: 'm', maxTokens: 384000 }
+      },
+    )
+    expect(calls).toEqual(['code'])
+  })
+
+  test('session/event keeps the bootstrap contract through every step and switches at turn/end', async () => {
     const listeners = register({ promotedPresentation: 'code', anchorGate: true })
     const assembleListener = listener(listeners, 'system-prompt/assemble')
     const eventListener = listener(listeners, 'session/event')
@@ -445,10 +483,25 @@ describe('anchored-tool-bootstrap', () => {
     expect(calls).toEqual([])
 
     await eventListener(sessionObj, { type: 'step/end' })
-    expect(calls).toEqual(['code'])
+    expect(calls).toEqual([])
 
+    const secondStep = await assembleListener(
+      undefined,
+      { agent },
+      async () => ({ system: 'minimal persona', tools, contexts: [], sections: SECTIONS }),
+    )
+    expect(secondStep.tools.map((tool: any) => tool.name)).toEqual(['bash', 'read'])
+
+    sessionObj.events.push(turnEndEvent(1))
     await eventListener(sessionObj, { type: 'turn/end' })
     expect(calls).toEqual(['code'])
+
+    const secondTurn = await assembleListener(
+      undefined,
+      { agent },
+      async () => ({ system: 'minimal persona', tools, contexts: [], sections: SECTIONS }),
+    )
+    expect(secondTurn.tools).toEqual(tools)
   })
 
   test('invalid promotedPresentation fails loudly', () => {
