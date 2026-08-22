@@ -7,6 +7,15 @@ import { fileURLToPath } from 'node:url'
 
 const ARCHIVE_MEMBER_MAX_BYTES = 16 * 1024 * 1024
 
+/** Parse generated files from `tar -tzf`, accepting native LF or CRLF output. */
+export function parseGeneratedArchiveMembers(output: string): string[] {
+  return output
+    .split(/\r?\n/u)
+    .filter(member => member.startsWith('package/lib/') && !member.endsWith('/'))
+    .map(member => member.slice('package/'.length))
+    .sort()
+}
+
 function assertInside(parent: string, child: string, label: string): void {
   const path = relative(parent, child)
   if (path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path)) {
@@ -56,11 +65,9 @@ export async function verifyDesktopVendorBuild(
     assertInside(vendorRoot, archive, `archive ${archivePath}`)
     assertInside(repositoryRoot, sourceRoot, `source ${sourceManifestPath}`)
 
-    const archiveMembers = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' })
-      .split('\n')
-      .filter(member => member.startsWith('package/lib/') && !member.endsWith('/'))
-      .map(member => member.slice('package/'.length))
-      .sort()
+    const archiveMembers = parseGeneratedArchiveMembers(
+      execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }),
+    )
     if (archiveMembers.length === 0) {
       throw new Error(`verify-desktop-vendor-build: ${archivePath} contains no generated lib files`)
     }

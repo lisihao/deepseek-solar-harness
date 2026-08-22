@@ -3,7 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { verifyDesktopVendorBuild } from './verify-desktop-vendor-build.ts'
+import {
+  parseGeneratedArchiveMembers,
+  verifyDesktopVendorBuild,
+} from './verify-desktop-vendor-build.ts'
 
 const roots: string[] = []
 
@@ -38,6 +41,11 @@ afterEach(async () => {
 })
 
 describe('Desktop vendor build closure', () => {
+  it('normalizes Windows CRLF in tar member listings', () => {
+    expect(parseGeneratedArchiveMembers('package/lib/\r\npackage/lib/index.js\r\n'))
+      .toEqual(['lib/index.js'])
+  })
+
   it('accepts an archive built from the current root workspace output', async () => {
     const root = await fixture({ archived: 'export const value = 1\n', built: 'export const value = 1\n' })
 
