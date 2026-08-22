@@ -52,8 +52,13 @@ describe('Claude Code resident driver environment', () => {
       chmodSync(preferredClaude, 0o700)
       chmodSync(legacyClaude, 0o700)
 
-      expect(resolveProductExecutable('claude', { PATH: `${preferred}${delimiter}${legacy}` }, process.platform))
-        .toBe(preferredClaude)
+      const resolved = resolveProductExecutable(
+        'claude',
+        { PATH: `${preferred}${delimiter}${legacy}` },
+        process.platform,
+      )
+      expect(process.platform === 'win32' ? resolved.toLowerCase() : resolved)
+        .toBe(process.platform === 'win32' ? preferredClaude.toLowerCase() : preferredClaude)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
