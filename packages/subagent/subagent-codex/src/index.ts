@@ -29,6 +29,8 @@ export {
   CodexApprovalRequiredError,
   type CodexAppServerExecutionProfile,
   type CodexAppServerModel,
+  type CodexAppServerRateLimit,
+  type CodexAppServerRateLimitWindow,
 } from './wire.ts'
 
 export const name = 'subagent-codex'

@@ -6,7 +6,10 @@
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../core/tools" },
+    { "path": "../../interaction/commands" },
     { "path": "../../core/system-prompt" },
+    { "path": "../../session/session-projection" },
+    { "path": "../model-allocation" },
     { "path": "../orchestration" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]

@@ -12,6 +12,8 @@ Status: implemented
 
 `dsh-orchestratord` 是持久编排状态的唯一写者。它在 Harness home 下的单个 SQLite WAL 数据库中保存已认证逻辑图、节点状态、attempt、Evidence 引用、不可变编译 Artifact 和 append-only 事件。可释放的 `ctx.orchestrations` Provider 通过仅属主可访问的 Unix socket 连接，因此 DSH 与 Desktop 重启不会停止已接纳 Run。
 
+打包后的 Desktop 使用 `desktop-<SemVer>` 作为 daemon build identity。客户端以 `ORCHESTRATION_VERSION_MISMATCH` 拒绝协议、schema、方法集或 build 不一致；自动启动会先让不兼容 daemon 退出，再让已安装版本复用同一持久状态启动。开发 composition 在调用方未提供 `DSH_BUILD_COMMIT` 时继续使用显式的 `development` identity。
+
 Run 编译使用有序不可变流水线：原始请求依次形成 `IntentIRV1`、requirement Artifact、逻辑 TaskGraph、验证、Plan Certificate 和 Run。ready 节点依次经过能力解析、上下文编译、算子选择、ExecutionPlan seal、审批和派发。`ctx.intentCompiler`、`ctx.contextCompiler` 与 `ctx.capabilityCapsules` 是独立 Provider seam；它们都不能创建 Run、修改 Graph 或派发算子。
 
 认证 Graph 是每个节点的最大权限。晚绑定胶囊可以实现或收缩 capability、effect、scope 与已审批 secret 预算，但不能扩大它们。必需的扩权会让 Run 以新 Graph revision 和 certificate 返回审批。每个已接纳 physical attempt 都使用新的稳定 `orch:<run>:<node>:<attempt>` execution identity 和不可变 `NodeExecutionPlanV1`；重试不改写已接纳 attempt，indeterminate receipt 不会自动重放。

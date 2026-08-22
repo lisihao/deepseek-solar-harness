@@ -9,8 +9,16 @@ import type {
 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextPolicy } from '@deepseek-ai/dsh-context-compiler'
 import type { IntentCompileRequest, IntentIRV1 } from '@deepseek-ai/dsh-intent-compiler'
+import type {
+  ContinualHarnessMode,
+  ModelAllocationObjective,
+  ModelAllocationPlan,
+  ModelTaskPhase,
+  RlmExecutionMode,
+} from '@deepseek-ai/dsh-model-allocation'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { PhysicalOperatorExecutionId, PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
+import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 
 /** Opaque orchestration run identity. */
 export type OrchestrationRunId = Branded<'OrchestrationRunId'>
@@ -60,6 +68,15 @@ export interface OrchestrationNodeSpecV1 {
   readonly approvedSecretRefs: readonly string[]
   readonly acceptance: readonly OrchestrationAcceptanceRequirement[]
   readonly retryPolicy: OrchestrationRetryPolicy
+  /** Quality-gate position used by the replaceable model allocator. */
+  readonly phase?: ModelTaskPhase
+  /** Node-local recursive execution; never a fourth global Scheduler or physical operator. */
+  readonly rlm?: {
+    readonly mode: RlmExecutionMode
+    readonly maxDepth: number
+    readonly maxChildren: number
+    readonly maxTurns: number
+  }
   readonly operator?: {
     readonly preferredIds?: readonly string[]
     readonly profile?: PhysicalOperatorExecutionPreference
@@ -98,9 +115,15 @@ export interface OrchestrationCompileRequest {
 
 /** User-selected collaboration policy and route captured before TaskGraph compilation. */
 export interface OrchestrationAdmissionTraceV1 {
-  readonly policy: 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent'
+  readonly policy: 'auto' | 'direct' | 'codex' | 'claude-code'
   readonly route: 'taskgraph'
   readonly sourceSessionId: string
+  /** Independent user/system choice; RLM is a node strategy, not an operator. */
+  readonly rlm?: RlmExecutionMode
+  /** Continuous Harness can be disabled, scoped to this Session, or scoped to a workspace. */
+  readonly continualHarness?: ContinualHarnessMode
+  /** Global quality/cost/throughput preference consumed by the allocation Provider. */
+  readonly optimization?: ModelAllocationObjective
 }
 
 /** Immutable compilation result that may be started after approval. */
@@ -159,7 +182,7 @@ export interface OrchestrationBlocker {
 /** One sealed operator selection. */
 export interface PhysicalOperatorPlanV1 {
   readonly operatorId: string
-  readonly mode: 'resident'
+  readonly mode: 'resident' | 'model-worker'
   readonly profile?: PhysicalOperatorExecutionPreference
   readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
 }
@@ -178,6 +201,10 @@ export interface NodeExecutionPlanV1 {
   readonly capabilityPlanRef: OrchestrationArtifactRef
   readonly capabilityGeneration: number
   readonly contextPacketRef: OrchestrationArtifactRef
+  readonly allocationPlanRef: OrchestrationArtifactRef
+  readonly allocationPlan: ModelAllocationPlan
+  readonly rlmPlan?: RlmExecutionPlanV1
+  readonly harnessSnapshotRef?: OrchestrationArtifactRef
   readonly operatorPlan: PhysicalOperatorPlanV1
   readonly effectiveReadScopes: readonly string[]
   readonly effectiveWriteScopes: readonly string[]
@@ -198,6 +225,10 @@ export interface OrchestrationNodeSnapshot {
   readonly capabilityGeneration: number
   readonly operatorId?: string
   readonly operatorProfile?: PhysicalOperatorExecutionPreference
+  readonly model?: string
+  readonly modelSource?: 'native-subscription' | 'metered-api'
+  readonly quotaPoolId?: string
+  readonly rlm?: RlmExecutionMode
   readonly capabilityPlanRef?: OrchestrationArtifactRef
   readonly contextPacketRef?: OrchestrationArtifactRef
   readonly executionPlanRef?: OrchestrationArtifactRef
@@ -307,6 +338,7 @@ export type OrchestrationErrorCode =
   | 'NODE_INDETERMINATE'
   | 'CAPABILITY_RECOMPILE_REQUIRED'
   | 'CAPABILITY_HOTSWAP_UNSUPPORTED'
+  | 'ORCHESTRATION_VERSION_MISMATCH'
   | 'ORCHESTRATION_UNAVAILABLE'
 
 /** Stable orchestration failure. */

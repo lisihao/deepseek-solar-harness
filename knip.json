@@ -33,9 +33,7 @@
         "scripts/**/*.mjs",
         "scripts/**/*.cjs"
       ],
-      "ignoreDependencies": [
-        "prime-agent"
-      ]
+      "ignoreDependencies": []
     },
     "examples": {
       "entry": [
@@ -289,18 +287,6 @@
       "project": [
         "src/**/*.ts",
         "tests/**/*.ts"
-      ]
-    },
-    "packages/physical-operator/resident-operator-prime-agent": {
-      "entry": [
-        "tests/**/*.spec.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
-      ],
-      "ignoreDependencies": [
-        "prime-agent"
       ]
     },
     "packages/core/tools": {
@@ -844,12 +830,32 @@
         "src/**/*.ts"
       ]
     },
+    "packages/orchestration/continual-harness": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
     "packages/orchestration/intent-compiler": {
       "project": [
         "src/**/*.ts"
       ]
     },
+    "packages/orchestration/model-allocation": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/orchestration/model-worker": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
     "packages/orchestration/orchestration": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
+    "packages/orchestration/rlm-strategy": {
       "project": [
         "src/**/*.ts"
       ]

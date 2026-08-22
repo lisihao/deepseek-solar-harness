@@ -8,6 +8,11 @@ import type {
   PhysicalOperatorProfileReasoningEffort,
   PhysicalOperatorRoutingPolicy,
 } from '@deepseek-ai/dsh-tool-physical-operator/client'
+import type {
+  ContinualHarnessMode,
+  ModelAllocationObjective,
+  RlmExecutionMode,
+} from '@deepseek-ai/dsh-tool-orchestration/client'
 import type { DesktopResidentDashboard } from '../resident-dashboard-contracts.ts'
 import { loadResidentDashboard } from './ResidentOperatorsPanel.tsx'
 
@@ -21,6 +26,12 @@ export interface PhysicalOperatorRoutingInjected {
     model?: string,
     effort?: PhysicalOperatorProfileReasoningEffort,
   ) => Promise<string | null>
+  /** Persist TaskGraph RLM, Continuous Harness, and quality/cost strategy. */
+  selectOrchestrationStrategy: (
+    rlm: RlmExecutionMode,
+    continualHarness: ContinualHarnessMode,
+    optimization: ModelAllocationObjective,
+  ) => Promise<string | null>
 }
 
 /** Full props for the additive composer-row execution strategy selector. */
@@ -32,7 +43,6 @@ const LABELS: Record<PhysicalOperatorRoutingPolicy, string> = {
   direct: '仅主模型',
   codex: '优先 Codex',
   'claude-code': '优先 Claude Code',
-  'prime-agent': '优先 Prime Agent',
 }
 
 /** Stable Chinese display label for one host-owned routing value. */
@@ -47,7 +57,6 @@ export function physicalOperatorRoutingSummary(policy: PhysicalOperatorRoutingPo
     direct: '仅主模型',
     codex: 'Codex',
     'claude-code': 'Claude Code',
-    'prime-agent': 'Prime Agent',
   } as const)[policy]
 }
 
@@ -63,6 +72,7 @@ export function PhysicalOperatorRoutingControl({
   input,
   select,
   selectProfile,
+  selectOrchestrationStrategy,
 }: PhysicalOperatorRoutingControlProps) {
   const routing = useProjection('physicalOperatorRouting')
   const [open, setOpen] = useState(false)
@@ -114,13 +124,13 @@ export function PhysicalOperatorRoutingControl({
     }
   }, [open])
   const profileProjection = useProjection('physicalOperatorProfiles')
+  const orchestrationPreferences = useProjection('orchestrationExecutionPreferences')
   if (routing === undefined) return null
 
   const locked = session.removed || input.phase !== 'plain' || saving
   const currentLabel = physicalOperatorRoutingSummary(routing.currentValue)
   const profileOwner = routing.currentValue === 'codex'
     || routing.currentValue === 'claude-code'
-    || routing.currentValue === 'prime-agent'
     ? routing.currentValue
     : undefined
   const provider = profileOwner === undefined
@@ -184,6 +194,23 @@ export function PhysicalOperatorRoutingControl({
     const nextEffort = id === 'auto' ? undefined : id as PhysicalOperatorProfileReasoningEffort
     saveProfile(profileOwner, selectedModel, nextEffort)
   }
+  const saveOrchestrationStrategy = (
+    rlm: RlmExecutionMode,
+    continualHarness: ContinualHarnessMode,
+    optimization: ModelAllocationObjective,
+  ): void => {
+    setSaving(true)
+    setError(null)
+    void selectOrchestrationStrategy(rlm, continualHarness, optimization).then((failure) => {
+      if (!alive.current) return
+      setSaving(false)
+      setError(failure)
+    }, (reason: unknown) => {
+      if (!alive.current) return
+      setSaving(false)
+      setError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
 
   return (
     <span className="dshDesktopOperatorRoutingWrap">
@@ -194,7 +221,7 @@ export function PhysicalOperatorRoutingControl({
         aria-haspopup="dialog"
         aria-expanded={open}
         disabled={locked}
-        title={error ?? '设置主模型是否邀请订阅态 Codex、Claude Code 或 Prime Agent 协作'}
+        title={error ?? '设置主模型、订阅态 Codex/Claude Code 与 TaskGraph 高级策略'}
         onClick={() => { setOpen(value => !value) }}
       >
         <span>协作 · {saving ? '保存中' : currentLabel}</span>
@@ -210,7 +237,7 @@ export function PhysicalOperatorRoutingControl({
             onMouseDown={event => { event.stopPropagation() }}
           >
             <header>
-              <div><strong>协作方式</strong><small>主模型负责对话；Codex、Claude Code 和 Prime Agent 只在需要时作为执行助手。</small></div>
+              <div><strong>协作方式</strong><small>主模型负责对话；Codex 与 Claude Code 是订阅态执行助手，RLM 是 TaskGraph 节点策略。</small></div>
               <button type="button" aria-label="关闭协作方式" onClick={() => { setOpen(false) }}>×</button>
             </header>
             <div className="dshDesktopOperatorStrategyOptions">
@@ -229,7 +256,7 @@ export function PhysicalOperatorRoutingControl({
             </div>
             {profileOwner !== undefined && (
               <div className="dshDesktopOperatorProfilePreferences">
-                <div><strong>{profileOwner === 'codex' ? 'Codex' : profileOwner === 'claude-code' ? 'Claude Code' : 'Prime Agent'} 高级偏好</strong><small>通常保持“按任务推荐”即可。</small></div>
+                <div><strong>{profileOwner === 'codex' ? 'Codex' : 'Claude Code'} 高级偏好</strong><small>通常保持“按任务推荐”即可。</small></div>
                 <label>
                   <span>执行模型</span>
                   <select
@@ -261,6 +288,53 @@ export function PhysicalOperatorRoutingControl({
                     : <p>偏好按当前对话保存。持久任务首次运行后，本工作区会固定实际模型和强度以保证重启连续；如需更换，请先在左侧“物理算子”中重置该会话。</p>}
               </div>
             )}
+            {orchestrationPreferences !== undefined && (
+              <div className="dshDesktopOperatorProfilePreferences">
+                <div><strong>TaskGraph 高级策略</strong><small>三个维度相互独立；“自动”由配额感知调度器选择。</small></div>
+                <label>
+                  <span>RLM 递归</span>
+                  <select
+                    aria-label="RLM 递归策略"
+                    value={orchestrationPreferences.rlm}
+                    disabled={saving}
+                    onChange={event => { saveOrchestrationStrategy(event.currentTarget.value as RlmExecutionMode, orchestrationPreferences.continualHarness, orchestrationPreferences.optimization) }}
+                  >
+                    <option value="auto">自动</option>
+                    <option value="enabled">启用</option>
+                    <option value="disabled">关闭</option>
+                  </select>
+                </label>
+                <label>
+                  <span>持续 Harness</span>
+                  <select
+                    aria-label="持续 Harness 策略"
+                    value={orchestrationPreferences.continualHarness}
+                    disabled={saving}
+                    onChange={event => { saveOrchestrationStrategy(orchestrationPreferences.rlm, event.currentTarget.value as ContinualHarnessMode, orchestrationPreferences.optimization) }}
+                  >
+                    <option value="auto">自动</option>
+                    <option value="off">关闭</option>
+                    <option value="session">当前会话</option>
+                    <option value="workspace">当前工作区</option>
+                  </select>
+                </label>
+                <label>
+                  <span>综合目标</span>
+                  <select
+                    aria-label="模型分配目标"
+                    value={orchestrationPreferences.optimization}
+                    disabled={saving}
+                    onChange={event => { saveOrchestrationStrategy(orchestrationPreferences.rlm, orchestrationPreferences.continualHarness, event.currentTarget.value as ModelAllocationObjective) }}
+                  >
+                    <option value="balanced">综合最优</option>
+                    <option value="quality">质量优先</option>
+                    <option value="speed">速度优先</option>
+                    <option value="economy">成本优先</option>
+                  </select>
+                </label>
+                <p>订阅套餐始终优先；Codex Spark 按独立池调度；只有订阅容量不足时才允许计费 API 兜底。</p>
+              </div>
+            )}
             {error !== null && <p className="dshDesktopOperatorStrategyError" role="status">更新失败：{error}</p>}
           </section>
         </div>,
@@ -273,11 +347,10 @@ export function PhysicalOperatorRoutingControl({
 /** Human-facing consequence of one collaboration policy. */
 export function physicalOperatorRoutingDescription(policy: PhysicalOperatorRoutingPolicy): string {
   return ({
-    auto: '推荐。按任务类型在主模型、Codex、Claude Code 与 Prime Agent 之间选择。',
+    auto: '推荐。按任务类型在主模型、Codex 与 Claude Code 之间选择；复杂任务可进入 TaskGraph。',
     direct: '始终由当前主聊天模型回答，不调用执行助手。',
     codex: '代码、调试和测试任务优先交给 Codex；短问答仍由主模型处理。',
     'claude-code': '分析、架构和长上下文任务优先交给 Claude Code；短问答仍由主模型处理。',
-    'prime-agent': '递归探索、多智能体综合与长周期节点优先交给 Prime Agent；全局编排仍由 DSH 负责。',
   } as const)[policy]
 }
 

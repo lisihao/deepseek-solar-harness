@@ -4,11 +4,13 @@
 
 `ctx.residentOperators` 的本地 Service Provider 与独立 daemon。DSH 插件只是可释放的 Unix socket 客户端；`dsh-resident-operatord` 是唯一 SQLite 写者，并跨 DSH/HMR 释放继续存在。它负责 command receipt、单 Session lease、state revision、有界结构化事件及大结果的内容寻址 Artifact。
 
-Claude Code 使用官方 Agent SDK 持久化与恢复 Session，并通过不提交 prompt 的 SDK 控制通道读取订阅可见模型。Codex 通过固定版本 app-server daemon 的本机属主 Unix WebSocket 控制 socket 使用非临时 thread，并通过 `model/list` 读取目录；CLI `proxy` 只是 WebSocket 原始字节桥，不是 NDJSON transport。两个 Driver 都会在本机 CLI 无法证明原生订阅登录时默认拒绝，且不支持 API-key fallback。
+Claude Code 使用官方 Agent SDK 持久化与恢复 Session，并通过不提交 prompt 的 SDK 控制通道读取订阅可见模型。资格审查会解析一个绝对路径的用户自有 `claude` 可执行文件，SDK 模型发现与真实回合也使用同一个文件，而不是 SDK 自带的后备程序；因此版本、钥匙串刷新行为、TLS 信任和订阅状态不会在资格与执行路径之间分叉。Codex 通过固定版本 app-server daemon 的本机属主 Unix WebSocket 控制 socket 使用非临时 thread，并通过 `model/list` 读取目录；CLI `proxy` 只是 WebSocket 原始字节桥，不是 NDJSON transport。两个 Driver 都会在本机 CLI 无法证明原生订阅登录时默认拒绝，且不支持 API-key fallback。
 
 ## 协议、存储与恢复
 
 JSON-RPC 2.0 通过仅属主可访问的 Unix socket 以 NDJSON 传输。握手会拒绝 Resident 协议、state schema、daemon build、必需方法集、已配置 Driver manifest、产品版本、产品协议 hash 或原生订阅资格不一致。协议 v6 新增通用 Driver SPI 与优雅 `system.shutdown`；配置新的 Driver 集合时，客户端会先退出不兼容的旧 daemon 再重连。daemon 在单写 WAL 数据库中保存 `resident_sessions`、`command_receipts`、`session_leases`、有界事件及 Artifact 索引。
+
+Codex 模型发现是执行前提，订阅配额遥测只用于调度参考。临时的限额遥测故障会保留已通过资格审查的模型目录和执行路径，暴露 `quotaUnavailableReason`，并把配额池标为未知，而不是误报整个原生订阅不可用。
 
 Receipt 按 `accepted -> running -> settled` 推进；有界 `turn.progress` 阶段会暴露连接、原生 Session 就绪、推理/工具活动与结果整理进度，但不保存 prompt 或 transcript。协议 v5 在 Receipt 与 accepted 事件中携带必需的调用方 lane 以及清理后的 160 字符展示任务摘要，并让 `session.list` 无需原生产品资格探测即可读取持久状态。状态迁移按列名复制历史记录，因此早期 `ALTER TABLE` 形成的列顺序不会在重建表时错置 Receipt 字段。同一算子的并发资格探测请求共享一个进行中的探测；Claude Code 按顺序检查版本、订阅状态和模型目录。准入前，daemon 会根据实时产品目录校验显式模型/强度，补全 Smart Auto 字段，并把有效 profile 锁定到算子/工作区/lane Session。手动指定强度但让模型自动选择时，候选范围只包含明确支持该强度的模型；若不存在兼容模型，准入会明确失败，而不是选出不兼容组合。后续 profile 变化在 reset 前都会失败。重新连接的 DSH 或 Desktop 客户端可以从 daemon 权威状态检查该 profile、lane、活动 turn、最新阶段及已结算结果。daemon 在无法证明结算前崩溃时，启动恢复会将 Receipt 标为 `indeterminate`。相同 command 与 canonical hash 重放会返回同一 Receipt，内容或 profile 变化则冲突。重试只能在显式处置后用新 command ID 准入，并唯一关联旧 Receipt。正常停止会排空已准入 turn；进程被强制终止时由启动恢复处理，绝不自动重放。
 

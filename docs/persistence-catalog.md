@@ -507,10 +507,24 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
   route: 'taskgraph'
   runId: string
   maxParallel: number
+  rlm: RlmExecutionMode
+  continualHarness: ContinualHarnessMode
+  optimization: ModelAllocationObjective
 }
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:15`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:33`](../packages/orchestration/tool-orchestration/src/index.ts)
+
+<a id="orchestrationpreferences--log-only"></a>
+
+#### `orchestration/preferences` — log-only
+
+```ts persistence-catalog
+/** Whole-value strategy preference for future TaskGraph admissions. */
+'orchestration/preferences': OrchestrationExecutionPreferences
+```
+
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 

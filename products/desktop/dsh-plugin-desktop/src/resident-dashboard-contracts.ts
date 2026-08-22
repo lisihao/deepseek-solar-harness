@@ -12,6 +12,7 @@ export interface DesktopResidentProvider {
   injectionBoundaries: Array<'pre-dispatch' | 'next-turn' | 'checkpoint'>
   available: boolean
   unavailableReason?: string
+  quotaUnavailableReason?: string
   authentication: 'native-subscription' | 'unqualified'
   productVersion: string
   models: DesktopResidentModel[]

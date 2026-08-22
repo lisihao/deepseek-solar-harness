@@ -71,6 +71,18 @@ flowchart LR
   svc_contextCompiler["ctx.contextCompiler<br/>Bounded Context Packet compiler"]
   pkg_capability_capsule["capability-capsule"]
   svc_capabilityCapsules["ctx.capabilityCapsules<br/>Capability Capsule registry and resolver"]
+  pkg_continual_harness["continual-harness"]
+  svc_continualHarness["ctx.continualHarness<br/>Continuous Harness snapshot and outcome seam"]
+  pkg_continual_harness_local["continual-harness-local"]
+  pkg_model_allocation["model-allocation"]
+  svc_modelAllocation["ctx.modelAllocation<br/>Quota-aware model allocation seam"]
+  pkg_model_allocation_local["model-allocation-local"]
+  pkg_model_worker["model-worker"]
+  svc_modelWorkers["ctx.modelWorkers<br/>One-shot model worker registry"]
+  pkg_model_worker_deepseek["model-worker-deepseek"]
+  pkg_rlm_strategy["rlm-strategy"]
+  svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
+  pkg_rlm_strategy_local["rlm-strategy-local"]
   pkg_orchestration["orchestration"]
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
@@ -234,6 +246,8 @@ flowchart LR
   pkg_compaction_basic --> svc_compaction
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
   pkg_context_compiler --> svc_contextCompiler
+  pkg_continual_harness --> svc_continualHarness
+  pkg_continual_harness_local --> svc_continualHarness
   pkg_cordis_host_runner --> svc_cordisInspect
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
@@ -258,6 +272,10 @@ flowchart LR
   pkg_lsp --> svc_lsp
   pkg_lsp_local --> svc_lsp
   pkg_message_feedback --> svc_messageFeedback
+  pkg_model_allocation --> svc_modelAllocation
+  pkg_model_allocation_local --> svc_modelAllocation
+  pkg_model_worker --> svc_modelWorkers
+  pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
   pkg_orchestration --> svc_orchestrations
   pkg_orchestration_local --> svc_capabilityCapsules
@@ -272,6 +290,8 @@ flowchart LR
   pkg_pwsh_local --> svc_shell
   pkg_resident_operator --> svc_residentOperators
   pkg_resident_operator_local --> svc_residentOperators
+  pkg_rlm_strategy --> svc_rlmStrategy
+  pkg_rlm_strategy_local --> svc_rlmStrategy
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
@@ -342,6 +362,7 @@ flowchart LR
   svc_clientModules --> pkg_hmr
   svc_codeRuntime --> pkg_tools
   svc_compaction --> pkg_compaction_basic
+  svc_continualHarness --> pkg_orchestration_local
   svc_cordisInspect --> pkg_tool_cordis
   svc_credentials --> pkg_apiproxy
   svc_credentials --> pkg_llm_deepseek
@@ -362,10 +383,13 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_modelAllocation --> pkg_orchestration_local
+  svc_modelWorkers --> pkg_orchestration_local
   svc_orchestrations --> pkg_tool_orchestration
   svc_orchestrations --> pkg_ui_orchestration
   svc_physicalOperators --> pkg_tool_physical_operator
   svc_residentOperators --> pkg_physical_operator_resident
+  svc_rlmStrategy --> pkg_orchestration_local
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -466,6 +490,10 @@ flowchart LR
 | `ctx.intentCompiler` | `seam` | [`intent-compiler`](../packages/orchestration/intent-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 把不可变原始请求编译为带确定性溯源的版本化 Intent IR；它们不能创建 Run 或派发算子。 |
 | `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 在 token、溯源、脱敏和降级策略下投影认证过的来源，但不成为事实源。 |
 | `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | 在 Graph Certificate 下晚绑定内容寻址的能力 Manifest；绑定只能实现或缩小权限。 |
+| `ctx.continualHarness` | `seam` | [`continual-harness`](../packages/orchestration/continual-harness) | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 提供有界的会话／工作区结果上下文，TaskGraph daemon 仍是唯一编排状态权威。 |
+| `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 选择合格的订阅优先执行 Offer 并建议并行度，但不派发任务。 |
+| `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 注册与 Provider 无关的一次性模型通道；计费 DeepSeek Provider 仍是最后兜底执行路径。 |
+| `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 在节点 Attempt 内封存有界递归执行指令，永不创建或修改全局 TaskGraph。 |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | 持有与 Provider 无关的编译、运行、事件、控制、审批、不确定结果处置和能力更新 API；本地 daemon 是唯一写者。 |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | 等待所有已配置后端就绪，然后将领域形态发布为一个受生命周期约束的服务，用于类型化持久状态。 |

@@ -27,12 +27,6 @@ linkWorkspacePackages: true
 overrides:
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
-  # The pinned Prime CLI entry is a self-contained official bundle. Its SDK-only
-  # URL dependencies are unused by the subprocess Driver and remain blocked as
-  # transitive exotic sources by the repository supply-chain policy.
-  'prime-agent>@earendil-works/pi-agent-core': '-'
-  'prime-agent>@earendil-works/pi-ai': '-'
-  'prime-agent>@earendil-works/pi-tui': '-'
 
 peerDependencyRules:
   allowedVersions:
@@ -59,12 +53,6 @@ allowBuilds:
   # The Python runtime deploy includes the reviewed workspace postinstall that
   # restores the executable bit on node-pty's macOS spawn helper.
   '@deepseek-ai/dsh-subprocess-local@file:packages/subprocess/subprocess-local': true
-  # Prime's postinstall is opt-in bootstrap only; DSH performs runtime
-  # qualification explicitly and must not download tools during installation.
-  prime-agent@https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/releases/v0.7.4/prime-agent-0.7.4.tgz: false
-  # The pinned public CLI bundle does not load zeromq. Keep its unused native
-  # transitive install script disabled instead of compiling an unconsumed addon.
-  zeromq: false
 
 minimumReleaseAgeExclude:
   # Fresh pi-ai releases carry the model catalog updates that are the whole

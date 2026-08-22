@@ -150,6 +150,7 @@ describe('published package surface', () => {
     expect(boot).toBeGreaterThan(prepare)
     expect(main).toContain("'dsh-plugin-desktop: packaged pnpm runtime PATH'")
     expect(main).toContain("'dsh-plugin-desktop: native product command PATH'")
+    expect(main).toContain("process.env.DSH_BUILD_COMMIT ??= app.isPackaged ? `desktop-${app.getVersion()}` : 'development'")
     expect(main).toContain('disposePnpmRuntime?.()')
     expect(main).toContain('disposeNativeProductRuntime?.()')
   })

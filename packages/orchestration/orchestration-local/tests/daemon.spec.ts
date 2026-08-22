@@ -33,19 +33,27 @@ class FakeResidentClient {
   }>>()
 
   async providers() {
-    return ['codex', 'claude-code', 'prime-agent'].map(operatorId => ({
+    return ['codex', 'claude-code'].map(operatorId => ({
       operatorId,
       product: operatorId,
-      displayName: operatorId === 'codex' ? 'Codex' : operatorId === 'claude-code' ? 'Claude Code' : 'Prime Agent',
+      displayName: operatorId === 'codex' ? 'Codex' : 'Claude Code',
       description: 'Test Resident provider.',
-      tags: operatorId === 'codex' ? ['coding'] : operatorId === 'claude-code' ? ['analysis'] : ['recursive', 'rlm'],
-      maxConcurrency: operatorId === 'prime-agent' ? 2 : 4,
+      tags: operatorId === 'codex' ? ['coding'] : ['analysis'],
+      maxConcurrency: 4,
       injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
       available: this.available && !this.unavailableOperators.has(operatorId),
       authentication: 'native-subscription',
       productVersion: 'test',
       protocolHash: 'test',
-      models: [],
+      models: operatorId === 'codex'
+        ? [
+          { model: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', efforts: ['medium'], defaultEffort: 'medium' },
+          { model: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol', efforts: ['high'], defaultEffort: 'high' },
+        ]
+        : [
+          { model: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', efforts: [] },
+          { model: 'claude-opus-4-6', displayName: 'Claude Opus 4.6', efforts: [] },
+        ],
     }))
   }
 
@@ -173,7 +181,35 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
-  it('selects Prime Agent only for a bounded recursive node while DSH owns the graph', async () => {
+  it('classifies an older daemon build as a version mismatch', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-upgrade-'))
+    const root = join(home, 'orchestrations')
+    const previousBuild = process.env.DSH_BUILD_COMMIT
+    const oldDaemon = new OrchestrationDaemon({
+      root,
+      dshHome: home,
+      buildCommit: 'desktop-old',
+      residentClient: new FakeResidentClient() as unknown as ResidentDaemonClient,
+    })
+    await oldDaemon.start()
+    process.env.DSH_BUILD_COMMIT = 'desktop-current'
+    const client = new OrchestrationDaemonClient({
+      root,
+      dshHome: home,
+      autoStart: false,
+      connectTimeoutMs: 2_000,
+    })
+    try {
+      await expect(client.ready()).rejects.toMatchObject({ code: 'ORCHESTRATION_VERSION_MISMATCH' })
+    } finally {
+      await oldDaemon.close()
+      if (previousBuild === undefined) Reflect.deleteProperty(process.env, 'DSH_BUILD_COMMIT')
+      else process.env.DSH_BUILD_COMMIT = previousBuild
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves native RLM inside a normal subscription operator while DSH owns the graph', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
     const root = join(home, 'orchestrations')
     const fake = new FakeResidentClient()
@@ -184,20 +220,21 @@ describe('orchestration daemon', () => {
     const workspace = join(home, 'workspace')
     await mkdir(workspace)
     const fixture = graph(workspace)
-    const { operator: _preferredOperator, ...primeNode } = fixture.nodes[0]!
-    const primeGraph: LogicalTaskGraphV1 = {
+    const { operator: _preferredOperator, ...rlmNode } = fixture.nodes[0]!
+    const rlmGraph: LogicalTaskGraphV1 = {
       ...fixture,
       nodes: [{
-        ...primeNode,
+        ...rlmNode,
         role: 'recursive synthesis',
         task: 'Use bounded RLM recursion to synthesize the alternatives.',
       }],
     }
-    const compilation = await client.compile({ intent: { request: 'Synthesize alternatives.' }, graph: primeGraph })
+    const compilation = await client.compile({ intent: { request: 'Synthesize alternatives.' }, graph: rlmGraph })
     const run = await client.start({ compilationId: compilation.compilationId })
     const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
-    expect(completed.nodes[0]).toMatchObject({ operatorId: 'prime-agent', state: 'passed' })
-    expect(fake.requests[0]).toMatchObject({ operatorId: 'prime-agent' })
+    expect(completed.nodes[0]).toMatchObject({ operatorId: 'claude-code', rlm: 'enabled', state: 'passed' })
+    expect(fake.requests[0]).toMatchObject({ operatorId: 'claude-code' })
+    expect(fake.requests[0]?.prompt?.map(block => block.text).join('\n')).toContain('dsh-native-rlm')
   })
 
   it('compiles, seals, dispatches Resident nodes, records Evidence, and completes a graph', async () => {
@@ -481,7 +518,7 @@ describe('orchestration daemon', () => {
     expect(fake.starts[0]).toMatch(/^codex:/u)
     expect(failed.nodes.find(node => node.id === 'review')).toMatchObject({
       state: 'blocked',
-      blockers: [{ code: 'ORCHESTRATION_UNAVAILABLE' }],
+      blockers: [{ code: 'EXPLICIT_MODEL_UNAVAILABLE' }],
     })
   })
 

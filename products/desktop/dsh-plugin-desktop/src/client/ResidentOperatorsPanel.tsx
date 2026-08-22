@@ -127,6 +127,7 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
                       <div>
                         <strong>{provider.displayName}</strong>
                         <small>{provider.productVersion} · {String(provider.models.length)} 个模型</small>
+                        {provider.quotaUnavailableReason !== undefined && <small>配额状态暂不可用，执行仍可继续</small>}
                       </div>
                       <em>{provider.available ? '订阅可用' : '不可用'}</em>
                     </div>
@@ -134,8 +135,8 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
                 </div>
                 <h3>如何调用</h3>
                 <div className="dshDesktopResidentHelp">
-                  <p>主模型选择旁的“协作”入口缺省为“智能协作”。主模型负责对话，并在非简单任务中决定是否调用 Codex、Claude Code 或 Prime Agent。</p>
-                  <code>智能协作：实现/调试/测试通常交给 Codex；架构/审查/长上下文通常交给 Claude Code；递归探索/综合通常交给 Prime Agent。</code>
+                  <p>主模型选择旁的“协作”入口缺省为“智能协作”。主模型负责对话，并在非简单任务中决定是否调用 Codex、Claude Code 或启动 TaskGraph。</p>
+                  <code>智能协作：实现/调试/测试通常交给 Codex；架构/审查/长上下文通常交给 Claude Code；递归探索由 TaskGraph 的 RLM 节点策略完成。</code>
                   <code>手动覆盖：可选择“仅主模型”或优先任一原生算子；短问答仍由主模型处理。</code>
                   <p>原生模型和推理强度属于执行助手的高级偏好，不是右侧主聊天模型。通常保持“按任务推荐”即可。</p>
                   <p>仓库修改、多轮任务和需要跨 DSH 重启继续的工作会优先使用 <code>mode=resident</code>。插件仍只依赖 <code>ctx.physicalOperators</code>，无需知道 daemon 或 CLI。</p>
@@ -272,9 +273,7 @@ function operatorLabel(operatorId: string): string {
     ? 'Claude Code'
     : operatorId === 'codex'
       ? 'Codex'
-      : operatorId === 'prime-agent'
-        ? 'Prime Agent'
-        : operatorId
+      : operatorId
 }
 
 function lifecycleLabel(lifecycle: DesktopResidentSession['lifecycle']): string {

@@ -257,6 +257,8 @@ function GraphView(props: {
       <Stage label="Intent" complete={eventTypes.has('intent.compiled')} />
       <Stage label="Graph" complete={eventTypes.has('graph.compiled')} />
       <Stage label="Capsule" complete={eventTypes.has('capsule.resolved')} />
+      <Stage label="RLM" complete={eventTypes.has('rlm.resolved')} />
+      <Stage label="Harness" complete={eventTypes.has('harness.snapshot') || run.admission?.continualHarness === 'off'} />
       <Stage label="Context" complete={eventTypes.has('context.compiled')} />
       <Stage label="Plan" complete={eventTypes.has('execution_plan.sealed')} />
       <Stage label="Operator" complete={eventTypes.has('node.dispatched')} />
@@ -287,7 +289,7 @@ function NodeCard(props: {
   const node = props.node
   const profile = node.operatorProfile
   const profileLabel = profile === undefined
-    ? node.operatorId ?? '算子待解析'
+    ? node.operatorId === undefined ? '算子待解析' : `${node.operatorId} · ${node.model ?? '模型待解析'}`
     : `${node.operatorId ?? '算子'} · ${profile.model ?? '默认模型'} · ${profile.effort ?? '默认强度'}`
   return <li data-state={node.state}>
     <div className="dshDesktopOrchestrationNodeTitle">
@@ -304,6 +306,8 @@ function NodeCard(props: {
     <div className="dshDesktopOrchestrationMeta">
       <span>Attempt {String(node.attempt)}</span>
       <span>Generation {String(node.capabilityGeneration)}</span>
+      <span>RLM {node.rlm ?? 'auto'}</span>
+      <span>{node.modelSource === 'native-subscription' ? '订阅' : node.modelSource === 'metered-api' ? 'API 计费' : '来源待解析'} · {node.quotaPoolId ?? '配额池 N/A'}</span>
       <span>Evidence {String(node.evidenceRefs.length)}</span>
     </div>
     <div className="dshDesktopOrchestrationRefs">
@@ -379,13 +383,12 @@ function EventTimeline(props: {
 }
 
 /** Present the exact collaboration preference persisted at TaskGraph admission. */
-export function collaborationPolicyLabel(policy: 'auto' | 'direct' | 'codex' | 'claude-code' | 'prime-agent' | undefined): string {
+export function collaborationPolicyLabel(policy: 'auto' | 'direct' | 'codex' | 'claude-code' | undefined): string {
   return ({
     auto: '智能协作',
     direct: '仅主模型',
     codex: '优先 Codex',
     'claude-code': '优先 Claude Code',
-    'prime-agent': '优先 Prime Agent',
   } as Record<string, string>)[String(policy)] ?? '历史策略 N/A'
 }
 
@@ -394,7 +397,16 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
   if (event.type === 'run.started') {
     const admission = event.data.admission as { policy?: string } | null | undefined
     const policy = admission?.policy
-    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' || policy === 'prime-agent' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
+    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
+  }
+  if (event.type === 'model.allocated') {
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${String(event.data.source ?? 'N/A')} · 配额池 ${String(event.data.quotaPoolId ?? 'N/A')}`
+  }
+  if (event.type === 'harness.snapshot') {
+    return `${String(event.data.scope ?? 'N/A')} · generation ${String(event.data.generation ?? 'N/A')} · ${String(event.data.entryCount ?? 0)} 条`
+  }
+  if (event.type === 'rlm.resolved') {
+    return `${event.data.enabled === true ? '已启用' : '直接执行'} · ${String(event.data.reason ?? 'N/A')} · ${shortRef(String(event.data.planSha256 ?? 'N/A'))}`
   }
   if (event.type === 'capsule.resolved') {
     return event.data.cleanContext === true ? 'Clean-task Context Capsule 已注入' : 'Capsule 未确认干净上下文'
@@ -468,8 +480,9 @@ function waitReasonLabel(code: string): string {
 function eventLabel(type: string): string {
   return ({
     'intent.compiled': 'Intent 已编译', 'graph.compiled': 'Graph 已认证', 'capsule.resolved': 'Capsule 已解析',
-    'context.compiled': 'Context 已编译', 'execution_plan.sealed': 'ExecutionPlan 已封存',
-    'node.dispatched': '已派发 Resident 算子', 'node.operator.progress': 'Resident 执行进度',
+    'rlm.resolved': 'RLM 策略已解析', 'harness.snapshot': 'Continuous Harness 已快照',
+    'model.allocated': '模型与配额已分配', 'context.compiled': 'Context 已编译', 'execution_plan.sealed': 'ExecutionPlan 已封存',
+    'node.dispatched': '执行已派发', 'node.operator.progress': 'Resident 执行进度',
     'node.evidence.accepted': 'Evidence 已验收',
     'node.failed': '节点失败', 'node.retry_scheduled': '已安排重试', 'run.completed': '任务已完成',
     'capability_update.proposed': '能力更新已提出', 'capability_update.applied': '能力更新已应用',

@@ -509,10 +509,24 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   route: 'taskgraph'
   runId: string
   maxParallel: number
+  rlm: RlmExecutionMode
+  continualHarness: ContinualHarnessMode
+  optimization: ModelAllocationObjective
 }
 ```
 
-来源：[`packages/orchestration/tool-orchestration/src/index.ts:15`](../packages/orchestration/tool-orchestration/src/index.ts)
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:33`](../packages/orchestration/tool-orchestration/src/index.ts)
+
+<a id="orchestrationpreferences--log-only"></a>
+
+#### `orchestration/preferences` — log-only
+
+```ts persistence-catalog
+/** Whole-value strategy preference for future TaskGraph admissions. */
+'orchestration/preferences': OrchestrationExecutionPreferences
+```
+
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 

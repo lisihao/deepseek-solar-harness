@@ -82,6 +82,32 @@ export interface ResidentModelOption {
   readonly supportsAdaptiveThinking: boolean
 }
 
+/** One rolling subscription allowance window reported by a native product. */
+export interface ResidentQuotaWindow {
+  /** Percentage already consumed in this window, from zero through one hundred. */
+  readonly usedPercent: number
+  /** Product-reported Unix timestamp at which this allowance resets. */
+  readonly resetsAt?: number
+  /** Product-reported rolling-window size in minutes. */
+  readonly windowDurationMinutes?: number
+}
+
+/** One independently metered native-subscription pool. */
+export interface ResidentQuotaPool {
+  /** Stable product-owned pool identity. */
+  readonly poolId: string
+  /** Product-owned display label, such as the dedicated Codex Spark pool. */
+  readonly displayName: string
+  /** Exact model ids charged to this pool when the product exposes the mapping. */
+  readonly models: readonly string[]
+  /** The pool is part of the native subscription and never an API-key fallback. */
+  readonly meter: 'native-subscription'
+  readonly primary?: ResidentQuotaWindow
+  readonly secondary?: ResidentQuotaWindow
+  /** Time at which the product status was sampled. */
+  readonly observedAt: string
+}
+
 /** Fully resolved model and optional reasoning intensity locked to one Resident Session. */
 export interface ResidentExecutionProfile {
   readonly model: string
@@ -102,10 +128,14 @@ export interface ResidentProviderStatus {
   readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
   readonly available: boolean
   readonly unavailableReason?: string
+  /** Non-fatal quota telemetry failure; execution remains available with unknown allowance. */
+  readonly quotaUnavailableReason?: string
   readonly authentication: 'native-subscription' | 'unqualified'
   readonly productVersion: string
   readonly protocolHash: string
   readonly models: readonly ResidentModelOption[]
+  /** Independently metered allowance pools, absent when the product does not expose them. */
+  readonly quotaPools?: readonly ResidentQuotaPool[]
 }
 
 /** One native product invocation after durable daemon admission. */

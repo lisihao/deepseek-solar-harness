@@ -71,25 +71,25 @@ describe('physical-operator-resident', () => {
     new ResidentStub(ctx)
     await ctx.plugin(provider, {
       operators: [{
-        id: 'prime-agent', residentProvider: 'prime-agent',
-        displayName: 'Prime Agent', description: 'Runs bounded RLM recursion through the user subscription.',
+        id: 'analysis-worker', residentProvider: 'analysis-worker',
+        displayName: 'Analysis Worker', description: 'Runs a generic resident analysis product.',
       }],
     })
 
-    expect(ctx.physicalOperators.status('prime-agent')).toMatchObject({
+    expect(ctx.physicalOperators.status('analysis-worker')).toMatchObject({
       state: 'available',
       executionModes: ['resident'],
     })
-    await expect(ctx.physicalOperators.start('prime-agent', {
+    await expect(ctx.physicalOperators.start('analysis-worker', {
       prompt: [{ type: 'text', text: 'default mode remains ephemeral' }],
       parent: parent(), signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'OPERATOR_MODE_UNSUPPORTED' })
-    const resident = await ctx.physicalOperators.start('prime-agent', {
-      mode: 'resident', prompt: [{ type: 'text', text: 'explore recursively' }],
+    const resident = await ctx.physicalOperators.start('analysis-worker', {
+      mode: 'resident', prompt: [{ type: 'text', text: 'analyze the fixture' }],
       parent: parent(), signal: new AbortController().signal,
     })
     await expect(resident.result).resolves.toMatchObject({ stopReason: 'completed' })
-    expect((ctx.residentOperators as ResidentStub).requests[0]).toMatchObject({ operatorId: 'prime-agent' })
+    expect((ctx.residentOperators as ResidentStub).requests[0]).toMatchObject({ operatorId: 'analysis-worker' })
   })
 
   it('keeps ephemeral as default and routes only explicit resident calls to the durable seam', async () => {

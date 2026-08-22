@@ -157,16 +157,15 @@ describe('desktop profile composition', () => {
       config: expect.objectContaining({
         autoStart: true,
         connectTimeoutMs: 15_000,
-        driverModules: ['@deepseek-ai/dsh-resident-operator-prime-agent'],
+        driverModules: [],
       }),
     }))
     expect(rows.find(row => row.id === 'physical-operator-dual-mode')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-physical-operator-resident',
-      config: expect.objectContaining({
-        operators: expect.arrayContaining([
-          expect.objectContaining({ id: 'prime-agent', residentProvider: 'prime-agent' }),
-        ]),
-      }),
+      config: expect.objectContaining({ operators: expect.arrayContaining([
+        expect.objectContaining({ id: 'codex', residentProvider: 'codex' }),
+        expect.objectContaining({ id: 'claude-code', residentProvider: 'claude-code' }),
+      ]) }),
     }))
     expect(rows.find(row => row.id === 'orchestration-local')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-orchestration-local',

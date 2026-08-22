@@ -85,11 +85,15 @@ export function resolveNativeProductCommands(
     .split(delimiter)
     .filter(value => value.length > 0)
   const directories = uniqueDirectories([
-    ...inheritedDirectories,
+    // Use one deterministic, user-owned product installation regardless of
+    // whether Desktop was opened from Finder or a shell. An inherited
+    // /usr/local binary may be an older root-owned Claude Code release that
+    // shares the same macOS Keychain item and predates OAuth refresh fixes.
     join(options.homeDir, '.local', 'bin'),
     join(options.homeDir, '.npm-global', 'bin'),
     join(options.homeDir, '.bun', 'bin'),
     join(options.homeDir, '.volta', 'bin'),
+    ...inheritedDirectories,
     '/opt/homebrew/bin',
     '/usr/local/bin',
   ])

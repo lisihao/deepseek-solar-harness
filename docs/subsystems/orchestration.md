@@ -72,6 +72,30 @@ abstract compile(request: ContextCompileRequest): Promise<ContextPacketV1>
 
 Source: [`packages/orchestration/context-compiler/src/index.ts:30`](../../packages/orchestration/context-compiler/src/index.ts)
 
+<a id="ctxcontinualharness--continualharnessservice-abstract-seam"></a>
+
+### `ctx.continualHarness` — `ContinualHarnessService` (abstract seam)
+
+Snapshot/outcome seam; the Scheduler only consumes immutable snapshots.
+
+```ts cordis-catalog
+/**
+ * Compile a bounded immutable snapshot for one session or workspace scope.
+ * @param request Scope, task, and entry-limit policy for the snapshot.
+ * @returns The content-addressed Continuous Harness snapshot.
+ */
+abstract snapshot(request: ContinualHarnessSnapshotRequest): Promise<ContinualHarnessSnapshotV1>
+
+/**
+ * Record a bounded task outcome after an orchestration node settles.
+ * @param request Bounded outcome summary and Evidence references.
+ * @returns The idempotently stored harness entry.
+ */
+abstract recordOutcome(request: ContinualHarnessOutcomeRequest): Promise<ContinualHarnessEntryV1>
+```
+
+Source: [`packages/orchestration/continual-harness/src/index.ts:72`](../../packages/orchestration/continual-harness/src/index.ts)
+
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 
 ### `ctx.intentCompiler` — `IntentCompilerService` (abstract seam)
@@ -88,6 +112,53 @@ abstract compile(request: IntentCompileRequest): Promise<IntentIRV1>
 ```
 
 Source: [`packages/orchestration/intent-compiler/src/index.ts:43`](../../packages/orchestration/intent-compiler/src/index.ts)
+
+<a id="ctxmodelallocation--modelallocationservice-abstract-seam"></a>
+
+### `ctx.modelAllocation` — `ModelAllocationService` (abstract seam)
+
+Scheduler-facing Service Definition; implementations remain replaceable plugins.
+
+```ts cordis-catalog
+/**
+ * Select one qualified execution offer and recommend safe parallelism.
+ * @param request Node phase, policy, quota, and currently qualified offers.
+ * @returns The selected model plan and parallelism recommendation.
+ */
+abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
+```
+
+Source: [`packages/orchestration/model-allocation/src/index.ts:92`](../../packages/orchestration/model-allocation/src/index.ts)
+
+<a id="ctxmodelworkers--modelworkerruntime"></a>
+
+### `ctx.modelWorkers` — `ModelWorkerRuntime`
+
+Registry authority; concrete billed or local inference Providers remain separate plugins.
+
+```ts cordis-catalog
+/**
+ * Register a model worker Provider for the lifetime of the current plugin effect.
+ * @param provider Provider that exposes offers and executes sealed requests.
+ * @returns An effect disposer that unregisters the Provider.
+ */
+register(provider: ModelWorkerProvider): () => Promise<void>
+
+/**
+ * List the currently available model execution offers from every Provider.
+ * @returns A flattened snapshot of qualified execution offers.
+ */
+async offers(): Promise<ModelExecutionOffer[]>
+
+/**
+ * Dispatch a sealed worker request to its selected Provider.
+ * @param request Selected worker, model, sealed prompt, and optional RLM plan.
+ * @returns The bounded model output and usage metadata.
+ */
+execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
+```
+
+Source: [`packages/orchestration/model-worker/src/index.ts:45`](../../packages/orchestration/model-worker/src/index.ts)
 
 <a id="ctxorchestrations--orchestrationservice-abstract-seam"></a>
 
@@ -159,5 +230,22 @@ abstract resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promi
 abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:327`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:359`](../../packages/orchestration/orchestration/src/index.ts)
+
+<a id="ctxrlmstrategy--rlmstrategyservice-abstract-seam"></a>
+
+### `ctx.rlmStrategy` — `RlmStrategyService` (abstract seam)
+
+Replaceable RLM policy Provider; the Scheduler consumes only its immutable plan.
+
+```ts cordis-catalog
+/**
+ * Resolve a bounded node-local RLM plan without modifying the global TaskGraph.
+ * @param request User mode, node phase, task, and optional resource budget.
+ * @returns An immutable, content-addressed RLM execution plan.
+ */
+abstract resolve(request: RlmStrategyRequest): Promise<RlmExecutionPlanV1>
+```
+
+Source: [`packages/orchestration/rlm-strategy/src/index.ts:49`](../../packages/orchestration/rlm-strategy/src/index.ts)
 <!-- END GENERATED cordis-surface -->

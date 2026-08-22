@@ -62,15 +62,25 @@ function concise(text) {
 
 /** A real user-message turn, compatible with logs that omit turn/start.trigger. */
 export function isMessageTurn(events, turn) {
-  return events.some((event) => event?.type === 'user/message'
+  if (events.some((event) => event?.type === 'user/message'
     && event.data?.turn === turn
     && (event.data?.message?.source?.kind === 'user'
       || event.data?.source?.kind === 'user'
       || event.data?.message?.role === 'user'
+      || event.data?.role === 'user'))) return true
+
+  const start = events.findIndex((event) => event?.type === 'turn/start' && event.data?.turn === turn)
+  if (start < 0) return false
+  if (events[start]?.data?.trigger?.kind === 'message') return true
+  const end = events.findIndex((event, index) => index > start
+    && event?.type === 'turn/end'
+    && event.data?.turn === turn)
+  const limit = end < 0 ? events.length : end
+  return events.slice(start + 1, limit).some((event) => event?.type === 'user/message'
+    && (event.data?.message?.source?.kind === 'user'
+      || event.data?.source?.kind === 'user'
+      || event.data?.message?.role === 'user'
       || event.data?.role === 'user'))
-    || events.some((event) => event?.type === 'turn/start'
-      && event.data?.turn === turn
-      && event.data?.trigger?.kind === 'message')
 }
 
 /** Last model-visible assistant text for one turn, excluding reasoning. */
@@ -172,6 +182,16 @@ export class DurableTurnState {
   }
 }
 
+/** Observe authoritative completed turn boundaries from the durable session feed. */
+export function observeCompletedTurns(ctx, listener) {
+  const onEvent = (session, event) => {
+    if (event?.type !== 'turn/end') return
+    const agent = ctx.get('agents')?.get?.(session.id) ?? { id: session.id, session }
+    listener(agent, event.data?.turn, event.data?.reason)
+  }
+  ctx.effect(() => ctx.on('session/event', onEvent, { global: true }))
+}
+
 /** Install the host-owned, idempotent end-of-turn memory write loop. */
 export function installTurnClosure(ctx, getRuntime, store, turnState) {
   const onSettled = (agent, turn, reason) => {
@@ -211,7 +231,10 @@ export function installTurnClosure(ctx, getRuntime, store, turnState) {
     else ctx.logger.error(`dsh-memory-evolve: turn ${turn} memory closure failed: ${JSON.stringify(receipt)}`)
   }
 
-  ctx.effect(() => ctx.on('agent/settled', onSettled))
+  // Turn and step boundaries are durable session/event facts. DSH deliberately
+  // does not mirror them as agent lifecycle events, so observe turn/end from
+  // the Host scope and resolve the owning Agent by session id.
+  observeCompletedTurns(ctx, onSettled)
 }
 
 /** Default location for the durable turn state. */

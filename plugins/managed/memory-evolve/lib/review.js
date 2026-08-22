@@ -5,7 +5,8 @@
  * subagent, no digest, no transcript reconstruction). The plugin only
  * provides the pace-maker and the write paths:
  *
- *   pace    `agent/settled` counts completed message-triggered turns per
+ *   pace    durable `session/event` turn/end facts count completed
+ *           message-triggered turns per
  *           session; when the count reaches `reviewInterval` the review is
  *           DUE. The counter is never auto-reset — only the model's
  *           `memory_review_status complete` call resets it, so a missed or
@@ -29,7 +30,7 @@
  */
 
 import { todayStamp } from './store.js'
-import { isMessageTurn } from './turn-close.js'
+import { isMessageTurn, observeCompletedTurns } from './turn-close.js'
 
 /**
  * Install the per-session review turn counter.
@@ -51,7 +52,7 @@ export function reviewTurnCounter(ctx, getRuntime, turnState) {
 
   // 显式挂到 ctx 生命周期（P2-7）：ctx.on 返回的 disposer 交给 ctx.effect
   // 管理，插件卸载/热重载时自动移除监听器，避免重复注册导致重复计数
-  ctx.effect(() => ctx.on('agent/settled', onSettled))
+  observeCompletedTurns(ctx, onSettled)
 
   return {
     turnsOf: (agent) => turnState.turnsOf(agent),

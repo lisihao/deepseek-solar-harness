@@ -190,6 +190,7 @@ Desktop 没有创建第二套模型请求管线。Anchored Standard 与 AgentTea
 - 切换 compatibility/advanced 模式按设计必然重启应用；存活的 generation 不会热切换 Loader row、slot 所有权或原生材质。
 - Linux 不支持高级模式。Linux 继续使用兼容呈现。
 - Resident 原生产品资格审查与发布验收目前仅覆盖 macOS。订阅登录缺失，或固定的 Claude/Codex 协议发生变化时会 fail loud，绝不会回退到 API key；普通 ephemeral 算子仍然可用。
+- Desktop 会先解析用户目录中的 `~/.local/bin`、`~/.npm-global/bin`、`~/.bun/bin` 或 `~/.volta/bin` 产品安装，再考虑继承的系统 `PATH`。这样 Finder 与终端启动会使用同一份已通过资格审查的 Claude/Codex 版本，并避免旧的 root-owned Claude CLI 共享和轮换同一个 macOS Keychain 凭据。Claude Agent SDK 的目录发现与执行也固定使用这份已解析客户端，不能静默退回另一份在 token 刷新或 TLS 行为上不同的内置 CLI。
 - macOS 与 Windows 托盘终端会提供私有 `dsh`、`pnpm` 与 `node` shim。除此之外，Host runtime 会在当前 Electron 进程的 `PATH` 中公开内置 `pnpm` 命令作为 ambient compatibility，并提供受管 `desktopPnpm` service；这些命令都不会加入系统 `PATH`，Linux 目前也没有 desktop 终端命令。
 - 在 Windows 上，ambient `pnpm` 命令与 lifecycle Node helper 是 `.cmd` shim。`desktopPnpm.run()` 与 `runPlugin()` 会启动准确的已打包 entry，从而避免 manager process 的 shell lookup；上游 `dsh plugin`、PowerShell 与命令提示符则可通过 command interpreter 解析 ambient shim。第三方插件直接调用 Node `spawn('pnpm', { shell: false })`，或 lifecycle script 直接以 `shell: false` 执行其 `.cmd` `npm_node_execpath`，仍属于不可移植行为，应改用受管 service 或 shell-aware 启动路径。
 - `dshmarket@1.2.3` 仍是用户可选安装的第三方 package，而不是内置 marketplace。只有重新审计的版本同时消费可选 Desktop service、保留普通 DSH fallback，并包含再分发所需的完整 license notice 后，才会重新评估预装。

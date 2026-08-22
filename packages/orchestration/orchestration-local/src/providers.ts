@@ -47,7 +47,7 @@ function cleanTaskContextCapsule(): CapabilityCapsuleManifestV1 {
     preconditions: ['A sealed TaskGraph node context is available.'],
     postconditions: ['Unrelated resident history is not propagated to the node or its children.'],
     invariants: ['Only the current Context Packet and its explicit upstream artifact references are authoritative.'],
-    consumes: [], produces: [], requires: [], compatible: ['codex', 'claude-code', 'prime-agent'], incompatible: [],
+    consumes: [], produces: [], requires: [], compatible: ['codex', 'claude-code'], incompatible: [],
     effects: EMPTY_EFFECTS,
     bindings: {
       instructions: [
@@ -57,7 +57,7 @@ function cleanTaskContextCapsule(): CapabilityCapsuleManifestV1 {
       secretRefs: [], guardRefs: [],
     },
     verification: ['Context Packet contains the clean-context instruction before dispatch.'],
-    operatorCompatibility: ['codex', 'claude-code', 'prime-agent'],
+    operatorCompatibility: ['codex', 'claude-code'],
   }
   return { ...manifest, digest: canonicalSha256(manifest) }
 }

@@ -6,9 +6,19 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContinualHarnessScope, ContinualHarnessSnapshotV1 } from '@deepseek-ai/dsh-continual-harness'
+import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
+import LlmRuntime, { type ContentBlock } from '@deepseek-ai/dsh-llm'
+import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
+import type { ModelAllocationPlan, ModelExecutionOffer, ModelTaskPhase } from '@deepseek-ai/dsh-model-allocation'
+import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
+import ModelWorkerRuntime from '@deepseek-ai/dsh-model-worker'
+import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
+import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
+import LocalRlmStrategy from '@deepseek-ai/dsh-rlm-strategy-local'
 import {
   OrchestrationError,
   OrchestrationRunId,
@@ -34,7 +44,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
-import type { ResidentProviderStatus } from '@deepseek-ai/dsh-resident-operator'
+import type { ResidentModelOption, ResidentProviderStatus, ResidentQuotaPool } from '@deepseek-ai/dsh-resident-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { canonicalSha256 } from './canonical.ts'
@@ -71,6 +81,7 @@ export const ORCHESTRATION_METHODS = Object.freeze([
 ] as const)
 
 interface ActiveAttempt {
+  readonly kind: 'resident' | 'model-worker'
   readonly runId: string
   readonly nodeId: string
   readonly attempt: number
@@ -218,9 +229,16 @@ function fakeParent(workspace: string, runId: string): Agent {
   } as unknown as Agent
 }
 
-function promptFromPlan(node: OrchestrationNodeSpecV1, context: ContextPacketV1, capabilities: CapabilityBindingPlanV1): ContentBlock[] {
+function promptFromPlan(
+  node: OrchestrationNodeSpecV1,
+  context: ContextPacketV1,
+  capabilities: CapabilityBindingPlanV1,
+  harness?: ContinualHarnessSnapshotV1,
+  rlm?: RlmExecutionPlanV1,
+): ContentBlock[] {
   const instructions = capabilities.instructions.map(value => `- ${value.text}`).join('\n')
   const upstream = context.included.filter(value => value.kind === 'artifact').map(value => `- ${value.ref}`).join('\n')
+  const harnessEntries = harness?.entries.map(value => `- [${value.kind}] ${value.text} (Evidence: ${value.evidenceRefs.join(', ') || 'none'})`).join('\n') ?? ''
   return [{
     type: 'text',
     text: [
@@ -234,10 +252,39 @@ function promptFromPlan(node: OrchestrationNodeSpecV1, context: ContextPacketV1,
       `Acceptance: ${node.acceptance.map(value => value.description).join('; ') || 'operator completion'}`,
       ...(instructions.length === 0 ? [] : ['', 'Capability instructions:', instructions]),
       ...(upstream.length === 0 ? [] : ['', 'Upstream artifact references:', upstream]),
+      ...(harnessEntries.length === 0 ? [] : ['', `Continuous Harness generation ${String(harness?.generation ?? 0)}:`, harnessEntries]),
+      ...(rlm?.enabled === true ? [
+        '',
+        'RLM execution strategy:',
+        `- Strategy: ${rlm.strategyId}@${rlm.strategyVersion}.`,
+        `- ${rlm.instruction}`,
+        `- Sealed RLM plan: ${rlm.planSha256}; reason: ${rlm.reason}.`,
+        '- DSH remains the only global TaskGraph Scheduler and acceptance authority.',
+      ] : []),
       '',
       'Return a concise result. Do not expand authority beyond the listed scopes and effects.',
     ].join('\n'),
   }]
+}
+
+function modelTier(model: ResidentModelOption): ModelExecutionOffer['tier'] {
+  const label = `${model.model} ${model.displayName}`.toLowerCase()
+  if (/\b(?:sol|opus|fable)\b|xhigh|max|ultra/u.test(label)) return 'high'
+  if (/\b(?:luna|spark|haiku|flash)\b/u.test(label)) return 'low'
+  return 'medium'
+}
+
+function nodePhase(spec: OrchestrationNodeSpecV1): ModelTaskPhase {
+  if (spec.phase !== undefined) return spec.phase
+  const label = `${spec.role} ${spec.title}`.toLowerCase()
+  if (/plan|architect|design|规划|架构|设计/u.test(label)) return 'planning'
+  if (/verify|review|accept|audit|验证|审查|验收/u.test(label)) return 'verification'
+  if (/synthesi|summar|综合|汇总/u.test(label)) return 'synthesis'
+  return 'execution'
+}
+
+function quotaForModel(pool: readonly ResidentQuotaPool[] | undefined, model: ResidentModelOption): ResidentQuotaPool | undefined {
+  return pool?.find(value => value.models.includes(model.model))
 }
 
 /** Single-writer Scheduler, compiler host, and physical-attempt reconciler. */
@@ -281,8 +328,22 @@ export class OrchestrationDaemon {
     this.acquireLock()
     const thisRoot = this.options.root
     await this.ctx.plugin(PhysicalOperatorRuntime)
+    await this.ctx.plugin(LlmRuntime)
+    await this.ctx.plugin(LocalCredentialProvider, { dshHome: this.options.dshHome, watch: true })
+    await this.ctx.plugin(LlmDeepSeek, {})
+    await this.ctx.plugin(ModelWorkerRuntime)
+    await this.ctx.plugin({
+      name: 'model-worker-deepseek',
+      inject: ['modelWorkers', 'llm'],
+      apply: DeepSeekModelWorker,
+    })
     await this.ctx.plugin(DirectIntentCompiler)
     await this.ctx.plugin(BasicContextCompiler)
+    await this.ctx.plugin(SubscriptionFirstModelAllocation)
+    await this.ctx.plugin(LocalRlmStrategy)
+    await this.ctx.plugin(class extends LocalContinualHarness {
+      constructor(ctx: Context) { super(ctx, join(thisRoot, 'continual-harness')) }
+    })
     await this.ctx.plugin(class extends LocalCapabilityCapsuleService {
       constructor(ctx: Context) { super(ctx, join(thisRoot, 'capsules')) }
     })
@@ -366,7 +427,7 @@ export class OrchestrationDaemon {
     const protocol = requiredInteger(params, 'protocol_version')
     const schema = requiredInteger(params, 'state_schema_version')
     if (protocol !== ORCHESTRATION_PROTOCOL_VERSION || schema !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
-      throw new OrchestrationError('orchestration protocol or state schema mismatch', 'ORCHESTRATION_UNAVAILABLE')
+      throw new OrchestrationError('orchestration protocol or state schema mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
     return {
       protocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
@@ -712,7 +773,11 @@ export class OrchestrationDaemon {
         maxParallel: record.graph.maxParallel,
       })])
     }
-    await Promise.all(selected.map(node => this.prepareAndDispatch(String(record.snapshot.runId), node.id)))
+    // Preparation writes the shared Run projection. Seal and accept each selected
+    // node in scheduler order, while the accepted product turns themselves run
+    // concurrently. This avoids lost Run revisions without reducing worker
+    // parallelism.
+    for (const node of selected) await this.prepareAndDispatch(String(record.snapshot.runId), node.id)
     record = this.store.getRun(String(record.snapshot.runId))
     const required = record.graph.nodes.filter(node => node.requiredForCompletion)
     const requiredStates = required.map(spec => record.snapshot.nodes.find(node => node.id === spec.id)?.state)
@@ -781,11 +846,37 @@ export class OrchestrationDaemon {
       this.blockNode(runId, nodeId, blockers)
       return
     }
+    const harnessMode = record.snapshot.admission?.continualHarness ?? 'auto'
+    const harnessScope: ContinualHarnessScope | undefined = harnessMode === 'off'
+      || !spec.contextPolicy.allowedSourceKinds.includes('knowledge')
+      ? undefined
+      : harnessMode === 'session' ? 'session' : 'workspace'
+    const harnessSnapshot = harnessScope === undefined ? undefined : await this.ctx.continualHarness.snapshot({
+      workspace: record.snapshot.workspace,
+      ...record.snapshot.admission?.sourceSessionId === undefined
+        ? {}
+        : { sessionId: record.snapshot.admission.sourceSessionId },
+      scope: harnessScope,
+      role: spec.role,
+      task: spec.task,
+      limit: 12,
+    })
+    const harnessSnapshotRef = harnessSnapshot === undefined ? undefined : this.store.putArtifact(harnessSnapshot)
+    if (harnessSnapshot !== undefined && harnessSnapshotRef !== undefined) {
+      this.store.recordArtifact('compilation_artifacts', {
+        ref: String(harnessSnapshotRef), runId, nodeId, attempt, generation: node.capabilityGeneration,
+      })
+      this.store.saveRun(record, [event(record.snapshot.runId, 'harness.snapshot', {
+        ref: String(harnessSnapshotRef), scope: harnessSnapshot.scope,
+        generation: harnessSnapshot.generation, entryCount: harnessSnapshot.entries.length,
+      }, node)])
+    }
     const sourceRefs: ContextSourceRef[] = [
       { ref: String(record.intentRef), kind: 'intent', required: true },
       ...record.requirementRef === undefined ? [] : [{ ref: String(record.requirementRef), kind: 'requirement' as const, required: true }],
       ...upstreamRefs.map(ref => ({ ref: String(ref), kind: 'artifact' as const, required: true })),
       ...capabilityPlan.resourceRefs.map(ref => ({ ref, kind: 'capsule' as const, required: true })),
+      ...harnessSnapshotRef === undefined ? [] : [{ ref: String(harnessSnapshotRef), kind: 'knowledge' as const, required: false }],
     ]
     const contextPacket = await this.ctx.contextCompiler.compile({
       runId,
@@ -805,8 +896,39 @@ export class OrchestrationDaemon {
     this.store.saveRun(record, [event(record.snapshot.runId, 'context.compiled', {
       ref: String(contextPacketRef), sha256: contextPacket.packetSha256, degradedSources: contextPacket.degradedSources,
     }, node)])
-    const selectedProvider = await this.selectOperator(spec)
-    const operatorId = selectedProvider.operatorId
+    const rlmPlan = await this.ctx.rlmStrategy.resolve({
+      runId,
+      nodeId,
+      phase: nodePhase(spec),
+      role: spec.role,
+      task: spec.task,
+      requestedMode: spec.rlm?.mode ?? record.snapshot.admission?.rlm ?? 'auto',
+      ...spec.rlm === undefined ? {} : { requestedBudget: {
+        maxDepth: spec.rlm.maxDepth,
+        maxChildren: spec.rlm.maxChildren,
+        maxTurns: spec.rlm.maxTurns,
+      } },
+    })
+    const rlmPlanRef = this.store.putArtifact(rlmPlan)
+    this.store.recordArtifact('compilation_artifacts', {
+      ref: String(rlmPlanRef), runId, nodeId, attempt, generation: node.capabilityGeneration,
+    })
+    this.store.saveRun(record, [event(record.snapshot.runId, 'rlm.resolved', {
+      ref: String(rlmPlanRef), enabled: rlmPlan.enabled, reason: rlmPlan.reason,
+      planSha256: rlmPlan.planSha256,
+    }, node)])
+    const { provider: selectedProvider, allocation } = await this.selectOperator(record, spec, rlmPlan)
+    const operatorId = allocation.operatorId
+    const allocationPlanRef = this.store.putArtifact(allocation)
+    this.store.recordArtifact('compilation_artifacts', {
+      ref: String(allocationPlanRef), runId, nodeId, attempt, generation: node.capabilityGeneration,
+    })
+    this.store.saveRun(record, [event(record.snapshot.runId, 'model.allocated', {
+      ref: String(allocationPlanRef), operatorId, model: allocation.model, source: allocation.source,
+      quotaPoolId: allocation.quotaPoolId ?? null,
+      suggestedParallelism: allocation.suggestedParallelism,
+      rationale: allocation.rationale,
+    }, node)])
     const executionId = PhysicalOperatorExecutionId(`orch:${runId}:${nodeId}:${String(attempt)}`)
     const taskRef = this.store.putArtifact({ title: spec.title, task: spec.task })
     const base = {
@@ -822,11 +944,15 @@ export class OrchestrationDaemon {
       capabilityPlanRef,
       capabilityGeneration: node.capabilityGeneration,
       contextPacketRef,
+      allocationPlanRef,
+      allocationPlan: allocation,
+      ...harnessSnapshotRef === undefined ? {} : { harnessSnapshotRef },
+      rlmPlan,
       operatorPlan: {
         operatorId,
-        mode: 'resident' as const,
-        ...spec.operator?.profile === undefined ? {} : { profile: spec.operator.profile },
-        injectionBoundaries: selectedProvider.injectionBoundaries,
+        mode: selectedProvider === undefined ? 'model-worker' as const : 'resident' as const,
+        ...allocation.profile === undefined ? {} : { profile: allocation.profile },
+        injectionBoundaries: selectedProvider?.injectionBoundaries ?? [],
       },
       effectiveReadScopes: capabilityPlan.effectiveReadScopes,
       effectiveWriteScopes: capabilityPlan.effectiveWriteScopes,
@@ -844,7 +970,11 @@ export class OrchestrationDaemon {
       ...value,
       attempt,
       operatorId,
-      ...spec.operator?.profile === undefined ? {} : { operatorProfile: spec.operator.profile },
+      ...allocation.profile === undefined ? {} : { operatorProfile: allocation.profile },
+      model: allocation.model,
+      modelSource: allocation.source,
+      ...allocation.quotaPoolId === undefined ? {} : { quotaPoolId: allocation.quotaPoolId },
+      rlm: rlmPlan.enabled ? 'enabled' as const : 'disabled' as const,
       capabilityPlanRef,
       contextPacketRef,
       executionPlanRef: planRef,
@@ -859,7 +989,7 @@ export class OrchestrationDaemon {
         updateIds: queuedUpdates.map(value => value.updateId), generation: node.capabilityGeneration, boundary: 'pre-dispatch',
       }, sealed.find(value => value.id === nodeId))] : [],
     ])
-    await this.dispatchPlan(record, spec, executionPlan, contextPacket, capabilityPlan)
+    await this.dispatchPlan(record, spec, executionPlan, contextPacket, capabilityPlan, harnessSnapshot)
   }
 
   private async dispatchPlan(
@@ -868,7 +998,12 @@ export class OrchestrationDaemon {
     plan: NodeExecutionPlanV1,
     contextPacket: ContextPacketV1,
     capabilityPlan: CapabilityBindingPlanV1,
+    harnessSnapshot?: ContinualHarnessSnapshotV1,
   ): Promise<void> {
+    if (plan.operatorPlan.mode === 'model-worker') {
+      await this.dispatchModelWorker(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
+      return
+    }
     const controller = new AbortController()
     const operator = this.physical.get(plan.operatorPlan.operatorId)
     if (operator === undefined) throw new OrchestrationError(`physical operator is unavailable: ${plan.operatorPlan.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
@@ -893,7 +1028,7 @@ export class OrchestrationDaemon {
         executionId: plan.executionId,
         mode: 'resident',
         label: `${spec.id}: ${spec.title}`,
-        prompt: promptFromPlan(spec, contextPacket, capabilityPlan),
+        prompt: promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, plan.rlmPlan),
         parent: fakeParent(record.snapshot.workspace, String(record.snapshot.runId)),
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
@@ -911,6 +1046,7 @@ export class OrchestrationDaemon {
       }, next.snapshot.nodes.find(value => value.id === spec.id))])
       const key = `${String(record.snapshot.runId)}\0${spec.id}`
       const active: ActiveAttempt = {
+        kind: 'resident',
         runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
         generation: plan.capabilityGeneration, executionId: String(plan.executionId),
         sessionId: receipt.sessionId, turnId: receipt.turnId,
@@ -921,7 +1057,7 @@ export class OrchestrationDaemon {
         async (result) => {
           if (this.closing) return
           await this.syncActiveProgress(active)
-          this.settleAttempt(active, result)
+          await this.settleAttempt(active, result)
         },
         async (error: unknown) => {
           if (this.closing) return
@@ -942,7 +1078,90 @@ export class OrchestrationDaemon {
     }
   }
 
+  private dispatchModelWorker(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    contextPacket: ContextPacketV1,
+    capabilityPlan: CapabilityBindingPlanV1,
+    harnessSnapshot?: ContinualHarnessSnapshotV1,
+  ): Promise<void> {
+    const controller = new AbortController()
+    const createdAt = now()
+    const acceptedAttempt: AttemptRecord = {
+      runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
+      generation: plan.capabilityGeneration, executionId: String(plan.executionId), state: 'accepted',
+      executionPlanRef: String(record.snapshot.nodes.find(value => value.id === spec.id)?.executionPlanRef),
+      createdAt, updatedAt: createdAt,
+    }
+    this.store.saveAttempt(acceptedAttempt)
+    const acceptedRecord = this.store.getRun(String(record.snapshot.runId))
+    const acceptedNodes = acceptedRecord.snapshot.nodes.map(value => value.id === spec.id
+      ? { ...value, state: 'running' as const, updatedAt: now() }
+      : value)
+    const acceptedRun = withRevision(acceptedRecord, { ...acceptedRecord.snapshot, nodes: acceptedNodes })
+    this.store.saveRun(acceptedRun, [event(acceptedRun.snapshot.runId, 'node.dispatch.accepted', {
+      executionId: String(plan.executionId), executor: 'model-worker',
+    }, acceptedNodes.find(value => value.id === spec.id))])
+    try {
+      const result = this.ctx.modelWorkers.execute({
+        commandId: String(plan.executionId),
+        workerId: plan.operatorPlan.operatorId,
+        model: plan.allocationPlan.model,
+        prompt: promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, plan.rlmPlan),
+        signal: controller.signal,
+        ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
+      })
+      const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', updatedAt: now() }
+      this.store.saveAttempt(attempt)
+      const current = this.store.getRun(String(record.snapshot.runId))
+      const next = withRevision(current, current.snapshot)
+      this.store.saveRun(next, [event(next.snapshot.runId, 'node.dispatched', {
+        executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
+        model: plan.allocationPlan.model, laneId: String(plan.executionId),
+        contextIsolation: 'one-shot-model-worker',
+      }, next.snapshot.nodes.find(value => value.id === spec.id))])
+      const run = {
+        result: result.then((workerResult) => {
+          if (workerResult.usage !== undefined) {
+            this.store.appendEvents([event(next.snapshot.runId, 'node.model.usage', {
+              operatorId: plan.operatorPlan.operatorId,
+              model: plan.allocationPlan.model,
+              ...workerResult.usage,
+            }, next.snapshot.nodes.find(value => value.id === spec.id))])
+          }
+          return { output: [...workerResult.output], stopReason: workerResult.stopReason }
+        }),
+        dispose: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+      }
+      const active: ActiveAttempt = {
+        kind: 'model-worker', runId: String(record.snapshot.runId), nodeId: spec.id,
+        attempt: plan.attempt, generation: plan.capabilityGeneration,
+        executionId: String(plan.executionId), sessionId: '', turnId: '',
+        operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
+      }
+      const key = `${String(record.snapshot.runId)}\0${spec.id}`
+      this.active.set(key, active)
+      void run.result.then(
+        async (value) => { if (!this.closing) await this.settleAttempt(active, value) },
+        (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
+      ).finally(() => { this.active.delete(key); void this.tick() })
+    } catch (error) {
+      const attempt: AttemptRecord = {
+        ...acceptedAttempt,
+        state: 'failed',
+        errorCode: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        updatedAt: now(),
+      }
+      this.store.saveAttempt(attempt)
+      this.applyFailure(attempt)
+    }
+    return Promise.resolve()
+  }
+
   private async syncActiveProgress(active: ActiveAttempt): Promise<void> {
+    if (active.kind === 'model-worker') return
     if (active.progressSync !== undefined) return active.progressSync
     const operation = this.syncActiveProgressUnchecked(active).finally(() => {
       if (active.progressSync === operation) delete active.progressSync
@@ -976,7 +1195,7 @@ export class OrchestrationDaemon {
     }
   }
 
-  private settleAttempt(active: ActiveAttempt, result: PhysicalOperatorResult): void {
+  private async settleAttempt(active: ActiveAttempt, result: PhysicalOperatorResult): Promise<void> {
     const attempt = this.store.attempts().find(value => (
       value.runId === active.runId
       && value.nodeId === active.nodeId
@@ -1029,6 +1248,26 @@ export class OrchestrationDaemon {
         ...output,
       }, settledNode),
     ])
+    const harnessMode = record.snapshot.admission?.continualHarness ?? 'auto'
+    if (harnessMode !== 'off' && spec?.contextPolicy.allowedSourceKinds.includes('knowledge') === true) {
+      const scope: ContinualHarnessScope = harnessMode === 'session' ? 'session' : 'workspace'
+      const entry = await this.ctx.continualHarness.recordOutcome({
+        runId: active.runId,
+        nodeId: active.nodeId,
+        workspace: record.snapshot.workspace,
+        ...record.snapshot.admission?.sourceSessionId === undefined
+          ? {}
+          : { sessionId: record.snapshot.admission.sourceSessionId },
+        scope,
+        role: spec.role,
+        task: spec.task,
+        outcome: passed ? 'passed' : 'failed',
+        evidenceRefs: [String(evidenceRef)],
+      })
+      this.store.appendEvents([event(next.snapshot.runId, 'harness.outcome.recorded', {
+        entryId: entry.entryId, digest: entry.digest, scope: entry.scope,
+      }, settledNode)])
+    }
   }
 
   private failAttempt(active: ActiveAttempt, error: unknown): void {
@@ -1111,33 +1350,67 @@ export class OrchestrationDaemon {
     this.store.saveRun(next, [event(next.snapshot.runId, `run.${state}`, {})])
   }
 
-  private async selectOperator(spec: OrchestrationNodeSpecV1): Promise<ResidentProviderStatus> {
+  private async selectOperator(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    rlmPlan: RlmExecutionPlanV1,
+  ): Promise<{ readonly provider?: ResidentProviderStatus; readonly allocation: ModelAllocationPlan }> {
     const providers = await this.resident.providers()
-    const available = new Map(providers
-      .filter(value => value.available && value.authentication === 'native-subscription')
-      .map(value => [value.operatorId, value]))
-    const preferred = spec.operator?.preferredIds ?? []
-    for (const id of preferred) {
-      const provider = available.get(id)
-      if (provider !== undefined) return provider
+    const activeByOperator = new Map<string, number>()
+    for (const active of this.active.values()) {
+      activeByOperator.set(active.operatorId, (activeByOperator.get(active.operatorId) ?? 0) + 1)
     }
-    if (preferred.length > 0) {
-      throw new OrchestrationError(
-        `none of the explicitly preferred Resident physical operators are available: ${preferred.join(', ')}`,
-        'ORCHESTRATION_UNAVAILABLE',
-      )
+    const residentOffers: ModelExecutionOffer[] = providers.flatMap((provider) => {
+      const available = provider.available && provider.authentication === 'native-subscription'
+      return provider.models
+        .filter(model => spec.operator?.profile?.model === undefined || model.model === spec.operator.profile.model)
+        .map((model): ModelExecutionOffer => {
+          const quotaPool = quotaForModel(provider.quotaPools, model)
+          return {
+            offerId: `${provider.operatorId}:${model.model}`,
+            operatorId: provider.operatorId,
+            provider: provider.product,
+            model: model.model,
+            displayName: `${provider.displayName} · ${model.displayName}`,
+            source: 'native-subscription',
+            tier: modelTier(model),
+            available,
+            maxConcurrency: provider.maxConcurrency,
+            activeCount: activeByOperator.get(provider.operatorId) ?? 0,
+            tags: provider.tags,
+            ...quotaPool === undefined ? {} : { quotaPool },
+            profile: {
+              model: model.model,
+              ...spec.operator?.profile?.effort === undefined
+                ? model.defaultEffort === undefined ? {} : { effort: model.defaultEffort }
+                : { effort: spec.operator.profile.effort },
+            },
+          }
+        })
+    })
+    const modelWorkerOffers = spec.writeScopes.length === 0
+      && spec.effectBudget.write.length === 0
+      && spec.effectBudget.execute.length === 0
+      ? await this.ctx.modelWorkers.offers()
+      : []
+    const allocation = await this.ctx.modelAllocation.allocate({
+      runId: String(record.snapshot.runId),
+      nodeId: spec.id,
+      phase: nodePhase(spec),
+      role: spec.role,
+      task: spec.task,
+      preferredOperatorIds: spec.operator?.preferredIds ?? [],
+      objective: record.snapshot.admission?.optimization ?? 'balanced',
+      rlm: rlmPlan.enabled ? 'enabled' : 'disabled',
+      graphMaxParallel: record.graph.maxParallel,
+      offers: [...residentOffers, ...modelWorkerOffers],
+      now: now(),
+    })
+    const provider = providers.find(value => value.operatorId === allocation.operatorId)
+    if (allocation.source === 'native-subscription' && provider === undefined) {
+      throw new OrchestrationError(`allocated provider disappeared: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     }
-    const role = `${spec.role} ${spec.task}`.toLowerCase()
-    const inferred = /recursive|recursion|rlm|multi.agent|synthesi[sz]|explor|long.horizon|递归|多智能体|综合探索/u.test(role)
-      ? 'prime-agent'
-      : /architect|review|analysis|research|long.context|架构|审查|长上下文/u.test(role)
-        ? 'claude-code'
-        : 'codex'
-    const inferredProvider = available.get(inferred)
-    if (inferredProvider !== undefined) return inferredProvider
-    const fallback = providers.find(value => available.has(value.operatorId))
-    if (fallback === undefined) throw new OrchestrationError('no qualified Resident physical operator is available', 'ORCHESTRATION_UNAVAILABLE')
-    return fallback
+    return provider === undefined ? { allocation } : { provider, allocation }
   }
 
   private async reconcile(): Promise<void> {
@@ -1152,6 +1425,7 @@ export class OrchestrationDaemon {
         if (inspection.state === 'settled' && inspection.result !== undefined) {
           const record = this.store.getRun(attempt.runId)
           const recovered: ActiveAttempt = {
+            kind: 'resident',
             runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
             generation: attempt.generation, executionId: attempt.executionId,
             sessionId: String(inspection.sessionId), turnId: attempt.turnId,
@@ -1160,7 +1434,7 @@ export class OrchestrationDaemon {
             progressCursor: 0,
           }
           await this.syncActiveProgress(recovered)
-          this.settleAttempt(recovered, inspection.result)
+          await this.settleAttempt(recovered, inspection.result)
         } else if (inspection.state === 'indeterminate') {
           this.applyIndeterminate({
             ...attempt,
