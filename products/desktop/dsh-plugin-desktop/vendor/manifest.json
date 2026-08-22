@@ -49,7 +49,7 @@
     {
       "name": "Code-as-Harness governance and per-session collaboration Trace",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "541817425a794b70fe50adf2b779d6e97332aa75"
+      "commit": "61574c8b3aafb5539a07cc80053048340b269470"
     },
     {
       "name": "Solar sidebar footer layout",
@@ -165,7 +165,7 @@
     "dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz": "8e1025fb49346f5b317e55de18e060069493e411dd86fa1d93e465a0d9dbf241",
     "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
     "dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz": "80755b4dd17400ca4e63d69abde591fcea016c62e39b127a48ef962926bbf940",
-    "dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz": "86457206fb99ecd4c19fa509f85ef7f44989de9f371a4a5fb37ecea5842395a6",
+    "dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz": "63ba496bca3f2f305ae0d149cc2401c88111416755a4fa9d9cc54e6904b15a06",
     "dsh-packages/dsh-web-billing-1.1.3.tgz": "7b2c7b85d74b4c16dec9d0bcecf87b818e5b071a01949765749a5c240f7fc209"
   }
 }

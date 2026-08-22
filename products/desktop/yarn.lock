@@ -5558,10 +5558,10 @@ __metadata:
 
 "@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.3.10
-  resolution: "@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz#./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz::hash=c0e001&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz#./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz::hash=4f222d&locator=deepseek-harness-desktop%40workspace%3A."
   bin:
     dsh-governed: ./bin/dsh-governed.mjs
-  checksum: 10c0/9f09becd7ab1f7b108c20bb9bf1157c2bff3319ed9e4eefb0ba41438b1ef4c68b4c90362f3d5b026ae7ee932bb53a206aecbf040548842b59ae0289b4dc74124
+  checksum: 10c0/c74f4459fbd5ef35d15ff49a4cffdf016e41977cc665bcacdc41e1e6497336f893c06402a060ef0f65780eafcba3edc007e5ddb4dd98f6863318a929e1ea8f0f
   languageName: node
   linkType: hard
 
