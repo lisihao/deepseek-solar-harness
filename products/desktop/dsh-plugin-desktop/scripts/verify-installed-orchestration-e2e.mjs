@@ -118,6 +118,52 @@ function assertQuotaAcceleratedAllocation(providers, allocation, objective) {
   assert(urgent, `${objective} quota pool ${pool.poolId} is not actually approaching reset`)
 }
 
+export function assertParallelWorkerEvents(events, workerNodeIds) {
+  const workerIds = new Set(workerNodeIds)
+  const workerAttempts = events.filter(event => event.type === 'node.dispatched' && workerIds.has(event.nodeId))
+  const workerEvidence = []
+  const workerDispatches = []
+  const quotaFailovers = []
+
+  for (const nodeId of workerIds) {
+    const accepted = events.filter(event => event.type === 'node.evidence.accepted' && event.nodeId === nodeId)
+    assert(accepted.length === 1, `${nodeId} produced ${String(accepted.length)} accepted Evidence events instead of one`)
+    const evidence = accepted[0]
+    const successfulDispatch = workerAttempts.find(event => (
+      event.nodeId === nodeId && event.attempt === evidence.attempt
+    ))
+    assert(successfulDispatch !== undefined, `${nodeId} has no dispatch for successful attempt ${String(evidence.attempt)}`)
+    workerEvidence.push(evidence)
+    workerDispatches.push(successfulDispatch)
+
+    const quotaRetries = events.filter(event => (
+      event.nodeId === nodeId
+      && event.type === 'node.retry_scheduled'
+      && event.data?.code === 'QUOTA_EXHAUSTED'
+    ))
+    for (const retry of quotaRetries) {
+      const before = events.findLast(event => (
+        event.nodeId === nodeId
+        && event.type === 'model.allocated'
+        && event.sequence < retry.sequence
+      ))
+      const after = events.find(event => (
+        event.nodeId === nodeId
+        && event.type === 'model.allocated'
+        && event.sequence > retry.sequence
+      ))
+      assert(before !== undefined && after !== undefined, `${nodeId} quota retry is missing its before/after allocation evidence`)
+      const beforeIdentity = before.data?.quotaPoolId ?? before.data?.offerId ?? `${String(before.data?.operatorId)}:${String(before.data?.model)}`
+      const afterIdentity = after.data?.quotaPoolId ?? after.data?.offerId ?? `${String(after.data?.operatorId)}:${String(after.data?.model)}`
+      assert(beforeIdentity !== afterIdentity, `${nodeId} retried the exhausted allocation ${beforeIdentity}`)
+      quotaFailovers.push({ nodeId, from: beforeIdentity, to: afterIdentity })
+    }
+  }
+
+  assert(Math.max(...workerDispatches.map(event => event.sequence)) < Math.min(...workerEvidence.map(event => event.sequence)), 'parallel workers were not both active before either settled')
+  return { workerAttempts, workerDispatches, workerEvidence, quotaFailovers }
+}
+
 async function runInner(appRoot) {
   const version = appVersion(appRoot)
   process.env.DSH_BUILD_COMMIT = `desktop-${version}`
@@ -248,11 +294,10 @@ async function runInner(appRoot) {
   assert(pipelineAllocations.get('verify')?.tier === 'high', 'verification node did not use a high-tier model')
   const rlm = pipeline.events.find(event => event.type === 'rlm.resolved' && event.nodeId === 'plan')
   assert(rlm?.data.enabled === true, 'planning node did not seal and execute an enabled RLM plan')
-  const workerIds = new Set(['worker-a', 'worker-b'])
-  const workerDispatches = pipeline.events.filter(event => event.type === 'node.dispatched' && workerIds.has(event.nodeId))
-  const workerEvidence = pipeline.events.filter(event => event.type === 'node.evidence.accepted' && workerIds.has(event.nodeId))
-  assert(workerDispatches.length === 2 && workerEvidence.length === 2, 'parallel workers did not both dispatch and settle')
-  assert(Math.max(...workerDispatches.map(event => event.sequence)) < Math.min(...workerEvidence.map(event => event.sequence)), 'parallel workers were not both active before either settled')
+  const { workerAttempts, workerDispatches, workerEvidence, quotaFailovers } = assertParallelWorkerEvents(
+    pipeline.events,
+    ['worker-a', 'worker-b'],
+  )
   process.stdout.write('[65%] RLM + 高低阶分工 + DAG 并行已通过真实执行\n')
 
   const conflictTitle = `DSH ${version} scope conflict E2E ${nonce}`
@@ -331,8 +376,10 @@ async function runInner(appRoot) {
     pipeline: {
       title: pipelineTitle,
       runId: String(pipeline.snapshot.runId),
+      workerAttemptSequences: workerAttempts.map(event => event.sequence),
       workerDispatchSequences: workerDispatches.map(event => event.sequence),
       workerEvidenceSequences: workerEvidence.map(event => event.sequence),
+      quotaFailovers,
       rlm: rlm.data,
     },
     conflict: {
@@ -566,5 +613,7 @@ async function runOuter() {
   process.stdout.write(`${JSON.stringify({ status: 'ok', evidencePath, application: result.application, runs: result.runs }, undefined, 2)}\n`)
 }
 
-if (process.argv.includes('--inner')) await runInner(resolve(valueAfter('--app') ?? defaultAppRoot))
-else await runOuter()
+if (process.argv[1] !== undefined && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  if (process.argv.includes('--inner')) await runInner(resolve(valueAfter('--app') ?? defaultAppRoot))
+  else await runOuter()
+}
