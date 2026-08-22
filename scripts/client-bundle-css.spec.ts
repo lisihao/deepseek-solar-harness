@@ -27,21 +27,33 @@ function cssPlugin(): CssPlugin {
   return plugin
 }
 
+async function loadFixture(
+  root: string,
+  source: string,
+  addWatchFile: (id: string) => void = () => {},
+): Promise<{ output: string; stylesheet: string; virtualId: string }> {
+  const stylesheet = join(root, 'Fixture.module.css')
+  await writeFile(stylesheet, source)
+  const plugin = cssPlugin()
+  const virtualId = plugin.resolveId?.('./Fixture.module.css', join(root, 'index.ts'))
+  if (typeof virtualId !== 'string' || plugin.load === undefined) {
+    throw new Error('CSS Modules plugin hooks are incomplete')
+  }
+  const output = await plugin.load.call({ addWatchFile }, virtualId)
+  if (output === null) throw new Error('CSS Modules plugin returned no output')
+  return { output, stylesheet, virtualId }
+}
+
 describe('client bundle CSS Modules', () => {
   it('registers the source stylesheet as a watch dependency', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-client-css-watch-'))
     try {
-      const stylesheet = join(root, 'Fixture.module.css')
-      const importer = join(root, 'index.ts')
-      await writeFile(stylesheet, '.root { color: red; }\n')
-      const plugin = cssPlugin()
-      const virtualId = plugin.resolveId?.('./Fixture.module.css', importer)
-      if (typeof virtualId !== 'string' || plugin.load === undefined) {
-        throw new Error('CSS Modules plugin hooks are incomplete')
-      }
       const watched: string[] = []
-
-      const output = await plugin.load.call({ addWatchFile: id => watched.push(id) }, virtualId)
+      const { output, stylesheet } = await loadFixture(
+        root,
+        '.root { color: red; }\n',
+        id => watched.push(id),
+      )
 
       expect(watched).toEqual([stylesheet])
       expect(output).toContain('data-plugin-css')
@@ -57,17 +69,8 @@ describe('client bundle CSS Modules', () => {
       const outputs: string[] = []
       const virtualIds: string[] = []
       for (const root of [firstRoot, secondRoot]) {
-        const stylesheet = join(root, 'Fixture.module.css')
-        const importer = join(root, 'index.ts')
-        await writeFile(stylesheet, '.root { color: red; }\n')
-        const plugin = cssPlugin()
-        const virtualId = plugin.resolveId?.('./Fixture.module.css', importer)
-        if (typeof virtualId !== 'string' || plugin.load === undefined) {
-          throw new Error('CSS Modules plugin hooks are incomplete')
-        }
+        const { output, virtualId } = await loadFixture(root, '.root { color: red; }\n')
         virtualIds.push(virtualId)
-        const output = await plugin.load.call({ addWatchFile() {} }, virtualId)
-        if (output === null) throw new Error('CSS Modules plugin returned no output')
         outputs.push(output)
       }
 
@@ -84,16 +87,10 @@ describe('client bundle CSS Modules', () => {
   it('serializes the Lightning CSS export map in a deterministic order', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-client-css-order-'))
     try {
-      const stylesheet = join(root, 'Fixture.module.css')
-      await writeFile(stylesheet, '.zebra { color: red; } .alpha { color: blue; }\n')
-      const plugin = cssPlugin()
-      const virtualId = plugin.resolveId?.('./Fixture.module.css', join(root, 'index.ts'))
-      if (typeof virtualId !== 'string' || plugin.load === undefined) {
-        throw new Error('CSS Modules plugin hooks are incomplete')
-      }
-
-      const output = await plugin.load.call({ addWatchFile() {} }, virtualId)
-      if (output === null) throw new Error('CSS Modules plugin returned no output')
+      const { output } = await loadFixture(
+        root,
+        '.zebra { color: red; } .alpha { color: blue; }\n',
+      )
       const serialized = output.split('\n').at(-1)?.replace(/^export default /, '').replace(/;$/, '')
       if (serialized === undefined) throw new Error('CSS Modules export missing')
       const classMap: unknown = JSON.parse(serialized)
