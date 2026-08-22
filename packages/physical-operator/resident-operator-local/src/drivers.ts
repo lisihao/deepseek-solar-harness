@@ -37,7 +37,7 @@ import { openCodexDaemonStream } from './codex-transport.ts'
 const execFileAsync = promisify(execFile)
 
 /** Qualified Claude Code CLI version for this Resident build. */
-export const EXPECTED_CLAUDE_CLI_VERSION = '2.1.233 (Claude Code)'
+export const EXPECTED_CLAUDE_CLI_VERSION = '2.1.239 (Claude Code)'
 /** Official Claude Agent SDK version compiled into this Resident build. */
 export const EXPECTED_CLAUDE_SDK_VERSION = '0.3.220'
 /** Qualified Codex CLI version for this Resident build. */
@@ -67,6 +67,23 @@ export function claudeEnvironment(
     environment.NODE_USE_SYSTEM_CA = '1'
   }
   return environment
+}
+
+/**
+ * Decide whether Claude Code proved a first-party claude.ai login.
+ *
+ * Claude Code 2.1.239 may report `subscriptionType: null` for a valid
+ * claude.ai session, so that advisory field is not part of the authentication
+ * boundary. API-key-shaped environment values are already removed before the
+ * command runs by {@link scrubbedParentEnv}.
+ *
+ * @param status Parsed output from `claude auth status --json`.
+ * @returns Whether the native product attested a first-party claude.ai login.
+ */
+export function isClaudeNativeSubscription(status: Readonly<Record<string, unknown>>): boolean {
+  return status.loggedIn === true
+    && status.authMethod === 'claude.ai'
+    && status.apiProvider === 'firstParty'
 }
 
 function environmentValue(environment: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -339,10 +356,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
       const { stdout: version, executable } = await command('claude', ['--version'])
       const { stdout: auth } = await command(executable, ['auth', 'status', '--json'])
       const parsed = JSON.parse(auth) as Record<string, unknown>
-      const subscription = parsed.loggedIn === true
-        && parsed.authMethod === 'claude.ai'
-        && typeof parsed.subscriptionType === 'string'
-        && parsed.subscriptionType.length > 0
+      const subscription = isClaudeNativeSubscription(parsed)
       const exactVersion = version.trim() === EXPECTED_CLAUDE_CLI_VERSION
       const models = subscription && exactVersion ? await claudeModels(executable) : []
       const catalogReady = models.length > 0

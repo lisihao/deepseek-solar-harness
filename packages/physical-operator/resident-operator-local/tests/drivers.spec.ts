@@ -8,6 +8,7 @@ import {
   claudeResultFailure,
   codexExecutionFailure,
   collectCodexModelsAndQuota,
+  isClaudeNativeSubscription,
   resolveProductExecutable,
 } from '../src/drivers.ts'
 
@@ -23,6 +24,28 @@ const model = {
 } as const
 
 describe('Claude Code resident driver environment', () => {
+  it('accepts the first-party claude.ai status emitted with a null subscription type', () => {
+    expect(isClaudeNativeSubscription({
+      loggedIn: true,
+      authMethod: 'claude.ai',
+      apiProvider: 'firstParty',
+      subscriptionType: null,
+    })).toBe(true)
+  })
+
+  it('rejects non-claude.ai and non-first-party authentication', () => {
+    expect(isClaudeNativeSubscription({
+      loggedIn: true,
+      authMethod: 'apiKey',
+      apiProvider: 'firstParty',
+    })).toBe(false)
+    expect(isClaudeNativeSubscription({
+      loggedIn: true,
+      authMethod: 'claude.ai',
+      apiProvider: 'thirdParty',
+    })).toBe(false)
+  })
+
   it('uses the macOS system CA store without changing the parent environment', () => {
     const parent = { PATH: '/usr/bin:/bin' }
     expect(claudeEnvironment(parent, 'darwin')).toEqual({
