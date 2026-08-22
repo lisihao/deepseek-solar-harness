@@ -364,6 +364,14 @@ class GovernanceTests(unittest.TestCase):
         expected = (self.root / ".git" / "governance-attestation.json").resolve()
         self.assertEqual(report, expected)
 
+    def test_verify_lock_rejects_overlap_and_releases_after_exit(self):
+        with governance.verify_lock(self.root):
+            with self.assertRaisesRegex(governance.GovernanceError, "already running"):
+                with governance.verify_lock(self.root):
+                    self.fail("a concurrent verify acquired the same worktree lock")
+        with governance.verify_lock(self.root):
+            pass
+
     def test_exported_bundle_is_verified_and_tampering_fails(self):
         project_profile = dict(self.profile)
         project_profile["harness_bundle"] = {
@@ -389,6 +397,16 @@ class GovernanceTests(unittest.TestCase):
         bundle_item = next(item for item in tampered["items"] if item["id"] == "harness-bundle")
         self.assertEqual(bundle_item["status"], "error")
         self.assertIn("digest mismatch", bundle_item["detail"])
+
+    def test_export_bundle_accepts_the_installed_project_profile_as_its_source(self):
+        profile = self.root / ".agent-governance" / "profile.json"
+        profile.parent.mkdir()
+        profile.write_text(json.dumps(self.profile), encoding="utf-8")
+        manifest = exporter.export_bundle(self.root, profile, "test-commit")
+        self.assertEqual(
+            manifest["files"][".agent-governance/profile.json"],
+            exporter.sha256_file(profile),
+        )
 
 
 if __name__ == "__main__":
