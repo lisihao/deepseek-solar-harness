@@ -84,7 +84,7 @@ describe('orchestration Desktop panel transport', () => {
       type: 'model.allocated',
       time: '2026-08-20T00:00:02.000Z',
       data: { operatorId: 'codex', model: 'gpt-5.6-luna', tier: 'low', source: 'native-subscription', quotaPoolId: 'codex-standard' },
-    })).toBe('codex · gpt-5.6-luna · 低阶 · native-subscription · 配额池 codex-standard')
+    })).toBe('codex · gpt-5.6-luna · 低阶 · 订阅套餐 · 配额池 codex-standard')
     expect(eventDetail({
       sequence: 5,
       runId: 'run-1',

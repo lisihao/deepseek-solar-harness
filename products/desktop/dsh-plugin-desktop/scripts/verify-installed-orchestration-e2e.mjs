@@ -213,7 +213,7 @@ async function runInner(appRoot) {
     graph: graph(pipelineTitle, workspace, [
       commonNode('plan', {
         title: 'Plan with bounded RLM',
-        task: `Plan two independent verification paths for orchestration E2E ${nonce}. Return a concise plan ending with PLAN_${nonce}.`,
+        task: `Plan two independent verification paths for orchestration E2E ${nonce}. Use only the supplied task context; do not call tools. Return a concise plan ending with PLAN_${nonce}.`,
         role: 'architecture planning',
         phase: 'planning',
         rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
@@ -233,7 +233,7 @@ async function runInner(appRoot) {
       commonNode('verify', {
         dependsOn: ['worker-a', 'worker-b'],
         title: 'High-tier verification',
-        task: `Verify the two orchestration E2E ${nonce} worker outcomes. Return a concise verdict ending with VERIFIED_${nonce}.`,
+        task: `Verify the two orchestration E2E ${nonce} worker outcomes using only the supplied upstream artifacts. Do not call tools. Return a concise verdict ending with VERIFIED_${nonce}.`,
         role: 'verification review',
         phase: 'verification',
         readScopes: ['e2e/worker-a', 'e2e/worker-b'],
@@ -365,24 +365,30 @@ function listeningPorts() {
 }
 
 async function discoverDesktopEndpoints() {
-  let baseUrl
-  let cdpTarget
-  for (const port of listeningPorts()) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${String(port)}/api/orchestrations?include_diagnostics=1`)
-      if (response.ok) baseUrl = `http://127.0.0.1:${String(port)}`
-    } catch { /* A non-HTTP product listener is not the Desktop Host. */ }
-    try {
-      const response = await fetch(`http://127.0.0.1:${String(port)}/json`)
-      if (!response.ok) continue
-      const targets = await response.json()
-      const target = targets.find(candidate => candidate.type === 'page' && typeof candidate.webSocketDebuggerUrl === 'string')
-      if (target !== undefined) cdpTarget = target
-    } catch { /* Only the explicit remote-debugging listener serves CDP discovery. */ }
+  const deadline = Date.now() + 20_000
+  for (;;) {
+    let baseUrl
+    let cdpTarget
+    for (const port of listeningPorts()) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${String(port)}/api/orchestrations?include_diagnostics=1`)
+        if (response.ok) baseUrl = `http://127.0.0.1:${String(port)}`
+      } catch { /* A non-HTTP product listener is not the Desktop Host. */ }
+      try {
+        const response = await fetch(`http://127.0.0.1:${String(port)}/json`)
+        if (!response.ok) continue
+        const targets = await response.json()
+        const target = targets.find(candidate => candidate.type === 'page' && typeof candidate.webSocketDebuggerUrl === 'string')
+        if (target !== undefined) cdpTarget = target
+      } catch { /* Only the explicit remote-debugging listener serves CDP discovery. */ }
+    }
+    if (baseUrl !== undefined && cdpTarget !== undefined) return { baseUrl, cdpTarget }
+    if (Date.now() >= deadline) {
+      assert(baseUrl !== undefined, 'running Desktop Host /api/orchestrations endpoint was not found')
+      assert(cdpTarget !== undefined, 'running Desktop CDP page was not found; relaunch with --remote-debugging-port')
+    }
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 500))
   }
-  assert(baseUrl !== undefined, 'running Desktop Host /api/orchestrations endpoint was not found')
-  assert(cdpTarget !== undefined, 'running Desktop CDP page was not found; relaunch with --remote-debugging-port')
-  return { baseUrl, cdpTarget }
 }
 
 async function cdpSession(target) {
@@ -442,27 +448,46 @@ async function verifyDesktopProjection(baseUrl, target, evidence) {
 
   const cdp = await cdpSession(target)
   try {
-    const opened = await cdp.evaluate(`(() => {
+    const openPanel = () => cdp.evaluate(`(() => {
       const button = document.querySelector('.dshDesktopOrchestrationAction')
       if (!(button instanceof HTMLElement)) return false
       button.click()
       return true
     })()`)
-    assert(opened === true, 'Desktop orchestration sidebar action is not mounted')
+    let opened = await openPanel()
+    if (!opened) {
+      const selected = await cdp.evaluate(`(() => {
+        const row = document.querySelector('[role="treeitem"][aria-selected="false"]')
+        if (!(row instanceof HTMLElement)) return false
+        row.click()
+        return true
+      })()`)
+      assert(selected === true, 'Desktop has no persisted Session for the orchestration header action')
+      await waitFor(
+        () => cdp.evaluate(`document.querySelector('.dshDesktopOrchestrationAction') !== null`),
+        value => value === true,
+        'Desktop orchestration action did not mount after selecting a persisted Session',
+      )
+      opened = await openPanel()
+    }
+    assert(opened === true, 'Desktop orchestration Session action is not mounted')
     await waitFor(
       () => cdp.evaluate(`document.querySelector('[aria-label="持久化任务编排"]') !== null`),
       value => value === true,
       'Desktop orchestration dialog did not open',
     )
-    const selected = await cdp.evaluate(`(() => {
-      const title = ${JSON.stringify(evidence.pipeline.title)}
-      const button = [...document.querySelectorAll('.dshDesktopOrchestrationRun')]
-        .find(candidate => candidate.textContent?.includes(title))
-      if (!(button instanceof HTMLElement)) return false
-      button.click()
-      return true
-    })()`)
-    assert(selected === true, 'Desktop orchestration panel did not render the E2E pipeline Run')
+    await waitFor(
+      () => cdp.evaluate(`(() => {
+        const title = ${JSON.stringify(evidence.pipeline.title)}
+        const button = [...document.querySelectorAll('.dshDesktopOrchestrationRun')]
+          .find(candidate => candidate.textContent?.includes(title))
+        if (!(button instanceof HTMLElement)) return false
+        button.click()
+        return true
+      })()`),
+      value => value === true,
+      'Desktop orchestration panel did not render the E2E pipeline Run',
+    )
     const view = await waitFor(
       () => cdp.evaluate(`(() => {
         const panel = document.querySelector('[aria-label="持久化任务编排"]')

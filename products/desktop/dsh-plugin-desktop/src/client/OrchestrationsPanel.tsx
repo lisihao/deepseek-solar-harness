@@ -305,7 +305,7 @@ function NodeCard(props: {
       <span>Generation {String(node.capabilityGeneration)}</span>
       <span>RLM {node.rlm ?? 'auto'}</span>
       <span>模型层级 {modelTierLabel(node.modelTier)}</span>
-      <span>{node.modelSource === 'native-subscription' ? '订阅' : node.modelSource === 'metered-api' ? 'API 计费' : '来源待解析'} · {node.quotaPoolId ?? '配额池 N/A'}</span>
+      <span>{modelSourceLabel(node.modelSource)} · {node.quotaPoolId ?? '配额池 N/A'}</span>
       <span>Evidence {String(node.evidenceRefs.length)}</span>
     </div>
     <div className="dshDesktopOrchestrationRefs">
@@ -398,7 +398,7 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
     return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
   }
   if (event.type === 'model.allocated') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${modelTierLabel(event.data.tier)} · ${String(event.data.source ?? 'N/A')} · 配额池 ${String(event.data.quotaPoolId ?? 'N/A')}`
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)} · 配额池 ${String(event.data.quotaPoolId ?? 'N/A')}`
   }
   if (event.type === 'harness.snapshot') {
     return `${String(event.data.scope ?? 'N/A')} · generation ${String(event.data.generation ?? 'N/A')} · ${String(event.data.entryCount ?? 0)} 条`
@@ -439,6 +439,13 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
 
 function modelTierLabel(value: unknown): string {
   return ({ low: '低阶', medium: '中阶', high: '高阶' } as Record<string, string>)[String(value)] ?? '待解析'
+}
+
+function modelSourceLabel(value: unknown): string {
+  return ({
+    'native-subscription': '订阅套餐',
+    'metered-api': '按量 API',
+  } as Record<string, string>)[String(value)] ?? '来源待解析'
 }
 
 function operatorProgressLabel(phase: string): string {
