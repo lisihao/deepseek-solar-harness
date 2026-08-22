@@ -245,6 +245,34 @@ describe('ResidentDaemon', () => {
     }
   })
 
+  it('uses connectTimeout only for socket connection, not a qualified RPC response', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = new ResidentDaemonClient({
+      root,
+      autoStart: false,
+      connectTimeoutMs: 50,
+      pollIntervalMs: 5,
+    })
+    await connected.ready()
+    driver.beginBlocking()
+    const result = connected.providers().then(
+      providers => ({ providers }),
+      (error: unknown) => ({ error }),
+    )
+    try {
+      await driver.blockingQualificationEntered
+      await new Promise<void>(resolve => setTimeout(resolve, 100))
+      driver.releaseQualification()
+      await expect(result).resolves.toMatchObject({ providers: [{ operatorId: 'codex' }] })
+    } finally {
+      driver.releaseQualification()
+      await daemon.close()
+    }
+  })
+
   it('continues one operator+realpath workspace across client restart and isolates workspaces', async () => {
     const root = temporaryRoot()
     const workspace = join(root, 'workspace')
