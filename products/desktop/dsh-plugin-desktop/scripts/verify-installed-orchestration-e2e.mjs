@@ -164,6 +164,51 @@ export function assertParallelWorkerEvents(events, workerNodeIds) {
   return { workerAttempts, workerDispatches, workerEvidence, quotaFailovers }
 }
 
+export function assertSerializedScopeWorkerEvents(events, workerNodeIds) {
+  const workerIds = new Set(workerNodeIds)
+  const dispatches = events.filter(event => event.type === 'node.dispatched' && workerIds.has(event.nodeId))
+  const successfulDispatches = []
+  const workerEvidence = []
+
+  for (const nodeId of workerIds) {
+    const accepted = events.filter(event => event.type === 'node.evidence.accepted' && event.nodeId === nodeId)
+    assert(accepted.length === 1, `${nodeId} produced ${String(accepted.length)} accepted Evidence events instead of one`)
+    const evidence = accepted[0]
+    const successfulDispatch = dispatches.find(event => (
+      event.nodeId === nodeId && event.attempt === evidence.attempt
+    ))
+    assert(successfulDispatch !== undefined, `${nodeId} has no dispatch for successful attempt ${String(evidence.attempt)}`)
+    successfulDispatches.push(successfulDispatch)
+    workerEvidence.push(evidence)
+  }
+
+  const attemptIntervals = dispatches.map((dispatch) => {
+    const end = events.find(event => (
+      event.sequence > dispatch.sequence
+      && event.nodeId === dispatch.nodeId
+      && event.attempt === dispatch.attempt
+      && ['node.retry_scheduled', 'node.evidence.accepted', 'node.failed', 'node.indeterminate'].includes(event.type)
+    ))
+    assert(end !== undefined, `${String(dispatch.nodeId)} attempt ${String(dispatch.attempt)} has no terminal event`)
+    return {
+      nodeId: dispatch.nodeId,
+      attempt: dispatch.attempt,
+      dispatchSequence: dispatch.sequence,
+      endSequence: end.sequence,
+      endType: end.type,
+    }
+  }).sort((left, right) => left.dispatchSequence - right.dispatchSequence)
+
+  for (let index = 1; index < attemptIntervals.length; index += 1) {
+    assert(
+      attemptIntervals[index - 1].endSequence < attemptIntervals[index].dispatchSequence,
+      'overlapping scope attempts executed concurrently',
+    )
+  }
+
+  return { attemptIntervals, successfulDispatches, workerEvidence }
+}
+
 async function runInner(appRoot) {
   const version = appVersion(appRoot)
   process.env.DSH_BUILD_COMMIT = `desktop-${version}`
@@ -320,10 +365,11 @@ async function runInner(appRoot) {
     && Array.isArray(event.data.waiting)
     && event.data.waiting.some(entry => entry?.code === 'SCOPE_CONFLICT'))
   assert(conflictWait !== undefined, 'scope conflict was not retained in the durable scheduler event stream')
-  const conflictDispatches = conflict.events.filter(event => event.type === 'node.dispatched')
-  const conflictEvidence = conflict.events.filter(event => event.type === 'node.evidence.accepted')
-  assert(conflictDispatches.length === 2 && conflictEvidence.length === 2, 'serialized scope workers did not both complete')
-  assert(conflictEvidence[0].sequence < conflictDispatches[1].sequence, 'overlapping scope workers executed concurrently')
+  const {
+    attemptIntervals: conflictAttemptIntervals,
+    successfulDispatches: conflictDispatches,
+    workerEvidence: conflictEvidence,
+  } = assertSerializedScopeWorkerEvents(conflict.events, ['conflict-a', 'conflict-b'])
   process.stdout.write('[80%] scope 冲突已串行消解，未形成死锁\n')
 
   const recallTitle = `DSH ${version} Continuous Harness recall E2E ${nonce}`
@@ -386,6 +432,7 @@ async function runInner(appRoot) {
       title: conflictTitle,
       runId: String(conflict.snapshot.runId),
       wait: conflictWait.data,
+      attemptIntervals: conflictAttemptIntervals,
       dispatchSequences: conflictDispatches.map(event => event.sequence),
       evidenceSequences: conflictEvidence.map(event => event.sequence),
     },
