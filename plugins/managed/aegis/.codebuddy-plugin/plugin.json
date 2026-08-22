@@ -1,0 +1,19 @@
+{
+  "name": "aegis",
+  "description": "Core skills library for CodeBuddy: TDD, debugging, collaboration patterns, and proven techniques",
+      "version": "2.8.5",
+  "author": {
+    "name": "Aegis Maintainers"
+  },
+  "homepage": "https://github.com/GanyuanRan/Aegis",
+  "repository": "https://github.com/GanyuanRan/Aegis",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "tdd",
+    "debugging",
+    "collaboration",
+    "best-practices",
+    "workflows"
+  ]
+}

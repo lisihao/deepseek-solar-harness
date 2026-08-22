@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# SessionStart hook for Aegis plugin
+
+set -euo pipefail
+
+# Determine plugin root directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+read_config_activation_mode() {
+    local config_file="${HOME}/.config/aegis/config.toml"
+    if [ ! -f "$config_file" ]; then
+        printf 'auto'
+        return
+    fi
+
+    local configured=""
+    configured="$(sed -n 's/^[[:space:]]*activation_mode[[:space:]]*=[[:space:]]*//p' "$config_file" | tail -n 1)"
+    configured="${configured%%#*}"
+    configured="${configured//\"/}"
+    configured="${configured//\'/}"
+    configured="$(printf '%s' "$configured" | tr -d '[:space:]')"
+
+    case "$configured" in
+        auto|explicit)
+            printf '%s' "$configured"
+            ;;
+        *)
+            printf 'auto'
+            ;;
+    esac
+}
+
+read_config_tdd_mode() {
+    local config_file="${HOME}/.config/aegis/config.toml"
+    if [ ! -f "$config_file" ]; then
+        printf 'off'
+        return
+    fi
+
+    local configured=""
+    configured="$(sed -n 's/^[[:space:]]*tdd_mode[[:space:]]*=[[:space:]]*//p' "$config_file" | tail -n 1)"
+    configured="${configured%%#*}"
+    configured="${configured//\"/}"
+    configured="${configured//\'/}"
+    configured="$(printf '%s' "$configured" | tr -d '[:space:]')"
+
+    case "$configured" in
+        auto|off)
+            printf '%s' "$configured"
+            ;;
+        *)
+            printf 'off'
+            ;;
+    esac
+}
+
+activation_mode="${AEGIS_ACTIVATION_MODE:-$(read_config_activation_mode)}"
+tdd_mode="${AEGIS_TDD_MODE:-$(read_config_tdd_mode)}"
+case "$tdd_mode" in
+    auto|off) ;;
+    *) tdd_mode="off" ;;
+esac
+
+if [ "$activation_mode" = "explicit" ]; then
+  printf '{}\n'
+  exit 0
+fi
+
+# Check if legacy skills directory exists and build warning
+warning_message=""
+legacy_skills_dir="${HOME}/.config/aegis/skills"
+if [ -d "$legacy_skills_dir" ]; then
+    warning_message="\n\n<important-reminder>IN YOUR FIRST REPLY AFTER SEEING THIS MESSAGE YOU MUST TELL THE USER:⚠️ **WARNING:** Aegis no longer reads custom skills from ~/.config/aegis/skills. Move them to the current host's supported skills surface (for example ~/.claude/skills, ~/.copilot/skills, ~/.agents/skills, or repository .github/skills as appropriate). To make this message go away, remove ~/.config/aegis/skills</important-reminder>"
+fi
+
+# Read compact using-aegis hot path
+using_aegis_content=$(cat "${PLUGIN_ROOT}/skills/using-aegis/SKILL.md" 2>&1 || echo "Error reading using-aegis skill")
+
+# Escape string for JSON embedding using bash parameter substitution.
+# Each ${s//old/new} is a single C-level pass - orders of magnitude
+# faster than the character-by-character loop this replaces.
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+using_aegis_escaped=$(escape_for_json "$using_aegis_content")
+warning_escaped=$(escape_for_json "$warning_message")
+tdd_mode_context="Aegis TDD mode: ${tdd_mode}. off is the default and disables automatic TDD while verification-before-completion still applies; auto routes strict TDD only when risk warrants."
+session_context="<EXTREMELY_IMPORTANT>\nYou have Aegis.\n\n${tdd_mode_context}\n\n**Below is the compact 'aegis:using-aegis' hot path. For task-specific workflows, use the Skill tool to load only the relevant skill or reference:**\n\n${using_aegis_escaped}\n\n${warning_escaped}\n</EXTREMELY_IMPORTANT>"
+
+# Output context injection as JSON.
+# Cursor hooks expect additional_context (snake_case).
+# Claude Code hooks expect hookSpecificOutput.additionalContext (nested).
+# Copilot CLI (v1.0.11+) and others expect additionalContext (top-level, SDK standard).
+# Claude Code reads BOTH additional_context and hookSpecificOutput without
+# deduplication, so we must emit only the field the current platform consumes.
+#
+# Set AEGIS_HOOK_JSON_STYLE=compact for hosts like Copilot whose command hooks
+# require single-line JSON output.
+#
+# Uses printf instead of heredoc to work around bash 5.3+ heredoc hang.
+# See: https://github.com/GanyuanRan/Aegis/issues/571
+json_style="${AEGIS_HOOK_JSON_STYLE:-pretty}"
+
+if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
+  # Cursor sets CURSOR_PLUGIN_ROOT (may also set CLAUDE_PLUGIN_ROOT)
+  if [ "$json_style" = "compact" ]; then
+    printf '{"additional_context":"%s"}\n' "$session_context"
+  else
+    printf '{\n  "additional_context": "%s"\n}\n' "$session_context"
+  fi
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -z "${COPILOT_CLI:-}" ]; then
+  # Claude Code sets CLAUDE_PLUGIN_ROOT without COPILOT_CLI
+  if [ "$json_style" = "compact" ]; then
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$session_context"
+  else
+    printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$session_context"
+  fi
+else
+  # Copilot CLI (sets COPILOT_CLI=1) or unknown platform — SDK standard format
+  if [ "$json_style" = "compact" ]; then
+    printf '{"additionalContext":"%s"}\n' "$session_context"
+  else
+    printf '{\n  "additionalContext": "%s"\n}\n' "$session_context"
+  fi
+fi
+
+exit 0

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "caseId": "trace-digest-boundary",
+  "workspace": {"mustRemainClean": true},
+  "response": {
+    "requiredClaimGroups": [
+      ["Retrieval chain", "Retrieval"],
+      ["Rule effects"],
+      ["Verification gaps"],
+      ["Host capability gaps"],
+      ["Redactions"],
+      ["Confidence"]
+    ]
+  },
+  "vetoes": ["workspace-change"]
+}
