@@ -218,12 +218,22 @@
       "timeout_seconds": 600
     },
     {
+      "id": "agent-teams-install",
+      "label": "Agent Teams dependency install",
+      "command": ["corepack", "pnpm", "--ignore-workspace", "install", "--frozen-lockfile"],
+      "cwd": "plugins/managed/agent-teams",
+      "scopes": ["managed-agent-teams"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
       "id": "agent-teams-build",
       "label": "Agent Teams build",
       "command": ["corepack", "pnpm", "--ignore-workspace", "run", "build"],
       "cwd": "plugins/managed/agent-teams",
       "scopes": ["managed-agent-teams"],
       "levels": ["full"],
+      "needs": ["agent-teams-install"],
       "timeout_seconds": 600
     },
     {
@@ -233,6 +243,7 @@
       "cwd": "plugins/managed/agent-teams",
       "scopes": ["managed-agent-teams"],
       "levels": ["full"],
+      "needs": ["agent-teams-install"],
       "timeout_seconds": 600
     },
     {
@@ -242,6 +253,7 @@
       "cwd": "plugins/managed/agent-teams",
       "scopes": ["managed-agent-teams"],
       "levels": ["full"],
+      "needs": ["agent-teams-install"],
       "timeout_seconds": 600
     },
     {
@@ -273,12 +285,22 @@
       "timeout_seconds": 300
     },
     {
+      "id": "web-ui-install",
+      "label": "Web UI dependency install",
+      "command": ["corepack", "pnpm", "install", "--frozen-lockfile"],
+      "cwd": "plugins/managed/web-ui",
+      "scopes": ["managed-web-ui"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
       "id": "web-ui-typecheck",
       "label": "Web UI monorepo typecheck",
       "command": ["pnpm", "typecheck"],
       "cwd": "plugins/managed/web-ui",
       "scopes": ["managed-web-ui"],
       "levels": ["full"],
+      "needs": ["web-ui-install"],
       "timeout_seconds": 1200
     },
     {
@@ -288,6 +310,7 @@
       "cwd": "plugins/managed/web-ui",
       "scopes": ["managed-web-ui"],
       "levels": ["full"],
+      "needs": ["web-ui-install"],
       "timeout_seconds": 1200
     },
     {
@@ -297,6 +320,7 @@
       "cwd": "plugins/managed/web-ui",
       "scopes": ["managed-web-ui"],
       "levels": ["full"],
+      "needs": ["web-ui-install"],
       "timeout_seconds": 600
     },
     {
@@ -306,6 +330,7 @@
       "cwd": "plugins/managed/web-ui",
       "scopes": ["managed-web-ui"],
       "levels": ["full"],
+      "needs": ["web-ui-install"],
       "timeout_seconds": 600
     }
   ]

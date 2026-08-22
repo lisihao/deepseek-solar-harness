@@ -2,7 +2,7 @@
 // DOM render channel: pure-plugin fence rendering on pristine hosts.
 // Builds the stock CodeBlock surface (`.md-code-block` + banner label div +
 // `<pre>`) inside a conversation row and drives the observer pipeline.
-import { cleanup, fireEvent } from '@testing-library/react'
+import { cleanup, fireEvent, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import type { Context } from '@deepseek-ai/cordis'
@@ -147,8 +147,9 @@ describe('installDomFenceRenderer', () => {
       expect(container!.textContent).toContain('你好，世界')
       // The body grows: the second finished component appears without settle.
       block.querySelector('code')!.textContent = '{"items":[{"type":"text","content":"你好，世界"},{"type":"text","content":"第二块"}]}'
-      await tick()
-      expect(row.querySelector('.genui-dom-fence')?.textContent).toContain('第二块')
+      await waitFor(() => {
+        expect(row.querySelector('.genui-dom-fence')?.textContent).toContain('第二块')
+      })
     } finally {
       dispose()
     }

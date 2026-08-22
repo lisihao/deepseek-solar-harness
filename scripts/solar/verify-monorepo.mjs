@@ -116,6 +116,34 @@ export function validateMonorepo({
     || relatedTests?.exclusive !== true) {
     errors.push('related-tests must use the bounded Vitest project worker budgets as an exclusive gate')
   }
+  for (const workspace of [
+    {
+      name: 'Agent Teams',
+      installId: 'agent-teams-install',
+      cwd: 'plugins/managed/agent-teams',
+      command: ['corepack', 'pnpm', '--ignore-workspace', 'install', '--frozen-lockfile'],
+      consumers: ['agent-teams-build', 'agent-teams-verify', 'agent-teams-typecheck'],
+    },
+    {
+      name: 'Web UI',
+      installId: 'web-ui-install',
+      cwd: 'plugins/managed/web-ui',
+      command: ['corepack', 'pnpm', 'install', '--frozen-lockfile'],
+      consumers: ['web-ui-typecheck', 'web-ui-tests', 'web-ui-script-tests', 'web-ui-docs'],
+    },
+  ]) {
+    const installGate = governanceGates.get(workspace.installId)
+    if (installGate?.cwd !== workspace.cwd
+      || JSON.stringify(installGate?.command) !== JSON.stringify(workspace.command)) {
+      errors.push(`${workspace.name} governance must install its isolated workspace deterministically`)
+    }
+    for (const consumerId of workspace.consumers) {
+      const consumer = governanceGates.get(consumerId)
+      if (!consumer?.needs?.includes(workspace.installId)) {
+        errors.push(`${consumerId} must depend on ${workspace.installId}`)
+      }
+    }
+  }
   const threadSafeWorkers = /name: 'thread-safe',[\s\S]{0,300}maxWorkers: 2,/u.test(vitestConfig ?? '')
   const processBoundWorkers = /name: 'process-bound',[\s\S]{0,200}maxWorkers: 1,/u.test(vitestConfig ?? '')
   if (!threadSafeWorkers || !processBoundWorkers) {

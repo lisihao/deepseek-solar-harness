@@ -42,6 +42,23 @@ function validInput() {
         { id: 'lint', command: ['pnpm', 'run', 'lint:contracts-ready'], needs: ['source-build'] },
         { id: 'related-tests', command: ['pnpm', 'exec', 'vitest', 'run', '--changed=origin/solar'], exclusive: true },
         { id: 'doc-sync', command: ['pnpm', 'run', 'doc-sync:contracts-ready'], needs: ['source-build'] },
+        {
+          id: 'agent-teams-install',
+          cwd: 'plugins/managed/agent-teams',
+          command: ['corepack', 'pnpm', '--ignore-workspace', 'install', '--frozen-lockfile'],
+        },
+        { id: 'agent-teams-build', needs: ['agent-teams-install'] },
+        { id: 'agent-teams-verify', needs: ['agent-teams-install'] },
+        { id: 'agent-teams-typecheck', needs: ['agent-teams-install'] },
+        {
+          id: 'web-ui-install',
+          cwd: 'plugins/managed/web-ui',
+          command: ['corepack', 'pnpm', 'install', '--frozen-lockfile'],
+        },
+        { id: 'web-ui-typecheck', needs: ['web-ui-install'] },
+        { id: 'web-ui-tests', needs: ['web-ui-install'] },
+        { id: 'web-ui-script-tests', needs: ['web-ui-install'] },
+        { id: 'web-ui-docs', needs: ['web-ui-install'] },
       ],
     },
     vitestConfig: [
@@ -113,6 +130,15 @@ test('rejects repeated source preparation inside governance consumers', () => {
   const input = validInput()
   input.governanceProfile.gates.find(gate => gate.id === 'lint').command = ['pnpm', 'run', 'lint']
   assert.match(validateMonorepo(input).join('\n'), /prepared source build/u)
+})
+
+test('rejects isolated workspace gates without deterministic install prerequisites', () => {
+  const input = validInput()
+  input.governanceProfile.gates.find(gate => gate.id === 'agent-teams-install').command = ['pnpm', 'install']
+  input.governanceProfile.gates.find(gate => gate.id === 'web-ui-tests').needs = []
+  const errors = validateMonorepo(input).join('\n')
+  assert.match(errors, /Agent Teams governance must install/u)
+  assert.match(errors, /web-ui-tests must depend on web-ui-install/u)
 })
 
 test('rejects uncached or full-history-blob Solar governance checkout', () => {
