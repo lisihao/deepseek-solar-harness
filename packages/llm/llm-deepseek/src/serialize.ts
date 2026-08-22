@@ -211,9 +211,9 @@ async function contentParts(
 
 /** Keep text-only user messages on the compact string wire form. */
 function userContent(parts: readonly WireUserContentPart[]): string | WireUserContentPart[] {
-  return parts.some(part => part.type === 'image_url')
-    ? [...parts]
-    : parts.map(part => part.type === 'text' ? part.text : '').join('')
+  if (parts.some(part => part.type === 'image_url')) return [...parts]
+  const textParts = parts as readonly Extract<WireUserContentPart, { type: 'text' }>[]
+  return textParts.map(part => part.text).join('')
 }
 
 /** Serialize one assistant message (text + reasoning + tool calls). */

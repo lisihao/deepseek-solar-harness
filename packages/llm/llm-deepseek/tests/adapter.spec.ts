@@ -906,6 +906,21 @@ describe('plugin registration and config', () => {
       })
   })
 
+  it('defaults a legacy direct-adapter catalog row to text input', async () => {
+    const connection = resolveAdapterOptions({ models: [] })
+    const adapter = new DeepSeekAdapter({
+      options: () => ({ ...connection, models: [{ id: 'legacy-model' }] }),
+      resolveApiKey: () => Promise.resolve('k'),
+      resolveUserId: () => TEST_USER_ID,
+    })
+    await expect(adapter.listModels('deepseek-official')).resolves.toEqual([{
+      provider: 'deepseek-official',
+      id: 'legacy-model',
+      name: 'legacy-model',
+      inputModalities: ['text'],
+    }])
+  })
+
   it('uses exact model capacity before the adapter-wide default', async () => {
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
@@ -958,6 +973,18 @@ describe('plugin registration and config', () => {
       models: [...models],
     })).rejects.toThrow(message)
     expect(ctx.llm.listProviders()).toEqual([])
+  })
+
+  const invalidResolvedModels: Array<[LlmDeepSeek.DeepSeekCatalogModel[], RegExp]> = [
+    [[{ id: 'm', inputModalities: [] }], /inputModalities must not be empty/],
+    [[{
+      id: 'm',
+      inputModalities: ['audio'] as unknown as NonNullable<LlmDeepSeek.DeepSeekCatalogModel['inputModalities']>,
+    }], /inputModalities must contain only "text" and "image"/],
+  ]
+
+  it.each(invalidResolvedModels)('rejects invalid model modalities at the direct resolver boundary', (models, message) => {
+    expect(() => resolveAdapterOptions({ models: [...models] })).toThrow(message)
   })
 
   it.each([0, 1.5])('rejects a per-model output cap of %s', (maxTokens) => {

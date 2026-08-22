@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
-import { CallId, createUserMessage, OFFLOADED_IMAGE_TEXT, offloadRequestImages } from '../src/index.ts'
+import { CallId, contentHasImage, createUserMessage, OFFLOADED_IMAGE_TEXT, offloadRequestImages } from '../src/index.ts'
 import type { ContentBlock } from '../src/index.ts'
 
 const source = { kind: 'plugin' as const, plugin: 'test' }
@@ -18,7 +18,24 @@ function image(bytes: number): ContentBlock {
   }
 }
 
+describe('contentHasImage', () => {
+  it('distinguishes text, direct images, and nested tool-result images', () => {
+    expect(contentHasImage([{ type: 'text', text: 'plain' }])).toBe(false)
+    expect(contentHasImage([image(3)])).toBe(true)
+    expect(contentHasImage([{
+      type: 'tool-result',
+      toolCallId: CallId('shot'),
+      content: [image(3)],
+    }])).toBe(true)
+  })
+})
+
 describe('offloadRequestImages', () => {
+  it('preserves the original request when no provider image bound is configured', () => {
+    const messages = [createUserMessage({ content: [image(3)], source })]
+    expect(offloadRequestImages(messages, undefined)).toBe(messages)
+  })
+
   it('preserves the original request when its base64 payload fits exactly', () => {
     const messages = [createUserMessage({ content: [image(3), image(3)], source })]
     expect(offloadRequestImages(messages, 8)).toBe(messages)
@@ -72,5 +89,20 @@ describe('offloadRequestImages', () => {
     const messages = [createUserMessage({ content: [image(300)], source })]
     expect(offloadRequestImages(messages, 8)[0]?.content)
       .toEqual([{ type: 'text', text: OFFLOADED_IMAGE_TEXT }])
+  })
+
+  it('preserves later nested text content after the oldest image is replaced', () => {
+    const later = createUserMessage({
+      content: [{
+        type: 'tool-result',
+        toolCallId: CallId('text-only'),
+        content: [{ type: 'text', text: 'still here' }],
+      }],
+      source,
+    })
+    const messages = [createUserMessage({ content: [image(3)], source }), later]
+    const fitted = offloadRequestImages(messages, 1)
+    expect(fitted[0]?.content).toEqual([{ type: 'text', text: OFFLOADED_IMAGE_TEXT }])
+    expect(fitted[1]).toBe(later)
   })
 })
