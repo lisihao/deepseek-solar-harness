@@ -127,6 +127,23 @@ export function validateMonorepo({
   if (!governanceWorkflow?.includes('cache: pnpm')) {
     errors.push('Solar governance must restore the pnpm cache')
   }
+  for (const retired of ['plugins/managed/luna-vision-bridge', 'plugins/managed/memory-evolve']) {
+    if (governanceWorkflow?.includes(retired)) {
+      errors.push(`Solar governance must not install retired component ${retired}`)
+    }
+  }
+  for (const required of [
+    'plugins/managed/better-sidebar/pnpm-lock.yaml',
+    'plugins/managed/genui/pnpm-lock.yaml',
+    'plugins/managed/llm-fallbacks/pnpm-lock.yaml',
+    'plugins/managed/mnemon/pnpm-lock.yaml',
+    'for plugin in better-sidebar genui llm-fallbacks mnemon',
+    'for plugin in plugin-check tool-markdown tool-regex tool-stat tool-time',
+  ]) {
+    if (!governanceWorkflow?.includes(required)) {
+      errors.push(`Solar governance controlled-plugin setup is missing ${required}`)
+    }
+  }
   if (governanceWorkflow?.includes('- run: corepack pnpm run build:lib')) {
     errors.push('Solar governance workflow must not rebuild source outside the attested DAG')
   }

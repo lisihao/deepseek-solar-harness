@@ -53,6 +53,12 @@ function validInput() {
     governanceWorkflow: [
       'filter: blob:none',
       'cache: pnpm',
+      'plugins/managed/better-sidebar/pnpm-lock.yaml',
+      'plugins/managed/genui/pnpm-lock.yaml',
+      'plugins/managed/llm-fallbacks/pnpm-lock.yaml',
+      'plugins/managed/mnemon/pnpm-lock.yaml',
+      'for plugin in better-sidebar genui llm-fallbacks mnemon',
+      'for plugin in plugin-check tool-markdown tool-regex tool-stat tool-time',
       '- run: python3 tools/agent-development-governance/governance.py verify --project .',
     ].join('\n'),
     pathExists: () => true,
@@ -104,4 +110,15 @@ test('rejects uncached or full-history-blob Solar governance checkout', () => {
   const input = validInput()
   input.governanceWorkflow = '- run: python3 tools/agent-development-governance/governance.py verify --project .'
   assert.match(validateMonorepo(input).join('\n'), /partial history|pnpm cache/u)
+})
+
+test('rejects retired or incomplete controlled-plugin CI setup', () => {
+  const input = validInput()
+  input.governanceWorkflow += '\nplugins/managed/luna-vision-bridge/pnpm-lock.yaml'
+  input.governanceWorkflow = input.governanceWorkflow.replace(
+    'for plugin in plugin-check tool-markdown tool-regex tool-stat tool-time',
+    '',
+  )
+  assert.match(validateMonorepo(input).join('\n'), /retired component/u)
+  assert.match(validateMonorepo(input).join('\n'), /controlled-plugin setup/u)
 })
