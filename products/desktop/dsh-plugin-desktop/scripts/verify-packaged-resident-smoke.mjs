@@ -54,6 +54,8 @@ const installation = installNativeProductRuntime({
   stateDir: join(temporaryRoot, 'runtime-products'),
   environment: process.env,
 })
+let client
+let shutdownRequested = false
 
 try {
   for (const command of ['claude', 'codex']) {
@@ -61,7 +63,7 @@ try {
       throw new Error(`verify-packaged-resident-smoke: native ${command} command was not resolved`)
     }
   }
-  const client = new ResidentDaemonClient({
+  client = new ResidentDaemonClient({
     root: stateRoot,
     autoStart: true,
     connectTimeoutMs: 15_000,
@@ -112,6 +114,7 @@ try {
   }
 
   await client.shutdown()
+  shutdownRequested = true
   const deadline = Date.now() + 10_000
   while (Date.now() < deadline) {
     try {
@@ -143,6 +146,9 @@ try {
     daemonProcess: processCommand,
   }, undefined, 2)}\n`)
 } finally {
+  if (client !== undefined && !shutdownRequested) {
+    await client.shutdown()
+  }
   installation.dispose()
   rmSync(temporaryRoot, { recursive: true, force: true })
 }
