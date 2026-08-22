@@ -1454,7 +1454,7 @@ __metadata:
 
 "@deepseek-ai/dsh-client-ui-remote-modules@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-client-ui-remote-modules@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz::hash=f5d61f&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-client-ui-remote-modules@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz::hash=2d74d3&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-client-ui-primitives": "npm:^0.1.0-rc.5"
     "@deepseek-ai/dsh-client-ui-slots": "npm:^0.1.0-rc.5"
@@ -1473,7 +1473,7 @@ __metadata:
     "@deepseek-ai/dsh-client-ui-sidebar": ^0.1.0-rc.5
     "@deepseek-ai/dsh-host-webserver": ^0.1.0-rc.5
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
-  checksum: 10c0/6c21cfa1e5fbfb05acbff0d5ac2007fcb548e1d385ebcddfeef408cf4a7a56334c40a1bc95cd4318e82af732baab815d7d4c632a84193141e5880b4cd0d0394f
+  checksum: 10c0/3bc2ef01f124b880412dba6c322f5956d35cb5c509e03054dc7dff9606468df323315f915e12742835555e14d1c860d1b858042053499a5e6518b3fecc7bdbd5
   languageName: node
   linkType: hard
 
@@ -1576,7 +1576,7 @@ __metadata:
 
 "@deepseek-ai/dsh-client-ui-sidebar@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-client-ui-sidebar@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz::hash=76c83a&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-client-ui-sidebar@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz::hash=e8716e&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     clsx: "npm:^2.0.0"
   peerDependencies:
@@ -1587,7 +1587,7 @@ __metadata:
     "@deepseek-ai/dsh-client-ui-slots": ^0.1.0-rc.5
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     react: ^18.2.0
-  checksum: 10c0/4c97466d12a35747a8f994456e000d089b0e8c32ce0bee622fc9a4de4e6c9336c3443facc54265e854b64760ecfb810e830b81c3532b0118e549b3dad16fbd32
+  checksum: 10c0/964701fce1cdedd314960bc167a50458ff42fa391f64dc496e407d9b66c00fb703d8cf5b4f86f81ffc506dc2015dc930dd90db80814607d1eeac9d4caea2d64f
   languageName: node
   linkType: hard
 

@@ -234,6 +234,7 @@ export function gatesForMode(selected: Mode): Gate[] {
         pnpmScript('duplication', 'duplication'),
         snapshotGate(),
         pnpmScript('build', 'build'),
+        desktopVendorBuildGate(),
         pnpmScript('build:web', 'build:web'),
         ...hygieneLeafGates({ artifactNeeds: ['build'] }),
         ...docSyncLeafGates({
@@ -290,6 +291,7 @@ function ciPrimaryGates(): Gate[] {
       needs: ['build'],
     }),
     builtPackageInvariantsGate(['build']),
+    desktopVendorBuildGate(),
     builtBinSmokeGate(),
   ]
 }
@@ -391,6 +393,7 @@ function ciArtifactGates(): Gate[] {
       needs: ['build'],
     }),
     builtPackageInvariantsGate(['build']),
+    desktopVendorBuildGate(),
     builtBinSmokeGate(),
   ]
 }
@@ -426,6 +429,13 @@ function webSnapshotGate(needs: string[]): Gate {
     displayCommand: 'DSH_SNAPSHOT=replay pnpm run test:web:built',
     env: { DSH_SNAPSHOT: 'replay' },
     needs,
+  })
+}
+
+function desktopVendorBuildGate(): Gate {
+  return pnpmScript('desktop-vendor-build', 'verify-desktop-vendor-build', {
+    label: 'Desktop vendor build closure',
+    needs: ['build'],
   })
 }
 
