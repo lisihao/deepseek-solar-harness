@@ -6,8 +6,8 @@
   "supportedPlatforms": ["darwin"],
   "desktop": {
     "sourcePath": "products/desktop",
-    "currentVersion": "2.9.3",
+    "currentVersion": "2.9.4",
     "stableTagPattern": "^DSH-desktop-v[0-9]+\\.[0-9]+\\.[0-9]+$",
-    "tagExample": "DSH-desktop-v2.9.3"
+    "tagExample": "DSH-desktop-v2.9.4"
   }
 }
