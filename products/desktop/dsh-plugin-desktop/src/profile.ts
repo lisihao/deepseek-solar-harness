@@ -81,10 +81,11 @@ const UI_SIDEBAR_PACKAGE = '@deepseek-ai/dsh-client-ui-sidebar'
 const UI_CONVERSATION_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
 const RESIDENT_OPERATOR_STARTUP_TIMEOUT_MS = 15_000
 const RETIRED_PRODUCT_BUNDLES = new Set([
+  '@liustack/modlens',
   '@ycp424c/dsh-luna-vision-bridge',
   'dsh-memory-evolve',
 ])
-const RETIRED_PRODUCT_ROWS = ['luna-vision-bridge', 'dsh-memory-evolve'] as const
+const RETIRED_PRODUCT_ROWS = ['modlens', 'luna-vision-bridge', 'dsh-memory-evolve'] as const
 /**
  * Parse desktop presentation state and reject corrupted values.
  * @param value - untrusted settings value.

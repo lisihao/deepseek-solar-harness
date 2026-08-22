@@ -30,6 +30,7 @@ describe('desktop profile composition', () => {
     expect(desktopBundleList([
       '@deepseek-ai/dsh-base',
       'third-party-one',
+      '@liustack/modlens',
       'dsh-memory-evolve',
       '@ycp424c/dsh-luna-vision-bridge',
       DESKTOP_PACKAGE_NAME,
@@ -210,6 +211,7 @@ describe('desktop profile composition', () => {
     }
     expect(rows.map(row => row.id)).not.toContain('dsh-memory-evolve')
     expect(rows.map(row => row.id)).not.toContain('luna-vision-bridge')
+    expect(rows.map(row => row.id)).not.toContain('modlens')
     expect(rows.find(row => row.id === 'code-harness-governance')).toEqual(expect.objectContaining({
       name: '@lisihao/dsh-code-harness-governance',
       config: expect.objectContaining({ strict: true }),
@@ -302,6 +304,8 @@ describe('desktop profile composition', () => {
       '      name: dsh-memory-evolve',
       '      config:',
       '        reviewEnabled: true',
+      '    - id: modlens',
+      "      name: '@liustack/modlens'",
       '',
     ].join('\n'))
 
@@ -320,6 +324,10 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'dsh-memory-evolve')).toEqual(expect.objectContaining({
       disabled: true,
       config: { reviewEnabled: true },
+    }))
+    expect(rows.find(row => row.id === 'modlens')).toEqual(expect.objectContaining({
+      name: '@liustack/modlens',
+      disabled: true,
     }))
   })
 
