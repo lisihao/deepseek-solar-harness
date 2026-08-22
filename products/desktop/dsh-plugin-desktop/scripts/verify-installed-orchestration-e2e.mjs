@@ -46,7 +46,7 @@ function commonNode(id, overrides = {}) {
     writeScopes: [],
     approvedSecretRefs: [],
     acceptance: [{ id: 'completed', description: 'native subscription operator completes', kind: 'operator-completed' }],
-    retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
+    retryPolicy: { maxAttempts: 2, backoffMs: 250, retryableCodes: ['RUNTIME_UNAVAILABLE'] },
     phase: 'execution',
     rlm: { mode: 'disabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
     ...overrides,
@@ -100,6 +100,22 @@ function assertNativeCompleted(result) {
     assert(typeof node.model === 'string' && node.model.length > 0, `${node.id} did not retain its selected model`)
     assert(node.evidenceRefs.length === 1, `${node.id} did not retain exactly one accepted Evidence artifact`)
   }
+}
+
+function assertQuotaAcceleratedAllocation(providers, allocation, objective) {
+  assert(allocation?.tier === 'low', `${objective} selected ${String(allocation?.tier)} instead of an accelerated low tier`)
+  assert(allocation.rationale?.includes('accelerate-before-quota-reset') === true, `${objective} low-tier allocation did not record quota-reset acceleration`)
+  const provider = providers.find(candidate => candidate.operatorId === allocation.operatorId)
+  const pool = provider?.quotaPools?.find(candidate => candidate.poolId === allocation.quotaPoolId)
+  assert(pool !== undefined, `${objective} allocation references unknown quota pool ${String(allocation.quotaPoolId)}`)
+  const nowSeconds = Math.floor(Date.now() / 1_000)
+  const urgent = [pool.primary, pool.secondary].some(window => (
+    window?.resetsAt !== undefined
+    && window.resetsAt > nowSeconds
+    && window.resetsAt - nowSeconds <= 6 * 60 * 60
+    && window.usedPercent < 100
+  ))
+  assert(urgent, `${objective} quota pool ${pool.poolId} is not actually approaching reset`)
 }
 
 async function runInner(appRoot) {
@@ -167,7 +183,7 @@ async function runInner(appRoot) {
   assert(cycleCode === 'GRAPH_CYCLE', `cyclic TaskGraph returned ${String(cycleCode)} instead of GRAPH_CYCLE`)
   process.stdout.write('[20%] 循环 Graph 已在真实 daemon 边界拒绝\n')
 
-  const goalExpectations = { quality: 'high', balanced: 'medium', economy: 'low' }
+  const goalExpectations = { quality: 'high', balanced: 'medium-or-accelerated-low', economy: 'low' }
   const goalResults = await Promise.all(Object.entries(goalExpectations).map(async ([objective, expectedTier]) => {
     const id = `goal-${objective}`
     const title = `DSH ${version} ${objective} objective E2E ${nonce}`
@@ -181,7 +197,11 @@ async function runInner(appRoot) {
     })
     assertNativeCompleted(result)
     const allocation = allocationByNode(result.events).get(id)
-    assert(allocation?.tier === expectedTier, `${objective} selected ${String(allocation?.tier)} instead of ${expectedTier}`)
+    if (objective === 'balanced') {
+      if (allocation?.tier !== 'medium') assertQuotaAcceleratedAllocation(providers, allocation, objective)
+    } else {
+      assert(allocation?.tier === expectedTier, `${objective} selected ${String(allocation?.tier)} instead of ${expectedTier}`)
+    }
     return { objective, expectedTier, title, runId: String(result.snapshot.runId), allocation }
   }))
   process.stdout.write('[40%] 质量/综合/成本目标已通过真实订阅模型验收\n')

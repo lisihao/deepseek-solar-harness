@@ -297,6 +297,7 @@ export class OrchestrationDaemon {
   readonly resident: ResidentDaemonClient
   private readonly server: Server
   private readonly transports = new Set<JsonRpcLineTransport>()
+  private readonly sockets = new Set<Socket>()
   private readonly ctx = new Context()
   private readonly physical = new Map<string, OrchestrationResidentOperator>()
   private readonly active = new Map<string, ActiveAttempt>()
@@ -376,6 +377,7 @@ export class OrchestrationDaemon {
     if (this.ticker !== undefined) clearInterval(this.ticker)
     this.ticker = undefined
     for (const transport of this.transports) transport.close()
+    for (const socket of this.sockets) socket.end()
     await Promise.allSettled([...this.active.values()].map(value => value.run.dispose()))
     await this.ctx.root.fiber.dispose()
     await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
@@ -390,10 +392,15 @@ export class OrchestrationDaemon {
     socket.setEncoding('utf8')
     const transport = new JsonRpcLineTransport(socket, socket)
     this.transports.add(transport)
+    this.sockets.add(socket)
     transport.onRequest(async (method, params) => {
       try { return wireSuccess(await this.dispatch(method, params)) } catch (error) { return wireFailure(error) }
     })
-    const remove = (): void => { transport.close(); this.transports.delete(transport) }
+    const remove = (): void => {
+      transport.close()
+      this.transports.delete(transport)
+      this.sockets.delete(socket)
+    }
     socket.once('close', remove)
     socket.once('error', remove)
     transport.start()

@@ -6,6 +6,7 @@ import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
   claudeEnvironment,
   claudeResultFailure,
+  codexExecutionFailure,
   collectCodexModelsAndQuota,
   resolveProductExecutable,
 } from '../src/drivers.ts'
@@ -84,6 +85,12 @@ describe('Claude Code resident terminal failures', () => {
 })
 
 describe('Codex Resident catalog qualification', () => {
+  it('classifies a disconnected response stream as retryable runtime unavailability', () => {
+    expect(codexExecutionFailure(new Error(
+      'subagent-codex: Codex turn ended with status failed: {"message":"stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)"}',
+    ))).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+  })
+
   it('keeps execution qualified when only quota telemetry is unavailable', async () => {
     const result = await collectCodexModelsAndQuota(
       async () => [model],

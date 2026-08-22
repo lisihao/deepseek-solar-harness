@@ -1,4 +1,6 @@
+import { once } from 'node:events'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -42,6 +44,25 @@ describe('Resident daemon Driver error boundary', () => {
       code: 'AUTH_MODE_MISMATCH',
       message: 'Claude Code subscription authentication expired; run `claude auth login` and retry the node.',
     })
+  })
+
+  it('classifies a disconnected Codex response stream as runtime unavailability', () => {
+    const error = new Error('subagent-codex: Codex turn ended with status failed: {"message":"stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)"}')
+    expect(normalizeResidentDriverError(error, false)).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+  })
+})
+
+describe('Resident daemon lifecycle', () => {
+  it('closes accepted control sockets before shutdown settles', async () => {
+    const root = temporaryRoot()
+    const daemon = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    await daemon.start()
+    const socket = createConnection(daemon.socketPath)
+    await once(socket, 'connect')
+
+    await daemon.close()
+
+    expect(socket.destroyed).toBe(true)
   })
 })
 
