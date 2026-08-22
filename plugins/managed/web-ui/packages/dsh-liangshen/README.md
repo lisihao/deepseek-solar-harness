@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Ships the "Anchored Standard" preset as a one-command plugin of the dsh-web-ui family: on host startup it syncs the bundled preset into `~/.dsh/.agent-presets`, so new sessions can pick "梁神模式" from the preset picker. The first model request sees only the builtin Minimal preset's exact two tools — persistent `bash` plus `str_replace_editor` — only the one-line persona prompt section, no runtime contexts, and no injected instructions; after the anchor is established the wire switches to Code Mode (PTC) and the ordinary injections open. Built entirely on the official NPM SDK — no dsh source changes.
+Ships the "Anchored Standard" preset as a one-command plugin of the dsh-web-ui family: on host startup it syncs the bundled preset into `~/.dsh/.agent-presets`, so new sessions can pick "梁神模式" from the preset picker. The first user turn sees only the builtin Minimal preset's exact two tools — persistent `bash` plus `str_replace_editor` — only the one-line persona prompt section, no runtime contexts, and no injected instructions; after that turn ends the wire switches to Code Mode (PTC) and the ordinary injections open. Built entirely on the official NPM SDK — no dsh source changes.
 
 ## Why
 
@@ -10,7 +10,7 @@ DeepSeek V4 Pro conditions strongly on the API tool catalog visible in the FIRST
 
 1. The first model request exposes only the builtin Minimal preset's exact two tools (persistent `bash` plus `str_replace_editor`), keeps only the `deployment:persona` prompt section, empties runtime contexts, and passes only the user's own messages;
 2. After the session's first durable `tool/call`, promotion waits until the first reasoning block is minimal-like (contains `we` and no `let me`), with a four-step fallback; the wire then switches to Code Mode (PTC) — a single `run_code` tool backed by the full tool registry SDK — and every assembled prompt section plus the ordinary workspace-instruction, skill-catalog, and runtime-context injections return;
-3. The phase derives from persisted session events, so resume / reload never lose state.
+3. The phase derives from persisted session events, and a resumed Agent restores Code Mode during `agent/created` before its driver can derive a request, so resume / reload cannot expose one stale native catalog.
 
 Measured on native Windows (DeepSeek V4 Pro, max, V4.1b task): 98 / 99, mean 98.5, zero `let me` traces in the second run — reproducible, not a lucky draw, and no tool capability sacrificed. Original experiment: [xiaobright/dsh-anchored-standard](https://github.com/xiaobright/dsh-anchored-standard).
 
@@ -21,7 +21,7 @@ The preset ships with extra safeguards on top of the reference mechanism, all co
 - `anchorGate` — after the first `tool/call`, the catalog stays two-tool until the first reasoning block classifies minimal-like, so a `Let me` first block does not immediately earn the full catalog;
 - `maxBootstrapSteps` — fallback promotion after N steps when no anchored block appeared;
 - `promoteAfterFirstResponse` — a tool-less first response promotes once it has responded; an anchor-gated session also releases when its first turn ends (`turn/end`), so the next user turn already sees the promoted catalog;
-- `promotedPresentation: code` — after promotion the wire is Code Mode (PTC): one `run_code` tool with the full registry available through the generated SDK, switched at the step boundary so the current step's native calls are never interrupted;
+- `promotedPresentation: code` — after promotion the wire is Code Mode (PTC): one `run_code` tool with the full registry available through the generated SDK; the switch waits for `turn/end`, so every model step in the first user turn keeps the same native two-tool contract;
 - `deferredSources` + `deferredGraceSteps` — workspace instructions and the skill catalog wait one extra step after promotion, so the tool-catalog switch and the injection shock do not land in the same step;
 - `bootstrapMaxTokens` — caps the phase-1 request output budget (community measurements put `max_tokens=1024` in the high-hit "We need" window, versus 0/5 at the 256k DSH default), and the cap is stripped again after promotion so `requestProposal` never solders 1024 into every later request.
 

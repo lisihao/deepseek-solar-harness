@@ -23,7 +23,8 @@ DSH 的目标是让一个本地应用成为对话、工具、会话、记忆、�
 - macOS Desktop 应用，提供 compatibility 与 advanced 两种呈现模式、原生生命周期集成、隔离 profile、内置 DSH terminal、更新发现和显式产品版本显示。
 - 在受保护 `solar` 集成线上开发的 DeepSeek Harness agent、模型、工具、Session、Web、sandbox、workflow 与插件基础。
 - 已接受的 Anchored Standard 产品 preset 使用双工具首轮 bootstrap，delegated AgentTeams worker 也遵循该规则，后续能力按需发现。
-- Smart 与 resident operator 路径、AgentTeams 协作、受管记忆、Luna 视觉桥接、Web billing 和受管 Web UI 集合。
+- Smart 与 resident operator 路径、AgentTeams 协作、Mnemon 记忆、原生 DeepSeek V4 Flash Vision、Web billing 和受管 Web UI 集合。
+- 封装后的受控插件套件，包含 Better Sidebar、GenUI、插件诊断、模型 fallback、代码图谱，以及有界的 stat、time、regex 与 Markdown 工具。
 - 仓库自有 Code-as-Harness 完成权威：根据待交付差异选择原生命令、记录 attestation 证据，并在治理接线缺失或陈旧时 fail closed。
 - 核心、Desktop 与受管插件可在同一源码仓中协同修改，同时每个组件保留自己的包管理器与测试合同。
 
@@ -40,8 +41,9 @@ DeepSeek-Solar-Harness
 │   └── Electron shell, profiles, native lifecycle, packaging, product UI
 ├── plugins/managed
 │   ├── governance (the user-created Code-as-Harness project)
-│   ├── agent-teams, luna-vision-bridge, memory-evolve
-│   └── web-billing, web-ui
+│   ├── agent-teams, mnemon, aegis, better-sidebar, genui
+│   ├── plugin-check, llm-fallbacks, codegraph, tool plugins
+│   └── web-billing, web-ui, plugin-console
 ├── distribution
 │   └── product identity, Desktop version, tag contract, upstream records
 └── protected solar branch

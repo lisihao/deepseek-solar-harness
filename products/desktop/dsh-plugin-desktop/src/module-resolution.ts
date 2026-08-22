@@ -30,7 +30,11 @@ export function installProfilePackageResolver(profileBaseUrl: string): () => voi
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
       const fromLoader = context.parentURL === LOADER_ENTRY_URL
-      const productEntry = fromLoader ? desktopProductEntryUrl(specifier) : undefined
+      // Product packages are immutable application inputs. Pin an exact
+      // product-package request regardless of which Loader helper issued it;
+      // Node's parent URL is not guaranteed to be the Loader entrypoint after
+      // an include/aggregate plugin delegates the import.
+      const productEntry = desktopProductEntryUrl(specifier)
       if (productEntry !== undefined) {
         return { shortCircuit: true, url: productEntry }
       }

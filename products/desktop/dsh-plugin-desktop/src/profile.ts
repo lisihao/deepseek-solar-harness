@@ -80,6 +80,12 @@ const UI_LAYOUT_PACKAGE = '@deepseek-ai/dsh-client-ui-layout'
 const UI_SIDEBAR_PACKAGE = '@deepseek-ai/dsh-client-ui-sidebar'
 const UI_CONVERSATION_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
 const RESIDENT_OPERATOR_STARTUP_TIMEOUT_MS = 15_000
+const RETIRED_PRODUCT_BUNDLES = new Set([
+  '@liustack/modlens',
+  '@ycp424c/dsh-luna-vision-bridge',
+  'dsh-memory-evolve',
+])
+const RETIRED_PRODUCT_ROWS = ['modlens', 'luna-vision-bridge', 'dsh-memory-evolve'] as const
 /**
  * Parse desktop presentation state and reject corrupted values.
  * @param value - untrusted settings value.
@@ -161,12 +167,17 @@ export interface PreparedDesktopProfile {
 }
 
 /**
- * Normalize the installation-owned prefix while preserving third-party order.
+ * Normalize the installation-owned prefix, retire removed product bundles,
+ * and preserve the remaining third-party order.
  * @param current - current persistent bundle list.
  * @returns base, Web carrier, then every third-party bundle in prior order.
  */
 export function desktopBundleList(current: readonly string[]): string[] {
-  const thirdParty = current.filter(name => !REQUIRED_BUNDLE_SET.has(name) && name !== DESKTOP_PACKAGE_NAME)
+  const thirdParty = current.filter(name => (
+    !REQUIRED_BUNDLE_SET.has(name)
+    && name !== DESKTOP_PACKAGE_NAME
+    && !RETIRED_PRODUCT_BUNDLES.has(name)
+  ))
   return [...REQUIRED_BUNDLES, ...thirdParty]
 }
 
@@ -217,6 +228,19 @@ function desktopPresetRoot(): string {
   return unpackedAsarPath(fileURLToPath(new URL('../vendor/agent-presets', import.meta.url)))
 }
 
+/** Resolve the bundle patch declared by one sealed product package. */
+function productBundlePatchPath(require: NodeJS.Require, packageName: string): string {
+  const packagePath = require.resolve(`${packageName}/package.json`)
+  const manifest = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+    dsh?: { bundle?: { patch?: unknown } }
+  }
+  const patch = manifest.dsh?.bundle?.patch
+  if (typeof patch !== 'string' || patch.length === 0) {
+    throw new Error(`${BIN_NAME}: sealed product bundle ${packageName} does not declare dsh.bundle.patch`)
+  }
+  return join(dirname(packagePath), patch)
+}
+
 /** Load product-owned bundles from the packaged application dependency tree. */
 function productBundlePatches(
   installedPackages: ReadonlySet<string>,
@@ -230,7 +254,7 @@ function productBundlePatches(
     ))
     .flatMap(packageName => loadOverlayPatches(
       BIN_NAME,
-      join(dirname(require.resolve(`${packageName}/package.json`)), 'cordis.patch.yml'),
+      productBundlePatchPath(require, packageName),
     ))
 }
 
@@ -375,6 +399,9 @@ export function prepareDesktopProfile(
   const rows = new Map<string, EntryOptions>()
   for (const row of composeEntries([patches])) {
     if (typeof row.id === 'string') rows.set(row.id, row)
+  }
+  for (const id of RETIRED_PRODUCT_ROWS) {
+    if (rows.has(id)) patches.push({ id, disabled: true })
   }
   const settings = rows.get('settings')
   if (settings?.name !== SETTINGS_FILE_PACKAGE) {

@@ -27,8 +27,7 @@
     {"scope": "desktop", "patterns": ["products/desktop/**"]},
     {"scope": "managed-governance", "patterns": ["plugins/managed/governance/**"]},
     {"scope": "managed-agent-teams", "patterns": ["plugins/managed/agent-teams/**"]},
-    {"scope": "managed-luna", "patterns": ["plugins/managed/luna-vision-bridge/**"]},
-    {"scope": "managed-memory", "patterns": ["plugins/managed/memory-evolve/**"]},
+    {"scope": "managed-controlled-plugins", "patterns": ["plugins/managed/aegis/**", "plugins/managed/better-sidebar/**", "plugins/managed/codegraph/**", "plugins/managed/genui/**", "plugins/managed/llm-fallbacks/**", "plugins/managed/mnemon/**", "plugins/managed/plugin-check/**", "plugins/managed/tool-markdown/**", "plugins/managed/tool-regex/**", "plugins/managed/tool-stat/**", "plugins/managed/tool-time/**"]},
     {"scope": "managed-billing", "patterns": ["plugins/managed/web-billing/**"]},
     {"scope": "managed-web-ui", "patterns": ["plugins/managed/web-ui/**"]},
     {"scope": "product-metadata", "patterns": ["plugins/registry.yaml", "distribution/**"]},
@@ -246,31 +245,14 @@
       "timeout_seconds": 600
     },
     {
-      "id": "luna-check",
-      "label": "Luna Vision Bridge package suite",
-      "command": ["corepack", "pnpm@8.15.9", "--ignore-workspace", "run", "check"],
-      "cwd": "plugins/managed/luna-vision-bridge",
-      "scopes": ["managed-luna"],
+      "id": "controlled-plugin-suite",
+      "label": "Controlled plugin native checks",
+      "command": ["node", "scripts/solar/verify-controlled-plugins.mjs"],
+      "cwd": ".",
+      "scopes": ["managed-controlled-plugins"],
       "levels": ["full"],
-      "timeout_seconds": 600
-    },
-    {
-      "id": "memory-test",
-      "label": "Memory Evolve regression tests",
-      "command": ["corepack", "pnpm", "--ignore-workspace", "run", "test"],
-      "cwd": "plugins/managed/memory-evolve",
-      "scopes": ["managed-memory"],
-      "levels": ["full"],
-      "timeout_seconds": 600
-    },
-    {
-      "id": "memory-build",
-      "label": "Memory Evolve build",
-      "command": ["corepack", "pnpm", "--ignore-workspace", "run", "build"],
-      "cwd": "plugins/managed/memory-evolve",
-      "scopes": ["managed-memory"],
-      "levels": ["full"],
-      "timeout_seconds": 600
+      "exclusive": true,
+      "timeout_seconds": 1800
     },
     {
       "id": "billing-check",

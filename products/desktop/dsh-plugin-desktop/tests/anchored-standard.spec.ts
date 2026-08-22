@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { apply } from '../vendor/agent-presets/anchored-standard/tool-bootstrap.mjs'
 
 describe('Anchored Standard tool reachability', () => {
-  it('keeps the exact bootstrap pair first, then exposes memory closure tools', async () => {
+  it('keeps the exact bootstrap pair first, then exposes discovery tools', async () => {
     const listeners = new Map<string, Function[]>()
     const ctx = {
       on(name: string, listener: Function) {
@@ -41,7 +41,6 @@ describe('Anchored Standard tool reachability', () => {
     const promoted = await assemble({}, { agent }, async () => ({ tools: catalog }))
     expect(promoted.tools.map((tool: { name: string }) => tool.name)).toEqual([
       'bash', 'str_replace_editor', 'dev_tool_search', 'skill_search', 'skill_load',
-      'memory', 'memory_suggest', 'memory_review_status', 'dtodo',
     ])
   })
 })

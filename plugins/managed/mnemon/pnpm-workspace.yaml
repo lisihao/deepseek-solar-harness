@@ -1,0 +1,8 @@
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': false
+  esbuild: true
+  koffi: true
+  lightningcss: true
+  node-pty: true
+  protobufjs: false
