@@ -51,16 +51,8 @@ jobs:
         working-directory: products/desktop
       - run: corepack pnpm install --ignore-workspace --frozen-lockfile
         working-directory: plugins/managed/agent-teams
-      - name: Install controlled pnpm plugin dependencies
-        run: |
-          for plugin in better-sidebar genui llm-fallbacks mnemon; do
-            (cd "plugins/managed/$plugin" && corepack pnpm install --frozen-lockfile)
-          done
-      - name: Install controlled npm plugin dependencies
-        run: |
-          for plugin in plugin-check tool-markdown tool-regex tool-stat tool-time; do
-            npm ci --prefix "plugins/managed/$plugin"
-          done
+      - name: Install controlled plugin dependencies
+        run: node scripts/solar/install-controlled-plugin-deps.mjs
       - run: corepack pnpm install --frozen-lockfile
         working-directory: plugins/managed/web-ui
       - run: python3 tools/agent-development-governance/governance.py audit --project . --strict-warnings

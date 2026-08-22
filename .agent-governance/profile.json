@@ -257,12 +257,22 @@
       "timeout_seconds": 600
     },
     {
+      "id": "controlled-plugin-install",
+      "label": "Controlled plugin dependency install",
+      "command": ["node", "scripts/solar/install-controlled-plugin-deps.mjs"],
+      "cwd": ".",
+      "scopes": ["managed-controlled-plugins"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
       "id": "controlled-plugin-suite",
       "label": "Controlled plugin native checks",
       "command": ["node", "scripts/solar/verify-controlled-plugins.mjs"],
       "cwd": ".",
       "scopes": ["managed-controlled-plugins"],
       "levels": ["full"],
+      "needs": ["controlled-plugin-install"],
       "exclusive": true,
       "timeout_seconds": 1800
     },
