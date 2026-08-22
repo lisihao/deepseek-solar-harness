@@ -4,7 +4,7 @@ DeepSeek Solar Harness (DSH) is the downstream, macOS-first product branch of De
 
 ## Released product compatibility
 
-DSH Desktop has tagged releases and persisted user state. Treat released on-disk, wire, session, and configuration formats as compatibility obligations: keep reading supported released data, provide a forward migration, or introduce an explicit versioned failure with a recorded decision. Internal unpublished package APIs may still change atomically with every repository consumer; an `rc` package version does not waive product-data compatibility. See the [unit-change-cost decision](.agents/notes/implemented/process/2026-08-22-reduce-unit-change-cost.md).
+DSH Desktop has tagged releases and persisted state. Released on-disk, wire, session, and configuration formats require compatibility, migration, or an explicit versioned failure. Unpublished package APIs may change atomically with all consumers; `rc` packages do not waive product-data compatibility ([decision](.agents/notes/implemented/process/2026-08-22-reduce-unit-change-cost.md)).
 
 ## Repository layout
 

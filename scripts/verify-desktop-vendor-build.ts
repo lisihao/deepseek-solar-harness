@@ -5,11 +5,6 @@ import { readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-interface DesktopVendorManifest {
-  readonly schemaVersion: number
-  readonly sourcePackages: Readonly<Record<string, string>>
-}
-
 const ARCHIVE_MEMBER_MAX_BYTES = 16 * 1024 * 1024
 
 function assertInside(parent: string, child: string, label: string): void {
@@ -28,10 +23,14 @@ export async function verifyDesktopVendorBuild(
   repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..'),
 ): Promise<{ archives: number; files: number }> {
   const vendorRoot = join(repositoryRoot, 'products/desktop/dsh-plugin-desktop/vendor')
-  const manifest = JSON.parse(
+  const manifest: unknown = JSON.parse(
     await readFile(join(vendorRoot, 'manifest.json'), 'utf8'),
-  ) as DesktopVendorManifest
-  if (manifest.schemaVersion !== 1
+  )
+  if (typeof manifest !== 'object'
+    || manifest === null
+    || !('schemaVersion' in manifest)
+    || manifest.schemaVersion !== 1
+    || !('sourcePackages' in manifest)
     || manifest.sourcePackages === null
     || typeof manifest.sourcePackages !== 'object') {
     throw new Error('verify-desktop-vendor-build: invalid manifest schema')
@@ -41,6 +40,9 @@ export async function verifyDesktopVendorBuild(
   let files = 0
   const stale: string[] = []
   for (const [archivePath, sourceManifestPath] of Object.entries(manifest.sourcePackages)) {
+    if (typeof sourceManifestPath !== 'string') {
+      throw new Error(`verify-desktop-vendor-build: invalid source path for ${archivePath}`)
+    }
     if (!sourceManifestPath.startsWith('packages/')) continue
     if (!archivePath.startsWith('dsh-packages/') || !archivePath.endsWith('.tgz')) {
       throw new Error(`verify-desktop-vendor-build: invalid archive path ${archivePath}`)

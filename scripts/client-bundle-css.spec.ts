@@ -96,8 +96,12 @@ describe('client bundle CSS Modules', () => {
       if (output === null) throw new Error('CSS Modules plugin returned no output')
       const serialized = output.split('\n').at(-1)?.replace(/^export default /, '').replace(/;$/, '')
       if (serialized === undefined) throw new Error('CSS Modules export missing')
+      const classMap: unknown = JSON.parse(serialized)
+      if (typeof classMap !== 'object' || classMap === null) {
+        throw new Error('CSS Modules export is not an object')
+      }
 
-      expect(Object.keys(JSON.parse(serialized))).toEqual(['alpha', 'zebra'])
+      expect(Object.keys(classMap)).toEqual(['alpha', 'zebra'])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
