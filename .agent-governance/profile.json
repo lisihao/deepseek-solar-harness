@@ -243,7 +243,7 @@
       "cwd": "plugins/managed/agent-teams",
       "scopes": ["managed-agent-teams"],
       "levels": ["full"],
-      "needs": ["agent-teams-build"],
+      "needs": ["agent-teams-install", "agent-teams-build"],
       "timeout_seconds": 600
     },
     {
