@@ -144,6 +144,9 @@ export function validateMonorepo({
       errors.push(`Solar governance controlled-plugin setup is missing ${required}`)
     }
   }
+  if (/for plugin in better-sidebar genui llm-fallbacks mnemon;[\s\S]{0,240}pnpm --ignore-workspace install/u.test(governanceWorkflow ?? '')) {
+    errors.push('Solar governance must preserve each controlled pnpm plugin workspace build policy')
+  }
   if (governanceWorkflow?.includes('- run: corepack pnpm run build:lib')) {
     errors.push('Solar governance workflow must not rebuild source outside the attested DAG')
   }

@@ -54,7 +54,7 @@ jobs:
       - name: Install controlled pnpm plugin dependencies
         run: |
           for plugin in better-sidebar genui llm-fallbacks mnemon; do
-            (cd "plugins/managed/$plugin" && corepack pnpm --ignore-workspace install --frozen-lockfile)
+            (cd "plugins/managed/$plugin" && corepack pnpm install --frozen-lockfile)
           done
       - name: Install controlled npm plugin dependencies
         run: |

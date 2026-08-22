@@ -74,6 +74,15 @@ test('accepts the exact Solar monorepo contract', () => {
   assert.deepEqual(validateMonorepo(validInput()), [])
 })
 
+test('rejects controlled plugin installs that bypass workspace build policy', () => {
+  const input = validInput()
+  input.governanceWorkflow = input.governanceWorkflow.replace(
+    'for plugin in better-sidebar genui llm-fallbacks mnemon',
+    'for plugin in better-sidebar genui llm-fallbacks mnemon; do\n  corepack pnpm --ignore-workspace install --frozen-lockfile\ndone',
+  )
+  assert.match(validateMonorepo(input).join('\n'), /preserve each controlled pnpm plugin workspace build policy/u)
+})
+
 test('rejects the old Desktop tag shape', () => {
   const input = validInput()
   input.product.desktop.stableTagPattern = '^desktop-v[0-9]+\\.[0-9]+\\.[0-9]+$'
