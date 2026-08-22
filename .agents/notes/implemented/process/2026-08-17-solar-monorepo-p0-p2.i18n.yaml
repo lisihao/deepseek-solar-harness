@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-17-solar-monorepo-p0-p2.md
-2026-08-17-solar-monorepo-p0-p2.md: eb3cfd711f06c533ac8779fc27a0c0889b48b5db
-2026-08-17-solar-monorepo-p0-p2.zh.md: 5b67994f71d7d5bfa3efff403ac14cde6130e321
+2026-08-17-solar-monorepo-p0-p2.md: 143ac5b30b6cc9d0f0fa5dc938437a22277e54f4
+2026-08-17-solar-monorepo-p0-p2.zh.md: 8be876d91c56fb6d0ef4268ace8795b6728ff319

@@ -8,11 +8,20 @@ import yaml from 'js-yaml'
 
 export const DESKTOP_TAG_PATTERN = '^DSH-desktop-v[0-9]+\\.[0-9]+\\.[0-9]+$'
 export const MANAGED_IDS = [
+  'aegis',
   'agent-teams',
+  'better-sidebar',
+  'codegraph',
+  'genui',
   'governance',
-  'luna-vision-bridge',
-  'memory-evolve',
+  'llm-fallbacks',
+  'mnemon',
+  'plugin-check',
   'plugin-console',
+  'tool-markdown',
+  'tool-regex',
+  'tool-stat',
+  'tool-time',
   'web-billing',
   'web-ui',
 ]

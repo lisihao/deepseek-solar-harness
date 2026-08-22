@@ -32,7 +32,7 @@ managed:
       - corepack pnpm --ignore-workspace run typecheck
   - id: genui
     path: plugins/managed/genui
-    package: '@omdsh-dev/dsh-genui@0.9.1-solar.1'
+    package: '@omdsh-dev/dsh-genui@0.9.1-solar.2'
     source: https://github.com/omdsh-dev/dsh-genui.git
     upstream: https://github.com/omdsh-dev/dsh-genui.git
     source_branch: main
@@ -56,7 +56,7 @@ managed:
       - corepack pnpm --ignore-workspace run check
   - id: llm-fallbacks
     path: plugins/managed/llm-fallbacks
-    package: dsh-llm-fallbacks@0.3.3
+    package: dsh-llm-fallbacks@0.3.3-solar.1
     source: https://github.com/btspoony/dsh-llm-fallbacks.git
     upstream: https://github.com/btspoony/dsh-llm-fallbacks.git
     source_branch: main
@@ -143,7 +143,7 @@ managed:
       - corepack pnpm --ignore-workspace run verify
   - id: aegis
     path: plugins/managed/aegis
-    package: aegis@2.8.5
+    package: aegis@2.8.5-solar.1
     source: https://github.com/GanyuanRan/Aegis.git
     upstream: https://github.com/GanyuanRan/Aegis.git
     source_branch: main
@@ -153,6 +153,20 @@ managed:
     license_evidence: plugins/managed/aegis/LICENSE
     tests:
       - node extensions/dsh/verify.mjs
+  - id: better-sidebar
+    path: plugins/managed/better-sidebar
+    package: dsh-better-sidebar@0.15.0-solar.1
+    source: https://github.com/omdsh-dev/DSH-better-sidebar.git
+    upstream: https://github.com/omdsh-dev/DSH-better-sidebar.git
+    source_branch: main
+    accepted_sha: 7dbd9b75e2fd65758d4e55f750319399b91255a2
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/better-sidebar/LICENSE
+    tests:
+      - corepack pnpm --ignore-workspace run build
+      - corepack pnpm --ignore-workspace run typecheck
+      - corepack pnpm --ignore-workspace run test
   - id: web-billing
     path: plugins/managed/web-billing
     package: dsh-web-billing@1.1.3

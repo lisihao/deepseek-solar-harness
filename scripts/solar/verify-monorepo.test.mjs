@@ -8,7 +8,7 @@ function validInput() {
     path: `plugins/managed/${id}`,
     package: `${id}@1.0.0`,
     source: `https://github.com/example/${id}.git`,
-    accepted_sha: `${index + 1}`.repeat(40),
+    accepted_sha: ((index % 15) + 1).toString(16).repeat(40),
     license: 'MIT',
     license_status: 'license-file',
     license_evidence: `plugins/managed/${id}/LICENSE`,

@@ -45,7 +45,6 @@ class E2eAttachmentStore extends AttachmentStore {
     maxImagesPerMessage: 1,
     maxMessageImageBytes: 1024,
     maxImagePixels: 1,
-    maxImageDimension: 1,
     mediaTypes: ['image/png'],
   }
 

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -43,16 +43,16 @@ try {
     'anchored-standard',
     'compaction-epoch.mjs',
   )).href
-  const lunaConfigModule = pathToFileURL(join(
+  const deepSeekModule = pathToFileURL(join(
     appRoot,
     'Contents',
     'Resources',
     'app.asar',
     'node_modules',
-    '@ycp424c',
-    'dsh-luna-vision-bridge',
+    '@deepseek-ai',
+    'dsh-llm-deepseek',
     'lib',
-    'config.js',
+    'index.js',
   )).href
   const anchoredConfig = join(
     unpackedRoot,
@@ -62,25 +62,17 @@ try {
     'agent.cordis.yml',
   )
 
-  const [{ prepareDesktopProfile }, { composeEntries }, { createEpochPromotion }, { resolveConfig }] = await Promise.all([
+  const [{ prepareDesktopProfile }, { composeEntries }, { createEpochPromotion }, { Config: DeepSeekConfig }] = await Promise.all([
     import(profileModule),
     import(appBootModule),
     import(epochModule),
-    import(lunaConfigModule),
+    import(deepSeekModule),
   ])
-  const lunaCommand = resolveConfig({}).lunaCommand
-  const expectedLunaCommand = join(
-    unpackedRoot,
-    'node_modules',
-    '@ycp424c',
-    'dsh-luna-vision-bridge',
-    'scripts',
-    'read-image-luna.sh',
-  )
-  if (lunaCommand !== expectedLunaCommand) {
-    throw new Error(`verify-packaged-composition-smoke: Luna launcher resolved to ${lunaCommand}`)
+  const deepSeekModels = DeepSeekConfig({}).models
+  const visionModel = deepSeekModels.find(model => model.id === 'deepseek-v4-flash-vision-exp')
+  if (!visionModel?.inputModalities?.includes('image')) {
+    throw new Error('verify-packaged-composition-smoke: native DeepSeek V4 Flash Vision model is missing image input')
   }
-  accessSync(lunaCommand, constants.X_OK)
   const prepared = prepareDesktopProfile(undefined, temporaryHome, 'darwin')
   const rows = composeEntries([prepared.patches])
   const rowsWithId = id => rows.filter(row => row.id === id)
@@ -93,7 +85,6 @@ try {
   const teamRows = rowsWithId('agent-teams')
   const remoteRows = rowsWithId('remote-web-ui')
   const billingRows = rowsWithId('web-billing')
-  const lunaRows = rowsWithId('luna-vision-bridge')
   const remoteModuleRows = rowsWithId('ui-remote-modules')
   if (residentRows.length !== 1 || residentRows[0].name !== '@deepseek-ai/dsh-resident-operator-local') {
     throw new Error('verify-packaged-composition-smoke: Resident bundle is not composed exactly once')
@@ -135,8 +126,26 @@ try {
   if (billingRows.length !== 1 || billingRows[0].name !== 'dsh-web-billing') {
     throw new Error('verify-packaged-composition-smoke: Billing bundle is not composed exactly once')
   }
-  if (lunaRows.length !== 1 || lunaRows[0].name !== '@ycp424c/dsh-luna-vision-bridge') {
-    throw new Error('verify-packaged-composition-smoke: Luna Vision Bridge bundle is not composed exactly once')
+  for (const [id, name] of [
+    ['genui', '@omdsh-dev/dsh-genui'],
+    ['tool-plugin-check', '@omdsh-dev/dsh-plugin-check'],
+    ['llm-fallbacks', 'dsh-llm-fallbacks'],
+    ['tool-stat', '@deepseek-ai/dsh-tool-stat'],
+    ['tool-time', '@deepseek-ai/dsh-tool-time'],
+    ['tool-regex', '@deepseek-ai/dsh-tool-regex'],
+    ['tool-markdown', '@deepseek-ai/dsh-tool-markdown'],
+    ['codegraph', 'dsh-codegraph'],
+    ['mnemon', 'dsh-mnemon'],
+    ['aegis-method-pack', 'aegis/extensions/dsh/index.js'],
+    ['better-sidebar', 'dsh-better-sidebar'],
+  ]) {
+    const matching = rowsWithId(id)
+    if (matching.length !== 1 || matching[0].name !== name) {
+      throw new Error(`verify-packaged-composition-smoke: ${id} bundle is not composed exactly once`)
+    }
+  }
+  if (rowsWithId('luna-vision-bridge').length !== 0 || rowsWithId('dsh-memory-evolve').length !== 0) {
+    throw new Error('verify-packaged-composition-smoke: retired Luna/Memory Evolve rows remain in the default product')
   }
   if (remoteModuleRows.length !== 1
     || remoteModuleRows[0].name !== '@deepseek-ai/dsh-client-ui-remote-modules'
@@ -190,8 +199,8 @@ try {
       memberPersonaPlacement: teamRows[0].config.memberPersonaPlacement,
       remoteWebUi: remoteRows[0].name,
       billing: billingRows[0].name,
-      lunaVisionBridge: lunaRows[0].name,
-      lunaCommand,
+      deepSeekVisionModel: visionModel.id,
+      deepSeekVisionModalities: visionModel.inputModalities,
       remoteModules: remoteModuleRows[0].name,
       remoteModuleInstances: remoteInstances.map(instance => instance.id),
     },

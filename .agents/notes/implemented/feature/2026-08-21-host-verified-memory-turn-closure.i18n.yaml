@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-21-host-verified-memory-turn-closure.md
-2026-08-21-host-verified-memory-turn-closure.md: f0901477d594409f298ac4a46143935464ec65e5
-2026-08-21-host-verified-memory-turn-closure.zh.md: 64898d67ee77b4fea2b6f2da35656bf2605f4e67
+2026-08-21-host-verified-memory-turn-closure.md: 8ef70d2b384a5a685540d2c05ab2e8528b247c40
+2026-08-21-host-verified-memory-turn-closure.zh.md: 63cf7bdf05476f982d392844b5f6d8263f0b9632

@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve as resolvePath } from 'node:path'
+import { join, relative, resolve as resolvePath } from 'node:path'
 import { SettingsConflictError, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { apply, mediaTypeForPath } from '../src/index.ts'
 import * as git from '../src/git.ts'
@@ -135,7 +135,10 @@ describe('host plugin smoke', () => {
     expect(all.slice(0, 5)).toEqual(first)
     expect(all.slice(5)).toEqual(second)
     // A skip past the end returns an empty page (the lazy loader's stop sign).
-    expect(await git.log(cwd, 5, 10_000)).toEqual([])
+    // The managed copy lives inside the Solar monorepo, whose history may
+    // legitimately exceed the old fixed 10,000-commit sentinel.
+    const count = Number(spawnSync('git', ['-C', cwd, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).stdout.trim())
+    expect(await git.log(cwd, 5, count)).toEqual([])
   })
 
   it('pty manager releases the quota on close and respawns after exit', async () => {
@@ -455,24 +458,26 @@ describe('session cwd resolution over the API route', () => {
     // (e.g. `src/git.ts`); a session whose cwd sits inside the repo must
     // still load per-file diffs instead of failing with "not an absolute
     // path". The session header points INTO the repository.
+    const repoRelativeFile = relative(await git.repoRoot(process.cwd()), join(process.cwd(), 'src/git.ts'))
     const route = mount({
       sessions: {
         get: () => ({ header: { cwd: join(process.cwd(), 'src') } }),
       },
     })
-    const result = await invoke(route, 'git.diff', { sessionId: 's-sub', path: 'src/git.ts', staged: false })
+    const result = await invoke(route, 'git.diff', { sessionId: 's-sub', path: repoRelativeFile, staged: false })
     expect(result.ok).toBe(true)
     const value = result as unknown as { ok: boolean; value?: { diff: string } }
     expect(typeof value.value?.diff).toBe('string')
   })
 
   it('fs.read resolves repo-relative paths (untracked diff fallback)', async () => {
+    const repoRelativeFile = relative(await git.repoRoot(process.cwd()), join(process.cwd(), 'src/git.ts'))
     const route = mount({
       sessions: {
         get: () => ({ header: { cwd: join(process.cwd(), 'src') } }),
       },
     })
-    const result = await invoke(route, 'fs.read', { sessionId: 's-sub', path: 'src/git.ts' })
+    const result = await invoke(route, 'fs.read', { sessionId: 's-sub', path: repoRelativeFile })
     expect(result.ok).toBe(true)
     const value = result as unknown as { ok: boolean; value?: { kind: string; content: string } }
     expect(value.value?.kind).toBe('text')

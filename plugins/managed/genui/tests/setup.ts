@@ -8,6 +8,7 @@
  * SVG measure APIs jsdom lacks.
  */
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
+import { beforeEach } from 'vitest'
 import { renderGenuiFence } from '../src/client/index.tsx'
 
 type HostFenceExt = {
@@ -19,6 +20,27 @@ export const hasFenceRegistry: boolean = typeof (primitives as unknown as HostFe
 if (hasFenceRegistry) {
   ;(primitives as unknown as HostFenceExt).registerFenceRenderer!('dsh-ui', renderGenuiFence as never)
 }
+
+// Node 26 exposes an experimental process-level localStorage accessor which is
+// undefined unless the process receives --localstorage-file. Install the
+// browser Storage contract before every test worker case; Electron continues
+// to use its native window.localStorage at runtime.
+const storageValues = new Map<string, string>()
+const testStorage: Storage = {
+  get length() { return storageValues.size },
+  clear: () => storageValues.clear(),
+  getItem: key => storageValues.get(key) ?? null,
+  key: index => [...storageValues.keys()][index] ?? null,
+  removeItem: key => storageValues.delete(key),
+  setItem: (key, value) => storageValues.set(key, String(value)),
+}
+
+beforeEach(() => {
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: testStorage,
+  })
+})
 
 // jsdom lacks rAF: the reveal animation uses it per item; manual tick below.
 if (typeof globalThis.requestAnimationFrame !== 'function') {

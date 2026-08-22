@@ -35,7 +35,6 @@ class StaticAttachmentStore extends AttachmentStore {
     maxImagesPerMessage: 4,
     maxMessageImageBytes: 64,
     maxImagePixels: 4,
-    maxImageDimension: 4,
     mediaTypes: ['image/png'],
   }
 

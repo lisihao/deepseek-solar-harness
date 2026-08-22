@@ -24,6 +24,7 @@ export const TOOL_MARKDOWN_PACKAGE = '@deepseek-ai/dsh-tool-markdown'
 export const CODEGRAPH_PACKAGE = 'dsh-codegraph'
 export const MNEMON_PACKAGE = 'dsh-mnemon'
 export const AEGIS_PACKAGE = 'aegis'
+export const BETTER_SIDEBAR_PACKAGE = 'dsh-better-sidebar'
 
 export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
@@ -45,6 +46,7 @@ export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [CODEGRAPH_PACKAGE, 'codegraph'],
   [MNEMON_PACKAGE, 'mnemon'],
   [AEGIS_PACKAGE, 'aegis-method-pack'],
+  [BETTER_SIDEBAR_PACKAGE, 'better-sidebar'],
 ])
 
 export const PRODUCT_BUNDLE_PACKAGES = [
@@ -67,6 +69,7 @@ export const PRODUCT_BUNDLE_PACKAGES = [
   CODEGRAPH_PACKAGE,
   MNEMON_PACKAGE,
   AEGIS_PACKAGE,
+  BETTER_SIDEBAR_PACKAGE,
 ] as const
 
 /** App-sealed runtime packages that must stay version-aligned with product bundles. */

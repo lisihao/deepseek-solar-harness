@@ -1,9 +1,0 @@
-# Host-only provider bridge. The plugin registers `luna-vision-bridge` and
-# advertises image input, so the stock DSH composer and attachment admission
-# path remain unchanged.
-- insert:
-    - id: luna-vision-bridge
-      name: '@ycp424c/dsh-luna-vision-bridge'
-      inject:
-        - llm
-        - attachments
