@@ -5005,12 +5005,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.18.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
-  version: 0.1.18
-  resolution: "@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.18.tgz#vendor/dsh-packages/linxin666-dsh-liangshen-0.1.18.tgz::hash=10512c&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
+"@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
+  version: 0.1.19
+  resolution: "@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz#vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz::hash=14fcd8&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
   dependencies:
     schemastery: "npm:^3.18.0"
-  checksum: 10c0/fdb0fd29b9b57c8b1358bb602b1e036224502b07c0709c400e8750c2377dc15c58da8cc941f8953e514b2f0a89260ebac8008aed313fa0cc22eebdff83c27031
+  checksum: 10c0/f72ebbd5957797db1e4b16bdd2e6d06d0598f98b9fb4dd32fbf124b069b81ac223ce69a18d37f72fcbdaf43461eabfa1cc7d3c3085d1aa3c9d139126a06bfd5b
   languageName: node
   linkType: hard
 
@@ -7509,7 +7509,7 @@ __metadata:
     "@deepseek-ai/dsh-workflow": "npm:0.1.0-rc.6"
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     "@electron/asar": "npm:3.4.1"
-    "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.18.tgz"
+    "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz"
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz"
     "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz"
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz"

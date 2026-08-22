@@ -10,7 +10,7 @@ DeepSeek V4 Pro 会强烈依赖 API 中可见的**首轮工具目录**选择执�
 
 1. 首轮模型请求只暴露官方 Minimal 精确双工具（持久 `bash` 与 `str_replace_editor`），只保留 `deployment:persona` 一个 prompt section，清空运行时上下文，并且只放行用户自己的消息；
 2. 会话出现首次持久 `tool/call` 后，晋升会等到首个 reasoning 块呈 minimal-like（包含 `we` 且无 `let me`）才发生，四步兜底；随后 wire 切换为 Code Mode（PTC）——只暴露一个 `run_code`，完整工具注册表通过生成的 SDK 调用——并恢复全部 prompt section（含 plan mode 的 `plan:policy`）以及 workspace 指令、skill 目录与运行时快照等常规注入；
-3. 阶段从持久化 session events 推导，resume / reload 不丢失状态。
+3. 阶段从持久化 session events 推导；恢复 Agent 会在 `agent/created` 阶段、驱动器推导请求之前重建 Code Mode，因此 resume / reload 不会短暂暴露陈旧的原生工具目录。
 
 Windows 原生环境实测（DeepSeek V4 Pro、max、V4.1b 题面）：98 / 99，均值 98.5，第二轮全程无 `let me` 痕迹，证明不是抽卡，也不需要牺牲完整工具能力。原始实验 preset：[xiaobright/dsh-anchored-standard](https://github.com/xiaobright/dsh-anchored-standard)。
 

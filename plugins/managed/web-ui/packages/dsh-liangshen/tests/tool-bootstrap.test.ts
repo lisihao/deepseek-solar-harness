@@ -430,6 +430,42 @@ describe('anchored-tool-bootstrap', () => {
     expect(calls).toEqual(['code'])
   })
 
+  test('agent/created restores Code Mode before a resumed driver starts', async () => {
+    const listeners = register({ promotedPresentation: 'code', anchorGate: true })
+    const createdListener = listener(listeners, 'agent/created')
+    const calls: string[] = []
+    const agent = {
+      session: {
+        events: [stepEvent(), reasoningEvent('We need inspect the repo.'), { type: 'tool/call' }, turnEndEvent(1)],
+      },
+      ctx: { tools: { presentAs: (mode: string) => calls.push(mode) } },
+    }
+
+    await createdListener({ agent }, async () => undefined)
+    expect(calls).toEqual(['code'])
+  })
+
+  test('agent/request restores Code Mode before downstream request derivation', async () => {
+    const listeners = register({ promotedPresentation: 'code', anchorGate: true })
+    const requestListener = listener(listeners, 'agent/request')
+    const calls: string[] = []
+    const agent = {
+      session: {
+        events: [stepEvent(), reasoningEvent('We need inspect the repo.'), { type: 'tool/call' }, turnEndEvent(1)],
+      },
+      ctx: { tools: { presentAs: (mode: string) => calls.push(mode) } },
+    }
+
+    await requestListener(
+      { agent, turn: 2, step: 1, signal: {} },
+      async () => {
+        expect(calls).toEqual(['code'])
+        return { provider: 'p', model: 'm', maxTokens: 384000 }
+      },
+    )
+    expect(calls).toEqual(['code'])
+  })
+
   test('session/event keeps the bootstrap contract through every step and switches at turn/end', async () => {
     const listeners = register({ promotedPresentation: 'code', anchorGate: true })
     const assembleListener = listener(listeners, 'system-prompt/assemble')

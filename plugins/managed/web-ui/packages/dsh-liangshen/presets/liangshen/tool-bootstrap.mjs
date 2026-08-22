@@ -275,6 +275,14 @@ export function apply(ctx, config) {
     bootstrapMaxTokens,
   }
 
+  // A resumed Agent starts with a fresh process-local tool presenter. Rebuild
+  // its presentation from durable session events before the driver can issue
+  // a resume request; otherwise the first resumed request can advertise the
+  // native catalog while execution already enforces Code Mode.
+  ctx.on('agent/created', ({ agent }) => {
+    refresh(agent, policy)
+  })
+
   // Promotion is evaluated at step/turn boundaries, never while a step is
   // executing tools. Native presentation may still promote at step/end; Code
   // presentation waits for turn/end so a multi-step first turn never changes
@@ -325,10 +333,10 @@ export function apply(ctx, config) {
   }, { prepend: true })
 
   ctx.on('agent/pre-step', async (payload, next) => {
-    const decision = await next()
     const agent = payload.agent
+    const state = agent === undefined ? undefined : refresh(agent, policy)
+    const decision = await next()
     if (agent === undefined || decision.kind !== 'enter') return decision
-    const state = refresh(agent, policy)
     if (state === undefined) return decision
 
     if (!state.promoted) {
@@ -354,10 +362,13 @@ export function apply(ctx, config) {
   // previous header into the next request unless the adapter marked it a
   // default, so an un-stripped cap would be soldered into every request.
   ctx.on('agent/request', async (payload, next) => {
-    const resolved = await next()
     const agent = payload?.agent
-    if (agent === undefined || policy.bootstrapMaxTokens === undefined) return resolved
-    const state = refresh(agent, policy)
+    // Presentation is an input to request derivation. Refresh it before
+    // delegating so a cold resume cannot emit one stale native header and
+    // switch to `run_code` only after that request has already started.
+    const state = agent === undefined ? undefined : refresh(agent, policy)
+    const resolved = await next()
+    if (state === undefined || policy.bootstrapMaxTokens === undefined) return resolved
     if (state.promoted) {
       if (resolved.maxTokens !== policy.bootstrapMaxTokens) return resolved
       const rest = { ...resolved }

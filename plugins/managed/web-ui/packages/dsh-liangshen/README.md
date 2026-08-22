@@ -10,7 +10,7 @@ DeepSeek V4 Pro conditions strongly on the API tool catalog visible in the FIRST
 
 1. The first model request exposes only the builtin Minimal preset's exact two tools (persistent `bash` plus `str_replace_editor`), keeps only the `deployment:persona` prompt section, empties runtime contexts, and passes only the user's own messages;
 2. After the session's first durable `tool/call`, promotion waits until the first reasoning block is minimal-like (contains `we` and no `let me`), with a four-step fallback; the wire then switches to Code Mode (PTC) — a single `run_code` tool backed by the full tool registry SDK — and every assembled prompt section plus the ordinary workspace-instruction, skill-catalog, and runtime-context injections return;
-3. The phase derives from persisted session events, so resume / reload never lose state.
+3. The phase derives from persisted session events, and a resumed Agent restores Code Mode during `agent/created` before its driver can derive a request, so resume / reload cannot expose one stale native catalog.
 
 Measured on native Windows (DeepSeek V4 Pro, max, V4.1b task): 98 / 99, mean 98.5, zero `let me` traces in the second run — reproducible, not a lucky draw, and no tool capability sacrificed. Original experiment: [xiaobright/dsh-anchored-standard](https://github.com/xiaobright/dsh-anchored-standard).
 
