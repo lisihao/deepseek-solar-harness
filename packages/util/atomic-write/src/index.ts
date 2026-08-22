@@ -11,7 +11,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 /**
@@ -68,6 +68,18 @@ function isEEXIST(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === 'EEXIST'
 }
 
+/** Windows may report an existing exclusively-created file as EPERM. */
+async function isLockContention(error: unknown, lockPath: string): Promise<boolean> {
+  if (isEEXIST(error)) return true
+  if (process.platform !== 'win32' || (error as NodeJS.ErrnoException | null)?.code !== 'EPERM') return false
+  try {
+    await lstat(lockPath)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
  * Writer-lock protocol constants. These are robustness invariants of the
  * cross-process write protocol, not deployment tunables: contention normally
@@ -102,7 +114,7 @@ export async function withFileLock<T>(
       await writeFile(lockPath, `${process.pid}\n`, { mode: 0o600, flag: 'wx' })
       break
     } catch (error) {
-      if (!isEEXIST(error)) throw error
+      if (!await isLockContention(error, lockPath)) throw error
     }
     if (Date.now() >= deadline) {
       throw new Error(`atomic-write: timed out waiting for the writer lock at ${lockPath}`)
