@@ -1,11 +1,12 @@
 {
   "name": "dsh-codegraph",
-  "version": "0.1.0",
+  "version": "0.1.0-solar.1",
   "description": "CodeGraph for DeepSeek Harness (dsh): a Node bridge that exposes the codegraph Python CLI as dsh tools (callers / callees / deps / dependents / search / impact / overview / reindex) over a code index in SQLite.",
   "type": "module",
   "main": "index.js",
   "files": [
     "index.js",
+    "src",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"

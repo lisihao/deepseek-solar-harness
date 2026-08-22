@@ -6,7 +6,9 @@
       name: dsh-mnemon
       config:
         routingGuidance: true
-        displayMode: sidebar
+        # Solar keeps scarce sidebar space for navigation. Mnemon is exposed
+        # as a conversation-area built-in tab instead.
+        displayMode: buildin
         lifecycleEnabled: true
         recallMode: guided
         writebackMode: guided
