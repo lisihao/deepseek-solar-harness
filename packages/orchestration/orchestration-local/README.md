@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 This package provides `ctx.orchestrations` through an independent `dsh-orchestratord`. The disposable DSH plugin is a Unix-socket client; the daemon is the only SQLite writer and keeps accepted TaskGraphs running across DSH or Desktop restarts.
 
+Packaged Desktop assigns `desktop-<SemVer>` as the local daemon build identity. The strict handshake rejects a daemon from another application build, asks it to shut down, preserves its SQLite state and artifacts, and then starts the installed build. Source development keeps the explicit `development` identity unless `DSH_BUILD_COMMIT` is supplied.
+
 The daemon hosts the deterministic direct Intent Provider, basic Context Provider, owner-local content-addressed Capsule Registry, quota-aware model allocator, persistent Continuous Harness Provider, graph validator, conflict-aware Scheduler, immutable ExecutionPlan compiler, and a private physical-operator composition that dispatches Resident Claude Code or Codex turns. State lives under `<DSH_HOME>/orchestrations`; the socket is owner-only and the database uses WAL.
 
 The Scheduler starts independent nodes up to the Graph's `maxParallel` bound without a phase-wide barrier. Dependencies, overlapping write/effect scopes, and the worker bound serialize only affected nodes; each wait reason is persisted with the run. Every attempt receives the built-in `context.clean-task` instruction Capsule and a fresh Resident lane, so a reused Codex or Claude Code host does not inherit an earlier native thread or fork the parent conversation history.

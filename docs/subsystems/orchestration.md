@@ -230,7 +230,7 @@ abstract resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promi
 abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:358`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:359`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmstrategy--rlmstrategyservice-abstract-seam"></a>
 

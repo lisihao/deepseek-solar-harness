@@ -181,6 +181,34 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('classifies an older daemon build as a version mismatch', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-upgrade-'))
+    const root = join(home, 'orchestrations')
+    const previousBuild = process.env.DSH_BUILD_COMMIT
+    const oldDaemon = new OrchestrationDaemon({
+      root,
+      dshHome: home,
+      buildCommit: 'desktop-old',
+      residentClient: new FakeResidentClient() as unknown as ResidentDaemonClient,
+    })
+    await oldDaemon.start()
+    process.env.DSH_BUILD_COMMIT = 'desktop-current'
+    const client = new OrchestrationDaemonClient({
+      root,
+      dshHome: home,
+      autoStart: false,
+      connectTimeoutMs: 2_000,
+    })
+    try {
+      await expect(client.ready()).rejects.toMatchObject({ code: 'ORCHESTRATION_VERSION_MISMATCH' })
+    } finally {
+      await oldDaemon.close()
+      if (previousBuild === undefined) Reflect.deleteProperty(process.env, 'DSH_BUILD_COMMIT')
+      else process.env.DSH_BUILD_COMMIT = previousBuild
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('resolves native RLM inside a normal subscription operator while DSH owns the graph', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
     const root = join(home, 'orchestrations')

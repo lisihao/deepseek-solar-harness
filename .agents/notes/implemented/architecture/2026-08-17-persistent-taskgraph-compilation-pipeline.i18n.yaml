@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-17-persistent-taskgraph-compilation-pipeline.md
-2026-08-17-persistent-taskgraph-compilation-pipeline.md: 99742c1ed308cd1650d61a218b4bcc16f730cf23
-2026-08-17-persistent-taskgraph-compilation-pipeline.zh.md: 0c12cd1bab0d2634e41696d51725da20aa46e4ec
+2026-08-17-persistent-taskgraph-compilation-pipeline.md: d8462b70b0cf5266c4bb13275d1b698fca6a2699
+2026-08-17-persistent-taskgraph-compilation-pipeline.zh.md: 906509c77b6c7978019d865bd3f00c95833b5ba4

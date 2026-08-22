@@ -153,11 +153,17 @@ export class OrchestrationDaemonClient {
   // Resident-backed daemons intentionally share the same bounded auto-start handshake lifecycle.
   /* jscpd:ignore-start */
   private async ensureReady(): Promise<void> {
+    let initialError: unknown
     try {
       await this.handshake()
       return
     } catch (error) {
+      initialError = error
       if (!this.options.autoStart) throw error
+    }
+    if (initialError instanceof OrchestrationError
+      && initialError.code === 'ORCHESTRATION_VERSION_MISMATCH') {
+      await this.retireIncompatibleDaemon(initialError)
     }
     startDetachedOrchestrationDaemon(
       this.options.root,
@@ -182,6 +188,31 @@ export class OrchestrationDaemonClient {
   }
   /* jscpd:ignore-end */
 
+  /** Drain an older detached daemon before starting the current Desktop build. */
+  private async retireIncompatibleDaemon(initialError: OrchestrationError): Promise<void> {
+    try {
+      await this.rawRequest('system.shutdown', {})
+    } catch (shutdownError) {
+      if (existsSync(this.socketPath)) {
+        throw new OrchestrationError(
+          `orchestration daemon upgrade is blocked: ${initialError.message}; shutdown failed: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
+          'ORCHESTRATION_VERSION_MISMATCH',
+        )
+      }
+      return
+    }
+    const deadline = Date.now() + this.options.connectTimeoutMs
+    while (existsSync(this.socketPath) && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    if (existsSync(this.socketPath)) {
+      throw new OrchestrationError(
+        `orchestration daemon upgrade is blocked because the old daemon did not drain: ${initialError.message}`,
+        'ORCHESTRATION_VERSION_MISMATCH',
+      )
+    }
+  }
+
   private async handshake(): Promise<void> {
     const response = await this.rawRequest<{
       protocolVersion: number
@@ -194,17 +225,17 @@ export class OrchestrationDaemonClient {
     })
     if (response.protocolVersion !== ORCHESTRATION_PROTOCOL_VERSION
       || response.stateSchemaVersion !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
-      throw new OrchestrationError('orchestration daemon protocol or schema mismatch', 'ORCHESTRATION_UNAVAILABLE')
+      throw new OrchestrationError('orchestration daemon protocol or schema mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
     const expectedCommit = process.env.DSH_BUILD_COMMIT ?? 'development'
     if (response.buildCommit !== expectedCommit) {
       throw new OrchestrationError(
         `orchestration daemon build ${response.buildCommit} does not match client ${expectedCommit}`,
-        'ORCHESTRATION_UNAVAILABLE',
+        'ORCHESTRATION_VERSION_MISMATCH',
       )
     }
     if (!Array.isArray(response.methods) || ORCHESTRATION_METHODS.some(method => !response.methods.includes(method))) {
-      throw new OrchestrationError('orchestration daemon lacks required methods', 'ORCHESTRATION_UNAVAILABLE')
+      throw new OrchestrationError('orchestration daemon lacks required methods', 'ORCHESTRATION_VERSION_MISMATCH')
     }
   }
 

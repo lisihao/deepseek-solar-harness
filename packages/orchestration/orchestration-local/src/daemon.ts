@@ -427,7 +427,7 @@ export class OrchestrationDaemon {
     const protocol = requiredInteger(params, 'protocol_version')
     const schema = requiredInteger(params, 'state_schema_version')
     if (protocol !== ORCHESTRATION_PROTOCOL_VERSION || schema !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
-      throw new OrchestrationError('orchestration protocol or state schema mismatch', 'ORCHESTRATION_UNAVAILABLE')
+      throw new OrchestrationError('orchestration protocol or state schema mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
     return {
       protocolVersion: ORCHESTRATION_PROTOCOL_VERSION,

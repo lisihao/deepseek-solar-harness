@@ -127,6 +127,7 @@ async function start(): Promise<void> {
 
   try {
     const environment = loadLayeredEnv(BIN_NAME, process.cwd())
+    process.env.DSH_BUILD_COMMIT ??= app.isPackaged ? `desktop-${app.getVersion()}` : 'development'
     const electronVersion = process.versions.electron
     if (electronVersion === undefined) {
       throw new Error(`${BIN_NAME}: plugin runtime requires the Electron runtime version`)
