@@ -8,6 +8,8 @@ export const REMOTE_WEB_UI_PACKAGE = '@linxin666/dsh-remote-web-ui'
 export const WEB_BILLING_PACKAGE = 'dsh-web-billing'
 export const LUNA_VISION_BRIDGE_PACKAGE = '@ycp424c/dsh-luna-vision-bridge'
 export const CODE_HARNESS_GOVERNANCE_PACKAGE = '@lisihao/dsh-code-harness-governance'
+export const PLUGIN_CONSOLE_PACKAGE = '@vlln/plugin-console'
+export const PLUGIN_CONSOLE_ROW_ID = 'plugin-console'
 export const UI_REMOTE_MODULES_PACKAGE = '@deepseek-ai/dsh-client-ui-remote-modules'
 export const UI_REMOTE_MODULES_ROW_ID = 'ui-remote-modules'
 export const HOST_APIPROXY_PACKAGE = '@deepseek-ai/dsh-host-apiproxy'
@@ -21,6 +23,7 @@ export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [WEB_BILLING_PACKAGE, 'web-billing'],
   [LUNA_VISION_BRIDGE_PACKAGE, 'luna-vision-bridge'],
   [CODE_HARNESS_GOVERNANCE_PACKAGE, 'code-harness-governance'],
+  [PLUGIN_CONSOLE_PACKAGE, PLUGIN_CONSOLE_ROW_ID],
   [UI_REMOTE_MODULES_PACKAGE, UI_REMOTE_MODULES_ROW_ID],
   [MEMORY_EVOLVE_PACKAGE, 'dsh-memory-evolve'],
 ])
@@ -33,6 +36,7 @@ export const PRODUCT_BUNDLE_PACKAGES = [
   WEB_BILLING_PACKAGE,
   LUNA_VISION_BRIDGE_PACKAGE,
   CODE_HARNESS_GOVERNANCE_PACKAGE,
+  PLUGIN_CONSOLE_PACKAGE,
   UI_REMOTE_MODULES_PACKAGE,
   MEMORY_EVOLVE_PACKAGE,
 ] as const

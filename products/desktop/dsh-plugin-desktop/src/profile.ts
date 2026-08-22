@@ -42,6 +42,8 @@ import {
   AGENT_TEAMS_ROW_ID,
   PRODUCT_BUNDLE_PACKAGES,
   PRODUCT_BUNDLE_ROW_IDS,
+  PLUGIN_CONSOLE_PACKAGE,
+  PLUGIN_CONSOLE_ROW_ID,
   SEALED_RUNTIME_PACKAGES,
   UI_REMOTE_MODULES_PACKAGE,
   UI_REMOTE_MODULES_ROW_ID,
@@ -232,6 +234,23 @@ function productBundlePatches(
     ))
 }
 
+/** Bind legacy plugin-console rows to the product-sealed package in memory. */
+export function bindPluginConsolePatches(patches: readonly PatchOptions[]): PatchOptions[] {
+  return patches.map((patch) => {
+    if (patch.insert !== undefined) {
+      return {
+        ...patch,
+        insert: patch.insert.map((row) => row.id === PLUGIN_CONSOLE_ROW_ID
+          ? { ...row, name: PLUGIN_CONSOLE_PACKAGE }
+          : row),
+      }
+    }
+    return patch.id === PLUGIN_CONSOLE_ROW_ID && patch.name !== undefined
+      ? { ...patch, name: PLUGIN_CONSOLE_PACKAGE }
+      : patch
+  })
+}
+
 /** Ensure one runtime-owned package link, rejecting an unrelated real path. */
 function ensureRuntimePackageLink(link: string, target: string): void {
   let stat: ReturnType<typeof lstatSync> | undefined
@@ -322,11 +341,11 @@ export function prepareDesktopProfile(
 
   const desktopPatches = loadOverlayPatches(BIN_NAME, DESKTOP_PATCH_PATH)
   const homePatches = loadOptionalPatches(BIN_NAME, join(home, PROFILE_PATCH_FILENAME)) ?? []
-  const selectedProfilePatches = [
+  const selectedProfilePatches = bindPluginConsolePatches([
     ...profile.layers.flatMap(layer => layer.patches),
     ...profile.patches,
     ...homePatches,
-  ]
+  ])
   const suppliedRows = new Set(
     composeEntries([selectedProfilePatches])
       .flatMap(row => typeof row.id === 'string' ? [row.id] : []),
@@ -348,11 +367,11 @@ export function prepareDesktopProfile(
     throw new Error(`${BIN_NAME}: desktop profile is missing @deepseek-ai/dsh-web-app`)
   }
 
-  const patches: PatchOptions[] = [
+  const patches: PatchOptions[] = bindPluginConsolePatches([
     ...bundlePatches,
     ...profile.patches,
     ...homePatches,
-  ]
+  ])
   const rows = new Map<string, EntryOptions>()
   for (const row of composeEntries([patches])) {
     if (typeof row.id === 'string') rows.set(row.id, row)
@@ -420,6 +439,14 @@ export function prepareDesktopProfile(
       ...rowConfig(agentTeams),
       memberPersonaPlacement: 'prompt',
     },
+  })
+  // The plugin console is product-owned. A selected legacy Web profile may
+  // still contribute the former @dsh-external row after the Desktop overlay;
+  // this final binding keeps the row on the sealed, non-blocking package.
+  patches.push({
+    id: PLUGIN_CONSOLE_ROW_ID,
+    name: PLUGIN_CONSOLE_PACKAGE,
+    disabled: false,
   })
   // Remote Web pages are user-owned profile data. The public Desktop ships the
   // configuration surface but never embeds one operator's private targets.
