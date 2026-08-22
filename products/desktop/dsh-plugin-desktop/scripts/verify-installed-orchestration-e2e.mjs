@@ -46,7 +46,7 @@ function commonNode(id, overrides = {}) {
     writeScopes: [],
     approvedSecretRefs: [],
     acceptance: [{ id: 'completed', description: 'native subscription operator completes', kind: 'operator-completed' }],
-    retryPolicy: { maxAttempts: 2, backoffMs: 250, retryableCodes: ['RUNTIME_UNAVAILABLE'] },
+    retryPolicy: { maxAttempts: 2, backoffMs: 250, retryableCodes: ['RUNTIME_UNAVAILABLE', 'QUOTA_EXHAUSTED'] },
     phase: 'execution',
     rlm: { mode: 'disabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
     ...overrides,

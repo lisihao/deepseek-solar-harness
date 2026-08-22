@@ -16,14 +16,22 @@ afterEach(async () => {
 })
 
 type TestResult = { output: Array<{ type: 'text'; text: string }>; stopReason: 'completed' }
+interface FakeResidentRequest {
+  commandId: string
+  operatorId: string
+  laneId?: string
+  profile?: { model: string }
+  prompt?: Array<{ type: string; text?: string }>
+}
 
 class FakeResidentClient {
   starts: string[] = []
-  requests: Array<{ commandId: string; operatorId: string; laneId?: string; prompt?: Array<{ type: string; text?: string }> }> = []
+  requests: FakeResidentRequest[] = []
   available = true
   unavailableOperators = new Set<string>()
   defer = false
   failNext = 0
+  failNextCode = 'RUNTIME_UNAVAILABLE'
   private readonly deferredResolvers: Array<() => void> = []
   turns = new Map<string, { state: 'running' | 'settled'; result?: TestResult }>()
   residentEvents = new Map<string, Array<{
@@ -59,7 +67,7 @@ class FakeResidentClient {
     }))
   }
 
-  async execute(request: { commandId: string; operatorId: string; laneId?: string; prompt?: Array<{ type: string; text?: string }> }) {
+  async execute(request: FakeResidentRequest) {
     this.requests.push(request)
     this.starts.push(`${request.operatorId}:${request.commandId}`)
     const turnId = `turn:${request.commandId}`
@@ -75,7 +83,7 @@ class FakeResidentClient {
     const resultPromise = this.failNext > 0
       ? (() => {
         this.failNext -= 1
-        const error = Object.assign(new Error('transient product failure'), { code: 'RUNTIME_UNAVAILABLE' })
+        const error = Object.assign(new Error('transient product failure'), { code: this.failNextCode })
         return Promise.reject(error)
       })()
       : this.defer
@@ -582,5 +590,38 @@ describe('orchestration daemon', () => {
     const retryRun = await client.start({ compilationId: retryCompilation.compilationId })
     const retried = await eventually(() => client.inspect(String(retryRun.runId)), value => value.state === 'completed')
     expect(retried.nodes[0]).toMatchObject({ state: 'passed', attempt: 2 })
+  })
+
+  it('excludes an exhausted model offer before an explicitly allowed retry', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-quota-retry-'))
+    const root = join(home, 'o')
+    const fake = new FakeResidentClient()
+    fake.failNext = 1
+    fake.failNextCode = 'QUOTA_EXHAUSTED'
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const base = graph(home)
+    const retryGraph = {
+      ...base,
+      nodes: base.nodes.map(value => value.id === 'code' ? {
+        ...value,
+        retryPolicy: { maxAttempts: 2, backoffMs: 0, retryableCodes: ['QUOTA_EXHAUSTED'] },
+      } : value),
+    }
+    const compilation = await client.compile({
+      intent: { request: 'Quota failover fixture.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'quota-failover',
+        rlm: 'auto', continualHarness: 'off', optimization: 'economy',
+      },
+      graph: retryGraph,
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ state: 'passed', attempt: 2 })
+    expect(fake.requests[0]?.profile?.model).toBe('gpt-5.6-luna')
+    expect(fake.requests[1]?.profile?.model).not.toBe('gpt-5.6-luna')
   })
 })

@@ -106,6 +106,13 @@ describe('Claude Code resident terminal failures', () => {
       type: 'result', subtype: 'success', is_error: false, result: 'ok',
     } as SDKResultMessage)).toBeUndefined()
   })
+
+  it('classifies a subscription allowance failure as quota exhaustion', () => {
+    expect(claudeResultFailure({
+      type: 'result', subtype: 'success', is_error: true,
+      result: 'Usage limit reached. Try again after the subscription window resets.',
+    } as SDKResultMessage)).toMatchObject({ code: 'QUOTA_EXHAUSTED' })
+  })
 })
 
 describe('Codex Resident catalog qualification', () => {
@@ -113,6 +120,12 @@ describe('Codex Resident catalog qualification', () => {
     expect(codexExecutionFailure(new Error(
       'subagent-codex: Codex turn ended with status failed: {"message":"stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)"}',
     ))).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+  })
+
+  it('classifies a native subscription usage limit as quota exhaustion', () => {
+    expect(codexExecutionFailure(new Error(
+      'subagent-codex: Codex turn ended with status failed: {"message":"You have hit your usage limit","codexErrorInfo":"usageLimitExceeded"}',
+    ))).toMatchObject({ code: 'QUOTA_EXHAUSTED' })
   })
 
   it('keeps execution qualified when only quota telemetry is unavailable', async () => {

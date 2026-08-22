@@ -326,6 +326,9 @@ export function claudeResultFailure(result: SDKResultMessage): ResidentOperatorE
       'AUTH_MODE_MISMATCH',
     )
   }
+  if (/(?:usage limit|quota (?:is )?exhausted|rate limit)/iu.test(detail)) {
+    return new ResidentOperatorError(`Claude Code subscription quota is exhausted: ${detail}`, 'QUOTA_EXHAUSTED')
+  }
   if (/(?:certificate verification|unable to connect to api)/iu.test(detail)) {
     return new ResidentOperatorError(`Claude Code runtime is unavailable: ${detail}`, 'RUNTIME_UNAVAILABLE')
   }
@@ -340,6 +343,9 @@ export function claudeResultFailure(result: SDKResultMessage): ResidentOperatorE
 export function codexExecutionFailure(error: unknown): ResidentOperatorError {
   if (error instanceof ResidentOperatorError) return error
   const message = error instanceof Error ? error.message : String(error)
+  if (/(?:usageLimitExceeded|hit your usage limit|quota (?:is )?exhausted)/iu.test(message)) {
+    return new ResidentOperatorError(message, 'QUOTA_EXHAUSTED')
+  }
   const unavailable = /stream disconnected before completion/iu.test(message)
     || /error sending request for url/iu.test(message)
     || /app-server protocol stream closed/iu.test(message)

@@ -20,6 +20,7 @@ import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 import LocalRlmStrategy from '@deepseek-ai/dsh-rlm-strategy-local'
 import {
+  OrchestrationArtifactRef,
   OrchestrationError,
   OrchestrationRunId,
   type CapabilityUpdateReceipt,
@@ -1360,6 +1361,17 @@ export class OrchestrationDaemon {
     rlmPlan: RlmExecutionPlanV1,
   ): Promise<{ readonly provider?: ResidentProviderStatus; readonly allocation: ModelAllocationPlan }> {
     const providers = await this.resident.providers()
+    const exhaustedOfferIds = new Set<string>()
+    const exhaustedQuotaPoolIds = new Set<string>()
+    for (const attempt of this.store.attempts().filter(value => (
+      value.runId === String(record.snapshot.runId)
+      && value.nodeId === spec.id
+      && value.errorCode === 'QUOTA_EXHAUSTED'
+    ))) {
+      const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+      if (plan.allocationPlan.quotaPoolId === undefined) exhaustedOfferIds.add(plan.allocationPlan.offerId)
+      else exhaustedQuotaPoolIds.add(plan.allocationPlan.quotaPoolId)
+    }
     const activeByOperator = new Map<string, number>()
     for (const active of this.active.values()) {
       activeByOperator.set(active.operatorId, (activeByOperator.get(active.operatorId) ?? 0) + 1)
@@ -1370,15 +1382,18 @@ export class OrchestrationDaemon {
         .filter(model => spec.operator?.profile?.model === undefined || model.model === spec.operator.profile.model)
         .map((model): ModelExecutionOffer => {
           const quotaPool = quotaForModel(provider.quotaPools, model)
+          const offerId = `${provider.operatorId}:${model.model}`
           return {
-            offerId: `${provider.operatorId}:${model.model}`,
+            offerId,
             operatorId: provider.operatorId,
             provider: provider.product,
             model: model.model,
             displayName: `${provider.displayName} · ${model.displayName}`,
             source: 'native-subscription',
             tier: modelTier(model),
-            available,
+            available: available
+              && !exhaustedOfferIds.has(offerId)
+              && (quotaPool === undefined || !exhaustedQuotaPoolIds.has(quotaPool.poolId)),
             maxConcurrency: provider.maxConcurrency,
             activeCount: activeByOperator.get(provider.operatorId) ?? 0,
             tags: provider.tags,
