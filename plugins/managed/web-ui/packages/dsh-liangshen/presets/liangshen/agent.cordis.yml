@@ -50,9 +50,10 @@
 # `promoteAfterFirstResponse` avoids a permanent two-tool session after a
 # tool-less first response, and releases an anchor-gated session once its
 # first turn ends (`turn/end`). After promotion the catalog is presented as
-# Code Mode (PTC): a single `run_code` tool on the wire, switched at the step
-# boundary; workspace instructions and the skill catalog are deferred one
-# step after promotion. `bootstrapMaxTokens` caps the phase-1 request output
+# Code Mode (PTC): a single `run_code` tool on the wire. The switch waits for
+# `turn/end`, keeping every model step in the bootstrap turn on the same native
+# two-tool contract; workspace instructions and the skill catalog are deferred
+# one step after promotion. `bootstrapMaxTokens` caps the phase-1 request output
 # budget (community-observed "We need" trigger window, 1024) and is stripped
 # again after promotion so the cap never solders into later requests.
 - id: tool-bootstrap

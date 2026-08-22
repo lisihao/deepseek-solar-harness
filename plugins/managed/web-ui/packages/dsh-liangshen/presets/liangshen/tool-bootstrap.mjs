@@ -17,8 +17,9 @@
  * responded, and also releases an anchor-gated session when its first turn
  * ends (`turn/end`). With `promotedPresentation: code` the promoted catalog
  * is presented as Code Mode (PTC): the wire shows a single `run_code` tool
- * backed by the generated SDK, switched at the step boundary so the current
- * step's native calls are never interrupted. `deferredSources` and
+ * backed by the generated SDK. Code presentation is deferred until the first
+ * turn ends, so every model step in that turn keeps the same native bootstrap
+ * contract and the next user turn starts cleanly in Code Mode. `deferredSources` and
  * `deferredGraceSteps` delay selected injected message kinds (workspace
  * instructions, skill catalog) for a few steps after promotion.
  *
@@ -180,11 +181,20 @@ function applyPresentation(agent, state, policy) {
  * d) tool-less first response with `promoteAfterFirstResponse` — promote.
  */
 function decidePromotion(state, config) {
-  if (state.toolCalled && config.anchorGate !== true) return true
-  if (state.toolCalled && config.anchorGate === true && (state.anchored || state.steps >= config.maxBootstrapSteps)) return true
-  if (state.toolCalled && config.anchorGate === true && config.promoteAfterFirstResponse === true && state.turnEnded) return true
-  if (!state.toolCalled && state.responded && config.promoteAfterFirstResponse === true) return true
-  return false
+  const eligible = (
+    (state.toolCalled && config.anchorGate !== true)
+    || (state.toolCalled && config.anchorGate === true && (state.anchored || state.steps >= config.maxBootstrapSteps))
+    || (state.toolCalled && config.anchorGate === true && config.promoteAfterFirstResponse === true && state.turnEnded)
+    || (!state.toolCalled && state.responded && config.promoteAfterFirstResponse === true)
+  )
+  if (!eligible) return false
+  // One user turn may contain several model/tool steps. Switching to Code
+  // Mode at step/end makes the next model step see only run_code even though
+  // the immediately preceding assistant message used native bash/edit calls.
+  // Keep the wire contract stable for the whole bootstrap turn and promote
+  // only after its durable turn/end boundary.
+  if (config.promotedPresentation === 'code' && !state.turnEnded) return false
+  return true
 }
 
 /** Scan newly appended session events and update promotion state. */
@@ -265,11 +275,10 @@ export function apply(ctx, config) {
     bootstrapMaxTokens,
   }
 
-  // Promotion is applied at step/turn boundaries, never while a step is still
-  // executing tools: switching the presentation mid-step would collapse the
-  // native calls that step already planned. By `step/end` the tool-call and
-  // reasoning events are durable, so the NEXT prompt assembly already sees
-  // Code Mode with its generated SDK section.
+  // Promotion is evaluated at step/turn boundaries, never while a step is
+  // executing tools. Native presentation may still promote at step/end; Code
+  // presentation waits for turn/end so a multi-step first turn never changes
+  // its direct-tool contract between model requests.
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'step/end' && event.type !== 'turn/end') return
     const state = stateFor(session)

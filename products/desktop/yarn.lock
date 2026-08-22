@@ -5005,6 +5005,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.18.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
+  version: 0.1.18
+  resolution: "@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.18.tgz#vendor/dsh-packages/linxin666-dsh-liangshen-0.1.18.tgz::hash=5e65dc&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
+  dependencies:
+    schemastery: "npm:^3.18.0"
+  checksum: 10c0/1f762941b3958aefa8a63ffa96317ed52c7eb29fab5bf7df4e233ffebb03d300f0c006ce73518425e83e6776e78dea98a74ff315f2761016845f091ab7659382
+  languageName: node
+  linkType: hard
+
 "@linxin666/dsh-remote-web-ui@file:./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.17
   resolution: "@linxin666/dsh-remote-web-ui@file:./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz#./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz::hash=1158a0&locator=deepseek-harness-desktop%40workspace%3A."
@@ -7500,6 +7509,7 @@ __metadata:
     "@deepseek-ai/dsh-workflow": "npm:0.1.0-rc.6"
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     "@electron/asar": "npm:3.4.1"
+    "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.18.tgz"
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz"
     "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz"
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz"

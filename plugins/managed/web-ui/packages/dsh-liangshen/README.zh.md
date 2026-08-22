@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-把「Anchored Standard」preset 做成 DSH 全家桶里的一键安装插件：Host 启动时把内置 preset 同步到 `~/.dsh/.agent-presets`，新建会话即可在预设选择器中选择「梁神模式」。首轮模型请求只看到官方 Minimal 精确双工具——持久 `bash` 与 `str_replace_editor`——与一行 persona，没有运行时上下文和指令注入；锚定建立后 wire 切换为 Code Mode（PTC），并开放全部 prompt section 与常规注入。全部通过官方 NPM SDK 实现，不修改 DSH 源码。
+把「Anchored Standard」preset 做成 DSH 全家桶里的一键安装插件：Host 启动时把内置 preset 同步到 `~/.dsh/.agent-presets`，新建会话即可在预设选择器中选择「梁神模式」。首个用户轮次只看到官方 Minimal 精确双工具——持久 `bash` 与 `str_replace_editor`——与一行 persona，没有运行时上下文和指令注入；该轮结束后 wire 切换为 Code Mode（PTC），并开放全部 prompt section 与常规注入。全部通过官方 NPM SDK 实现，不修改 DSH 源码。
 
 ## 原理
 
@@ -21,7 +21,7 @@ preset 在参考机制之上内置了额外保护，全部在 `agent.cordis.yml`
 - `anchorGate`：首次 `tool/call` 后，目录继续保持双工具，直到首个 reasoning 块被判定为 minimal-like，避免 `Let me` 开局立刻拿到完整目录；
 - `maxBootstrapSteps`：N 步后仍无锚定块时强制晋升；
 - `promoteAfterFirstResponse`：首轮无工具调用的回答在响应后自动晋升；锚定门控中的会话也会在首轮结束时（`turn/end`）释放，因此新用户轮次一开始就拿到晋升后的目录；
-- `promotedPresentation: code`：晋升后 wire 为 Code Mode（PTC）——一个 `run_code` 工具、完整注册表通过生成 SDK 调用；切换发生在 step 边界，不会打断当前步的原生工具调用；
+- `promotedPresentation: code`：晋升后 wire 为 Code Mode（PTC）——一个 `run_code` 工具、完整注册表通过生成 SDK 调用；切换等待 `turn/end`，因此首个用户轮次的每个模型步骤始终保持相同的原生双工具契约；
 - `deferredSources` + `deferredGraceSteps`：workspace 指令与 skill 目录在晋升后再等一步注入，工具目录切换和注入冲击不同时落地；
 - `bootstrapMaxTokens`：phase 1 请求的输出预算封顶（社区实测 `max_tokens=1024` 是 "We need" 轨迹的高命中窗口，DSH 默认 256k 命中率为 0），晋升后自动剥离该封顶，避免 `requestProposal` 把 1024 焊进后续每个请求。
 
