@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "caseId": "change-necessity-before-edit",
+  "workspace": {
+    "requiredChangedPaths": ["src/settings.js"],
+    "requiredExistingPaths": ["src/settings.js"]
+  },
+  "verification": [
+    {
+      "argv": ["npm", "test"],
+      "expectedExit": 0,
+      "timeoutSeconds": 30
+    }
+  ],
+  "events": {
+    "requiredBeforeFirstEdit": ["implementation-rationale"]
+  },
+  "vetoes": ["verification-failure"]
+}
