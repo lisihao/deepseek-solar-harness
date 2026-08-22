@@ -173,7 +173,7 @@ export function validateMonorepo({
     ...['plugin-check', 'tool-markdown', 'tool-regex', 'tool-stat', 'tool-time'].map(plugin => ({
       plugin,
       command: 'npm',
-      args: ['ci'],
+      args: ['ci', '--no-audit', '--fund=false'],
     })),
   ]
   if (JSON.stringify(controlledPluginInstalls) !== JSON.stringify(expectedControlledPluginInstalls)) {

@@ -92,7 +92,7 @@ function validInput() {
       ...['plugin-check', 'tool-markdown', 'tool-regex', 'tool-stat', 'tool-time'].map(plugin => ({
         plugin,
         command: 'npm',
-        args: ['ci'],
+        args: ['ci', '--no-audit', '--fund=false'],
       })),
     ],
     pathExists: () => true,
