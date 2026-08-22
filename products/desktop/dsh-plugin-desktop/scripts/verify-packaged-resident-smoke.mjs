@@ -17,10 +17,27 @@ if (process.versions.electron === undefined) {
   if (!existsSync(appExecutable)) {
     throw new Error(`verify-packaged-resident-smoke: packaged application is missing at ${appExecutable}`)
   }
+  const networkEnvironment = Object.fromEntries([
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'ALL_PROXY',
+    'NO_PROXY',
+    'http_proxy',
+    'https_proxy',
+    'all_proxy',
+    'no_proxy',
+    'NODE_EXTRA_CA_CERTS',
+    'SSL_CERT_FILE',
+  ].flatMap((name) => {
+    const value = process.env[name]
+    return value === undefined ? [] : [[name, value]]
+  }))
   const environment = {
     HOME: homedir(),
     PATH: '/usr/bin:/bin',
     ELECTRON_RUN_AS_NODE: '1',
+    // Preserve local proxy and CA routing without forwarding credentials.
+    ...networkEnvironment,
     ...process.env.USER === undefined ? {} : { USER: process.env.USER },
     ...process.env.LOGNAME === undefined ? {} : { LOGNAME: process.env.LOGNAME },
     ...process.env.LANG === undefined ? {} : { LANG: process.env.LANG },
