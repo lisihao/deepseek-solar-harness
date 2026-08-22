@@ -18,6 +18,7 @@ import {
   type OrchestrationStartRequest,
 } from '@deepseek-ai/dsh-orchestration'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { waitForDaemonSocketRelease } from '@deepseek-ai/dsh-resident-operator-local'
 import { ORCHESTRATION_METHODS, ORCHESTRATION_PROTOCOL_VERSION } from './daemon.ts'
 import { unwrapWire } from './protocol.ts'
 import { ORCHESTRATION_STATE_SCHEMA_VERSION } from './store.ts'
@@ -201,11 +202,7 @@ export class OrchestrationDaemonClient {
       }
       return
     }
-    const deadline = Date.now() + this.options.connectTimeoutMs
-    while (existsSync(this.socketPath) && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 50))
-    }
-    if (existsSync(this.socketPath)) {
+    if (!await waitForDaemonSocketRelease(this.socketPath, this.options.connectTimeoutMs)) {
       throw new OrchestrationError(
         `orchestration daemon upgrade is blocked because the old daemon did not drain: ${initialError.message}`,
         'ORCHESTRATION_VERSION_MISMATCH',

@@ -56,6 +56,22 @@ export interface ResidentClientOptions {
   readonly driverModules?: readonly string[]
 }
 
+/**
+ * Wait for one local daemon control path to disappear after graceful shutdown.
+ * @param socketPath - control path owned by the retiring daemon.
+ * @param timeoutMs - maximum shutdown interval.
+ * @returns whether the path disappeared before the timeout.
+ */
+export async function waitForDaemonSocketRelease(socketPath: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (existsSync(socketPath)) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return false
+    await new Promise(resolve => setTimeout(resolve, Math.min(50, remaining)))
+  }
+  return true
+}
+
 /** Stateless-per-request Unix-socket client for trusted Resident consumers. */
 export class ResidentDaemonClient {
   /** Resolved daemon control socket path. */
@@ -311,11 +327,7 @@ export class ResidentDaemonClient {
       }
       return
     }
-    const deadline = Date.now() + this.options.connectTimeoutMs
-    while (existsSync(this.socketPath) && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 50))
-    }
-    if (existsSync(this.socketPath)) {
+    if (!await waitForDaemonSocketRelease(this.socketPath, this.options.connectTimeoutMs)) {
       throw new ResidentOperatorError(
         `resident daemon upgrade is blocked because the old daemon did not drain: ${initialError.message}`,
         'PROTOCOL_MISMATCH',

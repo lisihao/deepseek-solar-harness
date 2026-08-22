@@ -18,7 +18,7 @@ import ResidentOperatorService, {
 } from '@deepseek-ai/dsh-resident-operator'
 import { brandedSession, brandedTurn, ResidentDaemonClient } from './client.ts'
 
-export { ResidentDaemonClient, startDetachedResidentDaemon } from './client.ts'
+export { ResidentDaemonClient, startDetachedResidentDaemon, waitForDaemonSocketRelease } from './client.ts'
 export { ResidentDaemon, RESIDENT_METHODS } from './daemon.ts'
 export {
   ClaudeCodeResidentDriver,
