@@ -6235,6 +6235,19 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@vlln/plugin-console@file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
+  version: 0.1.1-solar.1
+  resolution: "@vlln/plugin-console@file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz#vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz::hash=36d842&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
+  dependencies:
+    yaml: "npm:^2.4.0"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
+    react: ^18.2.0
+  checksum: 10c0/73e7744fc57f9ebeb96a7ec842a018e094f049c7e5cf27ab3c8d52af08ba3dc8608f77fec98812372f84cd62d4544d01dcec7893ba801c459c15448a4ef56f1b
+  languageName: node
+  linkType: hard
+
 "@vscode/ripgrep-darwin-arm64@npm:1.18.0":
   version: 1.18.0
   resolution: "@vscode/ripgrep-darwin-arm64@npm:1.18.0"
@@ -7494,6 +7507,7 @@ __metadata:
     "@types/node": "npm:^22.20.0"
     "@types/react": "npm:^18"
     "@types/react-dom": "npm:^18"
+    "@vlln/plugin-console": "file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz"
     "@ycp424c/dsh-luna-vision-bridge": "file:vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.3.tgz"
     dsh-memory-evolve: "file:vendor/dsh-packages/dsh-memory-evolve-0.1.3.tgz"
     dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.3.tgz"
@@ -11726,7 +11740,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"yaml@npm:^2.4.2, yaml@npm:^2.9.0":
+"yaml@npm:^2.4.0, yaml@npm:^2.4.2, yaml@npm:^2.9.0":
   version: 2.9.0
   resolution: "yaml@npm:2.9.0"
   bin:

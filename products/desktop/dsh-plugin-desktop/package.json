@@ -245,6 +245,7 @@
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz",
     "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.10.tgz",
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5.tgz",
+    "@vlln/plugin-console": "file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz",
     "@ycp424c/dsh-luna-vision-bridge": "file:vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.3.tgz",
     "dsh-memory-evolve": "file:vendor/dsh-packages/dsh-memory-evolve-0.1.3.tgz",
     "dsh-web-billing": "file:vendor/dsh-packages/dsh-web-billing-1.1.3.tgz",
