@@ -2520,7 +2520,7 @@ __metadata:
 
 "@deepseek-ai/dsh-orchestration-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-orchestration-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz::hash=a380f5&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-orchestration-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz::hash=119081&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -2547,7 +2547,7 @@ __metadata:
     "@deepseek-ai/dsh-rlm-strategy-local": ^0.1.0-rc.5
     "@deepseek-ai/dsh-sdk-protocol": ^0.1.0-rc.5
     "@deepseek-ai/dsh-session": ^0.1.0-rc.5
-  checksum: 10c0/b481592fabea3c501390426e4fb6a669123c813c59929fa31e16e49285df2ee38cf3a7eaca80eb59ae6b47a19716b4216243c3ed66f5e61b3d11d046b63c1378
+  checksum: 10c0/86e6d7d5aed68feb02ca70d826ab1d4c2e4afe9bc0a2cc8fc60ad2c5a6fe1a2d75210a514f815b0c4afa03cbd69b89c1028c4edacc98056124f51a21f0e94459
   languageName: node
   linkType: hard
 
@@ -2732,7 +2732,7 @@ __metadata:
 
 "@deepseek-ai/dsh-resident-operator-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-resident-operator-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz::hash=6c6ef7&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-resident-operator-local@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz::hash=fc6dd9&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@anthropic-ai/claude-agent-sdk": "npm:0.3.220"
     "@anthropic-ai/sdk": "npm:0.93.0"
@@ -2751,7 +2751,7 @@ __metadata:
     "@deepseek-ai/dsh-subagent": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subagent-codex": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
-  checksum: 10c0/f9ac8b96e1c7f05d8d77e837a487c25816116d200d3145dbe5443b6f3ccd2cacd1482ccbc5b6e79cb236520131c6105ca8989d63ed70e2a5f970a6a07a6b16a3
+  checksum: 10c0/f2c575d65ce8f1946914b7d3c7006bf41265edc478884d08e25ecd9704200a423685e257edda8cd8220d9987f6d25b7aa9ea643fc9980d5c4af3ce872efdda78
   languageName: node
   linkType: hard
 
@@ -6235,6 +6235,19 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@vlln/plugin-console@file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
+  version: 0.1.1-solar.1
+  resolution: "@vlln/plugin-console@file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz#vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz::hash=36d842&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
+  dependencies:
+    yaml: "npm:^2.4.0"
+  peerDependencies:
+    "@deepseek-ai/cordis": ^4.0.1
+    "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
+    react: ^18.2.0
+  checksum: 10c0/73e7744fc57f9ebeb96a7ec842a018e094f049c7e5cf27ab3c8d52af08ba3dc8608f77fec98812372f84cd62d4544d01dcec7893ba801c459c15448a4ef56f1b
+  languageName: node
+  linkType: hard
+
 "@vscode/ripgrep-darwin-arm64@npm:1.18.0":
   version: 1.18.0
   resolution: "@vscode/ripgrep-darwin-arm64@npm:1.18.0"
@@ -7494,6 +7507,7 @@ __metadata:
     "@types/node": "npm:^22.20.0"
     "@types/react": "npm:^18"
     "@types/react-dom": "npm:^18"
+    "@vlln/plugin-console": "file:vendor/dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz"
     "@ycp424c/dsh-luna-vision-bridge": "file:vendor/dsh-packages/ycp424c-dsh-luna-vision-bridge-0.1.3.tgz"
     dsh-memory-evolve: "file:vendor/dsh-packages/dsh-memory-evolve-0.1.3.tgz"
     dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.3.tgz"
@@ -11726,7 +11740,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"yaml@npm:^2.4.2, yaml@npm:^2.9.0":
+"yaml@npm:^2.4.0, yaml@npm:^2.4.2, yaml@npm:^2.9.0":
   version: 2.9.0
   resolution: "yaml@npm:2.9.0"
   bin:

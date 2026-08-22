@@ -184,6 +184,10 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'remote-web-ui')).toEqual(expect.objectContaining({
       name: '@linxin666/dsh-remote-web-ui',
     }))
+    expect(rows.find(row => row.id === 'plugin-console')).toEqual(expect.objectContaining({
+      name: '@vlln/plugin-console',
+      disabled: false,
+    }))
     expect(rows.find(row => row.id === 'web-billing')).toEqual(expect.objectContaining({
       name: 'dsh-web-billing',
     }))
@@ -244,6 +248,8 @@ describe('desktop profile composition', () => {
       '- insert:',
       '    - id: third-party-layout',
       "      name: 'third-party-layout'",
+      '    - id: plugin-console',
+      "      name: '@dsh-external/plugin-console'",
       '',
     ].join('\n'))
 
@@ -259,6 +265,10 @@ describe('desktop profile composition', () => {
       id: 'third-party-layout',
       name: 'third-party-layout',
     })
+    expect(rows.find(row => row.id === 'plugin-console')).toEqual(expect.objectContaining({
+      name: '@vlln/plugin-console',
+      disabled: false,
+    }))
     expect(rows.find(row => row.id === 'desktop-shell')).toEqual(expect.objectContaining({
       name: 'dsh-plugin-desktop',
       config: expect.objectContaining({ mode: 'compatibility' }),

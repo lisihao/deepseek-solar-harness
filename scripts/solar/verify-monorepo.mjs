@@ -12,6 +12,7 @@ export const MANAGED_IDS = [
   'governance',
   'luna-vision-bridge',
   'memory-evolve',
+  'plugin-console',
   'web-billing',
   'web-ui',
 ]

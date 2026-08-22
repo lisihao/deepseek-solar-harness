@@ -86,3 +86,16 @@ managed:
       - pnpm test
       - pnpm test:scripts
       - pnpm docs:check
+  - id: plugin-console
+    path: plugins/managed/plugin-console
+    package: '@vlln/plugin-console@0.1.1-solar.1'
+    source: https://github.com/vlln/plugin-registry.git
+    upstream: https://github.com/vlln/plugin-registry.git
+    source_branch: main
+    accepted_sha: b0ae1ea03a6c04c548dd10bf58f0fe7a70a92b29
+    license: MIT
+    license_status: package-declared
+    license_evidence: plugins/managed/plugin-console/package.json
+    tests:
+      - corepack pnpm --ignore-workspace --config.auto-install-peers=false run build
+      - corepack pnpm --ignore-workspace --config.auto-install-peers=false run test

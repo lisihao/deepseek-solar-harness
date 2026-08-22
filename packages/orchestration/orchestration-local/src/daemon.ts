@@ -1007,22 +1007,7 @@ export class OrchestrationDaemon {
     const controller = new AbortController()
     const operator = this.physical.get(plan.operatorPlan.operatorId)
     if (operator === undefined) throw new OrchestrationError(`physical operator is unavailable: ${plan.operatorPlan.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
-    const createdAt = now()
-    const acceptedAttempt: AttemptRecord = {
-      runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
-      generation: plan.capabilityGeneration, executionId: String(plan.executionId), state: 'accepted',
-      executionPlanRef: String(record.snapshot.nodes.find(value => value.id === spec.id)?.executionPlanRef),
-      createdAt, updatedAt: createdAt,
-    }
-    this.store.saveAttempt(acceptedAttempt)
-    const acceptedRecord = this.store.getRun(String(record.snapshot.runId))
-    const acceptedNodes = acceptedRecord.snapshot.nodes.map(value => value.id === spec.id
-      ? { ...value, state: 'running' as const, updatedAt: now() }
-      : value)
-    const acceptedRun = withRevision(acceptedRecord, { ...acceptedRecord.snapshot, nodes: acceptedNodes })
-    this.store.saveRun(acceptedRun, [event(acceptedRun.snapshot.runId, 'node.dispatch.accepted', {
-      executionId: String(plan.executionId),
-    }, acceptedNodes.find(value => value.id === spec.id))])
+    const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident')
     try {
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
@@ -1066,15 +1051,7 @@ export class OrchestrationDaemon {
         },
       ).finally(() => { this.active.delete(key); void this.tick() })
     } catch (error) {
-      const attempt: AttemptRecord = {
-        ...acceptedAttempt,
-        state: 'failed',
-        errorCode: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
-        errorMessage: error instanceof Error ? error.message : String(error),
-        updatedAt: now(),
-      }
-      this.store.saveAttempt(attempt)
-      this.applyFailure(attempt)
+      this.failDispatch(acceptedAttempt, error)
     }
   }
 
@@ -1087,22 +1064,7 @@ export class OrchestrationDaemon {
     harnessSnapshot?: ContinualHarnessSnapshotV1,
   ): Promise<void> {
     const controller = new AbortController()
-    const createdAt = now()
-    const acceptedAttempt: AttemptRecord = {
-      runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
-      generation: plan.capabilityGeneration, executionId: String(plan.executionId), state: 'accepted',
-      executionPlanRef: String(record.snapshot.nodes.find(value => value.id === spec.id)?.executionPlanRef),
-      createdAt, updatedAt: createdAt,
-    }
-    this.store.saveAttempt(acceptedAttempt)
-    const acceptedRecord = this.store.getRun(String(record.snapshot.runId))
-    const acceptedNodes = acceptedRecord.snapshot.nodes.map(value => value.id === spec.id
-      ? { ...value, state: 'running' as const, updatedAt: now() }
-      : value)
-    const acceptedRun = withRevision(acceptedRecord, { ...acceptedRecord.snapshot, nodes: acceptedNodes })
-    this.store.saveRun(acceptedRun, [event(acceptedRun.snapshot.runId, 'node.dispatch.accepted', {
-      executionId: String(plan.executionId), executor: 'model-worker',
-    }, acceptedNodes.find(value => value.id === spec.id))])
+    const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'model-worker')
     try {
       const result = this.ctx.modelWorkers.execute({
         commandId: String(plan.executionId),
@@ -1147,17 +1109,47 @@ export class OrchestrationDaemon {
         (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
       ).finally(() => { this.active.delete(key); void this.tick() })
     } catch (error) {
-      const attempt: AttemptRecord = {
-        ...acceptedAttempt,
-        state: 'failed',
-        errorCode: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
-        errorMessage: error instanceof Error ? error.message : String(error),
-        updatedAt: now(),
-      }
-      this.store.saveAttempt(attempt)
-      this.applyFailure(attempt)
+      this.failDispatch(acceptedAttempt, error)
     }
     return Promise.resolve()
+  }
+
+  private acceptDispatch(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    executor: 'resident' | 'model-worker',
+  ): AttemptRecord {
+    const createdAt = now()
+    const attempt: AttemptRecord = {
+      runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
+      generation: plan.capabilityGeneration, executionId: String(plan.executionId), state: 'accepted',
+      executionPlanRef: String(record.snapshot.nodes.find(value => value.id === spec.id)?.executionPlanRef),
+      createdAt, updatedAt: createdAt,
+    }
+    this.store.saveAttempt(attempt)
+    const acceptedRecord = this.store.getRun(String(record.snapshot.runId))
+    const nodes = acceptedRecord.snapshot.nodes.map(value => value.id === spec.id
+      ? { ...value, state: 'running' as const, updatedAt: now() }
+      : value)
+    const acceptedRun = withRevision(acceptedRecord, { ...acceptedRecord.snapshot, nodes })
+    this.store.saveRun(acceptedRun, [event(acceptedRun.snapshot.runId, 'node.dispatch.accepted', {
+      executionId: String(plan.executionId),
+      ...executor === 'model-worker' ? { executor } : {},
+    }, nodes.find(value => value.id === spec.id))])
+    return attempt
+  }
+
+  private failDispatch(acceptedAttempt: AttemptRecord, error: unknown): void {
+    const attempt: AttemptRecord = {
+      ...acceptedAttempt,
+      state: 'failed',
+      errorCode: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      updatedAt: now(),
+    }
+    this.store.saveAttempt(attempt)
+    this.applyFailure(attempt)
   }
 
   private async syncActiveProgress(active: ActiveAttempt): Promise<void> {
