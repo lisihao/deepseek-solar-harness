@@ -4009,7 +4009,7 @@ __metadata:
 
 "@deepseek-ai/dsh-tools@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-tools@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz::hash=eb6d87&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-tools@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz::hash=0e1f4f&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -4022,7 +4022,7 @@ __metadata:
     "@deepseek-ai/dsh-session": ^0.1.0-rc.5
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
     "@deepseek-ai/dsh-user-approval": ^0.1.0-rc.5
-  checksum: 10c0/6f6920ab61ac990be444aa8f4e460f376987107362dbe84a9d023a544b18b74eb24f0503b83bbfd75b97efb38061c8f69404e18c1cbd22daf4af575fac398cae
+  checksum: 10c0/5c387583fe2898af9e108824f25987d1d179a662b93bff343d258e915b04eaf030fe725ac931df6767874623569e07f86bdc4f6e0e798c9b59bf8cea2e1390c7
   languageName: node
   linkType: hard
 

@@ -51,11 +51,13 @@ import { renderToolsSdkPy } from './py-types.ts'
 const COLLAPSE_SECTION_ORDER = 99
 
 /**
- * The model-facing statement of the `code` collapse. Names the consequence
- * (the call fails) and the route (inside the program), because a rule the
- * model can only discover by being denied is one it corrects too late.
+ * The model-facing statement of the `code` collapse. Names the current-request
+ * boundary, the consequence, and the route inside the program. The history
+ * reminder is required when a preset changes presentation after a bootstrap
+ * tool call: an earlier successful native call is evidence about the past,
+ * not a capability in the current request.
  */
-const CODE_ONLY_INSTRUCTION = `\`${RUN_CODE_NAME}\` is the only tool you can call directly — a tool call naming any other tool fails. Reach every tool the SDK declares below from inside the program.`
+const CODE_ONLY_INSTRUCTION = `For this request, \`${RUN_CODE_NAME}\` is the only valid direct tool call; a call naming any other tool fails. Ignore direct native tool calls from earlier messages and invoke every SDK tool only inside the \`${RUN_CODE_NAME}\` program through \`tools.<name>(...)\`.`
 
 const SDK_RENDERERS: Record<string, (schemas: ToolSdkSchema[]) => string> = {
   typescript: renderToolsSdk,
@@ -996,7 +998,17 @@ export class ToolRuntime extends Service {
     const schemas = [...view.visible.values()].map(definition => this.schemaOf(definition, false))
     if (mode === 'code') {
       return {
-        schemas: schemas.filter(schema => schema.name === RUN_CODE_NAME),
+        // Repeat the collapse contract in the only tool schema visible to the
+        // provider. This is the highest-salience tool-selection surface after
+        // a bootstrap request has already demonstrated native calls in the
+        // same turn. `both` deliberately keeps the generic schema below,
+        // because native calls remain valid in that mode.
+        schemas: schemas
+          .filter(schema => schema.name === RUN_CODE_NAME)
+          .map(schema => ({
+            ...schema,
+            description: `${CODE_ONLY_INSTRUCTION} ${schema.description}`,
+          })),
         knownNames: [RUN_CODE_NAME],
       }
     }
