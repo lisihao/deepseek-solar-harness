@@ -288,6 +288,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer.',
   },
   {
+    key: 'remoteAuth',
+    pkg: 'remote-auth',
+    title: 'Remote device authentication authority',
+    mode: 'core',
+    consumers: ['connection', 'ui-orchestration'],
+    note: 'The Server is the sole writer for pairing, credential exchange, fixed device scopes, revocation, and payload-free command receipts; transport and orchestration projections consume authenticated principals without owning credential state.',
+  },
+  {
     key: 'storage',
     pkg: 'storage',
     title: 'Non-session storage hub',

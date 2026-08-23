@@ -35,6 +35,7 @@ import {
   type OrchestrationNodeSnapshot,
   type OrchestrationNodeSpecV1,
   type OrchestrationRunSnapshot,
+  type WorkbenchTaskContractV1,
 } from '@deepseek-ai/dsh-orchestration'
 import PhysicalOperatorRuntime, {
   PhysicalOperatorExecutionId,
@@ -50,7 +51,8 @@ import type { ResidentModelOption, ResidentProviderStatus, ResidentQuotaPool } f
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { canonicalSha256 } from './canonical.ts'
-import { graphCertificate, nodesConflict, validateGraph } from './graph.ts'
+import { GitWorktreeManager } from './git-worktrees.ts'
+import { dependsTransitively, graphCertificate, nodesConflict, validateGraph } from './graph.ts'
 import {
   BasicContextCompiler,
   CLEAN_TASK_CONTEXT_CAPABILITY,
@@ -215,6 +217,7 @@ function event(
 
 const MAX_OPERATOR_OUTPUT_PREVIEW = 8_000
 const MAX_RLM_BRANCH_PREVIEW = 2_000
+const MAX_UPSTREAM_CONTEXT_PREVIEW = 4_000
 
 /** Project the operator's user-facing result without copying unbounded output into the event index. */
 function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview: string; outputTruncated: boolean } {
@@ -225,6 +228,26 @@ function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview
   return {
     outputPreview: text.slice(0, MAX_OPERATOR_OUTPUT_PREVIEW),
     outputTruncated: text.length > MAX_OPERATOR_OUTPUT_PREVIEW,
+  }
+}
+
+/** Read settled Evidence into a bounded body that a downstream verifier can actually inspect. */
+function upstreamEvidencePreview(value: unknown): { text: string; truncated: boolean } {
+  const output = value !== null && typeof value === 'object' && 'output' in value
+    ? (value as { output?: unknown }).output
+    : undefined
+  const text = Array.isArray(output)
+    ? output.map((block: unknown) => {
+      if (block !== null && typeof block === 'object'
+          && 'type' in block && block.type === 'text' && 'text' in block) {
+        return String(block.text)
+      }
+      return JSON.stringify(block)
+    }).join('\n')
+    : JSON.stringify(value)
+  return {
+    text: text.slice(0, MAX_UPSTREAM_CONTEXT_PREVIEW),
+    truncated: text.length > MAX_UPSTREAM_CONTEXT_PREVIEW,
   }
 }
 
@@ -248,6 +271,9 @@ function promptFromPlan(
 ): ContentBlock[] {
   const instructions = capabilities.instructions.map(value => `- ${value.text}`).join('\n')
   const upstream = context.included.filter(value => value.kind === 'artifact').map(value => `- ${value.ref}`).join('\n')
+  const upstreamMaterials = context.sourceMaterials.map(value => (
+    `Evidence ${value.ref}${value.truncated ? ' (bounded preview)' : ''}:\n${value.text}`
+  )).join('\n\n')
   const harnessEntries = harness?.entries.map(value => `- [${value.kind}] ${value.text} (Evidence: ${value.evidenceRefs.join(', ') || 'none'})`).join('\n') ?? ''
   return [{
     type: 'text',
@@ -262,6 +288,7 @@ function promptFromPlan(
       `Acceptance: ${node.acceptance.map(value => value.description).join('; ') || 'operator completion'}`,
       ...(instructions.length === 0 ? [] : ['', 'Capability instructions:', instructions]),
       ...(upstream.length === 0 ? [] : ['', 'Upstream artifact references:', upstream]),
+      ...(upstreamMaterials.length === 0 ? [] : ['', 'Upstream Evidence contents:', upstreamMaterials]),
       ...(harnessEntries.length === 0 ? [] : ['', `Continuous Harness generation ${String(harness?.generation ?? 0)}:`, harnessEntries]),
       ...(rlm?.enabled === true ? [
         '',
@@ -293,8 +320,103 @@ function nodePhase(spec: OrchestrationNodeSpecV1): ModelTaskPhase {
   return 'execution'
 }
 
+function workbenchTaskContract(
+  record: RuntimeRunRecord,
+  spec: OrchestrationNodeSpecV1,
+  attempt: number,
+  allocation: ModelAllocationPlan,
+  capabilityPlan: CapabilityBindingPlanV1,
+  upstreamRefs: readonly OrchestrationArtifactRef[],
+  executionWorkspace: NodeExecutionPlanV1['executionWorkspace'],
+): WorkbenchTaskContractV1 {
+  const plannerNodeIds = record.graph.nodes
+    .filter(node => node.phase === 'planning' && dependsTransitively(record.graph, spec.id, node.id))
+    .map(node => node.id)
+  const verifierNodeIds = record.graph.nodes
+    .filter(node => node.phase === 'verification' && dependsTransitively(record.graph, node.id, spec.id))
+    .map(node => node.id)
+  const base = {
+    version: 1 as const,
+    taskId: `${String(record.snapshot.runId)}:${spec.id}:${String(attempt)}`,
+    repository: {
+      workspace: record.snapshot.workspace,
+      ...record.graph.baseSha === undefined ? {} : { baseSha: record.graph.baseSha },
+      executionWorkspace,
+    },
+    objective: record.intent.objective,
+    task: spec.task,
+    dependencies: { nodeIds: [...spec.dependsOn], evidenceRefs: [...upstreamRefs] },
+    authority: {
+      readScopes: [...capabilityPlan.effectiveReadScopes],
+      writeScopes: [...capabilityPlan.effectiveWriteScopes],
+      forbiddenScopes: [...(spec.forbiddenScopes ?? [])],
+      effects: capabilityPlan.effectiveEffects,
+    },
+    acceptance: [...spec.acceptance],
+    requiredArtifacts: [...(spec.requiredArtifacts
+      ?? spec.acceptance.filter(value => value.kind === 'artifact-present').map(value => value.id))],
+    models: {
+      plannerNodeIds,
+      executor: {
+        operatorId: allocation.operatorId,
+        model: allocation.model,
+        tier: allocation.tier,
+        source: allocation.source,
+      },
+      verifierNodeIds,
+      verifierTier: verifierNodeIds.length > 0 ? 'high' as const : 'unspecified' as const,
+    },
+    quota: {
+      class: allocation.source,
+      ...allocation.quotaPoolId === undefined ? {} : { poolId: allocation.quotaPoolId },
+    },
+    ...spec.timeoutMs === undefined ? {} : { timeoutMs: spec.timeoutMs },
+    retryPolicy: spec.retryPolicy,
+    permissions: {
+      externalNetwork: capabilityPlan.effectiveEffects.network.length > 0,
+      destructive: capabilityPlan.effectiveEffects.risk.some(value => /destructive|delete|overwrite/u.test(value)),
+      approvedSecretRefs: [...spec.approvedSecretRefs],
+    },
+  }
+  return { ...base, contractSha256: canonicalSha256(base) }
+}
+
+function attemptAbort(timeoutMs: number | undefined): {
+  readonly controller: AbortController
+  readonly clearTimeout: () => void
+} {
+  const controller = new AbortController()
+  const timer = timeoutMs === undefined
+    ? undefined
+    : setTimeout(() => {
+      controller.abort(new Error(`orchestration attempt exceeded ${String(timeoutMs)}ms`))
+    }, timeoutMs)
+  if (timer !== undefined) timer.unref()
+  return {
+    controller,
+    clearTimeout: () => { if (timer !== undefined) clearTimeout(timer) },
+  }
+}
+
 function quotaForModel(pool: readonly ResidentQuotaPool[] | undefined, model: ResidentModelOption): ResidentQuotaPool | undefined {
   return pool?.find(value => value.models.includes(model.model))
+}
+
+function quotaGuard(provider: ResidentProviderStatus): NonNullable<ModelExecutionOffer['quotaGuard']> {
+  if (provider.operatorId === 'claude-code') {
+    return {
+      unknownQuota: 'block',
+      protectedRemainingPercent: 20,
+      stopAdmissionAtRemainingPercent: 25,
+      accelerateBeforeReset: false,
+    }
+  }
+  return {
+    unknownQuota: 'allow',
+    protectedRemainingPercent: 0,
+    stopAdmissionAtRemainingPercent: 0,
+    accelerateBeforeReset: true,
+  }
 }
 
 /** Single-writer Scheduler, compiler host, and physical-attempt reconciler. */
@@ -312,6 +434,7 @@ export class OrchestrationDaemon {
   private readonly physical = new Map<string, OrchestrationResidentOperator>()
   private readonly active = new Map<string, ActiveAttempt>()
   private readonly capacityRetryAfter = new Map<string, number>()
+  private readonly worktrees: GitWorktreeManager
   private lockDescriptor: number | undefined
   private ticker: ReturnType<typeof setInterval> | undefined
   private ticking = false
@@ -323,6 +446,7 @@ export class OrchestrationDaemon {
   constructor(private readonly options: OrchestrationDaemonOptions) {
     this.socketPath = join(options.root, 'control.sock')
     this.store = new OrchestrationStore(options.root)
+    this.worktrees = new GitWorktreeManager(join(options.root, 'worktrees'))
     this.resident = options.residentClient ?? new ResidentDaemonClient({
       root: join(options.dshHome, 'resident-operators'),
       autoStart: true,
@@ -462,6 +586,9 @@ export class OrchestrationDaemon {
       throw new OrchestrationError(`graph workspace does not exist: ${request.graph.workspace}`, 'GRAPH_INVALID')
     })
     const graph = structuredClone({ ...request.graph, workspace })
+    if (graph.workspaceIsolation === 'git-worktree') {
+      await this.worktrees.verifyRepository(workspace, graph.baseSha as string)
+    }
     const intent = await this.ctx.intentCompiler.compile(structuredClone(request.intent))
     const intentRef = this.store.putArtifact(intent)
     const requirementRef = request.requirement === undefined ? undefined : this.store.putArtifact(request.requirement)
@@ -551,6 +678,10 @@ export class OrchestrationDaemon {
   }
 
   private control(request: OrchestrationControlRequest): OrchestrationRunSnapshot {
+    return this.withCommandReceipt('orchestration.control', request, () => this.controlUnchecked(request))
+  }
+
+  private controlUnchecked(request: OrchestrationControlRequest): OrchestrationRunSnapshot {
     const record = this.expectRevision(request.runId, request.expectedRevision)
     const current = record.snapshot.state
     let state = current
@@ -571,6 +702,10 @@ export class OrchestrationDaemon {
   }
 
   private decide(request: OrchestrationDecisionRequest): OrchestrationRunSnapshot {
+    return this.withCommandReceipt('orchestration.decide', request, () => this.decideUnchecked(request))
+  }
+
+  private decideUnchecked(request: OrchestrationDecisionRequest): OrchestrationRunSnapshot {
     const record = this.expectRevision(request.runId, request.expectedRevision)
     if (request.nodeId === undefined) {
       if (record.snapshot.state !== 'awaiting_approval') throw new OrchestrationError('run is not awaiting approval', 'RUN_STATE_CONFLICT')
@@ -599,6 +734,14 @@ export class OrchestrationDaemon {
   }
 
   private resolveIndeterminate(request: OrchestrationIndeterminateRequest): OrchestrationRunSnapshot {
+    return this.withCommandReceipt(
+      'orchestration.resolve_indeterminate',
+      request,
+      () => this.resolveIndeterminateUnchecked(request),
+    )
+  }
+
+  private resolveIndeterminateUnchecked(request: OrchestrationIndeterminateRequest): OrchestrationRunSnapshot {
     const record = this.expectRevision(request.runId, request.expectedRevision)
     const node = record.snapshot.nodes.find(value => value.id === request.nodeId)
     if (node?.state !== 'indeterminate') throw new OrchestrationError('node is not indeterminate', 'RUN_STATE_CONFLICT')
@@ -612,6 +755,44 @@ export class OrchestrationDaemon {
     this.store.saveRun(next, [event(request.runId, `node.indeterminate.${request.decision}`, { reason: request.reason }, nodes.find(value => value.id === request.nodeId))])
     void this.tick()
     return next.snapshot
+  }
+
+  private withCommandReceipt<T>(
+    method: string,
+    request: { readonly commandId: string },
+    action: () => T,
+  ): T {
+    if (typeof request.commandId !== 'string' || request.commandId.trim() !== request.commandId
+      || request.commandId.length < 1 || request.commandId.length > 200) {
+      throw new OrchestrationError('commandId must be a non-blank identifier of at most 200 characters', 'GRAPH_INVALID')
+    }
+    const requestSha256 = canonicalSha256({ method, request })
+    const existing = this.store.commandReceipt(request.commandId)
+    if (existing !== undefined) {
+      if (existing.method !== method || existing.requestSha256 !== requestSha256) {
+        throw new OrchestrationError(`command ${request.commandId} was already used for a different request`, 'COMMAND_CONFLICT')
+      }
+      if (existing.state === 'settled') return structuredClone(existing.response) as T
+      if (existing.state === 'failed') {
+        throw new OrchestrationError(existing.errorMessage ?? 'command failed', (existing.errorCode ?? 'ORCHESTRATION_UNAVAILABLE') as never)
+      }
+      if (existing.state === 'accepted') this.store.markCommandIndeterminate(request.commandId)
+      throw new OrchestrationError(
+        `command ${request.commandId} has an indeterminate outcome and will not be replayed automatically`,
+        'COMMAND_INDETERMINATE',
+      )
+    }
+    this.store.acceptCommand(request.commandId, method, requestSha256)
+    try {
+      const response = action()
+      this.store.settleCommand(request.commandId, response)
+      return response
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE'
+      const message = error instanceof Error ? error.message : String(error)
+      this.store.failCommand(request.commandId, code, message)
+      throw error
+    }
   }
 
   private proposeCapabilityUpdate(request: CapabilityUpdateRequest): CapabilityUpdateReceipt {
@@ -917,6 +1098,17 @@ export class OrchestrationDaemon {
       this.blockNode(runId, nodeId, blockers)
       return undefined
     }
+    const executionWorkspace: NodeExecutionPlanV1['executionWorkspace'] = record.graph.workspaceIsolation === 'git-worktree'
+      && (capabilityPlan.effectiveWriteScopes.length > 0 || capabilityPlan.effectiveEffects.write.length > 0)
+      ? await this.worktrees.prepare(record.snapshot.workspace, runId, nodeId, attempt)
+      : { mode: 'shared', path: record.snapshot.workspace }
+    if (executionWorkspace.mode === 'git-worktree') {
+      this.store.saveRun(record, [event(record.snapshot.runId, 'worktree.prepared', {
+        path: executionWorkspace.path,
+        branch: executionWorkspace.branch ?? null,
+        startSha: executionWorkspace.startSha ?? null,
+      }, node)])
+    }
     const harnessMode = record.snapshot.admission?.continualHarness ?? 'auto'
     const harnessScope: ContinualHarnessScope | undefined = harnessMode === 'off'
       || !spec.contextPolicy.allowedSourceKinds.includes('knowledge')
@@ -949,13 +1141,18 @@ export class OrchestrationDaemon {
       ...capabilityPlan.resourceRefs.map(ref => ({ ref, kind: 'capsule' as const, required: true })),
       ...harnessSnapshotRef === undefined ? [] : [{ ref: String(harnessSnapshotRef), kind: 'knowledge' as const, required: false }],
     ]
+    const sourceMaterials = upstreamRefs.map(ref => ({
+      ref: String(ref),
+      ...upstreamEvidencePreview(this.store.readArtifact(ref)),
+    }))
     const contextPacket = await this.ctx.contextCompiler.compile({
       runId,
       nodeId,
       objective: record.intent.objective,
-      workspace: record.snapshot.workspace,
+      workspace: executionWorkspace.path,
       task: spec.task,
       sourceRefs,
+      sourceMaterials,
       readScopes: spec.readScopes,
       writeScopes: spec.writeScopes,
       acceptance: spec.acceptance.map(value => value.description),
@@ -1025,7 +1222,16 @@ export class OrchestrationDaemon {
       }, node)])
     }
     const executionId = PhysicalOperatorExecutionId(`orch:${runId}:${nodeId}:${String(attempt)}`)
-    const taskRef = this.store.putArtifact({ title: spec.title, task: spec.task })
+    const taskContract = workbenchTaskContract(
+      record,
+      spec,
+      attempt,
+      allocation,
+      capabilityPlan,
+      upstreamRefs,
+      executionWorkspace,
+    )
+    const taskRef = this.store.putArtifact(taskContract)
     const base = {
       version: 1 as const,
       runId: record.snapshot.runId,
@@ -1036,6 +1242,7 @@ export class OrchestrationDaemon {
       intentRef: record.intentRef,
       ...record.requirementRef === undefined ? {} : { requirementRef: record.requirementRef },
       taskRef,
+      executionWorkspace,
       capabilityPlanRef,
       capabilityGeneration: node.capabilityGeneration,
       contextPacketRef,
@@ -1081,7 +1288,12 @@ export class OrchestrationDaemon {
     const queuedUpdates = applicableUpdates.filter(value => value.state === 'queued')
     this.store.markCapabilityUpdates(queuedUpdates.map(value => value.updateId), 'applied')
     this.store.saveRun(record, [
-      event(record.snapshot.runId, 'execution_plan.sealed', { ref: String(planRef), sha256: executionPlan.planSha256 }, sealed.find(value => value.id === nodeId)),
+      event(record.snapshot.runId, 'execution_plan.sealed', {
+        ref: String(planRef),
+        sha256: executionPlan.planSha256,
+        taskContractRef: String(taskRef),
+        taskContractSha256: taskContract.contractSha256,
+      }, sealed.find(value => value.id === nodeId)),
       ...queuedUpdates.length > 0 ? [event(record.snapshot.runId, 'capability_update.applied', {
         updateIds: queuedUpdates.map(value => value.updateId), generation: node.capabilityGeneration, boundary: 'pre-dispatch',
       }, sealed.find(value => value.id === nodeId))] : [],
@@ -1106,7 +1318,8 @@ export class OrchestrationDaemon {
       this.dispatchResidentRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
       return
     }
-    const controller = new AbortController()
+    const timeout = attemptAbort(spec.timeoutMs)
+    const { controller } = timeout
     const operator = this.physical.get(plan.operatorPlan.operatorId)
     if (operator === undefined) throw new OrchestrationError(`physical operator is unavailable: ${plan.operatorPlan.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident')
@@ -1116,7 +1329,7 @@ export class OrchestrationDaemon {
         mode: 'resident',
         label: `${spec.id}: ${spec.title}`,
         prompt: promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, plan.rlmPlan),
-        parent: fakeParent(record.snapshot.workspace, String(record.snapshot.runId)),
+        parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
       })
@@ -1151,8 +1364,9 @@ export class OrchestrationDaemon {
           await this.syncActiveProgress(active)
           this.failAttempt(active, error)
         },
-      ).finally(() => { this.active.delete(key); void this.tick() })
+      ).finally(() => { timeout.clearTimeout(); this.active.delete(key); void this.tick() })
     } catch (error) {
+      timeout.clearTimeout()
       this.failDispatch(acceptedAttempt, error)
     }
   }
@@ -1165,7 +1379,8 @@ export class OrchestrationDaemon {
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
   ): void {
-    const controller = new AbortController()
+    const timeout = attemptAbort(spec.timeoutMs)
+    const { controller } = timeout
     const physicalRuns: PhysicalOperatorRun[] = []
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident-rlm')
     const result = this.executeResidentRlm(
@@ -1186,8 +1401,9 @@ export class OrchestrationDaemon {
       executor: 'resident-rlm',
     })
     const run = {
-      result,
+      result: result.finally(timeout.clearTimeout),
       dispose: async (): Promise<void> => {
+        timeout.clearTimeout()
         controller.abort()
         await Promise.allSettled(physicalRuns.map(value => value.dispose()))
       },
@@ -1255,6 +1471,7 @@ export class OrchestrationDaemon {
             const started = await this.startResidentTurn(
               record,
               spec,
+              plan.executionWorkspace.path,
               executionId,
               workerPlan,
               branchPrompt,
@@ -1312,6 +1529,7 @@ export class OrchestrationDaemon {
       const synthesis = await this.startResidentTurn(
         record,
         spec,
+        plan.executionWorkspace.path,
         synthesisExecutionId,
         plan.allocationPlan,
         synthesisPrompt,
@@ -1345,6 +1563,7 @@ export class OrchestrationDaemon {
   private async startResidentTurn(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
+    workspace: string,
     executionId: PhysicalOperatorExecutionId,
     allocation: ModelAllocationPlan,
     prompt: readonly ContentBlock[],
@@ -1360,7 +1579,7 @@ export class OrchestrationDaemon {
       mode: 'resident',
       label: `${spec.id}: ${label}`,
       prompt: [...prompt],
-      parent: fakeParent(record.snapshot.workspace, String(record.snapshot.runId)),
+      parent: fakeParent(workspace, String(record.snapshot.runId)),
       signal,
       ...allocation.profile === undefined ? {} : { residentProfile: allocation.profile },
     })
@@ -1375,7 +1594,8 @@ export class OrchestrationDaemon {
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
   ): Promise<void> {
-    const controller = new AbortController()
+    const timeout = attemptAbort(spec.timeoutMs)
+    const { controller } = timeout
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'model-worker')
     try {
       const result = this.ctx.modelWorkers.execute({
@@ -1401,11 +1621,12 @@ export class OrchestrationDaemon {
             }, next.snapshot.nodes.find(value => value.id === spec.id))])
           }
           return { output: [...workerResult.output], stopReason: workerResult.stopReason }
-        }),
-        dispose: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+        }).finally(timeout.clearTimeout),
+        dispose: (): Promise<void> => { timeout.clearTimeout(); controller.abort(); return Promise.resolve() },
       }
       this.trackDelegatedAttempt('model-worker', record, spec, plan, run)
     } catch (error) {
+      timeout.clearTimeout()
       this.failDispatch(acceptedAttempt, error)
     }
     return Promise.resolve()
@@ -1529,7 +1750,7 @@ export class OrchestrationDaemon {
       && value.attempt === active.attempt
     ))
     if (attempt === undefined || !['accepted', 'running'].includes(attempt.state)) return
-    const record = this.store.getRun(active.runId)
+    let record = this.store.getRun(active.runId)
     const node = record.snapshot.nodes.find(value => value.id === active.nodeId)
     if (node === undefined || node.attempt !== active.attempt || node.capabilityGeneration !== active.generation) {
       this.store.saveAttempt({ ...attempt, state: 'failed', errorCode: 'GENERATION_FENCED', errorMessage: 'late result belongs to an older attempt or capability generation', updatedAt: now() })
@@ -1542,7 +1763,56 @@ export class OrchestrationDaemon {
       ...result.continuity === undefined ? {} : { continuity: result.continuity },
     })
     const spec = record.graph.nodes.find(value => value.id === active.nodeId)
-    const humanReview = spec?.acceptance.some(value => value.kind === 'human-review') ?? false
+    if (spec === undefined) {
+      this.failAttempt(active, new OrchestrationError(`graph node disappeared: ${active.nodeId}`, 'GRAPH_INVALID'))
+      return
+    }
+    if (result.stopReason === 'completed') {
+      const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+      try {
+        const integration = await this.worktrees.integrate(
+          record.snapshot.workspace,
+          plan.executionWorkspace,
+          `${active.runId}:${active.nodeId}:${String(active.attempt)}`,
+        )
+        if (integration !== undefined) {
+          this.store.appendEvents([event(record.snapshot.runId, 'worktree.integrated', {
+            evidenceRef: String(evidenceRef),
+            branch: integration.branch,
+            path: integration.worktreePath,
+            startSha: integration.startSha,
+            commits: integration.commits,
+            integratedHead: integration.integratedHead,
+          }, node)])
+        }
+      } catch (error) {
+        this.store.appendEvents([event(record.snapshot.runId, 'worktree.integration_failed', {
+          evidenceRef: String(evidenceRef),
+          code: error instanceof Error && 'code' in error ? String(error.code) : 'INTEGRATION_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+        }, node)])
+        this.failAttempt(active, error)
+        return
+      }
+    }
+    // Worktree integration is asynchronous. Another parallel attempt can
+    // settle the same Run while this attempt is awaiting it, so rebuild from
+    // the latest durable snapshot before applying this node's transition.
+    record = this.store.getRun(active.runId)
+    const currentNode = record.snapshot.nodes.find(value => value.id === active.nodeId)
+    if (currentNode === undefined
+      || currentNode.attempt !== active.attempt
+      || currentNode.capabilityGeneration !== active.generation) {
+      this.store.saveAttempt({
+        ...attempt,
+        state: 'failed',
+        errorCode: 'GENERATION_FENCED',
+        errorMessage: 'parallel settlement observed a newer attempt or capability generation',
+        updatedAt: now(),
+      })
+      return
+    }
+    const humanReview = spec.acceptance.some(value => value.kind === 'human-review')
     const passed = result.stopReason === 'completed'
     const pendingUpdates = this.store.capabilityUpdates(active.runId, active.nodeId)
       .filter(value => value.state === 'queued' && value.generation > active.generation)
@@ -1575,16 +1845,15 @@ export class OrchestrationDaemon {
         ...output,
       }, settledNode),
     ])
-    const harnessMode = record.snapshot.admission?.continualHarness ?? 'auto'
-    if (harnessMode !== 'off' && spec?.contextPolicy.allowedSourceKinds.includes('knowledge') === true) {
+    const admission = record.snapshot.admission
+    const harnessMode = admission?.continualHarness ?? 'auto'
+    if (harnessMode !== 'off' && spec.contextPolicy.allowedSourceKinds.includes('knowledge')) {
       const scope: ContinualHarnessScope = harnessMode === 'session' ? 'session' : 'workspace'
       const entry = await this.ctx.continualHarness.recordOutcome({
         runId: active.runId,
         nodeId: active.nodeId,
         workspace: record.snapshot.workspace,
-        ...record.snapshot.admission?.sourceSessionId === undefined
-          ? {}
-          : { sessionId: record.snapshot.admission.sourceSessionId },
+        ...admission?.sourceSessionId === undefined ? {} : { sessionId: admission.sourceSessionId },
         scope,
         role: spec.role,
         task: spec.task,
@@ -1719,6 +1988,7 @@ export class OrchestrationDaemon {
             activeCount: activeByOperator.get(provider.operatorId) ?? 0,
             tags: provider.tags,
             ...quotaPool === undefined ? {} : { quotaPool },
+            quotaGuard: quotaGuard(provider),
             profile: {
               model: model.model,
               ...honorProfile && spec.operator?.profile?.effort !== undefined

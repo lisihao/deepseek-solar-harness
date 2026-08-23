@@ -7,10 +7,36 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { HostDescription, IApiClient } from './api.ts'
 import { ConnectionController, type ConnectionConfig, type ConnectionSinks, type ConnectionState } from './connection.ts'
 import { FixtureApiClient } from './fixture.ts'
+import { RemoteSyncController } from './remote-sync-controller.ts'
+import { WebRemoteSyncClient } from './remote-sync-client.ts'
 import { WebApiClient } from './web-api-client.ts'
 import { createWebConnectionRpc } from './rpc.ts'
+export { WebRemoteAuthClient } from './remote-auth-client.ts'
+export type { RemoteAuthClient } from './remote-auth-client.ts'
+export { RemoteSyncController } from './remote-sync-controller.ts'
+export type {
+  RemoteSyncControllerConfig, RemoteSyncControllerHandle, RemoteSyncSinks, RemoteSyncState,
+} from './remote-sync-controller.ts'
+export { WebRemoteSyncClient } from './remote-sync-client.ts'
+export type { RemoteSyncClient } from './remote-sync-client.ts'
+export { REMOTE_AUTH_RPC_CHANNEL } from '../remote-auth-wire.ts'
+export type {
+  RemoteAccessSession, RemoteDeviceCredential, RemoteDeviceScope, RemoteDeviceView,
+  RemotePairingChallenge,
+} from '../remote-auth-wire.ts'
+export {
+  REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
+  parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
+} from '../remote-sync.ts'
+export type {
+  RemoteSyncCapability, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
+  RemoteSyncResyncRequired, RemoteSyncSnapshot,
+} from '../remote-sync.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
 import type { ClientConnectionRpc } from '../rpc.ts'
+export {
+  getBrowserRemoteAccessToken, setBrowserRemoteAccessToken, withBrowserRemoteAuthorization,
+} from './browser-access-token.ts'
 
 // ---- Contract re-exports (browser-safe apiproxy channels + core types) ----
 export type {
@@ -49,6 +75,15 @@ export interface HostDescriptionSource {
   subscribe(listener: () => void): () => void
 }
 
+/** UI-facing connection status; projections remain readable while reconnecting. */
+export type ConnectionViewState = 'connecting' | 'connected' | 'reconnecting'
+
+/** Observable connectivity source retained separately from cached projections. */
+export interface ConnectionStateSource {
+  getSnapshot(): ConnectionViewState
+  subscribe(listener: () => void): () => void
+}
+
 /** Required services (none — this is the wire root). */
 export const inject: string[] = []
 
@@ -60,10 +95,14 @@ export const inject: string[] = []
 export interface ConnectionHandle {
   /** Shared api client (fixture or real, decided at boot from the page URL). */
   readonly api: IApiClient
+  /** Direct Host streams or the authenticated snapshot + cursor projection transport; absent means direct for old consumers. */
+  readonly transport?: 'direct' | 'remote-projection'
   /** Whether the current page authority is loopback; non-browser contexts default to true. */
   readonly isLoopback: boolean
   /** Generation-scoped Host facts, including native path-open capability. */
   readonly hostDescription: HostDescriptionSource
+  /** Observable connectivity without making cached projections disappear. */
+  readonly state: ConnectionStateSource
   /** Generic logical RPC channels over the same Connection transport. */
   readonly rpc: ClientConnectionRpc
   /**
@@ -84,12 +123,16 @@ export interface ConnectionHandle {
 export function apply(ctx: Context): void {
   const pageLocation = typeof location === 'undefined' ? undefined : location
   const fixture = pageLocation !== undefined && new URLSearchParams(pageLocation.search).has('fixture')
+  const remoteProjection = pageLocation !== undefined
+    && new URLSearchParams(pageLocation.search).get('dsh-deployment-role') === 'frontend'
   const fixtureClient = fixture ? new FixtureApiClient() : undefined
   const api: IApiClient = fixtureClient ?? new WebApiClient()
   const rpc = fixtureClient?.rpc ?? createWebConnectionRpc()
   let started = false
   let description: HostDescription | undefined
+  let connectionState: ConnectionViewState = 'connecting'
   const descriptionListeners = new Set<() => void>()
+  const stateListeners = new Set<() => void>()
   const publishDescription = (next: HostDescription | undefined): void => {
     if (Object.is(description, next)) return
     description = next
@@ -101,8 +144,20 @@ export function apply(ctx: Context): void {
       }
     }
   }
+  const publishState = (next: ConnectionViewState): void => {
+    if (connectionState === next) return
+    connectionState = next
+    for (const listener of [...stateListeners]) {
+      try {
+        listener()
+      } catch (error) {
+        console.error('[web-runtime] connection-state listener threw:', error)
+      }
+    }
+  }
   const handle: ConnectionHandle = {
     api,
+    transport: remoteProjection ? 'remote-projection' : 'direct',
     isLoopback: pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
     hostDescription: {
       getSnapshot: () => description,
@@ -111,10 +166,58 @@ export function apply(ctx: Context): void {
         return () => { descriptionListeners.delete(listener) }
       },
     },
+    state: {
+      getSnapshot: () => connectionState,
+      subscribe: (listener) => {
+        stateListeners.add(listener)
+        return () => { stateListeners.delete(listener) }
+      },
+    },
     rpc,
     start(sinks, config) {
       if (started) throw new Error('connection: the stream loop is already owned by another consumer')
       started = true
+      if (remoteProjection) {
+        let currentDescription: HostDescription | undefined
+        const controller = new RemoteSyncController(new WebRemoteSyncClient(), {
+          replace: (remoteDescription, snapshot) => {
+            currentDescription = snapshot.host
+            publishDescription(snapshot.host)
+            sinks.onRemoteSnapshot?.(remoteDescription, snapshot)
+          },
+          apply: (event) => {
+            if (event.stream === 'mux') sinks.onMuxEnvelope?.(event.envelope)
+            else sinks.onHostEnvelope?.(event.envelope)
+          },
+          onStateChange: (state) => {
+            if (state === 'connected') {
+              if (currentDescription !== undefined) {
+                publishDescription(currentDescription)
+                publishState('connected')
+                sinks.onStateChange?.('connected')
+                sinks.onConnected?.(currentDescription)
+              }
+              return
+            }
+            if (state === 'reconnecting') {
+              publishDescription(undefined)
+              publishState('reconnecting')
+              sinks.onStateChange?.('reconnecting')
+            }
+          },
+          onError: (error) => {
+            console.error('[web-runtime] remote projection sync failed:', error)
+          },
+        }, config?.backoffBaseMs === undefined ? {} : { retryDelayMs: config.backoffBaseMs })
+        const remoteLoop = controller.start()
+        return {
+          stop: () => {
+            remoteLoop.stop()
+            publishDescription(undefined)
+            publishState('connecting')
+          },
+        }
+      }
       const controller = new ConnectionController(api, {
         ...sinks,
         onConnected: (next) => {
@@ -128,6 +231,7 @@ export function apply(ctx: Context): void {
         },
         onStateChange: (state) => {
           if (state === 'reconnecting') publishDescription(undefined)
+          publishState(state)
           sinks.onStateChange?.(state)
         },
       }, config ?? {})
@@ -136,6 +240,7 @@ export function apply(ctx: Context): void {
         stop: () => {
           controller.stop()
           publishDescription(undefined)
+          publishState('connecting')
         },
       }
     },

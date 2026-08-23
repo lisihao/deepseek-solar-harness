@@ -386,6 +386,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
         productVersion: version.trim(),
         protocolHash: createHash('sha256').update(`claude-agent-sdk@${EXPECTED_CLAUDE_SDK_VERSION}`).digest('hex'),
         models,
+        quotaUnavailableReason: 'Claude Code does not expose machine-readable subscription quota telemetry; automatic scheduling remains behind the protected reserve guard',
       }
     } catch (error) {
       return unavailable(this.operatorId, error)

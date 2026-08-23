@@ -9,6 +9,8 @@ import RlmStrategyService, {
   type RlmStrategyRequest,
 } from '@deepseek-ai/dsh-rlm-strategy'
 
+export * from './quality-eval.ts'
+
 export const name = 'rlm-strategy-local'
 const DEFAULT_BUDGET: RlmBudgetV1 = Object.freeze({ maxDepth: 2, maxChildren: 4, maxTurns: 12 })
 
@@ -64,4 +66,5 @@ export class LocalRlmStrategy extends RlmStrategyService {
 }
 
 export function apply(ctx: Context): void { new LocalRlmStrategy(ctx) }
+export * from './quality-eval.ts'
 export default LocalRlmStrategy

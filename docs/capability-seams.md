@@ -85,6 +85,9 @@ flowchart LR
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
   pkg_ui_orchestration["ui-orchestration"]
+  pkg_remote_auth["remote-auth"]
+  svc_remoteAuth["ctx.remoteAuth<br/>Remote device authentication authority"]
+  pkg_connection["connection"]
   pkg_storage["storage"]
   svc_storage["ctx.storage<br/>Non-session storage hub"]
   pkg_storage_json["storage-json"]
@@ -208,7 +211,6 @@ flowchart LR
   pkg_directory_picker_browse["directory-picker-browse"]
   pkg_webserver["webserver"]
   svc_webServer["ctx.webServer<br/>HTTP route registration"]
-  pkg_connection["connection"]
   pkg_modules["modules"]
   pkg_hmr["hmr"]
   svc_clientModules["ctx.clientModules<br/>Client plugin graph host"]
@@ -286,6 +288,7 @@ flowchart LR
   pkg_physical_operator_subagent --> svc_physicalOperators
   pkg_plan_mode --> svc_planMode
   pkg_pwsh_local --> svc_shell
+  pkg_remote_auth --> svc_remoteAuth
   pkg_resident_operator --> svc_residentOperators
   pkg_resident_operator_local --> svc_residentOperators
   pkg_rlm_strategy --> svc_rlmStrategy
@@ -386,6 +389,8 @@ flowchart LR
   svc_orchestrations --> pkg_tool_orchestration
   svc_orchestrations --> pkg_ui_orchestration
   svc_physicalOperators --> pkg_tool_physical_operator
+  svc_remoteAuth --> pkg_connection
+  svc_remoteAuth --> pkg_ui_orchestration
   svc_residentOperators --> pkg_physical_operator_resident
   svc_rlmStrategy --> pkg_orchestration_local
   svc_sandbox --> pkg_bash_sandbox
@@ -493,6 +498,7 @@ flowchart LR
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path. |
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph. |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |
+| `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | The Server is the sole writer for pairing, credential exchange, fixed device scopes, revocation, and payload-free command receipts; transport and orchestration projections consume authenticated principals without owning credential state. |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | Waits for every configured backend, then publishes the domain form as one lifecycle-bound service for typed durable state. |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | Owns local per-assistant-message feedback, lifecycle and target validation, per-item compare-and-set, and the Host unary Remote contract without entering Session history or telemetry. |

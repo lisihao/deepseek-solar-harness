@@ -1,6 +1,7 @@
 /** Owner-local HTTP projection and trusted controls for durable orchestration. */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
+import type { RemoteAuthService, RemoteDeviceScope } from '@deepseek-ai/dsh-host-remote-auth'
 import { OrchestrationRunId } from '@deepseek-ai/dsh-orchestration'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
@@ -10,6 +11,65 @@ export const inject = ['orchestrations', 'webServer']
 export const ORCHESTRATION_DASHBOARD_PATH = '/api/orchestrations'
 
 const MAX_CONTROL_BYTES = 64 * 1024
+
+interface OrchestrationRequestAuthority {
+  readonly local: boolean
+  readonly scope: RemoteDeviceScope
+}
+
+function loopbackAddress(value: string | undefined): boolean {
+  return value === '127.0.0.1' || value === '::1' || value === '::ffff:127.0.0.1'
+}
+
+function loopbackAuthority(value: string | undefined): boolean {
+  if (value === undefined) return false
+  try {
+    const url = new URL(value.includes('://') ? value : `http://${value}`)
+    return url.hostname === '127.0.0.1' || url.hostname === '::1' || url.hostname === 'localhost'
+  } catch {
+    return false
+  }
+}
+
+function firstHeader(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (!Array.isArray(value)) return undefined
+  return typeof value[0] === 'string' ? value[0] : undefined
+}
+
+/**
+ * Resolve loopback authority or one authenticated remote device scope.
+ * @param request - HTTP headers and peer address used at the trust boundary.
+ * @param auth - remote authentication service when the request is not local.
+ * @returns resolved authority, or undefined when authentication fails.
+ */
+export function authorizeOrchestrationRequest(
+  request: Pick<IncomingMessage, 'headers' | 'socket'>,
+  auth: Pick<RemoteAuthService, 'authenticate'> | undefined,
+): OrchestrationRequestAuthority | undefined {
+  const host = firstHeader(request.headers.host)
+  const origin = firstHeader(request.headers.origin)
+  if (loopbackAddress(request.socket.remoteAddress)
+    && loopbackAuthority(host)
+    && (origin === undefined || loopbackAuthority(origin))) {
+    return { local: true, scope: 'admin' }
+  }
+  const authorization = firstHeader(request.headers.authorization)
+  const token = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined
+  const principal = token === undefined ? undefined : auth?.authenticate(token)
+  return principal === undefined ? undefined : { local: false, scope: principal.scope }
+}
+
+/**
+ * Apply the fixed cockpit/pocket/admin command surface.
+ * @param scope - authenticated remote device scope.
+ * @param action - requested orchestration control action.
+ * @returns whether this scope may perform the action.
+ */
+export function remoteOrchestrationControlAllowed(scope: RemoteDeviceScope, action: string): boolean {
+  if (scope === 'admin' || scope === 'cockpit') return true
+  return action === 'pause' || action === 'resume' || action === 'approve' || action === 'reject'
+}
 
 /**
  * Classify the dedicated local acceptance-test workspace namespace.
@@ -129,14 +189,16 @@ async function readProjection(ctx: Context, url: URL) {
 
 async function executeControl(ctx: Context, body: Record<string, unknown>) {
   const action = requiredString(body, 'action')
+  const commandId = requiredString(body, 'commandId')
   const runId = OrchestrationRunId(requiredString(body, 'runId'))
   const expectedRevision = requiredRevision(body)
   const reason = optionalString(body, 'reason') ?? ''
   if (action === 'pause' || action === 'resume' || action === 'cancel') {
-    return ctx.orchestrations.control({ runId, expectedRevision, action, reason })
+    return ctx.orchestrations.control({ commandId, runId, expectedRevision, action, reason })
   }
   if (action === 'approve' || action === 'reject') {
     return ctx.orchestrations.decide({
+      commandId,
       runId,
       expectedRevision,
       ...body.nodeId === undefined ? {} : { nodeId: requiredString(body, 'nodeId') },
@@ -146,6 +208,7 @@ async function executeControl(ctx: Context, body: Record<string, unknown>) {
   }
   if (action === 'abandon' || action === 'retry') {
     return ctx.orchestrations.resolveIndeterminate({
+      commandId,
       runId,
       nodeId: requiredString(body, 'nodeId'),
       expectedRevision,
@@ -163,6 +226,13 @@ export function apply(ctx: Context): void {
     path: ORCHESTRATION_DASHBOARD_PATH,
     handler: async (request, response) => {
       try {
+        const authority = authorizeOrchestrationRequest(request, ctx.get('remoteAuth'))
+        if (authority === undefined) {
+          sendJson(response, ctx.get('remoteAuth') === undefined ? 503 : 401, {
+            error: ctx.get('remoteAuth') === undefined ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
+          })
+          return
+        }
         if (request.method === 'GET') {
           const url = new URL(request.url ?? ORCHESTRATION_DASHBOARD_PATH, 'http://127.0.0.1')
           sendJson(response, 200, await readProjection(ctx, url))
@@ -173,7 +243,13 @@ export function apply(ctx: Context): void {
             sendJson(response, 403, { error: 'CONTROL_HEADER_REQUIRED' })
             return
           }
-          sendJson(response, 200, await executeControl(ctx, await readBody(request)))
+          const body = await readBody(request)
+          const action = requiredString(body, 'action')
+          if (!remoteOrchestrationControlAllowed(authority.scope, action)) {
+            sendJson(response, 403, { error: 'REMOTE_SCOPE_FORBIDDEN' })
+            return
+          }
+          sendJson(response, 200, await executeControl(ctx, body))
           return
         }
         response.writeHead(405, { Allow: 'GET, POST' })

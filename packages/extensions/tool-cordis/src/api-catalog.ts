@@ -1170,6 +1170,67 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'remoteAuth',
+    summary: 'Sole Server writer for pairing, refresh credentials, access sessions, and revocation.',
+    description: 'Sole Server writer for pairing, refresh credentials, access sessions, and revocation.',
+    methods: [
+      {
+        signature: 'issuePairing(scope: RemoteDeviceScope): PairingChallenge',
+        description: 'Mint one local, one-time pairing code. The code is never persisted.',
+        parameters: [{ name: 'scope', description: 'fixed capability scope assigned to the paired device.' }],
+        returns: 'the one-time challenge and its expiry.',
+      },
+      {
+        signature: 'redeemPairing(code: string, deviceName: string): Promise<DeviceCredential>',
+        description: 'Redeem one code exactly once and return the only copy of the refresh credential.',
+        parameters: [{ name: 'code', description: 'unexpired pairing code minted by this Server process.' }, { name: 'deviceName', description: 'human-readable device label recorded in the registry.' }],
+        returns: 'the durable device credential and assigned scope.',
+      },
+      {
+        signature: 'exchange(credential: string): AccessSession',
+        description: 'Exchange a durable refresh credential for one short-lived access token.',
+        parameters: [{ name: 'credential', description: 'durable secret returned only when pairing was redeemed.' }],
+        returns: 'the authenticated device principal and expiring bearer token.',
+      },
+      {
+        signature: 'authenticate(accessToken: string): RemotePrincipal | undefined',
+        description: 'Resolve a short-lived bearer token; invalid and expired tokens are indistinguishable.',
+        parameters: [{ name: 'accessToken', description: 'bearer token issued by {@link exchange}.' }],
+        returns: 'the authenticated principal, or undefined for every rejected token.',
+      },
+      {
+        signature: 'listDevices(): RemoteDeviceView[]',
+        description: 'Project the paired-device roster for the trusted administration surface.',
+        parameters: [],
+        returns: 'the durable device registry without credential hashes or access tokens.',
+      },
+      {
+        signature: 'revoke(deviceId: string): Promise<void>',
+        description: 'Revoke one device and all of its current access sessions.',
+        parameters: [{ name: 'deviceId', description: 'durable identifier of the paired device.' }],
+        returns: 'a promise settled after the registry is persisted.',
+      },
+      {
+        signature: 'beginCommand(deviceId: string, commandId: string, requestHash: string): Promise<RemoteCommandBeginResult>',
+        description: 'Begin or reconcile one authenticated remote command without retaining its body.',
+        parameters: [{ name: 'deviceId', description: 'authenticated device that owns the command namespace.' }, { name: 'commandId', description: 'caller-stable idempotency identity.' }, { name: 'requestHash', description: 'canonical request digest used only for conflict detection.' }],
+        returns: 'whether the caller may execute, must wait, or can reuse a prior result.',
+      },
+      {
+        signature: 'settleCommand( deviceId: string, commandId: string, requestHash: string, response: RemoteCommandResponse, ): Promise<void>',
+        description: 'Cache the small carrier response for an accepted remote command.',
+        parameters: [{ name: 'deviceId', description: 'authenticated device that owns the command namespace.' }, { name: 'commandId', description: 'caller-stable idempotency identity.' }, { name: 'requestHash', description: 'canonical request digest accepted by {@link beginCommand}.' }, { name: 'response', description: 'bounded response safe to return on an identical retry.' }],
+        returns: 'a promise settled after the receipt is durable.',
+      },
+      {
+        signature: 'markCommandIndeterminate(deviceId: string, commandId: string, requestHash: string): Promise<void>',
+        description: 'Fence a command whose business outcome could not be proven after acceptance.',
+        parameters: [{ name: 'deviceId', description: 'authenticated device that owns the command namespace.' }, { name: 'commandId', description: 'caller-stable idempotency identity.' }, { name: 'requestHash', description: 'canonical request digest accepted by {@link beginCommand}.' }],
+        returns: 'a promise settled after the indeterminate state is durable.',
+      },
+    ],
+  },
+  {
     key: 'residentOperators',
     summary: 'Abstract provider-neutral resident session/control surface.',
     description: 'Abstract provider-neutral resident session/control surface.',
@@ -2922,6 +2983,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'AccessSession',
+    declaration: 'export interface AccessSession extends RemotePrincipal {\n    readonly accessToken: string;\n    readonly expiresAt: string;\n}',
+  },
+  {
     name: 'AdapterRegistrationHandle',
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
@@ -3187,7 +3252,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ContextCompileRequest',
-    declaration: 'export interface ContextCompileRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly sourceRefs: readonly ContextSourceRef[];\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly acceptance: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly policy: ContextPolicy;\n}',
+    declaration: 'export interface ContextCompileRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly sourceRefs: readonly ContextSourceRef[];\n    readonly sourceMaterials?: readonly ContextSourceMaterialV1[];\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly acceptance: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly policy: ContextPolicy;\n}',
   },
   {
     name: 'ContextFormed',
@@ -3195,7 +3260,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ContextPacketV1',
-    declaration: 'export interface ContextPacketV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly included: readonly ContextSourceRef[];\n    readonly summarized: readonly ContextSourceRef[];\n    readonly dropped: readonly {\n        readonly source: ContextSourceRef;\n        readonly reason: string;\n    }[];\n    readonly estimatedTokens: number;\n    readonly tokenBudget: number;\n    readonly truncationReason?: string;\n    readonly lineage: readonly string[];\n    readonly degradedSources: readonly string[];\n    readonly redactions: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly compilerId: string;\n    readonly compilerVersion: string;\n    readonly packetSha256: string;\n}',
+    declaration: 'export interface ContextPacketV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly included: readonly ContextSourceRef[];\n    readonly sourceMaterials: readonly ContextSourceMaterialV1[];\n    readonly summarized: readonly ContextSourceRef[];\n    readonly dropped: readonly {\n        readonly source: ContextSourceRef;\n        readonly reason: string;\n    }[];\n    readonly estimatedTokens: number;\n    readonly tokenBudget: number;\n    readonly truncationReason?: string;\n    readonly lineage: readonly string[];\n    readonly degradedSources: readonly string[];\n    readonly redactions: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly compilerId: string;\n    readonly compilerVersion: string;\n    readonly packetSha256: string;\n}',
   },
   {
     name: 'ContextPolicy',
@@ -3204,6 +3269,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ContextSnapshotSection',
     declaration: 'export interface ContextSnapshotSection {\n    readonly name: string;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'ContextSourceMaterialV1',
+    declaration: 'export interface ContextSourceMaterialV1 {\n    readonly ref: string;\n    readonly text: string;\n    readonly truncated: boolean;\n}',
   },
   {
     name: 'ContextSourceRef',
@@ -3312,6 +3381,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CredentialRef',
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
+  },
+  {
+    name: 'DeviceCredential',
+    declaration: 'export interface DeviceCredential {\n    readonly deviceId: string;\n    readonly credential: string;\n    readonly scope: RemoteDeviceScope;\n}',
   },
   {
     name: 'DiffCallView',
@@ -3723,7 +3796,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LogicalTaskGraphV1',
-    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
+    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly baseSha?: string;\n    readonly workspaceIsolation?: \'shared\' | \'git-worktree\';\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly qualityPolicy?: {\n        readonly independentVerification: \'required\' | \'advisory\';\n    };\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
   },
   {
     name: 'LspHover',
@@ -3875,7 +3948,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelExecutionOffer',
-    declaration: 'export interface ModelExecutionOffer {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly displayName: string;\n    readonly source: \'native-subscription\' | \'metered-api\';\n    readonly tier: \'low\' | \'medium\' | \'high\';\n    readonly available: boolean;\n    readonly maxConcurrency: number;\n    readonly activeCount: number;\n    readonly tags: readonly string[];\n    readonly quotaPool?: ModelQuotaPool;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n}',
+    declaration: 'export interface ModelExecutionOffer {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly displayName: string;\n    readonly source: \'native-subscription\' | \'metered-api\';\n    readonly tier: \'low\' | \'medium\' | \'high\';\n    readonly available: boolean;\n    readonly maxConcurrency: number;\n    readonly activeCount: number;\n    readonly tags: readonly string[];\n    readonly quotaPool?: ModelQuotaPool;\n    readonly quotaGuard?: ModelQuotaGuard;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n}',
   },
   {
     name: 'ModelMessageSource',
@@ -3888,6 +3961,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ModelModalityMap',
     declaration: 'export interface ModelModalityMap {\n    text: \'text\';\n    image: \'image\';\n}',
+  },
+  {
+    name: 'ModelQuotaGuard',
+    declaration: 'export interface ModelQuotaGuard {\n    readonly unknownQuota: \'allow\' | \'block\';\n    readonly protectedRemainingPercent: number;\n    readonly stopAdmissionAtRemainingPercent: number;\n    readonly accelerateBeforeReset: boolean;\n}',
   },
   {
     name: 'ModelQuotaPool',
@@ -3947,11 +4024,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationControlRequest',
-    declaration: 'export interface OrchestrationControlRequest {\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly action: \'pause\' | \'resume\' | \'cancel\';\n    readonly reason: string;\n}',
+    declaration: 'export interface OrchestrationControlRequest {\n    readonly commandId: string;\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly action: \'pause\' | \'resume\' | \'cancel\';\n    readonly reason: string;\n}',
   },
   {
     name: 'OrchestrationDecisionRequest',
-    declaration: 'export interface OrchestrationDecisionRequest {\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly nodeId?: string;\n    readonly decision: \'approve\' | \'reject\';\n    readonly reason: string;\n}',
+    declaration: 'export interface OrchestrationDecisionRequest {\n    readonly commandId: string;\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly nodeId?: string;\n    readonly decision: \'approve\' | \'reject\';\n    readonly reason: string;\n}',
   },
   {
     name: 'OrchestrationEvent',
@@ -3967,7 +4044,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationIndeterminateRequest',
-    declaration: 'export interface OrchestrationIndeterminateRequest {\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly decision: \'abandon\' | \'retry\';\n    readonly reason: string;\n}',
+    declaration: 'export interface OrchestrationIndeterminateRequest {\n    readonly commandId: string;\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly decision: \'abandon\' | \'retry\';\n    readonly reason: string;\n}',
   },
   {
     name: 'OrchestrationNodeSnapshot',
@@ -3975,7 +4052,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationNodeSpecV1',
-    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
+    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
   },
   {
     name: 'OrchestrationNodeState',
@@ -4000,6 +4077,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OrchestrationStartRequest',
     declaration: 'export interface OrchestrationStartRequest {\n    readonly compilationId: string;\n    readonly approvalRef?: string;\n}',
+  },
+  {
+    name: 'PairingChallenge',
+    declaration: 'export interface PairingChallenge {\n    readonly code: string;\n    readonly scope: RemoteDeviceScope;\n    readonly expiresAt: string;\n}',
   },
   {
     name: 'PermissionSelect',
@@ -4180,6 +4261,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RedactedSecret',
     declaration: 'export interface RedactedSecret {\n    path: string[];\n    set: boolean;\n}',
+  },
+  {
+    name: 'RemoteCommandBeginResult',
+    declaration: 'export type RemoteCommandBeginResult = {\n    readonly kind: \'accepted\';\n} | {\n    readonly kind: \'settled\';\n    readonly response: RemoteCommandResponse;\n} | {\n    readonly kind: \'conflict\';\n} | {\n    readonly kind: \'indeterminate\';\n} | {\n    readonly kind: \'running\';\n};',
+  },
+  {
+    name: 'RemoteCommandResponse',
+    declaration: 'export interface RemoteCommandResponse {\n    readonly status: number;\n    readonly contentType?: string;\n    readonly body: string;\n}',
+  },
+  {
+    name: 'RemoteDeviceScope',
+    declaration: 'export type RemoteDeviceScope = \'cockpit\' | \'pocket\' | \'admin\';',
+  },
+  {
+    name: 'RemoteDeviceView',
+    declaration: 'export interface RemoteDeviceView extends RemotePrincipal {\n    readonly createdAt: string;\n    readonly revokedAt?: string;\n}',
+  },
+  {
+    name: 'RemotePrincipal',
+    declaration: 'export interface RemotePrincipal {\n    readonly deviceId: string;\n    readonly deviceName: string;\n    readonly scope: RemoteDeviceScope;\n}',
   },
   {
     name: 'RequestContext',

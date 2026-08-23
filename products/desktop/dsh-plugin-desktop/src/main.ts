@@ -1,6 +1,6 @@
 /** DSH Desktop executable: minimal Electron bootstrap around the Host Cordis root. */
 
-import { app } from 'electron'
+import { app, net, safeStorage } from 'electron'
 import type { Context } from '@deepseek-ai/cordis'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,7 +17,13 @@ import { installDesktopPnpmRuntime } from './desktop-runtime-environment.ts'
 import { ElectronDesktopRuntime } from './electron-runtime.ts'
 import { installProfilePackageResolver } from './module-resolution.ts'
 import { installNativeProductRuntime } from './native-product-runtime.ts'
-import { packagedDependencyPath } from './packaged-runtime-path.ts'
+import { packagedDependencyPath, unpackedAsarPath } from './packaged-runtime-path.ts'
+import {
+  DesktopDeploymentStateStore,
+  DesktopRemoteAccessSession,
+  type DesktopDeploymentState,
+} from './deployment-state.ts'
+import { FrontendSetupController } from './frontend-setup.ts'
 import {
   beginDesktopProfileStartup,
   listDesktopProfiles,
@@ -38,6 +44,11 @@ import {
 
 const BIN_NAME = 'dsh-plugin-desktop'
 const PRODUCT_NAME = 'DSH Desktop'
+
+/** Resolve a packaged Desktop asset without depending on the Cordis shell plugin. */
+function desktopAssetPath(filename: string): string {
+  return unpackedAsarPath(fileURLToPath(new URL(`../build/${filename}`, import.meta.url)))
+}
 
 /** Report profile recovery without changing startup or rollback outcomes. */
 function notifyProfileRecovery(runtime: ElectronDesktopRuntime, body: string): void {
@@ -65,6 +76,11 @@ async function start(): Promise<void> {
   let removeShutdownRequests: (() => void) | undefined
   let disposePnpmRuntime: (() => void) | undefined
   let disposeNativeProductRuntime: (() => void) | undefined
+  let disposeFrontend: (() => Promise<void>) | undefined
+  let frontendAccess: DesktopRemoteAccessSession | undefined
+  let frontendSetup: FrontendSetupController | undefined
+  let deploymentStore: DesktopDeploymentStateStore | undefined
+  let deploymentState: DesktopDeploymentState = { version: 1, role: 'server' }
   let runtime!: ElectronDesktopRuntime
   const nativeExit = createDesktopExitCoordinator(
     {
@@ -83,17 +99,34 @@ async function start(): Promise<void> {
     restartRequested = true
     nativeExit.requestRelaunch()
     await shutdown.request(0)
+  }, {
+    currentRole: () => deploymentState.role,
+    configureFrontend: async () => {
+      if (frontendSetup === undefined) throw new Error('dsh-plugin-desktop: Frontend setup is not ready')
+      await frontendSetup.open()
+    },
+    useServer: async () => {
+      if (deploymentStore === undefined) throw new Error('dsh-plugin-desktop: deployment state is not ready')
+      deploymentState = await deploymentStore.useServer()
+      await runtime.requestRestart()
+    },
   })
   const finalExit = (code: number): void => { nativeExit.finish(code) }
   shutdown = createDesktopShutdown(
     async () => {
       try {
-        await current?.fiber.dispose()
+        await disposeFrontend?.()
       } finally {
         try {
-          disposeNativeProductRuntime?.()
+          await current?.fiber.dispose()
         } finally {
-          disposePnpmRuntime?.()
+          try {
+            frontendAccess?.stop()
+            frontendSetup?.dispose()
+            disposeNativeProductRuntime?.()
+          } finally {
+            disposePnpmRuntime?.()
+          }
         }
       }
     },
@@ -115,12 +148,18 @@ async function start(): Promise<void> {
   }
   installFailLoud(BIN_NAME, failLoudProcess, async () => {
     try {
-      await current?.fiber.dispose()
+      await disposeFrontend?.()
     } finally {
       try {
-        disposeNativeProductRuntime?.()
+        await current?.fiber.dispose()
       } finally {
-        disposePnpmRuntime?.()
+        try {
+          frontendAccess?.stop()
+          frontendSetup?.dispose()
+          disposeNativeProductRuntime?.()
+        } finally {
+          disposePnpmRuntime?.()
+        }
       }
     }
   })
@@ -128,6 +167,70 @@ async function start(): Promise<void> {
   try {
     const environment = loadLayeredEnv(BIN_NAME, process.cwd())
     process.env.DSH_BUILD_COMMIT ??= app.isPackaged ? `desktop-${app.getVersion()}` : 'development'
+    deploymentStore = new DesktopDeploymentStateStore(
+      app.getPath('userData'),
+      safeStorage,
+      { fetch: (url, init) => net.fetch(String(url), init) },
+    )
+    deploymentState = await deploymentStore.load()
+    frontendSetup = new FrontendSetupController(
+      deploymentStore,
+      () => deploymentState,
+      () => runtime.requestRestart(),
+    )
+    if (deploymentState.role === 'frontend') {
+      const state = deploymentState
+      const access = new DesktopRemoteAccessSession(deploymentStore, state, (cause) => {
+        process.stderr.write(
+          `${BIN_NAME}: failed to refresh remote access: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+      })
+      try {
+        await access.start()
+        frontendAccess = access
+        const endpoint = new URL(state.endpoint)
+        const renderer = new URL(endpoint)
+        renderer.searchParams.set('dsh-deployment-role', 'frontend')
+        renderer.searchParams.set('dsh-desktop-mode', state.presentation)
+        renderer.searchParams.set('dsh-desktop-platform', process.platform)
+        renderer.searchParams.set('dsh-desktop-version', runtime.updates.currentVersion)
+        const release = runtime.schedule({
+          mode: state.presentation,
+          width: 1280,
+          height: 840,
+          minWidth: 900,
+          minHeight: 640,
+          url: renderer.href,
+          productName: PRODUCT_NAME,
+          windowTitle: 'DSH Desktop · Remote Frontend',
+          iconPath: desktopAssetPath(process.platform === 'darwin' ? 'app-icon-mac.png' : 'app-icon.png'),
+          trayIcons: {
+            templatePath: desktopAssetPath('tray-iconTemplate.png'),
+            bluePath: desktopAssetPath('tray-icon-blue.png'),
+          },
+          remoteAccess: {
+            origin: endpoint.origin,
+            accessToken: () => access.accessToken(),
+          },
+          readThemeSource: () => 'system',
+          requestQuit,
+          requestModeChange: async (mode) => {
+            deploymentState = await deploymentStore!.setPresentation(state, mode)
+            await runtime.requestRestart()
+          },
+        })
+        disposeFrontend = release
+        await runtime.mountScheduled()
+      } catch (cause) {
+        access.stop()
+        frontendAccess = undefined
+        process.stderr.write(
+          `${BIN_NAME}: unable to open remote Frontend: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+        await frontendSetup.open()
+      }
+      return
+    }
     const electronVersion = process.versions.electron
     if (electronVersion === undefined) {
       throw new Error(`${BIN_NAME}: plugin runtime requires the Electron runtime version`)

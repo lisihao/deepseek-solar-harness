@@ -7,6 +7,7 @@ import {
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { ClientConnectionRpc } from '../rpc.ts'
 import { randomUuid } from './random-uuid.ts'
+import { withBrowserRemoteAuthorization } from './browser-access-token.ts'
 
 const INTERNAL_BASE = 'http://dsh.internal'
 const CHANNEL_PATTERN = /^\/[A-Za-z0-9._~-]+$/
@@ -29,12 +30,12 @@ export function createWebConnectionRpc(): ClientConnectionRpc {
       }
       const response = await globalThis.fetch(
         new URL(`${channel}/${endpoint}`, resolveBase()),
-        {
+        withBrowserRemoteAuthorization({
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(message),
           ...signal === undefined ? {} : { signal },
-        },
+        }),
       )
       if (!response.ok) {
         throw new Error(`transport failure for ${channel}/${endpoint}: HTTP ${response.status}`)

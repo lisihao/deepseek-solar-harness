@@ -1,7 +1,36 @@
 import { describe, expect, it } from 'vitest'
-import { isDiagnosticOrchestrationWorkspace, projectOrchestrationRuns } from '../src/index.ts'
+import {
+  authorizeOrchestrationRequest,
+  isDiagnosticOrchestrationWorkspace,
+  projectOrchestrationRuns,
+  remoteOrchestrationControlAllowed,
+} from '../src/index.ts'
 
 describe('orchestration dashboard presentation', () => {
+  it('requires a remote bearer session while retaining owner-local access', () => {
+    const request = (remoteAddress: string, authorization?: string) => ({
+      headers: { host: '127.0.0.1:3080', ...(authorization === undefined ? {} : { authorization }) },
+      socket: { remoteAddress },
+    })
+    const auth = {
+      authenticate: (token: string) => token === 'pocket-token'
+        ? { deviceId: 'phone', deviceName: 'Phone', scope: 'pocket' as const }
+        : undefined,
+    }
+
+    expect(authorizeOrchestrationRequest(request('127.0.0.1') as never, undefined))
+      .toEqual({ local: true, scope: 'admin' })
+    expect(authorizeOrchestrationRequest(request('10.0.0.5') as never, auth)).toBeUndefined()
+    expect(authorizeOrchestrationRequest(request('10.0.0.5', 'Bearer pocket-token') as never, auth))
+      .toEqual({ local: false, scope: 'pocket' })
+    expect(authorizeOrchestrationRequest({
+      headers: { host: 'harness.example' }, socket: { remoteAddress: '127.0.0.1' },
+    } as never, auth)).toBeUndefined()
+    expect(remoteOrchestrationControlAllowed('pocket', 'approve')).toBe(true)
+    expect(remoteOrchestrationControlAllowed('pocket', 'cancel')).toBe(false)
+    expect(remoteOrchestrationControlAllowed('cockpit', 'cancel')).toBe(true)
+  })
+
   it('identifies local acceptance workspaces without hiding user projects', () => {
     expect(isDiagnosticOrchestrationWorkspace('/private/tmp/dsh-orchestration-2.5.2-explicit-no-fallback')).toBe(true)
     expect(isDiagnosticOrchestrationWorkspace('/tmp/dsh-orchestration-acceptance')).toBe(true)

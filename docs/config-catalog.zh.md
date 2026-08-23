@@ -409,10 +409,14 @@ export interface ConnectionConfig {
   trustedHosts?: string[]
   /** Maximum buffered JSON body for every `/api` request. */
   maxRequestBodyBytes?: number
+  /** Enable the independently versioned snapshot + cursor Server projection. */
+  remoteSync?: boolean
+  /** Retained event count and per-Frontend unsent-frame bound. */
+  remoteSyncJournalCapacity?: number
 }
 ```
 
-来源：[`packages/client/connection/src/index.ts:50`](../packages/client/connection/src/index.ts)
+来源：[`packages/client/connection/src/index.ts:75`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -830,6 +834,26 @@ export interface Config {
 ```
 
 来源：[`packages/host/frontend-static/src/index.ts:28`](../packages/host/frontend-static/src/index.ts)
+
+<a id="deepseek-aidsh-host-remote-auth"></a>
+
+## `@deepseek-ai/dsh-host-remote-auth`
+
+```ts config-catalog
+/** Persistent remote-auth service configuration. */
+export interface Config {
+  /** Harness home; the device registry lives under remote-auth/v1. */
+  dshHome?: string
+  /** One-time pairing lifetime in milliseconds. */
+  pairingTtlMs?: number
+  /** Short-lived access-session lifetime in milliseconds. */
+  accessTtlMs?: number
+  /** Bound on durable non-revoked devices. */
+  maxDevices?: number
+}
+```
+
+来源：[`packages/host/remote-auth/src/index.ts:71`](../packages/host/remote-auth/src/index.ts)
 
 <a id="deepseek-aidsh-host-webserver"></a>
 

@@ -5,8 +5,10 @@
  * internally) — the shell's render is the one ctx-level renderSlot call in
  * the program.
  */
-import type { ReactNode } from 'react'
+import { useSyncExternalStore, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import { ConnectionBanner } from '@deepseek-ai/dsh-client-ui-primitives'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
 import { DocumentTitle } from './DocumentTitle.tsx'
 // Type-only: pulls the runtime's SlotMap declaration merge (the 'root' key) into this program.
@@ -27,6 +29,8 @@ export function buildRenderApp(deps: AssemblyDeps): () => ReactNode {
   const { ctx } = deps
   const sessions = ctx.get('sessions')
   if (sessions === undefined) throw new Error('shell assembly: sessions service unavailable')
+  const connection = ctx.get('connection') as ConnectionHandle | undefined
+  if (connection === undefined) throw new Error('shell assembly: connection service unavailable')
   const useSessions = bindSnapshotSelector(sessions.list)
   const SessionDocumentTitle = (): ReactNode => {
     const title = useSessions((state) => {
@@ -35,9 +39,24 @@ export function buildRenderApp(deps: AssemblyDeps): () => ReactNode {
     })
     return <DocumentTitle {...title === undefined ? {} : { title }} />
   }
+  const ConnectionStatus = (): ReactNode => {
+    const state = useSyncExternalStore(
+      listener => connection.state.subscribe(listener),
+      () => connection.state.getSnapshot(),
+    )
+    return (
+      <ConnectionBanner
+        reconnecting={state === 'reconnecting'}
+        label={connection.transport === 'remote-projection'
+          ? '与 DSH Server 的连接已断开；当前显示上次同步结果，正在重连…'
+          : '连接已断开，正在重连…'}
+      />
+    )
+  }
   return () => (
     <>
       <SessionDocumentTitle />
+      <ConnectionStatus />
       {ctx.slots.renderSlot('root', {})}
     </>
   )

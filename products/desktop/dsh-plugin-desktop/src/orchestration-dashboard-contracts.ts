@@ -115,6 +115,7 @@ export type DesktopOrchestrationControlAction =
   | 'retry'
 
 export interface DesktopOrchestrationControlRequest {
+  commandId: string
   action: DesktopOrchestrationControlAction
   runId: string
   expectedRevision: number

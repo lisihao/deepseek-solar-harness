@@ -23,16 +23,21 @@ interface Bench {
   stopped: number
 }
 
-async function mount(): Promise<Bench> {
+async function mount(transport: ConnectionHandle['transport'] = 'direct'): Promise<Bench> {
   const ctx = new Context()
   await ctx.plugin(TypertRegistry)
   const api = new FakeApiClient()
   const bench: Bench = { ctx, api, sinks: undefined, stopped: 0 }
   const handle: ConnectionHandle = {
     api,
+    transport,
     isLoopback: true,
     hostDescription: {
       getSnapshot: () => undefined,
+      subscribe: () => () => {},
+    },
+    state: {
+      getSnapshot: () => 'connected',
       subscribe: () => () => {},
     },
     rpc: {
@@ -55,6 +60,32 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('runtime client apply', () => {
+  it('installs remote Session and Workspace baselines without issuing duplicate list pulls', async () => {
+    const bench = await mount('remote-projection')
+    const sessions = bench.ctx.get('sessions') as SessionRuntime
+    const workspaces = bench.ctx.get('workspaces') as WorkspaceRuntime
+    bench.sinks?.onRemoteSnapshot?.({} as never, {
+      sessions: [{
+        sessionId: 's-remote', updatedAt: 7, running: true, blank: false, cwd: '/w/remote',
+      }],
+      workspaces: [{
+        workspaceId: 'w-remote', path: '/w/remote', title: 'remote', sessionIds: ['s-remote'],
+        createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z',
+      }],
+      archivedSessionIds: [],
+    } as never)
+    bench.sinks?.onConnected?.({ version: '3.2.0', cwd: '/srv/dsh', attachedSessions: 1, canOpenPath: false })
+    await flushMicrotasks()
+
+    expect(sessions.list.getSnapshot().ids).toContain('s-remote')
+    expect(workspaces.list.getSnapshot()).toMatchObject({
+      phase: 'ready', baselinesReady: true,
+      items: [{ workspaceId: 'w-remote' }],
+    })
+    expect(bench.api.callsOf('session.list')).toEqual([])
+    expect(bench.api.callsOf('workspace.list')).toEqual([])
+  })
+
   it('mounts slots, Sessions, and Workspaces and fans host frames into both managers', async () => {
     const bench = await mount()
     expect(bench.ctx.get('slots') !== undefined).toBe(true)

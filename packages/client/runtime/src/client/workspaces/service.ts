@@ -330,6 +330,18 @@ export class WorkspaceRuntime implements IWorkspaces {
     this.manager.handleConnected()
   }
 
+  /**
+   * Install the Server-owned Workspace baseline captured by remote snapshot.
+   * @param items - gap-free Workspace projections from the Server.
+   * @param archivedSessionIds - archived Session identities from the same snapshot.
+   */
+  replaceRemoteBaseline(
+    items: readonly import('@deepseek-ai/dsh-api-remotes/client').WorkspaceView[],
+    archivedSessionIds: readonly import('@deepseek-ai/dsh-api-remotes/client').SessionId[],
+  ): void {
+    this.manager.replaceRemoteBaseline(items, archivedSessionIds)
+  }
+
   private project(): void {
     const workspace = this.manager.getSnapshot()
     const sessions = this.sessions.list.getSnapshot()

@@ -105,12 +105,14 @@ describe('published package surface', () => {
 
   it('aligns the terminal backend with the persistent Bash tool prompt', () => {
     const prompt = '__DSH_PERSISTENT_BASH_PROMPT__ '
+    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
+    const dshRequire = createRequire(workspaceRequire.resolve('@deepseek-ai/dsh/package.json'))
     const terminalBash = readFileSync(
-      new URL('node_modules/@deepseek-ai/dsh-terminal-bash/lib/index.js', packageRoot),
+      dshRequire.resolve('@deepseek-ai/dsh-terminal-bash'),
       'utf8',
     )
     const persistentTool = readFileSync(
-      new URL('node_modules/@deepseek-ai/dsh-tool-bash-persistent/lib/index.js', packageRoot),
+      dshRequire.resolve('@deepseek-ai/dsh-tool-bash-persistent'),
       'utf8',
     )
 
@@ -124,6 +126,7 @@ describe('published package surface', () => {
     expect(config).toContain("'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts'")
     expect(config).toContain("'windows-acl-runner': 'src/windows-acl-runner.ts'")
     expect(config).toContain("'desktop-cli': 'src/desktop-cli.ts'")
+    expect(config).toContain("'frontend-setup-preload': 'src/frontend-setup-preload.ts'")
     expect(config).toContain("'desktop-runtime-environment': 'src/desktop-runtime-environment.ts'")
     expect(config).toContain("'desktop-terminal': 'src/desktop-terminal.ts'")
     expect(config).toContain("'profile-manager': 'src/profile-manager.ts'")
@@ -138,12 +141,18 @@ describe('published package surface', () => {
   it('installs the private pnpm PATH after the launch snapshot and before profile boot', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
     const snapshot = main.indexOf('const environment = loadLayeredEnv')
+    const frontend = main.indexOf("if (deploymentState.role === 'frontend')")
+    const localRuntime = main.indexOf('const electronVersion = process.versions.electron')
     const install = main.indexOf('const pnpmRuntime = installDesktopPnpmRuntime')
     const products = main.indexOf('const nativeProductRuntime = installNativeProductRuntime')
     const prepare = main.indexOf('const prepared = prepareDesktopProfile')
     const boot = main.indexOf('const ctx = await boot')
 
     expect(snapshot).toBeGreaterThanOrEqual(0)
+    expect(frontend).toBeGreaterThan(snapshot)
+    expect(localRuntime).toBeGreaterThan(frontend)
+    expect(main.slice(frontend, localRuntime)).toMatch(/\n\s+return\n/)
+    expect(install).toBeGreaterThan(frontend)
     expect(install).toBeGreaterThan(snapshot)
     expect(products).toBeGreaterThan(install)
     expect(prepare).toBeGreaterThan(products)

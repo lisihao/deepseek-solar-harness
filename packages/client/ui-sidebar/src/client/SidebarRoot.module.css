@@ -124,6 +124,10 @@
   cursor: pointer;
 }
 
+.pocketBrand {
+  cursor: default;
+}
+
 .iconButton {
   flex: none;
   display: inline-flex;

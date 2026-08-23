@@ -62,6 +62,66 @@ describe('subscription-first model allocation', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('protects Claude reserve when quota is unknown or reaches the admission stop line', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const claudeGuard = {
+      unknownQuota: 'block' as const,
+      protectedRemainingPercent: 20,
+      stopAdmissionAtRemainingPercent: 25,
+      accelerateBeforeReset: false,
+    }
+    const common = {
+      runId: 'r', nodeId: 'n', phase: 'execution' as const, role: 'worker', task: 'implement fixture',
+      preferredOperatorIds: [], objective: 'balanced' as const, rlm: 'disabled' as const,
+      graphMaxParallel: 4, now: '2026-08-23T00:00:00.000Z',
+    }
+    const codex = offer({ offerId: 'codex:luna', model: 'luna', tier: 'low' })
+    const unknownClaude = offer({
+      offerId: 'claude:sonnet', operatorId: 'claude-code', provider: 'claude-code', model: 'sonnet',
+      quotaGuard: claudeGuard,
+    })
+    await expect(service.allocate({ ...common, offers: [unknownClaude, codex] }))
+      .resolves.toMatchObject({ offerId: 'codex:luna' })
+
+    const protectedClaude = offer({
+      ...unknownClaude,
+      quotaPool: {
+        poolId: 'claude-five-hour', displayName: 'Claude five-hour', models: ['sonnet'], meter: 'native-subscription',
+        primary: { usedPercent: 75 }, observedAt: common.now,
+      },
+    })
+    await expect(service.allocate({ ...common, offers: [protectedClaude, codex] }))
+      .resolves.toMatchObject({ offerId: 'codex:luna' })
+    await ctx.root.fiber.dispose()
+  })
+
+  it('admits Claude above the stop line without spending its protected reserve near reset', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const now = 1_777_000_000
+    const result = await service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'planning', role: 'architect', task: 'review architecture',
+      preferredOperatorIds: ['claude-code'], objective: 'quality', rlm: 'disabled', graphMaxParallel: 2,
+      offers: [offer({
+        offerId: 'claude:opus', operatorId: 'claude-code', provider: 'claude-code', model: 'opus', tier: 'high',
+        quotaGuard: {
+          unknownQuota: 'block', protectedRemainingPercent: 20,
+          stopAdmissionAtRemainingPercent: 25, accelerateBeforeReset: false,
+        },
+        quotaPool: {
+          poolId: 'claude-five-hour', displayName: 'Claude five-hour', models: ['opus'], meter: 'native-subscription',
+          primary: { usedPercent: 60, resetsAt: now + 60 }, observedAt: new Date(now * 1_000).toISOString(),
+        },
+      })],
+      now: new Date(now * 1_000).toISOString(),
+    })
+    expect(result).toMatchObject({ offerId: 'claude:opus' })
+    expect(result.rationale).toContain('protected-reserve:20%')
+    expect(result.rationale).not.toContain('accelerate-before-quota-reset')
+    await ctx.root.fiber.dispose()
+  })
+
   it('uses a high-tier metered model only when no qualified high-tier subscription is available', async () => {
     const ctx = new Context()
     const service = new SubscriptionFirstModelAllocation(ctx)

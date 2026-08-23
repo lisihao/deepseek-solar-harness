@@ -6,15 +6,22 @@
     "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo"
   },
   "files": [
+    "src/browser-remote.ts",
     "src/api-path.ts",
     "src/client/api.ts",
+    "src/client/browser-access-token.ts",
     "src/client/connection.ts",
     "src/client/fixture.ts",
     "src/client/index.ts",
     "src/client/random-uuid.ts",
+    "src/client/remote-auth-client.ts",
+    "src/client/remote-sync-client.ts",
+    "src/client/remote-sync-controller.ts",
     "src/client/rpc.ts",
     "src/client/web-api-client.ts",
     "src/loopback-hostname.ts",
+    "src/remote-auth-wire.ts",
+    "src/remote-sync.ts",
     "src/rpc.ts"
   ],
   "references": [

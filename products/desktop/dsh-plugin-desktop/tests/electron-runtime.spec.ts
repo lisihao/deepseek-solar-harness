@@ -74,6 +74,11 @@ const electron = vi.hoisted(() => {
     on: vi.fn(),
     off: vi.fn(),
     setWindowOpenHandler: vi.fn(),
+    session: {
+      webRequest: {
+        onBeforeSendHeaders: vi.fn(),
+      },
+    },
   }
   const nativeTheme = { themeSource: 'system' }
 
@@ -285,6 +290,58 @@ describe('Electron compatibility runtime', () => {
     await release()
     expect(electron.browserWindowOff).toHaveBeenCalledWith('page-title-updated', titleListener)
     expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
+  })
+
+  it('injects a memory-only remote token for the configured origin and removes the hook', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule({
+      ...spec,
+      url: 'https://server.example/?dsh-deployment-role=frontend',
+      remoteAccess: {
+        origin: 'https://server.example',
+        accessToken: () => 'short-lived',
+      },
+    })
+    await runtime.mountScheduled()
+    expect(electron.loadURL).toHaveBeenCalledWith('https://server.example/?dsh-deployment-role=frontend')
+    expect(String(electron.loadURL.mock.calls[0]?.[0])).not.toContain('short-lived')
+    const hook = electron.browserWindows[0]!.webContents.session.webRequest.onBeforeSendHeaders
+    const listener = hook.mock.calls[0]?.[1] as (
+      details: { requestHeaders: Record<string, string> },
+      callback: (value: { requestHeaders: Record<string, string> }) => void,
+    ) => void
+    const callback = vi.fn()
+    listener({ requestHeaders: { Accept: 'text/html' } }, callback)
+    expect(callback).toHaveBeenCalledWith({
+      requestHeaders: { Accept: 'text/html', Authorization: 'Bearer short-lived' },
+    })
+    await release()
+    expect(hook.mock.calls.at(-1)?.[1]).toBeNull()
+  })
+
+  it('keeps deployment role controls separate from presentation mode controls', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const configureFrontend = vi.fn(async () => {})
+    const useServer = vi.fn(async () => {})
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {}, {
+      currentRole: () => 'frontend', configureFrontend, useServer,
+    })
+    const release = runtime.schedule(spec)
+    await runtime.mountScheduled()
+    const menu = electron.menuTemplates.at(-1) as Array<{ label?: string; click?: () => void }>
+    expect(menu.map(item => item.label).filter(Boolean)).toEqual(expect.arrayContaining([
+      'Deployment: Frontend',
+      'Connect to Remote Server…',
+      'Use Local Server',
+      'Switch to Advanced Mode',
+    ]))
+    menu.find(item => item.label === 'Use Local Server')?.click?.()
+    await vi.waitFor(() => { expect(useServer).toHaveBeenCalledOnce() })
+    expect(configureFrontend).not.toHaveBeenCalled()
+    await release()
   })
 
   it('keeps main navigation origin-locked while allowing loopback Remote Module frames', async () => {

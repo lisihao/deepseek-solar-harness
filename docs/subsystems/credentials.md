@@ -103,6 +103,86 @@ abstract unset(ref: CredentialRef): Promise<void>
 
 Source: [`packages/credentials/credentials/src/index.ts:60`](../../packages/credentials/credentials/src/index.ts)
 
+<a id="ctxremoteauth--remoteauthservice"></a>
+
+### `ctx.remoteAuth` — `RemoteAuthService`
+
+Sole Server writer for pairing, refresh credentials, access sessions, and revocation.
+
+```ts cordis-catalog
+/**
+ * Mint one local, one-time pairing code. The code is never persisted.
+ * @param scope - fixed capability scope assigned to the paired device.
+ * @returns the one-time challenge and its expiry.
+ */
+issuePairing(scope: RemoteDeviceScope): PairingChallenge
+
+/**
+ * Redeem one code exactly once and return the only copy of the refresh credential.
+ * @param code - unexpired pairing code minted by this Server process.
+ * @param deviceName - human-readable device label recorded in the registry.
+ * @returns the durable device credential and assigned scope.
+ */
+redeemPairing(code: string, deviceName: string): Promise<DeviceCredential>
+
+/**
+ * Exchange a durable refresh credential for one short-lived access token.
+ * @param credential - durable secret returned only when pairing was redeemed.
+ * @returns the authenticated device principal and expiring bearer token.
+ */
+exchange(credential: string): AccessSession
+
+/**
+ * Resolve a short-lived bearer token; invalid and expired tokens are indistinguishable.
+ * @param accessToken - bearer token issued by {@link exchange}.
+ * @returns the authenticated principal, or undefined for every rejected token.
+ */
+authenticate(accessToken: string): RemotePrincipal | undefined
+
+/**
+ * Project the paired-device roster for the trusted administration surface.
+ * @returns the durable device registry without credential hashes or access tokens.
+ */
+listDevices(): RemoteDeviceView[]
+
+/**
+ * Revoke one device and all of its current access sessions.
+ * @param deviceId - durable identifier of the paired device.
+ * @returns a promise settled after the registry is persisted.
+ */
+revoke(deviceId: string): Promise<void>
+
+/**
+ * Begin or reconcile one authenticated remote command without retaining its body.
+ * @param deviceId - authenticated device that owns the command namespace.
+ * @param commandId - caller-stable idempotency identity.
+ * @param requestHash - canonical request digest used only for conflict detection.
+ * @returns whether the caller may execute, must wait, or can reuse a prior result.
+ */
+beginCommand(deviceId: string, commandId: string, requestHash: string): Promise<RemoteCommandBeginResult>
+
+/**
+ * Cache the small carrier response for an accepted remote command.
+ * @param deviceId - authenticated device that owns the command namespace.
+ * @param commandId - caller-stable idempotency identity.
+ * @param requestHash - canonical request digest accepted by {@link beginCommand}.
+ * @param response - bounded response safe to return on an identical retry.
+ * @returns a promise settled after the receipt is durable.
+ */
+settleCommand( deviceId: string, commandId: string, requestHash: string, response: RemoteCommandResponse, ): Promise<void>
+
+/**
+ * Fence a command whose business outcome could not be proven after acceptance.
+ * @param deviceId - authenticated device that owns the command namespace.
+ * @param commandId - caller-stable idempotency identity.
+ * @param requestHash - canonical request digest accepted by {@link beginCommand}.
+ * @returns a promise settled after the indeterminate state is durable.
+ */
+markCommandIndeterminate(deviceId: string, commandId: string, requestHash: string): Promise<void>
+```
+
+Source: [`packages/host/remote-auth/src/index.ts:113`](../../packages/host/remote-auth/src/index.ts)
+
 <a id="credentials-events"></a>
 
 ### `credentials/*` events

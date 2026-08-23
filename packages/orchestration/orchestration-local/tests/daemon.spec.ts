@@ -1,16 +1,19 @@
 import { once } from 'node:events'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
+import { OrchestrationArtifactRef, type LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import { OrchestrationDaemonClient } from '../src/client.ts'
 import { canonicalSha256 } from '../src/canonical.ts'
 import { OrchestrationDaemon } from '../src/daemon.ts'
 
 const cleanup: Array<() => Promise<void>> = []
+const run = promisify(execFile)
 afterEach(async () => {
   for (const action of cleanup.splice(0).reverse()) await action()
 })
@@ -22,6 +25,7 @@ interface FakeResidentRequest {
   laneId?: string
   profile?: { model: string }
   prompt?: Array<{ type: string; text?: string }>
+  workspace: string
 }
 
 class FakeResidentClient {
@@ -33,6 +37,8 @@ class FakeResidentClient {
   defer = false
   failNext = 0
   failNextCode = 'RUNTIME_UNAVAILABLE'
+  claudeQuotaKnown = true
+  onExecute?: (request: FakeResidentRequest) => Promise<void>
   private readonly deferredResolvers: Array<() => void> = []
   turns = new Map<string, { state: 'running' | 'settled'; result?: TestResult }>()
   residentEvents = new Map<string, Array<{
@@ -65,10 +71,18 @@ class FakeResidentClient {
           { model: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', efforts: [] },
           { model: 'claude-opus-4-6', displayName: 'Claude Opus 4.6', efforts: [] },
         ],
+      ...operatorId !== 'claude-code' || !this.claudeQuotaKnown ? {} : {
+        quotaPools: [{
+          poolId: 'claude-test', displayName: 'Claude test quota',
+          models: ['claude-sonnet-4-6', 'claude-opus-4-6'], meter: 'native-subscription' as const,
+          primary: { usedPercent: 50 }, observedAt: '2026-08-21T00:00:00.000Z',
+        }],
+      },
     }))
   }
 
   async execute(request: FakeResidentRequest) {
+    await this.onExecute?.(request)
     this.requests.push(request)
     this.starts.push(`${request.operatorId}:${request.commandId}`)
     const turnId = `turn:${request.commandId}`
@@ -135,7 +149,9 @@ async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boole
   for (;;) {
     const value = await read()
     if (accept(value)) return value
-    if (Date.now() >= deadline) throw new Error('orchestration state did not converge')
+    if (Date.now() >= deadline) {
+      throw new Error(`orchestration state did not converge: ${JSON.stringify(value)}`)
+    }
     await new Promise(resolve => setTimeout(resolve, 20))
   }
 }
@@ -271,12 +287,22 @@ describe('orchestration daemon', () => {
       request.prompt?.map(block => block.text).join('\n').includes('Do not delegate') === true
     ))).toBe(true)
     const executionPlan = daemon.store.readArtifact(completed.nodes[0]!.executionPlanRef!) as {
+      taskRef: string
       allocationPlan: { model: string; suggestedParallelism: number }
       rlmWorkerPlan?: { model: string; tier: string }
     }
     expect(executionPlan).toMatchObject({
       allocationPlan: { model: 'claude-opus-4-6', suggestedParallelism: 1 },
       rlmWorkerPlan: { model: 'gpt-5.6-luna', tier: 'low' },
+    })
+    expect(daemon.store.readArtifact(OrchestrationArtifactRef(executionPlan.taskRef))).toMatchObject({
+      version: 1,
+      repository: { workspace: await realpath(workspace) },
+      objective: 'Synthesize alternatives.',
+      models: {
+        executor: { operatorId: 'claude-code', model: 'claude-opus-4-6', tier: 'high' },
+      },
+      quota: { class: 'native-subscription' },
     })
     const events = await client.readEvents({ runId: run.runId, limit: 200 })
     expect(events.events.filter(value => value.type === 'rlm.branch.settled')).toHaveLength(4)
@@ -349,6 +375,9 @@ describe('orchestration daemon', () => {
       `codex:orch:${String(started.runId)}:code:1`,
       `claude-code:orch:${String(started.runId)}:review:1`,
     ])
+    expect(fake.requests[1]?.prompt?.map(block => block.text).join('\n')).toContain(
+      `completed orch:${String(started.runId)}:code:1`,
+    )
     const events = await client.readEvents({ runId: started.runId, limit: 200 })
     expect(events.events.map(value => value.type)).toEqual(expect.arrayContaining([
       'intent.compiled', 'graph.compiled', 'capsule.resolved', 'context.compiled',
@@ -364,6 +393,47 @@ describe('orchestration daemon', () => {
     expect(String(codexEvidence?.data.outputPreview)).toContain('completed orch:')
     expect(events.events.filter(value => value.type === 'node.operator.progress').map(value => value.data.phase))
       .toEqual(expect.arrayContaining(['reasoning', 'tool_activity', 'finalizing']))
+  })
+
+  it('runs mutating nodes in isolated worktrees and integrates their branches into the certified repository', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-worktree-'))
+    const root = join(home, 'orchestrations')
+    const repository = join(home, 'repository')
+    await mkdir(repository)
+    await run('git', ['-C', repository, 'init', '-b', 'main'])
+    await writeFile(join(repository, 'README.md'), 'base\n')
+    await run('git', ['-C', repository, 'add', 'README.md'])
+    await run('git', [
+      '-C', repository,
+      '-c', 'user.name=DSH Test',
+      '-c', 'user.email=dsh-test@local',
+      'commit', '-m', 'base',
+    ])
+    const baseSha = (await run('git', ['-C', repository, 'rev-parse', 'HEAD'])).stdout.trim()
+    const fake = new FakeResidentClient()
+    fake.onExecute = async (request) => {
+      const file = request.commandId.includes(':code:') ? 'implementation.txt' : 'verification.txt'
+      await writeFile(join(request.workspace, file), `${request.operatorId}\n`)
+    }
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const fixture = graph(repository)
+    const compilation = await client.compile({
+      intent: { request: 'Implement and verify in isolated branches.' },
+      graph: { ...fixture, baseSha, workspaceIsolation: 'git-worktree' },
+    })
+    const started = await client.start({ compilationId: compilation.compilationId })
+    const settled = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+    expect(settled.nodes.map(value => value.state)).toEqual(['passed', 'passed'])
+    await expect(readFile(join(repository, 'implementation.txt'), 'utf8')).resolves.toBe('codex\n')
+    await expect(readFile(join(repository, 'verification.txt'), 'utf8')).resolves.toBe('claude-code\n')
+    expect(fake.requests.every(request => request.workspace !== repository)).toBe(true)
+    expect(new Set(fake.requests.map(request => request.workspace)).size).toBe(2)
+    const events = await client.readEvents({ runId: started.runId, limit: 200 })
+    expect(events.events.filter(value => value.type === 'worktree.prepared')).toHaveLength(2)
+    expect(events.events.filter(value => value.type === 'worktree.integrated')).toHaveLength(2)
   })
 
   it('does not dispatch an intent that requires clarification', async () => {
@@ -421,9 +491,31 @@ describe('orchestration daemon', () => {
     cleanup.push(async () => { await second.close(); await rm(home, { recursive: true, force: true }) })
     const recovered = await client.inspect(String(started.runId))
     expect(recovered).toMatchObject({ runId: started.runId, state: 'awaiting_approval', revision: started.revision })
-    const approved = await client.decide({ runId: started.runId, expectedRevision: recovered.revision, decision: 'approve', reason: 'test approval' })
+    const approved = await client.decide({ commandId: 'approve-recovered', runId: started.runId, expectedRevision: recovered.revision, decision: 'approve', reason: 'test approval' })
     expect(approved.state).toBe('running')
     await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+  })
+
+  it('returns one cached control result for an identical command and rejects identity reuse', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-command-receipt-'))
+    const root = join(home, 'o')
+    const fake = new FakeResidentClient()
+    fake.defer = true
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const compilation = await client.compile({ intent: { request: 'Command receipt fixture.' }, graph: graph(home, 'medium') })
+    const started = await client.start({ compilationId: compilation.compilationId })
+    const request = {
+      commandId: 'approve-command-1', runId: started.runId, expectedRevision: started.revision,
+      decision: 'approve' as const, reason: 'approve once',
+    }
+    const accepted = await client.decide(request)
+    const replay = await client.decide(request)
+    expect(replay).toEqual(accepted)
+    await expect(client.decide({ ...request, decision: 'reject' })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
+    fake.resolveAllDeferred()
   })
 
   it('reconciles an accepted native turn after the orchestration daemon restarts', async () => {
@@ -546,7 +638,7 @@ describe('orchestration daemon', () => {
     expect(waiting).toMatchObject({ state: 'awaiting_approval' })
     expect(waiting.nodes[0]).toMatchObject({ state: 'awaiting_recompile', capabilityGeneration: 1 })
     await expect(client.decide({
-      runId: run.runId, expectedRevision: waiting.revision, decision: 'approve', reason: 'cannot widen in place',
+      commandId: 'approve-widening', runId: run.runId, expectedRevision: waiting.revision, decision: 'approve', reason: 'cannot widen in place',
     })).rejects.toMatchObject({ code: 'RUN_STATE_CONFLICT' })
   })
 
@@ -568,6 +660,7 @@ describe('orchestration daemon', () => {
         readScopes: [],
         writeScopes: [`parallel/${String(index)}`],
         operator: { preferredIds: [index === 0 ? 'codex' : 'claude-code'] },
+        rlm: { mode: 'disabled' as const, maxDepth: 1, maxChildren: 2, maxTurns: 4 },
       })),
     }
     const compilation = await client.compile({ intent: { request: 'Parallel fixture.' }, graph: parallel })
@@ -643,6 +736,32 @@ describe('orchestration daemon', () => {
       state: 'blocked',
       blockers: [{ code: 'EXPLICIT_MODEL_UNAVAILABLE' }],
     })
+  })
+
+  it('does not auto-schedule Claude while its protected subscription quota is unknown', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-claude-quota-'))
+    const root = join(home, 'o')
+    const fake = new FakeResidentClient()
+    fake.claudeQuotaKnown = false
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const base = graph(home)
+    const planningNode = { ...base.nodes[0]! }
+    delete planningNode.operator
+    const quotaProtected = {
+      ...base,
+      nodes: [{
+        ...planningNode,
+        title: 'Architecture review', role: 'architect', task: 'Review the architecture.', phase: 'planning' as const,
+      }],
+    }
+    const compilation = await client.compile({ intent: { request: 'Quota-protected planning fixture.' }, graph: quotaProtected })
+    const started = await client.start({ compilationId: compilation.compilationId })
+    await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+    expect(fake.requests).toHaveLength(1)
+    expect(fake.requests[0]).toMatchObject({ operatorId: 'codex', profile: { model: 'gpt-5.6-sol' } })
   })
 
   it('serializes conflicting scopes and retries only an explicitly retryable failure', async () => {

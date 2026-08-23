@@ -30,6 +30,18 @@ export interface ModelQuotaPool {
   readonly observedAt: string
 }
 
+/** Admission policy applied before a native-subscription offer may be scheduled. */
+export interface ModelQuotaGuard {
+  /** Whether an offer without a product-reported quota snapshot may start. */
+  readonly unknownQuota: 'allow' | 'block'
+  /** Remaining percentage reserved for a user-owned workload such as Claude PPT authoring. */
+  readonly protectedRemainingPercent: number
+  /** Stop admitting new work at or below this remaining percentage. */
+  readonly stopAdmissionAtRemainingPercent: number
+  /** Whether unused allowance may increase priority as its reset approaches. */
+  readonly accelerateBeforeReset: boolean
+}
+
 /** One currently executable product/model lane. */
 export interface ModelExecutionOffer {
   readonly offerId: string
@@ -44,6 +56,7 @@ export interface ModelExecutionOffer {
   readonly activeCount: number
   readonly tags: readonly string[]
   readonly quotaPool?: ModelQuotaPool
+  readonly quotaGuard?: ModelQuotaGuard
   readonly profile?: PhysicalOperatorExecutionPreference
 }
 

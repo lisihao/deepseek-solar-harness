@@ -87,6 +87,9 @@ flowchart LR
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
   pkg_ui_orchestration["ui-orchestration"]
+  pkg_remote_auth["remote-auth"]
+  svc_remoteAuth["ctx.remoteAuth<br/>Remote device authentication authority"]
+  pkg_connection["connection"]
   pkg_storage["storage"]
   svc_storage["ctx.storage<br/>Non-session storage hub"]
   pkg_storage_json["storage-json"]
@@ -210,7 +213,6 @@ flowchart LR
   pkg_directory_picker_browse["directory-picker-browse"]
   pkg_webserver["webserver"]
   svc_webServer["ctx.webServer<br/>HTTP route registration"]
-  pkg_connection["connection"]
   pkg_modules["modules"]
   pkg_hmr["hmr"]
   svc_clientModules["ctx.clientModules<br/>Client plugin graph host"]
@@ -288,6 +290,7 @@ flowchart LR
   pkg_physical_operator_subagent --> svc_physicalOperators
   pkg_plan_mode --> svc_planMode
   pkg_pwsh_local --> svc_shell
+  pkg_remote_auth --> svc_remoteAuth
   pkg_resident_operator --> svc_residentOperators
   pkg_resident_operator_local --> svc_residentOperators
   pkg_rlm_strategy --> svc_rlmStrategy
@@ -388,6 +391,8 @@ flowchart LR
   svc_orchestrations --> pkg_tool_orchestration
   svc_orchestrations --> pkg_ui_orchestration
   svc_physicalOperators --> pkg_tool_physical_operator
+  svc_remoteAuth --> pkg_connection
+  svc_remoteAuth --> pkg_ui_orchestration
   svc_residentOperators --> pkg_physical_operator_resident
   svc_rlmStrategy --> pkg_orchestration_local
   svc_sandbox --> pkg_bash_sandbox
@@ -495,6 +500,7 @@ flowchart LR
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 注册与 Provider 无关的一次性模型通道；计费 DeepSeek Provider 仍是最后兜底执行路径。 |
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 在节点 Attempt 内封存有界递归执行指令，永不创建或修改全局 TaskGraph。 |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | 持有与 Provider 无关的编译、运行、事件、控制、审批、不确定结果处置和能力更新 API；本地 daemon 是唯一写者。 |
+| `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Server 是配对、凭据交换、固定设备范围、撤销和无正文命令回执的唯一写者；传输和编排投影消费已认证 principal，但不持有凭据状态。 |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | 等待所有已配置后端就绪，然后将领域形态发布为一个受生命周期约束的服务，用于类型化持久状态。 |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | 拥有本地逐 assistant 消息反馈、生命周期与目标校验、逐条目 compare-and-set 及 Host 一元 Remote 契约，且不进入 Session 历史或遥测。 |

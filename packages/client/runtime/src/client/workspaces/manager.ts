@@ -121,6 +121,23 @@ export class WorkspaceManager {
   }
 
   /**
+   * Replace projections from one gap-free Server snapshot before cursor replay.
+   * @param items - Server-owned Workspace projections.
+   * @param archivedSessionIds - Server-owned archived Session identities.
+   */
+  replaceRemoteBaseline(
+    items: readonly WorkspaceView[],
+    archivedSessionIds: readonly SessionId[],
+  ): void {
+    this.installViews(items.filter(workspace => !this.removedIds.has(workspace.workspaceId)))
+    this.installArchived(archivedSessionIds)
+    this.state = 'idle'
+    this.phase = 'ready'
+    this.error = null
+    this.notifier.markDirty()
+  }
+
+  /**
    * Create or resolve a real Workspace, then publish its returned snapshot
    * without waiting for the changed frame.
    * @param input - the existing absolute path to adopt.

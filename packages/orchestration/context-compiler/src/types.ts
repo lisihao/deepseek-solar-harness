@@ -5,6 +5,13 @@ export interface ContextSourceRef {
   readonly required: boolean
 }
 
+/** Bounded content materialized by the authority that owns one source ref. */
+export interface ContextSourceMaterialV1 {
+  readonly ref: string
+  readonly text: string
+  readonly truncated: boolean
+}
+
 /** Context policy certified by the TaskGraph. */
 export interface ContextPolicy {
   readonly maxTokens: number
@@ -20,6 +27,8 @@ export interface ContextCompileRequest {
   readonly workspace: string
   readonly task: string
   readonly sourceRefs: readonly ContextSourceRef[]
+  /** Optional bounded source bodies; refs without material remain lineage-only. */
+  readonly sourceMaterials?: readonly ContextSourceMaterialV1[]
   readonly readScopes: readonly string[]
   readonly writeScopes: readonly string[]
   readonly acceptance: readonly string[]
@@ -36,6 +45,7 @@ export interface ContextPacketV1 {
   readonly workspace: string
   readonly task: string
   readonly included: readonly ContextSourceRef[]
+  readonly sourceMaterials: readonly ContextSourceMaterialV1[]
   readonly summarized: readonly ContextSourceRef[]
   readonly dropped: readonly { readonly source: ContextSourceRef; readonly reason: string }[]
   readonly estimatedTokens: number

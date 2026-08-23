@@ -257,7 +257,7 @@ function GraphView(props: {
       <Stage label="RLM" complete={eventTypes.has('rlm.resolved')} />
       <Stage label="Harness" complete={eventTypes.has('harness.snapshot') || run.admission?.continualHarness === 'off'} />
       <Stage label="Context" complete={eventTypes.has('context.compiled')} />
-      <Stage label="Plan" complete={eventTypes.has('execution_plan.sealed')} />
+      <Stage label="Contract/Plan" complete={eventTypes.has('execution_plan.sealed')} />
       <Stage label="Operator" complete={eventTypes.has('node.dispatched')} />
     </div>
     {run.blockers.length > 0 && <Blockers blockers={run.blockers} />}
@@ -341,7 +341,10 @@ function RunControls(props: {
   const run = props.run
   const control = (action: DesktopOrchestrationControlRequest['action']): void => {
     if (['cancel', 'reject'].includes(action) && !window.confirm(`确认${action === 'cancel' ? '取消' : '拒绝'}这个编排任务？`)) return
-    void props.onControl({ action, runId: run.runId, expectedRevision: run.revision, reason: 'DSH Desktop 用户操作' })
+    void props.onControl({
+      commandId: crypto.randomUUID(), action, runId: run.runId,
+      expectedRevision: run.revision, reason: 'DSH Desktop 用户操作',
+    })
   }
   return <div className="dshDesktopOrchestrationControls">
     {run.state === 'running' && <button disabled={props.disabled} type="button" onClick={() => { control('pause') }}>暂停</button>}
@@ -421,6 +424,9 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
   if (event.type === 'capsule.resolved') {
     return event.data.cleanContext === true ? 'Clean-task Context Capsule 已注入' : 'Capsule 未确认干净上下文'
   }
+  if (event.type === 'execution_plan.sealed') {
+    return `Task Contract ${shortRef(String(event.data.taskContractRef ?? 'N/A'))} · Plan ${shortRef(String(event.data.ref ?? 'N/A'))}`
+  }
   if (event.type === 'node.dispatched') {
     if (event.data.executor === 'resident-rlm') {
       return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · DSH 控制的 Resident RLM`
@@ -479,6 +485,7 @@ function control(
   action: 'abandon' | 'retry',
 ): DesktopOrchestrationControlRequest {
   return {
+    commandId: crypto.randomUUID(),
     action,
     runId: run.runId,
     nodeId: node.id,
@@ -524,6 +531,8 @@ function eventLabel(type: string): string {
     'rlm.branch.settled': 'RLM 分支已完成', 'rlm.synthesis.dispatched': 'RLM 高阶综合已派发',
     'rlm.execution.settled': 'RLM 执行已完成', 'rlm.execution.failed': 'RLM 执行失败',
     'harness.snapshot': 'Continuous Harness 已快照',
+    'worktree.prepared': '隔离 Worktree 已准备', 'worktree.integrated': '隔离分支已集成',
+    'worktree.integration_failed': '隔离分支集成失败',
     'model.allocated': '模型与配额已分配', 'context.compiled': 'Context 已编译', 'execution_plan.sealed': 'ExecutionPlan 已封存',
     'node.dispatched': '执行已派发', 'node.operator.progress': 'Resident 执行进度',
     'node.evidence.accepted': 'Evidence 已验收',

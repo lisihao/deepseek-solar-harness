@@ -84,6 +84,75 @@ describe('connection client apply', () => {
     expect((await mount()).isLoopback).toBe(false)
   })
 
+  it('uses snapshot + cursor projection in the Desktop frontend role', async () => {
+    ;(globalThis as Win).location = {
+      hostname: 'server.example',
+      search: '?dsh-deployment-role=frontend',
+      origin: 'https://server.example',
+    }
+    ;(globalThis as WebSocketGlobal).WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const request = JSON.parse(init.body) as { rpcId: string; method: string }
+      const host = { version: '3.2.0', cwd: '/srv/dsh', attachedSessions: 1, canOpenPath: false }
+      const value = request.method === 'describe'
+        ? {
+          protocol: { major: 1, minor: 1 }, deploymentId: 'deployment-frontend',
+          cursor: { deploymentId: 'deployment-frontend', sequence: 7 },
+          describedAt: '2026-08-24T00:00:00.000Z', scope: 'cockpit',
+          capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
+          host,
+        }
+        : {
+          protocol: { major: 1, minor: 1 }, deploymentId: 'deployment-frontend',
+          cursor: { deploymentId: 'deployment-frontend', sequence: 7 },
+          capturedAt: '2026-08-24T00:00:00.000Z', host,
+          sessions: [], workspaces: [], archivedSessionIds: [],
+        }
+      return new Response(JSON.stringify({
+        type: 'server-response', rpcId: request.rpcId, result: { ok: true, value },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const handle = await mount()
+    expect(handle.transport).toBe('remote-projection')
+    const snapshots: number[] = []
+    const hostFrames: string[] = []
+    const connected = vi.fn()
+    const loop = handle.start({
+      onRemoteSnapshot: (_description, snapshot) => { snapshots.push(snapshot.cursor.sequence) },
+      onHostEnvelope: (envelope) => { hostFrames.push(envelope.payload.type) },
+      onConnected: connected,
+    }, { backoffBaseMs: 0 })
+    try {
+      await vi.waitFor(() => {
+        expect(snapshots).toEqual([7])
+        expect(sockets).toHaveLength(1)
+        expect(connected).toHaveBeenCalledOnce()
+      })
+      expect(sockets[0]?.url).toBe(
+        'wss://server.example/remote-sync/events?deploymentId=deployment-frontend&since=7',
+      )
+      sockets[0]?.receive(JSON.stringify({
+        type: 'remote-sync/event', sequence: 8, stream: 'host',
+        envelope: {
+          rpcId: 'rpc-remote-8',
+          payload: { type: 'host/session-status', sessionId: 'session-remote', running: true },
+        },
+      }))
+      await vi.waitFor(() => { expect(hostFrames).toEqual(['host/session-status']) })
+      expect(fetch.mock.calls.map((call) => {
+        const input = call[0]
+        return typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      })).toEqual([
+        'https://server.example/remote-sync/describe',
+        'https://server.example/remote-sync/snapshot',
+      ])
+    } finally {
+      loop.stop()
+      fetch.mockRestore()
+    }
+  })
+
   it('start() hands out one loop, rejects a second consumer, and stop() aborts the streams', async () => {
     ;(globalThis as Win).location = { hostname: 'localhost', search: '?fixture' }
     const handle = await mount()

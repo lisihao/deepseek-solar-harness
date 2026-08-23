@@ -51,8 +51,15 @@ interface ResidentInvocation {
   args: string[]
 }
 
+/** Manage authenticated remote Frontend devices against a running local Server. */
+interface RemoteInvocation {
+  mode: 'remote'
+  /** Raw remote command arguments parsed by the dedicated adapter. */
+  args: string[]
+}
+
 /** The resolved `dsh` invocation. Help, version, and errors exit inside {@link parseDshArgs}. */
-export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation | ResidentInvocation
+export type DshInvocation = ProfileInvocation | DumpConfigInvocation | PluginInvocation | ResidentInvocation | RemoteInvocation
 
 /** Launcher flags shared by the default command and the `web` alias. */
 interface BootOptions {
@@ -71,12 +78,14 @@ const collect = (value: string, previous: string[] = []): string[] => [...previo
 const HELP_EXAMPLES = `
 Examples:
   dsh --profile web                          boot the web profile (same as: dsh web)
+  dsh server                                 boot the persistent server profile
   dsh --profile headless "run the tests"     answer one task, print the result, and exit
   dsh --profile tui --patch ./extra.yml      boot a custom profile with one extra overlay
   dsh --profile tui --resume <session>       arguments after the launcher flags reach the app
   dsh --profile web --help                   the web app's own flags and help
   dsh plugin --profile tui add <package>     install a plugin into the tui profile
   dsh resident list                          list durable resident sessions
+  dsh remote pair --scope pocket             issue a one-time phone pairing code
 `
 
 /**
@@ -92,7 +101,12 @@ function resolveBoot(program: Command, profile: string, options: BootOptions, ar
   const patches = options.patch ?? []
   if (patches.includes('')) program.error('error: --patch needs a path')
   if (options.dumpConfig !== true && options.dumpDefaultConfig !== true) {
-    return { mode: 'profile', profile, patches, args }
+    return {
+      mode: 'profile',
+      profile,
+      patches,
+      args: profile === 'server' ? [...args, '--deployment-role', 'server'] : args,
+    }
   }
   if (options.dumpConfig === true && options.dumpDefaultConfig === true) {
     program.error('error: --dump-config and --dump-default-config are mutually exclusive')
@@ -176,6 +190,21 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       resolved = resolveBoot(web, 'web', options, args)
     })
 
+  const server = program.command('server').description('boot the persistent server profile; the web app\'s own flags follow')
+  server
+    .helpOption(false)
+    .allowUnknownOption()
+    .passThroughOptions()
+    .enablePositionalOptions()
+    .argument('[args...]', 'arguments for the server app (see: dsh server --help)')
+    .option('--patch <path>', 'extra patch-list overlay applied after the profile layer (repeatable)', collect)
+    .option('--dump-config', 'print the composed server-profile tree (with the user layer and any --patch) and exit')
+    .option('--dump-default-config', 'print the server profile\'s bundle layers (no user layer) and exit')
+    .action((args: string[], options: BootOptions) => {
+      rejectParentOptions('server')
+      resolved = resolveBoot(server, 'server', options, args)
+    })
+
   const plugin = program.command('plugin').description('manage a profile\'s plugins by forwarding the remaining arguments to pnpm in the profile directory')
   plugin
     .requiredOption('--profile <name>', 'the profile whose plugins to manage (initialized on first use)')
@@ -196,6 +225,16 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
       rejectParentOptions('resident')
       if (args.length === 0) program.error('error: resident needs a command (list, inspect, attach, interrupt, reset, resolve-indeterminate, daemon)')
       resolved = { mode: 'resident', args }
+    })
+
+  const remote = program.command('remote').description('manage authenticated Frontend devices on a running local Server')
+  remote
+    .allowUnknownOption()
+    .argument('[args...]', 'remote command and arguments (pair)')
+    .action((args: string[]) => {
+      rejectParentOptions('remote')
+      if (args.length === 0) program.error('error: remote needs a command (pair)')
+      resolved = { mode: 'remote', args }
     })
 
   try {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-expect-error The executable acceptance script is intentionally plain ESM.
-import { assertParallelWorkerEvents, assertSerializedScopeWorkerEvents, resolveSubscriptionE2EMode } from '../scripts/verify-installed-orchestration-e2e.mjs'
+import { assertParallelWorkerEvents, assertSerializedScopeWorkerEvents, countNativeSubscriptionTurns, resolveSubscriptionE2EMode } from '../scripts/verify-installed-orchestration-e2e.mjs'
 
 describe('installed orchestration E2E event assertions', () => {
   it('requires explicit authorization and defaults to the minimal subscription matrix', () => {
@@ -11,6 +11,17 @@ describe('installed orchestration E2E event assertions', () => {
       DSH_ALLOW_SUBSCRIPTION_E2E: '1',
       DSH_SUBSCRIPTION_E2E_FULL_MATRIX: '1',
     })).toBe('full')
+  })
+
+  it('counts physical RLM turns instead of one composite Scheduler node', () => {
+    expect(countNativeSubscriptionTurns([
+      { type: 'node.dispatched', data: { executor: 'resident-rlm' } },
+      { type: 'rlm.branch.dispatched', data: {} },
+      { type: 'rlm.branch.dispatched', data: {} },
+      { type: 'rlm.synthesis.dispatched', data: {} },
+      { type: 'node.dispatched', data: {} },
+      { type: 'node.dispatched', data: { executor: 'model-worker' } },
+    ])).toBe(4)
   })
 
   it('accepts parallel workers that retry on a different quota pool', () => {

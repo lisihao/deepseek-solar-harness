@@ -42,6 +42,7 @@ describe('orchestration Desktop panel transport', () => {
     vi.stubGlobal('fetch', fetch)
 
     await expect(controlOrchestration({
+      commandId: 'command-pause-1',
       action: 'pause',
       runId: 'run-1',
       expectedRevision: 3,
@@ -50,7 +51,7 @@ describe('orchestration Desktop panel transport', () => {
     expect(fetch).toHaveBeenCalledWith('/api/orchestrations', expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({ 'X-DSH-Orchestration-Control': '1' }),
-      body: JSON.stringify({ action: 'pause', runId: 'run-1', expectedRevision: 3, reason: 'test' }),
+      body: JSON.stringify({ commandId: 'command-pause-1', action: 'pause', runId: 'run-1', expectedRevision: 3, reason: 'test' }),
     }))
   })
 
@@ -78,6 +79,13 @@ describe('orchestration Desktop panel transport', () => {
       time: '2026-08-20T00:00:02.000Z',
       data: { operatorId: 'codex', contextIsolation: 'fresh-native-thread', laneId: 'orch:run:node:1' },
     })).toBe('codex · fresh-native-thread · lane 1')
+    expect(eventDetail({
+      sequence: 31,
+      runId: 'run-1',
+      type: 'execution_plan.sealed',
+      time: '2026-08-20T00:00:02.000Z',
+      data: { ref: 'sha256:plan1234567890', taskContractRef: 'sha256:contract1234567890' },
+    })).toBe('Task Contract contract12 · Plan plan123456')
     expect(eventDetail({
       sequence: 4,
       runId: 'run-1',

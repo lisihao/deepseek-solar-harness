@@ -802,4 +802,35 @@ describe('resolveBase', () => {
       delete globalWithLocation.location
     }
   })
+
+  it('retries one remote prompt with the same rpcId after a carrier drop', async () => {
+    class PromptProbe extends AbstractApiClient {
+      bodies: string[] = []
+      protected async doFetch(_input: URL, init?: RequestInit): Promise<Response> {
+        if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+        this.bodies.push(init.body)
+        if (this.bodies.length === 1) throw new Error('connection reset')
+        const request = JSON.parse(this.bodies[1]!) as { rpcId: string }
+        return Response.json({
+          type: 'server-response',
+          rpcId: request.rpcId,
+          result: { ok: true, value: { accepted: true } },
+        })
+      }
+    }
+    const globalWithLocation = globalThis as { location?: { origin?: string } }
+    globalWithLocation.location = { origin: 'https://harness.example' }
+    try {
+      const probe = new PromptProbe()
+      await expect(probe.sessions.prompt({
+        sessionId: 'session-1' as never,
+        mode: 'queue',
+        content: [{ type: 'text', text: 'continue' }],
+      })).resolves.toMatchObject({ result: { ok: true } })
+      expect(probe.bodies).toHaveLength(2)
+      expect(probe.bodies[1]).toBe(probe.bodies[0])
+    } finally {
+      delete globalWithLocation.location
+    }
+  })
 })

@@ -70,7 +70,7 @@ Provider-neutral context projection compiler.
 abstract compile(request: ContextCompileRequest): Promise<ContextPacketV1>
 ```
 
-Source: [`packages/orchestration/context-compiler/src/index.ts:30`](../../packages/orchestration/context-compiler/src/index.ts)
+Source: [`packages/orchestration/context-compiler/src/index.ts:31`](../../packages/orchestration/context-compiler/src/index.ts)
 
 <a id="ctxcontinualharness--continualharnessservice-abstract-seam"></a>
 
@@ -128,7 +128,7 @@ Scheduler-facing Service Definition; implementations remain replaceable plugins.
 abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
 ```
 
-Source: [`packages/orchestration/model-allocation/src/index.ts:92`](../../packages/orchestration/model-allocation/src/index.ts)
+Source: [`packages/orchestration/model-allocation/src/index.ts:105`](../../packages/orchestration/model-allocation/src/index.ts)
 
 <a id="ctxmodelworkers--modelworkerruntime"></a>
 
@@ -230,7 +230,7 @@ abstract resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promi
 abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:366`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:447`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmstrategy--rlmstrategyservice-abstract-seam"></a>
 

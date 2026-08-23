@@ -52,6 +52,11 @@ switch (invocation.mode) {
     process.exitCode = await runResidentCommand(invocation.args)
     break
   }
+  case 'remote': {
+    const { runRemoteCommand } = await import('./remote.ts')
+    process.exitCode = await runRemoteCommand(invocation.args)
+    break
+  }
   default:
     invocation satisfies never
     throw new Error(`dsh: unhandled invocation mode ${JSON.stringify(invocation)}`)

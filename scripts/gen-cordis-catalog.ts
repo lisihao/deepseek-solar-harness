@@ -84,6 +84,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   permissionPresets: 'permission-presets.md',
   physicalOperators: 'physical-operator.md',
   orchestrations: 'orchestration.md',
+  remoteAuth: 'credentials.md',
   residentOperators: 'physical-operator.md',
   rlmStrategy: 'orchestration.md',
   planMode: 'plan.md',
@@ -224,6 +225,14 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  * appear on more than one page.
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
+  AccessSession: 'credentials.md',
+  DeviceCredential: 'credentials.md',
+  PairingChallenge: 'credentials.md',
+  RemoteCommandBeginResult: 'credentials.md',
+  RemoteCommandResponse: 'credentials.md',
+  RemoteDeviceScope: 'credentials.md',
+  RemoteDeviceView: 'credentials.md',
+  RemotePrincipal: 'credentials.md',
   CapabilityBindingPlanV1: 'orchestration.md',
   CapabilityCapsuleManifestV1: 'orchestration.md',
   CapabilityCapsuleRef: 'orchestration.md',

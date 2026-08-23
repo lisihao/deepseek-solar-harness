@@ -17,11 +17,19 @@ function remaining(window: ModelQuotaWindow | undefined): number {
   return window === undefined ? 100 : Math.max(0, 100 - window.usedPercent)
 }
 
-function poolRemaining(offer: ModelExecutionOffer): number {
+function poolRemaining(offer: ModelExecutionOffer): number | undefined {
   const pool = offer.quotaPool
-  if (pool === undefined) return 100
+  if (pool === undefined) return undefined
   const windows = [pool.primary, pool.secondary].filter(window => window !== undefined)
-  return windows.length === 0 ? 100 : Math.min(...windows.map(window => remaining(window)))
+  return windows.length === 0 ? undefined : Math.min(...windows.map(window => remaining(window)))
+}
+
+function quotaAdmitted(offer: ModelExecutionOffer): boolean {
+  if (offer.source === 'metered-api') return true
+  const observed = poolRemaining(offer)
+  const guard = offer.quotaGuard
+  if (observed === undefined) return guard?.unknownQuota !== 'block'
+  return observed > (guard?.stopAdmissionAtRemainingPercent ?? 0)
 }
 
 function resetUrgency(window: ModelQuotaWindow | undefined, nowSeconds: number): number {
@@ -61,8 +69,12 @@ function poolFit(offer: ModelExecutionOffer, nowSeconds: number): number {
   // A depleted short window therefore makes the lane unavailable even when its
   // weekly bucket still has room.
   const usable = poolRemaining(offer)
-  if (usable <= 0) return -100_000
-  return 1_000 + resetUrgency(pool.primary, nowSeconds) + resetUrgency(pool.secondary, nowSeconds)
+  if (usable === undefined) return 1_000
+  if (!quotaAdmitted(offer)) return -100_000
+  const urgency = offer.quotaGuard?.accelerateBeforeReset === false
+    ? 0
+    : resetUrgency(pool.primary, nowSeconds) + resetUrgency(pool.secondary, nowSeconds)
+  return 1_000 + urgency
 }
 
 function capacityFit(offer: ModelExecutionOffer): number {
@@ -95,7 +107,7 @@ function suggestedParallelism(request: ModelAllocationRequest, qualified: readon
 /** Public deterministic Provider, separately mountable from the Scheduler. */
 export class SubscriptionFirstModelAllocation extends ModelAllocationService {
   allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan> {
-    const qualified = request.offers.filter(offer => offer.available && poolRemaining(offer) > 0)
+    const qualified = request.offers.filter(offer => offer.available && quotaAdmitted(offer))
     const explicitQualified = request.preferredOperatorIds.length === 0
       ? qualified
       : qualified.filter(offer => request.preferredOperatorIds.includes(offer.operatorId))
@@ -132,7 +144,8 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
       return difference === 0 ? left.offerId.localeCompare(right.offerId) : difference
     })
     if (selected === undefined) throw new ModelAllocationError('no qualified model execution capacity is available', 'NO_MODEL_CAPACITY')
-    const urgentCapacity = candidates.filter(offer => offer.quotaPool !== undefined && (
+    const urgentCapacity = candidates.filter(offer => offer.quotaPool !== undefined
+      && offer.quotaGuard?.accelerateBeforeReset !== false && (
       resetUrgency(offer.quotaPool.primary, nowSeconds) > 0 || resetUrgency(offer.quotaPool.secondary, nowSeconds) > 0
     )).length
     return Promise.resolve({
@@ -149,6 +162,9 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
         selected.source === 'native-subscription' ? 'native-subscription-first' : 'metered-api-last-resort',
         request.phase === 'planning' || request.phase === 'verification' ? 'high-tier-quality-gate' : 'worker-tier-throughput',
         ...selected.quotaPool === undefined ? [] : [`quota-pool:${selected.quotaPool.poolId}`],
+        ...selected.quotaGuard === undefined || selected.quotaGuard.protectedRemainingPercent === 0
+          ? []
+          : [`protected-reserve:${String(selected.quotaGuard.protectedRemainingPercent)}%`],
         ...urgentCapacity === 0 ? [] : ['accelerate-before-quota-reset'],
       ],
     })

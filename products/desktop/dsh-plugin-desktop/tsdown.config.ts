@@ -19,6 +19,7 @@ export default defineConfig([
       'native-product-runtime': 'src/native-product-runtime.ts',
       'desktop-terminal': 'src/desktop-terminal.ts',
       'desktop-cli': 'src/desktop-cli.ts',
+      'frontend-setup-preload': 'src/frontend-setup-preload.ts',
       terminal: 'src/terminal.ts',
       'update-checker': 'src/update-checker.ts',
       'update-download': 'src/update-download.ts',
