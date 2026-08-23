@@ -1178,17 +1178,13 @@ export class OrchestrationDaemon {
       controller,
       physicalRuns,
     )
-    const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', updatedAt: now() }
-    this.store.saveAttempt(attempt)
-    const current = this.store.getRun(String(record.snapshot.runId))
-    const next = withRevision(current, current.snapshot)
-    this.store.saveRun(next, [event(next.snapshot.runId, 'node.dispatched', {
+    this.markAttemptRunning(record, spec, acceptedAttempt, {
       executionId: String(plan.executionId),
       operatorId: plan.operatorPlan.operatorId,
       model: plan.allocationPlan.model,
       contextIsolation: 'scheduler-owned-resident-rlm',
       executor: 'resident-rlm',
-    }, next.snapshot.nodes.find(value => value.id === spec.id))])
+    })
     const run = {
       result,
       dispose: async (): Promise<void> => {
@@ -1196,18 +1192,7 @@ export class OrchestrationDaemon {
         await Promise.allSettled(physicalRuns.map(value => value.dispose()))
       },
     }
-    const active: ActiveAttempt = {
-      kind: 'resident-rlm', runId: String(record.snapshot.runId), nodeId: spec.id,
-      attempt: plan.attempt, generation: plan.capabilityGeneration,
-      executionId: String(plan.executionId), sessionId: '', turnId: '',
-      operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
-    }
-    const key = `${String(record.snapshot.runId)}\0${spec.id}`
-    this.active.set(key, active)
-    void run.result.then(
-      async (value) => { if (!this.closing) await this.settleAttempt(active, value) },
-      (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
-    ).finally(() => { this.active.delete(key); void this.tick() })
+    this.trackDelegatedAttempt('resident-rlm', record, spec, plan, run)
   }
 
   private async executeResidentRlm(
@@ -1401,15 +1386,11 @@ export class OrchestrationDaemon {
         signal: controller.signal,
         ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
       })
-      const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', updatedAt: now() }
-      this.store.saveAttempt(attempt)
-      const current = this.store.getRun(String(record.snapshot.runId))
-      const next = withRevision(current, current.snapshot)
-      this.store.saveRun(next, [event(next.snapshot.runId, 'node.dispatched', {
+      const next = this.markAttemptRunning(record, spec, acceptedAttempt, {
         executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model, laneId: String(plan.executionId),
         contextIsolation: 'one-shot-model-worker',
-      }, next.snapshot.nodes.find(value => value.id === spec.id))])
+      })
       const run = {
         result: result.then((workerResult) => {
           if (workerResult.usage !== undefined) {
@@ -1423,18 +1404,7 @@ export class OrchestrationDaemon {
         }),
         dispose: (): Promise<void> => { controller.abort(); return Promise.resolve() },
       }
-      const active: ActiveAttempt = {
-        kind: 'model-worker', runId: String(record.snapshot.runId), nodeId: spec.id,
-        attempt: plan.attempt, generation: plan.capabilityGeneration,
-        executionId: String(plan.executionId), sessionId: '', turnId: '',
-        operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
-      }
-      const key = `${String(record.snapshot.runId)}\0${spec.id}`
-      this.active.set(key, active)
-      void run.result.then(
-        async (value) => { if (!this.closing) await this.settleAttempt(active, value) },
-        (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
-      ).finally(() => { this.active.delete(key); void this.tick() })
+      this.trackDelegatedAttempt('model-worker', record, spec, plan, run)
     } catch (error) {
       this.failDispatch(acceptedAttempt, error)
     }
@@ -1465,6 +1435,44 @@ export class OrchestrationDaemon {
       ...executor === 'resident' ? {} : { executor },
     }, nodes.find(value => value.id === spec.id))])
     return attempt
+  }
+
+  private markAttemptRunning(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    acceptedAttempt: AttemptRecord,
+    dispatchData: Readonly<Record<string, unknown>>,
+  ): RuntimeRunRecord {
+    this.store.saveAttempt({ ...acceptedAttempt, state: 'running', updatedAt: now() })
+    const current = this.store.getRun(String(record.snapshot.runId))
+    const next = withRevision(current, current.snapshot)
+    this.store.saveRun(next, [event(next.snapshot.runId, 'node.dispatched', dispatchData,
+      next.snapshot.nodes.find(value => value.id === spec.id))])
+    return next
+  }
+
+  private trackActiveAttempt(active: ActiveAttempt): void {
+    const key = `${active.runId}\0${active.nodeId}`
+    this.active.set(key, active)
+    void active.run.result.then(
+      async (value) => { if (!this.closing) await this.settleAttempt(active, value) },
+      (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
+    ).finally(() => { this.active.delete(key); void this.tick() })
+  }
+
+  private trackDelegatedAttempt(
+    kind: 'resident-rlm' | 'model-worker',
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    run: ActiveAttempt['run'],
+  ): void {
+    this.trackActiveAttempt({
+      kind, runId: String(record.snapshot.runId), nodeId: spec.id,
+      attempt: plan.attempt, generation: plan.capabilityGeneration,
+      executionId: String(plan.executionId), sessionId: '', turnId: '',
+      operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
+    })
   }
 
   private failDispatch(acceptedAttempt: AttemptRecord, error: unknown): void {
