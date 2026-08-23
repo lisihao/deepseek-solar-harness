@@ -63,6 +63,7 @@ export interface DesktopOrchestrationRun {
   revision: number
   graphRevision: number
   maxParallel?: number
+  effectiveParallelism?: number
   admission?: {
     policy: 'auto' | 'direct' | 'codex' | 'claude-code'
     route: 'taskgraph'

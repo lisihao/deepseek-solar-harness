@@ -247,7 +247,7 @@ function GraphView(props: {
     >
       <p><strong>协作 Trace · {collaborationPolicyLabel(run.admission?.policy)}</strong></p>
       <p>路由：{run.admission?.route === 'taskgraph' ? '持久 TaskGraph' : '历史任务（无 admission 记录）'}</p>
-      <p>并行：{String(activeWorkers)}/{String(run.maxParallel ?? 1)} worker 运行中 · {String(readyWorkers)} 个可派发</p>
+      <p>并行：{String(activeWorkers)}/{String(run.effectiveParallelism ?? run.maxParallel ?? 1)} worker 运行中 · Graph 上限 {String(run.maxParallel ?? 1)} · {String(readyWorkers)} 个可派发</p>
       <p>上下文：{cleanContext ? 'Clean-task Capsule 已注入 · fresh native lane' : '等待 Capsule 解析'}</p>
     </div>
     <div className="dshDesktopOrchestrationPipeline" aria-label="编译流水线">
@@ -406,10 +406,25 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
   if (event.type === 'rlm.resolved') {
     return `${event.data.enabled === true ? '已启用' : '直接执行'} · ${String(event.data.reason ?? 'N/A')} · ${shortRef(String(event.data.planSha256 ?? 'N/A'))}`
   }
+  if (event.type === 'rlm.worker.allocated') {
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)}`
+  }
+  if (event.type === 'rlm.branch.dispatched' || event.type === 'rlm.branch.settled') {
+    return `深度 ${String(event.data.depth ?? 'N/A')} · 分支 ${String(event.data.branch ?? 'N/A')} · ${event.type.endsWith('settled') ? `Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))}` : `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')}`}`
+  }
+  if (event.type === 'rlm.synthesis.dispatched') {
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · 汇总 ${String(Array.isArray(event.data.branchArtifactRefs) ? event.data.branchArtifactRefs.length : 0)} 个叶节点`
+  }
+  if (event.type === 'rlm.execution.settled') {
+    return `递归深度 ${String(event.data.depthUsed ?? 0)} · 共 ${String(event.data.turnsUsed ?? 0)} turn · ${String(event.data.stopReason ?? 'N/A')}`
+  }
   if (event.type === 'capsule.resolved') {
     return event.data.cleanContext === true ? 'Clean-task Context Capsule 已注入' : 'Capsule 未确认干净上下文'
   }
   if (event.type === 'node.dispatched') {
+    if (event.data.executor === 'resident-rlm') {
+      return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · DSH 控制的 Resident RLM`
+    }
     return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.contextIsolation ?? 'N/A')} · lane ${shortRef(String(event.data.laneId ?? 'N/A'))}`
   }
   if (event.type === 'node.operator.progress') {
@@ -432,7 +447,7 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
       : []
     return waiting.length > 0
       ? waiting.join('；')
-      : `运行中 ${String(event.data.activeWorkers ?? 0)}/${String(event.data.maxParallel ?? 'N/A')}`
+      : `运行中 ${String(event.data.activeWorkers ?? 0)}/${String(event.data.effectiveParallelism ?? event.data.maxParallel ?? 'N/A')}`
   }
   return ''
 }
@@ -497,13 +512,18 @@ function waitReasonLabel(code: string): string {
     DEPENDENCIES_PENDING: '依赖尚未完成',
     SCOPE_CONFLICT: '读写或 effect 冲突，串行执行',
     MAX_PARALLEL_REACHED: '已达到并行上限',
+    MODEL_CAPACITY_BUSY: '等待符合策略的套餐容量',
   } as Record<string, string>)[code] ?? code
 }
 
 function eventLabel(type: string): string {
   return ({
     'intent.compiled': 'Intent 已编译', 'graph.compiled': 'Graph 已认证', 'capsule.resolved': 'Capsule 已解析',
-    'rlm.resolved': 'RLM 策略已解析', 'harness.snapshot': 'Continuous Harness 已快照',
+    'rlm.resolved': 'RLM 策略已解析', 'rlm.worker.allocated': 'RLM 低阶算子已分配',
+    'rlm.execution.started': 'RLM 执行已启动', 'rlm.branch.dispatched': 'RLM 分支已派发',
+    'rlm.branch.settled': 'RLM 分支已完成', 'rlm.synthesis.dispatched': 'RLM 高阶综合已派发',
+    'rlm.execution.settled': 'RLM 执行已完成', 'rlm.execution.failed': 'RLM 执行失败',
+    'harness.snapshot': 'Continuous Harness 已快照',
     'model.allocated': '模型与配额已分配', 'context.compiled': 'Context 已编译', 'execution_plan.sealed': 'ExecutionPlan 已封存',
     'node.dispatched': '执行已派发', 'node.operator.progress': 'Resident 执行进度',
     'node.evidence.accepted': 'Evidence 已验收',

@@ -28,6 +28,7 @@ class FakeResidentClient {
   starts: string[] = []
   requests: FakeResidentRequest[] = []
   available = true
+  maxConcurrency = 4
   unavailableOperators = new Set<string>()
   defer = false
   failNext = 0
@@ -49,7 +50,7 @@ class FakeResidentClient {
       displayName: operatorId === 'codex' ? 'Codex' : 'Claude Code',
       description: 'Test Resident provider.',
       tags: operatorId === 'codex' ? ['coding'] : ['analysis'],
-      maxConcurrency: 4,
+      maxConcurrency: this.maxConcurrency,
       injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
       available: this.available && !this.unavailableOperators.has(operatorId),
       authentication: 'native-subscription',
@@ -233,7 +234,7 @@ describe('orchestration daemon', () => {
     }
   })
 
-  it('resolves native RLM inside a normal subscription operator while DSH owns the graph', async () => {
+  it('executes bounded low-tier Resident RLM branches and high-tier synthesis while DSH owns the graph', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
     const root = join(home, 'orchestrations')
     const fake = new FakeResidentClient()
@@ -257,8 +258,69 @@ describe('orchestration daemon', () => {
     const run = await client.start({ compilationId: compilation.compilationId })
     const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
     expect(completed.nodes[0]).toMatchObject({ operatorId: 'claude-code', rlm: 'enabled', state: 'passed' })
-    expect(fake.requests[0]).toMatchObject({ operatorId: 'claude-code' })
-    expect(fake.requests[0]?.prompt?.map(block => block.text).join('\n')).toContain('dsh-native-rlm')
+    expect(fake.requests).toHaveLength(5)
+    expect(fake.requests.slice(0, 4).every(request => (
+      request.operatorId === 'codex' && request.profile?.model === 'gpt-5.6-luna'
+    ))).toBe(true)
+    expect(fake.requests[4]).toMatchObject({
+      operatorId: 'claude-code',
+      profile: { model: 'claude-opus-4-6' },
+    })
+    expect(new Set(fake.requests.map(request => request.laneId)).size).toBe(5)
+    expect(fake.requests.slice(0, 4).every(request => (
+      request.prompt?.map(block => block.text).join('\n').includes('Do not delegate') === true
+    ))).toBe(true)
+    const executionPlan = daemon.store.readArtifact(completed.nodes[0]!.executionPlanRef!) as {
+      allocationPlan: { model: string; suggestedParallelism: number }
+      rlmWorkerPlan?: { model: string; tier: string }
+    }
+    expect(executionPlan).toMatchObject({
+      allocationPlan: { model: 'claude-opus-4-6', suggestedParallelism: 1 },
+      rlmWorkerPlan: { model: 'gpt-5.6-luna', tier: 'low' },
+    })
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.filter(value => value.type === 'rlm.branch.settled')).toHaveLength(4)
+    expect(events.events.find(value => value.type === 'rlm.execution.settled')?.data).toMatchObject({
+      depthUsed: 2,
+      turnsUsed: 5,
+      branchCount: 2,
+    })
+  })
+
+  it('marks an interrupted Resident RLM composite indeterminate instead of replaying child turns after restart', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-r-'))
+    const root = join(home, 'orchestrations')
+    const firstFake = new FakeResidentClient()
+    firstFake.defer = true
+    const first = createDaemon(root, home, firstFake, 10)
+    await first.start()
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...rlmNode } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Persist bounded recursion.' },
+      graph: {
+        ...fixture,
+        nodes: [{ ...rlmNode, role: 'recursive synthesis', task: 'Recursively synthesize alternatives.' }],
+      },
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running' && firstFake.requests.length === 2)
+    await first.close()
+
+    const secondFake = new FakeResidentClient()
+    const second = createDaemon(root, home, secondFake, 10)
+    await second.start()
+    cleanup.push(async () => { await second.close(); await rm(home, { recursive: true, force: true }) })
+    const recoveredClient = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const recovered = await eventually(
+      () => recoveredClient.inspect(String(run.runId)),
+      value => value.state === 'indeterminate',
+    )
+    expect(recovered.nodes[0]).toMatchObject({ state: 'indeterminate' })
+    expect(secondFake.requests).toHaveLength(0)
   })
 
   it('compiles, seals, dispatches Resident nodes, records Evidence, and completes a graph', async () => {
@@ -523,6 +585,43 @@ describe('orchestration daemon', () => {
     expect((capsuleEvent?.data as { cleanContext?: boolean } | undefined)?.cleanContext).toBe(true)
     fake.defer = false
     fake.resolveAllDeferred()
+    await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+  })
+
+  it('enforces the allocator concurrency ceiling below graph maxParallel', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-capacity-'))
+    const root = join(home, 'o')
+    const fake = new FakeResidentClient()
+    fake.defer = true
+    fake.maxConcurrency = 1
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const base = graph(home)
+    const capacityBound = {
+      ...base,
+      maxParallel: 4,
+      nodes: base.nodes.map((value, index) => ({
+        ...value,
+        dependsOn: [],
+        readScopes: [],
+        writeScopes: [`capacity/${String(index)}`],
+        operator: { preferredIds: ['codex'] },
+      })),
+    }
+    const compilation = await client.compile({ intent: { request: 'Capacity fixture.' }, graph: capacityBound })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const limited = await eventually(
+      () => client.inspect(String(run.runId)),
+      value => value.nodes.filter(node => node.state === 'running').length === 1
+        && value.nodes.some(node => node.waitReason?.code === 'MAX_PARALLEL_REACHED'),
+    )
+    expect(limited).toMatchObject({ maxParallel: 4, effectiveParallelism: 1 })
+    expect(fake.starts).toHaveLength(1)
+    fake.resolveDeferred()
+    await eventually(() => client.inspect(String(run.runId)), () => fake.starts.length === 2)
+    fake.resolveDeferred()
     await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
   })
 

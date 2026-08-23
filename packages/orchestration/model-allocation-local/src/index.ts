@@ -17,6 +17,13 @@ function remaining(window: ModelQuotaWindow | undefined): number {
   return window === undefined ? 100 : Math.max(0, 100 - window.usedPercent)
 }
 
+function poolRemaining(offer: ModelExecutionOffer): number {
+  const pool = offer.quotaPool
+  if (pool === undefined) return 100
+  const windows = [pool.primary, pool.secondary].filter(window => window !== undefined)
+  return windows.length === 0 ? 100 : Math.min(...windows.map(window => remaining(window)))
+}
+
 function resetUrgency(window: ModelQuotaWindow | undefined, nowSeconds: number): number {
   if (window?.resetsAt === undefined) return 0
   const seconds = window.resetsAt - nowSeconds
@@ -50,7 +57,10 @@ function poolFit(offer: ModelExecutionOffer, nowSeconds: number): number {
   if (offer.source === 'metered-api') return -10_000
   const pool = offer.quotaPool
   if (pool === undefined) return 1_000
-  const usable = Math.max(remaining(pool.primary), remaining(pool.secondary))
+  // Reported windows are simultaneous allowance constraints, not alternatives.
+  // A depleted short window therefore makes the lane unavailable even when its
+  // weekly bucket still has room.
+  const usable = poolRemaining(offer)
   if (usable <= 0) return -100_000
   return 1_000 + resetUrgency(pool.primary, nowSeconds) + resetUrgency(pool.secondary, nowSeconds)
 }
@@ -64,28 +74,55 @@ function score(offer: ModelExecutionOffer, request: ModelAllocationRequest, nowS
   return poolFit(offer, nowSeconds) + qualityFit(offer, request) + productFit(offer, request) + capacityFit(offer)
 }
 
+function operatorCapacity(offers: readonly ModelExecutionOffer[], source: ModelExecutionOffer['source']): number {
+  const capacity = new Map<string, number>()
+  for (const offer of offers.filter(value => value.source === source)) {
+    const free = Math.max(0, offer.maxConcurrency - offer.activeCount)
+    capacity.set(offer.operatorId, Math.max(capacity.get(offer.operatorId) ?? 0, free))
+  }
+  return [...capacity.values()].reduce((total, value) => total + value, 0)
+}
+
+function suggestedParallelism(request: ModelAllocationRequest, qualified: readonly ModelExecutionOffer[]): number {
+  const subscriptionCapacity = operatorCapacity(qualified, 'native-subscription')
+  const meteredCapacity = operatorCapacity(qualified, 'metered-api')
+  const usable = subscriptionCapacity > 0
+    ? subscriptionCapacity + (request.objective === 'speed' ? meteredCapacity : 0)
+    : request.objective === 'speed' ? meteredCapacity : Math.min(meteredCapacity, 1)
+  return Math.max(1, Math.min(request.graphMaxParallel, usable))
+}
+
 /** Public deterministic Provider, separately mountable from the Scheduler. */
 export class SubscriptionFirstModelAllocation extends ModelAllocationService {
   allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan> {
-    const available = request.offers.filter(offer => offer.available && offer.activeCount < offer.maxConcurrency)
-    const explicit = request.preferredOperatorIds.length === 0
-      ? available
-      : available.filter(offer => request.preferredOperatorIds.includes(offer.operatorId))
-    if (request.preferredOperatorIds.length > 0 && explicit.length === 0) {
+    const qualified = request.offers.filter(offer => offer.available && poolRemaining(offer) > 0)
+    const explicitQualified = request.preferredOperatorIds.length === 0
+      ? qualified
+      : qualified.filter(offer => request.preferredOperatorIds.includes(offer.operatorId))
+    if (request.preferredOperatorIds.length > 0 && explicitQualified.length === 0) {
       throw new ModelAllocationError(
         `none of the explicitly preferred operators has capacity: ${request.preferredOperatorIds.join(', ')}`,
         'EXPLICIT_MODEL_UNAVAILABLE',
       )
     }
-    const candidates = explicit.filter((offer) => {
-      const pool = offer.quotaPool
-      return pool === undefined || Math.max(remaining(pool.primary), remaining(pool.secondary)) > 0
-    })
-    if (candidates.length === 0) throw new ModelAllocationError('no qualified model execution capacity is available', 'NO_MODEL_CAPACITY')
+    if (explicitQualified.length === 0) {
+      throw new ModelAllocationError('no qualified model execution capacity is available', 'NO_MODEL_CAPACITY')
+    }
     const requiresHighTier = request.phase === 'planning'
       || request.phase === 'verification'
       || request.phase === 'synthesis'
       || request.rlm === 'enabled'
+    const subscriptionQualified = explicitQualified.filter(offer => offer.source === 'native-subscription')
+    const highSubscriptionAvailable = subscriptionQualified.some(offer => offer.tier === 'high')
+    const allocationPool = subscriptionQualified.length > 0
+      && request.objective !== 'speed'
+      && (!requiresHighTier || highSubscriptionAvailable)
+      ? subscriptionQualified
+      : explicitQualified
+    const candidates = allocationPool.filter(offer => offer.activeCount < offer.maxConcurrency)
+    if (candidates.length === 0) {
+      throw new ModelAllocationError('qualified model execution capacity is temporarily busy', 'MODEL_CAPACITY_BUSY')
+    }
     const qualityCandidates = requiresHighTier && candidates.some(offer => offer.tier === 'high')
       ? candidates.filter(offer => offer.tier === 'high')
       : candidates
@@ -95,14 +132,6 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
       return difference === 0 ? left.offerId.localeCompare(right.offerId) : difference
     })
     if (selected === undefined) throw new ModelAllocationError('no qualified model execution capacity is available', 'NO_MODEL_CAPACITY')
-    const subscriptionCapacityByOperator = new Map<string, number>()
-    for (const offer of candidates.filter(value => value.source === 'native-subscription')) {
-      subscriptionCapacityByOperator.set(
-        offer.operatorId,
-        Math.max(subscriptionCapacityByOperator.get(offer.operatorId) ?? 0, offer.maxConcurrency - offer.activeCount),
-      )
-    }
-    const subscriptionCapacity = [...subscriptionCapacityByOperator.values()].reduce((total, value) => total + value, 0)
     const urgentCapacity = candidates.filter(offer => offer.quotaPool !== undefined && (
       resetUrgency(offer.quotaPool.primary, nowSeconds) > 0 || resetUrgency(offer.quotaPool.secondary, nowSeconds) > 0
     )).length
@@ -115,7 +144,7 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
       tier: selected.tier,
       ...selected.profile === undefined ? {} : { profile: selected.profile },
       ...selected.quotaPool === undefined ? {} : { quotaPoolId: selected.quotaPool.poolId },
-      suggestedParallelism: Math.max(1, Math.min(request.graphMaxParallel, subscriptionCapacity + urgentCapacity)),
+      suggestedParallelism: suggestedParallelism(request, explicitQualified),
       rationale: [
         selected.source === 'native-subscription' ? 'native-subscription-first' : 'metered-api-last-resort',
         request.phase === 'planning' || request.phase === 'verification' ? 'high-tier-quality-gate' : 'worker-tier-throughput',

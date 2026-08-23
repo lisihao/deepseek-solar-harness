@@ -41,6 +41,7 @@ import PhysicalOperatorRuntime, {
   PhysicalOperatorId,
   type PhysicalOperator,
   type PhysicalOperatorProviderRun,
+  type PhysicalOperatorRun,
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
@@ -82,7 +83,7 @@ export const ORCHESTRATION_METHODS = Object.freeze([
 ] as const)
 
 interface ActiveAttempt {
-  readonly kind: 'resident' | 'model-worker'
+  readonly kind: 'resident' | 'resident-rlm' | 'model-worker'
   readonly runId: string
   readonly nodeId: string
   readonly attempt: number
@@ -94,6 +95,13 @@ interface ActiveAttempt {
   progressCursor: number
   progressSync?: Promise<void>
   readonly run: { readonly result: Promise<PhysicalOperatorResult>; dispose(): Promise<void> }
+}
+
+interface ResidentRlmLeaf {
+  readonly depth: number
+  readonly index: number
+  readonly artifactRef: OrchestrationArtifactRef
+  readonly output: readonly ContentBlock[]
 }
 
 interface ResidentReceiptIdentity {
@@ -206,6 +214,7 @@ function event(
 }
 
 const MAX_OPERATOR_OUTPUT_PREVIEW = 8_000
+const MAX_RLM_BRANCH_PREVIEW = 2_000
 
 /** Project the operator's user-facing result without copying unbounded output into the event index. */
 function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview: string; outputTruncated: boolean } {
@@ -302,6 +311,7 @@ export class OrchestrationDaemon {
   private readonly ctx = new Context()
   private readonly physical = new Map<string, OrchestrationResidentOperator>()
   private readonly active = new Map<string, ActiveAttempt>()
+  private readonly capacityRetryAfter = new Map<string, number>()
   private lockDescriptor: number | undefined
   private ticker: ReturnType<typeof setInterval> | undefined
   private ticking = false
@@ -498,6 +508,7 @@ export class OrchestrationDaemon {
       revision: 1,
       graphRevision: 1,
       maxParallel: compilation.graph.maxParallel,
+      effectiveParallelism: compilation.graph.maxParallel,
       ...compilation.admission === undefined ? {} : { admission: structuredClone(compilation.admission) },
       certificate: compilation.certificate,
       nodes: compilation.graph.nodes.map(node => ({
@@ -729,15 +740,32 @@ export class OrchestrationDaemon {
       this.store.saveRun(record, [event(record.snapshot.runId, 'graph.readiness.updated', {})])
     }
     const liveNodes = record.snapshot.nodes.filter(node => node.state === 'running')
-    const slots = Math.max(0, record.graph.maxParallel - liveNodes.length)
+    const liveLimits = liveNodes.flatMap((node) => {
+      if (node.executionPlanRef === undefined) return []
+      const plan = this.store.readArtifact(node.executionPlanRef) as NodeExecutionPlanV1
+      return [plan.allocationPlan.suggestedParallelism]
+    })
+    let effectiveParallelism = Math.min(record.graph.maxParallel, ...liveLimits, record.graph.maxParallel)
+    const slots = Math.max(0, effectiveParallelism - liveNodes.length)
     const selected: OrchestrationNodeSnapshot[] = []
     const readyNodes = record.snapshot.nodes.filter(node => node.state === 'ready')
     const waitReasons = new Map<string, OrchestrationBlocker | undefined>()
     for (const candidate of readyNodes) {
+      const capacityKey = `${String(record.snapshot.runId)}\0${candidate.id}`
+      const capacityRetryAt = this.capacityRetryAfter.get(capacityKey)
+      if (capacityRetryAt !== undefined && capacityRetryAt > Date.now()) {
+        waitReasons.set(candidate.id, {
+          code: 'MODEL_CAPACITY_BUSY',
+          message: 'waiting for qualified subscription capacity',
+          nodeId: candidate.id,
+        })
+        continue
+      }
+      if (capacityRetryAt !== undefined) this.capacityRetryAfter.delete(capacityKey)
       if (slots === 0) {
         waitReasons.set(candidate.id, {
           code: 'MAX_PARALLEL_REACHED',
-          message: `waiting for one of ${String(record.graph.maxParallel)} graph worker slots`,
+          message: `waiting for one of ${String(effectiveParallelism)} effective worker slots`,
           nodeId: candidate.id,
         })
         continue
@@ -760,12 +788,13 @@ export class OrchestrationDaemon {
       } else {
         waitReasons.set(candidate.id, {
           code: 'MAX_PARALLEL_REACHED',
-          message: `waiting for one of ${String(record.graph.maxParallel)} graph worker slots`,
+          message: `waiting for one of ${String(effectiveParallelism)} effective worker slots`,
           nodeId: candidate.id,
         })
       }
     }
-    const schedulerChanged = readyNodes.some(node => node.waitReason?.code !== waitReasons.get(node.id)?.code)
+    const schedulerChanged = record.snapshot.effectiveParallelism !== effectiveParallelism
+      || readyNodes.some(node => node.waitReason?.code !== waitReasons.get(node.id)?.code)
     if (schedulerChanged) {
       const current = this.store.getRun(String(record.snapshot.runId))
       const scheduledNodes = current.snapshot.nodes.map((node): OrchestrationNodeSnapshot => {
@@ -775,10 +804,11 @@ export class OrchestrationDaemon {
           ? { ...clearWaitReason(node), updatedAt: now() }
           : { ...node, waitReason, updatedAt: now() }
       })
-      record = withRevision(current, { ...current.snapshot, nodes: scheduledNodes })
+      record = withRevision(current, { ...current.snapshot, effectiveParallelism, nodes: scheduledNodes })
       this.store.saveRun(record, [event(record.snapshot.runId, 'scheduler.waiting.updated', {
         activeWorkers: liveNodes.length,
         maxParallel: record.graph.maxParallel,
+        effectiveParallelism,
         waiting: scheduledNodes.flatMap(node => node.waitReason === undefined ? [] : [{
           nodeId: node.id,
           code: node.waitReason.code,
@@ -789,8 +819,22 @@ export class OrchestrationDaemon {
     // node in scheduler order, while the accepted product turns themselves run
     // concurrently. This avoids lost Run revisions without reducing worker
     // parallelism.
-    for (const node of selected) await this.prepareAndDispatch(String(record.snapshot.runId), node.id)
+    let dispatched = 0
+    for (const node of selected) {
+      if (liveNodes.length + dispatched >= effectiveParallelism) break
+      const recommendation = await this.prepareAndDispatch(String(record.snapshot.runId), node.id)
+      if (recommendation === undefined) continue
+      dispatched += 1
+      effectiveParallelism = Math.min(effectiveParallelism, recommendation)
+    }
     record = this.store.getRun(String(record.snapshot.runId))
+    if (record.snapshot.effectiveParallelism !== effectiveParallelism) {
+      record = withRevision(record, { ...record.snapshot, effectiveParallelism })
+      this.store.saveRun(record, [event(record.snapshot.runId, 'scheduler.parallelism.updated', {
+        maxParallel: record.graph.maxParallel,
+        effectiveParallelism,
+      })])
+    }
     const required = record.graph.nodes.filter(node => node.requiredForCompletion)
     const requiredStates = required.map(spec => record.snapshot.nodes.find(node => node.id === spec.id)?.state)
     const anyLive = record.snapshot.nodes.some(node => ['pending', 'ready', 'running', 'retry_wait', 'awaiting_approval'].includes(node.state))
@@ -800,24 +844,39 @@ export class OrchestrationDaemon {
     }
   }
 
-  private async prepareAndDispatch(runId: string, nodeId: string): Promise<void> {
+  private async prepareAndDispatch(runId: string, nodeId: string): Promise<number | undefined> {
     try {
-      await this.prepareAndDispatchUnchecked(runId, nodeId)
+      const recommendation = await this.prepareAndDispatchUnchecked(runId, nodeId)
+      if (recommendation !== undefined) this.capacityRetryAfter.delete(`${runId}\0${nodeId}`)
+      return recommendation
     } catch (error) {
       const code = error instanceof Error && 'code' in error
         ? String(error.code)
         : 'ORCHESTRATION_UNAVAILABLE'
       const message = error instanceof Error ? error.message : String(error)
+      if (code === 'MODEL_CAPACITY_BUSY') {
+        this.capacityRetryAfter.set(`${runId}\0${nodeId}`, Date.now() + 1_000)
+        const current = this.store.getRun(runId)
+        const nodes = current.snapshot.nodes.map(value => value.id === nodeId && value.state === 'ready'
+          ? { ...value, waitReason: { code, message, nodeId }, updatedAt: now() }
+          : value)
+        if (nodes.some((value, index) => value !== current.snapshot.nodes[index])) {
+          const next = withRevision(current, { ...current.snapshot, nodes })
+          this.store.saveRun(next, [event(next.snapshot.runId, 'scheduler.capacity.waiting', { code }, nodes.find(value => value.id === nodeId))])
+        }
+        return undefined
+      }
       const current = this.store.getRun(runId).snapshot.nodes.find(value => value.id === nodeId)
       if (current?.state === 'ready') this.blockNode(runId, nodeId, [{ code, message, nodeId }])
+      return undefined
     }
   }
 
-  private async prepareAndDispatchUnchecked(runId: string, nodeId: string): Promise<void> {
+  private async prepareAndDispatchUnchecked(runId: string, nodeId: string): Promise<number | undefined> {
     let record = this.store.getRun(runId)
     const node = record.snapshot.nodes.find(value => value.id === nodeId)
     const spec = record.graph.nodes.find(value => value.id === nodeId)
-    if (node?.state !== 'ready' || spec === undefined) return
+    if (node?.state !== 'ready' || spec === undefined) return undefined
     const attempt = node.attempt + 1
     const upstreamRefs = spec.dependsOn.flatMap(id => record.snapshot.nodes.find(value => value.id === id)?.evidenceRefs ?? [])
     const applicableUpdates = this.store.capabilityUpdates(runId, nodeId)
@@ -856,7 +915,7 @@ export class OrchestrationDaemon {
         code: 'CAPABILITY_UNSATISFIED', message: 'no Guard Capsule executor is available in the baseline Provider',
       }] : []]
       this.blockNode(runId, nodeId, blockers)
-      return
+      return undefined
     }
     const harnessMode = record.snapshot.admission?.continualHarness ?? 'auto'
     const harnessScope: ContinualHarnessScope | undefined = harnessMode === 'off'
@@ -929,7 +988,21 @@ export class OrchestrationDaemon {
       ref: String(rlmPlanRef), enabled: rlmPlan.enabled, reason: rlmPlan.reason,
       planSha256: rlmPlan.planSha256,
     }, node)])
-    const { provider: selectedProvider, allocation } = await this.selectOperator(record, spec, rlmPlan)
+    const selected = await this.selectOperator(record, spec, rlmPlan)
+    const rlmWorkerPlan = selected.provider !== undefined && rlmPlan.enabled && rlmPlan.maxTurns > 1
+      ? await this.selectResidentRlmWorker(record, spec, rlmPlan)
+      : undefined
+    // A Resident RLM node owns several internal physical turns. Keep it as one
+    // exclusive global Scheduler slot so node-level DAG parallelism cannot
+    // oversubscribe the same subscription pools behind the sealed child plan.
+    const allocation = rlmWorkerPlan === undefined
+      ? selected.allocation
+      : {
+        ...selected.allocation,
+        suggestedParallelism: 1,
+        rationale: [...selected.allocation.rationale, 'scheduler-owned-rlm-capacity'],
+      }
+    const selectedProvider = selected.provider
     const operatorId = allocation.operatorId
     const allocationPlanRef = this.store.putArtifact(allocation)
     this.store.recordArtifact('compilation_artifacts', {
@@ -941,6 +1014,16 @@ export class OrchestrationDaemon {
       suggestedParallelism: allocation.suggestedParallelism,
       rationale: allocation.rationale,
     }, node)])
+    if (rlmWorkerPlan !== undefined) {
+      this.store.saveRun(record, [event(record.snapshot.runId, 'rlm.worker.allocated', {
+        operatorId: rlmWorkerPlan.operatorId,
+        model: rlmWorkerPlan.model,
+        tier: rlmWorkerPlan.tier,
+        source: rlmWorkerPlan.source,
+        quotaPoolId: rlmWorkerPlan.quotaPoolId ?? null,
+        suggestedParallelism: rlmWorkerPlan.suggestedParallelism,
+      }, node)])
+    }
     const executionId = PhysicalOperatorExecutionId(`orch:${runId}:${nodeId}:${String(attempt)}`)
     const taskRef = this.store.putArtifact({ title: spec.title, task: spec.task })
     const base = {
@@ -958,6 +1041,7 @@ export class OrchestrationDaemon {
       contextPacketRef,
       allocationPlanRef,
       allocationPlan: allocation,
+      ...rlmWorkerPlan === undefined ? {} : { rlmWorkerPlan },
       ...harnessSnapshotRef === undefined ? {} : { harnessSnapshotRef },
       rlmPlan,
       operatorPlan: {
@@ -977,7 +1061,7 @@ export class OrchestrationDaemon {
     this.store.recordArtifact('node_execution_plans', { ref: String(planRef), runId, nodeId, attempt, generation: node.capabilityGeneration })
     record = this.store.getRun(runId)
     const current = record.snapshot.nodes.find(value => value.id === nodeId)
-    if (current?.state !== 'ready') return
+    if (current?.state !== 'ready') return undefined
     const sealed = record.snapshot.nodes.map(value => value.id === nodeId ? {
       ...value,
       attempt,
@@ -1003,6 +1087,7 @@ export class OrchestrationDaemon {
       }, sealed.find(value => value.id === nodeId))] : [],
     ])
     await this.dispatchPlan(record, spec, executionPlan, contextPacket, capabilityPlan, harnessSnapshot)
+    return allocation.suggestedParallelism
   }
 
   private async dispatchPlan(
@@ -1015,6 +1100,10 @@ export class OrchestrationDaemon {
   ): Promise<void> {
     if (plan.operatorPlan.mode === 'model-worker') {
       await this.dispatchModelWorker(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
+      return
+    }
+    if (plan.rlmPlan?.enabled === true) {
+      this.dispatchResidentRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
       return
     }
     const controller = new AbortController()
@@ -1066,6 +1155,231 @@ export class OrchestrationDaemon {
     } catch (error) {
       this.failDispatch(acceptedAttempt, error)
     }
+  }
+
+  private dispatchResidentRlm(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    contextPacket: ContextPacketV1,
+    capabilityPlan: CapabilityBindingPlanV1,
+    harnessSnapshot?: ContinualHarnessSnapshotV1,
+  ): void {
+    const controller = new AbortController()
+    const physicalRuns: PhysicalOperatorRun[] = []
+    const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident-rlm')
+    const result = this.executeResidentRlm(
+      record,
+      spec,
+      plan,
+      contextPacket,
+      capabilityPlan,
+      harnessSnapshot,
+      controller,
+      physicalRuns,
+    )
+    const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', updatedAt: now() }
+    this.store.saveAttempt(attempt)
+    const current = this.store.getRun(String(record.snapshot.runId))
+    const next = withRevision(current, current.snapshot)
+    this.store.saveRun(next, [event(next.snapshot.runId, 'node.dispatched', {
+      executionId: String(plan.executionId),
+      operatorId: plan.operatorPlan.operatorId,
+      model: plan.allocationPlan.model,
+      contextIsolation: 'scheduler-owned-resident-rlm',
+      executor: 'resident-rlm',
+    }, next.snapshot.nodes.find(value => value.id === spec.id))])
+    const run = {
+      result,
+      dispose: async (): Promise<void> => {
+        controller.abort()
+        await Promise.allSettled(physicalRuns.map(value => value.dispose()))
+      },
+    }
+    const active: ActiveAttempt = {
+      kind: 'resident-rlm', runId: String(record.snapshot.runId), nodeId: spec.id,
+      attempt: plan.attempt, generation: plan.capabilityGeneration,
+      executionId: String(plan.executionId), sessionId: '', turnId: '',
+      operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
+    }
+    const key = `${String(record.snapshot.runId)}\0${spec.id}`
+    this.active.set(key, active)
+    void run.result.then(
+      async (value) => { if (!this.closing) await this.settleAttempt(active, value) },
+      (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
+    ).finally(() => { this.active.delete(key); void this.tick() })
+  }
+
+  private async executeResidentRlm(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    contextPacket: ContextPacketV1,
+    capabilityPlan: CapabilityBindingPlanV1,
+    harnessSnapshot: ContinualHarnessSnapshotV1 | undefined,
+    controller: AbortController,
+    physicalRuns: PhysicalOperatorRun[],
+  ): Promise<PhysicalOperatorResult> {
+    const rlmPlan = plan.rlmPlan
+    if (rlmPlan?.enabled !== true) {
+      throw new OrchestrationError('Resident RLM dispatch requires an enabled sealed plan', 'GRAPH_INVALID')
+    }
+    const runId = String(record.snapshot.runId)
+    const basePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot)
+    const node = record.snapshot.nodes.find(value => value.id === spec.id)
+    const workerPlan = plan.rlmWorkerPlan
+    let leaves: ResidentRlmLeaf[] = []
+    let turnsUsed = 0
+    let depthUsed = 0
+    this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.started', {
+      planSha256: rlmPlan.planSha256,
+      maxDepth: rlmPlan.maxDepth,
+      maxChildren: rlmPlan.maxChildren,
+      maxTurns: rlmPlan.maxTurns,
+      workerOperatorId: workerPlan?.operatorId ?? null,
+      workerModel: workerPlan?.model ?? null,
+      synthesisOperatorId: plan.allocationPlan.operatorId,
+      synthesisModel: plan.allocationPlan.model,
+    }, node)])
+    try {
+      if (workerPlan !== undefined) {
+        const status = this.ctx.physicalOperators.status(workerPlan.operatorId)
+        const branchWidth = Math.min(
+          rlmPlan.maxChildren,
+          record.graph.maxParallel,
+          workerPlan.suggestedParallelism,
+          Math.max(0, status.maxConcurrency - status.active),
+          4,
+        )
+        let remainingWorkerTurns = Math.max(0, rlmPlan.maxTurns - 1)
+        for (let depth = 1; depth <= rlmPlan.maxDepth && remainingWorkerTurns > 0 && branchWidth > 0; depth += 1) {
+          const branchCount = Math.min(branchWidth, remainingWorkerTurns)
+          const parents = leaves
+          leaves = await Promise.all(Array.from({ length: branchCount }, async (_value, index): Promise<ResidentRlmLeaf> => {
+            const parent = parents.length === 0 ? undefined : parents[index % parents.length]
+            const executionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:d${String(depth)}:b${String(index + 1)}`)
+            const branchPrompt: ContentBlock[] = [
+              ...basePrompt,
+              {
+                type: 'text',
+                text: parent === undefined
+                  ? `RLM depth ${String(depth)}, branch ${String(index + 1)} of ${String(branchCount)}. Independently analyze one distinct decomposition or solution path. Do not delegate, spawn subagents, or create TaskGraph nodes; solve only this bounded branch.`
+                  : `RLM depth ${String(depth)}, branch ${String(index + 1)} of ${String(branchCount)}. Refine and challenge the prior branch at ${String(parent.artifactRef)}. Identify a concrete weakness, correct it, and return a stronger evidence-oriented branch. Do not delegate, spawn subagents, or create TaskGraph nodes.\n\nPrior branch preview:\n${operatorOutputPreview(parent.output).outputPreview.slice(0, MAX_RLM_BRANCH_PREVIEW)}`,
+              },
+            ]
+            const started = await this.startResidentTurn(
+              record,
+              spec,
+              executionId,
+              workerPlan,
+              branchPrompt,
+              controller.signal,
+              `RLM d${String(depth)} b${String(index + 1)}`,
+            )
+            physicalRuns.push(started.run)
+            this.store.appendEvents([event(record.snapshot.runId, 'rlm.branch.dispatched', {
+              executionId: String(executionId), depth, branch: index + 1,
+              operatorId: workerPlan.operatorId, model: workerPlan.model,
+              sessionId: started.receipt.sessionId, turnId: started.receipt.turnId,
+              parentArtifactRef: parent?.artifactRef ?? null,
+            }, node)])
+            const result = await started.run.result
+            if (result.stopReason !== 'completed') {
+              throw Object.assign(new Error(`RLM branch stopped with ${result.stopReason}`), { code: 'RLM_BRANCH_FAILED' })
+            }
+            const artifactRef = this.store.putArtifact({
+              kind: 'resident-rlm-branch', runId, nodeId: spec.id,
+              executionId: String(executionId), depth, branch: index + 1,
+              operatorId: workerPlan.operatorId, model: workerPlan.model,
+              parentArtifactRef: parent?.artifactRef ?? null,
+              stopReason: result.stopReason, output: result.output,
+              ...result.continuity === undefined ? {} : { continuity: result.continuity },
+            })
+            this.store.recordArtifact('compilation_artifacts', {
+              ref: String(artifactRef), runId, nodeId: spec.id,
+              attempt: plan.attempt, generation: plan.capabilityGeneration,
+            })
+            this.store.appendEvents([event(record.snapshot.runId, 'rlm.branch.settled', {
+              executionId: String(executionId), depth, branch: index + 1,
+              artifactRef: String(artifactRef), stopReason: result.stopReason,
+            }, node)])
+            return { depth, index: index + 1, artifactRef, output: result.output }
+          }))
+          remainingWorkerTurns -= branchCount
+          turnsUsed += branchCount
+          depthUsed = depth
+        }
+      }
+
+      const branchDigest = leaves.map(leaf => (
+        `Depth ${String(leaf.depth)} branch ${String(leaf.index)} (${String(leaf.artifactRef)}):\n${operatorOutputPreview(leaf.output).outputPreview.slice(0, MAX_RLM_BRANCH_PREVIEW)}`
+      )).join('\n\n')
+      const synthesisExecutionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:synthesis`)
+      const synthesisPrompt: ContentBlock[] = [
+        ...basePrompt,
+        {
+          type: 'text',
+          text: leaves.length === 0
+            ? 'The sealed RLM turn budget permits no child turn. Produce the final answer directly without delegation or TaskGraph changes.'
+            : `Synthesize and verify the following Scheduler-controlled RLM leaves into one final result. Resolve contradictions, retain concrete evidence, and do not delegate or create TaskGraph nodes.\n\n${branchDigest}`,
+        },
+      ]
+      const synthesis = await this.startResidentTurn(
+        record,
+        spec,
+        synthesisExecutionId,
+        plan.allocationPlan,
+        synthesisPrompt,
+        controller.signal,
+        'RLM synthesis',
+      )
+      physicalRuns.push(synthesis.run)
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.synthesis.dispatched', {
+        executionId: String(synthesisExecutionId), operatorId: plan.allocationPlan.operatorId,
+        model: plan.allocationPlan.model, sessionId: synthesis.receipt.sessionId,
+        turnId: synthesis.receipt.turnId, branchArtifactRefs: leaves.map(value => String(value.artifactRef)),
+      }, node)])
+      const result = await synthesis.run.result
+      turnsUsed += 1
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
+        executionId: String(plan.executionId), depthUsed, turnsUsed,
+        branchCount: leaves.length, stopReason: result.stopReason,
+      }, node)])
+      return result
+    } catch (error) {
+      controller.abort()
+      await Promise.allSettled(physicalRuns.map(value => value.dispose()))
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.failed', {
+        executionId: String(plan.executionId), depthUsed, turnsUsed,
+        code: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
+      }, node)])
+      throw error
+    }
+  }
+
+  private async startResidentTurn(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    executionId: PhysicalOperatorExecutionId,
+    allocation: ModelAllocationPlan,
+    prompt: readonly ContentBlock[],
+    signal: AbortSignal,
+    label: string,
+  ): Promise<{ readonly run: PhysicalOperatorRun; readonly receipt: ResidentReceiptIdentity }> {
+    const operator = this.physical.get(allocation.operatorId)
+    if (operator === undefined) {
+      throw new OrchestrationError(`physical operator is unavailable: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
+    }
+    const run = await this.ctx.physicalOperators.start(allocation.operatorId, {
+      executionId,
+      mode: 'resident',
+      label: `${spec.id}: ${label}`,
+      prompt: [...prompt],
+      parent: fakeParent(record.snapshot.workspace, String(record.snapshot.runId)),
+      signal,
+      ...allocation.profile === undefined ? {} : { residentProfile: allocation.profile },
+    })
+    return { run, receipt: operator.takeReceipt(String(executionId)) }
   }
 
   private dispatchModelWorker(
@@ -1131,7 +1445,7 @@ export class OrchestrationDaemon {
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
-    executor: 'resident' | 'model-worker',
+    executor: 'resident' | 'resident-rlm' | 'model-worker',
   ): AttemptRecord {
     const createdAt = now()
     const attempt: AttemptRecord = {
@@ -1148,7 +1462,7 @@ export class OrchestrationDaemon {
     const acceptedRun = withRevision(acceptedRecord, { ...acceptedRecord.snapshot, nodes })
     this.store.saveRun(acceptedRun, [event(acceptedRun.snapshot.runId, 'node.dispatch.accepted', {
       executionId: String(plan.executionId),
-      ...executor === 'model-worker' ? { executor } : {},
+      ...executor === 'resident' ? {} : { executor },
     }, nodes.find(value => value.id === spec.id))])
     return attempt
   }
@@ -1166,7 +1480,7 @@ export class OrchestrationDaemon {
   }
 
   private async syncActiveProgress(active: ActiveAttempt): Promise<void> {
-    if (active.kind === 'model-worker') return
+    if (active.kind !== 'resident') return
     if (active.progressSync !== undefined) return active.progressSync
     const operation = this.syncActiveProgressUnchecked(active).finally(() => {
       if (active.progressSync === operation) delete active.progressSync
@@ -1355,12 +1669,12 @@ export class OrchestrationDaemon {
     this.store.saveRun(next, [event(next.snapshot.runId, `run.${state}`, {})])
   }
 
-  private async selectOperator(
+  private residentOffers(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
-    rlmPlan: RlmExecutionPlanV1,
-  ): Promise<{ readonly provider?: ResidentProviderStatus; readonly allocation: ModelAllocationPlan }> {
-    const providers = await this.resident.providers()
+    providers: readonly ResidentProviderStatus[],
+    honorProfile: boolean,
+  ): ModelExecutionOffer[] {
     const exhaustedOfferIds = new Set<string>()
     const exhaustedQuotaPoolIds = new Set<string>()
     for (const attempt of this.store.attempts().filter(value => (
@@ -1372,14 +1686,13 @@ export class OrchestrationDaemon {
       if (plan.allocationPlan.quotaPoolId === undefined) exhaustedOfferIds.add(plan.allocationPlan.offerId)
       else exhaustedQuotaPoolIds.add(plan.allocationPlan.quotaPoolId)
     }
-    const activeByOperator = new Map<string, number>()
-    for (const active of this.active.values()) {
-      activeByOperator.set(active.operatorId, (activeByOperator.get(active.operatorId) ?? 0) + 1)
-    }
-    const residentOffers: ModelExecutionOffer[] = providers.flatMap((provider) => {
+    const activeByOperator = new Map(
+      this.ctx.physicalOperators.list().map(status => [String(status.id), status.active] as const),
+    )
+    return providers.flatMap((provider) => {
       const available = provider.available && provider.authentication === 'native-subscription'
       return provider.models
-        .filter(model => spec.operator?.profile?.model === undefined || model.model === spec.operator.profile.model)
+        .filter(model => !honorProfile || spec.operator?.profile?.model === undefined || model.model === spec.operator.profile.model)
         .map((model): ModelExecutionOffer => {
           const quotaPool = quotaForModel(provider.quotaPools, model)
           const offerId = `${provider.operatorId}:${model.model}`
@@ -1400,13 +1713,48 @@ export class OrchestrationDaemon {
             ...quotaPool === undefined ? {} : { quotaPool },
             profile: {
               model: model.model,
-              ...spec.operator?.profile?.effort === undefined
-                ? model.defaultEffort === undefined ? {} : { effort: model.defaultEffort }
-                : { effort: spec.operator.profile.effort },
+              ...honorProfile && spec.operator?.profile?.effort !== undefined
+                ? { effort: spec.operator.profile.effort }
+                : model.defaultEffort === undefined ? {} : { effort: model.defaultEffort },
             },
           }
         })
     })
+  }
+
+  private async selectResidentRlmWorker(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    rlmPlan: RlmExecutionPlanV1,
+  ): Promise<ModelAllocationPlan> {
+    const providers = await this.resident.providers()
+    const offers = this.residentOffers(record, spec, providers, false)
+    const available = offers.filter(value => value.available)
+    const targetTier = available.some(value => value.tier === 'low')
+      ? 'low'
+      : available.some(value => value.tier === 'medium') ? 'medium' : 'high'
+    return this.ctx.modelAllocation.allocate({
+      runId: String(record.snapshot.runId),
+      nodeId: `${spec.id}:rlm-worker`,
+      phase: 'execution',
+      role: 'bounded RLM worker',
+      task: spec.task,
+      preferredOperatorIds: [],
+      objective: 'economy',
+      rlm: 'disabled',
+      graphMaxParallel: Math.max(1, Math.min(record.graph.maxParallel, rlmPlan.maxChildren, 4)),
+      offers: offers.filter(value => value.tier === targetTier),
+      now: now(),
+    })
+  }
+
+  private async selectOperator(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    rlmPlan: RlmExecutionPlanV1,
+  ): Promise<{ readonly provider?: ResidentProviderStatus; readonly allocation: ModelAllocationPlan }> {
+    const providers = await this.resident.providers()
+    const residentOffers = this.residentOffers(record, spec, providers, true)
     const modelWorkerOffers = spec.writeScopes.length === 0
       && spec.effectBudget.write.length === 0
       && spec.effectBudget.execute.length === 0
@@ -1474,7 +1822,7 @@ export class OrchestrationDaemon {
   private async interruptActive(runId: string): Promise<void> {
     const active = [...this.active.values()].filter(value => value.runId === runId)
     await Promise.allSettled(active.map(async (value) => {
-      await this.resident.interrupt(value.sessionId, value.turnId)
+      if (value.kind === 'resident') await this.resident.interrupt(value.sessionId, value.turnId)
       await value.run.dispose()
     }))
   }
