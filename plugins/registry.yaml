@@ -3,7 +3,7 @@ policy: docs/architecture/adr-003-managed-plugin-lifecycle.md
 managed:
   - id: governance
     path: plugins/managed/governance
-    package: '@lisihao/dsh-code-harness-governance@0.3.8'
+    package: '@lisihao/dsh-code-harness-governance@0.3.11'
     source: https://github.com/lisihao/agent-development-governance.git
     upstream: null
     source_branch: codex/parallel-governance-v031

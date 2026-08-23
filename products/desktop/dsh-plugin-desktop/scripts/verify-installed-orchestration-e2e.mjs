@@ -9,9 +9,19 @@ const RESULT_MARKER = 'DSH_ORCHESTRATION_E2E_RESULT='
 const scriptPath = fileURLToPath(import.meta.url)
 const defaultAppRoot = '/Applications/DSH Desktop.app'
 const terminalStates = new Set(['completed', 'failed', 'cancelled', 'indeterminate'])
+const subscriptionAuthorization = 'DSH_ALLOW_SUBSCRIPTION_E2E'
+const fullMatrixAuthorization = 'DSH_SUBSCRIPTION_E2E_FULL_MATRIX'
 
 function assert(condition, message) {
   if (!condition) throw new Error(`verify-installed-orchestration-e2e: ${message}`)
+}
+
+export function resolveSubscriptionE2EMode(environment) {
+  assert(
+    environment[subscriptionAuthorization] === '1',
+    `real subscription execution is disabled; set ${subscriptionAuthorization}=1 only for an affected final installed-App acceptance`,
+  )
+  return environment[fullMatrixAuthorization] === '1' ? 'full' : 'minimal'
 }
 
 function valueAfter(name) {
@@ -210,6 +220,8 @@ export function assertSerializedScopeWorkerEvents(events, workerNodeIds) {
 }
 
 async function runInner(appRoot) {
+  const mode = resolveSubscriptionE2EMode(process.env)
+  const fullMatrix = mode === 'full'
   const version = appVersion(appRoot)
   process.env.DSH_BUILD_COMMIT = `desktop-${version}`
   const unpackedRoot = join(appRoot, 'Contents', 'Resources', 'app.asar.unpacked')
@@ -274,28 +286,33 @@ async function runInner(appRoot) {
   assert(cycleCode === 'GRAPH_CYCLE', `cyclic TaskGraph returned ${String(cycleCode)} instead of GRAPH_CYCLE`)
   process.stdout.write('[20%] 循环 Graph 已在真实 daemon 边界拒绝\n')
 
-  const goalExpectations = { quality: 'high', balanced: 'medium-or-accelerated-low', economy: 'low' }
-  const goalResults = await Promise.all(Object.entries(goalExpectations).map(async ([objective, expectedTier]) => {
-    const id = `goal-${objective}`
-    const title = `DSH ${version} ${objective} objective E2E ${nonce}`
-    const result = await startRun(client, {
-      intent: { request: `Exercise the ${objective} model-allocation objective.` },
-      admission: admission(sourceSessionId, objective),
-      graph: graph(title, workspace, [commonNode(id, {
-        title: `${objective} objective`,
-        task: `Implementation allocation acceptance. Return exactly DSH_E2E_${objective.toUpperCase()}_${nonce}. Do not call tools.`,
-      })], 1),
-    })
-    assertNativeCompleted(result)
-    const allocation = allocationByNode(result.events).get(id)
-    if (objective === 'balanced') {
-      if (allocation?.tier !== 'medium') assertQuotaAcceleratedAllocation(providers, allocation, objective)
-    } else {
-      assert(allocation?.tier === expectedTier, `${objective} selected ${String(allocation?.tier)} instead of ${expectedTier}`)
-    }
-    return { objective, expectedTier, title, runId: String(result.snapshot.runId), allocation }
-  }))
-  process.stdout.write('[40%] 质量/综合/成本目标已通过真实订阅模型验收\n')
+  const goalResults = []
+  if (fullMatrix) {
+    const goalExpectations = { quality: 'high', balanced: 'medium-or-accelerated-low', economy: 'low' }
+    goalResults.push(...await Promise.all(Object.entries(goalExpectations).map(async ([objective, expectedTier]) => {
+      const id = `goal-${objective}`
+      const title = `DSH ${version} ${objective} objective E2E ${nonce}`
+      const result = await startRun(client, {
+        intent: { request: `Exercise the ${objective} model-allocation objective.` },
+        admission: admission(sourceSessionId, objective),
+        graph: graph(title, workspace, [commonNode(id, {
+          title: `${objective} objective`,
+          task: `Implementation allocation acceptance. Return exactly DSH_E2E_${objective.toUpperCase()}_${nonce}. Do not call tools.`,
+        })], 1),
+      })
+      assertNativeCompleted(result)
+      const allocation = allocationByNode(result.events).get(id)
+      if (objective === 'balanced') {
+        if (allocation?.tier !== 'medium') assertQuotaAcceleratedAllocation(providers, allocation, objective)
+      } else {
+        assert(allocation?.tier === expectedTier, `${objective} selected ${String(allocation?.tier)} instead of ${expectedTier}`)
+      }
+      return { objective, expectedTier, title, runId: String(result.snapshot.runId), allocation }
+    })))
+    process.stdout.write('[40%] 质量/综合/成本目标已通过显式授权的完整订阅矩阵\n')
+  } else {
+    process.stdout.write('[40%] 最小订阅模式：复用未受影响的目标策略证据，不重复消耗套餐\n')
+  }
 
   const pipelineTitle = `DSH ${version} RLM parallel pipeline E2E ${nonce}`
   const pipeline = await startRun(client, {
@@ -345,32 +362,45 @@ async function runInner(appRoot) {
   )
   process.stdout.write('[65%] RLM + 高低阶分工 + DAG 并行已通过真实执行\n')
 
-  const conflictTitle = `DSH ${version} scope conflict E2E ${nonce}`
-  const conflict = await startRun(client, {
-    intent: { request: 'Serialize overlapping scopes without deadlock.' },
-    admission: admission(sourceSessionId, 'speed'),
-    graph: graph(conflictTitle, workspace, [
-      commonNode('conflict-a', {
-        task: `First shared-scope worker. Return exactly CONFLICT_A_${nonce}. Do not call tools.`,
-        writeScopes: ['e2e/shared'],
-      }),
-      commonNode('conflict-b', {
-        task: `Second shared-scope worker. Return exactly CONFLICT_B_${nonce}. Do not call tools.`,
-        writeScopes: ['e2e/shared'],
-      }),
-    ], 2),
-  })
-  assertNativeCompleted(conflict)
-  const conflictWait = conflict.events.find(event => event.type === 'scheduler.waiting.updated'
-    && Array.isArray(event.data.waiting)
-    && event.data.waiting.some(entry => entry?.code === 'SCOPE_CONFLICT'))
-  assert(conflictWait !== undefined, 'scope conflict was not retained in the durable scheduler event stream')
-  const {
-    attemptIntervals: conflictAttemptIntervals,
-    successfulDispatches: conflictDispatches,
-    workerEvidence: conflictEvidence,
-  } = assertSerializedScopeWorkerEvents(conflict.events, ['conflict-a', 'conflict-b'])
-  process.stdout.write('[80%] scope 冲突已串行消解，未形成死锁\n')
+  let conflictEvidence
+  if (fullMatrix) {
+    const conflictTitle = `DSH ${version} scope conflict E2E ${nonce}`
+    const conflict = await startRun(client, {
+      intent: { request: 'Serialize overlapping scopes without deadlock.' },
+      admission: admission(sourceSessionId, 'speed'),
+      graph: graph(conflictTitle, workspace, [
+        commonNode('conflict-a', {
+          task: `First shared-scope worker. Return exactly CONFLICT_A_${nonce}. Do not call tools.`,
+          writeScopes: ['e2e/shared'],
+        }),
+        commonNode('conflict-b', {
+          task: `Second shared-scope worker. Return exactly CONFLICT_B_${nonce}. Do not call tools.`,
+          writeScopes: ['e2e/shared'],
+        }),
+      ], 2),
+    })
+    assertNativeCompleted(conflict)
+    const conflictWait = conflict.events.find(event => event.type === 'scheduler.waiting.updated'
+      && Array.isArray(event.data.waiting)
+      && event.data.waiting.some(entry => entry?.code === 'SCOPE_CONFLICT'))
+    assert(conflictWait !== undefined, 'scope conflict was not retained in the durable scheduler event stream')
+    const {
+      attemptIntervals,
+      successfulDispatches,
+      workerEvidence: acceptedEvidence,
+    } = assertSerializedScopeWorkerEvents(conflict.events, ['conflict-a', 'conflict-b'])
+    conflictEvidence = {
+      title: conflictTitle,
+      runId: String(conflict.snapshot.runId),
+      wait: conflictWait.data,
+      attemptIntervals,
+      dispatchSequences: successfulDispatches.map(event => event.sequence),
+      evidenceSequences: acceptedEvidence.map(event => event.sequence),
+    }
+    process.stdout.write('[80%] scope 冲突已通过显式授权的完整订阅矩阵串行消解\n')
+  } else {
+    process.stdout.write('[80%] 最小订阅模式：复用未受影响的 scope 冲突证据，不重复调用算子\n')
+  }
 
   const recallTitle = `DSH ${version} Continuous Harness recall E2E ${nonce}`
   const recall = await startRun(client, {
@@ -392,7 +422,7 @@ async function runInner(appRoot) {
   const runs = [
     ...goalResults,
     { title: pipelineTitle, runId: String(pipeline.snapshot.runId) },
-    { title: conflictTitle, runId: String(conflict.snapshot.runId) },
+    ...(conflictEvidence === undefined ? [] : [{ title: conflictEvidence.title, runId: conflictEvidence.runId }]),
     { title: recallTitle, runId: String(recall.snapshot.runId) },
   ]
   const selectedModels = [
@@ -407,6 +437,7 @@ async function runInner(appRoot) {
   }))
   const evidence = {
     version,
+    mode,
     generatedAt: new Date().toISOString(),
     workspace,
     sourceSessionId,
@@ -428,14 +459,7 @@ async function runInner(appRoot) {
       quotaFailovers,
       rlm: rlm.data,
     },
-    conflict: {
-      title: conflictTitle,
-      runId: String(conflict.snapshot.runId),
-      wait: conflictWait.data,
-      attemptIntervals: conflictAttemptIntervals,
-      dispatchSequences: conflictDispatches.map(event => event.sequence),
-      evidenceSequences: conflictEvidence.map(event => event.sequence),
-    },
+    conflict: conflictEvidence ?? null,
     continualHarness: {
       title: recallTitle,
       runId: String(recall.snapshot.runId),
@@ -443,6 +467,11 @@ async function runInner(appRoot) {
     },
     selectedModels,
     runs,
+    resourcePolicy: {
+      plannedSubscriptionTurns: fullMatrix ? 10 : 5,
+      reusedUnchangedCoverage: fullMatrix ? [] : ['goal-objectives', 'scope-conflict'],
+      fullMatrixRequires: `${subscriptionAuthorization}=1 ${fullMatrixAuthorization}=1`,
+    },
   }
   process.stdout.write(`[100%] ${RESULT_MARKER}${JSON.stringify(evidence)}\n`)
 }
@@ -610,6 +639,7 @@ async function verifyDesktopProjection(baseUrl, target, evidence) {
 }
 
 async function runOuter() {
+  const mode = resolveSubscriptionE2EMode(process.env)
   const appRoot = resolve(valueAfter('--app') ?? defaultAppRoot)
   const executable = join(appRoot, 'Contents', 'MacOS', 'DSH Desktop')
   const version = appVersion(appRoot)
@@ -647,6 +677,7 @@ async function runOuter() {
       desktopProjection,
     },
   }
+  assert(result.mode === mode, `inner mode ${String(result.mode)} does not match outer mode ${mode}`)
   const defaultEvidencePath = resolve(
     import.meta.dirname,
     '..',

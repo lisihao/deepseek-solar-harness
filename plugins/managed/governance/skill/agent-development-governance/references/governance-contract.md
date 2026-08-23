@@ -39,6 +39,8 @@ Every important rule should have:
 - A CI aggregator is not a merge gate until branch protection requires it.
 - Baselines may ratchet downward; updating them is a policy change, not an automatic fix.
 - Bypass flags must not be used silently.
+- Reuse a passing gate only when the report proves the same gate command, relevant input bytes, dependency evidence, baseline, platform, and executable version. A failed report may contribute individually passing gates, but never a failed, blocked, missing, or fingerprint-mismatched result.
+- Subscription-backed and metered-API gates require explicit cost authorization when no compatible evidence exists. Reassurance alone is not an invalidation reason.
 
 ## Verification levels
 

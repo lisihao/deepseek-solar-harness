@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -140,6 +141,18 @@ class GovernanceTests(unittest.TestCase):
         with self.assertRaisesRegex(governance.GovernanceError, "exclusive must be a boolean"):
             governance.validate_profile(invalid, self.profile_path)
 
+    def test_profile_rejects_invalid_evidence_reuse_and_incremental_command(self):
+        invalid_reuse = dict(self.profile)
+        invalid_reuse["evidence_reuse"] = {"enabled": True, "gates": ["missing"]}
+        with self.assertRaisesRegex(governance.GovernanceError, "unknown gate"):
+            governance.validate_profile(invalid_reuse, self.profile_path)
+
+        invalid_incremental = dict(self.profile)
+        invalid_incremental["gates"] = [dict(gate) for gate in self.profile["gates"]]
+        invalid_incremental["gates"][0]["incremental_command"] = "unsafe shell"
+        with self.assertRaisesRegex(governance.GovernanceError, "incremental_command"):
+            governance.validate_profile(invalid_incremental, self.profile_path)
+
     def test_verify_propagates_failure(self):
         gate = dict(self.profile["gates"][0])
         gate["command"] = [sys.executable, "-c", "raise SystemExit(7)"]
@@ -233,6 +246,62 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual([result["status"] for result in results], ["error", "error"])
         self.assertIn("blocked by failed dependencies", results[1]["detail"])
         self.assertFalse(marker.exists())
+
+    def test_reused_dependency_is_not_repeated_for_a_fresh_consumer(self):
+        marker = self.root / "producer-ran"
+        producer = dict(self.profile["gates"][0])
+        producer["id"] = "producer"
+        producer["command"] = [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; import sys; Path(sys.argv[1]).write_text('ran')",
+            str(marker),
+        ]
+        consumer = dict(self.profile["gates"][1])
+        consumer["id"] = "consumer"
+        consumer["needs"] = ["producer"]
+        reused = {
+            "producer": {
+                "id": "producer",
+                "label": "producer",
+                "status": "ok",
+                "detail": "reused",
+                "reused": True,
+            }
+        }
+
+        results = governance.execute_gates(
+            self.root,
+            [producer, consumer],
+            False,
+            False,
+            reused_results=reused,
+        )
+        self.assertEqual([result["status"] for result in results], ["ok", "ok"])
+        self.assertTrue(results[0]["reused"])
+        self.assertFalse(marker.exists())
+
+    def test_incremental_command_composes_with_prior_evidence(self):
+        marker = self.root / "incremental-head"
+        gate = dict(self.profile["gates"][0])
+        gate["command"] = [sys.executable, "-c", "raise SystemExit(9)"]
+        gate["incremental_command"] = [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; import sys; Path(sys.argv[1]).write_text(sys.argv[2])",
+            str(marker),
+            "{evidence_head}",
+        ]
+        results = governance.execute_gates(
+            self.root,
+            [gate],
+            False,
+            False,
+            incremental_from={"always": "abc123"},
+        )
+        self.assertEqual(results[0]["status"], "ok")
+        self.assertTrue(results[0]["incremental"])
+        self.assertEqual(marker.read_text(), "abc123")
 
     def test_gate_environment_is_injected_without_shell(self):
         gate = dict(self.profile["gates"][0])
@@ -336,7 +405,16 @@ class GovernanceTests(unittest.TestCase):
             self.root, self.profile, self.profile_path, "auto", "full", None
         )
         gates = governance.select_gates(self.profile, payload["scopes"], "full")
-        results = governance.execute_gates(self.root, gates, False, False)
+        fingerprints = governance.gate_input_fingerprints(
+            self.root, self.profile, gates, payload["changed_files"], None
+        )
+        results = governance.execute_gates(
+            self.root,
+            gates,
+            False,
+            False,
+            input_fingerprints=fingerprints,
+        )
         report = self.root / "attestation.json"
         governance.write_attestation(
             report,
@@ -358,6 +436,174 @@ class GovernanceTests(unittest.TestCase):
         )
         failed = {item["id"] for item in stale["items"] if item["status"] == "error"}
         self.assertIn("fingerprint", failed)
+
+    def test_reuses_exact_gate_inputs_when_only_an_unrelated_scope_changes(self):
+        (self.root / "docs").mkdir()
+        self.profile["scope_rules"].append({"scope": "docs", "patterns": ["docs/**"]})
+        self.profile["evidence_reuse"] = {"enabled": True, "gates": ["source"]}
+        self.profile_path.write_text(json.dumps(self.profile), encoding="utf-8")
+        (self.root / "src" / "new.py").write_text("VALUE = 2\n", encoding="utf-8")
+        payload = governance.plan_payload(
+            self.root, self.profile, self.profile_path, "source", "full", None
+        )
+        gates = governance.select_gates(self.profile, payload["scopes"], "full")
+        fingerprints = governance.gate_input_fingerprints(
+            self.root, self.profile, gates, payload["changed_files"], None
+        )
+        results = governance.execute_gates(
+            self.root,
+            gates,
+            False,
+            False,
+            input_fingerprints=fingerprints,
+        )
+        report = self.root / "reuse.json"
+        governance.write_attestation(
+            report,
+            self.root,
+            self.profile,
+            self.profile_path,
+            payload,
+            results,
+            None,
+        )
+
+        (self.root / "docs" / "note.md").write_text("unrelated\n", encoding="utf-8")
+        current_files = governance.changed_files(self.root, None)
+        current_fingerprints = governance.gate_input_fingerprints(
+            self.root, self.profile, gates, current_files, None
+        )
+        reused, incremental, evidence_head = governance.load_reusable_evidence(
+            report,
+            self.root,
+            self.profile,
+            self.profile_path,
+            gates,
+            current_files,
+            None,
+            current_fingerprints,
+        )
+        self.assertIn("source", reused)
+        self.assertEqual(incremental, {})
+        self.assertEqual(evidence_head, governance.git_head(self.root))
+
+    def test_does_not_reuse_a_consumer_when_its_dependency_changed(self):
+        (self.root / "docs").mkdir()
+        self.profile["scope_rules"].append({"scope": "docs", "patterns": ["docs/**"]})
+        producer = dict(self.profile["gates"][1])
+        producer["id"] = "producer"
+        consumer = dict(self.profile["gates"][0])
+        consumer["id"] = "consumer"
+        consumer["scopes"] = ["docs"]
+        consumer["needs"] = ["producer"]
+        self.profile["gates"] = [producer, consumer]
+        self.profile["evidence_reuse"] = {
+            "enabled": True,
+            "gates": ["producer", "consumer"],
+        }
+        self.profile_path.write_text(json.dumps(self.profile), encoding="utf-8")
+        (self.root / "docs" / "note.md").write_text("stable\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "."], cwd=self.root, check=True, stdout=subprocess.DEVNULL
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "add dependency fixture"],
+            cwd=self.root,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        payload = governance.plan_payload(
+            self.root, self.profile, self.profile_path, "docs", "full", None
+        )
+        gates = governance.select_gates(self.profile, payload["scopes"], "full")
+        fingerprints = governance.gate_input_fingerprints(
+            self.root, self.profile, gates, payload["changed_files"], None
+        )
+        results = governance.execute_gates(
+            self.root, gates, False, False, input_fingerprints=fingerprints
+        )
+        report = self.root / "dependency-reuse.json"
+        governance.write_attestation(
+            report,
+            self.root,
+            self.profile,
+            self.profile_path,
+            payload,
+            results,
+            None,
+        )
+        subprocess.run(
+            ["git", "add", "."], cwd=self.root, check=True, stdout=subprocess.DEVNULL
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "record consumer evidence"],
+            cwd=self.root,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+
+        (self.root / "src" / "base.py").write_text("VALUE = 2\n", encoding="utf-8")
+        current_files = governance.changed_files(self.root, None)
+        current_fingerprints = governance.gate_input_fingerprints(
+            self.root, self.profile, gates, current_files, None
+        )
+        reused, _, _ = governance.load_reusable_evidence(
+            report,
+            self.root,
+            self.profile,
+            self.profile_path,
+            gates,
+            current_files,
+            None,
+            current_fingerprints,
+        )
+        self.assertNotIn("producer", reused)
+        self.assertNotIn("consumer", reused)
+
+    def test_verify_cli_reuses_unchanged_successful_evidence(self):
+        counter = self.root.parent / f"{self.root.name}-governance-counter"
+        gate = dict(self.profile["gates"][0])
+        gate["command"] = [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; import sys; "
+                "path = Path(sys.argv[1]); "
+                "path.write_text(str(int(path.read_text()) + 1) if path.exists() else '1')"
+            ),
+            str(counter),
+        ]
+        self.profile["gates"] = [gate]
+        self.profile["evidence_reuse"] = {"enabled": True, "gates": ["always"]}
+        self.profile_path.write_text(json.dumps(self.profile), encoding="utf-8")
+        arguments = [
+            "governance.py",
+            "verify",
+            "--project",
+            str(self.root),
+            "--profile",
+            str(self.profile_path),
+            "--scope",
+            "full",
+            "--level",
+            "quick",
+            "--report",
+            "@git",
+            "--json",
+        ]
+        try:
+            with mock.patch.object(sys, "argv", arguments), mock.patch(
+                "sys.stdout", new_callable=io.StringIO
+            ):
+                self.assertEqual(governance.main(), 0)
+            with mock.patch.object(sys, "argv", arguments), mock.patch(
+                "sys.stdout", new_callable=io.StringIO
+            ) as output:
+                self.assertEqual(governance.main(), 0)
+            self.assertEqual(counter.read_text(), "1")
+            self.assertIn('"reused": true', output.getvalue())
+        finally:
+            counter.unlink(missing_ok=True)
 
     def test_git_report_alias_resolves_inside_repository_metadata(self):
         report = governance.resolve_report_path(self.root, "@git")

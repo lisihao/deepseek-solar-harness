@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-expect-error The executable acceptance script is intentionally plain ESM.
-import { assertParallelWorkerEvents, assertSerializedScopeWorkerEvents } from '../scripts/verify-installed-orchestration-e2e.mjs'
+import {
+  assertParallelWorkerEvents,
+  assertSerializedScopeWorkerEvents,
+  resolveSubscriptionE2EMode,
+} from '../scripts/verify-installed-orchestration-e2e.mjs'
 
 describe('installed orchestration E2E event assertions', () => {
+  it('requires explicit authorization and defaults to the minimal subscription matrix', () => {
+    expect(() => resolveSubscriptionE2EMode({})).toThrow('DSH_ALLOW_SUBSCRIPTION_E2E=1')
+    expect(resolveSubscriptionE2EMode({ DSH_ALLOW_SUBSCRIPTION_E2E: '1' })).toBe('minimal')
+    expect(resolveSubscriptionE2EMode({
+      DSH_ALLOW_SUBSCRIPTION_E2E: '1',
+      DSH_SUBSCRIPTION_E2E_FULL_MATRIX: '1',
+    })).toBe('full')
+  })
+
   it('accepts parallel workers that retry on a different quota pool', () => {
     const events = [
       { sequence: 1, nodeId: 'worker-a', attempt: 0, type: 'model.allocated', data: { quotaPoolId: 'spark' } },

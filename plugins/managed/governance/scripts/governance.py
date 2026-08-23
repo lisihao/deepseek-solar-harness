@@ -12,6 +12,7 @@ import fnmatch
 import hashlib
 import json
 import os
+import platform
 import shlex
 import shutil
 import stat
@@ -130,6 +131,32 @@ def validate_profile(profile: dict[str, Any], source: Path) -> None:
         if not isinstance(exclusive, bool):
             raise GovernanceError(f"gate '{gate_id}' exclusive must be a boolean")
     gates_by_id = {gate["id"]: gate for gate in profile["gates"]}
+    reuse = profile.get("evidence_reuse", {})
+    if not isinstance(reuse, dict):
+        raise GovernanceError("evidence_reuse must be an object")
+    enabled = reuse.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise GovernanceError("evidence_reuse.enabled must be a boolean")
+    reuse_gates = reuse.get("gates", [])
+    if not isinstance(reuse_gates, list) or not all(
+        isinstance(item, str) and item for item in reuse_gates
+    ):
+        raise GovernanceError("evidence_reuse.gates must be a string array")
+    unknown_reuse_gates = set(reuse_gates) - gates_by_id.keys()
+    if unknown_reuse_gates:
+        raise GovernanceError(
+            f"evidence_reuse uses unknown gate(s): {sorted(unknown_reuse_gates)}"
+        )
+    for gate_id, gate in gates_by_id.items():
+        incremental = gate.get("incremental_command")
+        if incremental is not None and (
+            not isinstance(incremental, list)
+            or not incremental
+            or not all(isinstance(arg, str) and arg for arg in incremental)
+        ):
+            raise GovernanceError(
+                f"gate '{gate_id}' incremental_command must be a non-empty string array"
+            )
     for gate_id, gate in gates_by_id.items():
         needs = gate.get("needs", [])
         if not isinstance(needs, list) or not all(isinstance(item, str) and item for item in needs):
@@ -337,6 +364,248 @@ def change_fingerprint(project: Path, files: list[str], profile_sha256: str) -> 
             digest.update(b"<missing-or-non-file>")
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def resolved_git_ref(project: Path, ref: str | None) -> str | None:
+    """Resolve a baseline ref so evidence cannot survive unnoticed ref movement."""
+    if ref is None:
+        return None
+    result = subprocess.run(
+        ["git", "rev-parse", ref],
+        cwd=project,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise GovernanceError(f"cannot resolve changed-from ref '{ref}': {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def executable_identity(program: str) -> dict[str, Any]:
+    """Return the executable and version facts that affect one gate result."""
+    resolved = shutil.which(program)
+    if resolved is None:
+        return {"program": program, "path": None, "version": None}
+    path = Path(resolved).resolve()
+    try:
+        stat_result = path.stat()
+        file_identity = {
+            "size": stat_result.st_size,
+            "mtime_ns": stat_result.st_mtime_ns,
+        }
+    except OSError:
+        file_identity = {"size": None, "mtime_ns": None}
+    version = subprocess.run(
+        [resolved, "--version"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=10,
+    )
+    return {
+        "program": program,
+        "path": str(path),
+        **file_identity,
+        "version_returncode": version.returncode,
+        "version": (version.stdout or "").strip(),
+    }
+
+
+def gate_input_files(
+    profile: dict[str, Any], gate: dict[str, Any], files: list[str]
+) -> list[str]:
+    """Select outgoing-diff files whose scopes can affect a gate."""
+    gate_scopes = set(gate["scopes"])
+    if "always" in gate_scopes:
+        return list(files)
+    return [
+        path
+        for path in files
+        if gate_scopes.intersection(infer_scopes(profile, [path], "auto"))
+    ]
+
+
+def gate_execution_contract(gate: dict[str, Any]) -> dict[str, Any]:
+    """Return fields that define the full gate, excluding evidence-only optimization."""
+    return {
+        key: value
+        for key, value in gate.items()
+        if key not in {"incremental_command"}
+    }
+
+
+def gate_input_fingerprints(
+    project: Path,
+    profile: dict[str, Any],
+    gates: list[dict[str, Any]],
+    files: list[str],
+    changed_from: str | None,
+) -> dict[str, str]:
+    """Bind each reusable result to its command, relevant bytes, dependencies, and runtime."""
+    runtime_identities: dict[str, dict[str, Any]] = {}
+    fingerprints: dict[str, str] = {}
+    gates_by_id = {gate["id"]: gate for gate in gates}
+    baseline = resolved_git_ref(project, changed_from)
+
+    def fingerprint(gate_id: str) -> str:
+        existing = fingerprints.get(gate_id)
+        if existing is not None:
+            return existing
+        gate = gates_by_id[gate_id]
+        program = gate["command"][0]
+        runtime = runtime_identities.setdefault(program, executable_identity(program))
+        inputs = []
+        for relative in gate_input_files(profile, gate, files):
+            path = project / relative
+            inputs.append({
+                "path": relative,
+                "sha256": sha256_file(path) if path.is_file() else "<missing-or-non-file>",
+            })
+        dependencies = {
+            dependency: fingerprint(dependency)
+            for dependency in gate.get("needs", [])
+            if dependency in gates_by_id
+        }
+        payload = {
+            "contract": gate,
+            "scope_rules": profile["scope_rules"],
+            "baseline": baseline,
+            "inputs": inputs,
+            "dependencies": dependencies,
+            "runtime": runtime,
+            "platform": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "machine": platform.machine(),
+                "python": platform.python_version(),
+            },
+        }
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        fingerprints[gate_id] = digest
+        return digest
+
+    for gate in gates:
+        fingerprint(gate["id"])
+    return fingerprints
+
+
+def load_reusable_evidence(
+    report_path: Path,
+    project: Path,
+    profile: dict[str, Any],
+    profile_path: Path,
+    gates: list[dict[str, Any]],
+    files: list[str],
+    changed_from: str | None,
+    fingerprints: dict[str, str],
+) -> tuple[dict[str, dict[str, Any]], dict[str, str], str | None]:
+    """Load exact or ancestor-delta evidence without treating a failed report as all-failed."""
+    reuse = profile.get("evidence_reuse", {})
+    if not reuse.get("enabled", False) or not report_path.is_file():
+        return {}, {}, None
+    report = load_json(report_path)
+    evidence_head = report.get("git_head")
+    if (
+        report.get("profile") != profile["name"]
+        or report.get("changed_from") != changed_from
+        or not isinstance(evidence_head, str)
+    ):
+        return {}, {}, None
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", evidence_head, "HEAD"],
+        cwd=project,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        return {}, {}, None
+
+    current_by_id = {gate["id"]: gate for gate in gates}
+    previous_results = {
+        item.get("id"): item
+        for item in report.get("results", [])
+        if isinstance(item, dict) and item.get("status") == "ok"
+    }
+    allowed = set(reuse.get("gates", []))
+    reusable: dict[str, dict[str, Any]] = {}
+    incremental: dict[str, str] = {}
+
+    old_profile: dict[str, Any] | None = None
+    try:
+        relative_profile = profile_path.relative_to(project).as_posix()
+        old_text = subprocess.run(
+            ["git", "show", f"{evidence_head}:{relative_profile}"],
+            cwd=project,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if old_text.returncode == 0:
+            old_profile = json.loads(old_text.stdout)
+    except (ValueError, json.JSONDecodeError):
+        old_profile = None
+    old_gates = {
+        gate.get("id"): gate
+        for gate in (old_profile or {}).get("gates", [])
+        if isinstance(gate, dict)
+    }
+    scope_rules_stable = (old_profile or {}).get("scope_rules") == profile.get("scope_rules")
+    delta_files = changed_files(project, evidence_head)
+
+    impact_cache: dict[str, bool] = {}
+
+    def gate_or_dependency_changed(gate_id: str) -> bool:
+        cached = impact_cache.get(gate_id)
+        if cached is not None:
+            return cached
+        gate = current_by_id[gate_id]
+        impacted = bool(gate_input_files(profile, gate, delta_files)) or any(
+            gate_or_dependency_changed(dependency)
+            for dependency in gate.get("needs", [])
+            if dependency in current_by_id
+        )
+        impact_cache[gate_id] = impacted
+        return impacted
+
+    for gate_id in allowed.intersection(current_by_id):
+        previous = previous_results.get(gate_id)
+        if previous is None:
+            continue
+        current_gate = current_by_id[gate_id]
+        exact = previous.get("input_sha256") == fingerprints[gate_id]
+        old_gate = old_gates.get(gate_id)
+        contract_stable = (
+            scope_rules_stable
+            and isinstance(old_gate, dict)
+            and gate_execution_contract(old_gate) == gate_execution_contract(current_gate)
+        )
+        unaffected = not gate_or_dependency_changed(gate_id)
+        if exact or (contract_stable and unaffected):
+            reused = dict(previous)
+            reused.update({
+                "status": "ok",
+                "duration_seconds": 0.0,
+                "input_sha256": fingerprints[gate_id],
+                "reused": True,
+                "reused_from_head": evidence_head,
+                "reuse_basis": "exact-input" if exact else "ancestor-delta",
+                "original_duration_seconds": previous.get("duration_seconds"),
+                "detail": (
+                    f"reused from {evidence_head[:12]}; "
+                    f"basis={'exact-input' if exact else 'ancestor-delta'}"
+                ),
+            })
+            reusable[gate_id] = reused
+        elif contract_stable and current_gate.get("incremental_command"):
+            incremental[gate_id] = evidence_head
+    return reusable, incremental, evidence_head
 
 
 def matches(path: str, patterns: Iterable[str]) -> bool:
@@ -669,6 +938,9 @@ def execute_gates(
     fail_fast: bool,
     context_env: dict[str, str] | None = None,
     max_concurrency: int = 1,
+    input_fingerprints: dict[str, str] | None = None,
+    reused_results: dict[str, dict[str, Any]] | None = None,
+    incremental_from: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     if isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or max_concurrency < 1:
         raise GovernanceError("max_concurrency must be a positive integer")
@@ -695,7 +967,13 @@ def execute_gates(
 
     gates_by_id = {gate["id"]: gate for gate in gates}
     pending = dict(gates_by_id)
-    results_by_id: dict[str, dict[str, Any]] = {}
+    results_by_id: dict[str, dict[str, Any]] = dict(reused_results or {})
+    incremental_from = incremental_from or {}
+    input_fingerprints = input_fingerprints or {}
+    for gate_id in list(results_by_id):
+        pending.pop(gate_id, None)
+        print(f"\n==> {gate_id}: {results_by_id[gate_id]['detail']}", flush=True)
+
     running: dict[concurrent.futures.Future[tuple[dict[str, Any], str]], str] = {}
     failure_seen = False
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrency) as executor:
@@ -732,13 +1010,21 @@ def execute_gates(
                         break
                     if any(gates_by_id[running_id].get("exclusive", False) for running_id in running.values()):
                         break
-                    command = gate["command"]
+                    run_gate = gate
+                    evidence_head = incremental_from.get(gate_id)
+                    if evidence_head is not None:
+                        run_gate = dict(gate)
+                        run_gate["command"] = [
+                            argument.replace("{evidence_head}", evidence_head)
+                            for argument in gate["incremental_command"]
+                        ]
+                    command = run_gate["command"]
                     cwd = (project / gate.get("cwd", ".")).resolve()
                     environment = gate.get("env", {})
                     env_note = f" env={sorted(environment)}" if environment else ""
                     detail = f"(cd {cwd}){env_note} {shlex.join(command)}"
                     print(f"\n==> {gate_id}: {detail}", flush=True)
-                    future = executor.submit(execute_gate, project, gate, context_env)
+                    future = executor.submit(execute_gate, project, run_gate, context_env)
                     running[future] = gate_id
                     del pending[gate_id]
                     made_progress = True
@@ -756,6 +1042,12 @@ def execute_gates(
             for future in completed:
                 gate_id = running.pop(future)
                 result, output = future.result()
+                result["input_sha256"] = input_fingerprints.get(gate_id)
+                evidence_head = incremental_from.get(gate_id)
+                if evidence_head is not None:
+                    result["incremental"] = True
+                    result["reused_from_head"] = evidence_head
+                    result["detail"] += f"; composed with evidence from {evidence_head[:12]}"
                 if output:
                     print(f"\n<== {gate_id}\n{output}", end="" if output.endswith("\n") else "\n", flush=True)
                 results_by_id[gate_id] = result
@@ -776,7 +1068,7 @@ def write_attestation(
 ) -> dict[str, Any]:
     profile_digest = sha256_file(profile_path)
     attestation = {
-        "attestation_version": 1,
+        "attestation_version": 2,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "project": str(project),
         "profile": profile["name"],
@@ -792,6 +1084,8 @@ def write_attestation(
         "scopes": payload["scopes"],
         "required_gates": payload["gates"],
         "results": results,
+        "reused_gates": sum(bool(item.get("reused")) for item in results),
+        "incremental_gates": sum(bool(item.get("incremental")) for item in results),
         "overall": "ok"
         if len(results) == len(payload["gates"])
         and all(item["status"] == "ok" for item in results)
@@ -824,6 +1118,28 @@ def check_attestation(
     required_gates = report.get("required_gates", [])
     results = report.get("results", [])
     result_ids = [item.get("id") for item in results if isinstance(item, dict)]
+    current_gates_by_id = {gate["id"]: gate for gate in profile["gates"]}
+    fingerprint_gates = [
+        current_gates_by_id[gate_id]
+        for gate_id in required_gates
+        if gate_id in current_gates_by_id
+    ]
+    current_fingerprints = gate_input_fingerprints(
+        project,
+        profile,
+        fingerprint_gates,
+        current_files,
+        report.get("changed_from"),
+    )
+    result_fingerprints_ok = (
+        all(
+            isinstance(item, dict)
+            and item.get("input_sha256") == current_fingerprints.get(item.get("id"))
+            for item in results
+        )
+        if report.get("attestation_version", 1) >= 2
+        else True
+    )
     checks = [
         (
             "profile",
@@ -861,6 +1177,11 @@ def check_attestation(
             required_gates == result_ids
             and all(item.get("status") == "ok" for item in results),
             f"required={required_gates} results={result_ids}",
+        ),
+        (
+            "gate-inputs",
+            result_fingerprints_ok,
+            "every executed or reused gate matches its current input fingerprint",
         ),
     ]
     if require_level:
@@ -909,6 +1230,11 @@ def parse_args() -> argparse.Namespace:
             command.add_argument(
                 "--report",
                 help="Write a change-bound JSON attestation; use @git for worktree metadata",
+            )
+            command.add_argument(
+                "--no-reuse",
+                action="store_true",
+                help="Ignore compatible evidence from the existing report",
             )
         if name == "attest":
             command.add_argument(
@@ -961,6 +1287,13 @@ def main() -> int:
 
     gates_by_id = {gate["id"]: gate for gate in profile["gates"]}
     gates = [gates_by_id[gate_id] for gate_id in payload["gates"]]
+    fingerprints = gate_input_fingerprints(
+        project,
+        profile,
+        gates,
+        payload["changed_files"],
+        args.changed_from,
+    )
     context_env = (
         {
             "GOVERNANCE_CHANGED_FROM": args.changed_from,
@@ -969,6 +1302,20 @@ def main() -> int:
         if args.changed_from
         else None
     )
+    report_path = resolve_report_path(project, args.report) if args.report else None
+    reused_results: dict[str, dict[str, Any]] = {}
+    incremental_from: dict[str, str] = {}
+    if report_path is not None and not args.dry_run and not args.no_reuse:
+        reused_results, incremental_from, _ = load_reusable_evidence(
+            report_path,
+            project,
+            profile,
+            profile_path,
+            gates,
+            payload["changed_files"],
+            args.changed_from,
+            fingerprints,
+        )
     lock = contextlib.nullcontext() if args.dry_run else verify_lock(project)
     with lock:
         results = execute_gates(
@@ -978,6 +1325,9 @@ def main() -> int:
             args.fail_fast,
             context_env=context_env,
             max_concurrency=profile.get("max_concurrency", 1),
+            input_fingerprints=fingerprints,
+            reused_results=reused_results,
+            incremental_from=incremental_from,
         )
         output = {
             "title": "Governance verification",
@@ -987,10 +1337,13 @@ def main() -> int:
             "scopes": payload["scopes"],
             "changed_files": payload["changed_files"],
             "items": results,
-            "summary": f"{sum(item['status'] == 'ok' for item in results)}/{len(results)} gates passed",
+            "summary": (
+                f"{sum(item['status'] == 'ok' for item in results)}/{len(results)} gates passed; "
+                f"reused={sum(bool(item.get('reused')) for item in results)}; "
+                f"incremental={sum(bool(item.get('incremental')) for item in results)}"
+            ),
         }
-        if args.report and not args.dry_run:
-            report_path = resolve_report_path(project, args.report)
+        if report_path is not None and not args.dry_run:
             attestation = write_attestation(
                 report_path,
                 project,
