@@ -69,9 +69,8 @@ When required `gh`, `pnpm`, build, test, or generator commands fail because the 
 
 Run checks before pushes via [dsh-pre-push-checks](.agents/skills/dsh-pre-push-checks/SKILL.md); report only commands run. After `gh stack sync`, validate immediately; do not merge before checks pass.
 
-- Match evidence to the surface: focused tests for behavior, snapshots for model or user output, `doc-sync` for docs, build/hygiene and built smokes for published paths, and real-API e2e for provider behavior.
-- Never default to the full suite or repeat a passing check for commit or push. CI owns exhaustive coverage and the platform matrix; rehearse all locally only by explicit request, for CI diagnosis, or for an irreducibly repository-wide change.
-- Treat passing evidence as reusable while its command, affected inputs, dependency evidence, baseline, platform, and executor version remain unchanged. A commit, push, elapsed time, or desire for reassurance does not invalidate it. Subscription-backed and metered-API E2E requires an identified affected behavior plus explicit cost authorization; use the smallest representative installed-product path by default, and require separate authorization for the full paid matrix.
+- Match evidence to the surface: focused behavior tests, snapshots, doc checks, package smokes, and real-provider E2E only for changed provider behavior.
+- Reuse passing evidence while affected inputs and execution contract are unchanged; commit, push, time, or reassurance do not invalidate it. Paid E2E also needs explicit cost authorization and defaults to its smallest representative path; CI owns exhaustive platform coverage.
 - `test:coverage`, not `test`, is the CI coverage gate ([why](docs/testing.md)).
 
 ## Secrets / .env

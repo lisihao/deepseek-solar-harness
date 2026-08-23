@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-expect-error The executable acceptance script is intentionally plain ESM.
-import {
-  assertParallelWorkerEvents,
-  assertSerializedScopeWorkerEvents,
-  resolveSubscriptionE2EMode,
-} from '../scripts/verify-installed-orchestration-e2e.mjs'
+import { assertParallelWorkerEvents, assertSerializedScopeWorkerEvents, resolveSubscriptionE2EMode } from '../scripts/verify-installed-orchestration-e2e.mjs'
 
 describe('installed orchestration E2E event assertions', () => {
   it('requires explicit authorization and defaults to the minimal subscription matrix', () => {
