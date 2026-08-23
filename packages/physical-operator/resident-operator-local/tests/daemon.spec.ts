@@ -1,4 +1,6 @@
+import { once } from 'node:events'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -42,6 +44,25 @@ describe('Resident daemon Driver error boundary', () => {
       code: 'AUTH_MODE_MISMATCH',
       message: 'Claude Code subscription authentication expired; run `claude auth login` and retry the node.',
     })
+  })
+
+  it('classifies a disconnected Codex response stream as runtime unavailability', () => {
+    const error = new Error('subagent-codex: Codex turn ended with status failed: {"message":"stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)"}')
+    expect(normalizeResidentDriverError(error, false)).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+  })
+})
+
+describe('Resident daemon lifecycle', () => {
+  it('closes accepted control sockets before shutdown settles', async () => {
+    const root = temporaryRoot()
+    const daemon = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    await daemon.start()
+    const socket = createConnection(daemon.socketPath)
+    await once(socket, 'connect')
+
+    await daemon.close()
+
+    expect(socket.destroyed).toBe(true)
   })
 })
 
@@ -241,6 +262,34 @@ describe('ResidentDaemon', () => {
     } finally {
       driver.releaseQualification()
       await Promise.all([first, second])
+      await daemon.close()
+    }
+  })
+
+  it('uses connectTimeout only for socket connection, not a qualified RPC response', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingQualificationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = new ResidentDaemonClient({
+      root,
+      autoStart: false,
+      connectTimeoutMs: 50,
+      pollIntervalMs: 5,
+    })
+    await connected.ready()
+    driver.beginBlocking()
+    const result = connected.providers().then(
+      providers => ({ providers }),
+      (error: unknown) => ({ error }),
+    )
+    try {
+      await driver.blockingQualificationEntered
+      await new Promise<void>(resolve => setTimeout(resolve, 100))
+      driver.releaseQualification()
+      await expect(result).resolves.toMatchObject({ providers: [{ operatorId: 'codex' }] })
+    } finally {
+      driver.releaseQualification()
       await daemon.close()
     }
   })

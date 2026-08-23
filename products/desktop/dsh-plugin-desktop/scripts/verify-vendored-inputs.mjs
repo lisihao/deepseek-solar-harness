@@ -104,7 +104,11 @@ for (const archivePath of packageArchives) {
         `verify-vendored-inputs: installed ${archivedPackage.name} has stale ${packageRelative}; refresh yarn.lock and run yarn install`,
       )
     }
-    if (packageRelative === 'package.json' || packageRelative.startsWith('lib/')) continue
+    if (
+      packageRelative === 'package.json'
+      || packageRelative.startsWith('lib/')
+      || packageRelative.startsWith('dist/')
+    ) continue
     let sourceFile = resolve(sourcePackageRoot, packageRelative)
     let sourceFileRelative = relative(repositoryRoot, sourceFile)
     try {

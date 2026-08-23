@@ -55,10 +55,13 @@ python3 "$SKILL_DIR/scripts/governance.py" attest --project "$PROJECT_ROOT" --re
 
 Use `--dry-run` first when the repository is large. Use an explicit `--scope frontend`, `--scope backend`, or `--scope full` if the change range cannot be derived from the current worktree. Use `--changed-from <ref>` for committed branch changes.
 
-Completion requires fresh output from every selected gate. Record:
+When a Profile enables `evidence_reuse`, verification reuses an earlier successful gate only when its command, relevant changed-file bytes, dependency fingerprints, baseline ref, platform, and executable version still match. A changed gate may compose its prior full result with a declared `incremental_command`; the report marks both `reused` and `incremental` evidence with the source commit. Use `--no-reuse` only when an explicit fresh rerun is required. Never rerun subscription-backed or metered-API acceptance merely for reassurance; require an identified invalidated input and explicit cost authorization.
+
+Completion requires fresh or fingerprint-validated evidence from every selected gate. Record:
 
 - gate ID and exact command;
 - result and duration;
+- reused or incrementally composed evidence and its source commit;
 - skipped gate and concrete reason;
 - remaining warning, exception, or environment blocker;
 - CI status when local execution is not equivalent to the merge gate;

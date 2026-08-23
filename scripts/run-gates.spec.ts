@@ -93,6 +93,19 @@ describe('gate graph validation', () => {
     },
   )
 
+  it.each(['ci-primary', 'ci-artifacts', 'check-all'] as const)(
+    'checks Desktop sealed core archives against the current build in %s',
+    (mode) => {
+      const gate = withPnpmEntrypoint(() =>
+        gatesForMode(mode).find(subject => subject.id === 'desktop-vendor-build'))
+
+      expect(gate).toMatchObject({
+        displayCommand: 'pnpm run verify-desktop-vendor-build',
+        needs: ['build'],
+      })
+    },
+  )
+
   it('keeps native Windows coverage blocking while portability inventory remains observational', () => {
     const gates = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
     const byId = new Map(gates.map(subject => [subject.id, subject]))

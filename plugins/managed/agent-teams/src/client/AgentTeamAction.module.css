@@ -1,0 +1,86 @@
+.root {
+  position: relative;
+}
+
+.trigger {
+  border: 1px solid var(--border, #d8d8dc);
+  border-radius: 8px;
+  background: var(--background, #fff);
+  color: var(--foreground, #242429);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 24px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.trigger:hover {
+  background: var(--muted, #f4f4f6);
+}
+
+.popover {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(360px, calc(100vw - 32px));
+  border: 1px solid var(--border, #d8d8dc);
+  border-radius: 12px;
+  background: var(--background, #fff);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 16%);
+  box-sizing: border-box;
+  padding: 12px;
+}
+
+.label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 7px;
+}
+
+.input {
+  width: 100%;
+  resize: vertical;
+  min-height: 84px;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #d8d8dc);
+  border-radius: 8px;
+  background: var(--background, #fff);
+  color: inherit;
+  font: inherit;
+  padding: 8px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.cancel,
+.submit {
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 10px;
+}
+
+.cancel {
+  border: 1px solid var(--border, #d8d8dc);
+  background: transparent;
+  color: inherit;
+}
+
+.submit {
+  border: 1px solid #3056d3;
+  background: #3056d3;
+  color: #fff;
+}
+
+.submit:disabled {
+  cursor: default;
+  opacity: 0.5;
+}

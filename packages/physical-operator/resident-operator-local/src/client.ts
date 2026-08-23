@@ -387,6 +387,7 @@ export class ResidentDaemonClient {
     }, this.options.connectTimeoutMs)
     try {
       await connected
+      clearTimeout(timeout)
       const transport = new JsonRpcLineTransport(socket, socket)
       transport.start()
       try {

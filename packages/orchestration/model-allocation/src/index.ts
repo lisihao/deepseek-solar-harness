@@ -78,7 +78,7 @@ export interface ModelAllocationPlan {
 
 /** Structured model-capacity or explicit-selection failure. */
 export class ModelAllocationError extends HarnessError {
-  constructor(message: string, code: 'NO_MODEL_CAPACITY' | 'EXPLICIT_MODEL_UNAVAILABLE') {
+  constructor(message: string, code: 'NO_MODEL_CAPACITY' | 'MODEL_CAPACITY_BUSY' | 'EXPLICIT_MODEL_UNAVAILABLE') {
     super(message, code)
     this.name = 'ModelAllocationError'
   }

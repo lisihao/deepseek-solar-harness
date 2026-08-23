@@ -34,7 +34,10 @@ pre-commit:
       run: node_modules/.bin/tsx scripts/gen-third-party-notices.ts && git add THIRD_PARTY_NOTICES.md
 
     - name: whitespace (staged)
-      run: git diff --cached --check
+      # Controlled plugins preserve their accepted upstream bytes, including
+      # generated assets whose whitespace is not owned by the host repository.
+      # Keep the host gate strict without rewriting those provenance inputs.
+      run: git diff --cached --check -- . ':(exclude)plugins/managed/**'
 
     - name: vendor manifest guard
       run: scripts/check-vendor-manifest.sh

@@ -13,6 +13,7 @@ import type {
   ContinualHarnessMode,
   ModelAllocationObjective,
   ModelAllocationPlan,
+  ModelExecutionOffer,
   ModelTaskPhase,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation'
@@ -204,6 +205,8 @@ export interface NodeExecutionPlanV1 {
   readonly allocationPlanRef: OrchestrationArtifactRef
   readonly allocationPlan: ModelAllocationPlan
   readonly rlmPlan?: RlmExecutionPlanV1
+  /** Low-tier native-subscription allocation sealed for Scheduler-owned RLM child turns. */
+  readonly rlmWorkerPlan?: ModelAllocationPlan
   readonly harnessSnapshotRef?: OrchestrationArtifactRef
   readonly operatorPlan: PhysicalOperatorPlanV1
   readonly effectiveReadScopes: readonly string[]
@@ -226,6 +229,8 @@ export interface OrchestrationNodeSnapshot {
   readonly operatorId?: string
   readonly operatorProfile?: PhysicalOperatorExecutionPreference
   readonly model?: string
+  /** Allocator tier retained so the completed run remains explainable. */
+  readonly modelTier?: ModelExecutionOffer['tier']
   readonly modelSource?: 'native-subscription' | 'metered-api'
   readonly quotaPoolId?: string
   readonly rlm?: RlmExecutionMode
@@ -249,6 +254,8 @@ export interface OrchestrationRunSnapshot {
   readonly graphRevision: number
   /** Certified graph-wide concurrency ceiling. */
   readonly maxParallel?: number
+  /** Current quota- and capacity-aware concurrency ceiling, never above maxParallel. */
+  readonly effectiveParallelism?: number
   /** Collaboration policy and route that created this run, absent on legacy runs. */
   readonly admission?: OrchestrationAdmissionTraceV1
   readonly certificate: PlanCertificateV1

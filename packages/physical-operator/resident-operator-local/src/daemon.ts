@@ -81,6 +81,13 @@ export function normalizeResidentDriverError(error: unknown, aborted: boolean): 
   if (/claude code.*(?:certificate verification|unable to connect to api)/isu.test(message)) {
     return new ResidentOperatorError(message, 'RUNTIME_UNAVAILABLE')
   }
+  const codexTransportFailure = /subagent-codex.*stream disconnected before completion/isu.test(message)
+    || /subagent-codex.*error sending request for url/isu.test(message)
+    || /subagent-codex.*app-server protocol stream closed/isu.test(message)
+    || /subagent-codex.*\b(?:ECONNRESET|ETIMEDOUT|EPIPE)\b/isu.test(message)
+  if (codexTransportFailure) {
+    return new ResidentOperatorError(message, 'RUNTIME_UNAVAILABLE')
+  }
   if (error instanceof ResidentOperatorError) return error
   return new ResidentOperatorError(message, aborted ? 'RUNTIME_UNAVAILABLE' : 'INVALID_RESULT')
 }
@@ -193,6 +200,7 @@ export class ResidentDaemon {
   private readonly drivers = new Map<string, ResidentProductDriver>()
   private readonly driverManifestHash: string
   private readonly transports = new Set<JsonRpcLineTransport>()
+  private readonly sockets = new Set<Socket>()
   private readonly active = new Map<string, ActiveTurn>()
   private readonly qualifications = new Map<string, Promise<ResidentProviderStatus>>()
   private lockDescriptor: number | undefined
@@ -244,6 +252,7 @@ export class ResidentDaemon {
     // stop leaves their receipts for startup recovery as indeterminate.
     await Promise.allSettled([...this.active.values()].map(turn => turn.done))
     for (const transport of this.transports) transport.close()
+    for (const socket of this.sockets) socket.end()
     await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
     this.store.close()
     this.safeUnlink(this.socketPath)
@@ -256,6 +265,7 @@ export class ResidentDaemon {
     socket.setEncoding('utf8')
     const transport = new JsonRpcLineTransport(socket, socket)
     this.transports.add(transport)
+    this.sockets.add(socket)
     transport.onRequest(async (method, params) => {
       try {
         return wireSuccess(await this.dispatch(method, params))
@@ -266,6 +276,7 @@ export class ResidentDaemon {
     const remove = (): void => {
       transport.close()
       this.transports.delete(transport)
+      this.sockets.delete(socket)
     }
     socket.once('close', remove)
     socket.once('error', remove)

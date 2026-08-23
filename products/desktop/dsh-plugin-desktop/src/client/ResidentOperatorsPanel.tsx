@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { DesktopSidebarFooterActionOwnerProps } from './contracts.ts'
 import type {
   DesktopResidentDashboard,
   DesktopResidentActivity,
@@ -28,8 +27,8 @@ export async function loadResidentDashboard(
   return await response.json() as DesktopResidentDashboard
 }
 
-/** Sidebar action and local read-only overlay for persistent physical operators. */
-export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwnerProps) {
+/** Session-header action and local read-only overlay for persistent physical operators. */
+export function ResidentOperatorsPanel() {
   const [open, setOpen] = useState(false)
   const [selectedSessionId, setSelectedSessionId] = useState<string>()
   const [dashboard, setDashboard] = useState<DesktopResidentDashboard>()
@@ -86,14 +85,14 @@ export function ResidentOperatorsPanel({ wide }: DesktopSidebarFooterActionOwner
       <button
         type="button"
         className="dshDesktopResidentAction"
-        data-wide={wide || undefined}
+        data-surface="session-header"
         data-status={status}
         aria-label={label}
         title={label}
         onClick={() => { setOpen(true) }}
       >
         <span className="dshDesktopResidentDot" aria-hidden="true" />
-        {wide ? <><span>物理算子</span><span>{running > 0 ? `${String(running)} worker` : `${String(residentHosts)} 宿主`}</span></> : <span>OP</span>}
+        <span>算子</span>
       </button>
       {open && createPortal(
         <div className="dshDesktopResidentBackdrop" role="presentation" onMouseDown={() => { setOpen(false) }}>

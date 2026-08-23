@@ -16,17 +16,19 @@ desktop package 拥有普通 Host 与 Web Client 两个 face。它的 Client fac
 
 Desktop 产品层还会提供 Resident Physical Operators 与 AgentTeams，但不会把任一 bundle 持久化到用户选择的 profile。普通聊天模型选择旁只显示一个“协作”控件，不再把算子、原生模型和强度呈现为三个同级选择器。每个未配置的 Session 使用“智能协作”：主模型负责对话，并在非简单任务中判断是否委派给 Codex 或 Claude Code。人工策略按 Session 记录，可关闭委派或让符合条件的任务优先使用某个产品；短问答仍留在主模型。产品专属的原生模型和推理/思考强度统一收进该控件的高级偏好，两者缺省都按任务推荐；首轮实际采用的组合会按“算子 + 规范化工作区”锁定到 Resident Session，只有 idle 且 revision 匹配的 reset 才能改变。每次打开控件都会立即刷新原生订阅模型目录，并在面板可见时缩短刷新周期，避免启动初期竞态让选项持续禁用一分钟。Desktop 会识别旧版未标记的策略事件，而新版策略与 profile 事件带有可忽略扩展标记，因此旧 reader 也能冷加载同一 Session，不会拒绝日志。底层 physical-operator 请求在调用方省略 `mode` 时仍缺省为 `ephemeral`，从而保持 Provider 兼容；智能协作会对仓库、多轮和需要跨重启连续的工作显式优先使用 `resident`。在 macOS 上，launcher 会把用户原生的 `claude` 与 `codex` 命令解析为仅 owner 可访问的私有 wrapper，Resident daemon 使用产品订阅登录态和原生 session 连续性，禁止 API key fallback。Daemon 独立于 Electron generation，因此应用重启只会断开客户端，不会删除 receipt、lease、artifact 或原生产品 session。
 
-普通 sidebar 会在两种呈现模式下增加一个纯新增的 **物理算子** action。它会打开同源、只读的状态面板，显示 Provider 资格、持久 Session、最新 Receipt 状态与有界进度事件。Host route 按需读取 `ctx.residentOperators`，不会创建 Desktop 自有的 Resident 状态库。面板还会说明智能协作与插件能力契约：模型工作使用 `physical_operator` 工具，Host 插件通过注入 `ctx.physicalOperators` 执行，可信管理/状态插件则可注入 `ctx.residentOperators` 检查状态。基于实时 descriptor、tag 与 execution mode 的指引会主动触发委派；策略可见且已记录，不会引入隐藏分类器或第二调度权威。
+当前 Session header 会在两种呈现模式下增加一个纯新增的 **物理算子** action。它会打开同源、只读的状态面板，显示该 Session 的 Provider 资格、持久 Session、最新 Receipt 状态与有界进度事件。Host route 按需读取 `ctx.residentOperators`，不会创建 Desktop 自有的 Resident 状态库。面板还会说明智能协作与插件能力约定：模型工作使用 `physical_operator` 工具，Host 插件通过注入 `ctx.physicalOperators` 执行，可信管理/状态插件则可注入 `ctx.residentOperators` 检查状态。基于实时 descriptor、tag 与 execution mode 的指引会主动触发委派；策略可见且已记录，不会引入隐藏分类器或第二调度权威。Desktop 不会把该 action 放入 sidebar footer，因此运维检查不会占用会话导航空间。
 
 “物理算子”action 会区分已安装 Resident 宿主与活动 worker，并显示每个 worker 的隔离 lane。Codex 与 Claude Code 各自最多接纳四个并发 lane；一个原生产品宿主因此可以执行多个独立 TaskGraph 节点，而不会把重复应用错误呈现为多个算子。
 
-产品层还会把封装后的 `@deepseek-ai/dsh-orchestrations` Bundle 作为独立插件能力挂载。Service Definition 分别拥有 Intent、Context、Capsule、TaskGraph 和 Orchestration 契约；Local Provider 拥有持久 daemon、SQLite 状态、Artifact Store 与调度写入；Tool 和 Web UI 只消费 `ctx.orchestrations`。新增的 **编排** sidebar 工作台通过同源投影展示 Run、DAG 依赖、Compiler/Capsule/Context 阶段、已封印 ExecutionPlan、算子选择、Attempt、Generation、Evidence、Blocker 与事件。暂停、恢复、取消、批准、拒绝和不确定执行处置都调用公共 Service seam，不直接修改 daemon 存储。移除该 Bundle 就会完整移除这组能力，不改变聊天、Workflow 或物理算子。
+产品层还会把封装后的 `@deepseek-ai/dsh-orchestrations` Bundle 作为独立插件能力挂载。Service Definition 分别拥有 Intent、Context、Capsule、TaskGraph 和 Orchestration 约定；Local Provider 拥有持久 daemon、SQLite 状态、Artifact Store 与调度写入；Tool 和 Web UI 只消费 `ctx.orchestrations`。当前 Session header 中新增的 **编排** action 会打开工作台，通过同源投影展示 Run、DAG 依赖、Compiler/Capsule/Context 阶段、已封印 ExecutionPlan、算子选择、Attempt、Generation、Evidence、Blocker 与事件。暂停、恢复、取消、批准、拒绝和不确定执行处置都调用公共 Service seam，不直接修改 daemon 存储。移除该 Bundle 就会完整移除这组能力，不改变聊天、Workflow 或物理算子。
 
 每个编排工作台 Run 顶部都有“协作 Trace”摘要。它会标出准入的“智能协作”“仅主模型”“优先 Codex”或“优先 Claude Code”策略、TaskGraph 路由、活动与最大 worker 数、可派发节点、clean-task Capsule 状态和 fresh-lane 隔离。事件时间线保留相同的准入信息、Capsule 解析、算子派发、lane 与调度等待原因，因此任务完成并重启后仍可解释。
 
 Resident 派发还会将提供方无关的连接、推理／执行、工具活动和结果整理阶段投影到协作 Trace。终态事件会显示所选 Codex 或 Claude Code 算子、停止原因、有界的面向用户输出和不可变 Evidence 引用。私有推理文本、提示词、终端屏幕和产品本地 transcript 仍不进入该投影。
 
 位于 `/tmp/dsh-orchestration-*` 或 `/private/tmp/dsh-orchestration-*` 下的本地验收 Run 仍持久化保留，并带有**验收**标签。工作台默认包含它们，同时提供仅影响展示的隐藏控制，并保持已存储数量可见。
+
+Desktop 会把 Solar 受控的 Better Sidebar、GenUI、插件诊断、模型 fallback、代码图谱、Mnemon、Aegis skills 和有界工具作为产品输入封装。即使聚合 UI 包依赖旧版本，product-first 解析也会保持已接受 Better Sidebar 实现的权威性，而其挂载 guard 会阻止 sidebar 重复归属。Mnemon 是唯一产品记忆 bundle；陈旧的 Memory Evolve row 会被禁用，但不会删除用户数据。原生 DeepSeek provider 将 `deepseek-v4-flash-vision-exp` 声明为支持图像输入，因此 Desktop 不会加载 Luna Vision Bridge 或 Modlens。Aegis 只贡献 skills；Code-as-Harness 仍是唯一的完成与准入权威。
 
 打包内的 `anchored-standard` preset 是 system-trust 产品输入，并排在同名上游 preset root 之前。它的首轮 gate 会覆盖 delegated agent，因此 AgentTeams worker 会与主 agent 一样从 `bash` 和 `str_replace_editor` 两个 bootstrap 工具开始，而不是被当作已经 promoted。AgentTeams 还会把 member protocol 放入首条 user prompt，不再替换所选 preset 的 persona。若用户 profile 已声明 AgentTeams，产品层不会重复加载；最终 patch 仍会强制这一 prompt placement。
 
@@ -161,6 +163,8 @@ Release operator 必须先发布两个平台产物，再让版本可被发现。
 
 `yarn package:dir` 为当前宿主平台创建未封装目录。如果应用归档缺少 desktop 更新与终端模块、DSH CLI bootstrap、内置 pnpm 入口、Resident/AgentTeams runtime package、Code-as-Harness 治理、修复后的 Anchored Standard preset 或物理 deployment package，packaged-runtime gate 会拒绝该产物。Electron Builder 会把根 manifest、desktop runtime 与完整依赖树输出到 `app.asar.unpacked`；Host profile boot 与 CLI bootstrap 都会使用这棵物理树，因此 DSH profile fallback 的符号链接不会指向虚拟 ASAR 目录。`verify:vendor` 会在打包前拒绝过期的已安装 file dependency，`verify:composition-package` 会从打包后的 Electron 目录组合这些产品输入，`verify:resident-package` 会从打包 daemon 审查原生订阅 Provider，`verify:resident-execution` 则会显式执行无工具的真实产品 turn。`build/app-icon.png` 保持为未经修改的 iOS Default 源图，并继续作为 Windows 与 Linux 应用图标。构建过程会运行 `scripts/generate-mac-app-icon.mjs`，把该图缩放为 824 × 824 像素并居中放入透明的 1024 × 1024 画布；macOS 打包与运行中的 Dock 都使用生成的 `build/app-icon-mac.png`。`build/tray-icon.svg` 是品牌蓝托盘源文件：构建过程会派生由 macOS 系统自动着色的模板图，以及固定品牌蓝的 Windows 与 Linux 托盘图。
 
+`yarn verify:orchestration-e2e` 是持久化编排的安装态产品验收。因为它会消耗通过资格审查的 Claude Code 与 Codex 原生订阅，若未用 `DSH_ALLOW_SUBSCRIPTION_E2E=1` 显式授权一次确实受影响的最终验收，它会在连接 Desktop 之前直接拒绝执行。默认最小矩阵会拒绝循环 Graph，证明高阶规划与验证包围两个并行低阶 DAG 叶节点，封存并执行启用的节点级 RLM 计划，回忆一条先前的 Continuous Harness outcome，查询运行中 Host 的投影，并通过 CDP 打开真实 Desktop 工作台。质量/综合/成本三个独立目标 turn 与 scope 冲突的两个独立 turn 会复用仍然有效的确定性证据或既有安装态证据；只有相关行为确实受影响时，才用 `DSH_SUBSCRIPTION_E2E_FULL_MATRIX=1` 单独授权这五次额外订阅调用。该命令会在 `dist/acceptance/` 下写入包含运行模式与复用范围的 JSON 证据 Artifact；模块 mock 不能替代其中的真实执行部分。
+
 ### Windows x64 本地安装包
 
 请使用原生 Windows x64 电脑，并安装 Git 与 x64 Node `22.23.2`（与 CI 使用的版本相同）。打包命令接受官方发行版仍包含所需 Corepack 命令的 Node `22.19+` 与 Node `24.x`。在一个最新的 `v2` checkout 中打开 PowerShell，然后执行：
@@ -178,7 +182,7 @@ corepack.cmd yarn dist:win
 
 ## 模型体验
 
-产品层会增加 AgentTeams 与既有 physical-operator 工具面。每个 Session 的执行策略缺省为“智能协作”，并显示在聊天模型选择旁；也可以通过 `/operator` 命令或 Desktop 面板人工覆盖。Resident 执行只返回有界 continuity metadata，底层 run API 在省略 `mode` 时仍按 ephemeral 处理。动态 system-prompt 区段会在每个非简单任务开始时对照实时 descriptor、tag 和 mode 进行判断，而 sidebar 面板只向人投影状态。打包内的 Anchored Standard 会让主 agent 与 delegated agent 都使用双工具首轮 bootstrap。AgentTeams 会把协调协议放在 worker 的首条 user message 中，并保留 preset persona。
+产品层会增加 AgentTeams 与既有 physical-operator 工具面。每个 Session 的执行策略缺省为“智能协作”，并显示在聊天模型选择旁；也可以通过 `/operator` 命令或 Desktop 面板人工覆盖。Resident 执行只返回有界 continuity metadata，底层 run API 在省略 `mode` 时仍按 ephemeral 处理。动态 system-prompt 区段会在每个非简单任务开始时对照实时 descriptor、tag 和 mode 进行判断，而 Session-header 面板只向人投影状态。打包内的 Anchored Standard 会让主 agent 与 delegated agent 都使用双工具首轮 bootstrap。AgentTeams 会把协调协议放在 worker 的首条 user message 中，并保留 preset persona。
 
 #### KV Cache 影响
 

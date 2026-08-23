@@ -17,10 +17,27 @@ if (process.versions.electron === undefined) {
   if (!existsSync(appExecutable)) {
     throw new Error(`verify-packaged-resident-smoke: packaged application is missing at ${appExecutable}`)
   }
+  const networkEnvironment = Object.fromEntries([
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'ALL_PROXY',
+    'NO_PROXY',
+    'http_proxy',
+    'https_proxy',
+    'all_proxy',
+    'no_proxy',
+    'NODE_EXTRA_CA_CERTS',
+    'SSL_CERT_FILE',
+  ].flatMap((name) => {
+    const value = process.env[name]
+    return value === undefined ? [] : [[name, value]]
+  }))
   const environment = {
     HOME: homedir(),
     PATH: '/usr/bin:/bin',
     ELECTRON_RUN_AS_NODE: '1',
+    // Preserve local proxy and CA routing without forwarding credentials.
+    ...networkEnvironment,
     ...process.env.USER === undefined ? {} : { USER: process.env.USER },
     ...process.env.LOGNAME === undefined ? {} : { LOGNAME: process.env.LOGNAME },
     ...process.env.LANG === undefined ? {} : { LANG: process.env.LANG },
@@ -54,6 +71,8 @@ const installation = installNativeProductRuntime({
   stateDir: join(temporaryRoot, 'runtime-products'),
   environment: process.env,
 })
+let client
+let shutdownRequested = false
 
 try {
   for (const command of ['claude', 'codex']) {
@@ -61,7 +80,7 @@ try {
       throw new Error(`verify-packaged-resident-smoke: native ${command} command was not resolved`)
     }
   }
-  const client = new ResidentDaemonClient({
+  client = new ResidentDaemonClient({
     root: stateRoot,
     autoStart: true,
     connectTimeoutMs: 15_000,
@@ -112,6 +131,7 @@ try {
   }
 
   await client.shutdown()
+  shutdownRequested = true
   const deadline = Date.now() + 10_000
   while (Date.now() < deadline) {
     try {
@@ -143,6 +163,9 @@ try {
     daemonProcess: processCommand,
   }, undefined, 2)}\n`)
 } finally {
+  if (client !== undefined && !shutdownRequested) {
+    await client.shutdown()
+  }
   installation.dispose()
   rmSync(temporaryRoot, { recursive: true, force: true })
 }

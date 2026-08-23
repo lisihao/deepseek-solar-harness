@@ -319,7 +319,9 @@ describe('boot with user patches', () => {
     const basePatches = [{ id: 'noop', config: { value: 'generated' } }]
     const ctx = await boot(NAME, writeTree(dir), basePatches)
     await ctx.plugin(Timer)
-    await ctx.plugin(Hmr, { root: [], ignored: [], debounce: 0 })
+    // Exact native add/change/unlink behavior is owned by hmr-config.spec.ts.
+    // Poll here so this test isolates transactional patch replacement from OS watcher timing.
+    await ctx.plugin(Hmr, { root: [], ignored: [], debounce: 0, usePolling: true })
     const failures: Array<{ filename: string; error: Error }> = []
     ctx.on('hmr/config-update-failed', (failedFilename, error) => {
       failures.push({ filename: failedFilename, error })

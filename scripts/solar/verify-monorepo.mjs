@@ -5,14 +5,24 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import yaml from 'js-yaml'
+import { CONTROLLED_PLUGIN_INSTALLS } from './install-controlled-plugin-deps.mjs'
 
 export const DESKTOP_TAG_PATTERN = '^DSH-desktop-v[0-9]+\\.[0-9]+\\.[0-9]+$'
 export const MANAGED_IDS = [
+  'aegis',
   'agent-teams',
+  'better-sidebar',
+  'codegraph',
+  'genui',
   'governance',
-  'luna-vision-bridge',
-  'memory-evolve',
+  'llm-fallbacks',
+  'mnemon',
+  'plugin-check',
   'plugin-console',
+  'tool-markdown',
+  'tool-regex',
+  'tool-stat',
+  'tool-time',
   'web-billing',
   'web-ui',
 ]
@@ -28,6 +38,7 @@ export function validateMonorepo({
   governanceManifest,
   governanceProfile,
   governanceWorkflow,
+  controlledPluginInstalls,
   vitestConfig,
   pathExists,
   subtreeImports,
@@ -107,6 +118,41 @@ export function validateMonorepo({
     || relatedTests?.exclusive !== true) {
     errors.push('related-tests must use the bounded Vitest project worker budgets as an exclusive gate')
   }
+  for (const workspace of [
+    {
+      name: 'Agent Teams',
+      installId: 'agent-teams-install',
+      cwd: 'plugins/managed/agent-teams',
+      command: ['corepack', 'pnpm', '--ignore-workspace', 'install', '--frozen-lockfile'],
+      consumers: ['agent-teams-build', 'agent-teams-verify', 'agent-teams-typecheck'],
+    },
+    {
+      name: 'Web UI',
+      installId: 'web-ui-install',
+      cwd: 'plugins/managed/web-ui',
+      command: ['corepack', 'pnpm', 'install', '--frozen-lockfile'],
+      consumers: ['web-ui-typecheck', 'web-ui-tests', 'web-ui-script-tests', 'web-ui-docs'],
+    },
+    {
+      name: 'Controlled plugins',
+      installId: 'controlled-plugin-install',
+      cwd: '.',
+      command: ['node', 'scripts/solar/install-controlled-plugin-deps.mjs'],
+      consumers: ['controlled-plugin-suite'],
+    },
+  ]) {
+    const installGate = governanceGates.get(workspace.installId)
+    if (installGate?.cwd !== workspace.cwd
+      || JSON.stringify(installGate?.command) !== JSON.stringify(workspace.command)) {
+      errors.push(`${workspace.name} governance must install its isolated workspace deterministically`)
+    }
+    for (const consumerId of workspace.consumers) {
+      const consumer = governanceGates.get(consumerId)
+      if (!consumer?.needs?.includes(workspace.installId)) {
+        errors.push(`${consumerId} must depend on ${workspace.installId}`)
+      }
+    }
+  }
   const threadSafeWorkers = /name: 'thread-safe',[\s\S]{0,300}maxWorkers: 2,/u.test(vitestConfig ?? '')
   const processBoundWorkers = /name: 'process-bound',[\s\S]{0,200}maxWorkers: 1,/u.test(vitestConfig ?? '')
   if (!threadSafeWorkers || !processBoundWorkers) {
@@ -117,6 +163,37 @@ export function validateMonorepo({
   }
   if (!governanceWorkflow?.includes('cache: pnpm')) {
     errors.push('Solar governance must restore the pnpm cache')
+  }
+  const expectedControlledPluginInstalls = [
+    ...['better-sidebar', 'genui', 'llm-fallbacks', 'mnemon'].map(plugin => ({
+      plugin,
+      command: 'corepack',
+      args: ['pnpm', 'install', '--frozen-lockfile'],
+    })),
+    ...['plugin-check', 'tool-markdown', 'tool-regex', 'tool-stat', 'tool-time'].map(plugin => ({
+      plugin,
+      command: 'npm',
+      args: ['ci', '--no-audit', '--fund=false'],
+    })),
+  ]
+  if (JSON.stringify(controlledPluginInstalls) !== JSON.stringify(expectedControlledPluginInstalls)) {
+    errors.push('controlled plugin dependency installer must preserve every native workspace lockfile policy')
+  }
+  for (const retired of ['plugins/managed/luna-vision-bridge', 'plugins/managed/memory-evolve']) {
+    if (governanceWorkflow?.includes(retired)) {
+      errors.push(`Solar governance must not install retired component ${retired}`)
+    }
+  }
+  for (const required of [
+    'plugins/managed/better-sidebar/pnpm-lock.yaml',
+    'plugins/managed/genui/pnpm-lock.yaml',
+    'plugins/managed/llm-fallbacks/pnpm-lock.yaml',
+    'plugins/managed/mnemon/pnpm-lock.yaml',
+    'node scripts/solar/install-controlled-plugin-deps.mjs',
+  ]) {
+    if (!governanceWorkflow?.includes(required)) {
+      errors.push(`Solar governance controlled-plugin setup is missing ${required}`)
+    }
   }
   if (governanceWorkflow?.includes('- run: corepack pnpm run build:lib')) {
     errors.push('Solar governance workflow must not rebuild source outside the attested DAG')
@@ -171,6 +248,7 @@ export function verifyRepository(root) {
     governanceManifest: readJson('tools/agent-development-governance/manifest.json'),
     governanceProfile: readJson('.agent-governance/profile.json'),
     governanceWorkflow: readFileSync(resolve(root, '.github/workflows/solar-governance.yml'), 'utf8'),
+    controlledPluginInstalls: CONTROLLED_PLUGIN_INSTALLS,
     vitestConfig: readFileSync(resolve(root, 'vitest.config.ts'), 'utf8'),
     pathExists: path => existsSync(resolve(root, path)),
     subtreeImports: parseSubtreeImports(log),

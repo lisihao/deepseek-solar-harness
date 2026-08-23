@@ -34,8 +34,10 @@ jobs:
           cache-dependency-path: |
             pnpm-lock.yaml
             plugins/managed/agent-teams/pnpm-lock.yaml
-            plugins/managed/luna-vision-bridge/pnpm-lock.yaml
-            plugins/managed/memory-evolve/pnpm-lock.yaml
+            plugins/managed/better-sidebar/pnpm-lock.yaml
+            plugins/managed/genui/pnpm-lock.yaml
+            plugins/managed/llm-fallbacks/pnpm-lock.yaml
+            plugins/managed/mnemon/pnpm-lock.yaml
             plugins/managed/web-ui/pnpm-lock.yaml
       - run: corepack enable
       - uses: actions/cache@v4
@@ -49,12 +51,8 @@ jobs:
         working-directory: products/desktop
       - run: corepack pnpm install --ignore-workspace --frozen-lockfile
         working-directory: plugins/managed/agent-teams
-      - run: node scripts/link-dsh-source.mjs "$GITHUB_WORKSPACE"
-        working-directory: plugins/managed/luna-vision-bridge
-      - run: corepack pnpm@8.15.9 install --ignore-workspace --frozen-lockfile
-        working-directory: plugins/managed/luna-vision-bridge
-      - run: corepack pnpm install --ignore-workspace --frozen-lockfile
-        working-directory: plugins/managed/memory-evolve
+      - name: Install controlled plugin dependencies
+        run: node scripts/solar/install-controlled-plugin-deps.mjs
       - run: corepack pnpm install --frozen-lockfile
         working-directory: plugins/managed/web-ui
       - run: python3 tools/agent-development-governance/governance.py audit --project . --strict-warnings

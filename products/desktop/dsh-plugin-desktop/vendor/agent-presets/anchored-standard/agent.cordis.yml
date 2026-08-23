@@ -49,9 +49,8 @@
 #
 # POST-PROMOTION (local addition): the promoted catalog is NOT the full
 # Standard dump — it stays on the bootstrap pair + the three discovery tools
-# (dev_tool_search / skill_search / skill_load) + the memory turn-closure tools
-# (memory / memory_suggest / memory_review_status / dtodo) + whatever the model
-# unlocked via dev_tool_search. Heavier tools are one dev_tool_search away; the
+# (dev_tool_search / skill_search / skill_load) + whatever the model unlocked
+# via dev_tool_search. Heavier tools are one dev_tool_search away; the
 # trajectory is not pulled back to standard-like behavior by a 25-tool dump.
 #
 # COMPACTION (local addition): after `compaction/end` the session falls back

@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client'
 // slot, whose keyed renderer map lives in the ui-conversation contract.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { ActivityPanel } from './ActivityPanel.tsx'
+import { AgentTeamAction } from './AgentTeamAction.tsx'
 import { AgentTeamsCard, type AgentTeamsCardInjected } from './AgentTeamsCard.tsx'
 import { agentTeamsCardDefinition } from './agent-teams-card-definition.ts'
 
@@ -33,6 +34,11 @@ export function apply(ctx: ClientContext): void {
   }, 'agent-teams: activity panel')
 
   ctx.conversationEvents.register(agentTeamsCardDefinition)
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+    name: 'conversation.session.header.actions',
+    id: 'agent-team-launcher',
+    order: 30,
+  }, AgentTeamAction))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'agent-teams',

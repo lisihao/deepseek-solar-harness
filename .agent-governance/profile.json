@@ -2,6 +2,33 @@
   "profile_version": 1,
   "name": "deepseek-solar-harness",
   "max_concurrency": 2,
+  "evidence_reuse": {
+    "enabled": true,
+    "gates": [
+      "typecheck",
+      "lint",
+      "related-tests",
+      "doc-sync",
+      "build",
+      "hygiene",
+      "desktop-check",
+      "governance-tests",
+      "governance-skill",
+      "governance-plugin",
+      "governance-plugin-tests",
+      "agent-teams-install",
+      "agent-teams-build",
+      "agent-teams-verify",
+      "agent-teams-typecheck",
+      "controlled-plugin-install",
+      "controlled-plugin-suite",
+      "web-ui-install",
+      "web-ui-typecheck",
+      "web-ui-tests",
+      "web-ui-script-tests",
+      "web-ui-docs"
+    ]
+  },
   "project_markers": [
     "AGENTS.md",
     "package.json",
@@ -27,8 +54,7 @@
     {"scope": "desktop", "patterns": ["products/desktop/**"]},
     {"scope": "managed-governance", "patterns": ["plugins/managed/governance/**"]},
     {"scope": "managed-agent-teams", "patterns": ["plugins/managed/agent-teams/**"]},
-    {"scope": "managed-luna", "patterns": ["plugins/managed/luna-vision-bridge/**"]},
-    {"scope": "managed-memory", "patterns": ["plugins/managed/memory-evolve/**"]},
+    {"scope": "managed-controlled-plugins", "patterns": ["plugins/managed/aegis/**", "plugins/managed/better-sidebar/**", "plugins/managed/codegraph/**", "plugins/managed/genui/**", "plugins/managed/llm-fallbacks/**", "plugins/managed/mnemon/**", "plugins/managed/plugin-check/**", "plugins/managed/tool-markdown/**", "plugins/managed/tool-regex/**", "plugins/managed/tool-stat/**", "plugins/managed/tool-time/**"]},
     {"scope": "managed-billing", "patterns": ["plugins/managed/web-billing/**"]},
     {"scope": "managed-web-ui", "patterns": ["plugins/managed/web-ui/**"]},
     {"scope": "product-metadata", "patterns": ["plugins/registry.yaml", "distribution/**"]},
@@ -137,6 +163,7 @@
       "id": "related-tests",
       "label": "Vitest tests related to the outgoing Solar diff",
       "command": ["pnpm", "exec", "vitest", "run", "--changed=origin/solar"],
+      "incremental_command": ["pnpm", "exec", "vitest", "run", "--changed={evidence_head}"],
       "cwd": ".",
       "scopes": ["source", "tooling", "release"],
       "levels": ["full"],
@@ -219,12 +246,22 @@
       "timeout_seconds": 600
     },
     {
+      "id": "agent-teams-install",
+      "label": "Agent Teams dependency install",
+      "command": ["corepack", "pnpm", "--ignore-workspace", "install", "--frozen-lockfile"],
+      "cwd": "plugins/managed/agent-teams",
+      "scopes": ["managed-agent-teams"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
       "id": "agent-teams-build",
       "label": "Agent Teams build",
       "command": ["corepack", "pnpm", "--ignore-workspace", "run", "build"],
       "cwd": "plugins/managed/agent-teams",
       "scopes": ["managed-agent-teams"],
       "levels": ["full"],
+      "needs": ["agent-teams-install"],
       "timeout_seconds": 600
     },
     {
@@ -234,6 +271,7 @@
       "cwd": "plugins/managed/agent-teams",
       "scopes": ["managed-agent-teams"],
       "levels": ["full"],
+      "needs": ["agent-teams-install", "agent-teams-build"],
       "timeout_seconds": 600
     },
     {
@@ -243,34 +281,28 @@
       "cwd": "plugins/managed/agent-teams",
       "scopes": ["managed-agent-teams"],
       "levels": ["full"],
+      "needs": ["agent-teams-install"],
       "timeout_seconds": 600
     },
     {
-      "id": "luna-check",
-      "label": "Luna Vision Bridge package suite",
-      "command": ["corepack", "pnpm@8.15.9", "--ignore-workspace", "run", "check"],
-      "cwd": "plugins/managed/luna-vision-bridge",
-      "scopes": ["managed-luna"],
+      "id": "controlled-plugin-install",
+      "label": "Controlled plugin dependency install",
+      "command": ["node", "scripts/solar/install-controlled-plugin-deps.mjs"],
+      "cwd": ".",
+      "scopes": ["managed-controlled-plugins"],
       "levels": ["full"],
       "timeout_seconds": 600
     },
     {
-      "id": "memory-test",
-      "label": "Memory Evolve regression tests",
-      "command": ["corepack", "pnpm", "--ignore-workspace", "run", "test"],
-      "cwd": "plugins/managed/memory-evolve",
-      "scopes": ["managed-memory"],
+      "id": "controlled-plugin-suite",
+      "label": "Controlled plugin native checks",
+      "command": ["node", "scripts/solar/verify-controlled-plugins.mjs"],
+      "cwd": ".",
+      "scopes": ["managed-controlled-plugins"],
       "levels": ["full"],
-      "timeout_seconds": 600
-    },
-    {
-      "id": "memory-build",
-      "label": "Memory Evolve build",
-      "command": ["corepack", "pnpm", "--ignore-workspace", "run", "build"],
-      "cwd": "plugins/managed/memory-evolve",
-      "scopes": ["managed-memory"],
-      "levels": ["full"],
-      "timeout_seconds": 600
+      "needs": ["controlled-plugin-install"],
+      "exclusive": true,
+      "timeout_seconds": 1800
     },
     {
       "id": "billing-check",
@@ -291,12 +323,22 @@
       "timeout_seconds": 300
     },
     {
+      "id": "web-ui-install",
+      "label": "Web UI dependency install",
+      "command": ["corepack", "pnpm", "install", "--frozen-lockfile"],
+      "cwd": "plugins/managed/web-ui",
+      "scopes": ["managed-web-ui"],
+      "levels": ["full"],
+      "timeout_seconds": 600
+    },
+    {
       "id": "web-ui-typecheck",
       "label": "Web UI monorepo typecheck",
       "command": ["pnpm", "typecheck"],
       "cwd": "plugins/managed/web-ui",
       "scopes": ["managed-web-ui"],
       "levels": ["full"],
+      "needs": ["web-ui-install"],
       "timeout_seconds": 1200
     },
     {
@@ -306,6 +348,7 @@
       "cwd": "plugins/managed/web-ui",
       "scopes": ["managed-web-ui"],
       "levels": ["full"],
+      "needs": ["web-ui-install"],
       "timeout_seconds": 1200
     },
     {
@@ -315,6 +358,7 @@
       "cwd": "plugins/managed/web-ui",
       "scopes": ["managed-web-ui"],
       "levels": ["full"],
+      "needs": ["web-ui-install"],
       "timeout_seconds": 600
     },
     {
@@ -324,6 +368,7 @@
       "cwd": "plugins/managed/web-ui",
       "scopes": ["managed-web-ui"],
       "levels": ["full"],
+      "needs": ["web-ui-install"],
       "timeout_seconds": 600
     }
   ]

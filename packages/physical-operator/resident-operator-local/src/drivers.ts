@@ -37,7 +37,7 @@ import { openCodexDaemonStream } from './codex-transport.ts'
 const execFileAsync = promisify(execFile)
 
 /** Qualified Claude Code CLI version for this Resident build. */
-export const EXPECTED_CLAUDE_CLI_VERSION = '2.1.233 (Claude Code)'
+export const EXPECTED_CLAUDE_CLI_VERSION = '2.1.239 (Claude Code)'
 /** Official Claude Agent SDK version compiled into this Resident build. */
 export const EXPECTED_CLAUDE_SDK_VERSION = '0.3.220'
 /** Qualified Codex CLI version for this Resident build. */
@@ -67,6 +67,23 @@ export function claudeEnvironment(
     environment.NODE_USE_SYSTEM_CA = '1'
   }
   return environment
+}
+
+/**
+ * Decide whether Claude Code proved a first-party claude.ai login.
+ *
+ * Claude Code 2.1.239 may report `subscriptionType: null` for a valid
+ * claude.ai session, so that advisory field is not part of the authentication
+ * boundary. API-key-shaped environment values are already removed before the
+ * command runs by {@link scrubbedParentEnv}.
+ *
+ * @param status Parsed output from `claude auth status --json`.
+ * @returns Whether the native product attested a first-party claude.ai login.
+ */
+export function isClaudeNativeSubscription(status: Readonly<Record<string, unknown>>): boolean {
+  return status.loggedIn === true
+    && status.authMethod === 'claude.ai'
+    && status.apiProvider === 'firstParty'
 }
 
 function environmentValue(environment: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -309,10 +326,31 @@ export function claudeResultFailure(result: SDKResultMessage): ResidentOperatorE
       'AUTH_MODE_MISMATCH',
     )
   }
+  if (/(?:usage limit|quota (?:is )?exhausted|rate limit)/iu.test(detail)) {
+    return new ResidentOperatorError(`Claude Code subscription quota is exhausted: ${detail}`, 'QUOTA_EXHAUSTED')
+  }
   if (/(?:certificate verification|unable to connect to api)/iu.test(detail)) {
     return new ResidentOperatorError(`Claude Code runtime is unavailable: ${detail}`, 'RUNTIME_UNAVAILABLE')
   }
   return new ResidentOperatorError(`Claude Code returned an error result: ${detail}`, 'INVALID_RESULT')
+}
+
+/**
+ * Convert Codex transport and terminal failures into the stable Resident taxonomy.
+ * @param error - product protocol or terminal failure.
+ * @returns a retryable runtime failure for transient transport loss, otherwise an invalid result.
+ */
+export function codexExecutionFailure(error: unknown): ResidentOperatorError {
+  if (error instanceof ResidentOperatorError) return error
+  const message = error instanceof Error ? error.message : String(error)
+  if (/(?:usageLimitExceeded|hit your usage limit|quota (?:is )?exhausted)/iu.test(message)) {
+    return new ResidentOperatorError(message, 'QUOTA_EXHAUSTED')
+  }
+  const unavailable = /stream disconnected before completion/iu.test(message)
+    || /error sending request for url/iu.test(message)
+    || /app-server protocol stream closed/iu.test(message)
+    || /\b(?:ECONNRESET|ETIMEDOUT|EPIPE)\b/iu.test(message)
+  return new ResidentOperatorError(message, unavailable ? 'RUNTIME_UNAVAILABLE' : 'INVALID_RESULT')
 }
 
 /** Claude Code Agent SDK Driver using persisted native subscription Sessions. */
@@ -324,10 +362,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
       const { stdout: version, executable } = await command('claude', ['--version'])
       const { stdout: auth } = await command(executable, ['auth', 'status', '--json'])
       const parsed = JSON.parse(auth) as Record<string, unknown>
-      const subscription = parsed.loggedIn === true
-        && parsed.authMethod === 'claude.ai'
-        && typeof parsed.subscriptionType === 'string'
-        && parsed.subscriptionType.length > 0
+      const subscription = isClaudeNativeSubscription(parsed)
       const exactVersion = version.trim() === EXPECTED_CLAUDE_CLI_VERSION
       const models = subscription && exactVersion ? await claudeModels(executable) : []
       const catalogReady = models.length > 0
@@ -561,14 +596,14 @@ export class CodexResidentDriver implements ResidentProductDriver {
       request.onProgress('reasoning')
       const result = await wire.runTurn(texts, request.signal, (turnId) => {
         request.onRunning(threadId, turnId)
-      }, request.profile).catch((error: unknown) => {
-        if (error instanceof CodexApprovalRequiredError) {
-          throw new ResidentOperatorError(error.message, 'APPROVAL_REQUIRED')
-        }
-        throw error
-      })
+      }, request.profile)
       request.onProgress('finalizing')
       return { ...result, nativeSessionId: threadId }
+    } catch (error) {
+      if (error instanceof CodexApprovalRequiredError) {
+        throw new ResidentOperatorError(error.message, 'APPROVAL_REQUIRED')
+      }
+      throw codexExecutionFailure(error)
     } finally {
       request.signal.removeEventListener('abort', abort)
       wire.close()

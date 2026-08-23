@@ -8,7 +8,7 @@ function validInput() {
     path: `plugins/managed/${id}`,
     package: `${id}@1.0.0`,
     source: `https://github.com/example/${id}.git`,
-    accepted_sha: `${index + 1}`.repeat(40),
+    accepted_sha: ((index % 15) + 1).toString(16).repeat(40),
     license: 'MIT',
     license_status: 'license-file',
     license_evidence: `plugins/managed/${id}/LICENSE`,
@@ -42,6 +42,29 @@ function validInput() {
         { id: 'lint', command: ['pnpm', 'run', 'lint:contracts-ready'], needs: ['source-build'] },
         { id: 'related-tests', command: ['pnpm', 'exec', 'vitest', 'run', '--changed=origin/solar'], exclusive: true },
         { id: 'doc-sync', command: ['pnpm', 'run', 'doc-sync:contracts-ready'], needs: ['source-build'] },
+        {
+          id: 'agent-teams-install',
+          cwd: 'plugins/managed/agent-teams',
+          command: ['corepack', 'pnpm', '--ignore-workspace', 'install', '--frozen-lockfile'],
+        },
+        { id: 'agent-teams-build', needs: ['agent-teams-install'] },
+        { id: 'agent-teams-verify', needs: ['agent-teams-install'] },
+        { id: 'agent-teams-typecheck', needs: ['agent-teams-install'] },
+        {
+          id: 'web-ui-install',
+          cwd: 'plugins/managed/web-ui',
+          command: ['corepack', 'pnpm', 'install', '--frozen-lockfile'],
+        },
+        { id: 'web-ui-typecheck', needs: ['web-ui-install'] },
+        { id: 'web-ui-tests', needs: ['web-ui-install'] },
+        { id: 'web-ui-script-tests', needs: ['web-ui-install'] },
+        { id: 'web-ui-docs', needs: ['web-ui-install'] },
+        {
+          id: 'controlled-plugin-install',
+          cwd: '.',
+          command: ['node', 'scripts/solar/install-controlled-plugin-deps.mjs'],
+        },
+        { id: 'controlled-plugin-suite', needs: ['controlled-plugin-install'] },
       ],
     },
     vitestConfig: [
@@ -53,8 +76,25 @@ function validInput() {
     governanceWorkflow: [
       'filter: blob:none',
       'cache: pnpm',
+      'plugins/managed/better-sidebar/pnpm-lock.yaml',
+      'plugins/managed/genui/pnpm-lock.yaml',
+      'plugins/managed/llm-fallbacks/pnpm-lock.yaml',
+      'plugins/managed/mnemon/pnpm-lock.yaml',
+      'node scripts/solar/install-controlled-plugin-deps.mjs',
       '- run: python3 tools/agent-development-governance/governance.py verify --project .',
     ].join('\n'),
+    controlledPluginInstalls: [
+      ...['better-sidebar', 'genui', 'llm-fallbacks', 'mnemon'].map(plugin => ({
+        plugin,
+        command: 'corepack',
+        args: ['pnpm', 'install', '--frozen-lockfile'],
+      })),
+      ...['plugin-check', 'tool-markdown', 'tool-regex', 'tool-stat', 'tool-time'].map(plugin => ({
+        plugin,
+        command: 'npm',
+        args: ['ci', '--no-audit', '--fund=false'],
+      })),
+    ],
     pathExists: () => true,
     subtreeImports: new Set([
       ...managed.map(entry => `${entry.path}\0${entry.accepted_sha}`),
@@ -66,6 +106,12 @@ function validInput() {
 
 test('accepts the exact Solar monorepo contract', () => {
   assert.deepEqual(validateMonorepo(validInput()), [])
+})
+
+test('rejects controlled plugin installs that bypass workspace build policy', () => {
+  const input = validInput()
+  input.controlledPluginInstalls[0].args.splice(1, 0, '--ignore-workspace')
+  assert.match(validateMonorepo(input).join('\n'), /preserve every native workspace lockfile policy/u)
 })
 
 test('rejects the old Desktop tag shape', () => {
@@ -100,8 +146,30 @@ test('rejects repeated source preparation inside governance consumers', () => {
   assert.match(validateMonorepo(input).join('\n'), /prepared source build/u)
 })
 
+test('rejects isolated workspace gates without deterministic install prerequisites', () => {
+  const input = validInput()
+  input.governanceProfile.gates.find(gate => gate.id === 'agent-teams-install').command = ['pnpm', 'install']
+  input.governanceProfile.gates.find(gate => gate.id === 'web-ui-tests').needs = []
+  input.governanceProfile.gates.find(gate => gate.id === 'controlled-plugin-suite').needs = []
+  const errors = validateMonorepo(input).join('\n')
+  assert.match(errors, /Agent Teams governance must install/u)
+  assert.match(errors, /web-ui-tests must depend on web-ui-install/u)
+  assert.match(errors, /controlled-plugin-suite must depend on controlled-plugin-install/u)
+})
+
 test('rejects uncached or full-history-blob Solar governance checkout', () => {
   const input = validInput()
   input.governanceWorkflow = '- run: python3 tools/agent-development-governance/governance.py verify --project .'
   assert.match(validateMonorepo(input).join('\n'), /partial history|pnpm cache/u)
+})
+
+test('rejects retired or incomplete controlled-plugin CI setup', () => {
+  const input = validInput()
+  input.governanceWorkflow += '\nplugins/managed/luna-vision-bridge/pnpm-lock.yaml'
+  input.governanceWorkflow = input.governanceWorkflow.replace(
+    'node scripts/solar/install-controlled-plugin-deps.mjs',
+    '',
+  )
+  assert.match(validateMonorepo(input).join('\n'), /retired component/u)
+  assert.match(validateMonorepo(input).join('\n'), /controlled-plugin setup/u)
 })
