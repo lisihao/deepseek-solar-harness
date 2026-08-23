@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "private": true,
   "description": "DSH Desktop product workspace",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "@deepseek-ai/dsh-subagent-codex": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-tool-physical-operator": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-credentials-local": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-llm-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-llm-deepseek": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-llm-deepseek-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-ui-remote-modules": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-ui-sidebar": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz",

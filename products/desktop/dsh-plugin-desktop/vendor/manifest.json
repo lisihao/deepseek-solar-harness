@@ -12,9 +12,9 @@
       "commit": "140cd30cde8d3d3af59ba805daf5d6c1578acb17"
     },
     {
-      "name": "Persistent TaskGraph orchestration and compiler capability seams",
+      "name": "Persistent TaskGraph orchestration, bounded Resident RLM, and quota-aware scheduling",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "7b87464619b4527cd77cb6cc925406db17fdcdb4"
+      "commit": "896d4fcf17b17e53416463dd33e34e3cc01872fb"
     },
     {
       "name": "Configurable Remote Web Modules",
@@ -76,6 +76,7 @@
     "dsh-packages/deepseek-ai-dsh-context-compiler-0.1.0-rc.5.tgz": "packages/orchestration/context-compiler/package.json",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "packages/host/apiproxy/package.json",
     "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "packages/orchestration/intent-compiler/package.json",
+    "dsh-packages/deepseek-ai-dsh-llm-0.1.0-rc.5.tgz": "packages/llm/llm/package.json",
     "dsh-packages/deepseek-ai-dsh-llm-deepseek-0.1.0-rc.5.tgz": "packages/llm/llm-deepseek/package.json",
     "dsh-packages/deepseek-ai-dsh-model-allocation-0.1.0-rc.5.tgz": "packages/orchestration/model-allocation/package.json",
     "dsh-packages/deepseek-ai-dsh-model-allocation-local-0.1.0-rc.5.tgz": "packages/orchestration/model-allocation-local/package.json",
@@ -139,17 +140,18 @@
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "18e0f88aefe69709e3bf46971bcf99f1e5996e09d9639461b791182c8ed355af",
     "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "0b19f48fc167abd9b2b2dc22fd483a7cd3c755f9053fce772593ae26eeaeb689",
-    "dsh-packages/deepseek-ai-dsh-llm-deepseek-0.1.0-rc.5.tgz": "ab6fc9857753305ba06d6e3818fcaee371ae826f44b9eb8cd10c2dd01f68267e",
+    "dsh-packages/deepseek-ai-dsh-llm-0.1.0-rc.5.tgz": "5e923f4374fc6f1a15ddd53b3242360af6e6a57aee7fa13085fc2bb5f89b2818",
+    "dsh-packages/deepseek-ai-dsh-llm-deepseek-0.1.0-rc.5.tgz": "aeb82842017c77fdba5658c65cb57337653a8bf1883f3569d094e1db34c40de7",
     "dsh-packages/deepseek-ai-dsh-context-compiler-0.1.0-rc.5.tgz": "08e6ceb3ea1085b513dee645ba50f6be26bcf5d1eea506c01e66aa8f50e10b54",
     "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "e85b26a1c68a88b3821b455d3ee8f2a03b287b2bd6f978e3df85d7f3df9fe79b",
     "dsh-packages/deepseek-ai-dsh-continual-harness-0.1.0-rc.5.tgz": "2091e510cd86f16b92740fe51887556863a6a1137667868d75eb2ed815dd4436",
     "dsh-packages/deepseek-ai-dsh-continual-harness-local-0.1.0-rc.5.tgz": "aa113b22a35355af765a3db7557b7be6d6743ed6c9f3ea08d993d55396e72c94",
-    "dsh-packages/deepseek-ai-dsh-model-allocation-0.1.0-rc.5.tgz": "234b5d7526143465575af0c94ebea9cbbdd873bd06db67a28bda26afde2937c6",
-    "dsh-packages/deepseek-ai-dsh-model-allocation-local-0.1.0-rc.5.tgz": "d56458ac4ab4d9d6b4180e8ba93c5c82c5d8c97a4fb32bd30b02b6d1a81a269e",
+    "dsh-packages/deepseek-ai-dsh-model-allocation-0.1.0-rc.5.tgz": "d5e1aa25df33626a360e818fbdf9a8965df2b1495f980ddf6314d4a2c9298c9b",
+    "dsh-packages/deepseek-ai-dsh-model-allocation-local-0.1.0-rc.5.tgz": "0c0694e83a3813575b2b823be86e8210e232d3ef2f837e607b46be2e0ec26b87",
     "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "4648168c85caf8c545ed0a445942d6541deb0261f79dc5608739331e17e82df6",
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "c28cac3b1f10db062d13410c88bc9ab2cee8e26bdd2e428c0318e3d07bda6a7a",
-    "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "b5db5b1dcbda9f592ddb034d20edb2106d55a54a80a0e08bb4afa29d041296f2",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "cc212cedb46109d098b863d6df7fdae2e36693acdb9d30ad198be411a242d328",
+    "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "d69b41f45493c4ecb681773165f6a9ccdca066a9062a9a0d70370c5178b9c0a8",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "22b100a3be19948f5fd8c1ce0699ae58ac08db9dac67d1896e9c504e9dea4200",
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-0.1.0-rc.5.tgz": "1c38c7d7ee4e0d29b4f0dc34eecfc0edd9b6b6b66c4913132db2d95b87598931",
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-local-0.1.0-rc.5.tgz": "ce5aafb900fcd07830232017e7b9946142fef49a3d55bf5634a5e3309735b0c0",
     "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "8d9e57bf710c2d3c79c6a20b4f242bb2770718409f785f7b4b6de3c9f055bd1f",

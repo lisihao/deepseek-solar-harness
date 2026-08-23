@@ -3991,7 +3991,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationRunSnapshot',
-    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly maxParallel?: number;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly maxParallel?: number;\n    readonly effectiveParallelism?: number;\n    readonly admission?: OrchestrationAdmissionTraceV1;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'OrchestrationRunState',
