@@ -213,6 +213,9 @@ importers:
       '@deepseek-ai/dsh-mcp-client':
         specifier: workspace:^
         version: link:../../packages/mcp/mcp-client
+      '@deepseek-ai/dsh-orchestrations':
+        specifier: workspace:^
+        version: link:../../packages/bundle/orchestrations
       '@deepseek-ai/dsh-persona':
         specifier: workspace:^
         version: link:../../packages/preset/persona
@@ -228,6 +231,9 @@ importers:
       '@deepseek-ai/dsh-resident-operator-local':
         specifier: workspace:^
         version: link:../../packages/physical-operator/resident-operator-local
+      '@deepseek-ai/dsh-resident-operators':
+        specifier: workspace:^
+        version: link:../../packages/bundle/resident-operators
       '@deepseek-ai/dsh-schedule':
         specifier: workspace:^
         version: link:../../packages/schedule/schedule

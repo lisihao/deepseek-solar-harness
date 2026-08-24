@@ -159,7 +159,11 @@ describe('loadProfile', () => {
     }
     expect(readProfileManifest('t', resolveProfileDir('web', home)).dsh?.profile?.bundles)
       .toEqual([...PROFILE_TEMPLATES.web ?? []])
-    expect(PROFILE_TEMPLATES.server).toEqual(PROFILE_TEMPLATES.web)
+    expect(PROFILE_TEMPLATES.server).toEqual([
+      ...PROFILE_TEMPLATES.web ?? [],
+      '@deepseek-ai/dsh-resident-operators',
+      '@deepseek-ai/dsh-orchestrations',
+    ])
     try {
       loadProfile('t', 'server', anchor, home)
     } catch {
