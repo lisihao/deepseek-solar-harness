@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { DesktopResidentEvent } from '../src/resident-dashboard-contracts.ts'
+import type { DesktopResidentEvent } from '../src/contracts.ts'
 import {
   buildResidentActivities,
   formatResidentTimestamp,
   isDiagnosticResidentWorkspace,
-} from '../src/resident-presentation.ts'
+} from '../src/presentation.ts'
 
 describe('Resident Operator user-facing presentation', () => {
   it('renders an unambiguous browser-local timestamp with relative age', () => {

@@ -8,7 +8,10 @@
 |---|---|---|
 | [`physical-operator/`](physical-operator/README.md) | 负责发现、准入与生命周期的 Service Definition | `ctx.physicalOperators` |
 | [`physical-operator-subagent/`](physical-operator-subagent/README.md) | 将稳定 ID 映射到现有 subagent 提供方的 Service Provider | 注册到 `ctx.physicalOperators` |
+| [`resident-operator/`](resident-operator/README.md) | 持久 Session、Receipt 与事件 Service Definition | `ctx.residentOperators` |
+| [`resident-operator-local/`](resident-operator-local/README.md) | Unix socket daemon 客户端与原生订阅驱动 | 提供 `ctx.residentOperators` |
 | [`tool-physical-operator/`](tool-physical-operator/README.md) | 向模型暴露 `physical_operator` 的 Consumer | 注册到 `ctx.tools` |
+| [`ui-physical-operator/`](ui-physical-operator/README.md) | 认证 Host 投影与可复用浏览器控件 | Host 路由 + Client slots |
 
 首个 Service Provider 复用现有 subagent 执行产品。部署方可以把一个算子映射到 `codex`，把另一个映射到 `claude-code`，而无需改动模型工具或 Service Definition。未来的原生、远程或实验室 Provider 也可以实现同一服务约定。
 

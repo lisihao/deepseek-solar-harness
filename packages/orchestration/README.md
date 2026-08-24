@@ -20,7 +20,7 @@ This group owns the versioned seams and local runtime for compiling an intent in
 | [`orchestration/`](orchestration/README.md) | TaskGraph, execution-plan, control, and event contract | `ctx.orchestrations` |
 | [`orchestration-local/`](orchestration-local/README.md) | Unix-socket daemon, SQLite authority, and baseline providers | consumes all compiler/allocation seams |
 | [`tool-orchestration/`](tool-orchestration/README.md) | Model-facing orchestration Consumer | `ctx.tools` |
-| [`ui-orchestration/`](ui-orchestration/README.md) | Browser API projection and trusted controls | Host routes |
+| [`ui-orchestration/`](ui-orchestration/README.md) | Authenticated Host projection and reusable browser controls | Host route + Client slots |
 
 Provider and Consumer packages depend only on the matching Service Definition. The daemon is the sole state writer; DSH Session stores only bounded tool results.
 

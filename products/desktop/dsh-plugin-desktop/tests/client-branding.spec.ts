@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import { apply } from '../src/client/index.ts'
+import { apply as applyDesktop } from '../src/client/index.ts'
 import { mountSolarBrandFooter, solarBrandLabel } from '../src/client/SolarBrand.tsx'
 import {
+  apply as applyPhysicalOperator,
   physicalOperatorDashboardRefreshMs,
   physicalOperatorEffortLabel,
   physicalOperatorRoutingDescription,
   physicalOperatorRoutingLabel,
   physicalOperatorRoutingSummary,
   orchestrationExecutionModeLabel,
-} from '../src/client/PhysicalOperatorRoutingControl.tsx'
+} from '@deepseek-ai/dsh-ui-physical-operator/client'
+import { apply as applyOrchestration } from '@deepseek-ai/dsh-ui-orchestration/client'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Menu: () => null,
@@ -38,7 +40,16 @@ describe('Solar desktop branding', () => {
     })
 
     try {
-      apply({ slots, effect, remote: { commands: { execute } } } as unknown as ClientContext)
+      const request = vi.fn()
+      const ctx = {
+        slots,
+        effect,
+        remote: { commands: { execute } },
+        get: (key: string) => key === 'connection' ? { request } : undefined,
+      } as unknown as ClientContext
+      applyDesktop(ctx)
+      applyPhysicalOperator(ctx)
+      applyOrchestration(ctx)
     }
     finally {
       vi.unstubAllGlobals()

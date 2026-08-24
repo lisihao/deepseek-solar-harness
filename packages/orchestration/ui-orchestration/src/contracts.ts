@@ -1,4 +1,4 @@
-/** JSON-safe Desktop view of the provider-neutral orchestration projection. */
+/** JSON-safe view of the provider-neutral orchestration projection. */
 
 export const ORCHESTRATION_DASHBOARD_PATH = '/api/orchestrations'
 

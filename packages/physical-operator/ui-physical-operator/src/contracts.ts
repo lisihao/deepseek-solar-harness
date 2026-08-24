@@ -1,6 +1,6 @@
-/** JSON-safe read model shared by the Desktop Host route and browser panel. */
+/** JSON-safe read model shared by the Resident Host route and browser panel. */
 
-export const RESIDENT_DASHBOARD_PATH = '/api/desktop/resident-operators'
+export const RESIDENT_DASHBOARD_PATH = '/api/resident-operators'
 
 export interface DesktopResidentProvider {
   operatorId: string

@@ -1,7 +1,7 @@
 import type {
   DesktopResidentActivity,
   DesktopResidentEvent,
-} from './resident-dashboard-contracts.ts'
+} from './contracts.ts'
 
 const LEGACY_TASK_LABEL = '历史任务（升级前未记录摘要）'
 

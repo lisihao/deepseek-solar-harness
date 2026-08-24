@@ -1,0 +1,27 @@
+{
+  "extends": "../../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.client.tsbuildinfo"
+  },
+  "files": [
+    "src/client/index.ts",
+    "src/client/ResidentOperatorsPanel.tsx",
+    "src/client/PhysicalOperatorRoutingControl.tsx",
+    "src/client/styles.ts",
+    "src/contracts.ts",
+    "src/presentation.ts"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../api/remotes/tsconfig.client.json" },
+    { "path": "../../client/connection/tsconfig.client.json" },
+    { "path": "../../client/runtime" },
+    { "path": "../../client/ui-conversation" },
+    { "path": "../../client/ui-primitives" },
+    { "path": "../../client/ui-slots" },
+    { "path": "../tool-physical-operator" },
+    { "path": "../../orchestration/tool-orchestration" }
+  ]
+}

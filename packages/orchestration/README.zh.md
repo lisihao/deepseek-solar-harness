@@ -20,7 +20,7 @@
 | [`orchestration/`](orchestration/README.md) | TaskGraph、执行计划、控制与事件契约 | `ctx.orchestrations` |
 | [`orchestration-local/`](orchestration-local/README.md) | Unix socket daemon、SQLite 权威与基础 Provider | 消费全部编译/分配 seam |
 | [`tool-orchestration/`](tool-orchestration/README.md) | 面向模型的编排 Consumer | `ctx.tools` |
-| [`ui-orchestration/`](ui-orchestration/README.md) | 浏览器 API 投影与可信控制 | Host 路由 |
+| [`ui-orchestration/`](ui-orchestration/README.md) | 认证 Host 投影与可复用浏览器控制 | Host 路由 + Client slots |
 
 Provider 与 Consumer 只能依赖对应 Service Definition。daemon 是唯一状态写者；DSH Session 只保存有界工具结果。
 

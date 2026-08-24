@@ -5,7 +5,7 @@ import {
   ResidentOperatorTurnId,
 } from '@deepseek-ai/dsh-resident-operator'
 import { describe, expect, it, vi } from 'vitest'
-import { readResidentDashboard } from '../src/resident-dashboard.ts'
+import { readResidentDashboard } from '../src/dashboard.ts'
 
 describe('Resident Operator Desktop projection', () => {
   it('reconnects to daemon-owned session, progress, and settled result state', async () => {

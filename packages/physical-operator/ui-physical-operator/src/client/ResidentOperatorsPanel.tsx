@@ -5,18 +5,22 @@ import type {
   DesktopResidentActivity,
   DesktopResidentEvent,
   DesktopResidentSession,
-} from '../resident-dashboard-contracts.ts'
-import { RESIDENT_DASHBOARD_PATH } from '../resident-dashboard-contracts.ts'
-import { formatResidentTimestamp } from '../resident-presentation.ts'
+} from '../contracts.ts'
+import { RESIDENT_DASHBOARD_PATH } from '../contracts.ts'
+import { formatResidentTimestamp } from '../presentation.ts'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+
+export type BrowserRequest = ConnectionHandle['request']
 
 /** Load one same-origin daemon projection for the Desktop Resident panel. */
 export async function loadResidentDashboard(
   sessionId?: string,
   signal?: AbortSignal,
+  request: BrowserRequest = globalThis.fetch,
 ): Promise<DesktopResidentDashboard> {
   const url = new URL(RESIDENT_DASHBOARD_PATH, window.location.origin)
   if (sessionId !== undefined) url.searchParams.set('session_id', sessionId)
-  const response = await fetch(url, {
+  const response = await request(url, {
     cache: 'no-store',
     ...(signal === undefined ? {} : { signal }),
   })
@@ -28,7 +32,7 @@ export async function loadResidentDashboard(
 }
 
 /** Session-header action and local read-only overlay for persistent physical operators. */
-export function ResidentOperatorsPanel() {
+export function ResidentOperatorsPanel({ request }: { request: BrowserRequest }) {
   const [open, setOpen] = useState(false)
   const [selectedSessionId, setSelectedSessionId] = useState<string>()
   const [dashboard, setDashboard] = useState<DesktopResidentDashboard>()
@@ -39,7 +43,7 @@ export function ResidentOperatorsPanel() {
     let timer: ReturnType<typeof setTimeout> | undefined
     const refresh = async (): Promise<void> => {
       try {
-        const next = await loadResidentDashboard(open ? selectedSessionId : undefined, controller.signal)
+        const next = await loadResidentDashboard(open ? selectedSessionId : undefined, controller.signal, request)
         setDashboard(next)
         setError(undefined)
       } catch (cause) {
@@ -53,7 +57,7 @@ export function ResidentOperatorsPanel() {
       controller.abort()
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [open, selectedSessionId])
+  }, [open, request, selectedSessionId])
 
   useEffect(() => {
     if (!open || dashboard === undefined) return
@@ -101,7 +105,7 @@ export function ResidentOperatorsPanel() {
             role="dialog"
             aria-modal="true"
             aria-label="Resident 物理算子"
-            onMouseDown={event => { event.stopPropagation() }}
+            onMouseDown={(event) => { event.stopPropagation() }}
           >
             <header>
               <div>
@@ -138,7 +142,10 @@ export function ResidentOperatorsPanel() {
                   <code>智能协作：实现/调试/测试通常交给 Codex；架构/审查/长上下文通常交给 Claude Code；递归探索由 TaskGraph 的 RLM 节点策略完成。</code>
                   <code>手动覆盖：可选择“仅主模型”或优先任一原生算子；短问答仍由主模型处理。</code>
                   <p>原生模型和推理强度属于执行助手的高级偏好，不是右侧主聊天模型。通常保持“按任务推荐”即可。</p>
-                  <p>仓库修改、多轮任务和需要跨 DSH 重启继续的工作会优先使用 <code>mode=resident</code>。插件仍只依赖 <code>ctx.physicalOperators</code>，无需知道 daemon 或 CLI。</p>
+                  <p>
+                    仓库修改、多轮任务和需要跨 DSH 重启继续的工作会优先使用 <code>mode=resident</code>。
+                    插件仍只依赖 <code>ctx.physicalOperators</code>，无需知道 daemon 或 CLI。
+                  </p>
                 </div>
               </div>
               <div className="dshDesktopResidentColumn dshDesktopResidentSessions">
@@ -158,10 +165,10 @@ export function ResidentOperatorsPanel() {
                 {selectedSessionId === undefined
                   ? <p className="dshDesktopResidentEmpty">选择一个持久任务查看记录。</p>
                   : <ActivityTimeline
-                      activities={dashboard?.activities ?? []}
-                      generatedAt={dashboard?.generatedAt ?? new Date().toISOString()}
-                      timeZone={timeZone}
-                    />}
+                    activities={dashboard?.activities ?? []}
+                    generatedAt={dashboard?.generatedAt ?? new Date().toISOString()}
+                    timeZone={timeZone}
+                  />}
               </div>
             </div>
           </section>
@@ -215,7 +222,7 @@ function ActivityTimeline(props: { activities: DesktopResidentActivity[]; genera
   if (props.activities.length === 0) return <p className="dshDesktopResidentEmpty">还没有任务记录。</p>
   return (
     <ol>
-      {props.activities.slice(0, 20).map(activity => {
+      {props.activities.slice(0, 20).map((activity) => {
         const time = formatResidentTimestamp(activity.updatedAt, props.generatedAt, props.timeZone)
         return <li key={activity.turnId}>
           <time title={time.absolute}>{time.relative}</time>

@@ -22,6 +22,7 @@ describe('resident-operators bundle', () => {
     expect(rows.map(row => row.id)).toEqual([
       'physical-operators',
       'resident-operators',
+      'ui-physical-operator',
       'subagent-codex-native-subscription',
       'subagent-claude-code-native-subscription',
       'physical-operator-dual-mode',

@@ -6,20 +6,27 @@ import type {
   DesktopOrchestrationEvent,
   DesktopOrchestrationNode,
   DesktopOrchestrationRun,
-} from '../orchestration-dashboard-contracts.ts'
-import { ORCHESTRATION_DASHBOARD_PATH } from '../orchestration-dashboard-contracts.ts'
-import { formatResidentTimestamp } from '../resident-presentation.ts'
+} from '../contracts.ts'
+import { ORCHESTRATION_DASHBOARD_PATH } from '../contracts.ts'
+import { formatLocalTimestamp } from './timestamp.ts'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+
+type BrowserRequest = ConnectionHandle['request']
 
 /** Read one bounded orchestration projection from the same-origin Host endpoint. */
 export async function loadOrchestrationDashboard(
   runId?: string,
   signal?: AbortSignal,
   includeDiagnostics = true,
+  request: BrowserRequest = globalThis.fetch,
 ): Promise<DesktopOrchestrationDashboard> {
   const url = new URL(ORCHESTRATION_DASHBOARD_PATH, window.location.origin)
   if (runId !== undefined) url.searchParams.set('run_id', runId)
   url.searchParams.set('include_diagnostics', includeDiagnostics ? '1' : '0')
-  const response = await fetch(url, { cache: 'no-store', ...(signal === undefined ? {} : { signal }) })
+  const response = await request(url, {
+    cache: 'no-store',
+    ...(signal === undefined ? {} : { signal }),
+  })
   if (!response.ok) {
     throw new Error(`编排状态读取失败 (${String(response.status)}): ${await response.text()}`)
   }
@@ -29,8 +36,9 @@ export async function loadOrchestrationDashboard(
 /** Submit one revision-checked trusted control to the owner-local Host endpoint. */
 export async function controlOrchestration(
   request: DesktopOrchestrationControlRequest,
+  browserRequest: BrowserRequest = globalThis.fetch,
 ): Promise<DesktopOrchestrationRun> {
-  const response = await fetch(ORCHESTRATION_DASHBOARD_PATH, {
+  const response = await browserRequest(ORCHESTRATION_DASHBOARD_PATH, {
     method: 'POST',
     cache: 'no-store',
     headers: {
@@ -47,7 +55,7 @@ export async function controlOrchestration(
 }
 
 /** Session-header entry and theme-coherent control surface for durable TaskGraphs. */
-export function OrchestrationsPanel() {
+export function OrchestrationsPanel({ request: browserRequest }: { request: BrowserRequest }) {
   const [open, setOpen] = useState(false)
   const [selectedRunId, setSelectedRunId] = useState<string>()
   const [dashboard, setDashboard] = useState<DesktopOrchestrationDashboard>()
@@ -56,10 +64,10 @@ export function OrchestrationsPanel() {
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true)
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    const next = await loadOrchestrationDashboard(open ? selectedRunId : undefined, signal, includeDiagnostics)
+    const next = await loadOrchestrationDashboard(open ? selectedRunId : undefined, signal, includeDiagnostics, browserRequest)
     setDashboard(next)
     setError(undefined)
-  }, [includeDiagnostics, open, selectedRunId])
+  }, [browserRequest, includeDiagnostics, open, selectedRunId])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -106,14 +114,14 @@ export function OrchestrationsPanel() {
   const submit = useCallback(async (request: DesktopOrchestrationControlRequest) => {
     setControlPending(true)
     try {
-      await controlOrchestration(request)
+      await controlOrchestration(request, browserRequest)
       await refresh()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setControlPending(false)
     }
-  }, [refresh])
+  }, [browserRequest, refresh])
 
   const label = `任务编排：${String(active)} 个运行中${attention > 0 ? `，${String(attention)} 个需处理` : ''}`
   return (
@@ -137,7 +145,7 @@ export function OrchestrationsPanel() {
             role="dialog"
             aria-modal="true"
             aria-label="持久化任务编排"
-            onMouseDown={event => { event.stopPropagation() }}
+            onMouseDown={(event) => { event.stopPropagation() }}
           >
             <header>
               <div>
@@ -200,8 +208,8 @@ function RunList(props: {
         ? `没有用户任务；${String(props.diagnosticRunCount)} 条验收记录已隐藏。`
         : '还没有持久化 TaskGraph。'}
     </p>}
-    {props.runs.map(run => {
-      const time = formatResidentTimestamp(run.updatedAt, props.generatedAt ?? run.updatedAt, timeZone)
+    {props.runs.map((run) => {
+      const time = formatLocalTimestamp(run.updatedAt, props.generatedAt ?? run.updatedAt, timeZone)
       return <button
         key={run.runId}
         type="button"
@@ -255,7 +263,10 @@ function GraphView(props: {
     >
       <p><strong>协作 Trace · {collaborationPolicyLabel(run.admission?.policy)}</strong></p>
       <p>路由：{run.admission?.route === 'taskgraph' ? '持久 TaskGraph' : '历史任务（无 admission 记录）'}</p>
-      <p>并行：{String(activeWorkers)}/{String(run.effectiveParallelism ?? run.maxParallel ?? 1)} worker 运行中 · Graph 上限 {String(run.maxParallel ?? 1)} · {String(readyWorkers)} 个可派发</p>
+      <p>
+        并行：{String(activeWorkers)}/{String(run.effectiveParallelism ?? run.maxParallel ?? 1)} worker 运行中
+        · Graph 上限 {String(run.maxParallel ?? 1)} · {String(readyWorkers)} 个可派发
+      </p>
       <p>上下文：{cleanContext ? 'Clean-task Capsule 已注入 · fresh native lane' : '等待 Capsule 解析'}</p>
     </div>
     <div className="dshDesktopCollaborationTrace" data-execution-mode={rlmEnabled ? 'rlm' : 'standard'} aria-label="Prime RLM 运行状态">
@@ -392,8 +403,8 @@ function EventTimeline(props: {
       ? <p className="dshDesktopOrchestrationEmpty">选择任务查看事件。</p>
       : props.events.length === 0
         ? <p className="dshDesktopOrchestrationEmpty">还没有编排事件。</p>
-        : <ol>{[...props.events].reverse().slice(0, 40).map(event => {
-          const time = formatResidentTimestamp(event.time, props.generatedAt ?? event.time, timeZone)
+        : <ol>{[...props.events].reverse().slice(0, 40).map((event) => {
+          const time = formatLocalTimestamp(event.time, props.generatedAt ?? event.time, timeZone)
           return <li key={event.sequence}>
             <time title={time.absolute}>{time.relative}</time>
             <strong>{eventLabel(event.type)}</strong>

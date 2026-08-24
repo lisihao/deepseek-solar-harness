@@ -3,6 +3,7 @@
 import type { ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
+import { authorizeRemoteRequest } from '@deepseek-ai/dsh-host-remote-auth'
 import type {
   ResidentEvent,
   ResidentProviderStatus,
@@ -16,9 +17,9 @@ import type {
   DesktopResidentProvider,
   DesktopResidentSession,
   DesktopResidentTurn,
-} from './resident-dashboard-contracts.ts'
-import { RESIDENT_DASHBOARD_PATH } from './resident-dashboard-contracts.ts'
-import { buildResidentActivities, isDiagnosticResidentWorkspace } from './resident-presentation.ts'
+} from './contracts.ts'
+import { RESIDENT_DASHBOARD_PATH } from './contracts.ts'
+import { buildResidentActivities, isDiagnosticResidentWorkspace } from './presentation.ts'
 
 /**
  * Read the daemon-owned projection without copying Resident state into Desktop.
@@ -66,13 +67,20 @@ async function assembleResidentDashboard(
   }
 }
 
-/** Register the owner-only loopback read route for the Resident browser panel. */
+/** Register the authenticated read-only route for the Resident browser panel. */
 export function registerResidentDashboard(ctx: Context): () => void {
   let providerCache: { readonly expiresAt: number; readonly value: ResidentProviderStatus[] } | undefined
   return ctx.webServer.register({
     kind: 'exact',
     path: RESIDENT_DASHBOARD_PATH,
     handler: async (request, response) => {
+      const authority = authorizeRemoteRequest(request, ctx.get('remoteAuth'))
+      if (authority === undefined) {
+        sendJson(response, ctx.get('remoteAuth') === undefined ? 503 : 401, {
+          error: ctx.get('remoteAuth') === undefined ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
+        })
+        return
+      }
       if (request.method !== 'GET') {
         response.writeHead(405, { Allow: 'GET' })
         response.end()
