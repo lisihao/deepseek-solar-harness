@@ -25,7 +25,9 @@ function muxEnvelope(rpcId: string): RpcRequest<MuxFrame> {
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve()
-  return new Promise(resolve => signal.addEventListener('abort', () => { resolve() }, { once: true }))
+  return new Promise((resolve) => {
+    signal.addEventListener('abort', () => { resolve() }, { once: true })
+  })
 }
 
 async function * idle<T>(signal: AbortSignal): AsyncGenerator<RpcRequest<T>> {
@@ -187,18 +189,18 @@ describe('RemoteSyncHub', () => {
       scope: 'pocket', capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'approval.respond'],
     })
     await expect(hub.describe(signal, 'admin')).resolves.toMatchObject({
-      scope: 'admin', capabilities: expect.arrayContaining(['session.command']),
+      scope: 'admin',
+      capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
     })
     await expect(hub.snapshot(signal)).resolves.toMatchObject({
       host: hostValue, sessions: [], workspaces: [], archivedSessionIds: [],
     })
     const clients = (hub as unknown as { sockets: { clients: Set<WebSocket> } }).sockets.clients
-    const connected = {
-      terminate: vi.fn(() => { clients.delete(connected as unknown as WebSocket) }),
-    } as unknown as WebSocket
+    const terminate = vi.fn(() => { clients.delete(connected) })
+    const connected = { terminate } as unknown as WebSocket
     clients.add(connected)
     await hub.close()
-    expect(connected.terminate).toHaveBeenCalled()
+    expect(terminate).toHaveBeenCalled()
     await expect(hub.close()).rejects.toThrow()
   })
 
@@ -267,13 +269,14 @@ describe('RemoteSyncHub', () => {
   it('accepts a downlink, delivers events, and rejects upstream messages', async () => {
     const hub = new RemoteSyncHub(api(), 4)
     const sent: string[] = []
+    const close = vi.fn(function (this: { readyState: number }): void {
+      this.readyState = WebSocket.CLOSED
+      socket.emit('close')
+    })
     const socket = Object.assign(new EventEmitter(), {
       readyState: WebSocket.OPEN,
       send(data: string, callback: (error?: Error) => void): void { sent.push(data); callback() },
-      close: vi.fn(function (this: { readyState: number }): void {
-        this.readyState = WebSocket.CLOSED
-        socket.emit('close')
-      }),
+      close,
     }) as unknown as WebSocket
     const internals = hub as unknown as {
       sockets: { handleUpgrade: (_request: unknown, _socket: unknown, _head: Buffer, accept: (websocket: WebSocket) => void) => void }
@@ -285,7 +288,7 @@ describe('RemoteSyncHub', () => {
     await vi.waitFor(() => { expect(sent).toHaveLength(1) })
     socket.emit('error', new Error('transport failure'))
     socket.emit('message', Buffer.from('upstream'))
-    await vi.waitFor(() => { expect(socket.close).toHaveBeenCalledWith(1008, 'downlink only') })
+    await vi.waitFor(() => { expect(close).toHaveBeenCalledWith(1008, 'downlink only') })
     await hub.close()
   })
 
@@ -299,13 +302,14 @@ describe('RemoteSyncHub', () => {
     const closed = { readyState: WebSocket.CLOSED, close: vi.fn(), send: vi.fn() } as unknown as WebSocket
     await expect(pump(closed, stale, new AbortController())).rejects.toThrow('closed before frame delivery')
 
+    const failingClose = vi.fn()
     const failing = {
       readyState: WebSocket.OPEN,
-      close: vi.fn(),
+      close: failingClose,
       send: (_data: string, callback: (error?: Error) => void): void => { callback(new Error('send failed')) },
     } as unknown as WebSocket
     await expect(pump(failing, stale, new AbortController())).rejects.toThrow('send failed')
-    expect(failing.close).toHaveBeenCalled()
+    expect(failingClose).toHaveBeenCalled()
     await hub.close()
   })
 

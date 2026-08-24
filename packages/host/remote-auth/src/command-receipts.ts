@@ -1,7 +1,7 @@
 /** Durable, payload-free receipts for authenticated remote commands. */
 
-import { readFile, stat } from 'node:fs/promises'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { readOwnerOnlyText } from './private-file.ts'
 
 /** Bounded transport result cached for an idempotent remote command. */
 export interface RemoteCommandResponse {
@@ -52,17 +52,8 @@ export class RemoteCommandReceiptStore {
    * @returns a promise settled after recovery and any repair write.
    */
   async init(): Promise<void> {
-    let text: string
-    try {
-      const file = await stat(this.filename)
-      if (process.platform !== 'win32' && (file.mode & 0o077) !== 0) {
-        throw new Error(`remote-auth: ${this.filename} must be owner-only (chmod 600)`)
-      }
-      text = await readFile(this.filename, 'utf8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-      throw error
-    }
+    const text = await readOwnerOnlyText(this.filename)
+    if (text === undefined) return
     const parsed: unknown = JSON.parse(text)
     if (!isRemoteCommandDocument(parsed)) {
       throw new Error(`remote-auth: invalid command receipt journal ${this.filename}`)

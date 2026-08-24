@@ -932,6 +932,11 @@ export class SessionManager {
   /** After each connection generation: refresh the session baseline and rebuild opened windows. */
   handleConnected(): void {
     void this.refreshList()
+    this.refreshOpenedSubagentWindows()
+  }
+
+  /** Rebuild subagent catalogs and loaded session projections for the current generation. */
+  private refreshOpenedSubagentWindows(): void {
     const selectedAddress = this.selected === undefined ? undefined : this.addresses.get(this.selected)
     if (selectedAddress !== undefined) void this.refreshSubagents(selectedAddress.parentSessionId)
     if (this.selected !== undefined) void this.refreshSubagents(this.selected)
@@ -941,11 +946,7 @@ export class SessionManager {
 
   /** Rebuild opened windows without re-pulling the list already supplied by RemoteSyncSnapshot. */
   handleRemoteConnected(): void {
-    const selectedAddress = this.selected === undefined ? undefined : this.addresses.get(this.selected)
-    if (selectedAddress !== undefined) void this.refreshSubagents(selectedAddress.parentSessionId)
-    if (this.selected !== undefined) void this.refreshSubagents(this.selected)
-    for (const parentSessionId of this.openCatalogs) void this.refreshSubagents(parentSessionId)
-    for (const session of this.sessions.values()) void session.resync()
+    this.refreshOpenedSubagentWindows()
   }
 
   /** Debounce membership refetches while one parent catalog is selected or open. */

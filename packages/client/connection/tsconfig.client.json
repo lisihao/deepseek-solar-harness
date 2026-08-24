@@ -19,6 +19,7 @@
     "src/client/remote-sync-controller.ts",
     "src/client/rpc.ts",
     "src/client/web-api-client.ts",
+    "src/client/websocket-downlink.ts",
     "src/loopback-hostname.ts",
     "src/remote-auth-wire.ts",
     "src/remote-sync.ts",

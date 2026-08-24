@@ -6,8 +6,8 @@ import { hostFrameSchema, muxFrameSchema } from '@deepseek-ai/dsh-host-apiproxy/
 import { serverRequestSchema } from '@deepseek-ai/dsh-host-apiproxy/api/rpc.schema'
 import { HOST_EVENTS_PATH, MUX_EVENTS_PATH } from '../api-path.ts'
 import { withBrowserRemoteAuthorization } from './browser-access-token.ts'
+import { readWebSocketDownlink } from './websocket-downlink.ts'
 
-type SocketItem<F> = { kind: 'frame'; envelope: RpcRequest<F> } | { kind: 'end' }
 type Parser<F> = { parse(value: unknown): F }
 
 /** Browser platform subclass: unary/respond use fetch; mux/host use downlink-only WebSockets. */
@@ -41,52 +41,14 @@ export class WebApiClient extends AbstractApiClient {
     const url = new URL(path, this.resolveBase())
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     const socket = new WebSocket(url)
-    const inbox: SocketItem<F>[] = []
-    let wake: (() => void) | undefined
-    const enqueue = (item: SocketItem<F>): void => {
-      inbox.push(item)
-      wake?.()
-      wake = undefined
-    }
-    const handleOpen = (): void => { onOpen?.() }
-    const handleMessage = (event: MessageEvent): void => {
-      let full: ServerRequest
-      let frame: F
-      try {
-        if (typeof event.data !== 'string') throw new Error('binary WebSocket frame')
-        full = serverRequestSchema.parse(JSON.parse(event.data))
-        frame = frameSchema.parse(full.payload)
-      } catch (error) {
-        console.error(`[client-connection] dropping malformed WebSocket frame on ${path}:`, error)
-        return
-      }
+    yield * readWebSocketDownlink(socket, signal, (event): RpcRequest<F> => {
+      if (typeof event.data !== 'string') throw new Error('binary WebSocket frame')
+      const full: ServerRequest = serverRequestSchema.parse(JSON.parse(event.data))
+      const frame = frameSchema.parse(full.payload)
       this.onEnvelope(full)
-      enqueue({ kind: 'frame', envelope: { rpcId: full.rpcId, payload: frame } })
-    }
-    const handleClose = (): void => { enqueue({ kind: 'end' }) }
-    const handleAbort = (): void => {
-      if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) socket.close()
-    }
-    socket.addEventListener('open', handleOpen)
-    socket.addEventListener('message', handleMessage)
-    socket.addEventListener('close', handleClose, { once: true })
-    signal.addEventListener('abort', handleAbort, { once: true })
-    if (signal.aborted) handleAbort()
-    try {
-      while (true) {
-        while (inbox.length > 0) {
-          const item = inbox.shift() as SocketItem<F>
-          if (item.kind === 'end') return
-          yield item.envelope
-        }
-        await new Promise<void>((resolve) => { wake = resolve })
-      }
-    } finally {
-      signal.removeEventListener('abort', handleAbort)
-      socket.removeEventListener('open', handleOpen)
-      socket.removeEventListener('message', handleMessage)
-      socket.removeEventListener('close', handleClose)
-      handleAbort()
-    }
+      return { rpcId: full.rpcId, payload: frame }
+    }, (error) => {
+      console.error(`[client-connection] dropping malformed WebSocket frame on ${path}:`, error)
+    }, onOpen)
   }
 }

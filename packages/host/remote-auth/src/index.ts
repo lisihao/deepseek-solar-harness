@@ -1,7 +1,6 @@
 /** Persistent device authentication service for the DSH Server role. */
 
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -12,6 +11,7 @@ import {
   type RemoteCommandBeginResult,
   type RemoteCommandResponse,
 } from './command-receipts.ts'
+import { readOwnerOnlyText } from './private-file.ts'
 
 export type { RemoteCommandBeginResult, RemoteCommandResponse } from './command-receipts.ts'
 
@@ -318,17 +318,8 @@ export class RemoteAuthService extends Service {
   }
 
   private async load(): Promise<void> {
-    let text: string
-    try {
-      const file = await stat(this.filename)
-      if (process.platform !== 'win32' && (file.mode & 0o077) !== 0) {
-        throw new Error(`remote-auth: ${this.filename} must be owner-only (chmod 600)`)
-      }
-      text = await readFile(this.filename, 'utf8')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-      throw error
-    }
+    const text = await readOwnerOnlyText(this.filename)
+    if (text === undefined) return
     const parsed: unknown = JSON.parse(text)
     if (!isDeviceDocument(parsed)) throw new Error(`remote-auth: invalid device registry ${this.filename}`)
     for (const device of parsed.devices) this.devices.set(device.deviceId, device)

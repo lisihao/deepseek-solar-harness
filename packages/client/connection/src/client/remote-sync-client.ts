@@ -10,8 +10,7 @@ import {
 } from '../remote-sync.ts'
 import { randomUuid } from './random-uuid.ts'
 import { getBrowserRemoteAccessToken, withBrowserRemoteAuthorization } from './browser-access-token.ts'
-
-type SocketItem = { kind: 'frame'; frame: RemoteSyncFrame } | { kind: 'end' }
+import { readWebSocketDownlink } from './websocket-downlink.ts'
 
 /** Read-only remote projection client; commands remain outside this seam. */
 export interface RemoteSyncClient {
@@ -86,47 +85,12 @@ export class WebRemoteSyncClient implements RemoteSyncClient {
       'dsh-remote-sync-v1',
       ...token === undefined ? [] : [`dsh-bearer.${token}`],
     ])
-    const inbox: SocketItem[] = []
-    let wake: (() => void) | undefined
-    const enqueue = (item: SocketItem): void => {
-      inbox.push(item)
-      wake?.()
-      wake = undefined
-    }
-    const handleOpen = (): void => { onOpen?.() }
-    const handleMessage = (event: MessageEvent): void => {
-      try {
-        if (typeof event.data !== 'string') throw new Error('binary WebSocket frame')
-        enqueue({ kind: 'frame', frame: parseRemoteSyncFrame(JSON.parse(event.data)) })
-      } catch (error) {
-        console.error('[client-connection] dropping malformed remote sync frame:', error)
-      }
-    }
-    const handleClose = (): void => { enqueue({ kind: 'end' }) }
-    const handleAbort = (): void => {
-      if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) socket.close()
-    }
-    socket.addEventListener('open', handleOpen)
-    socket.addEventListener('message', handleMessage)
-    socket.addEventListener('close', handleClose, { once: true })
-    signal.addEventListener('abort', handleAbort, { once: true })
-    if (signal.aborted) handleAbort()
-    try {
-      while (true) {
-        while (inbox.length > 0) {
-          const item = inbox.shift() as SocketItem
-          if (item.kind === 'end') return
-          yield item.frame
-        }
-        await new Promise<void>((resolve) => { wake = resolve })
-      }
-    } finally {
-      signal.removeEventListener('abort', handleAbort)
-      socket.removeEventListener('open', handleOpen)
-      socket.removeEventListener('message', handleMessage)
-      socket.removeEventListener('close', handleClose)
-      handleAbort()
-    }
+    yield * readWebSocketDownlink(socket, signal, (event): RemoteSyncFrame => {
+      if (typeof event.data !== 'string') throw new Error('binary WebSocket frame')
+      return parseRemoteSyncFrame(JSON.parse(event.data))
+    }, (error) => {
+      console.error('[client-connection] dropping malformed remote sync frame:', error)
+    }, onOpen)
   }
 }
 
