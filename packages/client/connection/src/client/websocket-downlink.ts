@@ -2,7 +2,15 @@
 
 type SocketItem<T> = { kind: 'frame'; value: T } | { kind: 'end' }
 
-/** Decode and consume one downlink-only WebSocket as an abortable async stream. */
+/**
+ * Decode and consume one downlink-only WebSocket as an abortable async stream.
+ * @param socket - Connected browser WebSocket whose messages form the downlink.
+ * @param signal - Abort signal that closes the socket and ends iteration.
+ * @param decode - Convert one browser message into the caller's frame type.
+ * @param onMalformed - Report a frame that could not be decoded without ending the stream.
+ * @param onOpen - Optional notification after the transport opens.
+ * @returns Decoded frames until the transport closes or the caller aborts.
+ */
 export async function * readWebSocketDownlink<T>(
   socket: WebSocket,
   signal: AbortSignal,

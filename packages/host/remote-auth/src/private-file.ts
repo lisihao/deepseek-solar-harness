@@ -2,7 +2,11 @@
 
 import { readFile, stat } from 'node:fs/promises'
 
-/** Read a local authority file, returning undefined only when it does not exist. */
+/**
+ * Read a local authority file, returning undefined only when it does not exist.
+ * @param filename - Absolute or process-relative path to the authority file.
+ * @returns The UTF-8 file contents, or undefined when the file is absent.
+ */
 export async function readOwnerOnlyText(filename: string): Promise<string | undefined> {
   try {
     const file = await stat(filename)
