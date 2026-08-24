@@ -2577,7 +2577,7 @@ __metadata:
 
 "@deepseek-ai/dsh-host-remote-auth@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-host-remote-auth@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz::hash=d4ded9&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-host-remote-auth@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz::hash=43da47&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-atomic-write": "npm:^0.1.0-rc.5"
     "@deepseek-ai/dsh-home-paths": "npm:^0.1.0-rc.5"
@@ -2585,7 +2585,7 @@ __metadata:
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
-  checksum: 10c0/04b0041e4893bace25b46f47f980fee88ae3bb96b19ce079c5a5fb0e7a9987302d2d99385ff56946cf82b8f1e275b7715cf6936aba8c4f02152913705f6507f4
+  checksum: 10c0/732c581f6a37e9e419c9feae73cc28aa89537495b6733566b43b423dd116f24053dccd503ca02e74d12ebdbb88ec582eba96d1ef88974b1f01af9658eb45a325
   languageName: node
   linkType: hard
 

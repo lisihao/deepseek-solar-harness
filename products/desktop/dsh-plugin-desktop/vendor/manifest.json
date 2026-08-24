@@ -90,6 +90,11 @@
       "name": "Capability-owned durable Server and Client surfaces",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "fe2b8a878c7c05544ed9d09b7ae7daf5d95162e3"
+    },
+    {
+      "name": "Remote authority IPv6 loopback qualification",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "29d919b165a01a07fb58c743d6dddfd3b33d4b38"
     }
   ],
   "sourcePackages": {
@@ -181,7 +186,7 @@
     "dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz": "462e8d39eed6f169fae4beceac28417ae4f4002116355d38f552235312375838",
     "dsh-packages/deepseek-ai-dsh-client-web-0.1.0-rc.5.tgz": "ff11818877e8c782d744ef774b40222e8e5f5ebeab9c4e2f8dc1dca992ec507d",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "6d91ec4c14c709f905d0d58832ca463d4307dcd11b119eaeacbc122fe2c9aefe",
-    "dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz": "33de563e3ac4977020b0be9f9feddca7431e186ec9f0cb246a27b42128121dfb",
+    "dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz": "05b9930d1eafc66def404dc6441771e75235bcac0f76648d087e2770c2a651f0",
     "dsh-packages/deepseek-ai-dsh-home-paths-0.1.0-rc.5.tgz": "7c77e37ff3cf29d2c4132e81545ad1dc1f55c17ef943ebe09a910e12acc774c1",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "18e0f88aefe69709e3bf46971bcf99f1e5996e09d9639461b791182c8ed355af",
