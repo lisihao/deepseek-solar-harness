@@ -17,6 +17,8 @@ describe('orchestrations bundle', () => {
     const rows = (parsed as Array<{ insert?: Array<{ id?: string; name?: string }> }>).flatMap(value => value.insert ?? [])
     expect(rows.map(value => value.id)).toEqual(['orchestration-local', 'tool-orchestration', 'ui-orchestration'])
     for (const row of rows) expect(manifest.dependencies).toHaveProperty(String(row.name))
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-rlm-runtime')
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-rlm-runtime-local')
   })
 
   it('keeps Service Definitions, Providers, and Consumers on one-way seams', () => {
@@ -35,9 +37,11 @@ describe('orchestrations bundle', () => {
       '@deepseek-ai/dsh-context-compiler',
       '@deepseek-ai/dsh-capability-capsule',
       '@deepseek-ai/dsh-orchestration',
+      '@deepseek-ai/dsh-rlm-runtime',
     ]
-    for (const definition of ['intent-compiler', 'context-compiler', 'capability-capsule', 'orchestration']) {
+    for (const definition of ['intent-compiler', 'context-compiler', 'capability-capsule', 'orchestration', 'rlm-runtime']) {
       expect(dependencies(definition)).not.toContain(local)
+      expect(dependencies(definition)).not.toContain('@deepseek-ai/dsh-rlm-runtime-local')
     }
     for (const consumer of ['tool-orchestration', 'ui-orchestration']) {
       const values = dependencies(consumer)

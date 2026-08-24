@@ -1,6 +1,11 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { CallId, LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import ModelWorkerRuntime from '@deepseek-ai/dsh-model-worker'
+import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import apply, { DEEPSEEK_WORKER_ID } from '../src/index.ts'
 
@@ -11,6 +16,15 @@ class FixtureAdapter extends LlmAdapter {
 
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
+    if (options.tools !== undefined && this.requests.length === 1) {
+      const id = CallId('fixture-tool-call')
+      yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+      yield { type: 'tool-call-delta', index: 0, id, name: 'typescript_repl', argumentsDelta: '{"code":"1 + 1"}' }
+      yield { type: 'block-end', index: 0, block: { type: 'tool-call', id, name: 'typescript_repl', arguments: '{"code":"1 + 1"}' } }
+      yield { type: 'usage', usage: { inputTokens: 8, outputTokens: 1 } }
+      yield { type: 'finish', reason: { kind: 'tool-calls' } }
+      return
+    }
     const text = `result-${String(this.requests.length)}`
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text }
@@ -43,20 +57,70 @@ describe('DeepSeekModelWorker', () => {
     await ctx.root.fiber.dispose()
   })
 
-  it('runs bounded parallel RLM branches and one high-tier synthesis call', async () => {
+  it('runs a genuine DeepSeek tool loop against the owner-local TypeScript REPL bridge', async () => {
     const { ctx, adapter } = await setup()
-    const result = await ctx.modelWorkers.execute({
-      commandId: 'command', workerId: DEEPSEEK_WORKER_ID, model: 'deepseek-v4-pro',
-      prompt: [{ type: 'text', text: 'analyze alternatives' }],
-      signal: new AbortController().signal,
-      rlmPlan: {
-        version: 1, enabled: true, strategyId: 'test', strategyVersion: '1', reason: 'test',
-        instruction: 'bounded test', maxDepth: 2, maxChildren: 3, maxTurns: 6, planSha256: 'test',
-      },
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-deepseek-tool-'))
+    const socketPath = join(directory, 'bridge.sock')
+    const bridgeRequests: Array<{ method: string; params: Record<string, unknown> }> = []
+    const server = createServer((socket) => {
+      const transport = new JsonRpcLineTransport(socket, socket)
+      transport.onRequest((method, params) => {
+        bridgeRequests.push({ method, params })
+        return Promise.resolve({ method, params, value: 2 })
+      })
+      transport.start()
     })
-    expect(result.stopReason).toBe('completed')
-    expect(adapter.requests).toHaveLength(4)
-    expect(adapter.requests.at(-1)?.messages[0]?.content[1]).toMatchObject({ type: 'text' })
-    await ctx.root.fiber.dispose()
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(socketPath, resolve)
+    })
+    try {
+      const result = await ctx.modelWorkers.execute({
+        commandId: 'command', workerId: DEEPSEEK_WORKER_ID, model: 'deepseek-v4-pro',
+        prompt: [{ type: 'text', text: 'analyze alternatives' }],
+        signal: new AbortController().signal,
+        rlmPlan: {
+          version: 1, enabled: true, strategyId: 'test', strategyVersion: '1', reason: 'test',
+          instruction: 'bounded test', maxDepth: 2, maxChildren: 3, maxTurns: 6, planSha256: 'test',
+        },
+        modelToolBridge: {
+          version: 1, socketPath, sessionId: 'rlm-session',
+          tools: [{ name: 'typescript_repl', description: 'execute TypeScript', inputSchema: { type: 'object' } }],
+        },
+      })
+      expect(result.stopReason).toBe('completed')
+      expect(result.usage).toMatchObject({ inputTokens: 18, outputTokens: 3 })
+      expect(adapter.requests).toHaveLength(2)
+      expect(adapter.requests[0]?.tools?.[0]?.name).toBe('typescript_repl')
+      expect(adapter.requests[1]?.messages.map(message => message.role)).toEqual(['user', 'assistant', 'user'])
+      expect(adapter.requests[1]?.messages[2]?.content[0]).toMatchObject({ type: 'tool-result', isError: false })
+      expect(bridgeRequests).toEqual([{
+        method: 'tool.call',
+        params: {
+          session_id: 'rlm-session',
+          command_id: 'command:deepseek-tool:fixture-tool-call',
+          tool: 'typescript_repl',
+          arguments: { code: '1 + 1' },
+        },
+      }])
+    } finally {
+      await ctx.root.fiber.dispose()
+      await new Promise<void>((resolve) => { server.close(() =>{  resolve() }) })
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps ordinary non-RLM generation tool-free', async () => {
+    const { ctx, adapter } = await setup()
+    try {
+      await ctx.modelWorkers.execute({
+        commandId: 'ordinary', workerId: DEEPSEEK_WORKER_ID, model: 'deepseek-v4-flash',
+        prompt: [{ type: 'text', text: 'answer directly' }], signal: new AbortController().signal,
+      })
+      expect(adapter.requests).toHaveLength(1)
+      expect(adapter.requests[0]?.tools).toBeUndefined()
+    } finally {
+      await ctx.root.fiber.dispose()
+    }
   })
 })

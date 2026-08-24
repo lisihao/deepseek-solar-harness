@@ -35,6 +35,31 @@ export interface CodexAppServerExecutionProfile {
   readonly effort?: string
 }
 
+/** Experimental app-server function tool declared at persistent thread start. */
+export interface CodexDynamicToolSpec {
+  readonly type: 'function'
+  readonly name: string
+  readonly description: string
+  readonly inputSchema: Readonly<Record<string, unknown>>
+  readonly deferLoading?: boolean
+}
+
+/** One app-server dynamic tool invocation owned by the host. */
+export interface CodexDynamicToolCall {
+  readonly threadId: string
+  readonly turnId: string
+  readonly callId: string
+  readonly namespace?: string
+  readonly tool: string
+  readonly arguments: Readonly<Record<string, unknown>>
+}
+
+/** Host response rendered back into the native Codex turn. */
+export interface CodexDynamicToolResult {
+  readonly success: boolean
+  readonly text: string
+}
+
 /** One Codex account rate-limit window returned by app-server. */
 export interface CodexAppServerRateLimitWindow {
   readonly usedPercent: number
@@ -167,6 +192,8 @@ export class CodexAppServerWire {
     private readonly input: Readable,
     output: Writable,
     private readonly approvalBehavior: 'decline' | 'require' = 'decline',
+    private readonly dynamicTools: readonly CodexDynamicToolSpec[] = [],
+    private readonly dynamicToolHandler?: (call: CodexDynamicToolCall) => Promise<CodexDynamicToolResult>,
   ) {
     this.transport = new JsonRpcLineTransport(input, output)
     // Fatal protocol state can arrive after the current guarded operation has
@@ -206,7 +233,7 @@ export class CodexAppServerWire {
         version: '0.0.1',
       },
       capabilities: {
-        experimentalApi: false,
+        experimentalApi: this.dynamicTools.length > 0,
         requestAttestation: false,
       },
     }, signal), signal), 'initialize response')
@@ -282,6 +309,7 @@ export class CodexAppServerWire {
       cwd,
       ephemeral,
       ...profile === undefined ? {} : { model: profile.model },
+      ...this.dynamicTools.length === 0 ? {} : { dynamicTools: this.dynamicTools },
     }, signal), signal), 'thread/start response')
     const thread = object(response.thread, 'thread/start thread')
     const id = string(thread.id, 'thread/start thread id')
@@ -320,6 +348,19 @@ export class CodexAppServerWire {
       throw new Error('subagent-codex: app-server resumed an ephemeral thread for resident execution')
     }
     this.threadId = id
+  }
+
+  /**
+   * Ask app-server to compact the current persistent thread in place.
+   * @param signal - cancellation for the native compaction request.
+   */
+  async compactThread(signal: AbortSignal): Promise<void> {
+    if (this.threadId === undefined) {
+      throw new Error('subagent-codex: cannot compact before a thread is started or resumed')
+    }
+    object(await this.guarded(this.transport.request('thread/compact/start', {
+      threadId: this.threadId,
+    }, signal), signal), 'thread/compact/start response')
   }
 
   /** Native thread identity after start or resume. */
@@ -473,6 +514,24 @@ export class CodexAppServerWire {
   private handleServerRequest(method: string, params: JsonObject): Promise<unknown> {
     try {
       switch (method) {
+        case 'item/tool/call': {
+          this.validateRunIds(params)
+          if (this.dynamicToolHandler === undefined) throw new Error('subagent-codex: dynamic tool handler is unavailable')
+          const tool = string(params.tool, 'dynamic tool name')
+          const callId = string(params.callId, 'dynamic tool call id')
+          const argumentsValue = object(params.arguments, 'dynamic tool arguments')
+          return this.dynamicToolHandler({
+            threadId: string(params.threadId, 'dynamic tool thread id'),
+            turnId: string(params.turnId, 'dynamic tool turn id'),
+            callId,
+            ...typeof params.namespace === 'string' ? { namespace: params.namespace } : {},
+            tool,
+            arguments: argumentsValue,
+          }).then(result => ({
+            success: result.success,
+            contentItems: [{ type: 'inputText', text: result.text }],
+          }))
+        }
         case 'item/commandExecution/requestApproval':
         case 'item/fileChange/requestApproval': {
           this.validateRunIds(params)

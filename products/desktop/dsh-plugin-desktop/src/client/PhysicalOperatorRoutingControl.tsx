@@ -45,6 +45,17 @@ const LABELS: Record<PhysicalOperatorRoutingPolicy, string> = {
   'claude-code': '优先 Claude Code',
 }
 
+const RLM_EXECUTION_LABELS: Record<RlmExecutionMode, string> = {
+  auto: '自动（系统选择）',
+  enabled: 'RLM（Prime 递归）',
+  disabled: '标准（单 Agent）',
+}
+
+/** User-facing execution-mechanism label; `auto` remains the product default. */
+export function orchestrationExecutionModeLabel(mode: RlmExecutionMode): string {
+  return RLM_EXECUTION_LABELS[mode]
+}
+
 /** Stable Chinese display label for one host-owned routing value. */
 export function physicalOperatorRoutingLabel(policy: PhysicalOperatorRoutingPolicy): string {
   return LABELS[policy]
@@ -290,18 +301,18 @@ export function PhysicalOperatorRoutingControl({
             )}
             {orchestrationPreferences !== undefined && (
               <div className="dshDesktopOperatorProfilePreferences">
-                <div><strong>TaskGraph 高级策略</strong><small>三个维度相互独立；“自动”由配额感知调度器选择。</small></div>
+                <div><strong>TaskGraph 高级策略</strong><small>执行机制、持续 Harness 与优化目标相互独立；“自动”由配额感知调度器选择。</small></div>
                 <label>
-                  <span>RLM 递归</span>
+                  <span>执行机制</span>
                   <select
                     aria-label="RLM 递归策略"
                     value={orchestrationPreferences.rlm}
                     disabled={saving}
                     onChange={event => { saveOrchestrationStrategy(event.currentTarget.value as RlmExecutionMode, orchestrationPreferences.continualHarness, orchestrationPreferences.optimization) }}
                   >
-                    <option value="auto">自动</option>
-                    <option value="enabled">启用</option>
-                    <option value="disabled">关闭</option>
+                    <option value="auto">{orchestrationExecutionModeLabel('auto')}</option>
+                    <option value="enabled">{orchestrationExecutionModeLabel('enabled')}</option>
+                    <option value="disabled">{orchestrationExecutionModeLabel('disabled')}</option>
                   </select>
                 </label>
                 <label>

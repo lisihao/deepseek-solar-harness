@@ -146,10 +146,11 @@ class DualModePhysicalOperator implements PhysicalOperator {
       commandId: ResidentOperatorCommandId(String(request.executionId)),
       operatorId: residentProvider,
       workspace,
-      laneId: String(request.parent.id),
+      laneId: request.residentLaneId ?? String(request.parent.id),
       ...request.label === undefined ? {} : { taskLabel: request.label },
       prompt: request.prompt,
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
+      ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       signal: request.signal,
     })
     return {

@@ -73,7 +73,7 @@ status(id: string): PhysicalOperatorStatus
 async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun>
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:85`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:87`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="ctxresidentoperators--residentoperatorservice-abstract-seam"></a>
 
@@ -137,6 +137,13 @@ abstract interrupt(request: ResidentInterruptRequest): Promise<void>
 abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>
 
 /**
+ * Compact an idle native product Session without replacing its continuation identity.
+ * @param _request - Session identity, exact inspected revision, and optional native guidance.
+ * @returns the revised idle Session snapshot after native compaction succeeds.
+ */
+compact(_request: ResidentCompactRequest): Promise<ResidentCompactResult>
+
+/**
  * Record an explicit decision for an indeterminate command.
  * @param request - command identity, abandon decision, and expected Session revision.
  * @returns after the resolution is durably committed.
@@ -144,7 +151,7 @@ abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:306`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:341`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 
@@ -165,7 +172,7 @@ A stable operator became discoverable.
 'physical-operator/added'(operator: PhysicalOperator): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:62`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:64`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorend--emit"></a>
 
@@ -182,7 +189,7 @@ A published execution settled.
 'physical-operator/end'(info: PhysicalOperatorExecutionEndInfo): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:80`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:82`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorremoved--emit"></a>
 
@@ -199,7 +206,7 @@ An operator stopped accepting new executions. Accepted runs survive.
 'physical-operator/removed'(id: PhysicalOperatorId): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:68`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:70`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorstart--emit"></a>
 
@@ -216,5 +223,5 @@ A provider published an accepted execution.
 'physical-operator/start'(info: PhysicalOperatorExecutionInfo): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:74`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:76`](../../packages/physical-operator/physical-operator/src/index.ts)
 <!-- END GENERATED cordis-surface -->

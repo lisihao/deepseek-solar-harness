@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "minimumQualityLift": 0.2,
+  "maximumTokenRatio": 3,
+  "cases": [
+    {
+      "id": "scheduler-authority-blind",
+      "task": "Explain how bounded recursive execution composes with a durable TaskGraph.",
+      "criteria": [
+        { "id": "single-scheduler", "weight": 3, "critical": true, "requiredFacts": ["single scheduler", "taskgraph"] },
+        { "id": "node-local", "weight": 2, "requiredFacts": ["node-local", "sealed plan"] },
+        { "id": "no-shadow-graph", "weight": 2, "requiredFacts": ["no second graph"], "forbiddenFacts": ["replaces the scheduler"] }
+      ],
+      "arms": [
+        { "armId": "A7", "output": { "text": "Recursive execution is node-local inside one sealed plan. The TaskGraph remains the single scheduler, and children create no second graph.", "turns": 4, "estimatedTokens": 310 } },
+        { "armId": "B2", "output": { "text": "Recursive execution helps the TaskGraph explore alternatives.", "turns": 1, "estimatedTokens": 120 } }
+      ]
+    },
+    {
+      "id": "quota-routing-blind",
+      "task": "Choose models for planning, execution, and verification under subscription quotas.",
+      "criteria": [
+        { "id": "strong-boundaries", "weight": 3, "critical": true, "requiredFacts": ["high-tier", "planning", "verification"] },
+        { "id": "cheap-leaves", "weight": 2, "requiredFacts": ["low-tier", "execution"] },
+        { "id": "subscription-first", "weight": 2, "requiredFacts": ["subscription-first", "metered api"] }
+      ],
+      "arms": [
+        { "armId": "Q4", "output": { "text": "Use the strongest model for every step.", "turns": 1, "estimatedTokens": 100 } },
+        { "armId": "P9", "output": { "text": "Use high-tier models for planning and verification, low-tier models for execution, and subscription-first routing before metered API.", "turns": 4, "estimatedTokens": 270 } }
+      ]
+    }
+  ]
+}

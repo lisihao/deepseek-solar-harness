@@ -1,13 +1,21 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { describe, expect, it } from 'vitest'
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
   claudeEnvironment,
+  claudeCompactPrompt,
   claudeResultFailure,
   codexExecutionFailure,
   collectCodexModelsAndQuota,
+  CodexResidentDriver,
+  createClaudeRlmMcpServer,
+  createCodexRlmToolHandler,
   isClaudeNativeSubscription,
   resolveProductExecutable,
 } from '../src/drivers.ts'
@@ -24,6 +32,11 @@ const model = {
 } as const
 
 describe('Claude Code resident driver environment', () => {
+  it('uses Claude Code native /compact and preserves optional instructions', () => {
+    expect(claudeCompactPrompt()).toBe('/compact')
+    expect(claudeCompactPrompt('retain architectural decisions')).toBe('/compact retain architectural decisions')
+  })
+
   it('accepts the first-party claude.ai status emitted with a null subscription type', () => {
     expect(isClaudeNativeSubscription({
       loggedIn: true,
@@ -89,6 +102,105 @@ describe('Claude Code resident driver environment', () => {
   })
 })
 
+describe('Claude Code RLM host tool', () => {
+  it('serves typescript_repl through the Agent SDK MCP adapter with a stable Receipt identity', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-claude-rlm-'))
+    const socketPath = join(root, 'bridge.sock')
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = []
+    const bridgeServer = createServer((socket) => {
+      const transport = new JsonRpcLineTransport(socket, socket)
+      transport.onRequest((method, params) => {
+        requests.push({ method, params })
+        return Promise.resolve({ value: 42 })
+      })
+      transport.start()
+    })
+    await new Promise<void>((resolve, reject) => {
+      bridgeServer.once('error', reject)
+      bridgeServer.listen(socketPath, resolve)
+    })
+    const server = createClaudeRlmMcpServer('resident-command', {
+      version: 1,
+      socketPath,
+      sessionId: 'rlm-session',
+      tools: [{
+        name: 'typescript_repl',
+        description: 'Execute one persistent TypeScript cell.',
+        inputSchema: {
+          type: 'object', properties: { code: { type: 'string' } }, required: ['code'], additionalProperties: false,
+        },
+      }],
+    }, new AbortController().signal)
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'resident-driver-test', version: '1.0.0' })
+    try {
+      await server.instance.connect(serverTransport)
+      await client.connect(clientTransport)
+      await expect(client.callTool({ name: 'typescript_repl', arguments: { code: '40 + 2' } })).resolves.toEqual({
+        content: [{ type: 'text', text: '{"value":42}' }],
+      })
+      expect(requests).toEqual([{
+        method: 'tool.call',
+        params: {
+          session_id: 'rlm-session',
+          command_id: 'resident-command:claude-tool:1',
+          tool: 'typescript_repl',
+          arguments: { code: '40 + 2' },
+        },
+      }])
+    } finally {
+      await client.close()
+      await server.instance.close()
+      await new Promise<void>((resolve) => { bridgeServer.close(() => { resolve() }) })
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Codex RLM host tool', () => {
+  it('maps an app-server dynamic tool call to the same owner-local bridge with a stable Receipt identity', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-codex-rlm-'))
+    const socketPath = join(root, 'bridge.sock')
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = []
+    const bridgeServer = createServer((socket) => {
+      const transport = new JsonRpcLineTransport(socket, socket)
+      transport.onRequest((method, params) => {
+        requests.push({ method, params })
+        return Promise.resolve({ value: 42 })
+      })
+      transport.start()
+    })
+    await new Promise<void>((resolve, reject) => {
+      bridgeServer.once('error', reject)
+      bridgeServer.listen(socketPath, resolve)
+    })
+    const handler = createCodexRlmToolHandler('resident-command', {
+      version: 1,
+      socketPath,
+      sessionId: 'rlm-session',
+      tools: [{ name: 'typescript_repl', description: 'Execute TypeScript.', inputSchema: { type: 'object' } }],
+    }, new AbortController().signal)
+    try {
+      await expect(handler({
+        threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1',
+        tool: 'typescript_repl', arguments: { code: '40 + 2' },
+      })).resolves.toEqual({ success: true, text: '{"value":42}' })
+      expect(requests).toEqual([{
+        method: 'tool.call',
+        params: {
+          session_id: 'rlm-session',
+          command_id: 'resident-command:codex-tool:call-1',
+          tool: 'typescript_repl',
+          arguments: { code: '40 + 2' },
+        },
+      }])
+    } finally {
+      await new Promise<void>((resolve) => { bridgeServer.close(() => { resolve() }) })
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('Claude Code resident terminal failures', () => {
   it('classifies an expired native subscription as an authentication failure', () => {
     const failure = claudeResultFailure({
@@ -122,6 +234,15 @@ describe('Claude Code resident terminal failures', () => {
 })
 
 describe('Codex Resident catalog qualification', () => {
+  it('rejects unsupported compaction instructions before touching native transport', async () => {
+    await expect(new CodexResidentDriver().compact({
+      workspace: '/workspace',
+      nativeSessionId: 'thread-1',
+      instructions: 'retain architecture decisions',
+      signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+  })
+
   it('classifies a disconnected response stream as retryable runtime unavailability', () => {
     expect(codexExecutionFailure(new Error(
       'subagent-codex: Codex turn ended with status failed: {"message":"stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses)"}',

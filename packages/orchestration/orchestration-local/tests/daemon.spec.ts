@@ -6,8 +6,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import { OrchestrationArtifactRef, type LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
+import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { OrchestrationDaemonClient } from '../src/client.ts'
 import { canonicalSha256 } from '../src/canonical.ts'
 import { OrchestrationDaemon } from '../src/daemon.ts'
@@ -25,7 +27,32 @@ interface FakeResidentRequest {
   laneId?: string
   profile?: { model: string }
   prompt?: Array<{ type: string; text?: string }>
+  modelToolBridge?: { version: 1; socketPath: string; sessionId: string; tools: readonly { name: string }[] }
   workspace: string
+}
+
+async function callRlmTool(
+  request: Pick<FakeResidentRequest, 'modelToolBridge'>,
+  commandId: string,
+  code: string,
+): Promise<unknown> {
+  const bridge = request.modelToolBridge
+  if (bridge === undefined) throw new Error('fixture expected a model-tool bridge')
+  const socket = createConnection(bridge.socketPath)
+  await once(socket, 'connect')
+  const transport = new JsonRpcLineTransport(socket, socket)
+  transport.start()
+  try {
+    return await transport.request('tool.call', {
+      session_id: bridge.sessionId,
+      command_id: commandId,
+      tool: 'typescript_repl',
+      arguments: { code },
+    })
+  } finally {
+    transport.close()
+    socket.destroy()
+  }
 }
 
 class FakeResidentClient {
@@ -144,6 +171,51 @@ class FakeResidentClient {
   }
 }
 
+class KeylessModelWorker implements ModelWorkerProvider {
+  readonly id = 'deepseek-keyless-fixture'
+  readonly requests: ModelWorkerExecuteRequest[] = []
+  onExecute?: (request: ModelWorkerExecuteRequest) => Promise<void>
+
+  offers() {
+    const common = {
+      operatorId: this.id,
+      provider: 'deepseek-official-fixture',
+      displayName: 'Keyless DeepSeek fixture',
+      source: 'metered-api' as const,
+      available: true,
+      maxConcurrency: 8,
+      activeCount: 0,
+      tags: ['api', 'deepseek', 'offline-fixture'],
+    }
+    return Promise.resolve([{
+      ...common,
+      offerId: `000-${this.id}:fixture-high`,
+      model: 'deepseek-fixture-high',
+      tier: 'high' as const,
+    }, {
+      ...common,
+      offerId: `000-${this.id}:fixture-low`,
+      model: 'deepseek-fixture-low',
+      tier: 'low' as const,
+    }])
+  }
+
+  async execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
+    this.requests.push(request)
+    await this.onExecute?.(request)
+    const usage = request.commandId.endsWith(':rlm:root')
+      ? { inputTokens: 10, outputTokens: 2 }
+      : request.commandId.includes(':goal-continuation:')
+        ? { inputTokens: 5, outputTokens: 2 }
+        : { inputTokens: 3, outputTokens: 1 }
+    return {
+      output: [{ type: 'text', text: `completed ${request.commandId}` }],
+      stopReason: 'completed',
+      usage,
+    }
+  }
+}
+
 async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 5_000
   for (;;) {
@@ -183,11 +255,13 @@ function createDaemon(
   dshHome: string,
   residentClient: FakeResidentClient,
   schedulerIntervalMs?: number,
+  modelWorkerProviders?: readonly ModelWorkerProvider[],
 ): OrchestrationDaemon {
   return new OrchestrationDaemon({
     root,
     dshHome,
     residentClient: residentClient as unknown as ResidentDaemonClient,
+    modelWorkerProviders: modelWorkerProviders ?? [],
     ...schedulerIntervalMs === undefined ? {} : { schedulerIntervalMs },
   })
 }
@@ -231,6 +305,7 @@ describe('orchestration daemon', () => {
       dshHome: home,
       buildCommit: 'desktop-old',
       residentClient: new FakeResidentClient() as unknown as ResidentDaemonClient,
+      modelWorkerProviders: [],
     })
     await oldDaemon.start()
     process.env.DSH_BUILD_COMMIT = 'desktop-current'
@@ -250,10 +325,24 @@ describe('orchestration daemon', () => {
     }
   })
 
-  it('executes bounded low-tier Resident RLM branches and high-tier synthesis while DSH owns the graph', async () => {
+  it('lets the root model create asynchronous children through the persistent TypeScript RLM tool', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
     const root = join(home, 'orchestrations')
     const fake = new FakeResidentClient()
+    fake.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined) return
+      if (request.commandId.endsWith(':rlm:root')) {
+        await callRlmTool(request, 'root-cell', [
+          'const worker = await rlm("analyze one bounded alternative", { name: "worker" });',
+          'const received = await agentMessage.read();',
+          '({ worker, received })',
+        ].join('\n'))
+      } else if (request.commandId.endsWith(':deliver')) {
+        await callRlmTool(request, `delivery-cell:${request.commandId}`, 'await agentMessage.read()')
+      } else {
+        await callRlmTool(request, `child-cell:${request.commandId}`, 'await agentMessage.send("bounded child evidence", { receiverRole: "parent", mode: "auto" }); "sent"')
+      }
+    }
     const daemon = createDaemon(root, home, fake, 10)
     await daemon.start()
     cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
@@ -270,37 +359,39 @@ describe('orchestration daemon', () => {
         task: 'Use bounded RLM recursion to synthesize the alternatives.',
       }],
     }
-    const compilation = await client.compile({ intent: { request: 'Synthesize alternatives.' }, graph: rlmGraph })
+    const compilation = await client.compile({
+      intent: { request: 'Synthesize alternatives.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'forced-rlm-mode',
+        rlm: 'enabled', continualHarness: 'off', optimization: 'balanced',
+      },
+      graph: rlmGraph,
+    })
     const run = await client.start({ compilationId: compilation.compilationId })
     const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
     expect(completed.nodes[0]).toMatchObject({ operatorId: 'claude-code', rlm: 'enabled', state: 'passed' })
-    expect(fake.requests).toHaveLength(5)
-    expect(fake.requests.slice(0, 4).every(request => (
-      request.operatorId === 'codex' && request.profile?.model === 'gpt-5.6-luna'
-    ))).toBe(true)
-    expect(fake.requests[4]).toMatchObject({
+    expect(fake.requests).toHaveLength(3)
+    expect(fake.requests[0]).toMatchObject({
+      operatorId: 'codex',
+      profile: { model: 'gpt-5.6-luna' },
+    })
+    expect(fake.requests[1]).toMatchObject({
       operatorId: 'claude-code',
       profile: { model: 'claude-opus-4-6' },
     })
-    expect(new Set(fake.requests.map(request => request.laneId)).size).toBe(5)
-    expect(fake.requests.slice(0, 4).every(request => (
-      request.prompt?.map(block => block.text).join('\n').includes('Do not delegate') === true
-    ))).toBe(true)
-    const rlmPrompts = fake.requests.map(request => request.prompt?.map(block => block.text).join('\n') ?? '')
-    expect(rlmPrompts.slice(0, 4).every(prompt => prompt.includes('Strategy: dsh-native-rlm@1.1.0'))).toBe(true)
-    expect(rlmPrompts[0]).toContain('Solution completeness')
-    expect(rlmPrompts[1]).toContain('Adversarial failure analysis')
-    expect(rlmPrompts[2]).toContain('Solution completeness')
-    expect(rlmPrompts[3]).toContain('Adversarial failure analysis')
-    expect(rlmPrompts[4]).toContain('Do not merely summarize their consensus')
-    expect(rlmPrompts[4]).toContain('derive a coverage checklist from the original task')
+    expect(fake.requests[2]).toMatchObject({
+      operatorId: 'claude-code',
+      profile: { model: 'claude-opus-4-6' },
+    })
+    expect(fake.requests.every(request => request.modelToolBridge?.tools[0]?.name === 'typescript_repl')).toBe(true)
+    expect(fake.requests[1]?.prompt?.map(block => block.text).join('\n')).toContain('rlm(...) returns an admission handle immediately')
     const executionPlan = daemon.store.readArtifact(completed.nodes[0]!.executionPlanRef!) as {
       taskRef: string
       allocationPlan: { model: string; suggestedParallelism: number }
       rlmWorkerPlan?: { model: string; tier: string }
     }
     expect(executionPlan).toMatchObject({
-      allocationPlan: { model: 'claude-opus-4-6', suggestedParallelism: 1 },
+      allocationPlan: { model: 'claude-opus-4-6', suggestedParallelism: 2 },
       rlmWorkerPlan: { model: 'gpt-5.6-luna', tier: 'low' },
     })
     expect(daemon.store.readArtifact(OrchestrationArtifactRef(executionPlan.taskRef))).toMatchObject({
@@ -313,15 +404,104 @@ describe('orchestration daemon', () => {
       quota: { class: 'native-subscription' },
     })
     const events = await client.readEvents({ runId: run.runId, limit: 200 })
-    expect(events.events.filter(value => value.type === 'rlm.branch.settled')).toHaveLength(4)
+    expect(events.events.filter(value => value.type === 'rlm.child.settled')).toHaveLength(1)
+    expect(events.events.filter(value => value.type === 'rlm.message.continuation.settled')).toHaveLength(1)
     expect(events.events.find(value => value.type === 'rlm.execution.settled')?.data).toMatchObject({
-      depthUsed: 2,
-      turnsUsed: 5,
-      branchCount: 2,
+      childCount: 1,
     })
-    expect(events.events.find(value => value.type === 'rlm.synthesis.dispatched')?.data).toMatchObject({
-      branchPreviewLimit: 8_000,
+  })
+
+  it('does not let one RLM allocation serialize an independent TaskGraph node', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-cap-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    fake.defer = true
+    fake.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined) return
+      if (request.commandId.endsWith(':rlm:root')) {
+        await callRlmTool(request, 'parallel-root-cell', '"root admitted"')
+      }
+    }
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const independentGraph: LogicalTaskGraphV1 = {
+      ...fixture,
+      maxParallel: 2,
+      nodes: [{
+        ...fixture.nodes[0]!,
+        role: 'recursive synthesis',
+        task: 'Use RLM without owning unrelated DAG capacity.',
+        readScopes: [],
+        writeScopes: ['rlm-output'],
+        rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
+      }, {
+        ...fixture.nodes[1]!,
+        dependsOn: [],
+        readScopes: [],
+        writeScopes: ['independent-output'],
+        rlm: { mode: 'disabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
+      }],
+    }
+    const compilation = await client.compile({
+      intent: { request: 'Run independent RLM and standard nodes.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'rlm-dag-capacity',
+        rlm: 'auto', continualHarness: 'off', optimization: 'balanced',
+      },
+      graph: independentGraph,
     })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const concurrent = await eventually(
+      () => client.inspect(String(run.runId)),
+      value => value.nodes.filter(node => node.state === 'running').length === 2,
+    )
+    expect(concurrent).toMatchObject({ maxParallel: 2, effectiveParallelism: 2 })
+    expect(concurrent.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'code', rlm: 'enabled', state: 'running' }),
+      expect.objectContaining({ id: 'review', rlm: 'disabled', state: 'running' }),
+    ]))
+    fake.defer = false
+    fake.resolveAllDeferred()
+    await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+  })
+
+  it('keeps Standard mode on the direct execution path without creating an RLM session', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-standard-mode-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const compilation = await client.compile({
+      intent: { request: 'Use standard execution for a recursive-sounding task.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'forced-standard-mode',
+        rlm: 'disabled', continualHarness: 'off', optimization: 'balanced',
+      },
+      graph: {
+        ...fixture,
+        nodes: [
+          { ...fixture.nodes[0]!, role: 'recursive synthesis', task: 'Recursively explore alternatives, but obey Standard mode.' },
+        ],
+      },
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ state: 'passed', rlm: 'disabled' })
+    expect(fake.requests).toHaveLength(1)
+    expect(fake.requests[0]?.modelToolBridge).toBeUndefined()
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.find(value => value.type === 'rlm.resolved')?.data).toMatchObject({ enabled: false, reason: 'user-disabled' })
+    expect(events.events.some(value => value.type === 'rlm.execution.started')).toBe(false)
   })
 
   it('marks an interrupted Resident RLM composite indeterminate instead of replaying child turns after restart', async () => {
@@ -344,7 +524,7 @@ describe('orchestration daemon', () => {
       },
     })
     const run = await client.start({ compilationId: compilation.compilationId })
-    await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running' && firstFake.requests.length === 2)
+    await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running' && firstFake.requests.length === 1)
     await first.close()
 
     const secondFake = new FakeResidentClient()
@@ -358,6 +538,118 @@ describe('orchestration daemon', () => {
     )
     expect(recovered.nodes[0]).toMatchObject({ state: 'indeterminate' })
     expect(secondFake.requests).toHaveLength(0)
+  })
+
+  it('continues an explicit Prime goal until the model completes it without changing the TaskGraph', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-goal-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    fake.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined) return
+      if (request.commandId.endsWith(':rlm:root')) {
+        await callRlmTool(request, 'goal-create-cell', 'await goal.create("complete the bounded objective", { continuationBudget: 2 }); "goal active"')
+      } else if (request.commandId.includes(':goal-continuation:1')) {
+        await callRlmTool(request, 'goal-complete-cell', 'await goal.complete(); "goal complete"')
+      }
+    }
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...rlmNode } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Complete a persistent goal.' },
+      graph: { ...fixture, nodes: [{ ...rlmNode, role: 'recursive synthesis', task: 'Complete one persistent goal.' }] },
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled' })
+    expect(fake.requests).toHaveLength(2)
+    expect(fake.requests[0]?.laneId).toBe(fake.requests[1]?.laneId)
+    expect(fake.requests[0]?.modelToolBridge?.sessionId).toBe(fake.requests[1]?.modelToolBridge?.sessionId)
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.some(value => value.type === 'rlm.goal.continuation.settled')).toBe(true)
+  })
+
+  it('serially accounts keyless DeepSeek root, concurrent child, and active goal-continuation usage', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-goal-usage-'))
+    const root = join(home, 'orchestrations')
+    const resident = new FakeResidentClient()
+    resident.available = false
+    const worker = new KeylessModelWorker()
+    const daemon = createDaemon(root, home, resident, 10, [worker])
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+    const rlmGraph: LogicalTaskGraphV1 = {
+      ...fixture,
+      nodes: [{
+        ...baseNode,
+        role: 'recursive synthesis',
+        task: 'Exercise the keyless RLM Goal usage fixture.',
+        writeScopes: [],
+      }],
+    }
+    const admission = {
+      policy: 'codex' as const,
+      route: 'taskgraph' as const,
+      sourceSessionId: 'goal-usage-fixture',
+      rlm: 'enabled' as const,
+      continualHarness: 'off' as const,
+      optimization: 'balanced' as const,
+    }
+
+    const noGoalCompilation = await client.compile({
+      intent: { request: 'Run keyless RLM without creating a Goal.' },
+      admission,
+      graph: rlmGraph,
+    })
+    const noGoalRun = await client.start({ compilationId: noGoalCompilation.compilationId })
+    await eventually(() => client.inspect(String(noGoalRun.runId)), value => value.state === 'completed')
+    const noGoalEvents = await client.readEvents({ runId: noGoalRun.runId, limit: 200 })
+    expect(noGoalEvents.events.filter(value => value.type === 'rlm.goal.usage')).toHaveLength(0)
+
+    worker.onExecute = async (request) => {
+      if (request.commandId.endsWith(':rlm:root')) {
+        await callRlmTool(request, 'goal-usage-root-cell', [
+          'await goal.create("account every active DeepSeek turn", { continuationBudget: 2 });',
+          'await Promise.all([rlm("bounded child one", { name: "worker-one" }), rlm("bounded child two", { name: "worker-two" })]);',
+          '"goal active"',
+        ].join('\n'))
+      } else if (request.commandId.includes(':goal-continuation:2')) {
+        await callRlmTool(request, 'goal-usage-complete-cell', 'await goal.complete(); "goal complete"')
+      }
+    }
+    const goalCompilation = await client.compile({
+      intent: { request: 'Account root, child, and active continuation usage.' },
+      admission,
+      graph: rlmGraph,
+    })
+    const goalRun = await client.start({ compilationId: goalCompilation.compilationId })
+    await eventually(() => client.inspect(String(goalRun.runId)), value => value.state === 'completed')
+    const goalEvents = await client.readEvents({ runId: goalRun.runId, limit: 300 })
+    const usageEvents = goalEvents.events.filter(value => value.type === 'rlm.goal.usage')
+    expect(usageEvents).toHaveLength(4)
+    expect(usageEvents.map(value => value.data.source).sort()).toEqual([
+      'child',
+      'child',
+      'goal-continuation',
+      'root',
+    ])
+    expect(usageEvents.at(-1)?.data).toMatchObject({
+      source: 'goal-continuation',
+      inputTokens: 5,
+      outputTokens: 2,
+      tokensUsed: 27,
+      status: 'active',
+    })
   })
 
   it('compiles, seals, dispatches Resident nodes, records Evidence, and completes a graph', async () => {

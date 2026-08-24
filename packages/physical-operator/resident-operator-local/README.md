@@ -8,7 +8,11 @@ Claude Code uses the official Agent SDK with persisted/resumed sessions and read
 
 ## Protocol, storage, and recovery
 
-JSON-RPC 2.0 messages are newline-delimited over an owner-only Unix socket. Handshake rejects mismatched Resident protocol, state schema, daemon build, required method set, configured Driver manifest, product version, product protocol hash, or native-subscription qualification. Protocol v6 adds the generic Driver SPI and graceful `system.shutdown`; a newly configured Driver set retires an older incompatible daemon before reconnecting. The daemon stores `resident_sessions`, `command_receipts`, `session_leases`, bounded events, and artifact indexes in a single-writer WAL database.
+JSON-RPC 2.0 messages are newline-delimited over an owner-only Unix socket. Handshake rejects mismatched Resident protocol, state schema, daemon build, required method set, configured Driver manifest, product version, product protocol hash, or native-subscription qualification. Protocol v8 adds receipt-backed `session.compact`; protocol v7 carries a sealed model-tool bridge for RLM turns; protocol v6 added the generic Driver SPI and graceful `system.shutdown`. A newly configured Driver set retires an older incompatible daemon before reconnecting. The daemon stores `resident_sessions`, turn `command_receipts`, `session_compaction_receipts`, `session_leases`, bounded events, and artifact indexes in a single-writer WAL database.
+
+Native compaction is admitted only for an idle Session at the caller's exact state revision. Claude Code resumes the same Agent SDK Session and sends its native `/compact`, including optional guidance. Codex resumes the same non-ephemeral app-server thread and calls `thread/compact/start`; because that method has no instruction field, Codex explicitly rejects non-empty guidance. The daemon writes an accepted Receipt before product dispatch, returns the cached result for an identical settled command, rejects changed content, and fences an accepted/running crash or ambiguous transport outcome as `COMMAND_INDETERMINATE`. Explicit resolution is required before another compaction; the daemon never auto-replays the external product effect. Persisted Receipt and event data record only the canonical request hash and whether guidance was provided, never the guidance text.
+
+RLM turns expose exactly one `typescript_repl` Host tool. Claude Code receives it through an in-process Agent SDK MCP server; Codex receives it through app-server `thread/start.dynamicTools` and `item/tool/call`. Each native call identity is namespaced by the outer Resident command before reaching the RLM Receipt store, so reconnecting the same native call cannot execute a second cell. A caller-supplied lane keeps RLM native threads separate from ordinary Resident conversations, and subsequent Codex turns resume the thread whose dynamic tool surface was fixed at creation.
 
 Codex model discovery is an execution prerequisite, while subscription quota telemetry is advisory scheduling input. A transient rate-limit telemetry failure therefore preserves the qualified model catalog and execution path, exposes `quotaUnavailableReason`, and leaves quota pools unknown instead of misreporting the whole native subscription as unavailable.
 
@@ -42,6 +46,6 @@ No direct invalidation; the model-visible physical-operator Consumer owns its sc
 
 ## Known Limitations and Deferred Work
 
-- Protocol version 6 and state schema version 4 support local Unix sockets and macOS acceptance; schemas v1 through v3 migrate into the compatibility `legacy` lane, while Windows named pipes are deferred.
+- Protocol version 8 and state schema version 5 support local Unix sockets and macOS acceptance; schemas v1 through v3 migrate into the compatibility `legacy` lane, schema v4 adds the compaction Receipt table, and Windows named pipes are deferred.
 - Product-native permission policies remain authoritative. DSH file sandboxing does not automatically confine these external products.
 - Human write takeover, durable Jobs projection, remote farms, scheduling affinity, and transcript persistence are intentionally absent.

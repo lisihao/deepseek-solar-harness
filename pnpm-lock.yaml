@@ -1315,6 +1315,12 @@ importers:
       '@deepseek-ai/dsh-orchestration-local':
         specifier: workspace:^
         version: link:../../orchestration/orchestration-local
+      '@deepseek-ai/dsh-rlm-runtime':
+        specifier: workspace:^
+        version: link:../../orchestration/rlm-runtime
+      '@deepseek-ai/dsh-rlm-runtime-local':
+        specifier: workspace:^
+        version: link:../../orchestration/rlm-runtime-local
       '@deepseek-ai/dsh-rlm-strategy':
         specifier: workspace:^
         version: link:../../orchestration/rlm-strategy
@@ -5867,6 +5873,9 @@ importers:
       '@deepseek-ai/dsh-rlm-strategy':
         specifier: workspace:^
         version: link:../rlm-strategy
+      '@deepseek-ai/dsh-sdk-protocol':
+        specifier: workspace:^
+        version: link:../../sdk/protocol
 
   packages/orchestration/orchestration:
     devDependencies:
@@ -5964,6 +5973,12 @@ importers:
       '@deepseek-ai/dsh-resident-operator-local':
         specifier: workspace:^
         version: link:../../physical-operator/resident-operator-local
+      '@deepseek-ai/dsh-rlm-runtime':
+        specifier: workspace:^
+        version: link:../rlm-runtime
+      '@deepseek-ai/dsh-rlm-runtime-local':
+        specifier: workspace:^
+        version: link:../rlm-runtime-local
       '@deepseek-ai/dsh-rlm-strategy':
         specifier: workspace:^
         version: link:../rlm-strategy
@@ -5976,6 +5991,43 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+
+  packages/orchestration/rlm-runtime:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-brand':
+        specifier: workspace:^
+        version: link:../../util/brand
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../../physical-operator/physical-operator
+
+  packages/orchestration/rlm-runtime-local:
+    dependencies:
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-rlm-runtime':
+        specifier: workspace:^
+        version: link:../rlm-runtime
+      '@deepseek-ai/dsh-sdk-protocol':
+        specifier: workspace:^
+        version: link:../../sdk/protocol
 
   packages/orchestration/rlm-strategy:
     devDependencies:

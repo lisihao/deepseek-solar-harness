@@ -284,6 +284,8 @@
     { "path": "./packages/orchestration/model-worker-deepseek" },
     { "path": "./packages/orchestration/rlm-strategy" },
     { "path": "./packages/orchestration/rlm-strategy-local" },
+    { "path": "./packages/orchestration/rlm-runtime" },
+    { "path": "./packages/orchestration/rlm-runtime-local" },
     { "path": "./packages/orchestration/orchestration" },
     { "path": "./packages/orchestration/orchestration-local" },
     { "path": "./packages/orchestration/tool-orchestration" },

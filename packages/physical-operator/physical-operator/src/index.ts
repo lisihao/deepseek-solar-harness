@@ -36,6 +36,8 @@ export type {
   PhysicalOperatorExecutionEndInfo,
   PhysicalOperatorExecutionMode,
   PhysicalOperatorExecutionPreference,
+  PhysicalOperatorModelToolBridgeV1,
+  PhysicalOperatorModelToolV1,
   PhysicalOperatorExecutionInfo,
   PhysicalOperatorReasoningEffort,
   PhysicalOperatorProviderRun,

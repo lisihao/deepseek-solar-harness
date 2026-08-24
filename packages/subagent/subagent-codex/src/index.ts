@@ -31,6 +31,9 @@ export {
   type CodexAppServerModel,
   type CodexAppServerRateLimit,
   type CodexAppServerRateLimitWindow,
+  type CodexDynamicToolCall,
+  type CodexDynamicToolResult,
+  type CodexDynamicToolSpec,
 } from './wire.ts'
 
 export const name = 'subagent-codex'

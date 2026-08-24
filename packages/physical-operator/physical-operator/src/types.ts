@@ -46,6 +46,21 @@ export interface PhysicalOperatorExecutionPreference {
   readonly effort?: PhysicalOperatorReasoningEffort
 }
 
+/** One model-facing function tool served by an owner-local typed bridge. */
+export interface PhysicalOperatorModelToolV1 {
+  readonly name: string
+  readonly description: string
+  readonly inputSchema: Readonly<Record<string, unknown>>
+}
+
+/** Serializable bridge used by out-of-process Resident products to call owner-local tools. */
+export interface PhysicalOperatorModelToolBridgeV1 {
+  readonly version: 1
+  readonly socketPath: string
+  readonly sessionId: string
+  readonly tools: readonly PhysicalOperatorModelToolV1[]
+}
+
 /** Stable descriptive and admission metadata owned by an operator provider. */
 export interface PhysicalOperatorDescriptor {
   /** Stable id selected by callers; it does not expose the backing transport. */
@@ -99,6 +114,10 @@ export interface PhysicalOperatorStartRequest {
   readonly mode?: PhysicalOperatorExecutionMode
   /** Optional Resident model/effort preference; the daemon resolves omitted fields and locks the result. */
   readonly residentProfile?: PhysicalOperatorExecutionPreference
+  /** Stable caller-owned native-context lane used by multiple Resident turns in one logical session. */
+  readonly residentLaneId?: string
+  /** Optional genuine model-tool surface resolved before dispatch; never a prompt-encoded pseudo protocol. */
+  readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
 }
 
 /** Provider-facing request after the service owns identity and mode normalization. */

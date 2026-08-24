@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type {
   ResidentDriverExecuteRequest,
+  ResidentDriverCompactRequest,
   ResidentProductDriver,
   ResidentProviderStatus,
 } from '@deepseek-ai/dsh-resident-operator'
@@ -69,6 +70,8 @@ describe('Resident daemon lifecycle', () => {
 class MemoryDriver implements ResidentProductDriver {
   readonly operatorId = 'codex' as const
   readonly profiles: ResidentDriverExecuteRequest['profile'][] = []
+  readonly commandIds: string[] = []
+  readonly compactions: ResidentDriverCompactRequest[] = []
   constructor(readonly counts = new Map<string, number>()) {}
 
   qualify(): Promise<ResidentProviderStatus> {
@@ -89,6 +92,7 @@ class MemoryDriver implements ResidentProductDriver {
   }
 
   async execute(request: ResidentDriverExecuteRequest) {
+    this.commandIds.push(String(request.commandId))
     this.profiles.push(request.profile)
     request.onProgress('connecting')
     const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
@@ -108,6 +112,11 @@ class MemoryDriver implements ResidentProductDriver {
       stopReason: 'completed' as const,
       nativeSessionId: session,
     }
+  }
+
+  compact(request: ResidentDriverCompactRequest): Promise<{ nativeSessionId: string }> {
+    this.compactions.push(request)
+    return Promise.resolve({ nativeSessionId: request.nativeSessionId })
   }
 }
 
@@ -200,6 +209,20 @@ class FailingDriver extends MemoryDriver {
     const prompt = request.prompt[0]
     const text = prompt?.type === 'text' ? prompt.text : 'missing'
     throw new Error(`failure echoed ${text}; OPENAI_API_KEY=sk-test-secret-token-123456789`)
+  }
+}
+
+class IndeterminateCompactionDriver extends MemoryDriver {
+  compactAttempts = 0
+  override compact(): Promise<never> {
+    this.compactAttempts += 1
+    return Promise.reject(new Error('native transport disappeared after compaction dispatch'))
+  }
+}
+
+class IdentityChangingCompactionDriver extends MemoryDriver {
+  override compact(): Promise<{ nativeSessionId: string }> {
+    return Promise.resolve({ nativeSessionId: 'unexpected-replacement' })
   }
 }
 
@@ -310,6 +333,7 @@ describe('ResidentDaemon', () => {
       prompt: [{ type: 'text', text: 'first' }], signal: new AbortController().signal,
     })
     expect(await first.result).toMatchObject({ output: [{ text: 'session=native-1;count=1' }] })
+    expect(driver.commandIds).toEqual(['command-1'])
     expect(driver.profiles[0]).toEqual({ model: 'gpt-test', effort: 'medium' })
     const reconnected = await firstClient.inspect(first.sessionId)
     expect(reconnected).toMatchObject({
@@ -348,6 +372,131 @@ describe('ResidentDaemon', () => {
     })
     expect(isolated.sessionId).not.toBe(first.sessionId)
     expect(await isolated.result).toMatchObject({ output: [{ text: 'session=native-2;count=1' }] })
+    await daemon.close()
+  })
+
+  it('compacts an idle native Session once and replays the durable receipt without replacing history', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new MemoryDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const turn = await connected.execute({
+      commandId: 'compact-source', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'establish native history' }], signal: new AbortController().signal,
+    })
+    await turn.result
+    const before = await connected.inspect(turn.sessionId)
+    const request = {
+      commandId: 'compact-command',
+      sessionId: turn.sessionId,
+      expectedStateRevision: before.stateRevision,
+      instructions: 'retain architecture decisions',
+    }
+    const compacted = await connected.compact(request)
+    expect(compacted).toMatchObject({
+      nativeSessionId: 'native-1',
+      session: {
+        sessionId: turn.sessionId,
+        nativeSessionId: 'native-1',
+        lifecycle: 'idle',
+        stateRevision: before.stateRevision + 2,
+      },
+    })
+    expect(driver.compactions).toHaveLength(1)
+    expect(driver.compactions[0]).toMatchObject({
+      nativeSessionId: 'native-1',
+      instructions: 'retain architecture decisions',
+    })
+
+    await expect(connected.compact(request)).resolves.toEqual(compacted)
+    expect(driver.compactions).toHaveLength(1)
+    await expect(connected.compact({ ...request, instructions: 'different guidance' }))
+      .rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
+    const events = await connected.readEvents(turn.sessionId)
+    expect(events.events).toContainEqual(expect.objectContaining({
+      type: 'session.compacted',
+      data: { commandId: 'compact-command', instructionsProvided: true },
+    }))
+    expect(JSON.stringify(events)).not.toContain('retain architecture decisions')
+    await daemon.close()
+  })
+
+  it('rejects native compaction while the Session has an active turn', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const daemon = new ResidentDaemon({ root, drivers: [new BlockingDriver()] })
+    await daemon.start()
+    const connected = client(root)
+    const active = await connected.execute({
+      commandId: 'compact-busy-source', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'stay active' }], signal: new AbortController().signal,
+    })
+    const running = await connected.inspect(active.sessionId)
+    await expect(connected.compact({
+      commandId: 'compact-while-busy',
+      sessionId: active.sessionId,
+      expectedStateRevision: running.stateRevision,
+    })).rejects.toMatchObject({ code: 'SESSION_BUSY' })
+    await connected.interrupt(active.sessionId, active.turnId)
+    await expect(active.result).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    await daemon.close()
+  })
+
+  it('marks an unknown post-dispatch compaction failure indeterminate and does not retry it', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new IndeterminateCompactionDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const turn = await connected.execute({
+      commandId: 'compact-indeterminate-source', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'establish history' }], signal: new AbortController().signal,
+    })
+    await turn.result
+    const before = await connected.inspect(turn.sessionId)
+    const request = {
+      commandId: 'compact-indeterminate',
+      sessionId: turn.sessionId,
+      expectedStateRevision: before.stateRevision,
+    }
+    await expect(connected.compact(request)).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+    await expect(connected.compact(request)).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+    expect(driver.compactAttempts).toBe(1)
+    expect(await connected.inspect(turn.sessionId)).toMatchObject({
+      lifecycle: 'idle', health: 'degraded', healthReason: 'process_crashed',
+    })
+    await daemon.close()
+  })
+
+  it('marks a post-product native identity mismatch indeterminate instead of leaving a running receipt', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const daemon = new ResidentDaemon({ root, drivers: [new IdentityChangingCompactionDriver()] })
+    await daemon.start()
+    const connected = client(root)
+    const turn = await connected.execute({
+      commandId: 'compact-identity-source', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'establish history' }], signal: new AbortController().signal,
+    })
+    await turn.result
+    const before = await connected.inspect(turn.sessionId)
+    const request = {
+      commandId: 'compact-identity-mismatch',
+      sessionId: turn.sessionId,
+      expectedStateRevision: before.stateRevision,
+    }
+    await expect(connected.compact(request)).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+    await expect(connected.compact(request)).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+    expect(await connected.inspect(turn.sessionId)).toMatchObject({
+      lifecycle: 'idle', health: 'degraded', nativeSessionId: 'native-1',
+    })
     await daemon.close()
   })
 
@@ -554,21 +703,29 @@ describe('ResidentDaemon', () => {
     const daemon = new ResidentDaemon({ root, drivers: [driver] })
     await daemon.start()
     const connected = client(root)
+    const modelToolBridge = {
+      version: 1 as const,
+      socketPath: join(root, 'bridge.sock'),
+      sessionId: 'rlm-session',
+      tools: [{ name: 'typescript_repl', description: 'Execute TypeScript.', inputSchema: { type: 'object' } }],
+    }
     const first = await connected.execute({
       commandId: 'same', operatorId: 'codex', workspace,
-      prompt: [{ type: 'text', text: 'same' }], signal: new AbortController().signal,
+      prompt: [{ type: 'text', text: 'same' }], modelToolBridge, signal: new AbortController().signal,
     })
     await first.result
     const replay = await connected.execute({
       commandId: 'same', operatorId: 'codex', workspace,
-      prompt: [{ type: 'text', text: 'same' }], signal: new AbortController().signal,
+      prompt: [{ type: 'text', text: 'same' }], modelToolBridge, signal: new AbortController().signal,
     })
     expect(replay.turnId).toBe(first.turnId)
     await replay.result
     expect(driver.counts.get('native-1')).toBe(1)
     await expect(connected.execute({
       commandId: 'same', operatorId: 'codex', workspace,
-      prompt: [{ type: 'text', text: 'different' }], signal: new AbortController().signal,
+      prompt: [{ type: 'text', text: 'same' }],
+      modelToolBridge: { ...modelToolBridge, sessionId: 'another-rlm-session' },
+      signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
     await daemon.close()
   })

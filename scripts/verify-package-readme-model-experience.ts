@@ -66,6 +66,8 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/orchestration/model-worker-deepseek': { kind: 'indirect', reason: 'The optional billed worker executes only sealed orchestration prompts through the existing LLM seam.' },
   'packages/orchestration/rlm-strategy': { kind: 'none', reason: 'The abstract RLM seam emits an immutable strategy plan and registers no model-facing prompt or schema.' },
   'packages/orchestration/rlm-strategy-local': { kind: 'indirect', reason: 'The deterministic RLM Provider emits a bounded instruction consumed only by the sealed node execution plan.' },
+  'packages/orchestration/rlm-runtime': { kind: 'indirect', reason: 'The abstract persistent RLM runtime delegates the model-facing TypeScript REPL schema and results to a Consumer.' },
+  'packages/orchestration/rlm-runtime-local': { kind: 'indirect', reason: 'The local persistent RLM Provider delegates tool registration and result rendering to a model-provider Consumer.' },
   'packages/orchestration/orchestration': { kind: 'indirect', reason: 'The Service Definition delegates model rendering to dsh-tool-orchestration.' },
   'packages/orchestration/orchestration-local': { kind: 'indirect', reason: 'The daemon Provider delegates model rendering to dsh-tool-orchestration and physical operators.' },
   'packages/orchestration/ui-orchestration': { kind: 'none', reason: 'The trusted browser control projection registers no model-facing prompt, schema, or Session event.' },

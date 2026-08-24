@@ -7,15 +7,19 @@ import { homedir, tmpdir } from 'node:os'
 import { extname, isAbsolute, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import {
+  createSdkMcpServer,
   query as claudeQuery,
+  tool as claudeTool,
   type CanUseTool,
   type ModelInfo,
   type SDKResultMessage,
 } from '@anthropic-ai/claude-agent-sdk'
+import { z } from 'zod'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { PhysicalOperatorReasoningEffort } from '@deepseek-ai/dsh-physical-operator'
 import type {
   ResidentDriverExecuteRequest,
+  ResidentDriverCompactRequest,
   ResidentModelOption,
   ResidentProductDriver,
   ResidentProviderStatus,
@@ -28,11 +32,15 @@ import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
 import {
   CodexApprovalRequiredError,
   CodexAppServerWire,
+  type CodexDynamicToolCall,
+  type CodexDynamicToolResult,
+  type CodexDynamicToolSpec,
   type CodexAppServerModel,
   type CodexAppServerRateLimit,
 } from '@deepseek-ai/dsh-subagent-codex'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { openCodexDaemonStream } from './codex-transport.ts'
+import { callModelToolBridge, claudeMcpRequestId, modelToolCommandId } from './model-tool-bridge.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -67,6 +75,15 @@ export function claudeEnvironment(
     environment.NODE_USE_SYSTEM_CA = '1'
   }
   return environment
+}
+
+/**
+ * Build Claude Code's native slash command without persisting its optional guidance.
+ * @param instructions - optional native compaction guidance.
+ * @returns the bounded Claude Code slash command.
+ */
+export function claudeCompactPrompt(instructions?: string): string {
+  return instructions === undefined ? '/compact' : `/compact ${instructions}`
 }
 
 /**
@@ -134,6 +151,77 @@ function reasoningEffort(value: string | undefined): PhysicalOperatorReasoningEf
   return value !== undefined && EFFORTS.has(value as PhysicalOperatorReasoningEffort)
     ? value as PhysicalOperatorReasoningEffort
     : undefined
+}
+
+function ensureTypeScriptReplBridge(request: ResidentDriverExecuteRequest): NonNullable<ResidentDriverExecuteRequest['modelToolBridge']> | undefined {
+  const bridge = request.modelToolBridge
+  if (bridge === undefined) return undefined
+  if (bridge.tools.length !== 1 || bridge.tools[0]?.name !== 'typescript_repl') {
+    throw new ResidentOperatorError('Resident RLM requires the single qualified typescript_repl model tool', 'PROTOCOL_MISMATCH')
+  }
+  return bridge
+}
+
+function codexDynamicTools(request: ResidentDriverExecuteRequest): readonly CodexDynamicToolSpec[] {
+  const bridge = ensureTypeScriptReplBridge(request)
+  if (bridge === undefined) return []
+  return bridge.tools.map(spec => ({
+    type: 'function', name: spec.name, description: spec.description, inputSchema: spec.inputSchema, deferLoading: false,
+  }))
+}
+
+/**
+ * Build the in-process Claude Agent SDK MCP adapter for one sealed RLM turn.
+ * @param executionId - outer Physical Operator execution identity.
+ * @param bridge - sealed owner-local model tool bridge.
+ * @param signal - turn cancellation signal.
+ * @returns the configured Claude Agent SDK MCP server.
+ */
+export function createClaudeRlmMcpServer(
+  executionId: string,
+  bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
+  signal: AbortSignal,
+): ReturnType<typeof createSdkMcpServer> {
+  const toolSpec = bridge.tools[0]
+  if (toolSpec === undefined) {
+    throw new ResidentOperatorError('Resident RLM requires a qualified typescript_repl model tool', 'PROTOCOL_MISMATCH')
+  }
+  return createSdkMcpServer({
+    name: 'dsh_rlm',
+    version: '1.0.0',
+    instructions: 'Use typescript_repl as the persistent programming surface. Calls to rlm(...) return admission handles, never child answers; read explicit messages or artifacts for results.',
+    alwaysLoad: true,
+    tools: [claudeTool(
+      'typescript_repl',
+      toolSpec.description,
+      { code: z.string() },
+      async ({ code }, extra) => {
+        const commandId = modelToolCommandId(executionId, 'claude', claudeMcpRequestId(extra))
+        const result = await callModelToolBridge(bridge, 'typescript_repl', { code }, commandId, signal)
+        return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+      },
+      { alwaysLoad: true },
+    )],
+  })
+}
+
+/**
+ * Build the Codex app-server callback for one sealed RLM turn.
+ * @param executionId - outer Physical Operator execution identity.
+ * @param bridge - sealed owner-local model tool bridge.
+ * @param signal - turn cancellation signal.
+ * @returns a callback that settles Codex dynamic tool calls through the bridge.
+ */
+export function createCodexRlmToolHandler(
+  executionId: string,
+  bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
+  signal: AbortSignal,
+): (call: CodexDynamicToolCall) => Promise<CodexDynamicToolResult> {
+  return async (call) => {
+    const commandId = modelToolCommandId(executionId, 'codex', call.callId)
+    const result = await callModelToolBridge(bridge, call.tool, call.arguments, commandId, signal)
+    return { success: true, text: JSON.stringify(result) }
+  }
 }
 
 function claudeModelOption(model: ModelInfo, index: number): ResidentModelOption {
@@ -414,7 +502,10 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     let final: SDKResultMessage | undefined
     let approvalRequired: string | undefined
     const running = new Set<string>()
+    const modelToolBridge = ensureTypeScriptReplBridge(request)
+    const modelToolName = 'mcp__dsh_rlm__typescript_repl'
     const canUseTool: CanUseTool = (toolName, _input, options) => {
+      if (modelToolBridge !== undefined && toolName === modelToolName) return Promise.resolve({ behavior: 'allow' })
       approvalRequired = options.title ?? options.displayName ?? toolName
       return Promise.resolve({
         behavior: 'deny',
@@ -422,6 +513,9 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
         interrupt: true,
       })
     }
+    const rlmServer = modelToolBridge === undefined
+      ? undefined
+      : createClaudeRlmMcpServer(String(request.commandId), modelToolBridge, controller.signal)
     const query = claudeQuery({
       prompt: texts.join(''),
       options: {
@@ -439,6 +533,11 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
           : {},
         ...nativeSessionId === undefined ? {} : { resume: nativeSessionId },
         disallowedTools: ['AskUserQuestion'],
+        ...rlmServer === undefined ? {} : {
+          tools: [],
+          allowedTools: [modelToolName],
+          mcpServers: { dsh_rlm: rlmServer },
+        },
         canUseTool,
       },
     })
@@ -491,6 +590,59 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
       ? [{ type: 'text' as const, text: final.result }]
       : []
     return { output, stopReason, nativeSessionId }
+  }
+
+  async compact(request: ResidentDriverCompactRequest): Promise<{ nativeSessionId: string }> {
+    const qualification = await this.qualify()
+    if (!qualification.available) {
+      throw new ResidentOperatorError(
+        qualification.unavailableReason ?? 'Claude Code unavailable',
+        qualification.authentication === 'native-subscription'
+          ? 'PROVIDER_VERSION_MISMATCH'
+          : 'AUTH_MODE_MISMATCH',
+      )
+    }
+    const controller = new AbortController()
+    const abort = (): void => { controller.abort(request.signal.reason) }
+    if (request.signal.aborted) abort()
+    else request.signal.addEventListener('abort', abort, { once: true })
+    let observedSessionId = request.nativeSessionId
+    let final: SDKResultMessage | undefined
+    const query = claudeQuery({
+      prompt: claudeCompactPrompt(request.instructions),
+      options: {
+        abortController: controller,
+        cwd: request.workspace,
+        env: claudeEnvironment(),
+        pathToClaudeCodeExecutable: resolveProductExecutable('claude'),
+        persistSession: true,
+        resume: request.nativeSessionId,
+        tools: [],
+        allowedTools: [],
+        disallowedTools: ['AskUserQuestion'],
+      },
+    })
+    try {
+      for await (const message of query) {
+        const session = message.session_id
+        if (typeof session === 'string' && session.length > 0) {
+          if (session !== request.nativeSessionId) {
+            throw new ResidentOperatorError('Claude Code /compact replaced the native Session identity', 'INVALID_RESULT')
+          }
+          observedSessionId = session
+        }
+        if (message.type === 'result') final = message
+      }
+    } finally {
+      request.signal.removeEventListener('abort', abort)
+      query.close()
+    }
+    if (final === undefined) {
+      throw new ResidentOperatorError('Claude Code /compact ended without a result', 'INVALID_RESULT')
+    }
+    const failure = claudeResultFailure(final)
+    if (failure !== undefined) throw failure
+    return { nativeSessionId: observedSessionId }
   }
 }
 
@@ -576,7 +728,17 @@ export class CodexResidentDriver implements ResidentProductDriver {
         'RUNTIME_UNAVAILABLE',
       )
     })
-    const wire = new CodexAppServerWire(stream, stream, 'require')
+    const modelToolBridge = ensureTypeScriptReplBridge(request)
+    const dynamicTools = codexDynamicTools(request)
+    const wire = new CodexAppServerWire(
+      stream,
+      stream,
+      'require',
+      dynamicTools,
+      modelToolBridge === undefined
+        ? undefined
+        : createCodexRlmToolHandler(String(request.commandId), modelToolBridge, request.signal),
+    )
     const abort = (): void => { wire.interrupt() }
     if (request.signal.aborted) abort()
     else request.signal.addEventListener('abort', abort, { once: true })
@@ -607,6 +769,51 @@ export class CodexResidentDriver implements ResidentProductDriver {
       throw codexExecutionFailure(error)
     } finally {
       request.signal.removeEventListener('abort', abort)
+      wire.close()
+      stream.destroy()
+    }
+  }
+
+  async compact(request: ResidentDriverCompactRequest): Promise<{ nativeSessionId: string }> {
+    if (request.instructions !== undefined) {
+      throw new ResidentOperatorError(
+        'Codex app-server thread/compact/start does not support compaction instructions',
+        'INVALID_RESULT',
+      )
+    }
+    const qualification = await this.qualify()
+    if (!qualification.available) {
+      const code = qualification.authentication !== 'native-subscription'
+        ? 'AUTH_MODE_MISMATCH'
+        : qualification.productVersion !== EXPECTED_CODEX_CLI_VERSION
+          || qualification.protocolHash !== EXPECTED_CODEX_SCHEMA_SHA256
+          ? 'PROVIDER_VERSION_MISMATCH'
+          : 'RUNTIME_UNAVAILABLE'
+      throw new ResidentOperatorError(qualification.unavailableReason ?? 'Codex unavailable', code)
+    }
+    const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
+    if (!existsSync(socketPath)) {
+      throw new ResidentOperatorError('Codex app-server control socket is unavailable', 'RUNTIME_UNAVAILABLE')
+    }
+    const stream = await openCodexDaemonStream(socketPath, request.signal).catch((error: unknown) => {
+      throw new ResidentOperatorError(
+        `Codex app-server WebSocket unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        'RUNTIME_UNAVAILABLE',
+      )
+    })
+    const wire = new CodexAppServerWire(stream, stream, 'require')
+    try {
+      wire.start()
+      await wire.initialize(request.signal)
+      await wire.resumeThread(request.nativeSessionId, request.workspace, request.signal)
+      await wire.compactThread(request.signal)
+      if (wire.currentThreadId !== request.nativeSessionId) {
+        throw new ResidentOperatorError('Codex compaction replaced the native thread identity', 'INVALID_RESULT')
+      }
+      return { nativeSessionId: request.nativeSessionId }
+    } catch (error) {
+      throw codexExecutionFailure(error)
+    } finally {
       wire.close()
       stream.destroy()
     }

@@ -72,6 +72,7 @@ flowchart LR
   pkg_continual_harness["continual-harness"]
   svc_continualHarness["ctx.continualHarness<br/>Continuous Harness snapshot and outcome seam"]
   pkg_continual_harness_local["continual-harness-local"]
+  svc_continualHarnessSkills["ctx.continualHarnessSkills<br/>Continuous Harness TypeScript skill registry"]
   pkg_model_allocation["model-allocation"]
   svc_modelAllocation["ctx.modelAllocation<br/>Quota-aware model allocation seam"]
   pkg_model_allocation_local["model-allocation-local"]
@@ -81,6 +82,9 @@ flowchart LR
   pkg_rlm_strategy["rlm-strategy"]
   svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
   pkg_rlm_strategy_local["rlm-strategy-local"]
+  pkg_rlm_runtime["rlm-runtime"]
+  svc_rlmRuntime["ctx.rlmRuntime<br/>Persistent programmable RLM runtime"]
+  pkg_rlm_runtime_local["rlm-runtime-local"]
   pkg_orchestration["orchestration"]
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
@@ -247,6 +251,7 @@ flowchart LR
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
   pkg_context_compiler --> svc_contextCompiler
   pkg_continual_harness --> svc_continualHarness
+  pkg_continual_harness --> svc_continualHarnessSkills
   pkg_continual_harness_local --> svc_continualHarness
   pkg_cordis_host_runner --> svc_cordisInspect
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
@@ -291,6 +296,8 @@ flowchart LR
   pkg_remote_auth --> svc_remoteAuth
   pkg_resident_operator --> svc_residentOperators
   pkg_resident_operator_local --> svc_residentOperators
+  pkg_rlm_runtime --> svc_rlmRuntime
+  pkg_rlm_runtime_local --> svc_rlmRuntime
   pkg_rlm_strategy --> svc_rlmStrategy
   pkg_rlm_strategy_local --> svc_rlmStrategy
   pkg_sandbox --> svc_sandbox
@@ -364,6 +371,7 @@ flowchart LR
   svc_codeRuntime --> pkg_tools
   svc_compaction --> pkg_compaction_basic
   svc_continualHarness --> pkg_orchestration_local
+  svc_continualHarnessSkills --> pkg_continual_harness_local
   svc_cordisInspect --> pkg_tool_cordis
   svc_credentials --> pkg_apiproxy
   svc_credentials --> pkg_llm_deepseek
@@ -392,6 +400,7 @@ flowchart LR
   svc_remoteAuth --> pkg_connection
   svc_remoteAuth --> pkg_ui_orchestration
   svc_residentOperators --> pkg_physical_operator_resident
+  svc_rlmRuntime --> pkg_orchestration_local
   svc_rlmStrategy --> pkg_orchestration_local
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
@@ -494,9 +503,11 @@ flowchart LR
 | `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers project certified sources under token, lineage, redaction, and degradation policy without becoming a source of record. |
 | `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Late-binds content-addressed capability manifests under the Graph certificate; bindings may only implement or narrow authority. |
 | `ctx.continualHarness` | `seam` | [`continual-harness`](../packages/orchestration/continual-harness) | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Provides bounded session/workspace outcome context while the TaskGraph daemon remains the only orchestration state authority. |
+| `ctx.continualHarnessSkills` | `core` | [`continual-harness`](../packages/orchestration/continual-harness) | - | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | - | Registers trusted TypeScript modules and invokes only an explicitly allowed module/callable pair; generated harness content cannot create executable code at runtime. |
 | `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Selects qualified subscription-first execution offers and recommends parallelism without dispatching work. |
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path. |
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph. |
+| `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Owns the node-local TypeScript kernel, asynchronous child registry, family messages, receipts, goals, and recovery without becoming a second global TaskGraph scheduler. |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |
 | `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | The Server is the sole writer for pairing, credential exchange, fixed device scopes, revocation, and payload-free command receipts; transport and orchestration projections consume authenticated principals without owning credential state. |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |

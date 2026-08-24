@@ -8,6 +8,7 @@ import {
   physicalOperatorRoutingDescription,
   physicalOperatorRoutingLabel,
   physicalOperatorRoutingSummary,
+  orchestrationExecutionModeLabel,
 } from '../src/client/PhysicalOperatorRoutingControl.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
@@ -58,6 +59,7 @@ describe('Solar desktop branding', () => {
     const injected = routing?.options.inject?.('session-1') as {
       select: (policy: 'codex') => Promise<string | null>
       selectProfile: (operatorId: 'codex', model?: string, effort?: 'high') => Promise<string | null>
+      selectOrchestrationStrategy: (rlm: 'auto' | 'enabled' | 'disabled', harness: 'off', optimization: 'balanced') => Promise<string | null>
     }
     await expect(injected.select('codex')).resolves.toBeNull()
     expect(execute).toHaveBeenCalledWith('session-1', '/operator codex')
@@ -65,6 +67,13 @@ describe('Solar desktop branding', () => {
     expect(execute).toHaveBeenCalledWith('session-1', '/operator-profile codex gpt-5.6-sol high')
     await expect(injected.selectProfile('codex')).resolves.toBeNull()
     expect(execute).toHaveBeenCalledWith('session-1', '/operator-profile codex auto auto')
+    await expect(injected.selectOrchestrationStrategy('enabled', 'off', 'balanced')).resolves.toBeNull()
+    expect(execute).toHaveBeenCalledWith('session-1', '/orchestration-strategy enabled off balanced')
+    await expect(injected.selectOrchestrationStrategy('disabled', 'off', 'balanced')).resolves.toBeNull()
+    expect(execute).toHaveBeenCalledWith('session-1', '/orchestration-strategy disabled off balanced')
+    expect(orchestrationExecutionModeLabel('auto')).toBe('自动（系统选择）')
+    expect(orchestrationExecutionModeLabel('enabled')).toBe('RLM（Prime 递归）')
+    expect(orchestrationExecutionModeLabel('disabled')).toBe('标准（单 Agent）')
     expect(physicalOperatorRoutingLabel('auto')).toBe('智能协作')
     expect(physicalOperatorRoutingLabel('codex')).toBe('优先 Codex')
     expect(physicalOperatorRoutingSummary('claude-code')).toBe('Claude Code')

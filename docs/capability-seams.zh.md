@@ -74,6 +74,7 @@ flowchart LR
   pkg_continual_harness["continual-harness"]
   svc_continualHarness["ctx.continualHarness<br/>Continuous Harness snapshot and outcome seam"]
   pkg_continual_harness_local["continual-harness-local"]
+  svc_continualHarnessSkills["ctx.continualHarnessSkills<br/>Continuous Harness TypeScript skill registry"]
   pkg_model_allocation["model-allocation"]
   svc_modelAllocation["ctx.modelAllocation<br/>Quota-aware model allocation seam"]
   pkg_model_allocation_local["model-allocation-local"]
@@ -83,6 +84,9 @@ flowchart LR
   pkg_rlm_strategy["rlm-strategy"]
   svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
   pkg_rlm_strategy_local["rlm-strategy-local"]
+  pkg_rlm_runtime["rlm-runtime"]
+  svc_rlmRuntime["ctx.rlmRuntime<br/>Persistent programmable RLM runtime"]
+  pkg_rlm_runtime_local["rlm-runtime-local"]
   pkg_orchestration["orchestration"]
   svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
   pkg_tool_orchestration["tool-orchestration"]
@@ -249,6 +253,7 @@ flowchart LR
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
   pkg_context_compiler --> svc_contextCompiler
   pkg_continual_harness --> svc_continualHarness
+  pkg_continual_harness --> svc_continualHarnessSkills
   pkg_continual_harness_local --> svc_continualHarness
   pkg_cordis_host_runner --> svc_cordisInspect
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
@@ -293,6 +298,8 @@ flowchart LR
   pkg_remote_auth --> svc_remoteAuth
   pkg_resident_operator --> svc_residentOperators
   pkg_resident_operator_local --> svc_residentOperators
+  pkg_rlm_runtime --> svc_rlmRuntime
+  pkg_rlm_runtime_local --> svc_rlmRuntime
   pkg_rlm_strategy --> svc_rlmStrategy
   pkg_rlm_strategy_local --> svc_rlmStrategy
   pkg_sandbox --> svc_sandbox
@@ -366,6 +373,7 @@ flowchart LR
   svc_codeRuntime --> pkg_tools
   svc_compaction --> pkg_compaction_basic
   svc_continualHarness --> pkg_orchestration_local
+  svc_continualHarnessSkills --> pkg_continual_harness_local
   svc_cordisInspect --> pkg_tool_cordis
   svc_credentials --> pkg_apiproxy
   svc_credentials --> pkg_llm_deepseek
@@ -394,6 +402,7 @@ flowchart LR
   svc_remoteAuth --> pkg_connection
   svc_remoteAuth --> pkg_ui_orchestration
   svc_residentOperators --> pkg_physical_operator_resident
+  svc_rlmRuntime --> pkg_orchestration_local
   svc_rlmStrategy --> pkg_orchestration_local
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
@@ -496,9 +505,11 @@ flowchart LR
 | `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 在 token、溯源、脱敏和降级策略下投影认证过的来源，但不成为事实源。 |
 | `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | 在 Graph Certificate 下晚绑定内容寻址的能力 Manifest；绑定只能实现或缩小权限。 |
 | `ctx.continualHarness` | `seam` | [`continual-harness`](../packages/orchestration/continual-harness) | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 提供有界的会话／工作区结果上下文，TaskGraph daemon 仍是唯一编排状态权威。 |
+| `ctx.continualHarnessSkills` | `core` | [`continual-harness`](../packages/orchestration/continual-harness) | - | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | - | 注册可信 TypeScript 模块，并且只调用明确允许的模块／可调用项组合；生成的 Harness 内容不能在运行时创建可执行代码。 |
 | `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 选择合格的订阅优先执行 Offer 并建议并行度，但不派发任务。 |
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 注册与 Provider 无关的一次性模型通道；计费 DeepSeek Provider 仍是最后兜底执行路径。 |
 | `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 在节点 Attempt 内封存有界递归执行指令，永不创建或修改全局 TaskGraph。 |
+| `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 持有节点内 TypeScript Kernel、异步子项注册表、家族消息、Receipt、Goal 与恢复机制，不成为第二个全局 TaskGraph 调度器。 |
 | `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | 持有与 Provider 无关的编译、运行、事件、控制、审批、不确定结果处置和能力更新 API；本地 daemon 是唯一写者。 |
 | `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Server 是配对、凭据交换、固定设备范围、撤销和无正文命令回执的唯一写者；传输和编排投影消费已认证 principal，但不持有凭据状态。 |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |

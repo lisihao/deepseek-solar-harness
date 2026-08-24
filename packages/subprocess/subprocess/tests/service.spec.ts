@@ -75,12 +75,14 @@ describe('SubprocessRuntime seam', () => {
     await expect(ctx.plugin(SecondService)).rejects.toThrow(/service "subprocess" has been registered/)
   })
 
-  it('scrubbedParentEnv drops credential-shaped and DSH_ names (case-insensitively) but keeps PATH', () => {
+  it('scrubbedParentEnv drops credential-shaped and DSH_ names but preserves native CLI identity', () => {
+    const priorClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
     process.env.DSH_SCRUB_PROBE = 'stale'
     process.env.dsh_scrub_probe_lower = 'stale'
     process.env.SCRUB_PROBE_TOKEN = 'secret'
     process.env.SCRUB_PROBE_PASSWORD = 'secret'
     process.env.SCRUB_PROBE_PLAIN = 'visible'
+    process.env.CLAUDE_CONFIG_DIR = '/private/tmp/dsh-claude-config-probe'
     try {
       const env = scrubbedParentEnv()
       expect(env.DSH_SCRUB_PROBE).toBeUndefined()
@@ -89,12 +91,16 @@ describe('SubprocessRuntime seam', () => {
       expect(env.SCRUB_PROBE_PASSWORD).toBeUndefined()
       expect(env.SCRUB_PROBE_PLAIN).toBe('visible')
       expect(env.PATH).toBeDefined()
+      expect(env.HOME).toBe(process.env.HOME)
+      expect(env.CLAUDE_CONFIG_DIR).toBe('/private/tmp/dsh-claude-config-probe')
     } finally {
       delete process.env.DSH_SCRUB_PROBE
       delete process.env.dsh_scrub_probe_lower
       delete process.env.SCRUB_PROBE_TOKEN
       delete process.env.SCRUB_PROBE_PASSWORD
       delete process.env.SCRUB_PROBE_PLAIN
+      if (priorClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = priorClaudeConfigDir
     }
   })
 })

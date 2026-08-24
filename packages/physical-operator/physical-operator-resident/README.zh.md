@@ -10,7 +10,7 @@
 
 每条映射声明稳定物理 `id`、现有 `ephemeralProvider`、可选 `residentProvider`、展示信息及共享 `maxConcurrency`。未配置 `residentProvider` 时只发布 `ephemeral`；配置后发布两种模式。可用性按本次请求的模式检查：ephemeral 订阅声明缺失不能再错误阻塞已通过资格审查的 Resident 执行。空字段、重复 ID、不可用订阅声明、缺失工作区和不支持的模式都会明确失败，不会自动降级。
 
-Ephemeral 分支调用 `ctx.subagents`；Resident 分支只调用 `ctx.residentOperators` Service Definition，转发作为原生上下文隔离 lane 的父 DSH Session、有界任务摘要以及可选、Provider 中立的模型/强度偏好，但不 import 本地 daemon Provider。因此 Provider 与 Consumer 可在 capability seam 后独立替换。
+Ephemeral 分支调用 `ctx.subagents`；Resident 分支只调用 `ctx.residentOperators` Service Definition，转发调用方提供的原生上下文 lane；调用方未提供时才使用父 DSH Session。此外，该分支还会转发有界任务摘要和可选、Provider 中立的模型/强度偏好。对于 RLM 节点，它会原样转发已密封的模型工具桥。路由器不 import 本地 daemon Provider，因此 Provider 与 Consumer 可在 capability seam 后独立替换。
 
 ## Model Experience
 

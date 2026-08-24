@@ -35,6 +35,11 @@
       ],
       "ignoreDependencies": []
     },
+    "packages/orchestration/rlm-runtime": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
     "examples": {
       "entry": [
         "headless-agent/tests/fixtures/cli-mock-llm.ts",

@@ -391,6 +391,19 @@ export interface OrchestrationIndeterminateRequest {
   readonly reason: string
 }
 
+/** Explicitly abandon one crash-uncertain background auto-refinement round. */
+export interface OrchestrationAutoRefineIndeterminateRequest {
+  readonly commandId: string
+  readonly runId: OrchestrationRunId
+  readonly nodeId: string
+  readonly expectedRevision: number
+  readonly sessionId: string
+  readonly roundId: string
+  readonly branchVersion: string
+  readonly decision: 'abandon'
+  readonly reason: string
+}
+
 /** Proposed capability generation change. */
 export interface CapabilityUpdateRequest {
   readonly runId: OrchestrationRunId
@@ -499,6 +512,12 @@ export abstract class OrchestrationService extends Service {
    * @returns the updated run snapshot.
    */
   abstract resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promise<OrchestrationRunSnapshot>
+  /**
+   * Resolve a crash-uncertain auto-refinement round without replaying model work.
+   * @param request - run identity, expected revision, and explicit resolution.
+   * @returns the updated durable run snapshot.
+   */
+  abstract resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterminateRequest): Promise<OrchestrationRunSnapshot>
   /**
    * Propose one late-bound capability change.
    * @param request - requested capability change.

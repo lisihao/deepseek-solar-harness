@@ -5,6 +5,7 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
 import {
   ResidentOperatorError,
   ResidentOperatorCommandId,
@@ -12,6 +13,7 @@ import {
   ResidentOperatorTurnId,
   RESIDENT_STATE_SCHEMA_VERSION,
   type ResidentEventPage,
+  type ResidentCompactResult,
   type ResidentExecutionProfile,
   type ResidentExecutionProfileSource,
   type ResidentProgressPhase,
@@ -59,12 +61,32 @@ interface ReceiptRow {
   updated_at: string
 }
 
+interface CompactReceiptRow {
+  command_id: string
+  request_hash: string
+  session_id: string
+  state: ResidentReceiptState
+  result_json: string | null
+  error_code: string | null
+  error_message: string | null
+  resolution: string | null
+  updated_at: string
+}
+
 /** Durable receipt projection returned immediately after admission or replay. */
 export interface AcceptedTurn {
   readonly sessionId: string
   readonly turnId: string
   readonly stateRevision: number
   readonly state: ResidentReceiptState
+}
+
+/** Durable compaction receipt projection returned for admission or replay. */
+export interface AcceptedCompaction {
+  readonly state: ResidentReceiptState
+  readonly session: ResidentSessionSnapshot
+  readonly nativeSessionId: string
+  readonly result?: ResidentCompactResult
 }
 
 /** Receipt projection enriched with settled result or coded failure. */
@@ -78,6 +100,7 @@ export type TurnInspection = ResidentTurnSnapshot
  * @param profile - daemon-resolved model and reasoning profile.
  * @param supersedesCommandId - optional explicitly abandoned receipt lineage.
  * @param laneId - caller-owned native-context isolation lane.
+ * @param modelToolBridge - optional sealed RLM model-tool bridge.
  * @returns lowercase SHA-256 digest.
  */
 export function canonicalRequestHash(
@@ -87,9 +110,35 @@ export function canonicalRequestHash(
   profile: ResidentExecutionProfile,
   supersedesCommandId?: string,
   laneId = 'legacy',
+  modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
 ): string {
   return createHash('sha256')
-    .update(JSON.stringify({ operatorId, workspace, laneId, prompt, profile, supersedesCommandId: supersedesCommandId ?? null }))
+    .update(JSON.stringify({
+      operatorId,
+      workspace,
+      laneId,
+      prompt,
+      profile,
+      supersedesCommandId: supersedesCommandId ?? null,
+      modelToolBridge: modelToolBridge ?? null,
+    }))
+    .digest('hex')
+}
+
+/**
+ * Hash one native compaction request independently of its durable command identity.
+ * @param sessionId - Resident Session whose native history will be compacted.
+ * @param expectedStateRevision - exact revision inspected by the caller.
+ * @param instructions - optional native compaction guidance.
+ * @returns lowercase SHA-256 digest.
+ */
+export function canonicalCompactRequestHash(
+  sessionId: string,
+  expectedStateRevision: number,
+  instructions?: string,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ sessionId, expectedStateRevision, instructions: instructions ?? null }))
     .digest('hex')
 }
 
@@ -152,7 +201,7 @@ export class ResidentStore {
   private configure(): void {
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;')
     const version = (this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-    if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
+    if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== RESIDENT_STATE_SCHEMA_VERSION) {
       throw new ResidentOperatorError(
         `resident state schema ${version} is incompatible with ${RESIDENT_STATE_SCHEMA_VERSION}`,
         'PROTOCOL_MISMATCH',
@@ -223,6 +272,20 @@ export class ResidentStore {
       this.db.exec('ALTER TABLE command_receipts ADD COLUMN task_label TEXT;')
     }
     if (version >= 1 && version <= 3) this.migrateLaneSchema()
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS session_compaction_receipts (
+        command_id TEXT PRIMARY KEY,
+        request_hash TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES resident_sessions(id),
+        state TEXT NOT NULL,
+        result_json TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        resolution TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+    `)
     this.db.exec(`PRAGMA user_version = ${RESIDENT_STATE_SCHEMA_VERSION};`)
   }
 
@@ -326,6 +389,24 @@ export class ResidentStore {
           reason: 'daemon_recovery',
         }, now)
       }
+      const interruptedCompactions = this.db.prepare(
+        "SELECT command_id, session_id FROM session_compaction_receipts WHERE state IN ('accepted', 'running')",
+      ).all() as unknown as Array<{ command_id: string; session_id: string }>
+      for (const row of interruptedCompactions) {
+        this.db.prepare(`
+          UPDATE session_compaction_receipts
+          SET state = 'indeterminate', error_code = 'COMMAND_INDETERMINATE', error_message = ?, updated_at = ?
+          WHERE command_id = ?
+        `).run('daemon stopped before native compaction settlement; automatic replay is forbidden', now, row.command_id)
+        this.db.prepare(`
+          UPDATE resident_sessions SET lifecycle = 'idle', health = 'degraded', health_reason = 'process_crashed',
+            revision = revision + 1, updated_at = ? WHERE id = ?
+        `).run(now, row.session_id)
+        this.appendEvent(row.session_id, 'session.compaction_indeterminate', {
+          commandId: row.command_id,
+          reason: 'daemon_recovery',
+        }, now)
+      }
     })
   }
 
@@ -354,6 +435,9 @@ export class ResidentStore {
     laneId = 'legacy',
   ): AcceptedTurn {
     return this.transaction(() => {
+      if (this.compactReceiptByCommand(commandId) !== undefined) {
+        throw new ResidentOperatorError(`command ${commandId} belongs to a Session compaction`, 'COMMAND_CONFLICT')
+      }
       const existing = this.receiptByCommand(commandId)
       if (existing !== undefined) {
         if (existing.request_hash !== requestHash) {
@@ -424,9 +508,11 @@ export class ResidentStore {
           'EXECUTION_PROFILE_CONFLICT',
         )
       }
-      if (session.active_turn_id !== null) {
+      if (session.active_turn_id !== null || session.lifecycle !== 'idle') {
         throw new ResidentOperatorError(
-          `resident session ${session.id} already has active turn ${session.active_turn_id}`,
+          session.active_turn_id === null
+            ? `resident session ${session.id} is ${session.lifecycle}`
+            : `resident session ${session.id} already has active turn ${session.active_turn_id}`,
           'SESSION_BUSY',
         )
       }
@@ -730,12 +816,236 @@ export class ResidentStore {
   }
 
   /**
+   * Fence one idle Session while its native product compacts history.
+   * @param commandId - durable compaction command identity.
+   * @param requestHash - canonical hash used for conflict detection.
+   * @param sessionId - Session whose native history will be compacted.
+   * @param expectedRevision - exact inspected revision.
+   * @returns the fenced draining Session snapshot.
+   */
+  acceptCompaction(
+    commandId: string,
+    requestHash: string,
+    sessionId: string,
+    expectedRevision: number,
+  ): AcceptedCompaction {
+    return this.transaction(() => {
+      if (this.receiptByCommand(commandId) !== undefined) {
+        throw new ResidentOperatorError(`command ${commandId} belongs to a Resident turn`, 'COMMAND_CONFLICT')
+      }
+      const existing = this.compactReceiptByCommand(commandId)
+      if (existing !== undefined) {
+        if (existing.request_hash !== requestHash) {
+          throw new ResidentOperatorError(
+            `command ${commandId} was already accepted with different compaction content`,
+            'COMMAND_CONFLICT',
+          )
+        }
+        if (existing.state === 'indeterminate') {
+          throw new ResidentOperatorError(
+            existing.error_message ?? `Session compaction ${commandId} is indeterminate`,
+            'COMMAND_INDETERMINATE',
+          )
+        }
+        if (existing.state === 'settled' && existing.error_code !== null) {
+          throw new ResidentOperatorError(existing.error_message ?? existing.error_code, existing.error_code)
+        }
+        const session = this.inspectSession(existing.session_id)
+        const nativeSessionId = session.nativeSessionId
+        if (nativeSessionId === undefined) {
+          throw new ResidentOperatorError(`resident session ${existing.session_id} lost its native identity`, 'SESSION_UNAVAILABLE')
+        }
+        return {
+          state: existing.state,
+          session,
+          nativeSessionId,
+          ...existing.result_json === null ? {} : {
+            result: JSON.parse(existing.result_json) as ResidentCompactResult,
+          },
+        }
+      }
+      const row = this.sessionRow(sessionId)
+      if (row.revision !== expectedRevision) {
+        throw new ResidentOperatorError(
+          `resident session revision is ${row.revision}, not ${expectedRevision}`,
+          'REVISION_CONFLICT',
+        )
+      }
+      if (row.active_turn_id !== null || row.lifecycle !== 'idle') {
+        throw new ResidentOperatorError(`resident session ${sessionId} is not idle`, 'SESSION_BUSY')
+      }
+      if (row.native_session_id === null) {
+        throw new ResidentOperatorError(`resident session ${sessionId} has no native history to compact`, 'SESSION_UNAVAILABLE')
+      }
+      const unresolved = this.db.prepare(`
+        SELECT command_id FROM session_compaction_receipts
+        WHERE session_id = ? AND state = 'indeterminate' AND resolution IS NULL LIMIT 1
+      `).get(sessionId) as { command_id: string } | undefined
+      if (unresolved !== undefined) {
+        throw new ResidentOperatorError(
+          `Session compaction ${unresolved.command_id} is indeterminate and requires explicit resolution`,
+          'COMMAND_INDETERMINATE',
+        )
+      }
+      const now = new Date().toISOString()
+      this.db.prepare(`
+        INSERT INTO session_compaction_receipts
+          (command_id, request_hash, session_id, state, created_at, updated_at)
+        VALUES (?, ?, ?, 'accepted', ?, ?)
+      `).run(commandId, requestHash, sessionId, now, now)
+      this.db.prepare(`
+        UPDATE resident_sessions SET lifecycle = 'draining', revision = revision + 1, updated_at = ? WHERE id = ?
+      `).run(now, sessionId)
+      const session = this.inspectSession(sessionId)
+      return { state: 'accepted', session, nativeSessionId: row.native_session_id }
+    })
+  }
+
+  /**
+   * Mark a durably accepted native compaction immediately before product dispatch.
+   * @param commandId - durable compaction command identity.
+   */
+  markCompactionRunning(commandId: string): void {
+    const receipt = this.requireCompactReceipt(commandId)
+    if (receipt.state !== 'accepted' && receipt.state !== 'running') return
+    this.db.prepare(`
+      UPDATE session_compaction_receipts SET state = 'running', updated_at = ? WHERE command_id = ?
+    `).run(new Date().toISOString(), commandId)
+  }
+
+  /**
+   * Commit successful native compaction while retaining the same native identity.
+   * @param commandId - durable compaction command identity.
+   * @param sessionId - fenced Session identity.
+   * @param nativeSessionId - native identity returned by the product Driver.
+   * @param instructionsProvided - whether product-native guidance was supplied, without persisting its text.
+   * @returns the revised idle Session snapshot.
+   */
+  completeCompaction(
+    commandId: string,
+    sessionId: string,
+    nativeSessionId: string,
+    instructionsProvided: boolean,
+  ): ResidentCompactResult {
+    return this.transaction(() => {
+      const row = this.sessionRow(sessionId)
+      const receipt = this.requireCompactReceipt(commandId)
+      if (receipt.session_id !== sessionId) {
+        throw new ResidentOperatorError(`compaction ${commandId} belongs to another Session`, 'COMMAND_CONFLICT')
+      }
+      if (row.lifecycle !== 'draining' || row.active_turn_id !== null) {
+        throw new ResidentOperatorError(`resident session ${sessionId} is not compacting`, 'SESSION_BUSY')
+      }
+      if (row.native_session_id !== nativeSessionId) {
+        throw new ResidentOperatorError('native compaction replaced the Resident Session identity', 'INVALID_RESULT')
+      }
+      const now = new Date().toISOString()
+      this.db.prepare(`
+        UPDATE resident_sessions SET lifecycle = 'idle', health = 'ok', health_reason = NULL,
+          revision = revision + 1, updated_at = ? WHERE id = ?
+      `).run(now, sessionId)
+      const result = { session: this.inspectSession(sessionId), nativeSessionId, compactedAt: now }
+      this.db.prepare(`
+        UPDATE session_compaction_receipts
+        SET state = 'settled', result_json = ?, error_code = NULL, error_message = NULL, updated_at = ?
+        WHERE command_id = ?
+      `).run(JSON.stringify(result), now, commandId)
+      this.appendEvent(sessionId, 'session.compacted', { commandId, instructionsProvided }, now)
+      return result
+    })
+  }
+
+  /**
+   * Release a failed native compaction fence without replacing Session history.
+   * @param commandId - durable compaction command identity.
+   * @param code - stable native failure code.
+   * @param message - bounded native failure explanation.
+   * @returns the revised idle Session snapshot.
+   */
+  failCompaction(commandId: string, code: string, message: string): ResidentSessionSnapshot {
+    return this.transaction(() => {
+      const receipt = this.requireCompactReceipt(commandId)
+      const sessionId = receipt.session_id
+      const row = this.sessionRow(sessionId)
+      if (row.lifecycle !== 'draining' || row.active_turn_id !== null) {
+        throw new ResidentOperatorError(`resident session ${sessionId} is not compacting`, 'SESSION_BUSY')
+      }
+      const now = new Date().toISOString()
+      this.db.prepare(`
+        UPDATE resident_sessions SET lifecycle = 'idle', revision = revision + 1, updated_at = ? WHERE id = ?
+      `).run(now, sessionId)
+      this.db.prepare(`
+        UPDATE session_compaction_receipts
+        SET state = 'settled', error_code = ?, error_message = ?, updated_at = ? WHERE command_id = ?
+      `).run(code, message, now, commandId)
+      this.appendEvent(sessionId, 'session.compaction_failed', { commandId, code }, now)
+      return this.inspectSession(sessionId)
+    })
+  }
+
+  /**
+   * Fence an externally ambiguous native compaction outcome against automatic replay.
+   * @param commandId - durable compaction command identity.
+   * @param message - bounded diagnostic that does not contain compaction instructions.
+   * @returns the degraded idle Session awaiting explicit resolution.
+   */
+  markCompactionIndeterminate(commandId: string, message: string): ResidentSessionSnapshot {
+    return this.transaction(() => {
+      const receipt = this.requireCompactReceipt(commandId)
+      if (receipt.state === 'indeterminate') return this.inspectSession(receipt.session_id)
+      if (receipt.state === 'settled') {
+        throw new ResidentOperatorError(`Session compaction ${commandId} is already settled`, 'COMMAND_CONFLICT')
+      }
+      const now = new Date().toISOString()
+      this.db.prepare(`
+        UPDATE session_compaction_receipts
+        SET state = 'indeterminate', error_code = 'COMMAND_INDETERMINATE', error_message = ?, updated_at = ?
+        WHERE command_id = ?
+      `).run(message, now, commandId)
+      this.db.prepare(`
+        UPDATE resident_sessions SET lifecycle = 'idle', health = 'degraded', health_reason = 'process_crashed',
+          revision = revision + 1, updated_at = ? WHERE id = ?
+      `).run(now, receipt.session_id)
+      this.appendEvent(receipt.session_id, 'session.compaction_indeterminate', {
+        commandId,
+        reason: 'native_outcome_unproven',
+      }, now)
+      return this.inspectSession(receipt.session_id)
+    })
+  }
+
+  /**
    * Explicitly abandon one indeterminate command under optimistic concurrency.
    * @param commandId - indeterminate command identity.
    * @param expectedRevision - exact owning Session revision.
    */
   resolveIndeterminate(commandId: string, expectedRevision: number): void {
     this.transaction(() => {
+      const compact = this.compactReceiptByCommand(commandId)
+      if (compact !== undefined) {
+        if (compact.state !== 'indeterminate') {
+          throw new ResidentOperatorError(`command ${commandId} is not indeterminate`, 'COMMAND_CONFLICT')
+        }
+        const session = this.sessionRow(compact.session_id)
+        if (session.revision !== expectedRevision) {
+          throw new ResidentOperatorError(
+            `resident session revision is ${session.revision}, not ${expectedRevision}`,
+            'REVISION_CONFLICT',
+          )
+        }
+        const now = new Date().toISOString()
+        this.db.prepare(`
+          UPDATE session_compaction_receipts SET resolution = 'abandon', updated_at = ? WHERE command_id = ?
+        `).run(now, commandId)
+        this.db.prepare(`
+          UPDATE resident_sessions SET health = 'ok', health_reason = NULL, revision = revision + 1, updated_at = ? WHERE id = ?
+        `).run(now, compact.session_id)
+        this.appendEvent(compact.session_id, 'session.compaction_indeterminate_resolved', {
+          commandId,
+          decision: 'abandon',
+        }, now)
+        return
+      }
       const receipt = this.requireReceipt(commandId)
       if (receipt.state !== 'indeterminate') {
         throw new ResidentOperatorError(`command ${commandId} is not indeterminate`, 'COMMAND_CONFLICT')
@@ -792,6 +1102,19 @@ export class ResidentStore {
   private receiptByCommand(commandId: string): ReceiptRow | undefined {
     return this.db.prepare('SELECT * FROM command_receipts WHERE command_id = ?')
       .get(commandId) as unknown as ReceiptRow | undefined
+  }
+
+  private compactReceiptByCommand(commandId: string): CompactReceiptRow | undefined {
+    return this.db.prepare('SELECT * FROM session_compaction_receipts WHERE command_id = ?')
+      .get(commandId) as unknown as CompactReceiptRow | undefined
+  }
+
+  private requireCompactReceipt(commandId: string): CompactReceiptRow {
+    const receipt = this.compactReceiptByCommand(commandId)
+    if (receipt === undefined) {
+      throw new ResidentOperatorError(`unknown Session compaction ${commandId}`, 'SESSION_UNAVAILABLE')
+    }
+    return receipt
   }
 
   private requireReceipt(commandId: string): ReceiptRow {

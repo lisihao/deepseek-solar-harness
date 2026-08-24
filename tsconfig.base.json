@@ -105,6 +105,8 @@
       "@deepseek-ai/dsh-model-worker-deepseek": ["./packages/orchestration/model-worker-deepseek/src/index.ts"],
       "@deepseek-ai/dsh-rlm-strategy": ["./packages/orchestration/rlm-strategy/src/index.ts"],
       "@deepseek-ai/dsh-rlm-strategy-local": ["./packages/orchestration/rlm-strategy-local/src/index.ts"],
+      "@deepseek-ai/dsh-rlm-runtime": ["./packages/orchestration/rlm-runtime/src/index.ts"],
+      "@deepseek-ai/dsh-rlm-runtime-local": ["./packages/orchestration/rlm-runtime-local/src/index.ts"],
       "@deepseek-ai/dsh-*/invariant": [
         "./packages/core/*/src/invariant.ts",
         "./packages/prompt/*/src/invariant.ts",

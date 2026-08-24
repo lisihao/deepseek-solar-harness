@@ -105,8 +105,22 @@ describe('orchestration Desktop panel transport', () => {
       runId: 'run-1',
       type: 'rlm.execution.settled',
       time: '2026-08-20T00:00:02.000Z',
-      data: { depthUsed: 2, turnsUsed: 5, stopReason: 'completed' },
-    })).toBe('递归深度 2 · 共 5 turn · completed')
+      data: { childCount: 2, stateRevision: 5, stopReason: 'completed' },
+    })).toBe('2 个直接子 Agent · state rev 5 · completed')
+    expect(eventDetail({
+      sequence: 61,
+      runId: 'run-1',
+      type: 'rlm.child.dispatched',
+      time: '2026-08-20T00:00:02.000Z',
+      data: { depth: 1, name: 'reviewer', operatorId: 'codex', model: 'gpt-5.6-luna' },
+    })).toBe('深度 1 · reviewer · codex/gpt-5.6-luna')
+    expect(eventDetail({
+      sequence: 62,
+      runId: 'run-1',
+      type: 'rlm.message.continuation.settled',
+      time: '2026-08-20T00:00:02.000Z',
+      data: { artifactRef: 'sha256:message123456789', stopReason: 'completed' },
+    })).toBe('Agent 消息已续接 · Artifact message123 · completed')
     expect(eventDetail({
       sequence: 7,
       runId: 'run-1',

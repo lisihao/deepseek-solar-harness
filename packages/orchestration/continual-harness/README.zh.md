@@ -2,9 +2,13 @@
 
 [English](README.md) | 中文
 
-与 Provider 无关的 Continuous Harness seam。它为 TaskGraph 节点快照版本化指令、记忆、Skill、子代理模式及有界结果引用；它不是另一套 Scheduler、模型 Provider 或对话存储。
+与 Provider 无关的 Continuous Harness seam。它为 TaskGraph 节点生成有界快照，并管理版本化 prompt 补充、记忆、TypeScript Skill 和子代理定义；它不是另一套 Scheduler、模型 Provider 或对话存储。
+
+受管条目通过乐观并发控制作用于会话本地或工作区作用域。Refinement 规划不修改生效中的 Harness；应用只在声明的 Turn 边界发生，逐项独立报告编辑结果，并仅记录成功项以供显式回滚。不可变 base prompt 不能被修改。
 
 Scheduler 只消费不可变快照，并在结算后记录有界 Evidence 引用。
+
+可执行 TypeScript Skill 使用同一能力包中的第二个插件注册表。可信 Provider 注册带版本的模块和明确的 callable；受管 Harness 条目只向 RLM 暴露安全 alias 与参数契约。模型不能提交包路径，Provider 不可用时会明确失败，不会把条目文本冒充成可执行能力。
 
 ## 模型体验
 
@@ -16,5 +20,6 @@ Scheduler 只消费不可变快照，并在结算后记录有界 Evidence 引用
 
 ## 已知限制与后续工作
 
-- 版本 1 只支持派发前不可变快照和结算后结果。
-- 实时对话捕获、Turn 中修改及跨机器同步后置。
+- 快照在一个已封存节点 Attempt 内固定；后续 Harness generation 只影响后续 Attempt。
+- Turn 中修改及跨机器同步后置。
+- 基础 Bundle 只提供注册表和调用边界，不内置生产 Skill 目录；Skill Provider 仍作为可独立安装插件交付。

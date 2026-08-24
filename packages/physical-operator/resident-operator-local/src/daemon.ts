@@ -3,14 +3,16 @@
 import { chmodSync, closeSync, existsSync, lstatSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionPreference,
+  PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorReasoningEffort,
 } from '@deepseek-ai/dsh-physical-operator'
 import {
+  ResidentOperatorCommandId,
   ResidentOperatorError,
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
@@ -26,10 +28,10 @@ import {
 } from './drivers.ts'
 import { residentDriverManifestSha256 } from './driver-modules.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
-import { canonicalRequestHash, ResidentStore } from './store.ts'
+import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v6 method set advertised by daemon handshake. */
+/** Public protocol-v8 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
   'system.shutdown',
@@ -40,6 +42,7 @@ export const RESIDENT_METHODS = Object.freeze([
   'turn.inspect',
   'turn.interrupt',
   'turn.resolve_indeterminate',
+  'session.compact',
   'session.reset',
   'event.read',
 ] as const)
@@ -48,6 +51,11 @@ interface ActiveTurn {
   readonly commandId: string
   readonly controller: AbortController
   readonly done: Promise<void>
+}
+
+interface ActiveCompaction {
+  readonly controller: AbortController
+  readonly done: Promise<unknown>
 }
 
 /** Construction inputs for one independent local daemon. */
@@ -112,6 +120,20 @@ function taskLabelParam(params: Record<string, unknown>): string | undefined {
   return Array.from(graphemes, part => part.segment).slice(0, 160).join('')
 }
 
+function compactInstructionsParam(params: Record<string, unknown>): string | undefined {
+  const value = params.instructions
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') {
+    throw new ResidentOperatorError('resident protocol compact instructions must be a string', 'INVALID_RESULT')
+  }
+  const normalized = value.trim()
+  if (normalized.length === 0) return undefined
+  if (normalized.length > 4_000) {
+    throw new ResidentOperatorError('resident compact instructions exceed 4000 characters', 'INVALID_RESULT')
+  }
+  return normalized
+}
+
 function integerParam(params: Record<string, unknown>, name: string): number {
   const value = params[name]
   if (!Number.isSafeInteger(value) || Number(value) < 0) {
@@ -163,6 +185,33 @@ function profileParam(params: Record<string, unknown>): PhysicalOperatorExecutio
   }
 }
 
+function modelToolBridgeParam(params: Record<string, unknown>): PhysicalOperatorModelToolBridgeV1 | undefined {
+  const value = params.model_tool_bridge
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ResidentOperatorError('resident protocol model_tool_bridge must be an object', 'INVALID_RESULT')
+  }
+  const bridge = value as Record<string, unknown>
+  if (bridge.version !== 1 || typeof bridge.socketPath !== 'string' || !isAbsolute(bridge.socketPath)
+    || typeof bridge.sessionId !== 'string' || bridge.sessionId.trim().length === 0 || !Array.isArray(bridge.tools)) {
+    throw new ResidentOperatorError('resident protocol model_tool_bridge has an invalid identity or endpoint', 'INVALID_RESULT')
+  }
+  const tools = bridge.tools.map((entry, index) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ResidentOperatorError(`resident model tool ${String(index)} must be an object`, 'INVALID_RESULT')
+    }
+    const tool = entry as Record<string, unknown>
+    if (typeof tool.name !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(tool.name)
+      || typeof tool.description !== 'string' || tool.description.trim().length === 0
+      || tool.inputSchema === null || typeof tool.inputSchema !== 'object' || Array.isArray(tool.inputSchema)) {
+      throw new ResidentOperatorError(`resident model tool ${String(index)} has an invalid schema`, 'INVALID_RESULT')
+    }
+    return { name: tool.name, description: tool.description, inputSchema: tool.inputSchema as Readonly<Record<string, unknown>> }
+  })
+  if (tools.length === 0) throw new ResidentOperatorError('resident model tool bridge must contain at least one tool', 'INVALID_RESULT')
+  return { version: 1, socketPath: bridge.socketPath, sessionId: bridge.sessionId, tools }
+}
+
 function safeDiagnostic(message: string, prompt: readonly ContentBlock[]): string {
   let value = message
   for (const block of prompt) {
@@ -202,6 +251,7 @@ export class ResidentDaemon {
   private readonly transports = new Set<JsonRpcLineTransport>()
   private readonly sockets = new Set<Socket>()
   private readonly active = new Map<string, ActiveTurn>()
+  private readonly activeCompactions = new Map<string, ActiveCompaction>()
   private readonly qualifications = new Map<string, Promise<ResidentProviderStatus>>()
   private lockDescriptor: number | undefined
   private closing = false
@@ -250,7 +300,10 @@ export class ResidentDaemon {
     this.closing = true
     // Graceful administration drains admitted turns. A process-level forced
     // stop leaves their receipts for startup recovery as indeterminate.
-    await Promise.allSettled([...this.active.values()].map(turn => turn.done))
+    await Promise.allSettled([
+      ...[...this.active.values()].map(turn => turn.done),
+      ...[...this.activeCompactions.values()].map(compaction => compaction.done),
+    ])
     for (const transport of this.transports) transport.close()
     for (const socket of this.sockets) socket.end()
     await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
@@ -317,6 +370,8 @@ export class ResidentDaemon {
         )
         return { resolved: true }
       }
+      case 'session.compact':
+        return this.compact(params)
       case 'session.reset':
         return this.store.reset(
           stringParam(params, 'session_id'),
@@ -388,6 +443,7 @@ export class ResidentDaemon {
     const taskLabel = taskLabelParam(params)
     const prompt = promptParam(params)
     const requestedProfile = profileParam(params)
+    const modelToolBridge = modelToolBridgeParam(params)
     const supersedesCommandId = params.supersedes_command_id === undefined
       ? undefined
       : stringParam(params, 'supersedes_command_id')
@@ -421,7 +477,7 @@ export class ResidentDaemon {
               : { effort: requestedProfile.effort ?? locked.profile.effort },
           },
       )
-    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId, laneId)
+    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId, laneId, modelToolBridge)
     const accepted = this.store.accept(
       commandId,
       requestHash,
@@ -442,12 +498,88 @@ export class ResidentDaemon {
         workspace,
         prompt,
         resolved.profile,
+        modelToolBridge,
         controller,
       )
       this.active.set(accepted.turnId, { commandId, controller, done })
       void done.finally(() => { this.active.delete(accepted.turnId) })
     }
     return accepted
+  }
+
+  private async compact(params: Record<string, unknown>): Promise<unknown> {
+    if (this.closing) throw new ResidentOperatorError('resident daemon is draining', 'RUNTIME_UNAVAILABLE')
+    const commandId = stringParam(params, 'command_id')
+    const sessionId = stringParam(params, 'session_id')
+    const expectedRevision = integerParam(params, 'expected_state_revision')
+    const instructions = compactInstructionsParam(params)
+    const current = this.store.inspectSession(sessionId)
+    const driver = this.drivers.get(current.operatorId)
+    if (driver?.compact === undefined) {
+      throw new ResidentOperatorError(
+        `resident provider ${current.operatorId} does not support native Session compaction`,
+        'SESSION_UNAVAILABLE',
+      )
+    }
+    const compactDriver = driver.compact.bind(driver)
+    const accepted = this.store.acceptCompaction(
+      commandId,
+      canonicalCompactRequestHash(sessionId, expectedRevision, instructions),
+      sessionId,
+      expectedRevision,
+    )
+    if (accepted.result !== undefined) return accepted.result
+    const active = this.activeCompactions.get(commandId)
+    if (active !== undefined) return active.done
+    const controller = new AbortController()
+    this.store.markCompactionRunning(commandId)
+    const done = (async () => {
+      let result: { readonly nativeSessionId: string }
+      try {
+        result = await compactDriver({
+          workspace: accepted.session.workspace,
+          nativeSessionId: accepted.nativeSessionId,
+          ...instructions === undefined ? {} : { instructions },
+          signal: controller.signal,
+        })
+      } catch (error) {
+        const normalized = normalizeResidentDriverError(error, controller.signal.aborted)
+        const message = safeDiagnostic(
+          normalized.message,
+          instructions === undefined ? [] : [{ type: 'text', text: instructions }],
+        )
+        const outcomeUnproven = !(error instanceof ResidentOperatorError)
+          || normalized.code === 'RUNTIME_UNAVAILABLE'
+        if (outcomeUnproven) {
+          this.store.markCompactionIndeterminate(commandId, message)
+          throw new ResidentOperatorError(message, 'COMMAND_INDETERMINATE')
+        }
+        this.store.failCompaction(commandId, normalized.code, message)
+        throw new ResidentOperatorError(message, normalized.code)
+      }
+      try {
+        return this.store.completeCompaction(
+          commandId,
+          sessionId,
+          result.nativeSessionId,
+          instructions !== undefined,
+        )
+      } catch (error) {
+        const normalized = normalizeResidentDriverError(error, controller.signal.aborted)
+        const message = safeDiagnostic(
+          normalized.message,
+          instructions === undefined ? [] : [{ type: 'text', text: instructions }],
+        )
+        this.store.markCompactionIndeterminate(commandId, message)
+        throw new ResidentOperatorError(message, 'COMMAND_INDETERMINATE')
+      }
+    })()
+    this.activeCompactions.set(commandId, { controller, done })
+    try {
+      return await done
+    } finally {
+      this.activeCompactions.delete(commandId)
+    }
   }
 
   private async runDriver(
@@ -457,6 +589,7 @@ export class ResidentDaemon {
     workspace: string,
     prompt: ContentBlock[],
     profile: Parameters<ResidentProductDriver['execute']>[0]['profile'],
+    modelToolBridge: PhysicalOperatorModelToolBridgeV1 | undefined,
     controller: AbortController,
   ): Promise<void> {
     const heartbeat = setInterval(
@@ -468,9 +601,11 @@ export class ResidentDaemon {
       this.store.markRunning(commandId)
       const nativeSessionId = this.store.nativeSessionId(sessionId)
       const result = await driver.execute({
+        commandId: ResidentOperatorCommandId(commandId),
         workspace,
         prompt,
         profile,
+        ...modelToolBridge === undefined ? {} : { modelToolBridge },
         ...nativeSessionId === undefined ? {} : { nativeSessionId },
         signal: controller.signal,
         onRunning: (nativeSessionId, nativeTurnId) => {

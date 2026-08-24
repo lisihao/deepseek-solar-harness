@@ -148,6 +148,18 @@ describe('published package surface', () => {
     })
   })
 
+  it('keeps the complete registry runtime on one recorded DSH ABI release', () => {
+    const upstream = JSON.parse(readFileSync(new URL('upstream.json', workspaceRoot), 'utf8')) as {
+      runtimePackageVersion?: unknown
+    }
+    const lockText = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
+    const versions = new Set(
+      [...lockText.matchAll(/resolution: "@deepseek-ai\/dsh(?:-[^"@]+)?@npm:([^"#]+)"/gu)]
+        .map(match => match[1]),
+    )
+    expect([...versions]).toEqual([upstream.runtimePackageVersion])
+  })
+
   it('builds public Host plugins and their private native bootstraps', () => {
     const config = readFileSync(new URL('tsdown.config.ts', packageRoot), 'utf8')
 

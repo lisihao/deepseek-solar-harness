@@ -4,19 +4,44 @@ import { chmodSync, closeSync, existsSync, lstatSync, openSync, readFileSync, un
 import { realpath } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
-import type { ContinualHarnessScope, ContinualHarnessSnapshotV1 } from '@deepseek-ai/dsh-continual-harness'
+import type {
+  ContinualHarnessCreateRequest,
+  ContinualHarnessDeleteRequest,
+  ContinualHarnessListRequest,
+  ContinualHarnessJsonValue,
+  ContinualHarnessManagedEntryV2,
+  ContinualHarnessRefinementApplyRequest,
+  ContinualHarnessRefinementApplyReceiptV1,
+  ContinualHarnessRefinementChangeV1,
+  ContinualHarnessRefinementPlanRequest,
+  ContinualHarnessRollbackRequest,
+  ContinualHarnessScope,
+  ContinualHarnessSnapshotV1,
+  ContinualHarnessSkillDescriptorV1,
+  ContinualHarnessUpdateRequest,
+} from '@deepseek-ai/dsh-continual-harness'
+import { ContinualHarnessSkillRuntime } from '@deepseek-ai/dsh-continual-harness'
 import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
 import LlmRuntime, { type ContentBlock } from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type { ModelAllocationPlan, ModelExecutionOffer, ModelTaskPhase } from '@deepseek-ai/dsh-model-allocation'
 import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
-import ModelWorkerRuntime from '@deepseek-ai/dsh-model-worker'
+import ModelWorkerRuntime, { type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
+import {
+  RlmCommandId,
+  RlmRuntimeSessionId,
+  type RlmChildExecutionResult,
+  type RlmJsonValue,
+  type RlmRuntimeHostBindings,
+} from '@deepseek-ai/dsh-rlm-runtime'
+import LocalRlmRuntime from '@deepseek-ai/dsh-rlm-runtime-local'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 import LocalRlmStrategy from '@deepseek-ai/dsh-rlm-strategy-local'
 import {
@@ -27,6 +52,7 @@ import {
   type CapabilityUpdateRequest,
   type NodeExecutionPlanV1,
   type OrchestrationBlocker,
+  type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompilationV1,
   type OrchestrationControlRequest,
   type OrchestrationDecisionRequest,
@@ -45,11 +71,13 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorRun,
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
+  type PhysicalOperatorModelToolBridgeV1,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import type { ResidentModelOption, ResidentProviderStatus, ResidentQuotaPool } from '@deepseek-ai/dsh-resident-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { DurableAutoRefineCoordinator, PRIME_AUTO_REFINE_DEFAULTS, type AutoRefineReview } from './auto-refine.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { GitWorktreeManager } from './git-worktrees.ts'
 import { dependsTransitively, graphCertificate, nodesConflict, validateGraph } from './graph.ts'
@@ -81,8 +109,18 @@ export const ORCHESTRATION_METHODS = Object.freeze([
   'orchestration.control',
   'orchestration.decide',
   'orchestration.resolve_indeterminate',
+  'harness.auto_refine.resolve_indeterminate',
   'capability.propose_update',
 ] as const)
+
+/**
+ * Fence detached daemons from clients configured with another Skill Provider set.
+ * @param modules - configured managed Skill Provider module identifiers.
+ * @returns the canonical Provider-manifest SHA-256 digest.
+ */
+export function skillProviderManifestSha256(modules: readonly string[]): string {
+  return canonicalSha256([...modules])
+}
 
 interface ActiveAttempt {
   readonly kind: 'resident' | 'resident-rlm' | 'model-worker'
@@ -97,13 +135,6 @@ interface ActiveAttempt {
   progressCursor: number
   progressSync?: Promise<void>
   readonly run: { readonly result: Promise<PhysicalOperatorResult>; dispose(): Promise<void> }
-}
-
-interface ResidentRlmLeaf {
-  readonly depth: number
-  readonly index: number
-  readonly artifactRef: OrchestrationArtifactRef
-  readonly output: readonly ContentBlock[]
 }
 
 interface ResidentReceiptIdentity {
@@ -141,10 +172,11 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       commandId: String(request.executionId),
       operatorId: this.provider.operatorId,
       workspace,
-      laneId: String(request.executionId),
+      laneId: request.residentLaneId ?? String(request.executionId),
       ...request.label === undefined ? {} : { taskLabel: request.label },
       prompt: request.prompt,
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
+      ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       signal: request.signal,
     })
     this.receipts.set(String(request.executionId), { sessionId: turn.sessionId, turnId: turn.turnId })
@@ -173,6 +205,14 @@ export interface OrchestrationDaemonOptions {
   readonly schedulerIntervalMs?: number
   readonly residentClient?: ResidentDaemonClient
   readonly residentDriverModules?: readonly string[]
+  /** Trusted Cordis plugins that register TypeScript Skill modules in the headless daemon. */
+  readonly skillProviderModules?: readonly string[]
+  readonly autoRefine?: Partial<typeof PRIME_AUTO_REFINE_DEFAULTS>
+  /**
+   * Explicit complete one-shot Provider set. Supplying it disables every
+   * credential-backed built-in Provider so offline acceptance cannot spend API quota.
+   */
+  readonly modelWorkerProviders?: readonly ModelWorkerProvider[]
 }
 
 function requiredString(params: Record<string, unknown>, name: string): string {
@@ -216,21 +256,7 @@ function event(
 }
 
 const MAX_OPERATOR_OUTPUT_PREVIEW = 8_000
-const MAX_RLM_BRANCH_PREVIEW = 8_000
-const MAX_RLM_SYNTHESIS_CONTEXT = 24_000
 const MAX_UPSTREAM_CONTEXT_PREVIEW = 4_000
-
-const RLM_BRANCH_LENSES = Object.freeze([
-  'Solution completeness: construct an end-to-end answer, name the governing invariants, and make every acceptance claim observable.',
-  'Adversarial failure analysis: look for concurrency, recovery, idempotency, stale-result, authority, cost, and hidden-side-effect gaps; propose falsifiable checks for each.',
-  'Evidence review: challenge unsupported claims, define materialized evidence, and distinguish proven behavior from assumptions and deferred work.',
-  'Alternative design: develop a materially different decomposition, expose tradeoffs, and identify when the leading approach should not be used.',
-] as const)
-
-/** Give parallel RLM leaves deliberately different work instead of duplicating one generic prompt. */
-function rlmBranchLens(index: number): string {
-  return RLM_BRANCH_LENSES.at((index - 1) % RLM_BRANCH_LENSES.length) ?? RLM_BRANCH_LENSES[0]
-}
 
 /** Project the operator's user-facing result without copying unbounded output into the event index. */
 function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview: string; outputTruncated: boolean } {
@@ -242,6 +268,69 @@ function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview
     outputPreview: text.slice(0, MAX_OPERATOR_OUTPUT_PREVIEW),
     outputTruncated: text.length > MAX_OPERATOR_OUTPUT_PREVIEW,
   }
+}
+
+function parseModelJson(output: readonly ContentBlock[], label: string): Record<string, unknown> {
+  const text = operatorOutputPreview(output).outputPreview.trim()
+  const unfenced = text.replace(/^```(?:json)?\s*/u, '').replace(/\s*```$/u, '').trim()
+  const first = unfenced.indexOf('{')
+  const last = unfenced.lastIndexOf('}')
+  if (first < 0 || last <= first) throw new OrchestrationError(`${label} did not return a JSON object`, 'ORCHESTRATION_UNAVAILABLE')
+  let parsed: unknown
+  try { parsed = JSON.parse(unfenced.slice(first, last + 1)) } catch {
+    throw new OrchestrationError(`${label} returned invalid JSON`, 'ORCHESTRATION_UNAVAILABLE')
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new OrchestrationError(`${label} must return a JSON object`, 'ORCHESTRATION_UNAVAILABLE')
+  }
+  return parsed as Record<string, unknown>
+}
+
+function parseAutoRefineReview(output: readonly ContentBlock[]): AutoRefineReview {
+  const parsed = parseModelJson(output, 'auto-refine review')
+  if (typeof parsed.shouldRefine !== 'boolean' || typeof parsed.rationale !== 'string' || parsed.rationale.trim().length === 0) {
+    throw new OrchestrationError('auto-refine review requires shouldRefine and rationale', 'ORCHESTRATION_UNAVAILABLE')
+  }
+  if (parsed.instructions !== undefined && typeof parsed.instructions !== 'string') {
+    throw new OrchestrationError('auto-refine review instructions must be text', 'ORCHESTRATION_UNAVAILABLE')
+  }
+  return {
+    shouldRefine: parsed.shouldRefine,
+    rationale: parsed.rationale,
+    ...typeof parsed.instructions === 'string' && parsed.instructions.trim().length > 0
+      ? { instructions: parsed.instructions }
+      : {},
+  }
+}
+
+function asRlmExecutionResult(result: PhysicalOperatorResult): RlmChildExecutionResult {
+  const status = result.stopReason === 'completed' ? 'settled' as const : 'failed' as const
+  return {
+    status,
+    output: result.output,
+    outputPreview: operatorOutputPreview(result.output).outputPreview,
+    ...status === 'failed' ? { error: `native execution stopped with ${result.stopReason}` } : {},
+  }
+}
+
+function primeRlmRootPrompt(base: readonly ContentBlock[], defaultChild?: ModelAllocationPlan): ContentBlock[] {
+  return [
+    ...base,
+    {
+      type: 'text',
+      text: [
+        'This attempt uses the Prime Agent compatible programmable RLM runtime.',
+        'Use the native typescript_repl tool as the only programming and delegation surface.',
+        'The persistent namespace exposes context, rlm(task, options), rlm.listSubagents(), rlm.deleteSubagent(), agentMessage.send(), agentMessage.read(), harness, goal, and compact().',
+        'rlm(...) returns an admission handle immediately, never the child answer. Children deliver answers only by explicit agentMessage.send(...) or artifact references.',
+        'You decide the recursive topology dynamically within the sealed depth, child, and turn budgets. Do not ask the Scheduler to manufacture fixed branches.',
+        defaultChild === undefined
+          ? 'Use lower-cost children for bounded exploration and retain this root model for planning, verification, and final synthesis when that improves the result.'
+          : `When rlm() omits a model, the sealed default child is ${defaultChild.operatorId}/${defaultChild.model} (${defaultChild.tier}, ${defaultChild.source}). Use an explicit model only when the task genuinely requires an override.`,
+        'Before finishing, read pending family messages, verify coverage against the original task, and return one complete final answer.',
+      ].join('\n'),
+    },
+  ]
 }
 
 /** Read settled Evidence into a bounded body that a downstream verifier can actually inspect. */
@@ -287,7 +376,13 @@ function promptFromPlan(
   const upstreamMaterials = context.sourceMaterials.map(value => (
     `Evidence ${value.ref}${value.truncated ? ' (bounded preview)' : ''}:\n${value.text}`
   )).join('\n\n')
-  const harnessEntries = harness?.entries.map(value => `- [${value.kind}] ${value.text} (Evidence: ${value.evidenceRefs.join(', ') || 'none'})`).join('\n') ?? ''
+  const legacyHarnessEntries = harness?.entries.map(value => `- [${value.kind}] ${value.text} (Evidence: ${value.evidenceRefs.join(', ') || 'none'})`) ?? []
+  const managedHarnessEntries = harness?.managedEntries.map(value => [
+    `- [${value.kind}] ${value.title}: ${value.content}`,
+    ...value.reference === undefined ? [] : [`  reference=${JSON.stringify(value.reference)}`],
+    ...value.arguments === undefined ? [] : [`  arguments=${JSON.stringify(value.arguments)}`],
+  ].join('\n')) ?? []
+  const harnessEntries = [...managedHarnessEntries, ...legacyHarnessEntries].join('\n')
   return [{
     type: 'text',
     text: [
@@ -448,6 +543,10 @@ export class OrchestrationDaemon {
   private readonly active = new Map<string, ActiveAttempt>()
   private readonly capacityRetryAfter = new Map<string, number>()
   private readonly worktrees: GitWorktreeManager
+  private readonly autoRefine: DurableAutoRefineCoordinator
+  private readonly recoveredRlmControllers: AbortController[] = []
+  private readonly recoveredRlmDisposers: Array<() => void> = []
+  private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
   private lockDescriptor: number | undefined
   private ticker: ReturnType<typeof setInterval> | undefined
   private ticking = false
@@ -460,6 +559,10 @@ export class OrchestrationDaemon {
     this.socketPath = join(options.root, 'control.sock')
     this.store = new OrchestrationStore(options.root)
     this.worktrees = new GitWorktreeManager(join(options.root, 'worktrees'))
+    this.autoRefine = new DurableAutoRefineCoordinator(join(options.root, 'auto-refine.json'), {
+      ...PRIME_AUTO_REFINE_DEFAULTS,
+      ...options.autoRefine,
+    })
     this.resident = options.residentClient ?? new ResidentDaemonClient({
       root: join(options.dshHome, 'resident-operators'),
       autoStart: true,
@@ -478,21 +581,36 @@ export class OrchestrationDaemon {
     const thisRoot = this.options.root
     await this.ctx.plugin(PhysicalOperatorRuntime)
     await this.ctx.plugin(LlmRuntime)
-    await this.ctx.plugin(LocalCredentialProvider, { dshHome: this.options.dshHome, watch: true })
-    await this.ctx.plugin(LlmDeepSeek, {})
     await this.ctx.plugin(ModelWorkerRuntime)
-    await this.ctx.plugin({
-      name: 'model-worker-deepseek',
-      inject: ['modelWorkers', 'llm'],
-      apply: DeepSeekModelWorker,
-    })
+    if (this.options.modelWorkerProviders === undefined) {
+      await this.ctx.plugin(LocalCredentialProvider, { dshHome: this.options.dshHome, watch: true })
+      await this.ctx.plugin(LlmDeepSeek, {})
+      await this.ctx.plugin({
+        name: 'model-worker-deepseek',
+        inject: ['modelWorkers', 'llm'],
+        apply: DeepSeekModelWorker,
+      })
+    } else {
+      for (const provider of this.options.modelWorkerProviders) this.ctx.modelWorkers.register(provider)
+    }
     await this.ctx.plugin(DirectIntentCompiler)
     await this.ctx.plugin(BasicContextCompiler)
     await this.ctx.plugin(SubscriptionFirstModelAllocation)
     await this.ctx.plugin(LocalRlmStrategy)
+    await this.ctx.plugin(ContinualHarnessSkillRuntime)
+    await this.ctx.plugin(class extends LocalRlmRuntime {
+      constructor(ctx: Context) { super(ctx, join(thisRoot, 'rlm-runtime')) }
+    })
     await this.ctx.plugin(class extends LocalContinualHarness {
       constructor(ctx: Context) { super(ctx, join(thisRoot, 'continual-harness')) }
     })
+    for (const modulePath of this.options.skillProviderModules ?? []) {
+      const loaded = await import(pathToFileURL(modulePath).href) as { readonly default?: unknown }
+      if (loaded.default === undefined || (typeof loaded.default !== 'function' && typeof loaded.default !== 'object')) {
+        throw new OrchestrationError(`invalid Continuous Harness Skill Provider: ${modulePath}`, 'ORCHESTRATION_UNAVAILABLE')
+      }
+      await this.ctx.plugin(loaded.default as Parameters<Context['plugin']>[0])
+    }
     await this.ctx.plugin(class extends LocalCapabilityCapsuleService {
       constructor(ctx: Context) { super(ctx, join(thisRoot, 'capsules')) }
     })
@@ -512,6 +630,7 @@ export class OrchestrationDaemon {
         resolve()
       })
     })
+    await this.rebindRecoveredRlmHosts()
     await this.reconcile()
     this.ticker = setInterval(() => { void this.tick() }, this.options.schedulerIntervalMs ?? 250)
     this.ticker.unref()
@@ -524,6 +643,8 @@ export class OrchestrationDaemon {
     this.closing = true
     if (this.ticker !== undefined) clearInterval(this.ticker)
     this.ticker = undefined
+    for (const controller of this.recoveredRlmControllers) controller.abort(new Error('orchestration daemon is closing'))
+    for (const dispose of this.recoveredRlmDisposers.splice(0)) dispose()
     for (const transport of this.transports) transport.close()
     for (const socket of this.sockets) socket.end()
     await Promise.allSettled([...this.active.values()].map(value => value.run.dispose()))
@@ -570,6 +691,7 @@ export class OrchestrationDaemon {
       case 'orchestration.control': return this.control(params.request as never)
       case 'orchestration.decide': return this.decide(params.request as never)
       case 'orchestration.resolve_indeterminate': return this.resolveIndeterminate(params.request as never)
+      case 'harness.auto_refine.resolve_indeterminate': return this.resolveAutoRefineIndeterminate(params.request as never)
       case 'capability.propose_update': return this.proposeCapabilityUpdate(params.request as never)
       case 'system.shutdown':
         setTimeout(() => { void this.close() }, 10)
@@ -584,11 +706,17 @@ export class OrchestrationDaemon {
     if (protocol !== ORCHESTRATION_PROTOCOL_VERSION || schema !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
       throw new OrchestrationError('orchestration protocol or state schema mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
+    const skillProviderManifest = requiredString(params, 'skill_provider_manifest_sha256')
+    const activeSkillProviderManifest = skillProviderManifestSha256(this.options.skillProviderModules ?? [])
+    if (skillProviderManifest !== activeSkillProviderManifest) {
+      throw new OrchestrationError('orchestration Skill Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
+    }
     return {
       protocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
       stateSchemaVersion: ORCHESTRATION_STATE_SCHEMA_VERSION,
       buildCommit: this.options.buildCommit ?? process.env.DSH_BUILD_COMMIT ?? 'development',
       methods: ORCHESTRATION_METHODS,
+      skillProviderManifestSha256: activeSkillProviderManifest,
       injectionBoundaries: ['pre-dispatch', 'next-turn'],
     }
   }
@@ -770,6 +898,29 @@ export class OrchestrationDaemon {
     return next.snapshot
   }
 
+  private resolveAutoRefineIndeterminate(
+    request: OrchestrationAutoRefineIndeterminateRequest,
+  ): OrchestrationRunSnapshot {
+    return this.withCommandReceipt(
+      'harness.auto_refine.resolve_indeterminate',
+      request,
+      () => {
+        const record = this.expectRevision(request.runId, request.expectedRevision)
+        const node = record.snapshot.nodes.find(value => value.id === request.nodeId)
+        if (node === undefined) throw new OrchestrationError('auto-refine node is missing', 'GRAPH_INVALID')
+        this.autoRefine.resolveIndeterminate(request.sessionId, request.roundId, request.branchVersion)
+        this.store.appendEvents([event(record.snapshot.runId, 'harness.auto_refine.indeterminate_resolved', {
+          runtimeSessionId: request.sessionId,
+          roundId: request.roundId,
+          branchVersion: request.branchVersion,
+          decision: request.decision,
+          reason: request.reason,
+        }, node)])
+        return record.snapshot
+      },
+    )
+  }
+
   private withCommandReceipt<T>(
     method: string,
     request: { readonly commandId: string },
@@ -881,12 +1032,45 @@ export class OrchestrationDaemon {
     try {
       await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
       await this.reconcile()
+      await this.ctx.rlmRuntime.pumpMessages()
+      await this.ctx.rlmRuntime.pumpHeartbeats()
       for (const record of this.store.listRuns()) {
         if (record.snapshot.state !== 'running') continue
         await this.advance(record)
       }
     } finally {
       this.ticking = false
+    }
+  }
+
+  private async rebindRecoveredRlmHosts(): Promise<void> {
+    const sessions = await this.ctx.rlmRuntime.list()
+    const byId = new Map(sessions.map(session => [String(session.sessionId), session] as const))
+    const attempts = this.store.attempts()
+    const bindingsByRoot = new Map<string, RlmRuntimeHostBindings>()
+    const rootOf = (sessionId: string): string => {
+      let current = byId.get(sessionId)
+      while (current?.parentSessionId !== undefined) current = byId.get(String(current.parentSessionId))
+      return current?.sessionId ?? sessionId
+    }
+    for (const session of sessions) {
+      const rootId = rootOf(String(session.sessionId))
+      let bindings = bindingsByRoot.get(rootId)
+      if (bindings === undefined) {
+        const root = byId.get(rootId)
+        if (root === undefined) continue
+        const attempt = attempts.find(value => value.executionId === root.executionId)
+        if (attempt === undefined) continue
+        const record = this.store.getRun(attempt.runId)
+        const spec = record.graph.nodes.find(value => value.id === attempt.nodeId)
+        if (spec === undefined) continue
+        const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+        const controller = new AbortController()
+        this.recoveredRlmControllers.push(controller)
+        bindings = this.rlmHostBindings(record, spec, plan, controller, [])
+        bindingsByRoot.set(rootId, bindings)
+      }
+      this.recoveredRlmDisposers.push(await this.ctx.rlmRuntime.bindHost(session.sessionId, bindings))
     }
   }
 
@@ -937,6 +1121,10 @@ export class OrchestrationDaemon {
     const liveLimits = liveNodes.flatMap((node) => {
       if (node.executionPlanRef === undefined) return []
       const plan = this.store.readArtifact(node.executionPlanRef) as NodeExecutionPlanV1
+      // A recursive node owns its internal child budget, not the whole DAG.
+      // Applying its worker recommendation globally would serialize unrelated,
+      // non-conflicting nodes behind one RLM attempt.
+      if (plan.rlmPlan?.enabled === true) return []
       return [plan.allocationPlan.suggestedParallelism]
     })
     let effectiveParallelism = Math.min(record.graph.maxParallel, ...liveLimits, record.graph.maxParallel)
@@ -1144,7 +1332,8 @@ export class OrchestrationDaemon {
       })
       this.store.saveRun(record, [event(record.snapshot.runId, 'harness.snapshot', {
         ref: String(harnessSnapshotRef), scope: harnessSnapshot.scope,
-        generation: harnessSnapshot.generation, entryCount: harnessSnapshot.entries.length,
+        generation: harnessSnapshot.generation,
+        entryCount: harnessSnapshot.entries.length + harnessSnapshot.managedEntries.length,
       }, node)])
     }
     const sourceRefs: ContextSourceRef[] = [
@@ -1183,6 +1372,7 @@ export class OrchestrationDaemon {
       phase: nodePhase(spec),
       role: spec.role,
       task: spec.task,
+      objective: record.snapshot.admission?.optimization ?? 'balanced',
       requestedMode: spec.rlm?.mode ?? record.snapshot.admission?.rlm ?? 'auto',
       ...spec.rlm === undefined ? {} : { requestedBudget: {
         maxDepth: spec.rlm.maxDepth,
@@ -1199,19 +1389,15 @@ export class OrchestrationDaemon {
       planSha256: rlmPlan.planSha256,
     }, node)])
     const selected = await this.selectOperator(record, spec, rlmPlan)
-    const rlmWorkerPlan = selected.provider !== undefined && rlmPlan.enabled && rlmPlan.maxTurns > 1
-      ? await this.selectResidentRlmWorker(record, spec, rlmPlan)
+    const rlmWorkerPlan = rlmPlan.enabled && rlmPlan.maxTurns > 1
+      ? await this.selectRlmWorker(record, spec, rlmPlan)
       : undefined
-    // A Resident RLM node owns several internal physical turns. Keep it as one
-    // exclusive global Scheduler slot so node-level DAG parallelism cannot
-    // oversubscribe the same subscription pools behind the sealed child plan.
-    const allocation = rlmWorkerPlan === undefined
-      ? selected.allocation
-      : {
-        ...selected.allocation,
-        suggestedParallelism: 1,
-        rationale: [...selected.allocation.rationale, 'scheduler-owned-rlm-capacity'],
-      }
+    // RLM owns child admission inside this node, while the TaskGraph Scheduler
+    // continues to own independent DAG-node admission.  Do not turn one RLM
+    // node into a global concurrency clamp: provider capacity remains expressed
+    // by the allocator's sealed recommendation and scope/effect conflicts still
+    // fence unsafe peers.
+    const allocation = selected.allocation
     const selectedProvider = selected.provider
     const operatorId = allocation.operatorId
     const allocationPlanRef = this.store.putArtifact(allocation)
@@ -1312,7 +1498,7 @@ export class OrchestrationDaemon {
       }, sealed.find(value => value.id === nodeId))] : [],
     ])
     await this.dispatchPlan(record, spec, executionPlan, contextPacket, capabilityPlan, harnessSnapshot)
-    return allocation.suggestedParallelism
+    return rlmPlan.enabled ? record.graph.maxParallel : allocation.suggestedParallelism
   }
 
   private async dispatchPlan(
@@ -1324,6 +1510,10 @@ export class OrchestrationDaemon {
     harnessSnapshot?: ContinualHarnessSnapshotV1,
   ): Promise<void> {
     if (plan.operatorPlan.mode === 'model-worker') {
+      if (plan.rlmPlan?.enabled === true) {
+        this.dispatchModelWorkerRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
+        return
+      }
       await this.dispatchModelWorker(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
       return
     }
@@ -1435,147 +1625,899 @@ export class OrchestrationDaemon {
     physicalRuns: PhysicalOperatorRun[],
   ): Promise<PhysicalOperatorResult> {
     const rlmPlan = plan.rlmPlan
-    if (rlmPlan?.enabled !== true) {
-      throw new OrchestrationError('Resident RLM dispatch requires an enabled sealed plan', 'GRAPH_INVALID')
-    }
+    if (rlmPlan?.enabled !== true) throw new OrchestrationError('Resident RLM dispatch requires an enabled sealed plan', 'GRAPH_INVALID')
     const runId = String(record.snapshot.runId)
-    const basePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan)
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
-    const workerPlan = plan.rlmWorkerPlan
-    let leaves: ResidentRlmLeaf[] = []
-    let turnsUsed = 0
-    let depthUsed = 0
+    const rootSessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
+    const bindings = this.rlmHostBindings(record, spec, plan, controller, physicalRuns)
+    await this.ctx.rlmRuntime.create({
+      sessionId: rootSessionId,
+      commandId: RlmCommandId(`${String(plan.executionId)}:rlm:create`),
+      executionId: String(plan.executionId),
+      workspace: plan.executionWorkspace.path,
+      task: spec.task,
+      model: {
+        operatorId: plan.allocationPlan.operatorId,
+        model: plan.allocationPlan.model,
+        ...plan.allocationPlan.profile === undefined ? {} : { profile: plan.allocationPlan.profile },
+      },
+      ...plan.rlmWorkerPlan === undefined ? {} : { defaultChildModel: {
+        operatorId: plan.rlmWorkerPlan.operatorId,
+        model: plan.rlmWorkerPlan.model,
+        ...plan.rlmWorkerPlan.profile === undefined ? {} : { profile: plan.rlmWorkerPlan.profile },
+      } },
+      limits: {
+        maxDepth: rlmPlan.maxDepth,
+        maxChildren: rlmPlan.maxChildren,
+        maxTurns: rlmPlan.maxTurns,
+        maxCellMs: Math.min(spec.timeoutMs ?? 120_000, 300_000),
+        maxOutputBytes: 512 * 1024,
+      },
+      context: {
+        runId,
+        nodeId: spec.id,
+        task: spec.task,
+        contextPacketRef: String(plan.contextPacketRef),
+        capabilityPlanRef: String(plan.capabilityPlanRef),
+        graphCertificateHash: plan.graphCertificateHash,
+        ...plan.rlmWorkerPlan === undefined ? {} : {
+          defaultChildOperatorId: plan.rlmWorkerPlan.operatorId,
+          defaultChildModel: plan.rlmWorkerPlan.model,
+          defaultChildTier: plan.rlmWorkerPlan.tier,
+        },
+      },
+    }, bindings)
+    const bridge = await this.ctx.rlmRuntime.modelToolBridge(rootSessionId)
+    const rootExecutionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:root`)
+    const basePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan)
+    const rootPrompt = primeRlmRootPrompt(basePrompt, plan.rlmWorkerPlan)
     this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.started', {
-      planSha256: rlmPlan.planSha256,
-      maxDepth: rlmPlan.maxDepth,
-      maxChildren: rlmPlan.maxChildren,
-      maxTurns: rlmPlan.maxTurns,
-      workerOperatorId: workerPlan?.operatorId ?? null,
-      workerModel: workerPlan?.model ?? null,
-      synthesisOperatorId: plan.allocationPlan.operatorId,
-      synthesisModel: plan.allocationPlan.model,
+      runtimeSessionId: String(rootSessionId), planSha256: rlmPlan.planSha256,
+      maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
+      rootOperatorId: plan.allocationPlan.operatorId, rootModel: plan.allocationPlan.model,
+      tool: 'typescript_repl', topologyOwner: 'model',
     }, node)])
     try {
-      if (workerPlan !== undefined) {
-        const status = this.ctx.physicalOperators.status(workerPlan.operatorId)
-        const branchWidth = Math.min(
-          rlmPlan.maxChildren,
-          record.graph.maxParallel,
-          workerPlan.suggestedParallelism,
-          Math.max(0, status.maxConcurrency - status.active),
-          4,
-        )
-        let remainingWorkerTurns = Math.max(0, rlmPlan.maxTurns - 1)
-        for (let depth = 1; depth <= rlmPlan.maxDepth && remainingWorkerTurns > 0 && branchWidth > 0; depth += 1) {
-          const branchCount = Math.min(branchWidth, remainingWorkerTurns)
-          const parents = leaves
-          leaves = await Promise.all(Array.from({ length: branchCount }, async (_value, index): Promise<ResidentRlmLeaf> => {
-            const parent = parents.length === 0 ? undefined : parents[index % parents.length]
-            const executionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:d${String(depth)}:b${String(index + 1)}`)
-            const lens = rlmBranchLens(index + 1)
-            const branchPrompt: ContentBlock[] = [
-              ...basePrompt,
-              {
-                type: 'text',
-                text: parent === undefined
-                  ? `RLM depth ${String(depth)}, branch ${String(index + 1)} of ${String(branchCount)}. Use this distinct analysis lens: ${lens} Avoid duplicating the other likely lenses. Do not delegate, spawn subagents, or create TaskGraph nodes; solve only this bounded branch.`
-                  : `RLM depth ${String(depth)}, branch ${String(index + 1)} of ${String(branchCount)}. Continue with this distinct analysis lens: ${lens} Challenge the prior branch at ${String(parent.artifactRef)}; identify concrete omissions or weak claims, correct them, and return a stronger evidence-oriented branch. Do not delegate, spawn subagents, or create TaskGraph nodes.\n\nPrior branch preview:\n${operatorOutputPreview(parent.output).outputPreview.slice(0, MAX_RLM_BRANCH_PREVIEW)}`,
-              },
-            ]
-            const started = await this.startResidentTurn(
-              record,
-              spec,
-              plan.executionWorkspace.path,
-              executionId,
-              workerPlan,
-              branchPrompt,
-              controller.signal,
-              `RLM d${String(depth)} b${String(index + 1)}`,
-            )
-            physicalRuns.push(started.run)
-            this.store.appendEvents([event(record.snapshot.runId, 'rlm.branch.dispatched', {
-              executionId: String(executionId), depth, branch: index + 1,
-              operatorId: workerPlan.operatorId, model: workerPlan.model,
-              sessionId: started.receipt.sessionId, turnId: started.receipt.turnId,
-              parentArtifactRef: parent?.artifactRef ?? null,
-            }, node)])
-            const result = await started.run.result
-            if (result.stopReason !== 'completed') {
-              throw Object.assign(new Error(`RLM branch stopped with ${result.stopReason}`), { code: 'RLM_BRANCH_FAILED' })
-            }
-            const artifactRef = this.store.putArtifact({
-              kind: 'resident-rlm-branch', runId, nodeId: spec.id,
-              executionId: String(executionId), depth, branch: index + 1,
-              operatorId: workerPlan.operatorId, model: workerPlan.model,
-              parentArtifactRef: parent?.artifactRef ?? null,
-              stopReason: result.stopReason, output: result.output,
-              ...result.continuity === undefined ? {} : { continuity: result.continuity },
-            })
-            this.store.recordArtifact('compilation_artifacts', {
-              ref: String(artifactRef), runId, nodeId: spec.id,
-              attempt: plan.attempt, generation: plan.capabilityGeneration,
-            })
-            this.store.appendEvents([event(record.snapshot.runId, 'rlm.branch.settled', {
-              executionId: String(executionId), depth, branch: index + 1,
-              artifactRef: String(artifactRef), stopReason: result.stopReason,
-            }, node)])
-            return { depth, index: index + 1, artifactRef, output: result.output }
-          }))
-          remainingWorkerTurns -= branchCount
-          turnsUsed += branchCount
-          depthUsed = depth
-        }
+      const root = await this.startResidentTurn(
+        record, spec, plan.executionWorkspace.path, rootExecutionId, plan.allocationPlan,
+        rootPrompt, controller.signal, 'Prime RLM root', bridge, String(rootSessionId),
+      )
+      physicalRuns.push(root.run)
+      await this.ctx.rlmRuntime.trackExecution(rootSessionId, {
+        nativeSessionId: root.receipt.sessionId,
+        nativeTurnId: root.receipt.turnId,
+        result: root.run.result.then(asRlmExecutionResult, (error: unknown) => ({
+          status: controller.signal.aborted ? 'indeterminate' as const : 'failed' as const,
+          error: error instanceof Error ? error.message : String(error),
+        })),
+        interrupt: () => this.resident.interrupt(root.receipt.sessionId, root.receipt.turnId),
+      })
+      const attempt = this.store.attempts().find(value => value.runId === runId
+        && value.nodeId === spec.id
+        && value.attempt === plan.attempt)
+      if (attempt !== undefined) {
+        this.store.saveAttempt({ ...attempt, state: 'running', turnId: root.receipt.turnId, updatedAt: now() })
       }
-
-      const branchPreviewLimit = Math.min(
-        MAX_RLM_BRANCH_PREVIEW,
-        Math.floor(MAX_RLM_SYNTHESIS_CONTEXT / Math.max(1, leaves.length)),
-      )
-      const branchDigest = leaves.map(leaf => (
-        `Depth ${String(leaf.depth)} branch ${String(leaf.index)} (${String(leaf.artifactRef)}; lens: ${rlmBranchLens(leaf.index)}):\n${operatorOutputPreview(leaf.output).outputPreview.slice(0, branchPreviewLimit)}`
-      )).join('\n\n')
-      const synthesisExecutionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:synthesis`)
-      const synthesisPrompt: ContentBlock[] = [
-        ...basePrompt,
-        {
-          type: 'text',
-          text: leaves.length === 0
-            ? 'The sealed RLM turn budget permits no child turn. Produce the final answer directly without delegation or TaskGraph changes.'
-            : `Synthesize and verify the following Scheduler-controlled RLM leaves into one final result. Do not merely summarize their consensus. First derive a coverage checklist from the original task, then preserve every useful non-duplicated claim, identify important omissions across all leaves, resolve contradictions, and remove unsupported claims. The final answer must be at least as complete and falsifiable as the strongest leaf, with explicit invariants, failure/recovery boundaries, tradeoffs, and acceptance evidence where relevant. Do not delegate or create TaskGraph nodes.\n\n${branchDigest}`,
-        },
-      ]
-      const synthesis = await this.startResidentTurn(
-        record,
-        spec,
-        plan.executionWorkspace.path,
-        synthesisExecutionId,
-        plan.allocationPlan,
-        synthesisPrompt,
-        controller.signal,
-        'RLM synthesis',
-      )
-      physicalRuns.push(synthesis.run)
-      this.store.appendEvents([event(record.snapshot.runId, 'rlm.synthesis.dispatched', {
-        executionId: String(synthesisExecutionId), operatorId: plan.allocationPlan.operatorId,
-        model: plan.allocationPlan.model, sessionId: synthesis.receipt.sessionId,
-        turnId: synthesis.receipt.turnId, branchArtifactRefs: leaves.map(value => String(value.artifactRef)),
-        branchPreviewLimit,
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.root.dispatched', {
+        executionId: String(rootExecutionId), runtimeSessionId: String(rootSessionId),
+        nativeSessionId: root.receipt.sessionId, nativeTurnId: root.receipt.turnId,
+        operatorId: plan.allocationPlan.operatorId, model: plan.allocationPlan.model,
       }, node)])
-      const result = await synthesis.run.result
-      turnsUsed += 1
+      const rootResult = await root.run.result
+      await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
+      const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
+      const afterMessages = drained.lastContinuation?.output === undefined
+        ? rootResult
+        : { output: [...drained.lastContinuation.output], stopReason: 'completed' as const }
+      const result = await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
+      const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
       this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
-        executionId: String(plan.executionId), depthUsed, turnsUsed,
-        branchCount: leaves.length, stopReason: result.stopReason,
+        executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
+        childCount: snapshot.children.length, stateRevision: snapshot.stateRevision,
+        degradedVariables: snapshot.degradedVariables, stopReason: result.stopReason,
       }, node)])
       return result
     } catch (error) {
       controller.abort()
       await Promise.allSettled(physicalRuns.map(value => value.dispose()))
       this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.failed', {
-        executionId: String(plan.executionId), depthUsed, turnsUsed,
+        executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
         code: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
       }, node)])
       throw error
+    }
+  }
+
+  private async flushRlmHarnessBoundary(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    sessionId: RlmRuntimeSessionId,
+    boundary: 'turn-end' | 'before-next-turn',
+  ): Promise<readonly ContinualHarnessRefinementApplyReceiptV1[]> {
+    const isRootTurnEnd = boundary === 'turn-end'
+      && String(sessionId) === `rlm:${String(plan.executionId)}`
+    const nativeCompacted = isRootTurnEnd
+      ? await this.performScheduledNativeCompaction(record, spec, plan, sessionId)
+      : false
+    const common = { workspace: plan.executionWorkspace.path, boundary } as const
+    const receipts = [
+      ...await this.ctx.continualHarness.flushRefinements({ ...common, scope: 'session', sessionId: String(sessionId) }),
+      ...await this.ctx.continualHarness.flushRefinements({ ...common, scope: 'workspace' }),
+    ]
+    if (receipts.length > 0) {
+      this.store.appendEvents(receipts.map(receipt => event(record.snapshot.runId, `harness.refinement.${receipt.state}`, {
+        runtimeSessionId: String(sessionId), queueId: receipt.queueId, refinementId: receipt.refinementId,
+        requestedBoundary: receipt.requestedBoundary, appliedBoundary: boundary,
+        ...receipt.appliedPlan?.appliedGeneration === undefined ? {} : { appliedGeneration: receipt.appliedPlan.appliedGeneration },
+        ...receipt.appliedPlan?.changeResults === undefined ? {} : {
+          appliedChanges: receipt.appliedPlan.changeResults.filter(result => result.applied).length,
+          rejectedChanges: receipt.appliedPlan.changeResults.filter(result => !result.applied).length,
+        },
+        ...receipt.error === undefined ? {} : { error: receipt.error },
+      }, record.snapshot.nodes.find(value => value.id === spec.id))))
+    }
+    if (isRootTurnEnd
+      && receipts.length === 0
+      && record.snapshot.admission?.continualHarness !== 'off') {
+      await this.runAutoRefineBoundary(record, spec, plan, sessionId, nativeCompacted ? 'compact' : 'turn_interval')
+    }
+    return receipts
+  }
+
+  /** Execute one model-scheduled native compaction at the root turn boundary. */
+  private async performScheduledNativeCompaction(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    sessionId: RlmRuntimeSessionId,
+  ): Promise<boolean> {
+    const pending = this.autoRefine.inspect(String(sessionId)).pendingCompactExecution
+    if (pending === undefined) return false
+    const node = record.snapshot.nodes.find(value => value.id === spec.id)
+    try {
+      const residentSession = pending.residentSessionId === undefined
+        ? (await this.resident.list()).find(snapshot => (
+          snapshot.laneId === String(sessionId)
+          && snapshot.workspace === plan.executionWorkspace.path
+          && snapshot.operatorId === plan.operatorPlan.operatorId
+        ))
+        : await this.resident.inspect(pending.residentSessionId)
+      if (residentSession === undefined) {
+        throw new OrchestrationError(
+          `no Resident Session owns RLM lane ${String(sessionId)}`,
+          'ORCHESTRATION_UNAVAILABLE',
+        )
+      }
+      const expectedStateRevision = pending.expectedStateRevision ?? residentSession.stateRevision
+      if (pending.state === 'scheduled') {
+        this.autoRefine.markCompactRunning(
+          String(sessionId),
+          pending.commandId,
+          String(residentSession.sessionId),
+          expectedStateRevision,
+        )
+      }
+      const result = await this.resident.compact({
+        commandId: pending.commandId,
+        sessionId: String(residentSession.sessionId),
+        expectedStateRevision,
+        ...pending.instructions === undefined ? {} : { instructions: pending.instructions },
+      })
+      this.autoRefine.markCompactPerformed(String(sessionId), pending.commandId)
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.compaction.settled', {
+        runtimeSessionId: String(sessionId),
+        commandId: pending.commandId,
+        residentSessionId: String(result.session.sessionId),
+        nativeSessionId: result.nativeSessionId,
+        stateRevision: result.session.stateRevision,
+        compactedAt: result.compactedAt,
+      }, node)])
+      return true
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE'
+      const message = error instanceof Error ? error.message : String(error)
+      this.autoRefine.markCompactFailed(String(sessionId), message, pending.commandId)
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.compaction.failed', {
+        runtimeSessionId: String(sessionId), commandId: pending.commandId, code, message,
+      }, node)])
+      return false
+    }
+  }
+
+  private async runAutoRefineBoundary(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    sessionId: RlmRuntimeSessionId,
+    reason: 'turn_interval' | 'compact' = 'turn_interval',
+  ): Promise<void> {
+    const rootBeforeReview = await this.ctx.rlmRuntime.inspect(sessionId)
+    const branchVersion = `${plan.planSha256}:${String(rootBeforeReview.stateRevision)}`
+    const allocation = [plan.rlmWorkerPlan, plan.allocationPlan].find(value => (
+      value?.source === 'native-subscription' && this.physical.has(value.operatorId)
+    ))
+    const node = record.snapshot.nodes.find(value => value.id === spec.id)
+    if (allocation === undefined) {
+      this.store.appendEvents([event(record.snapshot.runId, 'harness.auto_refine.skipped', {
+        runtimeSessionId: String(sessionId), reason: 'native-subscription-unavailable',
+      }, node)])
+      return
+    }
+    let contextPromise: Promise<string> | undefined
+    const context = (): Promise<string> => contextPromise ??= this.autoRefineContext(
+      plan.executionWorkspace.path, sessionId, spec, rootBeforeReview,
+    )
+    const execute = (stage: 'review' | 'plan', prompt: string): Promise<readonly ContentBlock[]> => (
+      this.executeAutoRefineTurn(record, spec, plan, sessionId, allocation, stage, prompt)
+    )
+    const result = await this.autoRefine.boundary({
+      sessionId: String(sessionId),
+      branchVersion,
+      reason,
+      occurredAt: now(),
+      isRoot: true,
+    }, {
+      review: async boundary => parseAutoRefineReview(await execute('review', [
+        'Review whether the persistent Continuous Harness should be refined from the completed RLM trajectory.',
+        `Trigger: ${boundary.reason}; assistant turns since review: ${String(boundary.turnsSinceLastReview)}.`,
+        'Return exactly one JSON object: {"shouldRefine":boolean,"rationale":string,"instructions"?:string}.',
+        'Approve only a durable, reusable lesson supported by the supplied outcomes. Do not propose task-specific scratch notes.',
+        await context(),
+      ].join('\n\n'))),
+      plan: async boundary => this.parseAutoRefinePlan(await execute('plan', [
+        'Create a Prime-compatible Continuous Harness refinement proposal.',
+        `Review rationale: ${boundary.review.rationale}`,
+        ...boundary.review.instructions === undefined ? [] : [`Instructions: ${boundary.review.instructions}`],
+        'Return exactly one JSON object with observation, optional failingComponent and nextStep, evidenceRefs, and changes.',
+        'Each changes item is {operation:"create"|"update"|"delete",entry:{...}}. Use TypeScript skill references only.',
+        'Do not apply changes yourself. The host validates and applies each valid edit independently at this turn boundary.',
+        await context(),
+      ].join('\n\n')), plan, sessionId, allocation),
+      apply: async ({ proposal }) => {
+        const rootBeforeApply = await this.ctx.rlmRuntime.inspect(sessionId)
+        const currentBranchVersion = `${plan.planSha256}:${String(rootBeforeApply.stateRevision)}`
+        if (currentBranchVersion !== branchVersion) {
+          throw new OrchestrationError(
+            'RLM trajectory changed while auto-refine review was running',
+            'REVISION_CONFLICT',
+          )
+        }
+        const planned = await this.ctx.continualHarness.planRefinement(proposal)
+        return this.ctx.continualHarness.applyRefinement({
+          workspace: plan.executionWorkspace.path,
+          sessionId: String(sessionId),
+          scope: 'session',
+          refinementId: planned.refinementId,
+          expectedGeneration: planned.plannedGeneration,
+          boundary: 'turn-end',
+        })
+      },
+    })
+    if (result.state === 'not-due' || result.state === 'disabled' || result.state === 'child' || result.state === 'cooldown') return
+    this.store.appendEvents([event(record.snapshot.runId, `harness.auto_refine.${result.state}`, {
+      runtimeSessionId: String(sessionId),
+      ...'roundId' in result ? { roundId: result.roundId } : {},
+      ...result.state === 'reviewed' || result.state === 'applied'
+        ? { shouldRefine: result.review.shouldRefine, rationale: result.review.rationale }
+        : {},
+      ...result.state === 'applied'
+        ? { refinementId: result.applied.refinementId, appliedGeneration: result.applied.appliedGeneration }
+        : {},
+      ...result.state === 'failed' ? { phase: result.phase, error: result.error } : {},
+      ...result.state === 'indeterminate'
+        ? { phase: result.phase, startedAt: result.startedAt, branchVersion: result.branchVersion }
+        : {},
+      operatorId: allocation.operatorId,
+      model: allocation.model,
+    }, node)])
+  }
+
+  private async autoRefineContext(
+    workspace: string,
+    sessionId: RlmRuntimeSessionId,
+    spec: OrchestrationNodeSpecV1,
+    runtimeSnapshot: Awaited<ReturnType<Context['rlmRuntime']['inspect']>>,
+  ): Promise<string> {
+    const [session, global, sessionRefinements, workspaceRefinements, messages, events] = await Promise.all([
+      this.ctx.continualHarness.snapshot({
+        workspace, sessionId: String(sessionId), scope: 'session', role: spec.role, task: spec.task, limit: 64,
+      }),
+      this.ctx.continualHarness.snapshot({
+        workspace, scope: 'workspace', role: spec.role, task: spec.task, limit: 64,
+      }),
+      this.ctx.continualHarness.listRefinements({
+        workspace, sessionId: String(sessionId), scope: 'session', limit: 20,
+      }),
+      this.ctx.continualHarness.listRefinements({ workspace, scope: 'workspace', limit: 20 }),
+      this.ctx.rlmRuntime.readMessages({ sessionId, limit: 64 }),
+      this.ctx.rlmRuntime.readEvents({
+        sessionId, after: Math.max(0, runtimeSnapshot.eventCursor - 128), limit: 128,
+      }),
+    ])
+    const project = (snapshot: ContinualHarnessSnapshotV1): unknown => ({
+      scope: snapshot.scope,
+      generation: snapshot.generation,
+      outcomes: snapshot.entries.map(entry => ({
+        kind: entry.kind, text: entry.text.slice(0, 2_000), evidenceRefs: entry.evidenceRefs,
+      })),
+      managedEntries: snapshot.managedEntries.map(entry => ({
+        entryId: entry.entryId, entryVersion: entry.entryVersion, kind: entry.kind,
+        title: entry.title, content: entry.content.slice(0, 4_000),
+        reference: entry.reference, arguments: entry.arguments, tags: entry.tags,
+      })),
+    })
+    const refinement = (plan: (typeof sessionRefinements)[number]): unknown => ({
+      refinementId: plan.refinementId, state: plan.state, trigger: plan.trigger,
+      observation: plan.observation.slice(0, 2_000), failingComponent: plan.failingComponent,
+      nextStep: plan.nextStep, evidenceRefs: plan.evidenceRefs,
+      changeResults: plan.changeResults, updatedAt: plan.updatedAt,
+    })
+    return `Bounded harness and RLM trajectory context:\n${JSON.stringify({
+      trajectory: {
+        stateRevision: runtimeSnapshot.stateRevision,
+        lifecycle: runtimeSnapshot.lifecycle,
+        task: runtimeSnapshot.task.slice(0, 4_000),
+        goal: runtimeSnapshot.goal,
+        children: runtimeSnapshot.children.map(child => ({
+          childId: child.rlmChildId, name: child.name, lifecycle: child.lifecycle,
+          task: child.task.slice(0, 2_000), resultRef: child.resultRef,
+          outputPreview: child.outputPreview?.slice(0, 2_000), error: child.error,
+        })),
+        messages: messages.map(message => ({
+          from: message.fromSessionId, to: message.toSessionId, mode: message.effectiveMode,
+          text: message.text.slice(0, 2_000), artifactRefs: message.artifactRefs,
+          deliveryStatus: message.deliveryStatus, createdAt: message.createdAt,
+        })),
+        events: events.map(entry => ({
+          sequence: entry.sequence, type: entry.type, childId: entry.childId,
+          data: entry.data, createdAt: entry.createdAt,
+        })),
+      },
+      session: { ...(project(session) as object), refinements: sessionRefinements.map(refinement) },
+      workspace: { ...(project(global) as object), refinements: workspaceRefinements.map(refinement) },
+    })}`
+  }
+
+  private async executeAutoRefineTurn(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    sessionId: RlmRuntimeSessionId,
+    allocation: ModelAllocationPlan,
+    stage: 'review' | 'plan',
+    prompt: string,
+  ): Promise<readonly ContentBlock[]> {
+    const timeout = attemptAbort(Math.min(spec.timeoutMs ?? 120_000, 120_000))
+    const executionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:auto-refine:${stage}:${randomUUID()}`)
+    let run: PhysicalOperatorRun | undefined
+    try {
+      const started = await this.startResidentTurn(
+        record, spec, plan.executionWorkspace.path, executionId, allocation,
+        [{ type: 'text', text: prompt }], timeout.controller.signal,
+        `Continuous Harness auto-refine ${stage}`, undefined, `auto-refine:${String(sessionId)}`,
+      )
+      run = started.run
+      const result = await run.result
+      if (result.stopReason !== 'completed') {
+        throw new OrchestrationError(`auto-refine ${stage} stopped with ${result.stopReason}`, 'ORCHESTRATION_UNAVAILABLE')
+      }
+      return result.output
+    } finally {
+      timeout.clearTimeout()
+      if (run !== undefined) await run.dispose()
+    }
+  }
+
+  private parseAutoRefinePlan(
+    output: readonly ContentBlock[],
+    plan: NodeExecutionPlanV1,
+    sessionId: RlmRuntimeSessionId,
+    allocation: ModelAllocationPlan,
+  ): ContinualHarnessRefinementPlanRequest {
+    const parsed = parseModelJson(output, 'auto-refine plan')
+    if (typeof parsed.observation !== 'string' || !Array.isArray(parsed.changes) || parsed.changes.length === 0) {
+      throw new OrchestrationError('auto-refine plan requires observation and changes', 'ORCHESTRATION_UNAVAILABLE')
+    }
+    const evidenceRefs = Array.isArray(parsed.evidenceRefs)
+      ? parsed.evidenceRefs.filter((value): value is string => typeof value === 'string')
+      : []
+    const changes = parsed.changes.map((value, changeIndex): ContinualHarnessRefinementChangeV1 => {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throw new OrchestrationError(`auto-refine change ${String(changeIndex)} is invalid`, 'ORCHESTRATION_UNAVAILABLE')
+      }
+      const change = value as Record<string, unknown>
+      if (!['create', 'update', 'delete'].includes(String(change.operation))
+        || change.entry === null || typeof change.entry !== 'object' || Array.isArray(change.entry)) {
+        throw new OrchestrationError(`auto-refine change ${String(changeIndex)} is invalid`, 'ORCHESTRATION_UNAVAILABLE')
+      }
+      return {
+        operation: change.operation,
+        entry: {
+          ...(change.entry as Record<string, unknown>),
+          workspace: plan.executionWorkspace.path,
+          sessionId: String(sessionId),
+          scope: 'session',
+          provenance: `auto-refine:${allocation.operatorId}:${allocation.model}`,
+        },
+      } as unknown as ContinualHarnessRefinementChangeV1
+    })
+    return {
+      workspace: plan.executionWorkspace.path,
+      sessionId: String(sessionId),
+      scope: 'session',
+      trigger: 'auto',
+      observation: parsed.observation,
+      ...typeof parsed.failingComponent === 'string' ? { failingComponent: parsed.failingComponent } : {},
+      ...typeof parsed.nextStep === 'string' ? { nextStep: parsed.nextStep } : {},
+      evidenceRefs,
+      changes,
+      plannerId: allocation.operatorId,
+      plannerVersion: allocation.model,
+    }
+  }
+
+  private rlmHostBindings(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    controller: AbortController,
+    physicalRuns: PhysicalOperatorRun[],
+  ): RlmRuntimeHostBindings {
+    const runId = String(record.snapshot.runId)
+    const node = record.snapshot.nodes.find(value => value.id === spec.id)
+    return {
+      dispatchChild: async (request) => {
+        const executionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:${String(request.childId)}`)
+        const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.childSessionId)
+        const childPrompt: ContentBlock[] = [{
+          type: 'text',
+          text: [
+            `You are recursive RLM child "${request.name}" at depth ${String(request.depth)}.`,
+            `Bounded task: ${request.task}`,
+            'Use typescript_repl for programmable context or further recursive decomposition when useful.',
+            'rlm(...) returns only an admission handle. Read explicit replies with agentMessage.read().',
+            'Your ordinary final response is retained as a diagnostic artifact but is not delivered as the answer to your parent.',
+            'Before finishing, explicitly send your useful result to the parent with await agentMessage.send(text, { receiverRole: "parent", mode: "auto", artifactRefs?: [...] }).',
+          ].join('\n'),
+        }]
+        const settle = async (
+          settled: PhysicalOperatorResult,
+          workerResult?: ModelWorkerResult,
+        ): Promise<RlmChildExecutionResult> => {
+          if (workerResult !== undefined) {
+            await this.accountRlmGoalUsage(record, plan, 'child', String(executionId), workerResult)
+          }
+          const artifactRef = this.store.putArtifact({
+            kind: 'prime-rlm-child-result', runId, nodeId: spec.id,
+            childId: String(request.childId), childSessionId: String(request.childSessionId),
+            executionId: String(executionId), depth: request.depth, name: request.name,
+            operatorId: request.model.operatorId, model: request.model.model,
+            stopReason: settled.stopReason, output: settled.output,
+            ...settled.continuity === undefined ? {} : { continuity: settled.continuity },
+          })
+          this.store.recordArtifact('compilation_artifacts', {
+            ref: String(artifactRef), runId, nodeId: spec.id,
+            attempt: plan.attempt, generation: plan.capabilityGeneration,
+          })
+          const preview = operatorOutputPreview(settled.output).outputPreview
+          const status = settled.stopReason === 'completed' ? 'settled' as const : 'failed' as const
+          this.store.appendEvents([event(record.snapshot.runId, `rlm.child.${status}`, {
+            executionId: String(executionId), childId: String(request.childId),
+            childSessionId: String(request.childSessionId), artifactRef: String(artifactRef),
+            stopReason: settled.stopReason,
+          }, node)])
+          await this.flushRlmHarnessBoundary(record, spec, plan, request.childSessionId, 'turn-end')
+          return {
+            status,
+            output: settled.output,
+            resultRef: String(artifactRef),
+            outputPreview: preview.slice(0, 8_000),
+            ...status === 'failed' ? { error: `native child stopped with ${settled.stopReason}` } : {},
+          }
+        }
+        const failed = async (error: unknown): Promise<RlmChildExecutionResult> => {
+          await this.flushRlmHarnessBoundary(record, spec, plan, request.childSessionId, 'turn-end')
+          return {
+            status: controller.signal.aborted ? 'indeterminate' : 'failed',
+            error: error instanceof Error ? error.message : String(error),
+          }
+        }
+        if (this.physical.has(request.model.operatorId)) {
+          const started = await this.startResidentTurn(
+            record,
+            spec,
+            plan.executionWorkspace.path,
+            executionId,
+            request.model,
+            childPrompt,
+            controller.signal,
+            `Prime RLM child ${request.name}`,
+            bridge,
+            String(request.childSessionId),
+          )
+          physicalRuns.push(started.run)
+          this.store.appendEvents([event(record.snapshot.runId, 'rlm.child.dispatched', {
+            executionId: String(executionId), childId: String(request.childId),
+            childSessionId: String(request.childSessionId), parentSessionId: String(request.parentSessionId),
+            depth: request.depth, name: request.name, operatorId: request.model.operatorId,
+            model: request.model.model, nativeSessionId: started.receipt.sessionId,
+            nativeTurnId: started.receipt.turnId, executor: 'resident',
+          }, node)])
+          return {
+            nativeSessionId: started.receipt.sessionId,
+            nativeTurnId: started.receipt.turnId,
+            result: started.run.result.then(settle, failed),
+            interrupt: () => this.resident.interrupt(started.receipt.sessionId, started.receipt.turnId),
+          }
+        }
+        const workerResult = this.ctx.modelWorkers.execute({
+          commandId: String(executionId), workerId: request.model.operatorId,
+          model: request.model.model, prompt: childPrompt,
+          ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
+          modelToolBridge: bridge, signal: controller.signal,
+        })
+        const syntheticSessionId = `model-worker:${request.model.operatorId}:${String(request.childSessionId)}`
+        const syntheticTurnId = `model-worker-turn:${String(executionId)}`
+        this.store.appendEvents([event(record.snapshot.runId, 'rlm.child.dispatched', {
+          executionId: String(executionId), childId: String(request.childId),
+          childSessionId: String(request.childSessionId), parentSessionId: String(request.parentSessionId),
+          depth: request.depth, name: request.name, operatorId: request.model.operatorId,
+          model: request.model.model, nativeSessionId: syntheticSessionId,
+          nativeTurnId: syntheticTurnId, executor: 'model-worker',
+        }, node)])
+        return {
+          nativeSessionId: syntheticSessionId,
+          nativeTurnId: syntheticTurnId,
+          result: workerResult.then(result => settle(
+            { output: [...result.output], stopReason: result.stopReason },
+            result,
+          ), failed),
+          interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+        }
+      },
+      dispatchContinuation: request => this.dispatchRlmContinuation(
+        record, spec, plan, request, controller, physicalRuns,
+      ),
+      hostRequest: async ({ sessionId, method, params }) => {
+        const isRootSession = String(sessionId) === `rlm:${String(plan.executionId)}`
+        if (method === 'compact.status') {
+          const state = this.autoRefine.inspect(String(sessionId))
+          return {
+            ready: plan.operatorPlan.mode === 'resident' && isRootSession,
+            scheduled: state.pendingCompactExecution !== undefined,
+            ...isRootSession ? {} : { reason: 'native-history-compaction-is-root-only' },
+            ...state.lastCompactError === undefined ? {} : { lastError: state.lastCompactError },
+          }
+        }
+        if (method === 'compact.run') {
+          if (!isRootSession) {
+            return { scheduled: false, reason: 'native-history-compaction-is-root-only' }
+          }
+          if (plan.operatorPlan.mode !== 'resident') {
+            return { scheduled: false, reason: 'native-history-unavailable-for-model-worker' }
+          }
+          const instructions = params.instructions
+          if (instructions !== undefined && (typeof instructions !== 'string' || instructions.trim().length === 0)) {
+            throw new OrchestrationError('compact.run instructions must be a non-blank string', 'GRAPH_INVALID')
+          }
+          const scheduled = this.autoRefine.markCompact(String(sessionId), instructions)
+          return {
+            scheduled: true,
+            commandId: scheduled.commandId,
+            note: params.instructions === undefined
+              ? 'scheduled for the next native turn boundary'
+              : 'scheduled for the next native turn boundary with model-supplied instructions',
+          }
+        }
+        const scope = params.scope === 'workspace' ? 'workspace' as const : 'session' as const
+        const scoped = {
+          ...params,
+          workspace: plan.executionWorkspace.path,
+          sessionId: String(sessionId),
+          scope,
+        }
+        let result: unknown
+        switch (method) {
+          case 'skills.list':
+            result = await this.listManagedSkills(plan.executionWorkspace.path, String(sessionId))
+            break
+          case 'skills.call':
+            result = await this.callManagedSkill(plan.executionWorkspace.path, String(sessionId), params)
+            break
+          case 'harness.list':
+            result = await this.ctx.continualHarness.list(scoped)
+            break
+          case 'harness.get':
+            result = await this.ctx.continualHarness.get(scoped as unknown as ContinualHarnessListRequest & { readonly entryId: string })
+            break
+          case 'harness.create':
+            result = await this.ctx.continualHarness.create(scoped as unknown as ContinualHarnessCreateRequest)
+            break
+          case 'harness.update':
+            result = await this.ctx.continualHarness.update(scoped as unknown as ContinualHarnessUpdateRequest)
+            break
+          case 'harness.delete':
+            result = await this.ctx.continualHarness.delete(scoped as unknown as ContinualHarnessDeleteRequest)
+            break
+          case 'harness.plan_refinement':
+            result = await this.ctx.continualHarness.planRefinement({
+              ...scoped,
+              changes: Array.isArray(params.changes)
+                ? params.changes.map((value) => {
+                  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
+                  const change = value as Record<string, unknown>
+                  const entry = change.entry
+                  return {
+                    ...change,
+                    ...(entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+                      ? {
+                        entry: {
+                          ...(entry as Record<string, unknown>),
+                          workspace: plan.executionWorkspace.path,
+                          sessionId: String(sessionId),
+                          scope,
+                        },
+                      }
+                      : {}),
+                  }
+                })
+                : params.changes,
+            } as unknown as ContinualHarnessRefinementPlanRequest)
+            break
+          case 'harness.apply_refinement':
+            result = await this.ctx.continualHarness.queueRefinement(scoped as unknown as ContinualHarnessRefinementApplyRequest)
+            break
+          case 'harness.rollback':
+            result = await this.ctx.continualHarness.rollback(scoped as unknown as ContinualHarnessRollbackRequest)
+            break
+        }
+        return JSON.parse(JSON.stringify(result)) as RlmJsonValue
+      },
+    }
+  }
+
+  private async listManagedSkills(workspace: string, sessionId: string): Promise<ContinualHarnessSkillDescriptorV1[]> {
+    const [global, local] = await Promise.all([
+      this.ctx.continualHarness.list({ workspace, scope: 'workspace', kind: 'skill' }),
+      this.ctx.continualHarness.list({ workspace, sessionId, scope: 'session', kind: 'skill' }),
+    ])
+    const entries = new Map<string, ContinualHarnessManagedEntryV2>()
+    for (const entry of [...global, ...local]) entries.set(this.skillAlias(entry), entry)
+    return [...entries.entries()].map(([alias, entry]) => {
+      const { moduleId, callable } = this.managedSkillBinding(entry)
+      return {
+        alias,
+        title: entry.title,
+        callable,
+        arguments: entry.arguments ?? {},
+        available: this.ctx.continualHarnessSkills.has(moduleId, callable),
+      }
+    })
+  }
+
+  private async callManagedSkill(
+    workspace: string,
+    sessionId: string,
+    params: Readonly<Record<string, RlmJsonValue>>,
+  ): Promise<ContinualHarnessJsonValue> {
+    const alias = params.alias
+    const args = params.args
+    if (typeof alias !== 'string' || args === null || typeof args !== 'object' || Array.isArray(args)) {
+      throw new OrchestrationError('skills.call requires a managed alias and JSON object arguments', 'GRAPH_INVALID')
+    }
+    const [global, local] = await Promise.all([
+      this.ctx.continualHarness.list({ workspace, scope: 'workspace', kind: 'skill' }),
+      this.ctx.continualHarness.list({ workspace, sessionId, scope: 'session', kind: 'skill' }),
+    ])
+    const entry = [...global, ...local].reverse().find(candidate => this.skillAlias(candidate) === alias)
+    if (entry === undefined) throw new OrchestrationError(`managed TypeScript skill not found: ${alias}`, 'GRAPH_INVALID')
+    const { moduleId, callable } = this.managedSkillBinding(entry)
+    return this.ctx.continualHarnessSkills.invoke({
+      moduleId,
+      callable,
+      args,
+      workspace,
+      sessionId,
+      entryId: entry.entryId,
+    })
+  }
+
+  private skillAlias(entry: ContinualHarnessManagedEntryV2): string {
+    if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(entry.entryId) && entry.entryId.length <= 128) return entry.entryId
+    return `skill-${canonicalSha256({ entryId: entry.entryId }).slice(0, 24)}`
+  }
+
+  private managedSkillBinding(entry: ContinualHarnessManagedEntryV2): {
+    readonly moduleId: string
+    readonly callable: string
+  } {
+    const moduleId = entry.reference?.import
+    const callable = entry.reference?.callable
+      ?? entry.reference?.callPattern
+      ?? entry.reference?.call_pattern
+    if (typeof moduleId !== 'string' || typeof callable !== 'string') {
+      throw new OrchestrationError(`managed TypeScript skill binding is invalid: ${entry.entryId}`, 'GRAPH_INVALID')
+    }
+    return { moduleId, callable }
+  }
+
+  private async dispatchRlmContinuation(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    request: Parameters<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>[0],
+    controller: AbortController,
+    physicalRuns: PhysicalOperatorRun[],
+  ): Promise<Awaited<ReturnType<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>>> {
+    const executionId = PhysicalOperatorExecutionId(String(request.commandId))
+    const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.sessionId)
+    const prompt: ContentBlock[] = [{
+      type: 'text',
+      text: [
+        `Continue the persistent Prime RLM session for this ${request.source}.`,
+        request.instruction,
+        'Use typescript_repl to inspect the preserved context, variables, child registry, explicit messages, Continuous Harness, and goal state.',
+        request.source === 'goal'
+          ? 'Audit the objective. Call await goal.complete() only when every requirement is actually achieved; otherwise make concrete progress within this continuation.'
+          : request.source === 'heartbeat'
+            ? 'Treat this heartbeat as scheduled new work. Use explicit family messages for any recursive results.'
+            : `Process the queued family message using ${request.deliveryMode} ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.`,
+      ].join('\n'),
+    }]
+    const settle = async (
+      result: PhysicalOperatorResult,
+      workerResult?: ModelWorkerResult,
+    ): Promise<RlmChildExecutionResult> => {
+      if (request.source === 'goal' && workerResult !== undefined) {
+        await this.accountRlmGoalUsage(record, plan, 'goal-continuation', String(request.commandId), workerResult)
+      }
+      const artifactRef = this.store.putArtifact({
+        kind: `prime-rlm-${request.source}-continuation`,
+        runId: String(record.snapshot.runId), nodeId: spec.id,
+        runtimeSessionId: String(request.sessionId), commandId: String(request.commandId),
+        operatorId: request.model.operatorId, model: request.model.model,
+        stopReason: result.stopReason, output: result.output,
+      })
+      this.store.recordArtifact('compilation_artifacts', {
+        ref: String(artifactRef), runId: String(record.snapshot.runId), nodeId: spec.id,
+        attempt: plan.attempt, generation: plan.capabilityGeneration,
+      })
+      const status = result.stopReason === 'completed' ? 'settled' as const : 'failed' as const
+      this.store.appendEvents([event(record.snapshot.runId, `rlm.${request.source}.continuation.${status}`, {
+        runtimeSessionId: String(request.sessionId), commandId: String(request.commandId),
+        artifactRef: String(artifactRef), stopReason: result.stopReason,
+      }, record.snapshot.nodes.find(value => value.id === spec.id))])
+      await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')
+      return {
+        status, output: result.output, resultRef: String(artifactRef),
+        outputPreview: operatorOutputPreview(result.output).outputPreview,
+        ...status === 'failed' ? { error: `continuation stopped with ${result.stopReason}` } : {},
+      }
+    }
+    const failed = async (error: unknown): Promise<RlmChildExecutionResult> => {
+      await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')
+      return {
+        status: controller.signal.aborted ? 'indeterminate' : 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+    if (this.physical.has(request.model.operatorId)) {
+      const started = await this.startResidentTurn(
+        record, spec, plan.executionWorkspace.path, executionId, request.model,
+        prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId),
+      )
+      physicalRuns.push(started.run)
+      return {
+        nativeSessionId: started.receipt.sessionId,
+        nativeTurnId: started.receipt.turnId,
+        result: started.run.result.then(settle, failed),
+        interrupt: () => this.resident.interrupt(started.receipt.sessionId, started.receipt.turnId),
+      }
+    }
+    const result = this.ctx.modelWorkers.execute({
+      commandId: String(request.commandId), workerId: request.model.operatorId,
+      model: request.model.model, prompt,
+      ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
+      modelToolBridge: bridge, signal: controller.signal,
+    })
+    return {
+      nativeSessionId: `model-worker:${request.model.operatorId}:${String(request.sessionId)}`,
+      nativeTurnId: `model-worker-turn:${String(request.commandId)}`,
+      result: result.then(value => settle(
+        { output: [...value.output], stopReason: value.stopReason },
+        value,
+      ), failed),
+      interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+    }
+  }
+
+  private async continueActiveRlmGoal(
+    sessionId: RlmRuntimeSessionId,
+    bindings: RlmRuntimeHostBindings,
+    initial: PhysicalOperatorResult,
+    timeoutMs?: number,
+  ): Promise<PhysicalOperatorResult> {
+    let result = initial
+    for (;;) {
+      const snapshot = await this.ctx.rlmRuntime.inspect(sessionId)
+      const goal = snapshot.goal
+      if (goal === undefined || goal.status !== 'active') return result
+      const commandId = RlmCommandId(`${String(sessionId)}:goal-continuation:${String(goal.continuationsUsed + 1)}`)
+      const claim = await this.ctx.rlmRuntime.claimGoalContinuation(sessionId, commandId)
+      if (claim === undefined) return result
+      if (bindings.dispatchContinuation === undefined) throw new OrchestrationError('RLM host cannot continue an active goal', 'ORCHESTRATION_UNAVAILABLE')
+      const execution = await bindings.dispatchContinuation({
+        sessionId,
+        commandId: claim.commandId,
+        instruction: claim.objective,
+        source: 'goal',
+        deliveryMode: 'follow_up',
+        model: snapshot.model,
+      })
+      await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
+      const continuation = await execution.result
+      if (continuation.status !== 'settled') {
+        throw Object.assign(new Error(continuation.error ?? `RLM goal continuation became ${continuation.status}`), {
+          code: continuation.status === 'indeterminate' ? 'NODE_INDETERMINATE' : 'ORCHESTRATION_UNAVAILABLE',
+        })
+      }
+      if (continuation.output !== undefined) result = { output: [...continuation.output], stopReason: 'completed' }
+      const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(timeoutMs ?? 120_000, 300_000))
+      if (drained.lastContinuation?.output !== undefined) {
+        result = { output: [...drained.lastContinuation.output], stopReason: 'completed' }
+      }
+    }
+  }
+
+  private async accountRlmGoalUsage(
+    record: RuntimeRunRecord,
+    plan: NodeExecutionPlanV1,
+    source: 'root' | 'child' | 'goal-continuation',
+    sourceCommandId: string,
+    result: Pick<ModelWorkerResult, 'stopReason' | 'usage'>,
+  ): Promise<void> {
+    const usage = result.usage
+    if (usage === undefined || result.stopReason === 'error' || result.stopReason === 'aborted') return
+    const sessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
+    const queueKey = String(sessionId)
+    const previous = this.rlmGoalUsageQueues.get(queueKey) ?? Promise.resolve()
+    const queued = previous.catch(() => undefined).then(async () => {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const snapshot = await this.ctx.rlmRuntime.inspect(sessionId)
+        if (snapshot.goal?.active !== true) return
+        try {
+          const goal = await this.ctx.rlmRuntime.accountGoalUsage({
+            sessionId,
+            commandId: RlmCommandId(`${sourceCommandId}:goal-usage`),
+            expectedStateRevision: snapshot.stateRevision,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+          })
+          this.store.appendEvents([event(record.snapshot.runId, 'rlm.goal.usage', {
+            runtimeSessionId: String(sessionId),
+            source,
+            sourceCommandId,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            tokensUsed: goal.tokensUsed,
+            status: goal.status,
+          }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
+          return
+        } catch (error) {
+          if (!(error instanceof Error) || !('code' in error) || error.code !== 'RLM_REVISION_CONFLICT') throw error
+        }
+      }
+      throw new OrchestrationError(
+        `RLM Goal usage revision did not converge for ${sourceCommandId}`,
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    })
+    this.rlmGoalUsageQueues.set(queueKey, queued)
+    try {
+      await queued
+    } finally {
+      if (this.rlmGoalUsageQueues.get(queueKey) === queued) this.rlmGoalUsageQueues.delete(queueKey)
     }
   }
 
@@ -1584,10 +2526,12 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     workspace: string,
     executionId: PhysicalOperatorExecutionId,
-    allocation: ModelAllocationPlan,
+    allocation: Pick<ModelAllocationPlan, 'operatorId' | 'model' | 'profile'>,
     prompt: readonly ContentBlock[],
     signal: AbortSignal,
     label: string,
+    modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
+    residentLaneId?: string,
   ): Promise<{ readonly run: PhysicalOperatorRun; readonly receipt: ResidentReceiptIdentity }> {
     const operator = this.physical.get(allocation.operatorId)
     if (operator === undefined) {
@@ -1601,8 +2545,144 @@ export class OrchestrationDaemon {
       parent: fakeParent(workspace, String(record.snapshot.runId)),
       signal,
       ...allocation.profile === undefined ? {} : { residentProfile: allocation.profile },
+      ...modelToolBridge === undefined ? {} : { modelToolBridge },
+      ...residentLaneId === undefined ? {} : { residentLaneId },
     })
     return { run, receipt: operator.takeReceipt(String(executionId)) }
+  }
+
+  private dispatchModelWorkerRlm(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    contextPacket: ContextPacketV1,
+    capabilityPlan: CapabilityBindingPlanV1,
+    harnessSnapshot?: ContinualHarnessSnapshotV1,
+  ): void {
+    const timeout = attemptAbort(spec.timeoutMs)
+    const { controller } = timeout
+    const physicalRuns: PhysicalOperatorRun[] = []
+    const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident-rlm')
+    const result = this.executeModelWorkerRlm(
+      record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
+    )
+    this.markAttemptRunning(record, spec, acceptedAttempt, {
+      executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
+      model: plan.allocationPlan.model, contextIsolation: 'model-worker-prime-rlm',
+      executor: 'resident-rlm',
+    })
+    const run = {
+      result: result.finally(timeout.clearTimeout),
+      dispose: async (): Promise<void> => {
+        timeout.clearTimeout()
+        controller.abort()
+        await Promise.allSettled(physicalRuns.map(value => value.dispose()))
+      },
+    }
+    this.trackDelegatedAttempt('resident-rlm', record, spec, plan, run)
+  }
+
+  private async executeModelWorkerRlm(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    contextPacket: ContextPacketV1,
+    capabilityPlan: CapabilityBindingPlanV1,
+    harnessSnapshot: ContinualHarnessSnapshotV1 | undefined,
+    controller: AbortController,
+    physicalRuns: PhysicalOperatorRun[],
+  ): Promise<PhysicalOperatorResult> {
+    const rlmPlan = plan.rlmPlan
+    if (rlmPlan?.enabled !== true) throw new OrchestrationError('Model-worker RLM dispatch requires an enabled sealed plan', 'GRAPH_INVALID')
+    const runId = String(record.snapshot.runId)
+    const node = record.snapshot.nodes.find(value => value.id === spec.id)
+    const rootSessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
+    const bindings = this.rlmHostBindings(record, spec, plan, controller, physicalRuns)
+    await this.ctx.rlmRuntime.create({
+      sessionId: rootSessionId,
+      commandId: RlmCommandId(`${String(plan.executionId)}:rlm:create`),
+      executionId: String(plan.executionId),
+      workspace: plan.executionWorkspace.path,
+      task: spec.task,
+      model: { operatorId: plan.allocationPlan.operatorId, model: plan.allocationPlan.model },
+      ...plan.rlmWorkerPlan === undefined ? {} : { defaultChildModel: {
+        operatorId: plan.rlmWorkerPlan.operatorId,
+        model: plan.rlmWorkerPlan.model,
+        ...plan.rlmWorkerPlan.profile === undefined ? {} : { profile: plan.rlmWorkerPlan.profile },
+      } },
+      limits: {
+        maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
+        maxCellMs: Math.min(spec.timeoutMs ?? 120_000, 300_000), maxOutputBytes: 512 * 1024,
+      },
+      context: {
+        runId, nodeId: spec.id, task: spec.task,
+        contextPacketRef: String(plan.contextPacketRef), capabilityPlanRef: String(plan.capabilityPlanRef),
+        graphCertificateHash: plan.graphCertificateHash,
+        ...plan.rlmWorkerPlan === undefined ? {} : {
+          defaultChildOperatorId: plan.rlmWorkerPlan.operatorId,
+          defaultChildModel: plan.rlmWorkerPlan.model,
+          defaultChildTier: plan.rlmWorkerPlan.tier,
+        },
+      },
+    }, bindings)
+    const bridge = await this.ctx.rlmRuntime.modelToolBridge(rootSessionId)
+    const prompt = primeRlmRootPrompt(promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan), plan.rlmWorkerPlan)
+    this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.started', {
+      runtimeSessionId: String(rootSessionId), planSha256: rlmPlan.planSha256,
+      maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
+      rootOperatorId: plan.allocationPlan.operatorId, rootModel: plan.allocationPlan.model,
+      tool: 'typescript_repl', topologyOwner: 'model', executor: 'model-worker',
+    }, node)])
+    try {
+      const rootExecution = this.ctx.modelWorkers.execute({
+        commandId: `${String(plan.executionId)}:rlm:root`,
+        workerId: plan.operatorPlan.operatorId,
+        model: plan.allocationPlan.model,
+        prompt,
+        rlmPlan,
+        modelToolBridge: bridge,
+        signal: controller.signal,
+      })
+      await this.ctx.rlmRuntime.trackExecution(rootSessionId, {
+        nativeSessionId: `model-worker:${plan.operatorPlan.operatorId}:${String(rootSessionId)}`,
+        nativeTurnId: `model-worker-turn:${String(plan.executionId)}:rlm:root`,
+        result: rootExecution.then(
+          value => asRlmExecutionResult({ output: [...value.output], stopReason: value.stopReason }),
+          (error: unknown) => ({
+            status: controller.signal.aborted ? 'indeterminate' as const : 'failed' as const,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        ),
+        interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+      })
+      const rootResult = await rootExecution
+      await this.accountRlmGoalUsage(
+        record,
+        plan,
+        'root',
+        `${String(plan.executionId)}:rlm:root`,
+        rootResult,
+      )
+      await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
+      const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
+      const afterMessages = drained.lastContinuation?.output === undefined
+        ? { output: [...rootResult.output], stopReason: rootResult.stopReason }
+        : { output: [...drained.lastContinuation.output], stopReason: 'completed' as const }
+      const result = await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
+      const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
+        executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
+        childCount: snapshot.children.length, stateRevision: snapshot.stateRevision,
+        degradedVariables: snapshot.degradedVariables, stopReason: result.stopReason,
+      }, node)])
+      return result
+    } catch (error) {
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.failed', {
+        executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
+        code: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
+      }, node)])
+      throw error
+    }
   }
 
   private dispatchModelWorker(
@@ -2019,13 +3099,15 @@ export class OrchestrationDaemon {
     })
   }
 
-  private async selectResidentRlmWorker(
+  private async selectRlmWorker(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     rlmPlan: RlmExecutionPlanV1,
   ): Promise<ModelAllocationPlan> {
     const providers = await this.resident.providers()
-    const offers = this.residentOffers(record, spec, providers, false)
+    const residentOffers = this.residentOffers(record, spec, providers, false)
+    const modelWorkerOffers = await this.ctx.modelWorkers.offers()
+    const offers = [...residentOffers, ...modelWorkerOffers]
     const available = offers.filter(value => value.available)
     const targetTier = available.some(value => value.tier === 'low')
       ? 'low'

@@ -1,11 +1,19 @@
 /** DeepSeek official API last-resort orchestration worker. @module @deepseek-ai/dsh-model-worker-deepseek */
 
+import { createConnection } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
+import {
+  BlockAssembler,
+  createAssistantMessage,
+  createToolResultMessage,
+  createUserMessage,
+  type Message,
+  type TokenUsage,
+} from '@deepseek-ai/dsh-llm'
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
-import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
-import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
+import { ModelWorkerError, type ModelWorkerExecuteRequest, type ModelWorkerProvider, type ModelWorkerResult, type ModelWorkerToolBridgeV1 } from '@deepseek-ai/dsh-model-worker'
+import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 
 export const name = 'model-worker-deepseek'
 /** Stable allocator identity for the metered DeepSeek API worker. */
@@ -38,29 +46,32 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
       available,
       maxConcurrency: 4,
       activeCount: this.activeCount,
-      tags: ['api', 'deepseek', 'text-only', 'no-tools'],
+      tags: ['api', 'deepseek', 'text-only', 'dynamic-tools'],
     }))
   }
 
   async execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
     this.activeCount += 1
     try {
-      if (request.rlmPlan?.enabled === true) return await this.executeRlm(request, request.rlmPlan)
-      return await this.generate(request, request.prompt)
+      if (request.rlmPlan?.enabled === true) {
+        if (request.modelToolBridge === undefined) throw new ModelWorkerError('RLM model worker requires a genuine model-tool bridge', 'MODEL_WORKER_INVALID')
+        return await this.generateWithTools(request, request.modelToolBridge)
+      }
+      return await this.generate(request, [createUserMessage({
+        content: [...request.prompt],
+        source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-model-worker-deepseek' },
+      })])
     } finally {
       this.activeCount -= 1
     }
   }
 
-  private async generate(request: ModelWorkerExecuteRequest, prompt: readonly import('@deepseek-ai/dsh-llm').ContentBlock[]): Promise<ModelWorkerResult> {
+  private async generate(request: ModelWorkerExecuteRequest, messages: Message[]): Promise<ModelWorkerResult> {
     const assembler = new BlockAssembler()
     for await (const chunk of this.ctx.llm.stream({
       provider: 'deepseek-official',
       model: request.model,
-      messages: [createUserMessage({
-        content: [...prompt],
-        source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-model-worker-deepseek' },
-      })],
+      messages,
       signal: request.signal,
     })) assembler.push(chunk)
     const finish = assembler.finish
@@ -75,22 +86,113 @@ export class DeepSeekModelWorker implements ModelWorkerProvider {
     }
   }
 
-  private async executeRlm(request: ModelWorkerExecuteRequest, plan: RlmExecutionPlanV1): Promise<ModelWorkerResult> {
-    const branches = Math.max(1, Math.min(plan.maxChildren, plan.maxTurns - 1, 4))
-    const branchResults = await Promise.all(Array.from({ length: branches }, async (_value, index) => {
-      return this.generate(request, [
-        ...request.prompt,
-        { type: 'text' as const, text: `RLM branch ${String(index + 1)} of ${String(branches)}: independently analyze one useful decomposition or solution path. Keep this branch self-contained and evidence-oriented.` },
-      ])
-    }))
-    const branchText = branchResults.map((result, index) => {
-      const text = result.output.filter(block => block.type === 'text').map(block => block.text).join('\n')
-      return `Branch ${String(index + 1)}:\n${text}`
-    }).join('\n\n')
-    return this.generate(request, [
-      ...request.prompt,
-      { type: 'text', text: `Synthesize and verify the following independent RLM branches into one final answer. Resolve contradictions and retain concrete evidence.\n\n${branchText}` },
-    ])
+  private async generateWithTools(request: ModelWorkerExecuteRequest, bridge: ModelWorkerToolBridgeV1): Promise<ModelWorkerResult> {
+    if (bridge.tools.length !== 1 || bridge.tools[0]?.name !== 'typescript_repl') {
+      throw new ModelWorkerError('DeepSeek RLM requires the single qualified typescript_repl model tool', 'MODEL_WORKER_INVALID')
+    }
+    const messages: Message[] = [createUserMessage({
+      content: [...request.prompt],
+      source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-model-worker-deepseek' },
+    })]
+    let usage: TokenUsage | undefined
+    const maxToolRounds = Math.max(4, Math.min((request.rlmPlan?.maxTurns ?? 8) * 4, 64))
+    for (let round = 0; round <= maxToolRounds; round += 1) {
+      const assembler = new BlockAssembler()
+      for await (const chunk of this.ctx.llm.stream({
+        provider: 'deepseek-official',
+        model: request.model,
+        messages,
+        tools: bridge.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: { ...tool.inputSchema } })),
+        signal: request.signal,
+      })) assembler.push(chunk)
+      usage = mergeUsage(usage, assembler.usage)
+      const blocks = assembler.blocks()
+      if (assembler.finish.kind !== 'tool-calls') {
+        const stopReason = assembler.finish.kind === 'stop' ? 'completed' as const
+          : assembler.finish.kind === 'max-tokens' ? 'max-tokens' as const
+            : assembler.finish.kind === 'aborted' ? 'aborted' as const
+              : 'error' as const
+        return { output: blocks, stopReason, ...usage === undefined ? {} : { usage } }
+      }
+      if (round === maxToolRounds) throw new ModelWorkerError('DeepSeek RLM exceeded the bounded model-tool round limit', 'MODEL_WORKER_INVALID')
+      messages.push(createAssistantMessage({
+        content: blocks,
+        source: {
+          provider: 'deepseek-official', model: request.model,
+          ...assembler.replayState === undefined ? {} : { replayState: assembler.replayState },
+        },
+      }))
+      const calls = blocks.filter(block => block.type === 'tool-call')
+      if (calls.length === 0) throw new ModelWorkerError('DeepSeek returned tool_calls without a complete tool call', 'MODEL_WORKER_INVALID')
+      for (const call of calls) {
+        let isError = false
+        let result: unknown
+        try {
+          if (!bridge.tools.some(tool => tool.name === call.name)) throw new Error(`tool is outside the sealed bridge: ${call.name}`)
+          const argumentsValue = JSON.parse(call.arguments) as unknown
+          if (argumentsValue === null || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) throw new Error('tool arguments must be an object')
+          result = await callModelToolBridge(
+            bridge,
+            call.name,
+            argumentsValue as Readonly<Record<string, unknown>>,
+            `${request.commandId}:deepseek-tool:${String(call.id)}`,
+            request.signal,
+          )
+        } catch (error) {
+          isError = true
+          result = { error: error instanceof Error ? error.message : String(error) }
+        }
+        messages.push(createToolResultMessage({
+          callId: call.id,
+          content: [{ type: 'text', text: JSON.stringify(result) }],
+          isError,
+        }))
+      }
+    }
+    throw new ModelWorkerError('DeepSeek RLM tool loop terminated unexpectedly', 'MODEL_WORKER_INVALID')
+  }
+}
+
+function mergeUsage(left: TokenUsage | undefined, right: TokenUsage | undefined): TokenUsage | undefined {
+  if (left === undefined) return right
+  if (right === undefined) return left
+  return {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    cacheReadTokens: (left.cacheReadTokens ?? 0) + (right.cacheReadTokens ?? 0),
+    cacheWriteTokens: (left.cacheWriteTokens ?? 0) + (right.cacheWriteTokens ?? 0),
+    reasoningTokens: (left.reasoningTokens ?? 0) + (right.reasoningTokens ?? 0),
+  }
+}
+
+async function callModelToolBridge(
+  bridge: ModelWorkerToolBridgeV1,
+  tool: string,
+  argumentsValue: Readonly<Record<string, unknown>>,
+  commandId: string,
+  signal: AbortSignal,
+): Promise<unknown> {
+  const socket = createConnection(bridge.socketPath)
+  const transport = new JsonRpcLineTransport(socket, socket)
+  const connected = new Promise<void>((resolve, reject) => {
+    socket.once('connect', resolve)
+    socket.once('error', reject)
+  })
+  const abort = (): void => { socket.destroy(signal.reason instanceof Error ? signal.reason : new Error('model tool bridge aborted')) }
+  signal.addEventListener('abort', abort, { once: true })
+  try {
+    await connected
+    transport.start()
+    return await transport.request('tool.call', {
+      session_id: bridge.sessionId,
+      command_id: commandId,
+      tool,
+      arguments: argumentsValue,
+    }, signal)
+  } finally {
+    signal.removeEventListener('abort', abort)
+    transport.close()
+    socket.destroy()
   }
 }
 
