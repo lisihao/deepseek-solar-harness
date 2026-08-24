@@ -215,6 +215,7 @@ flowchart TD
     pkg_host_directory_picker_native["host-directory-picker-native"]
     pkg_host_frontend_static["host-frontend-static"]
     pkg_host_plugin_inventory["host-plugin-inventory"]
+    pkg_host_remote_auth["host-remote-auth"]
     pkg_host_webserver["host-webserver"]
   end
   subgraph group_identity["packages/identity"]
@@ -379,6 +380,7 @@ flowchart TD
   pkg_host_directory_picker --> pkg_invariants
   pkg_host_directory_picker_browse --> pkg_invariants
   pkg_host_directory_picker_native --> pkg_invariants
+  pkg_host_remote_auth --> pkg_invariants
   pkg_host_webserver --> pkg_invariants
   pkg_sandbox_windows_acl --> pkg_invariants
   pkg_storage --> pkg_invariants
@@ -389,6 +391,7 @@ flowchart TD
   pkg_typert_registry --> pkg_invariants
   pkg_attachment --> pkg_brand
   pkg_attachment --> pkg_invariants
+  pkg_client_connection --> pkg_host_remote_auth
   pkg_client_connection --> pkg_host_webserver
   pkg_client_connection --> pkg_invariants
   pkg_client_hmr --> pkg_client_modules
@@ -1177,6 +1180,7 @@ flowchart TD
   pkg_subagent_spawn_in_process --> pkg_subagent_in_process_driver
   pkg_client_runtime --> pkg_api_remotes
   pkg_client_runtime --> pkg_invariants
+  pkg_client_runtime --> pkg_session_projection
   pkg_client_runtime --> pkg_typert_protocol
   pkg_client_runtime --> pkg_typert_registry
   pkg_compaction_basic --> pkg_agent
@@ -1223,6 +1227,7 @@ flowchart TD
   pkg_tool_orchestration --> pkg_session_projection
   pkg_tool_orchestration --> pkg_system_prompt
   pkg_tool_orchestration --> pkg_tools
+  pkg_ui_orchestration --> pkg_host_remote_auth
   pkg_ui_orchestration --> pkg_host_webserver
   pkg_ui_orchestration --> pkg_invariants
   pkg_ui_orchestration --> pkg_orchestration
@@ -1592,6 +1597,7 @@ flowchart TD
 | [`host-directory-picker`](../packages/host/directory-picker) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`host-directory-picker-browse`](../packages/host/directory-picker-browse) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`host-directory-picker-native`](../packages/host/directory-picker-native) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`host-remote-auth`](../packages/host/remote-auth) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`host-webserver`](../packages/host/webserver) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`sandbox-windows-acl`](../packages/sandbox/sandbox-windows-acl) | `sandbox` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`storage`](../packages/storage/storage) | `storage` | [`invariants`](../packages/runtime-diagnostics/invariants) |
@@ -1601,7 +1607,7 @@ flowchart TD
 | [`typert-protocol`](../packages/typert/protocol) | `typert` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`typert-registry`](../packages/typert/registry) | `typert` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`attachment`](../packages/attachment/attachment) | `attachment` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
-| [`client-connection`](../packages/client/connection) | `client` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`client-connection`](../packages/client/connection) | `client` | [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-hmr`](../packages/client/hmr) | `client` | [`client-modules`](../packages/client/modules), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`credentials`](../packages/credentials/credentials) | `credentials` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`subprocess-e2b`](../packages/e2b/subprocess-e2b) | `e2b` | [`e2b`](../packages/e2b/e2b), [`invariants`](../packages/runtime-diagnostics/invariants), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
@@ -1762,12 +1768,12 @@ flowchart TD
 | [`subagent-codex`](../packages/subagent/subagent-codex) | `subagent` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
 | [`subagent-fork-in-process`](../packages/subagent/subagent-fork-in-process) | `subagent` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent), [`subagent-in-process-driver`](../packages/subagent/subagent-in-process-driver) |
 | [`subagent-spawn-in-process`](../packages/subagent/subagent-spawn-in-process) | `subagent` | [`invariants`](../packages/runtime-diagnostics/invariants), [`subagent`](../packages/subagent/subagent), [`subagent-in-process-driver`](../packages/subagent/subagent-in-process-driver) |
-| [`client-runtime`](../packages/client/runtime) | `client` | [`api-remotes`](../packages/api/remotes), [`invariants`](../packages/runtime-diagnostics/invariants), [`typert-protocol`](../packages/typert/protocol), [`typert-registry`](../packages/typert/registry) |
+| [`client-runtime`](../packages/client/runtime) | `client` | [`api-remotes`](../packages/api/remotes), [`invariants`](../packages/runtime-diagnostics/invariants), [`session-projection`](../packages/session/session-projection), [`typert-protocol`](../packages/typert/protocol), [`typert-registry`](../packages/typert/registry) |
 | [`compaction-basic`](../packages/compaction/compaction-basic) | `compaction` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`compaction`](../packages/compaction/compaction), [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`token-meter`](../packages/llm/token-meter) |
 | [`agent-spine-demo`](../packages/examples/agent-spine-demo) | `examples` | [`agent`](../packages/core/agent), [`agent-instructions`](../packages/context/agent-instructions), [`agent-loop`](../packages/core/agent-loop), [`goal`](../packages/goal/goal), [`goal-round-driver`](../packages/goal/goal-round-driver), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs-local`](../packages/jobs/jobs-local), [`llm`](../packages/llm/llm), [`llm-retry`](../packages/llm/llm-retry), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`session-title`](../packages/session/session-title), [`shell-env`](../packages/shell/shell-env), [`skill`](../packages/skill/skill), [`skill-filesystem`](../packages/skill/skill-filesystem), [`system-prompt`](../packages/core/system-prompt), [`tool-bash`](../packages/shell/tool-bash), [`tool-goal`](../packages/goal/tool-goal), [`tool-jobs`](../packages/jobs/tool-jobs), [`tool-skill`](../packages/skill/tool-skill), [`tools`](../packages/core/tools) |
 | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | `orchestration` | [`credentials`](../packages/credentials/credentials), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`model-worker`](../packages/orchestration/model-worker), [`rlm-strategy`](../packages/orchestration/rlm-strategy) |
 | [`tool-orchestration`](../packages/orchestration/tool-orchestration) | `orchestration` | [`commands`](../packages/interaction/commands), [`invariants`](../packages/runtime-diagnostics/invariants), [`model-allocation`](../packages/orchestration/model-allocation), [`orchestration`](../packages/orchestration/orchestration), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
-| [`ui-orchestration`](../packages/orchestration/ui-orchestration) | `orchestration` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`orchestration`](../packages/orchestration/orchestration) |
+| [`ui-orchestration`](../packages/orchestration/ui-orchestration) | `orchestration` | [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`orchestration`](../packages/orchestration/orchestration) |
 | [`sdk-client`](../packages/sdk/client) | `sdk` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session) |
 | [`sdk-jsonrpc-server`](../packages/sdk/server) | `sdk` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`llm-deepseek`](../packages/llm/llm-deepseek), [`scope`](../packages/core/scope), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent) |
 | [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | `subagent` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-client`](../packages/sdk/client), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent), [`subprocess`](../packages/subprocess/subprocess) |
