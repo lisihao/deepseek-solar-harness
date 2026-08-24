@@ -487,6 +487,67 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(incremental, {})
         self.assertEqual(evidence_head, governance.git_head(self.root))
 
+    def test_reuses_exact_gate_inputs_after_commit_is_amended(self):
+        self.profile["evidence_reuse"] = {"enabled": True, "gates": ["always"]}
+        self.profile_path.write_text(json.dumps(self.profile), encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "."], cwd=self.root, check=True, stdout=subprocess.DEVNULL
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "record reusable evidence"],
+            cwd=self.root,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        payload = governance.plan_payload(
+            self.root, self.profile, self.profile_path, "full", "quick", None
+        )
+        gates = governance.select_gates(self.profile, payload["scopes"], "quick")
+        fingerprints = governance.gate_input_fingerprints(
+            self.root, self.profile, gates, payload["changed_files"], None
+        )
+        results = governance.execute_gates(
+            self.root, gates, False, False, input_fingerprints=fingerprints
+        )
+        report = self.root.parent / f"{self.root.name}-amended-reuse.json"
+        governance.write_attestation(
+            report,
+            self.root,
+            self.profile,
+            self.profile_path,
+            payload,
+            results,
+            None,
+        )
+        evidence_head = governance.git_head(self.root)
+        subprocess.run(
+            ["git", "commit", "--amend", "-m", "rewrite reusable evidence"],
+            cwd=self.root,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        self.assertNotEqual(evidence_head, governance.git_head(self.root))
+
+        current_files = governance.changed_files(self.root, None)
+        current_fingerprints = governance.gate_input_fingerprints(
+            self.root, self.profile, gates, current_files, None
+        )
+        reused, incremental, reused_head = governance.load_reusable_evidence(
+            report,
+            self.root,
+            self.profile,
+            self.profile_path,
+            gates,
+            current_files,
+            None,
+            current_fingerprints,
+        )
+        self.assertIn("always", reused)
+        self.assertEqual(reused["always"]["reuse_basis"], "exact-input")
+        self.assertEqual(incremental, {})
+        self.assertEqual(reused_head, evidence_head)
+        report.unlink(missing_ok=True)
+
     def test_does_not_reuse_a_consumer_when_its_dependency_changed(self):
         (self.root / "docs").mkdir()
         self.profile["scope_rules"].append({"scope": "docs", "patterns": ["docs/**"]})
