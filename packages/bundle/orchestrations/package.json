@@ -23,6 +23,8 @@
     "@deepseek-ai/dsh-model-allocation-local": "workspace:^",
     "@deepseek-ai/dsh-model-worker": "workspace:^",
     "@deepseek-ai/dsh-model-worker-deepseek": "workspace:^",
+    "@deepseek-ai/dsh-rlm-runtime": "workspace:^",
+    "@deepseek-ai/dsh-rlm-runtime-local": "workspace:^",
     "@deepseek-ai/dsh-rlm-strategy": "workspace:^",
     "@deepseek-ai/dsh-rlm-strategy-local": "workspace:^",
     "@deepseek-ai/dsh-orchestration-local": "workspace:^",

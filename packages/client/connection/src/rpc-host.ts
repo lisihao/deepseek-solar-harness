@@ -32,6 +32,14 @@ interface ConnectionRpcInterceptor {
   readonly options: ConnectionRpcHandlerOptions
 }
 
+/** Deliberate HTTP rejection from a channel handler before business dispatch. */
+export class ConnectionRpcHttpError extends Error {
+  constructor(readonly status: 400 | 401 | 403 | 404 | 409, message: string) {
+    super(message)
+    this.name = 'ConnectionRpcHttpError'
+  }
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Host Connection transport and RPC registrations. */
@@ -178,9 +186,12 @@ function rpcFetchHandler(
       }
 
       try {
-        const result = await handler(endpoint, message.payload, request.signal)
+        const result = await handler(endpoint, message.payload, request.signal, { request })
         return fullResponse(message.rpcId, result)
       } catch (error) {
+        if (error instanceof ConnectionRpcHttpError) {
+          return new Response(error.message, { status: error.status })
+        }
         return new Response(`handler failure: ${String(error)}`, { status: 500 })
       }
     },

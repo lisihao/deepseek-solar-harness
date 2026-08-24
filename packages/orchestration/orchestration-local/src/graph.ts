@@ -30,6 +30,15 @@ export function validateGraph(value: unknown): string[] {
   const graph = value as unknown as LogicalTaskGraphV1
   requiredString(graph.title, 'graph.title')
   requiredString(graph.workspace, 'graph.workspace')
+  if (graph.baseSha !== undefined && !/^[a-f0-9]{7,64}$/iu.test(graph.baseSha)) {
+    throw new OrchestrationError('graph.baseSha must be a 7 to 64 character hexadecimal Git id', 'GRAPH_INVALID')
+  }
+  if (graph.workspaceIsolation !== undefined && !['shared', 'git-worktree'].includes(graph.workspaceIsolation)) {
+    throw new OrchestrationError('graph.workspaceIsolation is unsupported', 'GRAPH_INVALID')
+  }
+  if (graph.workspaceIsolation === 'git-worktree' && graph.baseSha === undefined) {
+    throw new OrchestrationError('git-worktree isolation requires graph.baseSha', 'GRAPH_INVALID')
+  }
   if (!Number.isSafeInteger(graph.maxParallel) || graph.maxParallel < 1 || graph.maxParallel > 64) {
     throw new OrchestrationError('graph.maxParallel must be an integer from 1 through 64', 'GRAPH_INVALID')
   }
@@ -55,6 +64,16 @@ export function validateGraph(value: unknown): string[] {
     stringArray(node.readScopes, `graph.nodes[${String(index)}].readScopes`)
     stringArray(node.writeScopes, `graph.nodes[${String(index)}].writeScopes`)
     stringArray(node.approvedSecretRefs, `graph.nodes[${String(index)}].approvedSecretRefs`)
+    if (node.forbiddenScopes !== undefined) {
+      stringArray(node.forbiddenScopes, `graph.nodes[${String(index)}].forbiddenScopes`)
+    }
+    if (node.requiredArtifacts !== undefined) {
+      stringArray(node.requiredArtifacts, `graph.nodes[${String(index)}].requiredArtifacts`)
+    }
+    if (node.timeoutMs !== undefined
+      && (!Number.isSafeInteger(node.timeoutMs) || node.timeoutMs < 1_000 || node.timeoutMs > 86_400_000)) {
+      throw new OrchestrationError(`node ${node.id} timeoutMs must be from 1000 through 86400000`, 'GRAPH_INVALID')
+    }
     if (!isRecord(candidate.retryPolicy)) {
       throw new OrchestrationError(`node ${node.id} retryPolicy must be an object`, 'GRAPH_INVALID')
     }
@@ -102,7 +121,51 @@ export function validateGraph(value: unknown): string[] {
     }
   }
   if (order.length !== graph.nodes.length) throw new OrchestrationError('graph contains a dependency cycle', 'GRAPH_CYCLE')
+  if (graph.qualityPolicy !== undefined) {
+    if (!isRecord(graph.qualityPolicy)
+      || !['required', 'advisory'].includes(graph.qualityPolicy.independentVerification)) {
+      throw new OrchestrationError('graph.qualityPolicy.independentVerification is unsupported', 'GRAPH_INVALID')
+    }
+    if (graph.qualityPolicy.independentVerification === 'required') {
+      const verificationNodes = graph.nodes.filter(node => node.phase === 'verification' && node.requiredForCompletion)
+      if (verificationNodes.length === 0) {
+        throw new OrchestrationError('strict quality policy requires a completion-critical verification node', 'GRAPH_INVALID')
+      }
+      for (const node of graph.nodes.filter(node => (
+        node.phase !== 'verification'
+        && (node.writeScopes.length > 0 || node.effectBudget.write.length > 0)
+      ))) {
+        if (!verificationNodes.some(verifier => dependsTransitively(graph, verifier.id, node.id))) {
+          throw new OrchestrationError(
+            `mutating node ${node.id} has no dependent completion-critical verification node`,
+            'GRAPH_INVALID',
+          )
+        }
+      }
+    }
+  }
   return order
+}
+
+/**
+ * Test whether one node transitively depends on another node.
+ * @param graph - validated logical TaskGraph.
+ * @param nodeId - dependent node identity.
+ * @param dependencyId - candidate transitive dependency identity.
+ * @returns whether the dependency is reachable from the node.
+ */
+export function dependsTransitively(graph: LogicalTaskGraphV1, nodeId: string, dependencyId: string): boolean {
+  const byId = new Map(graph.nodes.map(node => [node.id, node]))
+  const pending = [...(byId.get(nodeId)?.dependsOn ?? [])]
+  const seen = new Set<string>()
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (current === undefined || seen.has(current)) continue
+    if (current === dependencyId) return true
+    seen.add(current)
+    pending.push(...(byId.get(current)?.dependsOn ?? []))
+  }
+  return false
 }
 
 /**

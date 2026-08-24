@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { canonicalRequestHash, ResidentStore } from '../src/store.ts'
+import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from '../src/store.ts'
 
 const roots: string[] = []
 const PROFILE = { model: 'test-model', effort: 'high' as const }
@@ -211,6 +211,25 @@ describe('ResidentStore', () => {
     migrated.close()
   })
 
+  it('migrates schema v4 by adding the native compaction receipt table', () => {
+    const path = root()
+    const bootstrap = new ResidentStore(path)
+    bootstrap.close()
+    const legacy = new DatabaseSync(join(path, 'state.sqlite'))
+    legacy.exec('DROP TABLE session_compaction_receipts; PRAGMA user_version = 4;')
+    legacy.close()
+
+    const migrated = new ResidentStore(path)
+    const source = migrated.accept('v4-source', 'v4-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    migrated.markRunning('v4-source', 'v4-native')
+    migrated.settle('v4-source', { output: [], stopReason: 'completed' })
+    const before = migrated.inspectSession(source.sessionId)
+    const hash = canonicalCompactRequestHash(source.sessionId, before.stateRevision)
+    expect(migrated.acceptCompaction('v5-compact', hash, source.sessionId, before.stateRevision))
+      .toMatchObject({ state: 'accepted', nativeSessionId: 'v4-native' })
+    migrated.close()
+  })
+
   it('keeps a settled product terminal healthy and owner-only on disk', () => {
     const path = root()
     const store = new ResidentStore(path)
@@ -294,6 +313,36 @@ describe('ResidentStore', () => {
     expect(reset.executionProfile).toBeUndefined()
     expect(reset.stateRevision).toBe(snapshot.stateRevision + 1)
     store.close()
+  })
+
+  it('recovers an interrupted native compaction as indeterminate and never replays it', () => {
+    const stateRoot = root()
+    const first = new ResidentStore(stateRoot)
+    const source = first.accept('compact-crash-source', 'source-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    first.markRunning('compact-crash-source', 'thread-native')
+    first.settle('compact-crash-source', { output: [], stopReason: 'completed' })
+    const before = first.inspectSession(source.sessionId)
+    const hash = canonicalCompactRequestHash(source.sessionId, before.stateRevision, 'retain decisions')
+    first.acceptCompaction('compact-crash', hash, source.sessionId, before.stateRevision)
+    first.markCompactionRunning('compact-crash')
+    first.close()
+
+    const recovered = new ResidentStore(stateRoot)
+    const interrupted = recovered.inspectSession(source.sessionId)
+    expect(interrupted).toMatchObject({ lifecycle: 'idle', health: 'degraded', healthReason: 'process_crashed' })
+    expect(() => recovered.acceptCompaction('compact-crash', hash, source.sessionId, before.stateRevision))
+      .toThrow(expect.objectContaining({ code: 'COMMAND_INDETERMINATE' }))
+    expect(recovered.readEvents(source.sessionId).events).toContainEqual(expect.objectContaining({
+      type: 'session.compaction_indeterminate',
+      data: { commandId: 'compact-crash', reason: 'daemon_recovery' },
+    }))
+    recovered.resolveIndeterminate('compact-crash', interrupted.stateRevision)
+    const resolved = recovered.inspectSession(source.sessionId)
+    expect(resolved).toMatchObject({ health: 'ok' })
+    const nextHash = canonicalCompactRequestHash(source.sessionId, resolved.stateRevision)
+    expect(recovered.acceptCompaction('compact-after-resolution', nextHash, source.sessionId, resolved.stateRevision))
+      .toMatchObject({ state: 'accepted', nativeSessionId: 'thread-native' })
+    recovered.close()
   })
 
   it('spills a large result to a content-addressed artifact', () => {

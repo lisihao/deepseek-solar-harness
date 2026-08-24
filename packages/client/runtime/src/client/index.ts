@@ -202,6 +202,10 @@ export function apply(ctx: Context): void {
     'runtime: initial Workspace selection',
   )
   const loop = connection.start({
+    onRemoteSnapshot: (_description, snapshot) => {
+      sessions.replaceRemoteBaseline(snapshot.sessions)
+      workspaces.replaceRemoteBaseline(snapshot.workspaces, snapshot.archivedSessionIds)
+    },
     onMuxEnvelope: (envelope) => {
       sessions.handleMuxEnvelope(envelope)
     },
@@ -216,8 +220,11 @@ export function apply(ctx: Context): void {
       if (frame.type === 'host/remote-event') ctx.remote.$dispatch(frame.event, frame.args)
     },
     onConnected: () => {
-      sessions.handleConnected()
-      workspaces.handleConnected()
+      if (connection.transport === 'remote-projection') sessions.handleRemoteConnected()
+      else {
+        sessions.handleConnected()
+        workspaces.handleConnected()
+      }
       ctx.emit('connection/reset')
     },
     onStateChange: (state) => {

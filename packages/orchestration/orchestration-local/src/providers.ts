@@ -152,6 +152,17 @@ export class BasicContextCompiler extends ContextCompilerService {
       dropped.push({ source, reason: 'source unavailable' })
     }
     const task = redact(request.task)
+    const includedRefs = new Set(included.map(source => source.ref))
+    const sourceMaterials = (request.sourceMaterials ?? []).map((material) => {
+      if (!includedRefs.has(material.ref)) {
+        throw new ContextCompilerError(
+          `materialized context source is not included by policy: ${material.ref}`,
+          'CONTEXT_INVALID',
+        )
+      }
+      const result = redact(material.text)
+      return { ...material, text: result.text, changed: result.changed }
+    })
     const instructions = request.capsuleInstructions.map((instruction) => {
       const result = redact(instruction.text)
       return { ...instruction, text: result.text, changed: result.changed }
@@ -159,13 +170,16 @@ export class BasicContextCompiler extends ContextCompilerService {
     const redactions = [
       ...task.changed ? ['task'] : [],
       ...instructions.filter(value => value.changed).map(value => `capsule:${value.ref}`),
+      ...sourceMaterials.filter(value => value.changed).map(value => `source:${value.ref}`),
     ]
     const capsuleInstructions = instructions.map(({ changed: _changed, ...value }) => value)
+    const materials = sourceMaterials.map(({ changed: _changed, ...value }) => value)
     const estimateInput = {
       objective: request.objective,
       workspace: request.workspace,
       task: task.text,
       included,
+      sourceMaterials: materials,
       readScopes: request.readScopes,
       writeScopes: request.writeScopes,
       acceptance: request.acceptance,
@@ -186,6 +200,7 @@ export class BasicContextCompiler extends ContextCompilerService {
       workspace: request.workspace,
       task: task.text,
       included,
+      sourceMaterials: materials,
       summarized: [],
       dropped,
       estimatedTokens,

@@ -252,6 +252,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Provides bounded session/workspace outcome context while the TaskGraph daemon remains the only orchestration state authority.',
   },
   {
+    key: 'continualHarnessSkills',
+    pkg: 'continual-harness',
+    title: 'Continuous Harness TypeScript skill registry',
+    mode: 'core',
+    consumers: ['continual-harness-local'],
+    note: 'Registers trusted TypeScript modules and invokes only an explicitly allowed module/callable pair; generated harness content cannot create executable code at runtime.',
+  },
+  {
     key: 'modelAllocation',
     pkg: 'model-allocation',
     title: 'Quota-aware model allocation seam',
@@ -279,6 +287,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph.',
   },
   {
+    key: 'rlmRuntime',
+    pkg: 'rlm-runtime',
+    title: 'Persistent programmable RLM runtime',
+    mode: 'seam',
+    implementations: ['rlm-runtime-local'],
+    consumers: ['orchestration-local'],
+    note: 'Owns the node-local TypeScript kernel, asynchronous child registry, family messages, receipts, goals, and recovery without becoming a second global TaskGraph scheduler.',
+  },
+  {
     key: 'orchestrations',
     pkg: 'orchestration',
     title: 'Persistent TaskGraph authority',
@@ -286,6 +303,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     implementations: ['orchestration-local'],
     consumers: ['tool-orchestration', 'ui-orchestration'],
     note: 'Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer.',
+  },
+  {
+    key: 'remoteAuth',
+    pkg: 'remote-auth',
+    title: 'Remote device authentication authority',
+    mode: 'core',
+    consumers: ['connection', 'ui-orchestration'],
+    note: 'The Server is the sole writer for pairing, credential exchange, fixed device scopes, revocation, and payload-free command receipts; transport and orchestration projections consume authenticated principals without owning credential state.',
   },
   {
     key: 'storage',

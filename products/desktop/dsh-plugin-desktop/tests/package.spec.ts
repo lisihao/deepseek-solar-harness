@@ -105,12 +105,14 @@ describe('published package surface', () => {
 
   it('aligns the terminal backend with the persistent Bash tool prompt', () => {
     const prompt = '__DSH_PERSISTENT_BASH_PROMPT__ '
+    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
+    const dshRequire = createRequire(workspaceRequire.resolve('@deepseek-ai/dsh/package.json'))
     const terminalBash = readFileSync(
-      new URL('node_modules/@deepseek-ai/dsh-terminal-bash/lib/index.js', packageRoot),
+      dshRequire.resolve('@deepseek-ai/dsh-terminal-bash'),
       'utf8',
     )
     const persistentTool = readFileSync(
-      new URL('node_modules/@deepseek-ai/dsh-tool-bash-persistent/lib/index.js', packageRoot),
+      dshRequire.resolve('@deepseek-ai/dsh-tool-bash-persistent'),
       'utf8',
     )
 
@@ -118,12 +120,57 @@ describe('published package surface', () => {
     expect(persistentTool).toContain(`const SHELL_PROMPT = ${JSON.stringify(prompt)};`)
   })
 
+  it('keeps every SettingsScope consumer on the provider ABI release', () => {
+    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
+    const webAppRequire = createRequire(workspaceRequire.resolve('@deepseek-ai/dsh-web-app/package.json'))
+    const packageVersions = [
+      ['provider', workspaceRequire, '@deepseek-ai/dsh-client-ui-settings'],
+      ['general', webAppRequire, '@deepseek-ai/dsh-client-ui-settings-general'],
+      ['agent-preset', webAppRequire, '@deepseek-ai/dsh-client-ui-agent-preset'],
+      ['permission-presets', webAppRequire, '@deepseek-ai/dsh-client-ui-permission-presets'],
+      ['settings-models', webAppRequire, '@deepseek-ai/dsh-client-ui-settings-models'],
+      ['settings-plugins', webAppRequire, '@deepseek-ai/dsh-client-ui-settings-plugins'],
+    ].map(([role, resolver, packageName]) => {
+      const packageJson = JSON.parse(readFileSync(
+        (resolver as NodeJS.Require).resolve(`${packageName as string}/package.json`),
+        'utf8',
+      )) as { version?: unknown }
+      return [role, packageJson.version]
+    })
+
+    expect(Object.fromEntries(packageVersions)).toEqual({
+      provider: '0.1.0-rc.6',
+      general: '0.1.0-rc.6',
+      'agent-preset': '0.1.0-rc.6',
+      'permission-presets': '0.1.0-rc.6',
+      'settings-models': '0.1.0-rc.6',
+      'settings-plugins': '0.1.0-rc.6',
+    })
+  })
+
+  it('keeps the complete registry runtime on one recorded DSH ABI release', () => {
+    const upstream = JSON.parse(readFileSync(new URL('upstream.json', workspaceRoot), 'utf8')) as {
+      runtimePackageVersion?: unknown
+    }
+    const lockText = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
+    const versions = new Set(
+      [...lockText.matchAll(/resolution: "@deepseek-ai\/dsh(?:-[^"@]+)?@npm:([^"#]+)"/gu)]
+        .map(match => match[1]),
+    )
+    expect([...versions]).toEqual([upstream.runtimePackageVersion])
+  })
+
   it('builds public Host plugins and their private native bootstraps', () => {
     const config = readFileSync(new URL('tsdown.config.ts', packageRoot), 'utf8')
+    const frontendSetup = readFileSync(new URL('src/frontend-setup.ts', packageRoot), 'utf8')
 
     expect(config).toContain("'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts'")
     expect(config).toContain("'windows-acl-runner': 'src/windows-acl-runner.ts'")
     expect(config).toContain("'desktop-cli': 'src/desktop-cli.ts'")
+    expect(config).toContain("name: `${PACKAGE_NAME}/frontend-setup-preload`")
+    expect(config).toContain("entry: { 'frontend-setup-preload': 'src/frontend-setup-preload.ts' }")
+    expect(config).toContain("entryFileNames: 'frontend-setup-preload.cjs'")
+    expect(frontendSetup).toContain("new URL('./frontend-setup-preload.cjs', import.meta.url)")
     expect(config).toContain("'desktop-runtime-environment': 'src/desktop-runtime-environment.ts'")
     expect(config).toContain("'desktop-terminal': 'src/desktop-terminal.ts'")
     expect(config).toContain("'profile-manager': 'src/profile-manager.ts'")
@@ -138,12 +185,18 @@ describe('published package surface', () => {
   it('installs the private pnpm PATH after the launch snapshot and before profile boot', () => {
     const main = readFileSync(new URL('src/main.ts', packageRoot), 'utf8')
     const snapshot = main.indexOf('const environment = loadLayeredEnv')
+    const frontend = main.indexOf("if (deploymentState.role === 'frontend')")
+    const localRuntime = main.indexOf('const electronVersion = process.versions.electron')
     const install = main.indexOf('const pnpmRuntime = installDesktopPnpmRuntime')
     const products = main.indexOf('const nativeProductRuntime = installNativeProductRuntime')
     const prepare = main.indexOf('const prepared = prepareDesktopProfile')
     const boot = main.indexOf('const ctx = await boot')
 
     expect(snapshot).toBeGreaterThanOrEqual(0)
+    expect(frontend).toBeGreaterThan(snapshot)
+    expect(localRuntime).toBeGreaterThan(frontend)
+    expect(main.slice(frontend, localRuntime)).toMatch(/\n\s+return\n/)
+    expect(install).toBeGreaterThan(frontend)
     expect(install).toBeGreaterThan(snapshot)
     expect(products).toBeGreaterThan(install)
     expect(prepare).toBeGreaterThan(products)

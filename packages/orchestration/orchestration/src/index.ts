@@ -52,6 +52,54 @@ export interface OrchestrationAcceptanceRequirement {
   readonly kind: 'operator-completed' | 'artifact-present' | 'human-review'
 }
 
+/** Immutable per-attempt Workbench contract retained as the execution task artifact. */
+export interface WorkbenchTaskContractV1 {
+  readonly version: 1
+  readonly taskId: string
+  readonly repository: {
+    readonly workspace: string
+    readonly baseSha?: string
+    readonly executionWorkspace: NodeExecutionWorkspaceV1
+  }
+  readonly objective: string
+  readonly task: string
+  readonly dependencies: {
+    readonly nodeIds: readonly string[]
+    readonly evidenceRefs: readonly OrchestrationArtifactRef[]
+  }
+  readonly authority: {
+    readonly readScopes: readonly string[]
+    readonly writeScopes: readonly string[]
+    readonly forbiddenScopes: readonly string[]
+    readonly effects: CapabilityEffectSet
+  }
+  readonly acceptance: readonly OrchestrationAcceptanceRequirement[]
+  readonly requiredArtifacts: readonly string[]
+  readonly models: {
+    readonly plannerNodeIds: readonly string[]
+    readonly executor: {
+      readonly operatorId: string
+      readonly model: string
+      readonly tier: ModelExecutionOffer['tier']
+      readonly source: 'native-subscription' | 'metered-api'
+    }
+    readonly verifierNodeIds: readonly string[]
+    readonly verifierTier: 'high' | 'unspecified'
+  }
+  readonly quota: {
+    readonly class: 'native-subscription' | 'metered-api'
+    readonly poolId?: string
+  }
+  readonly timeoutMs?: number
+  readonly retryPolicy: OrchestrationRetryPolicy
+  readonly permissions: {
+    readonly externalNetwork: boolean
+    readonly destructive: boolean
+    readonly approvedSecretRefs: readonly string[]
+  }
+  readonly contractSha256: string
+}
+
 /** Version-one node specification in one certified logical TaskGraph. */
 export interface OrchestrationNodeSpecV1 {
   readonly id: string
@@ -67,8 +115,14 @@ export interface OrchestrationNodeSpecV1 {
   readonly readScopes: readonly string[]
   readonly writeScopes: readonly string[]
   readonly approvedSecretRefs: readonly string[]
+  /** Scopes explicitly excluded even when a broader read/write budget exists. */
+  readonly forbiddenScopes?: readonly string[]
   readonly acceptance: readonly OrchestrationAcceptanceRequirement[]
+  /** Named outputs the node contract must retain as Evidence. */
+  readonly requiredArtifacts?: readonly string[]
   readonly retryPolicy: OrchestrationRetryPolicy
+  /** Optional wall-clock bound for one physical attempt. */
+  readonly timeoutMs?: number
   /** Quality-gate position used by the replaceable model allocator. */
   readonly phase?: ModelTaskPhase
   /** Node-local recursive execution; never a fourth global Scheduler or physical operator. */
@@ -89,9 +143,26 @@ export interface LogicalTaskGraphV1 {
   readonly version: 1
   readonly title: string
   readonly workspace: string
+  /** Optional Git commit the Workbench contract is based on. */
+  readonly baseSha?: string
+  /** Isolate mutating worker nodes in one Git worktree and branch per attempt. */
+  readonly workspaceIsolation?: 'shared' | 'git-worktree'
   readonly maxParallel: number
   readonly risk: 'low' | 'medium' | 'high'
+  /** Opt-in strict quality policy for code-changing Workbench graphs. */
+  readonly qualityPolicy?: {
+    readonly independentVerification: 'required' | 'advisory'
+  }
   readonly nodes: readonly OrchestrationNodeSpecV1[]
+}
+
+/** Filesystem and Git branch sealed for one physical attempt. */
+export interface NodeExecutionWorkspaceV1 {
+  readonly mode: 'shared' | 'git-worktree'
+  readonly path: string
+  /** Commit from which this attempt branch was created. */
+  readonly startSha?: string
+  readonly branch?: string
 }
 
 /** Hash certificate proving the Graph's execution upper bounds. */
@@ -199,6 +270,7 @@ export interface NodeExecutionPlanV1 {
   readonly intentRef: OrchestrationArtifactRef
   readonly requirementRef?: OrchestrationArtifactRef
   readonly taskRef: OrchestrationArtifactRef
+  readonly executionWorkspace: NodeExecutionWorkspaceV1
   readonly capabilityPlanRef: OrchestrationArtifactRef
   readonly capabilityGeneration: number
   readonly contextPacketRef: OrchestrationArtifactRef
@@ -292,6 +364,7 @@ export interface OrchestrationEventPage {
 
 /** Optimistic run control request. */
 export interface OrchestrationControlRequest {
+  readonly commandId: string
   readonly runId: OrchestrationRunId
   readonly expectedRevision: number
   readonly action: 'pause' | 'resume' | 'cancel'
@@ -300,6 +373,7 @@ export interface OrchestrationControlRequest {
 
 /** Human decision for a pending run or node approval. */
 export interface OrchestrationDecisionRequest {
+  readonly commandId: string
   readonly runId: OrchestrationRunId
   readonly expectedRevision: number
   readonly nodeId?: string
@@ -309,10 +383,24 @@ export interface OrchestrationDecisionRequest {
 
 /** Explicit indeterminate attempt resolution. */
 export interface OrchestrationIndeterminateRequest {
+  readonly commandId: string
   readonly runId: OrchestrationRunId
   readonly nodeId: string
   readonly expectedRevision: number
   readonly decision: 'abandon' | 'retry'
+  readonly reason: string
+}
+
+/** Explicitly abandon one crash-uncertain background auto-refinement round. */
+export interface OrchestrationAutoRefineIndeterminateRequest {
+  readonly commandId: string
+  readonly runId: OrchestrationRunId
+  readonly nodeId: string
+  readonly expectedRevision: number
+  readonly sessionId: string
+  readonly roundId: string
+  readonly branchVersion: string
+  readonly decision: 'abandon'
   readonly reason: string
 }
 
@@ -345,6 +433,12 @@ export type OrchestrationErrorCode =
   | 'NODE_INDETERMINATE'
   | 'CAPABILITY_RECOMPILE_REQUIRED'
   | 'CAPABILITY_HOTSWAP_UNSUPPORTED'
+  | 'COMMAND_CONFLICT'
+  | 'COMMAND_INDETERMINATE'
+  | 'WORKSPACE_INVALID'
+  | 'WORKSPACE_DIRTY'
+  | 'INTEGRATION_FAILED'
+  | 'INTEGRATION_CONFLICT'
   | 'ORCHESTRATION_VERSION_MISMATCH'
   | 'ORCHESTRATION_UNAVAILABLE'
 
@@ -418,6 +512,12 @@ export abstract class OrchestrationService extends Service {
    * @returns the updated run snapshot.
    */
   abstract resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promise<OrchestrationRunSnapshot>
+  /**
+   * Resolve a crash-uncertain auto-refinement round without replaying model work.
+   * @param request - run identity, expected revision, and explicit resolution.
+   * @returns the updated durable run snapshot.
+   */
+  abstract resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterminateRequest): Promise<OrchestrationRunSnapshot>
   /**
    * Propose one late-bound capability change.
    * @param request - requested capability change.

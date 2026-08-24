@@ -8,7 +8,11 @@ Claude Code 使用官方 Agent SDK 持久化与恢复 Session，并通过不提�
 
 ## 协议、存储与恢复
 
-JSON-RPC 2.0 通过仅属主可访问的 Unix socket 以 NDJSON 传输。握手会拒绝 Resident 协议、state schema、daemon build、必需方法集、已配置 Driver manifest、产品版本、产品协议 hash 或原生订阅资格不一致。协议 v6 新增通用 Driver SPI 与优雅 `system.shutdown`；配置新的 Driver 集合时，客户端会先退出不兼容的旧 daemon 再重连。daemon 在单写 WAL 数据库中保存 `resident_sessions`、`command_receipts`、`session_leases`、有界事件及 Artifact 索引。
+JSON-RPC 2.0 通过仅属主可访问的 Unix socket 以 NDJSON 传输。握手会拒绝 Resident 协议、state schema、daemon build、必需方法集、已配置 Driver manifest、产品版本、产品协议 hash 或原生订阅资格不一致。协议 v8 新增基于 Receipt 的 `session.compact`；协议 v7 为 RLM turn 携带已密封的模型工具桥；协议 v6 新增通用 Driver SPI 与优雅 `system.shutdown`。配置新的 Driver 集合时，客户端会先退出不兼容的旧 daemon 再重连。daemon 在单写 WAL 数据库中保存 `resident_sessions`、turn `command_receipts`、`session_compaction_receipts`、`session_leases`、有界事件及 Artifact 索引。
+
+原生压缩只会在 Session 为 idle 且调用方 state revision 完全一致时准入。Claude Code 恢复同一个 Agent SDK Session，发送原生 `/compact`，并可携带指导语；Codex 恢复同一个非临时 app-server thread 后调用 `thread/compact/start`，由于该方法没有 instructions 字段，Codex 会明确拒绝非空指导语。daemon 会在调用产品前写入 accepted Receipt；相同已结算命令返回缓存结果，内容变化时报冲突，accepted/running 阶段崩溃或传输终态不明时进入 `COMMAND_INDETERMINATE`。再次压缩前必须显式处置，daemon 绝不会自动重放外部产品副作用。持久 Receipt 与事件只记录 canonical request hash 及是否提供指导语，不保存指导语正文。
+
+RLM turn 只暴露一个 `typescript_repl` Host 工具。Claude Code 通过进程内 Agent SDK MCP server 接收该工具；Codex 通过 app-server 的 `thread/start.dynamicTools` 与 `item/tool/call` 接收该工具。每个原生调用身份在进入 RLM Receipt store 前都会以外层 Resident command 划分命名空间，因此重连同一个原生调用不会执行第二次 cell。调用方提供的 lane 会把 RLM 原生 thread 与普通 Resident 对话隔离；后续 Codex turn 会恢复创建时已经固定动态工具表面的 thread。
 
 Codex 模型发现是执行前提，订阅配额遥测只用于调度参考。临时的限额遥测故障会保留已通过资格审查的模型目录和执行路径，暴露 `quotaUnavailableReason`，并把配额池标为未知，而不是误报整个原生订阅不可用。
 
@@ -42,6 +46,6 @@ No direct invalidation; the model-visible physical-operator Consumer owns its sc
 
 ## Known Limitations and Deferred Work
 
-- 协议 v6 与 state schema v4 只支持本地 Unix socket，schema v1 至 v3 会迁移到兼容 `legacy` lane，正式验收平台为 macOS；Windows named pipe 后置。
+- 协议 v8 与 state schema v5 只支持本地 Unix socket，schema v1 至 v3 会迁移到兼容 `legacy` lane，schema v4 会新增压缩 Receipt 表，正式验收平台为 macOS；Windows named pipe 后置。
 - 产品原生权限策略仍是权威；DSH 文件沙箱不会自动限制外部产品。
 - 人工写接管、durable Jobs 投影、远程算子池、亲和调度与 transcript 持久化均不在首发范围。

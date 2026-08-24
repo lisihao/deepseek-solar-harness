@@ -151,16 +151,25 @@
     - id: modules
       name: '@deepseek-ai/dsh-client-modules'
 
+    # Durable device registry and short-lived access sessions. The service is
+    # transport-agnostic; Connection owns the HTTP/WebSocket authentication
+    # boundary and activates it only for deploymentRole=server.
+    - id: remote-auth
+      name: '@deepseek-ai/dsh-host-remote-auth'
+
     # Owns both ends of the web transport: node half binds the gateway to the
     # webserver under /api; browser half is the fetch/SSE client.
     - id: connection
       name: '@deepseek-ai/dsh-client-connection'
-      inject: [webRuntime]
+      inject: [webRuntime, webStartup]
       config:
         # LAN literals derived from the active bind plus --trusted-host extras.
         # A deployment adding authorities keeps this expression and concatenates
         # its literals, for example: ['app.internal', ...ctx.webRuntime.trustedHosts].
         trustedHosts: !!js ctx.webRuntime.trustedHosts
+        # Only the persistent Server role owns replayable remote projections;
+        # ordinary `web` keeps the existing two-stream reconnect behavior.
+        remoteSync: !!js ctx.webStartup.deploymentRole === 'server'
 
     - id: api-remotes
       name: '@deepseek-ai/dsh-api-remotes'

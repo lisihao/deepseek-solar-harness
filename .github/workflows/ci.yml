@@ -483,7 +483,11 @@ jobs:
     timeout-minutes: 60
     env:
       DSH_COVERAGE_MAX_WORKERS: '2'
-      DSH_GATE_CONCURRENCY: '2'
+      # Coverage and its exempt aggregate each own a Vitest worker. Running
+      # both gates together on the hosted Windows runner makes otherwise-fast
+      # 5s contracts contend with V8 instrumentation and fail nondeterministically.
+      # Keep the complete inventory, but serialize its top-level gates.
+      DSH_GATE_CONCURRENCY: '1'
       DSH_PUBLINT_CONCURRENCY: '4'
     steps:
       - uses: actions/checkout@v6

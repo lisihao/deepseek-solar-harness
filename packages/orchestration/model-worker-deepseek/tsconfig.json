@@ -10,6 +10,7 @@
     { "path": "../../runtime-diagnostics/invariants" },
     { "path": "../model-allocation" },
     { "path": "../model-worker" },
-    { "path": "../rlm-strategy" }
+    { "path": "../rlm-strategy" },
+    { "path": "../../sdk/protocol" }
   ]
 }

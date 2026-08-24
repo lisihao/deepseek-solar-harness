@@ -9,6 +9,7 @@ export type {
   ContextCompilerErrorCode,
   ContextPacketV1,
   ContextPolicy,
+  ContextSourceMaterialV1,
   ContextSourceRef,
 } from './types.ts'
 

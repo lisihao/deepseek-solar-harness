@@ -1,16 +1,21 @@
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { CapabilityCapsuleRef } from '@deepseek-ai/dsh-capability-capsule'
 import { OrchestrationError, type LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
 import { canonicalSha256 } from '../src/canonical.ts'
 import { graphCertificate, nodesConflict, validateGraph } from '../src/graph.ts'
+import { GitWorktreeManager } from '../src/git-worktrees.ts'
 import { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from '../src/providers.ts'
 import { OrchestrationStore } from '../src/store.ts'
 
 const roots: string[] = []
+const run = promisify(execFile)
 afterEach(async () => {
   for (const root of roots.splice(0)) await import('node:fs/promises').then(fs => fs.rm(root, { recursive: true, force: true }))
 })
@@ -63,12 +68,15 @@ describe('immutable compilation foundations', () => {
         { ref: 'sha256:upstream', kind: 'artifact', required: true },
         { ref: 'unavailable:knowledge', kind: 'knowledge', required: false },
       ],
+      sourceMaterials: [{ ref: 'sha256:upstream', text: 'TOKEN=upstream-secret', truncated: false }],
       readScopes: [], writeScopes: [], acceptance: [], capsuleInstructions: [],
       policy: { maxTokens: 2_048, allowedSourceKinds: ['artifact', 'knowledge'], unavailableSource: 'degrade' },
     })
     expect(packet.lineage).toEqual(['sha256:upstream'])
     expect(packet.degradedSources).toEqual(['unavailable:knowledge'])
     expect(packet.task).toContain('[REDACTED]')
+    expect(packet.sourceMaterials[0]?.text).toContain('[REDACTED]')
+    expect(packet.redactions).toContain('source:sha256:upstream')
     expect(packet.packetSha256).toBe(canonicalSha256({ ...packet, packetSha256: undefined }))
     await ctx.root.fiber.dispose()
   })
@@ -81,6 +89,62 @@ describe('immutable compilation foundations', () => {
     expect(nodesConflict(valid.nodes[0]!, { ...valid.nodes[1]!, readScopes: [], writeScopes: ['src/a/nested'] })).toBe(true)
     const cyclic = { ...valid, nodes: valid.nodes.map(node => node.id === 'A' ? { ...node, dependsOn: ['B'] } : node) }
     expect(() => validateGraph(cyclic)).toThrow(expect.objectContaining<Partial<OrchestrationError>>({ code: 'GRAPH_CYCLE' }))
+  })
+
+  it('requires a completion-critical downstream verifier for strict mutating graphs', async () => {
+    const workspace = await temporary()
+    const fixture = graph(workspace)
+    const strict: LogicalTaskGraphV1 = {
+      ...fixture,
+      qualityPolicy: { independentVerification: 'required' },
+      nodes: fixture.nodes.map(node => node.id === 'B'
+        ? { ...node, phase: 'verification' as const, writeScopes: [] }
+        : node),
+    }
+    expect(validateGraph(strict)).toEqual(['A', 'B'])
+    expect(() => validateGraph({
+      ...strict,
+      nodes: strict.nodes.map(node => node.id === 'B' ? { ...node, phase: 'execution' as const } : node),
+    })).toThrow(/verification node/)
+  })
+
+  it('isolates parallel workers in branches and integrates each branch idempotently', async () => {
+    const root = await temporary()
+    const repository = join(root, 'repository')
+    await mkdir(repository)
+    await run('git', ['-C', repository, 'init', '-b', 'main'])
+    await writeFile(join(repository, 'README.md'), 'base\n')
+    await run('git', ['-C', repository, 'add', 'README.md'])
+    await run('git', [
+      '-C', repository,
+      '-c', 'user.name=DSH Test',
+      '-c', 'user.email=dsh-test@local',
+      'commit', '-m', 'base',
+    ])
+    const baseSha = (await run('git', ['-C', repository, 'rev-parse', 'HEAD'])).stdout.trim()
+    const manager = new GitWorktreeManager(join(root, 'worktrees'))
+    await manager.verifyRepository(repository, baseSha)
+    const [first, second] = await Promise.all([
+      manager.prepare(repository, 'run-fixture', 'first', 1),
+      manager.prepare(repository, 'run-fixture', 'second', 1),
+    ])
+    expect(first.path).not.toBe(second.path)
+    expect(first.branch).not.toBe(second.branch)
+    await Promise.all([
+      writeFile(join(first.path, 'first.txt'), 'first\n'),
+      writeFile(join(second.path, 'second.txt'), 'second\n'),
+    ])
+    const [firstIntegration, secondIntegration] = await Promise.all([
+      manager.integrate(repository, first, 'fixture:first:1'),
+      manager.integrate(repository, second, 'fixture:second:1'),
+    ])
+    expect(firstIntegration?.commits).toHaveLength(1)
+    expect(secondIntegration?.commits).toHaveLength(1)
+    await expect(readFile(join(repository, 'first.txt'), 'utf8')).resolves.toMatch(/^first\r?\n$/u)
+    await expect(readFile(join(repository, 'second.txt'), 'utf8')).resolves.toMatch(/^second\r?\n$/u)
+    const head = (await run('git', ['-C', repository, 'rev-parse', 'HEAD'])).stdout.trim()
+    await expect(manager.integrate(repository, first, 'fixture:first:1')).resolves.toMatchObject({ integratedHead: head })
+    expect((await run('git', ['-C', repository, 'rev-parse', 'HEAD'])).stdout.trim()).toBe(head)
   })
 
   it('fails closed when a capsule expands network authority', async () => {
@@ -128,8 +192,21 @@ describe('immutable compilation foundations', () => {
     const tables = (store.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map(value => value.name)
     expect(tables).toEqual(expect.arrayContaining([
       'runs', 'attempts', 'orchestration_events', 'compilation_artifacts', 'capability_bindings',
-      'context_packets', 'node_execution_plans', 'capability_updates',
+      'context_packets', 'node_execution_plans', 'capability_updates', 'command_receipts',
     ]))
+    store.close()
+  })
+
+  it('adds durable command receipts when opening a schema-one store', async () => {
+    const root = await temporary()
+    const database = new DatabaseSync(join(root, 'state.sqlite'))
+    database.exec('PRAGMA user_version = 1;')
+    database.close()
+
+    const store = new OrchestrationStore(root)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(2)
+    expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'command_receipts'").get())
+      .toBeDefined()
     store.close()
   })
 })

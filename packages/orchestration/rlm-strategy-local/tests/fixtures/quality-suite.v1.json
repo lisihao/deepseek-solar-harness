@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "minimumQualityLift": 0.2,
+  "maximumTokenRatio": 3,
+  "cases": [
+    {
+      "id": "scheduler-authority",
+      "task": "Explain how recursive execution composes with the durable TaskGraph.",
+      "criteria": [
+        { "id": "single-scheduler", "weight": 3, "critical": true, "requiredFacts": ["single scheduler", "taskgraph"] },
+        { "id": "node-local", "weight": 2, "requiredFacts": ["node-local", "sealed plan"] },
+        { "id": "no-shadow-graph", "weight": 2, "requiredFacts": ["no second graph"], "forbiddenFacts": ["rlm replaces the scheduler"] }
+      ],
+      "direct": { "text": "RLM helps the TaskGraph explore alternatives.", "turns": 1, "estimatedTokens": 120 },
+      "rlm": { "text": "RLM is node-local inside one sealed plan. The TaskGraph remains the single scheduler, and recursive children create no second graph.", "turns": 4, "estimatedTokens": 310 }
+    },
+    {
+      "id": "concurrency-diagnosis",
+      "task": "Diagnose why two independent workers are unnecessarily serialized.",
+      "criteria": [
+        { "id": "hierarchical-scopes", "weight": 3, "critical": true, "requiredFacts": ["hierarchical scope", "write"] },
+        { "id": "effect-conflict", "weight": 2, "requiredFacts": ["exclusive effect"] },
+        { "id": "parallelism", "weight": 2, "requiredFacts": ["disjoint", "parallel"] }
+      ],
+      "direct": { "text": "Raise maxParallel so both workers can run.", "turns": 1, "estimatedTokens": 90 },
+      "rlm": { "text": "Check hierarchical scope overlap on every write and any exclusive effect. Disjoint scopes can run in parallel without merely raising maxParallel.", "turns": 3, "estimatedTokens": 240 }
+    },
+    {
+      "id": "quota-routing",
+      "task": "Choose models for planning, execution, and verification under subscription quotas.",
+      "criteria": [
+        { "id": "strong-boundaries", "weight": 3, "critical": true, "requiredFacts": ["high-tier", "planning", "verification"] },
+        { "id": "cheap-leaves", "weight": 2, "requiredFacts": ["low-tier", "execution"] },
+        { "id": "subscription-first", "weight": 2, "requiredFacts": ["subscription-first", "metered api"] },
+        { "id": "reserve", "weight": 2, "requiredFacts": ["reserve", "unknown quota"] }
+      ],
+      "direct": { "text": "Use the strongest model for all steps.", "turns": 1, "estimatedTokens": 100 },
+      "rlm": { "text": "Use high-tier models for planning and verification, low-tier models for bounded execution, and subscription-first routing before metered API. Preserve the Claude reserve and block it when unknown quota prevents proof.", "turns": 4, "estimatedTokens": 280 }
+    }
+  ]
+}

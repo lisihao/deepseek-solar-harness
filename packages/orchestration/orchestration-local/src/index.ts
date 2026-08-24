@@ -7,6 +7,7 @@ import OrchestrationService, {
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
   type OrchestrationCompilationV1,
+  type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompileRequest,
   type OrchestrationControlRequest,
   type OrchestrationDecisionRequest,
@@ -24,6 +25,7 @@ export { OrchestrationDaemon, ORCHESTRATION_METHODS, ORCHESTRATION_PROTOCOL_VERS
 export { graphCertificate, nodesConflict, scopeOverlap, validateGraph } from './graph.ts'
 export { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from './providers.ts'
 export { ORCHESTRATION_STATE_SCHEMA_VERSION, OrchestrationStore } from './store.ts'
+export * from './auto-refine.ts'
 
 export const name = 'orchestration-local'
 
@@ -39,6 +41,8 @@ export interface Config {
   readonly connectTimeoutMs?: number
   /** Independently packaged Resident Driver modules required by headless execution. */
   readonly residentDriverModules?: string[]
+  /** Trusted plugins that register executable TypeScript Skills in the daemon. */
+  readonly skillProviderModules?: string[]
 }
 
 export const Config: z<Config> = z.object({
@@ -46,6 +50,7 @@ export const Config: z<Config> = z.object({
   autoStart: z.boolean().default(true),
   connectTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
   residentDriverModules: z.array(z.string()).default([]),
+  skillProviderModules: z.array(z.string()).default([]),
 })
 /* jscpd:ignore-end */
 
@@ -64,6 +69,10 @@ class LocalOrchestrationService extends OrchestrationService {
         if (ctx.baseUrl === undefined) throw new Error('orchestration-local requires ctx.baseUrl to resolve Resident Driver modules')
         return createRequire(ctx.baseUrl).resolve(module)
       }),
+      skillProviderModules: config.skillProviderModules.map((module) => {
+        if (ctx.baseUrl === undefined) throw new Error('orchestration-local requires ctx.baseUrl to resolve Skill Provider modules')
+        return createRequire(ctx.baseUrl).resolve(module)
+      }),
     })
   }
 
@@ -76,6 +85,10 @@ class LocalOrchestrationService extends OrchestrationService {
   decide(request: OrchestrationDecisionRequest): Promise<OrchestrationRunSnapshot> { return this.client.decide(request) }
   resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promise<OrchestrationRunSnapshot> {
     return this.client.resolveIndeterminate(request)
+  }
+
+  resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterminateRequest): Promise<OrchestrationRunSnapshot> {
+    return this.client.resolveAutoRefineIndeterminate(request)
   }
 
   proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt> {

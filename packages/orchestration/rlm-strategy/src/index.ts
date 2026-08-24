@@ -2,7 +2,11 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import type { ModelTaskPhase, RlmExecutionMode } from '@deepseek-ai/dsh-model-allocation'
+import type {
+  ModelAllocationObjective,
+  ModelTaskPhase,
+  RlmExecutionMode,
+} from '@deepseek-ai/dsh-model-allocation'
 
 /** Hard recursion and turn limits for one node-local RLM plan. */
 export interface RlmBudgetV1 {
@@ -19,6 +23,8 @@ export interface RlmStrategyRequest {
   readonly role: string
   readonly task: string
   readonly requestedMode: RlmExecutionMode
+  /** User optimization intent. Omitted values retain the balanced baseline. */
+  readonly objective?: ModelAllocationObjective
   readonly requestedBudget?: RlmBudgetV1
 }
 

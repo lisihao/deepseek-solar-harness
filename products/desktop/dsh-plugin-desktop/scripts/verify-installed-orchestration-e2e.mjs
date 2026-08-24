@@ -104,6 +104,38 @@ function allocationByNode(events) {
     .map(event => [event.nodeId, event.data]))
 }
 
+/** Count native product turns instead of treating one composite RLM node as one call. */
+export function countNativeSubscriptionTurns(events) {
+  return events.filter(event => (
+    event.type === 'rlm.root.dispatched'
+    || event.type === 'rlm.child.dispatched'
+    || /^rlm\.(?:message|goal|heartbeat)\.continuation\.(?:settled|failed)$/u.test(event.type)
+    || (event.type === 'node.dispatched'
+      && event.data?.executor !== 'resident-rlm'
+      && event.data?.executor !== 'model-worker')
+  )).length
+}
+
+/** Prove that an enabled RLM candidate delegated before its final Evidence was accepted. */
+export function assertRecursiveRlmEvents(events, nodeId) {
+  const started = events.find(event => event.type === 'rlm.execution.started' && event.nodeId === nodeId)
+  const children = events.filter(event => event.type === 'rlm.child.dispatched' && event.nodeId === nodeId)
+  const childResults = events.filter(event => event.type === 'rlm.child.settled' && event.nodeId === nodeId)
+  const continuations = events.filter(event => (
+    event.nodeId === nodeId
+    && event.type === 'rlm.message.continuation.settled'
+  ))
+  const settled = events.find(event => event.type === 'rlm.execution.settled' && event.nodeId === nodeId)
+  const evidence = events.find(event => event.type === 'node.evidence.accepted' && event.nodeId === nodeId)
+  assert(started !== undefined, `${nodeId} did not start the Prime RLM runtime`)
+  assert(children.length > 0, `${nodeId} enabled RLM but dispatched no recursive child`)
+  assert(childResults.length === children.length, `${nodeId} did not settle every recursive child`)
+  assert(Number(settled?.data?.childCount ?? 0) === children.length, `${nodeId} settled with an inconsistent child count`)
+  assert(evidence !== undefined, `${nodeId} produced no accepted final Evidence`)
+  assert(childResults.every(event => event.sequence < evidence.sequence), `${nodeId} accepted final Evidence before a recursive child settled`)
+  return { children, childResults, continuations, settled, evidence }
+}
+
 function assertNativeCompleted(result) {
   for (const node of result.snapshot.nodes) {
     assert(node.modelSource === 'native-subscription', `${node.id} used ${String(node.modelSource)} instead of a subscription`)
@@ -271,6 +303,16 @@ async function runInner(appRoot) {
 
   const nonce = randomUUID().slice(0, 8)
   const workspace = mkdtempSync('/tmp/dsh-orchestration-e2e-')
+  writeFileSync(join(workspace, 'README.md'), `DSH orchestration E2E ${nonce}\n`)
+  execFileSync('/usr/bin/git', ['-C', workspace, 'init', '-b', 'main'])
+  execFileSync('/usr/bin/git', ['-C', workspace, 'add', 'README.md'])
+  execFileSync('/usr/bin/git', [
+    '-C', workspace,
+    '-c', 'user.name=DSH E2E',
+    '-c', 'user.email=dsh-e2e@local',
+    'commit', '-m', 'E2E base',
+  ])
+  const baseSha = execFileSync('/usr/bin/git', ['-C', workspace, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   const sourceSessionId = `desktop-e2e-${version}-${nonce}`
 
   const cycleGraph = graph(`DSH ${version} cycle rejection ${nonce}`, workspace, [
@@ -307,7 +349,10 @@ async function runInner(appRoot) {
       } else {
         assert(allocation?.tier === expectedTier, `${objective} selected ${String(allocation?.tier)} instead of ${expectedTier}`)
       }
-      return { objective, expectedTier, title, runId: String(result.snapshot.runId), allocation }
+      return {
+        objective, expectedTier, title, runId: String(result.snapshot.runId), allocation,
+        subscriptionTurns: countNativeSubscriptionTurns(result.events),
+      }
     })))
     process.stdout.write('[40%] 质量/综合/成本目标已通过显式授权的完整订阅矩阵\n')
   } else {
@@ -315,51 +360,77 @@ async function runInner(appRoot) {
   }
 
   const pipelineTitle = `DSH ${version} RLM parallel pipeline E2E ${nonce}`
+  const rlmCandidateId = Number.parseInt(nonce.slice(-1), 16) % 2 === 0 ? 'candidate-a' : 'candidate-b'
+  const directCandidateId = rlmCandidateId === 'candidate-a' ? 'candidate-b' : 'candidate-a'
+  const candidateTask = `Analyze this DSH Workbench design problem for blind quality evaluation ${nonce}: explain how one durable TaskGraph should combine recursive reasoning, isolated parallel Git workers, materialized Evidence verification, and subscription-first quota routing without creating a second Scheduler. Cover concrete failure boundaries and acceptance evidence. If a private in-memory programmable reasoning surface is available, you must use it to obtain at least one bounded independent critique before synthesizing the final answer; otherwise reason directly. Do not use filesystem, network, or workspace tools, mention the method used to generate the answer, or reveal private reasoning. End with CANDIDATE_${nonce}.`
+  const candidate = id => commonNode(id, {
+    title: `Blind architecture candidate ${id.endsWith('a') ? 'A' : 'B'}`,
+    task: candidateTask,
+    role: 'architecture planning',
+    phase: 'planning',
+    rlm: {
+      mode: id === rlmCandidateId ? 'enabled' : 'disabled',
+      maxDepth: 1,
+      maxChildren: 2,
+      maxTurns: 4,
+    },
+  })
   const pipeline = await startRun(client, {
     intent: { request: 'Run a high-tier plan, parallel low-tier leaves, and a high-tier verification gate.' },
     admission: admission(sourceSessionId, 'speed', { continualHarness: 'workspace' }),
-    graph: graph(pipelineTitle, workspace, [
-      commonNode('plan', {
-        title: 'Plan with bounded RLM',
-        task: `Plan two independent verification paths for orchestration E2E ${nonce}. Use only the supplied task context; do not call tools. Return a concise plan ending with PLAN_${nonce}.`,
-        role: 'architecture planning',
-        phase: 'planning',
-        rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
-      }),
+    graph: {
+      ...graph(pipelineTitle, workspace, [
+      candidate('candidate-a'),
+      candidate('candidate-b'),
       commonNode('worker-a', {
-        dependsOn: ['plan'],
+        dependsOn: [rlmCandidateId],
         title: 'Parallel worker A',
         task: `Implementation worker A for orchestration E2E ${nonce}. Return exactly WORKER_A_${nonce}. Do not call tools.`,
         writeScopes: ['e2e/worker-a'],
       }),
       commonNode('worker-b', {
-        dependsOn: ['plan'],
+        dependsOn: [rlmCandidateId],
         title: 'Parallel worker B',
         task: `Implementation worker B for orchestration E2E ${nonce}. Return exactly WORKER_B_${nonce}. Do not call tools.`,
         writeScopes: ['e2e/worker-b'],
       }),
       commonNode('verify', {
-        dependsOn: ['worker-a', 'worker-b'],
+        dependsOn: ['candidate-a', 'candidate-b', 'worker-a', 'worker-b'],
         title: 'High-tier verification',
-        task: `Verify the two orchestration E2E ${nonce} worker outcomes using only the supplied upstream artifacts. Do not call tools. Return a concise verdict ending with VERIFIED_${nonce}.`,
+        task: `The first two upstream Evidence contents are anonymized Candidate A and Candidate B. Blindly compare their correctness, completeness, failure boundaries, and verifiable acceptance evidence. Then verify both worker outcomes. Do not call tools. End with exactly PREFERRED_A or PREFERRED_B on its own final line.`,
         role: 'verification review',
         phase: 'verification',
         readScopes: ['e2e/worker-a', 'e2e/worker-b'],
       }),
-    ], 2),
+      ], 2),
+      baseSha,
+      workspaceIsolation: 'git-worktree',
+      qualityPolicy: { independentVerification: 'required' },
+    },
   })
   assertNativeCompleted(pipeline)
   const pipelineAllocations = allocationByNode(pipeline.events)
-  assert(pipelineAllocations.get('plan')?.tier === 'high', 'planning node did not use a high-tier model')
+  assert(pipelineAllocations.get('candidate-a')?.tier === 'high', 'candidate-a planning did not use a high-tier model')
+  assert(pipelineAllocations.get('candidate-b')?.tier === 'high', 'candidate-b planning did not use a high-tier model')
   assert(pipelineAllocations.get('worker-a')?.tier === 'low', 'worker-a did not use a low-tier model')
   assert(pipelineAllocations.get('worker-b')?.tier === 'low', 'worker-b did not use a low-tier model')
   assert(pipelineAllocations.get('verify')?.tier === 'high', 'verification node did not use a high-tier model')
-  const rlm = pipeline.events.find(event => event.type === 'rlm.resolved' && event.nodeId === 'plan')
+  const rlm = pipeline.events.find(event => event.type === 'rlm.resolved' && event.nodeId === rlmCandidateId)
   assert(rlm?.data.enabled === true, 'planning node did not seal and execute an enabled RLM plan')
+  const recursiveRlm = assertRecursiveRlmEvents(pipeline.events, rlmCandidateId)
+  const verifierEvidence = pipeline.events.find(event => event.type === 'node.evidence.accepted' && event.nodeId === 'verify')
+  const preferred = String(verifierEvidence?.data.outputPreview ?? '').match(/PREFERRED_([AB])\s*$/u)?.[1]
+  const expectedPreferred = rlmCandidateId === 'candidate-a' ? 'A' : 'B'
+  assert(preferred === expectedPreferred, `blind quality verifier preferred ${String(preferred)} instead of RLM candidate ${expectedPreferred}`)
   const { workerAttempts, workerDispatches, workerEvidence, quotaFailovers } = assertParallelWorkerEvents(
     pipeline.events,
     ['worker-a', 'worker-b'],
   )
+  const preparedWorktrees = pipeline.events.filter(event => event.type === 'worktree.prepared')
+  const integratedWorktrees = pipeline.events.filter(event => event.type === 'worktree.integrated')
+  assert(preparedWorktrees.length === 2, `pipeline prepared ${String(preparedWorktrees.length)} worktrees instead of two`)
+  assert(new Set(preparedWorktrees.map(event => event.data.path)).size === 2, 'parallel workers shared one worktree path')
+  assert(integratedWorktrees.length === 2, `pipeline integrated ${String(integratedWorktrees.length)} worktrees instead of two`)
   process.stdout.write('[65%] RLM + 高低阶分工 + DAG 并行已通过真实执行\n')
 
   let conflictEvidence
@@ -392,6 +463,7 @@ async function runInner(appRoot) {
     conflictEvidence = {
       title: conflictTitle,
       runId: String(conflict.snapshot.runId),
+      subscriptionTurns: countNativeSubscriptionTurns(conflict.events),
       wait: conflictWait.data,
       attemptIntervals,
       dispatchSequences: successfulDispatches.map(event => event.sequence),
@@ -435,6 +507,28 @@ async function runInner(appRoot) {
     source: value.source,
     quotaPoolId: value.quotaPoolId ?? null,
   }))
+  const subscriptionTurnsByRun = [
+    ...goalResults.map(value => ({
+      title: value.title,
+      runId: value.runId,
+      turns: value.subscriptionTurns,
+    })),
+    {
+      title: pipelineTitle,
+      runId: String(pipeline.snapshot.runId),
+      turns: countNativeSubscriptionTurns(pipeline.events),
+    },
+    ...(conflictEvidence === undefined ? [] : [{
+      title: conflictEvidence.title,
+      runId: conflictEvidence.runId,
+      turns: conflictEvidence.subscriptionTurns,
+    }]),
+    {
+      title: recallTitle,
+      runId: String(recall.snapshot.runId),
+      turns: countNativeSubscriptionTurns(recall.events),
+    },
+  ]
   const evidence = {
     version,
     mode,
@@ -458,6 +552,21 @@ async function runInner(appRoot) {
       workerEvidenceSequences: workerEvidence.map(event => event.sequence),
       quotaFailovers,
       rlm: rlm.data,
+      recursiveRlm: {
+        childCount: recursiveRlm.children.length,
+        continuationCount: recursiveRlm.continuations.length,
+      },
+      qualityBlind: {
+        directCandidateId,
+        rlmCandidateId,
+        preferred: `candidate-${preferred?.toLowerCase()}`,
+        passed: preferred === expectedPreferred,
+        verifierEvidenceRef: verifierEvidence?.data.evidenceRef,
+      },
+      worktrees: {
+        prepared: preparedWorktrees.map(event => event.data),
+        integrated: integratedWorktrees.map(event => event.data),
+      },
     },
     conflict: conflictEvidence ?? null,
     continualHarness: {
@@ -468,7 +577,8 @@ async function runInner(appRoot) {
     selectedModels,
     runs,
     resourcePolicy: {
-      plannedSubscriptionTurns: fullMatrix ? 10 : 5,
+      observedSubscriptionTurns: subscriptionTurnsByRun.reduce((sum, value) => sum + value.turns, 0),
+      subscriptionTurnsByRun,
       reusedUnchangedCoverage: fullMatrix ? [] : ['goal-objectives', 'scope-conflict'],
       fullMatrixRequires: `${subscriptionAuthorization}=1 ${fullMatrixAuthorization}=1`,
     },
@@ -623,10 +733,10 @@ async function verifyDesktopProjection(baseUrl, target, evidence) {
             .map(element => ({ state: element.getAttribute('data-state'), text: element.textContent })),
         }
       })()`),
-      value => value?.text?.includes(evidence.pipeline.title) === true && value.nodes?.length === 4,
+      value => value?.text?.includes(evidence.pipeline.title) === true && value.nodes?.length === 5,
       'Desktop orchestration panel did not converge on the E2E pipeline Run',
     )
-    for (const stage of ['Intent', 'Graph', 'Capsule', 'RLM', 'Harness', 'Context', 'Plan', 'Operator']) {
+    for (const stage of ['Intent', 'Graph', 'Capsule', 'RLM', 'Harness', 'Context', 'Contract/Plan', 'Operator']) {
       assert(view.completeStages.includes(stage), `Desktop pipeline stage ${stage} is not complete`)
     }
     assert(view.nodes.every(node => node.state === 'passed'), 'Desktop DAG does not show all pipeline nodes as passed')

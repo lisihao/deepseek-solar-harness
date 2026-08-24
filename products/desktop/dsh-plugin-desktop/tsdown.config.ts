@@ -52,6 +52,21 @@ export default defineConfig([
     },
   },
   {
+    name: `${PACKAGE_NAME}/frontend-setup-preload`,
+    entry: { 'frontend-setup-preload': 'src/frontend-setup-preload.ts' },
+    outDir: 'lib',
+    format: 'cjs',
+    platform: 'node',
+    target: 'es2024',
+    fixedExtension: false,
+    dts: false,
+    clean: false,
+    sourcemap: true,
+    outputOptions: {
+      entryFileNames: 'frontend-setup-preload.cjs',
+    },
+  },
+  {
     name: `${PACKAGE_NAME}/client`,
     entry: { client: 'src/client/index.ts' },
     tsconfig: 'tsconfig.client.json',

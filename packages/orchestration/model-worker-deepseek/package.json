@@ -22,15 +22,18 @@
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-model-allocation": "workspace:^",
     "@deepseek-ai/dsh-model-worker": "workspace:^",
-    "@deepseek-ai/dsh-rlm-strategy": "workspace:^"
+    "@deepseek-ai/dsh-rlm-strategy": "workspace:^",
+    "@deepseek-ai/dsh-sdk-protocol": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-credentials": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-model-allocation": "workspace:^",
     "@deepseek-ai/dsh-model-worker": "workspace:^",
-    "@deepseek-ai/dsh-rlm-strategy": "workspace:^"
+    "@deepseek-ai/dsh-rlm-strategy": "workspace:^",
+    "@deepseek-ai/dsh-sdk-protocol": "workspace:^"
   }
 }

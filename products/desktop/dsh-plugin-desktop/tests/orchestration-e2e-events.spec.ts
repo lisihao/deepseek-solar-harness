@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-expect-error The executable acceptance script is intentionally plain ESM.
-import { assertParallelWorkerEvents, assertSerializedScopeWorkerEvents, resolveSubscriptionE2EMode } from '../scripts/verify-installed-orchestration-e2e.mjs'
+import { assertParallelWorkerEvents, assertRecursiveRlmEvents, assertSerializedScopeWorkerEvents, countNativeSubscriptionTurns, resolveSubscriptionE2EMode } from '../scripts/verify-installed-orchestration-e2e.mjs'
 
 describe('installed orchestration E2E event assertions', () => {
   it('requires explicit authorization and defaults to the minimal subscription matrix', () => {
@@ -11,6 +11,37 @@ describe('installed orchestration E2E event assertions', () => {
       DSH_ALLOW_SUBSCRIPTION_E2E: '1',
       DSH_SUBSCRIPTION_E2E_FULL_MATRIX: '1',
     })).toBe('full')
+  })
+
+  it('counts physical RLM turns instead of one composite Scheduler node', () => {
+    expect(countNativeSubscriptionTurns([
+      { type: 'node.dispatched', data: { executor: 'resident-rlm' } },
+      { type: 'rlm.root.dispatched', data: {} },
+      { type: 'rlm.child.dispatched', data: {} },
+      { type: 'rlm.child.dispatched', data: {} },
+      { type: 'rlm.message.continuation.settled', data: {} },
+      { type: 'node.dispatched', data: {} },
+      { type: 'node.dispatched', data: { executor: 'model-worker' } },
+    ])).toBe(5)
+  })
+
+  it('requires an enabled RLM candidate to settle a child before accepting final Evidence', () => {
+    const events = [
+      { sequence: 1, type: 'rlm.execution.started', nodeId: 'candidate-b', data: {} },
+      { sequence: 2, type: 'rlm.child.dispatched', nodeId: 'candidate-b', data: { childId: 'one' } },
+      { sequence: 3, type: 'rlm.child.settled', nodeId: 'candidate-b', data: { childId: 'one' } },
+      { sequence: 4, type: 'rlm.execution.settled', nodeId: 'candidate-b', data: { childCount: 1 } },
+      { sequence: 5, type: 'node.evidence.accepted', nodeId: 'candidate-b', data: {} },
+    ]
+    expect(assertRecursiveRlmEvents(events, 'candidate-b')).toMatchObject({
+      children: [{ type: 'rlm.child.dispatched' }],
+      continuations: [],
+    })
+    expect(() => assertRecursiveRlmEvents(events.filter(event => event.type !== 'rlm.child.dispatched'), 'candidate-b'))
+      .toThrow('dispatched no recursive child')
+    expect(() => assertRecursiveRlmEvents(events.map(event => (
+      event.type === 'node.evidence.accepted' ? { ...event, sequence: 3 } : event
+    )), 'candidate-b')).toThrow('accepted final Evidence before a recursive child settled')
   })
 
   it('accepts parallel workers that retry on a different quota pool', () => {

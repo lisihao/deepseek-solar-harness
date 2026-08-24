@@ -232,6 +232,14 @@ function GraphView(props: {
   const activeWorkers = run.nodes.filter(node => node.state === 'running').length
   const readyWorkers = run.nodes.filter(node => node.state === 'ready').length
   const cleanContext = props.events.some(event => event.type === 'capsule.resolved' && event.data.cleanContext === true)
+  const rlmEnabled = props.events.some(event => event.type === 'rlm.resolved' && event.data.enabled === true)
+  const rlmStarted = props.events.some(event => event.type === 'rlm.execution.started')
+  const rlmSettled = props.events.some(event => event.type === 'rlm.execution.settled')
+  const rlmChildren = props.events.filter(event => event.type === 'rlm.child.dispatched').length
+  const rlmChildrenSettled = props.events.filter(event => event.type === 'rlm.child.settled').length
+  const rlmMessages = props.events.filter(event => event.type === 'rlm.message.continuation.settled').length
+  const workerAllocation = [...props.events].reverse().find(event => event.type === 'rlm.worker.allocated')
+  const autoRefine = [...props.events].reverse().find(event => event.type.startsWith('harness.auto_refine.'))
   return <div className="dshDesktopOrchestrationColumn dshDesktopOrchestrationGraph">
     <div className="dshDesktopOrchestrationRunHeader">
       <div>
@@ -250,6 +258,19 @@ function GraphView(props: {
       <p>并行：{String(activeWorkers)}/{String(run.effectiveParallelism ?? run.maxParallel ?? 1)} worker 运行中 · Graph 上限 {String(run.maxParallel ?? 1)} · {String(readyWorkers)} 个可派发</p>
       <p>上下文：{cleanContext ? 'Clean-task Capsule 已注入 · fresh native lane' : '等待 Capsule 解析'}</p>
     </div>
+    <div className="dshDesktopCollaborationTrace" data-execution-mode={rlmEnabled ? 'rlm' : 'standard'} aria-label="Prime RLM 运行状态">
+      <p><strong>执行机制 · {rlmEnabled ? 'RLM（Prime）' : '标准（单 Agent）'}</strong></p>
+      {rlmEnabled
+        ? <>
+          <p>Runtime：{rlmSettled ? '已完成' : rlmStarted ? '运行中' : '待启动'} · TypeScript REPL {rlmStarted ? '已接通' : '待接通'}</p>
+          <p>子 Agent：{String(rlmChildrenSettled)}/{String(rlmChildren)} 已完成 · 消息续接 {String(rlmMessages)} 次</p>
+          <p>默认 worker：{workerAllocation === undefined ? '待分配' : `${String(workerAllocation.data.operatorId ?? 'N/A')}/${String(workerAllocation.data.model ?? 'N/A')} · ${modelTierLabel(workerAllocation.data.tier)} · ${modelSourceLabel(workerAllocation.data.source)}`}</p>
+          <p>自动演进：{autoRefine === undefined
+            ? '等待 Prime 触发条件'
+            : <>{eventLabel(autoRefine.type)}{autoRefine.data.model === undefined ? '' : ` · ${String(autoRefine.data.operatorId ?? 'N/A')}/${String(autoRefine.data.model)}`}</>}</p>
+        </>
+        : <p>本 Run 不创建 RLM Session，不挂载 typescript_repl，也不递归启动子 Agent。</p>}
+    </div>
     <div className="dshDesktopOrchestrationPipeline" aria-label="编译流水线">
       <Stage label="Intent" complete={eventTypes.has('intent.compiled')} />
       <Stage label="Graph" complete={eventTypes.has('graph.compiled')} />
@@ -257,7 +278,7 @@ function GraphView(props: {
       <Stage label="RLM" complete={eventTypes.has('rlm.resolved')} />
       <Stage label="Harness" complete={eventTypes.has('harness.snapshot') || run.admission?.continualHarness === 'off'} />
       <Stage label="Context" complete={eventTypes.has('context.compiled')} />
-      <Stage label="Plan" complete={eventTypes.has('execution_plan.sealed')} />
+      <Stage label="Contract/Plan" complete={eventTypes.has('execution_plan.sealed')} />
       <Stage label="Operator" complete={eventTypes.has('node.dispatched')} />
     </div>
     {run.blockers.length > 0 && <Blockers blockers={run.blockers} />}
@@ -303,7 +324,7 @@ function NodeCard(props: {
     <div className="dshDesktopOrchestrationMeta">
       <span>Attempt {String(node.attempt)}</span>
       <span>Generation {String(node.capabilityGeneration)}</span>
-      <span>RLM {node.rlm ?? 'auto'}</span>
+      <span>执行机制 {rlmModeLabel(node.rlm)}</span>
       <span>模型层级 {modelTierLabel(node.modelTier)}</span>
       <span>{modelSourceLabel(node.modelSource)} · {node.quotaPoolId ?? '配额池 N/A'}</span>
       <span>Evidence {String(node.evidenceRefs.length)}</span>
@@ -341,7 +362,10 @@ function RunControls(props: {
   const run = props.run
   const control = (action: DesktopOrchestrationControlRequest['action']): void => {
     if (['cancel', 'reject'].includes(action) && !window.confirm(`确认${action === 'cancel' ? '取消' : '拒绝'}这个编排任务？`)) return
-    void props.onControl({ action, runId: run.runId, expectedRevision: run.revision, reason: 'DSH Desktop 用户操作' })
+    void props.onControl({
+      commandId: crypto.randomUUID(), action, runId: run.runId,
+      expectedRevision: run.revision, reason: 'DSH Desktop 用户操作',
+    })
   }
   return <div className="dshDesktopOrchestrationControls">
     {run.state === 'running' && <button disabled={props.disabled} type="button" onClick={() => { control('pause') }}>暂停</button>}
@@ -403,23 +427,47 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
   if (event.type === 'harness.snapshot') {
     return `${String(event.data.scope ?? 'N/A')} · generation ${String(event.data.generation ?? 'N/A')} · ${String(event.data.entryCount ?? 0)} 条`
   }
+  if (event.type.startsWith('harness.auto_refine.')) {
+    if (event.type === 'harness.auto_refine.applied') {
+      return `${String(event.data.operatorId ?? 'N/A')}/${String(event.data.model ?? 'N/A')} · refinement ${shortRef(String(event.data.refinementId ?? 'N/A'))} · generation ${String(event.data.appliedGeneration ?? 'N/A')}`
+    }
+    if (event.type === 'harness.auto_refine.reviewed') return String(event.data.rationale ?? '模型审查完成，当前无需演进')
+    if (event.type === 'harness.auto_refine.failed') return `${String(event.data.phase ?? 'N/A')} · ${String(event.data.error ?? 'N/A')}`
+    if (event.type === 'harness.auto_refine.indeterminate') return `${String(event.data.phase ?? 'N/A')} · 需要显式确认，未自动重放`
+    return String(event.data.reason ?? '后台演进未执行')
+  }
   if (event.type === 'rlm.resolved') {
     return `${event.data.enabled === true ? '已启用' : '直接执行'} · ${String(event.data.reason ?? 'N/A')} · ${shortRef(String(event.data.planSha256 ?? 'N/A'))}`
   }
   if (event.type === 'rlm.worker.allocated') {
     return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)}`
   }
-  if (event.type === 'rlm.branch.dispatched' || event.type === 'rlm.branch.settled') {
-    return `深度 ${String(event.data.depth ?? 'N/A')} · 分支 ${String(event.data.branch ?? 'N/A')} · ${event.type.endsWith('settled') ? `Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))}` : `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')}`}`
+  if (event.type === 'rlm.root.dispatched') {
+    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · Session ${shortRef(String(event.data.runtimeSessionId ?? 'N/A'))}`
   }
-  if (event.type === 'rlm.synthesis.dispatched') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · 汇总 ${String(Array.isArray(event.data.branchArtifactRefs) ? event.data.branchArtifactRefs.length : 0)} 个叶节点`
+  if (event.type === 'rlm.child.dispatched') {
+    return `深度 ${String(event.data.depth ?? 'N/A')} · ${String(event.data.name ?? 'child')} · ${String(event.data.operatorId ?? 'N/A')}/${String(event.data.model ?? 'N/A')}`
+  }
+  if (event.type === 'rlm.child.settled') {
+    return `${String(event.data.childId ?? 'child')} · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+  }
+  if (event.type.startsWith('rlm.message.continuation.')) {
+    return `Agent 消息已续接 · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+  }
+  if (event.type.startsWith('rlm.goal.continuation.')) {
+    return `Goal 自动续接 · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+  }
+  if (event.type.startsWith('rlm.heartbeat.continuation.')) {
+    return `Heartbeat 定时续接 · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
   }
   if (event.type === 'rlm.execution.settled') {
-    return `递归深度 ${String(event.data.depthUsed ?? 0)} · 共 ${String(event.data.turnsUsed ?? 0)} turn · ${String(event.data.stopReason ?? 'N/A')}`
+    return `${String(event.data.childCount ?? 0)} 个直接子 Agent · state rev ${String(event.data.stateRevision ?? 0)} · ${String(event.data.stopReason ?? 'N/A')}`
   }
   if (event.type === 'capsule.resolved') {
     return event.data.cleanContext === true ? 'Clean-task Context Capsule 已注入' : 'Capsule 未确认干净上下文'
+  }
+  if (event.type === 'execution_plan.sealed') {
+    return `Task Contract ${shortRef(String(event.data.taskContractRef ?? 'N/A'))} · Plan ${shortRef(String(event.data.ref ?? 'N/A'))}`
   }
   if (event.type === 'node.dispatched') {
     if (event.data.executor === 'resident-rlm') {
@@ -456,6 +504,10 @@ function modelTierLabel(value: unknown): string {
   return ({ low: '低阶', medium: '中阶', high: '高阶' } as Record<string, string>)[String(value)] ?? '待解析'
 }
 
+function rlmModeLabel(value: DesktopOrchestrationNode['rlm']): string {
+  return ({ auto: '自动', enabled: 'RLM（Prime）', disabled: '标准' } as Record<string, string>)[String(value)] ?? '自动'
+}
+
 function modelSourceLabel(value: unknown): string {
   return ({
     'native-subscription': '订阅套餐',
@@ -479,6 +531,7 @@ function control(
   action: 'abandon' | 'retry',
 ): DesktopOrchestrationControlRequest {
   return {
+    commandId: crypto.randomUUID(),
     action,
     runId: run.runId,
     nodeId: node.id,
@@ -520,10 +573,23 @@ function eventLabel(type: string): string {
   return ({
     'intent.compiled': 'Intent 已编译', 'graph.compiled': 'Graph 已认证', 'capsule.resolved': 'Capsule 已解析',
     'rlm.resolved': 'RLM 策略已解析', 'rlm.worker.allocated': 'RLM 低阶算子已分配',
-    'rlm.execution.started': 'RLM 执行已启动', 'rlm.branch.dispatched': 'RLM 分支已派发',
-    'rlm.branch.settled': 'RLM 分支已完成', 'rlm.synthesis.dispatched': 'RLM 高阶综合已派发',
+    'rlm.execution.started': 'RLM 执行已启动', 'rlm.root.dispatched': 'RLM 根 Agent 已派发',
+    'rlm.child.dispatched': 'RLM 子 Agent 已派发', 'rlm.child.settled': 'RLM 子 Agent 已完成',
+    'rlm.message.continuation.settled': 'Agent 消息续接已完成',
+    'rlm.message.continuation.failed': 'Agent 消息续接失败',
+    'rlm.goal.continuation.settled': 'Goal 续接已完成',
+    'rlm.goal.continuation.failed': 'Goal 续接失败',
+    'rlm.heartbeat.continuation.settled': 'Heartbeat 续接已完成',
+    'rlm.heartbeat.continuation.failed': 'Heartbeat 续接失败',
     'rlm.execution.settled': 'RLM 执行已完成', 'rlm.execution.failed': 'RLM 执行失败',
     'harness.snapshot': 'Continuous Harness 已快照',
+    'harness.auto_refine.reviewed': 'Harness 自动审查完成',
+    'harness.auto_refine.applied': 'Harness 自动演进已应用',
+    'harness.auto_refine.failed': 'Harness 自动演进失败',
+    'harness.auto_refine.indeterminate': 'Harness 自动演进待确认',
+    'harness.auto_refine.skipped': 'Harness 自动演进已跳过',
+    'worktree.prepared': '隔离 Worktree 已准备', 'worktree.integrated': '隔离分支已集成',
+    'worktree.integration_failed': '隔离分支集成失败',
     'model.allocated': '模型与配额已分配', 'context.compiled': 'Context 已编译', 'execution_plan.sealed': 'ExecutionPlan 已封存',
     'node.dispatched': '执行已派发', 'node.operator.progress': 'Resident 执行进度',
     'node.evidence.accepted': 'Evidence 已验收',

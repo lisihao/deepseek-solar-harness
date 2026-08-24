@@ -1,6 +1,6 @@
 {
   "name": "@lisihao/dsh-code-harness-governance",
-  "version": "0.3.11",
+  "version": "0.3.12",
   "description": "Fail-closed Code-as-Harness governance bundle for DeepSeek-Solar-Harness",
   "license": "MIT",
   "type": "module",

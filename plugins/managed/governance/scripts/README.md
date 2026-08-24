@@ -17,7 +17,7 @@
 - `--report @git` 让 Git 解析普通 checkout 或 linked worktree 各自的 attestation 路径。
 - `export_bundle.py` 将 Harness 与项目 Profile 导出为带版本和 SHA-256 清单的仓内 bundle，供远端 CI 使用。
 - Profile 可用 `max_concurrency` 限制并发，并用 gate `needs` 声明依赖；Harness 会传递选择依赖，拒绝缺失或成环的依赖，并阻断失败依赖的消费者。
-- Profile 可启用 `evidence_reuse`：只有 gate 命令、相关输入、依赖证据、基线、平台与执行器版本一致时才复用成功证据；声明 `incremental_command` 的 gate 可只验证上次证据之后的改动。报告会标明 `reused`、`incremental` 和来源提交。
+- Profile 可启用 `evidence_reuse`：只有 gate 命令、相关输入、依赖证据、基线、平台与执行器版本一致时才复用成功证据；amend/rebase 后只要旧提交仍可解析，也按精确指纹或两个提交树之间的差异判定，不把“非祖先”误当作全部失效。声明 `incremental_command` 的 gate 可只验证上次证据之后的改动。报告会标明 `reused`、`incremental` 和来源提交。
 
 ## 强制执行
 

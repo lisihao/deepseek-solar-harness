@@ -7,6 +7,8 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import ResidentOperatorService, {
   type ResidentEventPage,
   type ResidentEventReadRequest,
+  type ResidentCompactRequest,
+  type ResidentCompactResult,
   type ResidentExecuteRequest,
   type ResidentIndeterminateResolutionRequest,
   type ResidentInterruptRequest,
@@ -29,7 +31,7 @@ export {
   EXPECTED_CODEX_SCHEMA_SHA256,
 } from './drivers.ts'
 export type { ResidentProductDriver } from '@deepseek-ai/dsh-resident-operator'
-export { ResidentStore, canonicalRequestHash } from './store.ts'
+export { ResidentStore, canonicalCompactRequestHash, canonicalRequestHash } from './store.ts'
 
 export const name = 'resident-operator-local'
 
@@ -92,6 +94,7 @@ class LocalResidentOperatorService extends ResidentOperatorService {
       ...request.taskLabel === undefined ? {} : { taskLabel: request.taskLabel },
       prompt: request.prompt,
       ...request.profile === undefined ? {} : { profile: request.profile },
+      ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       signal: request.signal,
     })
     return {
@@ -126,6 +129,15 @@ class LocalResidentOperatorService extends ResidentOperatorService {
 
   interrupt(request: ResidentInterruptRequest): Promise<void> {
     return this.client.interrupt(request.sessionId, request.turnId)
+  }
+
+  override compact(request: ResidentCompactRequest): Promise<ResidentCompactResult> {
+    return this.client.compact({
+      commandId: request.commandId,
+      sessionId: request.sessionId,
+      expectedStateRevision: request.expectedStateRevision,
+      ...request.instructions === undefined ? {} : { instructions: request.instructions },
+    })
   }
 
   reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot> {

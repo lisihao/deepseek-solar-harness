@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-resident-operator-local",
-  "description": "Local Unix-socket resident operator client and durable daemon",
+  "description": "Portable owner-local resident operator client and durable daemon",
   "version": "0.1.0-rc.5",
   "publishConfig": { "access": "public" },
   "repository": {

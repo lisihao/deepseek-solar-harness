@@ -409,10 +409,14 @@ export interface ConnectionConfig {
   trustedHosts?: string[]
   /** Maximum buffered JSON body for every `/api` request. */
   maxRequestBodyBytes?: number
+  /** Enable the independently versioned snapshot + cursor Server projection. */
+  remoteSync?: boolean
+  /** Retained event count and per-Frontend unsent-frame bound. */
+  remoteSyncJournalCapacity?: number
 }
 ```
 
-来源：[`packages/client/connection/src/index.ts:50`](../packages/client/connection/src/index.ts)
+来源：[`packages/client/connection/src/index.ts:75`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -575,7 +579,7 @@ export interface ToolResultPruneConfig {
 export type Config = string
 ```
 
-来源：[`packages/orchestration/continual-harness-local/src/index.ts:18`](../packages/orchestration/continual-harness-local/src/index.ts)
+来源：[`packages/orchestration/continual-harness-local/src/index.ts:34`](../packages/orchestration/continual-harness-local/src/index.ts)
 
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
@@ -830,6 +834,26 @@ export interface Config {
 ```
 
 来源：[`packages/host/frontend-static/src/index.ts:28`](../packages/host/frontend-static/src/index.ts)
+
+<a id="deepseek-aidsh-host-remote-auth"></a>
+
+## `@deepseek-ai/dsh-host-remote-auth`
+
+```ts config-catalog
+/** Persistent remote-auth service configuration. */
+export interface Config {
+  /** Harness home; the device registry lives under remote-auth/v1. */
+  dshHome?: string
+  /** One-time pairing lifetime in milliseconds. */
+  pairingTtlMs?: number
+  /** Short-lived access-session lifetime in milliseconds. */
+  accessTtlMs?: number
+  /** Bound on durable non-revoked devices. */
+  maxDevices?: number
+}
+```
+
+来源：[`packages/host/remote-auth/src/index.ts:71`](../packages/host/remote-auth/src/index.ts)
 
 <a id="deepseek-aidsh-host-webserver"></a>
 
@@ -1358,10 +1382,12 @@ export interface Config {
   readonly connectTimeoutMs?: number
   /** Independently packaged Resident Driver modules required by headless execution. */
   readonly residentDriverModules?: string[]
+  /** Trusted plugins that register executable TypeScript Skills in the daemon. */
+  readonly skillProviderModules?: string[]
 }
 ```
 
-来源：[`packages/orchestration/orchestration-local/src/index.ts:33`](../packages/orchestration/orchestration-local/src/index.ts)
+来源：[`packages/orchestration/orchestration-local/src/index.ts:35`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -1617,7 +1643,18 @@ export interface Config {
 }
 ```
 
-来源：[`packages/physical-operator/resident-operator-local/src/index.ts:37`](../packages/physical-operator/resident-operator-local/src/index.ts)
+来源：[`packages/physical-operator/resident-operator-local/src/index.ts:39`](../packages/physical-operator/resident-operator-local/src/index.ts)
+
+<a id="deepseek-aidsh-rlm-runtime-local"></a>
+
+## `@deepseek-ai/dsh-rlm-runtime-local`
+
+```ts config-catalog
+/** Owner-local directory that contains the RLM runtime state. */
+export type Config = string
+```
+
+来源：[`packages/orchestration/rlm-runtime-local/src/index.ts:54`](../packages/orchestration/rlm-runtime-local/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -2272,7 +2309,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/subagent/subagent-codex/src/index.ts:40`](../packages/subagent/subagent-codex/src/index.ts)
+来源：[`packages/subagent/subagent-codex/src/index.ts:43`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 
@@ -3276,6 +3313,7 @@ export interface Config {
 - `@deepseek-ai/dsh-model-allocation` — 抽象 `ModelAllocationService`（[`packages/orchestration/model-allocation/src/index.ts`](../packages/orchestration/model-allocation/src/index.ts)）
 - `@deepseek-ai/dsh-orchestration` — 抽象 `OrchestrationService`（[`packages/orchestration/orchestration/src/index.ts`](../packages/orchestration/orchestration/src/index.ts)）
 - `@deepseek-ai/dsh-resident-operator` — 抽象 `ResidentOperatorService`（[`packages/physical-operator/resident-operator/src/index.ts`](../packages/physical-operator/resident-operator/src/index.ts)）
+- `@deepseek-ai/dsh-rlm-runtime` — 抽象 `RlmRuntimeService`（[`packages/orchestration/rlm-runtime/src/index.ts`](../packages/orchestration/rlm-runtime/src/index.ts)）
 - `@deepseek-ai/dsh-rlm-strategy` — 抽象 `RlmStrategyService`（[`packages/orchestration/rlm-strategy/src/index.ts`](../packages/orchestration/rlm-strategy/src/index.ts)）
 - `@deepseek-ai/dsh-sandbox` — 抽象 `SandboxProvider`（[`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts)）
 - `@deepseek-ai/dsh-session-persistence` — 抽象 `SessionPersistence`（[`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts)）

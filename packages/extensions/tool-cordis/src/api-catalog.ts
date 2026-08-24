@@ -551,6 +551,97 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'request', description: 'Bounded outcome summary and Evidence references.' }],
         returns: 'The idempotently stored harness entry.',
       },
+      {
+        signature: 'abstract create(request: ContinualHarnessCreateRequest): Promise<ContinualHarnessManagedEntryV2>',
+        description: 'Create a versioned prompt, memory, skill, or subagent definition.',
+        parameters: [{ name: 'request', description: 'scope, kind, content, and optional executable binding.' }],
+        returns: 'the newly created managed entry.',
+      },
+      {
+        signature: 'abstract get(request: ContinualHarnessScopeRequest & { readonly entryId: string }): Promise<ContinualHarnessManagedEntryV2>',
+        description: 'Read one managed entry, including a tombstone when requested directly.',
+        parameters: [{ name: 'request', description: 'owning scope and stable entry identity.' }],
+        returns: 'the current managed entry or tombstone.',
+      },
+      {
+        signature: 'abstract list(request: ContinualHarnessListRequest): Promise<readonly ContinualHarnessManagedEntryV2[]>',
+        description: 'List managed entries in the selected session-local or workspace-global scope.',
+        parameters: [{ name: 'request', description: 'scope, optional kind filter, and tombstone policy.' }],
+        returns: 'matching managed entries in deterministic order.',
+      },
+      {
+        signature: 'abstract listRefinements(request: ContinualHarnessRefinementListRequest): Promise<readonly ContinualHarnessRefinementPlanV1[]>',
+        description: 'Read newest-first proposed, applied, rejected, and rolled-back refinement history.',
+        parameters: [{ name: 'request', description: 'scope and bounded refinement history limit.' }],
+        returns: 'matching refinement plans, newest first.',
+      },
+      {
+        signature: 'abstract update(request: ContinualHarnessUpdateRequest): Promise<ContinualHarnessManagedEntryV2>',
+        description: 'Update one managed entry without rewriting its version history.',
+        parameters: [{ name: 'request', description: 'revision-checked replacement content and metadata.' }],
+        returns: 'the new managed-entry generation.',
+      },
+      {
+        signature: 'abstract delete(request: ContinualHarnessDeleteRequest): Promise<ContinualHarnessManagedEntryV2>',
+        description: 'Tombstone one managed entry without deleting history.',
+        parameters: [{ name: 'request', description: 'revision-checked entry identity and deletion reason.' }],
+        returns: 'the resulting managed-entry tombstone.',
+      },
+      {
+        signature: 'abstract planRefinement(request: ContinualHarnessRefinementPlanRequest): Promise<ContinualHarnessRefinementPlanV1>',
+        description: 'Persist a non-mutating background refinement plan.',
+        parameters: [{ name: 'request', description: 'scope, evidence, proposals, and branch provenance.' }],
+        returns: 'the persisted proposed refinement plan.',
+      },
+      {
+        signature: 'abstract queueRefinement(request: ContinualHarnessRefinementApplyRequest): Promise<ContinualHarnessRefinementApplyReceiptV1>',
+        description: 'Queue a model-requested refinement without mutating the active harness.',
+        parameters: [{ name: 'request', description: 'approved refinement identity and expected branch revision.' }],
+        returns: 'the durable queue receipt.',
+      },
+      {
+        signature: 'abstract applyRefinement(request: ContinualHarnessRefinementApplyRequest): Promise<ContinualHarnessRefinementPlanV1>',
+        description: 'Apply each valid proposal edit independently at a declared turn boundary.',
+        parameters: [{ name: 'request', description: 'refinement identity, branch fence, and command identity.' }],
+        returns: 'the refinement plan with per-proposal application outcomes.',
+      },
+      {
+        signature: 'abstract flushRefinements(request: ContinualHarnessRefinementFlushRequest): Promise<readonly ContinualHarnessRefinementApplyReceiptV1[]>',
+        description: 'Apply queued model requests only when the host proves a real turn boundary.',
+        parameters: [{ name: 'request', description: 'scope, real turn identity, branch fence, and bounded batch size.' }],
+        returns: 'one durable receipt for each considered queued refinement.',
+      },
+      {
+        signature: 'abstract rollback(request: ContinualHarnessRollbackRequest): Promise<ContinualHarnessRefinementPlanV1>',
+        description: 'Restore an applied refinement\'s before-images as a new generation.',
+        parameters: [{ name: 'request', description: 'applied refinement identity and revision-checked rollback command.' }],
+        returns: 'the refinement plan after its successful edits are rolled back.',
+      },
+    ],
+  },
+  {
+    key: 'continualHarnessSkills',
+    summary: 'Plugin registry for approved TypeScript skill modules.',
+    description: 'Plugin registry for approved TypeScript skill modules.',
+    methods: [
+      {
+        signature: 'register(module: ContinualHarnessTypeScriptSkillModule): () => Promise<void>',
+        description: 'Register one trusted module for the lifetime of its providing plugin.',
+        parameters: [{ name: 'module', description: 'trusted module identity, callable allowlist, and implementation.' }],
+        returns: 'an awaited disposer that unregisters the exact module.',
+      },
+      {
+        signature: 'has(moduleId: string, callable: string): boolean',
+        description: 'Report whether an exact configured module/callable binding is available.',
+        parameters: [{ name: 'moduleId', description: 'registered TypeScript module identity.' }, { name: 'callable', description: 'callable that must appear in the module allowlist.' }],
+        returns: 'whether the exact binding is currently registered.',
+      },
+      {
+        signature: 'async invoke(request: { readonly moduleId: string readonly callable: string readonly args: Readonly<Record<string, ContinualHarnessJsonValue>> readonly workspace: string readonly sessionId: string readonly entryId: string }): Promise<ContinualHarnessJsonValue>',
+        description: 'Invoke only an already registered module/callable pair.',
+        parameters: [{ name: 'request', description: 'module binding, JSON arguments, and execution provenance.' }],
+        returns: 'the module\'s JSON-serializable result.',
+      },
     ],
   },
   {
@@ -1068,6 +1159,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the updated run snapshot.',
       },
       {
+        signature: 'abstract resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterminateRequest): Promise<OrchestrationRunSnapshot>',
+        description: 'Resolve a crash-uncertain auto-refinement round without replaying model work.',
+        parameters: [{ name: 'request', description: 'run identity, expected revision, and explicit resolution.' }],
+        returns: 'the updated durable run snapshot.',
+      },
+      {
         signature: 'abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>',
         description: 'Propose one late-bound capability change.',
         parameters: [{ name: 'request', description: 'requested capability change.' }],
@@ -1170,6 +1267,67 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'remoteAuth',
+    summary: 'Sole Server writer for pairing, refresh credentials, access sessions, and revocation.',
+    description: 'Sole Server writer for pairing, refresh credentials, access sessions, and revocation.',
+    methods: [
+      {
+        signature: 'issuePairing(scope: RemoteDeviceScope): PairingChallenge',
+        description: 'Mint one local, one-time pairing code. The code is never persisted.',
+        parameters: [{ name: 'scope', description: 'fixed capability scope assigned to the paired device.' }],
+        returns: 'the one-time challenge and its expiry.',
+      },
+      {
+        signature: 'redeemPairing(code: string, deviceName: string): Promise<DeviceCredential>',
+        description: 'Redeem one code exactly once and return the only copy of the refresh credential.',
+        parameters: [{ name: 'code', description: 'unexpired pairing code minted by this Server process.' }, { name: 'deviceName', description: 'human-readable device label recorded in the registry.' }],
+        returns: 'the durable device credential and assigned scope.',
+      },
+      {
+        signature: 'exchange(credential: string): AccessSession',
+        description: 'Exchange a durable refresh credential for one short-lived access token.',
+        parameters: [{ name: 'credential', description: 'durable secret returned only when pairing was redeemed.' }],
+        returns: 'the authenticated device principal and expiring bearer token.',
+      },
+      {
+        signature: 'authenticate(accessToken: string): RemotePrincipal | undefined',
+        description: 'Resolve a short-lived bearer token; invalid and expired tokens are indistinguishable.',
+        parameters: [{ name: 'accessToken', description: 'bearer token issued by {@link exchange}.' }],
+        returns: 'the authenticated principal, or undefined for every rejected token.',
+      },
+      {
+        signature: 'listDevices(): RemoteDeviceView[]',
+        description: 'Project the paired-device roster for the trusted administration surface.',
+        parameters: [],
+        returns: 'the durable device registry without credential hashes or access tokens.',
+      },
+      {
+        signature: 'revoke(deviceId: string): Promise<void>',
+        description: 'Revoke one device and all of its current access sessions.',
+        parameters: [{ name: 'deviceId', description: 'durable identifier of the paired device.' }],
+        returns: 'a promise settled after the registry is persisted.',
+      },
+      {
+        signature: 'beginCommand(deviceId: string, commandId: string, requestHash: string): Promise<RemoteCommandBeginResult>',
+        description: 'Begin or reconcile one authenticated remote command without retaining its body.',
+        parameters: [{ name: 'deviceId', description: 'authenticated device that owns the command namespace.' }, { name: 'commandId', description: 'caller-stable idempotency identity.' }, { name: 'requestHash', description: 'canonical request digest used only for conflict detection.' }],
+        returns: 'whether the caller may execute, must wait, or can reuse a prior result.',
+      },
+      {
+        signature: 'settleCommand( deviceId: string, commandId: string, requestHash: string, response: RemoteCommandResponse, ): Promise<void>',
+        description: 'Cache the small carrier response for an accepted remote command.',
+        parameters: [{ name: 'deviceId', description: 'authenticated device that owns the command namespace.' }, { name: 'commandId', description: 'caller-stable idempotency identity.' }, { name: 'requestHash', description: 'canonical request digest accepted by {@link beginCommand}.' }, { name: 'response', description: 'bounded response safe to return on an identical retry.' }],
+        returns: 'a promise settled after the receipt is durable.',
+      },
+      {
+        signature: 'markCommandIndeterminate(deviceId: string, commandId: string, requestHash: string): Promise<void>',
+        description: 'Fence a command whose business outcome could not be proven after acceptance.',
+        parameters: [{ name: 'deviceId', description: 'authenticated device that owns the command namespace.' }, { name: 'commandId', description: 'caller-stable idempotency identity.' }, { name: 'requestHash', description: 'canonical request digest accepted by {@link beginCommand}.' }],
+        returns: 'a promise settled after the indeterminate state is durable.',
+      },
+    ],
+  },
+  {
     key: 'residentOperators',
     summary: 'Abstract provider-neutral resident session/control surface.',
     description: 'Abstract provider-neutral resident session/control surface.',
@@ -1223,10 +1381,233 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the revised idle Session snapshot.',
       },
       {
+        signature: 'compact(_request: ResidentCompactRequest): Promise<ResidentCompactResult>',
+        description: 'Compact an idle native product Session without replacing its continuation identity.',
+        parameters: [{ name: '_request', description: 'Session identity, exact inspected revision, and optional native guidance.' }],
+        returns: 'the revised idle Session snapshot after native compaction succeeds.',
+      },
+      {
         signature: 'abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>',
         description: 'Record an explicit decision for an indeterminate command.',
         parameters: [{ name: 'request', description: 'command identity, abandon decision, and expected Session revision.' }],
         returns: 'after the resolution is durably committed.',
+      },
+    ],
+  },
+  {
+    key: 'rlmRuntime',
+    summary: 'Replaceable persistent programmable RLM runtime.',
+    description: 'Replaceable persistent programmable RLM runtime.',
+    methods: [
+      {
+        signature: 'abstract create(request: RlmRuntimeCreateRequest, bindings: RlmRuntimeHostBindings): Promise<RlmRuntimeSessionSnapshotV1>',
+        description: 'Create or idempotently reopen a root.',
+        parameters: [{ name: 'request', description: 'sealed root identity and limits.' }, { name: 'bindings', description: 'native host adapter.' }],
+        returns: 'durable root snapshot.',
+      },
+      {
+        signature: 'abstract bindHost(sessionId: RlmRuntimeSessionId, bindings: RlmRuntimeHostBindings): Promise<() => void>',
+        description: 'Bind a recovered session to a live host.',
+        parameters: [{ name: 'sessionId', description: 'durable session identity.' }, { name: 'bindings', description: 'native host adapter.' }],
+        returns: 'disposer for this binding.',
+      },
+      {
+        signature: 'abstract list(): Promise<readonly RlmRuntimeSessionSnapshotV1[]>',
+        description: 'List durable runtime sessions.',
+        parameters: [],
+        returns: 'snapshots ordered by Provider recency.',
+      },
+      {
+        signature: 'abstract inspect(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSnapshotV1>',
+        description: 'Inspect one runtime session.',
+        parameters: [{ name: 'sessionId', description: 'durable session identity.' }],
+        returns: 'current snapshot.',
+      },
+      {
+        signature: 'abstract inspectReceipt(commandId: RlmCommandId): Promise<RlmCommandReceiptSnapshotV1>',
+        description: 'Inspect one command receipt.',
+        parameters: [{ name: 'commandId', description: 'caller-generated command identity.' }],
+        returns: 'bounded receipt snapshot.',
+      },
+      {
+        signature: 'abstract executeCell(request: RlmCellExecuteRequest): Promise<RlmCellResultV1>',
+        description: 'Execute one serial TypeScript cell.',
+        parameters: [{ name: 'request', description: 'cell command and optional revision.' }],
+        returns: 'bounded result after namespace persistence.',
+      },
+      {
+        signature: 'abstract compactStatus(sessionId: RlmRuntimeSessionId): Promise<RlmJsonValue>',
+        description: 'Read the Host\'s current compaction status without changing it.',
+        parameters: [{ name: 'sessionId', description: 'target runtime session.' }],
+        returns: 'Host-owned JSON status projection.',
+      },
+      {
+        signature: 'abstract compactRun(request: RlmCompactRunRequest): Promise<RlmCompactRunResultV1>',
+        description: 'Schedule compaction at a real Host turn boundary without resetting program state.',
+        parameters: [{ name: 'request', description: 'receipt-bound scheduling command and optional instructions.' }],
+        returns: 'scheduling decision plus namespace continuity proof.',
+      },
+      {
+        signature: 'abstract modelToolBridge(sessionId: RlmRuntimeSessionId): Promise<RlmModelToolBridgeV1>',
+        description: 'Describe the owner-local model tool bridge.',
+        parameters: [{ name: 'sessionId', description: 'target runtime session.' }],
+        returns: 'bridge endpoint and tool schema.',
+      },
+      {
+        signature: 'abstract trackExecution(sessionId: RlmRuntimeSessionId, execution: RlmChildExecution): Promise<() => void>',
+        description: 'Register an admitted native execution so family messages queue behind it.',
+        parameters: [{ name: 'sessionId', description: 'owning session.' }, { name: 'execution', description: 'accepted native execution.' }],
+        returns: 'disposer for the tracking association.',
+      },
+      {
+        signature: 'abstract spawn(request: RlmChildSpawnRequest): Promise<RlmChildHandleV1>',
+        description: 'Admit one asynchronous child.',
+        parameters: [{ name: 'request', description: 'parent, task, name, and model selection.' }],
+        returns: 'admission handle, never the child answer.',
+      },
+      {
+        signature: 'abstract listChildren(sessionId: RlmRuntimeSessionId): Promise<readonly RlmChildSnapshotV1[]>',
+        description: 'List children registered under one parent.',
+        parameters: [{ name: 'sessionId', description: 'parent session identity.' }],
+        returns: 'durable child snapshots.',
+      },
+      {
+        signature: 'abstract inspectChild(parentSessionId: RlmRuntimeSessionId, childId: RlmChildId): Promise<RlmChildSnapshotV1>',
+        description: 'Inspect one registered child.',
+        parameters: [{ name: 'parentSessionId', description: 'parent session identity.' }, { name: 'childId', description: 'child identity.' }],
+        returns: 'durable child snapshot.',
+      },
+      {
+        signature: 'abstract deleteChild(parentSessionId: RlmRuntimeSessionId, childId: RlmChildId, commandId: RlmCommandId): Promise<void>',
+        description: 'Stop and remove one child from the active registry.',
+        parameters: [{ name: 'parentSessionId', description: 'parent session identity.' }, { name: 'childId', description: 'child identity.' }, { name: 'commandId', description: 'idempotent delete command.' }],
+        returns: 'after persistence.',
+      },
+      {
+        signature: 'abstract sendMessage(request: RlmMessageSendRequest): Promise<RlmMessageV1>',
+        description: 'Queue one nuclear-family message.',
+        parameters: [{ name: 'request', description: 'sender, recipient, mode, and content.' }],
+        returns: 'durable delivery receipt.',
+      },
+      {
+        signature: 'abstract readMessages(request: RlmMessageReadRequest): Promise<readonly RlmMessageV1[]>',
+        description: 'Read received messages from a stable offset.',
+        parameters: [{ name: 'request', description: 'session, cursor, and bound.' }],
+        returns: 'ordered message page.',
+      },
+      {
+        signature: 'abstract familyRoster(sessionId: RlmRuntimeSessionId): Promise<RlmFamilyRosterV1>',
+        description: 'Inspect directly reachable family members.',
+        parameters: [{ name: 'sessionId', description: 'current family member.' }],
+        returns: 'nuclear-family roster.',
+      },
+      {
+        signature: 'abstract pumpMessages(sessionId?: RlmRuntimeSessionId): Promise<number>',
+        description: 'Admit queued continuations for idle targets.',
+        parameters: [{ name: 'sessionId', description: 'optional target session.' }],
+        returns: 'admitted continuation count.',
+      },
+      {
+        signature: 'abstract drain(sessionId: RlmRuntimeSessionId, maxWaitMs: number): Promise<RlmDrainResultV1>',
+        description: 'Wait for descendant work and messages to drain.',
+        parameters: [{ name: 'sessionId', description: 'subtree root.' }, { name: 'maxWaitMs', description: 'bounded wait.' }],
+        returns: 'final activity counts.',
+      },
+      {
+        signature: 'abstract setGoal(request: RlmGoalSetRequest): Promise<RlmGoalV1>',
+        description: 'Create or revise a persistent goal.',
+        parameters: [{ name: 'request', description: 'goal content, budget, and revision.' }],
+        returns: 'revised goal.',
+      },
+      {
+        signature: 'accountGoalUsage(_request: RlmGoalUsageAccountRequest): Promise<RlmGoalV1>',
+        description: 'Account one terminal assistant turn against the active goal\'s token and wall-clock budgets. Existing third-party Providers may inherit the explicit unavailable result until they implement accounting.',
+        parameters: [{ name: '_request', description: 'idempotent token usage command.' }],
+        returns: 'revised goal, including a possible `budget_limited` transition.',
+      },
+      {
+        signature: 'abstract completeGoal(sessionId: RlmRuntimeSessionId, commandId: RlmCommandId, expectedStateRevision: number): Promise<RlmGoalV1>',
+        description: 'Complete any existing non-idle goal, including paused, budget-limited, or error states.',
+        parameters: [{ name: 'sessionId', description: 'owning session.' }, { name: 'commandId', description: 'idempotent command.' }, { name: 'expectedStateRevision', description: 'optimistic revision.' }],
+        returns: 'completed goal.',
+      },
+      {
+        signature: 'abstract claimGoalContinuation(sessionId: RlmRuntimeSessionId, commandId: RlmCommandId): Promise<RlmGoalContinuationClaimV1 | undefined>',
+        description: 'Claim one bounded goal continuation.',
+        parameters: [{ name: 'sessionId', description: 'owning session.' }, { name: 'commandId', description: 'idempotent claim.' }],
+        returns: 'claim or undefined when unavailable.',
+      },
+      {
+        signature: 'abstract createHeartbeat(request: RlmHeartbeatCreateRequest): Promise<RlmHeartbeatV1>',
+        description: 'Create a recurring heartbeat.',
+        parameters: [{ name: 'request', description: 'schedule and continuation instruction.' }],
+        returns: 'durable heartbeat.',
+      },
+      {
+        signature: 'abstract listHeartbeats(sessionId: RlmRuntimeSessionId, includeInactive?: boolean): Promise<readonly RlmHeartbeatV1[]>',
+        description: 'List a session\'s heartbeats.',
+        parameters: [{ name: 'sessionId', description: 'owning session.' }, { name: 'includeInactive', description: 'include paused and cancelled entries.' }],
+        returns: 'heartbeat snapshots.',
+      },
+      {
+        signature: 'abstract updateHeartbeat(request: RlmHeartbeatUpdateRequest): Promise<RlmHeartbeatV1>',
+        description: 'Update a recurring heartbeat.',
+        parameters: [{ name: 'request', description: 'heartbeat mutation command.' }],
+        returns: 'revised heartbeat.',
+      },
+      {
+        signature: 'abstract deleteHeartbeat(sessionId: RlmRuntimeSessionId, heartbeatId: string, commandId: RlmCommandId): Promise<RlmHeartbeatV1>',
+        description: 'Cancel a recurring heartbeat.',
+        parameters: [{ name: 'sessionId', description: 'owning session.' }, { name: 'heartbeatId', description: 'heartbeat identity.' }, { name: 'commandId', description: 'idempotent delete command.' }],
+        returns: 'cancelled heartbeat.',
+      },
+      {
+        signature: 'abstract claimDueHeartbeats(now?: string): Promise<readonly RlmHeartbeatClaimV1[]>',
+        description: 'Claim due heartbeats atomically.',
+        parameters: [{ name: 'now', description: 'optional ISO claim time.' }],
+        returns: 'admitted claims.',
+      },
+      {
+        signature: 'abstract settleHeartbeat(heartbeatId: string, commandId: RlmCommandId, outcome: { readonly status: \'settled\' | \'failed\' | \'indeterminate\'; readonly error?: string }, now?: string): Promise<RlmHeartbeatV1>',
+        description: 'Settle one heartbeat claim.',
+        parameters: [{ name: 'heartbeatId', description: 'heartbeat identity.' }, { name: 'commandId', description: 'matching claim command.' }, { name: 'outcome', description: 'proven native outcome.' }, { name: 'now', description: 'optional ISO settlement time.' }],
+        returns: 'revised heartbeat.',
+      },
+      {
+        signature: 'abstract pumpHeartbeats(now?: string): Promise<number>',
+        description: 'Dispatch all currently due heartbeats.',
+        parameters: [{ name: 'now', description: 'optional ISO claim time.' }],
+        returns: 'admitted native execution count.',
+      },
+      {
+        signature: 'abstract readEvents(request: RlmEventReadRequest): Promise<readonly RlmRuntimeEventV1[]>',
+        description: 'Read append-only runtime events.',
+        parameters: [{ name: 'request', description: 'session, cursor, and bound.' }],
+        returns: 'ordered event page.',
+      },
+      {
+        signature: 'abstract interrupt(sessionId: RlmRuntimeSessionId): Promise<void>',
+        description: 'Interrupt active executions in one subtree.',
+        parameters: [{ name: 'sessionId', description: 'subtree root.' }],
+        returns: 'after interrupt requests settle.',
+      },
+      {
+        signature: 'abstract reset( sessionId: RlmRuntimeSessionId, commandId: RlmCommandId, expectedStateRevision: number, ): Promise<RlmRuntimeSessionSnapshotV1>',
+        description: 'Reset one idle programmable namespace.',
+        parameters: [{ name: 'sessionId', description: 'target session.' }, { name: 'commandId', description: 'idempotent reset command.' }, { name: 'expectedStateRevision', description: 'optimistic revision.' }],
+        returns: 'reset snapshot.',
+      },
+      {
+        signature: 'abstract reconcile(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSnapshotV1>',
+        description: 'Reconcile recovered in-memory lifecycle with durable state.',
+        parameters: [{ name: 'sessionId', description: 'target session.' }],
+        returns: 'reconciled snapshot.',
+      },
+      {
+        signature: 'abstract resolveIndeterminate(request: RlmIndeterminateResolutionRequest): Promise<RlmCommandReceiptSnapshotV1>',
+        description: 'Explicitly abandon an uncertain command.',
+        parameters: [{ name: 'request', description: 'target receipt and resolution command.' }],
+        returns: 'resolved receipt snapshot.',
       },
     ],
   },
@@ -2922,6 +3303,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'AccessSession',
+    declaration: 'export interface AccessSession extends RemotePrincipal {\n    readonly accessToken: string;\n    readonly expiresAt: string;\n}',
+  },
+  {
     name: 'AdapterRegistrationHandle',
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
@@ -3187,7 +3572,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ContextCompileRequest',
-    declaration: 'export interface ContextCompileRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly sourceRefs: readonly ContextSourceRef[];\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly acceptance: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly policy: ContextPolicy;\n}',
+    declaration: 'export interface ContextCompileRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly sourceRefs: readonly ContextSourceRef[];\n    readonly sourceMaterials?: readonly ContextSourceMaterialV1[];\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly acceptance: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly policy: ContextPolicy;\n}',
   },
   {
     name: 'ContextFormed',
@@ -3195,7 +3580,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ContextPacketV1',
-    declaration: 'export interface ContextPacketV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly included: readonly ContextSourceRef[];\n    readonly summarized: readonly ContextSourceRef[];\n    readonly dropped: readonly {\n        readonly source: ContextSourceRef;\n        readonly reason: string;\n    }[];\n    readonly estimatedTokens: number;\n    readonly tokenBudget: number;\n    readonly truncationReason?: string;\n    readonly lineage: readonly string[];\n    readonly degradedSources: readonly string[];\n    readonly redactions: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly compilerId: string;\n    readonly compilerVersion: string;\n    readonly packetSha256: string;\n}',
+    declaration: 'export interface ContextPacketV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly included: readonly ContextSourceRef[];\n    readonly sourceMaterials: readonly ContextSourceMaterialV1[];\n    readonly summarized: readonly ContextSourceRef[];\n    readonly dropped: readonly {\n        readonly source: ContextSourceRef;\n        readonly reason: string;\n    }[];\n    readonly estimatedTokens: number;\n    readonly tokenBudget: number;\n    readonly truncationReason?: string;\n    readonly lineage: readonly string[];\n    readonly degradedSources: readonly string[];\n    readonly redactions: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly compilerId: string;\n    readonly compilerVersion: string;\n    readonly packetSha256: string;\n}',
   },
   {
     name: 'ContextPolicy',
@@ -3204,6 +3589,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ContextSnapshotSection',
     declaration: 'export interface ContextSnapshotSection {\n    readonly name: string;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'ContextSourceMaterialV1',
+    declaration: 'export interface ContextSourceMaterialV1 {\n    readonly ref: string;\n    readonly text: string;\n    readonly truncated: boolean;\n}',
   },
   {
     name: 'ContextSourceRef',
@@ -3234,12 +3623,36 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ContinuableSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'continuable\';\n    readonly label: string;\n    readonly agentProvider?: string;\n    readonly agentModel?: string;\n    readonly persona?: string;\n    readonly toolFilter?: ToolRestriction;\n}',
   },
   {
+    name: 'ContinualHarnessCreateRequest',
+    declaration: 'export interface ContinualHarnessCreateRequest extends ContinualHarnessScopeRequest {\n    readonly entryId?: string;\n    readonly kind: ContinualHarnessManagedKind;\n    readonly title: string;\n    readonly content: string;\n    readonly path?: string;\n    readonly reference?: Readonly<Record<string, ContinualHarnessJsonValue>>;\n    readonly arguments?: Readonly<Record<string, ContinualHarnessJsonValue>>;\n    readonly tags?: readonly string[];\n    readonly evidenceRefs?: readonly string[];\n    readonly provenance: string;\n    readonly immutableBase?: boolean;\n}',
+  },
+  {
+    name: 'ContinualHarnessDeleteRequest',
+    declaration: 'export interface ContinualHarnessDeleteRequest extends ContinualHarnessScopeRequest {\n    readonly entryId: string;\n    readonly expectedEntryVersion: number;\n    readonly provenance: string;\n}',
+  },
+  {
     name: 'ContinualHarnessEntryKind',
     declaration: 'export type ContinualHarnessEntryKind = \'instruction\' | \'memory\' | \'skill\' | \'subagent-pattern\' | \'outcome\';',
   },
   {
     name: 'ContinualHarnessEntryV1',
     declaration: 'export interface ContinualHarnessEntryV1 {\n    readonly version: 1;\n    readonly entryId: string;\n    readonly scope: ContinualHarnessScope;\n    readonly scopeId: string;\n    readonly kind: ContinualHarnessEntryKind;\n    readonly text: string;\n    readonly tags: readonly string[];\n    readonly evidenceRefs: readonly string[];\n    readonly createdAt: string;\n    readonly digest: string;\n}',
+  },
+  {
+    name: 'ContinualHarnessJsonValue',
+    declaration: 'export type ContinualHarnessJsonValue = null | boolean | number | string | ContinualHarnessJsonValue[] | {\n    readonly [key: string]: ContinualHarnessJsonValue;\n};',
+  },
+  {
+    name: 'ContinualHarnessListRequest',
+    declaration: 'export interface ContinualHarnessListRequest extends ContinualHarnessScopeRequest {\n    readonly kind?: ContinualHarnessManagedKind;\n    readonly includeDeleted?: boolean;\n}',
+  },
+  {
+    name: 'ContinualHarnessManagedEntryV2',
+    declaration: 'export interface ContinualHarnessManagedEntryV2 {\n    readonly version: 2;\n    readonly entryId: string;\n    readonly entryVersion: number;\n    readonly scope: ContinualHarnessScope;\n    readonly scopeId: string;\n    readonly kind: ContinualHarnessManagedKind;\n    readonly title: string;\n    readonly content: string;\n    readonly path?: string;\n    readonly reference?: Readonly<Record<string, ContinualHarnessJsonValue>>;\n    readonly arguments?: Readonly<Record<string, ContinualHarnessJsonValue>>;\n    readonly tags: readonly string[];\n    readonly evidenceRefs: readonly string[];\n    readonly provenance: string;\n    readonly immutableBase: boolean;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n    readonly deletedAt?: string;\n    readonly digest: string;\n}',
+  },
+  {
+    name: 'ContinualHarnessManagedKind',
+    declaration: 'export type ContinualHarnessManagedKind = \'prompt\' | \'memory\' | \'skill\' | \'subagent\';',
   },
   {
     name: 'ContinualHarnessMode',
@@ -3250,8 +3663,48 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ContinualHarnessOutcomeRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly workspace: string;\n    readonly sessionId?: string;\n    readonly scope: ContinualHarnessScope;\n    readonly role: string;\n    readonly task: string;\n    readonly outcome: \'passed\' | \'failed\';\n    readonly evidenceRefs: readonly string[];\n}',
   },
   {
+    name: 'ContinualHarnessRefinementApplyReceiptV1',
+    declaration: 'export interface ContinualHarnessRefinementApplyReceiptV1 {\n    readonly version: 1;\n    readonly queueId: string;\n    readonly refinementId: string;\n    readonly scope: ContinualHarnessScope;\n    readonly scopeId: string;\n    readonly expectedGeneration: number;\n    readonly requestedBoundary: \'turn-end\' | \'before-next-turn\';\n    readonly state: \'queued\' | \'applied\' | \'failed\';\n    readonly queuedAt: string;\n    readonly settledAt?: string;\n    readonly appliedPlan?: ContinualHarnessRefinementPlanV1;\n    readonly error?: string;\n}',
+  },
+  {
+    name: 'ContinualHarnessRefinementApplyRequest',
+    declaration: 'export interface ContinualHarnessRefinementApplyRequest extends ContinualHarnessScopeRequest {\n    readonly refinementId: string;\n    readonly expectedGeneration: number;\n    readonly boundary: \'turn-end\' | \'before-next-turn\';\n}',
+  },
+  {
+    name: 'ContinualHarnessRefinementChangeResultV1',
+    declaration: 'export interface ContinualHarnessRefinementChangeResultV1 {\n    readonly changeIndex: number;\n    readonly operation: ContinualHarnessRefinementChangeV1[\'operation\'];\n    readonly entryId: string;\n    readonly applied: boolean;\n    readonly error?: string;\n}',
+  },
+  {
+    name: 'ContinualHarnessRefinementChangeV1',
+    declaration: 'export type ContinualHarnessRefinementChangeV1 = {\n    readonly operation: \'create\';\n    readonly entry: ContinualHarnessCreateRequest;\n} | {\n    readonly operation: \'update\';\n    readonly entry: ContinualHarnessUpdateRequest;\n} | {\n    readonly operation: \'delete\';\n    readonly entry: ContinualHarnessDeleteRequest;\n};',
+  },
+  {
+    name: 'ContinualHarnessRefinementFlushRequest',
+    declaration: 'export interface ContinualHarnessRefinementFlushRequest extends ContinualHarnessScopeRequest {\n    readonly boundary: \'turn-end\' | \'before-next-turn\';\n}',
+  },
+  {
+    name: 'ContinualHarnessRefinementListRequest',
+    declaration: 'export interface ContinualHarnessRefinementListRequest extends ContinualHarnessScopeRequest {\n    readonly limit?: number;\n}',
+  },
+  {
+    name: 'ContinualHarnessRefinementPlanRequest',
+    declaration: 'export interface ContinualHarnessRefinementPlanRequest extends ContinualHarnessScopeRequest {\n    readonly trigger: string;\n    readonly observation: string;\n    readonly failingComponent?: string;\n    readonly nextStep?: string;\n    readonly evidenceRefs: readonly string[];\n    readonly changes: readonly ContinualHarnessRefinementChangeV1[];\n    readonly plannerId: string;\n    readonly plannerVersion: string;\n}',
+  },
+  {
+    name: 'ContinualHarnessRefinementPlanV1',
+    declaration: 'export interface ContinualHarnessRefinementPlanV1 {\n    readonly version: 1;\n    readonly refinementId: string;\n    readonly scope: ContinualHarnessScope;\n    readonly scopeId: string;\n    readonly state: \'proposed\' | \'applied\' | \'rejected\' | \'rolled-back\';\n    readonly trigger: string;\n    readonly observation: string;\n    readonly failingComponent?: string;\n    readonly nextStep?: string;\n    readonly evidenceRefs: readonly string[];\n    readonly changes: readonly ContinualHarnessRefinementChangeV1[];\n    readonly plannerId: string;\n    readonly plannerVersion: string;\n    readonly plannedGeneration: number;\n    readonly appliedGeneration?: number;\n    readonly changeResults?: readonly ContinualHarnessRefinementChangeResultV1[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n    readonly digest: string;\n}',
+  },
+  {
+    name: 'ContinualHarnessRollbackRequest',
+    declaration: 'export interface ContinualHarnessRollbackRequest extends ContinualHarnessScopeRequest {\n    readonly refinementId: string;\n    readonly expectedGeneration: number;\n}',
+  },
+  {
     name: 'ContinualHarnessScope',
     declaration: 'export type ContinualHarnessScope = \'session\' | \'workspace\';',
+  },
+  {
+    name: 'ContinualHarnessScopeRequest',
+    declaration: 'export interface ContinualHarnessScopeRequest {\n    readonly workspace: string;\n    readonly sessionId?: string;\n    readonly scope?: ContinualHarnessScope;\n}',
   },
   {
     name: 'ContinualHarnessSnapshotRequest',
@@ -3259,7 +3712,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ContinualHarnessSnapshotV1',
-    declaration: 'export interface ContinualHarnessSnapshotV1 {\n    readonly version: 1;\n    readonly scope: ContinualHarnessScope;\n    readonly scopeId: string;\n    readonly generation: number;\n    readonly entries: readonly ContinualHarnessEntryV1[];\n    readonly generatedAt: string;\n    readonly snapshotSha256: string;\n}',
+    declaration: 'export interface ContinualHarnessSnapshotV1 {\n    readonly version: 1;\n    readonly scope: ContinualHarnessScope;\n    readonly scopeId: string;\n    readonly generation: number;\n    readonly entries: readonly ContinualHarnessEntryV1[];\n    readonly managedEntries: readonly ContinualHarnessManagedEntryV2[];\n    readonly generatedAt: string;\n    readonly snapshotSha256: string;\n}',
+  },
+  {
+    name: 'ContinualHarnessTypeScriptSkillModule',
+    declaration: 'export interface ContinualHarnessTypeScriptSkillModule {\n    readonly moduleId: string;\n    readonly callables: readonly string[];\n    invoke(request: {\n        readonly callable: string;\n        readonly args: Readonly<Record<string, ContinualHarnessJsonValue>>;\n        readonly workspace: string;\n        readonly sessionId: string;\n        readonly entryId: string;\n    }): Promise<ContinualHarnessJsonValue>;\n}',
+  },
+  {
+    name: 'ContinualHarnessUpdateRequest',
+    declaration: 'export interface ContinualHarnessUpdateRequest extends ContinualHarnessScopeRequest {\n    readonly entryId: string;\n    readonly expectedEntryVersion: number;\n    readonly title?: string;\n    readonly content?: string;\n    readonly path?: string | null;\n    readonly reference?: Readonly<Record<string, ContinualHarnessJsonValue>> | null;\n    readonly arguments?: Readonly<Record<string, ContinualHarnessJsonValue>> | null;\n    readonly tags?: readonly string[];\n    readonly evidenceRefs?: readonly string[];\n    readonly provenance: string;\n}',
   },
   {
     name: 'CordisDynamicPackageId',
@@ -3312,6 +3773,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CredentialRef',
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
+  },
+  {
+    name: 'DeviceCredential',
+    declaration: 'export interface DeviceCredential {\n    readonly deviceId: string;\n    readonly credential: string;\n    readonly scope: RemoteDeviceScope;\n}',
   },
   {
     name: 'DiffCallView',
@@ -3723,7 +4188,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LogicalTaskGraphV1',
-    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
+    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly baseSha?: string;\n    readonly workspaceIsolation?: \'shared\' | \'git-worktree\';\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly qualityPolicy?: {\n        readonly independentVerification: \'required\' | \'advisory\';\n    };\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
   },
   {
     name: 'LspHover',
@@ -3875,7 +4340,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelExecutionOffer',
-    declaration: 'export interface ModelExecutionOffer {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly displayName: string;\n    readonly source: \'native-subscription\' | \'metered-api\';\n    readonly tier: \'low\' | \'medium\' | \'high\';\n    readonly available: boolean;\n    readonly maxConcurrency: number;\n    readonly activeCount: number;\n    readonly tags: readonly string[];\n    readonly quotaPool?: ModelQuotaPool;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n}',
+    declaration: 'export interface ModelExecutionOffer {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly displayName: string;\n    readonly source: \'native-subscription\' | \'metered-api\';\n    readonly tier: \'low\' | \'medium\' | \'high\';\n    readonly available: boolean;\n    readonly maxConcurrency: number;\n    readonly activeCount: number;\n    readonly tags: readonly string[];\n    readonly quotaPool?: ModelQuotaPool;\n    readonly quotaGuard?: ModelQuotaGuard;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n}',
   },
   {
     name: 'ModelMessageSource',
@@ -3888,6 +4353,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ModelModalityMap',
     declaration: 'export interface ModelModalityMap {\n    text: \'text\';\n    image: \'image\';\n}',
+  },
+  {
+    name: 'ModelQuotaGuard',
+    declaration: 'export interface ModelQuotaGuard {\n    readonly unknownQuota: \'allow\' | \'block\';\n    readonly protectedRemainingPercent: number;\n    readonly stopAdmissionAtRemainingPercent: number;\n    readonly accelerateBeforeReset: boolean;\n}',
   },
   {
     name: 'ModelQuotaPool',
@@ -3903,7 +4372,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelWorkerExecuteRequest',
-    declaration: 'export interface ModelWorkerExecuteRequest {\n    readonly commandId: string;\n    readonly workerId: string;\n    readonly model: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly rlmPlan?: RlmExecutionPlanV1;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ModelWorkerExecuteRequest {\n    readonly commandId: string;\n    readonly workerId: string;\n    readonly model: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly rlmPlan?: RlmExecutionPlanV1;\n    readonly modelToolBridge?: ModelWorkerToolBridgeV1;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ModelWorkerProvider',
@@ -3912,6 +4381,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ModelWorkerResult',
     declaration: 'export interface ModelWorkerResult {\n    readonly output: readonly ContentBlock[];\n    readonly stopReason: \'completed\' | \'aborted\' | \'error\' | \'max-tokens\' | \'refusal\';\n    readonly usage?: TokenUsage;\n}',
+  },
+  {
+    name: 'ModelWorkerToolBridgeV1',
+    declaration: 'export interface ModelWorkerToolBridgeV1 {\n    readonly version: 1;\n    readonly socketPath: string;\n    readonly sessionId: string;\n    readonly tools: readonly {\n        readonly name: string;\n        readonly description: string;\n        readonly inputSchema: Readonly<Record<string, unknown>>;\n    }[];\n}',
   },
   {
     name: 'ObjectJsonSchema',
@@ -3934,6 +4407,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type OrchestrationArtifactRef = Branded<\'OrchestrationArtifactRef\'>;',
   },
   {
+    name: 'OrchestrationAutoRefineIndeterminateRequest',
+    declaration: 'export interface OrchestrationAutoRefineIndeterminateRequest {\n    readonly commandId: string;\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly sessionId: string;\n    readonly roundId: string;\n    readonly branchVersion: string;\n    readonly decision: \'abandon\';\n    readonly reason: string;\n}',
+  },
+  {
     name: 'OrchestrationBlocker',
     declaration: 'export interface OrchestrationBlocker {\n    readonly code: string;\n    readonly message: string;\n    readonly nodeId?: string;\n}',
   },
@@ -3947,11 +4424,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationControlRequest',
-    declaration: 'export interface OrchestrationControlRequest {\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly action: \'pause\' | \'resume\' | \'cancel\';\n    readonly reason: string;\n}',
+    declaration: 'export interface OrchestrationControlRequest {\n    readonly commandId: string;\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly action: \'pause\' | \'resume\' | \'cancel\';\n    readonly reason: string;\n}',
   },
   {
     name: 'OrchestrationDecisionRequest',
-    declaration: 'export interface OrchestrationDecisionRequest {\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly nodeId?: string;\n    readonly decision: \'approve\' | \'reject\';\n    readonly reason: string;\n}',
+    declaration: 'export interface OrchestrationDecisionRequest {\n    readonly commandId: string;\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly nodeId?: string;\n    readonly decision: \'approve\' | \'reject\';\n    readonly reason: string;\n}',
   },
   {
     name: 'OrchestrationEvent',
@@ -3967,7 +4444,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationIndeterminateRequest',
-    declaration: 'export interface OrchestrationIndeterminateRequest {\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly decision: \'abandon\' | \'retry\';\n    readonly reason: string;\n}',
+    declaration: 'export interface OrchestrationIndeterminateRequest {\n    readonly commandId: string;\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly decision: \'abandon\' | \'retry\';\n    readonly reason: string;\n}',
   },
   {
     name: 'OrchestrationNodeSnapshot',
@@ -3975,7 +4452,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationNodeSpecV1',
-    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
+    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
   },
   {
     name: 'OrchestrationNodeState',
@@ -4000,6 +4477,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OrchestrationStartRequest',
     declaration: 'export interface OrchestrationStartRequest {\n    readonly compilationId: string;\n    readonly approvalRef?: string;\n}',
+  },
+  {
+    name: 'PairingChallenge',
+    declaration: 'export interface PairingChallenge {\n    readonly code: string;\n    readonly scope: RemoteDeviceScope;\n    readonly expiresAt: string;\n}',
   },
   {
     name: 'PermissionSelect',
@@ -4042,6 +4523,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PhysicalOperatorId = Branded<\'PhysicalOperatorId\'>;',
   },
   {
+    name: 'PhysicalOperatorModelToolBridgeV1',
+    declaration: 'export interface PhysicalOperatorModelToolBridgeV1 {\n    readonly version: 1;\n    readonly socketPath: string;\n    readonly sessionId: string;\n    readonly tools: readonly PhysicalOperatorModelToolV1[];\n}',
+  },
+  {
+    name: 'PhysicalOperatorModelToolV1',
+    declaration: 'export interface PhysicalOperatorModelToolV1 {\n    readonly name: string;\n    readonly description: string;\n    readonly inputSchema: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
     name: 'PhysicalOperatorProviderRun',
     declaration: 'export interface PhysicalOperatorProviderRun {\n    readonly result: Promise<PhysicalOperatorResult>;\n    dispose(): Promise<void>;\n}',
   },
@@ -4063,7 +4552,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',
@@ -4182,6 +4671,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RedactedSecret {\n    path: string[];\n    set: boolean;\n}',
   },
   {
+    name: 'RemoteCommandBeginResult',
+    declaration: 'export type RemoteCommandBeginResult = {\n    readonly kind: \'accepted\';\n} | {\n    readonly kind: \'settled\';\n    readonly response: RemoteCommandResponse;\n} | {\n    readonly kind: \'conflict\';\n} | {\n    readonly kind: \'indeterminate\';\n} | {\n    readonly kind: \'running\';\n};',
+  },
+  {
+    name: 'RemoteCommandResponse',
+    declaration: 'export interface RemoteCommandResponse {\n    readonly status: number;\n    readonly contentType?: string;\n    readonly body: string;\n}',
+  },
+  {
+    name: 'RemoteDeviceScope',
+    declaration: 'export type RemoteDeviceScope = \'cockpit\' | \'pocket\' | \'admin\';',
+  },
+  {
+    name: 'RemoteDeviceView',
+    declaration: 'export interface RemoteDeviceView extends RemotePrincipal {\n    readonly createdAt: string;\n    readonly revokedAt?: string;\n}',
+  },
+  {
+    name: 'RemotePrincipal',
+    declaration: 'export interface RemotePrincipal {\n    readonly deviceId: string;\n    readonly deviceName: string;\n    readonly scope: RemoteDeviceScope;\n}',
+  },
+  {
     name: 'RequestContext',
     declaration: 'export interface RequestContext {\n    provider: string;\n    model: string;\n    contextWindow?: number;\n}',
   },
@@ -4198,6 +4707,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type RequestRunOutcome = \'approved\' | \'completed\' | \'rejected\' | \'cancelled\' | \'failed\';',
   },
   {
+    name: 'ResidentCompactRequest',
+    declaration: 'export interface ResidentCompactRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly expectedStateRevision: number;\n    readonly instructions?: string;\n}',
+  },
+  {
+    name: 'ResidentCompactResult',
+    declaration: 'export interface ResidentCompactResult {\n    readonly session: ResidentSessionSnapshot;\n    readonly nativeSessionId: string;\n    readonly compactedAt: string;\n}',
+  },
+  {
     name: 'ResidentEvent',
     declaration: 'export interface ResidentEvent {\n    readonly sequence: number;\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly type: string;\n    readonly time: string;\n    readonly data: Readonly<Record<string, unknown>>;\n}',
   },
@@ -4211,7 +4728,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ResidentExecutionProfile',
@@ -4338,6 +4855,70 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RlmBudgetV1 {\n    readonly maxDepth: number;\n    readonly maxChildren: number;\n    readonly maxTurns: number;\n}',
   },
   {
+    name: 'RlmCellExecuteRequest',
+    declaration: 'export interface RlmCellExecuteRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly code: string;\n    readonly expectedStateRevision?: number;\n}',
+  },
+  {
+    name: 'RlmCellResultV1',
+    declaration: 'export interface RlmCellResultV1 {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly stateRevision: number;\n    readonly logs: readonly string[];\n    readonly value?: RlmJsonValue;\n    readonly display: string;\n    readonly degradedVariables: readonly string[];\n}',
+  },
+  {
+    name: 'RlmChildExecution',
+    declaration: 'export interface RlmChildExecution {\n    readonly nativeSessionId: string;\n    readonly nativeTurnId: string;\n    readonly result: Promise<RlmChildExecutionResult>;\n    interrupt(): Promise<void>;\n}',
+  },
+  {
+    name: 'RlmChildExecutionResult',
+    declaration: 'export interface RlmChildExecutionResult {\n    readonly status: \'settled\' | \'failed\' | \'indeterminate\';\n    readonly output?: readonly ContentBlock[];\n    readonly resultRef?: string;\n    readonly outputPreview?: string;\n    readonly error?: string;\n    readonly messages?: readonly Omit<RlmMessageSendRequest, \'commandId\' | \'fromSessionId\'>[];\n    readonly usage?: {\n        readonly provider: string;\n        readonly model: string;\n        readonly authMode: \'subscription\' | \'api\' | \'local\';\n        readonly inputTokens?: number;\n        readonly outputTokens?: number;\n        readonly costUsd?: number;\n    };\n}',
+  },
+  {
+    name: 'RlmChildHandleV1',
+    declaration: 'export interface RlmChildHandleV1 {\n    readonly rlmChildId: RlmChildId;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly name: string;\n    readonly sessionDir: string;\n    readonly model: RlmModelSelectionV1;\n}',
+  },
+  {
+    name: 'RlmChildId',
+    declaration: 'export type RlmChildId = Branded<\'RlmChildId\'>;',
+  },
+  {
+    name: 'RlmChildLifecycle',
+    declaration: 'export type RlmChildLifecycle = \'accepted\' | \'running\' | \'settled\' | \'failed\' | \'indeterminate\' | \'deleted\';',
+  },
+  {
+    name: 'RlmChildSnapshotV1',
+    declaration: 'export interface RlmChildSnapshotV1 extends RlmChildHandleV1 {\n    readonly version: 1;\n    readonly parentSessionId: RlmRuntimeSessionId;\n    readonly depth: number;\n    readonly task: string;\n    readonly lifecycle: RlmChildLifecycle;\n    readonly nativeSessionId?: string;\n    readonly nativeTurnId?: string;\n    readonly resultRef?: string;\n    readonly outputPreview?: string;\n    readonly error?: string;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'RlmChildSpawnRequest',
+    declaration: 'export interface RlmChildSpawnRequest {\n    readonly commandId: RlmCommandId;\n    readonly parentSessionId: RlmRuntimeSessionId;\n    readonly name: string;\n    readonly task: string;\n    readonly model?: RlmModelSelectionV1;\n}',
+  },
+  {
+    name: 'RlmCommandId',
+    declaration: 'export type RlmCommandId = Branded<\'RlmCommandId\'>;',
+  },
+  {
+    name: 'RlmCommandReceiptSnapshotV1',
+    declaration: 'export interface RlmCommandReceiptSnapshotV1 {\n    readonly version: 1;\n    readonly commandId: RlmCommandId;\n    readonly sessionId?: RlmRuntimeSessionId;\n    readonly operation?: string;\n    readonly requestSha256: string;\n    readonly state: \'accepted\' | \'running\' | \'settled\' | \'failed\' | \'indeterminate\';\n    readonly resultSha256?: string;\n    readonly error?: {\n        readonly message: string;\n        readonly code: string;\n    };\n    readonly resolution?: \'abandon\';\n    readonly resolutionReason?: string;\n}',
+  },
+  {
+    name: 'RlmCompactRunOutcomeV1',
+    declaration: 'export interface RlmCompactRunOutcomeV1 {\n    readonly scheduled: boolean;\n    readonly reason?: string;\n    readonly note?: string;\n}',
+  },
+  {
+    name: 'RlmCompactRunRequest',
+    declaration: 'export interface RlmCompactRunRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly expectedStateRevision?: number;\n    readonly instructions?: string;\n}',
+  },
+  {
+    name: 'RlmCompactRunResultV1',
+    declaration: 'export interface RlmCompactRunResultV1 extends RlmCompactRunOutcomeV1 {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly stateRevision: number;\n    readonly restorableVariables: readonly string[];\n    readonly degradedVariables: readonly string[];\n}',
+  },
+  {
+    name: 'RlmDrainResultV1',
+    declaration: 'export interface RlmDrainResultV1 {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly activeExecutions: number;\n    readonly queuedMessages: number;\n    readonly lastContinuation?: RlmChildExecutionResult;\n}',
+  },
+  {
+    name: 'RlmEventReadRequest',
+    declaration: 'export interface RlmEventReadRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly after?: number;\n    readonly limit?: number;\n}',
+  },
+  {
     name: 'RlmExecutionMode',
     declaration: 'export type RlmExecutionMode = \'auto\' | \'enabled\' | \'disabled\';',
   },
@@ -4346,8 +4927,108 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RlmExecutionPlanV1 extends RlmBudgetV1 {\n    readonly version: 1;\n    readonly enabled: boolean;\n    readonly strategyId: string;\n    readonly strategyVersion: string;\n    readonly reason: string;\n    readonly instruction: string;\n    readonly planSha256: string;\n}',
   },
   {
+    name: 'RlmFamilyRosterEntryV1',
+    declaration: 'export interface RlmFamilyRosterEntryV1 {\n    readonly relationship: \'parent\' | \'sibling\' | \'child\';\n    readonly name: string;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly depth: number;\n    readonly status: \'running\' | \'idle\' | \'inactive\';\n}',
+  },
+  {
+    name: 'RlmFamilyRosterV1',
+    declaration: 'export interface RlmFamilyRosterV1 {\n    readonly current: {\n        readonly name: string;\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly depth: number;\n    };\n    readonly entries: readonly RlmFamilyRosterEntryV1[];\n}',
+  },
+  {
+    name: 'RlmGoalContinuationClaimV1',
+    declaration: 'export interface RlmGoalContinuationClaimV1 {\n    readonly commandId: RlmCommandId;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly objective: string;\n    readonly continuation: number;\n    readonly continuationBudget: number;\n}',
+  },
+  {
+    name: 'RlmGoalSetRequest',
+    declaration: 'export interface RlmGoalSetRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly expectedStateRevision: number;\n    readonly objective: string;\n    readonly status?: RlmGoalV1[\'status\'] | \'blocked\';\n    readonly tokenBudget?: number;\n    readonly continuationBudget: number;\n    readonly reason?: string;\n    readonly error?: string;\n}',
+  },
+  {
+    name: 'RlmGoalStatus',
+    declaration: 'export type RlmGoalStatus = \'active\' | \'paused\' | \'budget_limited\' | \'complete\' | \'error\';',
+  },
+  {
+    name: 'RlmGoalUsageAccountRequest',
+    declaration: 'export interface RlmGoalUsageAccountRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly expectedStateRevision: number;\n    readonly inputTokens: number;\n    readonly outputTokens: number;\n}',
+  },
+  {
+    name: 'RlmGoalV1',
+    declaration: 'export interface RlmGoalV1 {\n    readonly goalId: string;\n    readonly objective: string;\n    readonly active: boolean;\n    readonly status: RlmGoalStatus;\n    readonly tokenBudget?: number;\n    readonly tokensUsed: number;\n    readonly timeUsedSeconds: number;\n    readonly continuationBudget: number;\n    readonly continuationsUsed: number;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n    readonly lastReason?: string;\n    readonly lastError?: string;\n}',
+  },
+  {
+    name: 'RlmHeartbeatClaimV1',
+    declaration: 'export interface RlmHeartbeatClaimV1 {\n    readonly heartbeat: RlmHeartbeatV1;\n    readonly commandId: RlmCommandId;\n}',
+  },
+  {
+    name: 'RlmHeartbeatCreateRequest',
+    declaration: 'export interface RlmHeartbeatCreateRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly instruction: string;\n    readonly interval?: string;\n    readonly deliveryMode?: \'steer\' | \'follow_up\';\n    readonly label?: string;\n}',
+  },
+  {
+    name: 'RlmHeartbeatUpdateRequest',
+    declaration: 'export interface RlmHeartbeatUpdateRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly heartbeatId: string;\n    readonly instruction?: string;\n    readonly interval?: string;\n    readonly deliveryMode?: \'steer\' | \'follow_up\';\n    readonly label?: string | null;\n    readonly status?: \'pause\' | \'resume\';\n}',
+  },
+  {
+    name: 'RlmHeartbeatV1',
+    declaration: 'export interface RlmHeartbeatV1 {\n    readonly version: 1;\n    readonly heartbeatId: string;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly status: \'active\' | \'paused\' | \'cancelled\';\n    readonly instruction: string;\n    readonly interval: string;\n    readonly intervalMs: number;\n    readonly deliveryMode: \'steer\' | \'follow_up\';\n    readonly label?: string;\n    readonly nextRunAt?: string;\n    readonly lastRunAt?: string;\n    readonly lastError?: string;\n    readonly runCount: number;\n    readonly inFlightCommandId?: RlmCommandId;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'RlmIndeterminateResolutionRequest',
+    declaration: 'export interface RlmIndeterminateResolutionRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly indeterminateCommandId: RlmCommandId;\n    readonly resolutionCommandId: RlmCommandId;\n    readonly expectedStateRevision: number;\n    readonly decision: \'abandon\';\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'RlmJsonValue',
+    declaration: 'export type RlmJsonValue = null | boolean | number | string | RlmJsonValue[] | {\n    readonly [key: string]: RlmJsonValue;\n};',
+  },
+  {
+    name: 'RlmMessageMode',
+    declaration: 'export type RlmMessageMode = \'auto\' | \'steer\' | \'follow_up\';',
+  },
+  {
+    name: 'RlmMessageReadRequest',
+    declaration: 'export interface RlmMessageReadRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly after?: number;\n    readonly limit?: number;\n}',
+  },
+  {
+    name: 'RlmMessageSendRequest',
+    declaration: 'export interface RlmMessageSendRequest {\n    readonly commandId: RlmCommandId;\n    readonly fromSessionId: RlmRuntimeSessionId;\n    readonly toSessionId: RlmRuntimeSessionId;\n    readonly mode: RlmMessageMode;\n    readonly text: string;\n    readonly artifactRefs?: readonly string[];\n}',
+  },
+  {
+    name: 'RlmMessageV1',
+    declaration: 'export interface RlmMessageV1 extends RlmMessageSendRequest {\n    readonly version: 1;\n    readonly messageId: string;\n    readonly effectiveMode: \'steer\' | \'follow_up\';\n    readonly deliveryStatus: \'queued\' | \'delivered\';\n    readonly queuedAt: string;\n    readonly deliveredAt?: string;\n    readonly deliveryError?: string;\n    readonly createdAt: string;\n}',
+  },
+  {
+    name: 'RlmModelSelectionV1',
+    declaration: 'export interface RlmModelSelectionV1 {\n    readonly operatorId: string;\n    readonly model: string;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n}',
+  },
+  {
+    name: 'RlmModelToolBridgeV1',
+    declaration: 'export interface RlmModelToolBridgeV1 {\n    readonly version: 1;\n    readonly socketPath: string;\n    readonly sessionId: string;\n    readonly tools: readonly [\n        {\n            readonly name: \'typescript_repl\';\n            readonly description: string;\n            readonly inputSchema: Readonly<Record<string, unknown>>;\n        }\n    ];\n}',
+  },
+  {
+    name: 'RlmRuntimeCreateRequest',
+    declaration: 'export interface RlmRuntimeCreateRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly executionId: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly context?: Readonly<Record<string, RlmJsonValue>>;\n}',
+  },
+  {
+    name: 'RlmRuntimeEventV1',
+    declaration: 'export interface RlmRuntimeEventV1 {\n    readonly version: 1;\n    readonly sequence: number;\n    readonly type: string;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly childId?: RlmChildId;\n    readonly createdAt: string;\n    readonly data: Readonly<Record<string, RlmJsonValue>>;\n}',
+  },
+  {
+    name: 'RlmRuntimeHostBindings',
+    declaration: 'export interface RlmRuntimeHostBindings {\n    dispatchChild(request: RlmChildSpawnRequest & {\n        readonly childId: RlmChildId;\n        readonly childSessionId: RlmRuntimeSessionId;\n        readonly depth: number;\n        readonly model: RlmModelSelectionV1;\n    }): Promise<RlmChildExecution>;\n    dispatchContinuation?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly commandId: RlmCommandId;\n        readonly instruction: string;\n        readonly source: \'goal\' | \'heartbeat\' | \'message\';\n        readonly deliveryMode: \'steer\' | \'follow_up\';\n        readonly model: RlmModelSelectionV1;\n    }): Promise<RlmChildExecution>;\n    hostRequest?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly method: \'harness.list\' | \'harness.get\' | \'harness.create\' | \'harness.update\' | \'harness.delete\' | \'harness.plan_refinement\' | \'harness.apply_refinement\' | \'harness.rollback\' | \'compact.status\' | \'compact.run\' | \'skills.list\' | \'skills.call\';\n        readonly params: Readonly<Record<string, RlmJsonValue>>;\n    }): Promise<RlmJsonValue>;\n}',
+  },
+  {
+    name: 'RlmRuntimeLimitsV1',
+    declaration: 'export interface RlmRuntimeLimitsV1 {\n    readonly maxDepth: number;\n    readonly maxChildren: number;\n    readonly maxTurns: number;\n    readonly maxCellMs: number;\n    readonly maxOutputBytes: number;\n}',
+  },
+  {
+    name: 'RlmRuntimeSessionId',
+    declaration: 'export type RlmRuntimeSessionId = Branded<\'RlmRuntimeSessionId\'>;',
+  },
+  {
+    name: 'RlmRuntimeSessionSnapshotV1',
+    declaration: 'export interface RlmRuntimeSessionSnapshotV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly executionId: string;\n    readonly parentSessionId?: RlmRuntimeSessionId;\n    readonly parentChildId?: RlmChildId;\n    readonly workspace: string;\n    readonly sessionDir: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly depth: number;\n    readonly lifecycle: \'idle\' | \'running\' | \'degraded\' | \'stopped\';\n    readonly stateRevision: number;\n    readonly eventCursor: number;\n    readonly children: readonly RlmChildSnapshotV1[];\n    readonly restorableVariables: readonly string[];\n    readonly degradedVariables: readonly string[];\n    readonly goal?: RlmGoalV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
     name: 'RlmStrategyRequest',
-    declaration: 'export interface RlmStrategyRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly requestedMode: RlmExecutionMode;\n    readonly requestedBudget?: RlmBudgetV1;\n}',
+    declaration: 'export interface RlmStrategyRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly requestedMode: RlmExecutionMode;\n    readonly objective?: ModelAllocationObjective;\n    readonly requestedBudget?: RlmBudgetV1;\n}',
   },
   {
     name: 'RpcError',

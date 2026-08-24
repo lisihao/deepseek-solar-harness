@@ -309,20 +309,34 @@ export abstract class AbstractApiClient implements IApiClient {
     body: ClientRequest | ClientResponse,
     signal: AbortSignal | undefined,
     timeoutPolicy: UnaryTimeoutPolicy = 'default',
+    retryRemoteTransport = false,
   ): Promise<Response> {
-    const requestSignal = timeoutPolicy === 'default'
-      ? signal === undefined
-        ? AbortSignal.timeout(this.timeoutMs)
-        : AbortSignal.any([AbortSignal.timeout(this.timeoutMs), signal])
-      : signal
-    const response = await this.doFetch(new URL(path, this.resolveBase()), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      ...requestSignal === undefined ? {} : { signal: requestSignal },
-    })
-    if (!response.ok) throw new Error(`transport failure for ${path}: HTTP ${response.status}`)
-    return response
+    const base = this.resolveBase()
+    const attempts = retryRemoteTransport && isRemoteAuthority(base) ? 2 : 1
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      const requestSignal = timeoutPolicy === 'default'
+        ? signal === undefined
+          ? AbortSignal.timeout(this.timeoutMs)
+          : AbortSignal.any([AbortSignal.timeout(this.timeoutMs), signal])
+        : signal
+      let response: Response
+      try {
+        response = await this.doFetch(new URL(path, base), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+          ...requestSignal === undefined ? {} : { signal: requestSignal },
+        })
+      } catch (error) {
+        if (attempt + 1 >= attempts || signal?.aborted === true) throw error
+        continue
+      }
+      if (!response.ok) throw new Error(`transport failure for ${path}: HTTP ${response.status}`)
+      return response
+    }
+    /* v8 ignore next -- attempts is always one or two, and every loop iteration
+     * either returns, throws, or continues into a final throwing iteration. */
+    throw new Error(`transport failure for ${path}`)
   }
 
   /**
@@ -338,7 +352,13 @@ export abstract class AbstractApiClient implements IApiClient {
   ): Promise<RpcResponse<ResponseValue<K>>> {
     const message: ClientRequest = { type: 'client-request', rpcId: this.mintRpcId(), method, payload }
     this.onEnvelope(message)
-    const response = await this.postJson(`/api/${method}`, message, signal, timeoutPolicy)
+    const response = await this.postJson(
+      `/api/${method}`,
+      message,
+      signal,
+      timeoutPolicy,
+      method === 'session.prompt',
+    )
     const full = serverResponseSchema.parse(await response.json())
     this.onEnvelope(full)
     if (full.rpcId !== message.rpcId) throw new Error(`rpcId mismatch for ${method}: sent ${message.rpcId}, got ${full.rpcId}`)
@@ -507,9 +527,15 @@ export abstract class AbstractApiClient implements IApiClient {
 
   async respond(message: ClientResponse, signal?: AbortSignal): Promise<RpcReceipt> {
     this.onEnvelope(message)
-    const response = await this.postJson('/api/respond', message, signal)
+    const response = await this.postJson('/api/respond', message, signal, 'default', true)
     return rpcReceiptSchema.parse(await response.json())
   }
+}
+
+function isRemoteAuthority(base: string): boolean {
+  const hostname = new URL(base).hostname.toLowerCase()
+  return hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '[::1]'
+    && hostname !== 'dsh.internal'
 }
 
 /**

@@ -5,6 +5,18 @@ import { HarnessError, type ContentBlock, type TokenUsage } from '@deepseek-ai/d
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 
+/** Serializable owner-local tool bridge usable by an in-process model worker. */
+export interface ModelWorkerToolBridgeV1 {
+  readonly version: 1
+  readonly socketPath: string
+  readonly sessionId: string
+  readonly tools: readonly {
+    readonly name: string
+    readonly description: string
+    readonly inputSchema: Readonly<Record<string, unknown>>
+  }[]
+}
+
 /** Sealed one-shot request dispatched to a selected model worker. */
 export interface ModelWorkerExecuteRequest {
   readonly commandId: string
@@ -12,6 +24,7 @@ export interface ModelWorkerExecuteRequest {
   readonly model: string
   readonly prompt: readonly ContentBlock[]
   readonly rlmPlan?: RlmExecutionPlanV1
+  readonly modelToolBridge?: ModelWorkerToolBridgeV1
   readonly signal: AbortSignal
 }
 

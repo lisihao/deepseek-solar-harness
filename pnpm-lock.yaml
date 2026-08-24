@@ -213,6 +213,9 @@ importers:
       '@deepseek-ai/dsh-mcp-client':
         specifier: workspace:^
         version: link:../../packages/mcp/mcp-client
+      '@deepseek-ai/dsh-orchestrations':
+        specifier: workspace:^
+        version: link:../../packages/bundle/orchestrations
       '@deepseek-ai/dsh-persona':
         specifier: workspace:^
         version: link:../../packages/preset/persona
@@ -228,6 +231,9 @@ importers:
       '@deepseek-ai/dsh-resident-operator-local':
         specifier: workspace:^
         version: link:../../packages/physical-operator/resident-operator-local
+      '@deepseek-ai/dsh-resident-operators':
+        specifier: workspace:^
+        version: link:../../packages/bundle/resident-operators
       '@deepseek-ai/dsh-schedule':
         specifier: workspace:^
         version: link:../../packages/schedule/schedule
@@ -370,6 +376,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../../packages/client/connection
       '@deepseek-ai/dsh-client-web':
         specifier: workspace:^
         version: link:../../packages/client/web
@@ -1312,6 +1321,12 @@ importers:
       '@deepseek-ai/dsh-orchestration-local':
         specifier: workspace:^
         version: link:../../orchestration/orchestration-local
+      '@deepseek-ai/dsh-rlm-runtime':
+        specifier: workspace:^
+        version: link:../../orchestration/rlm-runtime
+      '@deepseek-ai/dsh-rlm-runtime-local':
+        specifier: workspace:^
+        version: link:../../orchestration/rlm-runtime-local
       '@deepseek-ai/dsh-rlm-strategy':
         specifier: workspace:^
         version: link:../../orchestration/rlm-strategy
@@ -1521,6 +1536,9 @@ importers:
       '@deepseek-ai/dsh-host-plugin-inventory':
         specifier: workspace:^
         version: link:../../host/plugin-inventory
+      '@deepseek-ai/dsh-host-remote-auth':
+        specifier: workspace:^
+        version: link:../../host/remote-auth
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:^
         version: link:../../host/webserver
@@ -1604,6 +1622,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-host-remote-auth':
+        specifier: workspace:^
+        version: link:../../host/remote-auth
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:^
         version: link:../../host/webserver
@@ -1720,9 +1741,6 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
-      '@deepseek-ai/dsh-session-projection':
-        specifier: workspace:^
-        version: link:../../session/session-projection
       '@deepseek-ai/dsh-session-title':
         specifier: workspace:^
         version: link:../../session/session-title
@@ -1748,6 +1766,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-session-projection':
+        specifier: workspace:^
+        version: link:../../session/session-projection
       '@deepseek-ai/dsh-timeout':
         specifier: workspace:^
         version: link:../../util/timeout
@@ -3254,6 +3275,9 @@ importers:
 
   packages/client/web:
     dependencies:
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../connection
       '@deepseek-ai/dsh-client-modules':
         specifier: workspace:^
         version: link:../modules
@@ -5121,6 +5145,25 @@ importers:
         specifier: workspace:^
         version: link:../../typert/protocol
 
+  packages/host/remote-auth:
+    dependencies:
+      '@deepseek-ai/dsh-atomic-write':
+        specifier: workspace:^
+        version: link:../../util/atomic-write
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../util/home-paths
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+
   packages/host/webserver:
     dependencies:
       '@deepseek-ai/schemastery':
@@ -5746,6 +5789,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-atomic-write':
+        specifier: workspace:^
+        version: link:../../util/atomic-write
       '@deepseek-ai/dsh-continual-harness':
         specifier: workspace:^
         version: link:../continual-harness
@@ -5821,6 +5867,9 @@ importers:
       '@deepseek-ai/dsh-credentials':
         specifier: workspace:^
         version: link:../../credentials/credentials
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../util/home-paths
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
@@ -5836,6 +5885,9 @@ importers:
       '@deepseek-ai/dsh-rlm-strategy':
         specifier: workspace:^
         version: link:../rlm-strategy
+      '@deepseek-ai/dsh-sdk-protocol':
+        specifier: workspace:^
+        version: link:../../sdk/protocol
 
   packages/orchestration/orchestration:
     devDependencies:
@@ -5933,6 +5985,12 @@ importers:
       '@deepseek-ai/dsh-resident-operator-local':
         specifier: workspace:^
         version: link:../../physical-operator/resident-operator-local
+      '@deepseek-ai/dsh-rlm-runtime':
+        specifier: workspace:^
+        version: link:../rlm-runtime
+      '@deepseek-ai/dsh-rlm-runtime-local':
+        specifier: workspace:^
+        version: link:../rlm-runtime-local
       '@deepseek-ai/dsh-rlm-strategy':
         specifier: workspace:^
         version: link:../rlm-strategy
@@ -5945,6 +6003,49 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+
+  packages/orchestration/rlm-runtime:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-brand':
+        specifier: workspace:^
+        version: link:../../util/brand
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../../physical-operator/physical-operator
+
+  packages/orchestration/rlm-runtime-local:
+    dependencies:
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-atomic-write':
+        specifier: workspace:^
+        version: link:../../util/atomic-write
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../util/home-paths
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-rlm-runtime':
+        specifier: workspace:^
+        version: link:../rlm-runtime
+      '@deepseek-ai/dsh-sdk-protocol':
+        specifier: workspace:^
+        version: link:../../sdk/protocol
 
   packages/orchestration/rlm-strategy:
     devDependencies:
@@ -6011,6 +6112,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-host-remote-auth':
+        specifier: workspace:^
+        version: link:../../host/remote-auth
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:^
         version: link:../../host/webserver

@@ -4,6 +4,7 @@
  * @module @deepseek-ai/dsh-home-paths
  */
 
+import { createHash } from 'node:crypto'
 import { opendir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -16,6 +17,37 @@ export const DEFAULT_DSH_HOME_DISPLAY = `~/${DSH_HOME_DIR_NAME}`
 
 /** Environment variable that overrides the default DeepSeek Harness home. */
 export const DSH_HOME_ENV = 'DSH_HOME'
+
+/**
+ * Resolve one owner-local IPC endpoint without exposing filesystem-only socket
+ * assumptions to callers. Windows named pipes are derived from the canonical
+ * root and channel, while POSIX platforms keep the endpoint inside its owner
+ * directory so normal filesystem permissions remain authoritative.
+ * @param root - owner-local state directory for the daemon or bridge.
+ * @param channel - short diagnostic channel name such as `control` or `rlm`.
+ * @param platform - platform override used by cross-platform contract tests.
+ * @returns a Unix-domain socket path or Windows named-pipe address.
+ */
+export function localIpcAddress(
+  root: string,
+  channel: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const normalizedChannel = channel.trim().replace(/[^a-z0-9._-]+/giu, '-').replace(/^-+|-+$/gu, '')
+  if (normalizedChannel.length === 0) throw new Error('local IPC channel must be non-blank')
+  if (platform !== 'win32') return join(resolve(root), `${normalizedChannel}.sock`)
+  const digest = createHash('sha256').update(`${resolve(root)}\0${normalizedChannel}`).digest('hex').slice(0, 24)
+  return `\\\\.\\pipe\\dsh-${normalizedChannel}-${digest}`
+}
+
+/**
+ * Whether local IPC uses an address represented by a filesystem entry.
+ * @param platform - platform override used by cross-platform contract tests.
+ * @returns true for POSIX socket paths and false for Windows named pipes.
+ */
+export function localIpcUsesFilesystem(platform: NodeJS.Platform = process.platform): boolean {
+  return platform !== 'win32'
+}
 
 /**
  * Give a native filesystem watcher one canonical spelling of a path, even

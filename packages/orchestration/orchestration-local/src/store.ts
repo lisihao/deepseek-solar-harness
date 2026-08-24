@@ -27,7 +27,7 @@ import type { IntentIRV1 } from '@deepseek-ai/dsh-intent-compiler'
 import { canonicalJson, canonicalSha256 } from './canonical.ts'
 
 /** Forward-only SQLite schema version used by the strict daemon handshake. */
-export const ORCHESTRATION_STATE_SCHEMA_VERSION = 1
+export const ORCHESTRATION_STATE_SCHEMA_VERSION = 2
 
 /** Daemon-private state required to continue one public run projection. */
 export interface RuntimeRunRecord {
@@ -71,6 +71,19 @@ export interface CapabilityUpdateRecord {
   }
 }
 
+/** Durable idempotency receipt for one remotely retryable control command. */
+export interface OrchestrationCommandReceipt {
+  readonly commandId: string
+  readonly method: string
+  readonly requestSha256: string
+  readonly state: 'accepted' | 'settled' | 'failed' | 'indeterminate'
+  readonly response?: unknown
+  readonly errorCode?: string
+  readonly errorMessage?: string
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
 function makePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
   chmodSync(path, 0o700)
@@ -107,6 +120,7 @@ export class OrchestrationStore {
       )
     }
     if (version === 0) this.createSchema()
+    else if (version === 1) this.migrateSchema1To2()
   }
 
   /** Close the SQLite writer connection. */
@@ -366,6 +380,81 @@ export class OrchestrationStore {
   }
 
   /**
+   * Read one durable remote-control command receipt.
+   * @param commandId - caller-stable command identity.
+   * @returns the receipt when it exists.
+   */
+  commandReceipt(commandId: string): OrchestrationCommandReceipt | undefined {
+    const row = this.db.prepare('SELECT * FROM command_receipts WHERE command_id = ?').get(commandId) as Record<string, unknown> | undefined
+    if (row === undefined) return undefined
+    const response = optionalDatabaseString(row.response_json, 'response_json')
+    const errorCode = optionalDatabaseString(row.error_code, 'error_code')
+    const errorMessage = optionalDatabaseString(row.error_message, 'error_message')
+    return {
+      commandId: String(row.command_id), method: String(row.method), requestSha256: String(row.request_sha256),
+      state: String(row.state) as OrchestrationCommandReceipt['state'],
+      ...response === undefined ? {} : { response: JSON.parse(response) as unknown },
+      ...errorCode === undefined ? {} : { errorCode },
+      ...errorMessage === undefined ? {} : { errorMessage },
+      createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+    }
+  }
+
+  /**
+   * Persist acceptance before any control mutation is attempted.
+   * @param commandId - caller-stable command identity.
+   * @param method - requested orchestration control method.
+   * @param requestSha256 - canonical request digest.
+   */
+  acceptCommand(commandId: string, method: string, requestSha256: string): void {
+    const time = new Date().toISOString()
+    this.db.prepare(`
+      INSERT INTO command_receipts
+        (command_id, method, request_sha256, state, created_at, updated_at)
+      VALUES (?, ?, ?, 'accepted', ?, ?)
+    `).run(commandId, method, requestSha256, time, time)
+  }
+
+  /**
+   * Cache one successful command result for identical transport retries.
+   * @param commandId - accepted command identity.
+   * @param response - bounded control response.
+   */
+  settleCommand(commandId: string, response: unknown): void {
+    this.db.prepare(`
+      UPDATE command_receipts
+      SET state = 'settled', response_json = ?, updated_at = ?
+      WHERE command_id = ? AND state = 'accepted'
+    `).run(canonicalJson(response), new Date().toISOString(), commandId)
+  }
+
+  /**
+   * Cache one deterministic command rejection.
+   * @param commandId - accepted command identity.
+   * @param errorCode - stable failure code.
+   * @param errorMessage - bounded diagnostic message.
+   */
+  failCommand(commandId: string, errorCode: string, errorMessage: string): void {
+    this.db.prepare(`
+      UPDATE command_receipts
+      SET state = 'failed', error_code = ?, error_message = ?, updated_at = ?
+      WHERE command_id = ? AND state = 'accepted'
+    `).run(errorCode, errorMessage, new Date().toISOString(), commandId)
+  }
+
+  /**
+   * Fence one command whose outcome cannot be proven after daemon recovery.
+   * @param commandId - accepted command identity.
+   */
+  markCommandIndeterminate(commandId: string): void {
+    this.db.prepare(`
+      UPDATE command_receipts
+      SET state = 'indeterminate', updated_at = ?
+      WHERE command_id = ? AND state = 'accepted'
+    `).run(new Date().toISOString(), commandId)
+  }
+
+  /**
    * Read a bounded ordered event page.
    * @param runId - durable run identity.
    * @param afterSequence - exclusive cursor.
@@ -470,7 +559,37 @@ export class OrchestrationStore {
         created_at TEXT NOT NULL,
         FOREIGN KEY (run_id) REFERENCES runs(run_id)
       );
+      CREATE TABLE command_receipts (
+        command_id TEXT PRIMARY KEY,
+        method TEXT NOT NULL,
+        request_sha256 TEXT NOT NULL,
+        state TEXT NOT NULL,
+        response_json TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
       PRAGMA user_version = ${String(ORCHESTRATION_STATE_SCHEMA_VERSION)};
     `)
+  }
+
+  private migrateSchema1To2(): void {
+    this.transaction(() => {
+      this.db.exec(`
+        CREATE TABLE command_receipts (
+          command_id TEXT PRIMARY KEY,
+          method TEXT NOT NULL,
+          request_sha256 TEXT NOT NULL,
+          state TEXT NOT NULL,
+          response_json TEXT,
+          error_code TEXT,
+          error_message TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 2;
+      `)
+    })
   }
 }

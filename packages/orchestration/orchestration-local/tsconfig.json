@@ -20,6 +20,8 @@
     { "path": "../model-worker-deepseek" },
     { "path": "../rlm-strategy" },
     { "path": "../rlm-strategy-local" },
+    { "path": "../rlm-runtime" },
+    { "path": "../rlm-runtime-local" },
     { "path": "../context-compiler" },
     { "path": "../continual-harness" },
     { "path": "../continual-harness-local" },

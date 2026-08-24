@@ -2,12 +2,14 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createConnection } from 'node:net'
+import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { fileURLToPath } from 'node:url'
 import {
   OrchestrationError,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
   type OrchestrationCompilationV1,
+  type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompileRequest,
   type OrchestrationControlRequest,
   type OrchestrationDecisionRequest,
@@ -19,7 +21,7 @@ import {
 } from '@deepseek-ai/dsh-orchestration'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { waitForDaemonSocketRelease } from '@deepseek-ai/dsh-resident-operator-local'
-import { ORCHESTRATION_METHODS, ORCHESTRATION_PROTOCOL_VERSION } from './daemon.ts'
+import { ORCHESTRATION_METHODS, ORCHESTRATION_PROTOCOL_VERSION, skillProviderManifestSha256 } from './daemon.ts'
 import { unwrapWire } from './protocol.ts'
 import { ORCHESTRATION_STATE_SCHEMA_VERSION } from './store.ts'
 
@@ -32,6 +34,7 @@ export interface OrchestrationClientOptions {
   readonly autoStart: boolean
   readonly connectTimeoutMs: number
   readonly residentDriverModules?: readonly string[]
+  readonly skillProviderModules?: readonly string[]
 }
 
 /** Stateless-per-request client for the durable local Scheduler. */
@@ -41,7 +44,7 @@ export class OrchestrationDaemonClient {
   private readiness: Promise<void> | undefined
 
   constructor(private readonly options: OrchestrationClientOptions) {
-    this.socketPath = `${options.root}/control.sock`
+    this.socketPath = localIpcAddress(options.root, 'control')
   }
 
   /**
@@ -135,6 +138,15 @@ export class OrchestrationDaemonClient {
   }
 
   /**
+   * Explicitly abandon one uncertain auto-refinement round without replay.
+   * @param request - revision-fenced uncertain-round resolution.
+   * @returns the updated orchestration run.
+   */
+  resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterminateRequest): Promise<OrchestrationRunSnapshot> {
+    return this.request('harness.auto_refine.resolve_indeterminate', { request })
+  }
+
+  /**
    * Propose a versioned capability-binding change.
    * @param request - requested capability change.
    * @returns the durable update receipt.
@@ -170,6 +182,7 @@ export class OrchestrationDaemonClient {
       this.options.root,
       this.options.dshHome,
       this.options.residentDriverModules ?? [],
+      this.options.skillProviderModules ?? [],
     )
     const deadline = Date.now() + this.options.connectTimeoutMs
     let lastError: unknown
@@ -194,7 +207,7 @@ export class OrchestrationDaemonClient {
     try {
       await this.rawRequest('system.shutdown', {})
     } catch (shutdownError) {
-      if (existsSync(this.socketPath)) {
+      if (!localIpcUsesFilesystem() || existsSync(this.socketPath)) {
         throw new OrchestrationError(
           `orchestration daemon upgrade is blocked: ${initialError.message}; shutdown failed: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
           'ORCHESTRATION_VERSION_MISMATCH',
@@ -216,9 +229,11 @@ export class OrchestrationDaemonClient {
       stateSchemaVersion: number
       buildCommit: string
       methods: string[]
+      skillProviderManifestSha256: string
     }>('system.handshake', {
       protocol_version: ORCHESTRATION_PROTOCOL_VERSION,
       state_schema_version: ORCHESTRATION_STATE_SCHEMA_VERSION,
+      skill_provider_manifest_sha256: skillProviderManifestSha256(this.options.skillProviderModules ?? []),
     })
     if (response.protocolVersion !== ORCHESTRATION_PROTOCOL_VERSION
       || response.stateSchemaVersion !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
@@ -233,6 +248,9 @@ export class OrchestrationDaemonClient {
     }
     if (!Array.isArray(response.methods) || ORCHESTRATION_METHODS.some(method => !response.methods.includes(method))) {
       throw new OrchestrationError('orchestration daemon lacks required methods', 'ORCHESTRATION_VERSION_MISMATCH')
+    }
+    if (response.skillProviderManifestSha256 !== skillProviderManifestSha256(this.options.skillProviderModules ?? [])) {
+      throw new OrchestrationError('orchestration daemon Skill Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
   }
 
@@ -275,12 +293,14 @@ export class OrchestrationDaemonClient {
  * @param root - owner-private orchestration state root.
  * @param dshHome - DSH home shared with the Resident daemon.
  * @param residentDriverModules - absolute independent Resident Driver entries for the headless composition.
+ * @param skillProviderModules - absolute trusted TypeScript Skill Provider plugin entries.
  * @returns detached child process identity.
  */
 export function startDetachedOrchestrationDaemon(
   root: string,
   dshHome: string,
   residentDriverModules: readonly string[] = [],
+  skillProviderModules: readonly string[] = [],
 ): number {
   const builtEntry = fileURLToPath(new URL('./startup.js', import.meta.url))
   const sourceEntry = fileURLToPath(new URL('./startup.ts', import.meta.url))
@@ -296,6 +316,7 @@ export function startDetachedOrchestrationDaemon(
     '--root', root,
     '--dsh-home', dshHome,
     ...residentDriverModules.flatMap(module => ['--resident-driver-module', module]),
+    ...skillProviderModules.flatMap(module => ['--skill-provider-module', module]),
   ], {
     detached: true,
     stdio: 'ignore',

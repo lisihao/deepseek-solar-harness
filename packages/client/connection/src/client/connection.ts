@@ -1,4 +1,5 @@
 import type { HostDescription, IApiClient, HostFrame, MuxFrame, RpcRequest } from './api.ts'
+import type { RemoteSyncDescription, RemoteSyncSnapshot } from '../remote-sync.ts'
 
 /** Reconnect/backoff tunables (deployment-varying — no hardcoded tunables; these become the
  *  future `ctx.connection` plugin's Config). All fields optional; defaults below. */
@@ -44,6 +45,8 @@ export type ConnectionState = 'connected' | 'reconnecting'
 export interface ConnectionSinks {
   onMuxEnvelope?: (envelope: RpcRequest<MuxFrame>) => void
   onHostEnvelope?: (envelope: RpcRequest<HostFrame>) => void
+  /** Replace durable list projections from the authenticated Server snapshot. */
+  onRemoteSnapshot?: (description: RemoteSyncDescription, snapshot: RemoteSyncSnapshot) => void
   /** After each connection generation is established (both streams open + describe succeeded), first connect included. */
   onConnected?: (description: HostDescription) => void
   /** Coarse state transitions (deduplicated: fires only on change). The initial pre-connect

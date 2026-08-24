@@ -5,8 +5,9 @@ import { existsSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { fileURLToPath } from 'node:url'
+import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
-import type { PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
+import type { PhysicalOperatorExecutionPreference, PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
 import {
   ResidentOperatorError,
   ResidentOperatorSessionId,
@@ -14,6 +15,7 @@ import {
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
   type ResidentEventPage,
+  type ResidentCompactResult,
   type ResidentProviderStatus,
   type ResidentSessionSnapshot,
   type ResidentTurnSnapshot,
@@ -33,6 +35,7 @@ const REQUIRED_METHODS = Object.freeze([
   'turn.inspect',
   'turn.interrupt',
   'turn.resolve_indeterminate',
+  'session.compact',
   'session.reset',
   'event.read',
 ] as const)
@@ -60,16 +63,46 @@ export interface ResidentClientOptions {
  * Wait for one local daemon control path to disappear after graceful shutdown.
  * @param socketPath - control path owned by the retiring daemon.
  * @param timeoutMs - maximum shutdown interval.
+ * @param platform - platform override used by cross-platform contract tests.
  * @returns whether the path disappeared before the timeout.
  */
-export async function waitForDaemonSocketRelease(socketPath: string, timeoutMs: number): Promise<boolean> {
+export async function waitForDaemonSocketRelease(
+  socketPath: string,
+  timeoutMs: number,
+  platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
+  if (!localIpcUsesFilesystem(platform)) {
+    while (await localIpcReachable(socketPath, Math.max(1, Math.min(50, deadline - Date.now())))) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) return false
+      await new Promise(resolve => setTimeout(resolve, Math.min(50, remaining)))
+    }
+    return true
+  }
   while (existsSync(socketPath)) {
     const remaining = deadline - Date.now()
     if (remaining <= 0) return false
     await new Promise(resolve => setTimeout(resolve, Math.min(50, remaining)))
   }
   return true
+}
+
+function localIpcReachable(socketPath: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection(socketPath)
+    let settled = false
+    const finish = (reachable: boolean): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket.destroy()
+      resolve(reachable)
+    }
+    const timer = setTimeout(() => { finish(false) }, timeoutMs)
+    socket.once('connect', () => { finish(true) })
+    socket.once('error', () => { finish(false) })
+  })
 }
 
 /** Stateless-per-request Unix-socket client for trusted Resident consumers. */
@@ -79,7 +112,7 @@ export class ResidentDaemonClient {
   private readiness: Promise<void> | undefined
 
   constructor(private readonly options: ResidentClientOptions) {
-    this.socketPath = `${options.root}/control.sock`
+    this.socketPath = localIpcAddress(options.root, 'control')
   }
 
   /**
@@ -142,6 +175,7 @@ export class ResidentDaemonClient {
     taskLabel?: string
     prompt: readonly unknown[]
     profile?: PhysicalOperatorExecutionPreference
+    modelToolBridge?: PhysicalOperatorModelToolBridgeV1
     signal: AbortSignal
   }): Promise<{
     turnId: string
@@ -162,6 +196,7 @@ export class ResidentDaemonClient {
       ...request.taskLabel === undefined ? {} : { task_label: request.taskLabel },
       prompt: request.prompt,
       ...request.profile === undefined ? {} : { profile: request.profile },
+      ...request.modelToolBridge === undefined ? {} : { model_tool_bridge: request.modelToolBridge },
     }, request.signal)
     let settled = false
     const observation = new AbortController()
@@ -210,6 +245,25 @@ export class ResidentDaemonClient {
    */
   interrupt(sessionId: string, turnId: string): Promise<void> {
     return this.request('turn.interrupt', { session_id: sessionId, turn_id: turnId }).then(() => undefined)
+  }
+
+  /**
+   * Compact one idle native Session in place under optimistic concurrency.
+   * @param request - durable command, Session revision, and optional native guidance.
+   * @returns the revised idle Session snapshot.
+   */
+  compact(request: {
+    readonly commandId: string
+    readonly sessionId: string
+    readonly expectedStateRevision: number
+    readonly instructions?: string
+  }): Promise<ResidentCompactResult> {
+    return this.request('session.compact', {
+      command_id: request.commandId,
+      session_id: request.sessionId,
+      expected_state_revision: request.expectedStateRevision,
+      ...request.instructions === undefined ? {} : { instructions: request.instructions },
+    })
   }
 
   /**
@@ -319,7 +373,7 @@ export class ResidentDaemonClient {
     try {
       await this.rawRequest('system.shutdown', {})
     } catch (shutdownError) {
-      if (existsSync(this.socketPath)) {
+      if (!localIpcUsesFilesystem() || existsSync(this.socketPath)) {
         throw new ResidentOperatorError(
           `resident daemon upgrade is blocked: ${initialError.message}; shutdown failed: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
           'PROTOCOL_MISMATCH',

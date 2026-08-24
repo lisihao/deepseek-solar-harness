@@ -7,6 +7,16 @@ export type DesktopPlatform = 'darwin' | 'win32' | 'linux'
 /** Native presentation modes selected by the desktop-shell Cordis row. */
 export type DesktopShellMode = 'compatibility' | 'advanced'
 
+/** Process role selected before local Host startup. */
+export type DesktopDeploymentRole = 'server' | 'frontend'
+
+/** Main-process commands shown independently from the selected presentation mode. */
+export interface DesktopDeploymentAdapter {
+  currentRole(): DesktopDeploymentRole
+  configureFrontend(): Promise<void>
+  useServer(): Promise<void>
+}
+
 /** Electron appearance source used by native frame and material rendering. */
 export type DesktopThemeSource = 'system' | 'light' | 'dark'
 
@@ -125,6 +135,11 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   iconPath: string
   /** Generated tray assets derived from the repository-owned SVG. */
   trayIcons: DesktopTrayIcons
+  /** Optional remote authority token injected by Electron, never placed in a URL. */
+  remoteAccess?: {
+    readonly origin: string
+    accessToken(): string
+  }
   /** Read the authoritative built-in theme preference after Host boot settles. */
   readThemeSource(): DesktopThemeSource
   /** Request Cordis teardown followed by native application exit. */

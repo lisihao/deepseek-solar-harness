@@ -9,8 +9,13 @@ import RlmStrategyService, {
   type RlmStrategyRequest,
 } from '@deepseek-ai/dsh-rlm-strategy'
 
+export * from './quality-eval.ts'
+
 export const name = 'rlm-strategy-local'
-const DEFAULT_BUDGET: RlmBudgetV1 = Object.freeze({ maxDepth: 2, maxChildren: 4, maxTurns: 12 })
+// Prime Agent v0.8.0 defaults to one recursive level. Callers may opt into a
+// deeper tree explicitly, but Smart Auto must not silently spend a second
+// generation of subscription workers.
+const DEFAULT_BUDGET: RlmBudgetV1 = Object.freeze({ maxDepth: 1, maxChildren: 4, maxTurns: 12 })
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -20,11 +25,32 @@ function canonical(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function enabledByAuto(request: RlmStrategyRequest): boolean {
+function autoDecision(request: RlmStrategyRequest): { readonly enabled: boolean; readonly reason: string } {
   const text = `${request.role} ${request.task}`.toLowerCase()
-  return request.phase === 'synthesis'
-    || /recursive|rlm|decompos|explor|multi[- ]?agent|search tree|递归|分解|探索|多智能体|多代理/u.test(text)
-    || request.task.length >= 2_000
+  if (/recursive|rlm|decompos|explor|multi[- ]?agent|search tree|递归|分解|探索|多智能体|多代理/u.test(text)) {
+    return { enabled: true, reason: 'auto-explicit-decomposition' }
+  }
+  const objective = request.objective ?? 'balanced'
+  const length = request.task.length
+  if (objective === 'quality') {
+    if (request.phase === 'synthesis') return { enabled: true, reason: 'auto-quality-synthesis' }
+    if (request.phase === 'planning' && length >= 800) return { enabled: true, reason: 'auto-quality-complex-planning' }
+    if (length >= 1_400) return { enabled: true, reason: 'auto-quality-large-node' }
+    return { enabled: false, reason: 'auto-quality-direct-node' }
+  }
+  if (objective === 'balanced') {
+    if (request.phase === 'synthesis') return { enabled: true, reason: 'auto-balanced-synthesis' }
+    if (length >= 2_000) return { enabled: true, reason: 'auto-balanced-large-node' }
+    return { enabled: false, reason: 'auto-balanced-direct-node' }
+  }
+  if (objective === 'speed') {
+    if (request.phase === 'synthesis' && length >= 2_500) return { enabled: true, reason: 'auto-speed-large-synthesis' }
+    return { enabled: false, reason: 'auto-speed-direct-node' }
+  }
+  if (request.phase === 'synthesis' && length >= 4_000) {
+    return { enabled: true, reason: 'auto-economy-large-synthesis' }
+  }
+  return { enabled: false, reason: 'auto-economy-direct-node' }
 }
 
 function budgetOf(request: RlmStrategyRequest): RlmBudgetV1 {
@@ -42,20 +68,21 @@ function budgetOf(request: RlmStrategyRequest): RlmBudgetV1 {
 export class LocalRlmStrategy extends RlmStrategyService {
   resolve(request: RlmStrategyRequest): Promise<RlmExecutionPlanV1> {
     const budget = budgetOf(request)
+    const auto = autoDecision(request)
     const enabled = request.requestedMode === 'enabled'
-      || (request.requestedMode === 'auto' && enabledByAuto(request))
+      || (request.requestedMode === 'auto' && auto.enabled)
     const reason = request.requestedMode === 'auto'
-      ? enabled ? 'auto-complexity-trigger' : 'auto-direct-node'
+      ? auto.reason
       : `user-${request.requestedMode}`
     const base = {
       version: 1 as const,
       enabled,
       strategyId: 'dsh-native-rlm',
-      strategyVersion: '1.0.0',
+      strategyVersion: '1.3.0',
       reason,
       ...budget,
       instruction: enabled
-        ? `Use bounded recursive decomposition inside this sealed node only. Create at most ${String(budget.maxChildren)} fresh-context children per level, recurse at most ${String(budget.maxDepth)} levels and spend at most ${String(budget.maxTurns)} child turns. Prefer low-cost qualified workers for independent leaves, reserve a high-tier model for planning and verification, then synthesize one evidence-backed result. Never create or modify the global DSH TaskGraph.`
+        ? `Use bounded recursive decomposition inside this sealed node only. Create at most ${String(budget.maxChildren)} fresh-context children per level, recurse at most ${String(budget.maxDepth)} levels and spend at most ${String(budget.maxTurns)} child turns. Give parallel leaves distinct solution, failure-analysis, evidence-review, or alternative-design lenses. Prefer low-cost qualified workers for independent leaves, reserve a high-tier model for planning and verification, then synthesize one coverage-checked, evidence-backed result. Never create or modify the global DSH TaskGraph.`
         : 'Execute this sealed node directly without recursive child decomposition.',
     }
     const planSha256 = createHash('sha256').update(canonical(base)).digest('hex')

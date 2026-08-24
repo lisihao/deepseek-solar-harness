@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-24-prime-agent-compatible-typescript-runtime.md
+2026-08-24-prime-agent-compatible-typescript-runtime.md: 89561d3cbfa0f5d2b9b493fd13bc7b07960a8f0f
+2026-08-24-prime-agent-compatible-typescript-runtime.zh.md: b7908a2c02a5269f4deb7372f9dc0543dfde2cc7

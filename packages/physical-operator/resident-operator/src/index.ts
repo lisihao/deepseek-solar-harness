@@ -10,6 +10,7 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionPreference,
+  PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorReasoningEffort,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentOperatorError } from './error.ts'
@@ -17,9 +18,9 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 6
+export const RESIDENT_PROTOCOL_VERSION = 8
 /** Current forward-only daemon state schema version. */
-export const RESIDENT_STATE_SCHEMA_VERSION = 4
+export const RESIDENT_STATE_SCHEMA_VERSION = 5
 
 /** Opaque identity for one operator/workspace/lane Resident Session. */
 export type ResidentOperatorSessionId = Branded<'ResidentOperatorSessionId'>
@@ -140,14 +141,28 @@ export interface ResidentProviderStatus {
 
 /** One native product invocation after durable daemon admission. */
 export interface ResidentDriverExecuteRequest {
+  /** Outer durable command identity used to namespace native model-tool receipts. */
+  readonly commandId: ResidentOperatorCommandId
   readonly workspace: string
   readonly prompt: readonly ContentBlock[]
   readonly profile: ResidentExecutionProfile
   readonly nativeSessionId?: string
   readonly signal: AbortSignal
+  /** Genuine host-tool bridge sealed before native thread dispatch. */
+  readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
   readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
   /** Persist a bounded product-neutral progress phase for reconnecting observers. */
   readonly onProgress: (phase: ResidentProgressPhase) => void
+}
+
+/** One native history-compaction request after daemon idle/revision admission. */
+export interface ResidentDriverCompactRequest {
+  readonly workspace: string
+  /** Existing authoritative native product Session/thread; compaction must not replace it. */
+  readonly nativeSessionId: string
+  /** Optional product-native compaction guidance when the product supports it. */
+  readonly instructions?: string
+  readonly signal: AbortSignal
 }
 
 /** Native product qualification and resumable-turn adapter loaded by a daemon Provider. */
@@ -162,6 +177,8 @@ export interface ResidentProductDriver {
    * @returns bounded final result and authoritative native Session identity.
    */
   execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { readonly nativeSessionId: string }>
+  /** Compact one idle native Session without changing its continuation identity. */
+  compact?(request: ResidentDriverCompactRequest): Promise<{ readonly nativeSessionId: string }>
 }
 
 /** Construction inputs supplied to a configured out-of-process Driver module. */
@@ -234,6 +251,8 @@ export interface ResidentExecuteRequest {
   readonly prompt: readonly ContentBlock[]
   /** Optional caller preference; omitted fields are resolved from task complexity and the live catalog. */
   readonly profile?: PhysicalOperatorExecutionPreference
+  /** Optional genuine model-tool bridge sealed before dispatch. */
+  readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
   readonly signal: AbortSignal
 }
 
@@ -287,6 +306,22 @@ export interface ResidentResetRequest {
   readonly sessionId: ResidentOperatorSessionId
   readonly expectedStateRevision: number
   readonly reason: string
+}
+
+/** Optimistic request to compact one idle native product Session in place. */
+export interface ResidentCompactRequest {
+  readonly commandId: ResidentOperatorCommandId
+  readonly sessionId: ResidentOperatorSessionId
+  readonly expectedStateRevision: number
+  /** Optional native compaction guidance; unsupported products reject it explicitly. */
+  readonly instructions?: string
+}
+
+/** Durable result of one successful in-place native Session compaction. */
+export interface ResidentCompactResult {
+  readonly session: ResidentSessionSnapshot
+  readonly nativeSessionId: string
+  readonly compactedAt: string
 }
 
 /** Explicit trusted resolution for an indeterminate command. */
@@ -361,6 +396,15 @@ export abstract class ResidentOperatorService extends Service {
    * @returns the revised idle Session snapshot.
    */
   abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>
+
+  /**
+   * Compact an idle native product Session without replacing its continuation identity.
+   * @param _request - Session identity, exact inspected revision, and optional native guidance.
+   * @returns the revised idle Session snapshot after native compaction succeeds.
+   */
+  compact(_request: ResidentCompactRequest): Promise<ResidentCompactResult> {
+    throw new ResidentOperatorError('Resident Provider does not support native Session compaction', 'SESSION_UNAVAILABLE')
+  }
 
   /**
    * Record an explicit decision for an indeterminate command.

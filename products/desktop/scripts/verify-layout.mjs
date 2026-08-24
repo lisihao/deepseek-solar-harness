@@ -21,6 +21,8 @@ const noteName = '2026-08-15-pinned-upstream-and-isolated-yarn-workspace'
 const notePaths = [`${noteDirectory}/${noteName}.md`, `${noteDirectory}/${noteName}.zh.md`]
 const noteRecordPath = `${noteDirectory}/${noteName}.i18n.yaml`
 const sealedDshExtensions = new Set([
+  '@deepseek-ai/dsh-atomic-write',
+  '@deepseek-ai/dsh-home-paths',
   '@deepseek-ai/dsh-physical-operator',
   '@deepseek-ai/dsh-physical-operator-resident',
   '@deepseek-ai/dsh-resident-operator',
@@ -48,6 +50,8 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-model-allocation-local',
   '@deepseek-ai/dsh-model-worker',
   '@deepseek-ai/dsh-model-worker-deepseek',
+  '@deepseek-ai/dsh-rlm-runtime',
+  '@deepseek-ai/dsh-rlm-runtime-local',
   '@deepseek-ai/dsh-rlm-strategy',
   '@deepseek-ai/dsh-rlm-strategy-local',
   '@deepseek-ai/dsh-orchestration',
@@ -121,6 +125,15 @@ for (const name of Object.keys(plugin.dependencies).filter(name => name === '@de
   }
 }
 
+const lockText = readFileSync(resolve(root, 'yarn.lock'), 'utf8')
+const unexpectedRuntimeVersions = new Set()
+for (const match of lockText.matchAll(/resolution: "@deepseek-ai\/dsh(?:-[^"@]+)?@npm:([^"#]+)"/gu)) {
+  if (match[1] !== upstream.runtimePackageVersion) unexpectedRuntimeVersions.add(match[1])
+}
+if (unexpectedRuntimeVersions.size > 0) {
+  fail(`yarn.lock mixes DSH runtime package families: ${[...unexpectedRuntimeVersions].sort().join(', ')}`)
+}
+
 const noteRecord = readFileSync(resolve(root, noteRecordPath), 'utf8')
 for (const notePath of notePaths) {
   const expected = run('git', ['hash-object', '--', notePath])
@@ -130,4 +143,4 @@ for (const notePath of notePaths) {
   }
 }
 
-process.stdout.write(`verify-layout: Desktop Yarn workspace and Solar pnpm root are consistent; runtime family ${upstream.runtimePackageVersion} remains migration-pinned\n`)
+process.stdout.write(`verify-layout: Desktop Yarn workspace and Solar pnpm root are consistent; every registry DSH package is pinned to runtime family ${upstream.runtimePackageVersion}\n`)

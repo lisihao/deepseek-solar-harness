@@ -443,6 +443,56 @@ describe('CodexAppServerWire', () => {
     wire.close()
   })
 
+  it('registers experimental dynamic tools and returns host tool results to the active turn', async () => {
+    const child = fakeChild()
+    const tools = [{
+      type: 'function' as const,
+      name: 'typescript_repl',
+      description: 'Execute one persistent TypeScript cell',
+      inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] },
+    }]
+    const handler = vi.fn(async () => ({ success: true, text: '{"value":42}' }))
+    const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!, 'require', tools, handler)
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    expect(initialize.params).toMatchObject({ capabilities: { experimentalApi: true } })
+    child.peer.respond(initialize, { userAgent: 'codex-cli 0.147.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+
+    const starting = wire.startThread('/workspace', new AbortController().signal, false)
+    const threadStart = await child.peer.nextMethod('thread/start')
+    expect(threadStart.params).toEqual({ cwd: '/workspace', ephemeral: false, dynamicTools: tools })
+    child.peer.respond(threadStart, { thread: { id: 'thread-1', ephemeral: false } })
+    await starting
+
+    const result = wire.runTurn(['use the repl'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send({
+      id: 'tool-request-1',
+      method: 'item/tool/call',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1', namespace: null,
+        tool: 'typescript_repl', arguments: { code: '40 + 2' },
+      },
+    })
+    expect(await child.peer.nextResponse('tool-request-1')).toEqual({
+      jsonrpc: '2.0',
+      id: 'tool-request-1',
+      result: { success: true, contentItems: [{ type: 'inputText', text: '{"value":42}' }] },
+    })
+    expect(handler).toHaveBeenCalledWith({
+      threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1',
+      tool: 'typescript_repl', arguments: { code: '40 + 2' },
+    })
+    child.peer.send(agentMessage('done', 'final_answer'), turnCompleted('completed'))
+    await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    wire.close()
+  })
+
   it('reads the native model catalog and sends explicit model and effort overrides', async () => {
     const child = fakeChild()
     const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!)
@@ -485,6 +535,29 @@ describe('CodexAppServerWire', () => {
       turnCompleted('completed', 'turn-profile', 'thread-profile'),
     )
     await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    wire.close()
+  })
+
+  it('compacts one resumed persistent thread in place through thread/compact/start', async () => {
+    const child = fakeChild()
+    const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!)
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    child.peer.respond(initialize, { userAgent: 'codex-cli 0.147.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+
+    const resuming = wire.resumeThread('thread-persistent', '/workspace', new AbortController().signal)
+    const threadResume = await child.peer.nextMethod('thread/resume')
+    child.peer.respond(threadResume, { thread: { id: 'thread-persistent', ephemeral: false } })
+    await resuming
+    const compacting = wire.compactThread(new AbortController().signal)
+    const compact = await child.peer.nextMethod('thread/compact/start')
+    expect(compact.params).toEqual({ threadId: 'thread-persistent' })
+    child.peer.respond(compact, {})
+    await compacting
+    expect(wire.currentThreadId).toBe('thread-persistent')
     wire.close()
   })
 

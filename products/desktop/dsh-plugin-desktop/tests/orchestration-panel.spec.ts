@@ -42,6 +42,7 @@ describe('orchestration Desktop panel transport', () => {
     vi.stubGlobal('fetch', fetch)
 
     await expect(controlOrchestration({
+      commandId: 'command-pause-1',
       action: 'pause',
       runId: 'run-1',
       expectedRevision: 3,
@@ -50,7 +51,7 @@ describe('orchestration Desktop panel transport', () => {
     expect(fetch).toHaveBeenCalledWith('/api/orchestrations', expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({ 'X-DSH-Orchestration-Control': '1' }),
-      body: JSON.stringify({ action: 'pause', runId: 'run-1', expectedRevision: 3, reason: 'test' }),
+      body: JSON.stringify({ commandId: 'command-pause-1', action: 'pause', runId: 'run-1', expectedRevision: 3, reason: 'test' }),
     }))
   })
 
@@ -79,6 +80,13 @@ describe('orchestration Desktop panel transport', () => {
       data: { operatorId: 'codex', contextIsolation: 'fresh-native-thread', laneId: 'orch:run:node:1' },
     })).toBe('codex · fresh-native-thread · lane 1')
     expect(eventDetail({
+      sequence: 31,
+      runId: 'run-1',
+      type: 'execution_plan.sealed',
+      time: '2026-08-20T00:00:02.000Z',
+      data: { ref: 'sha256:plan1234567890', taskContractRef: 'sha256:contract1234567890' },
+    })).toBe('Task Contract contract12 · Plan plan123456')
+    expect(eventDetail({
       sequence: 4,
       runId: 'run-1',
       type: 'model.allocated',
@@ -97,8 +105,22 @@ describe('orchestration Desktop panel transport', () => {
       runId: 'run-1',
       type: 'rlm.execution.settled',
       time: '2026-08-20T00:00:02.000Z',
-      data: { depthUsed: 2, turnsUsed: 5, stopReason: 'completed' },
-    })).toBe('递归深度 2 · 共 5 turn · completed')
+      data: { childCount: 2, stateRevision: 5, stopReason: 'completed' },
+    })).toBe('2 个直接子 Agent · state rev 5 · completed')
+    expect(eventDetail({
+      sequence: 61,
+      runId: 'run-1',
+      type: 'rlm.child.dispatched',
+      time: '2026-08-20T00:00:02.000Z',
+      data: { depth: 1, name: 'reviewer', operatorId: 'codex', model: 'gpt-5.6-luna' },
+    })).toBe('深度 1 · reviewer · codex/gpt-5.6-luna')
+    expect(eventDetail({
+      sequence: 62,
+      runId: 'run-1',
+      type: 'rlm.message.continuation.settled',
+      time: '2026-08-20T00:00:02.000Z',
+      data: { artifactRef: 'sha256:message123456789', stopReason: 'completed' },
+    })).toBe('Agent 消息已续接 · Artifact message123 · completed')
     expect(eventDetail({
       sequence: 7,
       runId: 'run-1',

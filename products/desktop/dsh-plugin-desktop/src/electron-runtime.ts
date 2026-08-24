@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import type {
+  DesktopDeploymentAdapter,
   DesktopNotification,
   DesktopPlatform,
   DesktopRuntime,
@@ -86,7 +87,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private readonly trayItems = new Map<symbol, DesktopTrayItem>()
   private terminalSpec: DesktopTerminalSpec | undefined
 
-  constructor(private readonly restart: () => Promise<void>) {
+  constructor(
+    private readonly restart: () => Promise<void>,
+    private readonly deployment?: DesktopDeploymentAdapter,
+  ) {
     if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
       throw new Error(`dsh-plugin-desktop: unsupported Electron platform ${process.platform}`)
     }
@@ -424,6 +428,22 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     template.push(
       { type: 'separator' },
       { label: `Version ${PRODUCT_VERSION}`, enabled: false },
+      ...this.deployment === undefined ? [] : [
+        {
+          label: `Deployment: ${this.deployment.currentRole() === 'server' ? 'Server' : 'Frontend'}`,
+          enabled: false,
+        },
+        {
+          label: 'Connect to Remote Server…',
+          click: this.trayCommand(() => this.deployment!.configureFrontend()),
+        },
+        ...this.deployment.currentRole() === 'frontend'
+          ? [{
+              label: 'Use Local Server',
+              click: this.trayCommand(() => this.deployment!.useServer()),
+            }]
+          : [],
+      ],
       {
         label: modeToggleLabel(spec.mode),
         enabled: this.platform !== 'linux',
@@ -454,6 +474,23 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     window.accessibleTitle = spec.windowTitle
     if (this.platform === 'win32') window.removeMenu()
     this.window = window
+    const remoteAccess = spec.remoteAccess
+    if (remoteAccess !== undefined) {
+      if (new URL(spec.url).origin !== remoteAccess.origin) {
+        throw new Error('dsh-plugin-desktop: remote access origin does not match the window URL')
+      }
+      window.webContents.session.webRequest.onBeforeSendHeaders(
+        { urls: [`${remoteAccess.origin}/*`] },
+        (details, callback) => {
+          callback({
+            requestHeaders: {
+              ...details.requestHeaders,
+              Authorization: `Bearer ${remoteAccess.accessToken()}`,
+            },
+          })
+        },
+      )
+    }
 
     const show = (): void => { this.show() }
     const close = (event: Electron.Event): void => {
@@ -534,6 +571,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       window.webContents.off('will-redirect', navigate)
       mountedTray.off('click', show)
       mountedTray.destroy()
+      if (remoteAccess !== undefined) {
+        window.webContents.session.webRequest.onBeforeSendHeaders(
+          { urls: [`${remoteAccess.origin}/*`] },
+          null,
+        )
+      }
       if (!window.isDestroyed()) window.destroy()
       if (this.tray === mountedTray) this.tray = undefined
       if (this.window === window) this.window = undefined

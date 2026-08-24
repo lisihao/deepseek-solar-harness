@@ -89,7 +89,9 @@ describe('physical-operator-resident', () => {
       parent: parent(), signal: new AbortController().signal,
     })
     await expect(resident.result).resolves.toMatchObject({ stopReason: 'completed' })
-    expect((ctx.residentOperators as ResidentStub).requests[0]).toMatchObject({ operatorId: 'analysis-worker' })
+    expect((ctx.residentOperators as ResidentStub).requests[0]).toMatchObject({
+      operatorId: 'analysis-worker', laneId: 'parent',
+    })
   })
 
   it('keeps ephemeral as default and routes only explicit resident calls to the durable seam', async () => {
@@ -115,6 +117,7 @@ describe('physical-operator-resident', () => {
 
     const resident = await ctx.physicalOperators.start('codex', {
       mode: 'resident', label: 'Continue the proof', prompt: [{ type: 'text', text: 'continue' }],
+      residentLaneId: 'rlm:root',
       parent: parent(), signal: new AbortController().signal,
     })
     expect(await resident.result).toEqual({
@@ -126,7 +129,7 @@ describe('physical-operator-resident', () => {
       commandId: ResidentOperatorCommandId(String(resident.id)),
       operatorId: 'codex',
       workspace: '/workspace',
-      laneId: 'parent',
+      laneId: 'rlm:root',
       taskLabel: 'Continue the proof',
     })
     expect(oneShot.starts).toBe(1)
