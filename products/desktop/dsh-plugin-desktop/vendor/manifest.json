@@ -70,6 +70,11 @@
       "name": "Dual-mode portable local IPC and atomic persistence helpers",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "a745b9e5f7d3d2cc3b6b0a7b6b2dc523f53fda63"
+    },
+    {
+      "name": "Prime RLM family-message single-flight delivery",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "b94c38e23f01bbc91f7f8785e6b28f2477355d2e"
     }
   ],
   "sourcePackages": {
@@ -180,7 +185,7 @@
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-0.1.0-rc.5.tgz": "86d724356783c42267023dd4adf741e9c62a6d8fa720050d5da3e07c16b9f381",
     "dsh-packages/deepseek-ai-dsh-rlm-strategy-local-0.1.0-rc.5.tgz": "6320abb5f0e3b4d37efe45654ceed478ae47f8ce9df09edb609f3afff657c117",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "d760f5e14c9989f7637dce5781e12790d9aa5c9d19bfd3fc22253d45b33b10f0",
-    "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "a3463e45c7d8bc3ec80fffbeafbe7ad8fb9c7939e5ff21a85db54bddeb280b54",
+    "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "c34eedb647d18b0835b9778bb38e796c24c323e6d222d7c14b510f81bb60ad10",
     "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "3e7d11c4eca61972e8580fbf60192a1bc248818679f30e27b37d4f692e3cf63f",
     "dsh-packages/deepseek-ai-dsh-tool-markdown-0.0.1.tgz": "79c85b9e8cf8349577d2ade3f33326f885fe7e1fc53dedcb914d694d5342ab07",
     "dsh-packages/deepseek-ai-dsh-tool-regex-0.0.1.tgz": "84551254f449648f8f92cb7f260ea110c0ef62489c13faf4bfa930f2f7b75a14",
