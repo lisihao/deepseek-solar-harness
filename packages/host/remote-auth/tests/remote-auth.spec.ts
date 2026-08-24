@@ -7,6 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RemoteCommandReceiptStore } from '../src/command-receipts.ts'
 import RemoteAuthService, { RemoteAuthError } from '../src/index.ts'
+import { readOwnerOnlyText } from '../src/private-file.ts'
 
 const fibers: Array<{ dispose(): Promise<void> }> = []
 
@@ -183,12 +184,25 @@ describe('RemoteAuthService', () => {
   })
 
   it('rejects registries with unsafe permissions', async () => {
-    if (process.platform === 'win32') return
+    const platform = process.platform === 'win32'
+      ? vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+      : undefined
     const home = mkdtempSync(join(tmpdir(), 'dsh-remote-auth-mode-'))
     const filename = join(authDirectory(home), 'devices.json')
     writePrivateJson(filename, { version: 1, devices: [] })
     chmodSync(filename, 0o644)
-    await expect(start(home)).rejects.toThrow('must be owner-only')
+    try {
+      await expect(start(home)).rejects.toThrow('must be owner-only')
+    } finally {
+      platform?.mockRestore()
+    }
+  })
+
+  it('propagates authority file read failures', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-remote-auth-read-'))
+    const filename = join(home, 'devices.json')
+    mkdirSync(filename, { mode: 0o700 })
+    await expect(readOwnerOnlyText(filename)).rejects.toBeInstanceOf(Error)
   })
 
   it.each([
