@@ -216,8 +216,21 @@ function event(
 }
 
 const MAX_OPERATOR_OUTPUT_PREVIEW = 8_000
-const MAX_RLM_BRANCH_PREVIEW = 2_000
+const MAX_RLM_BRANCH_PREVIEW = 8_000
+const MAX_RLM_SYNTHESIS_CONTEXT = 24_000
 const MAX_UPSTREAM_CONTEXT_PREVIEW = 4_000
+
+const RLM_BRANCH_LENSES = Object.freeze([
+  'Solution completeness: construct an end-to-end answer, name the governing invariants, and make every acceptance claim observable.',
+  'Adversarial failure analysis: look for concurrency, recovery, idempotency, stale-result, authority, cost, and hidden-side-effect gaps; propose falsifiable checks for each.',
+  'Evidence review: challenge unsupported claims, define materialized evidence, and distinguish proven behavior from assumptions and deferred work.',
+  'Alternative design: develop a materially different decomposition, expose tradeoffs, and identify when the leading approach should not be used.',
+] as const)
+
+/** Give parallel RLM leaves deliberately different work instead of duplicating one generic prompt. */
+function rlmBranchLens(index: number): string {
+  return RLM_BRANCH_LENSES.at((index - 1) % RLM_BRANCH_LENSES.length) ?? RLM_BRANCH_LENSES[0]
+}
 
 /** Project the operator's user-facing result without copying unbounded output into the event index. */
 function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview: string; outputTruncated: boolean } {
@@ -1426,7 +1439,7 @@ export class OrchestrationDaemon {
       throw new OrchestrationError('Resident RLM dispatch requires an enabled sealed plan', 'GRAPH_INVALID')
     }
     const runId = String(record.snapshot.runId)
-    const basePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot)
+    const basePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan)
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
     const workerPlan = plan.rlmWorkerPlan
     let leaves: ResidentRlmLeaf[] = []
@@ -1459,13 +1472,14 @@ export class OrchestrationDaemon {
           leaves = await Promise.all(Array.from({ length: branchCount }, async (_value, index): Promise<ResidentRlmLeaf> => {
             const parent = parents.length === 0 ? undefined : parents[index % parents.length]
             const executionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:d${String(depth)}:b${String(index + 1)}`)
+            const lens = rlmBranchLens(index + 1)
             const branchPrompt: ContentBlock[] = [
               ...basePrompt,
               {
                 type: 'text',
                 text: parent === undefined
-                  ? `RLM depth ${String(depth)}, branch ${String(index + 1)} of ${String(branchCount)}. Independently analyze one distinct decomposition or solution path. Do not delegate, spawn subagents, or create TaskGraph nodes; solve only this bounded branch.`
-                  : `RLM depth ${String(depth)}, branch ${String(index + 1)} of ${String(branchCount)}. Refine and challenge the prior branch at ${String(parent.artifactRef)}. Identify a concrete weakness, correct it, and return a stronger evidence-oriented branch. Do not delegate, spawn subagents, or create TaskGraph nodes.\n\nPrior branch preview:\n${operatorOutputPreview(parent.output).outputPreview.slice(0, MAX_RLM_BRANCH_PREVIEW)}`,
+                  ? `RLM depth ${String(depth)}, branch ${String(index + 1)} of ${String(branchCount)}. Use this distinct analysis lens: ${lens} Avoid duplicating the other likely lenses. Do not delegate, spawn subagents, or create TaskGraph nodes; solve only this bounded branch.`
+                  : `RLM depth ${String(depth)}, branch ${String(index + 1)} of ${String(branchCount)}. Continue with this distinct analysis lens: ${lens} Challenge the prior branch at ${String(parent.artifactRef)}; identify concrete omissions or weak claims, correct them, and return a stronger evidence-oriented branch. Do not delegate, spawn subagents, or create TaskGraph nodes.\n\nPrior branch preview:\n${operatorOutputPreview(parent.output).outputPreview.slice(0, MAX_RLM_BRANCH_PREVIEW)}`,
               },
             ]
             const started = await this.startResidentTurn(
@@ -1513,8 +1527,12 @@ export class OrchestrationDaemon {
         }
       }
 
+      const branchPreviewLimit = Math.min(
+        MAX_RLM_BRANCH_PREVIEW,
+        Math.floor(MAX_RLM_SYNTHESIS_CONTEXT / Math.max(1, leaves.length)),
+      )
       const branchDigest = leaves.map(leaf => (
-        `Depth ${String(leaf.depth)} branch ${String(leaf.index)} (${String(leaf.artifactRef)}):\n${operatorOutputPreview(leaf.output).outputPreview.slice(0, MAX_RLM_BRANCH_PREVIEW)}`
+        `Depth ${String(leaf.depth)} branch ${String(leaf.index)} (${String(leaf.artifactRef)}; lens: ${rlmBranchLens(leaf.index)}):\n${operatorOutputPreview(leaf.output).outputPreview.slice(0, branchPreviewLimit)}`
       )).join('\n\n')
       const synthesisExecutionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:synthesis`)
       const synthesisPrompt: ContentBlock[] = [
@@ -1523,7 +1541,7 @@ export class OrchestrationDaemon {
           type: 'text',
           text: leaves.length === 0
             ? 'The sealed RLM turn budget permits no child turn. Produce the final answer directly without delegation or TaskGraph changes.'
-            : `Synthesize and verify the following Scheduler-controlled RLM leaves into one final result. Resolve contradictions, retain concrete evidence, and do not delegate or create TaskGraph nodes.\n\n${branchDigest}`,
+            : `Synthesize and verify the following Scheduler-controlled RLM leaves into one final result. Do not merely summarize their consensus. First derive a coverage checklist from the original task, then preserve every useful non-duplicated claim, identify important omissions across all leaves, resolve contradictions, and remove unsupported claims. The final answer must be at least as complete and falsifiable as the strongest leaf, with explicit invariants, failure/recovery boundaries, tradeoffs, and acceptance evidence where relevant. Do not delegate or create TaskGraph nodes.\n\n${branchDigest}`,
         },
       ]
       const synthesis = await this.startResidentTurn(
@@ -1541,6 +1559,7 @@ export class OrchestrationDaemon {
         executionId: String(synthesisExecutionId), operatorId: plan.allocationPlan.operatorId,
         model: plan.allocationPlan.model, sessionId: synthesis.receipt.sessionId,
         turnId: synthesis.receipt.turnId, branchArtifactRefs: leaves.map(value => String(value.artifactRef)),
+        branchPreviewLimit,
       }, node)])
       const result = await synthesis.run.result
       turnsUsed += 1

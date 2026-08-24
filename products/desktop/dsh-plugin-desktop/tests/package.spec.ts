@@ -120,6 +120,34 @@ describe('published package surface', () => {
     expect(persistentTool).toContain(`const SHELL_PROMPT = ${JSON.stringify(prompt)};`)
   })
 
+  it('keeps every SettingsScope consumer on the provider ABI release', () => {
+    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
+    const webAppRequire = createRequire(workspaceRequire.resolve('@deepseek-ai/dsh-web-app/package.json'))
+    const packageVersions = [
+      ['provider', workspaceRequire, '@deepseek-ai/dsh-client-ui-settings'],
+      ['general', webAppRequire, '@deepseek-ai/dsh-client-ui-settings-general'],
+      ['agent-preset', webAppRequire, '@deepseek-ai/dsh-client-ui-agent-preset'],
+      ['permission-presets', webAppRequire, '@deepseek-ai/dsh-client-ui-permission-presets'],
+      ['settings-models', webAppRequire, '@deepseek-ai/dsh-client-ui-settings-models'],
+      ['settings-plugins', webAppRequire, '@deepseek-ai/dsh-client-ui-settings-plugins'],
+    ].map(([role, resolver, packageName]) => {
+      const packageJson = JSON.parse(readFileSync(
+        (resolver as NodeJS.Require).resolve(`${packageName as string}/package.json`),
+        'utf8',
+      )) as { version?: unknown }
+      return [role, packageJson.version]
+    })
+
+    expect(Object.fromEntries(packageVersions)).toEqual({
+      provider: '0.1.0-rc.6',
+      general: '0.1.0-rc.6',
+      'agent-preset': '0.1.0-rc.6',
+      'permission-presets': '0.1.0-rc.6',
+      'settings-models': '0.1.0-rc.6',
+      'settings-plugins': '0.1.0-rc.6',
+    })
+  })
+
   it('builds public Host plugins and their private native bootstraps', () => {
     const config = readFileSync(new URL('tsdown.config.ts', packageRoot), 'utf8')
 

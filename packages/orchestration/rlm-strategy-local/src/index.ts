@@ -53,11 +53,11 @@ export class LocalRlmStrategy extends RlmStrategyService {
       version: 1 as const,
       enabled,
       strategyId: 'dsh-native-rlm',
-      strategyVersion: '1.0.0',
+      strategyVersion: '1.1.0',
       reason,
       ...budget,
       instruction: enabled
-        ? `Use bounded recursive decomposition inside this sealed node only. Create at most ${String(budget.maxChildren)} fresh-context children per level, recurse at most ${String(budget.maxDepth)} levels and spend at most ${String(budget.maxTurns)} child turns. Prefer low-cost qualified workers for independent leaves, reserve a high-tier model for planning and verification, then synthesize one evidence-backed result. Never create or modify the global DSH TaskGraph.`
+        ? `Use bounded recursive decomposition inside this sealed node only. Create at most ${String(budget.maxChildren)} fresh-context children per level, recurse at most ${String(budget.maxDepth)} levels and spend at most ${String(budget.maxTurns)} child turns. Give parallel leaves distinct solution, failure-analysis, evidence-review, or alternative-design lenses. Prefer low-cost qualified workers for independent leaves, reserve a high-tier model for planning and verification, then synthesize one coverage-checked, evidence-backed result. Never create or modify the global DSH TaskGraph.`
         : 'Execute this sealed node directly without recursive child decomposition.',
     }
     const planSha256 = createHash('sha256').update(canonical(base)).digest('hex')

@@ -12,7 +12,7 @@ Scheduler 会在 Graph 的 `maxParallel` 上限内启动彼此独立的节点，
 
 分配器把产品报告的每个额度窗口都视为必须同时满足的约束，优先使用资格合格的原生订阅池，并且只在所选优化目标允许时使用按量 API 容量。实时容量建议会把 Scheduler 上限降到 `maxParallel` 以下；套餐暂时繁忙时等待，不会静默消耗付费 API。临近重置且仍可用的额度会被优先利用。
 
-对于 Resident RLM，已封存的 ExecutionPlan 同时包含低阶 worker 分配和高阶综合分配。daemon 在新的原生 lane 上执行有界分支层，把每个分支保存为内容寻址 Artifact，随后只执行一次综合 turn。`maxDepth`、`maxChildren`、`maxTurns`、Graph 并行上限和 Provider 容量都会被机械执行。该复合执行只占一个全局 Scheduler 槽，因此节点内递归不会成为另一套 TaskGraph，也不会与并发 DAG 工作共同超卖容量。
+对于 Resident RLM，已封存的 ExecutionPlan 同时包含低阶 worker 分配和高阶综合分配。daemon 在新的原生 lane 上执行有界分支层，为并行叶子分别指定方案完整性、对抗性故障、证据审查与替代设计镜头，把每个分支保存为内容寻址 Artifact，随后只执行一次综合 turn。综合阶段接收有界但足够完整的叶子预览，并且必须先建立覆盖清单，不能只汇总共识。`maxDepth`、`maxChildren`、`maxTurns`、Graph 并行上限和 Provider 容量都会被机械执行。该复合执行只占一个全局 Scheduler 槽，因此节点内递归不会成为另一套 TaskGraph，也不会与并发 DAG 工作共同超卖容量。
 
 只有节点策略列出了返回的错误码且仍有 Attempt 预算时，自动重试才会创建新 Attempt。Resident 响应流断开会成为可重试的 `RUNTIME_UNAVAILABLE`；原生产品明确报告额度用尽时归类为 `QUOTA_EXHAUSTED`。允许额度重试时，下一个 Attempt 在重新密封前会排除已耗尽的 quota pool（没有 pool 身份时排除精确 offer）。格式错误的结果与不确定 command 绝不会自动重放。正常关闭 daemon 会在报告关闭完成前结束已接受的控制连接，因此被替换的 build 不会存活在拒绝连接的 socket 后面。
 

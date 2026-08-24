@@ -15,7 +15,14 @@ describe('LocalRlmStrategy', () => {
       runId: 'run', nodeId: 'explore', phase: 'execution', role: 'explorer',
       task: '递归探索候选方案并综合证据', requestedMode: 'auto',
     })
-    expect(plan).toMatchObject({ enabled: true, strategyId: 'dsh-native-rlm', maxDepth: 2 })
+    expect(plan).toMatchObject({
+      enabled: true,
+      strategyId: 'dsh-native-rlm',
+      strategyVersion: '1.1.0',
+      maxDepth: 2,
+    })
+    expect(plan.instruction).toContain('distinct solution, failure-analysis, evidence-review, or alternative-design lenses')
+    expect(plan.instruction).toContain('coverage-checked')
   })
 
   it('keeps an ordinary automatic node direct', async () => {

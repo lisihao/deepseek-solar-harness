@@ -286,6 +286,14 @@ describe('orchestration daemon', () => {
     expect(fake.requests.slice(0, 4).every(request => (
       request.prompt?.map(block => block.text).join('\n').includes('Do not delegate') === true
     ))).toBe(true)
+    const rlmPrompts = fake.requests.map(request => request.prompt?.map(block => block.text).join('\n') ?? '')
+    expect(rlmPrompts.slice(0, 4).every(prompt => prompt.includes('Strategy: dsh-native-rlm@1.1.0'))).toBe(true)
+    expect(rlmPrompts[0]).toContain('Solution completeness')
+    expect(rlmPrompts[1]).toContain('Adversarial failure analysis')
+    expect(rlmPrompts[2]).toContain('Solution completeness')
+    expect(rlmPrompts[3]).toContain('Adversarial failure analysis')
+    expect(rlmPrompts[4]).toContain('Do not merely summarize their consensus')
+    expect(rlmPrompts[4]).toContain('derive a coverage checklist from the original task')
     const executionPlan = daemon.store.readArtifact(completed.nodes[0]!.executionPlanRef!) as {
       taskRef: string
       allocationPlan: { model: string; suggestedParallelism: number }
@@ -310,6 +318,9 @@ describe('orchestration daemon', () => {
       depthUsed: 2,
       turnsUsed: 5,
       branchCount: 2,
+    })
+    expect(events.events.find(value => value.type === 'rlm.synthesis.dispatched')?.data).toMatchObject({
+      branchPreviewLimit: 8_000,
     })
   })
 
