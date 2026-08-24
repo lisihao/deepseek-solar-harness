@@ -182,6 +182,11 @@ function nonBlank(value: string, label: string): string {
   return result
 }
 
+function sessionStorageDirectory(sessionsRoot: string, sessionId: RlmRuntimeSessionId): string {
+  const digest = createHash('sha256').update(String(sessionId)).digest('hex')
+  return join(sessionsRoot, `session-${digest}`)
+}
+
 function compactRunOutcome(value: RlmJsonValue): RlmCompactRunOutcomeV1 {
   if (value === null || typeof value !== 'object' || Array.isArray(value) || typeof value.scheduled !== 'boolean') {
     throw new RlmRuntimeError('RLM host returned an invalid compact.run result', 'RLM_UNAVAILABLE')
@@ -283,7 +288,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       return Promise.resolve(existing.snapshot)
     }
     const createdAt = now()
-    const sessionDir = join(this.sessionsRoot, String(request.sessionId))
+    const sessionDir = sessionStorageDirectory(this.sessionsRoot, request.sessionId)
     mkdirSync(sessionDir, { recursive: true, mode: 0o700 })
     chmodSync(sessionDir, 0o700)
     const snapshot: RlmRuntimeSessionSnapshotV1 = {
@@ -537,7 +542,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     const childSessionId = RlmRuntimeSessionId(`rlm-session-${randomUUID()}`)
     const model = request.model ?? parent.snapshot.defaultChildModel ?? parent.snapshot.model
     const createdAt = now()
-    const sessionDir = join(this.sessionsRoot, String(childSessionId))
+    const sessionDir = sessionStorageDirectory(this.sessionsRoot, childSessionId)
     mkdirSync(sessionDir, { recursive: true, mode: 0o700 })
     chmodSync(sessionDir, 0o700)
     const child: RlmChildSnapshotV1 = {

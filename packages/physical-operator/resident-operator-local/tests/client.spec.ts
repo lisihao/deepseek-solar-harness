@@ -8,7 +8,7 @@ describe('waitForDaemonSocketRelease', () => {
   it('returns immediately when the daemon path is absent', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-daemon-release-'))
     try {
-      await expect(waitForDaemonSocketRelease(join(root, 'control.sock'), 100)).resolves.toBe(true)
+      await expect(waitForDaemonSocketRelease(join(root, 'control.sock'), 100, 'darwin')).resolves.toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -20,7 +20,7 @@ describe('waitForDaemonSocketRelease', () => {
     writeFileSync(control, '')
     const timer = setTimeout(() => { rmSync(control) }, 5)
     try {
-      await expect(waitForDaemonSocketRelease(control, 100)).resolves.toBe(true)
+      await expect(waitForDaemonSocketRelease(control, 100, 'darwin')).resolves.toBe(true)
     } finally {
       clearTimeout(timer)
       rmSync(root, { recursive: true, force: true })
@@ -32,7 +32,7 @@ describe('waitForDaemonSocketRelease', () => {
     const control = join(root, 'control.sock')
     writeFileSync(control, '')
     try {
-      await expect(waitForDaemonSocketRelease(control, 1)).resolves.toBe(false)
+      await expect(waitForDaemonSocketRelease(control, 1, 'darwin')).resolves.toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

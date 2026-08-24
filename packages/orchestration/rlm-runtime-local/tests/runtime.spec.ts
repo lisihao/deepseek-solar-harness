@@ -1,6 +1,6 @@
 import { copyFile, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { createConnection } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import {
@@ -43,6 +43,33 @@ async function runtime(root: string, bindings: RlmRuntimeHostBindings) {
 }
 
 describe('LocalRlmRuntime', () => {
+  it('maps logical session identities to portable content-addressed directories', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-portable-session-'))
+    const ctx = new Context()
+    const service = new LocalRlmRuntime(ctx, root)
+    const sessionId = RlmRuntimeSessionId('rlm:orch:run:node:1')
+    try {
+      const snapshot = await service.create({
+        sessionId,
+        commandId: RlmCommandId('create-portable-session'),
+        executionId: 'execution:portable',
+        workspace: root,
+        task: 'verify portable storage',
+        model,
+        limits,
+      }, { dispatchChild: () => { throw new Error('not used') } })
+      expect(basename(snapshot.sessionDir)).toMatch(/^session-[a-f0-9]{64}$/u)
+      expect(snapshot.sessionDir).not.toContain(String(sessionId))
+      await expect(service.executeCell({
+        sessionId,
+        commandId: RlmCommandId('portable-session-cell'),
+        code: '40 + 2',
+      })).resolves.toMatchObject({ value: 42 })
+    } finally {
+      await ctx.root.fiber.dispose()
+    }
+  })
+
   it('persists programmable context and restores serializable variables independently', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-context-'))
     const bindings: RlmRuntimeHostBindings = { dispatchChild: () => { throw new Error('not used') } }
