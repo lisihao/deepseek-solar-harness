@@ -107,12 +107,33 @@ function allocationByNode(events) {
 /** Count native product turns instead of treating one composite RLM node as one call. */
 export function countNativeSubscriptionTurns(events) {
   return events.filter(event => (
-    event.type === 'rlm.branch.dispatched'
-    || event.type === 'rlm.synthesis.dispatched'
+    event.type === 'rlm.root.dispatched'
+    || event.type === 'rlm.child.dispatched'
+    || /^rlm\.(?:message|goal|heartbeat)\.continuation\.(?:settled|failed)$/u.test(event.type)
     || (event.type === 'node.dispatched'
       && event.data?.executor !== 'resident-rlm'
       && event.data?.executor !== 'model-worker')
   )).length
+}
+
+/** Prove that an enabled RLM candidate delegated before its final Evidence was accepted. */
+export function assertRecursiveRlmEvents(events, nodeId) {
+  const started = events.find(event => event.type === 'rlm.execution.started' && event.nodeId === nodeId)
+  const children = events.filter(event => event.type === 'rlm.child.dispatched' && event.nodeId === nodeId)
+  const childResults = events.filter(event => event.type === 'rlm.child.settled' && event.nodeId === nodeId)
+  const continuations = events.filter(event => (
+    event.nodeId === nodeId
+    && event.type === 'rlm.message.continuation.settled'
+  ))
+  const settled = events.find(event => event.type === 'rlm.execution.settled' && event.nodeId === nodeId)
+  const evidence = events.find(event => event.type === 'node.evidence.accepted' && event.nodeId === nodeId)
+  assert(started !== undefined, `${nodeId} did not start the Prime RLM runtime`)
+  assert(children.length > 0, `${nodeId} enabled RLM but dispatched no recursive child`)
+  assert(childResults.length === children.length, `${nodeId} did not settle every recursive child`)
+  assert(Number(settled?.data?.childCount ?? 0) === children.length, `${nodeId} settled with an inconsistent child count`)
+  assert(evidence !== undefined, `${nodeId} produced no accepted final Evidence`)
+  assert(childResults.every(event => event.sequence < evidence.sequence), `${nodeId} accepted final Evidence before a recursive child settled`)
+  return { children, childResults, continuations, settled, evidence }
 }
 
 function assertNativeCompleted(result) {
@@ -341,7 +362,7 @@ async function runInner(appRoot) {
   const pipelineTitle = `DSH ${version} RLM parallel pipeline E2E ${nonce}`
   const rlmCandidateId = Number.parseInt(nonce.slice(-1), 16) % 2 === 0 ? 'candidate-a' : 'candidate-b'
   const directCandidateId = rlmCandidateId === 'candidate-a' ? 'candidate-b' : 'candidate-a'
-  const candidateTask = `Analyze this DSH Workbench design problem for blind quality evaluation ${nonce}: explain how one durable TaskGraph should combine recursive reasoning, isolated parallel Git workers, materialized Evidence verification, and subscription-first quota routing without creating a second Scheduler. Cover concrete failure boundaries and acceptance evidence. Do not call tools, mention the method used to generate the answer, or delegate. End with CANDIDATE_${nonce}.`
+  const candidateTask = `Analyze this DSH Workbench design problem for blind quality evaluation ${nonce}: explain how one durable TaskGraph should combine recursive reasoning, isolated parallel Git workers, materialized Evidence verification, and subscription-first quota routing without creating a second Scheduler. Cover concrete failure boundaries and acceptance evidence. If a private in-memory programmable reasoning surface is available, you must use it to obtain at least one bounded independent critique before synthesizing the final answer; otherwise reason directly. Do not use filesystem, network, or workspace tools, mention the method used to generate the answer, or reveal private reasoning. End with CANDIDATE_${nonce}.`
   const candidate = id => commonNode(id, {
     title: `Blind architecture candidate ${id.endsWith('a') ? 'A' : 'B'}`,
     task: candidateTask,
@@ -396,6 +417,7 @@ async function runInner(appRoot) {
   assert(pipelineAllocations.get('verify')?.tier === 'high', 'verification node did not use a high-tier model')
   const rlm = pipeline.events.find(event => event.type === 'rlm.resolved' && event.nodeId === rlmCandidateId)
   assert(rlm?.data.enabled === true, 'planning node did not seal and execute an enabled RLM plan')
+  const recursiveRlm = assertRecursiveRlmEvents(pipeline.events, rlmCandidateId)
   const verifierEvidence = pipeline.events.find(event => event.type === 'node.evidence.accepted' && event.nodeId === 'verify')
   const preferred = String(verifierEvidence?.data.outputPreview ?? '').match(/PREFERRED_([AB])\s*$/u)?.[1]
   const expectedPreferred = rlmCandidateId === 'candidate-a' ? 'A' : 'B'
@@ -530,6 +552,10 @@ async function runInner(appRoot) {
       workerEvidenceSequences: workerEvidence.map(event => event.sequence),
       quotaFailovers,
       rlm: rlm.data,
+      recursiveRlm: {
+        childCount: recursiveRlm.children.length,
+        continuationCount: recursiveRlm.continuations.length,
+      },
       qualityBlind: {
         directCandidateId,
         rlmCandidateId,
