@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RemoteCommandReceiptStore } from '../src/command-receipts.ts'
-import RemoteAuthService, { RemoteAuthError } from '../src/index.ts'
+import RemoteAuthService, { authorizeRemoteRequest, RemoteAuthError } from '../src/index.ts'
 import { readOwnerOnlyText } from '../src/private-file.ts'
 
 const fibers: Array<{ dispose(): Promise<void> }> = []
@@ -34,6 +34,43 @@ function writePrivateJson(filename: string, value: unknown): void {
   writeFileSync(filename, `${JSON.stringify(value)}\n`, { mode: 0o600 })
   chmodSync(filename, 0o600)
 }
+
+function request(
+  headers: Record<string, unknown>,
+  remoteAddress: string | undefined = '203.0.113.10',
+): Parameters<typeof authorizeRemoteRequest>[0] {
+  return { headers, socket: { remoteAddress } } as unknown as Parameters<typeof authorizeRemoteRequest>[0]
+}
+
+describe('authorizeRemoteRequest', () => {
+  it('accepts only fully loopback owner requests across header representations', () => {
+    expect(authorizeRemoteRequest(request({ host: '127.0.0.1:3080' }, '127.0.0.1'), undefined))
+      .toEqual({ local: true, scope: 'admin' })
+    expect(authorizeRemoteRequest(request({ host: ['http://localhost:3080'], origin: ['http://localhost:3000'] }, '::1'), undefined))
+      .toEqual({ local: true, scope: 'admin' })
+    expect(authorizeRemoteRequest(request({ host: '[::1]:3080' }, '::ffff:127.0.0.1'), undefined))
+      .toEqual({ local: true, scope: 'admin' })
+
+    expect(authorizeRemoteRequest(request({}, '127.0.0.1'), undefined)).toBeUndefined()
+    expect(authorizeRemoteRequest(request({ host: 3080 }, '127.0.0.1'), undefined)).toBeUndefined()
+    expect(authorizeRemoteRequest(request({ host: [3080] }, '127.0.0.1'), undefined)).toBeUndefined()
+    expect(authorizeRemoteRequest(request({ host: 'http://[' }, '127.0.0.1'), undefined)).toBeUndefined()
+    expect(authorizeRemoteRequest(request({ host: '127.0.0.1', origin: 'https://remote.example' }, '127.0.0.1'), undefined))
+      .toBeUndefined()
+  })
+
+  it('resolves a remote bearer through the supplied authority and rejects missing authentication', () => {
+    const principal = { deviceId: 'device', deviceName: 'MacBook', scope: 'cockpit' as const }
+    const authenticate = vi.fn((token: string) => token === 'valid-token' ? principal : undefined)
+
+    expect(authorizeRemoteRequest(request({ authorization: ['Bearer valid-token'] }), { authenticate }))
+      .toEqual({ local: false, scope: 'cockpit', principal })
+    expect(authorizeRemoteRequest(request({ authorization: 'Basic invalid' }), { authenticate })).toBeUndefined()
+    expect(authorizeRemoteRequest(request({ authorization: 'Bearer invalid' }), { authenticate })).toBeUndefined()
+    expect(authorizeRemoteRequest(request({ authorization: ['Bearer valid-token'] }), undefined)).toBeUndefined()
+    expect(authenticate).toHaveBeenCalledWith('valid-token')
+  })
+})
 
 describe('RemoteAuthService', () => {
   it('redeems once, persists only a hash, survives restart, and revokes every access session', async () => {
