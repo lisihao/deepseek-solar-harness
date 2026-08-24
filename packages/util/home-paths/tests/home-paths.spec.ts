@@ -27,6 +27,7 @@ describe('dsh path helpers', () => {
     expect(localIpcAddress(root, 'control', 'win32')).toBe(localIpcAddress(root, 'control', 'win32'))
     expect(localIpcUsesFilesystem('linux')).toBe(true)
     expect(localIpcUsesFilesystem('win32')).toBe(false)
+    expect(() => localIpcAddress(root, '   ', 'linux')).toThrow('local IPC channel must be non-blank')
   })
 
   it('owns the shared default DSH home directory name', () => {

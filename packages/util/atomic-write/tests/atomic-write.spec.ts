@@ -17,6 +17,14 @@ describe('writeFileAtomic', () => {
     if (process.platform !== 'win32') expect((await stat(target)).mode & 0o777).toBe(0o600)
   })
 
+  it('removes the synchronous temp file when replacement fails', async () => {
+    const dir = await scratch()
+    const occupied = join(dir, 'occupied')
+    await mkdir(occupied)
+    expect(() => { writeFileAtomicSync(occupied, 'blocked', { mode: 0o600 }) }).toThrow()
+    expect(await readdir(dir)).toEqual(['occupied'])
+  })
+
   it('creates the file and its parents with exactly the stated mode', async () => {
     const dir = await scratch()
     const target = join(dir, 'nested', 'deep', 'doc.yaml')
