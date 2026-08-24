@@ -21,6 +21,8 @@ const noteName = '2026-08-15-pinned-upstream-and-isolated-yarn-workspace'
 const notePaths = [`${noteDirectory}/${noteName}.md`, `${noteDirectory}/${noteName}.zh.md`]
 const noteRecordPath = `${noteDirectory}/${noteName}.i18n.yaml`
 const sealedDshExtensions = new Set([
+  '@deepseek-ai/dsh-atomic-write',
+  '@deepseek-ai/dsh-home-paths',
   '@deepseek-ai/dsh-physical-operator',
   '@deepseek-ai/dsh-physical-operator-resident',
   '@deepseek-ai/dsh-resident-operator',
