@@ -111,6 +111,8 @@ export class RemoteSyncJournal {
           if (subscriber.closeAfterDrain && subscriber.queue.length === 0) return
           continue
         }
+        /* v8 ignore next -- closeAfterDrain is paired with either an abort (which exits the loop)
+         * or an enqueued resync frame (which returns from the frame branch above). */
         if (subscriber.closeAfterDrain) return
         await new Promise<void>((resolve) => { subscriber.wake = resolve })
       }

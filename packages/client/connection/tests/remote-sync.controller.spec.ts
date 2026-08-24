@@ -1,6 +1,6 @@
 /** Frontend reconnect/resume and explicit-resync behavior. */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { RemoteSyncController } from '../src/client/remote-sync-controller.ts'
 import type { RemoteSyncClient } from '../src/client/remote-sync-client.ts'
 import type {
@@ -9,25 +9,25 @@ import type {
 
 const host = { version: '3.1.3', cwd: '/srv/dsh', attachedSessions: 0, canOpenPath: false }
 
-function description(sequence: number): RemoteSyncDescription {
+function description(sequence: number, deploymentId = 'deployment-1'): RemoteSyncDescription {
   return {
-    protocol: { major: 1, minor: 1 }, deploymentId: 'deployment-1',
-    cursor: { deploymentId: 'deployment-1', sequence },
+    protocol: { major: 1, minor: 1 }, deploymentId,
+    cursor: { deploymentId, sequence },
     describedAt: '2026-08-23T08:00:00.000Z', scope: 'cockpit',
     capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'], host,
   }
 }
 
-function snapshot(sequence: number): RemoteSyncSnapshot {
+function snapshot(sequence: number, deploymentId = 'deployment-1'): RemoteSyncSnapshot {
   return {
-    protocol: { major: 1, minor: 1 }, deploymentId: 'deployment-1',
-    cursor: { deploymentId: 'deployment-1', sequence },
+    protocol: { major: 1, minor: 1 }, deploymentId,
+    cursor: { deploymentId, sequence },
     capturedAt: '2026-08-23T08:00:00.000Z', host,
     sessions: [], workspaces: [], archivedSessionIds: [],
   }
 }
 
-function event(sequence: number): RemoteSyncEvent {
+function event(sequence: number): Extract<RemoteSyncEvent, { stream: 'host' }> {
   return {
     type: 'remote-sync/event', sequence, stream: 'host',
     envelope: {
@@ -111,5 +111,151 @@ describe('RemoteSyncController', () => {
     await handle.done
     expect(snapshotCalls).toBe(2)
     expect(replacements).toBe(2)
+  })
+
+  it('re-snapshots when the described deployment changes or falls behind the local cursor', async () => {
+    const descriptions = [
+      description(0, 'deployment-1'),
+      description(0, 'deployment-2'),
+      description(0, 'deployment-2'),
+    ]
+    const snapshots = [
+      snapshot(0, 'deployment-1'),
+      snapshot(0, 'deployment-2'),
+      snapshot(0, 'deployment-2'),
+    ]
+    let subscription = 0
+    const client: RemoteSyncClient = {
+      describe: async () => descriptions.shift() ?? description(0, 'deployment-2'),
+      snapshot: async () => snapshots.shift() ?? snapshot(0, 'deployment-2'),
+      events: (_cursor, signal) => (async function * (): AsyncGenerator<RemoteSyncFrame> {
+        subscription += 1
+        if (subscription === 1) {
+          yield event(1)
+          return
+        }
+        if (subscription === 2) {
+          yield { ...event(1), envelope: { ...event(1).envelope, rpcId: 'deployment-2-rpc' as never } }
+          return
+        }
+        handle.stop()
+        await waitForAbort(signal)
+      })(),
+    }
+    let replacements = 0
+    const controller = new RemoteSyncController(client, {
+      replace: () => { replacements += 1 },
+      apply: () => {},
+    }, { retryDelayMs: 0 })
+    const handle = controller.start()
+    await handle.done
+    expect(replacements).toBe(3)
+  })
+
+  it('retries immediately when snapshot and description deployments disagree', async () => {
+    let snapshots = 0
+    const client: RemoteSyncClient = {
+      describe: async () => description(0),
+      snapshot: async () => snapshot(0, snapshots++ === 0 ? 'deployment-other' : 'deployment-1'),
+      events: (_cursor, signal) => (async function * (): AsyncGenerator<RemoteSyncFrame> {
+        handle.stop()
+        await waitForAbort(signal)
+      })(),
+    }
+    let replacements = 0
+    const controller = new RemoteSyncController(client, {
+      replace: () => { replacements += 1 },
+      apply: () => {},
+    }, { retryDelayMs: 5_000 })
+    const handle = controller.start()
+    await handle.done
+    expect(snapshots).toBe(2)
+    expect(replacements).toBe(1)
+  })
+
+  it('reports an event gap, waits abortably, publishes states, and rejects a second start', async () => {
+    const states: string[] = []
+    const errors: unknown[] = []
+    let eventCalls = 0
+    const client: RemoteSyncClient = {
+      describe: async () => description(1),
+      snapshot: async () => snapshot(0),
+      events: (_cursor, signal, onOpen) => (async function * (): AsyncGenerator<RemoteSyncFrame> {
+        eventCalls += 1
+        onOpen?.()
+        if (eventCalls === 1) {
+          yield event(2)
+          return
+        }
+        await waitForAbort(signal)
+      })(),
+    }
+    const controller = new RemoteSyncController(client, {
+      replace: () => {},
+      apply: () => {},
+      onStateChange: (state) => { states.push(state) },
+      onError: (error) => { errors.push(error) },
+    }, { retryDelayMs: 10 })
+    const handle = controller.start()
+    expect(() => controller.start()).toThrow('already started')
+    await vi.waitFor(() => {
+      expect(errors).toHaveLength(1)
+      expect(states).toContain('reconnecting')
+    })
+    handle.stop()
+    await handle.done
+    expect(String(errors[0])).toContain('event gap')
+    expect(states).toEqual(expect.arrayContaining(['connecting', 'syncing', 'connected', 'reconnecting', 'stopped']))
+  })
+
+  it('rejects an invalid retry delay after a recoverable client failure', async () => {
+    const client: RemoteSyncClient = {
+      describe: async () => { throw new Error('offline') },
+      snapshot: async () => snapshot(0),
+      events: () => (async function * (): AsyncGenerator<RemoteSyncFrame> {})(),
+    }
+    const controller = new RemoteSyncController(client, {
+      replace: () => {},
+      apply: () => {},
+    }, { retryDelayMs: -1 })
+    await expect(controller.start().done).rejects.toThrow('non-negative finite number')
+  })
+
+  it('stops cleanly when an in-flight client operation rejects after abort', async () => {
+    const client: RemoteSyncClient = {
+      describe: async (signal) => {
+        if (signal === undefined) throw new Error('test client requires an abort signal')
+        await waitForAbort(signal)
+        throw new Error('aborted request')
+      },
+      snapshot: async () => snapshot(0),
+      events: () => (async function * (): AsyncGenerator<RemoteSyncFrame> {})(),
+    }
+    const controller = new RemoteSyncController(client, {
+      replace: () => {},
+      apply: () => {},
+    })
+    const handle = controller.start()
+    handle.stop()
+    await expect(handle.done).resolves.toBeUndefined()
+  })
+
+  it('aborts the default reconnect delay without publishing another error', async () => {
+    const errors: unknown[] = []
+    const client: RemoteSyncClient = {
+      describe: async () => { throw new Error('offline') },
+      snapshot: async () => snapshot(0),
+      events: () => (async function * (): AsyncGenerator<RemoteSyncFrame> {})(),
+    }
+    const controller = new RemoteSyncController(client, {
+      replace: () => {},
+      apply: () => {},
+      onError: (error) => { errors.push(error) },
+    })
+    const handle = controller.start()
+    await vi.waitFor(() => { expect(errors).toHaveLength(1) })
+    handle.stop()
+    await expect(handle.done).resolves.toBeUndefined()
+    expect(errors).toHaveLength(1)
   })
 })

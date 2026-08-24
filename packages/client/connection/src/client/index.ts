@@ -191,6 +191,8 @@ export function apply(ctx: Context): void {
           },
           onStateChange: (state) => {
             if (state === 'connected') {
+              /* v8 ignore next -- RemoteSyncController emits connected only from events.onOpen,
+               * after its snapshot replace sink has assigned currentDescription. */
               if (currentDescription !== undefined) {
                 publishDescription(currentDescription)
                 publishState('connected')

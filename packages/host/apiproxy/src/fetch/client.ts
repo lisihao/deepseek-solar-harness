@@ -334,6 +334,8 @@ export abstract class AbstractApiClient implements IApiClient {
       if (!response.ok) throw new Error(`transport failure for ${path}: HTTP ${response.status}`)
       return response
     }
+    /* v8 ignore next -- attempts is always one or two, and every loop iteration
+     * either returns, throws, or continues into a final throwing iteration. */
     throw new Error(`transport failure for ${path}`)
   }
 

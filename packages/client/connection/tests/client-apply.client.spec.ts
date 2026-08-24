@@ -91,7 +91,12 @@ describe('connection client apply', () => {
       origin: 'https://server.example',
     }
     ;(globalThis as WebSocketGlobal).WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    let failNextFetch = false
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      if (failNextFetch) {
+        failNextFetch = false
+        throw new Error('temporary network failure')
+      }
       if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
       const request = JSON.parse(init.body) as { rpcId: string; method: string }
       const host = { version: '3.2.0', cwd: '/srv/dsh', attachedSessions: 1, canOpenPath: false }
@@ -117,10 +122,17 @@ describe('connection client apply', () => {
     expect(handle.transport).toBe('remote-projection')
     const snapshots: number[] = []
     const hostFrames: string[] = []
+    const muxFrames: string[] = []
+    const states: string[] = []
     const connected = vi.fn()
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const stopThrowingState = handle.state.subscribe(() => { throw new Error('state listener failed') })
+    const stopState = handle.state.subscribe(() => { states.push(handle.state.getSnapshot()) })
     const loop = handle.start({
       onRemoteSnapshot: (_description, snapshot) => { snapshots.push(snapshot.cursor.sequence) },
       onHostEnvelope: (envelope) => { hostFrames.push(envelope.payload.type) },
+      onMuxEnvelope: (envelope) => { muxFrames.push(envelope.payload.type) },
+      onStateChange: (state) => { states.push(`sink:${state}`) },
       onConnected: connected,
     }, { backoffBaseMs: 0 })
     try {
@@ -140,13 +152,79 @@ describe('connection client apply', () => {
         },
       }))
       await vi.waitFor(() => { expect(hostFrames).toEqual(['host/session-status']) })
+      sockets[0]?.receive(JSON.stringify({
+        type: 'remote-sync/event', sequence: 9, stream: 'mux',
+        envelope: {
+          rpcId: 'rpc-remote-9',
+          payload: { type: 'session/subscribed', sessionId: 'session-remote', lastSeq: 8 },
+        },
+      }))
+      await vi.waitFor(() => { expect(muxFrames).toEqual(['session/subscribed']) })
+
+      failNextFetch = true
+      sockets[0]?.close()
+      await vi.waitFor(() => {
+        expect(states).toContain('reconnecting')
+        expect(states).toContain('sink:reconnecting')
+        expect(error).toHaveBeenCalledWith(
+          '[web-runtime] remote projection sync failed:',
+          expect.objectContaining({ message: 'temporary network failure' }),
+        )
+      })
       expect(fetch.mock.calls.map((call) => {
         const input = call[0]
         return typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      })).toEqual([
+      })).toEqual(expect.arrayContaining([
         'https://server.example/remote-sync/describe',
         'https://server.example/remote-sync/snapshot',
-      ])
+      ]))
+    } finally {
+      loop.stop()
+      stopState()
+      stopThrowingState()
+      expect(handle.state.getSnapshot()).toBe('connecting')
+      expect(error).toHaveBeenCalledWith(
+        '[web-runtime] connection-state listener threw:',
+        expect.objectContaining({ message: 'state listener failed' }),
+      )
+      error.mockRestore()
+      fetch.mockRestore()
+    }
+  })
+
+  it('uses default remote projection backoff when the start config is omitted', async () => {
+    ;(globalThis as Win).location = {
+      hostname: 'server.example',
+      search: '?dsh-deployment-role=frontend',
+      origin: 'https://server.example',
+    }
+    ;(globalThis as WebSocketGlobal).WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const request = JSON.parse(init.body) as { rpcId: string; method: string }
+      const host = { version: '3.2.1', cwd: '/srv/dsh', attachedSessions: 0, canOpenPath: false }
+      const value = request.method === 'describe'
+        ? {
+          protocol: { major: 1, minor: 1 }, deploymentId: 'deployment-default',
+          cursor: { deploymentId: 'deployment-default', sequence: 0 },
+          describedAt: '2026-08-24T00:00:00.000Z', scope: 'cockpit',
+          capabilities: ['session.read', 'workspace.read', 'event.subscribe'], host,
+        }
+        : {
+          protocol: { major: 1, minor: 1 }, deploymentId: 'deployment-default',
+          cursor: { deploymentId: 'deployment-default', sequence: 0 },
+          capturedAt: '2026-08-24T00:00:00.000Z', host,
+          sessions: [], workspaces: [], archivedSessionIds: [],
+        }
+      return new Response(JSON.stringify({
+        type: 'server-response', rpcId: request.rpcId, result: { ok: true, value },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const handle = await mount()
+    const connected = vi.fn()
+    const loop = handle.start({ onConnected: connected })
+    try {
+      await vi.waitFor(() => { expect(connected).toHaveBeenCalledOnce() })
     } finally {
       loop.stop()
       fetch.mockRestore()

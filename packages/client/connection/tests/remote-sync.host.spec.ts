@@ -1,8 +1,13 @@
-/** Remote Sync journal: replay, expiry, generation fencing, and no-gap handoff. */
+/** Remote Sync host: journal, projections, transport, and source recovery. */
 
-import { describe, expect, it } from 'vitest'
-import { RpcId, type HostFrame, type RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
-import { RemoteSyncJournal } from '../src/remote-sync-host.ts'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import { describe, expect, it, vi } from 'vitest'
+import WebSocket from 'ws'
+import {
+  RpcId, type ApiProxy, type HostFrame, type MuxFrame, type RpcRequest,
+} from '@deepseek-ai/dsh-host-apiproxy/api'
+import { RemoteSyncHub, RemoteSyncJournal } from '../src/remote-sync-host.ts'
 
 function hostEnvelope(rpcId: string): RpcRequest<HostFrame> {
   return {
@@ -11,7 +16,68 @@ function hostEnvelope(rpcId: string): RpcRequest<HostFrame> {
   }
 }
 
+function muxEnvelope(rpcId: string): RpcRequest<MuxFrame> {
+  return {
+    rpcId: RpcId(rpcId),
+    payload: { type: 'session/subscribed', sessionId: `session-${rpcId}` as never, lastSeq: 0 },
+  }
+}
+
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise(resolve => signal.addEventListener('abort', () => { resolve() }, { once: true }))
+}
+
+async function * idle<T>(signal: AbortSignal): AsyncGenerator<RpcRequest<T>> {
+  await waitForAbort(signal)
+}
+
+const hostValue = { version: '3.2.1', cwd: '/srv/dsh', attachedSessions: 0, canOpenPath: false }
+
+function api(overrides: {
+  describe?: ApiProxy['host']['describe']
+  sessions?: ApiProxy['sessions']['list']
+  workspaces?: ApiProxy['workspace']['list']
+  mux?: ApiProxy['events']['mux']
+  host?: ApiProxy['events']['host']
+} = {}): ApiProxy {
+  return {
+    host: {
+      describe: overrides.describe ?? (async request => ({
+        rpcId: request.rpcId, result: { ok: true, value: hostValue },
+      })),
+    },
+    sessions: {
+      list: overrides.sessions ?? (async request => ({
+        rpcId: request.rpcId, result: { ok: true, value: { items: [] } },
+      })),
+    },
+    workspace: {
+      list: overrides.workspaces ?? (async request => ({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { items: [], archivedSessionIds: [] } },
+      })),
+    },
+    events: {
+      mux: overrides.mux ?? ((_request, signal) => idle<MuxFrame>(signal)),
+      host: overrides.host ?? ((_request, signal) => idle<HostFrame>(signal)),
+    },
+  } as ApiProxy
+}
+
+function failure(rpcId: string, message: string): { rpcId: ReturnType<typeof RpcId>; result: { ok: false; error: { code: 'internal'; message: string; details: {} } } } {
+  return { rpcId: RpcId(rpcId), result: { ok: false, error: { code: 'internal', message, details: {} } } }
+}
+
 describe('RemoteSyncJournal', () => {
+  it('rejects invalid capacities and publishes both source kinds', () => {
+    expect(() => new RemoteSyncJournal(0)).toThrow('positive safe integer')
+    expect(() => new RemoteSyncJournal(1.5)).toThrow('positive safe integer')
+    const journal = new RemoteSyncJournal(2)
+    expect(journal.publish('mux', muxEnvelope('mux-1'))).toMatchObject({ stream: 'mux', sequence: 1 })
+    expect(journal.publish('host', hostEnvelope('host-1'))).toMatchObject({ stream: 'host', sequence: 2 })
+  })
+
   it('hands off snapshot cursor to replay and then the same live queue without a gap', async () => {
     const journal = new RemoteSyncJournal(8)
     const cursor = journal.cursor()
@@ -77,5 +143,192 @@ describe('RemoteSyncJournal', () => {
     })
     expect(journal.cursor()).toMatchObject({ sequence: 0 })
     expect(journal.cursor().deploymentId).not.toBe(prior.deploymentId)
+  })
+
+  it('closes a slow subscriber with resync instead of growing its queue', async () => {
+    const journal = new RemoteSyncJournal(1)
+    const stream = journal.subscribe(journal.cursor(), new AbortController().signal)[Symbol.asyncIterator]()
+    const first = stream.next()
+    journal.publish('host', hostEnvelope('one'))
+    await expect(first).resolves.toMatchObject({ value: { sequence: 1 } })
+    journal.publish('host', hostEnvelope('two'))
+    journal.publish('host', hostEnvelope('three'))
+    journal.publish('host', hostEnvelope('ignored-while-draining'))
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { type: 'remote-sync/resync-required', reason: 'cursor-expired' },
+    })
+    await expect(stream.next()).resolves.toMatchObject({ done: true })
+    journal.publish('host', hostEnvelope('after-subscriber-closed'))
+  })
+
+  it('wakes waiting subscribers on abort and deployment rotation', async () => {
+    const journal = new RemoteSyncJournal(2)
+    const abort = new AbortController()
+    const waiting = journal.subscribe(journal.cursor(), abort.signal)[Symbol.asyncIterator]()
+    const pending = waiting.next()
+    abort.abort()
+    await expect(pending).resolves.toMatchObject({ done: true })
+
+    const rotating = journal.subscribe(journal.cursor(), new AbortController().signal)[Symbol.asyncIterator]()
+    const rotated = rotating.next()
+    journal.rotateDeployment()
+    await expect(rotated).resolves.toMatchObject({
+      value: { type: 'remote-sync/resync-required', reason: 'deployment-mismatch' },
+    })
+    await expect(rotating.next()).resolves.toMatchObject({ done: true })
+  })
+})
+
+describe('RemoteSyncHub', () => {
+  it('describes pocket/admin capabilities and creates a complete snapshot', async () => {
+    const hub = new RemoteSyncHub(api(), 4)
+    const signal = new AbortController().signal
+    await expect(hub.describe(signal, 'pocket')).resolves.toMatchObject({
+      scope: 'pocket', capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'approval.respond'],
+    })
+    await expect(hub.describe(signal, 'admin')).resolves.toMatchObject({
+      scope: 'admin', capabilities: expect.arrayContaining(['session.command']),
+    })
+    await expect(hub.snapshot(signal)).resolves.toMatchObject({
+      host: hostValue, sessions: [], workspaces: [], archivedSessionIds: [],
+    })
+    const clients = (hub as unknown as { sockets: { clients: Set<WebSocket> } }).sockets.clients
+    const connected = {
+      terminate: vi.fn(() => { clients.delete(connected as unknown as WebSocket) }),
+    } as unknown as WebSocket
+    clients.add(connected)
+    await hub.close()
+    expect(connected.terminate).toHaveBeenCalled()
+    await expect(hub.close()).rejects.toThrow()
+  })
+
+  it('retries projections if deployment changes during reads and supports cancellation', async () => {
+    let describes = 0
+    let snapshots = 0
+    const hub = new RemoteSyncHub(api({
+      describe: async (request) => {
+        if (describes++ === 0) hub.journal.rotateDeployment()
+        return { rpcId: request.rpcId, result: { ok: true, value: hostValue } }
+      },
+      sessions: async (request) => {
+        if (snapshots++ === 0) hub.journal.rotateDeployment()
+        return { rpcId: request.rpcId, result: { ok: true, value: { items: [] } } }
+      },
+    }), 4)
+    await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({ scope: 'admin' })
+    await expect(hub.snapshot(new AbortController().signal)).resolves.toMatchObject({ sessions: [] })
+    expect(describes).toBeGreaterThan(1)
+    expect(snapshots).toBeGreaterThan(1)
+
+    const cancelled = new AbortController()
+    cancelled.abort()
+    await expect(hub.describe(cancelled.signal, 'admin')).rejects.toThrow('describe cancelled')
+    await expect(hub.snapshot(cancelled.signal)).rejects.toThrow('snapshot cancelled')
+    await hub.close()
+  })
+
+  it.each([
+    ['describe host', api({ describe: async request => failure(String(request.rpcId), 'host down') }), 'host.describe failed'],
+    ['snapshot host', api({ describe: async request => failure(String(request.rpcId), 'host down') }), 'host.describe failed'],
+    ['snapshot sessions', api({ sessions: async request => failure(String(request.rpcId), 'sessions down') }), 'session.list failed'],
+    ['snapshot workspaces', api({ workspaces: async request => failure(String(request.rpcId), 'workspaces down') }), 'workspace.list failed'],
+  ])('reports %s failures', async (kind, fakeApi, expected) => {
+    const hub = new RemoteSyncHub(fakeApi, 4)
+    const operation = kind === 'describe host'
+      ? hub.describe(new AbortController().signal, 'admin')
+      : hub.snapshot(new AbortController().signal)
+    await expect(operation).rejects.toThrow(expected)
+    await hub.close()
+  })
+
+  it('rejects invalid upgrades and sanitizes non-Error failures', async () => {
+    const hub = new RemoteSyncHub(api(), 4)
+    const invalid = new PassThrough()
+    let response = ''
+    invalid.on('data', (chunk) => { response += String(chunk) })
+    hub.handleEvents({ url: '/api/remote-sync/events?deploymentId=x&since=NaN' } as never, invalid, Buffer.alloc(0))
+    await new Promise(resolve => invalid.once('finish', resolve))
+    expect(response).toContain('400 Bad Request')
+
+    const missingUrl = new PassThrough()
+    hub.handleEvents({} as never, missingUrl, Buffer.alloc(0))
+    await new Promise(resolve => missingUrl.once('finish', resolve))
+
+    const thrown = new PassThrough()
+    let stringFailure = ''
+    thrown.on('data', (chunk) => { stringFailure += String(chunk) })
+    const request = { get url(): string { throw 'bad\r\nrequest' } }
+    hub.handleEvents(request as never, thrown, Buffer.alloc(0))
+    await new Promise(resolve => thrown.once('finish', resolve))
+    expect(stringFailure).toContain('bad  request')
+    await hub.close()
+  })
+
+  it('accepts a downlink, delivers events, and rejects upstream messages', async () => {
+    const hub = new RemoteSyncHub(api(), 4)
+    const sent: string[] = []
+    const socket = Object.assign(new EventEmitter(), {
+      readyState: WebSocket.OPEN,
+      send(data: string, callback: (error?: Error) => void): void { sent.push(data); callback() },
+      close: vi.fn(function (this: { readyState: number }): void {
+        this.readyState = WebSocket.CLOSED
+        socket.emit('close')
+      }),
+    }) as unknown as WebSocket
+    const internals = hub as unknown as {
+      sockets: { handleUpgrade: (_request: unknown, _socket: unknown, _head: Buffer, accept: (websocket: WebSocket) => void) => void }
+    }
+    internals.sockets.handleUpgrade = (_request, _raw, _head, accept) => { accept(socket) }
+    const cursor = hub.journal.cursor()
+    hub.handleEvents({ url: `/events?deploymentId=${cursor.deploymentId}&since=0` } as never, new PassThrough(), Buffer.alloc(0))
+    hub.journal.publish('host', hostEnvelope('delivered'))
+    await vi.waitFor(() => { expect(sent).toHaveLength(1) })
+    socket.emit('error', new Error('transport failure'))
+    socket.emit('message', Buffer.from('upstream'))
+    await vi.waitFor(() => { expect(socket.close).toHaveBeenCalledWith(1008, 'downlink only') })
+    await hub.close()
+  })
+
+  it('contains socket closure and callback failures while pumping', async () => {
+    const hub = new RemoteSyncHub(api(), 4)
+    const stale = { deploymentId: 'stale', sequence: 0 }
+    const pump = (hub as unknown as {
+      pumpSocket: (socket: WebSocket, cursor: typeof stale, abort: AbortController) => Promise<void>
+    }).pumpSocket.bind(hub)
+
+    const closed = { readyState: WebSocket.CLOSED, close: vi.fn(), send: vi.fn() } as unknown as WebSocket
+    await expect(pump(closed, stale, new AbortController())).rejects.toThrow('closed before frame delivery')
+
+    const failing = {
+      readyState: WebSocket.OPEN,
+      close: vi.fn(),
+      send: (_data: string, callback: (error?: Error) => void): void => { callback(new Error('send failed')) },
+    } as unknown as WebSocket
+    await expect(pump(failing, stale, new AbortController())).rejects.toThrow('send failed')
+    expect(failing.close).toHaveBeenCalled()
+    await hub.close()
+  })
+
+  it('publishes both source streams and contains a source crash', async () => {
+    const hub = new RemoteSyncHub(api(), 4)
+    const internals = hub as unknown as {
+      pumpSource: (stream: 'mux' | 'host', frames: AsyncIterable<RpcRequest<MuxFrame | HostFrame>>) => Promise<void>
+    }
+    await internals.pumpSource('mux', (async function * () { yield muxEnvelope('mux-source') })())
+    await internals.pumpSource('host', (async function * () { yield hostEnvelope('host-source') })())
+    await expect(internals.pumpSource('host', (async function * () { throw new Error('source failed') })())).resolves.toBeUndefined()
+    expect(hub.journal.cursor().sequence).toBe(2)
+    await hub.close()
+  })
+
+  it('rotates the deployment before retrying a completed source generation', async () => {
+    const hub = new RemoteSyncHub(api({
+      mux: () => (async function * (): AsyncGenerator<RpcRequest<MuxFrame>> {})(),
+    }), 4)
+    const initial = hub.journal.cursor().deploymentId
+    await vi.waitFor(() => {
+      expect(hub.journal.cursor().deploymentId).not.toBe(initial)
+    }, { timeout: 500 })
+    await hub.close()
   })
 })

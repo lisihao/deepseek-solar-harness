@@ -2,8 +2,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
+  parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
 } from '../src/remote-sync.ts'
+import { setBrowserRemoteAccessToken } from '../src/client/browser-access-token.ts'
 import { WebRemoteSyncClient } from '../src/client/remote-sync-client.ts'
 
 const snapshot = {
@@ -25,7 +26,49 @@ const snapshot = {
   archivedSessionIds: [],
 }
 
-afterEach(() => { vi.unstubAllGlobals() })
+interface SocketRecord {
+  readonly socket: FakeWebSocket
+  readonly protocols: string[]
+}
+
+const sockets: SocketRecord[] = []
+
+class FakeWebSocket extends EventTarget {
+  static readonly CONNECTING = 0
+  static readonly OPEN = 1
+  static readonly CLOSING = 2
+  static readonly CLOSED = 3
+
+  readonly url: string
+  readyState = FakeWebSocket.CONNECTING
+
+  constructor(url: string | URL, protocols: string[] = []) {
+    super()
+    this.url = String(url)
+    sockets.push({ socket: this, protocols })
+  }
+
+  open(): void {
+    this.readyState = FakeWebSocket.OPEN
+    this.dispatchEvent(new Event('open'))
+  }
+
+  receive(data: unknown): void {
+    this.dispatchEvent(new MessageEvent('message', { data }))
+  }
+
+  close(): void {
+    if (this.readyState === FakeWebSocket.CLOSED) return
+    this.readyState = FakeWebSocket.CLOSED
+    this.dispatchEvent(new Event('close'))
+  }
+}
+
+afterEach(() => {
+  sockets.length = 0
+  setBrowserRemoteAccessToken(undefined)
+  vi.unstubAllGlobals()
+})
 
 describe('Remote Sync wire parsing', () => {
   it('accepts an authenticated Server description and rejects unknown capabilities', () => {
@@ -92,6 +135,39 @@ describe('Remote Sync wire parsing', () => {
     })).toThrow('another deployment')
   })
 
+  it('rejects malformed descriptions, cursors, snapshots, and scalar fields', () => {
+    const description = {
+      protocol: { major: 1, minor: 1 }, deploymentId: 'deployment-1',
+      cursor: { deploymentId: 'deployment-1', sequence: 7 }, describedAt: snapshot.capturedAt,
+      scope: 'cockpit', capabilities: ['session.read'], host: snapshot.host,
+    }
+    expect(() => parseRemoteSyncDescription({
+      ...description, cursor: { deploymentId: 'deployment-2', sequence: 7 },
+    })).toThrow('another deployment')
+    expect(() => parseRemoteSyncDescription({ ...description, capabilities: {} }))
+      .toThrow('capabilities must be an array')
+    expect(() => parseRemoteSyncDescription({ ...description, scope: 'operator' }))
+      .toThrow('scope is invalid')
+    expect(() => parseRemoteSyncDescription({ ...description, describedAt: 'never' }))
+      .toThrow('not an ISO instant')
+    expect(() => parseRemoteSyncDescription({ ...description, protocol: { major: 1, minor: 2 } }))
+      .toThrow('protocol mismatch')
+
+    for (const value of [undefined, null, []]) {
+      expect(() => parseRemoteSyncCursor(value)).toThrow('must be an object')
+    }
+    expect(() => parseRemoteSyncCursor({ deploymentId: 1, sequence: 0 }))
+      .toThrow('must be a non-empty string')
+    expect(() => parseRemoteSyncCursor({ deploymentId: '', sequence: 0 }))
+      .toThrow('must be a non-empty string')
+    for (const sequence of ['1', Number.MAX_SAFE_INTEGER + 1, -1]) {
+      expect(() => parseRemoteSyncCursor({ deploymentId: 'deployment-1', sequence }))
+        .toThrow('non-negative safe integer')
+    }
+    expect(() => parseRemoteSyncSnapshot({ ...snapshot, capturedAt: 'never' }))
+      .toThrow('not an ISO instant')
+  })
+
   it('validates nested mux/host envelopes and structured resync frames', () => {
     expect(parseRemoteSyncFrame({
       type: 'remote-sync/event', sequence: 8, stream: 'host',
@@ -107,5 +183,125 @@ describe('Remote Sync wire parsing', () => {
     expect(() => parseRemoteSyncFrame({
       type: 'remote-sync/event', sequence: 0, stream: 'host', envelope: {},
     })).toThrow('must be positive')
+    expect(parseRemoteSyncFrame({
+      type: 'remote-sync/event', sequence: 9, stream: 'mux',
+      envelope: {
+        rpcId: 'rpc-2',
+        payload: { type: 'session/subscribed', sessionId: 'session-1', lastSeq: 8 },
+      },
+    })).toMatchObject({ sequence: 9, stream: 'mux' })
+    for (const reason of ['deployment-mismatch', 'cursor-ahead'] as const) {
+      expect(parseRemoteSyncFrame({
+        type: 'remote-sync/resync-required', deploymentId: 'deployment-1',
+        earliestSequence: 0, latestSequence: 10, reason,
+      })).toMatchObject({ reason })
+    }
+    expect(() => parseRemoteSyncFrame({
+      type: 'remote-sync/resync-required', deploymentId: 'deployment-1',
+      earliestSequence: 0, latestSequence: 10, reason: 'unknown',
+    })).toThrow('resync reason is invalid')
+    expect(() => parseRemoteSyncFrame({ type: 'unknown' })).toThrow('frame type is invalid')
+    expect(() => parseRemoteSyncFrame({
+      type: 'remote-sync/event', sequence: 1, stream: 'unknown', envelope: { rpcId: 'rpc', payload: {} },
+    })).toThrow('stream is invalid')
+  })
+})
+
+describe('WebRemoteSyncClient failures and WebSocket downlink', () => {
+  it('loads snapshots from the current page and rejects transport, correlation, and remote failures', async () => {
+    vi.stubGlobal('location', { origin: 'https://page.example' })
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const request = JSON.parse(init.body) as { rpcId: string }
+      return Response.json({
+        type: 'server-response', rpcId: request.rpcId, result: { ok: true, value: snapshot },
+      })
+    }))
+    const signal = new AbortController().signal
+    await expect(new WebRemoteSyncClient().snapshot(signal)).resolves.toMatchObject({ deploymentId: 'deployment-1' })
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toEqual(new URL('https://page.example/remote-sync/snapshot'))
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]).toHaveProperty('signal', signal)
+    vi.stubGlobal('location', { origin: 'null' })
+    await expect(new WebRemoteSyncClient().snapshot()).resolves.toMatchObject({ deploymentId: 'deployment-1' })
+    expect(vi.mocked(fetch).mock.calls[1]?.[0]).toEqual(new URL('http://dsh.internal/remote-sync/snapshot'))
+
+    const client = new WebRemoteSyncClient('https://server.example')
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('offline', { status: 503 }))
+    await expect(client.snapshot()).rejects.toThrow('HTTP 503')
+    expect(vi.mocked(fetch).mock.calls[2]?.[1]).not.toHaveProperty('signal')
+
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({
+      type: 'server-response', rpcId: 'different', result: { ok: true, value: snapshot },
+    }))
+    await expect(client.snapshot()).rejects.toThrow('rpcId mismatch')
+
+    vi.mocked(fetch).mockImplementationOnce(async (_input, init) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const request = JSON.parse(init.body) as { rpcId: string }
+      return Response.json({
+        type: 'server-response', rpcId: request.rpcId,
+        result: { ok: false, error: { code: 'internal', message: 'closed', details: {} } },
+      })
+    })
+    await expect(client.snapshot()).rejects.toThrow('internal: closed')
+  })
+
+  it('streams valid frames, drops malformed frames, and closes on server end', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    setBrowserRemoteAccessToken('memory-token')
+    const opened = vi.fn()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const iterator = new WebRemoteSyncClient('https://server.example')
+      .events({ deploymentId: 'deployment-1', sequence: 7 }, new AbortController().signal, opened)
+      [Symbol.asyncIterator]()
+    const first = iterator.next()
+    expect(sockets).toHaveLength(1)
+    expect(sockets[0]).toMatchObject({
+      protocols: ['dsh-remote-sync-v1', 'dsh-bearer.memory-token'],
+    })
+    expect(sockets[0]!.socket.url).toBe(
+      'wss://server.example/remote-sync/events?deploymentId=deployment-1&since=7',
+    )
+    sockets[0]!.socket.open()
+    expect(opened).toHaveBeenCalledOnce()
+    sockets[0]!.socket.receive(new Uint8Array([1]))
+    sockets[0]!.socket.receive('{')
+    sockets[0]!.socket.receive(JSON.stringify({
+      type: 'remote-sync/event', sequence: 8, stream: 'host',
+      envelope: {
+        rpcId: 'rpc-8',
+        payload: { type: 'host/session-status', sessionId: 'session-1', running: true },
+      },
+    }))
+    await expect(first).resolves.toMatchObject({ value: { sequence: 8 } })
+    expect(errors).toHaveBeenCalledTimes(2)
+    const end = iterator.next()
+    sockets[0]!.socket.close()
+    await expect(end).resolves.toMatchObject({ done: true })
+    errors.mockRestore()
+  })
+
+  it('uses an explicit bearer and closes an already-aborted insecure downlink', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const abort = new AbortController()
+    abort.abort()
+    const iterator = new WebRemoteSyncClient('http://server.example', 'explicit-token')
+      .events({ deploymentId: 'deployment-1', sequence: 0 }, abort.signal)
+      [Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toMatchObject({ done: true })
+    expect(sockets[0]).toMatchObject({
+      protocols: ['dsh-remote-sync-v1', 'dsh-bearer.explicit-token'],
+    })
+    expect(sockets[0]!.socket.url).toBe(
+      'ws://server.example/remote-sync/events?deploymentId=deployment-1&since=0',
+    )
+    expect(sockets[0]!.socket.readyState).toBe(FakeWebSocket.CLOSED)
+
+    sockets.length = 0
+    const noToken = new WebRemoteSyncClient('http://server.example')
+      .events({ deploymentId: 'deployment-1', sequence: 0 }, abort.signal)
+      [Symbol.asyncIterator]()
+    await expect(noToken.next()).resolves.toMatchObject({ done: true })
+    expect(sockets[0]?.protocols).toEqual(['dsh-remote-sync-v1'])
   })
 })
