@@ -706,28 +706,10 @@ export class CodexResidentDriver implements ResidentProductDriver {
   }
 
   async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
-    const qualification = await this.qualify()
-    if (!qualification.available) {
-      const code = qualification.authentication !== 'native-subscription'
-        ? 'AUTH_MODE_MISMATCH'
-        : qualification.productVersion !== EXPECTED_CODEX_CLI_VERSION
-          || qualification.protocolHash !== EXPECTED_CODEX_SCHEMA_SHA256
-          ? 'PROVIDER_VERSION_MISMATCH'
-          : 'RUNTIME_UNAVAILABLE'
-      throw new ResidentOperatorError(qualification.unavailableReason ?? 'Codex unavailable', code)
-    }
+    await this.requireAvailable()
     const texts = textPrompt(request.prompt, 'Codex')
     request.onProgress('connecting')
-    const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
-    if (!existsSync(socketPath)) {
-      throw new ResidentOperatorError('Codex app-server control socket is unavailable', 'RUNTIME_UNAVAILABLE')
-    }
-    const stream = await openCodexDaemonStream(socketPath, request.signal).catch((error: unknown) => {
-      throw new ResidentOperatorError(
-        `Codex app-server WebSocket unavailable: ${error instanceof Error ? error.message : String(error)}`,
-        'RUNTIME_UNAVAILABLE',
-      )
-    })
+    const stream = await this.openStream(request.signal)
     const modelToolBridge = ensureTypeScriptReplBridge(request)
     const dynamicTools = codexDynamicTools(request)
     const wire = new CodexAppServerWire(
@@ -781,26 +763,8 @@ export class CodexResidentDriver implements ResidentProductDriver {
         'INVALID_RESULT',
       )
     }
-    const qualification = await this.qualify()
-    if (!qualification.available) {
-      const code = qualification.authentication !== 'native-subscription'
-        ? 'AUTH_MODE_MISMATCH'
-        : qualification.productVersion !== EXPECTED_CODEX_CLI_VERSION
-          || qualification.protocolHash !== EXPECTED_CODEX_SCHEMA_SHA256
-          ? 'PROVIDER_VERSION_MISMATCH'
-          : 'RUNTIME_UNAVAILABLE'
-      throw new ResidentOperatorError(qualification.unavailableReason ?? 'Codex unavailable', code)
-    }
-    const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
-    if (!existsSync(socketPath)) {
-      throw new ResidentOperatorError('Codex app-server control socket is unavailable', 'RUNTIME_UNAVAILABLE')
-    }
-    const stream = await openCodexDaemonStream(socketPath, request.signal).catch((error: unknown) => {
-      throw new ResidentOperatorError(
-        `Codex app-server WebSocket unavailable: ${error instanceof Error ? error.message : String(error)}`,
-        'RUNTIME_UNAVAILABLE',
-      )
-    })
+    await this.requireAvailable()
+    const stream = await this.openStream(request.signal)
     const wire = new CodexAppServerWire(stream, stream, 'require')
     try {
       wire.start()
@@ -817,6 +781,31 @@ export class CodexResidentDriver implements ResidentProductDriver {
       wire.close()
       stream.destroy()
     }
+  }
+
+  private async requireAvailable(): Promise<void> {
+    const qualification = await this.qualify()
+    if (qualification.available) return
+    const code = qualification.authentication !== 'native-subscription'
+      ? 'AUTH_MODE_MISMATCH'
+      : qualification.productVersion !== EXPECTED_CODEX_CLI_VERSION
+        || qualification.protocolHash !== EXPECTED_CODEX_SCHEMA_SHA256
+        ? 'PROVIDER_VERSION_MISMATCH'
+        : 'RUNTIME_UNAVAILABLE'
+    throw new ResidentOperatorError(qualification.unavailableReason ?? 'Codex unavailable', code)
+  }
+
+  private async openStream(signal: AbortSignal) {
+    const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
+    if (!existsSync(socketPath)) {
+      throw new ResidentOperatorError('Codex app-server control socket is unavailable', 'RUNTIME_UNAVAILABLE')
+    }
+    return openCodexDaemonStream(socketPath, signal).catch((error: unknown) => {
+      throw new ResidentOperatorError(
+        `Codex app-server WebSocket unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        'RUNTIME_UNAVAILABLE',
+      )
+    })
   }
 
   private async schemaHash(): Promise<string> {

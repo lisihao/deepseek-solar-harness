@@ -5,6 +5,7 @@
   "references": [
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
+    { "path": "../../util/atomic-write" },
     { "path": "../continual-harness" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]

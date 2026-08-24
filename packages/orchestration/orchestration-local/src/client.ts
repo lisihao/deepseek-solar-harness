@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createConnection } from 'node:net'
+import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { fileURLToPath } from 'node:url'
 import {
   OrchestrationError,
@@ -43,7 +44,7 @@ export class OrchestrationDaemonClient {
   private readiness: Promise<void> | undefined
 
   constructor(private readonly options: OrchestrationClientOptions) {
-    this.socketPath = `${options.root}/control.sock`
+    this.socketPath = localIpcAddress(options.root, 'control')
   }
 
   /**
@@ -206,7 +207,7 @@ export class OrchestrationDaemonClient {
     try {
       await this.rawRequest('system.shutdown', {})
     } catch (shutdownError) {
-      if (existsSync(this.socketPath)) {
+      if (!localIpcUsesFilesystem() || existsSync(this.socketPath)) {
         throw new OrchestrationError(
           `orchestration daemon upgrade is blocked: ${initialError.message}; shutdown failed: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
           'ORCHESTRATION_VERSION_MISMATCH',

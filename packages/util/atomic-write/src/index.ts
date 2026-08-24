@@ -11,6 +11,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { lstat, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
@@ -59,6 +60,29 @@ export async function writeFileAtomic(filename: string, content: string, options
     await rename(temp, filename)
   } catch (error) {
     await rm(temp, { force: true })
+    throw error
+  }
+}
+
+/**
+ * Synchronous counterpart for state owners whose public contract is already
+ * synchronous. It preserves the same exclusive temp-file and atomic-rename
+ * semantics as {@link writeFileAtomic} without fire-and-forget persistence.
+ * @param filename - final path receiving the content.
+ * @param content - complete next file content.
+ * @param options - permission bits for the replacement inode.
+ */
+export function writeFileAtomicSync(filename: string, content: string, options: WriteFileAtomicOptions): void {
+  mkdirSync(dirname(filename), {
+    recursive: true,
+    ...options.dirMode === undefined ? {} : { mode: options.dirMode },
+  })
+  const temp = `${filename}.${randomBytes(6).toString('hex')}.tmp`
+  try {
+    writeFileSync(temp, content, { mode: options.mode, flag: 'wx' })
+    renameSync(temp, filename)
+  } catch (error) {
+    rmSync(temp, { force: true })
     throw error
   }
 }

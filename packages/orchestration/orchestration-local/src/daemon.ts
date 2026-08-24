@@ -37,6 +37,7 @@ import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
 import {
   RlmCommandId,
   RlmRuntimeSessionId,
+  type RlmChildExecution,
   type RlmChildExecutionResult,
   type RlmJsonValue,
   type RlmRuntimeHostBindings,
@@ -76,6 +77,7 @@ import PhysicalOperatorRuntime, {
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import type { ResidentModelOption, ResidentProviderStatus, ResidentQuotaPool } from '@deepseek-ai/dsh-resident-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { DurableAutoRefineCoordinator, PRIME_AUTO_REFINE_DEFAULTS, type AutoRefineReview } from './auto-refine.ts'
 import { canonicalSha256 } from './canonical.ts'
@@ -142,6 +144,21 @@ interface ResidentReceiptIdentity {
   readonly turnId: string
 }
 
+interface PreparedRlmExecution {
+  readonly rlmPlan: RlmExecutionPlanV1
+  readonly runId: string
+  readonly node: OrchestrationNodeSnapshot | undefined
+  readonly rootSessionId: RlmRuntimeSessionId
+  readonly bindings: RlmRuntimeHostBindings
+  readonly bridge: PhysicalOperatorModelToolBridgeV1
+  readonly rootPrompt: readonly ContentBlock[]
+}
+
+interface StartedResidentTurn {
+  readonly run: PhysicalOperatorRun
+  readonly receipt: ResidentReceiptIdentity
+}
+
 class OrchestrationResidentOperator implements PhysicalOperator {
   readonly descriptor
   private readonly receipts = new Map<string, ResidentReceiptIdentity>()
@@ -168,6 +185,9 @@ class OrchestrationResidentOperator implements PhysicalOperator {
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
     const workspace = request.parent.session.header.cwd
     if (workspace === undefined) throw new OrchestrationError('orchestration operator requires a workspace', 'GRAPH_INVALID')
+    // The headless Scheduler intentionally maps the public Physical Operator
+    // request to Resident IPC without depending on the installable Provider.
+    /* jscpd:ignore-start */
     const turn = await this.resident.execute({
       commandId: String(request.executionId),
       operatorId: this.provider.operatorId,
@@ -179,6 +199,7 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       signal: request.signal,
     })
+    /* jscpd:ignore-end */
     this.receipts.set(String(request.executionId), { sessionId: turn.sessionId, turnId: turn.turnId })
     return {
       result: turn.result.then(result => ({
@@ -556,7 +577,7 @@ export class OrchestrationDaemon {
   readonly closed = this.closedResolver.promise
 
   constructor(private readonly options: OrchestrationDaemonOptions) {
-    this.socketPath = join(options.root, 'control.sock')
+    this.socketPath = localIpcAddress(options.root, 'control')
     this.store = new OrchestrationStore(options.root)
     this.worktrees = new GitWorktreeManager(join(options.root, 'worktrees'))
     this.autoRefine = new DurableAutoRefineCoordinator(join(options.root, 'auto-refine.json'), {
@@ -625,7 +646,7 @@ export class OrchestrationDaemon {
       this.server.once('error', onError)
       this.server.listen(this.socketPath, () => {
         this.server.off('error', onError)
-        chmodSync(this.socketPath, 0o600)
+        if (localIpcUsesFilesystem()) chmodSync(this.socketPath, 0o600)
         writeFileSync(join(this.options.root, 'daemon.pid'), `${String(process.pid)}\n`, { mode: 0o600 })
         resolve()
       })
@@ -651,7 +672,7 @@ export class OrchestrationDaemon {
     await this.ctx.root.fiber.dispose()
     await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
     this.store.close()
-    this.safeUnlink(this.socketPath)
+    if (localIpcUsesFilesystem()) this.safeUnlink(this.socketPath)
     this.safeUnlink(join(this.options.root, 'daemon.pid'))
     this.releaseLock()
     this.closedResolver.resolve()
@@ -1582,26 +1603,28 @@ export class OrchestrationDaemon {
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
   ): void {
+    this.dispatchRlmAttempt(record, spec, plan, 'scheduler-owned-resident-rlm', (controller, physicalRuns) => (
+      this.executeResidentRlm(
+        record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
+      )
+    ))
+  }
+
+  private dispatchRlmAttempt(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    contextIsolation: string,
+    execute: (controller: AbortController, physicalRuns: PhysicalOperatorRun[]) => Promise<PhysicalOperatorResult>,
+  ): void {
     const timeout = attemptAbort(spec.timeoutMs)
     const { controller } = timeout
     const physicalRuns: PhysicalOperatorRun[] = []
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident-rlm')
-    const result = this.executeResidentRlm(
-      record,
-      spec,
-      plan,
-      contextPacket,
-      capabilityPlan,
-      harnessSnapshot,
-      controller,
-      physicalRuns,
-    )
+    const result = execute(controller, physicalRuns)
     this.markAttemptRunning(record, spec, acceptedAttempt, {
-      executionId: String(plan.executionId),
-      operatorId: plan.operatorPlan.operatorId,
-      model: plan.allocationPlan.model,
-      contextIsolation: 'scheduler-owned-resident-rlm',
-      executor: 'resident-rlm',
+      executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
+      model: plan.allocationPlan.model, contextIsolation, executor: 'resident-rlm',
     })
     const run = {
       result: result.finally(timeout.clearTimeout),
@@ -1614,7 +1637,7 @@ export class OrchestrationDaemon {
     this.trackDelegatedAttempt('resident-rlm', record, spec, plan, run)
   }
 
-  private async executeResidentRlm(
+  private async prepareRlmExecution(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
@@ -1623,9 +1646,10 @@ export class OrchestrationDaemon {
     harnessSnapshot: ContinualHarnessSnapshotV1 | undefined,
     controller: AbortController,
     physicalRuns: PhysicalOperatorRun[],
-  ): Promise<PhysicalOperatorResult> {
+    executor: 'resident' | 'model-worker',
+  ): Promise<PreparedRlmExecution> {
     const rlmPlan = plan.rlmPlan
-    if (rlmPlan?.enabled !== true) throw new OrchestrationError('Resident RLM dispatch requires an enabled sealed plan', 'GRAPH_INVALID')
+    if (rlmPlan?.enabled !== true) throw new OrchestrationError(`${executor} RLM dispatch requires an enabled sealed plan`, 'GRAPH_INVALID')
     const runId = String(record.snapshot.runId)
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
     const rootSessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
@@ -1647,18 +1671,12 @@ export class OrchestrationDaemon {
         ...plan.rlmWorkerPlan.profile === undefined ? {} : { profile: plan.rlmWorkerPlan.profile },
       } },
       limits: {
-        maxDepth: rlmPlan.maxDepth,
-        maxChildren: rlmPlan.maxChildren,
-        maxTurns: rlmPlan.maxTurns,
-        maxCellMs: Math.min(spec.timeoutMs ?? 120_000, 300_000),
-        maxOutputBytes: 512 * 1024,
+        maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
+        maxCellMs: Math.min(spec.timeoutMs ?? 120_000, 300_000), maxOutputBytes: 512 * 1024,
       },
       context: {
-        runId,
-        nodeId: spec.id,
-        task: spec.task,
-        contextPacketRef: String(plan.contextPacketRef),
-        capabilityPlanRef: String(plan.capabilityPlanRef),
+        runId, nodeId: spec.id, task: spec.task,
+        contextPacketRef: String(plan.contextPacketRef), capabilityPlanRef: String(plan.capabilityPlanRef),
         graphCertificateHash: plan.graphCertificateHash,
         ...plan.rlmWorkerPlan === undefined ? {} : {
           defaultChildOperatorId: plan.rlmWorkerPlan.operatorId,
@@ -1668,15 +1686,35 @@ export class OrchestrationDaemon {
       },
     }, bindings)
     const bridge = await this.ctx.rlmRuntime.modelToolBridge(rootSessionId)
-    const rootExecutionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:root`)
-    const basePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan)
-    const rootPrompt = primeRlmRootPrompt(basePrompt, plan.rlmWorkerPlan)
+    const rootPrompt = primeRlmRootPrompt(
+      promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan),
+      plan.rlmWorkerPlan,
+    )
     this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.started', {
       runtimeSessionId: String(rootSessionId), planSha256: rlmPlan.planSha256,
       maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
       rootOperatorId: plan.allocationPlan.operatorId, rootModel: plan.allocationPlan.model,
       tool: 'typescript_repl', topologyOwner: 'model',
+      ...executor === 'model-worker' ? { executor } : {},
     }, node)])
+    return { rlmPlan, runId, node, rootSessionId, bindings, bridge, rootPrompt }
+  }
+
+  private async executeResidentRlm(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    contextPacket: ContextPacketV1,
+    capabilityPlan: CapabilityBindingPlanV1,
+    harnessSnapshot: ContinualHarnessSnapshotV1 | undefined,
+    controller: AbortController,
+    physicalRuns: PhysicalOperatorRun[],
+  ): Promise<PhysicalOperatorResult> {
+    const prepared = await this.prepareRlmExecution(
+      record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns, 'resident',
+    )
+    const { runId, node, rootSessionId, bridge, rootPrompt } = prepared
+    const rootExecutionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:root`)
     try {
       const root = await this.startResidentTurn(
         record, spec, plan.executionWorkspace.path, rootExecutionId, plan.allocationPlan,
@@ -1704,28 +1742,48 @@ export class OrchestrationDaemon {
         operatorId: plan.allocationPlan.operatorId, model: plan.allocationPlan.model,
       }, node)])
       const rootResult = await root.run.result
-      await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
-      const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
-      const afterMessages = drained.lastContinuation?.output === undefined
-        ? rootResult
-        : { output: [...drained.lastContinuation.output], stopReason: 'completed' as const }
-      const result = await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
-      const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
-      this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
-        executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
-        childCount: snapshot.children.length, stateRevision: snapshot.stateRevision,
-        degradedVariables: snapshot.degradedVariables, stopReason: result.stopReason,
-      }, node)])
-      return result
+      return await this.settleRlmExecution(record, spec, plan, prepared, rootResult)
     } catch (error) {
       controller.abort()
       await Promise.allSettled(physicalRuns.map(value => value.dispose()))
-      this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.failed', {
-        executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
-        code: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
-      }, node)])
+      this.recordRlmFailure(record, plan, prepared, error)
       throw error
     }
+  }
+
+  private async settleRlmExecution(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    prepared: PreparedRlmExecution,
+    rootResult: PhysicalOperatorResult,
+  ): Promise<PhysicalOperatorResult> {
+    const { rootSessionId, bindings, node } = prepared
+    await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
+    const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
+    const afterMessages = drained.lastContinuation?.output === undefined
+      ? rootResult
+      : { output: [...drained.lastContinuation.output], stopReason: 'completed' as const }
+    const result = await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
+    const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
+    this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
+      executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
+      childCount: snapshot.children.length, stateRevision: snapshot.stateRevision,
+      degradedVariables: snapshot.degradedVariables, stopReason: result.stopReason,
+    }, node)])
+    return result
+  }
+
+  private recordRlmFailure(
+    record: RuntimeRunRecord,
+    plan: NodeExecutionPlanV1,
+    prepared: PreparedRlmExecution,
+    error: unknown,
+  ): void {
+    this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.failed', {
+      executionId: String(plan.executionId), runtimeSessionId: String(prepared.rootSessionId),
+      code: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
+    }, prepared.node)])
   }
 
   private async flushRlmHarnessBoundary(
@@ -2116,13 +2174,9 @@ export class OrchestrationDaemon {
             ...status === 'failed' ? { error: `native child stopped with ${settled.stopReason}` } : {},
           }
         }
-        const failed = async (error: unknown): Promise<RlmChildExecutionResult> => {
-          await this.flushRlmHarnessBoundary(record, spec, plan, request.childSessionId, 'turn-end')
-          return {
-            status: controller.signal.aborted ? 'indeterminate' : 'failed',
-            error: error instanceof Error ? error.message : String(error),
-          }
-        }
+        const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
+          record, spec, plan, request.childSessionId, controller, error,
+        )
         if (this.physical.has(request.model.operatorId)) {
           const started = await this.startResidentTurn(
             record,
@@ -2144,12 +2198,7 @@ export class OrchestrationDaemon {
             model: request.model.model, nativeSessionId: started.receipt.sessionId,
             nativeTurnId: started.receipt.turnId, executor: 'resident',
           }, node)])
-          return {
-            nativeSessionId: started.receipt.sessionId,
-            nativeTurnId: started.receipt.turnId,
-            result: started.run.result.then(settle, failed),
-            interrupt: () => this.resident.interrupt(started.receipt.sessionId, started.receipt.turnId),
-          }
+          return this.residentRlmExecution(started, settle, failed)
         }
         const workerResult = this.ctx.modelWorkers.execute({
           commandId: String(executionId), workerId: request.model.operatorId,
@@ -2395,25 +2444,16 @@ export class OrchestrationDaemon {
         ...status === 'failed' ? { error: `continuation stopped with ${result.stopReason}` } : {},
       }
     }
-    const failed = async (error: unknown): Promise<RlmChildExecutionResult> => {
-      await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')
-      return {
-        status: controller.signal.aborted ? 'indeterminate' : 'failed',
-        error: error instanceof Error ? error.message : String(error),
-      }
-    }
+    const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
+      record, spec, plan, request.sessionId, controller, error,
+    )
     if (this.physical.has(request.model.operatorId)) {
       const started = await this.startResidentTurn(
         record, spec, plan.executionWorkspace.path, executionId, request.model,
         prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId),
       )
       physicalRuns.push(started.run)
-      return {
-        nativeSessionId: started.receipt.sessionId,
-        nativeTurnId: started.receipt.turnId,
-        result: started.run.result.then(settle, failed),
-        interrupt: () => this.resident.interrupt(started.receipt.sessionId, started.receipt.turnId),
-      }
+      return this.residentRlmExecution(started, settle, failed)
     }
     const result = this.ctx.modelWorkers.execute({
       commandId: String(request.commandId), workerId: request.model.operatorId,
@@ -2429,6 +2469,34 @@ export class OrchestrationDaemon {
         value,
       ), failed),
       interrupt: (): Promise<void> => { controller.abort(); return Promise.resolve() },
+    }
+  }
+
+  private async failedRlmExecution(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    sessionId: RlmRuntimeSessionId,
+    controller: AbortController,
+    error: unknown,
+  ): Promise<RlmChildExecutionResult> {
+    await this.flushRlmHarnessBoundary(record, spec, plan, sessionId, 'turn-end')
+    return {
+      status: controller.signal.aborted ? 'indeterminate' : 'failed',
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+
+  private residentRlmExecution(
+    started: StartedResidentTurn,
+    settle: (result: PhysicalOperatorResult) => Promise<RlmChildExecutionResult>,
+    failed: (error: unknown) => Promise<RlmChildExecutionResult>,
+  ): RlmChildExecution {
+    return {
+      nativeSessionId: started.receipt.sessionId,
+      nativeTurnId: started.receipt.turnId,
+      result: started.run.result.then(settle, failed),
+      interrupt: () => this.resident.interrupt(started.receipt.sessionId, started.receipt.turnId),
     }
   }
 
@@ -2532,7 +2600,7 @@ export class OrchestrationDaemon {
     label: string,
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
     residentLaneId?: string,
-  ): Promise<{ readonly run: PhysicalOperatorRun; readonly receipt: ResidentReceiptIdentity }> {
+  ): Promise<StartedResidentTurn> {
     const operator = this.physical.get(allocation.operatorId)
     if (operator === undefined) {
       throw new OrchestrationError(`physical operator is unavailable: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
@@ -2559,27 +2627,11 @@ export class OrchestrationDaemon {
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
   ): void {
-    const timeout = attemptAbort(spec.timeoutMs)
-    const { controller } = timeout
-    const physicalRuns: PhysicalOperatorRun[] = []
-    const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident-rlm')
-    const result = this.executeModelWorkerRlm(
-      record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
-    )
-    this.markAttemptRunning(record, spec, acceptedAttempt, {
-      executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
-      model: plan.allocationPlan.model, contextIsolation: 'model-worker-prime-rlm',
-      executor: 'resident-rlm',
-    })
-    const run = {
-      result: result.finally(timeout.clearTimeout),
-      dispose: async (): Promise<void> => {
-        timeout.clearTimeout()
-        controller.abort()
-        await Promise.allSettled(physicalRuns.map(value => value.dispose()))
-      },
-    }
-    this.trackDelegatedAttempt('resident-rlm', record, spec, plan, run)
+    this.dispatchRlmAttempt(record, spec, plan, 'model-worker-prime-rlm', (controller, physicalRuns) => (
+      this.executeModelWorkerRlm(
+        record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
+      )
+    ))
   }
 
   private async executeModelWorkerRlm(
@@ -2592,53 +2644,20 @@ export class OrchestrationDaemon {
     controller: AbortController,
     physicalRuns: PhysicalOperatorRun[],
   ): Promise<PhysicalOperatorResult> {
-    const rlmPlan = plan.rlmPlan
-    if (rlmPlan?.enabled !== true) throw new OrchestrationError('Model-worker RLM dispatch requires an enabled sealed plan', 'GRAPH_INVALID')
-    const runId = String(record.snapshot.runId)
-    const node = record.snapshot.nodes.find(value => value.id === spec.id)
-    const rootSessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
-    const bindings = this.rlmHostBindings(record, spec, plan, controller, physicalRuns)
-    await this.ctx.rlmRuntime.create({
-      sessionId: rootSessionId,
-      commandId: RlmCommandId(`${String(plan.executionId)}:rlm:create`),
-      executionId: String(plan.executionId),
-      workspace: plan.executionWorkspace.path,
-      task: spec.task,
-      model: { operatorId: plan.allocationPlan.operatorId, model: plan.allocationPlan.model },
-      ...plan.rlmWorkerPlan === undefined ? {} : { defaultChildModel: {
-        operatorId: plan.rlmWorkerPlan.operatorId,
-        model: plan.rlmWorkerPlan.model,
-        ...plan.rlmWorkerPlan.profile === undefined ? {} : { profile: plan.rlmWorkerPlan.profile },
-      } },
-      limits: {
-        maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
-        maxCellMs: Math.min(spec.timeoutMs ?? 120_000, 300_000), maxOutputBytes: 512 * 1024,
-      },
-      context: {
-        runId, nodeId: spec.id, task: spec.task,
-        contextPacketRef: String(plan.contextPacketRef), capabilityPlanRef: String(plan.capabilityPlanRef),
-        graphCertificateHash: plan.graphCertificateHash,
-        ...plan.rlmWorkerPlan === undefined ? {} : {
-          defaultChildOperatorId: plan.rlmWorkerPlan.operatorId,
-          defaultChildModel: plan.rlmWorkerPlan.model,
-          defaultChildTier: plan.rlmWorkerPlan.tier,
-        },
-      },
-    }, bindings)
-    const bridge = await this.ctx.rlmRuntime.modelToolBridge(rootSessionId)
-    const prompt = primeRlmRootPrompt(promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan), plan.rlmWorkerPlan)
-    this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.started', {
-      runtimeSessionId: String(rootSessionId), planSha256: rlmPlan.planSha256,
-      maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
-      rootOperatorId: plan.allocationPlan.operatorId, rootModel: plan.allocationPlan.model,
-      tool: 'typescript_repl', topologyOwner: 'model', executor: 'model-worker',
-    }, node)])
+    // The model-worker transport shares the sealed RLM lifecycle but retains a
+    // distinct execution call and native identity from Resident providers.
+    /* jscpd:ignore-start */
+    const prepared = await this.prepareRlmExecution(
+      record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns, 'model-worker',
+    )
+    const { rlmPlan, rootSessionId, bridge, rootPrompt } = prepared
+    /* jscpd:ignore-end */
     try {
       const rootExecution = this.ctx.modelWorkers.execute({
         commandId: `${String(plan.executionId)}:rlm:root`,
         workerId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model,
-        prompt,
+        prompt: rootPrompt,
         rlmPlan,
         modelToolBridge: bridge,
         signal: controller.signal,
@@ -2663,24 +2682,11 @@ export class OrchestrationDaemon {
         `${String(plan.executionId)}:rlm:root`,
         rootResult,
       )
-      await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
-      const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
-      const afterMessages = drained.lastContinuation?.output === undefined
-        ? { output: [...rootResult.output], stopReason: rootResult.stopReason }
-        : { output: [...drained.lastContinuation.output], stopReason: 'completed' as const }
-      const result = await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
-      const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
-      this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
-        executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
-        childCount: snapshot.children.length, stateRevision: snapshot.stateRevision,
-        degradedVariables: snapshot.degradedVariables, stopReason: result.stopReason,
-      }, node)])
-      return result
+      return await this.settleRlmExecution(record, spec, plan, prepared, {
+        output: [...rootResult.output], stopReason: rootResult.stopReason,
+      })
     } catch (error) {
-      this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.failed', {
-        executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
-        code: error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE',
-      }, node)])
+      this.recordRlmFailure(record, plan, prepared, error)
       throw error
     }
   }
@@ -3233,6 +3239,7 @@ export class OrchestrationDaemon {
   }
 
   private removeStaleSocket(): void {
+    if (!localIpcUsesFilesystem()) return
     if (!existsSync(this.socketPath)) return
     if (!lstatSync(this.socketPath).isSocket()) throw new OrchestrationError(`orchestration control path is not a socket: ${this.socketPath}`, 'ORCHESTRATION_UNAVAILABLE')
     unlinkSync(this.socketPath)

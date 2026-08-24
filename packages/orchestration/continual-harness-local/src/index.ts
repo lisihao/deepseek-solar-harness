@@ -1,9 +1,10 @@
 /** Owner-local persistent Continuous Harness Provider. @module @deepseek-ai/dsh-continual-harness-local */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { writeFileAtomicSync } from '@deepseek-ai/dsh-atomic-write'
 import ContinualHarnessService, {
   ContinualHarnessError,
   type ContinualHarnessCreateRequest,
@@ -293,11 +294,7 @@ export class LocalContinualHarness extends ContinualHarnessService {
 
   queueRefinement(request: ContinualHarnessRefinementApplyRequest): Promise<ContinualHarnessRefinementApplyReceiptV1> {
     const { scope, scopeId: id } = managedScope(request)
-    const stored = this.document.refinements.find(value => value.plan.refinementId === request.refinementId
-      && value.plan.scope === scope
-      && value.plan.scopeId === id)
-    if (stored === undefined) throw new ContinualHarnessError(`refinement not found: ${request.refinementId}`, 'HARNESS_NOT_FOUND')
-    if (stored.plan.state !== 'proposed') throw new ContinualHarnessError(`refinement is not proposed: ${request.refinementId}`, 'HARNESS_REVISION_CONFLICT')
+    const stored = this.proposedRefinement(request.refinementId, scope, id)
     if (stored.plan.plannedGeneration !== request.expectedGeneration || this.document.generation !== request.expectedGeneration) {
       throw new ContinualHarnessError('Continuous Harness generation changed before refinement queue', 'HARNESS_REVISION_CONFLICT')
     }
@@ -322,11 +319,7 @@ export class LocalContinualHarness extends ContinualHarnessService {
   applyRefinement(request: ContinualHarnessRefinementApplyRequest): Promise<ContinualHarnessRefinementPlanV1> {
     const { scope, scopeId: id } = managedScope(request)
     if (request.expectedGeneration !== this.document.generation) throw new ContinualHarnessError('Continuous Harness generation changed before refinement apply', 'HARNESS_REVISION_CONFLICT')
-    const stored = this.document.refinements.find(value => value.plan.refinementId === request.refinementId
-      && value.plan.scope === scope
-      && value.plan.scopeId === id)
-    if (stored === undefined) throw new ContinualHarnessError(`refinement not found: ${request.refinementId}`, 'HARNESS_NOT_FOUND')
-    if (stored.plan.state !== 'proposed') throw new ContinualHarnessError(`refinement is not proposed: ${request.refinementId}`, 'HARNESS_REVISION_CONFLICT')
+    const stored = this.proposedRefinement(request.refinementId, scope, id)
     if (stored.plan.plannedGeneration !== request.expectedGeneration) throw new ContinualHarnessError('refinement was planned against another generation', 'HARNESS_REVISION_CONFLICT')
     let staged = structuredClone(this.document)
     const changeResults: ContinualHarnessRefinementChangeResultV1[] = []
@@ -580,11 +573,21 @@ export class LocalContinualHarness extends ContinualHarnessService {
     if (index >= 0) this.document.refinementQueue[index] = receipt
   }
 
+  private proposedRefinement(
+    refinementId: string,
+    scope: ContinualHarnessManagedEntryV2['scope'],
+    scopeId: string,
+  ): StoredRefinement {
+    const stored = this.document.refinements.find(value => value.plan.refinementId === refinementId
+      && value.plan.scope === scope
+      && value.plan.scopeId === scopeId)
+    if (stored === undefined) throw new ContinualHarnessError(`refinement not found: ${refinementId}`, 'HARNESS_NOT_FOUND')
+    if (stored.plan.state !== 'proposed') throw new ContinualHarnessError(`refinement is not proposed: ${refinementId}`, 'HARNESS_REVISION_CONFLICT')
+    return stored
+  }
+
   private persist(): void {
-    const temporary = `${this.filename}.${String(process.pid)}.tmp`
-    writeFileSync(temporary, `${JSON.stringify(this.document)}\n`, { mode: 0o600 })
-    renameSync(temporary, this.filename)
-    chmodSync(this.filename, 0o600)
+    writeFileAtomicSync(this.filename, `${JSON.stringify(this.document)}\n`, { mode: 0o600 })
   }
 }
 

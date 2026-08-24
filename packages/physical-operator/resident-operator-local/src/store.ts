@@ -794,16 +794,7 @@ export class ResidentStore {
    */
   reset(sessionId: string, expectedRevision: number, reason: string): ResidentSessionSnapshot {
     return this.transaction(() => {
-      const row = this.sessionRow(sessionId)
-      if (row.revision !== expectedRevision) {
-        throw new ResidentOperatorError(
-          `resident session revision is ${row.revision}, not ${expectedRevision}`,
-          'REVISION_CONFLICT',
-        )
-      }
-      if (row.active_turn_id !== null || row.lifecycle !== 'idle') {
-        throw new ResidentOperatorError(`resident session ${sessionId} is not idle`, 'SESSION_BUSY')
-      }
+      this.requireIdleRevision(sessionId, expectedRevision)
       const now = new Date().toISOString()
       this.db.prepare(`
         UPDATE resident_sessions SET native_session_id = NULL, model_id = NULL, reasoning_effort = NULL,
@@ -864,16 +855,7 @@ export class ResidentStore {
           },
         }
       }
-      const row = this.sessionRow(sessionId)
-      if (row.revision !== expectedRevision) {
-        throw new ResidentOperatorError(
-          `resident session revision is ${row.revision}, not ${expectedRevision}`,
-          'REVISION_CONFLICT',
-        )
-      }
-      if (row.active_turn_id !== null || row.lifecycle !== 'idle') {
-        throw new ResidentOperatorError(`resident session ${sessionId} is not idle`, 'SESSION_BUSY')
-      }
+      const row = this.requireIdleRevision(sessionId, expectedRevision)
       if (row.native_session_id === null) {
         throw new ResidentOperatorError(`resident session ${sessionId} has no native history to compact`, 'SESSION_UNAVAILABLE')
       }
@@ -1129,6 +1111,20 @@ export class ResidentStore {
     const row = this.db.prepare('SELECT * FROM resident_sessions WHERE id = ?').get(id) as unknown as SessionRow | undefined
     if (row === undefined) {
       throw new ResidentOperatorError(`unknown resident session ${id}`, 'SESSION_UNAVAILABLE')
+    }
+    return row
+  }
+
+  private requireIdleRevision(sessionId: string, expectedRevision: number): SessionRow {
+    const row = this.sessionRow(sessionId)
+    if (row.revision !== expectedRevision) {
+      throw new ResidentOperatorError(
+        `resident session revision is ${row.revision}, not ${expectedRevision}`,
+        'REVISION_CONFLICT',
+      )
+    }
+    if (row.active_turn_id !== null || row.lifecycle !== 'idle') {
+      throw new ResidentOperatorError(`resident session ${sessionId} is not idle`, 'SESSION_BUSY')
     }
     return row
   }

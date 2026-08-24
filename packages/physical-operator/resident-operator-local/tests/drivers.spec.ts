@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { describe, expect, it } from 'vitest'
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
@@ -105,7 +106,7 @@ describe('Claude Code resident driver environment', () => {
 describe('Claude Code RLM host tool', () => {
   it('serves typescript_repl through the Agent SDK MCP adapter with a stable Receipt identity', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-claude-rlm-'))
-    const socketPath = join(root, 'bridge.sock')
+    const socketPath = localIpcAddress(root, 'bridge')
     const requests: Array<{ method: string; params: Record<string, unknown> }> = []
     const bridgeServer = createServer((socket) => {
       const transport = new JsonRpcLineTransport(socket, socket)
@@ -160,7 +161,7 @@ describe('Claude Code RLM host tool', () => {
 describe('Codex RLM host tool', () => {
   it('maps an app-server dynamic tool call to the same owner-local bridge with a stable Receipt identity', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-codex-rlm-'))
-    const socketPath = join(root, 'bridge.sock')
+    const socketPath = localIpcAddress(root, 'bridge')
     const requests: Array<{ method: string; params: Record<string, unknown> }> = []
     const bridgeServer = createServer((socket) => {
       const transport = new JsonRpcLineTransport(socket, socket)

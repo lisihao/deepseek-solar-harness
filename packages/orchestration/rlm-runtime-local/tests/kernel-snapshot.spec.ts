@@ -1,3 +1,4 @@
+import { sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   PersistentTypeScriptKernel,
@@ -55,7 +56,7 @@ describe('PersistentTypeScriptKernel namespace snapshots', () => {
       '  product: multiply(4),',
       '})',
     ].join('\n'), 2_000)).resolves.toMatchObject({
-      value: { path: 'recovered.txt', pathSeparator: '/', sum: 14, box: 40, product: 12 },
+      value: { path: 'recovered.txt', pathSeparator: sep, sum: 14, box: 40, product: 12 },
     })
     recovered.dispose()
   })

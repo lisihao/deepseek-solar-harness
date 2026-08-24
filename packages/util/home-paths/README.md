@@ -22,9 +22,14 @@ Shared filesystem path helpers for DeepSeek Harness user data.
 
 `canonicalizeWatchPath()` gives a native filesystem watcher one stable spelling of its target. It resolves the deepest existing ancestor through `fs.realpath()` and restores any missing suffix, so a file or directory may still be watched before it is created. In particular, Windows 8.3 aliases cannot be mixed with the long paths emitted by the native watcher backend.
 
+## Local IPC
+
+`localIpcAddress(root, channel)` gives owner-local daemons one portable endpoint identity: a socket inside `root` on POSIX and a deterministic `\\.\pipe\...` named pipe on Windows. `localIpcUsesFilesystem()` tells lifecycle code whether stale-path cleanup and permission changes apply; Windows named pipes are never treated as files.
+
 This package is intentionally small and harness-dep-free so product packages can share user-data path conventions without depending on one another.
 
 ## Known Limitations and Deferred Work
 
 - **Expansion is deliberately narrow** — only bare `~`, `~/...`, and `~\...` use the current operating-system home; named-user forms such as `~alice/...`, environment variables, and shell expressions remain unchanged.
 - **Canonicalization reads but never mutates** — `canonicalizeWatchPath()` performs `realpath` probes and propagates errors other than absence; callers still own directory creation, permissions, and trust policy for the resulting path.
+- **IPC stays machine-local** — the helper does not open a listener, authenticate a peer, or expose TCP; the owning daemon still controls admission and lifecycle.

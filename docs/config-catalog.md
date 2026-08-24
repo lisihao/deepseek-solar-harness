@@ -577,7 +577,7 @@ Source: [`packages/compaction/compaction-tool-result-pruner/src/types.ts:4`](../
 export type Config = string
 ```
 
-Source: [`packages/orchestration/continual-harness-local/src/index.ts:33`](../packages/orchestration/continual-harness-local/src/index.ts)
+Source: [`packages/orchestration/continual-harness-local/src/index.ts:34`](../packages/orchestration/continual-harness-local/src/index.ts)
 
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
@@ -1652,7 +1652,7 @@ Source: [`packages/physical-operator/resident-operator-local/src/index.ts:39`](.
 export type Config = string
 ```
 
-Source: [`packages/orchestration/rlm-runtime-local/src/index.ts:52`](../packages/orchestration/rlm-runtime-local/src/index.ts)
+Source: [`packages/orchestration/rlm-runtime-local/src/index.ts:54`](../packages/orchestration/rlm-runtime-local/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 

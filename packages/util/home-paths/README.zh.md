@@ -22,9 +22,14 @@ DeepSeek Harness 用户数据的共享文件系统路径辅助工具。
 
 `canonicalizeWatchPath()` 为原生文件系统 watcher 提供一种稳定的目标路径表示。它通过 `fs.realpath()` 解析层级最深的现有祖先路径，再拼回缺失的后缀，因此即使文件或目录尚未创建也仍可监听。尤其是，Windows 8.3 别名不能与原生 watcher 后端发出的长路径混用。
 
+## 本地 IPC
+
+`localIpcAddress(root, channel)` 为本机 daemon 提供跨平台端点身份：POSIX 使用 `root` 内的 socket，Windows 使用确定性的 `\\.\pipe\...` 命名管道。`localIpcUsesFilesystem()` 告诉生命周期代码是否需要清理陈旧路径和设置文件权限；Windows 命名管道绝不会被当成文件处理。
+
 该包刻意保持规模小且不依赖 harness，以便产品包共享用户数据路径约定，而不必彼此依赖。
 
 ## 已知限制与暂缓事项
 
 - **展开范围刻意保持狭窄**：只有单独的 `~`、`~/...` 和 `~\...` 使用当前操作系统主目录；`~alice/...` 等指定用户的形式、环境变量和 shell 表达式保持不变。
 - **规范化会读取，但绝不修改**：`canonicalizeWatchPath()` 会执行 `realpath` 探测，并传播除路径不存在以外的错误；调用方仍负责目录创建、权限，以及对结果路径应用信任策略。
+- **IPC 仅限本机**：辅助函数不会打开监听、认证对端或暴露 TCP；准入和生命周期仍由对应 daemon 负责。

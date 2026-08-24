@@ -3,6 +3,7 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 import LlmRuntime, { CallId, LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import ModelWorkerRuntime from '@deepseek-ai/dsh-model-worker'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
@@ -60,7 +61,7 @@ describe('DeepSeekModelWorker', () => {
   it('runs a genuine DeepSeek tool loop against the owner-local TypeScript REPL bridge', async () => {
     const { ctx, adapter } = await setup()
     const directory = await mkdtemp(join(tmpdir(), 'dsh-deepseek-tool-'))
-    const socketPath = join(directory, 'bridge.sock')
+    const socketPath = localIpcAddress(directory, 'bridge')
     const bridgeRequests: Array<{ method: string; params: Record<string, unknown> }> = []
     const server = createServer((socket) => {
       const transport = new JsonRpcLineTransport(socket, socket)

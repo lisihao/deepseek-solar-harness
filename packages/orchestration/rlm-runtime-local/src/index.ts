@@ -1,11 +1,13 @@
 /** Owner-local persistent programmable RLM runtime Provider. @module @deepseek-ai/dsh-rlm-runtime-local */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { writeFileAtomicSync } from '@deepseek-ai/dsh-atomic-write'
+import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import RlmRuntimeService, {
   RlmChildId,
   RlmCommandId,
@@ -101,6 +103,9 @@ interface StoreDocument {
   heartbeats: RlmHeartbeatV1[]
 }
 
+// Kept local so the persistent RLM state owner does not acquire a runtime
+// dependency on the optional strategy Provider solely for request hashing.
+/* jscpd:ignore-start */
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
   if (value !== null && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>)
@@ -109,6 +114,7 @@ function canonical(value: unknown): string {
 }
 
 function sha256(value: unknown): string { return createHash('sha256').update(canonical(value)).digest('hex') }
+/* jscpd:ignore-end */
 function now(): string { return new Date().toISOString() }
 function goalObjective(value: string): string {
   const objective = nonBlank(value, 'goal objective')
@@ -236,15 +242,16 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       if (session.snapshot.goal?.status === 'active') this.goalAccountingStartedAt.set(String(session.snapshot.sessionId), accountingStartedAt)
     }
     this.recoverUncertainWork()
-    this.bridgeSocketPath = join(tmpdir(), `dsh-rlm-${createHash('sha256').update(resolve(root)).digest('hex').slice(0, 20)}.sock`)
-    if (existsSync(this.bridgeSocketPath)) unlinkSync(this.bridgeSocketPath)
+    const bridgeId = createHash('sha256').update(resolve(root)).digest('hex').slice(0, 20)
+    this.bridgeSocketPath = localIpcAddress(tmpdir(), `rlm-${bridgeId}`)
+    if (localIpcUsesFilesystem() && existsSync(this.bridgeSocketPath)) unlinkSync(this.bridgeSocketPath)
     this.bridgeServer = createServer((socket) => { this.acceptBridgeSocket(socket) })
     this.bridgeReady = new Promise<void>((accept, reject) => {
       const onError = (error: Error): void => { reject(error) }
       this.bridgeServer.once('error', onError)
       this.bridgeServer.listen(this.bridgeSocketPath, () => {
         this.bridgeServer.off('error', onError)
-        chmodSync(this.bridgeSocketPath, 0o600)
+        if (localIpcUsesFilesystem()) chmodSync(this.bridgeSocketPath, 0o600)
         accept()
       })
     })
@@ -255,7 +262,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         this.kernels.clear()
         this.kernelCommands.clear()
         await new Promise<void>((resolveClose) => { this.bridgeServer.close(() => { resolveClose() }) })
-        if (existsSync(this.bridgeSocketPath)) unlinkSync(this.bridgeSocketPath)
+        if (localIpcUsesFilesystem() && existsSync(this.bridgeSocketPath)) unlinkSync(this.bridgeSocketPath)
       }
     }.bind(this), 'rlmRuntimeLocal.modelToolBridge()')
   }
@@ -1801,10 +1808,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   }
 
   private persist(): void {
-    const temporary = `${this.filename}.${String(process.pid)}.tmp`
-    writeFileSync(temporary, `${JSON.stringify(this.document)}\n`, { mode: 0o600 })
-    renameSync(temporary, this.filename)
-    chmodSync(this.filename, 0o600)
+    writeFileAtomicSync(this.filename, `${JSON.stringify(this.document)}\n`, { mode: 0o600 })
   }
 }
 

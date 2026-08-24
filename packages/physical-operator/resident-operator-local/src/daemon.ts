@@ -5,6 +5,7 @@ import { realpath } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
 import { isAbsolute, join } from 'node:path'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionPreference,
@@ -260,7 +261,7 @@ export class ResidentDaemon {
   readonly closed = this.closedResolver.promise
 
   constructor(private readonly options: ResidentDaemonOptions) {
-    this.socketPath = join(options.root, 'control.sock')
+    this.socketPath = localIpcAddress(options.root, 'control')
     this.store = new ResidentStore(options.root)
     for (const driver of options.drivers ?? [new ClaudeCodeResidentDriver(), new CodexResidentDriver()]) {
       if (this.drivers.has(driver.operatorId)) {
@@ -284,7 +285,7 @@ export class ResidentDaemon {
       this.server.once('error', onError)
       this.server.listen(this.socketPath, () => {
         this.server.off('error', onError)
-        chmodSync(this.socketPath, 0o600)
+        if (localIpcUsesFilesystem()) chmodSync(this.socketPath, 0o600)
         writeFileSync(join(this.options.root, 'daemon.pid'), `${process.pid}\n`, { mode: 0o600 })
         resolve()
       })
@@ -308,7 +309,7 @@ export class ResidentDaemon {
     for (const socket of this.sockets) socket.end()
     await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
     this.store.close()
-    this.safeUnlink(this.socketPath)
+    if (localIpcUsesFilesystem()) this.safeUnlink(this.socketPath)
     this.safeUnlink(join(this.options.root, 'daemon.pid'))
     this.releaseLock()
     this.closedResolver.resolve()
@@ -660,6 +661,7 @@ export class ResidentDaemon {
   }
 
   private removeStaleSocket(): void {
+    if (!localIpcUsesFilesystem()) return
     if (!existsSync(this.socketPath)) return
     if (!lstatSync(this.socketPath).isSocket()) {
       throw new ResidentOperatorError(`resident control path is not a socket: ${this.socketPath}`, 'RUNTIME_UNAVAILABLE')

@@ -579,7 +579,7 @@ export interface ToolResultPruneConfig {
 export type Config = string
 ```
 
-来源：[`packages/orchestration/continual-harness-local/src/index.ts:33`](../packages/orchestration/continual-harness-local/src/index.ts)
+来源：[`packages/orchestration/continual-harness-local/src/index.ts:34`](../packages/orchestration/continual-harness-local/src/index.ts)
 
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
@@ -1654,7 +1654,7 @@ export interface Config {
 export type Config = string
 ```
 
-来源：[`packages/orchestration/rlm-runtime-local/src/index.ts:52`](../packages/orchestration/rlm-runtime-local/src/index.ts)
+来源：[`packages/orchestration/rlm-runtime-local/src/index.ts:54`](../packages/orchestration/rlm-runtime-local/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 

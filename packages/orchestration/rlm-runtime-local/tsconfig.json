@@ -5,6 +5,8 @@
   "references": [
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
+    { "path": "../../util/atomic-write" },
+    { "path": "../../util/home-paths" },
     { "path": "../../runtime-diagnostics/invariants" },
     { "path": "../../sdk/protocol" },
     { "path": "../rlm-runtime" }

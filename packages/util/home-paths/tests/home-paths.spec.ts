@@ -10,6 +10,8 @@ import {
   dshHomeDisplay,
   dshHomePath,
   expandHomePath,
+  localIpcAddress,
+  localIpcUsesFilesystem,
   resolveDshHome,
 } from '@deepseek-ai/dsh-home-paths'
 
@@ -18,6 +20,15 @@ afterEach(() => {
 })
 
 describe('dsh path helpers', () => {
+  it('resolves POSIX sockets and deterministic Windows named pipes', () => {
+    const root = resolve('fixture-home', 'resident-operators')
+    expect(localIpcAddress(root, 'control', 'darwin')).toBe(join(root, 'control.sock'))
+    expect(localIpcAddress(root, 'control', 'win32')).toMatch(/^\\\\\.\\pipe\\dsh-control-[a-f0-9]{24}$/u)
+    expect(localIpcAddress(root, 'control', 'win32')).toBe(localIpcAddress(root, 'control', 'win32'))
+    expect(localIpcUsesFilesystem('linux')).toBe(true)
+    expect(localIpcUsesFilesystem('win32')).toBe(false)
+  })
+
   it('owns the shared default DSH home directory name', () => {
     expect(DSH_HOME_DIR_NAME).toBe('.dsh')
     expect(DEFAULT_DSH_HOME_DISPLAY).toBe('~/.dsh')
