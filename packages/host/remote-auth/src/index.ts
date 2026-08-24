@@ -56,6 +56,9 @@ function loopbackAuthority(value: string | undefined): boolean {
 /**
  * Resolve a loopback owner request or one authenticated remote device request.
  * Loopback is accepted only when peer, Host, and optional Origin all remain local.
+ * @param request - HTTP request whose peer and authentication headers are checked.
+ * @param auth - optional persistent remote-device authentication authority.
+ * @returns the resolved local or remote authority, or undefined when authentication fails.
  */
 export function authorizeRemoteRequest(
   request: Pick<IncomingMessage, 'headers' | 'socket'>,

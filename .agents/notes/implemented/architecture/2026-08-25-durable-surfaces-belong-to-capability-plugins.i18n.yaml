@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-25-durable-surfaces-belong-to-capability-plugins.md
-2026-08-25-durable-surfaces-belong-to-capability-plugins.md: c2252c80f409f66365d508de753fafe8f7c8be66
-2026-08-25-durable-surfaces-belong-to-capability-plugins.zh.md: 2d54ad894b9ac03382db4d86e155d2c96994c7e3
+2026-08-25-durable-surfaces-belong-to-capability-plugins.md: b006c107c6b8c94c224960eadc70052ee3d1f3d4
+2026-08-25-durable-surfaces-belong-to-capability-plugins.zh.md: 65964ee21aa841c1b654cdbd8f59d89b45202e17

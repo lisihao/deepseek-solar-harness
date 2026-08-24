@@ -201,7 +201,7 @@ export function PhysicalOperatorRoutingControl({
     const nextEffort = effortSupported
       ? selectedEffort
       : undefined
-    saveProfile(profileOwner, nextModel, nextEffort as PhysicalOperatorProfileReasoningEffort | undefined)
+    saveProfile(profileOwner, nextModel, nextEffort)
   }
   const chooseEffort = (id: string): void => {
     if (profileOwner === undefined) return

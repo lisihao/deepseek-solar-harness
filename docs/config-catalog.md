@@ -851,7 +851,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/host/remote-auth/src/index.ts:71`](../packages/host/remote-auth/src/index.ts)
+Source: [`packages/host/remote-auth/src/index.ts:123`](../packages/host/remote-auth/src/index.ts)
 
 <a id="deepseek-aidsh-host-webserver"></a>
 
@@ -3290,6 +3290,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-physical-operator` — requires `tools` · `physicalOperators` · `systemPrompt` · `llm` · `agents` ([`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
 - `@deepseek-ai/dsh-ui-orchestration` — requires `orchestrations` · `webServer` ([`packages/orchestration/ui-orchestration/src/index.ts`](../packages/orchestration/ui-orchestration/src/index.ts))
+- `@deepseek-ai/dsh-ui-physical-operator` — requires `residentOperators` · `webServer` ([`packages/physical-operator/ui-physical-operator/src/index.ts`](../packages/physical-operator/ui-physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-workspace` — requires `storageDomain` · `sessionPersistence` ([`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts))
 

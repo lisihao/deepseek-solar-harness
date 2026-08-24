@@ -67,7 +67,11 @@ async function assembleResidentDashboard(
   }
 }
 
-/** Register the authenticated read-only route for the Resident browser panel. */
+/**
+ * Register the authenticated read-only route for the Resident browser panel.
+ * @param ctx - Host context carrying Web Server, Remote Auth, and Resident services.
+ * @returns a disposer that unregisters the route.
+ */
 export function registerResidentDashboard(ctx: Context): () => void {
   let providerCache: { readonly expiresAt: number; readonly value: ResidentProviderStatus[] } | undefined
   return ctx.webServer.register({

@@ -19,7 +19,9 @@ describe('orchestration Desktop panel transport', () => {
 
     await expect(loadOrchestrationDashboard('run-1')).resolves.toEqual(dashboard)
     const url = fetch.mock.calls[0]?.[0]
-    expect(String(url)).toBe('http://127.0.0.1:3080/api/orchestrations?run_id=run-1&include_diagnostics=1')
+    expect(url).toBeInstanceOf(URL)
+    if (!(url instanceof URL)) throw new Error('dashboard request must use URL')
+    expect(url.href).toBe('http://127.0.0.1:3080/api/orchestrations?run_id=run-1&include_diagnostics=1')
   })
 
   it('can hide acceptance runs without deleting their persisted count', async () => {
@@ -31,7 +33,10 @@ describe('orchestration Desktop panel transport', () => {
     vi.stubGlobal('fetch', fetch)
 
     await expect(loadOrchestrationDashboard(undefined, undefined, false)).resolves.toEqual(dashboard)
-    expect(String(fetch.mock.calls[0]?.[0])).toBe('http://127.0.0.1:3080/api/orchestrations?include_diagnostics=0')
+    const url = fetch.mock.calls[0]?.[0]
+    expect(url).toBeInstanceOf(URL)
+    if (!(url instanceof URL)) throw new Error('dashboard request must use URL')
+    expect(url.href).toBe('http://127.0.0.1:3080/api/orchestrations?include_diagnostics=0')
   })
 
   it('sends revision-checked controls with the trusted local header', async () => {
@@ -48,11 +53,14 @@ describe('orchestration Desktop panel transport', () => {
       expectedRevision: 3,
       reason: 'test',
     })).resolves.toEqual(run)
-    expect(fetch).toHaveBeenCalledWith('/api/orchestrations', expect.objectContaining({
-      method: 'POST',
-      headers: expect.objectContaining({ 'X-DSH-Orchestration-Control': '1' }),
-      body: JSON.stringify({ commandId: 'command-pause-1', action: 'pause', runId: 'run-1', expectedRevision: 3, reason: 'test' }),
-    }))
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch.mock.calls[0]?.[0]).toBe('/api/orchestrations')
+    expect(fetch.mock.calls[0]?.[1]?.method).toBe('POST')
+    expect(fetch.mock.calls[0]?.[1]?.headers).toEqual({
+      'Content-Type': 'application/json',
+      'X-DSH-Orchestration-Control': '1',
+    })
+    expect(fetch.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ commandId: 'command-pause-1', action: 'pause', runId: 'run-1', expectedRevision: 3, reason: 'test' }))
   })
 
   it('makes every collaboration preference and worker dispatch visible in Trace', () => {

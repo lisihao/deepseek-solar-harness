@@ -1,4 +1,10 @@
-/** Format one canonical UTC timestamp in an explicit browser-resolved local zone. */
+/**
+ * Format one canonical UTC timestamp in an explicit browser-resolved local zone.
+ * @param value - canonical timestamp to display.
+ * @param nowValue - canonical reference timestamp used for relative age.
+ * @param timeZone - IANA time zone selected by the browser.
+ * @returns absolute and relative user-facing time labels.
+ */
 export function formatLocalTimestamp(
   value: string,
   nowValue: string,

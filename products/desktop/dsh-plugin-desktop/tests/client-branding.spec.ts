@@ -2,16 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply as applyDesktop } from '../src/client/index.ts'
 import { mountSolarBrandFooter, solarBrandLabel } from '../src/client/SolarBrand.tsx'
-import {
-  apply as applyPhysicalOperator,
-  physicalOperatorDashboardRefreshMs,
-  physicalOperatorEffortLabel,
-  physicalOperatorRoutingDescription,
-  physicalOperatorRoutingLabel,
-  physicalOperatorRoutingSummary,
-  orchestrationExecutionModeLabel,
-} from '@deepseek-ai/dsh-ui-physical-operator/client'
-import { apply as applyOrchestration } from '@deepseek-ai/dsh-ui-orchestration/client'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Menu: () => null,
@@ -19,7 +9,7 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
 }))
 
 describe('Solar desktop branding', () => {
-  it('keeps product branding out of the sidebar and executes the logged operator routing command', async () => {
+  it('keeps the Desktop product contribution limited to its native footer', () => {
     const registrations: Array<{
       options: { name?: string; id?: string; inject?: (sessionId: string) => unknown }
       component: (props: { wide: boolean }) => unknown
@@ -32,7 +22,6 @@ describe('Solar desktop branding', () => {
       }),
     }
     const effect = vi.fn()
-    const execute = vi.fn().mockResolvedValue({ ok: true, value: { matched: true } })
     vi.stubGlobal('window', {
       location: {
         search: '?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.1',
@@ -40,58 +29,20 @@ describe('Solar desktop branding', () => {
     })
 
     try {
-      const request = vi.fn()
       const ctx = {
         slots,
         effect,
-        remote: { commands: { execute } },
-        get: (key: string) => key === 'connection' ? { request } : undefined,
       } as unknown as ClientContext
       applyDesktop(ctx)
-      applyPhysicalOperator(ctx)
-      applyOrchestration(ctx)
     }
     finally {
       vi.unstubAllGlobals()
     }
 
     const entry = registrations.find(({ options }) => options.id === 'solar-desktop-brand')
-    const resident = registrations.find(({ options }) => options.id === 'resident-physical-operators')
-    const orchestration = registrations.find(({ options }) => options.id === 'durable-orchestrations')
-    const routing = registrations.find(({ options }) => options.id === 'physical-operator-routing')
     expect(entry).toBeUndefined()
-    expect(resident).toBeDefined()
-    expect(orchestration).toBeDefined()
-    expect(resident?.options.name).toBe('conversation.session.header.actions')
-    expect(orchestration?.options.name).toBe('conversation.session.header.actions')
-    expect(routing).toBeDefined()
+    expect(registrations).toEqual([])
     expect(effect).toHaveBeenCalledWith(expect.any(Function), 'desktop: Solar product footer')
-
-    const injected = routing?.options.inject?.('session-1') as {
-      select: (policy: 'codex') => Promise<string | null>
-      selectProfile: (operatorId: 'codex', model?: string, effort?: 'high') => Promise<string | null>
-      selectOrchestrationStrategy: (rlm: 'auto' | 'enabled' | 'disabled', harness: 'off', optimization: 'balanced') => Promise<string | null>
-    }
-    await expect(injected.select('codex')).resolves.toBeNull()
-    expect(execute).toHaveBeenCalledWith('session-1', '/operator codex')
-    await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBeNull()
-    expect(execute).toHaveBeenCalledWith('session-1', '/operator-profile codex gpt-5.6-sol high')
-    await expect(injected.selectProfile('codex')).resolves.toBeNull()
-    expect(execute).toHaveBeenCalledWith('session-1', '/operator-profile codex auto auto')
-    await expect(injected.selectOrchestrationStrategy('enabled', 'off', 'balanced')).resolves.toBeNull()
-    expect(execute).toHaveBeenCalledWith('session-1', '/orchestration-strategy enabled off balanced')
-    await expect(injected.selectOrchestrationStrategy('disabled', 'off', 'balanced')).resolves.toBeNull()
-    expect(execute).toHaveBeenCalledWith('session-1', '/orchestration-strategy disabled off balanced')
-    expect(orchestrationExecutionModeLabel('auto')).toBe('自动（系统选择）')
-    expect(orchestrationExecutionModeLabel('enabled')).toBe('RLM（Prime 递归）')
-    expect(orchestrationExecutionModeLabel('disabled')).toBe('标准（单 Agent）')
-    expect(physicalOperatorRoutingLabel('auto')).toBe('智能协作')
-    expect(physicalOperatorRoutingLabel('codex')).toBe('优先 Codex')
-    expect(physicalOperatorRoutingSummary('claude-code')).toBe('Claude Code')
-    expect(physicalOperatorRoutingDescription('codex')).toContain('短问答仍由主模型处理')
-    expect(physicalOperatorEffortLabel('high')).toBe('高 · 复杂任务的深度推理')
-    expect(physicalOperatorDashboardRefreshMs(false)).toBe(60_000)
-    expect(physicalOperatorDashboardRefreshMs(true)).toBe(10_000)
   })
 
   it('mounts one complete version label in a window-bottom footer', () => {

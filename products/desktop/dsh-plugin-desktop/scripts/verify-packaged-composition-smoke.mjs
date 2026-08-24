@@ -79,6 +79,7 @@ try {
 
   const residentRows = rowsWithId('resident-operators')
   const dualModeRows = rowsWithId('physical-operator-dual-mode')
+  const physicalOperatorUiRows = rowsWithId('ui-physical-operator')
   const orchestrationRows = rowsWithId('orchestration-local')
   const orchestrationToolRows = rowsWithId('tool-orchestration')
   const orchestrationUiRows = rowsWithId('ui-orchestration')
@@ -94,6 +95,10 @@ try {
   }
   if (dualModeRows.length !== 1 || dualModeRows[0].name !== '@deepseek-ai/dsh-physical-operator-resident') {
     throw new Error('verify-packaged-composition-smoke: physical operator dual-mode router is missing')
+  }
+  if (physicalOperatorUiRows.length !== 1
+    || physicalOperatorUiRows[0].name !== '@deepseek-ai/dsh-ui-physical-operator') {
+    throw new Error('verify-packaged-composition-smoke: physical operator Web Consumer is not composed exactly once')
   }
   const physicalOperators = dualModeRows[0].config?.operators
   if (!Array.isArray(physicalOperators)
@@ -191,6 +196,7 @@ try {
       resident: residentRows[0].name,
       residentDriverModules: residentRows[0].config.driverModules,
       physicalRouter: dualModeRows[0].name,
+      physicalOperatorUi: physicalOperatorUiRows[0].name,
       physicalOperators: physicalOperators.map(operator => operator.id),
       orchestrationProvider: orchestrationRows[0].name,
       orchestrationTool: orchestrationToolRows[0].name,

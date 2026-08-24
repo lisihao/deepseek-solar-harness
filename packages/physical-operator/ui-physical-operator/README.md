@@ -13,8 +13,12 @@ This dual-face plugin exposes the daemon-owned Resident physical-operator projec
 
 ## Model Experience
 
-The selector changes the host-owned execution policy for subsequent turns. The bounded dashboard projection is not copied into model history.
+None, as the browser projection and execution-policy controls register no model-facing context.
 
 #### KV Cache effect
 
 None from the dashboard. A selected execution policy affects later dispatch only.
+
+## Known Limitations and Deferred Work
+
+- The first release exposes read-only Resident status remotely; interrupt and reset remain trusted local management operations.

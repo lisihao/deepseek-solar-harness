@@ -35,7 +35,7 @@ describe('desktop client environment', () => {
 })
 
 describe('advanced desktop layout', () => {
-  it('composites the active theme over an opaque light/dark collaboration underlay', () => {
+  it('installs only the Desktop-owned product footer styles', () => {
     let css = ''
     const style = {
       dataset: {},
@@ -50,12 +50,12 @@ describe('advanced desktop layout', () => {
 
     try {
       installSolarBrandStyles()
-      expect(css).toMatch(/:root \{ --dsh-desktop-popup-underlay: #fff; \}/)
-      expect(css).toMatch(/body\[data-ds-dark-theme\] \{ --dsh-desktop-popup-underlay: #151517; \}/)
       expect(css).toMatch(/body\[data-dsh-desktop-product-footer="true"\] #root \{ height: calc\(100% - 24px\); \}/)
       expect(css).toMatch(/\.dshDesktopSolarFooter \{[^}]*position: fixed;[^}]*bottom: 0;[^}]*height: 24px;[^}]*white-space: nowrap;/)
       expect(css).not.toContain('.dshDesktopSolarBrand')
-      expect(css).toMatch(/\.dshDesktopOperatorStrategyPanel \{[^}]*background: linear-gradient\(var\(--dsw-alias-bg-base, transparent\), var\(--dsw-alias-bg-base, transparent\)\), var\(--dsh-desktop-popup-underlay\);/)
+      expect(css).not.toContain('.dshDesktopOperatorStrategyPanel')
+      expect(css).not.toContain('.dshDesktopResidentPanel')
+      expect(css).not.toContain('.dshDesktopOrchestrationPanel')
     }
     finally {
       vi.unstubAllGlobals()

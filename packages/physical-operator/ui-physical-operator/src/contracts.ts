@@ -2,6 +2,7 @@
 
 export const RESIDENT_DASHBOARD_PATH = '/api/resident-operators'
 
+/** Qualification and model catalog for one Resident physical operator. */
 export interface DesktopResidentProvider {
   operatorId: string
   product: string
@@ -18,6 +19,7 @@ export interface DesktopResidentProvider {
   models: DesktopResidentModel[]
 }
 
+/** Browser-facing model and effort capabilities for one provider model. */
 export interface DesktopResidentModel {
   model: string
   resolvedModel?: string
@@ -29,6 +31,7 @@ export interface DesktopResidentModel {
   supportsAdaptiveThinking: boolean
 }
 
+/** One bounded Resident daemon event. */
 export interface DesktopResidentEvent {
   sequence: number
   type: string
@@ -36,6 +39,7 @@ export interface DesktopResidentEvent {
   data: Record<string, unknown>
 }
 
+/** Durable turn projection without prompt or native transcript content. */
 export interface DesktopResidentTurn {
   commandId: string
   turnId: string
@@ -46,6 +50,7 @@ export interface DesktopResidentTurn {
   updatedAt: string
 }
 
+/** Durable Resident Session projection for one operator, workspace, and lane. */
 export interface DesktopResidentSession {
   sessionId: string
   operatorId: string
@@ -64,6 +69,7 @@ export interface DesktopResidentSession {
   updatedAt: string
 }
 
+/** User-facing activity collapsed from one durable turn's event sequence. */
 export interface DesktopResidentActivity {
   commandId: string
   turnId: string
@@ -74,6 +80,7 @@ export interface DesktopResidentActivity {
   updatedAt: string
 }
 
+/** Complete bounded Resident dashboard response for one browser refresh. */
 export interface DesktopResidentDashboard {
   generatedAt: string
   providers: DesktopResidentProvider[]

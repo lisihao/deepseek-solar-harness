@@ -275,10 +275,10 @@ function GraphView(props: {
         ? <>
           <p>Runtime：{rlmSettled ? '已完成' : rlmStarted ? '运行中' : '待启动'} · TypeScript REPL {rlmStarted ? '已接通' : '待接通'}</p>
           <p>子 Agent：{String(rlmChildrenSettled)}/{String(rlmChildren)} 已完成 · 消息续接 {String(rlmMessages)} 次</p>
-          <p>默认 worker：{workerAllocation === undefined ? '待分配' : `${String(workerAllocation.data.operatorId ?? 'N/A')}/${String(workerAllocation.data.model ?? 'N/A')} · ${modelTierLabel(workerAllocation.data.tier)} · ${modelSourceLabel(workerAllocation.data.source)}`}</p>
+          <p>默认 worker：{workerAllocation === undefined ? '待分配' : `${eventValue(workerAllocation, 'operatorId')}/${eventValue(workerAllocation, 'model')} · ${modelTierLabel(workerAllocation.data.tier)} · ${modelSourceLabel(workerAllocation.data.source)}`}</p>
           <p>自动演进：{autoRefine === undefined
             ? '等待 Prime 触发条件'
-            : <>{eventLabel(autoRefine.type)}{autoRefine.data.model === undefined ? '' : ` · ${String(autoRefine.data.operatorId ?? 'N/A')}/${String(autoRefine.data.model)}`}</>}</p>
+            : <>{eventLabel(autoRefine.type)}{autoRefine.data.model === undefined ? '' : ` · ${eventValue(autoRefine, 'operatorId')}/${eventValue(autoRefine, 'model')}`}</>}</p>
         </>
         : <p>本 Run 不创建 RLM Session，不挂载 typescript_repl，也不递归启动子 Agent。</p>}
     </div>
@@ -430,69 +430,69 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
   if (event.type === 'run.started') {
     const admission = event.data.admission as { policy?: string } | null | undefined
     const policy = admission?.policy
-    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
+    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' ? policy : undefined)} · 并行上限 ${eventValue(event, 'maxParallel')}`
   }
   if (event.type === 'model.allocated') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)} · 配额池 ${String(event.data.quotaPoolId ?? 'N/A')}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'model')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)} · 配额池 ${eventValue(event, 'quotaPoolId')}`
   }
   if (event.type === 'harness.snapshot') {
-    return `${String(event.data.scope ?? 'N/A')} · generation ${String(event.data.generation ?? 'N/A')} · ${String(event.data.entryCount ?? 0)} 条`
+    return `${eventValue(event, 'scope')} · generation ${eventValue(event, 'generation')} · ${eventValue(event, 'entryCount', '0')} 条`
   }
   if (event.type.startsWith('harness.auto_refine.')) {
     if (event.type === 'harness.auto_refine.applied') {
-      return `${String(event.data.operatorId ?? 'N/A')}/${String(event.data.model ?? 'N/A')} · refinement ${shortRef(String(event.data.refinementId ?? 'N/A'))} · generation ${String(event.data.appliedGeneration ?? 'N/A')}`
+      return `${eventValue(event, 'operatorId')}/${eventValue(event, 'model')} · refinement ${shortRef(eventValue(event, 'refinementId'))} · generation ${eventValue(event, 'appliedGeneration')}`
     }
-    if (event.type === 'harness.auto_refine.reviewed') return String(event.data.rationale ?? '模型审查完成，当前无需演进')
-    if (event.type === 'harness.auto_refine.failed') return `${String(event.data.phase ?? 'N/A')} · ${String(event.data.error ?? 'N/A')}`
-    if (event.type === 'harness.auto_refine.indeterminate') return `${String(event.data.phase ?? 'N/A')} · 需要显式确认，未自动重放`
-    return String(event.data.reason ?? '后台演进未执行')
+    if (event.type === 'harness.auto_refine.reviewed') return eventValue(event, 'rationale', '模型审查完成，当前无需演进')
+    if (event.type === 'harness.auto_refine.failed') return `${eventValue(event, 'phase')} · ${eventValue(event, 'error')}`
+    if (event.type === 'harness.auto_refine.indeterminate') return `${eventValue(event, 'phase')} · 需要显式确认，未自动重放`
+    return eventValue(event, 'reason', '后台演进未执行')
   }
   if (event.type === 'rlm.resolved') {
-    return `${event.data.enabled === true ? '已启用' : '直接执行'} · ${String(event.data.reason ?? 'N/A')} · ${shortRef(String(event.data.planSha256 ?? 'N/A'))}`
+    return `${event.data.enabled === true ? '已启用' : '直接执行'} · ${eventValue(event, 'reason')} · ${shortRef(eventValue(event, 'planSha256'))}`
   }
   if (event.type === 'rlm.worker.allocated') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'model')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)}`
   }
   if (event.type === 'rlm.root.dispatched') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · Session ${shortRef(String(event.data.runtimeSessionId ?? 'N/A'))}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'model')} · Session ${shortRef(eventValue(event, 'runtimeSessionId'))}`
   }
   if (event.type === 'rlm.child.dispatched') {
-    return `深度 ${String(event.data.depth ?? 'N/A')} · ${String(event.data.name ?? 'child')} · ${String(event.data.operatorId ?? 'N/A')}/${String(event.data.model ?? 'N/A')}`
+    return `深度 ${eventValue(event, 'depth')} · ${eventValue(event, 'name', 'child')} · ${eventValue(event, 'operatorId')}/${eventValue(event, 'model')}`
   }
   if (event.type === 'rlm.child.settled') {
-    return `${String(event.data.childId ?? 'child')} · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `${eventValue(event, 'childId', 'child')} · Artifact ${shortRef(eventValue(event, 'artifactRef'))} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type.startsWith('rlm.message.continuation.')) {
-    return `Agent 消息已续接 · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `Agent 消息已续接 · Artifact ${shortRef(eventValue(event, 'artifactRef'))} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type.startsWith('rlm.goal.continuation.')) {
-    return `Goal 自动续接 · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `Goal 自动续接 · Artifact ${shortRef(eventValue(event, 'artifactRef'))} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type.startsWith('rlm.heartbeat.continuation.')) {
-    return `Heartbeat 定时续接 · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `Heartbeat 定时续接 · Artifact ${shortRef(eventValue(event, 'artifactRef'))} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type === 'rlm.execution.settled') {
-    return `${String(event.data.childCount ?? 0)} 个直接子 Agent · state rev ${String(event.data.stateRevision ?? 0)} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `${eventValue(event, 'childCount', '0')} 个直接子 Agent · state rev ${eventValue(event, 'stateRevision', '0')} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type === 'capsule.resolved') {
     return event.data.cleanContext === true ? 'Clean-task Context Capsule 已注入' : 'Capsule 未确认干净上下文'
   }
   if (event.type === 'execution_plan.sealed') {
-    return `Task Contract ${shortRef(String(event.data.taskContractRef ?? 'N/A'))} · Plan ${shortRef(String(event.data.ref ?? 'N/A'))}`
+    return `Task Contract ${shortRef(eventValue(event, 'taskContractRef'))} · Plan ${shortRef(eventValue(event, 'ref'))}`
   }
   if (event.type === 'node.dispatched') {
     if (event.data.executor === 'resident-rlm') {
-      return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · DSH 控制的 Resident RLM`
+      return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'model')} · DSH 控制的 Resident RLM`
     }
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.contextIsolation ?? 'N/A')} · lane ${shortRef(String(event.data.laneId ?? 'N/A'))}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'contextIsolation')} · lane ${shortRef(eventValue(event, 'laneId'))}`
   }
   if (event.type === 'node.operator.progress') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${operatorProgressLabel(String(event.data.phase ?? 'unknown'))}`
+    return `${eventValue(event, 'operatorId')} · ${operatorProgressLabel(eventValue(event, 'phase', 'unknown'))}`
   }
   if (event.type === 'node.evidence.accepted' || (event.type === 'node.failed' && typeof event.data.outputPreview === 'string')) {
-    const output = String(event.data.outputPreview ?? '')
+    const output = eventValue(event, 'outputPreview', '')
     const truncated = event.data.outputTruncated === true ? '\n…输出已截断，完整结果保留在 Evidence 产物中。' : ''
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.stopReason ?? 'N/A')} · Evidence ${shortRef(String(event.data.evidenceRef ?? 'N/A'))}\n${output}${truncated}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'stopReason')} · Evidence ${shortRef(eventValue(event, 'evidenceRef'))}\n${output}${truncated}`
   }
   if (event.type === 'scheduler.waiting.updated') {
     const waiting = Array.isArray(event.data.waiting)
@@ -506,13 +506,24 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
       : []
     return waiting.length > 0
       ? waiting.join('；')
-      : `运行中 ${String(event.data.activeWorkers ?? 0)}/${String(event.data.effectiveParallelism ?? event.data.maxParallel ?? 'N/A')}`
+      : `运行中 ${eventValue(event, 'activeWorkers', '0')}/${displayEventValue(event.data.effectiveParallelism, displayEventValue(event.data.maxParallel))}`
   }
   return ''
 }
 
+function eventValue(event: DesktopOrchestrationEvent, key: string, fallback = 'N/A'): string {
+  return displayEventValue(event.data[key], fallback)
+}
+
+function displayEventValue(value: unknown, fallback = 'N/A'): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return fallback
+}
+
 function modelTierLabel(value: unknown): string {
-  return ({ low: '低阶', medium: '中阶', high: '高阶' } as Record<string, string>)[String(value)] ?? '待解析'
+  return ({ low: '低阶', medium: '中阶', high: '高阶' } as Record<string, string>)[displayEventValue(value, '')] ?? '待解析'
 }
 
 function rlmModeLabel(value: DesktopOrchestrationNode['rlm']): string {
@@ -523,7 +534,7 @@ function modelSourceLabel(value: unknown): string {
   return ({
     'native-subscription': '订阅套餐',
     'metered-api': '按量 API',
-  } as Record<string, string>)[String(value)] ?? '来源待解析'
+  } as Record<string, string>)[displayEventValue(value, '')] ?? '来源待解析'
 }
 
 function operatorProgressLabel(phase: string): string {

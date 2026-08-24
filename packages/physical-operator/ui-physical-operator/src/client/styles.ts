@@ -15,7 +15,10 @@ const PHYSICAL_OPERATOR_STYLES = `
 @media(max-width:640px){.dshDesktopResidentBackdrop{padding:8px}.dshDesktopResidentPanel{width:calc(100vw - 16px);height:calc(100vh - 16px)}.dshDesktopOperatorProfilePreferences label{grid-template-columns:1fr}}
 `
 
-/** Install styles owned by the physical-operator client plugin. */
+/**
+ * Install styles owned by the physical-operator client plugin.
+ * @returns a disposer that removes the installed style element.
+ */
 export function installPhysicalOperatorStyles(): () => void {
   const style = document.createElement('style')
   style.dataset.plugin = '@deepseek-ai/dsh-ui-physical-operator'

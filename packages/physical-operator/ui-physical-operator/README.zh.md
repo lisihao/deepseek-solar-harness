@@ -13,8 +13,12 @@
 
 ## Model Experience
 
-选择器改变后续 Turn 的 Host 权威执行策略。有界 Dashboard 投影不会复制到模型历史。
+无。浏览器投影与执行策略控件不会注册模型可见上下文。
 
 #### KV Cache effect
 
 Dashboard 不产生 KV Cache 影响；所选执行策略只影响后续派发。
+
+## 已知限制与后续工作
+
+- 首发仅远程暴露只读 Resident 状态；中断与重置仍是受信任的本机管理操作。

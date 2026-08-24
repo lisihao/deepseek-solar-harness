@@ -5,14 +5,22 @@ import type {
 
 const LEGACY_TASK_LABEL = '历史任务（升级前未记录摘要）'
 
-/** Keep known local acceptance workspaces out of the user task surface. */
+/**
+ * Keep known local acceptance workspaces out of the user task surface.
+ * @param workspace - normalized or native workspace path.
+ * @returns whether the workspace belongs to a known diagnostic fixture.
+ */
 export function isDiagnosticResidentWorkspace(workspace: string): boolean {
   const normalized = workspace.replaceAll('\\', '/')
   return normalized.includes('/.dsh/artifacts/resident-dev-canary/')
     || /\/(?:private\/)?tmp\/dsh-(?:resident|profile|packaged)-/u.test(normalized)
 }
 
-/** Collapse low-level daemon events into one user-facing row per durable turn. */
+/**
+ * Collapse low-level daemon events into one user-facing row per durable turn.
+ * @param events - bounded Resident daemon event projection.
+ * @returns newest-first user-facing activities.
+ */
 export function buildResidentActivities(events: readonly DesktopResidentEvent[]): DesktopResidentActivity[] {
   const activities = new Map<string, DesktopResidentActivity>()
   for (const event of events) {
@@ -37,7 +45,13 @@ export function buildResidentActivities(events: readonly DesktopResidentEvent[])
   return [...activities.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 }
 
-/** Format one canonical UTC timestamp in an explicit browser-resolved local zone. */
+/**
+ * Format one canonical UTC timestamp in an explicit browser-resolved local zone.
+ * @param value - canonical timestamp to display.
+ * @param nowValue - canonical reference timestamp used for relative age.
+ * @param timeZone - IANA time zone selected by the browser.
+ * @returns absolute and relative user-facing time labels.
+ */
 export function formatResidentTimestamp(
   value: string,
   nowValue: string,

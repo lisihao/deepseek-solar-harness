@@ -40,7 +40,10 @@ const ORCHESTRATION_STYLES = `
 @media(max-width:720px){.dshDesktopOrchestrationBackdrop{padding:8px}.dshDesktopOrchestrationPanel{width:calc(100vw - 16px);height:calc(100vh - 16px)}.dshDesktopOrchestrationGrid{display:block;overflow:auto;height:calc(100% - 82px)}.dshDesktopOrchestrationColumn{overflow:visible;border-right:0;border-bottom:1px solid var(--dsw-alias-border-l2)}}
 `
 
-/** Install styles owned by the orchestration client plugin. */
+/**
+ * Install styles owned by the orchestration client plugin.
+ * @returns a disposer that removes the installed style element.
+ */
 export function installOrchestrationStyles(): () => void {
   const style = document.createElement('style')
   style.dataset.plugin = '@deepseek-ai/dsh-ui-orchestration'

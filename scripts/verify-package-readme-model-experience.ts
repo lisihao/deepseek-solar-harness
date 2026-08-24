@@ -71,6 +71,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/orchestration/orchestration': { kind: 'indirect', reason: 'The Service Definition delegates model rendering to dsh-tool-orchestration.' },
   'packages/orchestration/orchestration-local': { kind: 'indirect', reason: 'The daemon Provider delegates model rendering to dsh-tool-orchestration and physical operators.' },
   'packages/orchestration/ui-orchestration': { kind: 'none', reason: 'The trusted browser control projection registers no model-facing prompt, schema, or Session event.' },
+  'packages/physical-operator/ui-physical-operator': { kind: 'none', reason: 'The trusted browser projection and execution-policy controls register no model-facing prompt, schema, or Session event.' },
   'packages/code-runtime/code-runtime': { kind: 'indirect', reason: 'The service interface delegates model rendering to Code Mode in dsh-tools.' },
   'packages/core/agent-tool-presentation': { kind: 'indirect', reason: 'The row only selects between the two projections dsh-tools owns; it registers no prompt, schema, or result of its own.' },
   'packages/code-runtime/code-runtime-worker-thread': { kind: 'indirect', reason: 'The worker backend delegates model rendering to Code Mode in dsh-tools.' },

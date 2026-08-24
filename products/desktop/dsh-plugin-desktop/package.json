@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -130,7 +130,7 @@
     "@deepseek-ai/dsh-bash-local": "0.1.0-rc.6",
     "@deepseek-ai/dsh-brand": "0.1.0-rc.6",
     "@deepseek-ai/dsh-capability-capsule": "file:vendor/dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz",
-    "@deepseek-ai/dsh-client-connection": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-connection": "file:vendor/dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-modules": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
@@ -172,7 +172,7 @@
     "@deepseek-ai/dsh-host-directory-picker-browse": "0.1.0-rc.6",
     "@deepseek-ai/dsh-host-directory-picker-native": "0.1.0-rc.6",
     "@deepseek-ai/dsh-host-plugin-inventory": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-host-remote-auth": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-remote-auth": "file:vendor/dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.6",
     "@deepseek-ai/dsh-intent-compiler": "file:vendor/dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-invariants": "0.1.0-rc.6",
@@ -244,6 +244,7 @@
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-registry": "0.1.0-rc.6",
     "@deepseek-ai/dsh-ui-orchestration": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-ui-physical-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-user-approval": "0.1.0-rc.6",
     "@deepseek-ai/dsh-user-questions": "0.1.0-rc.6",
     "@deepseek-ai/dsh-web": "0.1.0-rc.6",
