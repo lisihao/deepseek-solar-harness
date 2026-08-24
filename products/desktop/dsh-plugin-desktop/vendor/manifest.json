@@ -121,7 +121,7 @@
     "dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz": "plugins/managed/mnemon/package.json",
     "dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz": "plugins/managed/web-ui/packages/dsh-liangshen/package.json",
     "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "plugins/managed/web-ui/packages/dsh-remote-web-ui/package.json",
-    "dsh-packages/lisihao-dsh-code-harness-governance-0.3.11.tgz": "plugins/managed/governance/plugins/deepseek-solar-harness-governance/package.json",
+    "dsh-packages/lisihao-dsh-code-harness-governance-0.3.12.tgz": "plugins/managed/governance/plugins/deepseek-solar-harness-governance/package.json",
     "dsh-packages/nanmicoder-dsh-agent-teams-0.1.5-solar.1.tgz": "plugins/managed/agent-teams/package.json",
     "dsh-packages/omdsh-dev-dsh-genui-0.9.1-solar.2.tgz": "plugins/managed/genui/package.json",
     "dsh-packages/omdsh-dev-dsh-plugin-check-0.1.0.tgz": "plugins/managed/plugin-check/package.json",
@@ -192,7 +192,7 @@
     "dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz": "8e1025fb49346f5b317e55de18e060069493e411dd86fa1d93e465a0d9dbf241",
     "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
     "dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz": "80755b4dd17400ca4e63d69abde591fcea016c62e39b127a48ef962926bbf940",
-    "dsh-packages/lisihao-dsh-code-harness-governance-0.3.11.tgz": "540f6caa63eaa581c2dda397822df687f294e6414ccade64e1b59e8862dab937",
+    "dsh-packages/lisihao-dsh-code-harness-governance-0.3.12.tgz": "2562753420c48cd009e367f311be29d580b777282ec2c0c6b9be0feeef7b910e",
     "dsh-packages/dsh-web-billing-1.1.3.tgz": "7b2c7b85d74b4c16dec9d0bcecf87b818e5b071a01949765749a5c240f7fc209"
   }
 }

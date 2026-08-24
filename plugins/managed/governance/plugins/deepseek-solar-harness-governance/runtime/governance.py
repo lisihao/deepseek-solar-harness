@@ -516,6 +516,15 @@ def load_reusable_evidence(
         or not isinstance(evidence_head, str)
     ):
         return {}, {}, None
+    evidence_commit = subprocess.run(
+        ["git", "cat-file", "-e", f"{evidence_head}^{{commit}}"],
+        cwd=project,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if evidence_commit.returncode != 0:
+        return {}, {}, None
     ancestor = subprocess.run(
         ["git", "merge-base", "--is-ancestor", evidence_head, "HEAD"],
         cwd=project,
@@ -523,8 +532,7 @@ def load_reusable_evidence(
         stderr=subprocess.DEVNULL,
         check=False,
     )
-    if ancestor.returncode != 0:
-        return {}, {}, None
+    delta_basis = "ancestor-delta" if ancestor.returncode == 0 else "tree-delta"
 
     current_by_id = {gate["id"]: gate for gate in gates}
     previous_results = {
@@ -595,11 +603,11 @@ def load_reusable_evidence(
                 "input_sha256": fingerprints[gate_id],
                 "reused": True,
                 "reused_from_head": evidence_head,
-                "reuse_basis": "exact-input" if exact else "ancestor-delta",
+                "reuse_basis": "exact-input" if exact else delta_basis,
                 "original_duration_seconds": previous.get("duration_seconds"),
                 "detail": (
                     f"reused from {evidence_head[:12]}; "
-                    f"basis={'exact-input' if exact else 'ancestor-delta'}"
+                    f"basis={'exact-input' if exact else delta_basis}"
                 ),
             })
             reusable[gate_id] = reused

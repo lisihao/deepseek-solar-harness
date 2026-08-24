@@ -5609,12 +5609,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.11.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
-  version: 0.3.11
-  resolution: "@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.11.tgz#./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.11.tgz::hash=dae8b4&locator=deepseek-harness-desktop%40workspace%3A."
+"@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.12.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.3.12
+  resolution: "@lisihao/dsh-code-harness-governance@file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.12.tgz#./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.12.tgz::hash=178f2d&locator=deepseek-harness-desktop%40workspace%3A."
   bin:
     dsh-governed: ./bin/dsh-governed.mjs
-  checksum: 10c0/fc80d2079becc14d070347b3d17693aa87e18a47c7792589f91a8758d5ff8330d2fc1cedb2db5da98186595309b3f6357c811619c129d42367249769f3258cf2
+  checksum: 10c0/6ee5a306fd17e117f1f8cdd9f8ba61ceb4b54b71b49b3ad43e57c57c2a04712029b61e19d53ce5872b803170f04df56106a55b07fda205f8bbcb0062653b60fa
   languageName: node
   linkType: hard
 
@@ -8998,7 +8998,7 @@ __metadata:
     "@electron/asar": "npm:3.4.1"
     "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz"
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz"
-    "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.11.tgz"
+    "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.12.tgz"
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5-solar.1.tgz"
     "@omdsh-dev/dsh-genui": "file:vendor/dsh-packages/omdsh-dev-dsh-genui-0.9.1-solar.2.tgz"
     "@omdsh-dev/dsh-plugin-check": "file:vendor/dsh-packages/omdsh-dev-dsh-plugin-check-0.1.0.tgz"

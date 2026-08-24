@@ -252,7 +252,7 @@
     "@deepseek-ai/schemastery": "^3.18.1",
     "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz",
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz",
-    "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.11.tgz",
+    "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.12.tgz",
     "@nanmicoder/dsh-agent-teams": "file:vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5-solar.1.tgz",
     "@omdsh-dev/dsh-genui": "file:vendor/dsh-packages/omdsh-dev-dsh-genui-0.9.1-solar.2.tgz",
     "@omdsh-dev/dsh-plugin-check": "file:vendor/dsh-packages/omdsh-dev-dsh-plugin-check-0.1.0.tgz",
