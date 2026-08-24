@@ -75,6 +75,11 @@
       "name": "Prime RLM family-message single-flight delivery",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "b94c38e23f01bbc91f7f8785e6b28f2477355d2e"
+    },
+    {
+      "name": "Durable execution bundles in the default Server profile",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "c9e5c11a8356a3bed2d4cc1cdfda024524f3d4f1"
     }
   ],
   "sourcePackages": {
@@ -149,8 +154,8 @@
     "agent-presets/anchored-standard/skill-search.mjs": "3276149046fd610ca7a3c06dab522354856d74215af16e8395b0176f222c13d7",
     "agent-presets/anchored-standard/tool-bootstrap.mjs": "c2a59d8ec4746f85bf4a40f783e106cd1f8c2cadffef5ab58d7754fc3577aad6",
     "dsh-packages/aegis-2.8.5-solar.1.tgz": "09376c24ef76ccdc927286187d09bb314161636e3aceb64d02dade8e233fad73",
-    "dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz": "6ba45e986395a217d6188c2cf9845dffa9e0abba638e9218c9794ca79e1dba3a",
-    "dsh-packages/deepseek-ai-dsh-app-boot-0.1.0-rc.5.tgz": "1c3e0042416f14f2e9a3a40373cf6fee98f1198963505502cdf102ae8392bf6e",
+    "dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz": "725402b6f9c94eabf8eb147ec6092ae18f5f15278e76f99c9b4120dada4be977",
+    "dsh-packages/deepseek-ai-dsh-app-boot-0.1.0-rc.5.tgz": "02c92558bd82719ddba1bfea84dcc4b5ac4e6b7fcb17ebe5e23be0a635355bd6",
     "dsh-packages/deepseek-ai-dsh-atomic-write-0.1.0-rc.5.tgz": "9a9897ec063d701d6151ed0adfe047f9db7c172d98eed651002ffed0c0c5b265",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "491e343d0bea31f55f27685a0d13a6516ddc3cf642820cf4e0217b02e6b778d2",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "8c4012d58cabd2f24e1d03f9fbd703b70daa9dbcc9ad3b8e55f199e7a8a13de8",
