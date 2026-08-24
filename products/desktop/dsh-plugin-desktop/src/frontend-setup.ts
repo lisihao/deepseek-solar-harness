@@ -66,7 +66,7 @@ export class FrontendSetupController {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
-        preload: fileURLToPath(new URL('./frontend-setup-preload.js', import.meta.url)),
+        preload: fileURLToPath(new URL('./frontend-setup-preload.cjs', import.meta.url)),
       },
     })
     this.window = window

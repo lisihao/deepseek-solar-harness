@@ -19,7 +19,6 @@ export default defineConfig([
       'native-product-runtime': 'src/native-product-runtime.ts',
       'desktop-terminal': 'src/desktop-terminal.ts',
       'desktop-cli': 'src/desktop-cli.ts',
-      'frontend-setup-preload': 'src/frontend-setup-preload.ts',
       terminal: 'src/terminal.ts',
       'update-checker': 'src/update-checker.ts',
       'update-download': 'src/update-download.ts',
@@ -50,6 +49,21 @@ export default defineConfig([
     sourcemap: true,
     outputOptions: {
       banner: '#!/usr/bin/env node',
+    },
+  },
+  {
+    name: `${PACKAGE_NAME}/frontend-setup-preload`,
+    entry: { 'frontend-setup-preload': 'src/frontend-setup-preload.ts' },
+    outDir: 'lib',
+    format: 'cjs',
+    platform: 'node',
+    target: 'es2024',
+    fixedExtension: false,
+    dts: false,
+    clean: false,
+    sourcemap: true,
+    outputOptions: {
+      entryFileNames: 'frontend-setup-preload.cjs',
     },
   },
   {

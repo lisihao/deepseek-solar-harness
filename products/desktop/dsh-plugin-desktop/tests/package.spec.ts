@@ -162,11 +162,15 @@ describe('published package surface', () => {
 
   it('builds public Host plugins and their private native bootstraps', () => {
     const config = readFileSync(new URL('tsdown.config.ts', packageRoot), 'utf8')
+    const frontendSetup = readFileSync(new URL('src/frontend-setup.ts', packageRoot), 'utf8')
 
     expect(config).toContain("'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts'")
     expect(config).toContain("'windows-acl-runner': 'src/windows-acl-runner.ts'")
     expect(config).toContain("'desktop-cli': 'src/desktop-cli.ts'")
-    expect(config).toContain("'frontend-setup-preload': 'src/frontend-setup-preload.ts'")
+    expect(config).toContain("name: `${PACKAGE_NAME}/frontend-setup-preload`")
+    expect(config).toContain("entry: { 'frontend-setup-preload': 'src/frontend-setup-preload.ts' }")
+    expect(config).toContain("entryFileNames: 'frontend-setup-preload.cjs'")
+    expect(frontendSetup).toContain("new URL('./frontend-setup-preload.cjs', import.meta.url)")
     expect(config).toContain("'desktop-runtime-environment': 'src/desktop-runtime-environment.ts'")
     expect(config).toContain("'desktop-terminal': 'src/desktop-terminal.ts'")
     expect(config).toContain("'profile-manager': 'src/profile-manager.ts'")
