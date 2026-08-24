@@ -220,6 +220,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   private readonly kernels = new Map<string, PersistentTypeScriptKernel>()
   private readonly kernelCommands = new Map<string, { cellCommandId: RlmCommandId; callOrdinal: number }>()
   private readonly activeExecutions = new Map<string, RlmChildExecution>()
+  private readonly activeMessagePumps = new Set<string>()
   private readonly lastContinuations = new Map<string, RlmChildExecutionResult>()
   private readonly messageRateBuckets = new Map<string, { tokens: number; updatedAt: number }>()
   private readonly goalAccountingStartedAt = new Map<string, number>()
@@ -1382,77 +1383,83 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   }
 
   private async pumpSessionMessage(sessionId: RlmRuntimeSessionId): Promise<number> {
-    const session = this.requireSession(sessionId)
     const key = String(sessionId)
-    if (this.activeExecutions.has(key) || session.snapshot.lifecycle === 'running') return 0
-    const bindings = this.bindings.get(key)
-    if (bindings?.dispatchContinuation === undefined) return 0
-    const message = this.document.messages
-      .filter(value => value.toSessionId === sessionId && value.deliveryStatus === 'queued')
-      .sort((left, right) => {
-        const priority = (left.effectiveMode === 'steer' ? 0 : 1) - (right.effectiveMode === 'steer' ? 0 : 1)
-        return priority === 0 ? left.createdAt.localeCompare(right.createdAt) : priority
-      })[0]
-    if (message === undefined) return 0
+    if (this.activeMessagePumps.has(key)) return 0
+    this.activeMessagePumps.add(key)
     try {
-      const execution = await bindings.dispatchContinuation({
-        sessionId,
-        commandId: RlmCommandId(`${message.messageId}:deliver`),
-        instruction: [
-          `Agent message from ${String(message.fromSessionId)}:`,
-          message.text,
-          ...message.artifactRefs === undefined || message.artifactRefs.length === 0
-            ? []
-            : [`Artifact references: ${message.artifactRefs.join(', ')}`],
-        ].join('\n'),
-        source: 'message',
-        deliveryMode: message.effectiveMode,
-        model: session.snapshot.model,
-      })
-      const { deliveryError: _deliveryError, ...messageWithoutError } = message
-      const delivered: RlmMessageV1 = {
-        ...messageWithoutError, deliveryStatus: 'delivered', deliveredAt: now(),
-      }
-      const index = this.document.messages.findIndex(value => value.messageId === message.messageId)
-      this.document.messages[index] = delivered
-      this.appendEvent(sessionId, 'rlm.message.delivered', {
-        messageId: message.messageId, effectiveMode: message.effectiveMode,
-        nativeSessionId: execution.nativeSessionId, nativeTurnId: execution.nativeTurnId,
-      })
-      void execution.result.then((result) => {
-        this.lastContinuations.set(key, result)
-        this.appendEvent(sessionId, `rlm.message.continuation.${result.status}`, {
-          messageId: message.messageId,
-          ...result.resultRef === undefined ? {} : { resultRef: result.resultRef },
-          ...result.error === undefined ? {} : { error: result.error },
+      const session = this.requireSession(sessionId)
+      if (this.activeExecutions.has(key) || session.snapshot.lifecycle === 'running') return 0
+      const bindings = this.bindings.get(key)
+      if (bindings?.dispatchContinuation === undefined) return 0
+      const message = this.document.messages
+        .filter(value => value.toSessionId === sessionId && value.deliveryStatus === 'queued')
+        .sort((left, right) => {
+          const priority = (left.effectiveMode === 'steer' ? 0 : 1) - (right.effectiveMode === 'steer' ? 0 : 1)
+          return priority === 0 ? left.createdAt.localeCompare(right.createdAt) : priority
+        })[0]
+      if (message === undefined) return 0
+      try {
+        const execution = await bindings.dispatchContinuation({
+          sessionId,
+          commandId: RlmCommandId(`${message.messageId}:deliver`),
+          instruction: [
+            `Agent message from ${String(message.fromSessionId)}:`,
+            message.text,
+            ...message.artifactRefs === undefined || message.artifactRefs.length === 0
+              ? []
+              : [`Artifact references: ${message.artifactRefs.join(', ')}`],
+          ].join('\n'),
+          source: 'message',
+          deliveryMode: message.effectiveMode,
+          model: session.snapshot.model,
         })
+        const { deliveryError: _deliveryError, ...messageWithoutError } = message
+        const delivered: RlmMessageV1 = {
+          ...messageWithoutError, deliveryStatus: 'delivered', deliveredAt: now(),
+        }
+        const index = this.document.messages.findIndex(value => value.messageId === message.messageId)
+        this.document.messages[index] = delivered
+        this.appendEvent(sessionId, 'rlm.message.delivered', {
+          messageId: message.messageId, effectiveMode: message.effectiveMode,
+          nativeSessionId: execution.nativeSessionId, nativeTurnId: execution.nativeTurnId,
+        })
+        void execution.result.then((result) => {
+          this.lastContinuations.set(key, result)
+          this.appendEvent(sessionId, `rlm.message.continuation.${result.status}`, {
+            messageId: message.messageId,
+            ...result.resultRef === undefined ? {} : { resultRef: result.resultRef },
+            ...result.error === undefined ? {} : { error: result.error },
+          })
+          this.persist()
+        })
+        await this.trackExecution(sessionId, execution)
         this.persist()
-      })
-      await this.trackExecution(sessionId, execution)
-      this.persist()
-      return 1
-    } catch (error) {
-      const code = error instanceof Error && 'code' in error ? String(error.code) : ''
-      if (code === 'SESSION_BUSY' || code === 'RLM_SESSION_BUSY' || /session.*busy/iu.test(error instanceof Error ? error.message : String(error))) {
+        return 1
+      } catch (error) {
+        const code = error instanceof Error && 'code' in error ? String(error.code) : ''
+        if (code === 'SESSION_BUSY' || code === 'RLM_SESSION_BUSY' || /session.*busy/iu.test(error instanceof Error ? error.message : String(error))) {
+          const index = this.document.messages.findIndex(value => value.messageId === message.messageId)
+          this.document.messages[index] = {
+            ...message,
+            deliveryError: 'target session is busy; delivery remains queued',
+          }
+          this.persist()
+          return 0
+        }
         const index = this.document.messages.findIndex(value => value.messageId === message.messageId)
         this.document.messages[index] = {
           ...message,
-          deliveryError: 'target session is busy; delivery remains queued',
+          deliveryError: error instanceof Error ? error.message : String(error),
         }
+        this.appendEvent(sessionId, 'rlm.message.delivery_failed', {
+          messageId: message.messageId,
+          error: error instanceof Error ? error.message : String(error),
+        })
         this.persist()
         return 0
       }
-      const index = this.document.messages.findIndex(value => value.messageId === message.messageId)
-      this.document.messages[index] = {
-        ...message,
-        deliveryError: error instanceof Error ? error.message : String(error),
-      }
-      this.appendEvent(sessionId, 'rlm.message.delivery_failed', {
-        messageId: message.messageId,
-        error: error instanceof Error ? error.message : String(error),
-      })
-      this.persist()
-      return 0
+    } finally {
+      this.activeMessagePumps.delete(key)
     }
   }
 

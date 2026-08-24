@@ -430,6 +430,49 @@ describe('LocalRlmRuntime', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('admits one continuation when concurrent pumps observe the same queued message', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-message-pump-'))
+    const continuationRequests: string[] = []
+    const dispatchChild: RlmRuntimeHostBindings['dispatchChild'] = async request => ({
+      nativeSessionId: `child:${request.childSessionId}`,
+      nativeTurnId: `child-turn:${request.childId}`,
+      result: Promise.resolve({ status: 'settled' }),
+      interrupt: () => Promise.resolve(),
+    })
+    const { ctx, service, sessionId } = await runtime(root, { dispatchChild })
+    const child = await service.spawn({
+      commandId: RlmCommandId('pump-child'), parentSessionId: sessionId,
+      name: 'messenger', task: 'send one bounded message',
+    })
+    await expect(service.sendMessage({
+      commandId: RlmCommandId('pump-message'), fromSessionId: child.sessionId, toSessionId: sessionId,
+      mode: 'follow_up', text: 'deliver exactly once',
+    })).resolves.toMatchObject({ deliveryStatus: 'queued' })
+
+    await service.bindHost(sessionId, {
+      dispatchChild,
+      dispatchContinuation: async (request) => {
+        continuationRequests.push(String(request.commandId))
+        await new Promise(resolve => setTimeout(resolve, 10))
+        return {
+          nativeSessionId: `continuation:${request.sessionId}`,
+          nativeTurnId: `continuation-turn:${request.commandId}`,
+          result: Promise.resolve({ status: 'settled' }),
+          interrupt: () => Promise.resolve(),
+        }
+      },
+    })
+
+    await Promise.all([
+      service.pumpMessages(sessionId),
+      service.pumpMessages(sessionId),
+      service.pumpMessages(sessionId),
+    ])
+    await expect(service.drain(sessionId, 1_000)).resolves.toMatchObject({ activeExecutions: 0, queuedMessages: 0 })
+    expect(continuationRequests).toHaveLength(1)
+    await ctx.root.fiber.dispose()
+  })
+
   it('uses optimistic revisions for durable goals', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-goal-'))
     const { ctx, service, sessionId } = await runtime(root, { dispatchChild: () => { throw new Error('not used') } })
