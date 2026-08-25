@@ -4,7 +4,7 @@
  */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apply, type ConnectionHandle } from '../src/client/index.ts'
+import { apply, setBrowserRemoteAccessToken, type ConnectionHandle } from '../src/client/index.ts'
 import type { RpcMessage } from '../src/client/api.ts'
 import { RpcId } from '../src/client/api.ts'
 import { FixtureApiClient } from '../src/client/fixture.ts'
@@ -48,6 +48,7 @@ class FakeWebSocket extends EventTarget {
 }
 
 afterEach(() => {
+  setBrowserRemoteAccessToken(undefined)
   delete (globalThis as Win).location
   sockets.length = 0
   if (originalWebSocket === undefined) delete (globalThis as WebSocketGlobal).WebSocket
@@ -82,6 +83,22 @@ describe('connection client apply', () => {
   it('reports non-loopback page authority through the connection handle', async () => {
     ;(globalThis as Win).location = { hostname: '192.0.2.20', search: '' }
     expect((await mount()).isLoopback).toBe(false)
+  })
+
+  it('shares the memory-only remote bearer with generic client plugin requests', async () => {
+    ;(globalThis as Win).location = { hostname: 'server.example', search: '' }
+    setBrowserRemoteAccessToken('surface-token')
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'))
+    try {
+      const handle = await mount()
+      await handle.request('/api/resident-operators', { headers: { 'x-client': 'physical-ui' } })
+      expect(fetch).toHaveBeenCalledOnce()
+      const init = fetch.mock.calls[0]?.[1]
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer surface-token')
+      expect(new Headers(init?.headers).get('x-client')).toBe('physical-ui')
+    } finally {
+      fetch.mockRestore()
+    }
   })
 
   it('uses snapshot + cursor projection in the Desktop frontend role', async () => {

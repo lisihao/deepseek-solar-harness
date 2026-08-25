@@ -5,7 +5,7 @@ import {
   ResidentOperatorTurnId,
 } from '@deepseek-ai/dsh-resident-operator'
 import { describe, expect, it, vi } from 'vitest'
-import { readResidentDashboard } from '../src/resident-dashboard.ts'
+import { readResidentDashboard } from '../src/dashboard.ts'
 
 describe('Resident Operator Desktop projection', () => {
   it('reconnects to daemon-owned session, progress, and settled result state', async () => {
@@ -83,15 +83,16 @@ describe('Resident Operator Desktop projection', () => {
       quotaUnavailableReason: 'Codex subscription quota telemetry unavailable: test outage',
       models: [expect.objectContaining({ model: 'gpt-5.6-sol', defaultEffort: 'medium' })],
     })])
-    expect(dashboard.sessions).toEqual([expect.objectContaining({
+    expect(dashboard.sessions).toHaveLength(1)
+    expect(dashboard.sessions[0]).toMatchObject({
       sessionId: 'session-1',
       activeTurnId: 'turn-1',
       executionProfile: { model: 'gpt-5.6-sol', effort: 'high' },
       executionProfileSource: 'manual',
-      latestTurn: expect.objectContaining({ state: 'running' }),
       workspaceDisplay: '/tmp/research',
-      latestEvent: expect.objectContaining({ data: expect.objectContaining({ phase: 'reasoning' }) }),
-    })])
+    })
+    expect(dashboard.sessions[0]?.latestTurn?.state).toBe('running')
+    expect(dashboard.sessions[0]?.latestEvent?.data.phase).toBe('reasoning')
     expect(dashboard.selectedTurn).toEqual(expect.objectContaining({ turnId: 'turn-1', state: 'running' }))
     expect(dashboard.events).toEqual([expect.objectContaining({ type: 'turn.progress' })])
     expect(dashboard.activities).toEqual([expect.objectContaining({

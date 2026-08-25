@@ -13,11 +13,13 @@ import type {
   ModelAllocationObjective,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-tool-orchestration/client'
-import type { DesktopResidentDashboard } from '../resident-dashboard-contracts.ts'
-import { loadResidentDashboard } from './ResidentOperatorsPanel.tsx'
+import type { DesktopResidentDashboard } from '../contracts.ts'
+import { loadResidentDashboard, type BrowserRequest } from './ResidentOperatorsPanel.tsx'
 
 /** Command face injected by the Desktop client registration. */
 export interface PhysicalOperatorRoutingInjected {
+  /** Authenticated same-origin request from the shared browser Connection seam. */
+  request: BrowserRequest
   /** Persist one Session routing policy through the host command boundary. */
   select: (policy: PhysicalOperatorRoutingPolicy) => Promise<string | null>
   /** Persist one product's optional model and effort fields through the host command boundary. */
@@ -81,6 +83,7 @@ export function PhysicalOperatorRoutingControl({
   useProjection,
   session,
   input,
+  request,
   select,
   selectProfile,
   selectOrchestrationStrategy,
@@ -100,7 +103,7 @@ export function PhysicalOperatorRoutingControl({
     let timer: ReturnType<typeof setTimeout> | undefined
     const refresh = async (): Promise<void> => {
       try {
-        setDashboard(await loadResidentDashboard(undefined, controller.signal))
+        setDashboard(await loadResidentDashboard(undefined, controller.signal, request))
       } catch {
         // The Resident status panel owns availability diagnostics; selection remains fail-closed.
       } finally {
@@ -112,7 +115,7 @@ export function PhysicalOperatorRoutingControl({
       controller.abort()
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [open])
+  }, [open, request])
   useEffect(() => {
     if (!open) return
     const place = (): void => {
@@ -156,12 +159,10 @@ export function PhysicalOperatorRoutingControl({
   const availableEfforts = selectedModel === undefined
     ? [...new Set(provider?.models.flatMap(option => option.supportedEfforts) ?? profileProjection?.efforts ?? [])]
     : model?.supportedEfforts ?? []
-  const choose = (id: string): void => {
-    const policy = routing.options.find(option => option.value === id)?.value
-    if (policy === undefined || policy === routing.currentValue) return
+  const persist = (operation: () => Promise<string | null>): void => {
     setSaving(true)
     setError(null)
-    void select(policy).then((failure) => {
+    void operation().then((failure) => {
       if (!alive.current) return
       setSaving(false)
       setError(failure)
@@ -171,22 +172,17 @@ export function PhysicalOperatorRoutingControl({
       setError(reason instanceof Error ? reason.message : String(reason))
     })
   }
+  const choose = (id: string): void => {
+    const policy = routing.options.find(option => option.value === id)?.value
+    if (policy === undefined || policy === routing.currentValue) return
+    persist(() => select(policy))
+  }
   const saveProfile = (
     operatorId: PhysicalOperatorProfileOwner,
     modelValue?: string,
     effortValue?: PhysicalOperatorProfileReasoningEffort,
   ): void => {
-    setSaving(true)
-    setError(null)
-    void selectProfile(operatorId, modelValue, effortValue).then((failure) => {
-      if (!alive.current) return
-      setSaving(false)
-      setError(failure)
-    }, (reason: unknown) => {
-      if (!alive.current) return
-      setSaving(false)
-      setError(reason instanceof Error ? reason.message : String(reason))
-    })
+    persist(() => selectProfile(operatorId, modelValue, effortValue))
   }
   const chooseModel = (id: string): void => {
     if (profileOwner === undefined) return
@@ -198,7 +194,7 @@ export function PhysicalOperatorRoutingControl({
     const nextEffort = effortSupported
       ? selectedEffort
       : undefined
-    saveProfile(profileOwner, nextModel, nextEffort as PhysicalOperatorProfileReasoningEffort | undefined)
+    saveProfile(profileOwner, nextModel, nextEffort)
   }
   const chooseEffort = (id: string): void => {
     if (profileOwner === undefined) return
@@ -210,17 +206,7 @@ export function PhysicalOperatorRoutingControl({
     continualHarness: ContinualHarnessMode,
     optimization: ModelAllocationObjective,
   ): void => {
-    setSaving(true)
-    setError(null)
-    void selectOrchestrationStrategy(rlm, continualHarness, optimization).then((failure) => {
-      if (!alive.current) return
-      setSaving(false)
-      setError(failure)
-    }, (reason: unknown) => {
-      if (!alive.current) return
-      setSaving(false)
-      setError(reason instanceof Error ? reason.message : String(reason))
-    })
+    persist(() => selectOrchestrationStrategy(rlm, continualHarness, optimization))
   }
 
   return (
@@ -245,7 +231,7 @@ export function PhysicalOperatorRoutingControl({
             role="dialog"
             aria-label="协作方式"
             style={panelPosition}
-            onMouseDown={event => { event.stopPropagation() }}
+            onMouseDown={(event) => { event.stopPropagation() }}
           >
             <header>
               <div><strong>协作方式</strong><small>主模型负责对话；Codex 与 Claude Code 是订阅态执行助手，RLM 是 TaskGraph 节点策略。</small></div>
@@ -261,7 +247,10 @@ export function PhysicalOperatorRoutingControl({
                   onClick={() => { choose(option.value) }}
                 >
                   <span className="dshDesktopOperatorStrategyRadio" aria-hidden="true" />
-                  <span><strong>{physicalOperatorRoutingLabel(option.value)}</strong><small>{physicalOperatorRoutingDescription(option.value)}</small></span>
+                  <span>
+                    <strong>{physicalOperatorRoutingLabel(option.value)}</strong>
+                    <small>{physicalOperatorRoutingDescription(option.value)}</small>
+                  </span>
                 </button>
               ))}
             </div>
@@ -274,7 +263,7 @@ export function PhysicalOperatorRoutingControl({
                     aria-label="执行模型"
                     value={selectedModel ?? 'auto'}
                     disabled={saving || provider === undefined || !provider.available}
-                    onChange={event => { chooseModel(event.currentTarget.value) }}
+                    onChange={(event) => { chooseModel(event.currentTarget.value) }}
                   >
                     <option value="auto">按任务推荐</option>
                     {provider?.models.map(option => <option key={option.model} value={option.model}>{option.displayName}</option>)}
@@ -286,7 +275,7 @@ export function PhysicalOperatorRoutingControl({
                     aria-label="推理强度"
                     value={selectedEffort ?? 'auto'}
                     disabled={saving || provider === undefined || !provider.available || availableEfforts.length === 0}
-                    onChange={event => { chooseEffort(event.currentTarget.value) }}
+                    onChange={(event) => { chooseEffort(event.currentTarget.value) }}
                   >
                     <option value="auto">按任务推荐</option>
                     {availableEfforts.map(effort => <option key={effort} value={effort}>{physicalOperatorEffortLabel(effort)}</option>)}
@@ -308,7 +297,13 @@ export function PhysicalOperatorRoutingControl({
                     aria-label="RLM 递归策略"
                     value={orchestrationPreferences.rlm}
                     disabled={saving}
-                    onChange={event => { saveOrchestrationStrategy(event.currentTarget.value as RlmExecutionMode, orchestrationPreferences.continualHarness, orchestrationPreferences.optimization) }}
+                    onChange={(event) => {
+                      saveOrchestrationStrategy(
+                        event.currentTarget.value as RlmExecutionMode,
+                        orchestrationPreferences.continualHarness,
+                        orchestrationPreferences.optimization,
+                      )
+                    }}
                   >
                     <option value="auto">{orchestrationExecutionModeLabel('auto')}</option>
                     <option value="enabled">{orchestrationExecutionModeLabel('enabled')}</option>
@@ -321,7 +316,13 @@ export function PhysicalOperatorRoutingControl({
                     aria-label="持续 Harness 策略"
                     value={orchestrationPreferences.continualHarness}
                     disabled={saving}
-                    onChange={event => { saveOrchestrationStrategy(orchestrationPreferences.rlm, event.currentTarget.value as ContinualHarnessMode, orchestrationPreferences.optimization) }}
+                    onChange={(event) => {
+                      saveOrchestrationStrategy(
+                        orchestrationPreferences.rlm,
+                        event.currentTarget.value as ContinualHarnessMode,
+                        orchestrationPreferences.optimization,
+                      )
+                    }}
                   >
                     <option value="auto">自动</option>
                     <option value="off">关闭</option>
@@ -335,7 +336,13 @@ export function PhysicalOperatorRoutingControl({
                     aria-label="模型分配目标"
                     value={orchestrationPreferences.optimization}
                     disabled={saving}
-                    onChange={event => { saveOrchestrationStrategy(orchestrationPreferences.rlm, orchestrationPreferences.continualHarness, event.currentTarget.value as ModelAllocationObjective) }}
+                    onChange={(event) => {
+                      saveOrchestrationStrategy(
+                        orchestrationPreferences.rlm,
+                        orchestrationPreferences.continualHarness,
+                        event.currentTarget.value as ModelAllocationObjective,
+                      )
+                    }}
                   >
                     <option value="balanced">综合最优</option>
                     <option value="quality">质量优先</option>

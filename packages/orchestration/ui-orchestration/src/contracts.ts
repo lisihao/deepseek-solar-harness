@@ -1,7 +1,8 @@
-/** JSON-safe Desktop view of the provider-neutral orchestration projection. */
+/** JSON-safe view of the provider-neutral orchestration projection. */
 
 export const ORCHESTRATION_DASHBOARD_PATH = '/api/orchestrations'
 
+/** Stable lifecycle states exposed by the bounded Run projection. */
 export type DesktopOrchestrationRunState =
   | 'awaiting_clarification'
   | 'awaiting_approval'
@@ -12,6 +13,7 @@ export type DesktopOrchestrationRunState =
   | 'cancelled'
   | 'indeterminate'
 
+/** Stable scheduler states exposed by one projected node. */
 export type DesktopOrchestrationNodeState =
   | 'pending'
   | 'ready'
@@ -25,12 +27,14 @@ export type DesktopOrchestrationNodeState =
   | 'indeterminate'
   | 'cancelled'
 
+/** One structured reason preventing Run or node progress. */
 export interface DesktopOrchestrationBlocker {
   code: string
   message: string
   nodeId?: string
 }
 
+/** JSON-safe node projection shared by Host and browser faces. */
 export interface DesktopOrchestrationNode {
   id: string
   title: string
@@ -55,6 +59,7 @@ export interface DesktopOrchestrationNode {
   updatedAt: string
 }
 
+/** JSON-safe durable Run projection shared by Host and browser faces. */
 export interface DesktopOrchestrationRun {
   runId: string
   title: string
@@ -85,6 +90,7 @@ export interface DesktopOrchestrationRun {
   diagnostic?: boolean
 }
 
+/** One bounded orchestration event with attempt and generation fencing. */
 export interface DesktopOrchestrationEvent {
   sequence: number
   runId: string
@@ -96,6 +102,7 @@ export interface DesktopOrchestrationEvent {
   data: Record<string, unknown>
 }
 
+/** Complete bounded dashboard response for one browser refresh. */
 export interface DesktopOrchestrationDashboard {
   generatedAt: string
   runs: DesktopOrchestrationRun[]
@@ -105,6 +112,7 @@ export interface DesktopOrchestrationDashboard {
   events?: DesktopOrchestrationEvent[]
 }
 
+/** Trusted revision-checked controls exposed by the dashboard endpoint. */
 export type DesktopOrchestrationControlAction =
   | 'pause'
   | 'resume'
@@ -114,6 +122,7 @@ export type DesktopOrchestrationControlAction =
   | 'abandon'
   | 'retry'
 
+/** One idempotent user control request targeting a Run or node. */
 export interface DesktopOrchestrationControlRequest {
   commandId: string
   action: DesktopOrchestrationControlAction

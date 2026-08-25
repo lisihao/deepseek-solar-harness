@@ -92,17 +92,6 @@ function createHarness(platform: DesktopRuntime['platform'] = 'darwin'): PluginH
       port: 43120,
       register: registerRoute,
     },
-    residentOperators: {
-      providers: vi.fn(async () => []),
-      list: vi.fn(async () => []),
-      inspect: vi.fn(),
-      inspectTurn: vi.fn(),
-      readEvents: vi.fn(),
-      execute: vi.fn(),
-      interrupt: vi.fn(),
-      reset: vi.fn(),
-      resolveIndeterminate: vi.fn(),
-    },
     settings,
     logger: { warn: vi.fn(), error: vi.fn() },
     get: vi.fn(() => () => {}),
@@ -163,12 +152,9 @@ describe('desktop Host plugin', () => {
     apply(harness.ctx, config)
 
     expect(inject).toContain('settings')
-    expect(inject).toContain('residentOperators')
+    expect(inject).not.toContain('residentOperators')
     expect(inject).not.toContain('loader')
-    expect(harness.registerRoute).toHaveBeenCalledWith(expect.objectContaining({
-      kind: 'exact',
-      path: '/api/desktop/resident-operators',
-    }))
+    expect(harness.registerRoute).not.toHaveBeenCalled()
     const register = vi.mocked(harness.ctx.settings.register)
     expect(register.mock.calls[0]?.[2]).toEqual(expect.objectContaining({ applies: 'restart' }))
     expect(register.mock.calls[0]?.[2]).not.toHaveProperty('base')

@@ -14,6 +14,9 @@
         pollIntervalMs: 250
         driverModules: []
 
+    - id: ui-physical-operator
+      name: '@deepseek-ai/dsh-ui-physical-operator'
+
     - id: subagent-codex-native-subscription
       name: '@deepseek-ai/dsh-subagent-codex'
       config:

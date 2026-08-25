@@ -30,6 +30,7 @@ async function mount(transport: ConnectionHandle['transport'] = 'direct'): Promi
   const bench: Bench = { ctx, api, sinks: undefined, stopped: 0 }
   const handle: ConnectionHandle = {
     api,
+    request: vi.fn(),
     transport,
     isLoopback: true,
     hostDescription: {

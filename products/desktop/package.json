@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "private": true,
   "description": "DSH Desktop product workspace",
   "license": "MIT",
@@ -196,6 +196,7 @@
     "@deepseek-ai/dsh-rlm-runtime": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-rlm-runtime-local": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-ui-orchestration": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-ui-physical-operator": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-orchestrations": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-tool-markdown": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-markdown-0.0.1.tgz",
     "@deepseek-ai/dsh-tool-regex": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-regex-0.0.1.tgz",

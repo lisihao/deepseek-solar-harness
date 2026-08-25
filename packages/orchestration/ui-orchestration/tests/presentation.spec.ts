@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  authorizeOrchestrationRequest,
   isDiagnosticOrchestrationWorkspace,
   projectOrchestrationRuns,
   remoteOrchestrationControlAllowed,
 } from '../src/index.ts'
+import { authorizeRemoteRequest } from '@deepseek-ai/dsh-host-remote-auth'
 
 describe('orchestration dashboard presentation', () => {
   it('requires a remote bearer session while retaining owner-local access', () => {
@@ -18,12 +18,16 @@ describe('orchestration dashboard presentation', () => {
         : undefined,
     }
 
-    expect(authorizeOrchestrationRequest(request('127.0.0.1') as never, undefined))
+    expect(authorizeRemoteRequest(request('127.0.0.1') as never, undefined))
       .toEqual({ local: true, scope: 'admin' })
-    expect(authorizeOrchestrationRequest(request('10.0.0.5') as never, auth)).toBeUndefined()
-    expect(authorizeOrchestrationRequest(request('10.0.0.5', 'Bearer pocket-token') as never, auth))
-      .toEqual({ local: false, scope: 'pocket' })
-    expect(authorizeOrchestrationRequest({
+    expect(authorizeRemoteRequest(request('10.0.0.5') as never, auth)).toBeUndefined()
+    expect(authorizeRemoteRequest(request('10.0.0.5', 'Bearer pocket-token') as never, auth))
+      .toEqual({
+        local: false,
+        scope: 'pocket',
+        principal: { deviceId: 'phone', deviceName: 'Phone', scope: 'pocket' },
+      })
+    expect(authorizeRemoteRequest({
       headers: { host: 'harness.example' }, socket: { remoteAddress: '127.0.0.1' },
     } as never, auth)).toBeUndefined()
     expect(remoteOrchestrationControlAllowed('pocket', 'approve')).toBe(true)

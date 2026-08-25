@@ -11,6 +11,7 @@ import { RemoteSyncController } from './remote-sync-controller.ts'
 import { WebRemoteSyncClient } from './remote-sync-client.ts'
 import { WebApiClient } from './web-api-client.ts'
 import { createWebConnectionRpc } from './rpc.ts'
+import { withBrowserRemoteAuthorization } from './browser-access-token.ts'
 export { WebRemoteAuthClient } from './remote-auth-client.ts'
 export type { RemoteAuthClient } from './remote-auth-client.ts'
 export { RemoteSyncController } from './remote-sync-controller.ts'
@@ -95,6 +96,8 @@ export const inject: string[] = []
 export interface ConnectionHandle {
   /** Shared api client (fixture or real, decided at boot from the page URL). */
   readonly api: IApiClient
+  /** Authenticated browser request using the same memory-only bearer as the primary transport. */
+  readonly request: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
   /** Direct Host streams or the authenticated snapshot + cursor projection transport; absent means direct for old consumers. */
   readonly transport?: 'direct' | 'remote-projection'
   /** Whether the current page authority is loopback; non-browser contexts default to true. */
@@ -157,6 +160,7 @@ export function apply(ctx: Context): void {
   }
   const handle: ConnectionHandle = {
     api,
+    request: (input, init) => globalThis.fetch(input, withBrowserRemoteAuthorization(init)),
     transport: remoteProjection ? 'remote-projection' : 'direct',
     isLoopback: pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
     hostDescription: {

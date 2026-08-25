@@ -6,20 +6,27 @@ import type {
   DesktopOrchestrationEvent,
   DesktopOrchestrationNode,
   DesktopOrchestrationRun,
-} from '../orchestration-dashboard-contracts.ts'
-import { ORCHESTRATION_DASHBOARD_PATH } from '../orchestration-dashboard-contracts.ts'
-import { formatResidentTimestamp } from '../resident-presentation.ts'
+} from '../contracts.ts'
+import { ORCHESTRATION_DASHBOARD_PATH } from '../contracts.ts'
+import { formatLocalTimestamp } from './timestamp.ts'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+
+type BrowserRequest = ConnectionHandle['request']
 
 /** Read one bounded orchestration projection from the same-origin Host endpoint. */
 export async function loadOrchestrationDashboard(
   runId?: string,
   signal?: AbortSignal,
   includeDiagnostics = true,
+  request: BrowserRequest = globalThis.fetch,
 ): Promise<DesktopOrchestrationDashboard> {
   const url = new URL(ORCHESTRATION_DASHBOARD_PATH, window.location.origin)
   if (runId !== undefined) url.searchParams.set('run_id', runId)
   url.searchParams.set('include_diagnostics', includeDiagnostics ? '1' : '0')
-  const response = await fetch(url, { cache: 'no-store', ...(signal === undefined ? {} : { signal }) })
+  const response = await request(url, {
+    cache: 'no-store',
+    ...(signal === undefined ? {} : { signal }),
+  })
   if (!response.ok) {
     throw new Error(`编排状态读取失败 (${String(response.status)}): ${await response.text()}`)
   }
@@ -29,8 +36,9 @@ export async function loadOrchestrationDashboard(
 /** Submit one revision-checked trusted control to the owner-local Host endpoint. */
 export async function controlOrchestration(
   request: DesktopOrchestrationControlRequest,
+  browserRequest: BrowserRequest = globalThis.fetch,
 ): Promise<DesktopOrchestrationRun> {
-  const response = await fetch(ORCHESTRATION_DASHBOARD_PATH, {
+  const response = await browserRequest(ORCHESTRATION_DASHBOARD_PATH, {
     method: 'POST',
     cache: 'no-store',
     headers: {
@@ -47,7 +55,7 @@ export async function controlOrchestration(
 }
 
 /** Session-header entry and theme-coherent control surface for durable TaskGraphs. */
-export function OrchestrationsPanel() {
+export function OrchestrationsPanel({ request: browserRequest }: { request: BrowserRequest }) {
   const [open, setOpen] = useState(false)
   const [selectedRunId, setSelectedRunId] = useState<string>()
   const [dashboard, setDashboard] = useState<DesktopOrchestrationDashboard>()
@@ -56,10 +64,10 @@ export function OrchestrationsPanel() {
   const [includeDiagnostics, setIncludeDiagnostics] = useState(true)
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
-    const next = await loadOrchestrationDashboard(open ? selectedRunId : undefined, signal, includeDiagnostics)
+    const next = await loadOrchestrationDashboard(open ? selectedRunId : undefined, signal, includeDiagnostics, browserRequest)
     setDashboard(next)
     setError(undefined)
-  }, [includeDiagnostics, open, selectedRunId])
+  }, [browserRequest, includeDiagnostics, open, selectedRunId])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -88,11 +96,11 @@ export function OrchestrationsPanel() {
 
   useEffect(() => {
     if (!open) return
-    const close = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
+    const closeOnEscape = ({ key }: KeyboardEvent): void => {
+      if (key === 'Escape') setOpen(false)
     }
-    document.addEventListener('keydown', close)
-    return () => { document.removeEventListener('keydown', close) }
+    window.addEventListener('keyup', closeOnEscape)
+    return () => { window.removeEventListener('keyup', closeOnEscape) }
   }, [open])
 
   const selectedRun = dashboard?.runs.find(run => run.runId === selectedRunId)
@@ -106,14 +114,14 @@ export function OrchestrationsPanel() {
   const submit = useCallback(async (request: DesktopOrchestrationControlRequest) => {
     setControlPending(true)
     try {
-      await controlOrchestration(request)
+      await controlOrchestration(request, browserRequest)
       await refresh()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setControlPending(false)
     }
-  }, [refresh])
+  }, [browserRequest, refresh])
 
   const label = `任务编排：${String(active)} 个运行中${attention > 0 ? `，${String(attention)} 个需处理` : ''}`
   return (
@@ -137,7 +145,7 @@ export function OrchestrationsPanel() {
             role="dialog"
             aria-modal="true"
             aria-label="持久化任务编排"
-            onMouseDown={event => { event.stopPropagation() }}
+            onMouseDown={(event) => { event.stopPropagation() }}
           >
             <header>
               <div>
@@ -200,8 +208,8 @@ function RunList(props: {
         ? `没有用户任务；${String(props.diagnosticRunCount)} 条验收记录已隐藏。`
         : '还没有持久化 TaskGraph。'}
     </p>}
-    {props.runs.map(run => {
-      const time = formatResidentTimestamp(run.updatedAt, props.generatedAt ?? run.updatedAt, timeZone)
+    {props.runs.map((run) => {
+      const time = formatLocalTimestamp(run.updatedAt, props.generatedAt ?? run.updatedAt, timeZone)
       return <button
         key={run.runId}
         type="button"
@@ -255,7 +263,10 @@ function GraphView(props: {
     >
       <p><strong>协作 Trace · {collaborationPolicyLabel(run.admission?.policy)}</strong></p>
       <p>路由：{run.admission?.route === 'taskgraph' ? '持久 TaskGraph' : '历史任务（无 admission 记录）'}</p>
-      <p>并行：{String(activeWorkers)}/{String(run.effectiveParallelism ?? run.maxParallel ?? 1)} worker 运行中 · Graph 上限 {String(run.maxParallel ?? 1)} · {String(readyWorkers)} 个可派发</p>
+      <p>
+        并行：{String(activeWorkers)}/{String(run.effectiveParallelism ?? run.maxParallel ?? 1)} worker 运行中
+        · Graph 上限 {String(run.maxParallel ?? 1)} · {String(readyWorkers)} 个可派发
+      </p>
       <p>上下文：{cleanContext ? 'Clean-task Capsule 已注入 · fresh native lane' : '等待 Capsule 解析'}</p>
     </div>
     <div className="dshDesktopCollaborationTrace" data-execution-mode={rlmEnabled ? 'rlm' : 'standard'} aria-label="Prime RLM 运行状态">
@@ -264,10 +275,10 @@ function GraphView(props: {
         ? <>
           <p>Runtime：{rlmSettled ? '已完成' : rlmStarted ? '运行中' : '待启动'} · TypeScript REPL {rlmStarted ? '已接通' : '待接通'}</p>
           <p>子 Agent：{String(rlmChildrenSettled)}/{String(rlmChildren)} 已完成 · 消息续接 {String(rlmMessages)} 次</p>
-          <p>默认 worker：{workerAllocation === undefined ? '待分配' : `${String(workerAllocation.data.operatorId ?? 'N/A')}/${String(workerAllocation.data.model ?? 'N/A')} · ${modelTierLabel(workerAllocation.data.tier)} · ${modelSourceLabel(workerAllocation.data.source)}`}</p>
+          <p>默认 worker：{workerAllocation === undefined ? '待分配' : `${eventValue(workerAllocation, 'operatorId')}/${eventValue(workerAllocation, 'model')} · ${modelTierLabel(workerAllocation.data.tier)} · ${modelSourceLabel(workerAllocation.data.source)}`}</p>
           <p>自动演进：{autoRefine === undefined
             ? '等待 Prime 触发条件'
-            : <>{eventLabel(autoRefine.type)}{autoRefine.data.model === undefined ? '' : ` · ${String(autoRefine.data.operatorId ?? 'N/A')}/${String(autoRefine.data.model)}`}</>}</p>
+            : <>{eventLabel(autoRefine.type)}{autoRefine.data.model === undefined ? '' : ` · ${eventValue(autoRefine, 'operatorId')}/${eventValue(autoRefine, 'model')}`}</>}</p>
         </>
         : <p>本 Run 不创建 RLM Session，不挂载 typescript_repl，也不递归启动子 Agent。</p>}
     </div>
@@ -392,8 +403,8 @@ function EventTimeline(props: {
       ? <p className="dshDesktopOrchestrationEmpty">选择任务查看事件。</p>
       : props.events.length === 0
         ? <p className="dshDesktopOrchestrationEmpty">还没有编排事件。</p>
-        : <ol>{[...props.events].reverse().slice(0, 40).map(event => {
-          const time = formatResidentTimestamp(event.time, props.generatedAt ?? event.time, timeZone)
+        : <ol>{[...props.events].reverse().slice(0, 40).map((event) => {
+          const time = formatLocalTimestamp(event.time, props.generatedAt ?? event.time, timeZone)
           return <li key={event.sequence}>
             <time title={time.absolute}>{time.relative}</time>
             <strong>{eventLabel(event.type)}</strong>
@@ -419,69 +430,69 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
   if (event.type === 'run.started') {
     const admission = event.data.admission as { policy?: string } | null | undefined
     const policy = admission?.policy
-    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' ? policy : undefined)} · 并行上限 ${String(event.data.maxParallel ?? 'N/A')}`
+    return `${collaborationPolicyLabel(policy === 'auto' || policy === 'direct' || policy === 'codex' || policy === 'claude-code' ? policy : undefined)} · 并行上限 ${eventValue(event, 'maxParallel')}`
   }
   if (event.type === 'model.allocated') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)} · 配额池 ${String(event.data.quotaPoolId ?? 'N/A')}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'model')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)} · 配额池 ${eventValue(event, 'quotaPoolId')}`
   }
   if (event.type === 'harness.snapshot') {
-    return `${String(event.data.scope ?? 'N/A')} · generation ${String(event.data.generation ?? 'N/A')} · ${String(event.data.entryCount ?? 0)} 条`
+    return `${eventValue(event, 'scope')} · generation ${eventValue(event, 'generation')} · ${eventValue(event, 'entryCount', '0')} 条`
   }
   if (event.type.startsWith('harness.auto_refine.')) {
     if (event.type === 'harness.auto_refine.applied') {
-      return `${String(event.data.operatorId ?? 'N/A')}/${String(event.data.model ?? 'N/A')} · refinement ${shortRef(String(event.data.refinementId ?? 'N/A'))} · generation ${String(event.data.appliedGeneration ?? 'N/A')}`
+      return `${eventValue(event, 'operatorId')}/${eventValue(event, 'model')} · refinement ${shortRef(eventValue(event, 'refinementId'))} · generation ${eventValue(event, 'appliedGeneration')}`
     }
-    if (event.type === 'harness.auto_refine.reviewed') return String(event.data.rationale ?? '模型审查完成，当前无需演进')
-    if (event.type === 'harness.auto_refine.failed') return `${String(event.data.phase ?? 'N/A')} · ${String(event.data.error ?? 'N/A')}`
-    if (event.type === 'harness.auto_refine.indeterminate') return `${String(event.data.phase ?? 'N/A')} · 需要显式确认，未自动重放`
-    return String(event.data.reason ?? '后台演进未执行')
+    if (event.type === 'harness.auto_refine.reviewed') return eventValue(event, 'rationale', '模型审查完成，当前无需演进')
+    if (event.type === 'harness.auto_refine.failed') return `${eventValue(event, 'phase')} · ${eventValue(event, 'error')}`
+    if (event.type === 'harness.auto_refine.indeterminate') return `${eventValue(event, 'phase')} · 需要显式确认，未自动重放`
+    return eventValue(event, 'reason', '后台演进未执行')
   }
   if (event.type === 'rlm.resolved') {
-    return `${event.data.enabled === true ? '已启用' : '直接执行'} · ${String(event.data.reason ?? 'N/A')} · ${shortRef(String(event.data.planSha256 ?? 'N/A'))}`
+    return `${event.data.enabled === true ? '已启用' : '直接执行'} · ${eventValue(event, 'reason')} · ${shortRef(eventValue(event, 'planSha256'))}`
   }
   if (event.type === 'rlm.worker.allocated') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'model')} · ${modelTierLabel(event.data.tier)} · ${modelSourceLabel(event.data.source)}`
   }
   if (event.type === 'rlm.root.dispatched') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · Session ${shortRef(String(event.data.runtimeSessionId ?? 'N/A'))}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'model')} · Session ${shortRef(eventValue(event, 'runtimeSessionId'))}`
   }
   if (event.type === 'rlm.child.dispatched') {
-    return `深度 ${String(event.data.depth ?? 'N/A')} · ${String(event.data.name ?? 'child')} · ${String(event.data.operatorId ?? 'N/A')}/${String(event.data.model ?? 'N/A')}`
+    return `深度 ${eventValue(event, 'depth')} · ${eventValue(event, 'name', 'child')} · ${eventValue(event, 'operatorId')}/${eventValue(event, 'model')}`
   }
   if (event.type === 'rlm.child.settled') {
-    return `${String(event.data.childId ?? 'child')} · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `${eventValue(event, 'childId', 'child')} · Artifact ${shortRef(eventValue(event, 'artifactRef'))} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type.startsWith('rlm.message.continuation.')) {
-    return `Agent 消息已续接 · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `Agent 消息已续接 · Artifact ${shortRef(eventValue(event, 'artifactRef'))} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type.startsWith('rlm.goal.continuation.')) {
-    return `Goal 自动续接 · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `Goal 自动续接 · Artifact ${shortRef(eventValue(event, 'artifactRef'))} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type.startsWith('rlm.heartbeat.continuation.')) {
-    return `Heartbeat 定时续接 · Artifact ${shortRef(String(event.data.artifactRef ?? 'N/A'))} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `Heartbeat 定时续接 · Artifact ${shortRef(eventValue(event, 'artifactRef'))} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type === 'rlm.execution.settled') {
-    return `${String(event.data.childCount ?? 0)} 个直接子 Agent · state rev ${String(event.data.stateRevision ?? 0)} · ${String(event.data.stopReason ?? 'N/A')}`
+    return `${eventValue(event, 'childCount', '0')} 个直接子 Agent · state rev ${eventValue(event, 'stateRevision', '0')} · ${eventValue(event, 'stopReason')}`
   }
   if (event.type === 'capsule.resolved') {
     return event.data.cleanContext === true ? 'Clean-task Context Capsule 已注入' : 'Capsule 未确认干净上下文'
   }
   if (event.type === 'execution_plan.sealed') {
-    return `Task Contract ${shortRef(String(event.data.taskContractRef ?? 'N/A'))} · Plan ${shortRef(String(event.data.ref ?? 'N/A'))}`
+    return `Task Contract ${shortRef(eventValue(event, 'taskContractRef'))} · Plan ${shortRef(eventValue(event, 'ref'))}`
   }
   if (event.type === 'node.dispatched') {
     if (event.data.executor === 'resident-rlm') {
-      return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.model ?? 'N/A')} · DSH 控制的 Resident RLM`
+      return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'model')} · DSH 控制的 Resident RLM`
     }
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.contextIsolation ?? 'N/A')} · lane ${shortRef(String(event.data.laneId ?? 'N/A'))}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'contextIsolation')} · lane ${shortRef(eventValue(event, 'laneId'))}`
   }
   if (event.type === 'node.operator.progress') {
-    return `${String(event.data.operatorId ?? 'N/A')} · ${operatorProgressLabel(String(event.data.phase ?? 'unknown'))}`
+    return `${eventValue(event, 'operatorId')} · ${operatorProgressLabel(eventValue(event, 'phase', 'unknown'))}`
   }
   if (event.type === 'node.evidence.accepted' || (event.type === 'node.failed' && typeof event.data.outputPreview === 'string')) {
-    const output = String(event.data.outputPreview ?? '')
+    const output = eventValue(event, 'outputPreview', '')
     const truncated = event.data.outputTruncated === true ? '\n…输出已截断，完整结果保留在 Evidence 产物中。' : ''
-    return `${String(event.data.operatorId ?? 'N/A')} · ${String(event.data.stopReason ?? 'N/A')} · Evidence ${shortRef(String(event.data.evidenceRef ?? 'N/A'))}\n${output}${truncated}`
+    return `${eventValue(event, 'operatorId')} · ${eventValue(event, 'stopReason')} · Evidence ${shortRef(eventValue(event, 'evidenceRef'))}\n${output}${truncated}`
   }
   if (event.type === 'scheduler.waiting.updated') {
     const waiting = Array.isArray(event.data.waiting)
@@ -495,13 +506,24 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
       : []
     return waiting.length > 0
       ? waiting.join('；')
-      : `运行中 ${String(event.data.activeWorkers ?? 0)}/${String(event.data.effectiveParallelism ?? event.data.maxParallel ?? 'N/A')}`
+      : `运行中 ${eventValue(event, 'activeWorkers', '0')}/${displayEventValue(event.data.effectiveParallelism, displayEventValue(event.data.maxParallel))}`
   }
   return ''
 }
 
+function eventValue(event: DesktopOrchestrationEvent, key: string, fallback = 'N/A'): string {
+  return displayEventValue(event.data[key], fallback)
+}
+
+function displayEventValue(value: unknown, fallback = 'N/A'): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return fallback
+}
+
 function modelTierLabel(value: unknown): string {
-  return ({ low: '低阶', medium: '中阶', high: '高阶' } as Record<string, string>)[String(value)] ?? '待解析'
+  return ({ low: '低阶', medium: '中阶', high: '高阶' } as Record<string, string>)[displayEventValue(value, '')] ?? '待解析'
 }
 
 function rlmModeLabel(value: DesktopOrchestrationNode['rlm']): string {
@@ -512,7 +534,7 @@ function modelSourceLabel(value: unknown): string {
   return ({
     'native-subscription': '订阅套餐',
     'metered-api': '按量 API',
-  } as Record<string, string>)[String(value)] ?? '来源待解析'
+  } as Record<string, string>)[displayEventValue(value, '')] ?? '来源待解析'
 }
 
 function operatorProgressLabel(phase: string): string {

@@ -1,6 +1,7 @@
 /** Persistent device authentication service for the DSH Server role. */
 
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto'
+import type { IncomingMessage } from 'node:http'
 import { join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -23,6 +24,57 @@ export interface RemotePrincipal {
   readonly deviceId: string
   readonly deviceName: string
   readonly scope: RemoteDeviceScope
+}
+
+/** Authority resolved for one local or paired-device HTTP request. */
+export interface RemoteRequestAuthority {
+  readonly local: boolean
+  readonly scope: RemoteDeviceScope
+  readonly principal?: RemotePrincipal
+}
+
+function firstHeader(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (!Array.isArray(value)) return undefined
+  return typeof value[0] === 'string' ? value[0] : undefined
+}
+
+function loopbackAddress(value: string | undefined): boolean {
+  return value === '127.0.0.1' || value === '::1' || value === '::ffff:127.0.0.1'
+}
+
+function loopbackAuthority(value: string | undefined): boolean {
+  if (value === undefined) return false
+  try {
+    const url = new URL(value.includes('://') ? value : `http://${value}`)
+    return url.hostname === '127.0.0.1' || url.hostname === '[::1]' || url.hostname === 'localhost'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Resolve a loopback owner request or one authenticated remote device request.
+ * Loopback is accepted only when peer, Host, and optional Origin all remain local.
+ * @param request - HTTP request whose peer and authentication headers are checked.
+ * @param auth - optional persistent remote-device authentication authority.
+ * @returns the resolved local or remote authority, or undefined when authentication fails.
+ */
+export function authorizeRemoteRequest(
+  request: Pick<IncomingMessage, 'headers' | 'socket'>,
+  auth: Pick<RemoteAuthService, 'authenticate'> | undefined,
+): RemoteRequestAuthority | undefined {
+  const host = firstHeader(request.headers.host)
+  const origin = firstHeader(request.headers.origin)
+  if (loopbackAddress(request.socket.remoteAddress)
+    && loopbackAuthority(host)
+    && (origin === undefined || loopbackAuthority(origin))) {
+    return { local: true, scope: 'admin' }
+  }
+  const authorization = firstHeader(request.headers.authorization)
+  const token = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined
+  const principal = token === undefined ? undefined : auth?.authenticate(token)
+  return principal === undefined ? undefined : { local: false, scope: principal.scope, principal }
 }
 
 /** One-time local pairing challenge. */

@@ -25,6 +25,7 @@
     "@deepseek-ai/dsh-physical-operator-resident": "workspace:^",
     "@deepseek-ai/dsh-resident-operator": "workspace:^",
     "@deepseek-ai/dsh-resident-operator-local": "workspace:^",
+    "@deepseek-ai/dsh-ui-physical-operator": "workspace:^",
     "@deepseek-ai/dsh-subagent-claude-code": "workspace:^",
     "@deepseek-ai/dsh-subagent-codex": "workspace:^",
     "@deepseek-ai/dsh-tool-physical-operator": "workspace:^"

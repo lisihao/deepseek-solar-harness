@@ -22,6 +22,7 @@ const notePaths = [`${noteDirectory}/${noteName}.md`, `${noteDirectory}/${noteNa
 const noteRecordPath = `${noteDirectory}/${noteName}.i18n.yaml`
 const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-atomic-write',
+  '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-home-paths',
   '@deepseek-ai/dsh-physical-operator',
   '@deepseek-ai/dsh-physical-operator-resident',
@@ -33,6 +34,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-client-ui-sidebar',
   '@deepseek-ai/dsh-client-ui-remote-modules',
   '@deepseek-ai/dsh-host-apiproxy',
+  '@deepseek-ai/dsh-host-remote-auth',
   '@deepseek-ai/dsh-session-projection-cache',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
@@ -58,6 +60,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-orchestration-local',
   '@deepseek-ai/dsh-tool-orchestration',
   '@deepseek-ai/dsh-ui-orchestration',
+  '@deepseek-ai/dsh-ui-physical-operator',
   '@deepseek-ai/dsh-orchestrations',
 ])
 

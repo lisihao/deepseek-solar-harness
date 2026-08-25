@@ -181,7 +181,7 @@ settleCommand( deviceId: string, commandId: string, requestHash: string, respons
 markCommandIndeterminate(deviceId: string, commandId: string, requestHash: string): Promise<void>
 ```
 
-Source: [`packages/host/remote-auth/src/index.ts:113`](../../packages/host/remote-auth/src/index.ts)
+Source: [`packages/host/remote-auth/src/index.ts:165`](../../packages/host/remote-auth/src/index.ts)
 
 <a id="credentials-events"></a>
 

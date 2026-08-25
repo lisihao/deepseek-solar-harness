@@ -170,6 +170,9 @@ describe('desktop profile composition', () => {
         expect.objectContaining({ id: 'claude-code', residentProvider: 'claude-code' }),
       ]) }),
     }))
+    expect(rows.find(row => row.id === 'ui-physical-operator')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-ui-physical-operator',
+    }))
     expect(rows.find(row => row.id === 'orchestration-local')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-orchestration-local',
       config: expect.objectContaining({ autoStart: true }),
@@ -317,6 +320,7 @@ describe('desktop profile composition', () => {
       config: expect.objectContaining({ memberPersonaPlacement: 'prompt' }),
     }))
     expect(rows.filter(row => row.id === 'resident-operators')).toHaveLength(1)
+    expect(rows.filter(row => row.id === 'ui-physical-operator')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'orchestration-local')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'remote-web-ui')).toHaveLength(1)
     expect(rows.filter(row => row.id === 'ui-remote-modules')).toHaveLength(1)

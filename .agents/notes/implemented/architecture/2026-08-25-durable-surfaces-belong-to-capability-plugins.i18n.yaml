@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-25-durable-surfaces-belong-to-capability-plugins.md
+2026-08-25-durable-surfaces-belong-to-capability-plugins.md: b006c107c6b8c94c224960eadc70052ee3d1f3d4
+2026-08-25-durable-surfaces-belong-to-capability-plugins.zh.md: 65964ee21aa841c1b654cdbd8f59d89b45202e17
