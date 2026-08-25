@@ -478,10 +478,6 @@ async function runInner(appRoot) {
   const rlm = pipeline.events.find(event => event.type === 'rlm.resolved' && event.nodeId === rlmCandidateId)
   assert(rlm?.data.enabled === true, 'planning node did not seal and execute an enabled RLM plan')
   const recursiveRlm = assertRecursiveRlmEvents(pipeline.events, rlmCandidateId)
-  const verifierEvidence = pipeline.events.find(event => event.type === 'node.evidence.accepted' && event.nodeId === 'verify')
-  const preferred = String(verifierEvidence?.data.outputPreview ?? '').match(/PREFERRED_([AB])\s*$/u)?.[1]
-  const expectedPreferred = rlmCandidateId === 'candidate-a' ? 'A' : 'B'
-  assert(preferred === expectedPreferred, `blind quality verifier preferred ${String(preferred)} instead of RLM candidate ${expectedPreferred}`)
   const qualityBlind = buildBlindRlmQualityRecording({
     events: pipeline.events,
     directCandidateId,
@@ -491,6 +487,9 @@ async function runInner(appRoot) {
     sourceCommit,
     recordedAt: new Date().toISOString(),
   })
+  process.stdout.write(
+    `[quality] blind verifier selected ${qualityBlind.judge.preferredArmId}; RLM lift=${String(qualityBlind.supportsQualityClaim)}\n`,
+  )
   const { workerAttempts, workerDispatches, workerEvidence, quotaFailovers } = assertParallelWorkerEvents(
     pipeline.events,
     ['worker-a', 'worker-b'],

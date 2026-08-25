@@ -72,6 +72,24 @@ describe('installed orchestration E2E event assertions', () => {
     })
   })
 
+  it('freezes a real blind loss without inventing an RLM quality claim', () => {
+    const recording = buildBlindRlmQualityRecording({
+      events: [
+        { sequence: 2, type: 'node.evidence.accepted', nodeId: 'candidate-a', data: { evidenceRef: 'sha256:a', outputPreview: 'recursive' } },
+        { sequence: 3, type: 'node.evidence.accepted', nodeId: 'candidate-b', data: { evidenceRef: 'sha256:b', outputPreview: 'direct' } },
+        { sequence: 4, type: 'node.evidence.accepted', nodeId: 'verify', data: { evidenceRef: 'sha256:v', outputPreview: 'review\nPREFERRED_B' } },
+      ],
+      directCandidateId: 'candidate-b',
+      rlmCandidateId: 'candidate-a',
+      nonce: 'bd686856',
+      productVersion: '3.6.1',
+      sourceCommit: 'b'.repeat(40),
+      recordedAt: '2026-08-26T00:00:00.000Z',
+    }) as { passed: boolean, supportsQualityClaim: boolean }
+
+    expect(recording).toMatchObject({ passed: false, supportsQualityClaim: false })
+  })
+
   it('accepts parallel workers that retry on a different quota pool', () => {
     const events = [
       { sequence: 1, nodeId: 'worker-a', attempt: 0, type: 'model.allocated', data: { quotaPoolId: 'spark' } },
