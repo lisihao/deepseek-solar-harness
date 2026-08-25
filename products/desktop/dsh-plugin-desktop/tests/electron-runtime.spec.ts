@@ -297,6 +297,32 @@ describe('Electron compatibility runtime', () => {
     expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
   })
 
+  it('keeps the native shell alive and reconnects after the initial URL is unavailable', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+      electron.loadURL
+        .mockRejectedValueOnce(new Error('ERR_CONNECTION_REFUSED'))
+        .mockResolvedValueOnce(undefined)
+      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+      const runtime = new ElectronDesktopRuntime(async () => {})
+      const release = runtime.schedule({ ...spec, retryUnavailableNavigation: true })
+
+      await expect(runtime.mountScheduled()).resolves.toBeUndefined()
+      expect(electron.browserWindows[0]?.destroy).not.toHaveBeenCalled()
+      expect(electron.trays).toHaveLength(1)
+      expect(electron.loadURL).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(electron.loadURL).toHaveBeenCalledTimes(2)
+      expect(electron.loadURL).toHaveBeenLastCalledWith(spec.url)
+
+      await release()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('injects a memory-only remote token for the configured origin and removes the hook', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')

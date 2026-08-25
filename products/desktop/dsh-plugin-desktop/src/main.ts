@@ -232,6 +232,7 @@ async function start(): Promise<void> {
           url: renderer.href,
           productName: PRODUCT_NAME,
           windowTitle: 'Remote Frontend',
+          retryUnavailableNavigation: true,
           iconPath: desktopAssetPath(process.platform === 'darwin' ? 'app-icon-mac.png' : 'app-icon.png'),
           trayIcons: {
             templatePath: desktopAssetPath('tray-iconTemplate.png'),

@@ -581,8 +581,25 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
     show()
     let tray: Tray | undefined
+    let navigationRetry: NodeJS.Timeout | undefined
+    const scheduleNavigationRetry = (): void => {
+      if (navigationRetry !== undefined || window.isDestroyed()) return
+      navigationRetry = setTimeout(() => {
+        navigationRetry = undefined
+        if (window.isDestroyed()) return
+        void window.loadURL(spec.url).catch(() => { scheduleNavigationRetry() })
+      }, 2_000)
+    }
     try {
-      await window.loadURL(spec.url)
+      try {
+        await window.loadURL(spec.url)
+      } catch (cause) {
+        if (spec.retryUnavailableNavigation !== true) throw cause
+        process.stderr.write(
+          `dsh-plugin-desktop: Desktop navigation unavailable; retrying: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+        scheduleNavigationRetry()
+      }
       tray = new Tray(prepareTrayIcon(spec.trayIcons, this.platform))
       this.tray = tray
       tray.setToolTip(spec.productName)
@@ -592,6 +609,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     } catch (cause) {
       app.off('activate', show)
       window.off('page-title-updated', preserveBlankTitle)
+      if (navigationRetry !== undefined) clearTimeout(navigationRetry)
       tray?.off('click', show)
       tray?.destroy()
       window.destroy()
@@ -618,6 +636,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       window.off('page-title-updated', preserveBlankTitle)
       window.webContents.off('will-frame-navigate', navigate)
       window.webContents.off('will-redirect', navigate)
+      if (navigationRetry !== undefined) clearTimeout(navigationRetry)
       mountedTray.off('click', show)
       mountedTray.destroy()
       if (remoteAccess !== undefined) {
