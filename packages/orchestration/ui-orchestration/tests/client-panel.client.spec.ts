@@ -5,10 +5,22 @@ import {
   eventDetail,
   loadOrchestrationDashboard,
 } from '../src/client/OrchestrationsPanel.tsx'
+import { formatLocalTimestamp } from '../src/client/timestamp.ts'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('orchestration Desktop panel transport', () => {
+  it('renders canonical timestamps in the browser-selected zone', () => {
+    expect(formatLocalTimestamp(
+      '2026-08-16T23:18:28.617Z',
+      '2026-08-17T01:05:03.000Z',
+      'America/Toronto',
+    )).toEqual({
+      absolute: '今天 19:18:28 GMT-4',
+      relative: '1 小时 46 分钟前',
+    })
+  })
+
   it('loads a selected run from the same-origin bounded projection', async () => {
     const dashboard = { generatedAt: '2026-08-18T00:00:00.000Z', runs: [], diagnosticRunCount: 0, diagnosticsIncluded: true, selectedRunId: 'run-1', events: [] }
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => (

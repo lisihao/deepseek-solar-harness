@@ -10,8 +10,10 @@ export function formatLocalTimestamp(
   nowValue: string,
   timeZone: string,
 ): { absolute: string; relative: string } {
-  const [date, now] = [value, nowValue].map(candidate => new Date(candidate))
-  const [timestamp, reference] = [date.getTime(), now.getTime()]
+  const date = new Date(value)
+  const referenceDate = new Date(nowValue)
+  const timestamp = date.getTime()
+  const reference = referenceDate.getTime()
   if (![timestamp, reference].every(Number.isFinite)) {
     return { absolute: '时间不可用', relative: '时间不可用' }
   }
@@ -35,7 +37,7 @@ export function formatLocalTimestamp(
   }).format(candidate)
   const clock = `${fields.hour}:${fields.minute}:${fields.second} ${fields.timeZoneName}`
   return {
-    absolute: day(date) === day(now) ? `今天 ${clock}` : `${fields.year}-${fields.month}-${fields.day} ${clock}`,
+    absolute: day(date) === day(referenceDate) ? `今天 ${clock}` : `${fields.year}-${fields.month}-${fields.day} ${clock}`,
     relative: elapsedLabel(timestamp, reference),
   }
 }
