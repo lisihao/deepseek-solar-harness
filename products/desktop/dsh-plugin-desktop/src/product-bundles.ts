@@ -5,6 +5,7 @@ export const ORCHESTRATION_BUNDLE_PACKAGE = '@deepseek-ai/dsh-orchestrations'
 export const AGENT_TEAMS_PACKAGE = '@nanmicoder/dsh-agent-teams'
 export const AGENT_TEAMS_ROW_ID = 'agent-teams'
 export const REMOTE_WEB_UI_PACKAGE = '@linxin666/dsh-remote-web-ui'
+export const BLUE_FANTASY_SKIN_PACKAGE = '@linxin666/dsh-client-ui-skin-blue-fantasy'
 export const LIANGSHEN_PACKAGE = '@linxin666/dsh-liangshen'
 export const LIANGSHEN_ROW_ID = 'liangshen'
 export const WEB_BILLING_PACKAGE = 'dsh-web-billing'
@@ -75,5 +76,6 @@ export const PRODUCT_BUNDLE_PACKAGES = [
 /** App-sealed runtime packages that must stay version-aligned with product bundles. */
 export const SEALED_RUNTIME_PACKAGES = [
   ...PRODUCT_BUNDLE_PACKAGES,
+  BLUE_FANTASY_SKIN_PACKAGE,
   HOST_APIPROXY_PACKAGE,
 ] as const

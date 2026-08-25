@@ -5619,6 +5619,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@linxin666/dsh-client-ui-skin-blue-fantasy@file:./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-client-ui-skin-blue-fantasy-0.1.17.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.1.17
+  resolution: "@linxin666/dsh-client-ui-skin-blue-fantasy@file:./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-client-ui-skin-blue-fantasy-0.1.17.tgz#./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-client-ui-skin-blue-fantasy-0.1.17.tgz::hash=575d48&locator=deepseek-harness-desktop%40workspace%3A."
+  checksum: 10c0/8f0e6c817e0eabcf404439cd5892b0f7050e823ddaac022a1722d25fe10f0cdebf2cdb6c722feefae00f12dbe52e9b27adbd375ae7d550b5c23914e7cf43e792
+  languageName: node
+  linkType: hard
+
 "@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz::locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop":
   version: 0.1.19
   resolution: "@linxin666/dsh-liangshen@file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz#vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz::hash=14fcd8&locator=dsh-plugin-desktop%40workspace%3Adsh-plugin-desktop"
@@ -9032,6 +9039,7 @@ __metadata:
     "@deepseek-ai/dsh-workflow": "npm:0.1.0-rc.6"
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     "@electron/asar": "npm:3.4.1"
+    "@linxin666/dsh-client-ui-skin-blue-fantasy": "file:vendor/dsh-packages/linxin666-dsh-client-ui-skin-blue-fantasy-0.1.17.tgz"
     "@linxin666/dsh-liangshen": "file:vendor/dsh-packages/linxin666-dsh-liangshen-0.1.19.tgz"
     "@linxin666/dsh-remote-web-ui": "file:vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz"
     "@lisihao/dsh-code-harness-governance": "file:vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.12.tgz"
