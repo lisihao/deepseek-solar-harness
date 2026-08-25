@@ -76,6 +76,7 @@ const electron = vi.hoisted(() => {
     setWindowOpenHandler: vi.fn(),
     session: {
       webRequest: {
+        onBeforeRequest: vi.fn(),
         onBeforeSendHeaders: vi.fn(),
       },
     },
@@ -320,6 +321,43 @@ describe('Electron compatibility runtime', () => {
     listener({ requestHeaders: { Accept: 'text/html' } }, callback)
     expect(callback).toHaveBeenCalledWith({
       requestHeaders: { Accept: 'text/html', Authorization: 'Bearer short-lived' },
+    })
+    await release()
+    expect(hook.mock.calls.at(-1)?.[1]).toBeNull()
+  })
+
+  it('redirects the remote global billing snapshot through the local history bridge', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule({
+      ...spec,
+      url: 'http://127.0.0.1:43120/?dsh-deployment-role=frontend',
+      frontendBilling: {
+        origin: 'http://127.0.0.1:43120',
+        baseline: {
+          calls: 415,
+          cost: 11.6173779,
+          costUsd: 1.697263652,
+          inputTokens: 2_043_980,
+          cacheReadTokens: 23_318_912,
+          outputTokens: 200_035,
+        },
+      },
+    })
+    await runtime.mountScheduled()
+    const hook = electron.browserWindows[0]!.webContents.session.webRequest.onBeforeRequest
+    expect(hook.mock.calls[0]?.[0]).toEqual({
+      urls: ['http://127.0.0.1:43120/billing/state*'],
+    })
+    const listener = hook.mock.calls[0]?.[1] as (
+      details: unknown,
+      callback: (value: { redirectURL: string }) => void,
+    ) => void
+    const callback = vi.fn()
+    listener({}, callback)
+    expect(callback).toHaveBeenCalledWith({
+      redirectURL: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]+$/),
     })
     await release()
     expect(hook.mock.calls.at(-1)?.[1]).toBeNull()

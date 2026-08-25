@@ -291,13 +291,14 @@ window.__ModuleLoader__.load({
 					refreshSession(sessionId);
 				}
 			}, [refreshSession, sessionId]);
-			const serverTotals = view.value?.totals;
-			const localBaseline = readFrontendLocalBaseline();
+			const desktopFrontend = view.value?.desktopFrontend;
+			const serverTotals = desktopFrontend?.serverTotals ?? view.value?.totals;
+			const localBaseline = desktopFrontend?.baseline ?? readFrontendLocalBaseline();
 			const emptyTotals = {
 				calls: 0, cost: 0, costUsd: 0, costNominal: 0, costNominalUsd: 0,
 				savings: 0, savingsUsd: 0, inputTokens: 0, cacheReadTokens: 0, outputTokens: 0
 			};
-			const totals = localBaseline === void 0 ? serverTotals : {
+			const totals = desktopFrontend !== void 0 ? view.value?.totals : localBaseline === void 0 ? serverTotals : {
 				...(serverTotals ?? emptyTotals),
 				calls: (serverTotals?.calls ?? 0) + localBaseline.calls,
 				cost: (serverTotals?.cost ?? 0) + localBaseline.cost,

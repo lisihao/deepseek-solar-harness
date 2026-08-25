@@ -9056,7 +9056,7 @@ __metadata:
     dsh-codegraph: "file:vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz"
     dsh-llm-fallbacks: "file:vendor/dsh-packages/dsh-llm-fallbacks-0.3.3-solar.1.tgz"
     dsh-mnemon: "file:vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz"
-    dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.4.tgz"
+    dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.5.tgz"
     electron: "npm:43.4.0"
     electron-builder: "npm:26.15.3"
     node-addon-require-builtin: "npm:^0.1.4"
@@ -9078,16 +9078,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.4.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
-  version: 1.1.4
-  resolution: "dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.4.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.4.tgz::hash=729208&locator=deepseek-harness-desktop%40workspace%3A."
+"dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 1.1.5
+  resolution: "dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.5.tgz::hash=2568f6&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-home-paths": "npm:^0.1.0-rc.6"
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-invariants": ">=0.1.0-rc.6 <0.2.0"
-  checksum: 10c0/9fb16fcf9fd1ddcfa58fab42c250cd274dcda3db54b5ed37156b6ad72a5a5339939f8dfde53a12225d689a9564d8d1e2f6d94c1f604603825d4a4dbbe7149951
+  checksum: 10c0/dce04e75212d24537c0c52156bfc161b3bffc6df9abdecffe196cdf60cd0ba60ce16d838b31e8be6945fc8804fe84af7ee171f31f4401c7d9bee2f9c30289bf5
   languageName: node
   linkType: hard
 

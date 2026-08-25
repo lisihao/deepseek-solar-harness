@@ -82,7 +82,7 @@ describe('installed orchestration E2E event assertions', () => {
       directCandidateId: 'candidate-b',
       rlmCandidateId: 'candidate-a',
       nonce: 'bd686856',
-      productVersion: '3.6.1',
+      productVersion: '3.6.2',
       sourceCommit: 'b'.repeat(40),
       recordedAt: '2026-08-26T00:00:00.000Z',
     }) as { passed: boolean, supportsQualityClaim: boolean }

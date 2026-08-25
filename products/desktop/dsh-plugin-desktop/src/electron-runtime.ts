@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
+import { startFrontendBillingBridge, type FrontendBillingBridge } from './frontend-billing.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import type {
   DesktopDeploymentAdapter,
@@ -492,6 +493,33 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         },
       )
     }
+    const frontendBilling = spec.frontendBilling
+    let billingBridge: FrontendBillingBridge | undefined
+    const billingFilter = frontendBilling === undefined
+      ? undefined
+      : { urls: [`${frontendBilling.origin}/billing/state*`] }
+    try {
+      if (frontendBilling !== undefined && billingFilter !== undefined) {
+        if (new URL(spec.url).origin !== frontendBilling.origin) {
+          throw new Error('dsh-plugin-desktop: Frontend billing origin does not match the window URL')
+        }
+        billingBridge = await startFrontendBillingBridge({
+          origin: frontendBilling.origin,
+          baseline: frontendBilling.baseline,
+          ...(frontendBilling.accessToken === undefined ? {} : {
+            accessToken: frontendBilling.accessToken,
+          }),
+        })
+        window.webContents.session.webRequest.onBeforeRequest(
+          billingFilter,
+          (_details, callback) => { callback({ redirectURL: billingBridge!.url }) },
+        )
+      }
+    } catch (cause) {
+      window.destroy()
+      this.window = undefined
+      throw cause
+    }
 
     const show = (): void => { this.show() }
     const close = (event: Electron.Event): void => {
@@ -569,6 +597,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       window.destroy()
       this.tray = undefined
       this.window = undefined
+      if (billingFilter !== undefined) {
+        window.webContents.session.webRequest.onBeforeRequest(billingFilter, null)
+      }
+      await billingBridge?.close()
       throw cause
     }
 
@@ -594,6 +626,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
           null,
         )
       }
+      if (billingFilter !== undefined) {
+        window.webContents.session.webRequest.onBeforeRequest(billingFilter, null)
+      }
+      await billingBridge?.close()
       if (!window.isDestroyed()) window.destroy()
       if (this.tray === mountedTray) this.tray = undefined
       if (this.window === window) this.window = undefined

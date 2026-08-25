@@ -169,7 +169,7 @@ managed:
       - corepack pnpm --ignore-workspace run test
   - id: web-billing
     path: plugins/managed/web-billing
-    package: dsh-web-billing@1.1.4
+    package: dsh-web-billing@1.1.5
     source: https://github.com/lisihao/dsh-web-billing.git
     upstream: https://github.com/bpc-oss/dsh-web-billing.git
     source_branch: codex/expose-billing-scope

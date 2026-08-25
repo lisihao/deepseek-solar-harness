@@ -92,17 +92,18 @@ const totals = {
   outputTokens: 35027,
 }
 
-function renderBadge(Badge, dictionaries, { open = false, balance, pricing } = {}) {
+function renderBadge(Badge, dictionaries, { open = false, balance, pricing, desktopFrontend, globalTotals = totals } = {}) {
   const value = {
     displayCurrency: 'CNY',
     symbol: '¥',
     symbolUsd: '$',
-    totals,
+    totals: globalTotals,
     today: totals,
     month: totals,
     byModel: {},
     pricing: pricing ?? { mode: 'auto', activePolicy: null },
     balance: balance ?? { status: 'ready', balance: { cny: { total: 246.67, granted: 0, toppedUp: 246.67 }, usd: null } },
+    ...(desktopFrontend === undefined ? {} : { desktopFrontend }),
   }
   const t = key => dictionaries.zh[key] ?? key
   return Badge({
@@ -139,6 +140,35 @@ test('Frontend combines the MacBook history baseline with the current Server led
   assert.match(text, /费用.*¥11\.99/)
   assert.match(text, /MacBook 历史 ¥11\.62/)
   assert.match(text, /累计.*¥11\.99/)
+})
+
+test('Frontend accepts an Electron-bridged total without adding the local baseline twice', async () => {
+  const loaded = await loadBadge({ open: true })
+  const baseline = {
+    calls: 415,
+    cost: 11.6173779,
+    costUsd: 1.697263652,
+    inputTokens: 2043980,
+    cacheReadTokens: 23318912,
+    outputTokens: 200035,
+  }
+  const tree = renderBadge(loaded.Badge, loaded.dictionaries, {
+    open: true,
+    globalTotals: {
+      ...totals,
+      calls: totals.calls + baseline.calls,
+      cost: totals.cost + baseline.cost,
+      costUsd: totals.costUsd + baseline.costUsd,
+      inputTokens: totals.inputTokens + baseline.inputTokens,
+      cacheReadTokens: totals.cacheReadTokens + baseline.cacheReadTokens,
+      outputTokens: totals.outputTokens + baseline.outputTokens,
+    },
+    desktopFrontend: { baseline, serverTotals: totals },
+  })
+  const text = textOf(tree)
+  assert.match(text, /费用.*¥11\.99/)
+  assert.match(text, /MacBook 历史 ¥11\.62/)
+  assert.doesNotMatch(text, /¥23\.61/)
 })
 
 test('mounts the cumulative badge in the sidebar instead of the crowded composer surface', async () => {

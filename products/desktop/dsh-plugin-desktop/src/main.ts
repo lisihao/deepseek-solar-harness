@@ -223,9 +223,6 @@ async function start(): Promise<void> {
         renderer.searchParams.set('dsh-desktop-platform', process.platform)
         renderer.searchParams.set('dsh-desktop-version', runtime.updates.currentVersion)
         const billingBaseline = await readFrontendBillingBaseline()
-        if (billingBaseline !== undefined) {
-          renderer.searchParams.set('dsh-local-billing-baseline', JSON.stringify(billingBaseline))
-        }
         const release = runtime.schedule({
           mode: state.presentation,
           width: 1280,
@@ -244,6 +241,13 @@ async function start(): Promise<void> {
             remoteAccess: {
               origin: endpoint.origin,
               accessToken: () => access.accessToken(),
+            },
+          },
+          ...billingBaseline === undefined ? {} : {
+            frontendBilling: {
+              origin: endpoint.origin,
+              baseline: billingBaseline,
+              ...(access === undefined ? {} : { accessToken: () => access.accessToken() }),
             },
           },
           readThemeSource: () => 'system',

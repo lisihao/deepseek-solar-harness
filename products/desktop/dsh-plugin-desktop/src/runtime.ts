@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type { FrontendBillingBaseline } from './frontend-billing.ts'
 import type { UpdateCheckResult, UpdateRequest } from './update-checker.ts'
 
 /** Electron platforms supported by the DSH Desktop native adapter. */
@@ -139,6 +140,12 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   remoteAccess?: {
     readonly origin: string
     accessToken(): string
+  }
+  /** Local ledger retained while a remote Server owns the active browser page. */
+  frontendBilling?: {
+    readonly origin: string
+    readonly baseline: FrontendBillingBaseline
+    accessToken?(): string
   }
   /** Read the authoritative built-in theme preference after Host boot settles. */
   readThemeSource(): DesktopThemeSource
