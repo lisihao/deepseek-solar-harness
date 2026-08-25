@@ -10,6 +10,8 @@ The Electron executable is minimal bootstrap code. It acquires the single-instan
 
 Both presentation modes reuse the existing loopback Web carrier. The profile mounts the ordinary `dsh-base` and `dsh-web-app` bundles, the Host binds its HTTP and WebSocket surface to `127.0.0.1` on an ephemeral port, and Electron loads that same-origin page in a sandboxed renderer. There is no Electron-owned plugin roster, preload bridge, or raw Electron API in the renderer.
 
+The same package also provides `dsh-product-server`, a plain-Node Host adapter for remote deployments. Desktop and Product Server are generated from one sealed product composition and therefore load the same Resident, Orchestration, AgentTeams, Billing, Remote Modules, RLM/Continuous Harness, model-allocation, memory, governance, and product UI rows. Only Host adapter rows differ: Desktop owns Electron window, tray, terminal, profile, and updater effects; Product Server owns the persistent Web endpoint and pins the browser directory picker for remote clients. The ordinary `dsh server` command remains the upstream-compatible bare Server profile and is not the DSH Desktop product deployment.
+
 The desktop package has normal Host and Web Client faces. Its Client face validates the Host-supplied mode, platform, and product-version markers. Both modes mount one non-interactive, single-line product marker in a reserved strip below the window content and keep Desktop actions on the ordinary additive slots. Compatibility then stops before providing a layout service or root presentation; advanced mode installs the desktop layout service and root presentation described below. Third-party Web clients continue to use the ordinary DSH module graph in both modes.
 
 The tray profile selector lists existing profiles and the lazily available `desktop` and `web` defaults. A selectable profile directly composes `dsh-base` before `dsh-web-app`; headless, malformed, or already desktop-embedded profiles remain visible but disabled. `desktop` is the only launcher-managed profile: its installation-owned prefix is repaired while third-party bundle order is preserved. Every other selected profile keeps its manifest, user patch, and dependencies unchanged. The launcher inserts its own desktop layer after `dsh-web-app` for the active generation and never persists that layer in the selected bundle list.
@@ -111,6 +113,7 @@ The headless-safe launcher surfaces can be exercised without importing or starti
 ```sh
 node lib/bin.js --help
 node lib/bin.js --version
+node lib/product-server-bin.js --host 127.0.0.1 --port 3080 --trusted-host mini.example:3080
 ```
 
 ## Plugin workflow

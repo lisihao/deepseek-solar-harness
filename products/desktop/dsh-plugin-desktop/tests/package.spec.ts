@@ -44,11 +44,16 @@ describe('published package surface', () => {
     expect(manifest.bin).toEqual({
       'dsh-plugin-desktop': 'lib/bin.js',
       'dsh-desktop': 'lib/bin.js',
+      'dsh-product-server': 'lib/product-server-bin.js',
     })
   })
 
   it('exposes the Host plugin and desktop-owned client face', () => {
     expect(manifest.exports).toHaveProperty('./client')
+    expect(manifest.exports).toHaveProperty('./product-server', {
+      types: './lib/types/product-server.d.ts',
+      default: './lib/product-server.js',
+    })
     expect(manifest.exports).toHaveProperty('./windows-pwsh-sandbox', {
       types: './lib/types/windows-pwsh-sandbox.d.ts',
       default: './lib/windows-pwsh-sandbox.js',
@@ -175,6 +180,8 @@ describe('published package surface', () => {
     expect(config).toContain("'desktop-terminal': 'src/desktop-terminal.ts'")
     expect(config).toContain("'profile-manager': 'src/profile-manager.ts'")
     expect(config).toContain("'profile-service': 'src/profile-service.ts'")
+    expect(config).toContain("'product-server': 'src/product-server.ts'")
+    expect(config).toContain("entry: { 'product-server-bin': 'src/product-server-bin.ts' }")
     expect(config).toContain("pnpm: 'src/pnpm.ts'")
     expect(config).toContain("profiles: 'src/profiles.ts'")
     expect(config).toContain("terminal: 'src/terminal.ts'")

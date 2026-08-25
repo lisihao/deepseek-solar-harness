@@ -53,11 +53,17 @@ import type { DesktopShellMode } from './runtime.ts'
 /** Persistent profile managed by the desktop launcher and the ordinary dsh plugin command. */
 export const DESKTOP_PROFILE_NAME = 'desktop'
 
+/** Persistent profile owned by the headless product server launcher. */
+export const PRODUCT_SERVER_PROFILE_NAME = 'product-server'
+
 /** Standalone package name inserted through the launcher-owned desktop layer. */
 export const DESKTOP_PACKAGE_NAME = 'dsh-plugin-desktop'
 
-/** Empty include root rewritten before every profile boot. */
-export const DESKTOP_PROFILE_ROOT = 'cordis.yml'
+/** Empty include root rewritten before every product-profile boot. */
+export const PRODUCT_PROFILE_ROOT = 'cordis.yml'
+
+/** Existing Desktop-facing name retained for package compatibility. */
+export const DESKTOP_PROFILE_ROOT = PRODUCT_PROFILE_ROOT
 
 const BIN_NAME = DESKTOP_PACKAGE_NAME
 const REQUIRED_BUNDLES = requiredWebBundles()
@@ -68,12 +74,14 @@ const DIRECTORY_PICKER_ROW_ID = 'directory-picker'
 const AUTO_PICKER_PACKAGE = '@deepseek-ai/dsh-host-directory-picker-auto'
 const BROWSE_PICKER_BACKEND = '@deepseek-ai/dsh-host-directory-picker-browse'
 const BROWSE_PICKER_SURFACE = '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+const SERVER_BROWSE_PICKER_HOST_ROW_ID = 'product-server-directory-picker-browse-host'
+const SERVER_BROWSE_PICKER_SURFACE_ROW_ID = 'product-server-directory-picker-browse-surface'
 const PWSH_SANDBOX_ROW_ID = 'pwsh-sandbox'
 const UPSTREAM_PWSH_SANDBOX_PACKAGE = '@deepseek-ai/dsh-pwsh-sandbox'
 const DESKTOP_WINDOWS_PWSH_SANDBOX_ROW_ID = 'desktop-windows-pwsh-sandbox'
 const DESKTOP_WINDOWS_PWSH_SANDBOX_PACKAGE = 'dsh-plugin-desktop/windows-pwsh-sandbox'
 const DEFAULT_DESKTOP_SHELL_MODE: DesktopShellMode = 'compatibility'
-const DESKTOP_MODULE_BASE_DIR = '.dsh-desktop-runtime'
+const PRODUCT_MODULE_BASE_DIR = '.dsh-product-runtime'
 const SETTINGS_FILE_PACKAGE = '@deepseek-ai/dsh-settings-file'
 const DESKTOP_SETTINGS_NAMESPACE = 'dsh-desktop'
 const UI_LAYOUT_PACKAGE = '@deepseek-ai/dsh-client-ui-layout'
@@ -150,8 +158,8 @@ function requiredWebBundles(): string[] {
   return [...bundles]
 }
 
-/** Prepared profile inputs consumed by app-boot. */
-export interface PreparedDesktopProfile {
+/** Shared product-profile inputs consumed by app-boot. */
+export interface PreparedProductProfile {
   /** Harness home shared by the launcher and generated command environment. */
   homeDir: string
   /** Resolved profile and its persistent user layer. */
@@ -160,11 +168,17 @@ export interface PreparedDesktopProfile {
   rootConfig: string
   /** Profile-owned parent URL used to resolve bare Cordis plugin packages. */
   bareModuleBaseUrl: string
-  /** Complete ordered patch list for this desktop generation. */
+  /** Complete ordered patch list for this product generation. */
   patches: PatchOptions[]
-  /** Persisted shell mode applied after every user-owned patch. */
+  /** Persisted presentation mode applied to browser rows and, on Desktop, the native shell. */
   mode: DesktopShellMode
 }
+
+/** Product composition consumed by the Electron launcher. */
+export type PreparedDesktopProfile = PreparedProductProfile
+
+/** Product composition consumed by the headless server launcher. */
+export type PreparedProductServerProfile = PreparedProductProfile
 
 /**
  * Normalize the installation-owned prefix, retire removed product bundles,
@@ -172,7 +186,7 @@ export interface PreparedDesktopProfile {
  * @param current - current persistent bundle list.
  * @returns base, Web carrier, then every third-party bundle in prior order.
  */
-export function desktopBundleList(current: readonly string[]): string[] {
+export function productBundleList(current: readonly string[]): string[] {
   const thirdParty = current.filter(name => (
     !REQUIRED_BUNDLE_SET.has(name)
     && name !== DESKTOP_PACKAGE_NAME
@@ -181,18 +195,22 @@ export function desktopBundleList(current: readonly string[]): string[] {
   return [...REQUIRED_BUNDLES, ...thirdParty]
 }
 
+/** Existing Desktop-facing name retained for package compatibility. */
+export const desktopBundleList = productBundleList
+
 /** Return whether two ordered string lists are identical. */
 function sameList(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
 /**
- * Initialize or repair the persistent desktop profile.
+ * Initialize or repair one persistent product profile.
+ * @param profileName - profile identity owned by a product Host adapter.
  * @param home - Harness home containing the profiles directory.
  * @returns the absolute profile directory.
  */
-export function ensureDesktopProfile(home: string = resolveDshHome()): string {
-  const dir = resolveProfileDir(DESKTOP_PROFILE_NAME, home)
+function ensureProductProfile(profileName: string, home: string): string {
+  const dir = resolveProfileDir(profileName, home)
   if (!existsSync(join(dir, 'package.json'))) initProfile(dir, REQUIRED_BUNDLES)
   const manifest = readProfileManifest(BIN_NAME, dir)
   const rawBundles = (manifest.dsh?.profile as { bundles?: unknown } | undefined)?.bundles
@@ -201,7 +219,7 @@ export function ensureDesktopProfile(home: string = resolveDshHome()): string {
     throw new Error(`${BIN_NAME}: dsh.profile.bundles must be an array of package names`)
   }
   const current = rawBundles === undefined ? [] : rawBundles as string[]
-  const bundles = desktopBundleList(current)
+  const bundles = productBundleList(current)
   if (!sameList(current, bundles)) {
     writeProfileManifest(dir, {
       ...manifest,
@@ -217,6 +235,15 @@ export function ensureDesktopProfile(home: string = resolveDshHome()): string {
   return dir
 }
 
+export function ensureDesktopProfile(home: string = resolveDshHome()): string {
+  return ensureProductProfile(DESKTOP_PROFILE_NAME, home)
+}
+
+/** Initialize or repair the persistent headless product-server profile. */
+export function ensureProductServerProfile(home: string = resolveDshHome()): string {
+  return ensureProductProfile(PRODUCT_SERVER_PROFILE_NAME, home)
+}
+
 /** Resolve the agent presets shipped by the matching dsh CLI dependency. */
 function shippedPresetRoot(): string {
   const require = createRequire(import.meta.url)
@@ -224,7 +251,7 @@ function shippedPresetRoot(): string {
 }
 
 /** Resolve the Desktop-owned preset root from source or the unpacked application. */
-function desktopPresetRoot(): string {
+function productPresetRoot(): string {
   return unpackedAsarPath(fileURLToPath(new URL('../vendor/agent-presets', import.meta.url)))
 }
 
@@ -298,14 +325,17 @@ function ensureRuntimePackageLink(link: string, target: string): void {
  * sealed App first; ordinary packages continue through the selected profile's
  * own node_modules and then the installation fallback in profiles/node_modules.
  */
-function ensureDesktopModuleBase(profileDir: string): string {
-  const root = join(profileDir, DESKTOP_MODULE_BASE_DIR)
+function ensureProductModuleBase(profileDir: string, includeDesktopAdapter: boolean): string {
+  const root = join(profileDir, PRODUCT_MODULE_BASE_DIR)
   const modules = join(root, 'node_modules')
   mkdirSync(modules, { recursive: true })
   const packagePath = join(root, 'package.json')
-  writeFileSync(packagePath, '{"name":"dsh-desktop-runtime-base","private":true}\n')
+  writeFileSync(packagePath, '{"name":"dsh-product-runtime-base","private":true}\n')
   const require = createRequire(INSTALL_ANCHOR)
-  for (const packageName of [DESKTOP_PACKAGE_NAME, ...SEALED_RUNTIME_PACKAGES]) {
+  const packages = includeDesktopAdapter
+    ? [DESKTOP_PACKAGE_NAME, ...SEALED_RUNTIME_PACKAGES]
+    : [...SEALED_RUNTIME_PACKAGES]
+  for (const packageName of packages) {
     const target = packageName === DESKTOP_PACKAGE_NAME
       ? dirname(INSTALL_ANCHOR)
       : dirname(require.resolve(`${packageName}/package.json`))
@@ -337,33 +367,46 @@ function rowDisabledOnPlatform(row: EntryOptions, platform: NodeJS.Platform): bo
   return Boolean(evaluate({ process: scopedProcess }, row.disabled.__jsExpr))
 }
 
-/**
- * Load and compose one desktop profile generation.
- * @param telemetryDisabled - inherited DSH telemetry opt-out value.
- * @param home - Harness home containing profiles and the machine-wide patch.
- * @param platform - native platform selecting launcher-owned safety overlays.
- * @param profileName - existing or lazily available Web profile to compose.
- * @returns root config, profile metadata, and ordered patches.
- */
-export function prepareDesktopProfile(
-  telemetryDisabled: string | undefined = process.env.DSH_TELEMETRY_DISABLED,
-  home: string = resolveDshHome(),
-  platform: NodeJS.Platform = process.platform,
-  profileName: string = DESKTOP_PROFILE_NAME,
-): PreparedDesktopProfile {
+type ProductHostAdapter = 'desktop' | 'server'
+
+interface ProductProfileOptions {
+  telemetryDisabled: string | undefined
+  home: string
+  platform: NodeJS.Platform
+  profileName: string
+  adapter: ProductHostAdapter
+}
+
+const DESKTOP_ADAPTER_ROW_IDS = [
+  'desktop-shell',
+  'desktop-terminal',
+  'desktop-pnpm',
+  'desktop-profiles',
+  'desktop-updates',
+  'desktop-directory-picker-browse-host',
+  'desktop-directory-picker-browse-surface',
+  DESKTOP_WINDOWS_PWSH_SANDBOX_ROW_ID,
+] as const
+
+/** Build the shared product composition, then add exactly one Host adapter. */
+function prepareProductProfile(options: ProductProfileOptions): PreparedProductProfile {
+  const { telemetryDisabled, home, platform, profileName, adapter } = options
   if (profileName === DESKTOP_PROFILE_NAME) ensureDesktopProfile(home)
+  else if (profileName === PRODUCT_SERVER_PROFILE_NAME) ensureProductServerProfile(home)
   else resolveProfileDir(profileName, home)
   healProfilesModuleFallback(INSTALL_ANCHOR, home)
   const profile = loadProfile(BIN_NAME, profileName, INSTALL_ANCHOR, home)
-  const moduleBasePath = ensureDesktopModuleBase(profile.dir)
+  const moduleBasePath = ensureProductModuleBase(profile.dir, adapter === 'desktop')
   // app-boot derives ctx.baseUrl (used by clientModules) from the root config
   // directory. Keep the empty generated root beside the product-first module
   // seat so Host imports and browser client bundles resolve the same package.
-  const rootConfig = join(dirname(moduleBasePath), DESKTOP_PROFILE_ROOT)
+  const rootConfig = join(dirname(moduleBasePath), PRODUCT_PROFILE_ROOT)
   const bareModuleBaseUrl = pathToFileURL(moduleBasePath).href
   writeFileSync(rootConfig, '[]\n')
 
-  const desktopPatches = loadOverlayPatches(BIN_NAME, DESKTOP_PATCH_PATH)
+  const adapterPatches = adapter === 'desktop'
+    ? loadOverlayPatches(BIN_NAME, DESKTOP_PATCH_PATH)
+    : []
   const homePatches = loadOptionalPatches(BIN_NAME, join(home, PROFILE_PATCH_FILENAME)) ?? []
   const selectedProfilePatches = bindPluginConsolePatches([
     ...profile.layers.flatMap(layer => layer.patches),
@@ -379,16 +422,16 @@ export function prepareDesktopProfile(
     suppliedRows,
   )
   const bundlePatches: PatchOptions[] = []
-  let desktopLayerInserted = false
+  let productLayerInserted = false
   for (const layer of profile.layers) {
     bundlePatches.push(...layer.patches)
     if (layer.packageName !== '@deepseek-ai/dsh-web-app') continue
-    bundlePatches.push(...desktopPatches)
+    bundlePatches.push(...adapterPatches)
     bundlePatches.push(...productPatches)
-    desktopLayerInserted = true
+    productLayerInserted = true
   }
-  if (!desktopLayerInserted) {
-    throw new Error(`${BIN_NAME}: desktop profile is missing @deepseek-ai/dsh-web-app`)
+  if (!productLayerInserted) {
+    throw new Error(`${BIN_NAME}: product profile is missing @deepseek-ai/dsh-web-app`)
   }
 
   const patches: PatchOptions[] = bindPluginConsolePatches([
@@ -450,7 +493,7 @@ export function prepareDesktopProfile(
       config: {
         ...rowConfig(presets),
         roots: [
-          { path: desktopPresetRoot(), trust: 'system' },
+          { path: productPresetRoot(), trust: 'system' },
           { path: shippedPresetRoot(), trust: 'system' },
         ],
       },
@@ -492,7 +535,7 @@ export function prepareDesktopProfile(
   if (!rows.has('webserver')) {
     throw new Error(`${BIN_NAME}: desktop profile has no webserver row`)
   }
-  if (platform === 'win32') {
+  if (adapter === 'desktop' && platform === 'win32') {
     if (!rows.has(DIRECTORY_PICKER_ROW_ID)) {
       throw new Error(`${BIN_NAME}: desktop profile has no directory-picker row`)
     }
@@ -537,27 +580,58 @@ export function prepareDesktopProfile(
       )
     }
   }
-  // Loopback-only binding is a launcher security invariant, not user config.
-  patches.push({
-    id: 'webserver',
-    disabled: false,
-    config: { host: '127.0.0.1', port: 0 },
-  })
+  if (adapter === 'desktop') {
+    // Loopback-only binding is a launcher security invariant, not user config.
+    patches.push({
+      id: 'webserver',
+      disabled: false,
+      config: { host: '127.0.0.1', port: 0 },
+    })
+  } else {
+    if (!rows.has(DIRECTORY_PICKER_ROW_ID)) {
+      throw new Error(`${BIN_NAME}: product server profile has no directory-picker row`)
+    }
+    patches.push(
+      {
+        id: DIRECTORY_PICKER_ROW_ID,
+        name: AUTO_PICKER_PACKAGE,
+        disabled: true,
+      },
+      {
+        insert: [
+          { id: SERVER_BROWSE_PICKER_HOST_ROW_ID, name: BROWSE_PICKER_BACKEND },
+          { id: SERVER_BROWSE_PICKER_SURFACE_ROW_ID, name: BROWSE_PICKER_SURFACE },
+        ],
+      },
+    )
+    // Host/port/trust remain command-line values supplied by product-server.
+    patches.push({ id: 'webserver', disabled: false })
+  }
   if ((telemetryDisabled ?? '') !== '' && rows.has('session-telemetry-otel')) {
     patches.push({ id: 'session-telemetry-otel', disabled: true })
   }
-  const desktopShell = rows.get('desktop-shell')
-  if (desktopShell === undefined) {
-    throw new Error(`${BIN_NAME}: desktop profile has no desktop-shell row`)
+  if (adapter === 'desktop') {
+    const desktopShell = rows.get('desktop-shell')
+    if (desktopShell === undefined) {
+      throw new Error(`${BIN_NAME}: desktop profile has no desktop-shell row`)
+    }
+    patches.push({
+      id: 'desktop-shell',
+      disabled: false,
+      config: {
+        ...rowConfig(desktopShell),
+        mode,
+      },
+    })
+  } else {
+    const composedRows = composeEntries([patches])
+    const desktopRows = composedRows
+      .filter(row => typeof row.id === 'string' && DESKTOP_ADAPTER_ROW_IDS.includes(row.id as typeof DESKTOP_ADAPTER_ROW_IDS[number]))
+      .map(row => row.id)
+    if (desktopRows.length > 0) {
+      throw new Error(`${BIN_NAME}: product server profile contains Desktop-only rows: ${desktopRows.join(', ')}`)
+    }
   }
-  patches.push({
-    id: 'desktop-shell',
-    disabled: false,
-    config: {
-      ...rowConfig(desktopShell),
-      mode,
-    },
-  })
   return {
     homeDir: home,
     profile,
@@ -566,6 +640,33 @@ export function prepareDesktopProfile(
     patches: structuredClone(patches),
     mode,
   }
+}
+
+/**
+ * Load and compose one desktop profile generation.
+ * @param telemetryDisabled - inherited DSH telemetry opt-out value.
+ * @param home - Harness home containing profiles and the machine-wide patch.
+ * @param platform - native platform selecting launcher-owned safety overlays.
+ * @param profileName - existing or lazily available Web profile to compose.
+ * @returns root config, profile metadata, and ordered patches.
+ */
+export function prepareDesktopProfile(
+  telemetryDisabled: string | undefined = process.env.DSH_TELEMETRY_DISABLED,
+  home: string = resolveDshHome(),
+  platform: NodeJS.Platform = process.platform,
+  profileName: string = DESKTOP_PROFILE_NAME,
+): PreparedDesktopProfile {
+  return prepareProductProfile({ telemetryDisabled, home, platform, profileName, adapter: 'desktop' })
+}
+
+/** Load the same sealed product composition without Electron-owned rows. */
+export function prepareProductServerProfile(
+  telemetryDisabled: string | undefined = process.env.DSH_TELEMETRY_DISABLED,
+  home: string = resolveDshHome(),
+  platform: NodeJS.Platform = process.platform,
+  profileName: string = PRODUCT_SERVER_PROFILE_NAME,
+): PreparedProductServerProfile {
+  return prepareProductProfile({ telemetryDisabled, home, platform, profileName, adapter: 'server' })
 }
 
 /** Expose the package anchor for focused resolution tests. */

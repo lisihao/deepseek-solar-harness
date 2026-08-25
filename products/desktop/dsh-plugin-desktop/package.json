@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.4.1",
+  "version": "3.4.2",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -13,7 +13,8 @@
   "types": "lib/types/index.d.ts",
   "bin": {
     "dsh-desktop": "lib/bin.js",
-    "dsh-plugin-desktop": "lib/bin.js"
+    "dsh-plugin-desktop": "lib/bin.js",
+    "dsh-product-server": "lib/product-server-bin.js"
   },
   "exports": {
     ".": {
@@ -23,6 +24,10 @@
     "./profile": {
       "types": "./lib/types/profile.d.ts",
       "default": "./lib/profile.js"
+    },
+    "./product-server": {
+      "types": "./lib/types/product-server.d.ts",
+      "default": "./lib/product-server.js"
     },
     "./client": {
       "types": "./lib/types/client/index.d.ts",
@@ -96,12 +101,13 @@
     "verify:cli": "node scripts/verify-cli-runtime.mjs",
     "verify:loader": "node scripts/verify-loader-boot.mjs",
     "verify:profile": "node scripts/verify-profile-boot.mjs",
+    "verify:product-server": "node scripts/verify-product-server.mjs",
     "verify:composition-package": "node scripts/verify-packaged-composition-smoke.mjs",
     "verify:resident-package": "node scripts/verify-packaged-resident-smoke.mjs",
     "verify:resident-execution": "node scripts/verify-packaged-resident-smoke.mjs --execute",
     "verify:orchestration-e2e": "node scripts/verify-installed-orchestration-e2e.mjs",
     "verify:vendor": "node scripts/verify-vendored-inputs.mjs",
-    "check": "yarn run verify:vendor && yarn run build && yarn run typecheck && yarn run test && yarn run verify:closure && yarn run verify:cli && yarn run verify:loader && yarn run verify:profile",
+    "check": "yarn run verify:vendor && yarn run build && yarn run typecheck && yarn run test && yarn run verify:closure && yarn run verify:cli && yarn run verify:loader && yarn run verify:profile && yarn run verify:product-server",
     "check:win-package": "yarn run build && yarn run typecheck && vitest run tests/package.spec.ts tests/package-win.spec.ts tests/update-checker.spec.ts tests/update-download.spec.ts tests/verify-win-installer.spec.ts tests/verify-packaged-runtime.spec.ts tests/windows-pwsh-sandbox.spec.ts tests/window-options.spec.ts && yarn run verify:closure",
     "start": "node lib/bin.js",
     "dev": "yarn run build && node lib/bin.js",
