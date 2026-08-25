@@ -95,6 +95,11 @@
       "name": "Remote authority IPv6 loopback qualification",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "29d919b165a01a07fb58c743d6dddfd3b33d4b38"
+    },
+    {
+      "name": "Capability UI duplication cleanup and deterministic timestamp presentation",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "cddbfb7bc08ed69dbd51550241b8686c6ed5e495"
     }
   ],
   "sourcePackages": {
@@ -213,8 +218,8 @@
     "dsh-packages/deepseek-ai-dsh-tool-stat-0.0.1.tgz": "1ba60c1cf0ac0223f6066d3462f08a2cd6ab498d2319ce505e7ab207615eed64",
     "dsh-packages/deepseek-ai-dsh-tool-time-0.0.1.tgz": "074f755f4aeee4dc135c68889414ae996bc0be6ed2a4d04d62049e39b37a4b7f",
     "dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz": "fcc23d56e286edbc7de66b1f4df21382958d1c444530a65e4e8f5f3234b5fcf7",
-    "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "d8f4b897409ee57a3c779e3ea4526b301968af39790c357019d8df13d125c06e",
-    "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "41acafa8cf146fa2367c3f243fc41e52a3c0ec2c5d7600d023692270aa032564",
+    "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "8958bd708f74e8541024e2cf5d837b83a9bb0c25524f41f7b8e2fe4ff7f62c45",
+    "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "ce950203cabda1842af19eac52d995881c2a0eaa5b7ec11cfa915b079a017671",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "414da2753d91f8cc4bce72b618819feee9efc387fab58a3a19650cc3d07f607c",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "a99df0376e50f978b9549444b9ad1ac52ca5ad9bc4ef9037ca79ac32445c2c7e",
     "dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz": "7e68a1f1466bdda283026a63c4ef54e6a112c2d7bab5d56b227a36b1a25ae863",
