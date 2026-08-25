@@ -117,6 +117,18 @@ describe('desktop profile composition', () => {
     ]) expect(rowIds).not.toContain(desktopRow)
   })
 
+  it('keeps the Product Server compatibility layout when Desktop settings request advanced', () => {
+    const home = temporaryHome()
+    writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: advanced\n')
+
+    const prepared = prepareProductServerProfile(undefined, home, 'darwin')
+    const rows = composeEntries([prepared.patches])
+
+    expect(prepared.mode).toBe('compatibility')
+    expect(rows.find(row => row.id === 'ui-layout')?.disabled).not.toBe(true)
+    expect(rows.find(row => row.id === 'desktop-shell')).toBeUndefined()
+  })
+
   it('keeps every sealed product row identical across Desktop and Product Server', () => {
     const home = temporaryHome()
     const desktop = composeEntries([prepareDesktopProfile(undefined, home, 'darwin').patches])

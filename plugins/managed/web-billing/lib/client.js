@@ -216,6 +216,19 @@ window.__ModuleLoader__.load({
 			if (value >= 1e3) return `${(value / 1e3).toFixed(1).replace(/\.0$/, "")}K`;
 			return formatNumber(value);
 		}
+		/** Read the Desktop Frontend's immutable local-ledger baseline from its launch URL. */
+		function readFrontendLocalBaseline() {
+			try {
+				const raw = new URLSearchParams(window.location.search).get("dsh-local-billing-baseline");
+				if (raw === null) return void 0;
+				const value = JSON.parse(raw);
+				const keys = ["calls", "cost", "costUsd", "inputTokens", "cacheReadTokens", "outputTokens"];
+				if (typeof value !== "object" || value === null || keys.some((key) => !Number.isFinite(value[key]) || value[key] < 0)) return void 0;
+				return value;
+			} catch {
+				return void 0;
+			}
+		}
 		//#endregion
 		//#region lib/types/client/MessageCostChip.js
 		/**
@@ -278,7 +291,23 @@ window.__ModuleLoader__.load({
 					refreshSession(sessionId);
 				}
 			}, [refreshSession, sessionId]);
-			const totals = view.value?.totals;
+			const serverTotals = view.value?.totals;
+			const localBaseline = readFrontendLocalBaseline();
+			const emptyTotals = {
+				calls: 0, cost: 0, costUsd: 0, costNominal: 0, costNominalUsd: 0,
+				savings: 0, savingsUsd: 0, inputTokens: 0, cacheReadTokens: 0, outputTokens: 0
+			};
+			const totals = localBaseline === void 0 ? serverTotals : {
+				...(serverTotals ?? emptyTotals),
+				calls: (serverTotals?.calls ?? 0) + localBaseline.calls,
+				cost: (serverTotals?.cost ?? 0) + localBaseline.cost,
+				costUsd: (serverTotals?.costUsd ?? 0) + localBaseline.costUsd,
+				costNominal: (serverTotals?.costNominal ?? 0) + localBaseline.cost,
+				costNominalUsd: (serverTotals?.costNominalUsd ?? 0) + localBaseline.costUsd,
+				inputTokens: (serverTotals?.inputTokens ?? 0) + localBaseline.inputTokens,
+				cacheReadTokens: (serverTotals?.cacheReadTokens ?? 0) + localBaseline.cacheReadTokens,
+				outputTokens: (serverTotals?.outputTokens ?? 0) + localBaseline.outputTokens
+			};
 			// An empty/new current session must not hide the plugin's account-local
 			// ledger. Fall back to the DSH totals; only hide while neither scope has
 			// any data yet.
@@ -364,6 +393,11 @@ window.__ModuleLoader__.load({
 					: balance.status === "loading"
 						? [t("balance"), t("balance.loading")]
 						: [t("balance"), t("balance.retrying")];
+			const frontendHistoryRow = localBaseline === void 0 ? null : [
+				t("scope.frontendHistory"),
+				formatCost(symbol, currency === "USD" ? localBaseline.costUsd : localBaseline.cost),
+				`${t("scope.currentServer")} ${formatCost(symbol, serverTotals === void 0 ? 0 : amountOf(serverTotals))}`
+			];
 			return react_jsx_runtime.jsxs(react_jsx_runtime.Fragment, {
 				children: [
 					react_jsx_runtime.jsx("div", {
@@ -423,6 +457,10 @@ window.__ModuleLoader__.load({
 												balanceRow !== null && react_jsx_runtime.jsx("span", {
 													title: balanceRow[2],
 													children: `${t("balance")} ${balanceRow[1]}`
+												}),
+												frontendHistoryRow !== null && react_jsx_runtime.jsx("span", {
+													title: frontendHistoryRow[2],
+													children: `${frontendHistoryRow[0]} ${frontendHistoryRow[1]}`
 												}),
 												react_jsx_runtime.jsx("span", {
 													children: `${t("calls")} ${formatNumber(active.calls)}`
@@ -581,6 +619,8 @@ window.__ModuleLoader__.load({
 			"scope.short": "DSH",
 			"scope.local": "DSH 本地统计",
 			"scope.note": "DSH 本地统计（仅本插件捕获的已完成调用），不是 DeepSeek 官方账单",
+			"scope.frontendHistory": "MacBook 历史",
+			"scope.currentServer": "当前 Server",
 			"tokens.short": "tok",
 			"sidebar.title": "费用"
 		};
@@ -625,6 +665,8 @@ window.__ModuleLoader__.load({
 			"scope.short": "DSH",
 			"scope.local": "Local DSH ledger",
 			"scope.note": "Local DSH estimate (completed calls captured by this plugin), not the official DeepSeek invoice",
+			"scope.frontendHistory": "MacBook history",
+			"scope.currentServer": "Current Server",
 			"tokens.short": "tok",
 			"sidebar.title": "Usage"
 		};

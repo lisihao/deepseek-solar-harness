@@ -10,9 +10,9 @@ Electron 可执行文件只包含最小启动代码。它获取单实例锁、�
 
 两种呈现模式都复用现有 loopback Web carrier。profile 挂载普通 `dsh-base` 与 `dsh-web-app` bundle；Host 把 HTTP 与 WebSocket surface 绑定到 `127.0.0.1` 的临时端口；Electron 在沙箱 renderer 中加载该同源页面。Electron 不维护自有插件 roster，不使用 preload bridge，renderer 也不会获得原始 Electron API。
 
-同一 package 还提供 `dsh-product-server`，它是远程部署使用的纯 Node Host Adapter。Desktop 与 Product Server 都从唯一的封装产品组合生成，因此会加载相同的 Resident、Orchestration、AgentTeams、Billing、Remote Modules、RLM／Continuous Harness、模型分配、记忆、治理和产品 UI row。只有 Host Adapter row 不同：Desktop 拥有 Electron 窗口、托盘、终端、profile 与更新 effect；Product Server 拥有持久 Web endpoint，并为远程客户端固定使用浏览器目录选择器。普通 `dsh server` 命令仍是兼容上游的裸 Server profile，不是 DSH Desktop 产品部署。
+同一 package 还提供 `dsh-product-server`，它是远程部署使用的纯 Node Host Adapter。Desktop 与 Product Server 都从唯一的封装产品组合生成，因此会加载相同的 Resident、Orchestration、AgentTeams、Billing、Remote Modules、RLM／Continuous Harness、模型分配、记忆、治理和产品 UI row。只有 Host Adapter row 不同：Desktop 拥有 Electron 窗口、托盘、终端、profile 与更新 effect；Product Server 拥有持久 Web endpoint，为远程客户端固定使用浏览器目录选择器，并始终保留 compatibility 浏览器布局，因为它不会加载 Electron 所有的 advanced layout provider。普通 `dsh server` 命令仍是兼容上游的裸 Server profile，不是 DSH Desktop 产品部署。
 
-MacBook Frontend 通常通过 owner 控制的 SSH 本地转发访问 Product Server。因此，`http://127.0.0.1:13080` 这类 loopback endpoint 会直接使用已经认证的隧道，不再要求第二份配对码或 Keychain 凭据。手机／pocket 等直接访问远程 HTTPS 的客户端仍使用一次性配对挑战、加密持久设备凭据和短期访问 session。Desktop 处于 Frontend 部署角色时，两条路径都不会启动本机 Host。
+MacBook Frontend 会保存一个带名称的 Product Server 列表和一项当前 Server 选择。原生 **Connect to Remote Server…** 窗口可新增、编辑、选择和删除条目；切换当前条目会让 Frontend 重启并连接对应 endpoint，而不会启动本机 Host。已有的单 Server 部署状态会迁移为列表中的第一个条目。`http://127.0.0.1:13080` 这类 loopback endpoint 通常通过 owner 控制的 SSH 本地转发访问 Product Server，会直接使用已经认证的隧道，不再要求第二份配对码或 Keychain 凭据。手机／pocket 等直接访问远程 HTTPS 的客户端仍使用一次性配对挑战、加密持久设备凭据和短期访问 session。
 
 desktop package 拥有普通 Host 与 Web Client 两个 face。它的 Client face 会校验 Host 提供的模式、平台与产品版本 marker。两种模式都会在窗口内容下方的保留区域挂载一条不可交互的单行产品标记，并继续把 Desktop 操作放在普通 additive slot 中；兼容模式随后停止，不提供 layout service 或 root 呈现，高级模式则安装下文所述的 desktop layout service 与 root 呈现。两种模式下，第三方 Web client 都继续使用普通 DSH 模块图。
 

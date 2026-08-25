@@ -16,19 +16,20 @@ import {
 
 describe('desktop client environment', () => {
   it('accepts the Electron-owned kebab query markers', () => {
-    expect(parseDesktopClientEnvironment('?dsh-desktop-mode=advanced&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.1'))
-      .toEqual({ mode: 'advanced', platform: 'darwin', productVersion: '2.0.1' })
-    expect(parseDesktopClientEnvironment('?dsh-desktop-platform=win32&dsh-desktop-mode=compatibility&dsh-desktop-version=2.0.1'))
-      .toEqual({ mode: 'compatibility', platform: 'win32', productVersion: '2.0.1' })
+    expect(parseDesktopClientEnvironment('?dsh-deployment-role=server&dsh-desktop-mode=advanced&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.1'))
+      .toEqual({ deploymentRole: 'server', mode: 'advanced', platform: 'darwin', productVersion: '2.0.1' })
+    expect(parseDesktopClientEnvironment('?dsh-deployment-role=frontend&dsh-desktop-platform=win32&dsh-desktop-mode=compatibility&dsh-desktop-version=2.0.1'))
+      .toEqual({ deploymentRole: 'frontend', mode: 'compatibility', platform: 'win32', productVersion: '2.0.1' })
   })
 
   it.each([
-    ['', 'dsh-desktop-mode'],
-    ['?dsh-desktop-mode=glass&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.1', 'dsh-desktop-mode'],
-    ['?dsh-desktop-mode=advanced&dsh-desktop-version=2.0.1', 'dsh-desktop-platform'],
-    ['?dsh-desktop-mode=advanced&dsh-desktop-platform=android&dsh-desktop-version=2.0.1', 'dsh-desktop-platform'],
-    ['?dsh-desktop-mode=advanced&dsh-desktop-platform=darwin', 'dsh-desktop-version'],
-    ['?dsh-desktop-mode=advanced&dsh-desktop-platform=darwin&dsh-desktop-version=v2.0.1', 'dsh-desktop-version'],
+    ['', 'dsh-deployment-role'],
+    ['?dsh-deployment-role=worker&dsh-desktop-mode=advanced&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.1', 'dsh-deployment-role'],
+    ['?dsh-deployment-role=server&dsh-desktop-mode=glass&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.1', 'dsh-desktop-mode'],
+    ['?dsh-deployment-role=server&dsh-desktop-mode=advanced&dsh-desktop-version=2.0.1', 'dsh-desktop-platform'],
+    ['?dsh-deployment-role=server&dsh-desktop-mode=advanced&dsh-desktop-platform=android&dsh-desktop-version=2.0.1', 'dsh-desktop-platform'],
+    ['?dsh-deployment-role=server&dsh-desktop-mode=advanced&dsh-desktop-platform=darwin', 'dsh-desktop-version'],
+    ['?dsh-deployment-role=server&dsh-desktop-mode=advanced&dsh-desktop-platform=darwin&dsh-desktop-version=v2.0.1', 'dsh-desktop-version'],
   ])('fails loud for malformed marker %s', (search, field) => {
     expect(() => parseDesktopClientEnvironment(search)).toThrow(field)
   })

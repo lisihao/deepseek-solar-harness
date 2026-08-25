@@ -313,6 +313,36 @@ describe('RemoteSyncHub', () => {
     await hub.close()
   })
 
+  it('contains a downlink send failure at the accepted socket boundary', async () => {
+    const hub = new RemoteSyncHub(api(), 4)
+    const close = vi.fn(function (this: { readyState: number }): void {
+      this.readyState = WebSocket.CLOSED
+      socket.emit('close')
+    })
+    const socket = Object.assign(new EventEmitter(), {
+      readyState: WebSocket.OPEN,
+      send(_data: string, callback: (error?: Error) => void): void {
+        callback(new Error('client disconnected'))
+      },
+      close,
+    }) as unknown as WebSocket
+    const internals = hub as unknown as {
+      sockets: { handleUpgrade: (_request: unknown, _socket: unknown, _head: Buffer, accept: (websocket: WebSocket) => void) => void }
+      socketPumps: Set<Promise<void>>
+    }
+    internals.sockets.handleUpgrade = (_request, _raw, _head, accept) => { accept(socket) }
+    const cursor = hub.journal.cursor()
+
+    hub.handleEvents({ url: `/events?deploymentId=${cursor.deploymentId}&since=0` } as never, new PassThrough(), Buffer.alloc(0))
+    hub.journal.publish('host', hostEnvelope('disconnect'))
+
+    await vi.waitFor(() => {
+      expect(close).toHaveBeenCalledOnce()
+      expect(internals.socketPumps).toHaveLength(0)
+    })
+    await hub.close()
+  })
+
   it('publishes both source streams and contains a source crash', async () => {
     const hub = new RemoteSyncHub(api(), 4)
     const internals = hub as unknown as {

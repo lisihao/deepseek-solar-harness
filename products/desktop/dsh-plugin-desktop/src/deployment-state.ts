@@ -6,30 +6,35 @@ import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import type { DesktopShellMode } from './runtime.ts'
 
 export interface DesktopServerDeploymentState {
-  readonly version: 2
+  readonly version: 3
   readonly role: 'server'
 }
 
-interface DesktopFrontendDeploymentBase {
-  readonly version: 2
-  readonly role: 'frontend'
+interface DesktopFrontendServerBase {
+  readonly id: string
+  readonly label: string
   readonly endpoint: string
   readonly deviceName: string
-  readonly presentation: DesktopShellMode
 }
 
-export interface DesktopTrustedTunnelDeploymentState extends DesktopFrontendDeploymentBase {
+export interface DesktopTrustedTunnelServer extends DesktopFrontendServerBase {
   readonly authMode: 'trusted-tunnel'
 }
 
-export interface DesktopPairedDeploymentState extends DesktopFrontendDeploymentBase {
+export interface DesktopPairedServer extends DesktopFrontendServerBase {
   readonly authMode: 'paired'
   readonly encryptedCredential: string
 }
 
-export type DesktopFrontendDeploymentState =
-  | DesktopTrustedTunnelDeploymentState
-  | DesktopPairedDeploymentState
+export type DesktopFrontendServer = DesktopTrustedTunnelServer | DesktopPairedServer
+
+export interface DesktopFrontendDeploymentState {
+  readonly version: 3
+  readonly role: 'frontend'
+  readonly activeServerId: string
+  readonly servers: readonly DesktopFrontendServer[]
+  readonly presentation: DesktopShellMode
+}
 
 export type DesktopDeploymentState = DesktopServerDeploymentState | DesktopFrontendDeploymentState
 
@@ -52,13 +57,15 @@ export interface DesktopDeploymentRequest {
 }
 
 export interface ConfigureFrontendRequest {
+  readonly serverId?: string
+  readonly label?: string
   readonly endpoint: string
   readonly pairingCode?: string
   readonly deviceName: string
   readonly presentation?: DesktopShellMode
 }
 
-const DEFAULT_STATE: DesktopServerDeploymentState = { version: 2, role: 'server' }
+const DEFAULT_STATE: DesktopServerDeploymentState = { version: 3, role: 'server' }
 
 /** Persistence owner for choosing a local Server or remote Frontend before Cordis boot. */
 export class DesktopDeploymentStateStore {
@@ -90,52 +97,112 @@ export class DesktopDeploymentStateStore {
     if (deviceName.length === 0 || deviceName.length > 100) {
       throw new Error('dsh-plugin-desktop: device name must contain 1 to 100 characters')
     }
+    const current = await this.load()
+    const servers = current.role === 'frontend' ? [...current.servers] : []
+    const requestedId = input.serverId?.trim()
+    const requestedIndex = requestedId === undefined || requestedId === ''
+      ? servers.findIndex(server => server.endpoint === endpoint.href)
+      : servers.findIndex(server => server.id === requestedId)
+    if (requestedId !== undefined && requestedId !== '' && requestedIndex < 0) {
+      throw new Error('dsh-plugin-desktop: Frontend Server id does not exist')
+    }
+    const duplicateEndpoint = servers.findIndex((server, index) => (
+      server.endpoint === endpoint.href && index !== requestedIndex
+    ))
+    if (duplicateEndpoint >= 0) {
+      throw new Error('dsh-plugin-desktop: Frontend Server endpoint is already configured')
+    }
+    const id = requestedIndex >= 0 ? servers[requestedIndex]!.id : crypto.randomUUID()
+    const label = parseLabel(input.label, endpoint)
+    let server: DesktopFrontendServer
     if (isLoopbackEndpoint(endpoint)) {
-      const state: DesktopTrustedTunnelDeploymentState = {
-        version: 2,
-        role: 'frontend',
+      server = {
+        id,
+        label,
         authMode: 'trusted-tunnel',
         endpoint: endpoint.href,
         deviceName,
-        presentation: input.presentation ?? 'compatibility',
       }
-      await this.persist(state)
-      return state
+    } else {
+      if (!this.secrets.isEncryptionAvailable()) {
+        throw new Error('dsh-plugin-desktop: operating-system credential encryption is unavailable')
+      }
+      const pairingCode = input.pairingCode?.trim() ?? ''
+      const existing = requestedIndex >= 0 ? servers[requestedIndex] : undefined
+      if (pairingCode === '' && existing?.authMode === 'paired'
+        && existing.endpoint === endpoint.href && existing.deviceName === deviceName) {
+        server = { ...existing, label }
+      } else {
+        if (!/^\d{8}$/.test(pairingCode)) {
+          throw new Error('dsh-plugin-desktop: pairing code must contain exactly 8 digits for a remote HTTPS Server')
+        }
+        const credential = await this.remoteCall(endpoint, 'pairing.redeem', {
+          code: pairingCode,
+          deviceName,
+        })
+        const parsedCredential = parseCredential(credential)
+        server = {
+          id,
+          label,
+          authMode: 'paired',
+          endpoint: endpoint.href,
+          deviceName,
+          encryptedCredential: this.secrets.encryptString(parsedCredential.credential).toString('base64'),
+        }
+      }
     }
-    if (!this.secrets.isEncryptionAvailable()) {
-      throw new Error('dsh-plugin-desktop: operating-system credential encryption is unavailable')
-    }
-    const pairingCode = input.pairingCode?.trim() ?? ''
-    if (!/^\d{8}$/.test(pairingCode)) {
-      throw new Error('dsh-plugin-desktop: pairing code must contain exactly 8 digits for a remote HTTPS Server')
-    }
-    const credential = await this.remoteCall(endpoint, 'pairing.redeem', {
-      code: pairingCode,
-      deviceName,
-    })
-    const parsedCredential = parseCredential(credential)
-    const state: DesktopPairedDeploymentState = {
-      version: 2,
+    if (requestedIndex >= 0) servers[requestedIndex] = server
+    else servers.push(server)
+    const state: DesktopFrontendDeploymentState = {
+      version: 3,
       role: 'frontend',
-      authMode: 'paired',
-      endpoint: endpoint.href,
-      deviceName,
-      presentation: input.presentation ?? 'compatibility',
-      encryptedCredential: this.secrets.encryptString(parsedCredential.credential).toString('base64'),
+      activeServerId: id,
+      servers,
+      presentation: input.presentation ?? (current.role === 'frontend' ? current.presentation : 'compatibility'),
     }
     await this.persist(state)
     return state
   }
 
-  async exchange(state: DesktopFrontendDeploymentState): Promise<DesktopAccessSession> {
-    if (state.authMode !== 'paired') {
+  async selectFrontend(serverId: string): Promise<DesktopFrontendDeploymentState> {
+    const current = await this.load()
+    if (current.role !== 'frontend') throw new Error('dsh-plugin-desktop: no Frontend Servers are configured')
+    const id = nonEmptyString(serverId.trim(), 'serverId')
+    if (!current.servers.some(server => server.id === id)) {
+      throw new Error('dsh-plugin-desktop: Frontend Server id does not exist')
+    }
+    const next = { ...current, activeServerId: id }
+    await this.persist(next)
+    return next
+  }
+
+  async removeFrontend(serverId: string): Promise<DesktopDeploymentState> {
+    const current = await this.load()
+    if (current.role !== 'frontend') throw new Error('dsh-plugin-desktop: no Frontend Servers are configured')
+    const id = nonEmptyString(serverId.trim(), 'serverId')
+    const servers = current.servers.filter(server => server.id !== id)
+    if (servers.length === current.servers.length) {
+      throw new Error('dsh-plugin-desktop: Frontend Server id does not exist')
+    }
+    if (servers.length === 0) return this.useServer()
+    const next: DesktopFrontendDeploymentState = {
+      ...current,
+      servers,
+      activeServerId: current.activeServerId === id ? servers[0]!.id : current.activeServerId,
+    }
+    await this.persist(next)
+    return next
+  }
+
+  async exchange(server: DesktopFrontendServer): Promise<DesktopAccessSession> {
+    if (server.authMode !== 'paired') {
       throw new Error('dsh-plugin-desktop: trusted tunnel Frontends do not exchange a paired credential')
     }
     if (!this.secrets.isEncryptionAvailable()) {
       throw new Error('dsh-plugin-desktop: operating-system credential encryption is unavailable')
     }
-    const credential = this.secrets.decryptString(Buffer.from(state.encryptedCredential, 'base64'))
-    const value = await this.remoteCall(new URL(state.endpoint), 'session.exchange', { credential })
+    const credential = this.secrets.decryptString(Buffer.from(server.encryptedCredential, 'base64'))
+    const value = await this.remoteCall(new URL(server.endpoint), 'session.exchange', { credential })
     return parseAccessSession(value)
   }
 
@@ -189,7 +256,7 @@ export class DesktopRemoteAccessSession {
 
   constructor(
     private readonly store: DesktopDeploymentStateStore,
-    private readonly state: DesktopFrontendDeploymentState,
+    private readonly server: DesktopFrontendServer,
     private readonly onRefreshError: (error: unknown) => void = () => {},
   ) {}
 
@@ -213,7 +280,7 @@ export class DesktopRemoteAccessSession {
 
   private async refresh(): Promise<void> {
     try {
-      const next = await this.store.exchange(this.state)
+      const next = await this.store.exchange(this.server)
       if (this.stopped) return
       this.current = next
       const refreshAt = Date.parse(next.expiresAt) - 60_000
@@ -257,9 +324,16 @@ function isLoopbackEndpoint(endpoint: URL): boolean {
   return endpoint.hostname === 'localhost' || endpoint.hostname === '127.0.0.1' || endpoint.hostname === '[::1]'
 }
 
+/** Resolve the selected Server from a validated Frontend deployment state. */
+export function activeFrontendServer(state: DesktopFrontendDeploymentState): DesktopFrontendServer {
+  const server = state.servers.find(candidate => candidate.id === state.activeServerId)
+  if (server === undefined) throw new Error('dsh-plugin-desktop: active Frontend Server does not exist')
+  return server
+}
+
 function parseDeploymentState(value: unknown): DesktopDeploymentState {
   const state = objectRecord(value, 'deployment state')
-  if (state.version !== 1 && state.version !== 2) {
+  if (state.version !== 1 && state.version !== 2 && state.version !== 3) {
     throw new Error('dsh-plugin-desktop: unsupported deployment state version')
   }
   if (state.role === 'server') return DEFAULT_STATE
@@ -268,28 +342,69 @@ function parseDeploymentState(value: unknown): DesktopDeploymentState {
   if (presentation !== 'compatibility' && presentation !== 'advanced') {
     throw new Error('dsh-plugin-desktop: invalid Frontend presentation mode')
   }
-  const endpoint = parseEndpoint(nonEmptyString(state.endpoint, 'endpoint'))
-  const base: DesktopFrontendDeploymentBase = {
-    version: 2,
+  if (state.version === 3) {
+    if (!Array.isArray(state.servers) || state.servers.length === 0) {
+      throw new Error('dsh-plugin-desktop: Frontend Servers must be a non-empty array')
+    }
+    const servers = state.servers.map(parseFrontendServer)
+    if (new Set(servers.map(server => server.id)).size !== servers.length) {
+      throw new Error('dsh-plugin-desktop: Frontend Server ids must be unique')
+    }
+    if (new Set(servers.map(server => server.endpoint)).size !== servers.length) {
+      throw new Error('dsh-plugin-desktop: Frontend Server endpoints must be unique')
+    }
+    const activeServerId = nonEmptyString(state.activeServerId, 'activeServerId')
+    if (!servers.some(server => server.id === activeServerId)) {
+      throw new Error('dsh-plugin-desktop: active Frontend Server does not exist')
+    }
+    return { version: 3, role: 'frontend', activeServerId, servers, presentation }
+  }
+  const legacy = parseFrontendServer({
+    id: 'legacy-default',
+    label: new URL(nonEmptyString(state.endpoint, 'endpoint')).host,
+    endpoint: state.endpoint,
+    deviceName: state.deviceName,
+    authMode: state.version === 1 ? 'paired' : state.authMode,
+    encryptedCredential: state.encryptedCredential,
+  })
+  return {
+    version: 3,
     role: 'frontend',
-    endpoint: endpoint.href,
-    deviceName: nonEmptyString(state.deviceName, 'deviceName'),
+    activeServerId: legacy.id,
+    servers: [legacy],
     presentation,
   }
-  if (state.version === 1 || state.authMode === 'paired') {
+}
+
+function parseFrontendServer(value: unknown): DesktopFrontendServer {
+  const server = objectRecord(value, 'Frontend Server')
+  const endpoint = parseEndpoint(nonEmptyString(server.endpoint, 'endpoint'))
+  const base: DesktopFrontendServerBase = {
+    id: nonEmptyString(server.id, 'server id'),
+    label: nonEmptyString(server.label, 'server label'),
+    endpoint: endpoint.href,
+    deviceName: nonEmptyString(server.deviceName, 'deviceName'),
+  }
+  if (server.authMode === 'paired') {
     return {
       ...base,
       authMode: 'paired',
-      encryptedCredential: nonEmptyString(state.encryptedCredential, 'encryptedCredential'),
+      encryptedCredential: nonEmptyString(server.encryptedCredential, 'encryptedCredential'),
     }
   }
-  if (state.authMode === 'trusted-tunnel') {
+  if (server.authMode === 'trusted-tunnel') {
     if (!isLoopbackEndpoint(endpoint)) {
       throw new Error('dsh-plugin-desktop: trusted tunnel Frontend endpoint must be loopback')
     }
     return { ...base, authMode: 'trusted-tunnel' }
   }
   throw new Error('dsh-plugin-desktop: invalid Frontend authentication mode')
+}
+
+function parseLabel(value: string | undefined, endpoint: URL): string {
+  const label = value?.trim() || endpoint.host
+  if (label.length > 100) throw new Error('dsh-plugin-desktop: Server label must contain 1 to 100 characters')
+  return label
 }
 
 function parseCredential(value: unknown): { credential: string } {

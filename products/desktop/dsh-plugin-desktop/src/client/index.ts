@@ -13,7 +13,9 @@ import { installSolarBrandStyles } from './styles.ts'
 
 export { applyAdvancedShell } from './advanced-shell.ts'
 export { parseDesktopClientEnvironment } from './environment.ts'
-export type { DesktopClientEnvironment, DesktopClientMode, DesktopClientPlatform } from './environment.ts'
+export type {
+  DesktopClientDeploymentRole, DesktopClientEnvironment, DesktopClientMode, DesktopClientPlatform,
+} from './environment.ts'
 
 /** Services required by advanced presentation. */
 export const inject = [
@@ -26,7 +28,7 @@ export function apply(ctx: ClientContext): void {
   const environment = parseDesktopClientEnvironment(window.location.search)
   ctx.effect(() => {
     const removeStyles = installSolarBrandStyles()
-    const removeFooter = mountSolarBrandFooter(environment.productVersion)
+    const removeFooter = mountSolarBrandFooter(environment)
     return () => {
       removeFooter()
       removeStyles()

@@ -506,6 +506,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       } catch {
         target = undefined
       }
+      if (event.isMainFrame && target?.href === 'dsh-desktop://deployment/local-server'
+        && spec.requestUseLocalServer !== undefined) {
+        event.preventDefault()
+        void spec.requestUseLocalServer().catch((cause: unknown) => {
+          process.stderr.write(`dsh-plugin-desktop: failed to switch to local Server: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+        })
+        return
+      }
       if (target?.origin === origin) return
       // Remote Modules are rendered in subframes through product-owned local
       // relays. Keep top-level navigation origin-locked while allowing only

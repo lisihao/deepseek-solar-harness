@@ -146,6 +146,8 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   requestQuit(code: number): void
   /** Persist another mode through the registered desktop settings scope. */
   requestModeChange(mode: DesktopShellMode): Promise<void>
+  /** Switch a Frontend window back to the complete local Server deployment. */
+  requestUseLocalServer?(): Promise<void>
 }
 
 /** Electron bootstrap capability supplied before the profile tree mounts. */

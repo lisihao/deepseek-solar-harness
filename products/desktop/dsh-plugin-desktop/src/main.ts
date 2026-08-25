@@ -2,6 +2,7 @@
 
 import { app, net, safeStorage } from 'electron'
 import type { Context } from '@deepseek-ai/cordis'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -19,10 +20,12 @@ import { installProfilePackageResolver } from './module-resolution.ts'
 import { installNativeProductRuntime } from './native-product-runtime.ts'
 import { packagedDependencyPath, unpackedAsarPath } from './packaged-runtime-path.ts'
 import {
+  activeFrontendServer,
   DesktopDeploymentStateStore,
   DesktopRemoteAccessSession,
   type DesktopDeploymentState,
 } from './deployment-state.ts'
+import { parseFrontendBillingBaseline, type FrontendBillingBaseline } from './frontend-billing.ts'
 import { FrontendSetupController } from './frontend-setup.ts'
 import {
   beginDesktopProfileStartup,
@@ -44,6 +47,21 @@ import {
 
 const BIN_NAME = 'dsh-plugin-desktop'
 const PRODUCT_NAME = 'DSH Desktop'
+
+/** Read the inactive local Host's billing totals for an explicit Frontend history baseline. */
+async function readFrontendBillingBaseline(): Promise<FrontendBillingBaseline | undefined> {
+  const path = join(resolveDshHome(), 'storages', 'web-billing.json')
+  try {
+    return parseFrontendBillingBaseline(JSON.parse(await readFile(path, 'utf8')))
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
+      process.stderr.write(
+        `${BIN_NAME}: unable to read local billing baseline: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      )
+    }
+    return undefined
+  }
+}
 
 /** Resolve a packaged Desktop asset without depending on the Cordis shell plugin. */
 function desktopAssetPath(filename: string): string {
@@ -80,7 +98,7 @@ async function start(): Promise<void> {
   let frontendAccess: DesktopRemoteAccessSession | undefined
   let frontendSetup: FrontendSetupController | undefined
   let deploymentStore: DesktopDeploymentStateStore | undefined
-  let deploymentState: DesktopDeploymentState = { version: 2, role: 'server' }
+  let deploymentState: DesktopDeploymentState = { version: 3, role: 'server' }
   let runtime!: ElectronDesktopRuntime
   const nativeExit = createDesktopExitCoordinator(
     {
@@ -180,8 +198,9 @@ async function start(): Promise<void> {
     )
     if (deploymentState.role === 'frontend') {
       const state = deploymentState
-      const access = state.authMode === 'paired'
-        ? new DesktopRemoteAccessSession(deploymentStore, state, (cause) => {
+      const server = activeFrontendServer(state)
+      const access = server.authMode === 'paired'
+        ? new DesktopRemoteAccessSession(deploymentStore, server, (cause) => {
             process.stderr.write(
               `${BIN_NAME}: failed to refresh remote access: ${cause instanceof Error ? cause.message : String(cause)}\n`,
             )
@@ -190,12 +209,16 @@ async function start(): Promise<void> {
       try {
         await access?.start()
         frontendAccess = access
-        const endpoint = new URL(state.endpoint)
+        const endpoint = new URL(server.endpoint)
         const renderer = new URL(endpoint)
         renderer.searchParams.set('dsh-deployment-role', 'frontend')
         renderer.searchParams.set('dsh-desktop-mode', state.presentation)
         renderer.searchParams.set('dsh-desktop-platform', process.platform)
         renderer.searchParams.set('dsh-desktop-version', runtime.updates.currentVersion)
+        const billingBaseline = await readFrontendBillingBaseline()
+        if (billingBaseline !== undefined) {
+          renderer.searchParams.set('dsh-local-billing-baseline', JSON.stringify(billingBaseline))
+        }
         const release = runtime.schedule({
           mode: state.presentation,
           width: 1280,
@@ -220,6 +243,10 @@ async function start(): Promise<void> {
           requestQuit,
           requestModeChange: async (mode) => {
             deploymentState = await deploymentStore!.setPresentation(state, mode)
+            await runtime.requestRestart()
+          },
+          requestUseLocalServer: async () => {
+            deploymentState = await deploymentStore!.useServer()
             await runtime.requestRestart()
           },
         })

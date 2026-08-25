@@ -156,7 +156,7 @@
     "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "packages/physical-operator/ui-physical-operator/package.json",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "packages/bundle/web-app/package.json",
     "dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz": "apps/web/package.json",
-    "dsh-packages/dsh-web-billing-1.1.3.tgz": "plugins/managed/web-billing/package.json",
+    "dsh-packages/dsh-web-billing-1.1.4.tgz": "plugins/managed/web-billing/package.json",
     "dsh-packages/aegis-2.8.5-solar.1.tgz": "plugins/managed/aegis/package.json",
     "dsh-packages/dsh-better-sidebar-0.15.0-solar.1.tgz": "plugins/managed/better-sidebar/package.json",
     "dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz": "plugins/managed/codegraph/package.json",
@@ -186,15 +186,15 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "491e343d0bea31f55f27685a0d13a6516ddc3cf642820cf4e0217b02e6b778d2",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "8c4012d58cabd2f24e1d03f9fbd703b70daa9dbcc9ad3b8e55f199e7a8a13de8",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "9effc50d51aaa9860deca0bf6d60d2b30fb078e80724390befe1f2899c7f5f8a",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "2972df1c7e001813a67b1a77de4dcbf02e64e42eefdf7502b9f2e1237b3ae651",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "abd0ff4e52597af5e51d2110e1b3cd9380401e55907a39239b14b7506bab062b",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "09de0d3544b7b879d9c1fd959d94614d30833d3dd601d8de54af849dbae973d1",
-    "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "a473c0fde3a56de0fa5d816f0693fcf09ae365ea7b2281a89bdb73be4fb430e0",
+    "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "31feed6a473d3fcf9bcd4a44970b6c7406f0fa6b4b81a5361984d7ae97c33095",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "1e8eb9704f1039e9de0f2e6b476af6714d6d74afe59e8c9ec4d34b38e963c773",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "de18e4c1d12cbad02d5ef62aeecf99f7dea59abe421e34d65c97e262496400c2",
-    "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "bc3717da3ef3fb7fde624b0d4fde13996d86da28c60995bf244285a56d6445ee",
+    "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "fd92cd15daf9411010bdeb6dce27c429ce62a9c6d5ebe442c9dcb9d2a78ef38f",
     "dsh-packages/deepseek-ai-dsh-client-runtime-0.1.0-rc.5.tgz": "4333227567a545252a4a3d515e91f7df9156c8614c0a098d9c79c372f89fd597",
     "dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz": "462e8d39eed6f169fae4beceac28417ae4f4002116355d38f552235312375838",
-    "dsh-packages/deepseek-ai-dsh-client-web-0.1.0-rc.5.tgz": "ff11818877e8c782d744ef774b40222e8e5f5ebeab9c4e2f8dc1dca992ec507d",
+    "dsh-packages/deepseek-ai-dsh-client-web-0.1.0-rc.5.tgz": "693461b1e0a2c0872da8ffe163bef9f70231189b6626a957727f964d54cd470c",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "6d91ec4c14c709f905d0d58832ca463d4307dcd11b119eaeacbc122fe2c9aefe",
     "dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz": "05b9930d1eafc66def404dc6441771e75235bcac0f76648d087e2770c2a651f0",
     "dsh-packages/deepseek-ai-dsh-home-paths-0.1.0-rc.5.tgz": "7c77e37ff3cf29d2c4132e81545ad1dc1f55c17ef943ebe09a910e12acc774c1",
@@ -239,6 +239,6 @@
     "dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz": "09cbe6dcbe6a3a82cb071577395e299282d3b336d0d700a210e577cb3f1cf69d",
     "dsh-packages/vlln-plugin-console-0.1.1-solar.1.tgz": "80755b4dd17400ca4e63d69abde591fcea016c62e39b127a48ef962926bbf940",
     "dsh-packages/lisihao-dsh-code-harness-governance-0.3.12.tgz": "2562753420c48cd009e367f311be29d580b777282ec2c0c6b9be0feeef7b910e",
-    "dsh-packages/dsh-web-billing-1.1.3.tgz": "7b2c7b85d74b4c16dec9d0bcecf87b818e5b071a01949765749a5c240f7fc209"
+    "dsh-packages/dsh-web-billing-1.1.4.tgz": "3446176f33375a93f0ef15bf53f7537b31261f1703c96094c9de4083f1981d9e"
   }
 }

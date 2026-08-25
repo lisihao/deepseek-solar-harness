@@ -22,7 +22,7 @@ function textOf(value) {
   return textOf(value.props?.children)
 }
 
-async function loadBadge({ open = false } = {}) {
+async function loadBadge({ open = false, baseline } = {}) {
   const source = await readFile(CLIENT_URL, 'utf8')
   let exported
   let Badge
@@ -36,10 +36,16 @@ async function loadBadge({ open = false } = {}) {
   }
   const context = {
     console,
+    URLSearchParams,
     clearInterval: () => {},
     fetch: async () => ({ ok: false }),
     setInterval: () => 1,
     window: {
+      location: {
+        search: baseline === undefined
+          ? ''
+          : `?dsh-local-billing-baseline=${encodeURIComponent(JSON.stringify(baseline))}`,
+      },
       __ModuleLoader__: {
         load: definition => {
           exported = definition.factory(id => {
@@ -114,6 +120,25 @@ test('global DSH cost total remains visible in the expanded sidebar for an untra
   const tree = renderBadge(loaded.Badge, loaded.dictionaries)
   assert.notEqual(tree, null)
   assert.match(textOf(tree), /费用.*¥0\.368/)
+})
+
+test('Frontend combines the MacBook history baseline with the current Server ledger', async () => {
+  const loaded = await loadBadge({
+    open: true,
+    baseline: {
+      calls: 415,
+      cost: 11.6173779,
+      costUsd: 1.697263652,
+      inputTokens: 2043980,
+      cacheReadTokens: 23318912,
+      outputTokens: 200035,
+    },
+  })
+  const tree = renderBadge(loaded.Badge, loaded.dictionaries, { open: true })
+  const text = textOf(tree)
+  assert.match(text, /费用.*¥11\.99/)
+  assert.match(text, /MacBook 历史 ¥11\.62/)
+  assert.match(text, /累计.*¥11\.99/)
 })
 
 test('mounts the cumulative badge in the sidebar instead of the crowded composer surface', async () => {

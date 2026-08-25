@@ -347,7 +347,8 @@ describe('Electron compatibility runtime', () => {
   it('keeps main navigation origin-locked while allowing loopback Remote Module frames', async () => {
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
-    runtime.schedule(spec)
+    const requestUseLocalServer = vi.fn(async () => {})
+    runtime.schedule({ ...spec, requestUseLocalServer })
     await runtime.mountScheduled()
 
     const window = electron.browserWindows[0]
@@ -367,6 +368,11 @@ describe('Electron compatibility runtime', () => {
     const sameOrigin = event('http://127.0.0.1:43120/settings', true)
     navigate(sameOrigin)
     expect(sameOrigin.preventDefault).not.toHaveBeenCalled()
+
+    const useLocal = event('dsh-desktop://deployment/local-server', true)
+    navigate(useLocal)
+    expect(useLocal.preventDefault).toHaveBeenCalledOnce()
+    await vi.waitFor(() => { expect(requestUseLocalServer).toHaveBeenCalledOnce() })
 
     for (const url of ['http://127.0.0.1:29001/', 'http://localhost:29002/console/']) {
       const relay = event(url, false)
