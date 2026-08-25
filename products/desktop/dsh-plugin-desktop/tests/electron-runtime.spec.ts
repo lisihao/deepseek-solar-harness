@@ -244,7 +244,7 @@ describe('Electron compatibility runtime', () => {
     expect(electron.browserWindowOptions).toHaveLength(1)
     const options = electron.browserWindowOptions[0]
     expect(options).toEqual(expect.objectContaining({
-      title: 'DeepSeek Harness Desktop',
+      title: `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
       width: 1280,
       height: 840,
       show: false,
@@ -270,11 +270,15 @@ describe('Electron compatibility runtime', () => {
     ]) {
       expect(options).not.toHaveProperty(option)
     }
-    expect(electron.browserWindows[0]?.accessibleTitle).toBe('DeepSeek Harness Desktop')
+    expect(electron.browserWindows[0]?.accessibleTitle).toBe(
+      `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
+    )
     expect(spec.readThemeSource).not.toHaveBeenCalled()
     expect(electron.nativeTheme.themeSource).toBe('system')
     expect(electron.browserWindows[0]?.removeMenu).not.toHaveBeenCalled()
     expect(electron.app.dock.setIcon).toHaveBeenCalledWith(electron.appIcon)
+    expect(electron.browserWindows[0]?.show).toHaveBeenCalledOnce()
+    expect(electron.browserWindows[0]?.focus).toHaveBeenCalledOnce()
     expect(electron.templateIcon.setTemplateImage).toHaveBeenCalledWith(true)
     expect(electron.trays[0]?.image).toBe(electron.templateIcon)
     expect(electron.menuTemplates[0]).toEqual(expect.arrayContaining([
@@ -400,10 +404,12 @@ describe('Electron compatibility runtime', () => {
     await runtime.mountScheduled()
 
     expect(electron.browserWindowOptions[0]).toEqual(expect.objectContaining({
-      title: 'DeepSeek Harness Desktop',
+      title: `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
       autoHideMenuBar: true,
     }))
-    expect(electron.browserWindows[0]?.accessibleTitle).toBe('DeepSeek Harness Desktop')
+    expect(electron.browserWindows[0]?.accessibleTitle).toBe(
+      `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
+    )
     expect(electron.browserWindows[0]?.removeMenu).toHaveBeenCalledOnce()
     expect(electron.app.dock.setIcon).not.toHaveBeenCalled()
     expect(electron.trays[0]?.image).toBe(electron.blueIcon)
@@ -440,6 +446,8 @@ describe('Electron compatibility runtime', () => {
 
     const mounted = runtime.mountScheduled(beforeInteractive)
     await vi.waitFor(() => { expect(electron.loadURL).toHaveBeenCalledOnce() })
+    expect(electron.browserWindows[0]?.show).toHaveBeenCalledOnce()
+    expect(electron.browserWindows[0]?.focus).toHaveBeenCalledOnce()
     expect(electron.trays).toHaveLength(0)
     expect(beforeInteractive).not.toHaveBeenCalled()
 

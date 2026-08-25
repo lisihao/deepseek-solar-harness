@@ -227,7 +227,7 @@ async function start(): Promise<void> {
           minHeight: 640,
           url: renderer.href,
           productName: PRODUCT_NAME,
-          windowTitle: 'DSH Desktop · Remote Frontend',
+          windowTitle: 'Remote Frontend',
           iconPath: desktopAssetPath(process.platform === 'darwin' ? 'app-icon-mac.png' : 'app-icon.png'),
           trayIcons: {
             templatePath: desktopAssetPath('tray-iconTemplate.png'),

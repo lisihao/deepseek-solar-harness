@@ -470,8 +470,9 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (this.platform === 'darwin') app.dock?.setIcon(icon)
     const origin = new URL(spec.url).origin
     if (spec.mode === 'advanced') nativeTheme.themeSource = spec.readThemeSource()
-    const window = new BrowserWindow(desktopWindowOptions(spec, icon, this.platform))
-    window.accessibleTitle = spec.windowTitle
+    const windowTitle = `${spec.productName} v${PRODUCT_VERSION} · ${spec.windowTitle}`
+    const window = new BrowserWindow(desktopWindowOptions({ ...spec, windowTitle }, icon, this.platform))
+    window.accessibleTitle = windowTitle
     if (this.platform === 'win32') window.removeMenu()
     this.window = window
     const remoteAccess = spec.remoteAccess
@@ -542,7 +543,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       return { action: 'deny' }
     })
 
-    window.once('ready-to-show', show)
+    show()
     let tray: Tray | undefined
     try {
       await window.loadURL(spec.url)
