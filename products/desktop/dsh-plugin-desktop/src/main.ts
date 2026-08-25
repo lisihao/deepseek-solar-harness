@@ -80,7 +80,7 @@ async function start(): Promise<void> {
   let frontendAccess: DesktopRemoteAccessSession | undefined
   let frontendSetup: FrontendSetupController | undefined
   let deploymentStore: DesktopDeploymentStateStore | undefined
-  let deploymentState: DesktopDeploymentState = { version: 1, role: 'server' }
+  let deploymentState: DesktopDeploymentState = { version: 2, role: 'server' }
   let runtime!: ElectronDesktopRuntime
   const nativeExit = createDesktopExitCoordinator(
     {
@@ -180,13 +180,15 @@ async function start(): Promise<void> {
     )
     if (deploymentState.role === 'frontend') {
       const state = deploymentState
-      const access = new DesktopRemoteAccessSession(deploymentStore, state, (cause) => {
-        process.stderr.write(
-          `${BIN_NAME}: failed to refresh remote access: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-        )
-      })
+      const access = state.authMode === 'paired'
+        ? new DesktopRemoteAccessSession(deploymentStore, state, (cause) => {
+            process.stderr.write(
+              `${BIN_NAME}: failed to refresh remote access: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+            )
+          })
+        : undefined
       try {
-        await access.start()
+        await access?.start()
         frontendAccess = access
         const endpoint = new URL(state.endpoint)
         const renderer = new URL(endpoint)
@@ -208,9 +210,11 @@ async function start(): Promise<void> {
             templatePath: desktopAssetPath('tray-iconTemplate.png'),
             bluePath: desktopAssetPath('tray-icon-blue.png'),
           },
-          remoteAccess: {
-            origin: endpoint.origin,
-            accessToken: () => access.accessToken(),
+          ...access === undefined ? {} : {
+            remoteAccess: {
+              origin: endpoint.origin,
+              accessToken: () => access.accessToken(),
+            },
           },
           readThemeSource: () => 'system',
           requestQuit,
@@ -222,7 +226,7 @@ async function start(): Promise<void> {
         disposeFrontend = release
         await runtime.mountScheduled()
       } catch (cause) {
-        access.stop()
+        access?.stop()
         frontendAccess = undefined
         process.stderr.write(
           `${BIN_NAME}: unable to open remote Frontend: ${cause instanceof Error ? cause.message : String(cause)}\n`,
