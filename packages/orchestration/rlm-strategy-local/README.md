@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 Deterministic baseline RLM Provider. Automatic mode combines task/phase signals with the selected quality, speed, economy, or balanced objective; explicit Standard and RLM choices always override it. Strategy `1.3.0` uses Prime's one-level recursion default, assigns deliberately different analysis lenses to parallel leaves, and requires coverage-checked synthesis so duplicate leaves cannot masquerade as added quality.
 
-The package also ships a keyless quality-evaluation contract. Reusable blind fixtures store two anonymous arms per case while a separate reveal-key file maps those arms to direct and RLM execution only after outputs are frozen. Daily development evaluates recorded fixtures without invoking a model; a release candidate may replace one pair with the single approved real-subscription blind run.
+The package also ships a keyless quality-evaluation contract. Reusable blind fixtures store two anonymous arms per case while a separate reveal-key file maps those arms to direct and RLM execution only after outputs are frozen. Daily development evaluates recorded fixtures without invoking a model; reports classify synthetic and keyless evidence as `fixture-regression-passed`, which cannot support a measured quality claim. Only a passing, provenance-stamped `real-subscription` blind recording reports `measured-lift-passed`. A release candidate performs at most one approved real-subscription blind run.
 
 ## Model Experience
 

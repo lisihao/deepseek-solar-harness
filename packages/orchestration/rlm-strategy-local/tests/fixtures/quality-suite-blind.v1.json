@@ -1,5 +1,12 @@
 {
   "version": 1,
+  "evidence": {
+    "kind": "synthetic-fixture",
+    "recordingId": "rlm-quality-blind-fixture-v1",
+    "recordedAt": "2026-08-24T00:00:00.000Z",
+    "sourceCommit": "0ab6186dfd9a3a364b81d1e9abec90c031600740",
+    "productVersion": "3.4.0"
+  },
   "minimumQualityLift": 0.2,
   "maximumTokenRatio": 3,
   "cases": [

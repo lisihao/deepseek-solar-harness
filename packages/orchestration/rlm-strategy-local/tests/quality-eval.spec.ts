@@ -17,6 +17,8 @@ describe('RLM recorded-output quality evaluation', () => {
     const report = evaluateRlmQualitySuite(suite)
     expect(report).toMatchObject({
       passed: true,
+      verdict: 'fixture-regression-passed',
+      supportsQualityClaim: false,
       averageDirectScore: 0,
       averageRlmScore: 1,
       criticalRegressions: [],
@@ -27,6 +29,7 @@ describe('RLM recorded-output quality evaluation', () => {
   it('fails closed when an RLM output loses a critical fact', () => {
     const report = evaluateRlmQualitySuite({
       version: 1,
+      evidence: fixtureEvidence(),
       minimumQualityLift: 0,
       maximumTokenRatio: 2,
       cases: [{
@@ -52,6 +55,8 @@ describe('RLM recorded-output quality evaluation', () => {
     expect(fixtureText).not.toMatch(/"(?:direct|rlm)"\s*:/iu)
     expect(evaluateBlindRlmQualitySuite(suite, assignments)).toMatchObject({
       passed: true,
+      verdict: 'fixture-regression-passed',
+      supportsQualityClaim: false,
       averageDirectScore: 0,
       averageRlmScore: 1,
       criticalRegressions: [],
@@ -61,6 +66,7 @@ describe('RLM recorded-output quality evaluation', () => {
   it('rejects a reveal key that aliases both methods to one arm', () => {
     expect(() => evaluateBlindRlmQualitySuite({
       version: 1,
+      evidence: fixtureEvidence(),
       minimumQualityLift: 0,
       maximumTokenRatio: 2,
       cases: [{
@@ -73,4 +79,34 @@ describe('RLM recorded-output quality evaluation', () => {
       }],
     }, [{ caseId: 'aliased', directArmId: 'A', rlmArmId: 'A' }])).toThrow('assignment is invalid')
   })
+
+  it('reserves measured quality claims for a passing real-subscription recording', () => {
+    const report = evaluateRlmQualitySuite({
+      version: 1,
+      evidence: { ...fixtureEvidence(), kind: 'real-subscription' },
+      minimumQualityLift: 0.2,
+      maximumTokenRatio: 2,
+      cases: [{
+        id: 'measured', task: 'fixture',
+        criteria: [{ id: 'fact', weight: 1, requiredFacts: ['receipt'] }],
+        direct: { text: 'missing', turns: 1, estimatedTokens: 10 },
+        rlm: { text: 'receipt', turns: 2, estimatedTokens: 20 },
+      }],
+    })
+    expect(report).toMatchObject({
+      passed: true,
+      verdict: 'measured-lift-passed',
+      supportsQualityClaim: true,
+    })
+  })
 })
+
+function fixtureEvidence() {
+  return {
+    kind: 'synthetic-fixture' as const,
+    recordingId: 'quality-eval-spec',
+    recordedAt: '2026-08-24T00:00:00.000Z',
+    sourceCommit: 'fixture-source',
+    productVersion: 'fixture-version',
+  }
+}

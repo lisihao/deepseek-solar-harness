@@ -136,6 +136,65 @@ export function assertRecursiveRlmEvents(events, nodeId) {
   return { children, childResults, continuations, settled, evidence }
 }
 
+/**
+ * Freeze the one approved real-subscription blind comparison as reusable evidence.
+ * Candidate identities are revealed only after the anonymous verifier has settled.
+ */
+export function buildBlindRlmQualityRecording({
+  events,
+  directCandidateId,
+  rlmCandidateId,
+  nonce,
+  productVersion,
+  sourceCommit,
+  recordedAt,
+}) {
+  assert(/^[a-f0-9]{40}$/u.test(sourceCommit), 'quality recording source commit is not a full Git SHA')
+  const candidateA = events.find(event => event.type === 'node.evidence.accepted' && event.nodeId === 'candidate-a')
+  const candidateB = events.find(event => event.type === 'node.evidence.accepted' && event.nodeId === 'candidate-b')
+  const verifier = events.find(event => event.type === 'node.evidence.accepted' && event.nodeId === 'verify')
+  assert(candidateA !== undefined && candidateB !== undefined, 'blind quality candidates did not both settle')
+  assert(verifier !== undefined, 'blind quality verifier did not settle')
+  assert(candidateA.sequence < verifier.sequence && candidateB.sequence < verifier.sequence, 'blind verifier settled before both candidates')
+  const preferredLetter = String(verifier.data.outputPreview ?? '').match(/PREFERRED_([AB])\s*$/u)?.[1]
+  assert(preferredLetter !== undefined, 'blind quality verifier did not return a preferred arm')
+  const preferredCandidateId = `candidate-${preferredLetter.toLowerCase()}`
+  const passed = preferredCandidateId === rlmCandidateId
+  const arm = event => ({
+    nodeId: event.nodeId,
+    evidenceRef: event.data.evidenceRef,
+    output: String(event.data.outputPreview ?? ''),
+    outputTruncated: event.data.outputTruncated === true,
+  })
+  return {
+    version: 1,
+    evidence: {
+      kind: 'real-subscription',
+      recordingId: `desktop-rlm-blind-${productVersion}-${nonce}`,
+      recordedAt,
+      sourceCommit,
+      productVersion,
+    },
+    evaluation: 'anonymous-high-tier-verifier',
+    claimScope: 'one frozen DSH architecture task on the recorded product and model allocation',
+    arms: { A: arm(candidateA), B: arm(candidateB) },
+    judge: {
+      evidenceRef: verifier.data.evidenceRef,
+      output: String(verifier.data.outputPreview ?? ''),
+      outputTruncated: verifier.data.outputTruncated === true,
+      settledSequence: verifier.sequence,
+      preferredArmId: preferredLetter,
+    },
+    reveal: {
+      directCandidateId,
+      rlmCandidateId,
+      revealedAfterSequence: verifier.sequence,
+    },
+    passed,
+    supportsQualityClaim: passed,
+  }
+}
+
 function assertNativeCompleted(result) {
   for (const node of result.snapshot.nodes) {
     assert(node.modelSource === 'native-subscription', `${node.id} used ${String(node.modelSource)} instead of a subscription`)
@@ -255,6 +314,7 @@ async function runInner(appRoot) {
   const mode = resolveSubscriptionE2EMode(process.env)
   const fullMatrix = mode === 'full'
   const version = appVersion(appRoot)
+  const sourceCommit = process.env.DSH_SOURCE_COMMIT ?? ''
   process.env.DSH_BUILD_COMMIT = `desktop-${version}`
   const unpackedRoot = join(appRoot, 'Contents', 'Resources', 'app.asar.unpacked')
   const orchestrationModule = pathToFileURL(join(
@@ -422,6 +482,15 @@ async function runInner(appRoot) {
   const preferred = String(verifierEvidence?.data.outputPreview ?? '').match(/PREFERRED_([AB])\s*$/u)?.[1]
   const expectedPreferred = rlmCandidateId === 'candidate-a' ? 'A' : 'B'
   assert(preferred === expectedPreferred, `blind quality verifier preferred ${String(preferred)} instead of RLM candidate ${expectedPreferred}`)
+  const qualityBlind = buildBlindRlmQualityRecording({
+    events: pipeline.events,
+    directCandidateId,
+    rlmCandidateId,
+    nonce,
+    productVersion: version,
+    sourceCommit,
+    recordedAt: new Date().toISOString(),
+  })
   const { workerAttempts, workerDispatches, workerEvidence, quotaFailovers } = assertParallelWorkerEvents(
     pipeline.events,
     ['worker-a', 'worker-b'],
@@ -556,13 +625,7 @@ async function runInner(appRoot) {
         childCount: recursiveRlm.children.length,
         continuationCount: recursiveRlm.continuations.length,
       },
-      qualityBlind: {
-        directCandidateId,
-        rlmCandidateId,
-        preferred: `candidate-${preferred?.toLowerCase()}`,
-        passed: preferred === expectedPreferred,
-        verifierEvidenceRef: verifierEvidence?.data.evidenceRef,
-      },
+      qualityBlind,
       worktrees: {
         prepared: preparedWorktrees.map(event => event.data),
         integrated: integratedWorktrees.map(event => event.data),
@@ -753,12 +816,15 @@ async function runOuter() {
   const appRoot = resolve(valueAfter('--app') ?? defaultAppRoot)
   const executable = join(appRoot, 'Contents', 'MacOS', 'DSH Desktop')
   const version = appVersion(appRoot)
+  const repositoryRoot = resolve(import.meta.dirname, '../../../..')
+  const sourceCommit = execFileSync('/usr/bin/git', ['-C', repositoryRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   const endpoints = await discoverDesktopEndpoints()
   const child = spawn(executable, [scriptPath, '--inner', `--app=${appRoot}`], {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',
       DSH_BUILD_COMMIT: `desktop-${version}`,
+      DSH_SOURCE_COMMIT: sourceCommit,
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   })
