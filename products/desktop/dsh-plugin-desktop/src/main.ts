@@ -27,6 +27,7 @@ import {
 } from './deployment-state.ts'
 import { parseFrontendBillingBaseline, type FrontendBillingBaseline } from './frontend-billing.ts'
 import { FrontendSetupController } from './frontend-setup.ts'
+import { DesktopGitSyncController } from './git-sync.ts'
 import {
   beginDesktopProfileStartup,
   listDesktopProfiles,
@@ -97,6 +98,7 @@ async function start(): Promise<void> {
   let disposeFrontend: (() => Promise<void>) | undefined
   let frontendAccess: DesktopRemoteAccessSession | undefined
   let frontendSetup: FrontendSetupController | undefined
+  let gitSync: DesktopGitSyncController | undefined
   let deploymentStore: DesktopDeploymentStateStore | undefined
   let deploymentState: DesktopDeploymentState = { version: 3, role: 'server' }
   let runtime!: ElectronDesktopRuntime
@@ -141,6 +143,7 @@ async function start(): Promise<void> {
           try {
             frontendAccess?.stop()
             frontendSetup?.dispose()
+            gitSync?.stop()
             disposeNativeProductRuntime?.()
           } finally {
             disposePnpmRuntime?.()
@@ -174,6 +177,7 @@ async function start(): Promise<void> {
         try {
           frontendAccess?.stop()
           frontendSetup?.dispose()
+          gitSync?.stop()
           disposeNativeProductRuntime?.()
         } finally {
           disposePnpmRuntime?.()
@@ -191,8 +195,11 @@ async function start(): Promise<void> {
       { fetch: (url, init) => net.fetch(String(url), init) },
     )
     deploymentState = await deploymentStore.load()
+    gitSync = new DesktopGitSyncController(app.getPath('userData'))
+    await gitSync.start()
     frontendSetup = new FrontendSetupController(
       deploymentStore,
+      gitSync,
       () => deploymentState,
       () => runtime.requestRestart(),
     )
@@ -249,6 +256,7 @@ async function start(): Promise<void> {
             deploymentState = await deploymentStore!.useServer()
             await runtime.requestRestart()
           },
+          requestConfigureDeployment: () => frontendSetup!.open(),
         })
         disposeFrontend = release
         await runtime.mountScheduled()

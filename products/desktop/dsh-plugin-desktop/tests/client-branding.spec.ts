@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply as applyDesktop } from '../src/client/index.ts'
-import { mountSolarBrandFooter, solarBrandLabel, USE_LOCAL_SERVER_URL } from '../src/client/SolarBrand.tsx'
+import { CONFIGURE_DEPLOYMENT_URL, mountSolarBrandFooter, solarBrandLabel, USE_LOCAL_SERVER_URL } from '../src/client/SolarBrand.tsx'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => ({
   Menu: () => null,
@@ -47,10 +47,14 @@ describe('Solar desktop branding', () => {
 
   it('mounts one complete version label in a window-bottom footer', () => {
     const marker = { className: '', textContent: '' }
-    const addEventListener = vi.fn()
-    const useLocal = {
-      type: '', className: '', dataset: {} as Record<string, string>, textContent: '', title: '', addEventListener,
-    }
+    const buttons: Array<{
+      type: string
+      className: string
+      dataset: Record<string, string>
+      textContent: string
+      title: string
+      addEventListener: ReturnType<typeof vi.fn>
+    }> = []
     const footer = {
       className: '',
       dataset: {} as Record<string, string>,
@@ -65,7 +69,15 @@ describe('Solar desktop branding', () => {
     }
     const assign = vi.fn()
     vi.stubGlobal('document', {
-      createElement: vi.fn((tag: string) => tag === 'footer' ? footer : tag === 'button' ? useLocal : marker),
+      createElement: vi.fn((tag: string) => {
+        if (tag === 'footer') return footer
+        if (tag !== 'button') return marker
+        const button = {
+          type: '', className: '', dataset: {} as Record<string, string>, textContent: '', title: '', addEventListener: vi.fn(),
+        }
+        buttons.push(button)
+        return button
+      }),
       body,
     })
     vi.stubGlobal('window', { location: { assign } })
@@ -83,11 +95,17 @@ describe('Solar desktop branding', () => {
       expect(footer.title).toBe(label)
       expect(footer.setAttribute).toHaveBeenCalledWith('aria-label', label)
       expect(footer.appendChild).toHaveBeenNthCalledWith(1, marker)
-      expect(footer.appendChild).toHaveBeenNthCalledWith(2, useLocal)
+      const [configure, useLocal] = buttons
+      if (configure === undefined || useLocal === undefined) throw new Error('expected two Frontend deployment buttons')
+      expect(footer.appendChild).toHaveBeenNthCalledWith(2, configure)
+      expect(footer.appendChild).toHaveBeenNthCalledWith(3, useLocal)
+      expect(configure?.textContent).toBe('Server / Git 同步')
       expect(useLocal.textContent).toBe('切换到本地 Server')
-      expect(addEventListener).toHaveBeenCalledWith('click', expect.any(Function))
-      const click = addEventListener.mock.calls[0]?.[1] as (() => void)
-      click()
+      const configureClick = configure?.addEventListener.mock.calls[0]?.[1] as (() => void)
+      const useLocalClick = useLocal.addEventListener.mock.calls[0]?.[1] as (() => void)
+      configureClick()
+      expect(assign).toHaveBeenCalledWith(CONFIGURE_DEPLOYMENT_URL)
+      useLocalClick()
       expect(assign).toHaveBeenCalledWith(USE_LOCAL_SERVER_URL)
 
       dispose()

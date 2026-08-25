@@ -5,6 +5,8 @@ export const SOLAR_BRAND = 'DSH - DeepSeek Harness的Solar分支，目标是您�
 
 /** Exact custom navigation consumed by the trusted Electron shell. */
 export const USE_LOCAL_SERVER_URL = 'dsh-desktop://deployment/local-server'
+/** Open native Server and Git synchronization configuration. */
+export const CONFIGURE_DEPLOYMENT_URL = 'dsh-desktop://deployment/configure'
 
 /** Complete accessible product marker with the running package version. */
 export function solarBrandLabel(productVersion: string): string {
@@ -25,6 +27,14 @@ export function mountSolarBrandFooter(environment: DesktopClientEnvironment): ()
   marker.textContent = label
   footer.appendChild(marker)
   if (environment.deploymentRole === 'frontend') {
+    const configure = document.createElement('button')
+    configure.type = 'button'
+    configure.className = 'dshDesktopUseLocalServer'
+    configure.dataset.testid = 'desktop-configure-deployment'
+    configure.textContent = 'Server / Git 同步'
+    configure.title = '配置远程 Server 与仅提交态的 GitHub/Tailscale Git 同步'
+    configure.addEventListener('click', () => { window.location.assign(CONFIGURE_DEPLOYMENT_URL) })
+    footer.appendChild(configure)
     const useLocal = document.createElement('button')
     useLocal.type = 'button'
     useLocal.className = 'dshDesktopUseLocalServer'

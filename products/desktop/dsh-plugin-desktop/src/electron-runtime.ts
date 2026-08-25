@@ -515,6 +515,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         })
         return
       }
+      if (event.isMainFrame && target?.href === 'dsh-desktop://deployment/configure'
+        && spec.requestConfigureDeployment !== undefined) {
+        event.preventDefault()
+        void spec.requestConfigureDeployment().catch((cause: unknown) => {
+          process.stderr.write(`dsh-plugin-desktop: failed to open deployment settings: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+        })
+        return
+      }
       if (target?.origin === origin) return
       // Remote Modules are rendered in subframes through product-owned local
       // relays. Keep top-level navigation origin-locked while allowing only

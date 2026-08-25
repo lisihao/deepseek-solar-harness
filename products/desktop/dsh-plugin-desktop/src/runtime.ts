@@ -148,6 +148,8 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   requestModeChange(mode: DesktopShellMode): Promise<void>
   /** Switch a Frontend window back to the complete local Server deployment. */
   requestUseLocalServer?(): Promise<void>
+  /** Open Desktop-owned Server and Git commit synchronization settings. */
+  requestConfigureDeployment?(): Promise<void>
 }
 
 /** Electron bootstrap capability supplied before the profile tree mounts. */

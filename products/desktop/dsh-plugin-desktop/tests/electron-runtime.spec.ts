@@ -352,7 +352,8 @@ describe('Electron compatibility runtime', () => {
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
     const requestUseLocalServer = vi.fn(async () => {})
-    runtime.schedule({ ...spec, requestUseLocalServer })
+    const requestConfigureDeployment = vi.fn(async () => {})
+    runtime.schedule({ ...spec, requestUseLocalServer, requestConfigureDeployment })
     await runtime.mountScheduled()
 
     const window = electron.browserWindows[0]
@@ -377,6 +378,11 @@ describe('Electron compatibility runtime', () => {
     navigate(useLocal)
     expect(useLocal.preventDefault).toHaveBeenCalledOnce()
     await vi.waitFor(() => { expect(requestUseLocalServer).toHaveBeenCalledOnce() })
+
+    const configure = event('dsh-desktop://deployment/configure', true)
+    navigate(configure)
+    expect(configure.preventDefault).toHaveBeenCalledOnce()
+    await vi.waitFor(() => { expect(requestConfigureDeployment).toHaveBeenCalledOnce() })
 
     for (const url of ['http://127.0.0.1:29001/', 'http://localhost:29002/console/']) {
       const relay = event(url, false)

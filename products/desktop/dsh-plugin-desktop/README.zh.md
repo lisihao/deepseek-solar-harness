@@ -14,6 +14,8 @@ Electron 可执行文件只包含最小启动代码。它获取单实例锁、�
 
 MacBook Frontend 会保存一个带名称的 Product Server 列表和一项当前 Server 选择。原生 **Connect to Remote Server…** 窗口可新增、编辑、选择和删除条目；切换当前条目会让 Frontend 重启并连接对应 endpoint，而不会启动本机 Host。已有的单 Server 部署状态会迁移为列表中的第一个条目。`http://127.0.0.1:13080` 这类 loopback endpoint 通常通过 owner 控制的 SSH 本地转发访问 Product Server，会直接使用已经认证的隧道，不再要求第二份配对码或 Keychain 凭据。手机／pocket 等直接访问远程 HTTPS 的客户端仍使用一次性配对挑战、加密持久设备凭据和短期访问 session。
 
+同一原生窗口还拥有可选的后台 Git commit 同步。每台设备分别配置本地仓库路径、作为权威的 GitHub remote、分支、同步方向、间隔，以及可选的 Tailscale／SSH 加速 remote。同步会拒绝脏工作树或错误分支，只对已提交 ref 执行 fast-forward 或 push；遇到分叉时报告冲突，不会自行 merge。加速 remote 只可预取 Git object；GitHub 始终是接受结果的权威，而且加速路径失败不会阻断权威路径。该机制绝不复制存活的 DSH Session、SQLite 或 WAL 文件：运行进展仍是 Server 投影，迁移运行权威必须另行显式执行。
+
 desktop package 拥有普通 Host 与 Web Client 两个 face。它的 Client face 会校验 Host 提供的模式、平台与产品版本 marker。两种模式都会在窗口内容下方的保留区域挂载一条不可交互的单行产品标记，并继续把 Desktop 操作放在普通 additive slot 中；兼容模式随后停止，不提供 layout service 或 root 呈现，高级模式则安装下文所述的 desktop layout service 与 root 呈现。两种模式下，第三方 Web client 都继续使用普通 DSH 模块图。
 
 托盘中的 profile 选择器会列出现有 profile，以及可延迟创建的 `desktop` 与 `web` 默认项。可选 profile 必须直接按顺序组合 `dsh-base` 与 `dsh-web-app`；headless、损坏或已经内嵌 desktop bundle 的 profile 仍会显示，但不可选择。只有 `desktop` 是 Launcher 管理的 profile：它会修复安装方拥有的前缀，同时保留第三方 bundle 的相对顺序。其他被选 profile 的 manifest、用户 patch 与依赖均保持不变。Launcher 只会为当前 generation 在 `dsh-web-app` 后插入自有 desktop layer，不会把该 layer 持久化到被选 bundle 列表。
