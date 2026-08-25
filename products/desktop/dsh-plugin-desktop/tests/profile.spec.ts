@@ -6,12 +6,16 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { composeEntries, initProfile, PROFILE_TEMPLATES } from '@deepseek-ai/dsh-app-boot'
 import {
   DESKTOP_PACKAGE_NAME,
+  PRODUCT_SERVER_PROFILE_NAME,
   desktopShellModeFromSettings,
   desktopBundleList,
   ensureDesktopProfile,
+  ensureProductServerProfile,
   prepareDesktopProfile,
+  prepareProductServerProfile,
   readDesktopShellMode,
 } from '../src/profile.ts'
+import { PRODUCT_BUNDLE_ROW_IDS } from '../src/product-bundles.ts'
 
 const homes: string[] = []
 
@@ -70,6 +74,82 @@ describe('desktop profile composition', () => {
     expect(repaired.custom.preserved).toBe(true)
   })
 
+  it('composes the complete product on Server without Electron-owned rows', () => {
+    const home = temporaryHome()
+    const dir = ensureProductServerProfile(home)
+    const prepared = prepareProductServerProfile(undefined, home, 'darwin')
+    const rows = composeEntries([prepared.patches])
+    const rowIds = new Set(rows.map(row => row.id))
+
+    expect(dir).toBe(join(home, 'profiles', PRODUCT_SERVER_PROFILE_NAME))
+    for (const rowId of PRODUCT_BUNDLE_ROW_IDS.values()) expect(rowIds).toContain(rowId)
+    expect(rows.find(row => row.id === 'resident-operators')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-resident-operator-local',
+      config: expect.objectContaining({ connectTimeoutMs: 15_000 }),
+    }))
+    expect(rows.find(row => row.id === 'orchestration-local')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-orchestration-local',
+      config: expect.objectContaining({ autoStart: true }),
+    }))
+    expect(rows.find(row => row.id === 'ui-remote-modules')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-client-ui-remote-modules',
+      disabled: false,
+    }))
+    expect(rows.find(row => row.id === 'webserver')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-host-webserver',
+      disabled: false,
+    }))
+    expect(rows.find(row => row.id === 'directory-picker')).toEqual(expect.objectContaining({
+      disabled: true,
+    }))
+    expect(rows.find(row => row.id === 'product-server-directory-picker-browse-host')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-host-directory-picker-browse',
+    }))
+    expect(rows.find(row => row.id === 'product-server-directory-picker-browse-surface')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse',
+    }))
+    for (const desktopRow of [
+      'desktop-shell',
+      'desktop-terminal',
+      'desktop-pnpm',
+      'desktop-profiles',
+      'desktop-updates',
+    ]) expect(rowIds).not.toContain(desktopRow)
+  })
+
+  it('keeps every sealed product row identical across Desktop and Product Server', () => {
+    const home = temporaryHome()
+    const desktop = composeEntries([prepareDesktopProfile(undefined, home, 'darwin').patches])
+    const server = composeEntries([prepareProductServerProfile(undefined, home, 'darwin').patches])
+    const desktopRows = new Map(desktop.map(row => [row.id, row]))
+    const serverRows = new Map(server.map(row => [row.id, row]))
+
+    for (const rowId of PRODUCT_BUNDLE_ROW_IDS.values()) {
+      expect(serverRows.get(rowId), rowId).toEqual(desktopRows.get(rowId))
+    }
+
+    const adapterRows = new Set([
+      'webserver',
+      'web-runtime',
+      'directory-picker',
+      'desktop-shell',
+      'desktop-terminal',
+      'desktop-pnpm',
+      'desktop-profiles',
+      'desktop-updates',
+      'desktop-directory-picker-browse-host',
+      'desktop-directory-picker-browse-surface',
+      'desktop-windows-pwsh-sandbox',
+      'product-server-directory-picker-browse-host',
+      'product-server-directory-picker-browse-surface',
+    ])
+    const sharedIds = new Set([...desktopRows.keys(), ...serverRows.keys()])
+    for (const rowId of sharedIds) {
+      if (adapterRows.has(rowId)) continue
+      expect(serverRows.get(rowId), rowId).toEqual(desktopRows.get(rowId))
+    }
+  })
+
   it('rejects malformed persistent bundle metadata', () => {
     const home = temporaryHome()
     const dir = ensureDesktopProfile(home)
@@ -108,7 +188,7 @@ describe('desktop profile composition', () => {
     expect(prepared.homeDir).toBe(home)
     expect(fileURLToPath(prepared.bareModuleBaseUrl)).toBe(join(
       prepared.profile.dir,
-      '.dsh-desktop-runtime',
+      '.dsh-product-runtime',
       'package.json',
     ))
     expect(prepared.mode).toBe('compatibility')

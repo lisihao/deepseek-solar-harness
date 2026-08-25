@@ -9066,6 +9066,7 @@ __metadata:
   bin:
     dsh-desktop: lib/bin.js
     dsh-plugin-desktop: lib/bin.js
+    dsh-product-server: lib/product-server-bin.js
   languageName: unknown
   linkType: soft
 
