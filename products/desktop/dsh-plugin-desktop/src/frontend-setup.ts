@@ -133,17 +133,19 @@ function frontendSetupPage(): string {
   <form id="form">
     <label for="endpoint">Server 地址</label>
     <input id="endpoint" type="url" placeholder="https://dsh.example" required>
-    <small>远端必须使用 HTTPS；仅本机调试允许 http://127.0.0.1。</small>
-    <label for="code">8 位配对码</label>
-    <input id="code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" required>
+    <small>MacBook 通过受控 SSH 隧道访问 http://127.0.0.1 时不需要二次配对；其他远端必须使用 HTTPS。</small>
+    <label for="code" id="code-label">8 位配对码（仅远程 HTTPS）</label>
+    <input id="code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8">
     <label for="device">设备名称</label>
     <input id="device" maxlength="100" value="MacBook" required>
-    <div class="actions"><button class="primary" type="submit">配对并切换</button><button class="secondary" id="local" type="button">使用本机 Server</button></div>
+    <div class="actions"><button class="primary" type="submit">连接并切换</button><button class="secondary" id="local" type="button">使用本机 Server</button></div>
   </form>
   <div id="status">正在读取当前配置…</div>
   <script>
-    const api=window.dshFrontendSetup,status=document.getElementById('status'),endpoint=document.getElementById('endpoint'),device=document.getElementById('device'),form=document.getElementById('form');
-    api.describe().then(value=>{endpoint.value=value.endpoint;device.value=value.deviceName||'MacBook';status.textContent=value.role==='frontend'?'当前使用远程 Frontend。':'当前使用本机 Server。'}).catch(error=>{status.className='error';status.textContent=String(error)});
+    const api=window.dshFrontendSetup,status=document.getElementById('status'),endpoint=document.getElementById('endpoint'),code=document.getElementById('code'),device=document.getElementById('device'),form=document.getElementById('form');
+    const updateAuth=()=>{try{const host=new URL(endpoint.value).hostname,loopback=host==='127.0.0.1'||host==='localhost'||host==='[::1]';code.required=!loopback;code.disabled=loopback;code.placeholder=loopback?'SSH 隧道已认证，无需配对码':'请输入 Server 生成的 8 位配对码'}catch{code.required=true;code.disabled=false}};
+    endpoint.addEventListener('input',updateAuth);
+    api.describe().then(value=>{endpoint.value=value.endpoint;device.value=value.deviceName||'MacBook';updateAuth();status.textContent=value.role==='frontend'?'当前使用远程 Frontend。':'当前使用本机 Server。'}).catch(error=>{status.className='error';status.textContent=String(error)});
     form.addEventListener('submit',event=>{event.preventDefault();status.className='';status.textContent='正在配对…';api.configure({endpoint:endpoint.value,pairingCode:document.getElementById('code').value,deviceName:device.value}).catch(error=>{status.className='error';status.textContent=String(error)})});
     document.getElementById('local').addEventListener('click',()=>{status.className='';status.textContent='正在切换…';api.useServer().catch(error=>{status.className='error';status.textContent=String(error)})});
   </script>

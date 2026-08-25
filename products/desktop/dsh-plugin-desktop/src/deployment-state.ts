@@ -6,18 +6,30 @@ import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import type { DesktopShellMode } from './runtime.ts'
 
 export interface DesktopServerDeploymentState {
-  readonly version: 1
+  readonly version: 2
   readonly role: 'server'
 }
 
-export interface DesktopFrontendDeploymentState {
-  readonly version: 1
+interface DesktopFrontendDeploymentBase {
+  readonly version: 2
   readonly role: 'frontend'
   readonly endpoint: string
   readonly deviceName: string
   readonly presentation: DesktopShellMode
+}
+
+export interface DesktopTrustedTunnelDeploymentState extends DesktopFrontendDeploymentBase {
+  readonly authMode: 'trusted-tunnel'
+}
+
+export interface DesktopPairedDeploymentState extends DesktopFrontendDeploymentBase {
+  readonly authMode: 'paired'
   readonly encryptedCredential: string
 }
+
+export type DesktopFrontendDeploymentState =
+  | DesktopTrustedTunnelDeploymentState
+  | DesktopPairedDeploymentState
 
 export type DesktopDeploymentState = DesktopServerDeploymentState | DesktopFrontendDeploymentState
 
@@ -41,12 +53,12 @@ export interface DesktopDeploymentRequest {
 
 export interface ConfigureFrontendRequest {
   readonly endpoint: string
-  readonly pairingCode: string
+  readonly pairingCode?: string
   readonly deviceName: string
   readonly presentation?: DesktopShellMode
 }
 
-const DEFAULT_STATE: DesktopServerDeploymentState = { version: 1, role: 'server' }
+const DEFAULT_STATE: DesktopServerDeploymentState = { version: 2, role: 'server' }
 
 /** Persistence owner for choosing a local Server or remote Frontend before Cordis boot. */
 export class DesktopDeploymentStateStore {
@@ -73,26 +85,39 @@ export class DesktopDeploymentStateStore {
   }
 
   async configureFrontend(input: ConfigureFrontendRequest): Promise<DesktopFrontendDeploymentState> {
-    if (!this.secrets.isEncryptionAvailable()) {
-      throw new Error('dsh-plugin-desktop: operating-system credential encryption is unavailable')
-    }
     const endpoint = parseEndpoint(input.endpoint)
-    const pairingCode = input.pairingCode.trim()
-    if (!/^\d{8}$/.test(pairingCode)) {
-      throw new Error('dsh-plugin-desktop: pairing code must contain exactly 8 digits')
-    }
     const deviceName = input.deviceName.trim()
     if (deviceName.length === 0 || deviceName.length > 100) {
       throw new Error('dsh-plugin-desktop: device name must contain 1 to 100 characters')
+    }
+    if (isLoopbackEndpoint(endpoint)) {
+      const state: DesktopTrustedTunnelDeploymentState = {
+        version: 2,
+        role: 'frontend',
+        authMode: 'trusted-tunnel',
+        endpoint: endpoint.href,
+        deviceName,
+        presentation: input.presentation ?? 'compatibility',
+      }
+      await this.persist(state)
+      return state
+    }
+    if (!this.secrets.isEncryptionAvailable()) {
+      throw new Error('dsh-plugin-desktop: operating-system credential encryption is unavailable')
+    }
+    const pairingCode = input.pairingCode?.trim() ?? ''
+    if (!/^\d{8}$/.test(pairingCode)) {
+      throw new Error('dsh-plugin-desktop: pairing code must contain exactly 8 digits for a remote HTTPS Server')
     }
     const credential = await this.remoteCall(endpoint, 'pairing.redeem', {
       code: pairingCode,
       deviceName,
     })
     const parsedCredential = parseCredential(credential)
-    const state: DesktopFrontendDeploymentState = {
-      version: 1,
+    const state: DesktopPairedDeploymentState = {
+      version: 2,
       role: 'frontend',
+      authMode: 'paired',
       endpoint: endpoint.href,
       deviceName,
       presentation: input.presentation ?? 'compatibility',
@@ -103,6 +128,9 @@ export class DesktopDeploymentStateStore {
   }
 
   async exchange(state: DesktopFrontendDeploymentState): Promise<DesktopAccessSession> {
+    if (state.authMode !== 'paired') {
+      throw new Error('dsh-plugin-desktop: trusted tunnel Frontends do not exchange a paired credential')
+    }
     if (!this.secrets.isEncryptionAvailable()) {
       throw new Error('dsh-plugin-desktop: operating-system credential encryption is unavailable')
     }
@@ -218,30 +246,50 @@ function parseEndpoint(input: string): URL {
     || endpoint.pathname !== '/' || endpoint.search !== '' || endpoint.hash !== '') {
     throw new Error('dsh-plugin-desktop: Server endpoint must contain only scheme and authority')
   }
-  const loopback = endpoint.hostname === 'localhost' || endpoint.hostname === '127.0.0.1' || endpoint.hostname === '[::1]'
+  const loopback = isLoopbackEndpoint(endpoint)
   if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && loopback)) {
     throw new Error('dsh-plugin-desktop: remote Server endpoint must use HTTPS')
   }
   return endpoint
 }
 
+function isLoopbackEndpoint(endpoint: URL): boolean {
+  return endpoint.hostname === 'localhost' || endpoint.hostname === '127.0.0.1' || endpoint.hostname === '[::1]'
+}
+
 function parseDeploymentState(value: unknown): DesktopDeploymentState {
   const state = objectRecord(value, 'deployment state')
-  if (state.version !== 1) throw new Error('dsh-plugin-desktop: unsupported deployment state version')
+  if (state.version !== 1 && state.version !== 2) {
+    throw new Error('dsh-plugin-desktop: unsupported deployment state version')
+  }
   if (state.role === 'server') return DEFAULT_STATE
   if (state.role !== 'frontend') throw new Error('dsh-plugin-desktop: invalid deployment role')
   const presentation = state.presentation
   if (presentation !== 'compatibility' && presentation !== 'advanced') {
     throw new Error('dsh-plugin-desktop: invalid Frontend presentation mode')
   }
-  return {
-    version: 1,
+  const endpoint = parseEndpoint(nonEmptyString(state.endpoint, 'endpoint'))
+  const base: DesktopFrontendDeploymentBase = {
+    version: 2,
     role: 'frontend',
-    endpoint: parseEndpoint(nonEmptyString(state.endpoint, 'endpoint')).href,
+    endpoint: endpoint.href,
     deviceName: nonEmptyString(state.deviceName, 'deviceName'),
     presentation,
-    encryptedCredential: nonEmptyString(state.encryptedCredential, 'encryptedCredential'),
   }
+  if (state.version === 1 || state.authMode === 'paired') {
+    return {
+      ...base,
+      authMode: 'paired',
+      encryptedCredential: nonEmptyString(state.encryptedCredential, 'encryptedCredential'),
+    }
+  }
+  if (state.authMode === 'trusted-tunnel') {
+    if (!isLoopbackEndpoint(endpoint)) {
+      throw new Error('dsh-plugin-desktop: trusted tunnel Frontend endpoint must be loopback')
+    }
+    return { ...base, authMode: 'trusted-tunnel' }
+  }
+  throw new Error('dsh-plugin-desktop: invalid Frontend authentication mode')
 }
 
 function parseCredential(value: unknown): { credential: string } {
