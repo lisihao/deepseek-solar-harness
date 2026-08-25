@@ -5,8 +5,20 @@ import {
   remoteOrchestrationControlAllowed,
 } from '../src/index.ts'
 import { authorizeRemoteRequest } from '@deepseek-ai/dsh-host-remote-auth'
+import { formatLocalTimestamp } from '../src/client/timestamp.ts'
 
 describe('orchestration dashboard presentation', () => {
+  it('renders canonical timestamps in the browser-selected zone', () => {
+    expect(formatLocalTimestamp(
+      '2026-08-16T23:18:28.617Z',
+      '2026-08-17T01:05:03.000Z',
+      'America/Toronto',
+    )).toEqual({
+      absolute: '今天 19:18:28 GMT-4',
+      relative: '1 小时 46 分钟前',
+    })
+  })
+
   it('requires a remote bearer session while retaining owner-local access', () => {
     const request = (remoteAddress: string, authorization?: string) => ({
       headers: { host: '127.0.0.1:3080', ...(authorization === undefined ? {} : { authorization }) },

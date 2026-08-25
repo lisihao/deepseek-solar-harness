@@ -159,12 +159,10 @@ export function PhysicalOperatorRoutingControl({
   const availableEfforts = selectedModel === undefined
     ? [...new Set(provider?.models.flatMap(option => option.supportedEfforts) ?? profileProjection?.efforts ?? [])]
     : model?.supportedEfforts ?? []
-  const choose = (id: string): void => {
-    const policy = routing.options.find(option => option.value === id)?.value
-    if (policy === undefined || policy === routing.currentValue) return
+  const persist = (operation: () => Promise<string | null>): void => {
     setSaving(true)
     setError(null)
-    void select(policy).then((failure) => {
+    void operation().then((failure) => {
       if (!alive.current) return
       setSaving(false)
       setError(failure)
@@ -174,22 +172,17 @@ export function PhysicalOperatorRoutingControl({
       setError(reason instanceof Error ? reason.message : String(reason))
     })
   }
+  const choose = (id: string): void => {
+    const policy = routing.options.find(option => option.value === id)?.value
+    if (policy === undefined || policy === routing.currentValue) return
+    persist(() => select(policy))
+  }
   const saveProfile = (
     operatorId: PhysicalOperatorProfileOwner,
     modelValue?: string,
     effortValue?: PhysicalOperatorProfileReasoningEffort,
   ): void => {
-    setSaving(true)
-    setError(null)
-    void selectProfile(operatorId, modelValue, effortValue).then((failure) => {
-      if (!alive.current) return
-      setSaving(false)
-      setError(failure)
-    }, (reason: unknown) => {
-      if (!alive.current) return
-      setSaving(false)
-      setError(reason instanceof Error ? reason.message : String(reason))
-    })
+    persist(() => selectProfile(operatorId, modelValue, effortValue))
   }
   const chooseModel = (id: string): void => {
     if (profileOwner === undefined) return
@@ -213,17 +206,7 @@ export function PhysicalOperatorRoutingControl({
     continualHarness: ContinualHarnessMode,
     optimization: ModelAllocationObjective,
   ): void => {
-    setSaving(true)
-    setError(null)
-    void selectOrchestrationStrategy(rlm, continualHarness, optimization).then((failure) => {
-      if (!alive.current) return
-      setSaving(false)
-      setError(failure)
-    }, (reason: unknown) => {
-      if (!alive.current) return
-      setSaving(false)
-      setError(reason instanceof Error ? reason.message : String(reason))
-    })
+    persist(() => selectOrchestrationStrategy(rlm, continualHarness, optimization))
   }
 
   return (

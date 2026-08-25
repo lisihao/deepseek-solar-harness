@@ -58,13 +58,12 @@ export function projectOrchestrationRuns<T extends { workspace: string }>(
 }
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
-  const body = JSON.stringify(value)
-  response.writeHead(status, {
-    'Cache-Control': 'no-store',
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-  })
-  response.end(body)
+  const encoded = Buffer.from(JSON.stringify(value))
+  response.statusCode = status
+  response.setHeader('Cache-Control', 'no-store')
+  response.setHeader('Content-Type', 'application/json; charset=utf-8')
+  response.setHeader('Content-Length', encoded.byteLength)
+  response.end(encoded)
 }
 
 async function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -181,10 +180,12 @@ export function apply(ctx: Context): void {
     path: ORCHESTRATION_DASHBOARD_PATH,
     handler: async (request, response) => {
       try {
-        const authority = authorizeRemoteRequest(request, ctx.get('remoteAuth'))
+        const remoteAuth = ctx.get('remoteAuth')
+        const authority = authorizeRemoteRequest(request, remoteAuth)
         if (authority === undefined) {
-          sendJson(response, ctx.get('remoteAuth') === undefined ? 503 : 401, {
-            error: ctx.get('remoteAuth') === undefined ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
+          const unavailable = remoteAuth === undefined
+          sendJson(response, unavailable ? 503 : 401, {
+            error: unavailable ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
           })
           return
         }

@@ -96,11 +96,11 @@ export function OrchestrationsPanel({ request: browserRequest }: { request: Brow
 
   useEffect(() => {
     if (!open) return
-    const close = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
+    const closeOnEscape = ({ key }: KeyboardEvent): void => {
+      if (key === 'Escape') setOpen(false)
     }
-    document.addEventListener('keydown', close)
-    return () => { document.removeEventListener('keydown', close) }
+    window.addEventListener('keyup', closeOnEscape)
+    return () => { window.removeEventListener('keyup', closeOnEscape) }
   }, [open])
 
   const selectedRun = dashboard?.runs.find(run => run.runId === selectedRunId)
