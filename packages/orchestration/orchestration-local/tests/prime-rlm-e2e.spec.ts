@@ -383,6 +383,17 @@ describe('Prime-compatible orchestration offline E2E', () => {
     )
     expect(explicitComplete.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled' })
     const explicitEvents = await fixture.client.readEvents({ runId: explicitRun.runId, limit: 400 })
+    expect(explicitEvents.events.find(event => event.type === 'rlm.resolved')?.data).toMatchObject({
+      enabled: true,
+      fidelity: 'prime-strict',
+    })
+    expect(explicitEvents.events.some(event => event.type === 'rlm.worker.allocated')).toBe(false)
+    const started = explicitEvents.events.find(event => event.type === 'rlm.execution.started')?.data
+    const childDispatches = explicitEvents.events.filter(event => event.type === 'rlm.child.dispatched')
+    expect(childDispatches).toHaveLength(2)
+    expect(childDispatches.every(event => (
+      event.data.operatorId === started?.rootOperatorId && event.data.model === started?.rootModel
+    ))).toBe(true)
     expect(explicitEvents.events.filter(event => event.type === 'rlm.child.settled')).toHaveLength(2)
     expect(explicitEvents.events.filter(event => event.type === 'rlm.message.continuation.settled')).toHaveLength(2)
     expect(explicitEvents.events).toContainEqual(expect.objectContaining({ type: 'rlm.goal.continuation.settled' }))
@@ -440,6 +451,7 @@ describe('Prime-compatible orchestration offline E2E', () => {
     const autoEvents = await fixture.client.readEvents({ runId: autoRun.runId, limit: 300 })
     expect(autoEvents.events.find(event => event.type === 'rlm.resolved')?.data).toMatchObject({
       enabled: true,
+      fidelity: 'dsh-optimized',
       reason: 'auto-explicit-decomposition',
     })
   }, 15_000)

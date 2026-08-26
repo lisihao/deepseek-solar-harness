@@ -182,6 +182,55 @@ function nonBlank(value: string, label: string): string {
   return result
 }
 
+interface PrimeRlmSpawnOptions {
+  readonly name?: string
+  readonly model?: string
+  readonly thinking?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
+}
+
+const RLM_THINKING_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const
+
+function primeRlmSpawnOptions(value: unknown): PrimeRlmSpawnOptions {
+  if (value === undefined) return {}
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RlmRuntimeError('rlm() options must be an object', 'RLM_INVALID')
+  }
+  const options = value as Record<string, unknown>
+  const unsupported = Object.keys(options).filter(key => !['name', 'model', 'thinking'].includes(key)).sort()
+  if (unsupported.length > 0) {
+    throw new RlmRuntimeError(`Unsupported rlm() options: ${unsupported.join(', ')}`, 'RLM_INVALID')
+  }
+  if (options.name !== undefined && typeof options.name !== 'string') {
+    throw new RlmRuntimeError('rlm() name must be a string', 'RLM_INVALID')
+  }
+  if (options.model !== undefined && typeof options.model !== 'string') {
+    throw new RlmRuntimeError('rlm() model must be a string', 'RLM_INVALID')
+  }
+  if (options.thinking !== undefined
+    && (typeof options.thinking !== 'string'
+      || !RLM_THINKING_LEVELS.some(level => level === options.thinking))) {
+    throw new RlmRuntimeError(`rlm() thinking must be one of: ${RLM_THINKING_LEVELS.join(', ')}`, 'RLM_INVALID')
+  }
+  return {
+    ...options.name === undefined ? {} : { name: nonBlank(options.name, 'rlm() name') },
+    ...options.model === undefined ? {} : { model: nonBlank(options.model, 'rlm() model') },
+    ...options.thinking === undefined
+      ? {}
+      : { thinking: options.thinking as NonNullable<PrimeRlmSpawnOptions['thinking']> },
+  }
+}
+
+function explicitRlmModel(
+  selector: string,
+  inherited: RlmRuntimeSessionSnapshotV1['model'],
+): RlmRuntimeSessionSnapshotV1['model'] {
+  const separator = selector.indexOf('/')
+  if (separator < 0) return { ...inherited, model: selector }
+  const operatorId = nonBlank(selector.slice(0, separator), 'rlm() model provider')
+  const model = nonBlank(selector.slice(separator + 1), 'rlm() model id')
+  return { operatorId, model }
+}
+
 function sessionStorageDirectory(sessionsRoot: string, sessionId: RlmRuntimeSessionId): string {
   const digest = createHash('sha256').update(String(sessionId)).digest('hex')
   return join(sessionsRoot, `session-${digest}`)
@@ -1198,19 +1247,24 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       return RlmCommandId(`${String(current.cellCommandId)}:${kind}:${String(current.callOrdinal)}`)
     }
     const hooks: KernelHooks = {
-      spawn: (task, options) => this.spawn({
-        commandId: nextCommand('child'), parentSessionId: session.snapshot.sessionId,
-        name: options?.name ?? `child-${String(this.kernelCommands.get(key)?.callOrdinal ?? 0)}`, task,
-        ...options?.model === undefined
-          ? {}
+      spawn: async (task, rawOptions) => {
+        const options = primeRlmSpawnOptions(rawOptions)
+        const inherited = session.snapshot.defaultChildModel ?? session.snapshot.model
+        const selected = options.model === undefined ? inherited : explicitRlmModel(options.model, inherited)
+        const model = options.model === undefined && options.thinking === undefined
+          ? undefined
           : {
-            model: {
-              operatorId: options.operatorId ?? session.snapshot.model.operatorId,
-              model: options.model,
-              ...options.profile === undefined ? {} : { profile: options.profile },
-            },
-          },
-      }),
+            ...selected,
+            ...options.thinking === undefined
+              ? {}
+              : { profile: { ...selected.profile, effort: options.thinking } },
+          }
+        return await this.spawn({
+          commandId: nextCommand('child'), parentSessionId: session.snapshot.sessionId,
+          name: options.name ?? `child-${String(this.kernelCommands.get(key)?.callOrdinal ?? 0)}`, task,
+          ...model === undefined ? {} : { model },
+        })
+      },
       listChildren: async () => (await this.listChildren(session.snapshot.sessionId)).map((child) => {
         const { outputPreview: _outputPreview, ...status } = child
         return status

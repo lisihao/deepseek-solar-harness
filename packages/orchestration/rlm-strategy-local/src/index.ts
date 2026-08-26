@@ -71,18 +71,26 @@ export class LocalRlmStrategy extends RlmStrategyService {
     const auto = autoDecision(request)
     const enabled = request.requestedMode === 'enabled'
       || (request.requestedMode === 'auto' && auto.enabled)
+    const fidelity = request.requestedMode === 'enabled'
+      ? 'prime-strict' as const
+      : request.requestedMode === 'auto'
+        ? 'dsh-optimized' as const
+        : 'standard' as const
     const reason = request.requestedMode === 'auto'
       ? auto.reason
       : `user-${request.requestedMode}`
     const base = {
       version: 1 as const,
       enabled,
+      fidelity,
       strategyId: 'dsh-native-rlm',
-      strategyVersion: '1.3.0',
+      strategyVersion: '1.4.0',
       reason,
       ...budget,
       instruction: enabled
-        ? `Use bounded recursive decomposition inside this sealed node only. Create at most ${String(budget.maxChildren)} fresh-context children per level, recurse at most ${String(budget.maxDepth)} levels and spend at most ${String(budget.maxTurns)} child turns. Give parallel leaves distinct solution, failure-analysis, evidence-review, or alternative-design lenses. Prefer low-cost qualified workers for independent leaves, reserve a high-tier model for planning and verification, then synthesize one coverage-checked, evidence-backed result. Never create or modify the global DSH TaskGraph.`
+        ? fidelity === 'prime-strict'
+          ? `Use Prime v0.8-compatible bounded recursive decomposition inside this sealed node only. Create at most ${String(budget.maxChildren)} fresh-context children per level, recurse at most ${String(budget.maxDepth)} levels and spend at most ${String(budget.maxTurns)} child turns. Children inherit the parent model, reasoning profile, tools, managed skills, retry policy and sealed capability context unless rlm() explicitly supplies a supported override. Give parallel leaves distinct solution, failure-analysis, evidence-review, or alternative-design lenses, then synthesize one coverage-checked, evidence-backed result. Never create or modify the global DSH TaskGraph.`
+          : `Use bounded recursive decomposition inside this sealed node only. Create at most ${String(budget.maxChildren)} fresh-context children per level, recurse at most ${String(budget.maxDepth)} levels and spend at most ${String(budget.maxTurns)} child turns. Give parallel leaves distinct solution, failure-analysis, evidence-review, or alternative-design lenses. Prefer low-cost qualified workers for independent leaves, reserve a high-tier model for planning and verification, then synthesize one coverage-checked, evidence-backed result. Never create or modify the global DSH TaskGraph.`
         : 'Execute this sealed node directly without recursive child decomposition.',
     }
     const planSha256 = createHash('sha256').update(canonical(base)).digest('hex')

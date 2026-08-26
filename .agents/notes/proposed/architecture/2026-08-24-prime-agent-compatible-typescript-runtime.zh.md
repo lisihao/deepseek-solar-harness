@@ -26,6 +26,10 @@ DSH 当前把 RLM 用作一项密封的调度策略：固定展开若干 Residen
 
 模型只看到一个由持久 Node 进程承载的 `typescript_repl` 工具。TypeScript Kernel 预载 `context`、`rlm`、`agentMessage`、`harness`、`goal` 和 `compact`。这是用户明确授权的 IPython 平台替换；生命周期、准入、消息、恢复和 Harness 契约必须保持等价。
 
+## 显式忠实度模式
+
+面向用户的三个模式拥有不同且密封的语义。显式选择 `RLM` 时使用 `prime-strict`：没有覆盖项的 child 必须继承 parent 的完整 operator/model、reasoning profile、模型工具桥、受管 Skill 目录、重试权威以及密封的 capability/context 引用。Prime v0.8.0 的 `rlm(task, options)` 只接受 `name`、`model` 和 `thinking`；未知参数必须在 child 准入前失败。`智能自动` 使用 `dsh-optimized`，可以密封成本更低且满足资格的 child model；`标准` 不创建 RLM Root。因此，成本优化不能静默改变用户明确选择的 Prime 兼容运行语义。
+
 ## 能力接缝与包拓扑
 
 - `@deepseek-ai/dsh-rlm-runtime`：Service Definition、版本化协议类型、错误和 `ctx.rlmRuntime`。
@@ -60,6 +64,7 @@ TypeScript Kernel 是隔离和生命周期边界，不是安全沙箱；它和 o
 | 异步 children | 子回合在密封预算内并发，结果独立报告 |
 | parent-scoped registry | 名称在父节点内唯一；list/inspect 跨 Kernel 和 daemon 重启恢复 |
 | 有界递归 | 子节点准入前强制 max depth/children/turns |
+| parent 执行配置继承 | 显式 RLM 继承 model、thinking、工具、受管 Skill、重试权威和密封 capability context；未知参数失败 |
 | A2A 核心家庭消息 | 只允许 parent、sibling、direct child；支持 `auto`、`steer`、`follow_up` |
 | child 通过消息/文件返回 | 不设隐藏返回通道；消息和内容寻址 Artifact 必须显式 |
 | compaction 保留程序状态 | 模型历史可以压缩，Kernel namespace 和 child registry 必须保留 |

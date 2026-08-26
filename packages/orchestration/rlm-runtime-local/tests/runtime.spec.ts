@@ -299,6 +299,60 @@ describe('LocalRlmRuntime', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('inherits the exact parent model and reasoning profile when no optimized child allocation exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-prime-inheritance-'))
+    const ctx = new Context()
+    const service = new LocalRlmRuntime(ctx, root)
+    const sessionId = RlmRuntimeSessionId('rlm-session-prime-inheritance')
+    const parentModel = {
+      operatorId: 'claude-code', model: 'claude-opus-4-1', profile: { model: 'claude-opus-4-1', effort: 'max' as const },
+    }
+    const dispatched: unknown[] = []
+    const bindings: RlmRuntimeHostBindings = {
+      dispatchChild: async (request) => {
+        dispatched.push(request.model)
+        return {
+          nativeSessionId: `native-${request.name}`, nativeTurnId: `turn-${request.name}`,
+          result: Promise.resolve({ status: 'settled' }), interrupt: () => Promise.resolve(),
+        }
+      },
+    }
+    await service.create({
+      sessionId, commandId: RlmCommandId('create-prime-inheritance'), executionId: 'execution-prime-inheritance',
+      workspace: root, task: 'preserve Prime defaults', model: parentModel, limits,
+    }, bindings)
+    await service.executeCell({
+      sessionId, commandId: RlmCommandId('spawn-inherited'),
+      code: 'await rlm("inherit everything", { name: "inherited" })',
+    })
+    await service.executeCell({
+      sessionId, commandId: RlmCommandId('spawn-overridden'),
+      code: 'await rlm("use Codex", { name: "overridden", model: "codex/gpt-5.6-sol", thinking: "high" })',
+    })
+    expect(dispatched).toEqual([
+      parentModel,
+      { operatorId: 'codex', model: 'gpt-5.6-sol', profile: { effort: 'high' } },
+    ])
+    await ctx.root.fiber.dispose()
+  })
+
+  it('rejects unknown rlm() options instead of silently ignoring them', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-prime-options-'))
+    let dispatches = 0
+    const { ctx, service, sessionId } = await runtime(root, {
+      dispatchChild: () => {
+        dispatches += 1
+        throw new Error('must not dispatch')
+      },
+    })
+    await expect(service.executeCell({
+      sessionId, commandId: RlmCommandId('spawn-unknown-option'),
+      code: 'await rlm("invalid", { name: "invalid", tools: ["bash"], retries: 2 })',
+    })).rejects.toThrow('Unsupported rlm() options: retries, tools')
+    expect(dispatches).toBe(0)
+    await ctx.root.fiber.dispose()
+  })
+
   it('allows only nuclear-family messages and enforces child budgets', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-family-'))
     const pending = deferred<RlmChildExecutionResult>()

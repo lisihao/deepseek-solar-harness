@@ -4919,12 +4919,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RlmEventReadRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly after?: number;\n    readonly limit?: number;\n}',
   },
   {
+    name: 'RlmExecutionFidelity',
+    declaration: 'export type RlmExecutionFidelity = \'standard\' | \'prime-strict\' | \'dsh-optimized\';',
+  },
+  {
     name: 'RlmExecutionMode',
     declaration: 'export type RlmExecutionMode = \'auto\' | \'enabled\' | \'disabled\';',
   },
   {
     name: 'RlmExecutionPlanV1',
-    declaration: 'export interface RlmExecutionPlanV1 extends RlmBudgetV1 {\n    readonly version: 1;\n    readonly enabled: boolean;\n    readonly strategyId: string;\n    readonly strategyVersion: string;\n    readonly reason: string;\n    readonly instruction: string;\n    readonly planSha256: string;\n}',
+    declaration: 'export interface RlmExecutionPlanV1 extends RlmBudgetV1 {\n    readonly version: 1;\n    readonly enabled: boolean;\n    readonly fidelity: RlmExecutionFidelity;\n    readonly strategyId: string;\n    readonly strategyVersion: string;\n    readonly reason: string;\n    readonly instruction: string;\n    readonly planSha256: string;\n}',
   },
   {
     name: 'RlmFamilyRosterEntryV1',

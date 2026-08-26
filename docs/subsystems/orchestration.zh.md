@@ -636,5 +636,5 @@ Replaceable RLM policy Provider; the Scheduler consumes only its immutable plan.
 abstract resolve(request: RlmStrategyRequest): Promise<RlmExecutionPlanV1>
 ```
 
-Source: [`packages/orchestration/rlm-strategy/src/index.ts:55`](../../packages/orchestration/rlm-strategy/src/index.ts)
+Source: [`packages/orchestration/rlm-strategy/src/index.ts:60`](../../packages/orchestration/rlm-strategy/src/index.ts)
 <!-- END GENERATED cordis-surface -->

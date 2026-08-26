@@ -81,7 +81,7 @@ describe('DeepSeekModelWorker', () => {
         prompt: [{ type: 'text', text: 'analyze alternatives' }],
         signal: new AbortController().signal,
         rlmPlan: {
-          version: 1, enabled: true, strategyId: 'test', strategyVersion: '1', reason: 'test',
+          version: 1, enabled: true, fidelity: 'dsh-optimized', strategyId: 'test', strategyVersion: '1', reason: 'test',
           instruction: 'bounded test', maxDepth: 2, maxChildren: 3, maxTurns: 6, planSha256: 'test',
         },
         modelToolBridge: {

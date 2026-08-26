@@ -371,15 +371,10 @@ describe('orchestration daemon', () => {
     const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
     expect(completed.nodes[0]).toMatchObject({ operatorId: 'claude-code', rlm: 'enabled', state: 'passed' })
     expect(fake.requests).toHaveLength(3)
+    expect(fake.requests.every(request => (
+      request.operatorId === 'claude-code' && request.profile?.model === 'claude-opus-4-6'
+    ))).toBe(true)
     expect(fake.requests[0]).toMatchObject({
-      operatorId: 'codex',
-      profile: { model: 'gpt-5.6-luna' },
-    })
-    expect(fake.requests[1]).toMatchObject({
-      operatorId: 'claude-code',
-      profile: { model: 'claude-opus-4-6' },
-    })
-    expect(fake.requests[2]).toMatchObject({
       operatorId: 'claude-code',
       profile: { model: 'claude-opus-4-6' },
     })
@@ -388,12 +383,14 @@ describe('orchestration daemon', () => {
     const executionPlan = daemon.store.readArtifact(completed.nodes[0]!.executionPlanRef!) as {
       taskRef: string
       allocationPlan: { model: string; suggestedParallelism: number }
+      rlmPlan: { fidelity: string }
       rlmWorkerPlan?: { model: string; tier: string }
     }
     expect(executionPlan).toMatchObject({
       allocationPlan: { model: 'claude-opus-4-6', suggestedParallelism: 2 },
-      rlmWorkerPlan: { model: 'gpt-5.6-luna', tier: 'low' },
+      rlmPlan: { fidelity: 'prime-strict' },
     })
+    expect(executionPlan).not.toHaveProperty('rlmWorkerPlan')
     expect(daemon.store.readArtifact(OrchestrationArtifactRef(executionPlan.taskRef))).toMatchObject({
       version: 1,
       repository: { workspace: await realpath(workspace) },
