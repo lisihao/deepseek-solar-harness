@@ -41,23 +41,37 @@ function fakeHttpServer(
 }
 
 /** Bodyless GET carrying the given headers (enough for the trust fence + bridge). */
-function fakeRequest(headers: Record<string, string>, url = `${API_PATH}/session.list`): IncomingMessage {
+function fakeRequest(
+  headers: Record<string, string>,
+  url = `${API_PATH}/session.list`,
+  remoteAddress = '127.0.0.1',
+): IncomingMessage {
   const request = Readable.from([]) as unknown as IncomingMessage
-  Object.assign(request, { url, method: 'GET', headers })
+  Object.assign(request, { url, method: 'GET', headers, socket: { remoteAddress } })
   return request
 }
 
 /** JSON POST carrying a complete client-request envelope. */
-function fakePost(headers: Record<string, string>, url: string, body: unknown): IncomingMessage {
+function fakePost(
+  headers: Record<string, string>,
+  url: string,
+  body: unknown,
+  remoteAddress = '127.0.0.1',
+): IncomingMessage {
   const request = Readable.from([Buffer.from(JSON.stringify(body))]) as unknown as IncomingMessage
-  Object.assign(request, { url, method: 'POST', headers: { 'content-type': 'application/json', ...headers } })
+  Object.assign(request, {
+    url,
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    socket: { remoteAddress },
+  })
   return request
 }
 
 /** Raw POST for malformed-body and media-type boundary cases. */
 function fakeRawPost(headers: Record<string, string>, url: string, body: string): IncomingMessage {
   const request = Readable.from([Buffer.from(body)]) as unknown as IncomingMessage
-  Object.assign(request, { url, method: 'POST', headers })
+  Object.assign(request, { url, method: 'POST', headers, socket: { remoteAddress: '127.0.0.1' } })
   return request
 }
 
@@ -86,6 +100,7 @@ async function mounted(
 ): Promise<{
   routes: WebRoute[]
   upgrades: WebUpgradeRoute[]
+  connection: HostConnectionHandle
   dispose: () => Promise<void>
 }> {
   const ctx = new Context()
@@ -152,7 +167,12 @@ async function mounted(
   }
   const fiber = ctx.plugin({ inject: [...inject], apply }, config)
   await fiber.await()
-  return { routes, upgrades, dispose: () => fiber.dispose() }
+  return {
+    routes,
+    upgrades,
+    connection: ctx.get('connection') as HostConnectionHandle,
+    dispose: () => fiber.dispose(),
+  }
 }
 
 /** Minimal long-lived API surface required by the Remote Sync vertical slice. */
@@ -358,6 +378,88 @@ describe('connection node half', () => {
     await dispose()
   })
 
+  it('never grants local-owner authority from a forged loopback Host', async () => {
+    const { routes, upgrades, connection, dispose } = await mounted({
+      trustedHosts: ['harness.example'],
+      remoteSync: true,
+      remoteSyncJournalCapacity: 8,
+    }, remoteSyncApi())
+    const remoteAddress = '203.0.113.10'
+    const authRoute = routes.find(route => route.path === '/remote-auth')!
+    const snapshotRoute = routes.find(route => route.path === REMOTE_SYNC_RPC_CHANNEL)!
+    const apiRoute = routes.find(route => route.path === API_PATH)!
+
+    const pairing = fakeResponse()
+    await authRoute.handler(fakePost(
+      { host: 'localhost:3080' },
+      '/remote-auth/pairing.issue',
+      {
+        type: 'client-request', rpcId: 'forged-pairing', method: 'pairing.issue', payload: { scope: 'admin' },
+      },
+      remoteAddress,
+    ), pairing.response)
+    expect(pairing.state).toMatchObject({ status: 403, body: 'forbidden' })
+
+    const snapshot = fakeResponse()
+    await snapshotRoute.handler(fakePost(
+      { host: 'localhost:3080' },
+      `${REMOTE_SYNC_RPC_CHANNEL}/snapshot`,
+      { type: 'client-request', rpcId: 'forged-snapshot', method: 'snapshot', payload: {} },
+      remoteAddress,
+    ), snapshot.response)
+    expect(snapshot.state).toMatchObject({ status: 401, body: 'unauthorized' })
+
+    const sessionList = fakeResponse()
+    await apiRoute.handler(fakePost(
+      { host: 'localhost:3080' },
+      `${API_PATH}/session.list`,
+      { type: 'client-request', rpcId: 'forged-list', method: 'session.list', payload: {} },
+      remoteAddress,
+    ), sessionList.response)
+    expect(sessionList.state).toMatchObject({ status: 401, body: 'unauthorized' })
+
+    const removeGateway = connection.rpc.intercept(
+      '/api',
+      endpoint => endpoint === 'goals/create',
+      async () => ({ ok: true, value: { accepted: true } }),
+      { authority: 'trusted-host' },
+    )
+    const gatewayRequest = {
+      type: 'client-request', rpcId: 'forged-gateway', method: 'goals/create', payload: {},
+    }
+    const gatewayDenied = fakeResponse()
+    await apiRoute.handler(fakePost(
+      { host: 'localhost:3080' },
+      `${API_PATH}/goals/create`,
+      gatewayRequest,
+      remoteAddress,
+    ), gatewayDenied.response)
+    expect(gatewayDenied.state).toMatchObject({ status: 401, body: 'unauthorized' })
+
+    const gatewayAccepted = fakeResponse()
+    await apiRoute.handler(fakePost(
+      { host: 'localhost:3080', authorization: 'Bearer access' },
+      `${API_PATH}/goals/create`,
+      gatewayRequest,
+      remoteAddress,
+    ), gatewayAccepted.response)
+    expect(gatewayAccepted.state.status).toBe(200)
+    await removeGateway()
+
+    const socket = new PassThrough()
+    const chunks: Buffer[] = []
+    socket.on('data', (chunk: Buffer) => { chunks.push(chunk) })
+    const ended = once(socket, 'end')
+    await upgrades.find(route => route.path === MUX_EVENTS_PATH)!.handler(
+      fakeRequest({ host: 'localhost:3080' }, MUX_EVENTS_PATH, remoteAddress),
+      socket,
+      Buffer.alloc(0),
+    )
+    await ended
+    expect(Buffer.concat(chunks).toString()).toContain('HTTP/1.1 403 Forbidden')
+    await dispose()
+  })
+
   it('authenticates remote reads and settles cockpit commands exactly once', async () => {
     let cancelCalls = 0
     const api = remoteSyncApi()
@@ -473,13 +575,12 @@ describe('connection node half', () => {
     await dispose()
   })
 
-  it('pins privileged methods to loopback even for a declared trusted authority', async () => {
+  it('does not treat a declared trusted authority as remote authentication', async () => {
     const { routes, dispose } = await mounted({ trustedHosts: ['harness.example'] })
     // The privileged set: native dialogs plus the whole settings/credential
     // configuration plane, reads included, plus the one method that makes the
-    // host fetch a caller-chosen URL. The same declared authority reaches
-    // ordinary reads (carrier-level 404 from the empty proxy proves the fence
-    // passed), but each privileged method stays loopback-only and 403s.
+    // host fetch a caller-chosen URL. A declared authority only passes the
+    // rebinding fence; without Remote Sync authentication all API methods 403.
     for (const method of [
       'host.pickDirectory', 'host.openPath',
       'settings.describe', 'settings.openDocument', 'settings.update', 'settings.replace', 'settings.mutate',
@@ -500,28 +601,28 @@ describe('connection node half', () => {
     }
     const read = fakeResponse()
     await routes[0]!.handler(fakeRequest({ host: 'harness.example' }), read.response)
-    expect(read.state.status).not.toBe(403)
+    expect(read.state).toMatchObject({ status: 403, body: 'forbidden' })
     await dispose()
   })
 
-  it('passes loopback and declared-authority requests through to the bridge', async () => {
+  it('passes loopback requests and keeps declared authorities behind remote authentication', async () => {
     const { routes, dispose } = await mounted({ trustedHosts: ['harness.example:3080', '192.168.1.5'] })
     // Loopback, no browser markers (curl shape): the fence passes; the carrier
     // answers 404 for a GET unary path — proof the bridge ran.
     const loopback = fakeResponse()
     await routes[0]!.handler(fakeRequest({ host: '127.0.0.1:3080' }), loopback.response)
     expect(loopback.state.status).toBe(404)
-    // An all-interfaces composition derives port-less LAN IP literals, which
-    // pass markerless curl on any port.
+    // A declared authority passes the DNS-rebinding fence but is not an
+    // authentication credential. With Remote Sync disabled it remains closed.
     const lan = fakeResponse()
     await routes[0]!.handler(fakeRequest({ host: '192.168.1.5:3080' }), lan.response)
-    expect(lan.state.status).toBe(404)
+    expect(lan.state.status).toBe(403)
     // Declared public authority, same-origin browser shape.
     const declared = fakeResponse()
     await routes[0]!.handler(fakeRequest({
       host: 'harness.example:3080', origin: 'http://harness.example:3080', 'sec-fetch-site': 'same-origin',
     }), declared.response)
-    expect(declared.state.status).toBe(404)
+    expect(declared.state.status).toBe(403)
     await dispose()
   })
 
@@ -725,6 +826,15 @@ describe('connection node half', () => {
       type: 'client-request', rpcId: 'rpc-public', method: 'read', payload: {},
     }), publicResponse.response)
     expect(publicResponse.state.status).toBe(403)
+
+    const forgedLoopback = fakeResponse()
+    await loopbackRoute.handler(fakePost(
+      { host: 'localhost:3080' },
+      '/loopback/read',
+      { type: 'client-request', rpcId: 'rpc-forged-loopback', method: 'read', payload: {} },
+      '203.0.113.10',
+    ), forgedLoopback.response)
+    expect(forgedLoopback.state).toMatchObject({ status: 403, body: 'forbidden' })
     await removeLoopback()
     await remove()
     await fiber.dispose()
@@ -802,16 +912,10 @@ describe('connection node half over a real HTTP server', () => {
       ]) {
         expect([method, await call(port, method, 'harness.example')]).toEqual([method, 403])
       }
-      // The model catalog stays reachable for the same authority: a LAN
-      // client's model picker needs it, and it carries no key or endpoint
-      // state (404 is the empty proxy's carrier answer — the fence passed).
-      // `agentPreset.list` joins the model catalog for the same reason: ids and
-      // trust only, and a LAN client's preset picker needs it. `select` is
-      // reachable too: `session.create` already takes an `agentPreset`, and the
-      // deployment's own default already carries bash, so pinning the switch
-      // would be a fence beside an open gate.
+      // A trusted authority is only a DNS-rebinding fence, not authentication;
+      // without Remote Sync auth even read-only catalog endpoints stay closed.
       for (const method of ['llm.providers', 'llm.models', 'agentPreset.list', 'agentPreset.select']) {
-        expect([method, await call(port, method, 'harness.example')]).toEqual([method, 404])
+        expect([method, await call(port, method, 'harness.example')]).toEqual([method, 403])
       }
       // Loopback reaches everything, configuration included.
       expect(await call(port, 'settings.describe', `127.0.0.1:${String(port)}`)).toBe(404)

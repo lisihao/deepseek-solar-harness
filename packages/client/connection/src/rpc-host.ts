@@ -12,7 +12,7 @@ import {
   type ServerResponse as RpcServerResponse,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { bridge, type FetchHandler } from './http-bridge.ts'
-import { isTrustedApiRequest } from './api-request-trust.ts'
+import { isLoopbackApiRequest, isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
 import type {
   ConnectionRpcEndpointMatcher,
@@ -81,16 +81,17 @@ export class HostConnectionService extends Service implements HostConnectionHand
     fallback: FetchHandler,
   ): FetchHandler {
     return {
-      fetch: (request) => {
+      fetch: (request, context) => {
         const endpoint = endpointFromPath(channel, new URL(request.url).pathname)
         const interceptor = this.interceptors.get(channel)
         if (endpoint === undefined || interceptor === undefined || !interceptor.matches(endpoint)) {
-          return fallback.fetch(request)
+          return fallback.fetch(request, context)
         }
-        if (interceptor.options.authority === 'loopback' && !isTrustedApiRequest(request, [])) {
+        if (interceptor.options.authority === 'loopback'
+          && !isLoopbackApiRequest(request, context.remoteAddress)) {
           return Promise.resolve(new Response('forbidden', { status: 403 }))
         }
-        return interceptor.fetchHandler.fetch(request)
+        return interceptor.fetchHandler.fetch(request, context)
       },
     }
   }
@@ -108,7 +109,10 @@ export class HostConnectionService extends Service implements HostConnectionHand
       kind: 'prefix',
       path: channel,
       handler: async (req, res) => {
-        if (!isTrustedApiRequest(req, trustedHosts)) {
+        const trusted = options.authority === 'loopback'
+          ? isLoopbackApiRequest(req, req.socket.remoteAddress)
+          : isTrustedApiRequest(req, trustedHosts)
+        if (!trusted) {
           res.writeHead(403)
           res.end('forbidden')
           return
@@ -154,7 +158,7 @@ function rpcFetchHandler(
   handler: ConnectionRpcHandler,
 ): FetchHandler {
   return {
-    async fetch(request: Request): Promise<Response> {
+    async fetch(request: Request, context): Promise<Response> {
       const endpoint = endpointFromPath(channel, new URL(request.url).pathname)
       if (request.method !== 'POST' || endpoint === undefined) {
         return new Response('not found', { status: 404 })
@@ -186,7 +190,10 @@ function rpcFetchHandler(
       }
 
       try {
-        const result = await handler(endpoint, message.payload, request.signal, { request })
+        const result = await handler(endpoint, message.payload, request.signal, {
+          request,
+          remoteAddress: context.remoteAddress,
+        })
         return fullResponse(message.rpcId, result)
       } catch (error) {
         if (error instanceof ConnectionRpcHttpError) {

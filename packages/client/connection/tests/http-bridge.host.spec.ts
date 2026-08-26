@@ -42,6 +42,7 @@ describe('HTTP bridge abort', () => {
       url: '/api/host.pickDirectory',
       method: 'POST',
       headers: { 'content-type': 'application/json' },
+      socket: { remoteAddress: '203.0.113.10' },
     })
 
     const response = Object.assign(new EventEmitter(), {
@@ -54,10 +55,12 @@ describe('HTTP bridge abort', () => {
     let resolveStarted!: () => void
     const started = new Promise<void>((resolve) => { resolveStarted = resolve })
     let carrierSignal: AbortSignal | undefined
+    let carrierAddress: string | undefined
     const pending = bridge(request, response, {
-      fetch: async (input) => {
+      fetch: async (input, context) => {
         const fetchRequest = input
         carrierSignal = fetchRequest.signal
+        carrierAddress = context.remoteAddress
         resolveStarted()
         if (!fetchRequest.signal.aborted) {
           await new Promise<void>((resolve) => {
@@ -71,5 +74,6 @@ describe('HTTP bridge abort', () => {
     response.emit('close')
     await pending
     expect(carrierSignal?.aborted).toBe(true)
+    expect(carrierAddress).toBe('203.0.113.10')
   })
 })

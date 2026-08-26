@@ -416,7 +416,7 @@ export interface ConnectionConfig {
 }
 ```
 
-来源：[`packages/client/connection/src/index.ts:75`](../packages/client/connection/src/index.ts)
+来源：[`packages/client/connection/src/index.ts:76`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 

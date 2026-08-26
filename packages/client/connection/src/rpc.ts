@@ -14,6 +14,8 @@ export interface ConnectionRpcHandlerOptions {
 /** Transport facts available to a Host handler after envelope decoding. */
 export interface ConnectionRpcRequestContext {
   readonly request: Request
+  /** TCP peer address carried separately from caller-controlled headers. */
+  readonly remoteAddress: string | undefined
 }
 
 /** Handler invoked after Connection has decoded the transport envelope. */

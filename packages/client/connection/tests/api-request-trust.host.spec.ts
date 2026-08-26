@@ -1,13 +1,26 @@
 /** Behavior of the /api browser-trust fence (rebinding + cross-site defense). */
 
 import { describe, expect, it } from 'vitest'
-import { assertTrustedAuthority, isTrustedApiRequest } from '../src/api-request-trust.ts'
+import {
+  assertTrustedAuthority,
+  isLoopbackApiRequest,
+  isTrustedApiRequest,
+} from '../src/api-request-trust.ts'
 
 function request(headers: Record<string, string | undefined>): { headers: Record<string, string | undefined> } {
   return { headers }
 }
 
 describe('isTrustedApiRequest', () => {
+  it('requires the observed TCP peer as well as a loopback Host for local-owner authority', () => {
+    expect(isLoopbackApiRequest(request({ host: 'localhost:3080' }), '127.0.0.1')).toBe(true)
+    expect(isLoopbackApiRequest(request({ host: '[::1]:3080' }), '::1')).toBe(true)
+    expect(isLoopbackApiRequest(request({ host: '127.8.9.10:3080' }), '::ffff:127.8.9.10')).toBe(true)
+    expect(isLoopbackApiRequest(request({ host: 'localhost:3080' }), '203.0.113.10')).toBe(false)
+    expect(isLoopbackApiRequest(request({ host: 'localhost:3080' }), undefined)).toBe(false)
+    expect(isLoopbackApiRequest(request({ host: 'harness.example:3080' }), '127.0.0.1')).toBe(false)
+  })
+
   it('holds markerless requests to the same Host fence — a plain-HTTP browser read carries no markers', () => {
     // Over plain HTTP a browser attaches neither Origin nor Fetch-Metadata to
     // reads (EventSource, images, navigations), so a rebound-origin GET is
