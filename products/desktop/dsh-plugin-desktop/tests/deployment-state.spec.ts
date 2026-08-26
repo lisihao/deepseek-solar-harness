@@ -40,22 +40,25 @@ describe('DesktopDeploymentStateStore', () => {
       },
     }
     const store = new DesktopDeploymentStateStore(root, secretStorage(), request)
-    await expect(store.load()).resolves.toEqual({ version: 2, role: 'server' })
+    await expect(store.load()).resolves.toEqual({ version: 3, role: 'server' })
     const state = await store.configureFrontend({
       endpoint: 'https://server.example', pairingCode: '12345678', deviceName: 'MacBook',
     })
     expect(state).toMatchObject({
-      version: 2,
+      version: 3,
       role: 'frontend',
-      authMode: 'paired',
-      endpoint: 'https://server.example/',
+      servers: [expect.objectContaining({
+        authMode: 'paired',
+        endpoint: 'https://server.example/',
+        label: 'server.example',
+      })],
     })
     const persisted = readFileSync(join(root, 'deployment', 'state.json'), 'utf8')
     expect(persisted).not.toContain('durable-secret')
     expect(persisted).toContain(Buffer.from('sealed:durable-secret').toString('base64'))
     await expect(new DesktopDeploymentStateStore(root, secretStorage(), request).load())
       .resolves.toEqual(state)
-    await expect(store.exchange(state)).resolves.toMatchObject({ accessToken: 'short-lived' })
+    await expect(store.exchange(state.servers[0]!)).resolves.toMatchObject({ accessToken: 'short-lived' })
     expect(calls).toEqual([
       {
         url: 'https://server.example/remote-auth/pairing.redeem',
@@ -83,11 +86,16 @@ describe('DesktopDeploymentStateStore', () => {
       deviceName: 'MacBook',
     })
     expect(state).toEqual({
-      version: 2,
+      version: 3,
       role: 'frontend',
-      authMode: 'trusted-tunnel',
-      endpoint: 'http://127.0.0.1:13080/',
-      deviceName: 'MacBook',
+      activeServerId: expect.any(String),
+      servers: [{
+        id: expect.any(String),
+        label: '127.0.0.1:13080',
+        authMode: 'trusted-tunnel',
+        endpoint: 'http://127.0.0.1:13080/',
+        deviceName: 'MacBook',
+      }],
       presentation: 'compatibility',
     })
     expect(fetch).not.toHaveBeenCalled()
@@ -111,14 +119,67 @@ describe('DesktopDeploymentStateStore', () => {
       fetch: async () => { throw new Error('should not request while loading') },
     })
     await expect(store.load()).resolves.toEqual({
-      version: 2,
+      version: 3,
       role: 'frontend',
-      authMode: 'paired',
-      endpoint: 'https://server.example/',
-      deviceName: 'Legacy MacBook',
+      activeServerId: 'legacy-default',
+      servers: [{
+        id: 'legacy-default',
+        label: 'server.example',
+        authMode: 'paired',
+        endpoint: 'https://server.example/',
+        deviceName: 'Legacy MacBook',
+        encryptedCredential: 'sealed-value',
+      }],
       presentation: 'advanced',
-      encryptedCredential: 'sealed-value',
     })
+  })
+
+  it('keeps multiple Frontend Servers and switches or removes the active selection', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-multi-server-'))
+    const fetch = vi.fn(async () => { throw new Error('trusted tunnels do not use remote auth') })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const first = await store.configureFrontend({
+      label: 'Primary mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+    const firstId = first.activeServerId
+    const second = await store.configureFrontend({
+      label: 'Lab mini', endpoint: 'http://127.0.0.1:23080', deviceName: 'MacBook',
+    })
+    expect(second.servers.map(server => server.label)).toEqual(['Primary mini', 'Lab mini'])
+    expect(second.activeServerId).not.toBe(firstId)
+
+    const selected = await store.selectFrontend(firstId)
+    expect(selected.activeServerId).toBe(firstId)
+    const removed = await store.removeFrontend(firstId)
+    expect(removed).toMatchObject({ role: 'frontend', activeServerId: second.activeServerId })
+    if (removed.role !== 'frontend') throw new Error('expected remaining Frontend Server')
+    expect(removed.servers).toHaveLength(1)
+    await expect(store.removeFrontend(removed.activeServerId)).resolves.toEqual({ version: 3, role: 'server' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('updates an existing paired Server label without redeeming a second credential', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-update-'))
+    const fetch = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { rpcId: string }
+      return new Response(JSON.stringify({
+        rpcId: body.rpcId,
+        result: { ok: true, value: { credential: 'durable-secret' } },
+      }))
+    })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const first = await store.configureFrontend({
+      label: 'Before', endpoint: 'https://server.example', pairingCode: '12345678', deviceName: 'MacBook',
+    })
+    const updated = await store.configureFrontend({
+      serverId: first.activeServerId,
+      label: 'After',
+      endpoint: 'https://server.example',
+      pairingCode: '',
+      deviceName: 'MacBook',
+    })
+    expect(updated.servers[0]).toMatchObject({ label: 'After', encryptedCredential: expect.any(String) })
+    expect(fetch).toHaveBeenCalledOnce()
   })
 
   it('rejects remote plaintext endpoints and unavailable operating-system encryption', async () => {

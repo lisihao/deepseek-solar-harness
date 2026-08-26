@@ -905,9 +905,19 @@ describe('runScenario', () => {
 
     const missing = await scenario({})
     await expect(runScenario(
-      { steps: [...boot, { op: 'waitForSubagentTurnEnd', child: 2, timeoutMs: 20 }] },
+      { steps: [...boot, { op: 'waitForSubagentTurnEnd', child: 2, timeoutMs: 1 }] },
       { agent: AGENT, mode: 'replay', fixtureFile: missing.fixtureFile },
-    )).rejects.toThrow(/subagent child #2 did not persist closed turn 1 within 20ms/)
+    )).rejects.toThrow(/subagent child #2 did not persist closed turn 1 within 1ms/)
+
+    const waitFor = vi.spyOn(vi, 'waitFor').mockRejectedValueOnce(new Error('Timed out in waitFor!'))
+    try {
+      await expect(runScenario(
+        { steps: [...boot, { op: 'waitForSubagentTurnEnd', timeoutMs: 20 }] },
+        { agent: AGENT, mode: 'replay', fixtureFile: missing.fixtureFile },
+      )).rejects.toThrow(/subagent child #1 did not persist closed turn 1 within 20ms/)
+    } finally {
+      waitFor.mockRestore()
+    }
   })
 
   it('waitForTitleAfterTurnEnd times out when the title precedes the boundary', { timeout: 20_000 }, async () => {

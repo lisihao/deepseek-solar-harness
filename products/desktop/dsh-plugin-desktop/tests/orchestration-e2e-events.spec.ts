@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-expect-error The executable acceptance script is intentionally plain ESM.
-import { assertParallelWorkerEvents, assertRecursiveRlmEvents, assertSerializedScopeWorkerEvents, countNativeSubscriptionTurns, resolveSubscriptionE2EMode } from '../scripts/verify-installed-orchestration-e2e.mjs'
+import { assertParallelWorkerEvents, assertRecursiveRlmEvents, assertSerializedScopeWorkerEvents, buildBlindRlmQualityRecording, countNativeSubscriptionTurns, resolveSubscriptionE2EMode } from '../scripts/verify-installed-orchestration-e2e.mjs'
 
 describe('installed orchestration E2E event assertions', () => {
   it('requires explicit authorization and defaults to the minimal subscription matrix', () => {
@@ -42,6 +42,52 @@ describe('installed orchestration E2E event assertions', () => {
     expect(() => assertRecursiveRlmEvents(events.map(event => (
       event.type === 'node.evidence.accepted' ? { ...event, sequence: 3 } : event
     )), 'candidate-b')).toThrow('accepted final Evidence before a recursive child settled')
+  })
+
+  it('freezes a real blind quality recording and reveals the assignment after the judge', () => {
+    const recording = buildBlindRlmQualityRecording({
+      events: [
+        { sequence: 2, type: 'node.evidence.accepted', nodeId: 'candidate-a', data: { evidenceRef: 'sha256:a', outputPreview: 'direct' } },
+        { sequence: 3, type: 'node.evidence.accepted', nodeId: 'candidate-b', data: { evidenceRef: 'sha256:b', outputPreview: 'recursive' } },
+        { sequence: 4, type: 'node.evidence.accepted', nodeId: 'verify', data: { evidenceRef: 'sha256:v', outputPreview: 'review\nPREFERRED_B' } },
+      ],
+      directCandidateId: 'candidate-a',
+      rlmCandidateId: 'candidate-b',
+      nonce: '0123abcd',
+      productVersion: '3.6.0',
+      sourceCommit: 'a'.repeat(40),
+      recordedAt: '2026-08-26T00:00:00.000Z',
+    }) as {
+      passed: boolean
+      supportsQualityClaim: boolean
+      reveal: { revealedAfterSequence: number }
+      evidence: { kind: string }
+    }
+
+    expect(recording).toMatchObject({
+      passed: true,
+      supportsQualityClaim: true,
+      evidence: { kind: 'real-subscription' },
+      reveal: { revealedAfterSequence: 4 },
+    })
+  })
+
+  it('freezes a real blind loss without inventing an RLM quality claim', () => {
+    const recording = buildBlindRlmQualityRecording({
+      events: [
+        { sequence: 2, type: 'node.evidence.accepted', nodeId: 'candidate-a', data: { evidenceRef: 'sha256:a', outputPreview: 'recursive' } },
+        { sequence: 3, type: 'node.evidence.accepted', nodeId: 'candidate-b', data: { evidenceRef: 'sha256:b', outputPreview: 'direct' } },
+        { sequence: 4, type: 'node.evidence.accepted', nodeId: 'verify', data: { evidenceRef: 'sha256:v', outputPreview: 'review\nPREFERRED_B' } },
+      ],
+      directCandidateId: 'candidate-b',
+      rlmCandidateId: 'candidate-a',
+      nonce: 'bd686856',
+      productVersion: '3.6.4',
+      sourceCommit: 'b'.repeat(40),
+      recordedAt: '2026-08-26T00:00:00.000Z',
+    }) as { passed: boolean, supportsQualityClaim: boolean }
+
+    expect(recording).toMatchObject({ passed: false, supportsQualityClaim: false })
   })
 
   it('accepts parallel workers that retry on a different quota pool', () => {

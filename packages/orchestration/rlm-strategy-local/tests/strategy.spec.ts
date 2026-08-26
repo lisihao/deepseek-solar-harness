@@ -17,8 +17,9 @@ describe('LocalRlmStrategy', () => {
     })
     expect(plan).toMatchObject({
       enabled: true,
+      fidelity: 'dsh-optimized',
       strategyId: 'dsh-native-rlm',
-      strategyVersion: '1.3.0',
+      strategyVersion: '1.4.0',
       maxDepth: 1,
       reason: 'auto-explicit-decomposition',
     })
@@ -58,10 +59,10 @@ describe('LocalRlmStrategy', () => {
     await expect(service.resolve({
       runId: 'run', nodeId: 'standard', phase: 'synthesis', role: 'synthesizer',
       task, requestedMode: 'disabled', objective: 'quality',
-    })).resolves.toMatchObject({ enabled: false, reason: 'user-disabled' })
+    })).resolves.toMatchObject({ enabled: false, fidelity: 'standard', reason: 'user-disabled' })
     await expect(service.resolve({
       runId: 'run', nodeId: 'rlm', phase: 'execution', role: 'implementer',
       task: 'change one label', requestedMode: 'enabled', objective: 'economy',
-    })).resolves.toMatchObject({ enabled: true, reason: 'user-enabled' })
+    })).resolves.toMatchObject({ enabled: true, fidelity: 'prime-strict', reason: 'user-enabled' })
   })
 })

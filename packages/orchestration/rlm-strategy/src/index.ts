@@ -15,6 +15,9 @@ export interface RlmBudgetV1 {
   readonly maxTurns: number
 }
 
+/** User-visible RLM semantics sealed into one attempt. */
+export type RlmExecutionFidelity = 'standard' | 'prime-strict' | 'dsh-optimized'
+
 /** Complete deterministic input to the RLM strategy Provider. */
 export interface RlmStrategyRequest {
   readonly runId: string
@@ -32,6 +35,8 @@ export interface RlmStrategyRequest {
 export interface RlmExecutionPlanV1 extends RlmBudgetV1 {
   readonly version: 1
   readonly enabled: boolean
+  /** Explicit RLM uses Prime inheritance; Smart Auto may use DSH cost-aware child allocation. */
+  readonly fidelity: RlmExecutionFidelity
   readonly strategyId: string
   readonly strategyVersion: string
   readonly reason: string

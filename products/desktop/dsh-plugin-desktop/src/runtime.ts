@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type { FrontendBillingBaseline } from './frontend-billing.ts'
 import type { UpdateCheckResult, UpdateRequest } from './update-checker.ts'
 
 /** Electron platforms supported by the DSH Desktop native adapter. */
@@ -131,6 +132,8 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   productName: string
   /** Visible native caption on platforms that retain a title. */
   windowTitle: string
+  /** Keep a remote Frontend window alive while its Server transport reconnects. */
+  retryUnavailableNavigation?: boolean
   /** Platform-selected application icon shipped with the package. */
   iconPath: string
   /** Generated tray assets derived from the repository-owned SVG. */
@@ -140,12 +143,22 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
     readonly origin: string
     accessToken(): string
   }
+  /** Local ledger retained while a remote Server owns the active browser page. */
+  frontendBilling?: {
+    readonly origin: string
+    readonly baseline: FrontendBillingBaseline
+    accessToken?(): string
+  }
   /** Read the authoritative built-in theme preference after Host boot settles. */
   readThemeSource(): DesktopThemeSource
   /** Request Cordis teardown followed by native application exit. */
   requestQuit(code: number): void
   /** Persist another mode through the registered desktop settings scope. */
   requestModeChange(mode: DesktopShellMode): Promise<void>
+  /** Switch a Frontend window back to the complete local Server deployment. */
+  requestUseLocalServer?(): Promise<void>
+  /** Open Desktop-owned Server and Git commit synchronization settings. */
+  requestConfigureDeployment?(): Promise<void>
 }
 
 /** Electron bootstrap capability supplied before the profile tree mounts. */

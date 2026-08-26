@@ -15,6 +15,18 @@ export interface RlmQualityOutputV1 {
   readonly estimatedTokens: number
 }
 
+/** Provenance class for frozen A/B outputs. */
+export type RlmQualityEvidenceKindV1 = 'synthetic-fixture' | 'recorded-keyless' | 'real-subscription'
+
+/** Recording provenance carried into every quality verdict. */
+export interface RlmQualityEvidenceV1 {
+  readonly kind: RlmQualityEvidenceKindV1
+  readonly recordingId: string
+  readonly recordedAt: string
+  readonly sourceCommit: string
+  readonly productVersion: string
+}
+
 /** One method-anonymous direct-versus-RLM comparison case. */
 export interface RlmQualityCaseV1 {
   readonly id: string
@@ -27,6 +39,7 @@ export interface RlmQualityCaseV1 {
 /** Versioned offline quality suite and its release thresholds. */
 export interface RlmQualitySuiteV1 {
   readonly version: 1
+  readonly evidence: RlmQualityEvidenceV1
   readonly minimumQualityLift: number
   readonly maximumTokenRatio: number
   readonly cases: readonly RlmQualityCaseV1[]
@@ -49,6 +62,7 @@ export interface RlmBlindQualityCaseV1 {
 /** Method-anonymous fixture consumed by reviewers and deterministic scoring. */
 export interface RlmBlindQualitySuiteV1 {
   readonly version: 1
+  readonly evidence: RlmQualityEvidenceV1
   readonly minimumQualityLift: number
   readonly maximumTokenRatio: number
   readonly cases: readonly RlmBlindQualityCaseV1[]
@@ -74,7 +88,10 @@ export interface RlmQualityCaseResultV1 {
 /** Aggregate quality, budget, and critical-regression verdict. */
 export interface RlmQualityReportV1 {
   readonly version: 1
+  readonly evidence: RlmQualityEvidenceV1
   readonly passed: boolean
+  readonly verdict: 'fixture-regression-passed' | 'measured-lift-passed' | 'failed'
+  readonly supportsQualityClaim: boolean
   readonly averageDirectScore: number
   readonly averageRlmScore: number
   readonly averageQualityLift: number
@@ -121,11 +138,18 @@ export function evaluateRlmQualitySuite(suite: RlmQualitySuiteV1): RlmQualityRep
     : rlmTokens / directTokens
   const criticalRegressions = cases.flatMap(entry => entry.criticalRegressions)
   const averageQualityLift = averageRlmScore - averageDirectScore
+  const passed = averageQualityLift >= suite.minimumQualityLift
+    && aggregateTokenRatio <= suite.maximumTokenRatio
+    && criticalRegressions.length === 0
+  const supportsQualityClaim = passed && suite.evidence.kind === 'real-subscription'
   return {
     version: 1,
-    passed: averageQualityLift >= suite.minimumQualityLift
-      && aggregateTokenRatio <= suite.maximumTokenRatio
-      && criticalRegressions.length === 0,
+    evidence: suite.evidence,
+    passed,
+    verdict: passed
+      ? supportsQualityClaim ? 'measured-lift-passed' : 'fixture-regression-passed'
+      : 'failed',
+    supportsQualityClaim,
     averageDirectScore,
     averageRlmScore,
     averageQualityLift,
@@ -152,6 +176,7 @@ export function evaluateBlindRlmQualitySuite(
   const assignmentByCase = new Map(assignments.map(entry => [entry.caseId, entry]))
   return evaluateRlmQualitySuite({
     version: 1,
+    evidence: suite.evidence,
     minimumQualityLift: suite.minimumQualityLift,
     maximumTokenRatio: suite.maximumTokenRatio,
     cases: suite.cases.map((entry) => {
@@ -203,6 +228,7 @@ function validateSuite(suite: RlmQualitySuiteV1): void {
   if (!Number.isFinite(suite.maximumTokenRatio) || suite.maximumTokenRatio < 1) {
     throw new Error('RLM maximumTokenRatio must be at least 1')
   }
+  validateEvidence(suite.evidence)
   const caseIds = new Set<string>()
   for (const entry of suite.cases) {
     if (entry.id.trim() !== entry.id || entry.id.length === 0 || caseIds.has(entry.id)) {
@@ -256,6 +282,7 @@ function validateBlindSuite(
   }
   validateSuite({
     version: 1,
+    evidence: suite.evidence,
     minimumQualityLift: suite.minimumQualityLift,
     maximumTokenRatio: suite.maximumTokenRatio,
     cases: suite.cases.map((entry) => {
@@ -272,6 +299,19 @@ function validateBlindSuite(
       }
     }),
   })
+}
+
+function validateEvidence(evidence: RlmQualityEvidenceV1): void {
+  if (!['synthetic-fixture', 'recorded-keyless', 'real-subscription'].includes(evidence.kind)) {
+    throw new Error('RLM quality evidence kind is invalid')
+  }
+  if ([evidence.recordingId, evidence.sourceCommit, evidence.productVersion]
+    .some(value => value.trim() !== value || value.length === 0)) {
+    throw new Error('RLM quality evidence provenance must be non-empty and trimmed')
+  }
+  if (Number.isNaN(Date.parse(evidence.recordedAt))) {
+    throw new Error('RLM quality evidence recordedAt must be an ISO-compatible timestamp')
+  }
 }
 
 function average(values: readonly number[]): number {

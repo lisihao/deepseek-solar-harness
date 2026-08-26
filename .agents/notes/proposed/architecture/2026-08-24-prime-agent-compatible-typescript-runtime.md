@@ -26,6 +26,10 @@ Add a capability seam named `ctx.rlmRuntime`. Keep `ctx.rlmStrategy` as policy o
 
 The model-facing programming surface is one `typescript_repl` tool backed by a persistent Node process. The TypeScript kernel preloads `context`, `rlm`, `agentMessage`, `harness`, `goal`, and `compact`. This is the user-authorized platform substitution for Prime's IPython kernel; all lifecycle, admission, messaging, recovery, and harness contracts remain equivalent.
 
+## Explicit fidelity modes
+
+The user-facing modes have distinct sealed semantics. Explicit `RLM` selects `prime-strict`: a child without overrides inherits the exact parent operator/model, reasoning profile, model-tool bridge, managed Skill catalog, retry authority, and sealed capability/context references. Prime v0.8.0's `rlm(task, options)` surface accepts only `name`, `model`, and `thinking`; unknown option names fail before child admission. `Smart Auto` selects `dsh-optimized` and may seal a lower-cost qualified child model. `Standard` does not create an RLM root. Cost optimization therefore cannot silently alter the semantics of an explicitly requested Prime-compatible run.
+
 ## Capability seam and package topology
 
 - `@deepseek-ai/dsh-rlm-runtime`: Service Definition, versioned protocol types, errors, and `ctx.rlmRuntime`.
@@ -60,6 +64,7 @@ The TypeScript kernel is an isolation and lifecycle boundary, not a security san
 | asynchronous children | child turns execute concurrently up to the sealed budget and report separately |
 | parent-scoped registry | names are unique within a parent; list/inspect survive kernel and daemon restart |
 | bounded recursion | enforce sealed max depth/children/turns before child admission |
+| parent execution inheritance | explicit RLM inherits model, thinking, tools, managed skills, retry authority, and sealed capability context; unknown options fail |
 | A2A nuclear-family messaging | parent, sibling, and direct-child targets only; `auto`, `steer`, and `follow_up` modes |
 | child response via message/file | no hidden return channel; messages and content-addressed artifacts are explicit |
 | compaction preserves program state | model history may compact while kernel namespace and child registry remain |

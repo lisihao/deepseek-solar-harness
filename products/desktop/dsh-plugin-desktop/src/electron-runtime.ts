@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
+import { startFrontendBillingBridge, type FrontendBillingBridge } from './frontend-billing.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import type {
   DesktopDeploymentAdapter,
@@ -470,8 +471,9 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (this.platform === 'darwin') app.dock?.setIcon(icon)
     const origin = new URL(spec.url).origin
     if (spec.mode === 'advanced') nativeTheme.themeSource = spec.readThemeSource()
-    const window = new BrowserWindow(desktopWindowOptions(spec, icon, this.platform))
-    window.accessibleTitle = spec.windowTitle
+    const windowTitle = `${spec.productName} v${PRODUCT_VERSION} · ${spec.windowTitle}`
+    const window = new BrowserWindow(desktopWindowOptions({ ...spec, windowTitle }, icon, this.platform))
+    window.accessibleTitle = windowTitle
     if (this.platform === 'win32') window.removeMenu()
     this.window = window
     const remoteAccess = spec.remoteAccess
@@ -491,6 +493,33 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         },
       )
     }
+    const frontendBilling = spec.frontendBilling
+    let billingBridge: FrontendBillingBridge | undefined
+    const billingFilter = frontendBilling === undefined
+      ? undefined
+      : { urls: [`${frontendBilling.origin}/billing/state*`] }
+    try {
+      if (frontendBilling !== undefined && billingFilter !== undefined) {
+        if (new URL(spec.url).origin !== frontendBilling.origin) {
+          throw new Error('dsh-plugin-desktop: Frontend billing origin does not match the window URL')
+        }
+        billingBridge = await startFrontendBillingBridge({
+          origin: frontendBilling.origin,
+          baseline: frontendBilling.baseline,
+          ...(frontendBilling.accessToken === undefined ? {} : {
+            accessToken: frontendBilling.accessToken,
+          }),
+        })
+        window.webContents.session.webRequest.onBeforeRequest(
+          billingFilter,
+          (_details, callback) => { callback({ redirectURL: billingBridge!.url }) },
+        )
+      }
+    } catch (cause) {
+      window.destroy()
+      this.window = undefined
+      throw cause
+    }
 
     const show = (): void => { this.show() }
     const close = (event: Electron.Event): void => {
@@ -505,6 +534,22 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         target = new URL(event.url)
       } catch {
         target = undefined
+      }
+      if (event.isMainFrame && target?.href === 'dsh-desktop://deployment/local-server'
+        && spec.requestUseLocalServer !== undefined) {
+        event.preventDefault()
+        void spec.requestUseLocalServer().catch((cause: unknown) => {
+          process.stderr.write(`dsh-plugin-desktop: failed to switch to local Server: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+        })
+        return
+      }
+      if (event.isMainFrame && target?.href === 'dsh-desktop://deployment/configure'
+        && spec.requestConfigureDeployment !== undefined) {
+        event.preventDefault()
+        void spec.requestConfigureDeployment().catch((cause: unknown) => {
+          process.stderr.write(`dsh-plugin-desktop: failed to open deployment settings: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+        })
+        return
       }
       if (target?.origin === origin) return
       // Remote Modules are rendered in subframes through product-owned local
@@ -534,10 +579,27 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       return { action: 'deny' }
     })
 
-    window.once('ready-to-show', show)
+    show()
     let tray: Tray | undefined
+    let navigationRetry: NodeJS.Timeout | undefined
+    const scheduleNavigationRetry = (): void => {
+      if (navigationRetry !== undefined || window.isDestroyed()) return
+      navigationRetry = setTimeout(() => {
+        navigationRetry = undefined
+        if (window.isDestroyed()) return
+        void window.loadURL(spec.url).catch(() => { scheduleNavigationRetry() })
+      }, 2_000)
+    }
     try {
-      await window.loadURL(spec.url)
+      try {
+        await window.loadURL(spec.url)
+      } catch (cause) {
+        if (spec.retryUnavailableNavigation !== true) throw cause
+        process.stderr.write(
+          `dsh-plugin-desktop: Desktop navigation unavailable; retrying: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+        scheduleNavigationRetry()
+      }
       tray = new Tray(prepareTrayIcon(spec.trayIcons, this.platform))
       this.tray = tray
       tray.setToolTip(spec.productName)
@@ -547,11 +609,16 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     } catch (cause) {
       app.off('activate', show)
       window.off('page-title-updated', preserveBlankTitle)
+      if (navigationRetry !== undefined) clearTimeout(navigationRetry)
       tray?.off('click', show)
       tray?.destroy()
       window.destroy()
       this.tray = undefined
       this.window = undefined
+      if (billingFilter !== undefined) {
+        window.webContents.session.webRequest.onBeforeRequest(billingFilter, null)
+      }
+      await billingBridge?.close()
       throw cause
     }
 
@@ -569,6 +636,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       window.off('page-title-updated', preserveBlankTitle)
       window.webContents.off('will-frame-navigate', navigate)
       window.webContents.off('will-redirect', navigate)
+      if (navigationRetry !== undefined) clearTimeout(navigationRetry)
       mountedTray.off('click', show)
       mountedTray.destroy()
       if (remoteAccess !== undefined) {
@@ -577,6 +645,10 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
           null,
         )
       }
+      if (billingFilter !== undefined) {
+        window.webContents.session.webRequest.onBeforeRequest(billingFilter, null)
+      }
+      await billingBridge?.close()
       if (!window.isDestroyed()) window.destroy()
       if (this.tray === mountedTray) this.tray = undefined
       if (this.window === window) this.window = undefined

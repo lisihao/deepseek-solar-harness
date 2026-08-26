@@ -251,7 +251,11 @@ export class RemoteSyncHub {
       websocket.once('message', () => { websocket.close(1008, 'downlink only') })
       const pump = this.pumpSocket(websocket, cursor, abort)
       this.socketPumps.add(pump)
-      void pump.finally(() => { this.socketPumps.delete(pump) })
+      const release = (): void => { this.socketPumps.delete(pump) }
+      // A browser disappearing is a transport outcome, not a Host failure.
+      // Consume both settlements here while retaining the original promise in
+      // socketPumps so close() can still await every in-flight pump.
+      void pump.then(release, release)
     })
   }
 

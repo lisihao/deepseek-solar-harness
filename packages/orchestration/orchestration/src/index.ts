@@ -277,7 +277,7 @@ export interface NodeExecutionPlanV1 {
   readonly allocationPlanRef: OrchestrationArtifactRef
   readonly allocationPlan: ModelAllocationPlan
   readonly rlmPlan?: RlmExecutionPlanV1
-  /** Low-tier native-subscription allocation sealed for Scheduler-owned RLM child turns. */
+  /** Cost-aware child allocation used only by Smart Auto; Prime Strict inherits the parent. */
   readonly rlmWorkerPlan?: ModelAllocationPlan
   readonly harnessSnapshotRef?: OrchestrationArtifactRef
   readonly operatorPlan: PhysicalOperatorPlanV1

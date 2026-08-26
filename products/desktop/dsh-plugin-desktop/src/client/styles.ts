@@ -52,7 +52,10 @@ html:has([aria-modal="true"]) .dshDesktopSidebarSurface::before { -webkit-app-re
 /** Window-bottom product marker shared by compatibility and advanced shells. */
 const SOLAR_BRAND_STYLES = `
 body[data-dsh-desktop-product-footer="true"] #root { height: calc(100% - 24px); }
-.dshDesktopSolarFooter { position: fixed; z-index: 2147482000; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; height: 24px; padding: 0 16px; overflow: hidden; border-top: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-secondary); font-size: 10px; font-weight: 500; line-height: 23px; text-overflow: ellipsis; user-select: none; white-space: nowrap; -webkit-app-region: no-drag; }
+.dshDesktopSolarFooter { position: fixed; z-index: 2147482000; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; gap: 10px; box-sizing: border-box; height: 24px; padding: 0 16px; overflow: hidden; border-top: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-secondary); font-size: 10px; font-weight: 500; line-height: 23px; user-select: none; white-space: nowrap; -webkit-app-region: no-drag; }
+.dshDesktopSolarFooterLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dshDesktopUseLocalServer { flex: 0 0 auto; height: 18px; padding: 0 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 5px; background: var(--dsw-alias-bg-elevated); color: var(--dsw-alias-label-primary); font: inherit; line-height: 16px; cursor: pointer; }
+.dshDesktopUseLocalServer:hover { background: var(--dsw-alias-bg-hover); }
 `
 
 /** Install and remove the advanced shell's global native-window styles. @returns the style disposer. */

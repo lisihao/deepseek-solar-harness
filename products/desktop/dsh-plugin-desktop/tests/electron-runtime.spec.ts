@@ -76,6 +76,7 @@ const electron = vi.hoisted(() => {
     setWindowOpenHandler: vi.fn(),
     session: {
       webRequest: {
+        onBeforeRequest: vi.fn(),
         onBeforeSendHeaders: vi.fn(),
       },
     },
@@ -244,7 +245,7 @@ describe('Electron compatibility runtime', () => {
     expect(electron.browserWindowOptions).toHaveLength(1)
     const options = electron.browserWindowOptions[0]
     expect(options).toEqual(expect.objectContaining({
-      title: 'DeepSeek Harness Desktop',
+      title: `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
       width: 1280,
       height: 840,
       show: false,
@@ -270,11 +271,15 @@ describe('Electron compatibility runtime', () => {
     ]) {
       expect(options).not.toHaveProperty(option)
     }
-    expect(electron.browserWindows[0]?.accessibleTitle).toBe('DeepSeek Harness Desktop')
+    expect(electron.browserWindows[0]?.accessibleTitle).toBe(
+      `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
+    )
     expect(spec.readThemeSource).not.toHaveBeenCalled()
     expect(electron.nativeTheme.themeSource).toBe('system')
     expect(electron.browserWindows[0]?.removeMenu).not.toHaveBeenCalled()
     expect(electron.app.dock.setIcon).toHaveBeenCalledWith(electron.appIcon)
+    expect(electron.browserWindows[0]?.show).toHaveBeenCalledOnce()
+    expect(electron.browserWindows[0]?.focus).toHaveBeenCalledOnce()
     expect(electron.templateIcon.setTemplateImage).toHaveBeenCalledWith(true)
     expect(electron.trays[0]?.image).toBe(electron.templateIcon)
     expect(electron.menuTemplates[0]).toEqual(expect.arrayContaining([
@@ -290,6 +295,32 @@ describe('Electron compatibility runtime', () => {
     await release()
     expect(electron.browserWindowOff).toHaveBeenCalledWith('page-title-updated', titleListener)
     expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
+  })
+
+  it('keeps the native shell alive and reconnects after the initial URL is unavailable', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+      electron.loadURL
+        .mockRejectedValueOnce(new Error('ERR_CONNECTION_REFUSED'))
+        .mockResolvedValueOnce(undefined)
+      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+      const runtime = new ElectronDesktopRuntime(async () => {})
+      const release = runtime.schedule({ ...spec, retryUnavailableNavigation: true })
+
+      await expect(runtime.mountScheduled()).resolves.toBeUndefined()
+      expect(electron.browserWindows[0]?.destroy).not.toHaveBeenCalled()
+      expect(electron.trays).toHaveLength(1)
+      expect(electron.loadURL).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(electron.loadURL).toHaveBeenCalledTimes(2)
+      expect(electron.loadURL).toHaveBeenLastCalledWith(spec.url)
+
+      await release()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('injects a memory-only remote token for the configured origin and removes the hook', async () => {
@@ -321,6 +352,43 @@ describe('Electron compatibility runtime', () => {
     expect(hook.mock.calls.at(-1)?.[1]).toBeNull()
   })
 
+  it('redirects the remote global billing snapshot through the local history bridge', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule({
+      ...spec,
+      url: 'http://127.0.0.1:43120/?dsh-deployment-role=frontend',
+      frontendBilling: {
+        origin: 'http://127.0.0.1:43120',
+        baseline: {
+          calls: 415,
+          cost: 11.6173779,
+          costUsd: 1.697263652,
+          inputTokens: 2_043_980,
+          cacheReadTokens: 23_318_912,
+          outputTokens: 200_035,
+        },
+      },
+    })
+    await runtime.mountScheduled()
+    const hook = electron.browserWindows[0]!.webContents.session.webRequest.onBeforeRequest
+    expect(hook.mock.calls[0]?.[0]).toEqual({
+      urls: ['http://127.0.0.1:43120/billing/state*'],
+    })
+    const listener = hook.mock.calls[0]?.[1] as (
+      details: unknown,
+      callback: (value: { redirectURL: string }) => void,
+    ) => void
+    const callback = vi.fn()
+    listener({}, callback)
+    expect(callback).toHaveBeenCalledWith({
+      redirectURL: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]+$/),
+    })
+    await release()
+    expect(hook.mock.calls.at(-1)?.[1]).toBeNull()
+  })
+
   it('keeps deployment role controls separate from presentation mode controls', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const configureFrontend = vi.fn(async () => {})
@@ -347,7 +415,9 @@ describe('Electron compatibility runtime', () => {
   it('keeps main navigation origin-locked while allowing loopback Remote Module frames', async () => {
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
-    runtime.schedule(spec)
+    const requestUseLocalServer = vi.fn(async () => {})
+    const requestConfigureDeployment = vi.fn(async () => {})
+    runtime.schedule({ ...spec, requestUseLocalServer, requestConfigureDeployment })
     await runtime.mountScheduled()
 
     const window = electron.browserWindows[0]
@@ -367,6 +437,16 @@ describe('Electron compatibility runtime', () => {
     const sameOrigin = event('http://127.0.0.1:43120/settings', true)
     navigate(sameOrigin)
     expect(sameOrigin.preventDefault).not.toHaveBeenCalled()
+
+    const useLocal = event('dsh-desktop://deployment/local-server', true)
+    navigate(useLocal)
+    expect(useLocal.preventDefault).toHaveBeenCalledOnce()
+    await vi.waitFor(() => { expect(requestUseLocalServer).toHaveBeenCalledOnce() })
+
+    const configure = event('dsh-desktop://deployment/configure', true)
+    navigate(configure)
+    expect(configure.preventDefault).toHaveBeenCalledOnce()
+    await vi.waitFor(() => { expect(requestConfigureDeployment).toHaveBeenCalledOnce() })
 
     for (const url of ['http://127.0.0.1:29001/', 'http://localhost:29002/console/']) {
       const relay = event(url, false)
@@ -394,10 +474,12 @@ describe('Electron compatibility runtime', () => {
     await runtime.mountScheduled()
 
     expect(electron.browserWindowOptions[0]).toEqual(expect.objectContaining({
-      title: 'DeepSeek Harness Desktop',
+      title: `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
       autoHideMenuBar: true,
     }))
-    expect(electron.browserWindows[0]?.accessibleTitle).toBe('DeepSeek Harness Desktop')
+    expect(electron.browserWindows[0]?.accessibleTitle).toBe(
+      `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
+    )
     expect(electron.browserWindows[0]?.removeMenu).toHaveBeenCalledOnce()
     expect(electron.app.dock.setIcon).not.toHaveBeenCalled()
     expect(electron.trays[0]?.image).toBe(electron.blueIcon)
@@ -434,6 +516,8 @@ describe('Electron compatibility runtime', () => {
 
     const mounted = runtime.mountScheduled(beforeInteractive)
     await vi.waitFor(() => { expect(electron.loadURL).toHaveBeenCalledOnce() })
+    expect(electron.browserWindows[0]?.show).toHaveBeenCalledOnce()
+    expect(electron.browserWindows[0]?.focus).toHaveBeenCalledOnce()
     expect(electron.trays).toHaveLength(0)
     expect(beforeInteractive).not.toHaveBeenCalled()
 

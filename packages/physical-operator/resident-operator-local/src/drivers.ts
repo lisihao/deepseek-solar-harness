@@ -49,9 +49,9 @@ export const EXPECTED_CLAUDE_CLI_VERSION = '2.1.239 (Claude Code)'
 /** Official Claude Agent SDK version compiled into this Resident build. */
 export const EXPECTED_CLAUDE_SDK_VERSION = '0.3.220'
 /** Qualified Codex CLI version for this Resident build. */
-export const EXPECTED_CODEX_CLI_VERSION = 'codex-cli 0.147.0'
+export const EXPECTED_CODEX_CLI_VERSION = 'codex-cli 0.149.1'
 /** SHA-256 of the qualified Codex app-server v2 JSON Schema. */
-export const EXPECTED_CODEX_SCHEMA_SHA256 = 'f3dec1e031d99a420b137b903f02196d4325eece57620c925bb7130b25f168d2'
+export const EXPECTED_CODEX_SCHEMA_SHA256 = '9b3de71a5a2ffc980b792a18aa8f8dec3f85f48829560222a0264fe494b679a9'
 
 const EFFORTS = new Set<PhysicalOperatorReasoningEffort>(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
 

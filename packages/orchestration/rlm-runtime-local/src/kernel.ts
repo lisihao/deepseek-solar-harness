@@ -5,7 +5,6 @@ import type {
   RlmChildHandleV1,
   RlmCompactRunOutcomeV1,
   RlmJsonValue,
-  RlmModelSelectionV1,
 } from '@deepseek-ai/dsh-rlm-runtime'
 import { analyzeTypeScriptCell, type KernelDeclaration, type KernelDeclarationKind } from './namespace.ts'
 
@@ -33,7 +32,8 @@ export interface PersistedVariable {
 
 /** Host-owned capabilities injected into one programmable kernel. */
 export interface KernelHooks {
-  spawn(task: string, options?: { readonly name?: string; readonly model?: string; readonly operatorId?: string; readonly profile?: RlmModelSelectionV1['profile'] }): Promise<RlmChildHandleV1>
+  /** The host validates Prime's runtime option surface; the Worker boundary is untrusted. */
+  spawn(task: string, options?: unknown): Promise<RlmChildHandleV1>
   listChildren(): Promise<unknown>
   deleteChild(child: unknown): Promise<void>
   sendMessage(text: string, options: { readonly receiverRole: 'parent' | 'child' | 'sibling'; readonly receiverName?: string; readonly mode?: 'auto' | 'steer' | 'follow_up'; readonly artifactRefs?: readonly string[] }): Promise<unknown>
@@ -93,9 +93,24 @@ const degradedDeclarations = new Map();
 const hostCalls = new Map();
 let hostOrdinal = 0;
 let activeLogs;
+let activeExecutionId;
+let activeHostError;
 const input = new PassThrough();
 const output = new PassThrough();
-output.resume();
+output.on('data', chunk => {
+  if (activeExecutionId === undefined) return;
+  const rendered = String(chunk).replace(/\u001b\[[0-9;]*m/g, '').trim();
+  if (!rendered.startsWith('Uncaught')) return;
+  const firstLine = rendered.split('\n', 1)[0].replace(/^Uncaught\s+/, '');
+  parentPort.postMessage({
+    type: 'execute-result',
+    id: activeExecutionId,
+    ok: false,
+    error: activeHostError?.message ?? firstLine,
+    ...(activeHostError?.code === undefined ? {} : { errorCode: activeHostError.code }),
+  });
+  activeExecutionId = undefined;
+});
 const server = start({ input, output, prompt: '', terminal: false, useGlobal: false });
 const evaluate = code => new Promise((resolve, reject) => {
   server.eval(code, server.context, 'dsh-rlm.ts', (error, value) => error !== null ? reject(error) : resolve(value));
@@ -312,11 +327,19 @@ parentPort.on('message', async message => {
     if (pending === undefined) return;
     hostCalls.delete(message.id);
     if (message.ok) pending.resolve(message.value);
-    else pending.reject(Object.assign(new Error(message.error ?? 'RLM host call failed'), message.errorCode === undefined ? {} : { code: message.errorCode }));
+    else {
+      activeHostError = {
+        message: message.error ?? 'RLM host call failed',
+        ...(message.errorCode === undefined ? {} : { code: message.errorCode }),
+      };
+      pending.reject(Object.assign(new Error(activeHostError.message), activeHostError.code === undefined ? {} : { code: activeHostError.code }));
+    }
     return;
   }
   if (message.type !== 'execute') return;
   try {
+    activeExecutionId = message.id;
+    activeHostError = undefined;
     await ready;
     for (const declaration of message.declarations) {
       if (RESERVED.has(declaration.name)) continue;
@@ -354,6 +377,7 @@ parentPort.on('message', async message => {
         ...(contextError === undefined ? [] : ['context']),
       ],
     } });
+    activeExecutionId = undefined;
   } catch (error) {
     parentPort.postMessage({
       type: 'execute-result',
@@ -362,6 +386,7 @@ parentPort.on('message', async message => {
       error: error instanceof Error ? error.message : String(error),
       errorCode: error instanceof Error && typeof error.code === 'string' ? error.code : undefined,
     });
+    activeExecutionId = undefined;
   } finally {
     activeLogs = undefined;
   }
@@ -481,7 +506,7 @@ export class PersistentTypeScriptKernel {
 
   private callHost(method: string, args: unknown[]): Promise<unknown> {
     switch (method) {
-      case 'spawn': return this.hooks.spawn(args[0] as string, args[1] as Parameters<KernelHooks['spawn']>[1])
+      case 'spawn': return this.hooks.spawn(args[0] as string, args[1])
       case 'listChildren': return this.hooks.listChildren()
       case 'deleteChild': return this.hooks.deleteChild(args[0])
       case 'sendMessage': return this.hooks.sendMessage(args[0] as string, args[1] as Parameters<KernelHooks['sendMessage']>[1])

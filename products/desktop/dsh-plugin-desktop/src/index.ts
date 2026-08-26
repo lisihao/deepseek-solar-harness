@@ -74,6 +74,7 @@ export function desktopRendererUrl(
   productVersion: string,
 ): string {
   const url = new URL(`http://127.0.0.1:${String(port)}/`)
+  url.searchParams.set('dsh-deployment-role', 'server')
   url.searchParams.set('dsh-desktop-mode', mode)
   url.searchParams.set('dsh-desktop-platform', platform)
   url.searchParams.set('dsh-desktop-version', productVersion)

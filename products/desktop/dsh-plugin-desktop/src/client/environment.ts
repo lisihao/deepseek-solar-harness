@@ -1,11 +1,16 @@
 /** Desktop renderer modes accepted from the Electron-owned page URL. */
 export type DesktopClientMode = 'compatibility' | 'advanced'
 
+/** Deployment role owned by the Electron main process. */
+export type DesktopClientDeploymentRole = 'server' | 'frontend'
+
 /** Host platforms whose native chrome has a desktop presentation. */
 export type DesktopClientPlatform = 'darwin' | 'win32' | 'linux'
 
 /** Validated renderer environment supplied by the Electron Host. */
 export interface DesktopClientEnvironment {
+  /** Active deployment role for this BrowserWindow lifetime. */
+  deploymentRole: DesktopClientDeploymentRole
   /** Active shell mode for this BrowserWindow lifetime. */
   mode: DesktopClientMode
   /** Electron Host platform used for native spacing and drag regions. */
@@ -15,6 +20,7 @@ export interface DesktopClientEnvironment {
 }
 
 const MODES = new Set<DesktopClientMode>(['compatibility', 'advanced'])
+const DEPLOYMENT_ROLES = new Set<DesktopClientDeploymentRole>(['server', 'frontend'])
 const PLATFORMS = new Set<DesktopClientPlatform>(['darwin', 'win32', 'linux'])
 const STABLE_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u
 
@@ -25,9 +31,13 @@ const STABLE_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u
  */
 export function parseDesktopClientEnvironment(search: string): DesktopClientEnvironment {
   const params = new URLSearchParams(search)
+  const deploymentRole = params.get('dsh-deployment-role')
   const mode = params.get('dsh-desktop-mode')
   const platform = params.get('dsh-desktop-platform')
   const productVersion = params.get('dsh-desktop-version')
+  if (!DEPLOYMENT_ROLES.has(deploymentRole as DesktopClientDeploymentRole)) {
+    throw new Error(`dsh-plugin-desktop: invalid or missing dsh-deployment-role ${JSON.stringify(deploymentRole)}`)
+  }
   if (!MODES.has(mode as DesktopClientMode)) {
     throw new Error(`dsh-plugin-desktop: invalid or missing dsh-desktop-mode ${JSON.stringify(mode)}`)
   }
@@ -37,5 +47,10 @@ export function parseDesktopClientEnvironment(search: string): DesktopClientEnvi
   if (productVersion === null || !STABLE_VERSION.test(productVersion)) {
     throw new Error(`dsh-plugin-desktop: invalid or missing dsh-desktop-version ${JSON.stringify(productVersion)}`)
   }
-  return { mode: mode as DesktopClientMode, platform: platform as DesktopClientPlatform, productVersion }
+  return {
+    deploymentRole: deploymentRole as DesktopClientDeploymentRole,
+    mode: mode as DesktopClientMode,
+    platform: platform as DesktopClientPlatform,
+    productVersion,
+  }
 }

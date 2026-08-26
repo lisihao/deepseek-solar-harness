@@ -169,7 +169,7 @@ try {
   if (mountedSpec?.mode !== 'compatibility') {
     throw new Error(`desktop plugin produced an unexpected shell mode: ${String(mountedSpec?.mode)}`)
   }
-  const expectedUrl = `http://127.0.0.1:43120/?dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin&dsh-desktop-version=${desktopPackage.version}`
+  const expectedUrl = `http://127.0.0.1:43120/?dsh-deployment-role=server&dsh-desktop-mode=compatibility&dsh-desktop-platform=darwin&dsh-desktop-version=${desktopPackage.version}`
   if (mountedSpec?.url !== expectedUrl) {
     throw new Error(`desktop plugin produced an unexpected renderer URL: ${String(mountedSpec?.url)}`)
   }

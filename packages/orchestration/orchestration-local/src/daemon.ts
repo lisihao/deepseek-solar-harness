@@ -334,7 +334,11 @@ function asRlmExecutionResult(result: PhysicalOperatorResult): RlmChildExecution
   }
 }
 
-function primeRlmRootPrompt(base: readonly ContentBlock[], defaultChild?: ModelAllocationPlan): ContentBlock[] {
+function primeRlmRootPrompt(
+  base: readonly ContentBlock[],
+  rlmPlan: RlmExecutionPlanV1,
+  defaultChild?: ModelAllocationPlan,
+): ContentBlock[] {
   return [
     ...base,
     {
@@ -346,7 +350,9 @@ function primeRlmRootPrompt(base: readonly ContentBlock[], defaultChild?: ModelA
         'rlm(...) returns an admission handle immediately, never the child answer. Children deliver answers only by explicit agentMessage.send(...) or artifact references.',
         'You decide the recursive topology dynamically within the sealed depth, child, and turn budgets. Do not ask the Scheduler to manufacture fixed branches.',
         defaultChild === undefined
-          ? 'Use lower-cost children for bounded exploration and retain this root model for planning, verification, and final synthesis when that improves the result.'
+          ? rlmPlan.fidelity === 'prime-strict'
+            ? 'Prime Strict is active: when rlm() omits overrides, every child inherits this parent model, reasoning profile, tools, managed skills, retry policy and sealed capability context. Unsupported rlm() option names fail instead of being ignored.'
+            : 'Use lower-cost children for bounded exploration and retain this root model for planning, verification, and final synthesis when that improves the result.'
           : `When rlm() omits a model, the sealed default child is ${defaultChild.operatorId}/${defaultChild.model} (${defaultChild.tier}, ${defaultChild.source}). Use an explicit model only when the task genuinely requires an override.`,
         'Before finishing, read pending family messages, verify coverage against the original task, and return one complete final answer.',
       ].join('\n'),
@@ -1407,10 +1413,10 @@ export class OrchestrationDaemon {
     })
     this.store.saveRun(record, [event(record.snapshot.runId, 'rlm.resolved', {
       ref: String(rlmPlanRef), enabled: rlmPlan.enabled, reason: rlmPlan.reason,
-      planSha256: rlmPlan.planSha256,
+      fidelity: rlmPlan.fidelity, planSha256: rlmPlan.planSha256,
     }, node)])
     const selected = await this.selectOperator(record, spec, rlmPlan)
-    const rlmWorkerPlan = rlmPlan.enabled && rlmPlan.maxTurns > 1
+    const rlmWorkerPlan = rlmPlan.enabled && rlmPlan.fidelity === 'dsh-optimized' && rlmPlan.maxTurns > 1
       ? await this.selectRlmWorker(record, spec, rlmPlan)
       : undefined
     // RLM owns child admission inside this node, while the TaskGraph Scheduler
@@ -1688,10 +1694,12 @@ export class OrchestrationDaemon {
     const bridge = await this.ctx.rlmRuntime.modelToolBridge(rootSessionId)
     const rootPrompt = primeRlmRootPrompt(
       promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan),
+      rlmPlan,
       plan.rlmWorkerPlan,
     )
     this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.started', {
       runtimeSessionId: String(rootSessionId), planSha256: rlmPlan.planSha256,
+      fidelity: rlmPlan.fidelity,
       maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
       rootOperatorId: plan.allocationPlan.operatorId, rootModel: plan.allocationPlan.model,
       tool: 'typescript_repl', topologyOwner: 'model',

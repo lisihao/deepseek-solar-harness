@@ -465,7 +465,14 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
     dshHome: home,
     ...rowConfig(settings),
   } as SettingsFileConfig)
-  const mode = readDesktopShellMode(settingsConfig)
+  // Product Server owns the remote Host graph, not an Electron renderer. Its
+  // browser shell must retain the compatibility layout even when a Desktop
+  // Frontend has selected the native advanced presentation in its own state.
+  // Applying the Desktop-only setting here disables ui-layout without loading
+  // dsh-plugin-desktop/client, leaving every layout consumer pending.
+  const mode = adapter === 'desktop'
+    ? readDesktopShellMode(settingsConfig)
+    : DEFAULT_DESKTOP_SHELL_MODE
   patches.push({
     id: 'settings',
     config: settingsConfig,
