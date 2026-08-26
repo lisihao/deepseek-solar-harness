@@ -14,7 +14,7 @@ import { RpcId, type ClientRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { WebServer, WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 import {
   API_PATH, apply, HOST_EVENTS_PATH, inject, MUX_EVENTS_PATH,
-  REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_RPC_CHANNEL,
+  HostConnectionService, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_RPC_CHANNEL,
   type HostConnectionHandle,
 } from '../src/index.ts'
 
@@ -743,6 +743,20 @@ describe('connection node half', () => {
       async () => ({ ok: true, value: null }),
       { authority: 'loopback' },
     )
+    const shared = (ctx.get('connection') as HostConnectionService).createSharedFetchHandler(
+      API_PATH,
+      { fetch: async () => new Response('fallback', { status: 418 }) },
+    )
+    const sharedRequest = (): Request => new Request('http://localhost:3080/api/goals/create', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', host: 'localhost:3080' },
+      body: JSON.stringify(request),
+    })
+    const forgedShared = await shared.fetch(sharedRequest(), { remoteAddress: '203.0.113.10' })
+    expect(forgedShared.status).toBe(403)
+    expect(await forgedShared.text()).toBe('forbidden')
+    const localShared = await shared.fetch(sharedRequest(), { remoteAddress: '127.0.0.1' })
+    expect(localShared.status).toBe(200)
     const loopbackOnly = fakeResponse()
     await route.handler(fakePost({ host: 'harness.example' }, '/api/goals/create', request), loopbackOnly.response)
     expect(loopbackOnly.state.status).toBe(403)
