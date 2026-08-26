@@ -1,12 +1,10 @@
 import type { DesktopClientEnvironment } from './environment.ts'
+import { CONFIGURE_DEPLOYMENT_URL, USE_LOCAL_SERVER_URL } from '../deployment-links.ts'
+
+export { CONFIGURE_DEPLOYMENT_URL, USE_LOCAL_SERVER_URL } from '../deployment-links.ts'
 
 /** Product position shown inside the DSH Desktop interface. */
 export const SOLAR_BRAND = 'DSH - DeepSeek Harness的Solar分支，目标是您的All-in-One AI工作台'
-
-/** Exact custom navigation consumed by the trusted Electron shell. */
-export const USE_LOCAL_SERVER_URL = 'dsh-desktop://deployment/local-server'
-/** Open native Server and Git synchronization configuration. */
-export const CONFIGURE_DEPLOYMENT_URL = 'dsh-desktop://deployment/configure'
 
 /** Complete accessible product marker with the running package version. */
 export function solarBrandLabel(productVersion: string): string {

@@ -53,6 +53,7 @@ const electron = vi.hoisted(() => {
   const browserWindowOff = vi.fn()
   const loadURL = vi.fn(async (_url: string) => {})
   const menuTemplates: unknown[][] = []
+  const applicationMenus: unknown[] = []
   const notifications: Notification[] = []
   const dialog = {
     showErrorBox: vi.fn(),
@@ -160,9 +161,12 @@ const electron = vi.hoisted(() => {
     Menu: {
       buildFromTemplate: vi.fn((template: unknown[]) => {
         menuTemplates.push(template)
-        return {}
+        return { template }
       }),
+      getApplicationMenu: vi.fn(() => null),
+      setApplicationMenu: vi.fn((menu: unknown) => { applicationMenus.push(menu) }),
     },
+    applicationMenus,
     menuTemplates,
     nativeImage: { createFromPath },
     nativeTheme,
@@ -219,6 +223,7 @@ describe('Electron compatibility runtime', () => {
     electron.browserWindows.length = 0
     electron.trays.length = 0
     electron.menuTemplates.length = 0
+    electron.applicationMenus.length = 0
     electron.notifications.length = 0
     childProcess.reset()
     vi.clearAllMocks()
@@ -282,9 +287,9 @@ describe('Electron compatibility runtime', () => {
     expect(electron.browserWindows[0]?.focus).toHaveBeenCalledOnce()
     expect(electron.templateIcon.setTemplateImage).toHaveBeenCalledWith(true)
     expect(electron.trays[0]?.image).toBe(electron.templateIcon)
-    expect(electron.menuTemplates[0]).toEqual(expect.arrayContaining([
+    expect(electron.menuTemplates).toEqual(expect.arrayContaining([expect.arrayContaining([
       expect.objectContaining({ label: 'Switch to Advanced Mode', enabled: true }),
-    ]))
+    ])]))
 
     const titleListener = electron.browserWindowOn.mock.calls.find(([event]) => event === 'page-title-updated')?.[1]
     expect(titleListener).toEqual(expect.any(Function))
@@ -311,11 +316,55 @@ describe('Electron compatibility runtime', () => {
       await expect(runtime.mountScheduled()).resolves.toBeUndefined()
       expect(electron.browserWindows[0]?.destroy).not.toHaveBeenCalled()
       expect(electron.trays).toHaveLength(1)
-      expect(electron.loadURL).toHaveBeenCalledTimes(1)
+      expect(electron.loadURL).toHaveBeenCalledTimes(2)
 
       await vi.advanceTimersByTimeAsync(2_000)
-      expect(electron.loadURL).toHaveBeenCalledTimes(2)
+      expect(electron.loadURL).toHaveBeenCalledTimes(3)
       expect(electron.loadURL).toHaveBeenLastCalledWith(spec.url)
+
+      await release()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps local deployment recovery available when the remote Frontend is unavailable', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+      electron.loadURL
+        .mockRejectedValueOnce(new Error('ERR_CONNECTION_REFUSED'))
+        .mockResolvedValue(undefined)
+      const configureFrontend = vi.fn(async () => {})
+      const useServer = vi.fn(async () => {})
+      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+      const runtime = new ElectronDesktopRuntime(async () => {}, {
+        currentRole: () => 'frontend', configureFrontend, useServer,
+      })
+      const release = runtime.schedule({ ...spec, retryUnavailableNavigation: true })
+
+      await runtime.mountScheduled()
+
+      const applicationMenu = electron.applicationMenus.at(-1) as {
+        template: Array<{ label?: string, submenu?: Array<{ label?: string, click?: () => void }> }>
+      }
+      const deployment = applicationMenu.template.find(item => item.label === 'Deployment')
+      expect(deployment?.submenu?.map(item => item.label).filter(Boolean)).toEqual([
+        'Deployment: Frontend',
+        'Connect to Remote Server…',
+        'Use Local Server',
+      ])
+      deployment?.submenu?.find(item => item.label === 'Use Local Server')?.click?.()
+      await vi.waitFor(() => { expect(useServer).toHaveBeenCalledOnce() })
+
+      expect(electron.loadURL).toHaveBeenCalledTimes(2)
+      const recoveryUrl = String(electron.loadURL.mock.calls[1]?.[0])
+      expect(recoveryUrl).toMatch(/^data:text\/html;charset=utf-8,/)
+      const recoveryHtml = decodeURIComponent(recoveryUrl.slice(recoveryUrl.indexOf(',') + 1))
+      expect(recoveryHtml).toContain('切换到本地 Server')
+      expect(recoveryHtml).toContain('dsh-desktop://deployment/local-server')
+      expect(recoveryHtml).toContain('配置远程 Server')
+      expect(recoveryHtml).toContain('dsh-desktop://deployment/configure')
 
       await release()
     } finally {
@@ -537,7 +586,7 @@ describe('Electron compatibility runtime', () => {
     const release = runtime.schedule({ ...spec, requestModeChange })
 
     await runtime.mountScheduled()
-    const item = (electron.menuTemplates[0] as Array<{ label?: string, click?: () => void }>)
+    const item = (electron.menuTemplates.flat() as Array<{ label?: string, click?: () => void }>)
       .find(candidate => candidate.label === 'Switch to Advanced Mode')
     expect(item).toBeDefined()
     item?.click?.()
@@ -895,9 +944,9 @@ describe('Electron compatibility runtime', () => {
       transparent: true,
       vibrancy: 'sidebar',
     }))
-    expect(electron.menuTemplates[0]).toEqual(expect.arrayContaining([
+    expect(electron.menuTemplates).toEqual(expect.arrayContaining([expect.arrayContaining([
       expect.objectContaining({ label: 'Switch to Compatibility Mode', enabled: true }),
-    ]))
+    ])]))
 
     runtime.setThemeSource('system')
     expect(electron.nativeTheme.themeSource).toBe('system')
