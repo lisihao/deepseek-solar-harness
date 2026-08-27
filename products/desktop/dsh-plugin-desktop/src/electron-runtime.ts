@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
+import { CONFIGURE_DEPLOYMENT_URL, USE_LOCAL_SERVER_URL } from './deployment-links.ts'
 import { startFrontendBillingBridge, type FrontendBillingBridge } from './frontend-billing.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import type {
@@ -63,6 +64,42 @@ export function desktopProductVersion(moduleUrl: string = import.meta.url): stri
 }
 
 const PRODUCT_VERSION = desktopProductVersion()
+
+/** Build the local recovery surface shown while a Frontend Server is unreachable. */
+export function frontendRecoveryPageUrl(): string {
+  const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <title>DSH Desktop · Server 不可用</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
+    main { width: min(520px, calc(100vw - 48px)); padding: 32px; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 16px; background: color-mix(in srgb, Canvas 92%, CanvasText 8%); box-shadow: 0 18px 50px rgb(0 0 0 / 18%); }
+    h1 { margin: 0 0 12px; font-size: 22px; }
+    p { margin: 0 0 24px; color: color-mix(in srgb, CanvasText 68%, transparent); line-height: 1.6; }
+    nav { display: flex; flex-wrap: wrap; gap: 12px; }
+    a { display: inline-flex; align-items: center; min-height: 38px; padding: 0 16px; border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); border-radius: 9px; color: CanvasText; text-decoration: none; font-weight: 600; }
+    a.primary { border-color: #3b82f6; background: #2563eb; color: white; }
+    small { display: block; margin-top: 22px; color: color-mix(in srgb, CanvasText 52%, transparent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>远程 Server 当前不可用</h1>
+    <p>DSH Desktop 会继续尝试重新连接。你也可以立即切换到本机完整 Server，或修改远程 Server 配置。</p>
+    <nav>
+      <a class="primary" href="${USE_LOCAL_SERVER_URL}">切换到本地 Server</a>
+      <a href="${CONFIGURE_DEPLOYMENT_URL}">配置远程 Server</a>
+    </nav>
+    <small>DSH Desktop v${PRODUCT_VERSION} · 本地恢复界面不依赖远程 Server</small>
+  </main>
+</body>
+</html>`
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+}
 
 /** Native adapter used by the DSH Desktop launcher and owned by its Cordis shell plugin. */
 export class ElectronDesktopRuntime implements DesktopRuntime {
@@ -239,24 +276,55 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
               enabled: command.enabled?.() ?? true,
               ...(command.type === undefined ? {} : { type: command.type }),
               ...(command.checked === undefined ? {} : { checked: command.checked() }),
-              click: this.trayCommand(() => command.invoke()),
+              click: this.menuCommand(() => command.invoke()),
             })),
           }
         }
         return {
           ...common,
-          click: this.trayCommand(() => item.invoke()),
+          click: this.menuCommand(() => item.invoke()),
         }
       })
   }
 
   /** Contain asynchronous contribution failures outside Electron menu callbacks. */
-  private trayCommand(invoke: () => void | Promise<void>): () => void {
+  private menuCommand(invoke: () => void | Promise<void>): () => void {
     return () => {
       void Promise.resolve().then(invoke).catch((cause: unknown) => {
-        process.stderr.write(`dsh-plugin-desktop: tray command failed: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+        process.stderr.write(`dsh-plugin-desktop: native menu command failed: ${cause instanceof Error ? cause.message : String(cause)}\n`)
       })
     }
+  }
+
+  /** Install deployment recovery in the native macOS menu owned by Electron. */
+  private installApplicationMenu(): void {
+    if (this.platform !== 'darwin') return
+    const deploymentItems: Electron.MenuItemConstructorOptions[] = this.deployment === undefined
+      ? []
+      : [
+          {
+            label: `Deployment: ${this.deployment.currentRole() === 'server' ? 'Server' : 'Frontend'}`,
+            enabled: false,
+          },
+          {
+            label: 'Connect to Remote Server…',
+            click: this.menuCommand(() => this.deployment!.configureFrontend()),
+          },
+          ...this.deployment.currentRole() === 'frontend'
+            ? [{
+                label: 'Use Local Server',
+                click: this.menuCommand(() => this.deployment!.useServer()),
+              }]
+            : [],
+        ]
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      { role: 'fileMenu' },
+      { role: 'editMenu' },
+      { label: 'Deployment', submenu: deploymentItems },
+      { role: 'viewMenu' },
+      { role: 'windowMenu' },
+    ]))
   }
 
   private showNotification(notification: DesktopNotification): void {
@@ -436,12 +504,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         },
         {
           label: 'Connect to Remote Server…',
-          click: this.trayCommand(() => this.deployment!.configureFrontend()),
+              click: this.menuCommand(() => this.deployment!.configureFrontend()),
         },
         ...this.deployment.currentRole() === 'frontend'
           ? [{
               label: 'Use Local Server',
-              click: this.trayCommand(() => this.deployment!.useServer()),
+              click: this.menuCommand(() => this.deployment!.useServer()),
             }]
           : [],
       ],
@@ -475,6 +543,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const window = new BrowserWindow(desktopWindowOptions({ ...spec, windowTitle }, icon, this.platform))
     window.accessibleTitle = windowTitle
     if (this.platform === 'win32') window.removeMenu()
+    const previousApplicationMenu = this.platform === 'darwin' ? Menu.getApplicationMenu() : undefined
+    this.installApplicationMenu()
     this.window = window
     const remoteAccess = spec.remoteAccess
     if (remoteAccess !== undefined) {
@@ -598,6 +668,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         process.stderr.write(
           `dsh-plugin-desktop: Desktop navigation unavailable; retrying: ${cause instanceof Error ? cause.message : String(cause)}\n`,
         )
+        await window.loadURL(frontendRecoveryPageUrl())
         scheduleNavigationRetry()
       }
       tray = new Tray(prepareTrayIcon(spec.trayIcons, this.platform))
@@ -613,6 +684,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       tray?.off('click', show)
       tray?.destroy()
       window.destroy()
+      if (previousApplicationMenu !== undefined) Menu.setApplicationMenu(previousApplicationMenu)
       this.tray = undefined
       this.window = undefined
       if (billingFilter !== undefined) {
@@ -637,6 +709,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       window.webContents.off('will-frame-navigate', navigate)
       window.webContents.off('will-redirect', navigate)
       if (navigationRetry !== undefined) clearTimeout(navigationRetry)
+      if (previousApplicationMenu !== undefined) Menu.setApplicationMenu(previousApplicationMenu)
       mountedTray.off('click', show)
       mountedTray.destroy()
       if (remoteAccess !== undefined) {
