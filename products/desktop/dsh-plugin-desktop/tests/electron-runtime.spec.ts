@@ -76,6 +76,7 @@ const electron = vi.hoisted(() => {
     off: vi.fn(),
     setWindowOpenHandler: vi.fn(),
     session: {
+      fetch: vi.fn(async () => new Response('', { status: 200 })),
       webRequest: {
         onBeforeRequest: vi.fn(),
         onBeforeSendHeaders: vi.fn(),
@@ -157,6 +158,7 @@ const electron = vi.hoisted(() => {
     browserWindowOff,
     browserWindowOn,
     loadURL,
+    webContents,
     dialog,
     Menu: {
       buildFromTemplate: vi.fn((template: unknown[]) => {
@@ -229,6 +231,8 @@ describe('Electron compatibility runtime', () => {
     vi.clearAllMocks()
     electron.loadURL.mockReset()
     electron.loadURL.mockResolvedValue(undefined)
+    electron.webContents.session.fetch.mockReset()
+    electron.webContents.session.fetch.mockResolvedValue(new Response('', { status: 200 }))
     electron.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
     electron.shell.openPath.mockResolvedValue('')
     electron.nativeTheme.themeSource = 'system'
@@ -365,6 +369,32 @@ describe('Electron compatibility runtime', () => {
       expect(recoveryHtml).toContain('dsh-desktop://deployment/local-server')
       expect(recoveryHtml).toContain('配置远程 Server')
       expect(recoveryHtml).toContain('dsh-desktop://deployment/configure')
+
+      await release()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps the local recovery page visible when the remote Frontend returns HTTP 502', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+      electron.webContents.session.fetch.mockResolvedValue(new Response('unavailable', { status: 502 }))
+      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+      const runtime = new ElectronDesktopRuntime(async () => {})
+      const release = runtime.schedule({ ...spec, retryUnavailableNavigation: true })
+
+      await runtime.mountScheduled()
+
+      expect(electron.loadURL).toHaveBeenCalledOnce()
+      const recoveryUrl = String(electron.loadURL.mock.calls[0]?.[0])
+      expect(recoveryUrl).toMatch(/^data:text\/html;charset=utf-8,/)
+      expect(decodeURIComponent(recoveryUrl.slice(recoveryUrl.indexOf(',') + 1))).toContain('切换到本地 Server')
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(electron.webContents.session.fetch).toHaveBeenCalledTimes(2)
+      expect(electron.loadURL).toHaveBeenCalledOnce()
 
       await release()
     } finally {

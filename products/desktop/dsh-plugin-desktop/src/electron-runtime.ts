@@ -652,17 +652,27 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     show()
     let tray: Tray | undefined
     let navigationRetry: NodeJS.Timeout | undefined
+    const loadPrimaryUrl = async (): Promise<void> => {
+      if (spec.retryUnavailableNavigation === true) {
+        const response = await window.webContents.session.fetch(spec.url)
+        await response.body?.cancel()
+        if (!response.ok) {
+          throw new Error(`HTTP ${String(response.status)}`)
+        }
+      }
+      await window.loadURL(spec.url)
+    }
     const scheduleNavigationRetry = (): void => {
       if (navigationRetry !== undefined || window.isDestroyed()) return
       navigationRetry = setTimeout(() => {
         navigationRetry = undefined
         if (window.isDestroyed()) return
-        void window.loadURL(spec.url).catch(() => { scheduleNavigationRetry() })
+        void loadPrimaryUrl().catch(() => { scheduleNavigationRetry() })
       }, 2_000)
     }
     try {
       try {
-        await window.loadURL(spec.url)
+        await loadPrimaryUrl()
       } catch (cause) {
         if (spec.retryUnavailableNavigation !== true) throw cause
         process.stderr.write(
