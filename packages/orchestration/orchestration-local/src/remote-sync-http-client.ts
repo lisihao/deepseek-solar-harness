@@ -14,6 +14,25 @@ import {
   type RemoteResidentTurnSnapshot,
 } from '@deepseek-ai/dsh-client-connection'
 
+/** The remote endpoint could not produce a correlated protocol response. */
+export class RemoteSyncTransportError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'RemoteSyncTransportError'
+  }
+}
+
+/** The remote endpoint returned a correlated, explicit command refusal. */
+export class RemoteSyncRejectedError extends Error {
+  constructor(
+    message: string,
+    readonly remoteCode: string,
+  ) {
+    super(message)
+    this.name = 'RemoteSyncRejectedError'
+  }
+}
+
 /** Stateless HTTP-up client used by detached Schedulers and Electron main. */
 export class RemoteSyncHttpClient {
   private readonly base: URL
@@ -91,20 +110,39 @@ export class RemoteSyncHttpClient {
   private async call(method: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
     const rpcId = RpcId(randomUUID())
     const body: ClientRequest = { type: 'client-request', rpcId, method, payload }
-    const response = await this.request(new URL(`/remote-sync/${method}`, this.base), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...this.accessToken === undefined ? {} : { authorization: `Bearer ${this.accessToken}` },
-      },
-      body: JSON.stringify(body),
-      ...signal === undefined ? {} : { signal },
-    })
-    if (!response.ok) throw new Error(`remote operator ${method} transport failed: HTTP ${String(response.status)}`)
-    const envelope = serverResponseSchema.parse(await response.json())
-    if (envelope.rpcId !== rpcId) throw new Error(`remote operator ${method} rpcId mismatch`)
+    let response: Response
+    try {
+      response = await this.request(new URL(`/remote-sync/${method}`, this.base), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...this.accessToken === undefined ? {} : { authorization: `Bearer ${this.accessToken}` },
+        },
+        body: JSON.stringify(body),
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (cause) {
+      throw new RemoteSyncTransportError(`remote operator ${method} transport failed`, { cause })
+    }
+    if (!response.ok) {
+      throw new RemoteSyncTransportError(
+        `remote operator ${method} transport failed: HTTP ${String(response.status)}`,
+      )
+    }
+    let envelope
+    try {
+      envelope = serverResponseSchema.parse(await response.json())
+    } catch (cause) {
+      throw new RemoteSyncTransportError(`remote operator ${method} returned an invalid response`, { cause })
+    }
+    if (envelope.rpcId !== rpcId) {
+      throw new RemoteSyncTransportError(`remote operator ${method} rpcId mismatch`)
+    }
     if (!envelope.result.ok) {
-      throw new Error(`remote operator ${method} failed: ${envelope.result.error.code}: ${envelope.result.error.message}`)
+      throw new RemoteSyncRejectedError(
+        `remote operator ${method} failed: ${envelope.result.error.code}: ${envelope.result.error.message}`,
+        envelope.result.error.code,
+      )
     }
     return envelope.result.value
   }

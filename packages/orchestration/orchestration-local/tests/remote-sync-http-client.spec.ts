@@ -157,4 +157,116 @@ describe('RemotePhysicalOperator', () => {
       'operator.events', 'operator.inspect',
     ])
   })
+
+  it('isolates an unavailable member catalog and restores it after qualification recovers', async () => {
+    let providerReads = 0
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
+      tags: ['code'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: '0.200.0', protocolHash: 'schema-1',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Fast worker',
+        supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true,
+        supportsAdaptiveThinking: true,
+      }],
+    }
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      if (call.method !== 'operator.providers') throw new Error(`unexpected method ${call.method}`)
+      providerReads += 1
+      if (providerReads === 2) throw new TypeError('network offline')
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value: [provider] } })
+    })
+    const [operator] = await createRemotePhysicalOperators({
+      id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', pollIntervalMs: 1,
+    }, request)
+
+    await expect(operator?.residentCatalog()).resolves.toMatchObject({
+      operatorId: 'remote.mini.codex', available: false,
+      unavailableReason: expect.stringContaining('qualification failed'),
+    })
+    expect(operator?.availability()).toMatchObject({ available: false })
+    await expect(operator?.residentCatalog()).resolves.toMatchObject({
+      operatorId: 'remote.mini.codex', available: true,
+    })
+    expect(operator?.availability()).toEqual({ available: true })
+  })
+
+  it('keeps an accepted remote turn attached across a transient transport outage', async () => {
+    let inspections = 0
+    const methods: string[] = []
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
+      tags: ['code'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: '0.200.0', protocolHash: 'schema-1',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Fast worker',
+        supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true,
+        supportsAdaptiveThinking: true,
+      }],
+    }
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      methods.push(call.method)
+      if (call.method === 'operator.inspect' && ++inspections === 1) throw new TypeError('temporary disconnect')
+      const value = call.method === 'operator.providers' ? [provider]
+        : call.method === 'operator.execute'
+          ? { sessionId: 'session-1', turnId: 'turn-1', stateRevision: 1 }
+          : {
+            commandId: 'command-1', sessionId: 'session-1', turnId: 'turn-1', state: 'settled',
+            stateRevision: 2, updatedAt: '2026-08-27T12:00:01.000Z',
+            result: { output: [{ type: 'text', text: 'done after reconnect' }], stopReason: 'completed' },
+          }
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    })
+    const [operator] = await createRemotePhysicalOperators({
+      id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', pollIntervalMs: 1,
+    }, request)
+    const run = await operator!.start({
+      executionId: 'command-1' as never,
+      mode: 'resident', prompt: [], signal: new AbortController().signal,
+      parent: { session: { header: { cwd: '/repo' } } } as never,
+    })
+
+    await expect(run.result).resolves.toMatchObject({
+      output: [{ type: 'text', text: 'done after reconnect' }],
+    })
+    expect(methods.filter(value => value === 'operator.execute')).toHaveLength(1)
+    expect(methods.filter(value => value === 'operator.inspect')).toHaveLength(2)
+  })
+
+  it('marks an uncorrelated admission loss indeterminate instead of replaying remotely', async () => {
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
+      tags: ['code'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: '0.200.0', protocolHash: 'schema-1',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Fast worker',
+        supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true,
+        supportsAdaptiveThinking: true,
+      }],
+    }
+    let executeCalls = 0
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      if (call.method === 'operator.execute') {
+        executeCalls += 1
+        throw new TypeError('connection reset after write')
+      }
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value: [provider] } })
+    })
+    const [operator] = await createRemotePhysicalOperators({
+      id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', pollIntervalMs: 1,
+    }, request)
+
+    await expect(operator!.start({
+      executionId: 'command-1' as never,
+      mode: 'resident', prompt: [], signal: new AbortController().signal,
+      parent: { session: { header: { cwd: '/repo' } } } as never,
+    })).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+    expect(executeCalls).toBe(1)
+  })
 })

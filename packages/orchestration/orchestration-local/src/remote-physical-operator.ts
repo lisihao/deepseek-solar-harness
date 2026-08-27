@@ -11,7 +11,11 @@ import {
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
 import type { RemoteResidentProviderStatus, RemoteResidentTurnSnapshot } from '@deepseek-ai/dsh-client-connection'
-import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
+import {
+  RemoteSyncHttpClient,
+  RemoteSyncRejectedError,
+  RemoteSyncTransportError,
+} from './remote-sync-http-client.ts'
 
 /** One independently addressable DSH Server execution member. */
 export interface RemotePhysicalOperatorServer {
@@ -54,6 +58,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
   readonly descriptor
   private provider: RemoteResidentProviderStatus
   private readonly client: RemoteSyncHttpClient
+  private unavailableReason: string | undefined
 
   constructor(
     readonly server: RemotePhysicalOperatorServer,
@@ -73,21 +78,28 @@ export class RemotePhysicalOperator implements PhysicalOperator {
   }
 
   availability() {
-    return this.provider.available
+    return this.unavailableReason === undefined && this.provider.available
       ? { available: true as const }
-      : { available: false as const, reason: this.provider.unavailableReason ?? 'remote Provider unavailable' }
+      : {
+        available: false as const,
+        reason: this.unavailableReason ?? this.provider.unavailableReason ?? 'remote Provider unavailable',
+      }
   }
 
   async residentCatalog(): Promise<PhysicalOperatorResidentCatalog> {
-    const current = (await this.client.operatorProviders())
-      .find(value => value.operatorId === this.provider.operatorId)
-    if (current === undefined) {
-      throw new PhysicalOperatorError(
-        `remote Provider "${this.provider.operatorId}" disappeared from ${this.server.label}`,
-        'OPERATOR_UNAVAILABLE',
-      )
+    try {
+      const current = (await this.client.operatorProviders())
+        .find(value => value.operatorId === this.provider.operatorId)
+      if (current === undefined) {
+        this.unavailableReason = `remote Provider "${this.provider.operatorId}" disappeared from ${this.server.label}`
+      } else {
+        this.provider = current
+        this.unavailableReason = undefined
+      }
+    } catch (error) {
+      this.unavailableReason = `${this.server.label} qualification failed: ${renderError(error)}`
     }
-    this.provider = current
+    const current = this.provider
     return {
       operatorId: this.descriptor.id,
       product: current.product,
@@ -95,8 +107,10 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       supportsModelToolBridge: false,
       location: 'remote',
       supportsWorkspaceMutationReturn: false,
-      available: current.available,
-      ...current.unavailableReason === undefined ? {} : { unavailableReason: current.unavailableReason },
+      available: current.available && this.unavailableReason === undefined,
+      ...this.unavailableReason === undefined
+        ? current.unavailableReason === undefined ? {} : { unavailableReason: current.unavailableReason }
+        : { unavailableReason: this.unavailableReason },
       ...current.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: current.quotaUnavailableReason },
       authentication: current.authentication,
       productVersion: current.productVersion,
@@ -122,16 +136,32 @@ export class RemotePhysicalOperator implements PhysicalOperator {
     if (workspace === undefined) {
       throw new PhysicalOperatorError('remote physical operator requires a workspace', 'WORKSPACE_INVALID')
     }
-    const accepted = await this.client.operatorExecute({
-      commandId: String(request.executionId),
-      operatorId: this.provider.operatorId,
-      workspace,
-      laneId: request.residentLaneId ?? String(request.executionId),
-      ...request.label === undefined ? {} : { taskLabel: request.label },
-      prompt: request.prompt,
-      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
-      ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
-    }, request.signal)
+    let accepted: PhysicalOperatorAcceptedReceipt
+    try {
+      accepted = await this.client.operatorExecute({
+        commandId: String(request.executionId),
+        operatorId: this.provider.operatorId,
+        workspace,
+        laneId: request.residentLaneId ?? String(request.executionId),
+        ...request.label === undefined ? {} : { taskLabel: request.label },
+        prompt: request.prompt,
+        ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
+        ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
+      }, request.signal)
+      this.unavailableReason = undefined
+    } catch (error) {
+      this.unavailableReason = `${this.server.label} admission failed: ${renderError(error)}`
+      if (error instanceof RemoteSyncRejectedError) {
+        throw new PhysicalOperatorError(error.message, 'OPERATOR_UNAVAILABLE', { cause: error })
+      }
+      // Once an HTTP command leaves this process, absence of a correlated
+      // response cannot prove that the remote durable Receipt was not accepted.
+      throw new PhysicalOperatorError(
+        `remote command admission is indeterminate on ${this.server.label}: ${renderError(error)}`,
+        'COMMAND_INDETERMINATE',
+        { cause: error },
+      )
+    }
     return this.observe(accepted, request.signal)
   }
 
@@ -140,11 +170,13 @@ export class RemotePhysicalOperator implements PhysicalOperator {
     try {
       turn = await this.client.operatorInspect(turnId)
     } catch (error) {
-      if (error instanceof Error && error.message.includes('SESSION_UNAVAILABLE')) {
+      this.unavailableReason = `${this.server.label} reattach failed: ${renderError(error)}`
+      if (error instanceof RemoteSyncRejectedError && error.message.includes('SESSION_UNAVAILABLE')) {
         throw new PhysicalOperatorError(error.message, 'COMMAND_INDETERMINATE')
       }
-      throw error
+      throw new PhysicalOperatorError(renderError(error), 'OPERATOR_UNAVAILABLE', { cause: error })
     }
+    this.unavailableReason = undefined
     return this.observe({
       sessionId: turn.sessionId,
       turnId: turn.turnId,
@@ -194,7 +226,24 @@ export class RemotePhysicalOperator implements PhysicalOperator {
 
   private async settle(turnId: string, signal: AbortSignal): Promise<PhysicalOperatorResult> {
     while (true) {
-      const turn = await this.client.operatorInspect(turnId, signal)
+      let turn: RemoteResidentTurnSnapshot
+      try {
+        turn = await this.client.operatorInspect(turnId, signal)
+        this.unavailableReason = undefined
+      } catch (error) {
+        if (signal.aborted) throw error
+        if (error instanceof RemoteSyncTransportError) {
+          this.unavailableReason = `${this.server.label} temporarily unreachable: ${error.message}`
+          await wait(this.server.pollIntervalMs ?? 250, signal)
+          continue
+        }
+        this.unavailableReason = `${this.server.label} turn inspection failed: ${renderError(error)}`
+        throw new PhysicalOperatorError(
+          `accepted remote turn became indeterminate on ${this.server.label}: ${renderError(error)}`,
+          'COMMAND_INDETERMINATE',
+          { cause: error },
+        )
+      }
       if (turn.state === 'settled') {
         if (turn.result === undefined) {
           throw new PhysicalOperatorError('remote settled turn omitted its terminal result', 'INVALID_RESULT')
@@ -214,6 +263,10 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       await wait(this.server.pollIntervalMs ?? 250, signal)
     }
   }
+}
+
+function renderError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 /**
