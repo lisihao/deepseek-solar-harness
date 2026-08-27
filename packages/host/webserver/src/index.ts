@@ -264,3 +264,11 @@ export class WebServer extends Service {
 }
 
 export default WebServer
+
+export {
+  createHttpBodyVariants,
+  encodedHttpBodyHeaders,
+  type EncodedHttpBody,
+  type HttpBodyVariants,
+  type HttpContentEncoding,
+} from './http-body.ts'

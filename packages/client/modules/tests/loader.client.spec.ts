@@ -236,6 +236,24 @@ describe('HMR reset', () => {
     expect((first as { generation: number }).generation).toBe(1)
     expect((second as { generation: number }).generation).toBe(2)
   })
+
+  it('updates the revision-specific URL before an immutable HMR refetch', async () => {
+    const b = bench([row('a')], { a: () => ({}) })
+    await b.loader.prefetch('a')
+    b.loader.updateRevision('a', 'next hash')
+    b.loader.invalidate('a')
+    await b.loader.prefetch('a')
+    expect(b.fetched).toEqual([
+      '/plugins/a/client.js?rev=0',
+      '/plugins/a/client.js?rev=next%20hash',
+    ])
+  })
+
+  it('rejects a revision update for an unknown graph entry', () => {
+    const b = bench([])
+    expect(() => { b.loader.updateRevision('nope', '1') })
+      .toThrow('updateRevision("nope") — not a graph entry')
+  })
 })
 
 describe('style claiming', () => {

@@ -11,12 +11,12 @@
  * @module @deepseek-ai/dsh-host-frontend-static
  */
 
-import type { ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-host-webserver'
+import { createHttpBodyVariants, encodedHttpBodyHeaders } from '@deepseek-ai/dsh-host-webserver'
 
 /** Stable Cordis plugin name. */
 export const name = 'frontend-static'
@@ -47,6 +47,7 @@ const MIME: Record<string, string> = {
 /**
  * Serve one GET/HEAD static request from the dist root.
  * @param pathname - decoded URL pathname of the request.
+ * @param req - the node:http request carrying method and accepted encodings.
  * @param res - the node:http response to write.
  * @param distRoot - absolute dist root directory (resolved by the caller).
  * @param distIndex - absolute path of index.html inside distRoot.
@@ -54,7 +55,7 @@ const MIME: Record<string, string> = {
  * `/` and every SPA fallback.
  */
 export async function serveStatic(
-  pathname: string, res: ServerResponse, distRoot: string, distIndex: string,
+  pathname: string, req: IncomingMessage, res: ServerResponse, distRoot: string, distIndex: string,
   renderIndex: () => Promise<string>,
 ): Promise<void> {
   const target = resolve(normalize(join(distRoot, pathname)))
@@ -67,22 +68,43 @@ export async function serveStatic(
     return
   }
   const serveIndex = async (): Promise<void> => {
-    const body = await renderIndex()
-    res.writeHead(200, { 'content-type': MIME['.html'] })
-    res.end(body)
+    const selected = await createHttpBodyVariants(await renderIndex()).select(req.headers['accept-encoding'])
+    res.writeHead(200, {
+      'content-type': MIME['.html'],
+      'cache-control': 'no-cache',
+      ...encodedHttpBodyHeaders(selected),
+    })
+    res.end(req.method === 'HEAD' ? undefined : selected.body)
   }
   if (target === distRoot || target === distIndex) {
     await serveIndex()
     return
   }
+  let body: Buffer
   try {
-    const body = await readFile(target)
-    res.writeHead(200, { 'content-type': MIME[extname(target)] ?? 'application/octet-stream' })
-    res.end(body)
+    body = await readFile(target)
   } catch {
     // Miss (ENOENT/EISDIR) falls back to index.html with 200 (SPA routing).
     await serveIndex()
+    return
   }
+  const extension = extname(target)
+  const contentType = MIME[extension] ?? 'application/octet-stream'
+  const compressible = contentType.startsWith('text/')
+    || contentType === 'application/json'
+    || contentType === 'application/manifest+json'
+    || contentType === 'image/svg+xml'
+  const selected = compressible
+    ? await createHttpBodyVariants(body).select(req.headers['accept-encoding'])
+    : { body }
+  res.writeHead(200, {
+    'content-type': contentType,
+    'cache-control': pathname.startsWith('/assets/')
+      ? 'public, max-age=31536000, immutable'
+      : 'no-cache',
+    ...encodedHttpBodyHeaders(selected),
+  })
+  res.end(req.method === 'HEAD' ? undefined : selected.body)
 }
 
 /**
@@ -105,6 +127,6 @@ export function apply(ctx: Context, config: Config): void {
     }
     /* v8 ignore next -- node:http always sets url on server requests */
     const rawPath = new URL(req.url ?? '/', 'http://x').pathname
-    await serveStatic(decodeURIComponent(rawPath), res, distRoot, distIndex, renderIndex)
+    await serveStatic(decodeURIComponent(rawPath), req, res, distRoot, distIndex, renderIndex)
   }), 'frontend-static: fallback seat')
 }

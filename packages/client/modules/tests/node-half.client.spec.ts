@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { brotliDecompressSync } from 'node:zlib'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { WebServer, WebRoute } from '@deepseek-ai/dsh-host-webserver'
@@ -140,13 +141,64 @@ describe('client bundle activation', () => {
     await route.handler({
       method: 'GET',
       url: `/plugins/${packageName}/client.js.map`,
+      headers: {},
     } as IncomingMessage, response)
 
     expect(status).toBe(200)
     expect(headers).toEqual({
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-cache',
+      'content-length': String(Buffer.byteLength(map)),
+      vary: 'accept-encoding',
     })
     expect(body).toBe(map)
+  })
+
+  it('compresses and immutably caches a bundle only under its current rev URL', async () => {
+    const packageName = '@fixture/compressed-client'
+    const source = 'module.exports = { value: "remote" }\n'.repeat(128)
+    const clientPath = writePackage(packageName)
+    mkdirSync(dirname(clientPath), { recursive: true })
+    writeFileSync(clientPath, source)
+    const { service, route } = constructWithRoute([packageName])
+    const rev = service.graph().entries[0]!.rev
+    let status = 0
+    let headers: Record<string, string> | undefined
+    let body = Buffer.alloc(0)
+    const response = {
+      writeHead(nextStatus: number, nextHeaders?: Record<string, string>) {
+        status = nextStatus
+        headers = nextHeaders
+        return response
+      },
+      end(chunk?: Uint8Array) {
+        body = chunk === undefined ? Buffer.alloc(0) : Buffer.from(chunk)
+        return response
+      },
+    } as unknown as ServerResponse
+
+    await route.handler({
+      method: 'GET',
+      url: `/plugins/${packageName}/client.js?rev=${rev}`,
+      headers: { 'accept-encoding': 'br, gzip' },
+    } as IncomingMessage, response)
+
+    expect(status).toBe(200)
+    expect(headers).toMatchObject({
+      'content-type': 'text/javascript; charset=utf-8',
+      'cache-control': 'public, max-age=31536000, immutable',
+      'content-encoding': 'br',
+      'content-length': String(body.length),
+      vary: 'accept-encoding',
+    })
+    expect(brotliDecompressSync(body).toString('utf8')).toBe(source)
+
+    await route.handler({
+      method: 'HEAD',
+      url: `/plugins/${packageName}/client.js?rev=stale`,
+      headers: {},
+    } as IncomingMessage, response)
+    expect(headers?.['cache-control']).toBe('no-cache')
+    expect(body.length).toBe(0)
   })
 })
