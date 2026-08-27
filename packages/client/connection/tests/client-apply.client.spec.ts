@@ -119,14 +119,14 @@ describe('connection client apply', () => {
       const host = { version: '3.2.0', cwd: '/srv/dsh', attachedSessions: 1, canOpenPath: false }
       const value = request.method === 'describe'
         ? {
-          protocol: { major: 1, minor: 2 }, deploymentId: 'deployment-frontend',
+          protocol: { major: 1, minor: 3 }, deploymentId: 'deployment-frontend',
           cursor: { deploymentId: 'deployment-frontend', sequence: 7 },
           describedAt: '2026-08-24T00:00:00.000Z', scope: 'cockpit',
           capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
           host,
         }
         : {
-          protocol: { major: 1, minor: 2 }, deploymentId: 'deployment-frontend',
+          protocol: { major: 1, minor: 3 }, deploymentId: 'deployment-frontend',
           cursor: { deploymentId: 'deployment-frontend', sequence: 7 },
           capturedAt: '2026-08-24T00:00:00.000Z', host,
           sessions: [], workspaces: [], archivedSessionIds: [],
@@ -222,13 +222,13 @@ describe('connection client apply', () => {
       const host = { version: '3.2.1', cwd: '/srv/dsh', attachedSessions: 0, canOpenPath: false }
       const value = request.method === 'describe'
         ? {
-          protocol: { major: 1, minor: 2 }, deploymentId: 'deployment-default',
+          protocol: { major: 1, minor: 3 }, deploymentId: 'deployment-default',
           cursor: { deploymentId: 'deployment-default', sequence: 0 },
           describedAt: '2026-08-24T00:00:00.000Z', scope: 'cockpit',
           capabilities: ['session.read', 'workspace.read', 'event.subscribe'], host,
         }
         : {
-          protocol: { major: 1, minor: 2 }, deploymentId: 'deployment-default',
+          protocol: { major: 1, minor: 3 }, deploymentId: 'deployment-default',
           cursor: { deploymentId: 'deployment-default', sequence: 0 },
           capturedAt: '2026-08-24T00:00:00.000Z', host,
           sessions: [], workspaces: [], archivedSessionIds: [],

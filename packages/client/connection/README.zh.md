@@ -14,7 +14,9 @@ node 半侧在桥接或 upgrade 前守卫 `/api` 下的每个入口（`src/api-r
 
 ## Remote Sync 与稳定 Session 交接
 
-Remote Sync 协议 1.2 保留 snapshot + cursor 投影，并为 cockpit/admin 客户端增加经过认证的 `replica.list`、`replica.read` 和 `replica.apply` 调用。只有挂载 `ctx.sessionPersistence` 时，Server 才声明 `session.replicate.read/write`。线路传输正典 `SessionHeader` 与完整事件日志；目标端把每次写入决策委托给 `SessionPersistence.replicate`，因此重试具备幂等性，而分叉或活动日志会明确失败。开放轮次可以远程观察，但会标记为不平衡，不能作为可恢复状态应用。这是显式权威交接，不是持续双写同步。
+Remote Sync 协议 1.3 保留 snapshot + cursor 投影，并为 cockpit/admin 客户端增加经过认证的 Session 交接与 Resident 执行控制。只有挂载 `ctx.sessionPersistence` 时，Server 才声明 `session.replicate.read/write`；副本目录只包含没有开放回合的完整日志。线路传输正典 `SessionHeader` 与完整事件日志，目标端把每次写入决策委托给 `SessionPersistence.replicate`，因此重试具备幂等性，而分叉或活动日志会明确失败。这是显式权威交接，不是持续双写同步。
+
+挂载 `ctx.residentOperators` 后，同一认证通道还会声明 `operator.read/execute/interrupt`。远端调用方可以查看经过资格审查的原生订阅 Provider，提交一条持久命令后立即断开，再按 turn id 重连、读取有界结构化进展，并中断匹配的 Session／turn。Server 自身的 Resident daemon 仍是唯一命令回执与原生会话权威。原始产品 transcript 与本机 Unix 模型工具桥地址不会跨越该边界；在单独的认证路由桥完成前，远端 model-tool bridge 请求会明确拒绝。
 
 ## 模型体验
 

@@ -8,7 +8,7 @@ import { setBrowserRemoteAccessToken } from '../src/client/browser-access-token.
 import { WebRemoteSyncClient } from '../src/client/remote-sync-client.ts'
 
 const snapshot = {
-  protocol: { major: 1, minor: 2 },
+  protocol: { major: 1, minor: 3 },
   deploymentId: 'deployment-1',
   cursor: { deploymentId: 'deployment-1', sequence: 7 },
   capturedAt: '2026-08-23T08:00:00.000Z',
@@ -73,7 +73,7 @@ afterEach(() => {
 describe('Remote Sync wire parsing', () => {
   it('accepts an authenticated Server description and rejects unknown capabilities', () => {
     const description = {
-      protocol: { major: 1, minor: 2 },
+      protocol: { major: 1, minor: 3 },
       deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 },
       describedAt: '2026-08-23T08:00:00.000Z',
@@ -103,7 +103,7 @@ describe('Remote Sync wire parsing', () => {
         result: {
           ok: true,
           value: {
-            protocol: { major: 1, minor: 2 },
+            protocol: { major: 1, minor: 3 },
             deploymentId: 'deployment-1',
             cursor: { deploymentId: 'deployment-1', sequence: 7 },
             describedAt: '2026-08-23T08:00:00.000Z',
@@ -154,6 +154,54 @@ describe('Remote Sync wire parsing', () => {
     expect(methods).toEqual(['replica.list', 'replica.read', 'replica.apply'])
   })
 
+  it('admits, reattaches, observes, and interrupts a durable remote Resident turn', async () => {
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
+      tags: ['code'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: '0.200.0', protocolHash: 'schema-1',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Fast worker', supportedEfforts: ['medium'],
+        defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true,
+      }],
+    }
+    const accepted = { sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 }
+    const turn = {
+      commandId: 'command-1', sessionId: accepted.sessionId, turnId: accepted.turnId,
+      state: 'settled', stateRevision: 3, stopReason: 'completed', updatedAt: '2026-08-27T12:00:00.000Z',
+      result: { output: [{ type: 'text', text: 'done' }], stopReason: 'completed' },
+    }
+    const page = {
+      events: [{
+        sequence: 1, sessionId: accepted.sessionId, type: 'turn.progress',
+        time: '2026-08-27T12:00:00.000Z', data: { phase: 'reasoning' },
+      }],
+      nextSequence: 1,
+    }
+    const methods: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const request = JSON.parse(init.body) as { rpcId: string; method: string }
+      methods.push(request.method)
+      const value = request.method === 'operator.providers' ? [provider]
+        : request.method === 'operator.execute' ? accepted
+          : request.method === 'operator.inspect' ? turn
+            : request.method === 'operator.events' ? page
+              : { interrupted: true }
+      return Response.json({ type: 'server-response', rpcId: request.rpcId, result: { ok: true, value } })
+    }))
+    const client = new WebRemoteSyncClient('https://server.example', 'access')
+    await expect(client.operatorProviders()).resolves.toMatchObject([{ operatorId: 'codex', models: [{ model: 'gpt-5.6-luna' }] }])
+    await expect(client.operatorExecute({
+      commandId: 'command-1', operatorId: 'codex', workspace: '/repo', laneId: 'lane-1', prompt: [],
+    } as never)).resolves.toEqual(accepted)
+    await expect(client.operatorInspect(accepted.turnId)).resolves.toMatchObject({ state: 'settled', result: { stopReason: 'completed' } })
+    await expect(client.operatorEvents(accepted.sessionId, 0, 100)).resolves.toEqual(page)
+    await expect(client.operatorInterrupt(accepted.sessionId, accepted.turnId)).resolves.toBeUndefined()
+    expect(methods).toEqual([
+      'operator.providers', 'operator.execute', 'operator.inspect', 'operator.events', 'operator.interrupt',
+    ])
+  })
+
   it('accepts a complete snapshot and rejects protocol or deployment mismatch', () => {
     expect(parseRemoteSyncSnapshot(snapshot)).toMatchObject({
       deploymentId: 'deployment-1', cursor: { sequence: 7 },
@@ -169,7 +217,7 @@ describe('Remote Sync wire parsing', () => {
 
   it('rejects malformed descriptions, cursors, snapshots, and scalar fields', () => {
     const description = {
-      protocol: { major: 1, minor: 2 }, deploymentId: 'deployment-1',
+      protocol: { major: 1, minor: 3 }, deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 }, describedAt: snapshot.capturedAt,
       scope: 'cockpit', capabilities: ['session.read'], host: snapshot.host,
     }

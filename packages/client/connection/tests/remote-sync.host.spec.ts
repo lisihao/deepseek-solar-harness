@@ -235,6 +235,61 @@ describe('RemoteSyncHub', () => {
     await hub.close()
   })
 
+  it('never advertises or reads a Session whose current turn is still open', async () => {
+    const header = { version: 0, id: 'session-open', createdAt: 1 }
+    const events = [{ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }]
+    const persistence = {
+      listSnapshots: async () => [{ header, revision: 'store:open' }],
+      inspect: async () => ({ meta: header, events }),
+      replicate: vi.fn(),
+    }
+    const hub = new RemoteSyncHub(api(), 4, persistence as never)
+    await expect(hub.replicaList()).resolves.toEqual([])
+    await expect(hub.replicaRead('session-open')).rejects.toThrow('open turn')
+    await hub.close()
+  })
+
+  it('exposes durable Resident admission and observation only when the control seam is mounted', async () => {
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
+      tags: ['code'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: '0.200.0', protocolHash: 'schema-1',
+      models: [],
+    }
+    const dispose = vi.fn(async () => undefined)
+    const execute = vi.fn(async () => ({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2,
+      result: new Promise(() => {}), dispose,
+    }))
+    const inspectTurn = vi.fn(async () => ({
+      commandId: 'command-1', sessionId: 'resident-session', turnId: 'resident-turn',
+      state: 'running', stateRevision: 2, updatedAt: '2026-08-27T12:00:00.000Z',
+    }))
+    const readEvents = vi.fn(async () => ({ events: [], nextSequence: 0 }))
+    const interrupt = vi.fn(async () => undefined)
+    const resident = {
+      providers: async () => [provider], execute, inspectTurn, readEvents, interrupt,
+    }
+    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never)
+    await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({
+      capabilities: expect.arrayContaining(['operator.read', 'operator.execute', 'operator.interrupt']),
+    })
+    await expect(hub.describe(new AbortController().signal, 'pocket')).resolves.not.toMatchObject({
+      capabilities: expect.arrayContaining(['operator.execute']),
+    })
+    await expect(hub.operatorProviders()).resolves.toEqual([provider])
+    await expect(hub.operatorExecute({
+      commandId: 'command-1', operatorId: 'codex', workspace: '/repo', laneId: 'lane-1', prompt: [],
+    } as never)).resolves.toEqual({ sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 })
+    expect(dispose).toHaveBeenCalledOnce()
+    await expect(hub.operatorInspectTurn('resident-turn')).resolves.toMatchObject({ state: 'running' })
+    await expect(hub.operatorReadEvents('resident-session', 0, 100)).resolves.toEqual({ events: [], nextSequence: 0 })
+    await expect(hub.operatorInterrupt('resident-session', 'resident-turn')).resolves.toBeUndefined()
+    expect(readEvents).toHaveBeenCalledWith(expect.objectContaining({ afterSequence: 0, limit: 100 }))
+    expect(interrupt).toHaveBeenCalledOnce()
+    await hub.close()
+  })
+
   it('retries projections if deployment changes during reads and supports cancellation', async () => {
     let describes = 0
     let snapshots = 0

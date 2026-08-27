@@ -58,6 +58,7 @@
     "@deepseek-ai/dsh-host-remote-auth": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "@deepseek-ai/dsh-resident-operator": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
   "devDependencies": {
@@ -65,6 +66,7 @@
     "@deepseek-ai/dsh-host-remote-auth": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-session-persistence": "workspace:^",
+    "@deepseek-ai/dsh-resident-operator": "workspace:^",
     "@types/ws": "^8.18.1",
     "@deepseek-ai/cordis": "workspace:^"
   }

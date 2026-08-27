@@ -5,8 +5,11 @@ import {
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import {
   REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_RPC_CHANNEL,
+  parseRemoteResidentAcceptedTurn, parseRemoteResidentEventPage, parseRemoteResidentProviders, parseRemoteResidentTurn,
   parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
   parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
+  type RemoteResidentAcceptedTurn, type RemoteResidentEventPage, type RemoteResidentExecuteRequest,
+  type RemoteResidentProviderStatus, type RemoteResidentTurnSnapshot,
   type RemoteSessionReplicaApplyResult, type RemoteSessionReplicaDocument, type RemoteSessionReplicaSummary,
   type RemoteSyncCursor, type RemoteSyncDescription, type RemoteSyncFrame, type RemoteSyncSnapshot,
 } from '../remote-sync.ts'
@@ -24,6 +27,14 @@ export interface RemoteSyncClient {
     replica: Pick<RemoteSessionReplicaDocument, 'meta' | 'events'>,
     signal?: AbortSignal,
   ): Promise<RemoteSessionReplicaApplyResult>
+  operatorProviders(signal?: AbortSignal): Promise<RemoteResidentProviderStatus[]>
+  operatorExecute(
+    request: RemoteResidentExecuteRequest,
+    signal?: AbortSignal,
+  ): Promise<RemoteResidentAcceptedTurn>
+  operatorInspect(turnId: string, signal?: AbortSignal): Promise<RemoteResidentTurnSnapshot>
+  operatorEvents(sessionId: string, afterSequence: number, limit: number, signal?: AbortSignal): Promise<RemoteResidentEventPage>
+  operatorInterrupt(sessionId: string, turnId: string, signal?: AbortSignal): Promise<void>
   events(
     cursor: RemoteSyncCursor,
     signal: AbortSignal,
@@ -64,6 +75,36 @@ export class WebRemoteSyncClient implements RemoteSyncClient {
     signal?: AbortSignal,
   ): Promise<RemoteSessionReplicaApplyResult> {
     return parseRemoteSessionReplicaApplyResult(await this.call('replica.apply', replica, signal))
+  }
+
+  async operatorProviders(signal?: AbortSignal): Promise<RemoteResidentProviderStatus[]> {
+    return parseRemoteResidentProviders(await this.call('operator.providers', {}, signal))
+  }
+
+  async operatorExecute(
+    request: RemoteResidentExecuteRequest,
+    signal?: AbortSignal,
+  ): Promise<RemoteResidentAcceptedTurn> {
+    return parseRemoteResidentAcceptedTurn(await this.call('operator.execute', request, signal))
+  }
+
+  async operatorInspect(turnId: string, signal?: AbortSignal): Promise<RemoteResidentTurnSnapshot> {
+    return parseRemoteResidentTurn(await this.call('operator.inspect', { turnId }, signal))
+  }
+
+  async operatorEvents(
+    sessionId: string,
+    afterSequence: number,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<RemoteResidentEventPage> {
+    return parseRemoteResidentEventPage(await this.call('operator.events', {
+      sessionId, afterSequence, limit,
+    }, signal))
+  }
+
+  async operatorInterrupt(sessionId: string, turnId: string, signal?: AbortSignal): Promise<void> {
+    await this.call('operator.interrupt', { sessionId, turnId }, signal)
   }
 
   private async call(method: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {

@@ -6,6 +6,13 @@ import type { Duplex } from 'node:stream'
 import WebSocket, { WebSocketServer } from 'ws'
 import { interruptedTurnClosers, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence, SessionReplica, SessionReplicationResult } from '@deepseek-ai/dsh-session-persistence'
+import type {
+  ResidentEventPage,
+  ResidentExecuteRequest,
+  ResidentOperatorService,
+  ResidentProviderStatus,
+  ResidentTurnSnapshot,
+} from '@deepseek-ai/dsh-resident-operator'
 import {
   RpcId,
   type ApiProxy, type HostFrame, type MuxFrame, type RpcRequest,
@@ -17,6 +24,7 @@ import {
   type RemoteSyncDescription, type RemoteSyncResyncRequired, type RemoteSyncSnapshot,
   type RemoteSessionReplicaApplyResult, type RemoteSessionReplicaDocument,
   type RemoteSessionReplicaSummary,
+  type RemoteResidentAcceptedTurn,
 } from './remote-sync.ts'
 import type { RemoteDeviceScope } from './remote-auth-wire.ts'
 
@@ -171,6 +179,7 @@ export class RemoteSyncHub {
     private readonly api: ApiProxy,
     capacity: number,
     private readonly persistence?: Pick<SessionPersistence, 'listSnapshots' | 'inspect' | 'replicate'>,
+    private readonly resident?: Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'>,
   ) {
     this.journal = new RemoteSyncJournal(capacity)
     this.sourceLoop = this.runSources()
@@ -201,6 +210,9 @@ export class RemoteSyncHub {
             ...this.persistence === undefined
               ? []
               : ['session.replicate.read' as const, 'session.replicate.write' as const],
+            ...this.resident === undefined
+              ? []
+              : ['operator.read' as const, 'operator.execute' as const, 'operator.interrupt' as const],
           ],
         host: host.result.value,
       }
@@ -242,19 +254,25 @@ export class RemoteSyncHub {
   /** List materialized Session identities and opaque revisions for handoff planning. */
   async replicaList(signal?: AbortSignal): Promise<RemoteSessionReplicaSummary[]> {
     const persistence = this.expectPersistence()
-    return (await persistence.listSnapshots(signal)).map(snapshot => ({
-      header: snapshot.header,
-      revision: String(snapshot.revision),
-    }))
+    const summaries: RemoteSessionReplicaSummary[] = []
+    for (const snapshot of await persistence.listSnapshots(signal)) {
+      const inspected = await persistence.inspect(snapshot.header.id, signal)
+      if (interruptedTurnClosers(inspected.events).length !== 0) continue
+      summaries.push({ header: snapshot.header, revision: String(snapshot.revision) })
+    }
+    return summaries
   }
 
   /** Read one complete logical Session document without mutating its source. */
   async replicaRead(sessionId: string, signal?: AbortSignal): Promise<RemoteSessionReplicaDocument> {
     const inspected = await this.expectPersistence().inspect(SessionId(sessionId), signal)
+    if (interruptedTurnClosers(inspected.events).length !== 0) {
+      throw new Error(`remote Session ${sessionId} has an open turn and cannot be replicated`)
+    }
     return {
       meta: inspected.meta,
       events: inspected.events,
-      balanced: interruptedTurnClosers(inspected.events).length === 0,
+      balanced: true,
     }
   }
 
@@ -262,6 +280,48 @@ export class RemoteSyncHub {
   async replicaApply(replica: SessionReplica, signal?: AbortSignal): Promise<RemoteSessionReplicaApplyResult> {
     const result: SessionReplicationResult = await this.expectPersistence().replicate(replica, signal)
     return { ...result, sessionId: String(result.sessionId) }
+  }
+
+  /** List native-subscription capacity without exposing remote product credentials. */
+  operatorProviders(): Promise<ResidentProviderStatus[]> {
+    return this.expectResident().providers()
+  }
+
+  /** Admit a durable remote turn, then detach the HTTP observer while execution continues. */
+  async operatorExecute(
+    request: Omit<ResidentExecuteRequest, 'signal' | 'modelToolBridge'>,
+  ): Promise<RemoteResidentAcceptedTurn> {
+    const turn = await this.expectResident().execute({
+      ...request,
+      signal: new AbortController().signal,
+    })
+    const accepted = {
+      sessionId: String(turn.sessionId),
+      turnId: String(turn.turnId),
+      stateRevision: turn.stateRevision,
+    }
+    await turn.dispose()
+    return accepted
+  }
+
+  /** Reattach to one durable remote receipt after any Frontend or network restart. */
+  operatorInspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
+    return this.expectResident().inspectTurn(turnId)
+  }
+
+  /** Read bounded structured progress without transferring native transcripts. */
+  operatorReadEvents(sessionId: string, afterSequence: number, limit: number, signal?: AbortSignal): Promise<ResidentEventPage> {
+    return this.expectResident().readEvents({
+      sessionId: sessionId as never,
+      afterSequence,
+      limit,
+      ...signal === undefined ? {} : { signal },
+    })
+  }
+
+  /** Interrupt a matching remote Session/turn pair without deleting continuity. */
+  operatorInterrupt(sessionId: string, turnId: string): Promise<void> {
+    return this.expectResident().interrupt({ sessionId: sessionId as never, turnId: turnId as never })
   }
 
   /**
@@ -310,6 +370,11 @@ export class RemoteSyncHub {
   private expectPersistence(): Pick<SessionPersistence, 'listSnapshots' | 'inspect' | 'replicate'> {
     if (this.persistence === undefined) throw new Error('remote Session replication is unavailable')
     return this.persistence
+  }
+
+  private expectResident(): Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'> {
+    if (this.resident === undefined) throw new Error('remote Resident execution is unavailable')
+    return this.resident
   }
 
   private async runSources(): Promise<void> {

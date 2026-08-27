@@ -4,6 +4,7 @@ import type {
   HostFrame, MuxFrame, ResponseValue, RpcRequest,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session/types'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { hostDescribeValueSchema } from '@deepseek-ai/dsh-host-apiproxy/api/host.schema'
 import { hostFrameSchema, muxFrameSchema } from '@deepseek-ai/dsh-host-apiproxy/api/events.schema'
 import { sessionListValueSchema } from '@deepseek-ai/dsh-host-apiproxy/api/sessions.schema'
@@ -17,7 +18,7 @@ export const REMOTE_SYNC_RPC_CHANNEL = '/remote-sync'
 export const REMOTE_SYNC_EVENTS_PATH = '/remote-sync/events'
 
 /** First independently versioned Server/Frontend projection protocol. */
-export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 2 })
+export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 3 })
 
 /** Process-generation identity plus one global event watermark. */
 export interface RemoteSyncCursor {
@@ -46,6 +47,107 @@ export type RemoteSyncCapability =
   | 'approval.respond'
   | 'session.replicate.read'
   | 'session.replicate.write'
+  | 'operator.read'
+  | 'operator.execute'
+  | 'operator.interrupt'
+
+/** Durable remote Resident turn identity returned before product execution settles. */
+export interface RemoteResidentAcceptedTurn {
+  readonly sessionId: string
+  readonly turnId: string
+  readonly stateRevision: number
+}
+
+/** Browser-safe native model catalog entry exposed by a remote Resident Provider. */
+export interface RemoteResidentModelOption {
+  readonly model: string
+  readonly resolvedModel?: string
+  readonly displayName: string
+  readonly description: string
+  readonly supportedEfforts: readonly RemoteResidentReasoningEffort[]
+  readonly defaultEffort?: RemoteResidentReasoningEffort
+  readonly isDefault: boolean
+  readonly supportsAdaptiveThinking: boolean
+}
+
+export type RemoteResidentReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
+
+export interface RemoteResidentQuotaWindow {
+  readonly usedPercent: number
+  readonly resetsAt?: number
+  readonly windowDurationMinutes?: number
+}
+
+export interface RemoteResidentQuotaPool {
+  readonly poolId: string
+  readonly displayName: string
+  readonly models: readonly string[]
+  readonly meter: 'native-subscription'
+  readonly primary?: RemoteResidentQuotaWindow
+  readonly secondary?: RemoteResidentQuotaWindow
+  readonly observedAt: string
+}
+
+/** Pure-data remote capacity DTO; it does not import the Host Resident Service identity. */
+export interface RemoteResidentProviderStatus {
+  readonly operatorId: string
+  readonly product: string
+  readonly displayName: string
+  readonly description: string
+  readonly tags: readonly string[]
+  readonly maxConcurrency: number
+  readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
+  readonly available: boolean
+  readonly unavailableReason?: string
+  readonly quotaUnavailableReason?: string
+  readonly authentication: 'native-subscription' | 'unqualified'
+  readonly productVersion: string
+  readonly protocolHash: string
+  readonly models: readonly RemoteResidentModelOption[]
+  readonly quotaPools?: readonly RemoteResidentQuotaPool[]
+}
+
+/** Serializable remote execution request; product-local tool sockets never enter this DTO. */
+export interface RemoteResidentExecuteRequest {
+  readonly commandId: string
+  readonly operatorId: string
+  readonly workspace: string
+  readonly laneId: string
+  readonly taskLabel?: string
+  readonly prompt: readonly ContentBlock[]
+  readonly systemPrompt?: string
+  readonly profile?: { readonly model?: string; readonly effort?: RemoteResidentReasoningEffort }
+}
+
+export interface RemoteResidentTurnSnapshot {
+  readonly commandId: string
+  readonly turnId: string
+  readonly sessionId: string
+  readonly state: 'accepted' | 'running' | 'settled' | 'indeterminate'
+  readonly stateRevision: number
+  readonly taskLabel?: string
+  readonly nativeTurnId?: string
+  readonly stopReason?: 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
+  readonly resultRef?: string
+  readonly updatedAt: string
+  readonly result?: {
+    readonly output: readonly ContentBlock[]
+    readonly stopReason: 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
+    readonly resultRef?: string
+  }
+  readonly error?: { readonly code: string; readonly message: string }
+}
+
+export interface RemoteResidentEventPage {
+  readonly events: readonly {
+    readonly sequence: number
+    readonly sessionId: string
+    readonly type: string
+    readonly time: string
+    readonly data: Readonly<Record<string, unknown>>
+  }[]
+  readonly nextSequence: number
+}
 
 /** One materialized Session available for an explicit single-writer handoff. */
 export interface RemoteSessionReplicaSummary {
@@ -248,6 +350,139 @@ export function parseRemoteSessionReplicaApplyResult(value: unknown): RemoteSess
   }
 }
 
+/** Validate subscription-backed Resident capacity advertised by a remote Server. */
+export function parseRemoteResidentProviders(value: unknown): RemoteResidentProviderStatus[] {
+  if (!Array.isArray(value)) throw new Error('remote Resident provider list must be an array')
+  return value.map((entry, index) => {
+    const label = `remote Resident provider ${index}`
+    const record = objectRecord(entry, label)
+    const authentication = record.authentication
+    if (authentication !== 'native-subscription' && authentication !== 'unqualified') {
+      throw new Error(`${label}.authentication is invalid`)
+    }
+    const models = arrayValue(record.models, `${label}.models`).map((model, modelIndex) => {
+      const modelLabel = `${label}.models[${modelIndex}]`
+      const item = objectRecord(model, modelLabel)
+      return {
+        model: nonEmptyString(item.model, `${modelLabel}.model`),
+        ...(typeof item.resolvedModel === 'string' ? { resolvedModel: item.resolvedModel } : {}),
+        displayName: nonEmptyString(item.displayName, `${modelLabel}.displayName`),
+        description: stringValue(item.description, `${modelLabel}.description`),
+        supportedEfforts: arrayValue(item.supportedEfforts, `${modelLabel}.supportedEfforts`)
+          .map((effort, effortIndex) => reasoningEffort(effort, `${modelLabel}.supportedEfforts[${effortIndex}]`)),
+        ...(item.defaultEffort === undefined ? {} : { defaultEffort: reasoningEffort(item.defaultEffort, `${modelLabel}.defaultEffort`) }),
+        isDefault: booleanValue(item.isDefault, `${modelLabel}.isDefault`),
+        supportsAdaptiveThinking: booleanValue(item.supportsAdaptiveThinking, `${modelLabel}.supportsAdaptiveThinking`),
+      }
+    })
+    const injectionBoundaries = arrayValue(record.injectionBoundaries, `${label}.injectionBoundaries`).map((value) => {
+      if (value === 'pre-dispatch' || value === 'next-turn' || value === 'checkpoint') return value
+      throw new Error(`${label}.injectionBoundaries contains an invalid boundary`)
+    })
+    return {
+      operatorId: nonEmptyString(record.operatorId, `${label}.operatorId`),
+      product: nonEmptyString(record.product, `${label}.product`),
+      displayName: nonEmptyString(record.displayName, `${label}.displayName`),
+      description: stringValue(record.description, `${label}.description`),
+      tags: arrayValue(record.tags, `${label}.tags`).map((tag, tagIndex) => nonEmptyString(tag, `${label}.tags[${tagIndex}]`)),
+      maxConcurrency: positiveInteger(record.maxConcurrency, `${label}.maxConcurrency`),
+      injectionBoundaries,
+      available: booleanValue(record.available, `${label}.available`),
+      ...(typeof record.unavailableReason === 'string' ? { unavailableReason: record.unavailableReason } : {}),
+      ...(typeof record.quotaUnavailableReason === 'string' ? { quotaUnavailableReason: record.quotaUnavailableReason } : {}),
+      authentication,
+      productVersion: nonEmptyString(record.productVersion, `${label}.productVersion`),
+      protocolHash: nonEmptyString(record.protocolHash, `${label}.protocolHash`),
+      models,
+      ...(record.quotaPools === undefined ? {} : {
+        quotaPools: arrayValue(record.quotaPools, `${label}.quotaPools`).map((pool, poolIndex) => {
+          const poolLabel = `${label}.quotaPools[${poolIndex}]`
+          const item = objectRecord(pool, poolLabel)
+          if (item.meter !== 'native-subscription') throw new Error(`${poolLabel}.meter is invalid`)
+          return {
+            poolId: nonEmptyString(item.poolId, `${poolLabel}.poolId`),
+            displayName: nonEmptyString(item.displayName, `${poolLabel}.displayName`),
+            models: arrayValue(item.models, `${poolLabel}.models`).map((model, modelIndex) => nonEmptyString(model, `${poolLabel}.models[${modelIndex}]`)),
+            meter: 'native-subscription' as const,
+            ...(item.primary === undefined ? {} : { primary: quotaWindow(item.primary, `${poolLabel}.primary`) }),
+            ...(item.secondary === undefined ? {} : { secondary: quotaWindow(item.secondary, `${poolLabel}.secondary`) }),
+            observedAt: isoInstant(item.observedAt, `${poolLabel}.observedAt`),
+          }
+        }),
+      }),
+    }
+  })
+}
+
+/** Validate one accepted remote Resident command receipt. */
+export function parseRemoteResidentAcceptedTurn(value: unknown): RemoteResidentAcceptedTurn {
+  const record = objectRecord(value, 'remote Resident accepted turn')
+  return {
+    sessionId: nonEmptyString(record.sessionId, 'sessionId'),
+    turnId: nonEmptyString(record.turnId, 'turnId'),
+    stateRevision: nonnegativeInteger(record.stateRevision, 'stateRevision'),
+  }
+}
+
+/** Validate one remote durable turn projection, including its bounded terminal result. */
+export function parseRemoteResidentTurn(value: unknown): RemoteResidentTurnSnapshot {
+  const record = objectRecord(value, 'remote Resident turn')
+  const state = record.state
+  if (state !== 'accepted' && state !== 'running' && state !== 'settled' && state !== 'indeterminate') {
+    throw new Error('remote Resident turn state is invalid')
+  }
+  const stopReason = record.stopReason
+  if (stopReason !== undefined && stopReason !== 'completed' && stopReason !== 'aborted'
+    && stopReason !== 'error' && stopReason !== 'max-tokens' && stopReason !== 'refusal') {
+    throw new Error('remote Resident turn stopReason is invalid')
+  }
+  const result = record.result === undefined ? undefined : objectRecord(record.result, 'remote Resident turn result')
+  if (result !== undefined && !Array.isArray(result.output)) throw new Error('remote Resident turn result.output must be an array')
+  const error = record.error === undefined ? undefined : objectRecord(record.error, 'remote Resident turn error')
+  return {
+    commandId: nonEmptyString(record.commandId, 'commandId'),
+    turnId: nonEmptyString(record.turnId, 'turnId'),
+    sessionId: nonEmptyString(record.sessionId, 'sessionId'),
+    state,
+    stateRevision: nonnegativeInteger(record.stateRevision, 'stateRevision'),
+    ...(typeof record.taskLabel === 'string' ? { taskLabel: record.taskLabel } : {}),
+    ...(typeof record.nativeTurnId === 'string' ? { nativeTurnId: record.nativeTurnId } : {}),
+    ...(stopReason === undefined ? {} : { stopReason }),
+    ...(typeof record.resultRef === 'string' ? { resultRef: record.resultRef } : {}),
+    updatedAt: isoInstant(record.updatedAt, 'updatedAt'),
+    ...(result === undefined ? {} : {
+      result: {
+        output: result.output as ContentBlock[],
+        stopReason: residentStopReason(result.stopReason, 'result.stopReason'),
+        ...(typeof result.resultRef === 'string' ? { resultRef: result.resultRef } : {}),
+      },
+    }),
+    ...(error === undefined ? {} : {
+      error: {
+        code: nonEmptyString(error.code, 'error.code'),
+        message: nonEmptyString(error.message, 'error.message'),
+      },
+    }),
+  }
+}
+
+/** Validate one ordered page of remote Resident progress observations. */
+export function parseRemoteResidentEventPage(value: unknown): RemoteResidentEventPage {
+  const record = objectRecord(value, 'remote Resident event page')
+  const events = arrayValue(record.events, 'remote Resident event page.events').map((entry, index) => {
+    const label = `remote Resident event ${index}`
+    const event = objectRecord(entry, label)
+    return {
+      sequence: positiveInteger(event.sequence, `${label}.sequence`),
+      sessionId: nonEmptyString(event.sessionId, `${label}.sessionId`),
+      type: nonEmptyString(event.type, `${label}.type`),
+      time: isoInstant(event.time, `${label}.time`),
+      data: objectRecord(event.data, `${label}.data`),
+    }
+  })
+  return { events, nextSequence: nonnegativeInteger(record.nextSequence, 'nextSequence') }
+}
+
 function parseCursor(value: unknown): RemoteSyncCursor {
   const cursor = objectRecord(value, 'remote sync cursor')
   return {
@@ -281,8 +516,49 @@ function remoteScope(value: unknown): RemoteDeviceScope {
 function remoteCapability(value: unknown): RemoteSyncCapability {
   if (value === 'session.read' || value === 'workspace.read' || value === 'event.subscribe'
     || value === 'session.command' || value === 'approval.respond'
-    || value === 'session.replicate.read' || value === 'session.replicate.write') return value
+    || value === 'session.replicate.read' || value === 'session.replicate.write'
+    || value === 'operator.read' || value === 'operator.execute' || value === 'operator.interrupt') return value
   throw new Error(`remote sync capability is invalid: ${String(value)}`)
+}
+
+function arrayValue(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`)
+  return value
+}
+
+function stringValue(value: unknown, label: string): string {
+  if (typeof value !== 'string') throw new Error(`${label} must be a string`)
+  return value
+}
+
+function booleanValue(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') throw new Error(`${label} must be a boolean`)
+  return value
+}
+
+function reasoningEffort(value: unknown, label: string): 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra' {
+  if (value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max' || value === 'ultra') return value
+  throw new Error(`${label} is invalid`)
+}
+
+function residentStopReason(value: unknown, label: string): 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal' {
+  if (value === 'completed' || value === 'aborted' || value === 'error' || value === 'max-tokens' || value === 'refusal') return value
+  throw new Error(`${label} is invalid`)
+}
+
+function quotaWindow(value: unknown, label: string): { usedPercent: number; resetsAt?: number; windowDurationMinutes?: number } {
+  const record = objectRecord(value, label)
+  const usedPercent = record.usedPercent
+  if (typeof usedPercent !== 'number' || !Number.isFinite(usedPercent) || usedPercent < 0 || usedPercent > 100) {
+    throw new Error(`${label}.usedPercent must be between 0 and 100`)
+  }
+  return {
+    usedPercent,
+    ...(record.resetsAt === undefined ? {} : { resetsAt: nonnegativeInteger(record.resetsAt, `${label}.resetsAt`) }),
+    ...(record.windowDurationMinutes === undefined ? {} : {
+      windowDurationMinutes: positiveInteger(record.windowDurationMinutes, `${label}.windowDurationMinutes`),
+    }),
+  }
 }
 
 function sessionHeader(value: unknown, label: string): SessionHeader {

@@ -14,7 +14,9 @@ The node half guards every entry under `/api` before bridging or upgrading (`src
 
 ## Remote Sync and stable Session handoff
 
-Remote Sync protocol 1.2 keeps the snapshot-plus-cursor projection and adds authenticated `replica.list`, `replica.read`, and `replica.apply` calls for cockpit/admin clients. A Server advertises `session.replicate.read/write` only when `ctx.sessionPersistence` is mounted. The wire moves the canonical `SessionHeader` and complete event log; the destination delegates every write decision to `SessionPersistence.replicate`, so retries are idempotent and divergent or live logs fail loudly. An open turn may be observed remotely but is marked unbalanced and cannot be applied as recoverable state. This is explicit authority handoff, not continuous dual-write synchronization.
+Remote Sync protocol 1.3 keeps the snapshot-plus-cursor projection and adds authenticated Session handoff and Resident execution controls for cockpit/admin clients. A Server advertises `session.replicate.read/write` only when `ctx.sessionPersistence` is mounted; the replica catalog contains only complete logs with no open turn. The wire moves the canonical `SessionHeader` and complete event log, while the destination delegates every write decision to `SessionPersistence.replicate`, so retries are idempotent and divergent or live logs fail loudly. This is explicit authority handoff, not continuous dual-write synchronization.
+
+When `ctx.residentOperators` is mounted, the same authenticated channel advertises `operator.read/execute/interrupt`. A remote caller can inspect qualified native-subscription Providers, submit one durable command, detach immediately, reattach by turn id, read bounded structured progress, and interrupt the matching Session/turn pair. The Server's Resident daemon remains the sole command-receipt and native-session authority. Raw product transcripts and local Unix model-tool bridge addresses do not cross this boundary; remote model-tool bridge requests are rejected until a separately authenticated routed bridge exists.
 
 ## Model Experience
 

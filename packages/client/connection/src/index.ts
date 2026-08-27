@@ -4,6 +4,8 @@ import type { IncomingHttpHeaders } from 'node:http'
 import { createHash } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-attachment'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ResidentExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
 import { SessionReplicationError, type SessionReplica } from '@deepseek-ai/dsh-session-persistence'
 import {
   RemoteAuthError,
@@ -43,10 +45,14 @@ export type {
 export { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 export {
   REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
+  parseRemoteResidentAcceptedTurn, parseRemoteResidentEventPage, parseRemoteResidentProviders, parseRemoteResidentTurn,
   parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
   parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
 } from './remote-sync.ts'
 export type {
+  RemoteResidentAcceptedTurn, RemoteResidentEventPage, RemoteResidentExecuteRequest,
+  RemoteResidentModelOption, RemoteResidentProviderStatus, RemoteResidentQuotaPool,
+  RemoteResidentQuotaWindow, RemoteResidentReasoningEffort, RemoteResidentTurnSnapshot,
   RemoteSessionReplicaApplyResult, RemoteSessionReplicaDocument, RemoteSessionReplicaSummary,
   RemoteSyncCapability, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
   RemoteSyncResyncRequired, RemoteSyncSnapshot,
@@ -367,6 +373,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         authCtx.apiProxy,
         remoteSyncJournalCapacity,
         authCtx.get('sessionPersistence'),
+        authCtx.get('residentOperators'),
       )
       const removeAuthRpc = connection.rpc.handle(
         REMOTE_AUTH_RPC_CHANNEL,
@@ -418,6 +425,57 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
                 },
               }
             }
+          }
+          if (endpoint === 'operator.providers') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: await hub.operatorProviders() }
+          }
+          if (endpoint === 'operator.execute') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            if (!Array.isArray(body.prompt)) throw new ConnectionRpcHttpError(400, 'prompt must be an array')
+            if (body.modelToolBridge !== undefined) {
+              throw new ConnectionRpcHttpError(400, 'remote model-tool bridges are not supported')
+            }
+            const profile = body.profile === undefined ? undefined : residentProfile(body.profile)
+            const request: Omit<ResidentExecuteRequest, 'signal' | 'modelToolBridge'> = {
+              commandId: requiredString(body.commandId, 'commandId') as never,
+              operatorId: requiredString(body.operatorId, 'operatorId'),
+              workspace: requiredString(body.workspace, 'workspace'),
+              laneId: requiredString(body.laneId, 'laneId'),
+              prompt: body.prompt as ContentBlock[],
+              ...(typeof body.taskLabel === 'string' ? { taskLabel: body.taskLabel } : {}),
+              ...(typeof body.systemPrompt === 'string' ? { systemPrompt: body.systemPrompt } : {}),
+              ...profile === undefined ? {} : { profile },
+            }
+            return { ok: true, value: await hub.operatorExecute(request) }
+          }
+          if (endpoint === 'operator.inspect') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            return { ok: true, value: await hub.operatorInspectTurn(requiredString(body.turnId, 'turnId')) }
+          }
+          if (endpoint === 'operator.events') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            return {
+              ok: true,
+              value: await hub.operatorReadEvents(
+                requiredString(body.sessionId, 'sessionId'),
+                boundedInteger(body.afterSequence, 'afterSequence', 0, Number.MAX_SAFE_INTEGER),
+                boundedInteger(body.limit, 'limit', 1, 500),
+                signal,
+              ),
+            }
+          }
+          if (endpoint === 'operator.interrupt') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            await hub.operatorInterrupt(
+              requiredString(body.sessionId, 'sessionId'),
+              requiredString(body.turnId, 'turnId'),
+            )
+            return { ok: true, value: { interrupted: true } }
           }
           return {
             ok: false,
@@ -634,6 +692,24 @@ function requiredString(value: unknown, field: string): string {
     throw new ConnectionRpcHttpError(400, `${field} must be a non-empty string`)
   }
   return value
+}
+
+function boundedInteger(value: unknown, field: string, minimum: number, maximum: number): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new ConnectionRpcHttpError(400, `${field} must be an integer from ${String(minimum)} to ${String(maximum)}`)
+  }
+  return value
+}
+
+function residentProfile(value: unknown): NonNullable<ResidentExecuteRequest['profile']> {
+  const record = recordPayload(value)
+  const model = requiredString(record.model, 'profile.model')
+  const effort = record.effort
+  if (effort !== undefined && effort !== 'low' && effort !== 'medium' && effort !== 'high'
+    && effort !== 'xhigh' && effort !== 'max' && effort !== 'ultra') {
+    throw new ConnectionRpcHttpError(400, 'profile.effort is invalid')
+  }
+  return { model, ...effort === undefined ? {} : { effort } }
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {
