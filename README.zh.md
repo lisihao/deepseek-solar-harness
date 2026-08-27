@@ -1,180 +1,212 @@
 # DSH — DeepSeek Solar Harness
 
-[English](README.md) | 中文
+[English](README.md) | 简体中文
 
-**DeepSeek Harness 的 Solar 发行版：以 macOS Desktop 应用为产品形态，目标是可扩展的 All-in-One AI 工作台。**
+**一个具备治理闭环、插件化组合、持久 TaskGraph 编排能力的 Agent Runtime 与 macOS 工作台。**
 
-DeepSeek-Solar-Harness（`DSH`）是基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的下游产品。它保留上游的插件架构与 agent runtime，同时拥有独立的 Solar 集成分支、Desktop 产品、受管插件、发布身份和工程治理。产品目前只支持 macOS；其他操作系统不在已验收的产品合同内。
+**快照说明：** DeepSeek-Solar-Harness（`DSH`）是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的社区下游发行版，不是 DeepSeek AI 官方发行版。本分析固定在 2026-08-27 的 `solar@a3cd4397efc5294704e9d7384515ab285f81bd06`，对应 DSH Desktop `3.6.6`。当前已接受的产品合同只覆盖 macOS；在该快照之后，机器可读 manifest 仍是事实来源。
 
-本仓库是 Solar 核心、Desktop shell 和 Solar 维护插件的完整开发源码。它不代表 DeepSeek AI 的官方发行版，Solar 改动也不会回馈到任何上游仓库。
+## 项目定位
 
-## 产品目标
+DSH 不只是终端 coding agent，也不只是 agent workflow 库。它把交互式 Agent 数据平面、持久编排控制平面以及产品与治理平面放进同一个源码仓库。
 
-DSH 的目标是让一个本地应用成为对话、工具、会话、记忆、上下文、coding agent、协作、远程界面和可观测任务执行的日常控制中心。产品在增加能力时保护以下五项性质：
+交互平面保留 DeepSeek Harness 的 Cordis 模型：Agent、模型、工具、Session、UI、子进程、sandbox、subagent 和 workflow 都以具备生命周期的插件挂载。Solar 控制平面增加 intent 编译、受限 context packet、认证 TaskGraph、capability budget、冲突感知调度、receipt、artifact、审批、quota-aware 物理 Operator 路由和重启恢复。产品平面进一步把这些源码闭环成 macOS Desktop 发行版，并维护受管插件来源证明与 Code-as-Harness 验证。
 
-1. **模型能力。** 打包内的 Anchored Standard preset 让主 agent 与 delegated worker 首轮只看到 `bash` 和 `str_replace_editor`，随后按需公开其他工具。这样可以减少首轮 tool schema 压力，同时不删除后续能力。
-2. **连续性。** Session 历史、runtime 所有权、记忆、任务进度和 resume 行为必须跨越普通 UI 导航与进程边界继续存在，并且不能悄悄改变所选执行路径。
-3. **可组合性。** 核心行为、Desktop 呈现和产品功能保持为 Cordis 插件或显式产品输入。任何功能都不能依赖对生成运行态的未记录补丁。
-4. **可复现性。** 每份 Solar 自有源码输入都有仓库路径、接受版本、许可证记录、原生测试和可评审历史。已安装应用和用户 profile 是输出，不是源码。
-5. **受控演进。** 上游变更先作为候选被发现，再根据 Solar 合同完成资格审查；只有冲突、兼容性、行为、打包和治理证据都被接受后才会合并。
+关键架构决策是：把 Codex 与 Claude Code 作为内层 coding loop 的**物理 Operator**，而由 DSH 掌握外层控制环。因此 DSH 优化的不是“一条 prompt 最快得到一次回答”，而是长任务能否持续可检查、可恢复、authority 有界且可复现。
 
-## 产品特性
+## 已实现能力盘点
 
-- macOS Desktop 应用，提供 compatibility 与 advanced 两种呈现模式、原生生命周期集成、隔离 profile、内置 DSH terminal、更新发现和显式产品版本显示。
-- 在受保护 `solar` 集成线上开发的 DeepSeek Harness agent、模型、工具、Session、Web、sandbox、workflow 与插件基础。
-- 已接受的 Anchored Standard 产品 preset 使用双工具首轮 bootstrap，delegated AgentTeams worker 也遵循该规则，后续能力按需发现。
-- Smart 与 resident operator 路径、AgentTeams 协作、Mnemon 记忆、原生 DeepSeek V4 Flash Vision、Web billing 和受管 Web UI 集合。
-- 封装后的受控插件套件，包含 Better Sidebar、GenUI、插件诊断、模型 fallback、代码图谱，以及有界的 stat、time、regex 与 Markdown 工具。
-- 仓库自有 Code-as-Harness 完成权威：根据待交付差异选择原生命令、记录 attestation 证据，并在治理接线缺失或陈旧时 fail closed。
-- 核心、Desktop 与受管插件可在同一源码仓中协同修改，同时每个组件保留自己的包管理器与测试合同。
-
-## 架构
-
-DSH 保留上游 Cordis 原则：能力通过插件、service、event 和 profile 配置组合。Solar 产品在这些运行机制外增加受控的仓库与发行层。
-
-```text
-DeepSeek-Solar-Harness
-├── Core Harness (pnpm workspace)
-│   ├── agents, models, tools, sessions, workflows, sandboxes
-│   └── Web host/client and Cordis plugin runtime
-├── products/desktop (Yarn workspace)
-│   └── Electron shell, profiles, native lifecycle, packaging, product UI
-├── plugins/managed
-│   ├── governance (the user-created Code-as-Harness project)
-│   ├── agent-teams, mnemon, aegis, better-sidebar, genui
-│   ├── plugin-check, llm-fallbacks, codegraph, tool plugins
-│   └── web-billing, web-ui, plugin-console
-├── distribution
-│   └── product identity, Desktop version, tag contract, upstream records
-└── protected solar branch
-    └── reviewed task branches + CI + Code-as-Harness attestation
-```
-
-核心保留在仓库根目录，使其 pnpm workspace 继续有效。Desktop 位于 [`products/desktop`](products/desktop)，它是独立 Yarn workspace，禁止再包含一份 Harness checkout。Solar 自有组件位于 [`plugins/managed`](plugins/managed)；[`plugins/registry.yaml`](plugins/registry.yaml) 是其源码、版本、许可证与测试的机器可读注册表。产品与上游元数据位于 [`distribution`](distribution)。
-
-Desktop 在 Yarn 构建期间安装已接受的 sealed package 输入，并通过 [`products/desktop/dsh-plugin-desktop/vendor/manifest.json`](products/desktop/dsh-plugin-desktop/vendor/manifest.json) 把每个 sealed package 映射回仓库中已跟踪的源码包。`yarn verify:vendor` 会提取每个归档的 manifest，把所有非生成文件与已跟踪源码逐字节比较，并拒绝未跟踪、缺失、陈旧或名称/版本不一致的输入。因此，fresh clone 已包含默认 Desktop 应用中每个 sealed package 的源码。
-
-用户自行安装到 `~/.dsh` 的可选插件属于 profile 扩展，并非默认 Desktop 构建输入。未修改插件保持 external；只有 Solar 修改或打包插件时，才会携带来源与原生测试进入 [`plugins/managed`](plugins/managed)。个人 Remote Modules 的网页名称、URL 和中继端口同样只保存在本机 profile 设置中；公开应用只发布配置界面与空实例列表。
-
-## 与上游项目的关系
-
-| 对象 | 上游作用 | Solar 规则 |
+| 能力 | 本仓库代码证据 | 重要边界 |
 | --- | --- | --- |
-| DeepSeek Harness | Runtime 与插件架构来源 | 只读上游输入；Solar 改动保留在本仓库 |
-| Desktop 祖先项目 | 产品 shell 设计来源 | 历史已导入；Solar 拥有当前 macOS 产品 |
-| 外部插件 | 独立插件发行版 | 未修改时保持 external，并锁定接受版本 |
-| 受管插件 | Solar 修改能力的上游或 fork 来源 | 在 `plugins/managed` 保留导入历史；绝不把 Solar 改动推送到上游 |
-| Code-as-Harness | 用户在 Codex 中创建的 `agent-development-governance` 项目 | 精确权威导入 `plugins/managed/governance`；禁止替换为通用概念或同名项目 |
+| Cordis 插件 runtime | Service、类型化 event、可逆 effect、scoped context、profile 组合 | 扩展由配置和生命周期驱动；加载顺序与 scope 仍会影响行为 |
+| 交互式 agent loop | [`ReactLoopAgent`](packages/core/agent-loop/src/agent.ts)、inbox 路由、turn/step 边界、streaming、steering、follow-up、cancellation | 默认 loop 可替换，但修改它会影响持久 event 语义 |
+| 类型化工具执行 | [`executeToolCalls`](packages/core/agent-loop/src/tool-calls.ts)、schema 校验、policy waterfall、有序结果提交、有界并行池 | 并行必须由每次调用的 safety classifier 显式声明；取消是 cooperative 的 |
+| Event-sourced Session | [`packages/core/session`](packages/core/session)、append-only event、surface projection、fork、compaction、crash repair | 当前 Session format 仍处于 prerelease；reader 会拒绝不支持的 required event |
+| Prompt 与 context 组装 | [`packages/core/system-prompt`](packages/core/system-prompt)、有序 section、变量、工具排序、runtime context | Prompt 或 schema 变化会破坏 KV-cache prefix，且模型可见内容必须能从 log 重建 |
+| LLM Provider seam | Direct DeepSeek 与多 Provider adapter、retry policy、token meter、routed request metadata | Provider default 与 replay metadata 绑定到精确的已解析模型路由 |
+| 执行能力族 | Filesystem、shell、持久 terminal、LSP、subprocess、sandbox、E2B、workflow、subagent、MCP-facing tool | Worker thread 与 `node:vm` 是隔离机制，不是安全边界 |
+| 持久编排 | 本地 `dsh-orchestratord`、Unix socket、SQLite WAL、immutable plan、event、审批、暂停/恢复/取消 | Daemon 是本地 single writer，不是分布式集群 scheduler |
+| Intent/context/capability 编译 | 带版本的 Service Definition 与确定性本地 Provider | Tool、MCP、secret 与 executable-guard capsule binding 在无 enforcement 时保持 fail closed |
+| Resident Operator 与 RLM | Quota-aware 分配、Resident Claude Code/Codex、有界递归 child、Continual Harness | Operator capability 更新在 dispatch 前或后续 turn generation 生效，不支持任意 in-turn hot swap |
+| Desktop 产品 | Thin Electron host、loopback Host/Web client、profile 切换、原生生命周期、package closure | 已接受的发行合同以 macOS 为先 |
+| 受管插件治理 | [`plugins/registry.yaml`](plugins/registry.yaml)、accepted revision、license evidence、native check、sealed-source 验证 | 未修改的可选插件仍属于外部 profile extension |
 
-已接受源码版本属于数据，不属于说明性文字：请查看 [`distribution/upstreams.yaml`](distribution/upstreams.yaml) 与 [`plugins/registry.yaml`](plugins/registry.yaml)。校验器会拒绝缺失路径、非法 revision、缺失许可证证据、未绑定的 subtree 导入、嵌套 gitlink、不匹配的治理 bundle 或无效 Desktop 标签合同。
+## 系统架构
 
-## 上游更新规则
-
-“最新”表示发现到可供评估的新 revision，绝不表示自动接受。每次核心、Desktop 祖先或受管插件更新都遵循以下顺序：
-
-1. **发现。** 记录当前接受 revision 与新的远端 revision，不修改 `solar`，也不改变运行中的安装。
-2. **分级。** 纯元数据变更为 `R0`，隔离的叶插件变更为 `R1`，涉及 Session、agent loop、sandbox、persistence、默认组合或 Desktop packaging 的变更为 `R2`。
-3. **机械导入。** 创建隔离候选 worktree，把上游移动与 Solar 适配分成独立 commit，保留上游历史并报告全部冲突。
-4. **兼容性分析。** 比较 manifest、API、event 与 persistence vocabulary、profile 组合、工具暴露、Desktop package closure 和用户可见行为。
-5. **资格审查。** 运行完整受影响组件套件、根产品合同、Code-as-Harness full verification 与 attestation，以及适用的 runtime 或 Desktop D00–D08 验收。
-6. **评审与合并。** 向受保护 `solar` 提交 PR，列出旧/新 revision、冲突决策、证据、回滚点和未解决限制。`R2` 必须由人批准；自动化永不直接合并。
-7. **记录接受。** 只有经过评审的 revision 才能更新 registry 或 upstream manifest。失败候选不会改变当前接受 revision。
-
-本流程的权威决策是 [ADR-003](docs/architecture/adr-003-managed-plugin-lifecycle.md) 与 [ADR-004](docs/architecture/adr-004-upstream-qualification.md)。上游自动化可以创建候选分支或报告，但没有发布 package、向上游仓库 push 或修改已安装应用的权限。
-
-## AI coding agent 开发规则
-
-在本仓库中，**Code-as-Harness 只表示用户在 Codex 中创建的项目：`agent-development-governance`**。它的权威 skill 与实现导入在 [`plugins/managed/governance`](plugins/managed/governance)；仓库入口 skill [`.agents/skills/dsh-code-as-harness`](.agents/skills/dsh-code-as-harness/SKILL.md) 把该权威绑定到 DSH。导出的 runner 与 digest manifest 位于 [`tools/agent-development-governance`](tools/agent-development-governance)。
-
-每个 AI coding agent 都必须遵循以下生命周期：
-
-1. 解析 `/Users/sihaoli/Projects` 下的物理 Git 根，读取根与最近的 `AGENTS.md`，再读取仓库 Code-as-Harness skill 及其导入的权威 skill 与合同。
-2. 基于受保护 `solar` 在隔离任务 worktree 工作；禁止把生成运行态、`/Applications/DSH Desktop.app` 或其他任务 worktree 当成源码修改。
-3. 编辑前运行 strict audit 和完整的 change-aware plan，保留 dirty worktree 所有权与精确组件边界。
-4. 实现最小而完整的改动；治理变更必须同时提供书面规则、可执行控制、接线、反例测试和 fail-closed 聚合。
-5. 针对完整 `origin/solar` 差异运行组件原生检查，以及 Code-as-Harness full verification 与 attestation。
-6. 提交已接受的字节，针对该精确 commit 重新验证，push 任务分支，再 fetch 并证明本地与远端 SHA 相等。
-7. 报告本地与远端 SHA、PR 或 release URL、门禁证据、适用的运行态证据，以及全部 `warn`、`error` 或 `pending`。创建 PR 或 artifact 不等于完成。
-
-从仓库根目录使用以下入口命令：
-
-```sh
-python3 tools/agent-development-governance/governance.py audit --project . --strict-warnings
-python3 tools/agent-development-governance/governance.py plan --project . --scope auto --level full --changed-from origin/solar
-python3 tools/agent-development-governance/governance.py verify --project . --scope auto --level full --changed-from origin/solar --report @git
-python3 tools/agent-development-governance/governance.py attest --project . --report @git --require-level full
+```mermaid
+flowchart TB
+  U[User / API] --> S[Desktop / Web / CLI / SDK]
+  S --> B[Profile Boot + Cordis Composition]
+  B --> A[Interactive Agent Runtime]
+  A --> P[Prompt + Context]
+  A --> L[LLM Providers]
+  A --> T[Typed Tool Runtime]
+  A --> E[Append-only Session Events]
+  T --> X[FS / Shell / Terminal / LSP / Sandbox / Workflow]
+  E --> SP[JSONL / SQLite Persistence + Projections]
+  A --> O[Orchestration Service]
+  O -->|Unix socket| D[dsh-orchestratord]
+  D --> C[Intent + Context + Capability Compilation]
+  C --> G[Certified TaskGraph + Sealed Plans]
+  D --> DB[(SQLite WAL + Receipts)]
+  D --> CAS[(Content-addressed Artifacts)]
+  D --> Q[Conflict-aware Scheduler]
+  Q --> M[Quota-aware Allocation]
+  M --> CC[Resident Claude Code]
+  M --> CX[Resident Codex]
+  M --> DS[DeepSeek API Fallback]
+  Q --> R[Bounded RLM + Continual Harness]
+  MP[Managed Plugins] --> B
+  GV[Code-as-Harness Governance] --> MP
+  GV --> REL[Protected PR + Release Evidence]
 ```
 
-Desktop 改动还必须遵循 [`products/desktop/AGENTS.md`](products/desktop/AGENTS.md) 中完整的 D00–D08 协议。纯迁移、纯文档或纯治理改动不会安装或重启应用，并且必须显式说明该例外。
+这里刻意分离了交互 transcript 与 orchestration run。普通 DSH Session 记录什么内容进入模型可见 turn、模型生成什么以及调用了哪些工具。TaskGraph run 则记录任务为何这样分解、每个 node 密封了哪些 context 与 authority、哪个物理 attempt 被接受、哪些 effect 可以重叠、产生了什么证据，以及 UI 或 Harness 重启后如何恢复。
+
+## Runtime 执行路径
+
+1. [`apps/cli/src/bin.ts`](apps/cli/src/bin.ts) 解析 invocation mode，并动态加载 profile、plugin、resident、remote 或 configuration 路径。
+2. [`apps/cli/src/profile-boot.ts`](apps/cli/src/profile-boot.ts) 解析 bundle、profile patch、home patch、命令 overlay、telemetry policy、immutable launch environment 与 bounded shutdown。
+3. Cordis 挂载配置树；每次注册由 fiber 所有，并随插件 scope 一同 unwind，而不是变成未记录的 process-global state。
+4. `ReactLoopAgent` 打开持久 turn、领取 inbox 输入、组装 prompt section 与可见 tool schema、从 Session log 推导 message history，并解析精确 LLM call。
+5. Stream chunk 与 canonical assistant message 分开追加，使 replay 同时保留 Provider fidelity 和稳定的模型可见 message。
+6. Tool call 依次经过 pre-policy、monotonic guard、around-execute wrapper、post-policy、definition finalization、持久 call/result 关联和 next-step context 插入；exclusive call 构成 barrier，显式安全的 call 使用 bounded rolling pool。
+7. 持久编排把 request 编译成带版本 IR，校验并认证 graph，密封 per-attempt plan，分发物理 Operator，持久化 receipt/event/artifact，并在重启后 reconcile 已接受或结果不确定的 attempt。
+
+## 持久 TaskGraph 控制平面
+
+| 阶段 | 主要实现 | 合同 |
+| --- | --- | --- |
+| Intent IR | `ctx.intentCompiler` | 生成带版本、Provider-neutral 的需求表示 |
+| Context packet | `ctx.contextCompiler` | 绑定受限 instruction 与 source/resource reference，而不是传递不受约束的 conversation dump |
+| Capability capsule | `ctx.capabilityCapsules` | 解析已接受 capability、effect、secret 与 enforcement generation；不支持的 authority fail closed |
+| Graph validation | [`validateGraph`](packages/orchestration/orchestration-local/src/graph.ts) | 拒绝非法 ID、dependency、cycle、budget、timeout 与缺少 completion-critical verification coverage 的 graph |
+| Plan certification | Canonical JSON 加 SHA-256 | 在物理 dispatch 前使 graph 与 node order 可按内容验证 |
+| Scheduling | Conflict 与 dependency algorithm | 在 graph、worker、scope、effect 与实时 capacity 上限内运行独立 node，而不是使用 phase-wide barrier |
+| Persistence | [`OrchestrationStore`](packages/orchestration/orchestration-local/src/store.ts) | SQLite WAL single-writer state、command idempotency receipt、attempt reconciliation、append-only event、content-addressed artifact |
+| Physical execution | Resident Operator 组合 | 把 Claude Code、Codex 与 metered fallback worker 作为同一 sealed-plan authority 下的路由 Provider |
+
+这个控制平面比 prompt 级 supervisor 更强，因为 scheduler state 与 evidence 不依赖任何单一模型对话；它也比普通 graph library 更重，因为 daemon、artifact lineage、receipt protocol、approval state、release identity 与 Desktop projection 共同形成的是产品 operating model，而不只是开发 API。
+
+## 关键技术设计
+
+### Cordis 插件 runtime
+
+Cordis 提供 service、可声明合并的类型化 event、waterfall/serial dispatch、child context 与可逆 effect。DSH package 通常把 capability 拆成 Service Definition、Service Provider 与 Consumer 三种角色。Consumer 依赖 definition 而不是某个本地 Provider，因此 filesystem、shell、sandbox、subagent、model 或 persistence 实现可以迁移，而不必 fork 所有调用方。
+
+### Event-sourced Session
+
+Session log 是模型 history 的事实来源。`turn/*`、`step/*`、`user/message`、`assistant/*` 与 `tool/*` 记录建立持久 enclosure 与 provenance；projection 推导模型 surface 和 UI state。所有模型可见输入必须能从 log 重建。Compaction 通过追加 replacement event 而不是删除历史来缩短 context；crash repair 会区分“工具从未被持久记录为已启动”和“attempt 已启动但外部结果未知”。
+
+### 类型化工具与 Code Mode
+
+Tool registry 统一拥有参数校验、output schema、rendering、policy interception、timeout/retry wrapping、concurrency classification 与 tool-owned UI presentation。Native function calling 和 Code Mode 使用同一 registry。Code Mode 把可见 definition 收敛到生成的 `run_code` transport 与 TypeScript/Python SDK，从而降低直接 schema 压力，同时不绕过执行 policy。
+
+### Prompt 与 context 组装
+
+Prompt 由插件拥有的有序 section、严格变量、动态 context 与可见工具全集组装。Scoped contribution 可以为单个 agent shadow global 内容。未知变量、非法 interpolation、多个 complete section、无效 tool order，或 runtime language 缺少 SDK renderer，都会在模型请求前明确失败。
+
+### 执行与 sandbox 边界
+
+Filesystem、subprocess、shell、terminal、LSP、workflow、code runtime 与 sandbox 是独立 capability family，但必须描述同一个一致的 execution world。本地 sandbox Provider 实现平台相关 confinement；远程隔离通过替换完整 Provider 实现。Cooperative cancellation 会等待所拥有工作 quiesce。Worker thread 与动态 `node:vm` execution 都不能视为 hostile-code containment。
+
+### Desktop 与受管插件
+
+Desktop 是 thin Electron host：Host runtime 仍然基于 Cordis，通过 loopback HTTP/WebSocket 提供普通 Web UI，并只公开受限 Desktop service，而不是把原始 Electron API 暴露给页面。根目录保持 pnpm workspace，[`products/desktop`](products/desktop) 则是隔离 Yarn workspace。受管插件保留 source history、accepted SHA、license、native test 与 packaged-byte closure，使 clean clone 能解释默认应用的每一项输入。
+
+## 代码地图
+
+| 区域 | 主要路径 | 关键作用 |
+| --- | --- | --- |
+| CLI 分发 | [`apps/cli/src/bin.ts`](apps/cli/src/bin.ts) | 在不预先耦合全部 surface 的前提下选择 runtime mode |
+| Profile boot | [`apps/cli/src/profile-boot.ts`](apps/cli/src/profile-boot.ts) | 管理有序组合、live patch reload、launch provenance 与 shutdown |
+| Agent state machine | [`packages/core/agent-loop/src/agent.ts`](packages/core/agent-loop/src/agent.ts) | 定义 turn/step admission、request construction、streaming、cancellation 与 continuation |
+| Tool scheduler | [`packages/core/agent-loop/src/tool-calls.ts`](packages/core/agent-loop/src/tool-calls.ts) | 只重叠显式安全的 dispatch body，同时保持模型顺序提交 |
+| Session model | [`packages/core/session`](packages/core/session) | 拥有持久 event vocabulary、surface replacement、fork 与 request reconstruction |
+| Tool ABI | [`packages/core/tools`](packages/core/tools) | 拥有 schema、policy、execution、result、Code Mode 与 presentation contract |
+| Prompt registry | [`packages/core/system-prompt`](packages/core/system-prompt) | 为每个 scoped request 组装精确 prompt/tool prefix |
+| Orchestration API | [`packages/orchestration/orchestration`](packages/orchestration/orchestration) | Provider-neutral TaskGraph、control、event、artifact 与 execution-plan type |
+| Graph algorithm | [`packages/orchestration/orchestration-local/src/graph.ts`](packages/orchestration/orchestration-local/src/graph.ts) | 校验 graph，并计算 dependency/effect conflict |
+| 持久 store | [`packages/orchestration/orchestration-local/src/store.ts`](packages/orchestration/orchestration-local/src/store.ts) | 实现 WAL state、migration、receipt、attempt、event 与 CAS artifact |
+| 本地 daemon | [`packages/orchestration/orchestration-local`](packages/orchestration/orchestration-local) | 唯一 orchestration writer 与物理 Operator coordinator |
+| Desktop 架构 | [`products/desktop/docs/architecture.en.md`](products/desktop/docs/architecture.en.md) | 说明 Electron、Host、Web client、profile、native runtime 与 packaging closure |
+| Plugin provenance | [`plugins/registry.yaml`](plugins/registry.yaml) | 记录 source、accepted revision、license evidence 与 native check |
+| 产品 identity | [`distribution/product.json`](distribution/product.json) | 定义 platform、Desktop version 与稳定 tag 合同 |
+
+## 与相关项目的对比
+
+| 项目族 | 相对 DSH 更强之处 | DSH 更强之处 |
+| --- | --- | --- |
+| [上游 DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | 上游差异更小、贡献路径更简单、社区基线更统一 | Solar Desktop、受管插件源码闭环、治理化发布、持久 TaskGraph daemon、Resident Operator 路由、Continual Harness |
+| [OpenAI Codex](https://github.com/openai/codex)、Claude Code、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[OpenCode](https://github.com/anomalyco/opencode) | 启动与运维复杂度更低；model-native coding loop 高度优化；其中多个项目提供更广平台打包 | 外置持久编排、显式 effect/read/write scope、Operator-independent receipt 与 artifact、Provider 路由、可复现产品组合 |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | 任意 Python graph、checkpoint、interrupt、deployment integration 与应用嵌入的 library ergonomics 更成熟 | 集成 coding workbench、event-sourced model transcript、tool ABI、本地物理 Operator、Desktop、受管插件、源码到发布治理 |
+| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) 与 AutoGen 谱系 | 多语言企业 API、分布式/应用托管模式、广泛 Provider 生态和标准协作 pattern | 更具主张的本地 coding 控制平面、可执行 profile 组合、per-node capability sealing、本地 Resident Operator、产品源码闭环 |
+| AI4Research、GPT Researcher、Open Deep Research、OpenJiuwen DeepSearch、Octos 等深度研究流水线 | 领域化来源采集、证据综合、报告规划、引用与发布 workflow | 通用可执行 Agent runtime、coding tool、持久 Session、底层 capability seam、物理 Operator 编排、Desktop 生命周期 |
+
+DSH 不应替换所有专业研究流水线。在 Solar 类系统中，它更适合作为研究 Operator 下方的执行底座：研究专用 Artifact schema、citation support、coverage evaluation、Report Planner、Chapter Writer 与发布仍应由领域 service 负责，而 DSH 提供有界执行、状态、恢复、Operator 路由、工具和治理。
+
+## 优势
+
+1. **Durability 同时覆盖模型与非模型状态。** Session event 重建模型可见 history；TaskGraph state、receipt 与 artifact 独立于 conversation 持久存在。
+2. **Authority 比 prompt-supervised 系统更显式。** Node 声明 dependency、read/write scope、effect budget、capability budget、secret、timeout、retry 与 verification criticality。
+3. **扩展点是真实 runtime contract。** Service、Provider、Consumer、scope、event、configuration 与 disposal 都在代码中表示，而不是隐藏在一个 supervisor prompt 内。
+4. **产品可复现。** Desktop package closure、受管插件源码、accepted revision、license evidence 与 release identity 一起被跟踪。
+5. **强 coding agent 仍是可替换资源。** Codex、Claude Code 与 metered worker 可由 policy 选择，但不会取得 global scheduler、evidence graph 或 release authority。
+
+## 限制与风险
+
+1. **上游分叉成本高。** Solar 必须持续验证 event vocabulary、persistence、package export、profile composition、Desktop 行为与受管插件。
+2. **系统包含多个 failure domain。** Cordis lifecycle、profile composition、Session persistence、orchestration daemon、物理 Operator、native helper 与 Desktop packaging 都需要独立诊断。
+3. **macOS 才是已接受产品面。** Cross-platform 代码路径或上游支持不等于 Solar 已支持 Windows/Linux Desktop release。
+4. **部分隔离机制不是安全边界。** Dynamic package、worker-authored workflow、本地 tool、MCP server 与第三方插件都需要 trusted-computing-base review。
+5. **没有分布式编排。** SQLite WAL 加 owner-local daemon 提供强本地恢复，不提供 horizontal availability 或 multi-region consensus。
+6. **Capsule enforcement 有意不完整。** 不支持的 tool/MCP/secret/guard binding 会拒绝而不是静默授权；这更安全，但限制可部署场景。
+7. **仓库与发布复杂度高。** Root pnpm、Desktop Yarn、Python/native build、sealed archive 与大量验证 gate 会提高变更延迟。
+
+## 何时选择 DSH
+
+### 适合场景
+
+- macOS 本地 AI 工作台需要同时组合 conversation、coding、tool、memory、Web/Desktop UI 与长任务。
+- 工作必须跨 UI/runtime 重启继续，并具备显式 receipt、artifact、approval、retry 与 indeterminate-outcome 处理。
+- Codex 或 Claude Code 可以执行受限 node，但不能拥有 global scheduler、evidence graph 或 release authority。
+- Plugin provenance、package closure 与 agent-generated code verification 是产品一级要求。
+
+### 优先其他基础的场景
+
+- 需求只是最小、model-native 的 terminal coding loop，几乎不需要外层编排。
+- 主要交付物是 cloud-native Python/.NET/Go workflow service，而不是本地 macOS workbench。
+- 必须立即具备多节点分布式调度、multi-region availability 或 enterprise hosted control plane。
+- 核心问题仅是领域化研究证据与报告生成，并不需要通用 coding/runtime 底座。
 
 <a id="run"></a><a id="run-from-source"></a>
 
-## 本地开发
+## 开发
 
-前置条件是 macOS、Git、Node.js `22.19+` 或 `24+`，以及 Corepack。根依赖图与 Desktop 依赖图有意保持分离。
+前置条件是 macOS、Git、Corepack，以及 Node.js `22.19+` 或 `24+`。根目录与 Desktop dependency graph 有意分离。
 
 ```sh
 git clone https://github.com/lisihao/deepseek-solar-harness.git
 cd deepseek-solar-harness
 corepack pnpm install --frozen-lockfile
 corepack pnpm run build
+corepack pnpm dsh web
 
 cd products/desktop
 corepack yarn install --immutable
 corepack yarn check
-```
-
-只有确实需要图形会话时才运行 Desktop 图形开发：
-
-```sh
-cd products/desktop
+# Run only in a graphical session:
 corepack yarn dev
 ```
 
-受管组件使用 [`plugins/registry.yaml`](plugins/registry.yaml) 中记录的命令。不要把所有插件装入同一个包管理 workspace；组件 lockfile 与原生检查是其接受来源的一部分。
+根验证包含 typecheck、lint、unit/coverage test、snapshot、E2E suite、runtime-closure check、generated catalog、documentation check、package constraint 与 release verification。Desktop 使用独立的 headless `yarn check`，应用交付范围内还执行 D00–D08 acceptance。真实 Provider test 需要对应 credential；被跳过的测试不得报告为通过。
 
-应用启动后，可在**设置 → 插件 → 远程模块**中配置个人网页。这些值写入本机 DSH profile，并有意排除在 Git、vendor 归档和公开产品默认值之外。
+## 验证与来源证明
 
-## 分支、提交与 Pull Request
+先阅读 [`AGENTS.md`](AGENTS.md) 获取长期仓库规则，再阅读 [`docs/architecture.md`](docs/architecture.md) 获取上游 runtime map。[`distribution/upstreams.yaml`](distribution/upstreams.yaml) 记录已接受 core/Desktop ancestry，[`plugins/registry.yaml`](plugins/registry.yaml) 记录受管插件 revision、license 与 native command。第三方 runtime disclosure 位于 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
-- `solar` 是受保护的集成分支。全部改动从隔离 worktree 的任务分支进入；禁止直接 push、force push 或删除该分支。
-- 使用 Conventional Commits，例如 `feat(desktop): ...`、`fix(memory-evolve): ...`、`sync(plugin/web-ui): ...` 或 `docs(readme): ...`。机械上游导入与 Solar 适配必须分成独立 commit。
-- 非 Draft PR 以 `solar` 为目标，引用需求或 Issue，标明受影响组件与风险等级，并说明用户可见行为和兼容性影响。
-- PR 为新增受管代码记录来源与许可证；为上游移动记录精确旧/新 revision；同时提供测试命令与结果、Code-as-Harness attestation、回滚信息和所有未解决限制。
-- Desktop 产品或 package 改动必须包含分配的 Semantic Version、source/package/running version 一致性、D00–D08 证据、已安装应用备份路径、process/listener/HTTP 证明、远端 SHA 与 release URL。非应用交付任务要说明这些检查为何不适用。
-- 必需 CI、conversation resolution、CODEOWNERS review 与 latest-push approval 必须通过。对于 `R2` 变更，编写代码的 agent 不能替代必需的人类批准。
-
-## 发布身份
-
-DSH Desktop 的版本独立于 DeepSeek Harness 和每个插件。Stable release 使用 annotated tag，并且必须精确匹配 `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$`，例如 `DSH-desktop-v2.6.0`。旧格式 `desktop-v2.4.3` 无效。
-
-每次发布都要标识 Solar commit、Desktop version、接受的核心与受管插件 revision、测试与 attestation 证据、artifact checksum、支持平台和回滚目标。只生成 `dist/`、只看到 Electron process，或在没有 installed-version 验收时 push 标签，都不构成 Desktop 交付。
-
-## 后续需求规划
-
-| 阶段 | 必需结果 |
-| --- | --- |
-| 仓库基础 | 受保护 `solar`、monorepo 边界、保留的 Desktop/插件历史、来源注册表、Code-as-Harness skill 与可执行控制 |
-| 上游监测 | 对核心、Desktop 祖先与全部受管插件进行定时只读发现；候选报告包含旧/新 revision 与风险等级 |
-| 候选接入 | 可复现候选 worktree、机械导入 commit、Solar 适配 commit、冲突与接口变更报告 |
-| 源码集成 | 只有同仓构建通过 closure、兼容性与回滚测试后，才替换临时公开或 sealed Desktop 输入 |
-| 产品验收 | 自动覆盖 Session/resume、首轮工具暴露、memory/context、受管插件、Desktop 生命周期、packaging 与更新路径 |
-| 发布自动化 | 签名并 notarize 的 macOS artifact、精确版本显示、checksum、release manifest、固定 GitHub Release、恢复与回滚证据 |
-| 产品扩展 | 只有 macOS 合同持续为绿色后，才评估其他平台、插件市场治理、远程访问、可观测性和更丰富的 agent 协作 |
-
-路线图工作必须继续保护前述目标。任何新功能只要削弱模型能力、Session 持久性、来源证明、发布身份或上游移动资格审查能力，就不能被接受。
-
-## 源码与运行态边界
-
-- 物理开发 checkout 与所有 linked worktree 位于 `/Users/sihaoli/Projects`。Documents 路径只用于兼容，禁止在其中存放物理 Git metadata、依赖或构建输出。
-- `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness` 与 `/Applications/DSH Desktop.app` 是生成的运行部署。禁止把它们当成源码编辑，也禁止把其中改动复制回 Git。
-- 凭据、profile、Session、memory、cache、`node_modules` 和构建 artifact 不进入源码导入。Fresh clone 必须能从已跟踪源码与声明输入重建产品。
-- 本仓库不授予部署 Mac mini 的权限。后续远端部署必须拉取已标识的 GitHub Release，并独立验证。
-
-## 文档与决策
-
-请先阅读 [`AGENTS.md`](AGENTS.md) 了解 agent 常驻规则，阅读 [`docs/architecture.md`](docs/architecture.md) 了解上游 runtime map，并通过 Solar ADR 了解下游所有权：[产品身份](docs/architecture/adr-001-downstream-solar-product.md)、[monorepo](docs/architecture/adr-002-monorepo.md)、[受管插件](docs/architecture/adr-003-managed-plugin-lifecycle.md)、[上游资格审查](docs/architecture/adr-004-upstream-qualification.md)与 [AI agent 权威](docs/architecture/adr-005-ai-agent-authority.md)。
+`solar` 是受保护分支。改动通过隔离 task branch 与 Pull Request 进入，并执行 change-aware Code-as-Harness audit、plan、verification、attestation、remote-SHA equality 以及适用的 runtime/release evidence。只有 PR 或 build artifact 不等于交付完成。
 
 ## 许可证
 
-核心仓库使用 [MIT](LICENSE) 许可证。导入组件保留自己的许可证文件与声明；[`plugins/registry.yaml`](plugins/registry.yaml) 记录已接受证据。第三方运行时依赖见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+核心仓库使用 [MIT](LICENSE) 许可证。导入组件保留自己的许可证证据与 notice。

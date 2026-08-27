@@ -1,180 +1,212 @@
 # DSH — DeepSeek Solar Harness
 
-English | [中文](README.zh.md)
+English | [简体中文](README.zh.md)
 
-**The Solar distribution of DeepSeek Harness, built as a macOS-first Desktop application and an extensible all-in-one AI workbench.**
+**A governed, plugin-composed agent runtime and macOS workbench with durable TaskGraph orchestration.**
 
-DeepSeek-Solar-Harness (`DSH`) is a downstream product based on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It keeps the upstream plugin architecture and agent runtime, then owns an independent Solar integration branch, Desktop product, managed plugins, release identity, and engineering governance. The project currently supports macOS; other operating systems are outside the accepted product contract.
+**Snapshot:** DeepSeek-Solar-Harness (`DSH`) is a community downstream distribution of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), not an official DeepSeek AI release. This analysis is pinned to `solar@a3cd4397efc5294704e9d7384515ab285f81bd06` on 2026-08-27 and DSH Desktop `3.6.6`. The accepted product contract currently covers macOS; machine-readable manifests remain authoritative after this snapshot.
 
-This repository is the complete development source for the Solar core, Desktop shell, and Solar-maintained plugins. It does not represent an official DeepSeek AI release, and Solar changes are not submitted back to the upstream repositories.
+## Positioning
 
-## Product goals
+DSH is not only a terminal coding agent and not only an agent-workflow library. It combines an interactive agent data plane, a persistent orchestration control plane, and a product/governance plane in one source repository.
 
-DSH aims to make one local application the daily control center for conversations, tools, sessions, memory, context, coding agents, collaboration, remote interfaces, and observable task execution. The product protects five properties while adding capabilities:
+The interactive plane retains DeepSeek Harness's Cordis model: agents, models, tools, sessions, UI surfaces, subprocesses, sandboxes, subagents, and workflows are mounted as lifecycle-managed plugins. The Solar control plane adds compiled intents, bounded context packets, certified TaskGraphs, capability budgets, conflict-aware scheduling, receipts, artifacts, approval, quota-aware physical-operator routing, and restart recovery. The product plane closes these sources into a macOS Desktop distribution with managed-plugin provenance and Code-as-Harness verification.
 
-1. **Model capability.** The packaged Anchored Standard preset begins the main agent and delegated workers with only `bash` and `str_replace_editor`, then exposes further tools on demand. This limits first-turn tool-schema pressure without removing later capability.
-2. **Continuity.** Session history, runtime ownership, memory, task progress, and resume behavior must survive ordinary UI navigation and process boundaries without silently changing the selected execution path.
-3. **Composability.** Core behavior, Desktop presentation, and product features remain Cordis plugins or explicit product inputs. A feature must not depend on an undocumented patch to generated runtime state.
-4. **Reproducibility.** Every Solar-owned source input has a repository path, accepted revision, license record, native tests, and reviewable history. Installed applications and user profiles are outputs, never source.
-5. **Controlled evolution.** Upstream changes are discovered as candidates, qualified against Solar contracts, and merged only after conflicts, compatibility, behavior, packaging, and governance evidence are accepted.
+The key architectural decision is to treat Codex and Claude Code as **physical operators** for an inner coding loop while DSH owns the outer control loop. DSH therefore optimizes for long-running work that must remain inspectable, resumable, authority-bounded, and reproducible rather than for the shortest path from one prompt to one answer.
 
-## Product characteristics
+## Implemented capability inventory
 
-- A macOS Desktop application with compatibility and advanced presentation modes, native lifecycle integration, isolated profiles, an embedded DSH terminal, update discovery, and explicit product-version display.
-- The DeepSeek Harness agent, model, tool, session, Web, sandbox, workflow, and plugin foundations, developed on the protected `solar` integration line.
-- A two-tool first-turn bootstrap for the accepted Anchored Standard product preset, including delegated AgentTeams workers, followed by on-demand capability discovery.
-- Smart and resident operator paths, AgentTeams collaboration, Mnemon memory, native DeepSeek V4 Flash Vision, Web billing, and the managed Web UI collection.
-- A sealed controlled-plugin suite for the Better Sidebar, GenUI, plugin diagnostics, model fallbacks, code graphs, and bounded stat, time, regex, and Markdown tools.
-- A repository-owned Code-as-Harness completion authority that selects native checks from the outgoing diff, records attestation evidence, and fails closed on missing or stale governance wiring.
-- One source repository for coordinated core, Desktop, and managed-plugin changes, while each component retains its native package manager and test contract.
+| Capability | Evidence in this repository | Important boundary |
+| --- | --- | --- |
+| Cordis plugin runtime | Services, typed events, reversible effects, scoped contexts, profile composition | Extension is configuration- and lifecycle-driven; load order and scope remain part of behavior |
+| Interactive agent loop | [`ReactLoopAgent`](packages/core/agent-loop/src/agent.ts), inbox routing, turn/step boundaries, streaming, steering, follow-ups, cancellation | The default loop is replaceable, but changing it affects durable event semantics |
+| Typed tool execution | [`executeToolCalls`](packages/core/agent-loop/src/tool-calls.ts), schema validation, policy waterfalls, ordered result commit, bounded parallel pools | Parallelism requires an explicit per-call safety classifier; cancellation is cooperative |
+| Event-sourced sessions | [`packages/core/session`](packages/core/session), append-only events, surface projection, forks, compaction, crash repair | Current session format remains pre-release and readers fail on unsupported required events |
+| Prompt and context assembly | [`packages/core/system-prompt`](packages/core/system-prompt), ordered sections, variables, tool ordering, runtime context | Prompt or schema changes can invalidate KV-cache prefixes and must remain reconstructable from the log |
+| LLM provider seam | Direct DeepSeek and multi-provider adapters, retry policy, token meter, routed request metadata | Provider defaults and replay metadata belong to the exact resolved model route |
+| Execution capabilities | Filesystem, shell, persistent terminal, LSP, subprocess, sandbox, E2B, workflow, subagent, MCP-facing tools | Worker threads and `node:vm` are isolation mechanisms, not security boundaries |
+| Durable orchestration | Local `dsh-orchestratord`, Unix socket, SQLite WAL, immutable plans, events, approvals, pause/resume/cancel | The daemon is a local single writer, not a distributed cluster scheduler |
+| Intent/context/capability compilation | Versioned service definitions and deterministic local providers | Tool, MCP, secret, and executable-guard capsule bindings remain fail-closed where enforcement is absent |
+| Resident operators and RLM | Quota-aware allocation, Resident Claude Code/Codex, bounded recursive children, Continual Harness | Operator capability updates apply before dispatch or at later turn generations, not arbitrary in-turn hot swap |
+| Desktop product | Thin Electron host, loopback Host/Web client, profile switching, native lifecycle, packaging closure | The accepted release contract is macOS-first |
+| Managed-plugin governance | [`plugins/registry.yaml`](plugins/registry.yaml), accepted revisions, license evidence, native checks, sealed-source verification | Unmodified optional plugins remain external profile extensions |
 
 ## Architecture
 
-DSH preserves the upstream Cordis principle that capabilities compose through plugins, services, events, and profile configuration. The Solar product adds a controlled repository and distribution layer around those runtime mechanisms.
-
-```text
-DeepSeek-Solar-Harness
-├── Core Harness (pnpm workspace)
-│   ├── agents, models, tools, sessions, workflows, sandboxes
-│   └── Web host/client and Cordis plugin runtime
-├── products/desktop (Yarn workspace)
-│   └── Electron shell, profiles, native lifecycle, packaging, product UI
-├── plugins/managed
-│   ├── governance (the user-created Code-as-Harness project)
-│   ├── agent-teams, mnemon, aegis, better-sidebar, genui
-│   ├── plugin-check, llm-fallbacks, codegraph, tool plugins
-│   └── web-billing, web-ui, plugin-console
-├── distribution
-│   └── product identity, Desktop version, tag contract, upstream records
-└── protected solar branch
-    └── reviewed task branches + CI + Code-as-Harness attestation
+```mermaid
+flowchart TB
+  U[User / API] --> S[Desktop / Web / CLI / SDK]
+  S --> B[Profile Boot + Cordis Composition]
+  B --> A[Interactive Agent Runtime]
+  A --> P[Prompt + Context]
+  A --> L[LLM Providers]
+  A --> T[Typed Tool Runtime]
+  A --> E[Append-only Session Events]
+  T --> X[FS / Shell / Terminal / LSP / Sandbox / Workflow]
+  E --> SP[JSONL / SQLite Persistence + Projections]
+  A --> O[Orchestration Service]
+  O -->|Unix socket| D[dsh-orchestratord]
+  D --> C[Intent + Context + Capability Compilation]
+  C --> G[Certified TaskGraph + Sealed Plans]
+  D --> DB[(SQLite WAL + Receipts)]
+  D --> CAS[(Content-addressed Artifacts)]
+  D --> Q[Conflict-aware Scheduler]
+  Q --> M[Quota-aware Allocation]
+  M --> CC[Resident Claude Code]
+  M --> CX[Resident Codex]
+  M --> DS[DeepSeek API Fallback]
+  Q --> R[Bounded RLM + Continual Harness]
+  MP[Managed Plugins] --> B
+  GV[Code-as-Harness Governance] --> MP
+  GV --> REL[Protected PR + Release Evidence]
 ```
 
-The core stays at the repository root so its pnpm workspace remains valid. Desktop lives at [`products/desktop`](products/desktop) as an independent Yarn workspace and must not contain another Harness checkout. Solar-owned components live under [`plugins/managed`](plugins/managed); [`plugins/registry.yaml`](plugins/registry.yaml) is their machine-readable source, revision, license, and test registry. Product and upstream metadata lives under [`distribution`](distribution).
+The deliberate separation is between the interactive transcript and the orchestration run. A DSH Session records what entered a model-visible turn, what the model produced, and which tools were called. A TaskGraph run records why work was decomposed, which context and authority were sealed for each node, which physical attempt was accepted, which effects may overlap, which evidence was produced, and how execution resumes after a UI or Harness restart.
 
-Desktop installs accepted sealed package inputs during its Yarn build, and every sealed package is mapped back to a tracked source package in [`products/desktop/dsh-plugin-desktop/vendor/manifest.json`](products/desktop/dsh-plugin-desktop/vendor/manifest.json). `yarn verify:vendor` extracts each archive manifest, compares every non-generated packaged file with its tracked source, and rejects untracked, missing, stale, or name/version-mismatched inputs. A fresh clone therefore contains the source for every package sealed into the default Desktop application.
+## Runtime execution path
 
-Optional plugins that a user installs into `~/.dsh` are profile extensions, not default Desktop build inputs. They stay external while unmodified; a plugin enters [`plugins/managed`](plugins/managed) with provenance and native tests when Solar changes or bundles it. Personal Remote Modules page names, URLs, and relay ports also stay in local profile settings: the public application ships the configuration surface with an empty instance list.
+1. [`apps/cli/src/bin.ts`](apps/cli/src/bin.ts) parses the invocation mode and dynamically loads the profile, plugin, resident, remote, or configuration path.
+2. [`apps/cli/src/profile-boot.ts`](apps/cli/src/profile-boot.ts) resolves bundles, profile patches, home patches, command overlays, telemetry policy, immutable launch environment, and bounded shutdown.
+3. Cordis mounts the configured tree; every registration is owned by a fiber and unwinds with its plugin scope rather than becoming undocumented process-global state.
+4. `ReactLoopAgent` opens a durable turn, claims inbox input, assembles prompt sections and visible tool schemas, derives message history from the Session log, and resolves the exact LLM call.
+5. Stream chunks and the canonical assistant message are appended separately so replay keeps both provider fidelity and a stable model-visible message.
+6. Tool calls pass through pre-policy, monotonic guards, around-execute wrappers, post-policy, definition finalization, durable call/result linking, and next-step context insertion; exclusive calls form barriers and explicitly safe calls use a bounded rolling pool.
+7. Durable orchestration compiles a request into versioned IRs, validates and certifies a graph, seals per-attempt plans, dispatches physical operators, persists receipts/events/artifacts, and reconciles accepted or uncertain attempts after restart.
 
-## Relationship with upstream projects
+## Durable TaskGraph control plane
 
-| Subject | Upstream role | Solar rule |
+| Stage | Main implementation | Contract |
 | --- | --- | --- |
-| DeepSeek Harness | Runtime and plugin-architecture origin | Read-only upstream input; Solar changes stay in this repository |
-| Desktop ancestor | Product-shell design origin | Imported history; Solar owns the current macOS product |
-| External plugins | Independent plugin releases | Remain external when unmodified; lock accepted versions |
-| Managed plugins | Upstream or fork source for Solar-modified capabilities | Preserve imported history under `plugins/managed`; never push Solar changes upstream |
-| Code-as-Harness | User-created Codex project `agent-development-governance` | Exact authority imported at `plugins/managed/governance`; never substitute a generic or same-named project |
+| Intent IR | `ctx.intentCompiler` | Produces a versioned, provider-neutral requirement representation |
+| Context packet | `ctx.contextCompiler` | Binds bounded instructions and source/resource references instead of forwarding an unrestricted conversation dump |
+| Capability capsule | `ctx.capabilityCapsules` | Resolves accepted capabilities, effects, secrets, and enforcement generations; unsupported authority fails closed |
+| Graph validation | [`validateGraph`](packages/orchestration/orchestration-local/src/graph.ts) | Rejects invalid IDs, dependencies, cycles, budgets, timeouts, and missing completion-critical verification coverage |
+| Plan certification | Canonical JSON plus SHA-256 | Makes the graph and node order content-verifiable before physical dispatch |
+| Scheduling | Conflict and dependency algorithms | Runs independent nodes up to graph, worker, scope, effect, and live-capacity bounds rather than using a phase-wide barrier |
+| Persistence | [`OrchestrationStore`](packages/orchestration/orchestration-local/src/store.ts) | SQLite WAL single-writer state, command idempotency receipts, attempt reconciliation, append-only events, content-addressed artifacts |
+| Physical execution | Resident operator composition | Treats Claude Code, Codex, and metered fallback workers as routed providers under the same sealed-plan authority |
 
-The accepted source revisions are data, not prose: consult [`distribution/upstreams.yaml`](distribution/upstreams.yaml) and [`plugins/registry.yaml`](plugins/registry.yaml). Their verifier rejects missing paths, malformed revisions, missing license evidence, unbound subtree imports, nested gitlinks, a mismatched governance bundle, or an invalid Desktop tag contract.
+The control plane is stronger than a prompt-level supervisor because scheduler state and evidence are outside any one model conversation. It is also heavier than a library graph: the daemon, artifact lineage, receipt protocol, approval states, release identity, and Desktop projections create a product operating model rather than only a developer API.
 
-## Upstream update policy
+## Key technical designs
 
-“Latest” means the newest revision detected for evaluation; it never means automatically accepted. Every core, Desktop ancestor, or managed-plugin update follows this sequence:
+### Cordis plugin runtime
 
-1. **Discover.** Record the current accepted revision and the new remote revision without changing `solar` or a running installation.
-2. **Classify.** Assign risk `R0` to metadata-only changes, `R1` to isolated leaf-plugin changes, and `R2` to session, agent loop, sandbox, persistence, default composition, or Desktop packaging changes.
-3. **Import mechanically.** Create an isolated candidate worktree and commit the upstream movement separately from Solar adaptations. Preserve upstream history and report every conflict.
-4. **Analyze compatibility.** Compare manifests, APIs, event and persistence vocabularies, profile composition, tool exposure, Desktop package closure, and user-visible behavior.
-5. **Qualify.** Run the complete affected component suites, the root product contract, Code-as-Harness full verification and attestation, and any applicable runtime or Desktop D00–D08 acceptance.
-6. **Review and merge.** Open a PR to protected `solar` with old/new revisions, conflict decisions, evidence, rollback point, and unresolved limits. `R2` requires human approval; automation never merges it directly.
-7. **Record acceptance.** Update the registry or upstream manifest only for the reviewed revision. Failed candidates leave the accepted revision unchanged.
+Cordis supplies services, merge-extensible typed events, waterfall/serial dispatch, child contexts, and reversible effects. DSH packages normally split a capability into Service Definition, Service Provider, and Consumer roles. Consumers depend on the definition rather than a concrete local provider, allowing filesystem, shell, sandbox, subagent, model, or persistence implementations to move without forking every caller.
 
-The governing decisions are [ADR-003](docs/architecture/adr-003-managed-plugin-lifecycle.md) and [ADR-004](docs/architecture/adr-004-upstream-qualification.md). Upstream automation may open candidate branches or reports, but it receives no authority to publish packages, push to upstream repositories, or mutate an installed application.
+### Event-sourced Session
 
-## Development with AI coding agents
+The Session log is the source of model history. `turn/*`, `step/*`, `user/message`, `assistant/*`, and `tool/*` records establish durable enclosure and provenance; projections derive the model surface and UI state. Model-visible input must be reconstructable from the log. Compaction appends replacement events instead of deleting history, while crash repair distinguishes a tool never durably started from an attempt whose external outcome is unknown.
 
-In this repository, **Code-as-Harness means only the project created by the user in Codex: `agent-development-governance`**. Its authoritative skill and implementation are imported under [`plugins/managed/governance`](plugins/managed/governance); the repository entry skill at [`.agents/skills/dsh-code-as-harness`](.agents/skills/dsh-code-as-harness/SKILL.md) binds that authority to DSH. The exported runner and digest manifest live under [`tools/agent-development-governance`](tools/agent-development-governance).
+### Typed tools and Code Mode
 
-Every AI coding agent must follow this lifecycle:
+The tool registry owns argument validation, output schemas, rendering, policy interception, timeout/retry wrapping, concurrency classification, and tool-owned UI presentation. Native function calling and Code Mode share the same registry. Code Mode collapses visible definitions behind a generated `run_code` transport and TypeScript/Python SDK, reducing direct schema pressure without bypassing execution policy.
 
-1. Resolve the physical Git root under `/Users/sihaoli/Projects`, read root and nearest `AGENTS.md` files, then read the repository Code-as-Harness skill and its imported authoritative skill and contract.
-2. Work in an isolated task worktree based on protected `solar`; never edit generated runtime state, `/Applications/DSH Desktop.app`, or another task's worktree as source.
-3. Run strict audit and a full change-aware plan before editing. Preserve dirty-worktree ownership and exact component boundaries.
-4. Implement the smallest complete change with its written rule, executable control, wiring, invalid-case test, and fail-closed aggregate when governance changes.
-5. Run component-native checks plus Code-as-Harness full verification and attestation against the complete `origin/solar` diff.
-6. Commit the accepted bytes, rerun verification against that exact commit, push the task branch, fetch it, and prove local and remote SHAs are equal.
-7. Report local and remote SHAs, PR or release URL, gate evidence, runtime evidence where applicable, and every `warn`, `error`, or `pending` result. Creating a PR or artifact is not completion.
+### Prompt and context assembly
 
-Use these entry commands from the repository root:
+Prompt text is assembled from ordered plugin-owned sections, strict variables, dynamic contexts, and the visible tool universe. Scoped contributions can shadow globals for one agent. Unknown variables, malformed interpolation, multiple complete sections, invalid tool ordering, or a runtime language without an SDK renderer fail loudly before a model request.
 
-```sh
-python3 tools/agent-development-governance/governance.py audit --project . --strict-warnings
-python3 tools/agent-development-governance/governance.py plan --project . --scope auto --level full --changed-from origin/solar
-python3 tools/agent-development-governance/governance.py verify --project . --scope auto --level full --changed-from origin/solar --report @git
-python3 tools/agent-development-governance/governance.py attest --project . --report @git --require-level full
-```
+### Execution and sandbox boundaries
 
-Desktop changes additionally follow the complete D00–D08 protocol in [`products/desktop/AGENTS.md`](products/desktop/AGENTS.md). A migration-only, documentation-only, or governance-only change does not install or restart the application and must state that exception explicitly.
+Filesystem, subprocess, shell, terminal, LSP, workflow, code runtime, and sandbox are separate capability families but must describe one coherent execution world. Local sandbox backends provide platform-specific confinement; remote isolation replaces complete providers. Cooperative cancellation waits for owned work to quiesce. Neither worker threads nor dynamic `node:vm` execution should be treated as hostile-code containment.
+
+### Desktop and managed plugins
+
+Desktop is a thin Electron host: the Host runtime remains Cordis-based, serves the normal Web UI over loopback HTTP/WebSocket, and exposes only bounded Desktop services rather than raw Electron APIs. The root remains a pnpm workspace while [`products/desktop`](products/desktop) is an isolated Yarn workspace. Managed plugins retain source history, accepted SHAs, licenses, native tests, and packaged-byte closure so a clean clone can explain the default application.
+
+## Code map
+
+| Area | Primary path | Why it matters |
+| --- | --- | --- |
+| CLI dispatch | [`apps/cli/src/bin.ts`](apps/cli/src/bin.ts) | Selects runtime mode without eagerly coupling every surface |
+| Profile boot | [`apps/cli/src/profile-boot.ts`](apps/cli/src/profile-boot.ts) | Owns ordered composition, live patch reload, launch provenance, and shutdown |
+| Agent state machine | [`packages/core/agent-loop/src/agent.ts`](packages/core/agent-loop/src/agent.ts) | Defines turn/step admission, request construction, streaming, cancellation, and continuation |
+| Tool scheduler | [`packages/core/agent-loop/src/tool-calls.ts`](packages/core/agent-loop/src/tool-calls.ts) | Preserves model order while overlapping only explicitly safe dispatch bodies |
+| Session model | [`packages/core/session`](packages/core/session) | Owns durable event vocabulary, surface replacement, forks, and request reconstruction |
+| Tool ABI | [`packages/core/tools`](packages/core/tools) | Owns schema, policy, execution, results, Code Mode, and presentation contracts |
+| Prompt registry | [`packages/core/system-prompt`](packages/core/system-prompt) | Assembles the exact prompt/tool prefix for each scoped request |
+| Orchestration API | [`packages/orchestration/orchestration`](packages/orchestration/orchestration) | Provider-neutral TaskGraph, control, event, artifact, and execution-plan types |
+| Graph algorithms | [`packages/orchestration/orchestration-local/src/graph.ts`](packages/orchestration/orchestration-local/src/graph.ts) | Validates graphs and computes dependency/effect conflicts |
+| Durable store | [`packages/orchestration/orchestration-local/src/store.ts`](packages/orchestration/orchestration-local/src/store.ts) | Implements WAL state, migrations, receipts, attempts, events, and CAS artifacts |
+| Local daemon | [`packages/orchestration/orchestration-local`](packages/orchestration/orchestration-local) | Sole orchestration writer and physical-operator coordinator |
+| Desktop architecture | [`products/desktop/docs/architecture.en.md`](products/desktop/docs/architecture.en.md) | Documents Electron, Host, Web client, profiles, native runtime, and packaging closure |
+| Plugin provenance | [`plugins/registry.yaml`](plugins/registry.yaml) | Records source, accepted revision, license evidence, and native checks |
+| Product identity | [`distribution/product.json`](distribution/product.json) | Defines platform, Desktop version, and stable tag contract |
+
+## Comparison with related projects
+
+| Project family | Where it is stronger than DSH | Where DSH is stronger |
+| --- | --- | --- |
+| [Upstream DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | Smaller upstream delta, simpler contribution path, broader community baseline | Solar Desktop, managed-plugin source closure, governed releases, persistent TaskGraph daemon, resident-operator routing, Continual Harness |
+| [OpenAI Codex](https://github.com/openai/codex), Claude Code, [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://github.com/anomalyco/opencode) | Lower startup and operational complexity; highly optimized model-native coding loops; broader platform packaging in several cases | External durable orchestration, explicit effect/read/write scopes, operator-independent receipts and artifacts, provider routing, reproducible product composition |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | Mature library ergonomics for arbitrary Python graphs, checkpoints, interrupts, deployment integrations, and application embedding | Integrated coding workbench, event-sourced model transcript, tool ABI, local physical operators, Desktop, managed plugins, source-to-release governance |
+| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) and AutoGen lineage | Multi-language enterprise APIs, distributed/application hosting patterns, broad provider ecosystem, standard collaboration patterns | More opinionated local coding control plane, executable profile composition, per-node capability sealing, local Resident operators, product-source closure |
+| Deep-research pipelines such as AI4Research, GPT Researcher, Open Deep Research, OpenJiuwen DeepSearch, and Octos | Domain-specific source collection, evidence synthesis, report planning, citation and publishing workflows | General executable agent runtime, coding tools, durable sessions, low-level capability seams, physical-operator orchestration, Desktop lifecycle |
+
+DSH should not replace every specialized research pipeline. Its best role for Solar-style systems is the execution substrate beneath research Operators: research-specific Artifact schemas, citation support, coverage evaluation, Report Planner, Chapter Writer, and publication remain domain services, while DSH supplies bounded execution, state, recovery, operator routing, tools, and governance.
+
+## Strengths
+
+1. **Durability spans model and non-model state.** Session events reconstruct model-visible history; TaskGraph state, receipts, and artifacts survive outside the conversation.
+2. **Authority is more explicit than in prompt-supervised systems.** Nodes declare dependencies, read/write scopes, effect budgets, capability budgets, secrets, timeout, retry, and verification criticality.
+3. **Extension points are real runtime contracts.** Services, providers, consumers, scopes, events, configuration, and disposal are represented in code rather than hidden in one supervisor prompt.
+4. **The product is reproducible.** Desktop package closure, managed-plugin sources, accepted revisions, license evidence, and release identity are tracked together.
+5. **Strong coding agents remain replaceable resources.** Codex, Claude Code, and metered workers can be selected by policy without surrendering outer-loop state authority to their private transcript.
+
+## Constraints and risks
+
+1. **Upstream divergence is expensive.** Solar must continuously qualify changes across event vocabularies, persistence, package exports, profile composition, Desktop behavior, and managed plugins.
+2. **The system has several failure domains.** Cordis lifecycle, profile composition, Session persistence, orchestration daemon, physical operators, native helpers, and Desktop packaging each require independent diagnostics.
+3. **macOS is the accepted product surface.** Cross-platform code paths or upstream support do not imply a Solar-supported Windows/Linux Desktop release.
+4. **Some isolation mechanisms are not security boundaries.** Dynamic packages, worker-authored workflows, local tools, MCP servers, and third-party plugins require a trusted-computing-base review.
+5. **Distributed orchestration is absent.** SQLite WAL plus an owner-local daemon provides strong local recovery, not horizontal availability or multi-region consensus.
+6. **Capsule enforcement is intentionally incomplete.** Unsupported tool/MCP/secret/guard bindings reject rather than silently grant authority, which is safer but limits deployable scenarios.
+7. **Repository and release complexity is high.** Root pnpm, Desktop Yarn, Python/native builds, sealed archives, and many verification gates increase change latency.
+
+## When to choose DSH
+
+### Good fit
+
+- A macOS-local AI workbench must combine conversation, coding, tools, memory, Web/Desktop UI, and long-running tasks.
+- Work must continue across UI/runtime restarts with explicit receipts, artifacts, approval, retries, and indeterminate-outcome handling.
+- Codex or Claude Code should execute bounded nodes but must not own the global scheduler, evidence graph, or release authority.
+- Plugin provenance, package closure, and agent-generated code verification are first-class product requirements.
+
+### Prefer another base
+
+- The requirement is a minimal, model-native terminal coding loop with little outer orchestration.
+- The primary deliverable is a cloud-native Python/.NET/Go workflow service rather than a local macOS workbench.
+- Immediate multi-node distributed scheduling, multi-region availability, or enterprise hosted control planes are mandatory.
+- The core problem is domain-specific research evidence and report generation and no general coding/runtime substrate is needed.
 
 <a id="run"></a><a id="run-from-source"></a>
 
-## Local development
+## Development
 
-Prerequisites are macOS, Git, Node.js `22.19+` or `24+`, and Corepack. The root and Desktop dependency graphs remain intentionally separate.
+Prerequisites are macOS, Git, Corepack, and Node.js `22.19+` or `24+`. The root and Desktop dependency graphs are intentionally separate.
 
 ```sh
 git clone https://github.com/lisihao/deepseek-solar-harness.git
 cd deepseek-solar-harness
 corepack pnpm install --frozen-lockfile
 corepack pnpm run build
+corepack pnpm dsh web
 
 cd products/desktop
 corepack yarn install --immutable
 corepack yarn check
-```
-
-Run graphical Desktop development only when a graphical session is intended:
-
-```sh
-cd products/desktop
+# Run only in a graphical session:
 corepack yarn dev
 ```
 
-Managed components use the commands recorded in [`plugins/registry.yaml`](plugins/registry.yaml). Do not install every plugin into one package-manager workspace: component lockfiles and native checks remain part of their accepted provenance.
+Root validation includes type checking, lint, unit/coverage tests, snapshots, E2E suites, runtime-closure checks, generated catalogs, documentation checks, package constraints, and release verification. Desktop uses its own headless `yarn check` plus D00–D08 acceptance where application delivery is in scope. Real-provider tests require the corresponding credentials and must not be reported as passed when skipped.
 
-Configure personal Web pages after launch under **Settings → Plugins → Remote Modules**. Those values are written to the local DSH profile and are intentionally absent from Git, vendor archives, and public product defaults.
+## Verification and provenance
 
-## Branches, commits, and pull requests
+Start with [`AGENTS.md`](AGENTS.md) for standing repository rules and [`docs/architecture.md`](docs/architecture.md) for the upstream runtime map. [`distribution/upstreams.yaml`](distribution/upstreams.yaml) records accepted core/Desktop ancestry, while [`plugins/registry.yaml`](plugins/registry.yaml) records managed-plugin revisions, licenses, and native commands. Third-party runtime disclosures are in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-- `solar` is the protected integration branch. All changes enter through a task branch in an isolated worktree; direct pushes, force pushes, and branch deletion are forbidden.
-- Use Conventional Commits such as `feat(desktop): ...`, `fix(memory-evolve): ...`, `sync(plugin/web-ui): ...`, or `docs(readme): ...`. Mechanical upstream imports and Solar adaptations must be separate commits.
-- A non-draft PR targets `solar`, references its requirement or issue, identifies affected components and risk class, and explains user-visible behavior and compatibility impact.
-- The PR records source and license provenance for new managed code, exact old/new revisions for an upstream movement, test commands and results, a Code-as-Harness attestation, rollback information, and any unresolved limitation.
-- Desktop product or package changes include the assigned Semantic Version, source/package/running version equality, D00–D08 evidence, installed-app backup path, process/listener/HTTP proof, remote SHA, and release URL. A task outside app-delivery scope states why these checks do not apply.
-- Required CI, conversation resolution, CODEOWNERS review, and the latest-push approval must pass. The authoring agent cannot replace required human approval for an `R2` change.
-
-## Release identity
-
-DSH Desktop versions independently from DeepSeek Harness and every plugin. A stable release uses an annotated tag that matches exactly `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$`, for example `DSH-desktop-v2.6.0`. The old `desktop-v2.4.3` shape is invalid.
-
-A release identifies the Solar commit, Desktop version, accepted core and managed-plugin revisions, test and attestation evidence, artifact checksums, supported platform, and rollback target. Building `dist/`, observing an Electron process, or pushing a tag without installed-version acceptance does not constitute a Desktop delivery.
-
-## Development roadmap
-
-| Phase | Required outcome |
-| --- | --- |
-| Repository foundation | Protected `solar`, monorepo boundaries, preserved Desktop/plugin history, provenance registry, Code-as-Harness skill and executable controls |
-| Upstream watch | Scheduled read-only discovery for core, Desktop ancestor, and every managed plugin; candidate report with old/new revisions and risk class |
-| Candidate intake | Reproducible candidate worktree, mechanical import commit, Solar adaptation commit, conflict and interface-change report |
-| Source integration | Replace temporary published or sealed Desktop inputs only where same-repository builds pass closure, compatibility, and rollback tests |
-| Product acceptance | Automated session/resume, first-turn tool exposure, memory/context, managed-plugin, Desktop lifecycle, packaging, and update-path scenarios |
-| Release automation | Signed and notarized macOS artifact, exact version display, checksums, release manifest, fixed GitHub Release, recovery and rollback evidence |
-| Product expansion | Evaluate additional platforms, plugin marketplace curation, remote access, observability, and richer agent collaboration only after macOS contracts remain green |
-
-Roadmap work must preserve the protection goals above. A new feature is not accepted when it weakens model capability, session durability, provenance, release identity, or the ability to qualify upstream movement.
-
-## Source and runtime boundaries
-
-- The physical development checkout and every linked worktree live under `/Users/sihaoli/Projects`. The Documents path is compatibility-only and must not contain physical Git metadata, dependencies, or build output.
-- `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness` and `/Applications/DSH Desktop.app` are generated runtime deployments. Never edit them as source or copy their changes back into Git.
-- Credentials, profiles, sessions, memories, caches, `node_modules`, and build artifacts never enter source imports. A fresh clone must reconstruct the product from tracked sources and declared inputs.
-- This repository never grants authority to deploy a Mac mini. A later remote deployment pulls an identified GitHub Release and verifies it independently.
-
-## Documentation and decisions
-
-Start with [`AGENTS.md`](AGENTS.md) for standing agent rules, [`docs/architecture.md`](docs/architecture.md) for the upstream runtime map, and the Solar ADRs for downstream ownership: [product identity](docs/architecture/adr-001-downstream-solar-product.md), [monorepo](docs/architecture/adr-002-monorepo.md), [managed plugins](docs/architecture/adr-003-managed-plugin-lifecycle.md), [upstream qualification](docs/architecture/adr-004-upstream-qualification.md), and [AI agent authority](docs/architecture/adr-005-ai-agent-authority.md).
+`solar` is protected. Changes use isolated task branches and Pull Requests, with change-aware Code-as-Harness audit, plan, verification, attestation, remote-SHA equality, and applicable runtime/release evidence. A PR or build artifact alone is not delivery.
 
 ## License
 
-The core repository is licensed under [MIT](LICENSE). Imported components retain their own license files and declarations; [`plugins/registry.yaml`](plugins/registry.yaml) records the accepted evidence. Third-party runtime dependencies are disclosed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+The core repository is licensed under [MIT](LICENSE). Imported components retain their own license evidence and notices.
