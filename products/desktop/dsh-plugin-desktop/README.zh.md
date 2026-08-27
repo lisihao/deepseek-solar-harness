@@ -16,7 +16,9 @@ DSH Desktop 保存一个带名称的 Product Server 列表和一项当前 Server
 
 Electron 持有原生 **Deployment** 菜单，以及当前 Frontend Server 无法加载时显示的本地恢复页面。两处都提供不依赖远程 Client bundle 的 **Use Local Server** 与 **Connect to Remote Server…**。Desktop 页脚始终直接暴露 Server 配置；在 Frontend 角色下还会额外暴露 **Use Local Server**。
 
-同一原生窗口还拥有可选的后台 Git commit 同步。每台设备分别配置本地仓库路径、作为权威的 GitHub remote、分支、同步方向、间隔，以及可选的 Tailscale／SSH 加速 remote。同步会拒绝脏工作树或错误分支，只对已提交 ref 执行 fast-forward 或 push；遇到分叉时报告冲突，不会自行 merge。加速 remote 只可预取 Git object；GitHub 始终是接受结果的权威，而且加速路径失败不会阻断权威路径。该机制绝不复制存活的 DSH Session、SQLite 或 WAL 文件：运行进展仍是 Server 投影，迁移运行权威必须另行显式执行。
+同一原生窗口还拥有可选的后台 Git commit 同步。每台设备分别配置本地仓库路径、作为权威的 GitHub remote、分支、同步方向、间隔，以及可选的 Tailscale／SSH 加速 remote。同步会拒绝脏工作树或错误分支，只对已提交 ref 执行 fast-forward 或 push；遇到分叉时报告冲突，不会自行 merge。加速 remote 只可预取 Git object；GitHub 始终是接受结果的权威，而且加速路径失败不会阻断权威路径。
+
+该窗口还提供按 revision 去重的后台 Session 进展交接。Frontend 可以把当前 Product Server 上完整、事件边界闭合的 Session 副本拉取到受保护的暂存箱，切换到本机 Server 后再导入；正在运行的本机 Server 也可对同样的不可变日志前缀执行推送或拉取。控制器按 Server 记录 revision，未变化的日志不会重复传输。它不会复制 SQLite 或 WAL 文件，不复制未闭合的回合，也不会建立第二个活跃写者：存活任务继续由原 Server 持有，通过现有 snapshot/cursor 流实时观察。
 
 desktop package 拥有普通 Host 与 Web Client 两个 face。它的 Client face 会校验 Host 提供的模式、平台与产品版本 marker。两种模式都会在窗口内容下方的保留区域挂载一条不可交互的单行产品标记，并继续把 Desktop 操作放在普通 additive slot 中；兼容模式随后停止，不提供 layout service 或 root 呈现，高级模式则安装下文所述的 desktop layout service 与 root 呈现。两种模式下，第三方 Web client 都继续使用普通 DSH 模块图。
 

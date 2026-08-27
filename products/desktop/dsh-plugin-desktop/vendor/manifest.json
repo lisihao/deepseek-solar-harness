@@ -115,6 +115,11 @@
       "name": "Prime strict RLM execution semantics",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "bbcdabc830c8b1fd88d2946a8967af10ede78024"
+    },
+    {
+      "name": "Prefix-safe Session replicas and authenticated remote handoff",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "ce498eb4979688232e56204da191b0559b63ead3"
     }
   ],
   "sourcePackages": {
@@ -157,6 +162,7 @@
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "packages/orchestration/rlm-runtime/package.json",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "packages/orchestration/rlm-runtime-local/package.json",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "packages/session/session-projection-cache/package.json",
+    "dsh-packages/deepseek-ai-dsh-session-persistence-0.1.0-rc.5.tgz": "packages/session/session-persistence/package.json",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "packages/subagent/subagent-codex/package.json",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "packages/core/system-prompt/package.json",
     "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "packages/orchestration/tool-orchestration/package.json",
@@ -206,7 +212,7 @@
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "31feed6a473d3fcf9bcd4a44970b6c7406f0fa6b4b81a5361984d7ae97c33095",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "1e8eb9704f1039e9de0f2e6b476af6714d6d74afe59e8c9ec4d34b38e963c773",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "de18e4c1d12cbad02d5ef62aeecf99f7dea59abe421e34d65c97e262496400c2",
-    "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "15652a37678dff90c82733a4761d199e807c1335b172d2fce0f56bf808d896da",
+    "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "813af71a95b6912da05dcfada4d2eea858094f866db3f86567c1a0b757f9baeb",
     "dsh-packages/deepseek-ai-dsh-client-hmr-0.1.0-rc.5.tgz": "61785ac44be3634d9bd85598cd8e51e87a3b4f2692cd829ffe0a9802a67b642f",
     "dsh-packages/deepseek-ai-dsh-client-modules-0.1.0-rc.5.tgz": "427973f13e45e39b16bcccf4febf6fec60b35f0578ac1fb245f715effa35144c",
     "dsh-packages/deepseek-ai-dsh-client-runtime-0.1.0-rc.5.tgz": "4333227567a545252a4a3d515e91f7df9156c8614c0a098d9c79c372f89fd597",
@@ -218,6 +224,7 @@
     "dsh-packages/deepseek-ai-dsh-host-webserver-0.1.0-rc.5.tgz": "6349e28b2ad740163df7558cfa73738f09768bf38d950ef4b9aa1bdbd33100c8",
     "dsh-packages/deepseek-ai-dsh-home-paths-0.1.0-rc.5.tgz": "7c77e37ff3cf29d2c4132e81545ad1dc1f55c17ef943ebe09a910e12acc774c1",
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
+    "dsh-packages/deepseek-ai-dsh-session-persistence-0.1.0-rc.5.tgz": "1480e272e75a35f2fe4ba33acbf45ef1d06440513bf60f8cbfac73273e00016b",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "18e0f88aefe69709e3bf46971bcf99f1e5996e09d9639461b791182c8ed355af",
     "dsh-packages/deepseek-ai-dsh-intent-compiler-0.1.0-rc.5.tgz": "0b19f48fc167abd9b2b2dc22fd483a7cd3c755f9053fce772593ae26eeaeb689",
     "dsh-packages/deepseek-ai-dsh-llm-0.1.0-rc.5.tgz": "5e923f4374fc6f1a15ddd53b3242360af6e6a57aee7fa13085fc2bb5f89b2818",

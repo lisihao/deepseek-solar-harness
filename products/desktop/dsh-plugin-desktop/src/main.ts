@@ -14,6 +14,7 @@ import {
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
+import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { installDesktopPnpmRuntime } from './desktop-runtime-environment.ts'
 import { ElectronDesktopRuntime } from './electron-runtime.ts'
 import { installProfilePackageResolver } from './module-resolution.ts'
@@ -28,6 +29,7 @@ import {
 import { parseFrontendBillingBaseline, type FrontendBillingBaseline } from './frontend-billing.ts'
 import { FrontendSetupController } from './frontend-setup.ts'
 import { DesktopGitSyncController } from './git-sync.ts'
+import { DesktopRemoteSessionClient, DesktopSessionSyncController } from './session-sync.ts'
 import {
   beginDesktopProfileStartup,
   listDesktopProfiles,
@@ -99,6 +101,7 @@ async function start(): Promise<void> {
   let frontendAccess: DesktopRemoteAccessSession | undefined
   let frontendSetup: FrontendSetupController | undefined
   let gitSync: DesktopGitSyncController | undefined
+  let sessionSync: DesktopSessionSyncController | undefined
   let deploymentStore: DesktopDeploymentStateStore | undefined
   let deploymentState: DesktopDeploymentState = {
     version: 4,
@@ -149,6 +152,7 @@ async function start(): Promise<void> {
             frontendAccess?.stop()
             frontendSetup?.dispose()
             gitSync?.stop()
+            sessionSync?.stop()
             disposeNativeProductRuntime?.()
           } finally {
             disposePnpmRuntime?.()
@@ -183,6 +187,7 @@ async function start(): Promise<void> {
           frontendAccess?.stop()
           frontendSetup?.dispose()
           gitSync?.stop()
+          sessionSync?.stop()
           disposeNativeProductRuntime?.()
         } finally {
           disposePnpmRuntime?.()
@@ -202,9 +207,36 @@ async function start(): Promise<void> {
     deploymentState = await deploymentStore.load()
     gitSync = new DesktopGitSyncController(app.getPath('userData'))
     await gitSync.start()
+    sessionSync = new DesktopSessionSyncController(app.getPath('userData'), {
+      remote: async () => {
+        const serverId = deploymentState.activeServerId
+        if (serverId === undefined) return undefined
+        const server = deploymentState.servers.find(candidate => candidate.id === serverId)
+        if (server === undefined) return undefined
+        const accessToken = server.authMode === 'paired'
+          ? frontendAccess?.accessToken() ?? (await deploymentStore!.exchange(server)).accessToken
+          : undefined
+        return {
+          serverId,
+          client: new DesktopRemoteSessionClient(
+            server.endpoint,
+            accessToken,
+            (url, init) => net.fetch(String(url), init),
+          ),
+        }
+      },
+      local: () => current?.get('sessionPersistence') as SessionPersistence | undefined,
+      onError: (cause) => {
+        process.stderr.write(
+          `${BIN_NAME}: Session sync failed: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+      },
+    })
+    await sessionSync.start()
     frontendSetup = new FrontendSetupController(
       deploymentStore,
       gitSync,
+      sessionSync,
       () => deploymentState,
       () => runtime.requestRestart(),
     )
@@ -368,6 +400,12 @@ async function start(): Promise<void> {
       throw cause
     })
     current = ctx
+    const imported = await sessionSync.importInbox()
+    for (const result of imported) {
+      if (result.status === 'error') {
+        process.stderr.write(`${BIN_NAME}: unable to import staged Session: ${result.message}\n`)
+      }
+    }
     runtime.configureTerminal({
       profileName: activeProfileName,
       profileDir: prepared.profile.dir,

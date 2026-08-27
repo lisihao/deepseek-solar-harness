@@ -9,6 +9,9 @@ import {
   DesktopDeploymentStateStore,
 } from './deployment-state.ts'
 import { DesktopGitSyncController, type DesktopGitSyncConfigureRequest } from './git-sync.ts'
+import {
+  DesktopSessionSyncController, type DesktopSessionSyncConfigureRequest,
+} from './session-sync.ts'
 
 const DESCRIBE_CHANNEL = 'dsh-desktop:frontend-setup:describe'
 const CONFIGURE_CHANNEL = 'dsh-desktop:frontend-setup:configure'
@@ -17,6 +20,8 @@ const REMOVE_CHANNEL = 'dsh-desktop:frontend-setup:remove'
 const USE_SERVER_CHANNEL = 'dsh-desktop:frontend-setup:use-server'
 const GIT_SYNC_CONFIGURE_CHANNEL = 'dsh-desktop:frontend-setup:git-sync-configure'
 const GIT_SYNC_RUN_CHANNEL = 'dsh-desktop:frontend-setup:git-sync-run'
+const SESSION_SYNC_CONFIGURE_CHANNEL = 'dsh-desktop:frontend-setup:session-sync-configure'
+const SESSION_SYNC_RUN_CHANNEL = 'dsh-desktop:frontend-setup:session-sync-run'
 const CLOSE_CHANNEL = 'dsh-desktop:frontend-setup:close'
 
 export class FrontendSetupController {
@@ -25,6 +30,7 @@ export class FrontendSetupController {
   constructor(
     private readonly store: DesktopDeploymentStateStore,
     private readonly gitSync: DesktopGitSyncController,
+    private readonly sessionSync: DesktopSessionSyncController,
     private readonly readState: () => DesktopDeploymentState,
     private readonly restart: () => Promise<void>,
   ) {
@@ -45,6 +51,7 @@ export class FrontendSetupController {
         endpoint: active?.endpoint ?? '',
         deviceName: active?.deviceName ?? '',
         gitSync: this.gitSync.snapshot(),
+        sessionSync: this.sessionSync.snapshot(),
       }
     })
     ipcMain.handle(CONFIGURE_CHANNEL, async (event, value: unknown) => {
@@ -74,6 +81,14 @@ export class FrontendSetupController {
     ipcMain.handle(GIT_SYNC_RUN_CHANNEL, async (event) => {
       this.assertSender(event.sender.id)
       return await this.gitSync.runNow()
+    })
+    ipcMain.handle(SESSION_SYNC_CONFIGURE_CHANNEL, async (event, value: unknown) => {
+      this.assertSender(event.sender.id)
+      return await this.sessionSync.configure(value as DesktopSessionSyncConfigureRequest)
+    })
+    ipcMain.handle(SESSION_SYNC_RUN_CHANNEL, async (event) => {
+      this.assertSender(event.sender.id)
+      return await this.sessionSync.runNow()
     })
     ipcMain.on(CLOSE_CHANNEL, (event) => {
       this.assertSender(event.sender.id)
@@ -119,6 +134,8 @@ export class FrontendSetupController {
     ipcMain.removeHandler(USE_SERVER_CHANNEL)
     ipcMain.removeHandler(GIT_SYNC_CONFIGURE_CHANNEL)
     ipcMain.removeHandler(GIT_SYNC_RUN_CHANNEL)
+    ipcMain.removeHandler(SESSION_SYNC_CONFIGURE_CHANNEL)
+    ipcMain.removeHandler(SESSION_SYNC_RUN_CHANNEL)
     ipcMain.removeAllListeners(CLOSE_CHANNEL)
     this.window?.destroy()
     this.window = undefined
@@ -210,9 +227,16 @@ function frontendSetupPage(): string {
   </div>
   <div class="actions"><button class="primary" id="sync-save" type="button">保存同步设置</button></div>
   <div id="sync-status">尚未运行 Git 同步。</div>
+  <h2>后台 Session 进展同步</h2>
+  <p>存活回合由 Frontend 实时查看；这里只快进复制已经闭合的 Session 日志。Frontend 模式会先安全暂存，切到本机 Server 后导入；不会复制 SQLite/WAL，也不会建立两个写者。</p>
+  <div class="inline"><input id="session-sync-enabled" type="checkbox"><label for="session-sync-enabled">启动后台同步</label><label for="session-sync-interval">间隔（分钟）</label><input id="session-sync-interval" type="number" min="1" max="1440" value="10"></div>
+  <label for="session-sync-direction">方向</label>
+  <select id="session-sync-direction"><option value="pull">远端 → 本机</option><option value="push">本机 → 远端</option><option value="bidirectional">双向快进</option></select>
+  <div class="actions"><button class="primary" id="session-sync-save" type="button">保存 Session 同步</button><button class="secondary" id="session-sync-run" type="button">立即同步</button></div>
+  <div id="session-sync-status">尚未运行 Session 同步。</div>
   <div id="status">正在读取当前配置…</div>
   <script>
-    const api=window.dshFrontendSetup,status=document.getElementById('status'),servers=document.getElementById('servers'),label=document.getElementById('label'),endpoint=document.getElementById('endpoint'),code=document.getElementById('code'),device=document.getElementById('device'),form=document.getElementById('form'),syncEnabled=document.getElementById('sync-enabled'),syncInterval=document.getElementById('sync-interval'),syncRepositoriesSelect=document.getElementById('sync-repositories'),syncLabel=document.getElementById('sync-label'),syncPath=document.getElementById('sync-path'),syncAuthority=document.getElementById('sync-authority'),syncBranch=document.getElementById('sync-branch'),syncDirection=document.getElementById('sync-direction'),syncAccelerator=document.getElementById('sync-accelerator'),syncStatus=document.getElementById('sync-status');let current={role:'server',activeServerId:'',servers:[]},editingId='',syncRepositories=[],editingSyncId='';
+    const api=window.dshFrontendSetup,status=document.getElementById('status'),servers=document.getElementById('servers'),label=document.getElementById('label'),endpoint=document.getElementById('endpoint'),code=document.getElementById('code'),device=document.getElementById('device'),form=document.getElementById('form'),syncEnabled=document.getElementById('sync-enabled'),syncInterval=document.getElementById('sync-interval'),syncRepositoriesSelect=document.getElementById('sync-repositories'),syncLabel=document.getElementById('sync-label'),syncPath=document.getElementById('sync-path'),syncAuthority=document.getElementById('sync-authority'),syncBranch=document.getElementById('sync-branch'),syncDirection=document.getElementById('sync-direction'),syncAccelerator=document.getElementById('sync-accelerator'),syncStatus=document.getElementById('sync-status'),sessionSyncEnabled=document.getElementById('session-sync-enabled'),sessionSyncInterval=document.getElementById('session-sync-interval'),sessionSyncDirection=document.getElementById('session-sync-direction'),sessionSyncStatus=document.getElementById('session-sync-status');let current={role:'server',activeServerId:'',servers:[]},editingId='',syncRepositories=[],editingSyncId='';
     const updateAuth=()=>{try{const url=new URL(endpoint.value),host=url.hostname,loopback=host==='127.0.0.1'||host==='localhost'||host==='[::1]',saved=current.servers.find(item=>item.id===editingId),reuse=saved?.authMode==='paired'&&saved.endpoint===url.href&&saved.deviceName===device.value;code.required=!loopback&&!reuse;code.disabled=loopback;code.placeholder=loopback?'SSH 隧道已认证，无需配对码':reuse?'凭据未变化，留空即可复用':'请输入 Server 生成的 8 位配对码'}catch{code.required=true;code.disabled=false}};
     const loadServer=id=>{const server=current.servers.find(item=>item.id===id);editingId=server?.id||'';label.value=server?.label||'';endpoint.value=server?.endpoint||'';device.value=server?.deviceName||'MacBook';code.value='';updateAuth()};
     const render=value=>{current=value;servers.replaceChildren();if(value.servers.length===0){const option=document.createElement('option');option.value='';option.textContent='尚未配置';servers.append(option)}else for(const server of value.servers){const option=document.createElement('option');option.value=server.id;option.textContent=server.label+' · '+server.endpoint;servers.append(option)}servers.value=value.activeServerId||value.servers[0]?.id||'';loadServer(servers.value);status.textContent=value.role==='frontend'?'当前 Frontend 已保存 '+value.servers.length+' 个 Server。':'当前使用本机 Server。'};
@@ -224,7 +248,8 @@ function frontendSetupPage(): string {
     document.getElementById('remove').addEventListener('click',()=>{if(!servers.value)return;if(!confirm('删除这个 Server 配置？凭据也会从 DSH Desktop 配置中移除。'))return;status.className='';status.textContent='正在删除…';api.remove(servers.value).catch(error=>{status.className='error';status.textContent=String(error)})});
     const loadSyncRepository=id=>{const repository=syncRepositories.find(item=>item.id===id);editingSyncId=repository?.id||'';syncLabel.value=repository?.label||'';syncPath.value=repository?.repositoryPath||'';syncAuthority.value=repository?.authorityRemote||'origin';syncBranch.value=repository?.branch||'main';syncDirection.value=repository?.direction||'bidirectional';syncAccelerator.value=repository?.acceleratorRemote||''};
     const renderGitSync=value=>{syncEnabled.checked=value.enabled;syncInterval.value=String(value.intervalMinutes);syncRepositories=[...value.repositories];syncRepositoriesSelect.replaceChildren();if(syncRepositories.length===0){const option=document.createElement('option');option.value='';option.textContent='尚未配置';syncRepositoriesSelect.append(option)}else for(const repository of syncRepositories){const option=document.createElement('option');option.value=repository.id;option.textContent=repository.label+' · '+repository.branch;syncRepositoriesSelect.append(option)}syncRepositoriesSelect.value=editingSyncId&&syncRepositories.some(item=>item.id===editingSyncId)?editingSyncId:syncRepositories[0]?.id||'';loadSyncRepository(syncRepositoriesSelect.value);const details=value.results.map(result=>{const repository=syncRepositories.find(item=>item.id===result.repositoryId);return (repository?.label||result.repositoryId)+'：'+result.message}).join('\\n');syncStatus.textContent=value.running?'同步运行中…':details||'尚未运行 Git 同步。'};
-    api.describe().then(value=>{render(value);renderGitSync(value.gitSync)}).catch(error=>{status.className='error';status.textContent=String(error)});
+    const renderSessionSync=value=>{sessionSyncEnabled.checked=value.enabled;sessionSyncInterval.value=String(value.intervalMinutes);sessionSyncDirection.value=value.direction;const details=value.results.map(result=>(result.sessionId?result.sessionId+'：':'')+result.message).join('\\n');sessionSyncStatus.textContent=value.running?'Session 同步运行中…':details||'尚未运行 Session 同步。'};
+    api.describe().then(value=>{render(value);renderGitSync(value.gitSync);renderSessionSync(value.sessionSync)}).catch(error=>{status.className='error';status.textContent=String(error)});
     form.addEventListener('submit',event=>{event.preventDefault();status.className='';status.textContent='正在保存并连接…';api.configure({serverId:editingId,label:label.value,endpoint:endpoint.value,pairingCode:code.value,deviceName:device.value}).catch(error=>{status.className='error';status.textContent=String(error)})});
     document.getElementById('local').addEventListener('click',()=>{status.className='';status.textContent='正在切换…';api.useServer().catch(error=>{status.className='error';status.textContent=String(error)})});
     syncRepositoriesSelect.addEventListener('change',()=>{loadSyncRepository(syncRepositoriesSelect.value)});
@@ -232,6 +257,8 @@ function frontendSetupPage(): string {
     document.getElementById('sync-remove').addEventListener('click',()=>{if(!syncRepositoriesSelect.value)return;syncRepositories=syncRepositories.filter(item=>item.id!==syncRepositoriesSelect.value);editingSyncId='';api.configureGitSync({enabled:syncEnabled.checked,intervalMinutes:Number(syncInterval.value),repositories:syncRepositories}).then(renderGitSync).catch(error=>{syncStatus.className='error';syncStatus.textContent=String(error)})});
     document.getElementById('sync-save').addEventListener('click',()=>{const id=editingSyncId||'repo-'+Date.now(),repository={id,label:syncLabel.value,repositoryPath:syncPath.value,authorityRemote:syncAuthority.value,branch:syncBranch.value,direction:syncDirection.value,...syncAccelerator.value?{acceleratorRemote:syncAccelerator.value}:{}};const index=syncRepositories.findIndex(item=>item.id===id);if(index>=0)syncRepositories[index]=repository;else syncRepositories.push(repository);editingSyncId=id;syncStatus.className='';syncStatus.textContent='正在保存同步设置…';api.configureGitSync({enabled:syncEnabled.checked,intervalMinutes:Number(syncInterval.value),repositories:syncRepositories}).then(renderGitSync).catch(error=>{syncStatus.className='error';syncStatus.textContent=String(error)})});
     document.getElementById('sync-run').addEventListener('click',()=>{syncStatus.className='';syncStatus.textContent='正在同步已提交的 Git commit…';api.runGitSync().then(renderGitSync).catch(error=>{syncStatus.className='error';syncStatus.textContent=String(error)})});
+    document.getElementById('session-sync-save').addEventListener('click',()=>{sessionSyncStatus.className='';sessionSyncStatus.textContent='正在保存 Session 同步设置…';api.configureSessionSync({enabled:sessionSyncEnabled.checked,intervalMinutes:Number(sessionSyncInterval.value),direction:sessionSyncDirection.value}).then(renderSessionSync).catch(error=>{sessionSyncStatus.className='error';sessionSyncStatus.textContent=String(error)})});
+    document.getElementById('session-sync-run').addEventListener('click',()=>{sessionSyncStatus.className='';sessionSyncStatus.textContent='正在同步闭合的 Session 日志…';api.runSessionSync().then(renderSessionSync).catch(error=>{sessionSyncStatus.className='error';sessionSyncStatus.textContent=String(error)})});
   </script>
 </body></html>`
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
