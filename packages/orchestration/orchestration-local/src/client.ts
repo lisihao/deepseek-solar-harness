@@ -6,9 +6,18 @@ import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-p
 import { fileURLToPath } from 'node:url'
 import {
   OrchestrationError,
+  type OrchestrationArtifactRef,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
   type OrchestrationCompilationV1,
+  type OrchestrationClusterHeartbeatRequest,
+  type OrchestrationClusterHeartbeatResponse,
+  type OrchestrationClusterInstallReceipt,
+  type OrchestrationClusterInstallRequest,
+  type OrchestrationClusterReplicaV1,
+  type OrchestrationClusterStatus,
+  type OrchestrationClusterVoteRequest,
+  type OrchestrationClusterVoteResponse,
   type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompileRequest,
   type OrchestrationControlRequest,
@@ -111,6 +120,15 @@ export class OrchestrationDaemonClient {
   }
 
   /**
+   * Read one digest-verified immutable artifact.
+   * @param ref - artifact identity issued by the orchestration daemon.
+   * @returns the decoded artifact value.
+   */
+  readArtifact(ref: OrchestrationArtifactRef): Promise<unknown> {
+    return this.request('artifact.read', { artifact_ref: String(ref) })
+  }
+
+  /**
    * Apply a revision-checked run control.
    * @param request - revision-checked control request.
    * @returns the updated run.
@@ -153,6 +171,49 @@ export class OrchestrationDaemonClient {
    */
   proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt> {
     return this.request('capability.propose_update', { request })
+  }
+
+  /**
+   * Read this Product Server's bounded cluster authority state.
+   * @returns the current cluster status, or undefined in standalone mode.
+   */
+  clusterStatus(): Promise<OrchestrationClusterStatus | undefined> {
+    return this.request('cluster.status', {})
+  }
+
+  /**
+   * Forward an authenticated peer vote to the durable election state.
+   * @param request - candidate term and replication watermark.
+   * @returns this member's term-fenced vote response.
+   */
+  clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse> {
+    return this.request('cluster.vote', { request })
+  }
+
+  /**
+   * Forward an authenticated leader heartbeat to the durable election state.
+   * @param request - elected leader term, lease, and replication watermark.
+   * @returns this follower's lease acknowledgement.
+   */
+  clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse> {
+    return this.request('cluster.heartbeat', { request })
+  }
+
+  /**
+   * Export a complete logical state image for one authenticated follower.
+   * @returns the current durable TaskGraph state image.
+   */
+  clusterExportReplica(): Promise<OrchestrationClusterReplicaV1> {
+    return this.request('cluster.export', {})
+  }
+
+  /**
+   * Install a term-fenced logical state image on a follower.
+   * @param request - elected leader coordinates and logical state image.
+   * @returns the follower's applied or unchanged watermark.
+   */
+  clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt> {
+    return this.request('cluster.install', { request })
   }
 
   /**

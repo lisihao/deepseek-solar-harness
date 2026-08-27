@@ -2,13 +2,16 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
+  parseRemoteResidentAcceptedTurn, parseRemoteResidentEventPage, parseRemoteResidentProviders,
+  parseRemoteResidentTurn, parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument,
+  parseRemoteSessionReplicaList, parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame,
+  parseRemoteSyncSnapshot,
 } from '../src/remote-sync.ts'
 import { setBrowserRemoteAccessToken } from '../src/client/browser-access-token.ts'
 import { WebRemoteSyncClient } from '../src/client/remote-sync-client.ts'
 
 const snapshot = {
-  protocol: { major: 1, minor: 1 },
+  protocol: { major: 1, minor: 3 },
   deploymentId: 'deployment-1',
   cursor: { deploymentId: 'deployment-1', sequence: 7 },
   capturedAt: '2026-08-23T08:00:00.000Z',
@@ -73,17 +76,19 @@ afterEach(() => {
 describe('Remote Sync wire parsing', () => {
   it('accepts an authenticated Server description and rejects unknown capabilities', () => {
     const description = {
-      protocol: { major: 1, minor: 1 },
+      protocol: { major: 1, minor: 3 },
       deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 },
       describedAt: '2026-08-23T08:00:00.000Z',
       scope: 'cockpit',
       capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
       host: snapshot.host,
+      cluster: { nodeId: 'server-a', term: 4, role: 'leader', leaderId: 'server-a', canSchedule: true },
     }
     expect(parseRemoteSyncDescription(description)).toMatchObject({
       deploymentId: 'deployment-1', scope: 'cockpit',
       capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
+      cluster: { nodeId: 'server-a', term: 4, role: 'leader', leaderId: 'server-a', canSchedule: true },
     })
     expect(() => parseRemoteSyncDescription({
       ...description, capabilities: [...description.capabilities, 'task.write'],
@@ -103,7 +108,7 @@ describe('Remote Sync wire parsing', () => {
         result: {
           ok: true,
           value: {
-            protocol: { major: 1, minor: 1 },
+            protocol: { major: 1, minor: 3 },
             deploymentId: 'deployment-1',
             cursor: { deploymentId: 'deployment-1', sequence: 7 },
             describedAt: '2026-08-23T08:00:00.000Z',
@@ -122,6 +127,218 @@ describe('Remote Sync wire parsing', () => {
     expect(seenAuthorization).toBe('Bearer short-lived')
   })
 
+  it('lists, reads, and applies complete Session replicas over the same authenticated channel', async () => {
+    const header = { version: 0, id: 'session-replica', createdAt: 1 }
+    const events = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    const methods: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const request = JSON.parse(init.body) as { rpcId: string; method: string; payload: unknown }
+      methods.push(request.method)
+      const value = request.method === 'replica.list'
+        ? [{ header, revision: 'store:1' }]
+        : request.method === 'replica.read'
+          ? { meta: header, events, balanced: true }
+          : {
+            sessionId: 'session-replica', state: 'created', sourceEventCount: 2,
+            destinationEventCount: 2, appendedEventCount: 2,
+          }
+      return Response.json({
+        type: 'server-response', rpcId: request.rpcId, result: { ok: true, value },
+      })
+    }))
+    const client = new WebRemoteSyncClient('https://server.example', 'access')
+    await expect(client.replicaList()).resolves.toEqual([{ header, revision: 'store:1' }])
+    await expect(client.replicaRead('session-replica')).resolves.toMatchObject({ balanced: true, events })
+    await expect(client.replicaApply({ meta: header as never, events: events as never })).resolves.toMatchObject({
+      state: 'created', appendedEventCount: 2,
+    })
+    expect(methods).toEqual(['replica.list', 'replica.read', 'replica.apply'])
+  })
+
+  it('admits, reattaches, observes, and interrupts a durable remote Resident turn', async () => {
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
+      tags: ['code'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: '0.200.0', protocolHash: 'schema-1',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Fast worker', supportedEfforts: ['medium'],
+        defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true,
+      }],
+    }
+    const accepted = { sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 }
+    const turn = {
+      commandId: 'command-1', sessionId: accepted.sessionId, turnId: accepted.turnId,
+      state: 'settled', stateRevision: 3, stopReason: 'completed', updatedAt: '2026-08-27T12:00:00.000Z',
+      result: { output: [{ type: 'text', text: 'done' }], stopReason: 'completed' },
+    }
+    const page = {
+      events: [{
+        sequence: 1, sessionId: accepted.sessionId, type: 'turn.progress',
+        time: '2026-08-27T12:00:00.000Z', data: { phase: 'reasoning' },
+      }],
+      nextSequence: 1,
+    }
+    const methods: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const request = JSON.parse(init.body) as { rpcId: string; method: string }
+      methods.push(request.method)
+      const value = request.method === 'operator.providers' ? [provider]
+        : request.method === 'operator.execute' ? accepted
+          : request.method === 'operator.inspect' ? turn
+            : request.method === 'operator.events' ? page
+              : { interrupted: true }
+      return Response.json({ type: 'server-response', rpcId: request.rpcId, result: { ok: true, value } })
+    }))
+    const client = new WebRemoteSyncClient('https://server.example', 'access')
+    await expect(client.operatorProviders()).resolves.toMatchObject([{ operatorId: 'codex', models: [{ model: 'gpt-5.6-luna' }] }])
+    await expect(client.operatorExecute({
+      commandId: 'command-1', operatorId: 'codex', workspace: '/repo', laneId: 'lane-1', prompt: [],
+    })).resolves.toEqual(accepted)
+    await expect(client.operatorInspect(accepted.turnId)).resolves.toMatchObject({ state: 'settled', result: { stopReason: 'completed' } })
+    await expect(client.operatorEvents(accepted.sessionId, 0, 100)).resolves.toEqual(page)
+    await expect(client.operatorInterrupt(accepted.sessionId, accepted.turnId)).resolves.toBeUndefined()
+    expect(methods).toEqual([
+      'operator.providers', 'operator.execute', 'operator.inspect', 'operator.events', 'operator.interrupt',
+    ])
+  })
+
+  it('validates every remote replication and Resident wire variant', () => {
+    const header = { version: 0, id: 'session-replica', createdAt: 1 }
+    const events = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    expect(parseRemoteSessionReplicaList([{ header, revision: 'store:1' }])).toHaveLength(1)
+    expect(parseRemoteSessionReplicaDocument({ meta: header, events, balanced: true })).toMatchObject({ balanced: true })
+    for (const state of ['created', 'advanced', 'unchanged', 'destination-ahead'] as const) {
+      expect(parseRemoteSessionReplicaApplyResult({
+        sessionId: 'session-replica', state, sourceEventCount: 2, destinationEventCount: 2, appendedEventCount: 0,
+      })).toMatchObject({ state })
+    }
+    expect(parseRemoteResidentAcceptedTurn({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0,
+    })).toMatchObject({ stateRevision: 0 })
+
+    const provider = {
+      operatorId: 'claude-code', product: 'claude-code', displayName: 'Claude Code', description: '',
+      tags: ['architecture'], maxConcurrency: 1,
+      injectionBoundaries: ['pre-dispatch', 'next-turn', 'checkpoint'],
+      available: false, unavailableReason: 'auth required', quotaUnavailableReason: 'unknown quota',
+      authentication: 'unqualified', productVersion: '2.1.0', protocolHash: 'schema-2',
+      models: [{
+        model: 'sonnet', resolvedModel: 'claude-sonnet-4-6', displayName: 'Sonnet', description: '',
+        supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+        isDefault: false, supportsAdaptiveThinking: false,
+      }],
+      quotaPools: [{
+        poolId: 'claude-main', displayName: 'Claude', models: ['sonnet'], meter: 'native-subscription',
+        primary: { usedPercent: 25, resetsAt: 10, windowDurationMinutes: 300 },
+        secondary: { usedPercent: 50 }, observedAt: '2026-08-27T12:00:00.000Z',
+      }, {
+        poolId: 'claude-secondary', displayName: 'Claude secondary', models: [], meter: 'native-subscription',
+        observedAt: '2026-08-27T12:00:00.000Z',
+      }],
+    }
+    expect(parseRemoteResidentProviders([provider])).toMatchObject([{
+      authentication: 'unqualified', unavailableReason: 'auth required',
+      models: [{ resolvedModel: 'claude-sonnet-4-6' }],
+      quotaPools: [
+        { primary: { resetsAt: 10, windowDurationMinutes: 300 }, secondary: { usedPercent: 50 } },
+        { poolId: 'claude-secondary' },
+      ],
+    }])
+
+    const baseTurn = {
+      commandId: 'command-1', turnId: 'turn-1', sessionId: 'session-1',
+      stateRevision: 1, updatedAt: '2026-08-27T12:00:00.000Z',
+    }
+    for (const state of ['accepted', 'running', 'settled', 'indeterminate'] as const) {
+      expect(parseRemoteResidentTurn({ ...baseTurn, state })).toMatchObject({ state })
+    }
+    for (const stopReason of ['completed', 'aborted', 'error', 'max-tokens', 'refusal'] as const) {
+      expect(parseRemoteResidentTurn({
+        ...baseTurn, state: 'settled', stopReason, taskLabel: 'task', nativeTurnId: 'native-turn',
+        resultRef: 'sha256:outer',
+        result: { output: [], stopReason, resultRef: 'sha256:inner' },
+        error: { code: 'PRODUCT_ERROR', message: 'stopped' },
+      })).toMatchObject({ stopReason, result: { stopReason }, error: { code: 'PRODUCT_ERROR' } })
+    }
+    expect(parseRemoteResidentEventPage({
+      events: [{
+        sequence: 1, sessionId: 'session-1', type: 'turn.progress',
+        time: '2026-08-27T12:00:00.000Z', data: { phase: 'running' },
+      }],
+      nextSequence: 1,
+    })).toMatchObject({ events: [{ sequence: 1 }], nextSequence: 1 })
+  })
+
+  it('rejects malformed remote replication and Resident wire payloads', () => {
+    const header = { version: 0, id: 'session-replica', createdAt: 1 }
+    expect(() => parseRemoteSessionReplicaList({})).toThrow('must be an array')
+    expect(() => parseRemoteSessionReplicaList([{ header: { ...header, id: '' }, revision: 'store:1' }]))
+      .toThrow('must be a non-empty string')
+    expect(() => parseRemoteSessionReplicaDocument({ meta: header, events: {}, balanced: true }))
+      .toThrow('events must be an array')
+    expect(() => parseRemoteSessionReplicaDocument({ meta: header, events: [], balanced: 'yes' }))
+      .toThrow('balanced must be a boolean')
+    expect(() => parseRemoteSessionReplicaApplyResult({
+      sessionId: 'session-replica', state: 'merged', sourceEventCount: 0, destinationEventCount: 0, appendedEventCount: 0,
+    })).toThrow('state is invalid')
+
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: '', tags: [],
+      maxConcurrency: 1, injectionBoundaries: ['pre-dispatch'], available: true,
+      authentication: 'native-subscription', productVersion: '1', protocolHash: 'schema', models: [{
+        model: 'sol', displayName: 'Sol', description: '', supportedEfforts: ['medium'],
+        defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true,
+      }],
+    }
+    expect(() => parseRemoteResidentProviders({})).toThrow('must be an array')
+    expect(() => parseRemoteResidentProviders([{ ...provider, authentication: 'api-key' }]))
+      .toThrow('authentication is invalid')
+    expect(() => parseRemoteResidentProviders([{ ...provider, injectionBoundaries: ['live'] }]))
+      .toThrow('invalid boundary')
+    expect(() => parseRemoteResidentProviders([{ ...provider, description: 1 }]))
+      .toThrow('must be a string')
+    expect(() => parseRemoteResidentProviders([{ ...provider, available: 'yes' }]))
+      .toThrow('must be a boolean')
+    expect(() => parseRemoteResidentProviders([{
+      ...provider, models: [{ ...provider.models[0], supportedEfforts: ['impossible'] }],
+    }])).toThrow('is invalid')
+    expect(() => parseRemoteResidentProviders([{
+      ...provider, quotaPools: [{
+        poolId: 'pool', displayName: 'Pool', models: [], meter: 'api',
+        observedAt: '2026-08-27T12:00:00.000Z',
+      }],
+    }])).toThrow('meter is invalid')
+    for (const usedPercent of ['25', Number.NaN, -1, 101]) {
+      expect(() => parseRemoteResidentProviders([{
+        ...provider, quotaPools: [{
+          poolId: 'pool', displayName: 'Pool', models: [], meter: 'native-subscription',
+          primary: { usedPercent }, observedAt: '2026-08-27T12:00:00.000Z',
+        }],
+      }])).toThrow('between 0 and 100')
+    }
+
+    const baseTurn = {
+      commandId: 'command-1', turnId: 'turn-1', sessionId: 'session-1', state: 'running',
+      stateRevision: 1, updatedAt: '2026-08-27T12:00:00.000Z',
+    }
+    expect(() => parseRemoteResidentTurn({ ...baseTurn, state: 'queued' })).toThrow('state is invalid')
+    expect(() => parseRemoteResidentTurn({ ...baseTurn, stopReason: 'unknown' })).toThrow('stopReason is invalid')
+    expect(() => parseRemoteResidentTurn({ ...baseTurn, result: { output: {}, stopReason: 'completed' } }))
+      .toThrow('result.output must be an array')
+    expect(() => parseRemoteResidentTurn({
+      ...baseTurn, result: { output: [], stopReason: 'unknown' },
+    })).toThrow('result.stopReason is invalid')
+    expect(() => parseRemoteResidentEventPage({ events: {}, nextSequence: 0 })).toThrow('must be an array')
+  })
+
   it('accepts a complete snapshot and rejects protocol or deployment mismatch', () => {
     expect(parseRemoteSyncSnapshot(snapshot)).toMatchObject({
       deploymentId: 'deployment-1', cursor: { sequence: 7 },
@@ -137,7 +354,7 @@ describe('Remote Sync wire parsing', () => {
 
   it('rejects malformed descriptions, cursors, snapshots, and scalar fields', () => {
     const description = {
-      protocol: { major: 1, minor: 1 }, deploymentId: 'deployment-1',
+      protocol: { major: 1, minor: 3 }, deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 }, describedAt: snapshot.capturedAt,
       scope: 'cockpit', capabilities: ['session.read'], host: snapshot.host,
     }
@@ -150,8 +367,17 @@ describe('Remote Sync wire parsing', () => {
       .toThrow('scope is invalid')
     expect(() => parseRemoteSyncDescription({ ...description, describedAt: 'never' }))
       .toThrow('not an ISO instant')
-    expect(() => parseRemoteSyncDescription({ ...description, protocol: { major: 1, minor: 2 } }))
+    expect(() => parseRemoteSyncDescription({ ...description, protocol: { major: 1, minor: 1 } }))
       .toThrow('protocol mismatch')
+    expect(() => parseRemoteSyncDescription({
+      ...description, cluster: { nodeId: 'server-a', term: 1, role: 'primary', canSchedule: true },
+    })).toThrow('cluster role is invalid')
+    expect(() => parseRemoteSyncDescription({
+      ...description, cluster: { nodeId: 'server-a', term: -1, role: 'follower', canSchedule: false },
+    })).toThrow('non-negative safe integer')
+    expect(parseRemoteSyncDescription({
+      ...description, cluster: { nodeId: 'server-a', term: 1, role: 'follower', canSchedule: false },
+    }).cluster).toEqual({ nodeId: 'server-a', term: 1, role: 'follower', canSchedule: false })
 
     for (const value of [undefined, null, []]) {
       expect(() => parseRemoteSyncCursor(value)).toThrow('must be an object')

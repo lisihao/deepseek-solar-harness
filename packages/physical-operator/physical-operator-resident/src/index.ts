@@ -10,8 +10,9 @@ import {
   type PhysicalOperatorExecutionMode,
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorProviderStartRequest,
+  type PhysicalOperatorResidentCatalog,
 } from '@deepseek-ai/dsh-physical-operator'
-import { ResidentOperatorCommandId, type ResidentTurn } from '@deepseek-ai/dsh-resident-operator'
+import { residentProgressPage, ResidentOperatorCommandId, type ResidentTurn } from '@deepseek-ai/dsh-resident-operator'
 import type { SubagentProvider, SubagentRun } from '@deepseek-ai/dsh-subagent'
 
 export const name = 'physical-operator-resident'
@@ -68,6 +69,7 @@ function subagentReason(name: string, provider: SubagentProvider | undefined): s
 
 class DualModePhysicalOperator implements PhysicalOperator {
   readonly descriptor: PhysicalOperatorDescriptor
+  readonly residentCatalog?: () => Promise<PhysicalOperatorResidentCatalog>
 
   // Both provider forms project the same immutable discovery descriptor.
   /* jscpd:ignore-start */
@@ -85,6 +87,34 @@ class DualModePhysicalOperator implements PhysicalOperator {
         ...config.ephemeralProvider === undefined ? [] : ['ephemeral' as const],
         ...config.residentProvider === undefined ? [] : ['resident' as const],
       ],
+    }
+    if (config.residentProvider !== undefined) {
+      this.residentCatalog = async () => {
+        const provider = (await this.ctx.residentOperators.providers())
+          .find(value => value.operatorId === config.residentProvider)
+        if (provider === undefined) {
+          throw new PhysicalOperatorError(
+            `resident provider "${config.residentProvider}" is not registered`,
+            'OPERATOR_UNAVAILABLE',
+          )
+        }
+        return {
+          operatorId: this.descriptor.id,
+          product: provider.product,
+          injectionBoundaries: provider.injectionBoundaries,
+          supportsModelToolBridge: true,
+          location: 'local',
+          supportsWorkspaceMutationReturn: true,
+          available: provider.available,
+          ...provider.unavailableReason === undefined ? {} : { unavailableReason: provider.unavailableReason },
+          ...provider.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: provider.quotaUnavailableReason },
+          authentication: provider.authentication,
+          productVersion: provider.productVersion,
+          protocolHash: provider.protocolHash,
+          models: provider.models,
+          ...provider.quotaPools === undefined ? {} : { quotaPools: provider.quotaPools },
+        }
+      }
     }
   }
   /* jscpd:ignore-end */
@@ -149,11 +179,26 @@ class DualModePhysicalOperator implements PhysicalOperator {
       laneId: request.residentLaneId ?? String(request.parent.id),
       ...request.label === undefined ? {} : { taskLabel: request.label },
       prompt: request.prompt,
+      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       signal: request.signal,
     })
     return {
+      receipt: {
+        sessionId: String(turn.sessionId),
+        turnId: String(turn.turnId),
+        stateRevision: turn.stateRevision,
+      },
+      readEvents: async (afterSequence, limit, signal) => {
+        const page = await this.ctx.residentOperators.readEvents({
+          sessionId: turn.sessionId,
+          afterSequence,
+          limit,
+          ...signal === undefined ? {} : { signal },
+        })
+        return residentProgressPage(page)
+      },
       result: turn.result.then(result => ({
         output: result.output,
         stopReason: result.stopReason,

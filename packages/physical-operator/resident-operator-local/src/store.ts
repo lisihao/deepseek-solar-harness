@@ -101,6 +101,7 @@ export type TurnInspection = ResidentTurnSnapshot
  * @param supersedesCommandId - optional explicitly abandoned receipt lineage.
  * @param laneId - caller-owned native-context isolation lane.
  * @param modelToolBridge - optional sealed RLM model-tool bridge.
+ * @param systemPrompt - optional DSH-owned system instructions.
  * @returns lowercase SHA-256 digest.
  */
 export function canonicalRequestHash(
@@ -111,6 +112,7 @@ export function canonicalRequestHash(
   supersedesCommandId?: string,
   laneId = 'legacy',
   modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
+  systemPrompt?: string,
 ): string {
   return createHash('sha256')
     .update(JSON.stringify({
@@ -118,9 +120,14 @@ export function canonicalRequestHash(
       workspace,
       laneId,
       prompt,
+      systemPrompt: systemPrompt ?? null,
       profile,
       supersedesCommandId: supersedesCommandId ?? null,
-      modelToolBridge: modelToolBridge ?? null,
+      modelToolBridge: modelToolBridge === undefined ? null : {
+        version: modelToolBridge.version,
+        sessionId: modelToolBridge.sessionId,
+        tools: modelToolBridge.tools,
+      },
     }))
     .digest('hex')
 }
@@ -629,6 +636,7 @@ export class ResidentStore {
         storedResult = {
           output: [{ type: 'text', text: `Resident result stored at ${resultRef}.` }],
           stopReason: result.stopReason,
+          ...result.usage === undefined ? {} : { usage: result.usage },
           resultRef,
         }
       }
@@ -642,6 +650,13 @@ export class ResidentStore {
         commandId,
         turnId: receipt.turn_id,
         stopReason: result.stopReason,
+        ...result.usage === undefined ? {} : {
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          cacheReadInputTokens: result.usage.cacheReadInputTokens ?? 0,
+          cacheWriteInputTokens: result.usage.cacheWriteInputTokens ?? 0,
+          ...result.usage.costUsd === undefined ? {} : { costUsd: result.usage.costUsd },
+        },
         resultRef,
       }, now)
       return this.inspectTurn(receipt.turn_id)

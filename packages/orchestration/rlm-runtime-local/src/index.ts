@@ -830,7 +830,9 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     const session = this.requireSession(request.sessionId)
     if (!Number.isSafeInteger(request.inputTokens) || request.inputTokens < 0
       || !Number.isSafeInteger(request.outputTokens) || request.outputTokens < 0
-      || !Number.isSafeInteger(request.inputTokens + request.outputTokens)) {
+      || !Number.isSafeInteger(request.cacheReadInputTokens ?? 0) || (request.cacheReadInputTokens ?? 0) < 0
+      || !Number.isSafeInteger(request.cacheWriteInputTokens ?? 0) || (request.cacheWriteInputTokens ?? 0) < 0
+      || !Number.isSafeInteger(request.inputTokens + request.outputTokens + (request.cacheWriteInputTokens ?? 0))) {
       throw new RlmRuntimeError('RLM goal usage must contain non-negative safe token counts', 'RLM_INVALID')
     }
     const requestHash = sha256(request)
@@ -844,7 +846,10 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       this.persist()
       return Promise.resolve(current)
     }
-    const tokensUsed = current.tokensUsed + request.inputTokens + request.outputTokens
+    const tokensUsed = current.tokensUsed
+      + request.inputTokens
+      + request.outputTokens
+      + (request.cacheWriteInputTokens ?? 0)
     if (!Number.isSafeInteger(tokensUsed)) throw new RlmRuntimeError('RLM goal token usage exceeds safe integer bounds', 'RLM_INVALID')
     const budgetLimited = current.tokenBudget !== undefined && tokensUsed >= current.tokenBudget
     const goal: RlmGoalV1 = {
@@ -859,6 +864,8 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     this.appendEvent(request.sessionId, budgetLimited ? 'rlm.goal.budget_exhausted' : 'rlm.goal.usage_accounted', {
       inputTokens: request.inputTokens,
       outputTokens: request.outputTokens,
+      cacheReadInputTokens: request.cacheReadInputTokens ?? 0,
+      cacheWriteInputTokens: request.cacheWriteInputTokens ?? 0,
       tokensUsed,
       ...goal.tokenBudget === undefined ? {} : { tokenBudget: goal.tokenBudget },
     })

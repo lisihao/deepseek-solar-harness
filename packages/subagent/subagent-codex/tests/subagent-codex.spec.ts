@@ -432,11 +432,34 @@ describe('CodexAppServerWire', () => {
       agentMessage('unphased', null),
       agentMessage('first final', 'final_answer'),
       agentMessage('last final', 'final_answer'),
+      {
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: 'thread-1', turnId: 'turn-1',
+          tokenUsage: {
+            total: {
+              totalTokens: 180, inputTokens: 150, cachedInputTokens: 90,
+              cacheWriteInputTokens: 3, outputTokens: 30, reasoningOutputTokens: 10,
+            },
+            last: {
+              totalTokens: 48, inputTokens: 40, cachedInputTokens: 12,
+              cacheWriteInputTokens: 2, outputTokens: 8, reasoningOutputTokens: 3,
+            },
+            modelContextWindow: 258_400,
+          },
+        },
+      },
       turnCompleted('completed'),
     )
     await expect(result).resolves.toEqual({
       output: [{ type: 'text', text: 'last final' }],
       stopReason: 'completed',
+      usage: {
+        inputTokens: 28,
+        outputTokens: 8,
+        cacheReadInputTokens: 12,
+        cacheWriteInputTokens: 2,
+      },
     })
     expect(wire.collectOutput()).toEqual([{ type: 'text', text: 'last final' }])
     wire.close()
@@ -516,9 +539,11 @@ describe('CodexAppServerWire', () => {
     await expect(listing).resolves.toEqual([expect.objectContaining({ model: 'gpt-test', isDefault: true })])
 
     const profile = { model: 'gpt-test', effort: 'medium' }
-    const starting = wire.startThread('/workspace', new AbortController().signal, false, profile)
+    const starting = wire.startThread('/workspace', new AbortController().signal, false, profile, 'DSH system')
     const threadStart = await child.peer.nextMethod('thread/start')
-    expect(threadStart.params).toEqual({ cwd: '/workspace', ephemeral: false, model: 'gpt-test' })
+    expect(threadStart.params).toEqual({
+      cwd: '/workspace', ephemeral: false, model: 'gpt-test', developerInstructions: 'DSH system',
+    })
     child.peer.respond(threadStart, { thread: { id: 'thread-profile', ephemeral: false } })
     await starting
 
@@ -548,8 +573,13 @@ describe('CodexAppServerWire', () => {
     await initializing
     await child.peer.nextMethod('initialized')
 
-    const resuming = wire.resumeThread('thread-persistent', '/workspace', new AbortController().signal)
+    const resuming = wire.resumeThread(
+      'thread-persistent', '/workspace', new AbortController().signal, undefined, 'DSH resumed system',
+    )
     const threadResume = await child.peer.nextMethod('thread/resume')
+    expect(threadResume.params).toEqual({
+      threadId: 'thread-persistent', cwd: '/workspace', developerInstructions: 'DSH resumed system',
+    })
     child.peer.respond(threadResume, { thread: { id: 'thread-persistent', ephemeral: false } })
     await resuming
     const compacting = wire.compactThread(new AbortController().signal)

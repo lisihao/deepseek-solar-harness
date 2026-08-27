@@ -6,8 +6,9 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import { SessionPreparation } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionId, SessionHeader } from '@deepseek-ai/dsh-session'
+import { isDeepStrictEqual } from 'node:util'
+import { interruptedTurnClosers, Session, SessionId, SessionPreparation } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistenceRevision } from './revision.ts'
 
 // Re-export the metadata vocabulary so Consumers import it from the Service Definition.
@@ -38,6 +39,38 @@ export interface SessionRawArtifact {
   readonly filename: string
   /** The artifact's full text content, decoded from the backend's physical encoding. */
   readonly content: string
+}
+
+/** One complete, balanced source log offered for single-writer replication. */
+export interface SessionReplica {
+  /** Validated immutable identity and lineage metadata. */
+  readonly meta: SessionHeader
+  /** Complete contiguous log from seq zero through a balanced turn boundary. */
+  readonly events: readonly SessionEvent[]
+}
+
+/** Result of prefix-compatible replication into the local persistence authority. */
+export interface SessionReplicationResult {
+  readonly sessionId: SessionId
+  readonly state: 'created' | 'advanced' | 'unchanged' | 'destination-ahead'
+  readonly sourceEventCount: number
+  readonly destinationEventCount: number
+  readonly appendedEventCount: number
+}
+
+/** Stable refusal codes for a replica that cannot be applied without competing writers. */
+export type SessionReplicationErrorCode =
+  | 'SESSION_LIVE'
+  | 'SESSION_OPEN_TURN'
+  | 'SESSION_IDENTITY_CONFLICT'
+  | 'SESSION_HISTORY_CONFLICT'
+
+/** Typed fail-loud boundary for canonical Session replication. */
+export class SessionReplicationError extends Error {
+  constructor(message: string, readonly code: SessionReplicationErrorCode) {
+    super(message)
+    this.name = 'SessionReplicationError'
+  }
 }
 
 // The backend-agnostic write-path orchestration first-party backends compose.
@@ -82,6 +115,8 @@ export interface SessionLocation {
  * rewriting committed events.
  */
 export abstract class SessionPersistence extends Service {
+  private readonly replicationChains = new Map<SessionId, Promise<void>>()
+
   constructor(ctx: Context) {
     super(ctx, 'sessionPersistence')
   }
@@ -238,6 +273,110 @@ export abstract class SessionPersistence extends Service {
    * @returns one header and opaque revision per materialized session without loading full logs.
    */
   abstract listSnapshots(signal?: AbortSignal): Promise<SessionPersistenceSnapshot[]>
+
+  /**
+   * Apply one complete, balanced remote log without creating a second writer.
+   * Only an absent destination or an exact prefix match can advance. A live
+   * Session, open source turn, metadata mismatch, or divergent event rejects.
+   * Calls for the same id serialize inside this Service; cross-process active
+   * authority transfer remains a deployment-level quiescence requirement.
+   * @param replica - complete source header and event log.
+   * @param signal - optional cancellation while waiting for local replication.
+   * @returns whether the destination was created, advanced, unchanged, or already ahead.
+   */
+  replicate(replica: SessionReplica, signal?: AbortSignal): Promise<SessionReplicationResult> {
+    const id = SessionId(String(replica.meta.id))
+    const previous = this.replicationChains.get(id) ?? Promise.resolve()
+    const operation = previous.then(async () => {
+      signal?.throwIfAborted()
+      return await this.replicateCore(id, replica, signal)
+    })
+    const tail = operation.then(() => undefined, () => undefined)
+    this.replicationChains.set(id, tail)
+    return operation.finally(() => {
+      if (this.replicationChains.get(id) === tail) this.replicationChains.delete(id)
+    })
+  }
+
+  private async replicateCore(
+    id: SessionId,
+    replica: SessionReplica,
+    signal?: AbortSignal,
+  ): Promise<SessionReplicationResult> {
+    const source = Session.create(
+      id,
+      replica.events.map(event => structuredClone(event)),
+      structuredClone(replica.meta),
+    )
+    const sourceEvents = source.events.slice(0, replica.events.length)
+    if (interruptedTurnClosers(sourceEvents).length > 0) {
+      throw new SessionReplicationError(
+        `session "${id}" replica ends inside an open turn`,
+        'SESSION_OPEN_TURN',
+      )
+    }
+    this.assertSessionNotLive(id)
+    signal?.throwIfAborted()
+    const exists = (await this.listSnapshots(signal)).some(snapshot => snapshot.header.id === id)
+    if (!exists) {
+      await this.create(source.header)
+      if (sourceEvents.length > 0) await this.append(id, sourceEvents)
+      return {
+        sessionId: id,
+        state: 'created',
+        sourceEventCount: sourceEvents.length,
+        destinationEventCount: sourceEvents.length,
+        appendedEventCount: sourceEvents.length,
+      }
+    }
+
+    const destination = await this.inspect(id, signal)
+    this.assertSessionNotLive(id)
+    if (!isDeepStrictEqual(destination.meta, source.header)) {
+      throw new SessionReplicationError(
+        `session "${id}" replica metadata conflicts with the destination`,
+        'SESSION_IDENTITY_CONFLICT',
+      )
+    }
+    const shared = Math.min(destination.events.length, sourceEvents.length)
+    for (let index = 0; index < shared; index++) {
+      if (!isDeepStrictEqual(destination.events[index], sourceEvents[index])) {
+        throw new SessionReplicationError(
+          `session "${id}" replica diverges from the destination at seq ${index}`,
+          'SESSION_HISTORY_CONFLICT',
+        )
+      }
+    }
+    if (destination.events.length >= sourceEvents.length) {
+      return {
+        sessionId: id,
+        state: destination.events.length === sourceEvents.length ? 'unchanged' : 'destination-ahead',
+        sourceEventCount: sourceEvents.length,
+        destinationEventCount: destination.events.length,
+        appendedEventCount: 0,
+      }
+    }
+    const suffix = sourceEvents.slice(destination.events.length)
+    signal?.throwIfAborted()
+    this.assertSessionNotLive(id)
+    await this.append(id, suffix)
+    return {
+      sessionId: id,
+      state: 'advanced',
+      sourceEventCount: sourceEvents.length,
+      destinationEventCount: sourceEvents.length,
+      appendedEventCount: suffix.length,
+    }
+  }
+
+  private assertSessionNotLive(id: SessionId): void {
+    if (this.ctx.get('sessions')?.get(id) !== undefined) {
+      throw new SessionReplicationError(
+        `session "${id}" is live and cannot accept a replica`,
+        'SESSION_LIVE',
+      )
+    }
+  }
 }
 
 export default SessionPersistence

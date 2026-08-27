@@ -34,6 +34,18 @@
     },
     {
       "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../session/session-persistence"
+    },
+    {
+      "path": "../../physical-operator/resident-operator"
+    },
+    {
+      "path": "../../physical-operator/physical-operator"
+    },
+    {
+      "path": "../../orchestration/orchestration"
     }
   ]
 }

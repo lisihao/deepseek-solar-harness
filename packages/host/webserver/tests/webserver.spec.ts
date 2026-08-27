@@ -11,14 +11,55 @@ import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { brotliDecompressSync, gunzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import HttpServer from '../src/index.ts'
+import HttpServer, { createHttpBodyVariants, encodedHttpBodyHeaders } from '../src/index.ts'
 
 let root: string | undefined
 let context: Context | undefined
+
+describe('HTTP body variants', () => {
+  const source = Buffer.from('remote-plugin-body\n'.repeat(256))
+
+  it('negotiates and memoizes Brotli and gzip representations', async () => {
+    const variants = createHttpBodyVariants(source)
+    const brotli = await variants.select('gzip;q=0.7, br;q=0.7')
+    expect(brotli.encoding).toBe('br')
+    expect(brotliDecompressSync(brotli.body)).toEqual(source)
+    expect((await variants.select('br')).body).toBe(brotli.body)
+
+    const compressedGzip = await variants.select('br;q=0, gzip;q=1')
+    expect(compressedGzip.encoding).toBe('gzip')
+    expect(gunzipSync(compressedGzip.body)).toEqual(source)
+    expect(encodedHttpBodyHeaders(compressedGzip)).toEqual({
+      'content-length': String(compressedGzip.body.length),
+      vary: 'accept-encoding',
+      'content-encoding': 'gzip',
+    })
+  })
+
+  it('keeps small, unaccepted, and explicitly disabled bodies uncompressed', async () => {
+    const small = await createHttpBodyVariants('small').select('br')
+    expect(small).toEqual({ body: Buffer.from('small') })
+    expect(await createHttpBodyVariants(source).select(undefined)).toEqual({ body: source })
+    expect(await createHttpBodyVariants(source).select('deflate')).toEqual({ body: source })
+    expect(await createHttpBodyVariants(source).select('*;q=bogus')).toEqual({ body: source })
+    expect(encodedHttpBodyHeaders(small)).toEqual({
+      'content-length': '5',
+      vary: 'accept-encoding',
+    })
+  })
+
+  it('honors wildcard acceptance and exact exclusions', async () => {
+    const wildcard = await createHttpBodyVariants(source).select('*;q=0.5')
+    expect(wildcard.encoding).toBe('br')
+    const exact = await createHttpBodyVariants(source).select('*;q=1, br;q=0, gzip;q=0.4')
+    expect(exact.encoding).toBe('gzip')
+  })
+})
 
 afterEach(async () => {
   await context?.fiber.dispose()

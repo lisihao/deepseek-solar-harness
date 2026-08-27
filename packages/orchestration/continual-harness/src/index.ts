@@ -4,7 +4,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 
 /** Durable scope used to select Continuous Harness entries. */
-export type ContinualHarnessScope = 'session' | 'workspace'
+export type ContinualHarnessScope = 'session' | 'workspace' | 'global'
 /** Supported bounded entry categories. */
 export type ContinualHarnessEntryKind = 'instruction' | 'memory' | 'skill' | 'subagent-pattern' | 'outcome'
 /** Prime-compatible mutable harness entry categories. */
@@ -330,7 +330,7 @@ export abstract class ContinualHarnessService extends Service {
   }
 
   /**
-   * Compile a bounded immutable snapshot for one session or workspace scope.
+   * Compile a bounded immutable snapshot for one session, workspace, or user-global scope.
    * @param request Scope, task, and entry-limit policy for the snapshot.
    * @returns The content-addressed Continuous Harness snapshot.
    */
@@ -354,7 +354,7 @@ export abstract class ContinualHarnessService extends Service {
    */
   abstract get(request: ContinualHarnessScopeRequest & { readonly entryId: string }): Promise<ContinualHarnessManagedEntryV2>
   /**
-   * List managed entries in the selected session-local or workspace-global scope.
+   * List managed entries in the selected session, workspace, or user-global scope.
    * @param request - scope, optional kind filter, and tombstone policy.
    * @returns matching managed entries in deterministic order.
    */

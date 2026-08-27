@@ -284,7 +284,7 @@ describe('connection node half', () => {
       result: {
         ok: true,
         value: {
-          protocol: { major: 1, minor: 1 },
+          protocol: { major: 1, minor: 3 },
           scope: 'admin',
           capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
           host: { version: '3.1.3' },
@@ -306,7 +306,7 @@ describe('connection node half', () => {
       result: {
         ok: true,
         value: {
-          protocol: { major: 1, minor: 1 },
+          protocol: { major: 1, minor: 3 },
           host: { version: '3.1.3', cwd: '/srv/dsh' },
           sessions: [], workspaces: [], archivedSessionIds: [],
         },

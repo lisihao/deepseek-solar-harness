@@ -5,7 +5,7 @@ import {
   authorizeRemoteRequest,
   type RemoteDeviceScope,
 } from '@deepseek-ai/dsh-host-remote-auth'
-import { OrchestrationRunId } from '@deepseek-ai/dsh-orchestration'
+import { OrchestrationArtifactRef, OrchestrationRunId } from '@deepseek-ai/dsh-orchestration'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
 export const name = 'ui-orchestration'
@@ -103,6 +103,8 @@ function requiredRevision(body: Record<string, unknown>): number {
 
 async function readProjection(ctx: Context, url: URL) {
   const runId = url.searchParams.get('run_id')
+  const evidenceRef = url.searchParams.get('evidence_ref')
+  if (evidenceRef !== null && runId === null) throw new Error('evidence_ref requires run_id')
   const includeDiagnostics = url.searchParams.get('include_diagnostics') !== '0'
   const listedRuns = await ctx.orchestrations.list()
   let runs = projectOrchestrationRuns(listedRuns, true).runs
@@ -118,6 +120,16 @@ async function readProjection(ctx: Context, url: URL) {
   }
 
   const inspectedRun = await ctx.orchestrations.inspect(OrchestrationRunId(runId))
+  if (evidenceRef !== null) {
+    const retained = inspectedRun.nodes.some(node => node.evidenceRefs.some(ref => String(ref) === evidenceRef))
+    if (!retained) throw new Error(`Evidence ${evidenceRef} does not belong to Run ${runId}`)
+    return {
+      generatedAt: new Date().toISOString(),
+      selectedRunId: runId,
+      evidenceRef,
+      evidence: await ctx.orchestrations.readArtifact(OrchestrationArtifactRef(evidenceRef)),
+    }
+  }
   const projectedRun = {
     ...inspectedRun,
     diagnostic: isDiagnosticOrchestrationWorkspace(inspectedRun.workspace),

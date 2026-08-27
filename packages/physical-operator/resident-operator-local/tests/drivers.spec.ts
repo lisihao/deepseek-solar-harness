@@ -156,6 +156,50 @@ describe('Claude Code RLM host tool', () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  it('serves a generic DSH tool envelope through the Agent SDK MCP adapter', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-claude-tools-'))
+    const socketPath = localIpcAddress(root, 'bridge')
+    const bridgeServer = createServer((socket) => {
+      const transport = new JsonRpcLineTransport(socket, socket)
+      transport.onRequest(() => Promise.resolve({
+        isError: false,
+        content: [{ type: 'text', text: 'echoed by DSH' }],
+        value: { accepted: true },
+      }))
+      transport.start()
+    })
+    await new Promise<void>((resolve, reject) => {
+      bridgeServer.once('error', reject)
+      bridgeServer.listen(socketPath, resolve)
+    })
+    const server = createClaudeRlmMcpServer('resident-command', {
+      version: 1,
+      socketPath,
+      sessionId: 'agent-session',
+      tools: [{
+        name: 'echo',
+        description: 'Echo through DSH.',
+        inputSchema: {
+          type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false,
+        },
+      }],
+    }, new AbortController().signal)
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'resident-driver-test', version: '1.0.0' })
+    try {
+      await server.instance.connect(serverTransport)
+      await client.connect(clientTransport)
+      await expect(client.callTool({ name: 'echo', arguments: { value: 'hello' } })).resolves.toEqual({
+        content: [{ type: 'text', text: 'echoed by DSH\n{"value":{"accepted":true}}' }],
+      })
+    } finally {
+      await client.close()
+      await server.instance.close()
+      await new Promise<void>((resolve) => { bridgeServer.close(() => { resolve() }) })
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('Codex RLM host tool', () => {

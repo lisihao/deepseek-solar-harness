@@ -416,7 +416,7 @@ export interface ConnectionConfig {
 }
 ```
 
-来源：[`packages/client/connection/src/index.ts:76`](../packages/client/connection/src/index.ts)
+来源：[`packages/client/connection/src/index.ts:92`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -579,7 +579,7 @@ export interface ToolResultPruneConfig {
 export type Config = string
 ```
 
-来源：[`packages/orchestration/continual-harness-local/src/index.ts:34`](../packages/orchestration/continual-harness-local/src/index.ts)
+来源：[`packages/orchestration/continual-harness-local/src/index.ts:35`](../packages/orchestration/continual-harness-local/src/index.ts)
 
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
@@ -1387,7 +1387,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/orchestration/orchestration-local/src/index.ts:35`](../packages/orchestration/orchestration-local/src/index.ts)
+来源：[`packages/orchestration/orchestration-local/src/index.ts:44`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -1484,7 +1484,7 @@ export interface OperatorConfig {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:43`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:44`](../packages/physical-operator/physical-operator-resident/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 

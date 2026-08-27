@@ -11,10 +11,12 @@ import type { ContextPacketV1, ContextPolicy } from '@deepseek-ai/dsh-context-co
 import type { IntentCompileRequest, IntentIRV1 } from '@deepseek-ai/dsh-intent-compiler'
 import type {
   ContinualHarnessMode,
+  ExecutionModelPreference,
   ModelAllocationObjective,
   ModelAllocationPlan,
   ModelExecutionOffer,
   ModelTaskPhase,
+  PlannerVerifierPreference,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
@@ -50,6 +52,44 @@ export interface OrchestrationAcceptanceRequirement {
   readonly id: string
   readonly description: string
   readonly kind: 'operator-completed' | 'artifact-present' | 'human-review'
+}
+
+/** User/system selection for Prime-compatible host-driven continuation. */
+export type RlmAutonomousMode = 'auto' | 'enabled' | 'disabled'
+
+/** Shell quality gates evaluated by the orchestration host after every completed assistant turn. */
+export interface RlmAutonomousGateConfigV1 {
+  readonly commands: readonly string[]
+  readonly maxRetries?: number
+  readonly timeoutMs?: number
+}
+
+/** Optional graph input for Prime-compatible Autonomous Mode. */
+export interface RlmAutonomousConfigV1 {
+  readonly mode: RlmAutonomousMode
+  readonly maxContinuations?: number
+  readonly maxTurns?: number
+  readonly maxTokens?: number
+  readonly timeoutMs?: number
+  readonly continuationPrompt?: string
+  readonly gates?: RlmAutonomousGateConfigV1
+}
+
+/** Fully resolved immutable Autonomous policy sealed into one physical attempt. */
+export interface RlmAutonomousPolicyV1 {
+  readonly version: 1
+  readonly enabled: boolean
+  readonly maxContinuations: number
+  readonly maxTurns: number
+  readonly maxTokens: number
+  readonly timeoutMs: number
+  readonly continuationPrompt: string
+  readonly gates: {
+    readonly commands: readonly string[]
+    readonly maxRetries: number
+    readonly timeoutMs: number
+  }
+  readonly policySha256: string
 }
 
 /** Immutable per-attempt Workbench contract retained as the execution task artifact. */
@@ -132,6 +172,8 @@ export interface OrchestrationNodeSpecV1 {
     readonly maxChildren: number
     readonly maxTurns: number
   }
+  /** Prime-compatible host policy; disabled unless explicitly or automatically admitted. */
+  readonly autonomous?: RlmAutonomousConfigV1
   readonly operator?: {
     readonly preferredIds?: readonly string[]
     readonly profile?: PhysicalOperatorExecutionPreference
@@ -192,10 +234,16 @@ export interface OrchestrationAdmissionTraceV1 {
   readonly sourceSessionId: string
   /** Independent user/system choice; RLM is a node strategy, not an operator. */
   readonly rlm?: RlmExecutionMode
+  /** Autonomous continuation is independent from Goal and reuses the same RLM/TaskGraph authority. */
+  readonly autonomous?: RlmAutonomousMode
   /** Continuous Harness can be disabled, scoped to this Session, or scoped to a workspace. */
   readonly continualHarness?: ContinualHarnessMode
   /** Global quality/cost/throughput preference consumed by the allocation Provider. */
   readonly optimization?: ModelAllocationObjective
+  /** Prefer Codex Sol for high-tier planning/verification, or choose the best qualified high-tier offer. */
+  readonly plannerVerifierPreference?: PlannerVerifierPreference
+  /** Prefer Codex Luna for execution leaves when qualified, or use ordinary balanced scoring. */
+  readonly executionPreference?: ExecutionModelPreference
 }
 
 /** Immutable compilation result that may be started after approval. */
@@ -277,6 +325,8 @@ export interface NodeExecutionPlanV1 {
   readonly allocationPlanRef: OrchestrationArtifactRef
   readonly allocationPlan: ModelAllocationPlan
   readonly rlmPlan?: RlmExecutionPlanV1
+  /** Host continuation/gate policy sealed before the first physical receipt is accepted. */
+  readonly autonomousPolicy?: RlmAutonomousPolicyV1
   /** Cost-aware child allocation used only by Smart Auto; Prime Strict inherits the parent. */
   readonly rlmWorkerPlan?: ModelAllocationPlan
   readonly harnessSnapshotRef?: OrchestrationArtifactRef
@@ -306,6 +356,7 @@ export interface OrchestrationNodeSnapshot {
   readonly modelSource?: 'native-subscription' | 'metered-api'
   readonly quotaPoolId?: string
   readonly rlm?: RlmExecutionMode
+  readonly autonomous?: RlmAutonomousMode
   readonly capabilityPlanRef?: OrchestrationArtifactRef
   readonly contextPacketRef?: OrchestrationArtifactRef
   readonly executionPlanRef?: OrchestrationArtifactRef
@@ -422,6 +473,75 @@ export interface CapabilityUpdateReceipt {
   readonly errorCode?: string
 }
 
+/** Bounded Server-cluster authority projection; TaskGraph state remains owned by one elected Scheduler. */
+export interface OrchestrationClusterStatus {
+  readonly nodeId: string
+  readonly memberIds: readonly string[]
+  readonly term: number
+  readonly role: 'follower' | 'candidate' | 'leader'
+  readonly votedFor?: string
+  readonly leaderId?: string
+  readonly leaseUntil: number
+  readonly commitIndex: number
+  readonly quorum: number
+  readonly canSchedule: boolean
+}
+
+/** One term-fenced vote request from another configured Product Server. */
+export interface OrchestrationClusterVoteRequest {
+  readonly term: number
+  readonly candidateId: string
+  readonly commitIndex: number
+}
+
+/** Durable vote response from one configured member. */
+export interface OrchestrationClusterVoteResponse {
+  readonly term: number
+  readonly voterId: string
+  readonly granted: boolean
+  readonly commitIndex: number
+}
+
+/** Bounded majority-lease heartbeat from an elected Scheduler. */
+export interface OrchestrationClusterHeartbeatRequest {
+  readonly term: number
+  readonly leaderId: string
+  readonly commitIndex: number
+  readonly leaseUntil: number
+}
+
+/** Follower acknowledgement and its current replication watermark. */
+export interface OrchestrationClusterHeartbeatResponse {
+  readonly term: number
+  readonly followerId: string
+  readonly accepted: boolean
+  readonly commitIndex: number
+}
+
+/** Complete logical single-writer state replicated only across authenticated admin peers. */
+export interface OrchestrationClusterReplicaV1 {
+  readonly version: 1
+  readonly stateSchemaVersion: number
+  readonly commitIndex: number
+  readonly capturedAt: string
+  readonly tables: Readonly<Record<string, readonly Readonly<Record<string, string | number | null>>[]>>
+  readonly artifacts: readonly { readonly ref: OrchestrationArtifactRef; readonly json: string }[]
+}
+
+/** Term-fenced follower installation request from the current elected leader. */
+export interface OrchestrationClusterInstallRequest {
+  readonly term: number
+  readonly leaderId: string
+  readonly replica: OrchestrationClusterReplicaV1
+}
+
+/** Applied or idempotently retained follower watermark. */
+export interface OrchestrationClusterInstallReceipt {
+  readonly nodeId: string
+  readonly commitIndex: number
+  readonly state: 'applied' | 'unchanged'
+}
+
 /** Orchestration error taxonomy. */
 export type OrchestrationErrorCode =
   | 'GRAPH_INVALID'
@@ -433,12 +553,15 @@ export type OrchestrationErrorCode =
   | 'NODE_INDETERMINATE'
   | 'CAPABILITY_RECOMPILE_REQUIRED'
   | 'CAPABILITY_HOTSWAP_UNSUPPORTED'
+  | 'AUTONOMOUS_LIMIT_REACHED'
+  | 'AUTONOMOUS_GATE_RETRY_EXHAUSTED'
   | 'COMMAND_CONFLICT'
   | 'COMMAND_INDETERMINATE'
   | 'WORKSPACE_INVALID'
   | 'WORKSPACE_DIRTY'
   | 'INTEGRATION_FAILED'
   | 'INTEGRATION_CONFLICT'
+  | 'NOT_CLUSTER_LEADER'
   | 'ORCHESTRATION_VERSION_MISMATCH'
   | 'ORCHESTRATION_UNAVAILABLE'
 
@@ -495,6 +618,12 @@ export abstract class OrchestrationService extends Service {
    */
   abstract readEvents(request: OrchestrationEventReadRequest): Promise<OrchestrationEventPage>
   /**
+   * Read one immutable content-addressed artifact.
+   * @param ref - digest-verified artifact identity returned by this service.
+   * @returns the decoded immutable artifact value.
+   */
+  abstract readArtifact(ref: OrchestrationArtifactRef): Promise<unknown>
+  /**
    * Apply a revision-checked run control.
    * @param request - revision-checked run control.
    * @returns the updated run snapshot.
@@ -524,6 +653,34 @@ export abstract class OrchestrationService extends Service {
    * @returns the durable update receipt.
    */
   abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
+  /**
+   * Read the local Server's bounded cluster authority projection.
+   * @returns the current cluster status, or undefined in standalone mode.
+   */
+  abstract clusterStatus(): Promise<OrchestrationClusterStatus | undefined>
+  /**
+   * Process one authenticated, configured-member vote request.
+   * @param request - candidate term and replication watermark.
+   * @returns this member's term-fenced vote response.
+   */
+  abstract clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse>
+  /**
+   * Process one authenticated majority-lease heartbeat.
+   * @param request - elected leader term, lease, and replication watermark.
+   * @returns this follower's lease acknowledgement.
+   */
+  abstract clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse>
+  /**
+   * Export one complete logical replica for authenticated cluster peers.
+   * @returns the current durable TaskGraph state image.
+   */
+  abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
+  /**
+   * Install one term-fenced leader replica while this node is a follower.
+   * @param request - elected leader coordinates and logical state image.
+   * @returns the follower's applied or unchanged watermark.
+   */
+  abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 }
 
 export type { CapabilityBindingPlanV1, ContextPacketV1 }

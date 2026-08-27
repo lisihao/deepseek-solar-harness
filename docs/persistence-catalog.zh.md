@@ -510,12 +510,15 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   runId: string
   maxParallel: number
   rlm: RlmExecutionMode
+  autonomous: RlmAutonomousMode
   continualHarness: ContinualHarnessMode
   optimization: ModelAllocationObjective
+  plannerVerifierPreference: PlannerVerifierPreference
+  executionPreference: ExecutionModelPreference
 }
 ```
 
-来源：[`packages/orchestration/tool-orchestration/src/index.ts:33`](../packages/orchestration/tool-orchestration/src/index.ts)
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:40`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -526,7 +529,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-来源：[`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:53`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 
@@ -567,7 +570,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:66`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:68`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -581,7 +584,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:78`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:80`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -595,7 +598,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:51`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:53`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -609,7 +612,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:53`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:55`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -626,7 +629,37 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:58`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:60`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortool-call--log-only"></a>
+
+#### `physical-operator/tool-call` — log-only
+
+```ts persistence-catalog
+/** One Resident-native model call into the current Agent's real DSH tool surface. */
+'physical-operator/tool-call': {
+  commandId: string
+  tool: string
+  arguments: Record<string, JsonValue>
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:85`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortool-result--log-only"></a>
+
+#### `physical-operator/tool-result` — log-only
+
+```ts persistence-catalog
+/** Settled result of one bridged DSH tool call. */
+'physical-operator/tool-result': {
+  commandId: string
+  tool: string
+  result: JsonValue
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:91`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

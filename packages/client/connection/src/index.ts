@@ -4,6 +4,15 @@ import type { IncomingHttpHeaders } from 'node:http'
 import { createHash } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-attachment'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ResidentExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
+import type {
+  OrchestrationClusterHeartbeatRequest,
+  OrchestrationClusterInstallRequest,
+  OrchestrationClusterReplicaV1,
+  OrchestrationClusterVoteRequest,
+} from '@deepseek-ai/dsh-orchestration'
+import { SessionReplicationError, type SessionReplica } from '@deepseek-ai/dsh-session-persistence'
 import {
   RemoteAuthError,
   type RemoteAuthService,
@@ -42,10 +51,17 @@ export type {
 export { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 export {
   REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
+  bindRemoteResidentProtocol, RemoteResidentProtocolClient,
+  parseRemoteResidentAcceptedTurn, parseRemoteResidentEventPage, parseRemoteResidentProviders, parseRemoteResidentTurn,
+  parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
   parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
 } from './remote-sync.ts'
 export type {
-  RemoteSyncCapability, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
+  RemoteResidentAcceptedTurn, RemoteResidentEventPage, RemoteResidentExecuteRequest,
+  RemoteResidentModelOption, RemoteResidentProviderStatus, RemoteResidentQuotaPool,
+  RemoteResidentProtocolBindings, RemoteResidentQuotaWindow, RemoteResidentReasoningEffort, RemoteResidentTurnSnapshot,
+  RemoteSessionReplicaApplyResult, RemoteSessionReplicaDocument, RemoteSessionReplicaSummary,
+  RemoteSyncCapability, RemoteSyncClusterProjection, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
   RemoteSyncResyncRequired, RemoteSyncSnapshot,
 } from './remote-sync.ts'
 
@@ -360,7 +376,13 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
     registerDownlink(MUX_EVENTS_PATH, (req, socket, head) => { downlinks.handleMux(req, socket, head) })
     registerDownlink(HOST_EVENTS_PATH, (req, socket, head) => { downlinks.handleHost(req, socket, head) })
     if (remoteSync) apiCtx.inject(['remoteAuth'], (authCtx) => {
-      const hub = new RemoteSyncHub(authCtx.apiProxy, remoteSyncJournalCapacity)
+      const hub = new RemoteSyncHub(
+        authCtx.apiProxy,
+        remoteSyncJournalCapacity,
+        authCtx.get('sessionPersistence'),
+        authCtx.get('residentOperators'),
+        () => authCtx.get('orchestrations'),
+      )
       const removeAuthRpc = connection.rpc.handle(
         REMOTE_AUTH_RPC_CHANNEL,
         async (endpoint, payload, _signal, requestContext) => remoteAuthCall(
@@ -373,7 +395,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
       )
       const removeSyncRpc = connection.rpc.handle(
         REMOTE_SYNC_RPC_CHANNEL,
-        async (endpoint, _payload, signal, requestContext) => {
+        async (endpoint, payload, signal, requestContext) => {
           const access = requireRemoteAccess(
             authCtx.remoteAuth,
             requestContext,
@@ -381,6 +403,128 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
           )
           if (endpoint === 'describe') return { ok: true, value: await hub.describe(signal, access.scope) }
           if (endpoint === 'snapshot') return { ok: true, value: await hub.snapshot(signal) }
+          if (endpoint === 'replica.list') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: await hub.replicaList(signal) }
+          }
+          if (endpoint === 'replica.read') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            return { ok: true, value: await hub.replicaRead(requiredString(body.sessionId, 'sessionId'), signal) }
+          }
+          if (endpoint === 'replica.apply') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            const events = body.events
+            if (!Array.isArray(events)) throw new ConnectionRpcHttpError(400, 'events must be an array')
+            try {
+              return {
+                ok: true,
+                value: await hub.replicaApply({ meta: body.meta, events } as SessionReplica, signal),
+              }
+            } catch (error) {
+              if (!(error instanceof SessionReplicationError)) throw error
+              return {
+                ok: false,
+                error: {
+                  code: 'internal' as const,
+                  message: `${error.code}: ${error.message}`,
+                  details: {},
+                },
+              }
+            }
+          }
+          if (endpoint === 'operator.providers') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: await hub.operatorProviders() }
+          }
+          if (endpoint === 'operator.execute') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            if (!Array.isArray(body.prompt)) throw new ConnectionRpcHttpError(400, 'prompt must be an array')
+            if (body.modelToolBridge !== undefined) {
+              throw new ConnectionRpcHttpError(400, 'remote model-tool bridges are not supported')
+            }
+            const profile = body.profile === undefined ? undefined : residentProfile(body.profile)
+            const request: Omit<ResidentExecuteRequest, 'signal' | 'modelToolBridge'> = {
+              commandId: requiredString(body.commandId, 'commandId') as never,
+              operatorId: requiredString(body.operatorId, 'operatorId'),
+              workspace: requiredString(body.workspace, 'workspace'),
+              laneId: requiredString(body.laneId, 'laneId'),
+              prompt: body.prompt as ContentBlock[],
+              ...(typeof body.taskLabel === 'string' ? { taskLabel: body.taskLabel } : {}),
+              ...(typeof body.systemPrompt === 'string' ? { systemPrompt: body.systemPrompt } : {}),
+              ...profile === undefined ? {} : { profile },
+            }
+            return { ok: true, value: await hub.operatorExecute(request) }
+          }
+          if (endpoint === 'operator.inspect') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            return { ok: true, value: await hub.operatorInspectTurn(requiredString(body.turnId, 'turnId')) }
+          }
+          if (endpoint === 'operator.events') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            return {
+              ok: true,
+              value: await hub.operatorReadEvents(
+                requiredString(body.sessionId, 'sessionId'),
+                boundedInteger(body.afterSequence, 'afterSequence', 0, Number.MAX_SAFE_INTEGER),
+                boundedInteger(body.limit, 'limit', 1, 500),
+                signal,
+              ),
+            }
+          }
+          if (endpoint === 'operator.interrupt') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            await hub.operatorInterrupt(
+              requiredString(body.sessionId, 'sessionId'),
+              requiredString(body.turnId, 'turnId'),
+            )
+            return { ok: true, value: { interrupted: true } }
+          }
+          if (endpoint === 'cluster.status') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: await hub.clusterStatus() }
+          }
+          if (endpoint === 'cluster.vote') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            const request: OrchestrationClusterVoteRequest = {
+              term: boundedInteger(body.term, 'term', 1, Number.MAX_SAFE_INTEGER),
+              candidateId: requiredString(body.candidateId, 'candidateId'),
+              commitIndex: boundedInteger(body.commitIndex, 'commitIndex', 0, Number.MAX_SAFE_INTEGER),
+            }
+            return { ok: true, value: await hub.clusterRequestVote(request) }
+          }
+          if (endpoint === 'cluster.heartbeat') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            const request: OrchestrationClusterHeartbeatRequest = {
+              term: boundedInteger(body.term, 'term', 1, Number.MAX_SAFE_INTEGER),
+              leaderId: requiredString(body.leaderId, 'leaderId'),
+              commitIndex: boundedInteger(body.commitIndex, 'commitIndex', 0, Number.MAX_SAFE_INTEGER),
+              leaseUntil: boundedInteger(body.leaseUntil, 'leaseUntil', 1, Number.MAX_SAFE_INTEGER),
+            }
+            return { ok: true, value: await hub.clusterHeartbeat(request) }
+          }
+          if (endpoint === 'cluster.export') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: await hub.clusterExportReplica() }
+          }
+          if (endpoint === 'cluster.install') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            recordPayload(body.replica)
+            const request: OrchestrationClusterInstallRequest = {
+              term: boundedInteger(body.term, 'term', 1, Number.MAX_SAFE_INTEGER),
+              leaderId: requiredString(body.leaderId, 'leaderId'),
+              replica: body.replica as OrchestrationClusterReplicaV1,
+            }
+            return { ok: true, value: await hub.clusterInstallReplica(request) }
+          }
           return {
             ok: false,
             error: {
@@ -596,6 +740,24 @@ function requiredString(value: unknown, field: string): string {
     throw new ConnectionRpcHttpError(400, `${field} must be a non-empty string`)
   }
   return value
+}
+
+function boundedInteger(value: unknown, field: string, minimum: number, maximum: number): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new ConnectionRpcHttpError(400, `${field} must be an integer from ${String(minimum)} to ${String(maximum)}`)
+  }
+  return value
+}
+
+function residentProfile(value: unknown): NonNullable<ResidentExecuteRequest['profile']> {
+  const record = recordPayload(value)
+  const model = requiredString(record.model, 'profile.model')
+  const effort = record.effort
+  if (effort !== undefined && effort !== 'low' && effort !== 'medium' && effort !== 'high'
+    && effort !== 'xhigh' && effort !== 'max' && effort !== 'ultra') {
+    throw new ConnectionRpcHttpError(400, 'profile.effort is invalid')
+  }
+  return { model, ...effort === undefined ? {} : { effort } }
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {

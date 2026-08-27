@@ -94,6 +94,57 @@ export interface PhysicalOperatorStatus extends Omit<PhysicalOperatorDescriptor,
   readonly unavailableReason?: string
 }
 
+/** One native model offered by a Resident physical operator. */
+export interface PhysicalOperatorResidentModel {
+  readonly model: string
+  readonly resolvedModel?: string
+  readonly displayName: string
+  readonly description: string
+  readonly supportedEfforts: readonly PhysicalOperatorReasoningEffort[]
+  readonly defaultEffort?: PhysicalOperatorReasoningEffort
+  readonly isDefault: boolean
+  readonly supportsAdaptiveThinking: boolean
+}
+
+/** One rolling allowance window reported by a subscription product. */
+export interface PhysicalOperatorQuotaWindow {
+  readonly usedPercent: number
+  readonly resetsAt?: number
+  readonly windowDurationMinutes?: number
+}
+
+/** Independently metered subscription allowance pool. */
+export interface PhysicalOperatorQuotaPool {
+  readonly poolId: string
+  readonly displayName: string
+  readonly models: readonly string[]
+  readonly meter: 'native-subscription'
+  readonly primary?: PhysicalOperatorQuotaWindow
+  readonly secondary?: PhysicalOperatorQuotaWindow
+  readonly observedAt: string
+}
+
+/** Provider-neutral dynamic Resident model and quota catalog. */
+export interface PhysicalOperatorResidentCatalog {
+  readonly operatorId: PhysicalOperatorId
+  readonly product: string
+  readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
+  /** Whether this transport can reach the owner-local typed model-tool socket. */
+  readonly supportsModelToolBridge: boolean
+  /** Physical execution location relative to the Scheduler authority. */
+  readonly location: 'local' | 'remote'
+  /** Whether workspace mutations can be returned to the Scheduler's integration worktree. */
+  readonly supportsWorkspaceMutationReturn: boolean
+  readonly available: boolean
+  readonly unavailableReason?: string
+  readonly quotaUnavailableReason?: string
+  readonly authentication: 'native-subscription' | 'unqualified'
+  readonly productVersion: string
+  readonly protocolHash: string
+  readonly models: readonly PhysicalOperatorResidentModel[]
+  readonly quotaPools?: readonly PhysicalOperatorQuotaPool[]
+}
+
 /** Caller-owned input for one operator execution. */
 export interface PhysicalOperatorStartRequest {
   /**
@@ -106,6 +157,8 @@ export interface PhysicalOperatorStartRequest {
   readonly label?: string
   /** Complete standalone task content for the selected operator. */
   readonly prompt: ContentBlock[]
+  /** Exact assembled DSH system instructions for a native product acting as the current Agent. */
+  readonly systemPrompt?: string
   /** Exact live agent whose workspace and authority the provider derives. */
   readonly parent: Agent
   /** Canonical cancellation channel before and after execution publication. */
@@ -140,12 +193,23 @@ export interface PhysicalOperatorStopReasonMap {
 /** Terminal reason union for a physical-operator execution. */
 export type PhysicalOperatorStopReason = PhysicalOperatorStopReasonMap[keyof PhysicalOperatorStopReasonMap]
 
+/** Product-reported token and cost usage for one physical execution. */
+export interface PhysicalOperatorUsage {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadInputTokens?: number
+  readonly cacheWriteInputTokens?: number
+  readonly costUsd?: number
+}
+
 /** Provider-neutral terminal result. */
 export interface PhysicalOperatorResult {
   /** Final or partial canonical content returned by the backing execution. */
   readonly output: ContentBlock[]
   /** Why the execution ended. Only `completed` is a successful result. */
   readonly stopReason: PhysicalOperatorStopReason
+  /** Native product usage when the Provider exposes authoritative counters. */
+  readonly usage?: PhysicalOperatorUsage
   /** Opaque durable continuation identity returned only by resident executions. */
   readonly continuity?: {
     readonly sessionId: string
@@ -153,8 +217,33 @@ export interface PhysicalOperatorResult {
   }
 }
 
+/** Provider-neutral accepted identity published before a durable turn settles. */
+export interface PhysicalOperatorAcceptedReceipt {
+  readonly sessionId: string
+  readonly turnId: string
+  readonly stateRevision: number
+}
+
+/** Bounded provider-neutral progress observation for Trace projection. */
+export interface PhysicalOperatorProgressEvent {
+  readonly sequence: number
+  readonly type: string
+  readonly time: string
+  readonly data: Readonly<Record<string, unknown>>
+}
+
+/** Ordered progress page returned without exposing a native transcript. */
+export interface PhysicalOperatorProgressPage {
+  readonly events: readonly PhysicalOperatorProgressEvent[]
+  readonly nextSequence: number
+}
+
 /** Provider-owned run before the service adds identity and lifecycle observation. */
 export interface PhysicalOperatorProviderRun {
+  /** Durable accepted receipt when the backing Provider supports reconnection. */
+  readonly receipt?: PhysicalOperatorAcceptedReceipt
+  /** Optional structured progress reader implemented by local and remote Resident Providers. */
+  readEvents?(afterSequence: number, limit: number, signal?: AbortSignal): Promise<PhysicalOperatorProgressPage>
   /** Settles once with the execution outcome; infrastructure faults may reject. */
   readonly result: Promise<PhysicalOperatorResult>
   /** Cancel remaining work and await resource quiescence. Idempotent. */
@@ -175,6 +264,12 @@ export interface PhysicalOperator {
   readonly descriptor: PhysicalOperatorDescriptor
   /** Resolve current transport or deployment availability, optionally for one requested lifetime. */
   availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability
+  /** Optionally publish the live model/quota catalog for Resident scheduling. */
+  residentCatalog?(): Promise<PhysicalOperatorResidentCatalog>
+  /** Reattach observation to a previously accepted durable turn after caller restart. */
+  reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>
+  /** Interrupt an accepted durable turn without deleting its Resident Session. */
+  interrupt?(receipt: PhysicalOperatorAcceptedReceipt): Promise<void>
   /** Establish one run; fulfillment transfers ownership to the caller. */
   start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>
 }

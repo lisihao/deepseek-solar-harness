@@ -7,6 +7,7 @@
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../util/home-paths" },
+    { "path": "../../host/apiproxy" },
     { "path": "../../credentials/credentials-local" },
     { "path": "../../llm/llm" },
     { "path": "../../llm/llm-deepseek" },
@@ -27,6 +28,7 @@
     { "path": "../continual-harness-local" },
     { "path": "../capability-capsule" },
     { "path": "../orchestration" },
+    { "path": "../../client/connection/tsconfig.host.json" },
     { "path": "../../physical-operator/physical-operator" },
     { "path": "../../physical-operator/resident-operator-local" },
     { "path": "../../runtime-diagnostics/invariants" }

@@ -193,6 +193,7 @@ describe('immutable compilation foundations', () => {
     expect(tables).toEqual(expect.arrayContaining([
       'runs', 'attempts', 'orchestration_events', 'compilation_artifacts', 'capability_bindings',
       'context_packets', 'node_execution_plans', 'capability_updates', 'command_receipts',
+      'autonomous_states', 'cluster_election',
     ]))
     store.close()
   })
@@ -204,9 +205,36 @@ describe('immutable compilation foundations', () => {
     database.close()
 
     const store = new OrchestrationStore(root)
-    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(2)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(4)
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'command_receipts'").get())
       .toBeDefined()
+    expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'autonomous_states'").get())
+      .toBeDefined()
+    expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cluster_election'").get())
+      .toBeDefined()
     store.close()
+  })
+
+  it('requires explicit execute authority for Autonomous shell gates', async () => {
+    const root = await temporary()
+    const fixture = graph(root)
+    const node = fixture.nodes[0]!
+    expect(() => validateGraph({
+      ...fixture,
+      nodes: [{
+        ...node,
+        rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 1, maxTurns: 2 },
+        autonomous: { mode: 'enabled', gates: { commands: ['pnpm test'] } },
+      }],
+    })).toThrow('autonomous-gate execute effect')
+    expect(validateGraph({
+      ...fixture,
+      nodes: [{
+        ...node,
+        effectBudget: { ...node.effectBudget, execute: ['autonomous-gate'] },
+        rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 1, maxTurns: 2 },
+        autonomous: { mode: 'enabled', gates: { commands: ['pnpm test'] } },
+      }],
+    })).toEqual(['A'])
   })
 })

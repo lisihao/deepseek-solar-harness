@@ -4,7 +4,9 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
 import type {
+  ExecutionModelPreference,
   ModelAllocationObjective,
+  PlannerVerifierPreference,
   RlmExecutionMode,
 } from './strategy-types.ts'
 
@@ -69,6 +71,8 @@ export interface ModelAllocationRequest {
   readonly task: string
   readonly preferredOperatorIds: readonly string[]
   readonly objective: ModelAllocationObjective
+  readonly plannerVerifierPreference?: PlannerVerifierPreference
+  readonly executionPreference?: ExecutionModelPreference
   readonly rlm: RlmExecutionMode
   readonly graphMaxParallel: number
   readonly offers: readonly ModelExecutionOffer[]

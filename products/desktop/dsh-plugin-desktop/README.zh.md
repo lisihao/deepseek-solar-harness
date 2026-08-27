@@ -12,11 +12,13 @@ Electron 可执行文件只包含最小启动代码。它获取单实例锁、�
 
 同一 package 还提供 `dsh-product-server`，它是远程部署使用的纯 Node Host Adapter。Desktop 与 Product Server 都从唯一的封装产品组合生成，因此会加载相同的 Resident、Orchestration、AgentTeams、Billing、Remote Modules、RLM／Continuous Harness、模型分配、记忆、治理和产品 UI row。只有 Host Adapter row 不同：Desktop 拥有 Electron 窗口、托盘、终端、profile 与更新 effect；Product Server 拥有持久 Web endpoint，为远程客户端固定使用浏览器目录选择器，并始终保留 compatibility 浏览器布局，因为它不会加载 Electron 所有的 advanced layout provider。普通 `dsh server` 命令仍是兼容上游的裸 Server profile，不是 DSH Desktop 产品部署。
 
-MacBook Frontend 会保存一个带名称的 Product Server 列表和一项当前 Server 选择。原生 **Connect to Remote Server…** 窗口可新增、编辑、选择和删除条目；切换当前条目会让 Frontend 重启并连接对应 endpoint，而不会启动本机 Host。已有的单 Server 部署状态会迁移为列表中的第一个条目。`http://127.0.0.1:13080` 这类 loopback endpoint 通常通过 owner 控制的 SSH 本地转发访问 Product Server，会直接使用已经认证的隧道，不再要求第二份配对码或 Keychain 凭据。手机／pocket 等直接访问远程 HTTPS 的客户端仍使用一次性配对挑战、加密持久设备凭据和短期访问 session。
+DSH Desktop 保存一个带名称的 Product Server 列表和一项当前 Server 选择，且这两项不依赖当前部署角色。原生 **Connect to Remote Server…** 窗口可新增、编辑、选择和删除条目；切换当前条目会让 Frontend 重启并连接对应 endpoint，而不会启动本机 Host。Frontend 启动时，Desktop 会先通过经过认证的投影协议资格检查上次选择；若该项不可达，则按用户定义的顺序尝试其余条目。成功接管的备用项会成为持久化的当前 Server，并显示在原生窗口标题中。若全部条目均不可用，系统会保留完整目录并打开本地部署恢复界面，不会静默启动本机 Host。切回本机 Server 后，系统仍保留完整列表、最后选择和呈现模式，因此用户无需重新配置就能再次选择任一已保存 Server。已有的单 Server 部署状态会迁移为列表中的第一个条目。`http://127.0.0.1:13080` 这类 loopback endpoint 通常通过 owner 控制的 SSH 本地转发访问 Product Server，会直接使用已经认证的隧道，不再要求第二份配对码或 Keychain 凭据。手机／pocket 等直接访问远程 HTTPS 的客户端仍使用一次性配对挑战、加密持久设备凭据和短期访问 session。
 
-Electron 持有原生 **Deployment** 菜单，以及当前 Frontend Server 无法加载时显示的本地恢复页面。两处都提供不依赖远程 Client bundle 的 **Use Local Server** 与 **Connect to Remote Server…**；远程页面可用时，其 Desktop 页脚继续提供相同操作。
+Electron 持有原生 **Deployment** 菜单，以及当前 Frontend Server 无法加载时显示的本地恢复页面。两处都提供不依赖远程 Client bundle 的 **Use Local Server** 与 **Connect to Remote Server…**。Desktop 页脚始终直接暴露 Server 配置；在 Frontend 角色下还会额外暴露 **Use Local Server**。
 
-同一原生窗口还拥有可选的后台 Git commit 同步。每台设备分别配置本地仓库路径、作为权威的 GitHub remote、分支、同步方向、间隔，以及可选的 Tailscale／SSH 加速 remote。同步会拒绝脏工作树或错误分支，只对已提交 ref 执行 fast-forward 或 push；遇到分叉时报告冲突，不会自行 merge。加速 remote 只可预取 Git object；GitHub 始终是接受结果的权威，而且加速路径失败不会阻断权威路径。该机制绝不复制存活的 DSH Session、SQLite 或 WAL 文件：运行进展仍是 Server 投影，迁移运行权威必须另行显式执行。
+同一原生窗口还拥有可选的后台 Git commit 同步。每台设备分别配置本地仓库路径、作为权威的 GitHub remote、分支、同步方向、间隔，以及可选的 Tailscale／SSH 加速 remote。同步会拒绝脏工作树或错误分支，只对已提交 ref 执行 fast-forward 或 push；遇到分叉时报告冲突，不会自行 merge。加速 remote 只可预取 Git object；GitHub 始终是接受结果的权威，而且加速路径失败不会阻断权威路径。
+
+该窗口还提供按 revision 去重的后台 Session 进展交接。Frontend 可以把当前 Product Server 上完整、事件边界闭合的 Session 副本拉取到受保护的暂存箱，切换到本机 Server 后再导入；正在运行的本机 Server 也可对同样的不可变日志前缀执行推送或拉取。控制器按 Server 记录 revision，未变化的日志不会重复传输。它不会复制 SQLite 或 WAL 文件，不复制未闭合的回合，也不会建立第二个活跃写者：存活任务继续由原 Server 持有，通过现有 snapshot/cursor 流实时观察。
 
 desktop package 拥有普通 Host 与 Web Client 两个 face。它的 Client face 会校验 Host 提供的模式、平台与产品版本 marker。两种模式都会在窗口内容下方的保留区域挂载一条不可交互的单行产品标记，并继续把 Desktop 操作放在普通 additive slot 中；兼容模式随后停止，不提供 layout service 或 root 呈现，高级模式则安装下文所述的 desktop layout service 与 root 呈现。两种模式下，第三方 Web client 都继续使用普通 DSH 模块图。
 

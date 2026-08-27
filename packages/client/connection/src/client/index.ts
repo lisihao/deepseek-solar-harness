@@ -27,9 +27,16 @@ export type {
 } from '../remote-auth-wire.ts'
 export {
   REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
+  bindRemoteResidentProtocol, RemoteResidentProtocolClient,
+  parseRemoteResidentAcceptedTurn, parseRemoteResidentEventPage, parseRemoteResidentProviders, parseRemoteResidentTurn,
+  parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
   parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
 } from '../remote-sync.ts'
 export type {
+  RemoteResidentAcceptedTurn, RemoteResidentEventPage, RemoteResidentExecuteRequest,
+  RemoteResidentModelOption, RemoteResidentProviderStatus, RemoteResidentQuotaPool,
+  RemoteResidentProtocolBindings, RemoteResidentQuotaWindow, RemoteResidentReasoningEffort, RemoteResidentTurnSnapshot,
+  RemoteSessionReplicaApplyResult, RemoteSessionReplicaDocument, RemoteSessionReplicaSummary,
   RemoteSyncCapability, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
   RemoteSyncResyncRequired, RemoteSyncSnapshot,
 } from '../remote-sync.ts'

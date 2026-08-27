@@ -4,7 +4,7 @@
 
 `ctx.continualHarness` 的所有者本地持久 Provider。它在编排 daemon 根目录保存显式受管 Harness 条目、有界结果摘要、标签和 Evidence 引用；它不采集原始用户 prompt、完整对话、凭据或模型私有状态。
 
-快照按作用域过滤、版本化、内容寻址，并在封存到节点 Attempt 后保持不可变。Refinement 逐项独立应用有效编辑，为被拒绝编辑保留结构化失败，并且只为成功编辑持久化 before-image。回滚创建后续 generation，并可跨 Provider 重启执行。
+快照按作用域过滤、版本化、内容寻址，并在封存到节点 Attempt 后保持不可变。会话与工作区身份继续彼此隔离，而所有使用同一 DSH home 的仓库共享所有者本地 `global` 身份。Refinement 逐项独立应用有效编辑，为被拒绝编辑保留结构化失败，并且只为成功编辑持久化 before-image。回滚创建后续 generation，并可跨 Provider 重启执行。
 
 ## 模型体验
 

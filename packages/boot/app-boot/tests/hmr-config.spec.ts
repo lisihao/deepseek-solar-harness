@@ -152,9 +152,18 @@ describe('HMR exact config paths', () => {
       })
       await started.promise
       writeFileSync(filename, 'two')
-      // Chokidar coalesces atomic writes for 100 ms by default. Wait beyond
-      // that window so this edit is queued before registration disposal.
-      await new Promise(resolve => setTimeout(resolve, 250))
+      // Do not guess how long a polling scan takes under CI load. Wait until
+      // the watcher has actually marked a second refresh dirty while the first
+      // callback is blocked, then verify disposal drains both in order.
+      const internals = ctx.hmr as unknown as {
+        configs: Map<string, object>
+        configRefreshes: WeakMap<object, { dirty: boolean }>
+      }
+      await eventually(
+        () => [...internals.configs.values()]
+          .some(registration => internals.configRefreshes.get(registration)?.dirty === true),
+        'HMR did not queue the second config refresh',
+      )
 
       let disposed = false
       const disposal = dispose().then(() => { disposed = true })

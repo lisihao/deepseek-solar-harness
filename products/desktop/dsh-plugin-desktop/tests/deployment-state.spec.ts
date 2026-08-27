@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  connectFrontendServer,
   DesktopDeploymentStateStore,
   type DesktopDeploymentRequest,
   type DesktopSecretStorage,
@@ -40,12 +41,14 @@ describe('DesktopDeploymentStateStore', () => {
       },
     }
     const store = new DesktopDeploymentStateStore(root, secretStorage(), request)
-    await expect(store.load()).resolves.toEqual({ version: 3, role: 'server' })
+    await expect(store.load()).resolves.toEqual({
+      version: 4, role: 'server', servers: [], presentation: 'compatibility',
+    })
     const state = await store.configureFrontend({
       endpoint: 'https://server.example', pairingCode: '12345678', deviceName: 'MacBook',
     })
     expect(state).toMatchObject({
-      version: 3,
+      version: 4,
       role: 'frontend',
       servers: [expect.objectContaining({
         authMode: 'paired',
@@ -86,7 +89,7 @@ describe('DesktopDeploymentStateStore', () => {
       deviceName: 'MacBook',
     })
     expect(state).toEqual({
-      version: 3,
+      version: 4,
       role: 'frontend',
       activeServerId: expect.any(String),
       servers: [{
@@ -119,7 +122,7 @@ describe('DesktopDeploymentStateStore', () => {
       fetch: async () => { throw new Error('should not request while loading') },
     })
     await expect(store.load()).resolves.toEqual({
-      version: 3,
+      version: 4,
       role: 'frontend',
       activeServerId: 'legacy-default',
       servers: [{
@@ -154,7 +157,158 @@ describe('DesktopDeploymentStateStore', () => {
     expect(removed).toMatchObject({ role: 'frontend', activeServerId: second.activeServerId })
     if (removed.role !== 'frontend') throw new Error('expected remaining Frontend Server')
     expect(removed.servers).toHaveLength(1)
-    await expect(store.removeFrontend(removed.activeServerId)).resolves.toEqual({ version: 3, role: 'server' })
+    await expect(store.removeFrontend(removed.activeServerId)).resolves.toEqual({
+      version: 4, role: 'server', servers: [], presentation: 'compatibility',
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('fails over to the first reachable configured Server and persists the elected ingress', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-failover-'))
+    const probes: string[] = []
+    const fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const endpoint = new URL(String(url))
+      probes.push(endpoint.origin)
+      if (endpoint.port === '13080') return new Response('offline', { status: 503 })
+      const body = JSON.parse(String(init?.body)) as { rpcId: string }
+      return Response.json({
+        type: 'server-response', rpcId: body.rpcId,
+        result: { ok: true, value: { deploymentId: 'lab' } },
+      })
+    })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const first = await store.configureFrontend({
+      label: 'Primary mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+    const second = await store.configureFrontend({
+      label: 'Lab mini', endpoint: 'http://127.0.0.1:23080', deviceName: 'MacBook',
+    })
+    const activeFirst = await store.selectFrontend(first.activeServerId)
+
+    await expect(connectFrontendServer(store, activeFirst)).resolves.toMatchObject({
+      state: { activeServerId: second.activeServerId },
+      server: { id: second.activeServerId, label: 'Lab mini' },
+    })
+    expect(probes).toEqual(['http://127.0.0.1:13080', 'http://127.0.0.1:23080'])
+    await expect(store.load()).resolves.toMatchObject({
+      role: 'frontend', activeServerId: second.activeServerId,
+    })
+  })
+
+  it('reports every failed configured Server without discarding the catalog', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-failover-none-'))
+    const fetch = vi.fn(async () => new Response('offline', { status: 503 }))
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const first = await store.configureFrontend({
+      label: 'Primary mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+    const second = await store.configureFrontend({
+      label: 'Lab mini', endpoint: 'http://127.0.0.1:23080', deviceName: 'MacBook',
+    })
+    const failures: string[] = []
+
+    await expect(connectFrontendServer(store, second, server => { failures.push(server.label) }))
+      .rejects.toThrow('no configured Frontend Server is reachable')
+    expect(failures).toEqual(['Lab mini', 'Primary mini'])
+    await expect(store.load()).resolves.toMatchObject({
+      role: 'frontend', activeServerId: second.activeServerId, servers: expect.arrayContaining([
+        expect.objectContaining({ id: first.activeServerId }),
+        expect.objectContaining({ id: second.activeServerId }),
+      ]),
+    })
+  })
+
+  it('prefers the reachable cluster leader over the persisted follower', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-leader-'))
+    const fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const endpoint = new URL(String(url))
+      const body = JSON.parse(String(init?.body)) as { rpcId: string }
+      const leader = endpoint.port === '23080'
+      return Response.json({
+        type: 'server-response', rpcId: body.rpcId,
+        result: {
+          ok: true,
+          value: {
+            deploymentId: leader ? 'leader' : 'follower',
+            cluster: {
+              nodeId: leader ? 'server-b' : 'server-a', term: 4,
+              role: leader ? 'leader' : 'follower', leaderId: 'server-b', canSchedule: leader,
+            },
+          },
+        },
+      })
+    })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const first = await store.configureFrontend({
+      label: 'Follower mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+    const second = await store.configureFrontend({
+      label: 'Leader mini', endpoint: 'http://127.0.0.1:23080', deviceName: 'MacBook',
+    })
+    const activeFollower = await store.selectFrontend(first.activeServerId)
+
+    await expect(connectFrontendServer(store, activeFollower)).resolves.toMatchObject({
+      state: { activeServerId: second.activeServerId },
+      server: { label: 'Leader mini' },
+    })
+  })
+
+  it('keeps the first reachable follower for read-only access when no leader is reachable', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-follower-only-'))
+    const fetch = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { rpcId: string }
+      return Response.json({
+        type: 'server-response', rpcId: body.rpcId,
+        result: {
+          ok: true,
+          value: {
+            deploymentId: 'follower',
+            cluster: {
+              nodeId: 'server-a', term: 4, role: 'follower', leaderId: 'server-b', canSchedule: false,
+            },
+          },
+        },
+      })
+    })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const state = await store.configureFrontend({
+      label: 'Follower mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+
+    await expect(connectFrontendServer(store, state)).resolves.toMatchObject({
+      state: { activeServerId: state.activeServerId },
+      server: { label: 'Follower mini' },
+    })
+  })
+
+  it('retains the Server catalog while local Server mode is active and can switch back', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-local-server-catalog-'))
+    const fetch = vi.fn(async () => { throw new Error('trusted tunnels do not use remote auth') })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const remote = await store.configureFrontend({
+      label: 'Remote mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+      presentation: 'advanced',
+    })
+
+    const local = await store.useServer()
+    expect(local).toEqual({
+      version: 4,
+      role: 'server',
+      activeServerId: remote.activeServerId,
+      servers: remote.servers,
+      presentation: 'advanced',
+    })
+    await expect(new DesktopDeploymentStateStore(root, secretStorage(), { fetch }).load())
+      .resolves.toEqual(local)
+
+    const selected = await store.selectFrontend(remote.activeServerId)
+    expect(selected).toMatchObject({
+      version: 4,
+      role: 'frontend',
+      activeServerId: remote.activeServerId,
+      servers: remote.servers,
+      presentation: 'advanced',
+    })
     expect(fetch).not.toHaveBeenCalled()
   })
 

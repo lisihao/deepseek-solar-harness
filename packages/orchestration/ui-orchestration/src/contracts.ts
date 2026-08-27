@@ -50,6 +50,7 @@ export interface DesktopOrchestrationNode {
   modelSource?: 'native-subscription' | 'metered-api'
   quotaPoolId?: string
   rlm?: 'auto' | 'enabled' | 'disabled'
+  autonomous?: 'auto' | 'enabled' | 'disabled'
   capabilityPlanRef?: string
   contextPacketRef?: string
   executionPlanRef?: string
@@ -74,8 +75,11 @@ export interface DesktopOrchestrationRun {
     route: 'taskgraph'
     sourceSessionId: string
     rlm?: 'auto' | 'enabled' | 'disabled'
-    continualHarness?: 'auto' | 'off' | 'session' | 'workspace'
+    autonomous?: 'auto' | 'enabled' | 'disabled'
+    continualHarness?: 'auto' | 'off' | 'session' | 'workspace' | 'global'
     optimization?: 'balanced' | 'quality' | 'speed' | 'economy'
+    plannerVerifierPreference?: 'codex-sol' | 'best-high-tier'
+    executionPreference?: 'luna-first' | 'balanced'
   }
   certificate: {
     certificateSha256: string
@@ -110,6 +114,14 @@ export interface DesktopOrchestrationDashboard {
   diagnosticsIncluded: boolean
   selectedRunId?: string
   events?: DesktopOrchestrationEvent[]
+}
+
+/** Complete immutable Evidence value loaded only after a user asks to inspect it. */
+export interface DesktopOrchestrationEvidence {
+  generatedAt: string
+  selectedRunId: string
+  evidenceRef: string
+  evidence: unknown
 }
 
 /** Trusted revision-checked controls exposed by the dashboard endpoint. */

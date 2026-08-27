@@ -508,12 +508,15 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
   runId: string
   maxParallel: number
   rlm: RlmExecutionMode
+  autonomous: RlmAutonomousMode
   continualHarness: ContinualHarnessMode
   optimization: ModelAllocationObjective
+  plannerVerifierPreference: PlannerVerifierPreference
+  executionPreference: ExecutionModelPreference
 }
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:33`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:40`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -524,7 +527,7 @@ Source: [`packages/orchestration/tool-orchestration/src/index.ts:33`](../package
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:53`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 
@@ -565,7 +568,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:66`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:68`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -579,7 +582,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:66`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:78`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:80`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -593,7 +596,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:78`](..
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:51`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:53`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -607,7 +610,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:51`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:53`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:55`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -624,7 +627,37 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:53`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:58`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:60`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortool-call--log-only"></a>
+
+#### `physical-operator/tool-call` — log-only
+
+```ts persistence-catalog
+/** One Resident-native model call into the current Agent's real DSH tool surface. */
+'physical-operator/tool-call': {
+  commandId: string
+  tool: string
+  arguments: Record<string, JsonValue>
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:85`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortool-result--log-only"></a>
+
+#### `physical-operator/tool-result` — log-only
+
+```ts persistence-catalog
+/** Settled result of one bridged DSH tool call. */
+'physical-operator/tool-result': {
+  commandId: string
+  tool: string
+  result: JsonValue
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:91`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

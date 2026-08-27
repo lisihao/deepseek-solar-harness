@@ -7,24 +7,44 @@ describe('orchestration model guidance', () => {
     expect(orchestrationGuidance).toContain('Claude Code')
     expect(orchestrationGuidance).toContain('RLM')
     expect(orchestrationGuidance).toContain('Continuous Harness')
+    expect(orchestrationGuidance).toContain('Autonomous Mode')
     expect(orchestrationGuidance).not.toContain('Prime Agent')
     expect(orchestrationGuidance).toContain('intelligent routing')
     expect(orchestrationGuidance).toContain('fail rather than silently switch products')
     expect(orchestrationGuidance).toContain('clean-task Context Capsule')
     expect(orchestrationGuidance).toContain('without a phase barrier')
+    expect(orchestrationGuidance).toContain('Sol for planning/verification')
+    expect(orchestrationGuidance).toContain('Luna for qualified coding leaves')
   })
 
   it('defaults to Auto and preserves explicit RLM or Standard choices for comparison', () => {
     expect(foldOrchestrationPreferences([])).toEqual({
-      rlm: 'auto', continualHarness: 'auto', optimization: 'balanced',
+      rlm: 'auto', autonomous: 'disabled', continualHarness: 'auto', optimization: 'balanced',
+      plannerVerifierPreference: 'codex-sol', executionPreference: 'luna-first',
     })
     expect(foldOrchestrationPreferences([{
       type: 'orchestration/preferences',
       data: { rlm: 'enabled', continualHarness: 'session', optimization: 'quality' },
-    }])).toEqual({ rlm: 'enabled', continualHarness: 'session', optimization: 'quality' })
+    }])).toEqual({
+      rlm: 'enabled', autonomous: 'disabled', continualHarness: 'session', optimization: 'quality',
+      plannerVerifierPreference: 'codex-sol', executionPreference: 'luna-first',
+    })
     expect(foldOrchestrationPreferences([{
       type: 'orchestration/preferences',
       data: { rlm: 'disabled', continualHarness: 'off', optimization: 'balanced' },
-    }])).toEqual({ rlm: 'disabled', continualHarness: 'off', optimization: 'balanced' })
+    }])).toEqual({
+      rlm: 'disabled', autonomous: 'disabled', continualHarness: 'off', optimization: 'balanced',
+      plannerVerifierPreference: 'codex-sol', executionPreference: 'luna-first',
+    })
+    expect(foldOrchestrationPreferences([{
+      type: 'orchestration/preferences',
+      data: {
+        rlm: 'disabled', continualHarness: 'global', optimization: 'balanced',
+        plannerVerifierPreference: 'best-high-tier', executionPreference: 'balanced',
+      },
+    }])).toEqual({
+      rlm: 'disabled', autonomous: 'disabled', continualHarness: 'global', optimization: 'balanced',
+      plannerVerifierPreference: 'best-high-tier', executionPreference: 'balanced',
+    })
   })
 })

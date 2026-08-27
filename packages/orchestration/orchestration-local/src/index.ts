@@ -6,7 +6,16 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import OrchestrationService, {
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
+  type OrchestrationArtifactRef,
   type OrchestrationCompilationV1,
+  type OrchestrationClusterHeartbeatRequest,
+  type OrchestrationClusterHeartbeatResponse,
+  type OrchestrationClusterInstallReceipt,
+  type OrchestrationClusterInstallRequest,
+  type OrchestrationClusterReplicaV1,
+  type OrchestrationClusterStatus,
+  type OrchestrationClusterVoteRequest,
+  type OrchestrationClusterVoteResponse,
   type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompileRequest,
   type OrchestrationControlRequest,
@@ -81,6 +90,7 @@ class LocalOrchestrationService extends OrchestrationService {
   list(): Promise<OrchestrationRunSnapshot[]> { return this.client.list() }
   inspect(runId: OrchestrationRunId): Promise<OrchestrationRunSnapshot> { return this.client.inspect(String(runId)) }
   readEvents(request: OrchestrationEventReadRequest): Promise<OrchestrationEventPage> { return this.client.readEvents(request) }
+  readArtifact(ref: OrchestrationArtifactRef): Promise<unknown> { return this.client.readArtifact(ref) }
   control(request: OrchestrationControlRequest): Promise<OrchestrationRunSnapshot> { return this.client.control(request) }
   decide(request: OrchestrationDecisionRequest): Promise<OrchestrationRunSnapshot> { return this.client.decide(request) }
   resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promise<OrchestrationRunSnapshot> {
@@ -93,6 +103,18 @@ class LocalOrchestrationService extends OrchestrationService {
 
   proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt> {
     return this.client.proposeCapabilityUpdate(request)
+  }
+
+  clusterStatus(): Promise<OrchestrationClusterStatus | undefined> { return this.client.clusterStatus() }
+  clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse> {
+    return this.client.clusterRequestVote(request)
+  }
+  clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse> {
+    return this.client.clusterHeartbeat(request)
+  }
+  clusterExportReplica(): Promise<OrchestrationClusterReplicaV1> { return this.client.clusterExportReplica() }
+  clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt> {
+    return this.client.clusterInstallReplica(request)
   }
 }
 

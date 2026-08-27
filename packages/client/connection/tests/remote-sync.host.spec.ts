@@ -204,6 +204,154 @@ describe('RemoteSyncHub', () => {
     await expect(hub.close()).rejects.toThrow()
   })
 
+  it('advertises and serves prefix-compatible Session replication only when persistence is mounted', async () => {
+    const header = { version: 0, id: 'session-replica', createdAt: 1 }
+    const events = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    const replicate = vi.fn(async () => ({
+      sessionId: 'session-replica', state: 'created' as const,
+      sourceEventCount: 2, destinationEventCount: 2, appendedEventCount: 2,
+    }))
+    const persistence = {
+      listSnapshots: async () => [{ header, revision: 'store:1' }],
+      inspect: async () => ({ meta: header, events }),
+      replicate,
+    }
+    const hub = new RemoteSyncHub(api(), 4, persistence as never)
+    const adminDescription = await hub.describe(new AbortController().signal, 'admin')
+    expect(adminDescription.capabilities).toEqual(expect.arrayContaining([
+      'session.replicate.read', 'session.replicate.write',
+    ]))
+    const pocketDescription = await hub.describe(new AbortController().signal, 'pocket')
+    expect(pocketDescription.capabilities).not.toContain('session.replicate.read')
+    await expect(hub.replicaList()).resolves.toEqual([{ header, revision: 'store:1' }])
+    await expect(hub.replicaRead('session-replica')).resolves.toEqual({ meta: header, events, balanced: true })
+    await expect(hub.replicaApply({ meta: header, events } as never)).resolves.toMatchObject({
+      sessionId: 'session-replica', state: 'created', appendedEventCount: 2,
+    })
+    expect(replicate).toHaveBeenCalledOnce()
+    await hub.close()
+  })
+
+  it('never advertises or reads a Session whose current turn is still open', async () => {
+    const header = { version: 0, id: 'session-open', createdAt: 1 }
+    const events = [{ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }]
+    const persistence = {
+      listSnapshots: async () => [{ header, revision: 'store:open' }],
+      inspect: async () => ({ meta: header, events }),
+      replicate: vi.fn(),
+    }
+    const hub = new RemoteSyncHub(api(), 4, persistence as never)
+    await expect(hub.replicaList()).resolves.toEqual([])
+    await expect(hub.replicaRead('session-open')).rejects.toThrow('open turn')
+    await hub.close()
+  })
+
+  it('exposes durable Resident admission and observation only when the control seam is mounted', async () => {
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
+      tags: ['code'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: '0.200.0', protocolHash: 'schema-1',
+      models: [],
+    }
+    const dispose = vi.fn(async () => undefined)
+    const execute = vi.fn(async () => ({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2,
+      result: new Promise(() => {}), dispose,
+    }))
+    const inspectTurn = vi.fn(async () => ({
+      commandId: 'command-1', sessionId: 'resident-session', turnId: 'resident-turn',
+      state: 'running', stateRevision: 2, updatedAt: '2026-08-27T12:00:00.000Z',
+    }))
+    const readEvents = vi.fn(async () => ({ events: [], nextSequence: 0 }))
+    const interrupt = vi.fn(async () => undefined)
+    const resident = {
+      providers: async () => [provider], execute, inspectTurn, readEvents, interrupt,
+    }
+    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never)
+    const adminDescription = await hub.describe(new AbortController().signal, 'admin')
+    expect(adminDescription.capabilities).toEqual(expect.arrayContaining([
+      'operator.read', 'operator.execute', 'operator.interrupt',
+    ]))
+    const pocketDescription = await hub.describe(new AbortController().signal, 'pocket')
+    expect(pocketDescription.capabilities).not.toContain('operator.execute')
+    await expect(hub.operatorProviders()).resolves.toEqual([provider])
+    await expect(hub.operatorExecute({
+      commandId: 'command-1', operatorId: 'codex', workspace: '/repo', laneId: 'lane-1', prompt: [],
+    } as never)).resolves.toEqual({ sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 })
+    expect(dispose).toHaveBeenCalledOnce()
+    await expect(hub.operatorInspectTurn('resident-turn')).resolves.toMatchObject({ state: 'running' })
+    const signal = new AbortController().signal
+    await expect(hub.operatorReadEvents('resident-session', 0, 100, signal)).resolves.toEqual({ events: [], nextSequence: 0 })
+    await expect(hub.operatorReadEvents('resident-session', 1, 10)).resolves.toEqual({ events: [], nextSequence: 0 })
+    await expect(hub.operatorInterrupt('resident-session', 'resident-turn')).resolves.toBeUndefined()
+    expect(readEvents).toHaveBeenCalledWith(expect.objectContaining({ afterSequence: 0, limit: 100, signal }))
+    expect(readEvents).toHaveBeenCalledWith(expect.objectContaining({ afterSequence: 1, limit: 10 }))
+    expect(interrupt).toHaveBeenCalledOnce()
+    await hub.close()
+  })
+
+  it('advertises orchestration election control only to admin peers', async () => {
+    const clusterStatus = vi.fn(async () => ({
+      nodeId: 'a', memberIds: ['a', 'b', 'c'], term: 2, role: 'leader' as const,
+      leaderId: 'a', leaseUntil: 10_000, commitIndex: 7, quorum: 2, canSchedule: true,
+    }))
+    const clusterRequestVote = vi.fn(async () => ({ term: 3, voterId: 'a', granted: true, commitIndex: 7 }))
+    const clusterHeartbeat = vi.fn(async () => ({ term: 3, followerId: 'a', accepted: true, commitIndex: 7 }))
+    const clusterExportReplica = vi.fn(async () => ({
+      version: 1 as const, stateSchemaVersion: 4, commitIndex: 7,
+      capturedAt: '2026-08-27T12:00:00.000Z', tables: {}, artifacts: [],
+    }))
+    const clusterInstallReplica = vi.fn(async () => ({ nodeId: 'a', commitIndex: 7, state: 'applied' as const }))
+    const hub = new RemoteSyncHub(api(), 4, undefined, undefined, () => ({
+      clusterStatus, clusterRequestVote, clusterHeartbeat, clusterExportReplica, clusterInstallReplica,
+    }))
+    const adminDescription = await hub.describe(new AbortController().signal, 'admin')
+    expect(adminDescription.capabilities).toContain('orchestration.cluster')
+    expect(adminDescription.cluster).toMatchObject({
+      nodeId: 'a', term: 2, role: 'leader', leaderId: 'a', canSchedule: true,
+    })
+    const cockpitDescription = await hub.describe(new AbortController().signal, 'cockpit')
+    expect(cockpitDescription.capabilities).not.toContain('orchestration.cluster')
+    expect(cockpitDescription.cluster).toMatchObject({
+      nodeId: 'a', term: 2, role: 'leader', leaderId: 'a', canSchedule: true,
+    })
+    await expect(hub.clusterStatus()).resolves.toMatchObject({ leaderId: 'a', commitIndex: 7 })
+    await expect(hub.clusterRequestVote({ term: 3, candidateId: 'b', commitIndex: 7 }))
+      .resolves.toMatchObject({ granted: true })
+    await expect(hub.clusterHeartbeat({ term: 3, leaderId: 'b', commitIndex: 7, leaseUntil: 12_000 }))
+      .resolves.toMatchObject({ accepted: true })
+    await expect(hub.clusterExportReplica()).resolves.toMatchObject({ commitIndex: 7 })
+    await expect(hub.clusterInstallReplica({ term: 3, leaderId: 'b', replica: {} as never }))
+      .resolves.toMatchObject({ state: 'applied' })
+    expect(clusterRequestVote).toHaveBeenCalledOnce()
+    expect(clusterHeartbeat).toHaveBeenCalledOnce()
+    await hub.close()
+  })
+
+  it('omits an unknown cluster leader and fails loud when optional authority seams are absent', async () => {
+    const clusterStatus = vi.fn(async () => ({
+      nodeId: 'a', memberIds: ['a'], term: 1, role: 'candidate' as const,
+      leaseUntil: 0, commitIndex: 0, quorum: 1, canSchedule: false,
+    }))
+    const hub = new RemoteSyncHub(api(), 4, undefined, undefined, () => ({
+      clusterStatus,
+      clusterRequestVote: vi.fn(), clusterHeartbeat: vi.fn(), clusterExportReplica: vi.fn(), clusterInstallReplica: vi.fn(),
+    }))
+    await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({
+      cluster: { nodeId: 'a', role: 'candidate', canSchedule: false },
+    })
+    await hub.close()
+
+    const standalone = new RemoteSyncHub(api(), 4)
+    await expect(standalone.replicaList()).rejects.toThrow('replication is unavailable')
+    expect(() => standalone.operatorProviders()).toThrow('Resident execution is unavailable')
+    expect(() => standalone.clusterStatus()).toThrow('cluster control is unavailable')
+    await standalone.close()
+  })
+
   it('retries projections if deployment changes during reads and supports cancellation', async () => {
     let describes = 0
     let snapshots = 0

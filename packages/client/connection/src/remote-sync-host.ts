@@ -4,6 +4,26 @@ import { randomUUID } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import WebSocket, { WebSocketServer } from 'ws'
+import { interruptedTurnClosers, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionPersistence, SessionReplica, SessionReplicationResult } from '@deepseek-ai/dsh-session-persistence'
+import type {
+  ResidentEventPage,
+  ResidentExecuteRequest,
+  ResidentOperatorService,
+  ResidentProviderStatus,
+  ResidentTurnSnapshot,
+} from '@deepseek-ai/dsh-resident-operator'
+import type {
+  OrchestrationClusterHeartbeatRequest,
+  OrchestrationClusterHeartbeatResponse,
+  OrchestrationClusterInstallReceipt,
+  OrchestrationClusterInstallRequest,
+  OrchestrationClusterReplicaV1,
+  OrchestrationClusterStatus,
+  OrchestrationClusterVoteRequest,
+  OrchestrationClusterVoteResponse,
+  OrchestrationService,
+} from '@deepseek-ai/dsh-orchestration'
 import {
   RpcId,
   type ApiProxy, type HostFrame, type MuxFrame, type RpcRequest,
@@ -13,6 +33,9 @@ import {
   parseRemoteSyncCursor,
   type RemoteSyncCursor, type RemoteSyncEvent, type RemoteSyncFrame,
   type RemoteSyncDescription, type RemoteSyncResyncRequired, type RemoteSyncSnapshot,
+  type RemoteSessionReplicaApplyResult, type RemoteSessionReplicaDocument,
+  type RemoteSessionReplicaSummary,
+  type RemoteResidentAcceptedTurn,
 } from './remote-sync.ts'
 import type { RemoteDeviceScope } from './remote-auth-wire.ts'
 
@@ -163,7 +186,16 @@ export class RemoteSyncHub {
   private readonly sourceLoop: Promise<void>
   private readonly socketPumps = new Set<Promise<void>>()
 
-  constructor(private readonly api: ApiProxy, capacity: number) {
+  constructor(
+    private readonly api: ApiProxy,
+    capacity: number,
+    private readonly persistence?: Pick<SessionPersistence, 'listSnapshots' | 'inspect' | 'replicate'>,
+    private readonly resident?: Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'>,
+    private readonly orchestration?: () => Pick<
+      OrchestrationService,
+      'clusterStatus' | 'clusterRequestVote' | 'clusterHeartbeat' | 'clusterExportReplica' | 'clusterInstallReplica'
+    > | undefined,
+  ) {
     this.journal = new RemoteSyncJournal(capacity)
     this.sourceLoop = this.runSources()
   }
@@ -179,6 +211,7 @@ export class RemoteSyncHub {
       const cursor = this.journal.cursor()
       const host = await this.api.host.describe({ rpcId: RpcId(randomUUID()), payload: {} })
       if (!host.result.ok) throw new Error(`host.describe failed: ${host.result.error.message}`)
+      const cluster = await this.orchestration?.()?.clusterStatus()
       if (this.journal.cursor().deploymentId !== cursor.deploymentId) continue
       return {
         protocol: REMOTE_SYNC_PROTOCOL,
@@ -188,8 +221,28 @@ export class RemoteSyncHub {
         scope,
         capabilities: scope === 'pocket'
           ? ['session.read', 'workspace.read', 'event.subscribe', 'approval.respond']
-          : ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
+          : [
+            'session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond',
+            ...this.persistence === undefined
+              ? []
+              : ['session.replicate.read' as const, 'session.replicate.write' as const],
+            ...this.resident === undefined
+              ? []
+              : ['operator.read' as const, 'operator.execute' as const, 'operator.interrupt' as const],
+            ...scope !== 'admin' || this.orchestration?.() === undefined
+              ? []
+              : ['orchestration.cluster' as const],
+          ],
         host: host.result.value,
+        ...cluster === undefined ? {} : {
+          cluster: {
+            nodeId: cluster.nodeId,
+            term: cluster.term,
+            role: cluster.role,
+            ...cluster.leaderId === undefined ? {} : { leaderId: cluster.leaderId },
+            canSchedule: cluster.canSchedule,
+          },
+        },
       }
     }
     throw new Error('remote sync describe cancelled')
@@ -224,6 +277,159 @@ export class RemoteSyncHub {
       }
     }
     throw new Error('remote sync snapshot cancelled')
+  }
+
+  /**
+   * List materialized Session identities and opaque revisions for handoff planning.
+   * @param signal - optional cancellation signal for persistence reads.
+   * @returns balanced Sessions eligible for replication.
+   */
+  async replicaList(signal?: AbortSignal): Promise<RemoteSessionReplicaSummary[]> {
+    const persistence = this.expectPersistence()
+    const summaries: RemoteSessionReplicaSummary[] = []
+    for (const snapshot of await persistence.listSnapshots(signal)) {
+      const inspected = await persistence.inspect(snapshot.header.id, signal)
+      if (interruptedTurnClosers(inspected.events).length !== 0) continue
+      summaries.push({ header: snapshot.header, revision: String(snapshot.revision) })
+    }
+    return summaries
+  }
+
+  /**
+   * Read one complete logical Session document without mutating its source.
+   * @param sessionId - stable Session identity to materialize.
+   * @param signal - optional cancellation signal for persistence reads.
+   * @returns the complete balanced Session document.
+   */
+  async replicaRead(sessionId: string, signal?: AbortSignal): Promise<RemoteSessionReplicaDocument> {
+    const inspected = await this.expectPersistence().inspect(SessionId(sessionId), signal)
+    if (interruptedTurnClosers(inspected.events).length !== 0) {
+      throw new Error(`remote Session ${sessionId} has an open turn and cannot be replicated`)
+    }
+    return {
+      meta: inspected.meta,
+      events: inspected.events,
+      balanced: true,
+    }
+  }
+
+  /**
+   * Apply one balanced document using the persistence authority's prefix-compatible primitive.
+   * @param replica - validated Session replica to apply.
+   * @param signal - optional cancellation signal for persistence writes.
+   * @returns the authoritative prefix-replication result.
+   */
+  async replicaApply(replica: SessionReplica, signal?: AbortSignal): Promise<RemoteSessionReplicaApplyResult> {
+    const result: SessionReplicationResult = await this.expectPersistence().replicate(replica, signal)
+    return { ...result, sessionId: String(result.sessionId) }
+  }
+
+  /**
+   * List native-subscription capacity without exposing remote product credentials.
+   * @returns the current Resident Provider catalog.
+   */
+  operatorProviders(): Promise<ResidentProviderStatus[]> {
+    return this.expectResident().providers()
+  }
+
+  /**
+   * Admit a durable remote turn, then detach the HTTP observer while execution continues.
+   * @param request - serializable Resident execution request.
+   * @returns the durable accepted command receipt.
+   */
+  async operatorExecute(
+    request: Omit<ResidentExecuteRequest, 'signal' | 'modelToolBridge'>,
+  ): Promise<RemoteResidentAcceptedTurn> {
+    const turn = await this.expectResident().execute({
+      ...request,
+      signal: new AbortController().signal,
+    })
+    const accepted = {
+      sessionId: String(turn.sessionId),
+      turnId: String(turn.turnId),
+      stateRevision: turn.stateRevision,
+    }
+    await turn.dispose()
+    return accepted
+  }
+
+  /**
+   * Reattach to one durable remote receipt after any Frontend or network restart.
+   * @param turnId - durable Resident turn identity.
+   * @returns the current terminal or in-flight turn projection.
+   */
+  operatorInspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
+    return this.expectResident().inspectTurn(turnId)
+  }
+
+  /**
+   * Read bounded structured progress without transferring native transcripts.
+   * @param sessionId - durable Resident Session identity.
+   * @param afterSequence - exclusive event cursor.
+   * @param limit - maximum number of events to return.
+   * @param signal - optional cancellation signal for the read.
+   * @returns the ordered bounded event page.
+   */
+  operatorReadEvents(sessionId: string, afterSequence: number, limit: number, signal?: AbortSignal): Promise<ResidentEventPage> {
+    return this.expectResident().readEvents({
+      sessionId: sessionId as never,
+      afterSequence,
+      limit,
+      ...signal === undefined ? {} : { signal },
+    })
+  }
+
+  /**
+   * Interrupt a matching remote Session/turn pair without deleting continuity.
+   * @param sessionId - durable Resident Session identity.
+   * @param turnId - active turn identity within that Session.
+   * @returns when the interrupt request has been admitted.
+   */
+  operatorInterrupt(sessionId: string, turnId: string): Promise<void> {
+    return this.expectResident().interrupt({ sessionId: sessionId as never, turnId: turnId as never })
+  }
+
+  /**
+   * Read the local Product Server's bounded orchestration authority projection.
+   * @returns the current cluster status, or undefined in standalone mode.
+   */
+  clusterStatus(): Promise<OrchestrationClusterStatus | undefined> {
+    return this.expectOrchestration().clusterStatus()
+  }
+
+  /**
+   * Forward one authenticated vote request to the daemon-owned election state.
+   * @param request - candidate term and replication watermark.
+   * @returns this member's term-fenced vote response.
+   */
+  clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse> {
+    return this.expectOrchestration().clusterRequestVote(request)
+  }
+
+  /**
+   * Forward one authenticated majority-lease heartbeat.
+   * @param request - elected leader term, lease, and replication watermark.
+   * @returns this follower's lease acknowledgement.
+   */
+  clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse> {
+    return this.expectOrchestration().clusterHeartbeat(request)
+  }
+
+  /**
+   * Export one complete logical replica for an authenticated admin peer.
+   * @returns the current durable TaskGraph state image.
+   */
+  clusterExportReplica(): Promise<OrchestrationClusterReplicaV1> {
+    return this.expectOrchestration().clusterExportReplica()
+  }
+
+  /**
+   * Install one term-fenced logical replica on the current follower.
+   * @param request - elected leader coordinates and logical state image.
+   * @returns the follower's applied or unchanged watermark.
+   */
+  clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt> {
+    return this.expectOrchestration().clusterInstallReplica(request)
   }
 
   /**
@@ -267,6 +473,25 @@ export class RemoteSyncHub {
     await new Promise<void>((resolve, reject) => {
       this.sockets.close((error) => { if (error === undefined) resolve(); else reject(error) })
     })
+  }
+
+  private expectPersistence(): Pick<SessionPersistence, 'listSnapshots' | 'inspect' | 'replicate'> {
+    if (this.persistence === undefined) throw new Error('remote Session replication is unavailable')
+    return this.persistence
+  }
+
+  private expectResident(): Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'> {
+    if (this.resident === undefined) throw new Error('remote Resident execution is unavailable')
+    return this.resident
+  }
+
+  private expectOrchestration(): Pick<
+    OrchestrationService,
+    'clusterStatus' | 'clusterRequestVote' | 'clusterHeartbeat' | 'clusterExportReplica' | 'clusterInstallReplica'
+  > {
+    const orchestration = this.orchestration?.()
+    if (orchestration === undefined) throw new Error('remote orchestration cluster control is unavailable')
+    return orchestration
   }
 
   private async runSources(): Promise<void> {

@@ -14,13 +14,14 @@ import {
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
+import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { installDesktopPnpmRuntime } from './desktop-runtime-environment.ts'
 import { ElectronDesktopRuntime } from './electron-runtime.ts'
 import { installProfilePackageResolver } from './module-resolution.ts'
 import { installNativeProductRuntime } from './native-product-runtime.ts'
 import { packagedDependencyPath, unpackedAsarPath } from './packaged-runtime-path.ts'
 import {
-  activeFrontendServer,
+  connectFrontendServer,
   DesktopDeploymentStateStore,
   DesktopRemoteAccessSession,
   type DesktopDeploymentState,
@@ -28,6 +29,7 @@ import {
 import { parseFrontendBillingBaseline, type FrontendBillingBaseline } from './frontend-billing.ts'
 import { FrontendSetupController } from './frontend-setup.ts'
 import { DesktopGitSyncController } from './git-sync.ts'
+import { DesktopRemoteSessionClient, DesktopSessionSyncController } from './session-sync.ts'
 import {
   beginDesktopProfileStartup,
   listDesktopProfiles,
@@ -99,8 +101,14 @@ async function start(): Promise<void> {
   let frontendAccess: DesktopRemoteAccessSession | undefined
   let frontendSetup: FrontendSetupController | undefined
   let gitSync: DesktopGitSyncController | undefined
+  let sessionSync: DesktopSessionSyncController | undefined
   let deploymentStore: DesktopDeploymentStateStore | undefined
-  let deploymentState: DesktopDeploymentState = { version: 3, role: 'server' }
+  let deploymentState: DesktopDeploymentState = {
+    version: 4,
+    role: 'server',
+    servers: [],
+    presentation: 'compatibility',
+  }
   let runtime!: ElectronDesktopRuntime
   const nativeExit = createDesktopExitCoordinator(
     {
@@ -144,6 +152,7 @@ async function start(): Promise<void> {
             frontendAccess?.stop()
             frontendSetup?.dispose()
             gitSync?.stop()
+            sessionSync?.stop()
             disposeNativeProductRuntime?.()
           } finally {
             disposePnpmRuntime?.()
@@ -178,6 +187,7 @@ async function start(): Promise<void> {
           frontendAccess?.stop()
           frontendSetup?.dispose()
           gitSync?.stop()
+          sessionSync?.stop()
           disposeNativeProductRuntime?.()
         } finally {
           disposePnpmRuntime?.()
@@ -197,24 +207,53 @@ async function start(): Promise<void> {
     deploymentState = await deploymentStore.load()
     gitSync = new DesktopGitSyncController(app.getPath('userData'))
     await gitSync.start()
+    sessionSync = new DesktopSessionSyncController(app.getPath('userData'), {
+      remote: async () => {
+        const serverId = deploymentState.activeServerId
+        if (serverId === undefined) return undefined
+        const server = deploymentState.servers.find(candidate => candidate.id === serverId)
+        if (server === undefined) return undefined
+        const accessToken = server.authMode === 'paired'
+          ? frontendAccess?.accessToken() ?? (await deploymentStore!.exchange(server)).accessToken
+          : undefined
+        return {
+          serverId,
+          client: new DesktopRemoteSessionClient(
+            server.endpoint,
+            accessToken,
+            (url, init) => net.fetch(String(url), init),
+          ),
+        }
+      },
+      local: () => current?.get('sessionPersistence') as SessionPersistence | undefined,
+      onError: (cause) => {
+        process.stderr.write(
+          `${BIN_NAME}: Session sync failed: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+      },
+    })
+    await sessionSync.start()
     frontendSetup = new FrontendSetupController(
       deploymentStore,
       gitSync,
+      sessionSync,
       () => deploymentState,
       () => runtime.requestRestart(),
     )
     if (deploymentState.role === 'frontend') {
-      const state = deploymentState
-      const server = activeFrontendServer(state)
-      const access = server.authMode === 'paired'
-        ? new DesktopRemoteAccessSession(deploymentStore, server, (cause) => {
-            process.stderr.write(
-              `${BIN_NAME}: failed to refresh remote access: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-            )
-          })
-        : undefined
+      let state = deploymentState
+      let access: DesktopRemoteAccessSession | undefined
       try {
-        await access?.start()
+        const connected = await connectFrontendServer(deploymentStore, state, (candidate, cause) => {
+          process.stderr.write(
+            `${BIN_NAME}: Frontend Server ${candidate.label} unavailable: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+          )
+        })
+        state = connected.state
+        deploymentState = connected.state
+        const server = connected.server
+        const connectedAccess = connected.access
+        access = connectedAccess
         frontendAccess = access
         const endpoint = new URL(server.endpoint)
         const renderer = new URL(endpoint)
@@ -231,24 +270,24 @@ async function start(): Promise<void> {
           minHeight: 640,
           url: renderer.href,
           productName: PRODUCT_NAME,
-          windowTitle: 'Remote Frontend',
+          windowTitle: `Remote Frontend · ${server.label}`,
           retryUnavailableNavigation: true,
           iconPath: desktopAssetPath(process.platform === 'darwin' ? 'app-icon-mac.png' : 'app-icon.png'),
           trayIcons: {
             templatePath: desktopAssetPath('tray-iconTemplate.png'),
             bluePath: desktopAssetPath('tray-icon-blue.png'),
           },
-          ...access === undefined ? {} : {
+          ...connectedAccess === undefined ? {} : {
             remoteAccess: {
               origin: endpoint.origin,
-              accessToken: () => access.accessToken(),
+              accessToken: () => connectedAccess.accessToken(),
             },
           },
           ...billingBaseline === undefined ? {} : {
             frontendBilling: {
               origin: endpoint.origin,
               baseline: billingBaseline,
-              ...(access === undefined ? {} : { accessToken: () => access.accessToken() }),
+              ...(connectedAccess === undefined ? {} : { accessToken: () => connectedAccess.accessToken() }),
             },
           },
           readThemeSource: () => 'system',
@@ -363,6 +402,12 @@ async function start(): Promise<void> {
       throw cause
     })
     current = ctx
+    const imported = await sessionSync.importInbox()
+    for (const result of imported) {
+      if (result.status === 'error') {
+        process.stderr.write(`${BIN_NAME}: unable to import staged Session: ${result.message}\n`)
+      }
+    }
     runtime.configureTerminal({
       profileName: activeProfileName,
       profileDir: prepared.profile.dir,

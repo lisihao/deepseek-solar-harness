@@ -13,8 +13,8 @@
  * re-cascades natively — reloading a data-layer plugin (connection/runtime)
  * cascades into its UI dependents with no HMR-side bookkeeping.
  *
- * Reload order (lazy CJS table): invalidate (drop the stale factory and
- * materialized record) → prefetch (load and register the fresh
+ * Reload order (lazy CJS table): install the host-announced revision row →
+ * invalidate (drop the stale factory and materialized record) → prefetch (load and register the fresh
  * factory) → registry-first teardown → drain old fiber unload → remove
  * owned `<style data-plugin>` tags → `entry.refresh()` materializes the new
  * factory. Invalidate MUST precede prefetch: a live factory makes prefetch
@@ -101,17 +101,17 @@ export function apply(ctx: Context): void {
   const modLoader = ctx.modules
   const loader: Loader = ctx.loader
 
-  async function reload(id: string): Promise<void> {
+  async function reload(id: string, rev: string): Promise<void> {
     const entry = findEntry(loader, id)
     if (entry === undefined) {
       ctx.logger.warn(`client-hmr: rebuilt frame for unknown entry "${id}" (not in the loader tree)`)
       return
     }
-    // Invalidate first (drop stale factory + record — a live factory makes
-    // prefetch a no-op and re-registration a loud duplicate), then run the
-    // async half while the old fiber still serves: script loading registers
-    // the fresh factory with zero side effects (lazy CJS — module bodies run
-    // at materialization, not execution).
+    // Install the host-announced content revision, then invalidate the stale
+    // factory/record before prefetch. The old fiber keeps serving while the
+    // fresh factory arrives; the revision-specific URL is safe under the
+    // host's immutable cache policy.
+    modLoader.updateRevision(id, rev)
     modLoader.invalidate(id)
     await modLoader.prefetch(id)
 
@@ -145,16 +145,15 @@ export function apply(ctx: Context): void {
   const handle = (frame: PluginsEventFrame): void => {
     switch (frame.type) {
       case 'rebuilt':
-        queue = queue.then(() => reload(frame.id)).catch((error: unknown) => {
+        queue = queue.then(() => reload(frame.id, frame.rev)).catch((error: unknown) => {
           ctx.logger.error(`client-hmr: reload of "${frame.id}" failed`)
           ctx.logger.error(error)
         })
         break
       case 'graph':
-        // Connect-time snapshot, unused. The loader's cached graph rev
-        // goes stale after rebuilds — harmless, since prefetch hits the
-        // network anyway (host serves bundles no-cache); graph rev refresh
-        // lands with the reconnect-handshake mechanism.
+        // Connect-time snapshot, unused. Rebuilt frames update individual
+        // rows before prefetch; a full reconnect-handshake can later replace
+        // the whole graph when dynamic enrollment needs it.
         break
       default:
         // Merge-extensible frame union: unknown frame types from newer hosts

@@ -53,12 +53,39 @@ function qualityFit(offer: ModelExecutionOffer, request: ModelAllocationRequest)
 function productFit(offer: ModelExecutionOffer, request: ModelAllocationRequest): number {
   const text = `${request.role} ${request.task}`.toLowerCase()
   if (/architect|review|analysis|research|long.context|架构|审查|研究|长上下文/u.test(text)) {
-    return offer.operatorId === 'claude-code' ? 120 : 0
+    return offer.provider === 'claude-code' ? 120 : 0
   }
   if (/implement|debug|test|code|repo|实现|调试|测试|代码|仓库/u.test(text)) {
-    return offer.operatorId === 'codex' ? 120 : 0
+    return offer.provider === 'codex' ? 120 : 0
   }
   return 0
+}
+
+function isCodingExecution(request: ModelAllocationRequest): boolean {
+  if (request.phase !== 'execution') return false
+  return /implement|debug|test|code|repo|worker|实现|调试|测试|代码|仓库|执行/u
+    .test(`${request.role} ${request.task}`.toLowerCase())
+}
+
+function codexFamily(offer: ModelExecutionOffer, family: 'sol' | 'luna'): boolean {
+  return offer.provider === 'codex'
+    && new RegExp(`(?:^|[._-])${family}(?:$|[._-])`, 'u').test(offer.model.toLowerCase())
+}
+
+function policyCandidates(
+  candidates: readonly ModelExecutionOffer[],
+  request: ModelAllocationRequest,
+): readonly ModelExecutionOffer[] {
+  if ((request.phase === 'planning' || request.phase === 'verification')
+    && request.plannerVerifierPreference === 'codex-sol') {
+    const sol = candidates.filter(offer => offer.tier === 'high' && codexFamily(offer, 'sol'))
+    if (sol.length > 0) return sol
+  }
+  if (request.executionPreference === 'luna-first' && isCodingExecution(request)) {
+    const luna = candidates.filter(offer => codexFamily(offer, 'luna'))
+    if (luna.length > 0) return luna
+  }
+  return candidates
 }
 
 function poolFit(offer: ModelExecutionOffer, nowSeconds: number): number {
@@ -138,8 +165,9 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
     const qualityCandidates = requiresHighTier && candidates.some(offer => offer.tier === 'high')
       ? candidates.filter(offer => offer.tier === 'high')
       : candidates
+    const routedCandidates = policyCandidates(qualityCandidates, request)
     const nowSeconds = Math.floor(Date.parse(request.now) / 1_000)
-    const [selected] = [...qualityCandidates].sort((left, right) => {
+    const [selected] = [...routedCandidates].sort((left, right) => {
       const difference = score(right, request, nowSeconds) - score(left, request, nowSeconds)
       return difference === 0 ? left.offerId.localeCompare(right.offerId) : difference
     })
@@ -161,6 +189,12 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
       rationale: [
         selected.source === 'native-subscription' ? 'native-subscription-first' : 'metered-api-last-resort',
         request.phase === 'planning' || request.phase === 'verification' ? 'high-tier-quality-gate' : 'worker-tier-throughput',
+        ...request.plannerVerifierPreference === 'codex-sol' && codexFamily(selected, 'sol')
+          ? ['codex-sol-planner-verifier']
+          : [],
+        ...request.executionPreference === 'luna-first' && codexFamily(selected, 'luna')
+          ? ['codex-luna-worker']
+          : [],
         ...selected.quotaPool === undefined ? [] : [`quota-pool:${selected.quotaPool.poolId}`],
         ...selected.quotaGuard === undefined || selected.quotaGuard.protectedRemainingPercent === 0
           ? []

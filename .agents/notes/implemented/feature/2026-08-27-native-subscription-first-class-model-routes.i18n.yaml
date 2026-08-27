@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-27-native-subscription-first-class-model-routes.md
+2026-08-27-native-subscription-first-class-model-routes.md: cd384b1bd466161c76114b8d8b58685a156754a2
+2026-08-27-native-subscription-first-class-model-routes.zh.md: 64f1c55ba1c3361c31f9ffd9038902c45e6cd17f

@@ -47,6 +47,7 @@ function state(overrides: Partial<ModelsSettingsState> = {}): ModelsSettingsStat
     error: null,
     credentialError: null,
     writable: true,
+    activeModelProviders: [],
     rows: [row()],
     namespaces: new Map(),
     ...overrides,
@@ -91,6 +92,13 @@ describe('onboardingReadiness', () => {
     expect(onboardingReadiness(state({
       rows: [row(), otherRow({ credential: missingCredential })],
     }))).toEqual({ kind: 'credential-missing' })
+  })
+
+  it('ends onboarding when a subscription-backed model route is active without a DeepSeek key', () => {
+    expect(onboardingReadiness(state({
+      activeModelProviders: ['dsh-physical-operator'],
+      rows: [row({ credential: missingCredential })],
+    }))).toEqual({ kind: 'provider-ready' })
   })
 
   it('accepts file and process-environment credentials without prompting', () => {

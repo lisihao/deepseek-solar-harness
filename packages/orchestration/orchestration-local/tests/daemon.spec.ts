@@ -5,19 +5,22 @@ import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import { OrchestrationArtifactRef, type LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { OrchestrationDaemonClient } from '../src/client.ts'
 import { canonicalSha256 } from '../src/canonical.ts'
+import type { OrchestrationClusterPeerTransport } from '../src/cluster.ts'
 import { OrchestrationDaemon } from '../src/daemon.ts'
+import type { RemotePhysicalOperatorServer } from '../src/remote-physical-operator.ts'
 
 const cleanup: Array<() => Promise<void>> = []
 const run = promisify(execFile)
 afterEach(async () => {
   for (const action of cleanup.splice(0).reverse()) await action()
+  vi.unstubAllGlobals()
 })
 
 type TestResult = { output: Array<{ type: 'text'; text: string }>; stopReason: 'completed' }
@@ -149,7 +152,7 @@ class FakeResidentClient {
 
   async inspectTurn(turnId: string) {
     const turn = this.turns.get(turnId)
-    if (turn === undefined) throw new Error('unknown turn')
+    if (turn === undefined) throw Object.assign(new Error('unknown turn'), { code: 'SESSION_UNAVAILABLE' })
     return { turnId, sessionId: 'session:recovered', commandId: 'command', stateRevision: 1, updatedAt: new Date().toISOString(), ...turn }
   }
 
@@ -256,12 +259,14 @@ function createDaemon(
   residentClient: FakeResidentClient,
   schedulerIntervalMs?: number,
   modelWorkerProviders?: readonly ModelWorkerProvider[],
+  remoteOperatorServers?: readonly RemotePhysicalOperatorServer[],
 ): OrchestrationDaemon {
   return new OrchestrationDaemon({
     root,
     dshHome,
     residentClient: residentClient as unknown as ResidentDaemonClient,
     modelWorkerProviders: modelWorkerProviders ?? [],
+    ...remoteOperatorServers === undefined ? {} : { remoteOperatorServers },
     ...schedulerIntervalMs === undefined ? {} : { schedulerIntervalMs },
   })
 }
@@ -282,6 +287,156 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('blocks Scheduler mutations until a majority lease is acquired', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'oc-'))
+    const root = join(home, 'orchestrations')
+    const resident = new FakeResidentClient()
+    let quorumAvailable = false
+    const replicatedCommitIndexes: number[] = []
+    const transport: OrchestrationClusterPeerTransport = {
+      requestVote: async (member, request) => {
+        if (!quorumAvailable) throw new Error('peer unavailable')
+        return { term: request.term, voterId: member.id, granted: member.id === 'b', commitIndex: 0 }
+      },
+      heartbeat: async (member, request) => {
+        if (!quorumAvailable) throw new Error('peer unavailable')
+        return { term: request.term, followerId: member.id, accepted: member.id === 'b', commitIndex: 0 }
+      },
+      installReplica: async (member, request) => {
+        if (replicatedCommitIndexes.length === 0) expect(resident.starts).toEqual([])
+        replicatedCommitIndexes.push(request.replica.commitIndex)
+        return { nodeId: member.id, commitIndex: request.replica.commitIndex, state: 'applied' }
+      },
+    }
+    const daemon = new OrchestrationDaemon({
+      root,
+      dshHome: home,
+      residentClient: resident as unknown as ResidentDaemonClient,
+      modelWorkerProviders: [],
+      schedulerIntervalMs: 10,
+      clusterConfig: {
+        version: 1,
+        nodeId: 'a',
+        leaseMs: 1_000,
+        members: [
+          { id: 'a', label: 'A', endpoint: 'http://a.example/' },
+          { id: 'b', label: 'B', endpoint: 'http://b.example/' },
+          { id: 'c', label: 'C', endpoint: 'http://c.example/' },
+        ],
+      },
+      clusterTransport: transport,
+    })
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    await expect(client.clusterStatus()).resolves.toMatchObject({ role: 'follower', canSchedule: false, quorum: 2 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    await expect(client.compile({ intent: { request: 'blocked fixture' }, graph: graph(workspace) }))
+      .rejects.toMatchObject({ code: 'NOT_CLUSTER_LEADER' })
+
+    quorumAvailable = true
+    await eventually(() => client.clusterStatus(), value => value?.canSchedule === true)
+    const compilation = await client.compile({ intent: { request: 'leader fixture' }, graph: graph(workspace) })
+    expect(compilation).toMatchObject({ graph: { title: 'integration graph' } })
+    const started = await client.start({ compilationId: compilation.compilationId })
+    await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+    expect(replicatedCommitIndexes.length).toBeGreaterThan(0)
+    expect(resident.starts).toEqual([
+      `codex:orch:${String(started.runId)}:code:1`,
+      `claude-code:orch:${String(started.runId)}:review:1`,
+    ])
+  })
+
+  it('reattaches a remote subscription turn after Scheduler restart and projects its progress', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-ro-'))
+    const root = join(home, 'orchestrations')
+    const local = new FakeResidentClient()
+    const methods: string[] = []
+    let remoteSettled = false
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Remote Codex',
+      tags: ['coding'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: 'test', protocolHash: 'test',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', description: 'Fast worker',
+        supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true,
+        supportsAdaptiveThinking: true,
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      methods.push(call.method)
+      const value = call.method === 'operator.providers' ? [provider]
+        : call.method === 'operator.execute'
+          ? { sessionId: 'remote-session', turnId: 'remote-turn', stateRevision: 1 }
+          : call.method === 'operator.inspect'
+            ? remoteSettled ? {
+              commandId: 'remote-command', sessionId: 'remote-session', turnId: 'remote-turn',
+              state: 'settled', stateRevision: 2, updatedAt: '2026-08-27T12:00:01.000Z',
+              result: { output: [{ type: 'text', text: 'remote result' }], stopReason: 'completed' },
+            } : {
+              commandId: 'remote-command', sessionId: 'remote-session', turnId: 'remote-turn',
+              state: 'running', stateRevision: 1, updatedAt: '2026-08-27T12:00:00.000Z',
+            }
+            : call.method === 'operator.events'
+              ? {
+                events: [{
+                  sequence: 1, sessionId: 'remote-session', type: 'turn.progress',
+                  time: '2026-08-27T12:00:00.000Z', data: { turnId: 'remote-turn', phase: 'reasoning' },
+                }],
+                nextSequence: 1,
+              }
+              : { interrupted: true }
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    }))
+    const daemon = createDaemon(root, home, local, 10, [], [{
+      id: 'mini', label: 'Mac mini', endpoint: 'http://127.0.0.1:13300', pollIntervalMs: 10,
+    }])
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close() })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const compilation = await client.compile({
+      intent: { request: 'Analyze the fixture remotely.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'remote-read-only',
+        rlm: 'disabled', continualHarness: 'off', optimization: 'economy',
+      },
+      graph: {
+        ...fixture,
+        nodes: [{
+          ...fixture.nodes[0]!,
+          title: 'Analyze', task: 'Analyze the fixture without modifying files.', role: 'analysis',
+          writeScopes: [], operator: { preferredIds: ['remote.mini.codex'] },
+        }],
+      },
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running')
+    await daemon.close()
+    remoteSettled = true
+    const recoveredDaemon = createDaemon(root, home, local, 10, [], [{
+      id: 'mini', label: 'Mac mini', endpoint: 'http://127.0.0.1:13300', pollIntervalMs: 10,
+    }])
+    await recoveredDaemon.start()
+    cleanup.push(async () => { await recoveredDaemon.close(); await rm(home, { recursive: true, force: true }) })
+    const recoveredClient = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const completed = await eventually(() => recoveredClient.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ operatorId: 'remote.mini.codex', state: 'passed' })
+    expect(local.requests).toHaveLength(0)
+    const events = await recoveredClient.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.find(value => value.type === 'node.operator.progress')?.data).toMatchObject({
+      operatorId: 'remote.mini.codex', phase: 'reasoning',
+    })
+    expect(methods).toEqual(expect.arrayContaining([
+      'operator.providers', 'operator.execute', 'operator.inspect', 'operator.events',
+    ]))
+  })
+
   it('closes accepted control sockets before shutdown settles', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-close-'))
     const root = join(home, 'orchestrations')
@@ -571,6 +726,122 @@ describe('orchestration daemon', () => {
     expect(events.events.some(value => value.type === 'rlm.goal.continuation.settled')).toBe(true)
   })
 
+  it('runs Prime Autonomous quality gates in the same sealed RLM lane and lets a passing gate complete', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-auto-pass-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Let the host verifier decide completion.' },
+      graph: {
+        ...fixture,
+        nodes: [{
+          ...baseNode,
+          role: 'recursive synthesis',
+          effectBudget: { ...baseNode.effectBudget, execute: ['autonomous-gate'] },
+          rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
+          autonomous: {
+            mode: 'enabled',
+            gates: { commands: [`${process.execPath} -e "process.exit(0)"`] },
+          },
+        }],
+      },
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled', autonomous: 'enabled' })
+    expect(fake.requests).toHaveLength(1)
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.find(value => value.type === 'rlm.autonomous.resolved')?.data).toMatchObject({
+      enabled: true,
+      gateCount: 1,
+    })
+    expect(events.events.find(value => value.type === 'rlm.autonomous.stopped')?.data).toMatchObject({
+      reason: 'gate_passed',
+      continuationsUsed: 0,
+      turnsUsed: 1,
+    })
+    expect(events.events.filter(value => value.type.startsWith('rlm.autonomous.')).map(value => ({
+      type: value.type,
+      ...value.type === 'rlm.autonomous.resolved' ? {
+        enabled: value.data.enabled,
+        gateCount: value.data.gateCount,
+      } : value.type === 'rlm.autonomous.usage' ? {
+        turnsUsed: value.data.turnsUsed,
+        tokensUsed: value.data.tokensUsed,
+      } : {
+        reason: value.data.reason,
+        continuationsUsed: value.data.continuationsUsed,
+        turnsUsed: value.data.turnsUsed,
+      },
+    }))).toMatchInlineSnapshot(`
+      [
+        {
+          "enabled": true,
+          "gateCount": 1,
+          "type": "rlm.autonomous.resolved",
+        },
+        {
+          "tokensUsed": 0,
+          "turnsUsed": 1,
+          "type": "rlm.autonomous.usage",
+        },
+        {
+          "continuationsUsed": 0,
+          "reason": "gate_passed",
+          "turnsUsed": 1,
+          "type": "rlm.autonomous.stopped",
+        },
+      ]
+    `)
+  })
+
+  it('does not report Autonomous limit exhaustion as a successful TaskGraph node', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-auto-limit-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Bound autonomous work without a host verifier.' },
+      graph: {
+        ...fixture,
+        nodes: [{
+          ...baseNode,
+          role: 'recursive synthesis',
+          retryPolicy: { ...baseNode.retryPolicy, maxAttempts: 1 },
+          rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
+          autonomous: { mode: 'enabled', maxContinuations: 1 },
+        }],
+      },
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const failed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'failed')
+    expect(failed.nodes[0]).toMatchObject({ state: 'failed', autonomous: 'enabled' })
+    expect(fake.requests).toHaveLength(2)
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.find(value => value.type === 'rlm.autonomous.stopped')?.data).toMatchObject({
+      reason: 'maxContinuations',
+      continuationsUsed: 1,
+    })
+    expect(events.events.find(value => value.type === 'node.failed')?.data).toMatchObject({
+      code: 'AUTONOMOUS_LIMIT_REACHED',
+    })
+  })
+
   it('serially accounts keyless DeepSeek root, concurrent child, and active goal-continuation usage', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-goal-usage-'))
     const root = join(home, 'orchestrations')
@@ -612,6 +883,7 @@ describe('orchestration daemon', () => {
     await eventually(() => client.inspect(String(noGoalRun.runId)), value => value.state === 'completed')
     const noGoalEvents = await client.readEvents({ runId: noGoalRun.runId, limit: 200 })
     expect(noGoalEvents.events.filter(value => value.type === 'rlm.goal.usage')).toHaveLength(0)
+    expect(noGoalEvents.events.filter(value => value.type === 'rlm.usage')).toHaveLength(1)
 
     worker.onExecute = async (request) => {
       if (request.commandId.endsWith(':rlm:root')) {
@@ -632,6 +904,23 @@ describe('orchestration daemon', () => {
     const goalRun = await client.start({ compilationId: goalCompilation.compilationId })
     await eventually(() => client.inspect(String(goalRun.runId)), value => value.state === 'completed')
     const goalEvents = await client.readEvents({ runId: goalRun.runId, limit: 300 })
+    const allUsageEvents = goalEvents.events.filter(value => value.type === 'rlm.usage')
+    expect(allUsageEvents).toHaveLength(5)
+    expect(allUsageEvents.map(value => value.data.source).sort()).toEqual([
+      'child',
+      'child',
+      'goal-continuation',
+      'goal-continuation',
+      'root',
+    ])
+    expect(allUsageEvents.at(-1)?.data).toMatchObject({
+      operatorId: 'deepseek-keyless-fixture',
+      authMode: 'api',
+      inputTokens: 5,
+      outputTokens: 2,
+      cacheReadInputTokens: 0,
+      cacheWriteInputTokens: 0,
+    })
     const usageEvents = goalEvents.events.filter(value => value.type === 'rlm.goal.usage')
     expect(usageEvents).toHaveLength(4)
     expect(usageEvents.map(value => value.data.source).sort()).toEqual([
@@ -691,6 +980,13 @@ describe('orchestration daemon', () => {
       stopReason: 'completed',
     })
     expect(String(codexEvidence?.data.outputPreview)).toContain('completed orch:')
+    const evidence = await client.readArtifact(OrchestrationArtifactRef(String(codexEvidence?.data.evidenceRef))) as {
+      output: Array<{ type: string; text: string }>
+    }
+    expect(evidence.output).toEqual([{
+      type: 'text',
+      text: `completed orch:${String(started.runId)}:code:1`,
+    }])
     expect(events.events.filter(value => value.type === 'node.operator.progress').map(value => value.data.phase))
       .toEqual(expect.arrayContaining(['reasoning', 'tool_activity', 'finalizing']))
   })

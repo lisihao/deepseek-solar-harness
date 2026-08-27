@@ -213,6 +213,15 @@ export interface SubagentStopReasonMap {
 /** The union over {@link SubagentStopReasonMap} — widens automatically as backends merge in variants. */
 export type SubagentStopReason = SubagentStopReasonMap[keyof SubagentStopReasonMap]
 
+/** Product-reported usage for one subagent execution. */
+export interface SubagentUsage {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadInputTokens?: number
+  readonly cacheWriteInputTokens?: number
+  readonly costUsd?: number
+}
+
 /**
  * The terminal outcome of a subagent run, resolved by {@link SubagentRun.result}.
  */
@@ -235,6 +244,8 @@ export interface SubagentResult {
   readonly structured?: unknown
   /** Why the run ended. A non-`completed` reason means `output` may be partial. */
   readonly stopReason: SubagentStopReason
+  /** Native provider usage when its protocol reports authoritative counters. */
+  readonly usage?: SubagentUsage
 }
 
 /**

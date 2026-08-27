@@ -28,9 +28,14 @@ import type {
 } from '@deepseek-ai/dsh-continual-harness'
 import { ContinualHarnessSkillRuntime } from '@deepseek-ai/dsh-continual-harness'
 import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
-import LlmRuntime, { type ContentBlock } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { type ContentBlock, type TokenUsage } from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
-import type { ModelAllocationPlan, ModelExecutionOffer, ModelTaskPhase } from '@deepseek-ai/dsh-model-allocation'
+import type {
+  ContinualHarnessMode,
+  ModelAllocationPlan,
+  ModelExecutionOffer,
+  ModelTaskPhase,
+} from '@deepseek-ai/dsh-model-allocation'
 import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
 import ModelWorkerRuntime, { type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
@@ -55,6 +60,11 @@ import {
   type OrchestrationBlocker,
   type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompilationV1,
+  type OrchestrationClusterHeartbeatRequest,
+  type OrchestrationClusterInstallReceipt,
+  type OrchestrationClusterInstallRequest,
+  type OrchestrationClusterStatus,
+  type OrchestrationClusterVoteRequest,
   type OrchestrationControlRequest,
   type OrchestrationDecisionRequest,
   type OrchestrationEvent,
@@ -68,19 +78,38 @@ import PhysicalOperatorRuntime, {
   PhysicalOperatorExecutionId,
   PhysicalOperatorId,
   type PhysicalOperator,
+  type PhysicalOperatorAcceptedReceipt,
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorRun,
   type PhysicalOperatorProviderStartRequest,
+  type PhysicalOperatorQuotaPool,
+  type PhysicalOperatorResidentCatalog,
+  type PhysicalOperatorResidentModel,
   type PhysicalOperatorResult,
   type PhysicalOperatorModelToolBridgeV1,
+  type PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
-import type { ResidentModelOption, ResidentProviderStatus, ResidentQuotaPool } from '@deepseek-ai/dsh-resident-operator'
+import { residentProgressPage, type ResidentProviderStatus, type ResidentTurnSnapshot } from '@deepseek-ai/dsh-resident-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { DurableAutoRefineCoordinator, PRIME_AUTO_REFINE_DEFAULTS, type AutoRefineReview } from './auto-refine.ts'
+import { abortableDelay } from './abortable-delay.ts'
+import {
+  accountAutonomousUsage,
+  createAutonomousState,
+  nextAutonomousDecision,
+  resolveAutonomousPolicy,
+} from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
+import {
+  OrchestrationClusterElection,
+  RemoteSyncClusterPeerTransport,
+  readOrchestrationClusterConfig,
+  type OrchestrationClusterConfig,
+  type OrchestrationClusterPeerTransport,
+} from './cluster.ts'
 import { GitWorktreeManager } from './git-worktrees.ts'
 import { dependsTransitively, graphCertificate, nodesConflict, validateGraph } from './graph.ts'
 import {
@@ -91,6 +120,11 @@ import {
 } from './providers.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
 import {
+  createRemotePhysicalOperators,
+  type RemotePhysicalOperatorServer,
+} from './remote-physical-operator.ts'
+import { readRemoteOperatorCatalog } from './remote-operators.ts'
+import {
   ORCHESTRATION_STATE_SCHEMA_VERSION,
   OrchestrationStore,
   type AttemptRecord,
@@ -98,7 +132,7 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 1
+export const ORCHESTRATION_PROTOCOL_VERSION = 4
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
@@ -108,11 +142,17 @@ export const ORCHESTRATION_METHODS = Object.freeze([
   'orchestration.list',
   'orchestration.inspect',
   'event.read',
+  'artifact.read',
   'orchestration.control',
   'orchestration.decide',
   'orchestration.resolve_indeterminate',
   'harness.auto_refine.resolve_indeterminate',
   'capability.propose_update',
+  'cluster.status',
+  'cluster.vote',
+  'cluster.heartbeat',
+  'cluster.export',
+  'cluster.install',
 ] as const)
 
 /**
@@ -136,7 +176,8 @@ interface ActiveAttempt {
   readonly operatorId: string
   progressCursor: number
   progressSync?: Promise<void>
-  readonly run: { readonly result: Promise<PhysicalOperatorResult>; dispose(): Promise<void> }
+  readonly run: Pick<PhysicalOperatorRun, 'result' | 'dispose'>
+    & Partial<Pick<PhysicalOperatorRun, 'readEvents'>>
 }
 
 interface ResidentReceiptIdentity {
@@ -152,6 +193,7 @@ interface PreparedRlmExecution {
   readonly bindings: RlmRuntimeHostBindings
   readonly bridge: PhysicalOperatorModelToolBridgeV1
   readonly rootPrompt: readonly ContentBlock[]
+  readonly signal: AbortSignal
 }
 
 interface StartedResidentTurn {
@@ -159,9 +201,64 @@ interface StartedResidentTurn {
   readonly receipt: ResidentReceiptIdentity
 }
 
+type RlmUsageResult = Pick<PhysicalOperatorResult, 'stopReason' | 'usage'>
+  | Pick<ModelWorkerResult, 'stopReason' | 'usage'>
+
+function isPhysicalOperatorUsage(
+  usage: PhysicalOperatorUsage | TokenUsage,
+): usage is PhysicalOperatorUsage {
+  return 'cacheReadInputTokens' in usage || 'cacheWriteInputTokens' in usage
+}
+
+function rlmAuthMode(
+  source: 'native-subscription' | 'metered-api' | undefined,
+  operatorId: string,
+): 'api' | 'subscription' {
+  if (source !== undefined) return source === 'metered-api' ? 'api' : 'subscription'
+  return operatorId.startsWith('deepseek') ? 'api' : 'subscription'
+}
+
+function rlmUsage(result: RlmUsageResult): {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadInputTokens: number
+  readonly cacheWriteInputTokens: number
+  readonly costUsd?: number
+} | undefined {
+  const usage = result.usage
+  if (usage === undefined) return undefined
+  const physical = isPhysicalOperatorUsage(usage)
+  const cacheReadInputTokens = physical ? usage.cacheReadInputTokens ?? 0 : usage.cacheReadTokens ?? 0
+  const cacheWriteInputTokens = physical ? usage.cacheWriteInputTokens ?? 0 : usage.cacheWriteTokens ?? 0
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadInputTokens,
+    cacheWriteInputTokens,
+    ...physical && usage.costUsd !== undefined ? { costUsd: usage.costUsd } : {},
+  }
+}
+
+function rlmAttributedUsage(
+  result: RlmUsageResult,
+  model: {
+    readonly operatorId: string
+    readonly model: string
+    readonly source?: 'native-subscription' | 'metered-api'
+  },
+): RlmChildExecutionResult['usage'] {
+  const usage = rlmUsage(result)
+  if (usage === undefined) return undefined
+  return {
+    provider: model.operatorId,
+    model: model.model,
+    authMode: rlmAuthMode(model.source, model.operatorId),
+    ...usage,
+  }
+}
+
 class OrchestrationResidentOperator implements PhysicalOperator {
   readonly descriptor
-  private readonly receipts = new Map<string, ResidentReceiptIdentity>()
 
   constructor(
     private readonly resident: ResidentDaemonClient,
@@ -182,6 +279,25 @@ class OrchestrationResidentOperator implements PhysicalOperator {
     return { available: true as const }
   }
 
+  residentCatalog(): Promise<PhysicalOperatorResidentCatalog> {
+    return Promise.resolve({
+      operatorId: this.descriptor.id,
+      product: this.provider.product,
+      injectionBoundaries: this.provider.injectionBoundaries,
+      supportsModelToolBridge: true,
+      location: 'local',
+      supportsWorkspaceMutationReturn: true,
+      available: this.provider.available,
+      ...this.provider.unavailableReason === undefined ? {} : { unavailableReason: this.provider.unavailableReason },
+      ...this.provider.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: this.provider.quotaUnavailableReason },
+      authentication: this.provider.authentication,
+      productVersion: this.provider.productVersion,
+      protocolHash: this.provider.protocolHash,
+      models: this.provider.models,
+      ...this.provider.quotaPools === undefined ? {} : { quotaPools: this.provider.quotaPools },
+    })
+  }
+
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
     const workspace = request.parent.session.header.cwd
     if (workspace === undefined) throw new OrchestrationError('orchestration operator requires a workspace', 'GRAPH_INVALID')
@@ -195,13 +311,18 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       laneId: request.residentLaneId ?? String(request.executionId),
       ...request.label === undefined ? {} : { taskLabel: request.label },
       prompt: request.prompt,
+      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       signal: request.signal,
     })
     /* jscpd:ignore-end */
-    this.receipts.set(String(request.executionId), { sessionId: turn.sessionId, turnId: turn.turnId })
     return {
+      receipt: { sessionId: turn.sessionId, turnId: turn.turnId, stateRevision: turn.stateRevision },
+      readEvents: async (afterSequence, limit, signal) => {
+        const page = await this.resident.readEvents(turn.sessionId, afterSequence, limit, signal)
+        return residentProgressPage(page)
+      },
       result: turn.result.then(result => ({
         ...result,
         continuity: { sessionId: turn.sessionId, stateRevision: turn.stateRevision },
@@ -210,12 +331,76 @@ class OrchestrationResidentOperator implements PhysicalOperator {
     }
   }
 
-  takeReceipt(executionId: string): ResidentReceiptIdentity {
-    const receipt = this.receipts.get(executionId)
-    if (receipt === undefined) throw new OrchestrationError(`resident receipt was not published for ${executionId}`, 'ORCHESTRATION_UNAVAILABLE')
-    this.receipts.delete(executionId)
-    return receipt
+  async reattach(turnId: string): Promise<PhysicalOperatorProviderRun> {
+    let initial: ResidentTurnSnapshot
+    try {
+      initial = await this.resident.inspectTurn(turnId)
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && String(error.code) === 'SESSION_UNAVAILABLE') {
+        throw new OrchestrationError(error.message, 'COMMAND_INDETERMINATE')
+      }
+      throw error
+    }
+    const observation = new AbortController()
+    const receipt = {
+      sessionId: String(initial.sessionId),
+      turnId: String(initial.turnId),
+      stateRevision: initial.stateRevision,
+    }
+    const result = this.pollTurn(initial, observation.signal)
+    return {
+      receipt,
+      readEvents: async (afterSequence, limit, signal) => {
+        const page = await this.resident.readEvents(receipt.sessionId, afterSequence, limit, signal)
+        return residentProgressPage(page)
+      },
+      result,
+      dispose: async () => {
+        observation.abort(new Error('recovered Resident observer detached'))
+        await result.catch(() => undefined)
+      },
+    }
   }
+
+  interrupt(receipt: PhysicalOperatorAcceptedReceipt): Promise<void> {
+    return this.resident.interrupt(receipt.sessionId, receipt.turnId)
+  }
+
+  private async pollTurn(initial: ResidentTurnSnapshot, signal: AbortSignal): Promise<PhysicalOperatorResult> {
+    let turn = initial
+    while (true) {
+      if (turn.state === 'settled') {
+        if (turn.result === undefined) {
+          throw new OrchestrationError('settled Resident turn omitted its result', 'ORCHESTRATION_UNAVAILABLE')
+        }
+        return {
+          ...turn.result,
+          continuity: { sessionId: String(turn.sessionId), stateRevision: turn.stateRevision },
+        }
+      }
+      if (turn.state === 'indeterminate') {
+        throw new OrchestrationError(
+          turn.error?.message ?? 'Resident turn outcome is indeterminate',
+          'COMMAND_INDETERMINATE',
+        )
+      }
+      await abortableDelay(250, signal)
+      turn = await this.resident.inspectTurn(String(turn.turnId))
+    }
+  }
+}
+
+function acceptedReceipt(run: PhysicalOperatorRun, executionId: string): PhysicalOperatorAcceptedReceipt {
+  if (run.receipt === undefined) {
+    throw new OrchestrationError(`resident receipt was not published for ${executionId}`, 'ORCHESTRATION_UNAVAILABLE')
+  }
+  return run.receipt
+}
+
+function selectedHarnessScope(mode: ContinualHarnessMode): ContinualHarnessScope | undefined {
+  if (mode === 'off') return undefined
+  if (mode === 'session' || mode === 'global') return mode
+  return 'workspace'
 }
 
 /** Daemon construction policy. */
@@ -234,6 +419,12 @@ export interface OrchestrationDaemonOptions {
    * credential-backed built-in Provider so offline acceptance cannot spend API quota.
    */
   readonly modelWorkerProviders?: readonly ModelWorkerProvider[]
+  /** Optional explicit remote execution members; omission follows the versioned root catalog. */
+  readonly remoteOperatorServers?: readonly RemotePhysicalOperatorServer[]
+  /** Explicit cluster membership used by tests; omission follows root/cluster.json. */
+  readonly clusterConfig?: OrchestrationClusterConfig
+  /** Authenticated peer transport used by the majority-election control plane. */
+  readonly clusterTransport?: OrchestrationClusterPeerTransport
 }
 
 function requiredString(params: Record<string, unknown>, name: string): string {
@@ -439,7 +630,7 @@ function promptFromPlan(
   }]
 }
 
-function modelTier(model: ResidentModelOption): ModelExecutionOffer['tier'] {
+function modelTier(model: PhysicalOperatorResidentModel): ModelExecutionOffer['tier'] {
   const label = `${model.model} ${model.displayName}`.toLowerCase()
   if (/\b(?:sol|opus|fable)\b|xhigh|max|ultra/u.test(label)) return 'high'
   if (/\b(?:luna|spark|haiku|flash)\b/u.test(label)) return 'low'
@@ -533,12 +724,15 @@ function attemptAbort(timeoutMs: number | undefined): {
   }
 }
 
-function quotaForModel(pool: readonly ResidentQuotaPool[] | undefined, model: ResidentModelOption): ResidentQuotaPool | undefined {
+function quotaForModel(
+  pool: readonly PhysicalOperatorQuotaPool[] | undefined,
+  model: PhysicalOperatorResidentModel,
+): PhysicalOperatorQuotaPool | undefined {
   return pool?.find(value => value.models.includes(model.model))
 }
 
-function quotaGuard(provider: ResidentProviderStatus): NonNullable<ModelExecutionOffer['quotaGuard']> {
-  if (provider.operatorId === 'claude-code') {
+function quotaGuard(provider: PhysicalOperatorResidentCatalog): NonNullable<ModelExecutionOffer['quotaGuard']> {
+  if (provider.product === 'claude-code') {
     return {
       unknownQuota: 'block',
       protectedRemainingPercent: 20,
@@ -566,13 +760,20 @@ export class OrchestrationDaemon {
   private readonly transports = new Set<JsonRpcLineTransport>()
   private readonly sockets = new Set<Socket>()
   private readonly ctx = new Context()
-  private readonly physical = new Map<string, OrchestrationResidentOperator>()
   private readonly active = new Map<string, ActiveAttempt>()
+  private readonly reconcileRetryAfter = new Map<string, number>()
   private readonly capacityRetryAfter = new Map<string, number>()
   private readonly worktrees: GitWorktreeManager
   private readonly autoRefine: DurableAutoRefineCoordinator
+  private readonly cluster: OrchestrationClusterElection | undefined
   private readonly recoveredRlmControllers: AbortController[] = []
   private readonly recoveredRlmDisposers: Array<() => void> = []
+  private readonly remoteOperatorRegistrations = new Map<string, {
+    readonly signature: string
+    readonly dispose: readonly (() => Promise<void>)[]
+  }>()
+  private remoteOperatorRefreshAt = 0
+  private clusterActionAt = 0
   private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
   private lockDescriptor: number | undefined
   private ticker: ReturnType<typeof setInterval> | undefined
@@ -590,6 +791,14 @@ export class OrchestrationDaemon {
       ...PRIME_AUTO_REFINE_DEFAULTS,
       ...options.autoRefine,
     })
+    const clusterConfig = options.clusterConfig ?? readOrchestrationClusterConfig(options.root)
+    this.cluster = clusterConfig === undefined
+      ? undefined
+      : new OrchestrationClusterElection(
+        clusterConfig,
+        this.store,
+        options.clusterTransport ?? new RemoteSyncClusterPeerTransport(),
+      )
     this.resident = options.residentClient ?? new ResidentDaemonClient({
       root: join(options.dshHome, 'resident-operators'),
       autoStart: true,
@@ -643,9 +852,9 @@ export class OrchestrationDaemon {
     })
     for (const provider of await this.resident.providers()) {
       const operator = new OrchestrationResidentOperator(this.resident, provider)
-      this.physical.set(provider.operatorId, operator)
       this.ctx.physicalOperators.registerOperator(operator)
     }
+    await this.refreshRemoteOperators(true)
     this.removeStaleSocket()
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => { reject(error) }
@@ -672,6 +881,10 @@ export class OrchestrationDaemon {
     this.ticker = undefined
     for (const controller of this.recoveredRlmControllers) controller.abort(new Error('orchestration daemon is closing'))
     for (const dispose of this.recoveredRlmDisposers.splice(0)) dispose()
+    for (const registration of this.remoteOperatorRegistrations.values()) {
+      await Promise.allSettled(registration.dispose.map(dispose => dispose()))
+    }
+    this.remoteOperatorRegistrations.clear()
     for (const transport of this.transports) transport.close()
     for (const socket of this.sockets) socket.end()
     await Promise.allSettled([...this.active.values()].map(value => value.run.dispose()))
@@ -706,8 +919,8 @@ export class OrchestrationDaemon {
   private async dispatch(method: string, params: Record<string, unknown>): Promise<unknown> {
     switch (method) {
       case 'system.handshake': return this.handshake(params)
-      case 'orchestration.compile': return this.compile(params.request as never)
-      case 'orchestration.start': return this.startRun(requiredString(params, 'compilation_id'), params.approval_ref as string | undefined)
+      case 'orchestration.compile': this.requireClusterLeader(); return this.compile(params.request as never)
+      case 'orchestration.start': this.requireClusterLeader(); return this.startRun(requiredString(params, 'compilation_id'), params.approval_ref as string | undefined)
       case 'orchestration.list': return this.store.listRuns().map(value => value.snapshot)
       case 'orchestration.inspect': return this.store.getRun(requiredString(params, 'run_id')).snapshot
       case 'event.read': return this.store.readEvents(
@@ -715,11 +928,19 @@ export class OrchestrationDaemon {
         params.after_sequence === undefined ? 0 : requiredInteger(params, 'after_sequence'),
         params.limit === undefined ? 100 : requiredInteger(params, 'limit'),
       )
-      case 'orchestration.control': return this.control(params.request as never)
-      case 'orchestration.decide': return this.decide(params.request as never)
-      case 'orchestration.resolve_indeterminate': return this.resolveIndeterminate(params.request as never)
-      case 'harness.auto_refine.resolve_indeterminate': return this.resolveAutoRefineIndeterminate(params.request as never)
-      case 'capability.propose_update': return this.proposeCapabilityUpdate(params.request as never)
+      case 'artifact.read': return this.store.readArtifact(
+        OrchestrationArtifactRef(requiredString(params, 'artifact_ref')),
+      )
+      case 'orchestration.control': this.requireClusterLeader(); return this.control(params.request as never)
+      case 'orchestration.decide': this.requireClusterLeader(); return this.decide(params.request as never)
+      case 'orchestration.resolve_indeterminate': this.requireClusterLeader(); return this.resolveIndeterminate(params.request as never)
+      case 'harness.auto_refine.resolve_indeterminate': this.requireClusterLeader(); return this.resolveAutoRefineIndeterminate(params.request as never)
+      case 'capability.propose_update': this.requireClusterLeader(); return this.proposeCapabilityUpdate(params.request as never)
+      case 'cluster.status': return this.cluster?.status()
+      case 'cluster.vote': return this.expectCluster().requestVote(params.request as OrchestrationClusterVoteRequest)
+      case 'cluster.heartbeat': return this.expectCluster().heartbeat(params.request as OrchestrationClusterHeartbeatRequest)
+      case 'cluster.export': this.requireClusterLeader(); return this.store.exportClusterReplica()
+      case 'cluster.install': return this.installClusterReplica(params.request as OrchestrationClusterInstallRequest)
       case 'system.shutdown':
         setTimeout(() => { void this.close() }, 10)
         return { draining: true }
@@ -1053,14 +1274,108 @@ export class OrchestrationDaemon {
     return record
   }
 
+  private expectCluster(): OrchestrationClusterElection {
+    if (this.cluster === undefined) {
+      throw new OrchestrationError('orchestration cluster is not configured', 'ORCHESTRATION_UNAVAILABLE')
+    }
+    return this.cluster
+  }
+
+  private requireClusterLeader(): void {
+    if (this.cluster === undefined || this.cluster.canSchedule()) return
+    const status: OrchestrationClusterStatus = this.cluster.status()
+    throw new OrchestrationError(
+      status.leaderId === undefined
+        ? 'orchestration cluster has no majority-backed leader'
+        : `orchestration authority is held by cluster leader "${status.leaderId}"`,
+      'NOT_CLUSTER_LEADER',
+    )
+  }
+
+  private installClusterReplica(request: OrchestrationClusterInstallRequest): OrchestrationClusterInstallReceipt {
+    const cluster = this.expectCluster()
+    const status = cluster.status()
+    if (this.ticking || this.active.size > 0) {
+      throw new OrchestrationError('orchestration follower is busy and cannot install a cluster replica', 'ORCHESTRATION_UNAVAILABLE')
+    }
+    if (status.role !== 'follower' || status.term !== request.term
+      || status.leaderId !== request.leaderId || status.leaseUntil <= Date.now()) {
+      throw new OrchestrationError('orchestration cluster replica is not authorized by the current leader lease', 'NOT_CLUSTER_LEADER')
+    }
+    const state = this.store.installClusterReplica(request.replica)
+    return { nodeId: status.nodeId, commitIndex: this.store.commitIndex(), state }
+  }
+
+  private async replicateClusterAuthority(): Promise<void> {
+    if (this.cluster === undefined) return
+    const status = await this.cluster.renew()
+    if (!status.canSchedule) {
+      throw new OrchestrationError('orchestration cluster lost majority before physical dispatch', 'NOT_CLUSTER_LEADER')
+    }
+  }
+
+  private async refreshClusterAuthority(): Promise<void> {
+    if (this.cluster === undefined || Date.now() < this.clusterActionAt) return
+    const before = this.cluster.status()
+    const status = before.role === 'leader'
+      ? await this.cluster.renew()
+      : before.leaseUntil > Date.now()
+        ? before
+        : await this.cluster.campaign()
+    const memberOffset = Math.max(status.memberIds.indexOf(status.nodeId), 0) * 50
+    this.clusterActionAt = status.canSchedule
+      ? Date.now() + Math.max(Math.floor(this.cluster.config.leaseMs / 3), 250)
+      : Math.max(status.leaseUntil, Date.now()) + 100 + memberOffset
+  }
+
+  private async refreshRemoteOperators(initial: boolean): Promise<void> {
+    let servers: readonly RemotePhysicalOperatorServer[]
+    try {
+      servers = this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root)
+    } catch (error) {
+      if (initial) throw error
+      this.ctx.logger.warn(`remote operator catalog rejected: ${error instanceof Error ? error.message : String(error)}`)
+      this.remoteOperatorRefreshAt = Date.now() + 5_000
+      return
+    }
+    const desired = new Map(servers.map(server => [server.id, server] as const))
+    for (const [serverId, registration] of this.remoteOperatorRegistrations) {
+      if (desired.has(serverId)) continue
+      await Promise.allSettled(registration.dispose.map(dispose => dispose()))
+      this.remoteOperatorRegistrations.delete(serverId)
+    }
+    for (const server of servers) {
+      const signature = JSON.stringify(server)
+      const existing = this.remoteOperatorRegistrations.get(server.id)
+      if (existing?.signature === signature) continue
+      try {
+        const operators = await createRemotePhysicalOperators(server)
+        if (existing !== undefined) {
+          await Promise.allSettled(existing.dispose.map(dispose => dispose()))
+          this.remoteOperatorRegistrations.delete(server.id)
+        }
+        const dispose = operators.map(operator => this.ctx.physicalOperators.registerOperator(operator))
+        this.remoteOperatorRegistrations.set(server.id, { signature, dispose })
+      } catch (error) {
+        this.ctx.logger.warn(
+          `remote operator Server "${server.label}" unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    this.remoteOperatorRefreshAt = Date.now() + 5_000
+  }
+
   private async tick(): Promise<void> {
     if (this.ticking || this.closing) return
     this.ticking = true
     try {
+      await this.refreshClusterAuthority()
+      if (Date.now() >= this.remoteOperatorRefreshAt) await this.refreshRemoteOperators(false)
       await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
       await this.reconcile()
       await this.ctx.rlmRuntime.pumpMessages()
       await this.ctx.rlmRuntime.pumpHeartbeats()
+      if (this.cluster !== undefined && !this.cluster.canSchedule()) return
       for (const record of this.store.listRuns()) {
         if (record.snapshot.state !== 'running') continue
         await this.advance(record)
@@ -1338,10 +1653,9 @@ export class OrchestrationDaemon {
       }, node)])
     }
     const harnessMode = record.snapshot.admission?.continualHarness ?? 'auto'
-    const harnessScope: ContinualHarnessScope | undefined = harnessMode === 'off'
-      || !spec.contextPolicy.allowedSourceKinds.includes('knowledge')
-      ? undefined
-      : harnessMode === 'session' ? 'session' : 'workspace'
+    const harnessScope = spec.contextPolicy.allowedSourceKinds.includes('knowledge')
+      ? selectedHarnessScope(harnessMode)
+      : undefined
     const harnessSnapshot = harnessScope === undefined ? undefined : await this.ctx.continualHarness.snapshot({
       workspace: record.snapshot.workspace,
       ...record.snapshot.admission?.sourceSessionId === undefined
@@ -1393,6 +1707,7 @@ export class OrchestrationDaemon {
     this.store.saveRun(record, [event(record.snapshot.runId, 'context.compiled', {
       ref: String(contextPacketRef), sha256: contextPacket.packetSha256, degradedSources: contextPacket.degradedSources,
     }, node)])
+    const requestedAutonomousMode = spec.autonomous?.mode ?? record.snapshot.admission?.autonomous ?? 'disabled'
     const rlmPlan = await this.ctx.rlmStrategy.resolve({
       runId,
       nodeId,
@@ -1400,7 +1715,9 @@ export class OrchestrationDaemon {
       role: spec.role,
       task: spec.task,
       objective: record.snapshot.admission?.optimization ?? 'balanced',
-      requestedMode: spec.rlm?.mode ?? record.snapshot.admission?.rlm ?? 'auto',
+      requestedMode: requestedAutonomousMode === 'enabled'
+        ? 'enabled'
+        : spec.rlm?.mode ?? record.snapshot.admission?.rlm ?? 'auto',
       ...spec.rlm === undefined ? {} : { requestedBudget: {
         maxDepth: spec.rlm.maxDepth,
         maxChildren: spec.rlm.maxChildren,
@@ -1414,6 +1731,24 @@ export class OrchestrationDaemon {
     this.store.saveRun(record, [event(record.snapshot.runId, 'rlm.resolved', {
       ref: String(rlmPlanRef), enabled: rlmPlan.enabled, reason: rlmPlan.reason,
       fidelity: rlmPlan.fidelity, planSha256: rlmPlan.planSha256,
+    }, node)])
+    const autonomousPolicy = resolveAutonomousPolicy(
+      spec.autonomous,
+      record.snapshot.admission?.autonomous,
+      rlmPlan.enabled,
+    )
+    const autonomousPolicyRef = this.store.putArtifact(autonomousPolicy)
+    this.store.recordArtifact('compilation_artifacts', {
+      ref: String(autonomousPolicyRef), runId, nodeId, attempt, generation: node.capabilityGeneration,
+    })
+    this.store.saveRun(record, [event(record.snapshot.runId, 'rlm.autonomous.resolved', {
+      ref: String(autonomousPolicyRef), enabled: autonomousPolicy.enabled,
+      policySha256: autonomousPolicy.policySha256,
+      gateCount: autonomousPolicy.gates.commands.length,
+      maxContinuations: autonomousPolicy.maxContinuations,
+      maxTurns: autonomousPolicy.maxTurns,
+      maxTokens: autonomousPolicy.maxTokens,
+      timeoutMs: autonomousPolicy.timeoutMs,
     }, node)])
     const selected = await this.selectOperator(record, spec, rlmPlan)
     const rlmWorkerPlan = rlmPlan.enabled && rlmPlan.fidelity === 'dsh-optimized' && rlmPlan.maxTurns > 1
@@ -1474,6 +1809,7 @@ export class OrchestrationDaemon {
       contextPacketRef,
       allocationPlanRef,
       allocationPlan: allocation,
+      autonomousPolicy,
       ...rlmWorkerPlan === undefined ? {} : { rlmWorkerPlan },
       ...harnessSnapshotRef === undefined ? {} : { harnessSnapshotRef },
       rlmPlan,
@@ -1505,6 +1841,7 @@ export class OrchestrationDaemon {
       modelSource: allocation.source,
       ...allocation.quotaPoolId === undefined ? {} : { quotaPoolId: allocation.quotaPoolId },
       rlm: rlmPlan.enabled ? 'enabled' as const : 'disabled' as const,
+      autonomous: autonomousPolicy.enabled ? 'enabled' as const : 'disabled' as const,
       capabilityPlanRef,
       contextPacketRef,
       executionPlanRef: planRef,
@@ -1538,22 +1875,23 @@ export class OrchestrationDaemon {
   ): Promise<void> {
     if (plan.operatorPlan.mode === 'model-worker') {
       if (plan.rlmPlan?.enabled === true) {
-        this.dispatchModelWorkerRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
+        await this.dispatchModelWorkerRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
         return
       }
       await this.dispatchModelWorker(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
       return
     }
     if (plan.rlmPlan?.enabled === true) {
-      this.dispatchResidentRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
+      await this.dispatchResidentRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
       return
     }
     const timeout = attemptAbort(spec.timeoutMs)
     const { controller } = timeout
-    const operator = this.physical.get(plan.operatorPlan.operatorId)
+    const operator = this.ctx.physicalOperators.getOperator(plan.operatorPlan.operatorId)
     if (operator === undefined) throw new OrchestrationError(`physical operator is unavailable: ${plan.operatorPlan.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident')
     try {
+      await this.replicateClusterAuthority()
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
@@ -1563,7 +1901,7 @@ export class OrchestrationDaemon {
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
       })
-      const receipt = operator.takeReceipt(String(plan.executionId))
+      const receipt = acceptedReceipt(run, String(plan.executionId))
       const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', turnId: receipt.turnId, updatedAt: now() }
       this.store.saveAttempt(attempt)
       const current = this.store.getRun(String(record.snapshot.runId))
@@ -1608,25 +1946,32 @@ export class OrchestrationDaemon {
     contextPacket: ContextPacketV1,
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
-  ): void {
-    this.dispatchRlmAttempt(record, spec, plan, 'scheduler-owned-resident-rlm', (controller, physicalRuns) => (
+  ): Promise<void> {
+    return this.dispatchRlmAttempt(record, spec, plan, 'scheduler-owned-resident-rlm', (controller, physicalRuns) => (
       this.executeResidentRlm(
         record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
       )
     ))
   }
 
-  private dispatchRlmAttempt(
+  private async dispatchRlmAttempt(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
     contextIsolation: string,
     execute: (controller: AbortController, physicalRuns: PhysicalOperatorRun[]) => Promise<PhysicalOperatorResult>,
-  ): void {
+  ): Promise<void> {
     const timeout = attemptAbort(spec.timeoutMs)
     const { controller } = timeout
     const physicalRuns: PhysicalOperatorRun[] = []
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident-rlm')
+    try {
+      await this.replicateClusterAuthority()
+    } catch (error) {
+      timeout.clearTimeout()
+      this.failDispatch(acceptedAttempt, error)
+      return
+    }
     const result = execute(controller, physicalRuns)
     this.markAttemptRunning(record, spec, acceptedAttempt, {
       executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
@@ -1669,11 +2014,13 @@ export class OrchestrationDaemon {
       model: {
         operatorId: plan.allocationPlan.operatorId,
         model: plan.allocationPlan.model,
+        source: plan.allocationPlan.source,
         ...plan.allocationPlan.profile === undefined ? {} : { profile: plan.allocationPlan.profile },
       },
       ...plan.rlmWorkerPlan === undefined ? {} : { defaultChildModel: {
         operatorId: plan.rlmWorkerPlan.operatorId,
         model: plan.rlmWorkerPlan.model,
+        source: plan.rlmWorkerPlan.source,
         ...plan.rlmWorkerPlan.profile === undefined ? {} : { profile: plan.rlmWorkerPlan.profile },
       } },
       limits: {
@@ -1691,6 +2038,11 @@ export class OrchestrationDaemon {
         },
       },
     }, bindings)
+    const autonomousPolicy = plan.autonomousPolicy
+    if (autonomousPolicy?.enabled === true
+      && this.store.autonomousState(runId, spec.id, plan.attempt) === undefined) {
+      this.store.saveAutonomousState(runId, spec.id, plan.attempt, createAutonomousState(autonomousPolicy))
+    }
     const bridge = await this.ctx.rlmRuntime.modelToolBridge(rootSessionId)
     const rootPrompt = primeRlmRootPrompt(
       promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan),
@@ -1701,11 +2053,13 @@ export class OrchestrationDaemon {
       runtimeSessionId: String(rootSessionId), planSha256: rlmPlan.planSha256,
       fidelity: rlmPlan.fidelity,
       maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
+      autonomous: autonomousPolicy?.enabled === true,
+      autonomousPolicySha256: autonomousPolicy?.policySha256 ?? null,
       rootOperatorId: plan.allocationPlan.operatorId, rootModel: plan.allocationPlan.model,
       tool: 'typescript_repl', topologyOwner: 'model',
       ...executor === 'model-worker' ? { executor } : {},
     }, node)])
-    return { rlmPlan, runId, node, rootSessionId, bindings, bridge, rootPrompt }
+    return { rlmPlan, runId, node, rootSessionId, bindings, bridge, rootPrompt, signal: controller.signal }
   }
 
   private async executeResidentRlm(
@@ -1750,6 +2104,13 @@ export class OrchestrationDaemon {
         operatorId: plan.allocationPlan.operatorId, model: plan.allocationPlan.model,
       }, node)])
       const rootResult = await root.run.result
+      await this.accountRlmGoalUsage(
+        record,
+        plan,
+        'root',
+        String(rootExecutionId),
+        rootResult,
+      )
       return await this.settleRlmExecution(record, spec, plan, prepared, rootResult)
     } catch (error) {
       controller.abort()
@@ -1766,13 +2127,24 @@ export class OrchestrationDaemon {
     prepared: PreparedRlmExecution,
     rootResult: PhysicalOperatorResult,
   ): Promise<PhysicalOperatorResult> {
-    const { rootSessionId, bindings, node } = prepared
+    const { rootSessionId, bindings, node, signal } = prepared
     await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
     const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
     const afterMessages = drained.lastContinuation?.output === undefined
       ? rootResult
       : { output: [...drained.lastContinuation.output], stopReason: 'completed' as const }
-    const result = await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
+    const result = plan.autonomousPolicy?.enabled === true
+      ? await this.continueAutonomousRlm(
+        record,
+        spec,
+        plan,
+        rootSessionId,
+        bindings,
+        afterMessages,
+        `${String(plan.executionId)}:rlm:root`,
+        signal,
+      )
+      : await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
     const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
     this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
       executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
@@ -1810,6 +2182,7 @@ export class OrchestrationDaemon {
     const receipts = [
       ...await this.ctx.continualHarness.flushRefinements({ ...common, scope: 'session', sessionId: String(sessionId) }),
       ...await this.ctx.continualHarness.flushRefinements({ ...common, scope: 'workspace' }),
+      ...await this.ctx.continualHarness.flushRefinements({ ...common, scope: 'global' }),
     ]
     if (receipts.length > 0) {
       this.store.appendEvents(receipts.map(receipt => event(record.snapshot.runId, `harness.refinement.${receipt.state}`, {
@@ -1901,7 +2274,8 @@ export class OrchestrationDaemon {
     const rootBeforeReview = await this.ctx.rlmRuntime.inspect(sessionId)
     const branchVersion = `${plan.planSha256}:${String(rootBeforeReview.stateRevision)}`
     const allocation = [plan.rlmWorkerPlan, plan.allocationPlan].find(value => (
-      value?.source === 'native-subscription' && this.physical.has(value.operatorId)
+      value?.source === 'native-subscription'
+      && this.ctx.physicalOperators.getOperator(value.operatorId) !== undefined
     ))
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
     if (allocation === undefined) {
@@ -1985,17 +2359,30 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     runtimeSnapshot: Awaited<ReturnType<Context['rlmRuntime']['inspect']>>,
   ): Promise<string> {
-    const [session, global, sessionRefinements, workspaceRefinements, messages, events] = await Promise.all([
+    const [
+      session,
+      workspaceHarness,
+      globalHarness,
+      sessionRefinements,
+      workspaceRefinements,
+      globalRefinements,
+      messages,
+      events,
+    ] = await Promise.all([
       this.ctx.continualHarness.snapshot({
         workspace, sessionId: String(sessionId), scope: 'session', role: spec.role, task: spec.task, limit: 64,
       }),
       this.ctx.continualHarness.snapshot({
         workspace, scope: 'workspace', role: spec.role, task: spec.task, limit: 64,
       }),
+      this.ctx.continualHarness.snapshot({
+        workspace, scope: 'global', role: spec.role, task: spec.task, limit: 64,
+      }),
       this.ctx.continualHarness.listRefinements({
         workspace, sessionId: String(sessionId), scope: 'session', limit: 20,
       }),
       this.ctx.continualHarness.listRefinements({ workspace, scope: 'workspace', limit: 20 }),
+      this.ctx.continualHarness.listRefinements({ workspace, scope: 'global', limit: 20 }),
       this.ctx.rlmRuntime.readMessages({ sessionId, limit: 64 }),
       this.ctx.rlmRuntime.readEvents({
         sessionId, after: Math.max(0, runtimeSnapshot.eventCursor - 128), limit: 128,
@@ -2041,7 +2428,8 @@ export class OrchestrationDaemon {
         })),
       },
       session: { ...(project(session) as object), refinements: sessionRefinements.map(refinement) },
-      workspace: { ...(project(global) as object), refinements: workspaceRefinements.map(refinement) },
+      workspace: { ...(project(workspaceHarness) as object), refinements: workspaceRefinements.map(refinement) },
+      global: { ...(project(globalHarness) as object), refinements: globalRefinements.map(refinement) },
     })}`
   }
 
@@ -2151,9 +2539,12 @@ export class OrchestrationDaemon {
           settled: PhysicalOperatorResult,
           workerResult?: ModelWorkerResult,
         ): Promise<RlmChildExecutionResult> => {
-          if (workerResult !== undefined) {
-            await this.accountRlmGoalUsage(record, plan, 'child', String(executionId), workerResult)
-          }
+          const accounted = workerResult ?? settled
+          await this.accountRlmGoalUsage(record, plan, 'child', String(executionId), accounted, {
+            operatorId: request.model.operatorId,
+            model: request.model.model,
+            authMode: rlmAuthMode(request.model.source, request.model.operatorId),
+          })
           const artifactRef = this.store.putArtifact({
             kind: 'prime-rlm-child-result', runId, nodeId: spec.id,
             childId: String(request.childId), childSessionId: String(request.childSessionId),
@@ -2174,18 +2565,22 @@ export class OrchestrationDaemon {
             stopReason: settled.stopReason,
           }, node)])
           await this.flushRlmHarnessBoundary(record, spec, plan, request.childSessionId, 'turn-end')
+          const usage = rlmAttributedUsage(accounted, request.model)
           return {
             status,
             output: settled.output,
             resultRef: String(artifactRef),
             outputPreview: preview.slice(0, 8_000),
+            ...usage === undefined ? {} : {
+              usage,
+            },
             ...status === 'failed' ? { error: `native child stopped with ${settled.stopReason}` } : {},
           }
         }
         const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
           record, spec, plan, request.childSessionId, controller, error,
         )
-        if (this.physical.has(request.model.operatorId)) {
+        if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
           const started = await this.startResidentTurn(
             record,
             spec,
@@ -2267,7 +2662,13 @@ export class OrchestrationDaemon {
               : 'scheduled for the next native turn boundary with model-supplied instructions',
           }
         }
-        const scope = params.scope === 'workspace' ? 'workspace' as const : 'session' as const
+        if (params.scope !== undefined
+          && params.scope !== 'session'
+          && params.scope !== 'workspace'
+          && params.scope !== 'global') {
+          throw new OrchestrationError('Harness scope must be session, workspace, or global', 'GRAPH_INVALID')
+        }
+        const scope: ContinualHarnessScope = params.scope ?? 'session'
         const scoped = {
           ...params,
           workspace: plan.executionWorkspace.path,
@@ -2335,12 +2736,15 @@ export class OrchestrationDaemon {
   }
 
   private async listManagedSkills(workspace: string, sessionId: string): Promise<ContinualHarnessSkillDescriptorV1[]> {
-    const [global, local] = await Promise.all([
+    const [globalEntries, workspaceEntries, sessionEntries] = await Promise.all([
+      this.ctx.continualHarness.list({ workspace, scope: 'global', kind: 'skill' }),
       this.ctx.continualHarness.list({ workspace, scope: 'workspace', kind: 'skill' }),
       this.ctx.continualHarness.list({ workspace, sessionId, scope: 'session', kind: 'skill' }),
     ])
     const entries = new Map<string, ContinualHarnessManagedEntryV2>()
-    for (const entry of [...global, ...local]) entries.set(this.skillAlias(entry), entry)
+    for (const entry of [...globalEntries, ...workspaceEntries, ...sessionEntries]) {
+      entries.set(this.skillAlias(entry), entry)
+    }
     return [...entries.entries()].map(([alias, entry]) => {
       const { moduleId, callable } = this.managedSkillBinding(entry)
       return {
@@ -2363,11 +2767,14 @@ export class OrchestrationDaemon {
     if (typeof alias !== 'string' || args === null || typeof args !== 'object' || Array.isArray(args)) {
       throw new OrchestrationError('skills.call requires a managed alias and JSON object arguments', 'GRAPH_INVALID')
     }
-    const [global, local] = await Promise.all([
+    const [globalEntries, workspaceEntries, sessionEntries] = await Promise.all([
+      this.ctx.continualHarness.list({ workspace, scope: 'global', kind: 'skill' }),
       this.ctx.continualHarness.list({ workspace, scope: 'workspace', kind: 'skill' }),
       this.ctx.continualHarness.list({ workspace, sessionId, scope: 'session', kind: 'skill' }),
     ])
-    const entry = [...global, ...local].reverse().find(candidate => this.skillAlias(candidate) === alias)
+    const entry = [...globalEntries, ...workspaceEntries, ...sessionEntries]
+      .reverse()
+      .find(candidate => this.skillAlias(candidate) === alias)
     if (entry === undefined) throw new OrchestrationError(`managed TypeScript skill not found: ${alias}`, 'GRAPH_INVALID')
     const { moduleId, callable } = this.managedSkillBinding(entry)
     return this.ctx.continualHarnessSkills.invoke({
@@ -2419,16 +2826,30 @@ export class OrchestrationDaemon {
           ? 'Audit the objective. Call await goal.complete() only when every requirement is actually achieved; otherwise make concrete progress within this continuation.'
           : request.source === 'heartbeat'
             ? 'Treat this heartbeat as scheduled new work. Use explicit family messages for any recursive results.'
-            : `Process the queued family message using ${request.deliveryMode} ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.`,
+            : request.source === 'autonomous'
+              ? 'This follow-up was injected by the host Autonomous policy. Do not claim completion from prose; make concrete progress and let the host quality gates decide.'
+              : `Process the queued family message using ${request.deliveryMode} ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.`,
       ].join('\n'),
     }]
     const settle = async (
       result: PhysicalOperatorResult,
       workerResult?: ModelWorkerResult,
     ): Promise<RlmChildExecutionResult> => {
-      if (request.source === 'goal' && workerResult !== undefined) {
-        await this.accountRlmGoalUsage(record, plan, 'goal-continuation', String(request.commandId), workerResult)
-      }
+      const accounted = workerResult ?? result
+      await this.accountRlmGoalUsage(
+        record,
+        plan,
+        request.source === 'goal'
+          ? 'goal-continuation'
+          : request.source === 'autonomous' ? 'autonomous-continuation' : 'continuation',
+        String(request.commandId),
+        accounted,
+        {
+          operatorId: request.model.operatorId,
+          model: request.model.model,
+          authMode: rlmAuthMode(request.model.source, request.model.operatorId),
+        },
+      )
       const artifactRef = this.store.putArtifact({
         kind: `prime-rlm-${request.source}-continuation`,
         runId: String(record.snapshot.runId), nodeId: spec.id,
@@ -2446,16 +2867,20 @@ export class OrchestrationDaemon {
         artifactRef: String(artifactRef), stopReason: result.stopReason,
       }, record.snapshot.nodes.find(value => value.id === spec.id))])
       await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')
+      const usage = rlmAttributedUsage(accounted, request.model)
       return {
         status, output: result.output, resultRef: String(artifactRef),
         outputPreview: operatorOutputPreview(result.output).outputPreview,
+        ...usage === undefined ? {} : {
+          usage,
+        },
         ...status === 'failed' ? { error: `continuation stopped with ${result.stopReason}` } : {},
       }
     }
     const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
       record, spec, plan, request.sessionId, controller, error,
     )
-    if (this.physical.has(request.model.operatorId)) {
+    if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
       const started = await this.startResidentTurn(
         record, spec, plan.executionWorkspace.path, executionId, request.model,
         prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId),
@@ -2508,6 +2933,108 @@ export class OrchestrationDaemon {
     }
   }
 
+  private async continueAutonomousRlm(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    sessionId: RlmRuntimeSessionId,
+    bindings: RlmRuntimeHostBindings,
+    initial: PhysicalOperatorResult,
+    initialCommandId: string,
+    signal: AbortSignal,
+  ): Promise<PhysicalOperatorResult> {
+    const policy = plan.autonomousPolicy
+    if (policy?.enabled !== true) return initial
+    let result = initial
+    let commandId = initialCommandId
+    for (;;) {
+      const current = this.store.autonomousState(String(record.snapshot.runId), spec.id, plan.attempt)
+        ?? createAutonomousState(policy)
+      const accounted = accountAutonomousUsage(current, commandId, result.usage)
+      this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, accounted)
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.usage', {
+        runtimeSessionId: String(sessionId), commandId,
+        turnsUsed: accounted.turnsUsed, tokensUsed: accounted.tokensUsed,
+        inputTokens: result.usage?.inputTokens ?? 0,
+        outputTokens: result.usage?.outputTokens ?? 0,
+        cacheReadInputTokens: result.usage?.cacheReadInputTokens ?? 0,
+        cacheWriteInputTokens: result.usage?.cacheWriteInputTokens ?? 0,
+      }, record.snapshot.nodes.find(value => value.id === spec.id))])
+      if (result.stopReason === 'error' || result.stopReason === 'aborted') {
+        throw new OrchestrationError(
+          `Autonomous root turn stopped with ${result.stopReason}`,
+          'ORCHESTRATION_UNAVAILABLE',
+        )
+      }
+      const decision = await nextAutonomousDecision(
+        policy,
+        accounted,
+        plan.executionWorkspace.path,
+        signal,
+      )
+      this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, decision.state)
+      if (decision.action === 'complete') {
+        this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.stopped', {
+          runtimeSessionId: String(sessionId), reason: decision.reason,
+          continuationsUsed: decision.state.continuationsUsed,
+          turnsUsed: decision.state.turnsUsed,
+          tokensUsed: decision.state.tokensUsed,
+          gateAttempts: decision.state.gateAttempts,
+        }, record.snapshot.nodes.find(value => value.id === spec.id))])
+        if (decision.reason === 'gate_passed') return result
+        throw new OrchestrationError(
+          decision.reason === 'gate_retry_exhausted'
+            ? 'Autonomous quality-gate retry budget was exhausted without terminal evidence'
+            : `Autonomous Mode stopped at ${decision.reason} without a passing quality gate`,
+          decision.reason === 'gate_retry_exhausted'
+            ? 'AUTONOMOUS_GATE_RETRY_EXHAUSTED'
+            : 'AUTONOMOUS_LIMIT_REACHED',
+        )
+      }
+      if (bindings.dispatchContinuation === undefined) {
+        throw new OrchestrationError('RLM host cannot dispatch an Autonomous continuation', 'ORCHESTRATION_UNAVAILABLE')
+      }
+      commandId = `${String(sessionId)}:autonomous-continuation:${String(decision.state.continuationsUsed)}`
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.continuation.requested', {
+        runtimeSessionId: String(sessionId), commandId, reason: decision.reason,
+        continuationsUsed: decision.state.continuationsUsed,
+        promptPreview: decision.prompt.slice(0, 2_000),
+      }, record.snapshot.nodes.find(value => value.id === spec.id))])
+      const runtime = await this.ctx.rlmRuntime.inspect(sessionId)
+      const execution = await bindings.dispatchContinuation({
+        sessionId,
+        commandId: RlmCommandId(commandId),
+        instruction: decision.prompt,
+        source: 'autonomous',
+        deliveryMode: 'follow_up',
+        model: runtime.model,
+      })
+      await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
+      const continuation = await execution.result
+      if (continuation.status !== 'settled') {
+        throw Object.assign(new Error(continuation.error ?? `Autonomous continuation became ${continuation.status}`), {
+          code: continuation.status === 'indeterminate' ? 'NODE_INDETERMINATE' : 'ORCHESTRATION_UNAVAILABLE',
+        })
+      }
+      result = {
+        output: [...(continuation.output ?? [])],
+        stopReason: 'completed',
+        ...continuation.usage === undefined ? {} : { usage: {
+          inputTokens: continuation.usage.inputTokens ?? 0,
+          outputTokens: continuation.usage.outputTokens ?? 0,
+          cacheReadInputTokens: continuation.usage.cacheReadInputTokens ?? 0,
+          cacheWriteInputTokens: continuation.usage.cacheWriteInputTokens ?? 0,
+          ...continuation.usage.costUsd === undefined ? {} : { costUsd: continuation.usage.costUsd },
+        } },
+      }
+      const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
+      if (drained.lastContinuation?.output !== undefined) result = {
+        ...result,
+        output: [...drained.lastContinuation.output],
+      }
+    }
+  }
+
   private async continueActiveRlmGoal(
     sessionId: RlmRuntimeSessionId,
     bindings: RlmRuntimeHostBindings,
@@ -2549,13 +3076,30 @@ export class OrchestrationDaemon {
   private async accountRlmGoalUsage(
     record: RuntimeRunRecord,
     plan: NodeExecutionPlanV1,
-    source: 'root' | 'child' | 'goal-continuation',
+    source: 'root' | 'child' | 'goal-continuation' | 'autonomous-continuation' | 'continuation',
     sourceCommandId: string,
-    result: Pick<ModelWorkerResult, 'stopReason' | 'usage'>,
+    result: RlmUsageResult,
+    attribution: {
+      readonly operatorId: string
+      readonly model: string
+      readonly authMode: 'api' | 'subscription'
+    } = {
+      operatorId: plan.allocationPlan.operatorId,
+      model: plan.allocationPlan.model,
+      authMode: rlmAuthMode(plan.allocationPlan.source, plan.allocationPlan.operatorId),
+    },
   ): Promise<void> {
-    const usage = result.usage
-    if (usage === undefined || result.stopReason === 'error' || result.stopReason === 'aborted') return
+    const usage = rlmUsage(result)
+    if (usage === undefined) return
     const sessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
+    this.store.appendEvents([event(record.snapshot.runId, 'rlm.usage', {
+      runtimeSessionId: String(sessionId),
+      source,
+      sourceCommandId,
+      ...attribution,
+      stopReason: result.stopReason,
+      ...usage,
+    }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
     const queueKey = String(sessionId)
     const previous = this.rlmGoalUsageQueues.get(queueKey) ?? Promise.resolve()
     const queued = previous.catch(() => undefined).then(async () => {
@@ -2569,6 +3113,8 @@ export class OrchestrationDaemon {
             expectedStateRevision: snapshot.stateRevision,
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            cacheWriteInputTokens: usage.cacheWriteInputTokens,
           })
           this.store.appendEvents([event(record.snapshot.runId, 'rlm.goal.usage', {
             runtimeSessionId: String(sessionId),
@@ -2576,6 +3122,8 @@ export class OrchestrationDaemon {
             sourceCommandId,
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            cacheWriteInputTokens: usage.cacheWriteInputTokens,
             tokensUsed: goal.tokensUsed,
             status: goal.status,
           }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
@@ -2609,7 +3157,7 @@ export class OrchestrationDaemon {
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
     residentLaneId?: string,
   ): Promise<StartedResidentTurn> {
-    const operator = this.physical.get(allocation.operatorId)
+    const operator = this.ctx.physicalOperators.getOperator(allocation.operatorId)
     if (operator === undefined) {
       throw new OrchestrationError(`physical operator is unavailable: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     }
@@ -2624,7 +3172,7 @@ export class OrchestrationDaemon {
       ...modelToolBridge === undefined ? {} : { modelToolBridge },
       ...residentLaneId === undefined ? {} : { residentLaneId },
     })
-    return { run, receipt: operator.takeReceipt(String(executionId)) }
+    return { run, receipt: acceptedReceipt(run, String(executionId)) }
   }
 
   private dispatchModelWorkerRlm(
@@ -2634,8 +3182,8 @@ export class OrchestrationDaemon {
     contextPacket: ContextPacketV1,
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
-  ): void {
-    this.dispatchRlmAttempt(record, spec, plan, 'model-worker-prime-rlm', (controller, physicalRuns) => (
+  ): Promise<void> {
+    return this.dispatchRlmAttempt(record, spec, plan, 'model-worker-prime-rlm', (controller, physicalRuns) => (
       this.executeModelWorkerRlm(
         record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
       )
@@ -2692,6 +3240,7 @@ export class OrchestrationDaemon {
       )
       return await this.settleRlmExecution(record, spec, plan, prepared, {
         output: [...rootResult.output], stopReason: rootResult.stopReason,
+        ...rootResult.usage === undefined ? {} : { usage: rootResult.usage },
       })
     } catch (error) {
       this.recordRlmFailure(record, plan, prepared, error)
@@ -2699,7 +3248,7 @@ export class OrchestrationDaemon {
     }
   }
 
-  private dispatchModelWorker(
+  private async dispatchModelWorker(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
@@ -2711,6 +3260,7 @@ export class OrchestrationDaemon {
     const { controller } = timeout
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'model-worker')
     try {
+      await this.replicateClusterAuthority()
       const result = this.ctx.modelWorkers.execute({
         commandId: String(plan.executionId),
         workerId: plan.operatorPlan.operatorId,
@@ -2742,7 +3292,6 @@ export class OrchestrationDaemon {
       timeout.clearTimeout()
       this.failDispatch(acceptedAttempt, error)
     }
-    return Promise.resolve()
   }
 
   private acceptDispatch(
@@ -2832,8 +3381,9 @@ export class OrchestrationDaemon {
   }
 
   private async syncActiveProgressUnchecked(active: ActiveAttempt): Promise<void> {
+    if (active.run.readEvents === undefined) return
     try {
-      const page = await this.resident.readEvents(active.sessionId, active.progressCursor, 200)
+      const page = await active.run.readEvents(active.progressCursor, 200)
       const progress = page.events.filter(value => (
         value.type === 'turn.progress'
         && value.data.turnId === active.turnId
@@ -2961,7 +3511,8 @@ export class OrchestrationDaemon {
     const admission = record.snapshot.admission
     const harnessMode = admission?.continualHarness ?? 'auto'
     if (harnessMode !== 'off' && spec.contextPolicy.allowedSourceKinds.includes('knowledge')) {
-      const scope: ContinualHarnessScope = harnessMode === 'session' ? 'session' : 'workspace'
+      const scope = selectedHarnessScope(harnessMode)
+      if (scope === undefined) throw new OrchestrationError('enabled Harness mode omitted its scope', 'GRAPH_INVALID')
       const entry = await this.ctx.continualHarness.recordOutcome({
         runId: active.runId,
         nodeId: active.nodeId,
@@ -3062,8 +3613,9 @@ export class OrchestrationDaemon {
   private residentOffers(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
-    providers: readonly ResidentProviderStatus[],
+    providers: readonly PhysicalOperatorResidentCatalog[],
     honorProfile: boolean,
+    requiresModelToolBridge = false,
   ): ModelExecutionOffer[] {
     const exhaustedOfferIds = new Set<string>()
     const exhaustedQuotaPoolIds = new Set<string>()
@@ -3079,38 +3631,43 @@ export class OrchestrationDaemon {
     const activeByOperator = new Map(
       this.ctx.physicalOperators.list().map(status => [String(status.id), status.active] as const),
     )
-    return providers.flatMap((provider) => {
-      const available = provider.available && provider.authentication === 'native-subscription'
-      return provider.models
-        .filter(model => !honorProfile || spec.operator?.profile?.model === undefined || model.model === spec.operator.profile.model)
-        .map((model): ModelExecutionOffer => {
-          const quotaPool = quotaForModel(provider.quotaPools, model)
-          const offerId = `${provider.operatorId}:${model.model}`
-          return {
-            offerId,
-            operatorId: provider.operatorId,
-            provider: provider.product,
-            model: model.model,
-            displayName: `${provider.displayName} · ${model.displayName}`,
-            source: 'native-subscription',
-            tier: modelTier(model),
-            available: available
+    const mutatesWorkspace = spec.writeScopes.length > 0 || spec.effectBudget.write.length > 0
+    return providers
+      .filter(provider => !requiresModelToolBridge || provider.supportsModelToolBridge)
+      .filter(provider => !mutatesWorkspace || provider.supportsWorkspaceMutationReturn)
+      .flatMap((provider) => {
+        const status = this.ctx.physicalOperators.status(String(provider.operatorId))
+        const available = provider.available && provider.authentication === 'native-subscription'
+        return provider.models
+          .filter(model => !honorProfile || spec.operator?.profile?.model === undefined || model.model === spec.operator.profile.model)
+          .map((model): ModelExecutionOffer => {
+            const quotaPool = quotaForModel(provider.quotaPools, model)
+            const offerId = `${provider.operatorId}:${model.model}`
+            return {
+              offerId,
+              operatorId: provider.operatorId,
+              provider: provider.product,
+              model: model.model,
+              displayName: `${status.displayName} · ${model.displayName}`,
+              source: 'native-subscription',
+              tier: modelTier(model),
+              available: available
               && !exhaustedOfferIds.has(offerId)
               && (quotaPool === undefined || !exhaustedQuotaPoolIds.has(quotaPool.poolId)),
-            maxConcurrency: provider.maxConcurrency,
-            activeCount: activeByOperator.get(provider.operatorId) ?? 0,
-            tags: provider.tags,
-            ...quotaPool === undefined ? {} : { quotaPool },
-            quotaGuard: quotaGuard(provider),
-            profile: {
-              model: model.model,
-              ...honorProfile && spec.operator?.profile?.effort !== undefined
-                ? { effort: spec.operator.profile.effort }
-                : model.defaultEffort === undefined ? {} : { effort: model.defaultEffort },
-            },
-          }
-        })
-    })
+              maxConcurrency: status.maxConcurrency,
+              activeCount: activeByOperator.get(provider.operatorId) ?? 0,
+              tags: status.tags,
+              ...quotaPool === undefined ? {} : { quotaPool },
+              quotaGuard: quotaGuard(provider),
+              profile: {
+                model: model.model,
+                ...honorProfile && spec.operator?.profile?.effort !== undefined
+                  ? { effort: spec.operator.profile.effort }
+                  : model.defaultEffort === undefined ? {} : { effort: model.defaultEffort },
+              },
+            }
+          })
+      })
   }
 
   private async selectRlmWorker(
@@ -3118,8 +3675,8 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     rlmPlan: RlmExecutionPlanV1,
   ): Promise<ModelAllocationPlan> {
-    const providers = await this.resident.providers()
-    const residentOffers = this.residentOffers(record, spec, providers, false)
+    const providers = await this.ctx.physicalOperators.residentCatalogs()
+    const residentOffers = this.residentOffers(record, spec, providers, false, true)
     const modelWorkerOffers = await this.ctx.modelWorkers.offers()
     const offers = [...residentOffers, ...modelWorkerOffers]
     const available = offers.filter(value => value.available)
@@ -3134,6 +3691,8 @@ export class OrchestrationDaemon {
       task: spec.task,
       preferredOperatorIds: [],
       objective: 'economy',
+      plannerVerifierPreference: record.snapshot.admission?.plannerVerifierPreference ?? 'codex-sol',
+      executionPreference: record.snapshot.admission?.executionPreference ?? 'luna-first',
       rlm: 'disabled',
       graphMaxParallel: Math.max(1, Math.min(record.graph.maxParallel, rlmPlan.maxChildren, 4)),
       offers: offers.filter(value => value.tier === targetTier),
@@ -3145,9 +3704,9 @@ export class OrchestrationDaemon {
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     rlmPlan: RlmExecutionPlanV1,
-  ): Promise<{ readonly provider?: ResidentProviderStatus; readonly allocation: ModelAllocationPlan }> {
-    const providers = await this.resident.providers()
-    const residentOffers = this.residentOffers(record, spec, providers, true)
+  ): Promise<{ readonly provider?: PhysicalOperatorResidentCatalog; readonly allocation: ModelAllocationPlan }> {
+    const providers = await this.ctx.physicalOperators.residentCatalogs()
+    const residentOffers = this.residentOffers(record, spec, providers, true, rlmPlan.enabled)
     const modelWorkerOffers = spec.writeScopes.length === 0
       && spec.effectBudget.write.length === 0
       && spec.effectBudget.execute.length === 0
@@ -3161,6 +3720,8 @@ export class OrchestrationDaemon {
       task: spec.task,
       preferredOperatorIds: spec.operator?.preferredIds ?? [],
       objective: record.snapshot.admission?.optimization ?? 'balanced',
+      plannerVerifierPreference: record.snapshot.admission?.plannerVerifierPreference ?? 'codex-sol',
+      executionPreference: record.snapshot.admission?.executionPreference ?? 'luna-first',
       rlm: rlmPlan.enabled ? 'enabled' : 'disabled',
       graphMaxParallel: record.graph.maxParallel,
       offers: [...residentOffers, ...modelWorkerOffers],
@@ -3175,37 +3736,60 @@ export class OrchestrationDaemon {
 
   private async reconcile(): Promise<void> {
     for (const attempt of this.store.attempts(['accepted', 'running'])) {
-      if (this.active.has(`${attempt.runId}\0${attempt.nodeId}`)) continue
+      const key = `${attempt.runId}\0${attempt.nodeId}`
+      if (this.active.has(key) || (this.reconcileRetryAfter.get(key) ?? 0) > Date.now()) continue
       if (attempt.turnId === undefined) {
         this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: 'daemon restarted before a Resident turn identity was recorded', updatedAt: now() })
         continue
       }
+      const record = this.store.getRun(attempt.runId)
+      const operatorId = record.snapshot.nodes.find(value => value.id === attempt.nodeId)?.operatorId
+      if (operatorId === undefined) {
+        this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: 'recovered attempt has no sealed physical operator identity', updatedAt: now() })
+        continue
+      }
+      const operator = this.ctx.physicalOperators.getOperator(operatorId)
+      if (operator === undefined) {
+        this.reconcileRetryAfter.set(key, Date.now() + 2_000)
+        continue
+      }
+      if (operator.reattach === undefined) {
+        this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: `physical operator ${operatorId} cannot reattach its durable turn`, updatedAt: now() })
+        continue
+      }
       try {
-        const inspection = await this.resident.inspectTurn(attempt.turnId)
-        if (inspection.state === 'settled' && inspection.result !== undefined) {
-          const record = this.store.getRun(attempt.runId)
-          const recovered: ActiveAttempt = {
-            kind: 'resident',
-            runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
-            generation: attempt.generation, executionId: attempt.executionId,
-            sessionId: String(inspection.sessionId), turnId: attempt.turnId,
-            run: { result: Promise.resolve(inspection.result), dispose: async () => {} },
-            operatorId: record.snapshot.nodes.find(value => value.id === attempt.nodeId)?.operatorId ?? 'unknown',
-            progressCursor: 0,
-          }
-          await this.syncActiveProgress(recovered)
-          await this.settleAttempt(recovered, inspection.result)
-        } else if (inspection.state === 'indeterminate') {
-          this.applyIndeterminate({
-            ...attempt,
-            state: 'indeterminate',
-            ...inspection.error?.code === undefined ? {} : { errorCode: inspection.error.code },
-            ...inspection.error?.message === undefined ? {} : { errorMessage: inspection.error.message },
-            updatedAt: now(),
-          })
+        const run = await operator.reattach(attempt.turnId)
+        const receipt = run.receipt
+        if (receipt === undefined) throw new OrchestrationError('reattached Provider omitted its durable receipt', 'ORCHESTRATION_UNAVAILABLE')
+        const recovered: ActiveAttempt = {
+          kind: 'resident',
+          runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
+          generation: attempt.generation, executionId: attempt.executionId,
+          sessionId: receipt.sessionId, turnId: receipt.turnId,
+          run, operatorId, progressCursor: 0,
         }
+        this.reconcileRetryAfter.delete(key)
+        this.active.set(key, recovered)
+        await this.syncActiveProgress(recovered)
+        void run.result.then(
+          async (result) => {
+            if (this.closing) return
+            await this.syncActiveProgress(recovered)
+            await this.settleAttempt(recovered, result)
+          },
+          async (error: unknown) => {
+            if (this.closing) return
+            await this.syncActiveProgress(recovered)
+            this.failAttempt(recovered, error)
+          },
+        ).finally(() => { this.active.delete(key); void this.tick() })
       } catch (error) {
-        this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: error instanceof Error ? error.message : String(error), updatedAt: now() })
+        const code = error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE'
+        if (code === 'COMMAND_INDETERMINATE') {
+          this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: code, errorMessage: error instanceof Error ? error.message : String(error), updatedAt: now() })
+        } else {
+          this.reconcileRetryAfter.set(key, Date.now() + 2_000)
+        }
       }
     }
   }
@@ -3215,7 +3799,14 @@ export class OrchestrationDaemon {
   private async interruptActive(runId: string): Promise<void> {
     const active = [...this.active.values()].filter(value => value.runId === runId)
     await Promise.allSettled(active.map(async (value) => {
-      if (value.kind === 'resident') await this.resident.interrupt(value.sessionId, value.turnId)
+      if (value.kind === 'resident') {
+        const operator = this.ctx.physicalOperators.getOperator(value.operatorId)
+        await operator?.interrupt?.({
+          sessionId: value.sessionId,
+          turnId: value.turnId,
+          stateRevision: 0,
+        })
+      }
       await value.run.dispose()
     }))
   }

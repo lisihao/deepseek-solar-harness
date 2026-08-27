@@ -12,6 +12,14 @@ node 半侧在桥接或 upgrade 前守卫 `/api` 下的每个入口（`src/api-r
 
 `/api/events.mux` 与 `/api/events.host` 各接受一条 WebSocket upgrade，并只向浏览器发送对应的 `ServerRequest` 文本消息；客户端不会在这些 socket 上发送业务数据。任一 socket 结束都会使当前 connection generation 失败并重建两条流，连接就绪仍要求两条 socket 均已打开且 `host.describe` HTTP 调用成功。浏览器断开只会结算并释放它自己持有的 pump，不能表现为未处理的 Host rejection。Host teardown 会终止两条 socket、中止各自的 source，并等待 source 清理完成后再返回。普通网络 GET 这些路径会返回 426，不保留 SSE（Server-Sent Events）回退；`toFetchHandler` 的 SSE 编解码只服务进程内同构载体。
 
+## Remote Sync 与稳定 Session 交接
+
+Remote Sync 协议 1.3 保留 snapshot + cursor 投影，并为 cockpit/admin 客户端增加经过认证的 Session 交接与 Resident 执行控制。只有挂载 `ctx.sessionPersistence` 时，Server 才声明 `session.replicate.read/write`；副本目录只包含没有开放回合的完整日志。线路传输正典 `SessionHeader` 与完整事件日志，目标端把每次写入决策委托给 `SessionPersistence.replicate`，因此重试具备幂等性，而分叉或活动日志会明确失败。这是显式权威交接，不是持续双写同步。
+
+挂载 `ctx.residentOperators` 后，同一认证通道还会声明 `operator.read/execute/interrupt`。远端调用方可以查看经过资格审查的原生订阅 Provider，提交一条持久命令后立即断开，再按 turn id 重连、读取有界结构化进展，并中断匹配的 Session／turn。Server 自身的 Resident daemon 仍是唯一命令回执与原生会话权威。原始产品 transcript 与本机 Unix 模型工具桥地址不会跨越该边界；在单独的认证路由桥完成前，远端 model-tool bridge 请求会明确拒绝。
+
+当 `ctx.orchestrations` 暴露集群权威时，每个经过认证的 description 都可以带有有界只读投影（`nodeId`、term、role、leader id 和 `canSchedule`）。这样，配置了多个 Server 的 Frontend 可以优先连接当前持有多数租约的 Leader，而不会获得选举权威。`orchestration.cluster` 控制能力只向 admin peer 声明，承载 vote、heartbeat、逻辑副本 export 和受 term 约束的 install。生产 peer 应当通过经过认证的回环隧道调用这些控制操作；普通 Frontend bearer 不是集群凭据。
+
 ## 模型体验
 
 无。协议消费层只在浏览器与主机之间搬运已经组合好的消息；这里没有任何内容进入模型请求。
@@ -24,3 +32,5 @@ node 半侧在桥接或 upgrade 前守卫 `/api` 下的每个入口（`src/api-r
 
 - **History 会恢复未附加的会话**：打开 history 可能创建宿主侧 agent，并增加首次打开的延迟；没有仅从持久化读取的路径。
 - **`/api` 桥把每个请求体整体缓冲在内存里**：`maxRequestBodyBytes`（默认 160 MiB，按默认 100 MiB 图片总量上限经 base64 膨胀加信封余量得出）因此同时是单请求的驻留内存上界；要降低它而不缩小图片限额，需要流式请求体路径。
+- **副本读取目前是整份日志且无分页**：已结束会话作为一个逻辑文档传输。若要用于无界历史，必须先增加大日志分块。
+- **编排集群副本目前是完整逻辑快照**：它会校验 digest 并以事务安装，但目前仍共用有界 Remote Sync 请求路径。无界编排存储需要增量复制。

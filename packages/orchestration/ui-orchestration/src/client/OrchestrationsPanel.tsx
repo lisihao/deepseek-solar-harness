@@ -246,6 +246,9 @@ function GraphView(props: {
   const rlmChildren = props.events.filter(event => event.type === 'rlm.child.dispatched').length
   const rlmChildrenSettled = props.events.filter(event => event.type === 'rlm.child.settled').length
   const rlmMessages = props.events.filter(event => event.type === 'rlm.message.continuation.settled').length
+  const autonomousPolicy = [...props.events].reverse().find(event => event.type === 'rlm.autonomous.resolved')
+  const autonomousStopped = [...props.events].reverse().find(event => event.type === 'rlm.autonomous.stopped')
+  const autonomousContinuations = props.events.filter(event => event.type === 'rlm.autonomous.continuation.requested').length
   const workerAllocation = [...props.events].reverse().find(event => event.type === 'rlm.worker.allocated')
   const autoRefine = [...props.events].reverse().find(event => event.type.startsWith('harness.auto_refine.'))
   return <div className="dshDesktopOrchestrationColumn dshDesktopOrchestrationGraph">
@@ -267,6 +270,10 @@ function GraphView(props: {
         并行：{String(activeWorkers)}/{String(run.effectiveParallelism ?? run.maxParallel ?? 1)} worker 运行中
         · Graph 上限 {String(run.maxParallel ?? 1)} · {String(readyWorkers)} 个可派发
       </p>
+      <p>
+        模型分工：{run.admission?.plannerVerifierPreference === 'best-high-tier' ? '最佳高阶模型规划/验证' : 'Codex Sol 优先规划/验证'}
+        · {run.admission?.executionPreference === 'balanced' ? '调度器综合选择执行模型' : 'Codex Luna 优先执行代码节点'}
+      </p>
       <p>上下文：{cleanContext ? 'Clean-task Capsule 已注入 · fresh native lane' : '等待 Capsule 解析'}</p>
     </div>
     <div className="dshDesktopCollaborationTrace" data-execution-mode={rlmEnabled ? 'rlm' : 'standard'} aria-label="Prime RLM 运行状态">
@@ -279,6 +286,9 @@ function GraphView(props: {
           <p>自动演进：{autoRefine === undefined
             ? '等待 Prime 触发条件'
             : <>{eventLabel(autoRefine.type)}{autoRefine.data.model === undefined ? '' : ` · ${eventValue(autoRefine, 'operatorId')}/${eventValue(autoRefine, 'model')}`}</>}</p>
+          <p>自主续接：{autonomousPolicy?.data.enabled === true
+            ? `${autonomousStopped === undefined ? '运行中' : `已停止（${eventValue(autonomousStopped, 'reason')}）`} · ${String(autonomousContinuations)} 次 · 质量门禁 ${eventValue(autonomousPolicy, 'gateCount')}`
+            : '关闭（不会用 Goal 冒充）'}</p>
         </>
         : <p>本 Run 不创建 RLM Session，不挂载 typescript_repl，也不递归启动子 Agent。</p>}
     </div>

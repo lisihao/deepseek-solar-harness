@@ -7,6 +7,9 @@ import type {
 } from '../remote-sync.ts'
 import type { RemoteSyncClient } from './remote-sync-client.ts'
 
+/** Client surface required by the live projection loop. */
+export type RemoteSyncProjectionClient = Pick<RemoteSyncClient, 'describe' | 'snapshot' | 'events'>
+
 /** Frontend projection convergence state. */
 export type RemoteSyncState = 'connecting' | 'syncing' | 'connected' | 'reconnecting' | 'stopped'
 
@@ -34,7 +37,7 @@ export class RemoteSyncController {
   private started = false
 
   constructor(
-    private readonly client: RemoteSyncClient,
+    private readonly client: RemoteSyncProjectionClient,
     private readonly sinks: RemoteSyncSinks,
     private readonly config: RemoteSyncControllerConfig = {},
   ) {}

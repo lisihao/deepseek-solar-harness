@@ -54,7 +54,7 @@ Package metadata — including the negative "not a client package" verdict — i
 
 ## The bundle route and index tap
 
-`GET`/`HEAD /plugins/<id>/client.js` serves the registered bundle from disk with `no-cache` (the rev query, not HTTP caching, anchors consistency); other methods are 405. An unknown id — or a registered row whose bundle is unreadable because it has not been built yet — answers a loud 404 rather than letting the carrier's SPA fallback ship HTML as JavaScript. The index tap injects the current graph on every index render, so a reload always boots against the live composition.
+`GET`/`HEAD /plugins/<id>/client.js` serves the registered bundle with Brotli or gzip when accepted. A request whose `rev` query exactly matches the row receives `public, max-age=31536000, immutable`; a missing or stale revision and every source map remain `no-cache`. The row rev therefore anchors both consistency and cache identity, while `rebuilt()` replaces the memoized body variants when content changes. Other methods are 405. An unknown id — or a registered row whose bundle is unreadable because it has not been built yet — answers a loud 404 rather than letting the carrier's SPA fallback ship HTML as JavaScript. The index tap injects the current graph on every index render, so a reload always boots against the live composition.
 
 ## The service
 
@@ -114,5 +114,5 @@ onRebuilt(listener: (id: string, rev: string) => void): () => void
 onGraphChanged(listener: () => void): () => void
 ```
 
-Source: [`packages/client/modules/src/index.ts:184`](../../packages/client/modules/src/index.ts)
+Source: [`packages/client/modules/src/index.ts:189`](../../packages/client/modules/src/index.ts)
 <!-- END GENERATED cordis-surface -->

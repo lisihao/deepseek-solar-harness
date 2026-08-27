@@ -18,6 +18,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+function optionalPositiveInteger(value: unknown, name: string, maximum: number): void {
+  if (value !== undefined && (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > maximum)) {
+    throw new OrchestrationError(`${name} must be a positive integer no greater than ${String(maximum)}`, 'GRAPH_INVALID')
+  }
+}
+
 /**
  * Validate one untrusted graph at the durable/wire boundary.
  * @param value - untrusted version-one logical graph.
@@ -87,6 +93,42 @@ export function validateGraph(value: unknown): string[] {
       || !Number.isSafeInteger(node.contextPolicy.maxTokens)
       || node.contextPolicy.maxTokens < 1) {
       throw new OrchestrationError(`node ${node.id} context maxTokens must be positive`, 'GRAPH_INVALID')
+    }
+    if (candidate.autonomous !== undefined) {
+      if (!isRecord(candidate.autonomous) || !['auto', 'enabled', 'disabled'].includes(node.autonomous?.mode ?? '')) {
+        throw new OrchestrationError(`node ${node.id} autonomous mode is unsupported`, 'GRAPH_INVALID')
+      }
+      optionalPositiveInteger(node.autonomous?.maxContinuations, `node ${node.id} autonomous maxContinuations`, 64)
+      optionalPositiveInteger(node.autonomous?.maxTurns, `node ${node.id} autonomous maxTurns`, 256)
+      optionalPositiveInteger(node.autonomous?.maxTokens, `node ${node.id} autonomous maxTokens`, 10_000_000)
+      optionalPositiveInteger(node.autonomous?.timeoutMs, `node ${node.id} autonomous timeoutMs`, 86_400_000)
+      if (node.autonomous?.continuationPrompt !== undefined
+        && (node.autonomous.continuationPrompt.trim().length === 0
+          || node.autonomous.continuationPrompt !== node.autonomous.continuationPrompt.trim()
+          || node.autonomous.continuationPrompt.length > 12_000)) {
+        throw new OrchestrationError(`node ${node.id} autonomous continuationPrompt is invalid`, 'GRAPH_INVALID')
+      }
+      if (node.autonomous?.gates !== undefined) {
+        if (!isRecord(node.autonomous.gates)) {
+          throw new OrchestrationError(`node ${node.id} autonomous gates must be an object`, 'GRAPH_INVALID')
+        }
+        stringArray(node.autonomous.gates.commands, `node ${node.id} autonomous gates.commands`)
+        if (node.autonomous.gates.commands.length > 16 || node.autonomous.gates.commands.some(command => command.length > 4_096)) {
+          throw new OrchestrationError(`node ${node.id} autonomous gates exceed the command budget`, 'GRAPH_INVALID')
+        }
+        optionalPositiveInteger(node.autonomous.gates.maxRetries, `node ${node.id} autonomous gates.maxRetries`, 20)
+        optionalPositiveInteger(node.autonomous.gates.timeoutMs, `node ${node.id} autonomous gates.timeoutMs`, 3_600_000)
+        if (node.autonomous.gates.commands.length > 0
+          && !node.effectBudget.execute.some(effect => effect === '*' || effect === 'autonomous-gate')) {
+          throw new OrchestrationError(
+            `node ${node.id} autonomous shell gates require the autonomous-gate execute effect`,
+            'GRAPH_INVALID',
+          )
+        }
+      }
+      if (node.autonomous !== undefined && node.autonomous.mode !== 'disabled' && node.rlm?.mode === 'disabled') {
+        throw new OrchestrationError(`node ${node.id} cannot enable Autonomous Mode while RLM is disabled`, 'GRAPH_INVALID')
+      }
     }
     byId.set(node.id, node)
   }

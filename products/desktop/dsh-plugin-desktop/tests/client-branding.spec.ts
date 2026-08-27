@@ -116,4 +116,52 @@ describe('Solar desktop branding', () => {
       vi.unstubAllGlobals()
     }
   })
+
+  it('keeps remote Server configuration visible while the Desktop uses its local Server', () => {
+    const marker = { className: '', textContent: '' }
+    const buttons: Array<{
+      type: string
+      className: string
+      dataset: Record<string, string>
+      textContent: string
+      title: string
+      addEventListener: ReturnType<typeof vi.fn>
+    }> = []
+    const footer = {
+      className: '', dataset: {} as Record<string, string>, setAttribute: vi.fn(), title: '', appendChild: vi.fn(), remove: vi.fn(),
+    }
+    const body = { dataset: {} as Record<string, string>, appendChild: vi.fn() }
+    const assign = vi.fn()
+    vi.stubGlobal('document', {
+      createElement: vi.fn((tag: string) => {
+        if (tag === 'footer') return footer
+        if (tag !== 'button') return marker
+        const button = {
+          type: '', className: '', dataset: {} as Record<string, string>, textContent: '', title: '', addEventListener: vi.fn(),
+        }
+        buttons.push(button)
+        return button
+      }),
+      body,
+    })
+    vi.stubGlobal('window', { location: { assign } })
+
+    try {
+      const dispose = mountSolarBrandFooter({
+        deploymentRole: 'server', mode: 'compatibility', platform: 'darwin', productVersion: '3.7.0',
+      })
+      expect(buttons).toHaveLength(1)
+      const [configure] = buttons
+      if (configure === undefined) throw new Error('expected local Server deployment button')
+      expect(configure.textContent).toBe('连接远程 Server')
+      expect(configure.dataset.testid).toBe('desktop-configure-deployment')
+      const configureClick = configure.addEventListener.mock.calls[0]?.[1] as (() => void)
+      configureClick()
+      expect(assign).toHaveBeenCalledWith(CONFIGURE_DEPLOYMENT_URL)
+      dispose()
+    }
+    finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

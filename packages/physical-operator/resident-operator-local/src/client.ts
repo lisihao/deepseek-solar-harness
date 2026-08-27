@@ -174,6 +174,7 @@ export class ResidentDaemonClient {
     laneId?: string
     taskLabel?: string
     prompt: readonly unknown[]
+    systemPrompt?: string
     profile?: PhysicalOperatorExecutionPreference
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1
     signal: AbortSignal
@@ -195,6 +196,7 @@ export class ResidentDaemonClient {
       lane_id: request.laneId ?? 'legacy',
       ...request.taskLabel === undefined ? {} : { task_label: request.taskLabel },
       prompt: request.prompt,
+      ...request.systemPrompt === undefined ? {} : { system_prompt: request.systemPrompt },
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { model_tool_bridge: request.modelToolBridge },
     }, request.signal)

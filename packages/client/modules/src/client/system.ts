@@ -189,6 +189,16 @@ export class ClientModuleSystem implements ClientModuleLoader {
     await this.arrive(row)
   }
 
+  updateRevision(id: string, revision: string): void {
+    const row = this.graphRows.get(id)
+    if (row === undefined) throw new Error(`client-modules: updateRevision("${id}") — not a graph entry`)
+    this.graphRows.set(id, {
+      id,
+      url: `/plugins/${id}/client.js?rev=${encodeURIComponent(revision)}`,
+      rev: revision,
+    })
+  }
+
   invalidate(id: string): void {
     this.factories.delete(id)
     this.loadCache.delete(id)

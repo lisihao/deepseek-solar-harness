@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld('dshFrontendSetup', {
   useServer: () => ipcRenderer.invoke('dsh-desktop:frontend-setup:use-server'),
   configureGitSync: (value: unknown) => ipcRenderer.invoke('dsh-desktop:frontend-setup:git-sync-configure', value),
   runGitSync: () => ipcRenderer.invoke('dsh-desktop:frontend-setup:git-sync-run'),
+  configureSessionSync: (value: unknown) => ipcRenderer.invoke('dsh-desktop:frontend-setup:session-sync-configure', value),
+  runSessionSync: () => ipcRenderer.invoke('dsh-desktop:frontend-setup:session-sync-run'),
   close: () => ipcRenderer.send('dsh-desktop:frontend-setup:close'),
 })

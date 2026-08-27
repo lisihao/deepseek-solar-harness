@@ -42,14 +42,21 @@ describe('physical operator client plugin', () => {
       selectProfile: (operatorId: 'codex', model?: string, effort?: 'high') => Promise<string | null>
       selectOrchestrationStrategy: (
         rlm: 'enabled', harness: 'off', optimization: 'balanced',
+        plannerVerifierPreference: 'codex-sol', executionPreference: 'luna-first',
       ) => Promise<string | null>
     }
     await expect(injected.select('codex')).resolves.toBeNull()
     await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBeNull()
-    await expect(injected.selectOrchestrationStrategy('enabled', 'off', 'balanced')).resolves.toBeNull()
+    await expect(injected.selectOrchestrationStrategy(
+      'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
+    )).resolves.toBeNull()
     expect(execute).toHaveBeenNthCalledWith(1, 'session-1', '/operator codex')
     expect(execute).toHaveBeenNthCalledWith(2, 'session-1', '/operator-profile codex gpt-5.6-sol high')
-    expect(execute).toHaveBeenNthCalledWith(3, 'session-1', '/orchestration-strategy enabled off balanced')
+    expect(execute).toHaveBeenNthCalledWith(
+      3,
+      'session-1',
+      '/orchestration-strategy enabled off balanced codex-sol luna-first',
+    )
   })
 
   it('keeps user-facing collaboration labels stable outside the Desktop product', () => {

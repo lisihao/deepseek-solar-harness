@@ -115,6 +115,42 @@ describe('PhysicalOperatorRuntime', () => {
     expect(service.list()).toEqual([])
   })
 
+  it('preserves durable receipts and progress readers from a Provider run', async () => {
+    const { runtime: service } = await runtime()
+    service.registerOperator({
+      descriptor: {
+        id: PhysicalOperatorId('resident-test'),
+        displayName: 'Resident Test',
+        description: 'Publishes reconnectable run metadata.',
+        tags: ['resident'],
+        maxConcurrency: 1,
+        executionModes: ['resident'],
+      },
+      availability: () => ({ available: true }),
+      start: async () => ({
+        receipt: { sessionId: 'session-1', turnId: 'turn-1', stateRevision: 3 },
+        readEvents: async () => ({
+          events: [{
+            sequence: 1,
+            type: 'turn.progress',
+            time: '2026-08-27T12:00:00.000Z',
+            data: { phase: 'reasoning' },
+          }],
+          nextSequence: 1,
+        }),
+        result: Promise.resolve({ output: [], stopReason: 'completed' }),
+        dispose: async () => {},
+      }),
+    })
+
+    const run = await service.start('resident-test', { ...request(), mode: 'resident' })
+    expect(run.receipt).toEqual({ sessionId: 'session-1', turnId: 'turn-1', stateRevision: 3 })
+    await expect(run.readEvents?.(0, 100)).resolves.toMatchObject({
+      events: [{ type: 'turn.progress', data: { phase: 'reasoning' } }],
+      nextSequence: 1,
+    })
+  })
+
   it('reserves capacity before async work and releases it only after settlement', async () => {
     const { runtime: service } = await runtime()
     const deferred = Promise.withResolvers<PhysicalOperatorResult>()

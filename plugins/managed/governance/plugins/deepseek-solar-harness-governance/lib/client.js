@@ -1,6 +1,6 @@
 window.__ModuleLoader__.load({ id: "@lisihao/dsh-code-harness-governance", factory: (require) => {
 var module = { exports: {} }; var exports = module.exports;
-const __governanceCss = ".dsh-governance-view {\n  box-sizing: border-box;\n  height: 100%;\n  overflow: auto;\n  padding: 20px;\n  width: 100%;\n}\n\n.dsh-governance-panel {\n  background: var(--dsw-alias-bg-layer-1);\n  border: 1px solid var(--dsw-alias-border-l2);\n  border-radius: 14px;\n  box-sizing: border-box;\n  color: var(--dsw-alias-label-primary);\n  display: flex;\n  flex-direction: column;\n  margin: 0 auto;\n  max-width: 900px;\n  min-height: 320px;\n  overflow: hidden;\n  width: 100%;\n}\n\n.dsh-governance-header {\n  align-items: center;\n  border-bottom: 1px solid var(--dsw-alias-border-l2);\n  display: flex;\n  justify-content: space-between;\n  padding: 18px 20px;\n}\n\n.dsh-governance-header h2,\n.dsh-governance-header p {\n  margin: 0;\n}\n\n.dsh-governance-header h2 {\n  font-size: 17px;\n}\n\n.dsh-governance-header p {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n  margin-top: 4px;\n}\n\n.dsh-governance-actions {\n  display: flex;\n  gap: 6px;\n}\n\n.dsh-governance-actions button {\n  align-items: center;\n  background: transparent;\n  border: 0;\n  border-radius: 8px;\n  color: var(--dsw-alias-label-secondary);\n  cursor: pointer;\n  display: flex;\n  justify-content: center;\n  padding: 8px;\n}\n\n.dsh-governance-actions button:hover {\n  background: var(--dsw-alias-interactive-bg-hover);\n}\n\n.dsh-governance-summary {\n  align-items: center;\n  background: var(--dsw-alias-bg-layer-2);\n  border-bottom: 1px solid var(--dsw-alias-border-l2);\n  color: var(--dsw-alias-label-secondary);\n  display: flex;\n  font-size: 12px;\n  gap: 12px;\n  padding: 10px 20px;\n}\n\n.dsh-governance-phase {\n  border-radius: 999px;\n  padding: 3px 8px;\n}\n\n.dsh-governance-phase-accepted {\n  background: var(--dsw-alias-state-success-secondary);\n  color: var(--dsw-alias-state-success-primary);\n}\n\n.dsh-governance-phase-blocked {\n  background: var(--dsw-alias-state-error-secondary);\n  color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-phase-rejected,\n.dsh-governance-phase-invalidated {\n  background: var(--dsw-alias-state-error-secondary);\n  color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-error {\n  background: var(--dsw-alias-interactive-bg-hover-danger);\n  color: var(--dsw-alias-state-error-primary);\n  margin: 16px 20px 0;\n  padding: 10px 12px;\n}\n\n.dsh-governance-events {\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  list-style: none;\n  margin: 0;\n  max-height: min(560px, 60vh);\n  overflow: auto;\n  padding: 16px 20px 24px;\n}\n\n.dsh-governance-event {\n  background: var(--dsw-alias-bg-layer-2);\n  border: 1px solid var(--dsw-alias-border-l2);\n  border-radius: 10px;\n  padding: 12px;\n}\n\n.dsh-governance-event[data-decision='denied'] {\n  border-color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-event-head {\n  align-items: center;\n  display: grid;\n  gap: 10px;\n  grid-template-columns: auto 1fr auto;\n}\n\n.dsh-governance-sequence,\n.dsh-governance-event-status {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n}\n\n.dsh-governance-event-meta,\n.dsh-governance-event-detail,\n.dsh-governance-event-message {\n  color: var(--dsw-alias-label-secondary);\n  font-size: 12px;\n  margin-top: 7px;\n}\n\n.dsh-governance-empty {\n  align-items: center;\n  color: var(--dsw-alias-label-tertiary);\n  display: flex;\n  flex: 1;\n  justify-content: center;\n  min-height: 200px;\n  padding: 24px 20px;\n  text-align: center;\n}\n\n.dsh-collaboration-section {\n  border-top: 1px solid var(--dsw-alias-border-l2);\n}\n\n.dsh-collaboration-section > h3 {\n  font-size: 15px;\n  margin: 0;\n  padding: 16px 20px 10px;\n}\n\n.dsh-collaboration-empty {\n  min-height: 120px;\n}\n\n.dsh-collaboration-event .dsh-governance-event-message {\n  white-space: pre-wrap;\n}\n\n.dsh-orchestration-run {\n  border-top: 1px solid var(--dsw-alias-border-l2);\n}\n\n.dsh-orchestration-run > header {\n  align-items: center;\n  display: flex;\n  gap: 10px;\n  justify-content: space-between;\n  padding: 14px 20px 0;\n}\n\n.dsh-orchestration-run > header span {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n}\n\n@media (max-width: 720px) {\n  .dsh-governance-view {\n    padding: 0;\n  }\n\n  .dsh-governance-panel {\n    border-radius: 0;\n    height: 100%;\n    max-height: none;\n    max-width: none;\n    min-height: 0;\n    width: 100%;\n  }\n}\n";
+const __governanceCss = ".dsh-governance-view {\n  box-sizing: border-box;\n  height: 100%;\n  overflow: auto;\n  padding: 20px;\n  width: 100%;\n}\n\n.dsh-governance-panel {\n  background: var(--dsw-alias-bg-layer-1);\n  border: 1px solid var(--dsw-alias-border-l2);\n  border-radius: 14px;\n  box-sizing: border-box;\n  color: var(--dsw-alias-label-primary);\n  display: flex;\n  flex-direction: column;\n  margin: 0 auto;\n  max-width: 900px;\n  min-height: 320px;\n  overflow: hidden;\n  width: 100%;\n}\n\n.dsh-governance-header {\n  align-items: center;\n  border-bottom: 1px solid var(--dsw-alias-border-l2);\n  display: flex;\n  justify-content: space-between;\n  padding: 18px 20px;\n}\n\n.dsh-governance-header h2,\n.dsh-governance-header p {\n  margin: 0;\n}\n\n.dsh-governance-header h2 {\n  font-size: 17px;\n}\n\n.dsh-governance-header p {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n  margin-top: 4px;\n}\n\n.dsh-governance-actions {\n  display: flex;\n  gap: 6px;\n}\n\n.dsh-governance-actions button {\n  align-items: center;\n  background: transparent;\n  border: 0;\n  border-radius: 8px;\n  color: var(--dsw-alias-label-secondary);\n  cursor: pointer;\n  display: flex;\n  justify-content: center;\n  padding: 8px;\n}\n\n.dsh-governance-actions button:hover {\n  background: var(--dsw-alias-interactive-bg-hover);\n}\n\n.dsh-governance-summary {\n  align-items: center;\n  background: var(--dsw-alias-bg-layer-2);\n  border-bottom: 1px solid var(--dsw-alias-border-l2);\n  color: var(--dsw-alias-label-secondary);\n  display: flex;\n  font-size: 12px;\n  gap: 12px;\n  padding: 10px 20px;\n}\n\n.dsh-governance-phase {\n  border-radius: 999px;\n  padding: 3px 8px;\n}\n\n.dsh-governance-phase-accepted {\n  background: var(--dsw-alias-state-success-secondary);\n  color: var(--dsw-alias-state-success-primary);\n}\n\n.dsh-governance-phase-blocked {\n  background: var(--dsw-alias-state-error-secondary);\n  color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-phase-rejected,\n.dsh-governance-phase-invalidated {\n  background: var(--dsw-alias-state-error-secondary);\n  color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-error {\n  background: var(--dsw-alias-interactive-bg-hover-danger);\n  color: var(--dsw-alias-state-error-primary);\n  margin: 16px 20px 0;\n  padding: 10px 12px;\n}\n\n.dsh-governance-events {\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  list-style: none;\n  margin: 0;\n  max-height: min(560px, 60vh);\n  overflow: auto;\n  padding: 16px 20px 24px;\n}\n\n.dsh-governance-event {\n  background: var(--dsw-alias-bg-layer-2);\n  border: 1px solid var(--dsw-alias-border-l2);\n  border-radius: 10px;\n  padding: 12px;\n}\n\n.dsh-governance-event[data-decision='denied'] {\n  border-color: var(--dsw-alias-state-error-primary);\n}\n\n.dsh-governance-event-head {\n  align-items: center;\n  display: grid;\n  gap: 10px;\n  grid-template-columns: auto 1fr auto;\n}\n\n.dsh-governance-sequence,\n.dsh-governance-event-status {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n}\n\n.dsh-governance-event-meta,\n.dsh-governance-event-detail,\n.dsh-governance-event-message {\n  color: var(--dsw-alias-label-secondary);\n  font-size: 12px;\n  margin-top: 7px;\n}\n\n.dsh-governance-empty {\n  align-items: center;\n  color: var(--dsw-alias-label-tertiary);\n  display: flex;\n  flex: 1;\n  justify-content: center;\n  min-height: 200px;\n  padding: 24px 20px;\n  text-align: center;\n}\n\n.dsh-collaboration-section {\n  border-top: 1px solid var(--dsw-alias-border-l2);\n}\n\n.dsh-collaboration-section > h3 {\n  font-size: 15px;\n  margin: 0;\n  padding: 16px 20px 10px;\n}\n\n.dsh-collaboration-empty {\n  min-height: 120px;\n}\n\n.dsh-collaboration-event .dsh-governance-event-message {\n  white-space: pre-wrap;\n}\n\n.dsh-governance-evidence-output {\n  margin-top: 8px;\n}\n\n.dsh-governance-evidence-output button {\n  background: var(--dsw-alias-bg-layer-1);\n  border: 1px solid var(--dsw-alias-border-l2);\n  border-radius: 7px;\n  color: var(--dsw-alias-label-secondary);\n  cursor: pointer;\n  padding: 6px 9px;\n}\n\n.dsh-governance-evidence-output button:hover {\n  background: var(--dsw-alias-interactive-bg-hover);\n}\n\n.dsh-governance-evidence-output .dsh-governance-event-message {\n  white-space: pre-wrap;\n}\n\n.dsh-orchestration-run {\n  border-top: 1px solid var(--dsw-alias-border-l2);\n}\n\n.dsh-orchestration-run > header {\n  align-items: center;\n  display: flex;\n  gap: 10px;\n  justify-content: space-between;\n  padding: 14px 20px 0;\n}\n\n.dsh-orchestration-run > header span {\n  color: var(--dsw-alias-label-tertiary);\n  font-size: 12px;\n}\n\n@media (max-width: 720px) {\n  .dsh-governance-view {\n    padding: 0;\n  }\n\n  .dsh-governance-panel {\n    border-radius: 0;\n    height: 100%;\n    max-height: none;\n    max-width: none;\n    min-height: 0;\n    width: 100%;\n  }\n}\n";
 const __governanceStyleId = "@lisihao/dsh-code-harness-governance/client.css";
 if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css=' + JSON.stringify(__governanceStyleId) + ']') === null) {
   const tag = document.createElement('style');
@@ -126,6 +126,56 @@ function orchestrationEventDetail(event) {
   return ''
 }
 
+function modelVisibleEvidenceText(value) {
+  const content = value?.evidence?.output
+  if (!Array.isArray(content)) throw new Error('Evidence has no model-visible output')
+  return content.flatMap(block => {
+    if (block === null || typeof block !== 'object' || Array.isArray(block)) return []
+    if (block.type === 'reasoning') return []
+    if (block.type === 'text' && typeof block.text === 'string') return [block.text]
+    if (block.type === 'tool-result' && Array.isArray(block.content)) {
+      return [modelVisibleEvidenceText({ evidence: { output: block.content } })]
+    }
+    return [JSON.stringify(block)]
+  }).filter(Boolean).join('\n')
+}
+
+async function fetchOrchestrationEvidence(runId, evidenceRef) {
+  const url = new URL(ORCHESTRATION_PATH, window.location.origin)
+  url.searchParams.set('run_id', runId)
+  url.searchParams.set('evidence_ref', evidenceRef)
+  const response = await fetch(url, { cache: 'no-store' })
+  const body = await response.json()
+  if (!response.ok) throw new Error(body?.message ?? `HTTP ${String(response.status)}`)
+  return modelVisibleEvidenceText(body)
+}
+
+function OrchestrationEvidenceOutput({ runId, event }) {
+  const evidenceRef = typeof event.data?.evidenceRef === 'string' ? event.data.evidenceRef : undefined
+  const [output, setOutput] = useState()
+  const [error, setError] = useState()
+  const [loading, setLoading] = useState(false)
+  if (evidenceRef === undefined || event.data?.outputTruncated !== true) return null
+  const load = async () => {
+    setLoading(true)
+    try {
+      setOutput(await fetchOrchestrationEvidence(runId, evidenceRef))
+      setError(undefined)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setLoading(false)
+    }
+  }
+  return h('div', { className: 'dsh-governance-evidence-output' },
+    output === undefined && error === undefined
+      ? h('button', { type: 'button', disabled: loading, onClick: () => { void load() } }, loading ? '读取中…' : '查看完整 Evidence 输出')
+      : null,
+    error === undefined ? null : h('div', { className: 'dsh-governance-error', role: 'alert' }, error),
+    output === undefined ? null : h('div', { className: 'dsh-governance-event-message' }, output),
+  )
+}
+
 function SessionCollaborationEvent({ event }) {
   const detail = event.type === 'physical-operator/routing-decision'
     ? `${collaborationPolicyLabel(event.policy)} · ${String(event.route ?? 'N/A')} · ${String(event.reason ?? '')}`
@@ -135,19 +185,27 @@ function SessionCollaborationEvent({ event }) {
         ? `${String(event.code ?? 'N/A')} · command ${shortRef(event.commandId)}`
         : event.type === 'orchestration/admission'
           ? `${collaborationPolicyLabel(event.policy)} · TaskGraph ${shortRef(event.runId)} · 并行上限 ${String(event.maxParallel ?? 'N/A')}`
-          : `${String(event.operatorId ?? 'N/A')}\n${String(event.outputPreview ?? '')}${event.outputTruncated === true ? '\n…输出已截断。' : ''}`
+          : event.type === 'physical-operator/tool-call' || event.type === 'subagent/call'
+            ? `${String(event.operatorId ?? 'Resident')} · ${String(event.tool ?? 'N/A')}\n${String(event.input ?? '')}`
+            : event.type === 'physical-operator/tool-result' || event.type === 'subagent/output'
+              ? `${String(event.operatorId ?? 'Resident')} · ${String(event.tool ?? 'N/A')}\n${String(event.output ?? event.outputPreview ?? '')}`
+              : `${String(event.operatorId ?? 'N/A')}\n${String(event.output ?? event.outputPreview ?? '')}`
+  const failed = event.type === 'physical-operator/dispatch-terminal' || event.isError === true
+  const status = event.type.endsWith('/call') || event.type.endsWith('/tool-call')
+    ? '调用'
+    : failed ? '失败' : event.type.includes('output') || event.type.endsWith('/tool-result') ? '输出' : '会话'
   return h('li', { className: 'dsh-governance-event dsh-collaboration-event' },
     h('div', { className: 'dsh-governance-event-head' },
       h('span', { className: 'dsh-governance-sequence' }, `#${String(event.sequence)}`),
       h('strong', null, String(event.type)),
-      h('span', { className: 'dsh-governance-event-status' }, event.type === 'physical-operator/dispatch-terminal' ? '失败' : '会话'),
+      h('span', { className: 'dsh-governance-event-status' }, status),
     ),
     h('div', { className: 'dsh-governance-event-meta' }, formatTime(event.timestamp)),
     h('div', { className: 'dsh-governance-event-message' }, detail),
   )
 }
 
-function OrchestrationEvent({ event }) {
+function OrchestrationEvent({ runId, event }) {
   return h('li', { className: 'dsh-governance-event dsh-collaboration-event' },
     h('div', { className: 'dsh-governance-event-head' },
       h('span', { className: 'dsh-governance-sequence' }, `#${String(event.sequence)}`),
@@ -156,6 +214,7 @@ function OrchestrationEvent({ event }) {
     ),
     h('div', { className: 'dsh-governance-event-meta' }, formatTime(event.time)),
     orchestrationEventDetail(event) === '' ? null : h('div', { className: 'dsh-governance-event-message' }, orchestrationEventDetail(event)),
+    h(OrchestrationEvidenceOutput, { runId, event }),
   )
 }
 
@@ -239,7 +298,7 @@ function GovernanceTraceView({ sessionId }) {
           ...(trace?.events ?? []).slice().reverse().map(event => h(TraceEvent, { event, key: event.sequence })),
         ),
       h('section', { className: 'dsh-collaboration-section', 'data-testid': 'collaboration-trace-panel' },
-        h('h3', null, '智能协作与 Resident 子代理'),
+        h('h3', null, '智能协作、首模型与 Resident 算子'),
         h('div', { className: 'dsh-governance-summary' },
           h('span', null, trace === null ? '会话协作事件 N/A' : `会话协作事件 ${String(trace.collaboration?.returnedEvents ?? 0)}/${String(trace.collaboration?.totalEvents ?? 0)}`),
           h('span', null, `TaskGraph ${String(orchestrations.length)}`),
@@ -256,7 +315,7 @@ function GovernanceTraceView({ sessionId }) {
                 h('span', null, `${collaborationPolicyLabel(run.admission?.policy)} · ${runStateLabel(run.state)} · ${String(run.nodes?.length ?? 0)} 节点`),
               ),
               h('ol', { className: 'dsh-governance-events' },
-                ...events.slice().reverse().map(event => h(OrchestrationEvent, { event, key: `${String(run.runId)}-${String(event.sequence)}` })),
+                ...events.slice().reverse().map(event => h(OrchestrationEvent, { runId: String(run.runId), event, key: `${String(run.runId)}-${String(event.sequence)}` })),
               ),
             )),
           ),

@@ -16,6 +16,8 @@ The Graph is an execution permission ceiling rather than a prompt template. Caps
 
 The orchestration daemon survives Desktop and DSH client shutdown. It calls the provider-neutral physical-operator seam in Resident mode and reconciles accepted attempts through stable execution identities. DSH Session stores only bounded tool projections; SQLite and content-addressed Artifacts retain authoritative orchestration state.
 
+An RLM node can additionally select Prime-compatible Autonomous Mode as `disabled | auto | enabled`; it is disabled by default. The daemon seals one immutable host policy per Attempt, persists token/turn/continuation and gate state, runs declared host quality gates before evaluating limits, and resumes the same RLM lane only while budget remains. Gate success can complete the node; exhausted limits never become success. This policy is neither a Goal nor another Scheduler, and its shell commands require the Graph's explicit `autonomous-gate` execute effect.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -80,7 +82,7 @@ Snapshot/outcome seam; the Scheduler only consumes immutable snapshots.
 
 ```ts cordis-catalog
 /**
- * Compile a bounded immutable snapshot for one session or workspace scope.
+ * Compile a bounded immutable snapshot for one session, workspace, or user-global scope.
  * @param request Scope, task, and entry-limit policy for the snapshot.
  * @returns The content-addressed Continuous Harness snapshot.
  */
@@ -108,7 +110,7 @@ abstract create(request: ContinualHarnessCreateRequest): Promise<ContinualHarnes
 abstract get(request: ContinualHarnessScopeRequest & { readonly entryId: string }): Promise<ContinualHarnessManagedEntryV2>
 
 /**
- * List managed entries in the selected session-local or workspace-global scope.
+ * List managed entries in the selected session, workspace, or user-global scope.
  * @param request - scope, optional kind filter, and tombstone policy.
  * @returns matching managed entries in deterministic order.
  */
@@ -237,7 +239,7 @@ Scheduler-facing Service Definition; implementations remain replaceable plugins.
 abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
 ```
 
-Source: [`packages/orchestration/model-allocation/src/index.ts:105`](../../packages/orchestration/model-allocation/src/index.ts)
+Source: [`packages/orchestration/model-allocation/src/index.ts:109`](../../packages/orchestration/model-allocation/src/index.ts)
 
 <a id="ctxmodelworkers--modelworkerruntime"></a>
 
@@ -311,6 +313,13 @@ abstract inspect(runId: OrchestrationRunId): Promise<OrchestrationRunSnapshot>
 abstract readEvents(request: OrchestrationEventReadRequest): Promise<OrchestrationEventPage>
 
 /**
+ * Read one immutable content-addressed artifact.
+ * @param ref - digest-verified artifact identity returned by this service.
+ * @returns the decoded immutable artifact value.
+ */
+abstract readArtifact(ref: OrchestrationArtifactRef): Promise<unknown>
+
+/**
  * Apply a revision-checked run control.
  * @param request - revision-checked run control.
  * @returns the updated run snapshot.
@@ -344,9 +353,42 @@ abstract resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterm
  * @returns the durable update receipt.
  */
 abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
+
+/**
+ * Read the local Server's bounded cluster authority projection.
+ * @returns the current cluster status, or undefined in standalone mode.
+ */
+abstract clusterStatus(): Promise<OrchestrationClusterStatus | undefined>
+
+/**
+ * Process one authenticated, configured-member vote request.
+ * @param request - candidate term and replication watermark.
+ * @returns this member's term-fenced vote response.
+ */
+abstract clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse>
+
+/**
+ * Process one authenticated majority-lease heartbeat.
+ * @param request - elected leader term, lease, and replication watermark.
+ * @returns this follower's lease acknowledgement.
+ */
+abstract clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse>
+
+/**
+ * Export one complete logical replica for authenticated cluster peers.
+ * @returns the current durable TaskGraph state image.
+ */
+abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
+
+/**
+ * Install one term-fenced leader replica while this node is a follower.
+ * @param request - elected leader coordinates and logical state image.
+ * @returns the follower's applied or unchanged watermark.
+ */
+abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:460`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:583`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 
@@ -619,7 +661,7 @@ abstract reconcile(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSna
 abstract resolveIndeterminate(request: RlmIndeterminateResolutionRequest): Promise<RlmCommandReceiptSnapshotV1>
 ```
 
-Source: [`packages/orchestration/rlm-runtime/src/index.ts:480`](../../packages/orchestration/rlm-runtime/src/index.ts)
+Source: [`packages/orchestration/rlm-runtime/src/index.ts:487`](../../packages/orchestration/rlm-runtime/src/index.ts)
 
 <a id="ctxrlmstrategy--rlmstrategyservice-abstract-seam"></a>
 
