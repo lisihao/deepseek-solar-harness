@@ -106,6 +106,8 @@ export interface PhysicalOperatorStartRequest {
   readonly label?: string
   /** Complete standalone task content for the selected operator. */
   readonly prompt: ContentBlock[]
+  /** Exact assembled DSH system instructions for a native product acting as the current Agent. */
+  readonly systemPrompt?: string
   /** Exact live agent whose workspace and authority the provider derives. */
   readonly parent: Agent
   /** Canonical cancellation channel before and after execution publication. */

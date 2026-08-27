@@ -298,17 +298,20 @@ export class CodexAppServerWire {
    * @param signal - unpublished-start cancellation.
    * @param ephemeral - whether product history may discard the thread after this run.
    * @param profile - optional native model override for the new thread.
+   * @param developerInstructions - optional DSH-owned system instructions for this thread.
    */
   async startThread(
     cwd: string,
     signal: AbortSignal,
     ephemeral = true,
     profile?: CodexAppServerExecutionProfile,
+    developerInstructions?: string,
   ): Promise<void> {
     const response = object(await this.guarded(this.transport.request('thread/start', {
       cwd,
       ephemeral,
       ...profile === undefined ? {} : { model: profile.model },
+      ...developerInstructions === undefined ? {} : { developerInstructions },
       ...this.dynamicTools.length === 0 ? {} : { dynamicTools: this.dynamicTools },
     }, signal), signal), 'thread/start response')
     const thread = object(response.thread, 'thread/start thread')
@@ -327,17 +330,20 @@ export class CodexAppServerWire {
    * @param cwd - canonical workspace for the resumed turn.
    * @param signal - unpublished-start cancellation.
    * @param profile - optional native model override for the resumed thread.
+   * @param developerInstructions - optional DSH-owned system instructions for the resumed thread.
    */
   async resumeThread(
     threadId: string,
     cwd: string,
     signal: AbortSignal,
     profile?: CodexAppServerExecutionProfile,
+    developerInstructions?: string,
   ): Promise<void> {
     const response = object(await this.guarded(this.transport.request('thread/resume', {
       threadId,
       cwd,
       ...profile === undefined ? {} : { model: profile.model },
+      ...developerInstructions === undefined ? {} : { developerInstructions },
     }, signal), signal), 'thread/resume response')
     const thread = object(response.thread, 'thread/resume thread')
     const id = string(thread.id, 'thread/resume thread id')

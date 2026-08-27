@@ -8,7 +8,7 @@
 
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import { assembleContextFor, type Agent, type PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   isAgentLoopRequest,
   LlmAdapter,
@@ -20,6 +20,7 @@ import {
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { z as zod } from 'zod'
 import type {
   PhysicalOperatorExecutionPreference,
@@ -39,6 +40,7 @@ import type {
   PhysicalOperatorProfilePreferences,
   PhysicalOperatorProfilePreferencesSelect,
 } from './types.ts'
+import { PhysicalOperatorModelToolBridge } from './model-tool-bridge.ts'
 
 export type * from './types.ts'
 
@@ -78,6 +80,18 @@ declare module '@deepseek-ai/dsh-session/types' {
     'physical-operator/dispatch-terminal': {
       commandId: string
       code: string
+    }
+    /** One Resident-native model call into the current Agent's real DSH tool surface. */
+    'physical-operator/tool-call': {
+      commandId: string
+      tool: string
+      arguments: Record<string, JsonValue>
+    }
+    /** Settled result of one bridged DSH tool call. */
+    'physical-operator/tool-result': {
+      commandId: string
+      tool: string
+      result: JsonValue
     }
   }
 }
@@ -202,7 +216,11 @@ const profileProjectionSchema = zod.object({
 export function apply(ctx: Context): void {
   const pending = new WeakMap<Agent, Map<string, PendingHostRoute>>()
   const fallbackConfigs = new WeakMap<Agent, LlmCallConfig>()
-  ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx))
+  const modelTools = new PhysicalOperatorModelToolBridge(ctx)
+  ctx.effect(function* () {
+    yield async () => { await modelTools.dispose() }
+  }, 'tool-physical-operator: model tool bridge')
+  ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx, modelTools))
 
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
     const decision = decideHostRoute(agent, messages)
@@ -231,26 +249,35 @@ export function apply(ctx: Context): void {
     let route = byPosition?.get(key)
     byPosition?.delete(key)
     route ??= dispatchForPosition(agent.session.events, turn, step)
-    if (route === undefined) {
-      if (base.provider !== ROUTER_PROVIDER) {
-        fallbackConfigs.set(agent, cloneCallConfig(base))
-        return base
-      }
+    if (route === undefined && base.provider === ROUTER_PROVIDER) {
       const fallback = recoverFallbackConfig(agent, fallbackConfigs.get(agent))
-      if (fallback === undefined) {
-        throw new Error('physical-operator router cannot restore the primary model route')
+      if (fallback !== undefined) {
+        fallbackConfigs.set(agent, fallback)
+        return fallback
       }
-      fallbackConfigs.set(agent, fallback)
-      return fallback
+      const promptMessage = latestUserPromptMessage(agent.session.events)
+      if (promptMessage === undefined) {
+        throw new Error('physical-operator primary model has no current user message')
+      }
+      if (!ctx.physicalOperators.list().some(operator => String(operator.id) === base.model)) {
+        throw new Error(`physical-operator primary model is not registered: ${base.model}`)
+      }
+      route = newHostRoute(agent, promptMessage.id, base.model)
+    }
+    if (route === undefined) {
+      fallbackConfigs.set(agent, cloneCallConfig(base))
+      return base
     }
     const fallback = base.provider === ROUTER_PROVIDER
       ? recoverFallbackConfig(agent, fallbackConfigs.get(agent))
       : cloneCallConfig(base)
-    if (fallback === undefined) {
+    if (base.provider !== ROUTER_PROVIDER && fallback === undefined) {
       throw new Error('physical-operator router cannot capture the primary model route')
     }
-    fallbackConfigs.set(agent, fallback)
-    route = { ...route, fallbackConfig: fallback }
+    if (fallback !== undefined) {
+      fallbackConfigs.set(agent, fallback)
+      route = { ...route, fallbackConfig: fallback }
+    }
     if (dispatchForPosition(agent.session.events, turn, step) === undefined) {
       agent.session.append('physical-operator/dispatch', {
         ...route,
@@ -481,20 +508,34 @@ export function apply(ctx: Context): void {
       const operatorId = requireTrimmed(request.operator_id, 'operator_id')
       const description = requireTrimmed(request.description, 'description')
       const prompt = requireTrimmed(request.prompt, 'prompt')
-      const run = await ctx.physicalOperators.start(operatorId, {
-        label: description,
-        prompt: [{ type: 'text', text: prompt }],
-        parent,
-        signal: exec.signal,
-        ...request.mode === undefined ? {} : { mode: request.mode },
-      })
-      const result = await settleForeground(run)
-      return {
-        kind: 'run',
-        operatorId: String(run.operatorId),
-        executionId: String(run.id),
-        output: result.output as unknown as JsonValue[],
-        ...result.continuity === undefined ? {} : { continuity: result.continuity },
+      const executionId = PhysicalOperatorExecutionId(
+        `tool-${createHash('sha256').update(`${String(parent.id)}\0${String(exec.callId)}`).digest('hex').slice(0, 32)}`,
+      )
+      const resident = request.mode === 'resident'
+        ? await prepareResidentSurface(ctx, modelTools, executionId, parent, exec.signal)
+        : undefined
+      let run: PhysicalOperatorRun | undefined
+      try {
+        run = await ctx.physicalOperators.start(operatorId, {
+          executionId,
+          label: description,
+          prompt: [{ type: 'text', text: prompt }],
+          parent,
+          signal: exec.signal,
+          ...request.mode === undefined ? {} : { mode: request.mode },
+          ...resident?.systemPrompt === undefined ? {} : { systemPrompt: resident.systemPrompt },
+          ...resident?.descriptor === undefined ? {} : { modelToolBridge: resident.descriptor },
+        })
+        const result = await settleForeground(run)
+        return {
+          kind: 'run',
+          operatorId: String(run.operatorId),
+          executionId: String(run.id),
+          output: result.output as unknown as JsonValue[],
+          ...result.continuity === undefined ? {} : { continuity: result.continuity },
+        }
+      } finally {
+        resident?.release()
       }
     },
   }))
@@ -507,16 +548,21 @@ export function apply(ctx: Context): void {
  * message directly.
  */
 class PhysicalOperatorLlmAdapter extends LlmAdapter {
-  constructor(private readonly ctx: Context) {
+  constructor(
+    private readonly ctx: Context,
+    private readonly modelTools: PhysicalOperatorModelToolBridge,
+  ) {
     super()
   }
 
   override listModels(provider: string): Promise<readonly { provider: string; id: string; name: string }[]> {
-    return Promise.resolve(this.ctx.physicalOperators.list().map(operator => ({
-      provider,
-      id: String(operator.id),
-      name: operator.displayName,
-    })))
+    return Promise.resolve(this.ctx.physicalOperators.list()
+      .filter(operator => operator.state !== 'unavailable')
+      .map(operator => ({
+        provider,
+        id: String(operator.id),
+        name: operator.displayName,
+      })))
   }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -534,7 +580,15 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     }
     const signal = options.signal ?? new AbortController().signal
     let run: PhysicalOperatorRun | undefined
+    let releaseModelTools: (() => void) | undefined
     try {
+      const bound = await this.modelTools.bind(
+        dispatch.commandId,
+        agent,
+        options.tools ?? [],
+        signal,
+      )
+      releaseModelTools = () => { bound.release() }
       run = await this.ctx.physicalOperators.start(dispatch.operatorId, {
         executionId: PhysicalOperatorExecutionId(dispatch.commandId),
         label: labelFor(prompt),
@@ -542,6 +596,8 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         parent: agent,
         signal,
         mode: 'resident',
+        ...options.system === undefined ? {} : { systemPrompt: options.system },
+        ...bound.descriptor === undefined ? {} : { modelToolBridge: bound.descriptor },
         ...dispatch.residentProfile === undefined ? {} : { residentProfile: dispatch.residentProfile },
       })
       const result = await run.result
@@ -555,9 +611,26 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       }
       throw error
     } finally {
+      releaseModelTools?.()
       await run?.dispose()
     }
   }
+}
+
+async function prepareResidentSurface(
+  ctx: Context,
+  modelTools: PhysicalOperatorModelToolBridge,
+  executionId: PhysicalOperatorExecutionId,
+  agent: Agent,
+  signal: AbortSignal,
+): Promise<{
+  readonly systemPrompt: string
+  readonly descriptor?: import('@deepseek-ai/dsh-physical-operator').PhysicalOperatorModelToolBridgeV1
+  release(): void
+}> {
+  const assembly = await ctx.systemPrompt.assemble(assembleContextFor(agent, signal))
+  const bound = await modelTools.bind(String(executionId), agent, assembly.tools, signal)
+  return { systemPrompt: renderPrompt(assembly), ...bound }
 }
 
 /** Resolve explicit, continuation, preferred, and smart-auto routing in strict priority order. */
@@ -798,6 +871,15 @@ function cloneCallConfig(config: LlmCallConfig): LlmCallConfig {
 function promptForMessage(events: readonly SessionEvent[], messageId: string): ContentBlock[] | undefined {
   const found = events.find(event => event.type === 'user/message' && String(event.data.id) === messageId)
   return found?.type === 'user/message' ? [...found.data.content] : undefined
+}
+
+function latestUserPromptMessage(events: readonly SessionEvent[]): { readonly id: string; readonly content: ContentBlock[] } | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'user/message') continue
+    return { id: String(event.data.id), content: [...event.data.content] }
+  }
+  return undefined
 }
 
 function textContent(content: readonly ContentBlock[]): string {

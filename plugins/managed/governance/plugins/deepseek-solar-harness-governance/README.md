@@ -2,7 +2,7 @@
 
 Static Cordis governance bundle for DeepSeek-Solar-Harness. The plugin adapts
 the repository's canonical `scripts/governance.py`; it does not replace
-project-native rules or remote CI. Version 0.3.9 governs only Git worktrees
+project-native rules or remote CI. Version 0.3.13 governs only Git worktrees
 with a project Profile, anchors nested sessions to their Git root, and records
 audit or plan failures in the durable Trace. Mutation-classified tools
 invalidate evidence only when re-attestation confirms that the governed state
@@ -20,7 +20,7 @@ cd plugins/deepseek-solar-harness-governance
 npm test
 npm run verify
 npm pack
-dsh plugin --profile governed-code add ./lisihao-dsh-code-harness-governance-0.3.9.tgz
+dsh plugin --profile governed-code add ./lisihao-dsh-code-harness-governance-0.3.13.tgz
 ```
 
 Inspect the composition and start through the fail-closed admission wrapper:
@@ -57,10 +57,14 @@ re-attests the current worktree before it appends
 append-only session log. It includes gate results, attestation digests, phase
 transitions, and every commit or delivery admission decision. The Web client
 exposes the same projection through the `治理 Trace` tab in every session's
-conversation view ring. The tab refreshes while mounted and never consumes
-left-sidebar space. An empty tab means that this DSH session has not invoked
-governance tools or delivery guards; external Codex tasks and GitHub Actions
-do not automatically enter its session log. The HTTP projection reads a live session when present and otherwise
+conversation view ring. Its collaboration section also projects the exact
+model-visible final text from first-class Codex/Claude Code routes, every bridged
+DSH tool call and result, and the final result of the ordinary
+`subagent_codex`/`subagent_claude_code` tools. Product-private reasoning is
+excluded. TaskGraph events retain a bounded preview and load the complete
+digest-verified model-visible Evidence only when the user requests it. The tab refreshes while mounted and never consumes left-sidebar
+space. An empty tab means that this DSH session has not invoked governance,
+collaboration, or delivery paths. The HTTP projection reads a live session when present and otherwise
 inspects its immutable persisted log, so historical tasks remain visible
 without publishing them as active sessions. Full command output remains in the
 mode-`0600` run log under Git metadata and is referenced by digest and path

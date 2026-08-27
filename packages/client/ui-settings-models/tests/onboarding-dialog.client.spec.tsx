@@ -98,6 +98,7 @@ function harness(options: {
             }],
         }))
       },
+      models: () => Promise.resolve(ok({ groups: [], failures: [] })),
     },
     settings: {
       describe: () => Promise.resolve(ok({

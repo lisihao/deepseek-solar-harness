@@ -93,6 +93,7 @@ class LocalResidentOperatorService extends ResidentOperatorService {
       laneId: request.laneId,
       ...request.taskLabel === undefined ? {} : { taskLabel: request.taskLabel },
       prompt: request.prompt,
+      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       signal: request.signal,

@@ -99,6 +99,7 @@ class CatalogOrchestrationService extends OrchestrationService {
   override list(): never { throw new Error('tool catalog never executes orchestration') }
   override inspect(): never { throw new Error('tool catalog never executes orchestration') }
   override readEvents(): never { throw new Error('tool catalog never executes orchestration') }
+  override readArtifact(): never { throw new Error('tool catalog never executes orchestration') }
   override control(): never { throw new Error('tool catalog never executes orchestration') }
   override decide(): never { throw new Error('tool catalog never executes orchestration') }
   override resolveIndeterminate(): never { throw new Error('tool catalog never executes orchestration') }

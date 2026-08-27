@@ -6,6 +6,7 @@ import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-p
 import { fileURLToPath } from 'node:url'
 import {
   OrchestrationError,
+  type OrchestrationArtifactRef,
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
   type OrchestrationCompilationV1,
@@ -108,6 +109,15 @@ export class OrchestrationDaemonClient {
       after_sequence: request.afterSequence ?? 0,
       limit: request.limit ?? 100,
     })
+  }
+
+  /**
+   * Read one digest-verified immutable artifact.
+   * @param ref - artifact identity issued by the orchestration daemon.
+   * @returns the decoded artifact value.
+   */
+  readArtifact(ref: OrchestrationArtifactRef): Promise<unknown> {
+    return this.request('artifact.read', { artifact_ref: String(ref) })
   }
 
   /**

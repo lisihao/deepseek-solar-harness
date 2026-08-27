@@ -5,6 +5,8 @@ const COLLABORATION_EVENT_TYPES = new Set([
   'physical-operator/routing-decision',
   'physical-operator/dispatch',
   'physical-operator/dispatch-terminal',
+  'physical-operator/tool-call',
+  'physical-operator/tool-result',
   'orchestration/admission',
 ])
 const MAX_OUTPUT_PREVIEW = 4_000
@@ -34,6 +36,8 @@ function rawGovernanceSession(raw, sessionId) {
     const traceEvent = record.type.startsWith('governance/')
       || COLLABORATION_EVENT_TYPES.has(record.type)
       || record.type === 'assistant/message'
+      || record.type === 'tool/call'
+      || record.type === 'tool/result'
     if (!traceEvent) continue
     if (!Number.isSafeInteger(record.seq) || record.seq < 0 || record.data === null || typeof record.data !== 'object') {
       throw new Error(`raw session ${sessionId} contains an invalid trace event at line ${String(index + 1)}`)
@@ -60,16 +64,86 @@ function directOperatorOutput(event) {
     .trim()
   if (text === '') return undefined
   return {
+    output: text,
     outputPreview: text.slice(0, MAX_OUTPUT_PREVIEW),
     outputTruncated: text.length > MAX_OUTPUT_PREVIEW,
     operatorId: typeof message.source.model === 'string' ? message.source.model : undefined,
   }
 }
 
-function projectCollaborationEvent(event, index) {
+function visibleContentText(content) {
+  if (!Array.isArray(content)) return ''
+  return content.flatMap(block => {
+    if (block === null || typeof block !== 'object' || Array.isArray(block)) return []
+    if (block.type === 'reasoning') return []
+    if (block.type === 'text' && typeof block.text === 'string') return [block.text]
+    if (block.type === 'tool-result' && Array.isArray(block.content)) return [visibleContentText(block.content)]
+    return [JSON.stringify(block)]
+  }).filter(Boolean).join('\n')
+}
+
+function subagentOperator(toolName) {
+  if (!/^subagent[_-](?:codex|claude(?:[_-]code)?)$/iu.test(toolName)) return undefined
+  return /claude/iu.test(toolName) ? 'claude-code' : 'codex'
+}
+
+function projectCollaborationEvent(event, index, subagentCalls) {
   const output = directOperatorOutput(event)
-  if (!COLLABORATION_EVENT_TYPES.has(event.type) && output === undefined) return undefined
   const data = event.data ?? {}
+  if (event.type === 'tool/call') {
+    const operatorId = subagentOperator(String(data.name ?? ''))
+    if (operatorId === undefined || typeof data.callId !== 'string') return undefined
+    const call = { operatorId, tool: data.name, input: String(data.arguments ?? '') }
+    subagentCalls.set(data.callId, call)
+    return {
+      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
+      type: 'subagent/call',
+      timestamp: eventTimestamp(event),
+      ...call,
+    }
+  }
+  if (event.type === 'tool/result') {
+    const callId = data.message?.source?.callId
+    const call = typeof callId === 'string' ? subagentCalls.get(callId) : undefined
+    if (call === undefined) return undefined
+    const text = visibleContentText(data.message?.content)
+    return {
+      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
+      type: 'subagent/output',
+      timestamp: eventTimestamp(event),
+      operatorId: call.operatorId,
+      tool: call.tool,
+      output: text,
+      outputPreview: text.slice(0, MAX_OUTPUT_PREVIEW),
+      outputTruncated: text.length > MAX_OUTPUT_PREVIEW,
+      isError: data.message?.content?.some?.(block => block?.type === 'tool-result' && block.isError === true) === true,
+    }
+  }
+  if (!COLLABORATION_EVENT_TYPES.has(event.type) && output === undefined) return undefined
+  if (event.type === 'physical-operator/tool-call') {
+    return {
+      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
+      type: event.type,
+      timestamp: eventTimestamp(event),
+      commandId: typeof data.commandId === 'string' ? data.commandId : undefined,
+      tool: typeof data.tool === 'string' ? data.tool : undefined,
+      input: JSON.stringify(data.arguments ?? {}, null, 2),
+    }
+  }
+  if (event.type === 'physical-operator/tool-result') {
+    const text = visibleContentText(data.result?.content)
+    return {
+      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
+      type: event.type,
+      timestamp: eventTimestamp(event),
+      commandId: typeof data.commandId === 'string' ? data.commandId : undefined,
+      tool: typeof data.tool === 'string' ? data.tool : undefined,
+      output: text,
+      outputPreview: text.slice(0, MAX_OUTPUT_PREVIEW),
+      outputTruncated: text.length > MAX_OUTPUT_PREVIEW,
+      isError: data.result?.isError === true,
+    }
+  }
   return {
     sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
     type: output === undefined ? event.type : 'physical-operator/output',
@@ -88,9 +162,12 @@ function projectCollaborationEvent(event, index) {
 
 function projectCollaboration(session, requestedLimit) {
   const limit = requestedLimit ?? 200
-  const events = session.events
-    .map(projectCollaborationEvent)
-    .filter(event => event !== undefined)
+  const calls = new Map()
+  const events = []
+  for (const [index, event] of session.events.entries()) {
+    const projected = projectCollaborationEvent(event, index, calls)
+    if (projected !== undefined) events.push(projected)
+  }
   return {
     totalEvents: events.length,
     returnedEvents: Math.min(events.length, limit),

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-`ctx.orchestrations` owns the provider-neutral API for compiling, starting, observing, approving, pausing, resuming, cancelling, and explicitly resolving durable TaskGraph runs. A sealed `NodeExecutionPlanV1` is immutable after its physical-operator receipt is accepted.
+`ctx.orchestrations` owns the provider-neutral API for compiling, starting, observing, approving, pausing, resuming, cancelling, explicitly resolving durable TaskGraph runs, and reading their immutable content-addressed artifacts. A sealed `NodeExecutionPlanV1` is immutable after its physical-operator receipt is accepted.
 
 ## Model Experience
 

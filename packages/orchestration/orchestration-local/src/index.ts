@@ -6,6 +6,7 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import OrchestrationService, {
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
+  type OrchestrationArtifactRef,
   type OrchestrationCompilationV1,
   type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompileRequest,
@@ -81,6 +82,7 @@ class LocalOrchestrationService extends OrchestrationService {
   list(): Promise<OrchestrationRunSnapshot[]> { return this.client.list() }
   inspect(runId: OrchestrationRunId): Promise<OrchestrationRunSnapshot> { return this.client.inspect(String(runId)) }
   readEvents(request: OrchestrationEventReadRequest): Promise<OrchestrationEventPage> { return this.client.readEvents(request) }
+  readArtifact(ref: OrchestrationArtifactRef): Promise<unknown> { return this.client.readArtifact(ref) }
   control(request: OrchestrationControlRequest): Promise<OrchestrationRunSnapshot> { return this.client.control(request) }
   decide(request: OrchestrationDecisionRequest): Promise<OrchestrationRunSnapshot> { return this.client.decide(request) }
   resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promise<OrchestrationRunSnapshot> {

@@ -42,6 +42,8 @@ export interface ModelsSettingsState {
   credentialError: string | null
   /** Whether the settings provider accepts writes. */
   writable: boolean
+  /** Registered model routes that currently advertise at least one selectable model. */
+  activeModelProviders: readonly string[]
   /** Every configurable provider joined with its configured/credential state. */
   rows: readonly ProviderRow[]
   /** Namespace views by ns, for the editor's schema/layers/secrets. */
@@ -99,7 +101,8 @@ function apiKeyEnvOf(namespace: SettingsNamespaceView | undefined, path: readonl
 export class ModelsSettingsStore {
   /** The snapshot the section renders from (uSES-safe store). */
   readonly store: SnapshotStore<ModelsSettingsState> = createSnapshotStore<ModelsSettingsState>({
-    status: 'idle', error: null, credentialError: null, writable: false, rows: [], namespaces: new Map(),
+    status: 'idle', error: null, credentialError: null, writable: false,
+    activeModelProviders: [], rows: [], namespaces: new Map(),
   })
 
   /** Latest load wins; an older response never overwrites a newer one. */
@@ -123,15 +126,24 @@ export class ModelsSettingsStore {
     let writable: boolean
     let views: SettingsNamespaceView[]
     try {
-      const [providersResponse, settingsResponse] = await Promise.all([
+      const [providersResponse, settingsResponse, modelsResponse] = await Promise.all([
         this.api.llm.providers({}),
         this.api.settings.describe({}),
+        this.api.llm.models({}),
       ])
       if (!providersResponse.result.ok) throw new Error(providersResponse.result.error.message)
       if (!settingsResponse.result.ok) throw new Error(settingsResponse.result.error.message)
       providers = providersResponse.result.value.providers
+      const activeModelProviders = modelsResponse.result.ok
+        ? modelsResponse.result.value.groups
+          .filter(group => group.models.length > 0)
+          .map(group => group.id)
+        : []
       writable = settingsResponse.result.value.writable
       views = settingsResponse.result.value.namespaces
+      if (generation === this.generation) {
+        this.store.update((s) => { s.activeModelProviders = activeModelProviders })
+      }
     } catch (error) {
       if (generation !== this.generation) return
       this.store.update((s) => {
@@ -241,6 +253,7 @@ export function onboardingReadiness(state: ModelsSettingsState): OnboardingReadi
       reason: 'load-failed',
     }
   }
+  if (state.activeModelProviders.length > 0) return { kind: 'provider-ready' }
   if (state.rows.some(providerUsable)) return { kind: 'provider-ready' }
   const row = state.rows.find(candidate =>
     candidate.entry.provider === 'deepseek-official'

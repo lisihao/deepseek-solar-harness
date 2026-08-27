@@ -183,7 +183,7 @@ describe('physical_operator tool', () => {
       operatorId: 'physics-solver',
       output: [{ type: 'text', text: 'answer 42' }],
     })
-    expect((result.value as { executionId: string }).executionId).toMatch(/^[0-9a-f-]{36}$/)
+    expect((result.value as { executionId: string }).executionId).toMatch(/^tool-[0-9a-f]{32}$/)
     expect(text(result)).toBe('answer 42')
     expect(operator.lastRequest).toMatchObject({
       label: 'solve pendulum',

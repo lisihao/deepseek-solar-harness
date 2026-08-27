@@ -70,6 +70,7 @@ describe('Resident daemon lifecycle', () => {
 class MemoryDriver implements ResidentProductDriver {
   readonly operatorId = 'codex' as const
   readonly profiles: ResidentDriverExecuteRequest['profile'][] = []
+  readonly systemPrompts: Array<string | undefined> = []
   readonly commandIds: string[] = []
   readonly compactions: ResidentDriverCompactRequest[] = []
   constructor(readonly counts = new Map<string, number>()) {}
@@ -94,6 +95,7 @@ class MemoryDriver implements ResidentProductDriver {
   async execute(request: ResidentDriverExecuteRequest) {
     this.commandIds.push(String(request.commandId))
     this.profiles.push(request.profile)
+    this.systemPrompts.push(request.systemPrompt)
     request.onProgress('connecting')
     const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
     const count = (this.counts.get(session) ?? 0) + 1
@@ -330,11 +332,12 @@ describe('ResidentDaemon', () => {
     const first = await firstClient.execute({
       commandId: 'command-1', operatorId: 'codex', workspace,
       taskLabel: '  Analyze\n 🐳 runtime\u0000  ',
-      prompt: [{ type: 'text', text: 'first' }], signal: new AbortController().signal,
+      prompt: [{ type: 'text', text: 'first' }], systemPrompt: 'DSH assembled system', signal: new AbortController().signal,
     })
     expect(await first.result).toMatchObject({ output: [{ text: 'session=native-1;count=1' }] })
     expect(driver.commandIds).toEqual(['command-1'])
     expect(driver.profiles[0]).toEqual({ model: 'gpt-test', effort: 'medium' })
+    expect(driver.systemPrompts[0]).toBe('DSH assembled system')
     const reconnected = await firstClient.inspect(first.sessionId)
     expect(reconnected).toMatchObject({
       executionProfile: { model: 'gpt-test', effort: 'medium' },

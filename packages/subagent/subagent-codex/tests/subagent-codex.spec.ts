@@ -516,9 +516,11 @@ describe('CodexAppServerWire', () => {
     await expect(listing).resolves.toEqual([expect.objectContaining({ model: 'gpt-test', isDefault: true })])
 
     const profile = { model: 'gpt-test', effort: 'medium' }
-    const starting = wire.startThread('/workspace', new AbortController().signal, false, profile)
+    const starting = wire.startThread('/workspace', new AbortController().signal, false, profile, 'DSH system')
     const threadStart = await child.peer.nextMethod('thread/start')
-    expect(threadStart.params).toEqual({ cwd: '/workspace', ephemeral: false, model: 'gpt-test' })
+    expect(threadStart.params).toEqual({
+      cwd: '/workspace', ephemeral: false, model: 'gpt-test', developerInstructions: 'DSH system',
+    })
     child.peer.respond(threadStart, { thread: { id: 'thread-profile', ephemeral: false } })
     await starting
 
@@ -548,8 +550,13 @@ describe('CodexAppServerWire', () => {
     await initializing
     await child.peer.nextMethod('initialized')
 
-    const resuming = wire.resumeThread('thread-persistent', '/workspace', new AbortController().signal)
+    const resuming = wire.resumeThread(
+      'thread-persistent', '/workspace', new AbortController().signal, undefined, 'DSH resumed system',
+    )
     const threadResume = await child.peer.nextMethod('thread/resume')
+    expect(threadResume.params).toEqual({
+      threadId: 'thread-persistent', cwd: '/workspace', developerInstructions: 'DSH resumed system',
+    })
     child.peer.respond(threadResume, { thread: { id: 'thread-persistent', ephemeral: false } })
     await resuming
     const compacting = wire.compactThread(new AbortController().signal)

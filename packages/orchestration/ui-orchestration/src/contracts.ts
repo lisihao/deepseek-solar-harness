@@ -112,6 +112,14 @@ export interface DesktopOrchestrationDashboard {
   events?: DesktopOrchestrationEvent[]
 }
 
+/** Complete immutable Evidence value loaded only after a user asks to inspect it. */
+export interface DesktopOrchestrationEvidence {
+  generatedAt: string
+  selectedRunId: string
+  evidenceRef: string
+  evidence: unknown
+}
+
 /** Trusted revision-checked controls exposed by the dashboard endpoint. */
 export type DesktopOrchestrationControlAction =
   | 'pause'

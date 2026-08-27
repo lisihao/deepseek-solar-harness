@@ -22,12 +22,20 @@ describe('ResidentStore', () => {
   it('deduplicates one command and rejects conflicting content', () => {
     const store = new ResidentStore(root())
     const prompt = [{ type: 'text' as const, text: 'remember alpha' }]
-    const hash = canonicalRequestHash('codex', '/workspace', prompt, PROFILE)
+    const hash = canonicalRequestHash('codex', '/workspace', prompt, PROFILE, undefined, 'legacy', undefined, 'system one')
     const first = store.accept('command-1', hash, 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
     expect(store.accept('command-1', hash, 'codex', '/workspace', PROFILE, PROFILE_SOURCE)).toEqual(first)
     expect(() => store.accept(
       'command-1',
-      canonicalRequestHash('codex', '/workspace', [{ type: 'text', text: 'different' }], PROFILE),
+      canonicalRequestHash('codex', '/workspace', [{ type: 'text', text: 'different' }], PROFILE, undefined, 'legacy', undefined, 'system one'),
+      'codex',
+      '/workspace',
+      PROFILE,
+      PROFILE_SOURCE,
+    )).toThrow(expect.objectContaining({ code: 'COMMAND_CONFLICT' }))
+    expect(() => store.accept(
+      'command-1',
+      canonicalRequestHash('codex', '/workspace', prompt, PROFILE, undefined, 'legacy', undefined, 'system two'),
       'codex',
       '/workspace',
       PROFILE,

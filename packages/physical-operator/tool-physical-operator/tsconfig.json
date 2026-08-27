@@ -21,6 +21,12 @@
       "path": "../../llm/llm"
     },
     {
+      "path": "../../util/home-paths"
+    },
+    {
+      "path": "../../sdk/protocol"
+    },
+    {
       "path": "../../core/session"
     },
     {

@@ -176,6 +176,27 @@
   white-space: pre-wrap;
 }
 
+.dsh-governance-evidence-output {
+  margin-top: 8px;
+}
+
+.dsh-governance-evidence-output button {
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 7px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  padding: 6px 9px;
+}
+
+.dsh-governance-evidence-output button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.dsh-governance-evidence-output .dsh-governance-event-message {
+  white-space: pre-wrap;
+}
+
 .dsh-orchestration-run {
   border-top: 1px solid var(--dsw-alias-border-l2);
 }

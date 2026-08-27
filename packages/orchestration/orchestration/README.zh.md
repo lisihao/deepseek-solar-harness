@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`ctx.orchestrations` 持有提供方无关 API，用于编译、启动、观察、审批、暂停、恢复、取消以及显式处置持久化 TaskGraph Run 的不确定状态。物理算子 Receipt accepted 后，已封存的 `NodeExecutionPlanV1` 不可修改。
+`ctx.orchestrations` 持有提供方无关 API，用于编译、启动、观察、审批、暂停、恢复、取消、显式处置持久化 TaskGraph Run 的不确定状态，以及读取其不可变内容寻址 Artifact。物理算子 Receipt accepted 后，已封存的 `NodeExecutionPlanV1` 不可修改。
 
 ## Model Experience
 

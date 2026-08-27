@@ -1,3 +1,5 @@
+import { once } from 'node:events'
+import { createConnection } from 'node:net'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
@@ -12,7 +14,8 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
+import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import PhysicalOperatorRuntime, {
   PhysicalOperatorId,
   type PhysicalOperator,
@@ -21,6 +24,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
 import * as tool from '../src/index.ts'
+import { PhysicalOperatorModelToolBridge } from '../src/model-tool-bridge.ts'
 
 class CountingDeepSeek extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
@@ -45,7 +49,11 @@ class DurableOperator implements PhysicalOperator {
   readonly receipts = new Map<string, Receipt>()
   productStarts = 0
 
-  constructor(readonly id: 'codex' | 'claude-code', private readonly immediate = true) {
+  constructor(
+    readonly id: 'codex' | 'claude-code',
+    private readonly immediate = true,
+    private readonly bridgeToolName?: string,
+  ) {
     this.descriptor = {
       id: PhysicalOperatorId(id),
       displayName: id === 'codex' ? 'Codex' : 'Claude Code',
@@ -64,15 +72,20 @@ class DurableOperator implements PhysicalOperator {
     this.requests.push(request)
     const id = String(request.executionId)
     let receipt = this.receipts.get(id)
+    let created = false
     if (receipt === undefined) {
+      created = true
       this.productStarts += 1
       receipt = { result: Promise.withResolvers<PhysicalOperatorResult>() }
       this.receipts.set(id, receipt)
-      if (this.immediate) receipt.result.resolve({
-        output: [{ type: 'text', text: `${this.id} resident answer` }],
-        stopReason: 'completed',
-      })
     }
+    const bridged = this.bridgeToolName === undefined
+      ? undefined
+      : await callBridgeTool(request, this.bridgeToolName, { value: 'hello' })
+    if (created && this.immediate) receipt.result.resolve({
+      output: [{ type: 'text', text: bridged === undefined ? `${this.id} resident answer` : JSON.stringify(bridged) }],
+      stopReason: 'completed',
+    })
     const activeReceipt = receipt
     const callerResult = new Promise<PhysicalOperatorResult>((resolve, reject) => {
       const abort = (): void => {
@@ -93,7 +106,37 @@ class DurableOperator implements PhysicalOperator {
   }
 }
 
-async function setup(options: { codexImmediate?: boolean } = {}) {
+async function callBridgeTool(
+  request: PhysicalOperatorProviderStartRequest,
+  toolName: string,
+  args: Readonly<Record<string, unknown>>,
+): Promise<unknown> {
+  const bridge = request.modelToolBridge
+  if (bridge === undefined) throw new Error('fixture expected a model-tool bridge')
+  const socket = createConnection(bridge.socketPath)
+  await once(socket, 'connect')
+  const transport = new JsonRpcLineTransport(socket, socket)
+  transport.start()
+  try {
+    return await transport.request('tool.call', {
+      session_id: bridge.sessionId,
+      command_id: `${String(request.executionId)}:fixture-tool`,
+      tool: toolName,
+      arguments: args,
+    }, request.signal)
+  } finally {
+    transport.close()
+    socket.destroy()
+  }
+}
+
+async function setup(options: {
+  codexImmediate?: boolean
+  codexBridgeTool?: string
+  primary?: 'deepseek' | 'codex' | 'claude-code'
+  registerDeepSeek?: boolean
+  mountTool?: boolean
+} = {}) {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionStore)
@@ -105,14 +148,31 @@ async function setup(options: { codexImmediate?: boolean } = {}) {
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   const deepseek = new CountingDeepSeek()
-  ctx.llm.registerAdapter(['deepseek'], deepseek)
-  const codex = new DurableOperator('codex', options.codexImmediate ?? true)
+  if (options.registerDeepSeek !== false) ctx.llm.registerAdapter(['deepseek'], deepseek)
+  const echoCalls: string[] = []
+  ctx.tools.register(defineTool({
+    name: 'subscription_echo',
+    description: 'Echo through the real DSH tool runtime.',
+    parameters: { value: { type: 'string', required: true } },
+    output: {
+      schema: { type: 'string' },
+      render: (_args, value) => [{ type: 'text', text: value }],
+    },
+    execute: (args) => {
+      echoCalls.push(args.value)
+      return Promise.resolve(`subscription:${args.value}`)
+    },
+  }))
+  const codex = new DurableOperator('codex', options.codexImmediate ?? true, options.codexBridgeTool)
   const claude = new DurableOperator('claude-code')
   ctx.physicalOperators.registerOperator(codex)
   ctx.physicalOperators.registerOperator(claude)
-  const mounted = await ctx.plugin(tool)
-  const agent = ctx.agentLoop.create(SessionId('router-session'), { provider: 'deepseek', model: 'deepseek' })
-  return { ctx, deepseek, codex, claude, mounted, agent }
+  const mounted = options.mountTool === false ? undefined : await ctx.plugin(tool)
+  const primary = options.primary ?? 'deepseek'
+  const agent = ctx.agentLoop.create(SessionId('router-session'), primary === 'deepseek'
+    ? { provider: 'deepseek', model: 'deepseek' }
+    : { provider: 'dsh-physical-operator', model: primary })
+  return { ctx, deepseek, codex, claude, mounted, agent, echoCalls }
 }
 
 function send(agent: Agent, text: string): void {
@@ -149,6 +209,81 @@ describe('host physical-operator routing', () => {
     expect(lastAssistantMessage(agent).source).toMatchObject({
       provider: 'dsh-physical-operator',
       model: 'codex',
+    })
+  })
+
+  it('runs Codex as the first-class main model without a DeepSeek adapter and exposes the real DSH tools', async () => {
+    const { agent, deepseek, codex } = await setup({
+      primary: 'codex',
+      registerDeepSeek: false,
+      codexBridgeTool: 'subscription_echo',
+    })
+
+    send(agent, '你好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(codex.requests).toHaveLength(1)
+    expect(codex.requests[0]?.systemPrompt).toContain('physical')
+    expect(codex.requests[0]?.modelToolBridge?.tools.map(value => value.name)).toContain('subscription_echo')
+    const answer = lastAssistantMessage(agent).content[0]
+    expect(answer?.type).toBe('text')
+    expect(answer?.type === 'text' ? answer.text : '').toContain('subscription:hello')
+    expect(agent.session.events.some(event => event.type === 'physical-operator/tool-call')).toBe(true)
+    expect(agent.session.events.some(event => event.type === 'physical-operator/tool-result')).toBe(true)
+  })
+
+  it('does not replay a bridged tool command whose persisted result is indeterminate', async () => {
+    const { ctx, agent, echoCalls } = await setup({ mountTool: false })
+    const bridge = new PhysicalOperatorModelToolBridge(ctx)
+    const commandId = 'native-tool-indeterminate'
+    agent.session.append('physical-operator/tool-call', {
+      commandId,
+      tool: 'subscription_echo',
+      arguments: { nested: { b: 2, a: 1 }, value: 'hello' },
+    }, { ignorable: true })
+    const bound = await bridge.bind('outer-command', agent, [{
+      name: 'subscription_echo',
+      description: 'Echo through the real DSH tool runtime.',
+      parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] },
+    }], new AbortController().signal)
+    if (bound.descriptor === undefined) throw new Error('expected a model tool descriptor')
+    const socket = createConnection(bound.descriptor.socketPath)
+    await once(socket, 'connect')
+    const transport = new JsonRpcLineTransport(socket, socket)
+    transport.start()
+    try {
+      await expect(transport.request('tool.call', {
+        session_id: bound.descriptor.sessionId,
+        command_id: commandId,
+        tool: 'subscription_echo',
+        arguments: { value: 'hello', nested: { a: 1, b: 2 } },
+      })).rejects.toThrow(/indeterminate and will not be replayed/u)
+      expect(echoCalls).toEqual([])
+    } finally {
+      transport.close()
+      socket.destroy()
+      bound.release()
+      await bridge.dispose()
+      await ctx.root.fiber.dispose()
+    }
+  })
+
+  it('runs Claude Code as the first-class main model without a DeepSeek adapter', async () => {
+    const { agent, deepseek, claude } = await setup({
+      primary: 'claude-code',
+      registerDeepSeek: false,
+    })
+
+    send(agent, '你好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(1)
+    expect(claude.requests[0]).toMatchObject({ mode: 'resident' })
+    expect(lastAssistantMessage(agent).source).toMatchObject({
+      provider: 'dsh-physical-operator',
+      model: 'claude-code',
     })
   })
 
@@ -235,6 +370,7 @@ describe('host physical-operator routing', () => {
       data: { fallbackConfig: { provider: 'deepseek', model: 'deepseek' } },
     })
 
+    if (mounted === undefined) throw new Error('expected the physical-operator plugin')
     await mounted.dispose()
     await ctx.plugin(tool)
     send(agent, '刚才是哪个模型回答的')
@@ -318,9 +454,12 @@ describe('host physical-operator routing', () => {
   })
 
   it('replays the same durable command after caller interruption and router remount', async () => {
-    const { ctx, agent, deepseek, codex, mounted } = await setup({ codexImmediate: false })
+    const { ctx, agent, deepseek, codex, mounted, echoCalls } = await setup({
+      codexImmediate: false,
+      codexBridgeTool: 'subscription_echo',
+    })
     send(agent, '用 Codex 深度检查这个仓库并持续执行')
-    while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+    while (codex.requests.length === 0 || echoCalls.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
     const firstRequest = codex.requests[0]
     if (firstRequest === undefined) throw new Error('expected the first Codex request')
     const firstId = String(firstRequest.executionId)
@@ -331,6 +470,7 @@ describe('host physical-operator routing', () => {
       type: 'turn/end',
       data: { reason: { kind: 'aborted' } },
     })
+    if (mounted === undefined) throw new Error('expected the physical-operator plugin')
     await mounted.dispose()
     await ctx.plugin(tool)
 
@@ -346,6 +486,7 @@ describe('host physical-operator routing', () => {
     expect(deepseek.requests).toHaveLength(0)
     expect(codex.productStarts).toBe(1)
     expect(codex.requests).toHaveLength(2)
+    expect(echoCalls).toEqual(['hello'])
     const replayRequest = codex.requests[1]
     if (replayRequest === undefined) throw new Error('expected the replayed Codex request')
     expect(String(replayRequest.executionId)).toBe(firstId)

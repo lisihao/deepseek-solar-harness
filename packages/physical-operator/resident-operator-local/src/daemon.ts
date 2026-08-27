@@ -160,6 +160,18 @@ function promptParam(params: Record<string, unknown>): ContentBlock[] {
   })
 }
 
+function systemPromptParam(params: Record<string, unknown>): string | undefined {
+  const value = params.system_prompt
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new ResidentOperatorError('resident protocol system_prompt must be a non-empty string', 'INVALID_RESULT')
+  }
+  if (value.length > 1_000_000) {
+    throw new ResidentOperatorError('resident protocol system_prompt exceeds 1000000 characters', 'INVALID_RESULT')
+  }
+  return value
+}
+
 const PROFILE_EFFORTS = new Set<PhysicalOperatorReasoningEffort>([
   'low', 'medium', 'high', 'xhigh', 'max', 'ultra',
 ])
@@ -443,6 +455,7 @@ export class ResidentDaemon {
     const laneId = stringParam(params, 'lane_id')
     const taskLabel = taskLabelParam(params)
     const prompt = promptParam(params)
+    const systemPrompt = systemPromptParam(params)
     const requestedProfile = profileParam(params)
     const modelToolBridge = modelToolBridgeParam(params)
     const supersedesCommandId = params.supersedes_command_id === undefined
@@ -478,7 +491,16 @@ export class ResidentDaemon {
               : { effort: requestedProfile.effort ?? locked.profile.effort },
           },
       )
-    const requestHash = canonicalRequestHash(operatorId, workspace, prompt, resolved.profile, supersedesCommandId, laneId, modelToolBridge)
+    const requestHash = canonicalRequestHash(
+      operatorId,
+      workspace,
+      prompt,
+      resolved.profile,
+      supersedesCommandId,
+      laneId,
+      modelToolBridge,
+      systemPrompt,
+    )
     const accepted = this.store.accept(
       commandId,
       requestHash,
@@ -498,6 +520,7 @@ export class ResidentDaemon {
         accepted.sessionId,
         workspace,
         prompt,
+        systemPrompt,
         resolved.profile,
         modelToolBridge,
         controller,
@@ -589,6 +612,7 @@ export class ResidentDaemon {
     sessionId: string,
     workspace: string,
     prompt: ContentBlock[],
+    systemPrompt: string | undefined,
     profile: Parameters<ResidentProductDriver['execute']>[0]['profile'],
     modelToolBridge: PhysicalOperatorModelToolBridgeV1 | undefined,
     controller: AbortController,
@@ -605,6 +629,7 @@ export class ResidentDaemon {
         commandId: ResidentOperatorCommandId(commandId),
         workspace,
         prompt,
+        ...systemPrompt === undefined ? {} : { systemPrompt },
         profile,
         ...modelToolBridge === undefined ? {} : { modelToolBridge },
         ...nativeSessionId === undefined ? {} : { nativeSessionId },

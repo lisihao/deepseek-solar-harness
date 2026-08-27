@@ -115,6 +115,56 @@ function orchestrationEventDetail(event) {
   return ''
 }
 
+function modelVisibleEvidenceText(value) {
+  const content = value?.evidence?.output
+  if (!Array.isArray(content)) throw new Error('Evidence has no model-visible output')
+  return content.flatMap(block => {
+    if (block === null || typeof block !== 'object' || Array.isArray(block)) return []
+    if (block.type === 'reasoning') return []
+    if (block.type === 'text' && typeof block.text === 'string') return [block.text]
+    if (block.type === 'tool-result' && Array.isArray(block.content)) {
+      return [modelVisibleEvidenceText({ evidence: { output: block.content } })]
+    }
+    return [JSON.stringify(block)]
+  }).filter(Boolean).join('\n')
+}
+
+async function fetchOrchestrationEvidence(runId, evidenceRef) {
+  const url = new URL(ORCHESTRATION_PATH, window.location.origin)
+  url.searchParams.set('run_id', runId)
+  url.searchParams.set('evidence_ref', evidenceRef)
+  const response = await fetch(url, { cache: 'no-store' })
+  const body = await response.json()
+  if (!response.ok) throw new Error(body?.message ?? `HTTP ${String(response.status)}`)
+  return modelVisibleEvidenceText(body)
+}
+
+function OrchestrationEvidenceOutput({ runId, event }) {
+  const evidenceRef = typeof event.data?.evidenceRef === 'string' ? event.data.evidenceRef : undefined
+  const [output, setOutput] = useState()
+  const [error, setError] = useState()
+  const [loading, setLoading] = useState(false)
+  if (evidenceRef === undefined || event.data?.outputTruncated !== true) return null
+  const load = async () => {
+    setLoading(true)
+    try {
+      setOutput(await fetchOrchestrationEvidence(runId, evidenceRef))
+      setError(undefined)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setLoading(false)
+    }
+  }
+  return h('div', { className: 'dsh-governance-evidence-output' },
+    output === undefined && error === undefined
+      ? h('button', { type: 'button', disabled: loading, onClick: () => { void load() } }, loading ? '读取中…' : '查看完整 Evidence 输出')
+      : null,
+    error === undefined ? null : h('div', { className: 'dsh-governance-error', role: 'alert' }, error),
+    output === undefined ? null : h('div', { className: 'dsh-governance-event-message' }, output),
+  )
+}
+
 function SessionCollaborationEvent({ event }) {
   const detail = event.type === 'physical-operator/routing-decision'
     ? `${collaborationPolicyLabel(event.policy)} · ${String(event.route ?? 'N/A')} · ${String(event.reason ?? '')}`
@@ -124,19 +174,27 @@ function SessionCollaborationEvent({ event }) {
         ? `${String(event.code ?? 'N/A')} · command ${shortRef(event.commandId)}`
         : event.type === 'orchestration/admission'
           ? `${collaborationPolicyLabel(event.policy)} · TaskGraph ${shortRef(event.runId)} · 并行上限 ${String(event.maxParallel ?? 'N/A')}`
-          : `${String(event.operatorId ?? 'N/A')}\n${String(event.outputPreview ?? '')}${event.outputTruncated === true ? '\n…输出已截断。' : ''}`
+          : event.type === 'physical-operator/tool-call' || event.type === 'subagent/call'
+            ? `${String(event.operatorId ?? 'Resident')} · ${String(event.tool ?? 'N/A')}\n${String(event.input ?? '')}`
+            : event.type === 'physical-operator/tool-result' || event.type === 'subagent/output'
+              ? `${String(event.operatorId ?? 'Resident')} · ${String(event.tool ?? 'N/A')}\n${String(event.output ?? event.outputPreview ?? '')}`
+              : `${String(event.operatorId ?? 'N/A')}\n${String(event.output ?? event.outputPreview ?? '')}`
+  const failed = event.type === 'physical-operator/dispatch-terminal' || event.isError === true
+  const status = event.type.endsWith('/call') || event.type.endsWith('/tool-call')
+    ? '调用'
+    : failed ? '失败' : event.type.includes('output') || event.type.endsWith('/tool-result') ? '输出' : '会话'
   return h('li', { className: 'dsh-governance-event dsh-collaboration-event' },
     h('div', { className: 'dsh-governance-event-head' },
       h('span', { className: 'dsh-governance-sequence' }, `#${String(event.sequence)}`),
       h('strong', null, String(event.type)),
-      h('span', { className: 'dsh-governance-event-status' }, event.type === 'physical-operator/dispatch-terminal' ? '失败' : '会话'),
+      h('span', { className: 'dsh-governance-event-status' }, status),
     ),
     h('div', { className: 'dsh-governance-event-meta' }, formatTime(event.timestamp)),
     h('div', { className: 'dsh-governance-event-message' }, detail),
   )
 }
 
-function OrchestrationEvent({ event }) {
+function OrchestrationEvent({ runId, event }) {
   return h('li', { className: 'dsh-governance-event dsh-collaboration-event' },
     h('div', { className: 'dsh-governance-event-head' },
       h('span', { className: 'dsh-governance-sequence' }, `#${String(event.sequence)}`),
@@ -145,6 +203,7 @@ function OrchestrationEvent({ event }) {
     ),
     h('div', { className: 'dsh-governance-event-meta' }, formatTime(event.time)),
     orchestrationEventDetail(event) === '' ? null : h('div', { className: 'dsh-governance-event-message' }, orchestrationEventDetail(event)),
+    h(OrchestrationEvidenceOutput, { runId, event }),
   )
 }
 
@@ -228,7 +287,7 @@ function GovernanceTraceView({ sessionId }) {
           ...(trace?.events ?? []).slice().reverse().map(event => h(TraceEvent, { event, key: event.sequence })),
         ),
       h('section', { className: 'dsh-collaboration-section', 'data-testid': 'collaboration-trace-panel' },
-        h('h3', null, '智能协作与 Resident 子代理'),
+        h('h3', null, '智能协作、首模型与 Resident 算子'),
         h('div', { className: 'dsh-governance-summary' },
           h('span', null, trace === null ? '会话协作事件 N/A' : `会话协作事件 ${String(trace.collaboration?.returnedEvents ?? 0)}/${String(trace.collaboration?.totalEvents ?? 0)}`),
           h('span', null, `TaskGraph ${String(orchestrations.length)}`),
@@ -245,7 +304,7 @@ function GovernanceTraceView({ sessionId }) {
                 h('span', null, `${collaborationPolicyLabel(run.admission?.policy)} · ${runStateLabel(run.state)} · ${String(run.nodes?.length ?? 0)} 节点`),
               ),
               h('ol', { className: 'dsh-governance-events' },
-                ...events.slice().reverse().map(event => h(OrchestrationEvent, { event, key: `${String(run.runId)}-${String(event.sequence)}` })),
+                ...events.slice().reverse().map(event => h(OrchestrationEvent, { runId: String(run.runId), event, key: `${String(run.runId)}-${String(event.sequence)}` })),
               ),
             )),
           ),

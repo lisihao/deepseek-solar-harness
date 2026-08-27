@@ -18,7 +18,7 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 8
+export const RESIDENT_PROTOCOL_VERSION = 9
 /** Current forward-only daemon state schema version. */
 export const RESIDENT_STATE_SCHEMA_VERSION = 5
 
@@ -145,6 +145,8 @@ export interface ResidentDriverExecuteRequest {
   readonly commandId: ResidentOperatorCommandId
   readonly workspace: string
   readonly prompt: readonly ContentBlock[]
+  /** DSH-owned system instructions assembled for this exact Agent request. */
+  readonly systemPrompt?: string
   readonly profile: ResidentExecutionProfile
   readonly nativeSessionId?: string
   readonly signal: AbortSignal
@@ -249,6 +251,8 @@ export interface ResidentExecuteRequest {
   /** Optional bounded display summary persisted independently of the raw prompt. */
   readonly taskLabel?: string
   readonly prompt: readonly ContentBlock[]
+  /** DSH-owned system instructions assembled for this exact Agent request. */
+  readonly systemPrompt?: string
   /** Optional caller preference; omitted fields are resolved from task complexity and the live catalog. */
   readonly profile?: PhysicalOperatorExecutionPreference
   /** Optional genuine model-tool bridge sealed before dispatch. */

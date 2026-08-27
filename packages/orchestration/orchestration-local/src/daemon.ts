@@ -98,7 +98,7 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 1
+export const ORCHESTRATION_PROTOCOL_VERSION = 2
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
@@ -108,6 +108,7 @@ export const ORCHESTRATION_METHODS = Object.freeze([
   'orchestration.list',
   'orchestration.inspect',
   'event.read',
+  'artifact.read',
   'orchestration.control',
   'orchestration.decide',
   'orchestration.resolve_indeterminate',
@@ -195,6 +196,7 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       laneId: request.residentLaneId ?? String(request.executionId),
       ...request.label === undefined ? {} : { taskLabel: request.label },
       prompt: request.prompt,
+      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       signal: request.signal,
@@ -714,6 +716,9 @@ export class OrchestrationDaemon {
         requiredString(params, 'run_id'),
         params.after_sequence === undefined ? 0 : requiredInteger(params, 'after_sequence'),
         params.limit === undefined ? 100 : requiredInteger(params, 'limit'),
+      )
+      case 'artifact.read': return this.store.readArtifact(
+        OrchestrationArtifactRef(requiredString(params, 'artifact_ref')),
       )
       case 'orchestration.control': return this.control(params.request as never)
       case 'orchestration.decide': return this.decide(params.request as never)

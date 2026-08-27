@@ -153,17 +153,21 @@ function reasoningEffort(value: string | undefined): PhysicalOperatorReasoningEf
     : undefined
 }
 
-function ensureTypeScriptReplBridge(request: ResidentDriverExecuteRequest): NonNullable<ResidentDriverExecuteRequest['modelToolBridge']> | undefined {
+function ensureModelToolBridge(request: ResidentDriverExecuteRequest): NonNullable<ResidentDriverExecuteRequest['modelToolBridge']> | undefined {
   const bridge = request.modelToolBridge
   if (bridge === undefined) return undefined
-  if (bridge.tools.length !== 1 || bridge.tools[0]?.name !== 'typescript_repl') {
-    throw new ResidentOperatorError('Resident RLM requires the single qualified typescript_repl model tool', 'PROTOCOL_MISMATCH')
+  if (bridge.tools.length === 0 || new Set(bridge.tools.map(tool => tool.name)).size !== bridge.tools.length) {
+    throw new ResidentOperatorError('Resident model tool bridge must contain unique tools', 'PROTOCOL_MISMATCH')
   }
   return bridge
 }
 
+function isRlmOnlyBridge(bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>): boolean {
+  return bridge.tools.length === 1 && bridge.tools[0]?.name === 'typescript_repl'
+}
+
 function codexDynamicTools(request: ResidentDriverExecuteRequest): readonly CodexDynamicToolSpec[] {
-  const bridge = ensureTypeScriptReplBridge(request)
+  const bridge = ensureModelToolBridge(request)
   if (bridge === undefined) return []
   return bridge.tools.map(spec => ({
     type: 'function', name: spec.name, description: spec.description, inputSchema: spec.inputSchema, deferLoading: false,
@@ -182,26 +186,34 @@ export function createClaudeRlmMcpServer(
   bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
   signal: AbortSignal,
 ): ReturnType<typeof createSdkMcpServer> {
-  const toolSpec = bridge.tools[0]
-  if (toolSpec === undefined) {
-    throw new ResidentOperatorError('Resident RLM requires a qualified typescript_repl model tool', 'PROTOCOL_MISMATCH')
-  }
+  const name = claudeBridgeName(bridge)
   return createSdkMcpServer({
-    name: 'dsh_rlm',
+    name,
     version: '1.0.0',
-    instructions: 'Use typescript_repl as the persistent programming surface. Calls to rlm(...) return admission handles, never child answers; read explicit messages or artifacts for results.',
+    instructions: isRlmOnlyBridge(bridge)
+      ? 'Use typescript_repl as the persistent programming surface. Calls to rlm(...) return admission handles, never child answers; read explicit messages or artifacts for results.'
+      : 'These are the current DSH Agent tools. Their calls execute through DSH scope, guard, approval, logging, and plugin ownership; use them as the task requires.',
     alwaysLoad: true,
-    tools: [claudeTool(
-      'typescript_repl',
+    tools: bridge.tools.map(toolSpec => claudeTool(
+      toolSpec.name,
       toolSpec.description,
-      { code: z.string() },
-      async ({ code }, extra) => {
+      zodShape(toolSpec.inputSchema),
+      async (args, extra) => {
         const commandId = modelToolCommandId(executionId, 'claude', claudeMcpRequestId(extra))
-        const result = await callModelToolBridge(bridge, 'typescript_repl', { code }, commandId, signal)
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] }
+        const result = bridgeToolResult(await callModelToolBridge(
+          bridge,
+          toolSpec.name,
+          args,
+          commandId,
+          signal,
+        ))
+        return {
+          content: [{ type: 'text', text: bridgeToolText(result) }],
+          ...result.isError ? { isError: true } : {},
+        }
       },
       { alwaysLoad: true },
-    )],
+    )),
   })
 }
 
@@ -219,9 +231,66 @@ export function createCodexRlmToolHandler(
 ): (call: CodexDynamicToolCall) => Promise<CodexDynamicToolResult> {
   return async (call) => {
     const commandId = modelToolCommandId(executionId, 'codex', call.callId)
-    const result = await callModelToolBridge(bridge, call.tool, call.arguments, commandId, signal)
-    return { success: true, text: JSON.stringify(result) }
+    const result = bridgeToolResult(await callModelToolBridge(bridge, call.tool, call.arguments, commandId, signal))
+    return { success: !result.isError, text: bridgeToolText(result) }
   }
+}
+
+interface BridgeToolResult {
+  readonly isError: boolean
+  readonly content: readonly ContentBlock[]
+  readonly value?: unknown
+  readonly error?: unknown
+  readonly additionalContexts?: unknown
+  readonly concludesTurn?: boolean
+}
+
+function bridgeToolResult(value: unknown): BridgeToolResult {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ResidentOperatorError('DSH model tool bridge returned a non-object result', 'INVALID_RESULT')
+  }
+  const result = value as Record<string, unknown>
+  if (typeof result.isError === 'boolean' && Array.isArray(result.content)) {
+    return result as unknown as BridgeToolResult
+  }
+  // Protocol v1 RLM bridges returned the evaluator value directly. Preserve
+  // that stable Prime surface while the generic DSH bridge returns the richer
+  // tool-runtime envelope above.
+  return {
+    isError: false,
+    content: [{ type: 'text', text: JSON.stringify(value) }],
+  }
+}
+
+function bridgeToolText(result: BridgeToolResult): string {
+  const text = result.content.map(block => block.type === 'text' || block.type === 'reasoning'
+    ? block.text
+    : JSON.stringify(block)).join('\n')
+  const details = {
+    ...result.value === undefined ? {} : { value: result.value },
+    ...result.error === undefined ? {} : { error: result.error },
+    ...result.additionalContexts === undefined ? {} : { additionalContexts: result.additionalContexts },
+    ...result.concludesTurn === true ? { concludesTurn: true } : {},
+  }
+  const encoded = Object.keys(details).length === 0 ? '' : JSON.stringify(details)
+  return [text, encoded].filter(value => value.length > 0).join('\n') || (result.isError ? 'DSH tool failed' : 'DSH tool completed')
+}
+
+function zodShape(schema: Readonly<Record<string, unknown>>): z.ZodRawShape {
+  const parsed = z.fromJSONSchema(schema)
+  if (!(parsed instanceof z.ZodObject)) {
+    throw new ResidentOperatorError('Claude model tool input schema must describe an object', 'PROTOCOL_MISMATCH')
+  }
+  return parsed.shape
+}
+
+function claudeBridgeName(bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>): 'dsh_rlm' | 'dsh_tools' {
+  return isRlmOnlyBridge(bridge) ? 'dsh_rlm' : 'dsh_tools'
+}
+
+function claudeQualifiedToolNames(bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>): string[] {
+  const prefix = `mcp__${claudeBridgeName(bridge)}__`
+  return bridge.tools.map(tool => `${prefix}${tool.name}`)
 }
 
 function claudeModelOption(model: ModelInfo, index: number): ResidentModelOption {
@@ -502,10 +571,10 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     let final: SDKResultMessage | undefined
     let approvalRequired: string | undefined
     const running = new Set<string>()
-    const modelToolBridge = ensureTypeScriptReplBridge(request)
-    const modelToolName = 'mcp__dsh_rlm__typescript_repl'
+    const modelToolBridge = ensureModelToolBridge(request)
+    const modelToolNames = new Set(modelToolBridge === undefined ? [] : claudeQualifiedToolNames(modelToolBridge))
     const canUseTool: CanUseTool = (toolName, _input, options) => {
-      if (modelToolBridge !== undefined && toolName === modelToolName) return Promise.resolve({ behavior: 'allow' })
+      if (modelToolNames.has(toolName)) return Promise.resolve({ behavior: 'allow' })
       approvalRequired = options.title ?? options.displayName ?? toolName
       return Promise.resolve({
         behavior: 'deny',
@@ -532,11 +601,14 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
           ? { thinking: { type: 'adaptive' as const } }
           : {},
         ...nativeSessionId === undefined ? {} : { resume: nativeSessionId },
+        ...request.systemPrompt === undefined ? {} : {
+          systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: request.systemPrompt },
+        },
         disallowedTools: ['AskUserQuestion'],
-        ...rlmServer === undefined ? {} : {
-          tools: [],
-          allowedTools: [modelToolName],
-          mcpServers: { dsh_rlm: rlmServer },
+        ...modelToolBridge === undefined || rlmServer === undefined ? {} : {
+          ...isRlmOnlyBridge(modelToolBridge) ? { tools: [] as const } : {},
+          allowedTools: [...modelToolNames],
+          mcpServers: { [claudeBridgeName(modelToolBridge)]: rlmServer },
         },
         canUseTool,
       },
@@ -710,7 +782,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
     const texts = textPrompt(request.prompt, 'Codex')
     request.onProgress('connecting')
     const stream = await this.openStream(request.signal)
-    const modelToolBridge = ensureTypeScriptReplBridge(request)
+    const modelToolBridge = ensureModelToolBridge(request)
     const dynamicTools = codexDynamicTools(request)
     const wire = new CodexAppServerWire(
       stream,
@@ -728,9 +800,9 @@ export class CodexResidentDriver implements ResidentProductDriver {
       wire.start()
       await wire.initialize(request.signal)
       if (request.nativeSessionId === undefined) {
-        await wire.startThread(request.workspace, request.signal, false, request.profile)
+        await wire.startThread(request.workspace, request.signal, false, request.profile, request.systemPrompt)
       } else {
-        await wire.resumeThread(request.nativeSessionId, request.workspace, request.signal, request.profile)
+        await wire.resumeThread(request.nativeSessionId, request.workspace, request.signal, request.profile, request.systemPrompt)
       }
       const threadId = wire.currentThreadId
       if (threadId === undefined) {

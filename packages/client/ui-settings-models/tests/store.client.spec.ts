@@ -41,6 +41,10 @@ const NAMESPACES = [
 
 function api(overrides: {
   providers?: () => Promise<RpcResponse<{ providers: typeof DIRECTORY }>>
+  models?: () => Promise<RpcResponse<{
+    groups: Array<{ id: string; name: string; models: Array<{ id: string; name: string }> }>
+    failures: unknown[]
+  }>>
   describeSettings?: () => Promise<RpcResponse<{ writable: boolean; namespaces: typeof NAMESPACES }>>
   describeCredentials?: (refs: string[]) => Promise<RpcResponse<{ credentials: Record<string, unknown> }>>
 } = {}) {
@@ -48,7 +52,7 @@ function api(overrides: {
   const face = {
     llm: {
       providers: overrides.providers ?? (() => Promise.resolve(ok({ providers: DIRECTORY }))),
-      models: () => Promise.resolve(ok({ groups: [], failures: [] })),
+      models: overrides.models ?? (() => Promise.resolve(ok({ groups: [], failures: [] }))),
     },
     settings: {
       describe: overrides.describeSettings ?? (() => Promise.resolve(ok({ writable: true, hasDocument: false, namespaces: NAMESPACES }))),
@@ -96,6 +100,18 @@ describe('ModelsSettingsStore', () => {
     expect(byProvider.get('anthropic')?.apiKeyEnv).toBeUndefined()
     expect(byProvider.get('ghost')).toMatchObject({ configured: false, removable: false })
     expect(state.namespaces.get('llm-pi-ai')?.ns).toBe('llm-pi-ai')
+  })
+
+  it('projects active subscription model routes independently of configurable API keys', async () => {
+    const { face } = api({
+      models: () => Promise.resolve(ok({
+        groups: [{ id: 'dsh-physical-operator', name: 'Subscription products', models: [{ id: 'codex', name: 'Codex' }] }],
+        failures: [],
+      })),
+    })
+    const store = new ModelsSettingsStore(face)
+    await store.load()
+    expect(store.store.getSnapshot().activeModelProviders).toEqual(['dsh-physical-operator'])
   })
 
   it('degrades the credential badge, not the page, when the credential domain fails', async () => {

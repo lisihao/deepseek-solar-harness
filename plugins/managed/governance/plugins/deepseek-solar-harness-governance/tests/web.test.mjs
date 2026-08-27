@@ -43,7 +43,7 @@ test('trace HTTP projection returns one live session without mutating it', async
   assert.equal(body.events[0].type, 'governance/work-opened')
 })
 
-test('trace HTTP projection includes only safe collaboration events and Resident final text from the same session', async () => {
+test('trace HTTP projection includes exact safe main-model and subscription-subagent outputs from the same session', async () => {
   const session = { id: 'session-collaboration', events: [{
     type: 'physical-operator/routing-decision', seq: 3, time: Date.parse('2026-08-21T01:00:00.000Z'),
     data: { policy: 'auto', route: 'resident', reason: 'bounded implementation', operatorId: 'codex' },
@@ -57,7 +57,23 @@ test('trace HTTP projection includes only safe collaboration events and Resident
       { type: 'text', text: 'bounded final result' },
     ] } },
   }, {
-    type: 'orchestration/admission', seq: 6, time: Date.parse('2026-08-21T01:00:03.000Z'),
+    type: 'physical-operator/tool-call', seq: 6, time: Date.parse('2026-08-21T01:00:02.100Z'),
+    data: { commandId: 'native-tool-1', tool: 'read', arguments: { path: '/workspace/README.md' } },
+  }, {
+    type: 'physical-operator/tool-result', seq: 7, time: Date.parse('2026-08-21T01:00:02.200Z'),
+    data: { commandId: 'native-tool-1', tool: 'read', result: {
+      isError: false, content: [{ type: 'text', text: 'exact DSH tool output' }],
+    } },
+  }, {
+    type: 'tool/call', seq: 8, time: Date.parse('2026-08-21T01:00:02.300Z'),
+    data: { callId: 'child-1', name: 'subagent_claude_code', arguments: '{"prompt":"review"}' },
+  }, {
+    type: 'tool/result', seq: 9, time: Date.parse('2026-08-21T01:00:02.400Z'),
+    data: { message: { source: { callId: 'child-1' }, content: [{
+      type: 'tool-result', isError: false, content: [{ type: 'text', text: 'exact Claude child output' }],
+    }] } },
+  }, {
+    type: 'orchestration/admission', seq: 10, time: Date.parse('2026-08-21T01:00:03.000Z'),
     data: { policy: 'auto', route: 'taskgraph', runId: 'run-1', maxParallel: 2 },
   }] }
   const ctx = context(session)
@@ -67,11 +83,16 @@ test('trace HTTP projection includes only safe collaboration events and Resident
   assert.equal(res.status, 200)
   const body = JSON.parse(res.body)
   assert.equal(body.sessionId, session.id)
-  assert.equal(body.collaboration.totalEvents, 4)
+  assert.equal(body.collaboration.totalEvents, 8)
   assert.equal(body.collaboration.events[2].type, 'physical-operator/output')
+  assert.equal(body.collaboration.events[2].output, 'bounded final result')
   assert.equal(body.collaboration.events[2].outputPreview, 'bounded final result')
+  assert.equal(body.collaboration.events[4].output, 'exact DSH tool output')
+  assert.equal(body.collaboration.events[6].type, 'subagent/output')
+  assert.equal(body.collaboration.events[6].operatorId, 'claude-code')
+  assert.equal(body.collaboration.events[6].output, 'exact Claude child output')
   assert.doesNotMatch(JSON.stringify(body.collaboration), /private reasoning/u)
-  assert.equal(body.collaboration.events[3].runId, 'run-1')
+  assert.equal(body.collaboration.events[7].runId, 'run-1')
 })
 
 test('trace HTTP projection rejects missing and unknown sessions', async () => {

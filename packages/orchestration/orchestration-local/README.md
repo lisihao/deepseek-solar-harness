@@ -18,7 +18,7 @@ Prime-compatible automatic refinement is root-only and runs at a real turn bound
 
 An automatic retry creates a new attempt only when the node policy names the returned error code and still has attempt budget. Resident response-stream disconnects arrive as retryable `RUNTIME_UNAVAILABLE`; an explicit native-product allowance failure arrives as `QUOTA_EXHAUSTED`. A permitted quota retry excludes the exhausted quota pool (or the exact offer when no pool identity exists) before resealing the next attempt. Malformed results and indeterminate commands are never replayed automatically. Graceful daemon shutdown ends accepted control connections before reporting closure, so a retiring build cannot remain alive behind a non-accepting socket.
 
-While an attempt runs, the daemon copies bounded Resident progress phases into the orchestration event stream. Settlement keeps the complete operator result in its Evidence artifact and adds a bounded user-facing output preview to the terminal event. These projections expose execution and results without copying prompts, private reasoning, terminal screens, or product-local transcripts.
+While an attempt runs, the daemon copies bounded Resident progress phases into the orchestration event stream. Settlement keeps the complete operator result in its Evidence artifact and adds a bounded user-facing output preview to the terminal event. Protocol version 2 adds digest-verified `artifact.read`, so an authenticated projection can load a retained Evidence result on demand without copying prompts, private reasoning, terminal screens, or product-local transcripts into the event stream.
 
 ## Model Experience
 

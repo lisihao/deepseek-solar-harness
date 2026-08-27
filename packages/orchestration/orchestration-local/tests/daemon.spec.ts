@@ -691,6 +691,13 @@ describe('orchestration daemon', () => {
       stopReason: 'completed',
     })
     expect(String(codexEvidence?.data.outputPreview)).toContain('completed orch:')
+    const evidence = await client.readArtifact(OrchestrationArtifactRef(String(codexEvidence?.data.evidenceRef))) as {
+      output: Array<{ type: string; text: string }>
+    }
+    expect(evidence.output).toEqual([{
+      type: 'text',
+      text: `completed orch:${String(started.runId)}:code:1`,
+    }])
     expect(events.events.filter(value => value.type === 'node.operator.progress').map(value => value.data.phase))
       .toEqual(expect.arrayContaining(['reasoning', 'tool_activity', 'finalizing']))
   })
