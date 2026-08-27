@@ -70,7 +70,14 @@ export class PhysicalOperatorModelToolBridge {
     this.server = createServer((socket) => { this.accept(socket) })
   }
 
-  /** Bind the exact model-visible schemas for one durable Resident command. */
+  /**
+   * Bind the exact model-visible schemas for one durable Resident command.
+   * @param commandId - durable command identity.
+   * @param agent - owning Agent whose tool surface is exposed.
+   * @param schemas - exact model-visible tool schemas.
+   * @param signal - owning turn cancellation signal.
+   * @returns the native bridge descriptor and an idempotent release handle.
+   */
   async bind(
     commandId: string,
     agent: Agent,

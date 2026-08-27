@@ -10,7 +10,7 @@ import {
   type PhysicalOperatorResidentCatalog,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
-import type { RemoteResidentProviderStatus, RemoteResidentTurnSnapshot } from './remote-sync.ts'
+import type { RemoteResidentProviderStatus, RemoteResidentTurnSnapshot } from '@deepseek-ai/dsh-client-connection'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 
 /** One independently addressable DSH Server execution member. */
@@ -211,7 +211,12 @@ export class RemotePhysicalOperator implements PhysicalOperator {
   }
 }
 
-/** Qualify one Server and construct its independently registered remote Providers. */
+/**
+ * Qualify one Server and construct its independently registered remote Providers.
+ * @param server - remote DSH Server member to qualify.
+ * @param request - HTTP implementation used for authenticated control calls.
+ * @returns independently registered Physical Operator projections.
+ */
 export async function createRemotePhysicalOperators(
   server: RemotePhysicalOperatorServer,
   request: typeof fetch = globalThis.fetch,

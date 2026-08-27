@@ -26,10 +26,6 @@
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
-    "./remote-operator": {
-      "types": "./lib/types/remote-operator.d.ts",
-      "default": "./lib/remote-operator.js"
-    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
@@ -55,7 +51,6 @@
     "lib/index.js",
     "lib/invariant.js",
     "lib/client.js",
-    "lib/remote-operator.js",
     "lib/types/**/*.d.ts"
   ],
   "peerDependencies": {

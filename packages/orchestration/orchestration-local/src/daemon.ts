@@ -7,10 +7,6 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import {
-  createRemotePhysicalOperators,
-  type RemotePhysicalOperatorServer,
-} from '@deepseek-ai/dsh-client-connection/remote-operator'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
@@ -98,6 +94,10 @@ import {
   LocalCapabilityCapsuleService,
 } from './providers.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
+import {
+  createRemotePhysicalOperators,
+  type RemotePhysicalOperatorServer,
+} from './remote-physical-operator.ts'
 import { readRemoteOperatorCatalog } from './remote-operators.ts'
 import {
   ORCHESTRATION_STATE_SCHEMA_VERSION,

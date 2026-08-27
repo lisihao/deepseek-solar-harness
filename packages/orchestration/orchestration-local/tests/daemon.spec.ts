@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { RemotePhysicalOperatorServer } from '@deepseek-ai/dsh-client-connection/remote-operator'
 import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import { OrchestrationArtifactRef, type LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
@@ -14,6 +13,7 @@ import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { OrchestrationDaemonClient } from '../src/client.ts'
 import { canonicalSha256 } from '../src/canonical.ts'
 import { OrchestrationDaemon } from '../src/daemon.ts'
+import type { RemotePhysicalOperatorServer } from '../src/remote-physical-operator.ts'
 
 const cleanup: Array<() => Promise<void>> = []
 const run = promisify(execFile)

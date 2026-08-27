@@ -311,6 +311,13 @@ abstract inspect(runId: OrchestrationRunId): Promise<OrchestrationRunSnapshot>
 abstract readEvents(request: OrchestrationEventReadRequest): Promise<OrchestrationEventPage>
 
 /**
+ * Read one immutable content-addressed artifact.
+ * @param ref - digest-verified artifact identity returned by this service.
+ * @returns the decoded immutable artifact value.
+ */
+abstract readArtifact(ref: OrchestrationArtifactRef): Promise<unknown>
+
+/**
  * Apply a revision-checked run control.
  * @param request - revision-checked run control.
  * @returns the updated run snapshot.

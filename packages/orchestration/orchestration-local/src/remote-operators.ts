@@ -2,8 +2,9 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { RemotePhysicalOperatorServer } from '@deepseek-ai/dsh-client-connection/remote-operator'
+import type { RemotePhysicalOperatorServer } from './remote-physical-operator.ts'
 
+/** Current persisted remote execution member catalog schema version. */
 export const REMOTE_OPERATOR_CATALOG_VERSION = 1
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -18,7 +19,11 @@ function string(value: unknown, label: string): string {
   return value
 }
 
-/** Read the optional remote capacity catalog; absence means local-only scheduling. */
+/**
+ * Read the optional remote capacity catalog; absence means local-only scheduling.
+ * @param root - orchestration state root containing the optional catalog.
+ * @returns validated remote execution member definitions.
+ */
 export function readRemoteOperatorCatalog(root: string): RemotePhysicalOperatorServer[] {
   const path = join(root, 'remote-operators.json')
   if (!existsSync(path)) return []

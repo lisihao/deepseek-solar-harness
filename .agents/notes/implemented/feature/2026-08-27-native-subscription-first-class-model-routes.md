@@ -43,3 +43,10 @@ Release acceptance adds exactly one minimal real Codex subscription main-Agent c
 Codex and Claude Code can drive DSH as first-class models, planners, TaskGraph workers, or ordinary subagents. Subagent mode remains useful for isolated delegation but is no longer the only integration role. The native products gain DSH's plugin-composed system and tool surface without copying the Agent Loop into either Provider, while DeepSeek stays available as a peer when configured.
 
 The first release still accepts text-only Resident prompts, has no native token-usage mapping for the first-class adapter, and does not provide a remote model-tool bridge. Those limitations must be shown rather than described as full parity with every API adapter feature.
+
+## Alternatives considered
+
+- Keep Codex and Claude Code only as delegated subagents. Rejected because a second paid/API model would still be required to drive the Agent Loop, and subscription users would not receive the composed DSH tool surface.
+- Copy the Agent Loop into each native product Provider. Rejected because it would create competing turn authorities and duplicate prompt, tool, approval, and Session semantics.
+- Fall back to a DeepSeek API route when native qualification or tool bridging fails. Rejected because it would silently change authentication and cost; unavailable native routes must fail visibly.
+- Expose the ordinary DSH tool catalog inside strict RLM execution. Rejected because Prime-compatible RLM isolation intentionally exposes only its sealed `typescript_repl` surface.

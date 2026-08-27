@@ -251,7 +251,11 @@ export class RemoteSyncHub {
     throw new Error('remote sync snapshot cancelled')
   }
 
-  /** List materialized Session identities and opaque revisions for handoff planning. */
+  /**
+   * List materialized Session identities and opaque revisions for handoff planning.
+   * @param signal - optional cancellation signal for persistence reads.
+   * @returns balanced Sessions eligible for replication.
+   */
   async replicaList(signal?: AbortSignal): Promise<RemoteSessionReplicaSummary[]> {
     const persistence = this.expectPersistence()
     const summaries: RemoteSessionReplicaSummary[] = []
@@ -263,7 +267,12 @@ export class RemoteSyncHub {
     return summaries
   }
 
-  /** Read one complete logical Session document without mutating its source. */
+  /**
+   * Read one complete logical Session document without mutating its source.
+   * @param sessionId - stable Session identity to materialize.
+   * @param signal - optional cancellation signal for persistence reads.
+   * @returns the complete balanced Session document.
+   */
   async replicaRead(sessionId: string, signal?: AbortSignal): Promise<RemoteSessionReplicaDocument> {
     const inspected = await this.expectPersistence().inspect(SessionId(sessionId), signal)
     if (interruptedTurnClosers(inspected.events).length !== 0) {
@@ -276,18 +285,30 @@ export class RemoteSyncHub {
     }
   }
 
-  /** Apply one balanced document using the persistence authority's prefix-compatible primitive. */
+  /**
+   * Apply one balanced document using the persistence authority's prefix-compatible primitive.
+   * @param replica - validated Session replica to apply.
+   * @param signal - optional cancellation signal for persistence writes.
+   * @returns the authoritative prefix-replication result.
+   */
   async replicaApply(replica: SessionReplica, signal?: AbortSignal): Promise<RemoteSessionReplicaApplyResult> {
     const result: SessionReplicationResult = await this.expectPersistence().replicate(replica, signal)
     return { ...result, sessionId: String(result.sessionId) }
   }
 
-  /** List native-subscription capacity without exposing remote product credentials. */
+  /**
+   * List native-subscription capacity without exposing remote product credentials.
+   * @returns the current Resident Provider catalog.
+   */
   operatorProviders(): Promise<ResidentProviderStatus[]> {
     return this.expectResident().providers()
   }
 
-  /** Admit a durable remote turn, then detach the HTTP observer while execution continues. */
+  /**
+   * Admit a durable remote turn, then detach the HTTP observer while execution continues.
+   * @param request - serializable Resident execution request.
+   * @returns the durable accepted command receipt.
+   */
   async operatorExecute(
     request: Omit<ResidentExecuteRequest, 'signal' | 'modelToolBridge'>,
   ): Promise<RemoteResidentAcceptedTurn> {
@@ -304,12 +325,23 @@ export class RemoteSyncHub {
     return accepted
   }
 
-  /** Reattach to one durable remote receipt after any Frontend or network restart. */
+  /**
+   * Reattach to one durable remote receipt after any Frontend or network restart.
+   * @param turnId - durable Resident turn identity.
+   * @returns the current terminal or in-flight turn projection.
+   */
   operatorInspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
     return this.expectResident().inspectTurn(turnId)
   }
 
-  /** Read bounded structured progress without transferring native transcripts. */
+  /**
+   * Read bounded structured progress without transferring native transcripts.
+   * @param sessionId - durable Resident Session identity.
+   * @param afterSequence - exclusive event cursor.
+   * @param limit - maximum number of events to return.
+   * @param signal - optional cancellation signal for the read.
+   * @returns the ordered bounded event page.
+   */
   operatorReadEvents(sessionId: string, afterSequence: number, limit: number, signal?: AbortSignal): Promise<ResidentEventPage> {
     return this.expectResident().readEvents({
       sessionId: sessionId as never,
@@ -319,7 +351,12 @@ export class RemoteSyncHub {
     })
   }
 
-  /** Interrupt a matching remote Session/turn pair without deleting continuity. */
+  /**
+   * Interrupt a matching remote Session/turn pair without deleting continuity.
+   * @param sessionId - durable Resident Session identity.
+   * @param turnId - active turn identity within that Session.
+   * @returns when the interrupt request has been admitted.
+   */
   operatorInterrupt(sessionId: string, turnId: string): Promise<void> {
     return this.expectResident().interrupt({ sessionId: sessionId as never, turnId: turnId as never })
   }

@@ -1141,6 +1141,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'an ordered event page.',
       },
       {
+        signature: 'abstract readArtifact(ref: OrchestrationArtifactRef): Promise<unknown>',
+        description: 'Read one immutable content-addressed artifact.',
+        parameters: [{ name: 'ref', description: 'digest-verified artifact identity returned by this service.' }],
+        returns: 'the decoded immutable artifact value.',
+      },
+      {
         signature: 'abstract control(request: OrchestrationControlRequest): Promise<OrchestrationRunSnapshot>',
         description: 'Apply a revision-checked run control.',
         parameters: [{ name: 'request', description: 'revision-checked run control.' }],
@@ -1238,6 +1244,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Resolve one live status or fail loud for an unknown operator id.',
         parameters: [{ name: 'id', description: 'stable operator identity to inspect.' }],
         returns: 'the current status snapshot.',
+      },
+      {
+        signature: 'async residentCatalogs(): Promise<PhysicalOperatorResidentCatalog[]>',
+        description: 'Return every registered Resident model/quota catalog in registration order.',
+        parameters: [],
+        returns: 'the current validated Resident catalogs.',
       },
       {
         signature: 'async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun>',
@@ -1734,6 +1746,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List materialized sessions with cheap per-log change tokens.\n\nRepeated observations of an unchanged log return the same revision. A successful mutating load repair changes the next listed revision. Revisions also distinguish independently backed stores so backend-local counters cannot compare equal across different persistence sources.',
         parameters: [{ name: 'signal', description: 'optional cancellation for backend snapshot-listing work.' }],
         returns: 'one header and opaque revision per materialized session without loading full logs.',
+      },
+      {
+        signature: 'replicate(replica: SessionReplica, signal?: AbortSignal): Promise<SessionReplicationResult>',
+        description: 'Apply one complete, balanced remote log without creating a second writer. Only an absent destination or an exact prefix match can advance. A live Session, open source turn, metadata mismatch, or divergent event rejects. Calls for the same id serialize inside this Service; cross-process active authority transfer remains a deployment-level quiescence requirement.',
+        parameters: [{ name: 'replica', description: 'complete source header and event log.' }, { name: 'signal', description: 'optional cancellation while waiting for local replication.' }],
+        returns: 'whether the destination was created, advanced, unchanged, or already ahead.',
       },
     ],
   },
@@ -4488,7 +4506,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperator',
-    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
+    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    residentCatalog?(): Promise<PhysicalOperatorResidentCatalog>;\n    reattach?(turnId: string): Promise<PhysicalOperatorProviderRun>;\n    interrupt?(receipt: PhysicalOperatorAcceptedReceipt): Promise<void>;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
+  },
+  {
+    name: 'PhysicalOperatorAcceptedReceipt',
+    declaration: 'export interface PhysicalOperatorAcceptedReceipt {\n    readonly sessionId: string;\n    readonly turnId: string;\n    readonly stateRevision: number;\n}',
   },
   {
     name: 'PhysicalOperatorAvailability',
@@ -4531,16 +4553,40 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorModelToolV1 {\n    readonly name: string;\n    readonly description: string;\n    readonly inputSchema: Readonly<Record<string, unknown>>;\n}',
   },
   {
+    name: 'PhysicalOperatorProgressEvent',
+    declaration: 'export interface PhysicalOperatorProgressEvent {\n    readonly sequence: number;\n    readonly type: string;\n    readonly time: string;\n    readonly data: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'PhysicalOperatorProgressPage',
+    declaration: 'export interface PhysicalOperatorProgressPage {\n    readonly events: readonly PhysicalOperatorProgressEvent[];\n    readonly nextSequence: number;\n}',
+  },
+  {
     name: 'PhysicalOperatorProviderRun',
-    declaration: 'export interface PhysicalOperatorProviderRun {\n    readonly result: Promise<PhysicalOperatorResult>;\n    dispose(): Promise<void>;\n}',
+    declaration: 'export interface PhysicalOperatorProviderRun {\n    readonly receipt?: PhysicalOperatorAcceptedReceipt;\n    readEvents?(afterSequence: number, limit: number, signal?: AbortSignal): Promise<PhysicalOperatorProgressPage>;\n    readonly result: Promise<PhysicalOperatorResult>;\n    dispose(): Promise<void>;\n}',
   },
   {
     name: 'PhysicalOperatorProviderStartRequest',
     declaration: 'export interface PhysicalOperatorProviderStartRequest extends PhysicalOperatorStartRequest {\n    readonly executionId: PhysicalOperatorExecutionId;\n    readonly mode: PhysicalOperatorExecutionMode;\n}',
   },
   {
+    name: 'PhysicalOperatorQuotaPool',
+    declaration: 'export interface PhysicalOperatorQuotaPool {\n    readonly poolId: string;\n    readonly displayName: string;\n    readonly models: readonly string[];\n    readonly meter: \'native-subscription\';\n    readonly primary?: PhysicalOperatorQuotaWindow;\n    readonly secondary?: PhysicalOperatorQuotaWindow;\n    readonly observedAt: string;\n}',
+  },
+  {
+    name: 'PhysicalOperatorQuotaWindow',
+    declaration: 'export interface PhysicalOperatorQuotaWindow {\n    readonly usedPercent: number;\n    readonly resetsAt?: number;\n    readonly windowDurationMinutes?: number;\n}',
+  },
+  {
     name: 'PhysicalOperatorReasoningEffort',
     declaration: 'export type PhysicalOperatorReasoningEffort = \'low\' | \'medium\' | \'high\' | \'xhigh\' | \'max\' | \'ultra\';',
+  },
+  {
+    name: 'PhysicalOperatorResidentCatalog',
+    declaration: 'export interface PhysicalOperatorResidentCatalog {\n    readonly operatorId: PhysicalOperatorId;\n    readonly product: string;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly supportsModelToolBridge: boolean;\n    readonly location: \'local\' | \'remote\';\n    readonly supportsWorkspaceMutationReturn: boolean;\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly PhysicalOperatorResidentModel[];\n    readonly quotaPools?: readonly PhysicalOperatorQuotaPool[];\n}',
+  },
+  {
+    name: 'PhysicalOperatorResidentModel',
+    declaration: 'export interface PhysicalOperatorResidentModel {\n    readonly model: string;\n    readonly resolvedModel?: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly supportedEfforts: readonly PhysicalOperatorReasoningEffort[];\n    readonly defaultEffort?: PhysicalOperatorReasoningEffort;\n    readonly isDefault: boolean;\n    readonly supportsAdaptiveThinking: boolean;\n}',
   },
   {
     name: 'PhysicalOperatorResult',
@@ -4552,7 +4598,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',
@@ -4728,7 +4774,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ResidentExecutionProfile',
@@ -5265,6 +5311,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionReferenceInput',
     declaration: 'export interface SessionReferenceInput {\n    sessionId: SessionId;\n    label?: string;\n}',
+  },
+  {
+    name: 'SessionReplica',
+    declaration: 'export interface SessionReplica {\n    readonly meta: SessionHeader;\n    readonly events: readonly SessionEvent[];\n}',
+  },
+  {
+    name: 'SessionReplicationResult',
+    declaration: 'export interface SessionReplicationResult {\n    readonly sessionId: SessionId;\n    readonly state: \'created\' | \'advanced\' | \'unchanged\' | \'destination-ahead\';\n    readonly sourceEventCount: number;\n    readonly destinationEventCount: number;\n    readonly appendedEventCount: number;\n}',
   },
   {
     name: 'SessionResultFilter',

@@ -151,7 +151,10 @@ export class PhysicalOperatorRuntime extends Service {
     return this.statusOf(this.expectOperator(id))
   }
 
-  /** Return every registered Resident model/quota catalog in registration order. */
+  /**
+   * Return every registered Resident model/quota catalog in registration order.
+   * @returns the current validated Resident catalogs.
+   */
   async residentCatalogs(): Promise<PhysicalOperatorResidentCatalog[]> {
     const catalogs = await Promise.all([...this.operators.values()].flatMap(async (operator) => {
       if (operator.residentCatalog === undefined) return []

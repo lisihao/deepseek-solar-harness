@@ -70,14 +70,17 @@ export interface RemoteResidentModelOption {
   readonly supportsAdaptiveThinking: boolean
 }
 
+/** Reasoning-effort vocabulary shared by remote native-subscription Providers. */
 export type RemoteResidentReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 
+/** One observed rolling quota window for a remote native subscription. */
 export interface RemoteResidentQuotaWindow {
   readonly usedPercent: number
   readonly resetsAt?: number
   readonly windowDurationMinutes?: number
 }
 
+/** One independently metered quota pool advertised by a remote Provider. */
 export interface RemoteResidentQuotaPool {
   readonly poolId: string
   readonly displayName: string
@@ -119,6 +122,7 @@ export interface RemoteResidentExecuteRequest {
   readonly profile?: { readonly model?: string; readonly effort?: RemoteResidentReasoningEffort }
 }
 
+/** Durable turn projection returned by the remote control plane. */
 export interface RemoteResidentTurnSnapshot {
   readonly commandId: string
   readonly turnId: string
@@ -138,6 +142,7 @@ export interface RemoteResidentTurnSnapshot {
   readonly error?: { readonly code: string; readonly message: string }
 }
 
+/** Ordered bounded page of structured Resident progress observations. */
 export interface RemoteResidentEventPage {
   readonly events: readonly {
     readonly sequence: number
@@ -310,7 +315,11 @@ export function parseRemoteSyncCursor(value: unknown): RemoteSyncCursor {
   return parseCursor(value)
 }
 
-/** Validate the remote materialized Session catalog. */
+/**
+ * Validate the remote materialized Session catalog.
+ * @param value - untrusted wire payload.
+ * @returns validated Session replica summaries.
+ */
 export function parseRemoteSessionReplicaList(value: unknown): RemoteSessionReplicaSummary[] {
   if (!Array.isArray(value)) throw new Error('remote Session replica list must be an array')
   return value.map((entry, index) => {
@@ -322,7 +331,11 @@ export function parseRemoteSessionReplicaList(value: unknown): RemoteSessionRepl
   })
 }
 
-/** Validate one complete remote Session document before local application. */
+/**
+ * Validate one complete remote Session document before local application.
+ * @param value - untrusted wire payload.
+ * @returns the validated balanced Session document.
+ */
 export function parseRemoteSessionReplicaDocument(value: unknown): RemoteSessionReplicaDocument {
   const record = objectRecord(value, 'remote Session replica document')
   if (!Array.isArray(record.events)) throw new Error('remote Session replica events must be an array')
@@ -334,7 +347,11 @@ export function parseRemoteSessionReplicaDocument(value: unknown): RemoteSession
   }
 }
 
-/** Validate the destination result of one replica apply. */
+/**
+ * Validate the destination result of one replica apply.
+ * @param value - untrusted wire payload.
+ * @returns the validated authoritative apply result.
+ */
 export function parseRemoteSessionReplicaApplyResult(value: unknown): RemoteSessionReplicaApplyResult {
   const record = objectRecord(value, 'remote Session replica apply result')
   const state = record.state
@@ -350,7 +367,11 @@ export function parseRemoteSessionReplicaApplyResult(value: unknown): RemoteSess
   }
 }
 
-/** Validate subscription-backed Resident capacity advertised by a remote Server. */
+/**
+ * Validate subscription-backed Resident capacity advertised by a remote Server.
+ * @param value - untrusted wire payload.
+ * @returns validated remote Provider capacity.
+ */
 export function parseRemoteResidentProviders(value: unknown): RemoteResidentProviderStatus[] {
   if (!Array.isArray(value)) throw new Error('remote Resident provider list must be an array')
   return value.map((entry, index) => {
@@ -414,7 +435,11 @@ export function parseRemoteResidentProviders(value: unknown): RemoteResidentProv
   })
 }
 
-/** Validate one accepted remote Resident command receipt. */
+/**
+ * Validate one accepted remote Resident command receipt.
+ * @param value - untrusted wire payload.
+ * @returns the validated durable receipt.
+ */
 export function parseRemoteResidentAcceptedTurn(value: unknown): RemoteResidentAcceptedTurn {
   const record = objectRecord(value, 'remote Resident accepted turn')
   return {
@@ -424,7 +449,11 @@ export function parseRemoteResidentAcceptedTurn(value: unknown): RemoteResidentA
   }
 }
 
-/** Validate one remote durable turn projection, including its bounded terminal result. */
+/**
+ * Validate one remote durable turn projection, including its bounded terminal result.
+ * @param value - untrusted wire payload.
+ * @returns the validated turn projection.
+ */
 export function parseRemoteResidentTurn(value: unknown): RemoteResidentTurnSnapshot {
   const record = objectRecord(value, 'remote Resident turn')
   const state = record.state
@@ -466,7 +495,11 @@ export function parseRemoteResidentTurn(value: unknown): RemoteResidentTurnSnaps
   }
 }
 
-/** Validate one ordered page of remote Resident progress observations. */
+/**
+ * Validate one ordered page of remote Resident progress observations.
+ * @param value - untrusted wire payload.
+ * @returns the validated bounded event page.
+ */
 export function parseRemoteResidentEventPage(value: unknown): RemoteResidentEventPage {
   const record = objectRecord(value, 'remote Resident event page')
   const events = arrayValue(record.events, 'remote Resident event page.events').map((entry, index) => {

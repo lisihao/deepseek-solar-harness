@@ -12,7 +12,7 @@ import {
   type RemoteResidentExecuteRequest,
   type RemoteResidentProviderStatus,
   type RemoteResidentTurnSnapshot,
-} from './remote-sync.ts'
+} from '@deepseek-ai/dsh-client-connection'
 
 /** Stateless HTTP-up client used by detached Schedulers and Electron main. */
 export class RemoteSyncHttpClient {
@@ -26,10 +26,21 @@ export class RemoteSyncHttpClient {
     this.base = new URL(endpoint)
   }
 
+  /**
+   * Read remote native-subscription capacity.
+   * @param signal - optional cancellation signal.
+   * @returns the validated remote Provider catalog.
+   */
   async operatorProviders(signal?: AbortSignal): Promise<RemoteResidentProviderStatus[]> {
     return parseRemoteResidentProviders(await this.call('operator.providers', {}, signal))
   }
 
+  /**
+   * Admit one durable remote Resident command.
+   * @param request - serializable Resident execution request.
+   * @param signal - optional cancellation signal for admission.
+   * @returns the durable accepted receipt.
+   */
   async operatorExecute(
     request: RemoteResidentExecuteRequest,
     signal?: AbortSignal,
@@ -37,10 +48,24 @@ export class RemoteSyncHttpClient {
     return parseRemoteResidentAcceptedTurn(await this.call('operator.execute', request, signal))
   }
 
+  /**
+   * Read the current state of one durable remote turn.
+   * @param turnId - durable turn identity.
+   * @param signal - optional cancellation signal.
+   * @returns the validated turn projection.
+   */
   async operatorInspect(turnId: string, signal?: AbortSignal): Promise<RemoteResidentTurnSnapshot> {
     return parseRemoteResidentTurn(await this.call('operator.inspect', { turnId }, signal))
   }
 
+  /**
+   * Read bounded structured progress for one remote Resident Session.
+   * @param sessionId - durable Resident Session identity.
+   * @param afterSequence - exclusive event cursor.
+   * @param limit - maximum number of events to return.
+   * @param signal - optional cancellation signal.
+   * @returns the validated ordered event page.
+   */
   async operatorEvents(
     sessionId: string,
     afterSequence: number,
@@ -52,6 +77,13 @@ export class RemoteSyncHttpClient {
     }, signal))
   }
 
+  /**
+   * Interrupt one active remote turn without deleting Session continuity.
+   * @param sessionId - durable Resident Session identity.
+   * @param turnId - active turn identity.
+   * @param signal - optional cancellation signal.
+   * @returns when the interrupt request has been admitted.
+   */
   async operatorInterrupt(sessionId: string, turnId: string, signal?: AbortSignal): Promise<void> {
     await this.call('operator.interrupt', { sessionId, turnId }, signal)
   }

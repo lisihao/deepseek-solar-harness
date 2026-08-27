@@ -43,3 +43,10 @@ Governance Trace 会一致投影一条 Session 谱系：路由与派发事件、
 Codex 与 Claude Code 可以作为 DSH 的一等主模型、Planner、TaskGraph worker 或普通 subagent。Subagent 模式仍适合隔离委派，但不再是唯一集成角色。原生产品获得 DSH 插件组合的系统和工具表面，同时无需把 Agent Loop 复制到任一 Provider；DeepSeek 配置后仍作为同级候选存在。
 
 首发仍只接受文本 Resident prompt，尚未为一等 adapter 映射原生 token usage，也没有远程模型工具桥。这些限制必须明确展示，不能被描述成与每项 API adapter 特性完全对等。
+
+## 考虑过的替代方案
+
+- 继续仅把 Codex 与 Claude Code 作为被委派的 subagent。未采纳，因为 Agent Loop 仍需要第二个计费 API／模型驱动，订阅用户也无法获得组合后的 DSH 工具表面。
+- 在每个原生产品 Provider 中复制 Agent Loop。未采纳，因为这会产生相互竞争的回合权威，并重复 prompt、工具、审批与 Session 语义。
+- 原生资格或工具桥失败时回退到 DeepSeek API 路由。未采纳，因为这会静默改变认证与成本；原生路由不可用时必须明确失败。
+- 在 strict RLM 执行中暴露普通 DSH 工具目录。未采纳，因为 Prime 兼容的 RLM 隔离有意只暴露密封的 `typescript_repl` 表面。
