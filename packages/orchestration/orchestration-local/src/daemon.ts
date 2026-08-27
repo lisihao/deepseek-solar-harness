@@ -327,7 +327,9 @@ function acceptedReceipt(run: PhysicalOperatorRun, executionId: string): Physica
 }
 
 function observationDelay(delayMs: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.reject(signal.reason)
+  if (signal.aborted) {
+    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('operator observation aborted'))
+  }
   return new Promise<void>((resolve, reject) => {
     const complete = (): void => {
       signal.removeEventListener('abort', abort)
@@ -336,7 +338,7 @@ function observationDelay(delayMs: number, signal: AbortSignal): Promise<void> {
     const timer = setTimeout(complete, delayMs)
     const abort = (): void => {
       clearTimeout(timer)
-      reject(signal.reason)
+      reject(signal.reason instanceof Error ? signal.reason : new Error('operator observation aborted'))
     }
     signal.addEventListener('abort', abort, { once: true })
   })
@@ -3321,6 +3323,8 @@ export class OrchestrationDaemon {
       task: spec.task,
       preferredOperatorIds: [],
       objective: 'economy',
+      plannerVerifierPreference: record.snapshot.admission?.plannerVerifierPreference ?? 'codex-sol',
+      executionPreference: record.snapshot.admission?.executionPreference ?? 'luna-first',
       rlm: 'disabled',
       graphMaxParallel: Math.max(1, Math.min(record.graph.maxParallel, rlmPlan.maxChildren, 4)),
       offers: offers.filter(value => value.tier === targetTier),
@@ -3348,6 +3352,8 @@ export class OrchestrationDaemon {
       task: spec.task,
       preferredOperatorIds: spec.operator?.preferredIds ?? [],
       objective: record.snapshot.admission?.optimization ?? 'balanced',
+      plannerVerifierPreference: record.snapshot.admission?.plannerVerifierPreference ?? 'codex-sol',
+      executionPreference: record.snapshot.admission?.executionPreference ?? 'luna-first',
       rlm: rlmPlan.enabled ? 'enabled' : 'disabled',
       graphMaxParallel: record.graph.maxParallel,
       offers: [...residentOffers, ...modelWorkerOffers],

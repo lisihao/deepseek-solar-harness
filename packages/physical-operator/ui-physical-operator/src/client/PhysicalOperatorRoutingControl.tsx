@@ -10,7 +10,9 @@ import type {
 } from '@deepseek-ai/dsh-tool-physical-operator/client'
 import type {
   ContinualHarnessMode,
+  ExecutionModelPreference,
   ModelAllocationObjective,
+  PlannerVerifierPreference,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-tool-orchestration/client'
 import type { DesktopResidentDashboard } from '../contracts.ts'
@@ -33,6 +35,8 @@ export interface PhysicalOperatorRoutingInjected {
     rlm: RlmExecutionMode,
     continualHarness: ContinualHarnessMode,
     optimization: ModelAllocationObjective,
+    plannerVerifierPreference: PlannerVerifierPreference,
+    executionPreference: ExecutionModelPreference,
   ) => Promise<string | null>
 }
 
@@ -205,8 +209,16 @@ export function PhysicalOperatorRoutingControl({
     rlm: RlmExecutionMode,
     continualHarness: ContinualHarnessMode,
     optimization: ModelAllocationObjective,
+    plannerVerifierPreference = orchestrationPreferences?.plannerVerifierPreference ?? 'codex-sol',
+    executionPreference = orchestrationPreferences?.executionPreference ?? 'luna-first',
   ): void => {
-    persist(() => selectOrchestrationStrategy(rlm, continualHarness, optimization))
+    persist(() => selectOrchestrationStrategy(
+      rlm,
+      continualHarness,
+      optimization,
+      plannerVerifierPreference,
+      executionPreference,
+    ))
   }
 
   return (
@@ -350,7 +362,47 @@ export function PhysicalOperatorRoutingControl({
                     <option value="economy">成本优先</option>
                   </select>
                 </label>
-                <p>订阅套餐始终优先；Codex Spark 按独立池调度；只有订阅容量不足时才允许计费 API 兜底。</p>
+                <label>
+                  <span>规划与验证</span>
+                  <select
+                    aria-label="规划与验证模型策略"
+                    value={orchestrationPreferences.plannerVerifierPreference}
+                    disabled={saving}
+                    onChange={(event) => {
+                      saveOrchestrationStrategy(
+                        orchestrationPreferences.rlm,
+                        orchestrationPreferences.continualHarness,
+                        orchestrationPreferences.optimization,
+                        event.currentTarget.value as PlannerVerifierPreference,
+                        orchestrationPreferences.executionPreference,
+                      )
+                    }}
+                  >
+                    <option value="codex-sol">Codex Sol 优先</option>
+                    <option value="best-high-tier">最佳高阶模型</option>
+                  </select>
+                </label>
+                <label>
+                  <span>代码执行</span>
+                  <select
+                    aria-label="代码执行模型策略"
+                    value={orchestrationPreferences.executionPreference}
+                    disabled={saving}
+                    onChange={(event) => {
+                      saveOrchestrationStrategy(
+                        orchestrationPreferences.rlm,
+                        orchestrationPreferences.continualHarness,
+                        orchestrationPreferences.optimization,
+                        orchestrationPreferences.plannerVerifierPreference,
+                        event.currentTarget.value as ExecutionModelPreference,
+                      )
+                    }}
+                  >
+                    <option value="luna-first">Codex Luna 优先</option>
+                    <option value="balanced">调度器综合选择</option>
+                  </select>
+                </label>
+                <p>默认由 Sol 规划/验证、Luna 执行可并行代码节点；订阅套餐始终优先，Codex Spark 使用独立池，只有订阅容量不足时才允许计费 API 兜底。</p>
               </div>
             )}
             {error !== null && <p className="dshDesktopOperatorStrategyError" role="status">更新失败：{error}</p>}

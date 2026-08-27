@@ -8,7 +8,9 @@ import {
 } from '@deepseek-ai/dsh-orchestration'
 import type {
   ContinualHarnessMode,
+  ExecutionModelPreference,
   ModelAllocationObjective,
+  PlannerVerifierPreference,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation'
 import { z as zod } from 'zod'
@@ -23,8 +25,11 @@ type CollaborationPolicy = 'auto' | 'direct' | 'codex' | 'claude-code'
 const RLM_OPTIONS = ['auto', 'enabled', 'disabled'] as const satisfies readonly RlmExecutionMode[]
 const HARNESS_OPTIONS = ['auto', 'off', 'session', 'workspace'] as const satisfies readonly ContinualHarnessMode[]
 const OPTIMIZATION_OPTIONS = ['balanced', 'quality', 'speed', 'economy'] as const satisfies readonly ModelAllocationObjective[]
+const PLANNER_VERIFIER_OPTIONS = ['codex-sol', 'best-high-tier'] as const satisfies readonly PlannerVerifierPreference[]
+const EXECUTION_OPTIONS = ['luna-first', 'balanced'] as const satisfies readonly ExecutionModelPreference[]
 const DEFAULT_PREFERENCES: OrchestrationExecutionPreferences = {
   rlm: 'auto', continualHarness: 'auto', optimization: 'balanced',
+  plannerVerifierPreference: 'codex-sol', executionPreference: 'luna-first',
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
@@ -38,6 +43,8 @@ declare module '@deepseek-ai/dsh-session/types' {
       rlm: RlmExecutionMode
       continualHarness: ContinualHarnessMode
       optimization: ModelAllocationObjective
+      plannerVerifierPreference: PlannerVerifierPreference
+      executionPreference: ExecutionModelPreference
     }
     /** Whole-value strategy preference for future TaskGraph admissions. */
     'orchestration/preferences': OrchestrationExecutionPreferences
@@ -55,7 +62,7 @@ type ToolArgs = {
 }
 
 /** Model-visible policy for durable graphs and per-node Resident operator routing. */
-export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Under Smart Auto, prefer this durable TaskGraph path over directly handing a parallelizable task to one Resident operator. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds and the smallest useful maxParallel ceiling (normally at most 4). Independent nodes run without a phase barrier; dependencies and overlapping write/effect scopes serialize explicitly. For repository-changing work, set qualityPolicy.independentVerification="required", give every mutating node a completion-critical downstream verification node, set graph.baseSha to the clean repository HEAD, and set workspaceIsolation="git-worktree" so each mutating attempt receives its own branch and worktree. Mark planning and verification nodes with phase="planning" or phase="verification" so the allocator requires a high-tier model; execution leaves normally use phase="execution" and low/mid-tier models. Each accepted attempt seals a content-addressed Workbench task contract covering repository/base SHA, execution worktree, authority, dependencies, artifacts, model roles, quota, timeout, retry, and permissions. RLM is a bounded node strategy declared with node.rlm, not an operator id or another global Scheduler. Continuous Harness is an admission preference that supplies versioned workspace/session context without mutating the Graph. Allocation is native-subscription first: Codex and Claude Code capacity is consumed before billed DeepSeek API workers; Codex standard and Spark are independent quota pools, and unused quota nearing reset increases safe parallelism. DeepSeek V4 Flash/Pro are the final text-only fallback and cannot receive file-writing nodes. DSH remains the only global Scheduler and acceptance authority. Leave operator.preferredIds unset for intelligent routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Every node receives the mandatory clean-task Context Capsule and a fresh native execution lane. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
+export const orchestrationGuidance = 'Use the orchestration tool for non-trivial work that benefits from an explicit dependency graph, parallel independent nodes, durable Resident execution, approval, retries, or recovery across DSH restarts. Under Smart Auto, prefer this durable TaskGraph path over directly handing a parallelizable task to one Resident operator. Do not use it for a simple answer or one atomic tool call. For action=start, construct a complete version-1 logical TaskGraph JSON with explicit capability/effect/scope/context/retry/acceptance upper bounds and the smallest useful maxParallel ceiling (normally at most 4). Independent nodes run without a phase barrier; dependencies and overlapping write/effect scopes serialize explicitly. For repository-changing work, set qualityPolicy.independentVerification="required", give every mutating node a completion-critical downstream verification node, set graph.baseSha to the clean repository HEAD, and set workspaceIsolation="git-worktree" so each mutating attempt receives its own branch and worktree. Mark planning and verification nodes with phase="planning" or phase="verification" so the allocator requires a high-tier model; execution leaves normally use phase="execution" and low/mid-tier models. Each accepted attempt seals a content-addressed Workbench task contract covering repository/base SHA, execution worktree, authority, dependencies, artifacts, model roles, quota, timeout, retry, and permissions. RLM is a bounded node strategy declared with node.rlm, not an operator id or another global Scheduler. Continuous Harness is an admission preference that supplies versioned workspace/session context without mutating the Graph. Allocation is native-subscription first: Codex and Claude Code capacity is consumed before billed DeepSeek API workers; Codex standard and Spark are independent quota pools, and unused quota nearing reset increases safe parallelism. The default Codex-optimized policy prefers Sol for planning/verification gates and Luna for qualified coding leaves; users can switch independently to best-high-tier and balanced execution without changing the Graph. DeepSeek V4 Flash/Pro are the final text-only fallback and cannot receive file-writing nodes. DSH remains the only global Scheduler and acceptance authority. Leave operator.preferredIds unset for intelligent routing. Set it only when the user or task explicitly requires an operator; an unavailable explicit preference must fail rather than silently switch products. Every node receives the mandatory clean-task Context Capsule and a fresh native execution lane. Low-risk graphs start automatically; medium/high-risk graphs stop at human approval. Inspect existing runs instead of recreating work after a restart.'
 
 const VALUE_SCHEMA = {
   type: 'object',
@@ -116,13 +123,22 @@ export function foldOrchestrationPreferences(
 ): OrchestrationExecutionPreferences {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-    if (event?.type === 'orchestration/preferences') return { ...(event.data as OrchestrationExecutionPreferences) }
+    if (event?.type === 'orchestration/preferences') {
+      return { ...DEFAULT_PREFERENCES, ...(event.data as Partial<OrchestrationExecutionPreferences>) }
+    }
   }
   return { ...DEFAULT_PREFERENCES }
 }
 
 function preferenceProjection(value: OrchestrationExecutionPreferences): OrchestrationExecutionPreferencesSelect {
-  return { ...value, rlmOptions: RLM_OPTIONS, continualHarnessOptions: HARNESS_OPTIONS, optimizationOptions: OPTIMIZATION_OPTIONS }
+  return {
+    ...value,
+    rlmOptions: RLM_OPTIONS,
+    continualHarnessOptions: HARNESS_OPTIONS,
+    optimizationOptions: OPTIMIZATION_OPTIONS,
+    plannerVerifierPreferenceOptions: PLANNER_VERIFIER_OPTIONS,
+    executionPreferenceOptions: EXECUTION_OPTIONS,
+  }
 }
 
 /** Register one compact orchestration tool and its automatic-entry policy. */
@@ -133,32 +149,47 @@ export function apply(ctx: Context): void {
       key: 'orchestrationExecutionPreferences',
       schema: zod.object({
         rlm: zod.enum(RLM_OPTIONS), continualHarness: zod.enum(HARNESS_OPTIONS), optimization: zod.enum(OPTIMIZATION_OPTIONS),
+        plannerVerifierPreference: zod.enum(PLANNER_VERIFIER_OPTIONS),
+        executionPreference: zod.enum(EXECUTION_OPTIONS),
         rlmOptions: zod.array(zod.enum(RLM_OPTIONS)),
         continualHarnessOptions: zod.array(zod.enum(HARNESS_OPTIONS)),
         optimizationOptions: zod.array(zod.enum(OPTIMIZATION_OPTIONS)),
+        plannerVerifierPreferenceOptions: zod.array(zod.enum(PLANNER_VERIFIER_OPTIONS)),
+        executionPreferenceOptions: zod.array(zod.enum(EXECUTION_OPTIONS)),
       }),
       init: () => ({ ...DEFAULT_PREFERENCES }),
-      apply: (state, event) => event.type === 'orchestration/preferences' ? { ...event.data } : state,
+      apply: (state, event) => event.type === 'orchestration/preferences'
+        ? { ...DEFAULT_PREFERENCES, ...event.data }
+        : state,
       view: preferenceProjection,
-      stateVersion: 1,
+      stateVersion: 2,
     })
   })
   ctx.inject(['commands'], (commandCtx) => {
     commandCtx.commands.register({
       name: 'orchestration-strategy',
-      description: 'Select RLM, Continuous Harness, and quality/cost optimization for future TaskGraphs',
-      input: { hint: '<auto|enabled|disabled> <auto|off|session|workspace> <balanced|quality|speed|economy>' },
+      description: 'Select RLM, Continuous Harness, optimization, planning/verifying model policy, and execution model policy',
+      input: { hint: '<rlm> <harness> <optimization> <codex-sol|best-high-tier> <luna-first|balanced>' },
       handler: ({ agent, rawInput }) => {
-        const [rlm, continualHarness, optimization, ...extra] = rawInput.trim().split(/\s+/u)
+        const [
+          rlm, continualHarness, optimization, plannerVerifierPreference, executionPreference, ...extra
+        ] = rawInput.trim().split(/\s+/u)
         if (!RLM_OPTIONS.some(value => value === rlm)
           || !HARNESS_OPTIONS.some(value => value === continualHarness)
           || !OPTIMIZATION_OPTIONS.some(value => value === optimization)
+          || !PLANNER_VERIFIER_OPTIONS.some(value => value === plannerVerifierPreference)
+          || !EXECUTION_OPTIONS.some(value => value === executionPreference)
           || extra.length > 0) {
-          return { kind: 'error', text: 'usage: /orchestration-strategy <auto|enabled|disabled> <auto|off|session|workspace> <balanced|quality|speed|economy>' }
+          return { kind: 'error', text: 'usage: /orchestration-strategy <auto|enabled|disabled> <auto|off|session|workspace> <balanced|quality|speed|economy> <codex-sol|best-high-tier> <luna-first|balanced>' }
         }
-        const preferences = { rlm, continualHarness, optimization } as OrchestrationExecutionPreferences
+        const preferences = {
+          rlm, continualHarness, optimization, plannerVerifierPreference, executionPreference,
+        } as OrchestrationExecutionPreferences
         agent.session.append('orchestration/preferences', preferences, { ignorable: true })
-        return { kind: 'success', text: `orchestration strategy ${rlm}/${continualHarness}/${optimization}` }
+        return {
+          kind: 'success',
+          text: `orchestration strategy ${rlm}/${continualHarness}/${optimization}/${plannerVerifierPreference}/${executionPreference}`,
+        }
       },
     })
   })

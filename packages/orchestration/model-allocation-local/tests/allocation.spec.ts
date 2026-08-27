@@ -24,6 +24,44 @@ describe('subscription-first model allocation', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('makes Codex Sol gates and Luna workers explicit switchable preferences', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const offers = [
+      offer({ offerId: 'codex:sol', model: 'gpt-5.6-sol', tier: 'high' }),
+      offer({
+        offerId: 'claude:opus', operatorId: 'claude-code', provider: 'claude-code',
+        model: 'opus', tier: 'high',
+      }),
+      offer({ offerId: 'codex:terra', model: 'gpt-5.6-terra', tier: 'medium' }),
+      offer({ offerId: 'codex:luna', model: 'gpt-5.6-luna', tier: 'low' }),
+    ]
+    const common = {
+      runId: 'r', nodeId: 'n', role: 'architect', task: 'review and implement the repository change',
+      preferredOperatorIds: [], objective: 'balanced' as const, rlm: 'disabled' as const,
+      graphMaxParallel: 4, offers, now: '2026-08-27T00:00:00.000Z',
+    }
+    const sol = await service.allocate({
+      ...common, phase: 'planning', plannerVerifierPreference: 'codex-sol', executionPreference: 'balanced',
+    })
+    expect(sol.model).toBe('gpt-5.6-sol')
+    expect(sol.rationale).toContain('codex-sol-planner-verifier')
+    await expect(service.allocate({
+      ...common, phase: 'planning', plannerVerifierPreference: 'best-high-tier', executionPreference: 'balanced',
+    })).resolves.toMatchObject({ model: 'opus' })
+    const luna = await service.allocate({
+      ...common, phase: 'execution', role: 'implementation', task: 'implement the repository change',
+      plannerVerifierPreference: 'best-high-tier', executionPreference: 'luna-first',
+    })
+    expect(luna.model).toBe('gpt-5.6-luna')
+    expect(luna.rationale).toContain('codex-luna-worker')
+    await expect(service.allocate({
+      ...common, phase: 'execution', role: 'implementation', task: 'implement the repository change',
+      plannerVerifierPreference: 'best-high-tier', executionPreference: 'balanced',
+    })).resolves.toMatchObject({ model: 'gpt-5.6-terra' })
+    await ctx.root.fiber.dispose()
+  })
+
   it('keeps product affinity when a remote Server namespaces the operator id', async () => {
     const ctx = new Context()
     const service = new SubscriptionFirstModelAllocation(ctx)

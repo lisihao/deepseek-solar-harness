@@ -11,10 +11,12 @@ import type { ContextPacketV1, ContextPolicy } from '@deepseek-ai/dsh-context-co
 import type { IntentCompileRequest, IntentIRV1 } from '@deepseek-ai/dsh-intent-compiler'
 import type {
   ContinualHarnessMode,
+  ExecutionModelPreference,
   ModelAllocationObjective,
   ModelAllocationPlan,
   ModelExecutionOffer,
   ModelTaskPhase,
+  PlannerVerifierPreference,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
@@ -196,6 +198,10 @@ export interface OrchestrationAdmissionTraceV1 {
   readonly continualHarness?: ContinualHarnessMode
   /** Global quality/cost/throughput preference consumed by the allocation Provider. */
   readonly optimization?: ModelAllocationObjective
+  /** Prefer Codex Sol for high-tier planning/verification, or choose the best qualified high-tier offer. */
+  readonly plannerVerifierPreference?: PlannerVerifierPreference
+  /** Prefer Codex Luna for execution leaves when qualified, or use ordinary balanced scoring. */
+  readonly executionPreference?: ExecutionModelPreference
 }
 
 /** Immutable compilation result that may be started after approval. */

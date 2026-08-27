@@ -512,10 +512,12 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   rlm: RlmExecutionMode
   continualHarness: ContinualHarnessMode
   optimization: ModelAllocationObjective
+  plannerVerifierPreference: PlannerVerifierPreference
+  executionPreference: ExecutionModelPreference
 }
 ```
 
-来源：[`packages/orchestration/tool-orchestration/src/index.ts:33`](../packages/orchestration/tool-orchestration/src/index.ts)
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:38`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -526,7 +528,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-来源：[`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:50`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 

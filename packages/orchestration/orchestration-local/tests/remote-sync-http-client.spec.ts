@@ -47,7 +47,11 @@ describe('RemoteSyncHttpClient', () => {
     expect(methods).toEqual([
       'operator.providers', 'operator.execute', 'operator.inspect', 'operator.events', 'operator.interrupt',
     ])
-    expect(request.mock.calls.map(value => String(value[0]))).toEqual([
+    expect(request.mock.calls.map(([input]) => input instanceof URL
+      ? input.href
+      : typeof input === 'string'
+        ? input
+        : input.url)).toEqual([
       'https://server.example/remote-sync/operator.providers',
       'https://server.example/remote-sync/operator.execute',
       'https://server.example/remote-sync/operator.inspect',

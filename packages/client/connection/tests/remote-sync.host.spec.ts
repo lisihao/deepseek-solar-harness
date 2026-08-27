@@ -220,12 +220,12 @@ describe('RemoteSyncHub', () => {
       replicate,
     }
     const hub = new RemoteSyncHub(api(), 4, persistence as never)
-    await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({
-      capabilities: expect.arrayContaining(['session.replicate.read', 'session.replicate.write']),
-    })
-    await expect(hub.describe(new AbortController().signal, 'pocket')).resolves.not.toMatchObject({
-      capabilities: expect.arrayContaining(['session.replicate.read']),
-    })
+    const adminDescription = await hub.describe(new AbortController().signal, 'admin')
+    expect(adminDescription.capabilities).toEqual(expect.arrayContaining([
+      'session.replicate.read', 'session.replicate.write',
+    ]))
+    const pocketDescription = await hub.describe(new AbortController().signal, 'pocket')
+    expect(pocketDescription.capabilities).not.toContain('session.replicate.read')
     await expect(hub.replicaList()).resolves.toEqual([{ header, revision: 'store:1' }])
     await expect(hub.replicaRead('session-replica')).resolves.toEqual({ meta: header, events, balanced: true })
     await expect(hub.replicaApply({ meta: header, events } as never)).resolves.toMatchObject({
@@ -271,12 +271,12 @@ describe('RemoteSyncHub', () => {
       providers: async () => [provider], execute, inspectTurn, readEvents, interrupt,
     }
     const hub = new RemoteSyncHub(api(), 4, undefined, resident as never)
-    await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({
-      capabilities: expect.arrayContaining(['operator.read', 'operator.execute', 'operator.interrupt']),
-    })
-    await expect(hub.describe(new AbortController().signal, 'pocket')).resolves.not.toMatchObject({
-      capabilities: expect.arrayContaining(['operator.execute']),
-    })
+    const adminDescription = await hub.describe(new AbortController().signal, 'admin')
+    expect(adminDescription.capabilities).toEqual(expect.arrayContaining([
+      'operator.read', 'operator.execute', 'operator.interrupt',
+    ]))
+    const pocketDescription = await hub.describe(new AbortController().signal, 'pocket')
+    expect(pocketDescription.capabilities).not.toContain('operator.execute')
     await expect(hub.operatorProviders()).resolves.toEqual([provider])
     await expect(hub.operatorExecute({
       commandId: 'command-1', operatorId: 'codex', workspace: '/repo', laneId: 'lane-1', prompt: [],

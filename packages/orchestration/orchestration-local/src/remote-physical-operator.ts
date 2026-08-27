@@ -32,7 +32,9 @@ function alias(serverId: string, nativeOperatorId: string): string {
 }
 
 function wait(delayMs: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.reject(signal.reason)
+  if (signal.aborted) {
+    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('remote operator wait aborted'))
+  }
   return new Promise<void>((resolve, reject) => {
     const complete = (): void => {
       signal.removeEventListener('abort', abort)
@@ -41,7 +43,7 @@ function wait(delayMs: number, signal: AbortSignal): Promise<void> {
     const timer = setTimeout(complete, delayMs)
     const abort = (): void => {
       clearTimeout(timer)
-      reject(signal.reason)
+      reject(signal.reason instanceof Error ? signal.reason : new Error('remote operator wait aborted'))
     }
     signal.addEventListener('abort', abort, { once: true })
   })
@@ -183,7 +185,10 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       },
       result,
       // Detach only: the remote daemon retains Receipt, Session, and native execution.
-      dispose: async () => { polling.abort(new Error('remote physical operator observer detached')) },
+      dispose: () => {
+        polling.abort(new Error('remote physical operator observer detached'))
+        return Promise.resolve()
+      },
     }
   }
 

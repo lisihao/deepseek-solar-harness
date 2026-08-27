@@ -193,7 +193,7 @@ describe('Remote Sync wire parsing', () => {
     await expect(client.operatorProviders()).resolves.toMatchObject([{ operatorId: 'codex', models: [{ model: 'gpt-5.6-luna' }] }])
     await expect(client.operatorExecute({
       commandId: 'command-1', operatorId: 'codex', workspace: '/repo', laneId: 'lane-1', prompt: [],
-    } as never)).resolves.toEqual(accepted)
+    })).resolves.toEqual(accepted)
     await expect(client.operatorInspect(accepted.turnId)).resolves.toMatchObject({ state: 'settled', result: { stopReason: 'completed' } })
     await expect(client.operatorEvents(accepted.sessionId, 0, 100)).resolves.toEqual(page)
     await expect(client.operatorInterrupt(accepted.sessionId, accepted.turnId)).resolves.toBeUndefined()

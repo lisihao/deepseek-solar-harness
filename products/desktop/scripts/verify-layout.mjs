@@ -40,6 +40,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-host-remote-auth',
   '@deepseek-ai/dsh-host-webserver',
   '@deepseek-ai/dsh-session-projection-cache',
+  '@deepseek-ai/dsh-session-persistence',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
   '@deepseek-ai/dsh-llm-deepseek',

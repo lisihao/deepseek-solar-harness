@@ -237,7 +237,7 @@ Scheduler-facing Service Definition; implementations remain replaceable plugins.
 abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
 ```
 
-Source: [`packages/orchestration/model-allocation/src/index.ts:105`](../../packages/orchestration/model-allocation/src/index.ts)
+Source: [`packages/orchestration/model-allocation/src/index.ts:109`](../../packages/orchestration/model-allocation/src/index.ts)
 
 <a id="ctxmodelworkers--modelworkerruntime"></a>
 
@@ -353,7 +353,7 @@ abstract resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterm
 abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:460`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:466`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 

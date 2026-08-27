@@ -510,10 +510,12 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
   rlm: RlmExecutionMode
   continualHarness: ContinualHarnessMode
   optimization: ModelAllocationObjective
+  plannerVerifierPreference: PlannerVerifierPreference
+  executionPreference: ExecutionModelPreference
 }
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:33`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:38`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -524,7 +526,7 @@ Source: [`packages/orchestration/tool-orchestration/src/index.ts:33`](../package
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:50`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 

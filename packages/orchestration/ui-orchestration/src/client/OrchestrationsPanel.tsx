@@ -267,6 +267,10 @@ function GraphView(props: {
         并行：{String(activeWorkers)}/{String(run.effectiveParallelism ?? run.maxParallel ?? 1)} worker 运行中
         · Graph 上限 {String(run.maxParallel ?? 1)} · {String(readyWorkers)} 个可派发
       </p>
+      <p>
+        模型分工：{run.admission?.plannerVerifierPreference === 'best-high-tier' ? '最佳高阶模型规划/验证' : 'Codex Sol 优先规划/验证'}
+        · {run.admission?.executionPreference === 'balanced' ? '调度器综合选择执行模型' : 'Codex Luna 优先执行代码节点'}
+      </p>
       <p>上下文：{cleanContext ? 'Clean-task Capsule 已注入 · fresh native lane' : '等待 Capsule 解析'}</p>
     </div>
     <div className="dshDesktopCollaborationTrace" data-execution-mode={rlmEnabled ? 'rlm' : 'standard'} aria-label="Prime RLM 运行状态">

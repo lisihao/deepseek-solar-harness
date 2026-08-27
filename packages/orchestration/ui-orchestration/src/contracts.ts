@@ -76,6 +76,8 @@ export interface DesktopOrchestrationRun {
     rlm?: 'auto' | 'enabled' | 'disabled'
     continualHarness?: 'auto' | 'off' | 'session' | 'workspace'
     optimization?: 'balanced' | 'quality' | 'speed' | 'economy'
+    plannerVerifierPreference?: 'codex-sol' | 'best-high-tier'
+    executionPreference?: 'luna-first' | 'balanced'
   }
   certificate: {
     certificateSha256: string

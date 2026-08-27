@@ -3905,6 +3905,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface EpochHeader {\n    config: LlmCallConfig;\n    adapterDefaults?: LlmCallConfigAdapterDefaults;\n    system?: string;\n    tools?: ToolSchema[];\n}',
   },
   {
+    name: 'ExecutionModelPreference',
+    declaration: 'export type ExecutionModelPreference = \'luna-first\' | \'balanced\';',
+  },
+  {
     name: 'FileDiff',
     declaration: 'export interface FileDiff {\n    path: string;\n    oldText: string | null;\n    newText: string;\n}',
   },
@@ -4354,7 +4358,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelAllocationRequest',
-    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly objective: ModelAllocationObjective;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
+    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
   },
   {
     name: 'ModelExecutionOffer',
@@ -4418,7 +4422,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationAdmissionTraceV1',
-    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly sourceSessionId: string;\n    readonly rlm?: RlmExecutionMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n}',
+    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly sourceSessionId: string;\n    readonly rlm?: RlmExecutionMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
   },
   {
     name: 'OrchestrationArtifactRef',
@@ -4615,6 +4619,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PlanCertificateV1',
     declaration: 'export interface PlanCertificateV1 {\n    readonly version: 1;\n    readonly graphSha256: string;\n    readonly certificateSha256: string;\n    readonly nodeIds: readonly string[];\n    readonly maximumRisk: LogicalTaskGraphV1[\'risk\'];\n    readonly requiresApproval: boolean;\n    readonly generatedAt: string;\n}',
+  },
+  {
+    name: 'PlannerVerifierPreference',
+    declaration: 'export type PlannerVerifierPreference = \'codex-sol\' | \'best-high-tier\';',
   },
   {
     name: 'PostToolDecision',
