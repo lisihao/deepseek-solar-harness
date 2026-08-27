@@ -11,7 +11,7 @@ const host = { version: '3.1.3', cwd: '/srv/dsh', attachedSessions: 0, canOpenPa
 
 function description(sequence: number, deploymentId = 'deployment-1'): RemoteSyncDescription {
   return {
-    protocol: { major: 1, minor: 1 }, deploymentId,
+    protocol: { major: 1, minor: 2 }, deploymentId,
     cursor: { deploymentId, sequence },
     describedAt: '2026-08-23T08:00:00.000Z', scope: 'cockpit',
     capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'], host,
@@ -20,7 +20,7 @@ function description(sequence: number, deploymentId = 'deployment-1'): RemoteSyn
 
 function snapshot(sequence: number, deploymentId = 'deployment-1'): RemoteSyncSnapshot {
   return {
-    protocol: { major: 1, minor: 1 }, deploymentId,
+    protocol: { major: 1, minor: 2 }, deploymentId,
     cursor: { deploymentId, sequence },
     capturedAt: '2026-08-23T08:00:00.000Z', host,
     sessions: [], workspaces: [], archivedSessionIds: [],

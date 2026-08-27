@@ -5,7 +5,9 @@ import {
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import {
   REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_RPC_CHANNEL,
+  parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
   parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
+  type RemoteSessionReplicaApplyResult, type RemoteSessionReplicaDocument, type RemoteSessionReplicaSummary,
   type RemoteSyncCursor, type RemoteSyncDescription, type RemoteSyncFrame, type RemoteSyncSnapshot,
 } from '../remote-sync.ts'
 import { randomUuid } from './random-uuid.ts'
@@ -16,6 +18,12 @@ import { readWebSocketDownlink } from './websocket-downlink.ts'
 export interface RemoteSyncClient {
   describe(signal?: AbortSignal): Promise<RemoteSyncDescription>
   snapshot(signal?: AbortSignal): Promise<RemoteSyncSnapshot>
+  replicaList(signal?: AbortSignal): Promise<RemoteSessionReplicaSummary[]>
+  replicaRead(sessionId: string, signal?: AbortSignal): Promise<RemoteSessionReplicaDocument>
+  replicaApply(
+    replica: Pick<RemoteSessionReplicaDocument, 'meta' | 'events'>,
+    signal?: AbortSignal,
+  ): Promise<RemoteSessionReplicaApplyResult>
   events(
     cursor: RemoteSyncCursor,
     signal: AbortSignal,
@@ -36,17 +44,32 @@ export class WebRemoteSyncClient implements RemoteSyncClient {
   }
 
   async describe(signal?: AbortSignal): Promise<RemoteSyncDescription> {
-    return parseRemoteSyncDescription(await this.call('describe', signal))
+    return parseRemoteSyncDescription(await this.call('describe', {}, signal))
   }
 
   async snapshot(signal?: AbortSignal): Promise<RemoteSyncSnapshot> {
-    return parseRemoteSyncSnapshot(await this.call('snapshot', signal))
+    return parseRemoteSyncSnapshot(await this.call('snapshot', {}, signal))
   }
 
-  private async call(method: 'describe' | 'snapshot', signal?: AbortSignal): Promise<unknown> {
+  async replicaList(signal?: AbortSignal): Promise<RemoteSessionReplicaSummary[]> {
+    return parseRemoteSessionReplicaList(await this.call('replica.list', {}, signal))
+  }
+
+  async replicaRead(sessionId: string, signal?: AbortSignal): Promise<RemoteSessionReplicaDocument> {
+    return parseRemoteSessionReplicaDocument(await this.call('replica.read', { sessionId }, signal))
+  }
+
+  async replicaApply(
+    replica: Pick<RemoteSessionReplicaDocument, 'meta' | 'events'>,
+    signal?: AbortSignal,
+  ): Promise<RemoteSessionReplicaApplyResult> {
+    return parseRemoteSessionReplicaApplyResult(await this.call('replica.apply', replica, signal))
+  }
+
+  private async call(method: string, payload: unknown, signal?: AbortSignal): Promise<unknown> {
     const rpcId = RpcId(randomUuid())
     const request: ClientRequest = {
-      type: 'client-request', rpcId, method, payload: {},
+      type: 'client-request', rpcId, method, payload,
     }
     const response = await globalThis.fetch(
       new URL(`${REMOTE_SYNC_RPC_CHANNEL}/${method}`, this.base),

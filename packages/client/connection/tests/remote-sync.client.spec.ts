@@ -8,7 +8,7 @@ import { setBrowserRemoteAccessToken } from '../src/client/browser-access-token.
 import { WebRemoteSyncClient } from '../src/client/remote-sync-client.ts'
 
 const snapshot = {
-  protocol: { major: 1, minor: 1 },
+  protocol: { major: 1, minor: 2 },
   deploymentId: 'deployment-1',
   cursor: { deploymentId: 'deployment-1', sequence: 7 },
   capturedAt: '2026-08-23T08:00:00.000Z',
@@ -73,7 +73,7 @@ afterEach(() => {
 describe('Remote Sync wire parsing', () => {
   it('accepts an authenticated Server description and rejects unknown capabilities', () => {
     const description = {
-      protocol: { major: 1, minor: 1 },
+      protocol: { major: 1, minor: 2 },
       deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 },
       describedAt: '2026-08-23T08:00:00.000Z',
@@ -103,7 +103,7 @@ describe('Remote Sync wire parsing', () => {
         result: {
           ok: true,
           value: {
-            protocol: { major: 1, minor: 1 },
+            protocol: { major: 1, minor: 2 },
             deploymentId: 'deployment-1',
             cursor: { deploymentId: 'deployment-1', sequence: 7 },
             describedAt: '2026-08-23T08:00:00.000Z',
@@ -122,6 +122,38 @@ describe('Remote Sync wire parsing', () => {
     expect(seenAuthorization).toBe('Bearer short-lived')
   })
 
+  it('lists, reads, and applies complete Session replicas over the same authenticated channel', async () => {
+    const header = { version: 0, id: 'session-replica', createdAt: 1 }
+    const events = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    const methods: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const request = JSON.parse(init.body) as { rpcId: string; method: string; payload: unknown }
+      methods.push(request.method)
+      const value = request.method === 'replica.list'
+        ? [{ header, revision: 'store:1' }]
+        : request.method === 'replica.read'
+          ? { meta: header, events, balanced: true }
+          : {
+            sessionId: 'session-replica', state: 'created', sourceEventCount: 2,
+            destinationEventCount: 2, appendedEventCount: 2,
+          }
+      return Response.json({
+        type: 'server-response', rpcId: request.rpcId, result: { ok: true, value },
+      })
+    }))
+    const client = new WebRemoteSyncClient('https://server.example', 'access')
+    await expect(client.replicaList()).resolves.toEqual([{ header, revision: 'store:1' }])
+    await expect(client.replicaRead('session-replica')).resolves.toMatchObject({ balanced: true, events })
+    await expect(client.replicaApply({ meta: header as never, events: events as never })).resolves.toMatchObject({
+      state: 'created', appendedEventCount: 2,
+    })
+    expect(methods).toEqual(['replica.list', 'replica.read', 'replica.apply'])
+  })
+
   it('accepts a complete snapshot and rejects protocol or deployment mismatch', () => {
     expect(parseRemoteSyncSnapshot(snapshot)).toMatchObject({
       deploymentId: 'deployment-1', cursor: { sequence: 7 },
@@ -137,7 +169,7 @@ describe('Remote Sync wire parsing', () => {
 
   it('rejects malformed descriptions, cursors, snapshots, and scalar fields', () => {
     const description = {
-      protocol: { major: 1, minor: 1 }, deploymentId: 'deployment-1',
+      protocol: { major: 1, minor: 2 }, deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 }, describedAt: snapshot.capturedAt,
       scope: 'cockpit', capabilities: ['session.read'], host: snapshot.host,
     }
@@ -150,7 +182,7 @@ describe('Remote Sync wire parsing', () => {
       .toThrow('scope is invalid')
     expect(() => parseRemoteSyncDescription({ ...description, describedAt: 'never' }))
       .toThrow('not an ISO instant')
-    expect(() => parseRemoteSyncDescription({ ...description, protocol: { major: 1, minor: 2 } }))
+    expect(() => parseRemoteSyncDescription({ ...description, protocol: { major: 1, minor: 1 } }))
       .toThrow('protocol mismatch')
 
     for (const value of [undefined, null, []]) {

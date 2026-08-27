@@ -14,7 +14,7 @@ Electron 可执行文件只包含最小启动代码。它获取单实例锁、�
 
 MacBook Frontend 会保存一个带名称的 Product Server 列表和一项当前 Server 选择。原生 **Connect to Remote Server…** 窗口可新增、编辑、选择和删除条目；切换当前条目会让 Frontend 重启并连接对应 endpoint，而不会启动本机 Host。已有的单 Server 部署状态会迁移为列表中的第一个条目。`http://127.0.0.1:13080` 这类 loopback endpoint 通常通过 owner 控制的 SSH 本地转发访问 Product Server，会直接使用已经认证的隧道，不再要求第二份配对码或 Keychain 凭据。手机／pocket 等直接访问远程 HTTPS 的客户端仍使用一次性配对挑战、加密持久设备凭据和短期访问 session。
 
-Electron 持有原生 **Deployment** 菜单，以及当前 Frontend Server 无法加载时显示的本地恢复页面。两处都提供不依赖远程 Client bundle 的 **Use Local Server** 与 **Connect to Remote Server…**；远程页面可用时，其 Desktop 页脚继续提供相同操作。
+Electron 持有原生 **Deployment** 菜单，以及当前 Frontend Server 无法加载时显示的本地恢复页面。两处都提供不依赖远程 Client bundle 的 **Use Local Server** 与 **Connect to Remote Server…**。Desktop 页脚始终直接暴露 Server 配置；在 Frontend 角色下还会额外暴露 **Use Local Server**。
 
 同一原生窗口还拥有可选的后台 Git commit 同步。每台设备分别配置本地仓库路径、作为权威的 GitHub remote、分支、同步方向、间隔，以及可选的 Tailscale／SSH 加速 remote。同步会拒绝脏工作树或错误分支，只对已提交 ref 执行 fast-forward 或 push；遇到分叉时报告冲突，不会自行 merge。加速 remote 只可预取 Git object；GitHub 始终是接受结果的权威，而且加速路径失败不会阻断权威路径。该机制绝不复制存活的 DSH Session、SQLite 或 WAL 文件：运行进展仍是 Server 投影，迁移运行权威必须另行显式执行。
 

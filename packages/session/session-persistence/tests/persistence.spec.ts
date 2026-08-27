@@ -4,7 +4,7 @@ import SessionStore, { Session, SessionId, isJsonValue } from '@deepseek-ai/dsh-
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import {
   DEFAULT_PREPARED_SESSION_CACHE_SIZE, DEFAULT_WRITE_BATCH_MAX_DELAY_MS, MAX_WRITE_BATCH_DELAY_MS,
-  SessionPersistence, SessionPersistenceRevision, PersistenceCoordinator,
+  SessionPersistence, SessionPersistenceRevision, SessionReplicationError, PersistenceCoordinator,
   type PersistenceBackend, type SessionPersistenceSnapshot, type StoredPrefix, type StoredSuffix,
 } from '../src/index.ts'
 import { runPersistenceContract, meta, oneTurnLog } from './contract.ts'
@@ -266,6 +266,62 @@ describe('the inherited readRaw default', () => {
     await expect(
       ctx.sessionPersistence.readRaw(SessionId('any-session'), controller.signal),
     ).rejects.toThrow('aborted')
+  })
+})
+
+describe('SessionPersistence prefix-compatible replication', () => {
+  it('creates, replays, and advances one balanced cold Session without duplicating events', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(MemoryPersistence)
+    try {
+      const header = meta('replica-prefix', '/work')
+      const first = oneTurnLog()
+      await expect(ctx.sessionPersistence.replicate({ meta: header, events: first })).resolves.toMatchObject({
+        state: 'created', destinationEventCount: 6, appendedEventCount: 6,
+      })
+      await expect(ctx.sessionPersistence.replicate({ meta: header, events: structuredClone(first) })).resolves.toMatchObject({
+        state: 'unchanged', destinationEventCount: 6, appendedEventCount: 0,
+      })
+      const second = [
+        ...first,
+        { type: 'turn/start' as const, seq: 6, time: 7, data: { turn: 2 } },
+        { type: 'turn/end' as const, seq: 7, time: 8, data: { turn: 2, reason: { kind: 'completed' as const } } },
+      ]
+      await expect(ctx.sessionPersistence.replicate({ meta: header, events: second })).resolves.toMatchObject({
+        state: 'advanced', destinationEventCount: 8, appendedEventCount: 2,
+      })
+      expect((await ctx.sessionPersistence.inspect(header.id)).events).toEqual(second)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('refuses a live destination, an open source turn, and divergent history', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(MemoryPersistence)
+    try {
+      const live = ctx.sessions.create(SessionId('replica-live'))
+      await expect(ctx.sessionPersistence.replicate({ meta: live.header, events: [] }))
+        .rejects.toMatchObject({ code: 'SESSION_LIVE' } satisfies Partial<SessionReplicationError>)
+
+      const openHeader = meta('replica-open')
+      await expect(ctx.sessionPersistence.replicate({
+        meta: openHeader,
+        events: [{ type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } }],
+      })).rejects.toMatchObject({ code: 'SESSION_OPEN_TURN' } satisfies Partial<SessionReplicationError>)
+
+      const conflictHeader = meta('replica-conflict')
+      const log = oneTurnLog()
+      await ctx.sessionPersistence.replicate({ meta: conflictHeader, events: log })
+      const divergent = structuredClone(log)
+      divergent[0] = { ...divergent[0]!, time: 99 }
+      await expect(ctx.sessionPersistence.replicate({ meta: conflictHeader, events: divergent }))
+        .rejects.toMatchObject({ code: 'SESSION_HISTORY_CONFLICT' } satisfies Partial<SessionReplicationError>)
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 })
 

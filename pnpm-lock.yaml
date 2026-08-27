@@ -1634,6 +1634,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-session-persistence':
+        specifier: workspace:^
+        version: link:../../session/session-persistence
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
@@ -6319,6 +6322,9 @@ importers:
       '@deepseek-ai/dsh-commands':
         specifier: workspace:^
         version: link:../../interaction/commands
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../util/home-paths
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
@@ -6328,6 +6334,9 @@ importers:
       '@deepseek-ai/dsh-physical-operator':
         specifier: workspace:^
         version: link:../physical-operator
+      '@deepseek-ai/dsh-sdk-protocol':
+        specifier: workspace:^
+        version: link:../../sdk/protocol
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session

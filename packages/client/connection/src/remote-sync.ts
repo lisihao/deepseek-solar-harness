@@ -3,6 +3,7 @@
 import type {
   HostFrame, MuxFrame, ResponseValue, RpcRequest,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session/types'
 import { hostDescribeValueSchema } from '@deepseek-ai/dsh-host-apiproxy/api/host.schema'
 import { hostFrameSchema, muxFrameSchema } from '@deepseek-ai/dsh-host-apiproxy/api/events.schema'
 import { sessionListValueSchema } from '@deepseek-ai/dsh-host-apiproxy/api/sessions.schema'
@@ -16,7 +17,7 @@ export const REMOTE_SYNC_RPC_CHANNEL = '/remote-sync'
 export const REMOTE_SYNC_EVENTS_PATH = '/remote-sync/events'
 
 /** First independently versioned Server/Frontend projection protocol. */
-export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 1 })
+export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 2 })
 
 /** Process-generation identity plus one global event watermark. */
 export interface RemoteSyncCursor {
@@ -43,6 +44,30 @@ export type RemoteSyncCapability =
   | 'event.subscribe'
   | 'session.command'
   | 'approval.respond'
+  | 'session.replicate.read'
+  | 'session.replicate.write'
+
+/** One materialized Session available for an explicit single-writer handoff. */
+export interface RemoteSessionReplicaSummary {
+  readonly header: SessionHeader
+  readonly revision: string
+}
+
+/** Complete logical Session log transferred across the authenticated wire. */
+export interface RemoteSessionReplicaDocument {
+  readonly meta: SessionHeader
+  readonly events: readonly SessionEvent[]
+  readonly balanced: boolean
+}
+
+/** Prefix-compatible apply result returned by the destination Server. */
+export interface RemoteSessionReplicaApplyResult {
+  readonly sessionId: string
+  readonly state: 'created' | 'advanced' | 'unchanged' | 'destination-ahead'
+  readonly sourceEventCount: number
+  readonly destinationEventCount: number
+  readonly appendedEventCount: number
+}
 
 /** Authenticated Server identity and protocol capabilities discovered before snapshot. */
 export interface RemoteSyncDescription {
@@ -183,6 +208,46 @@ export function parseRemoteSyncCursor(value: unknown): RemoteSyncCursor {
   return parseCursor(value)
 }
 
+/** Validate the remote materialized Session catalog. */
+export function parseRemoteSessionReplicaList(value: unknown): RemoteSessionReplicaSummary[] {
+  if (!Array.isArray(value)) throw new Error('remote Session replica list must be an array')
+  return value.map((entry, index) => {
+    const record = objectRecord(entry, `remote Session replica list entry ${index}`)
+    return {
+      header: sessionHeader(record.header, `remote Session replica list entry ${index}.header`),
+      revision: nonEmptyString(record.revision, `remote Session replica list entry ${index}.revision`),
+    }
+  })
+}
+
+/** Validate one complete remote Session document before local application. */
+export function parseRemoteSessionReplicaDocument(value: unknown): RemoteSessionReplicaDocument {
+  const record = objectRecord(value, 'remote Session replica document')
+  if (!Array.isArray(record.events)) throw new Error('remote Session replica events must be an array')
+  if (typeof record.balanced !== 'boolean') throw new Error('remote Session replica balanced must be a boolean')
+  return {
+    meta: sessionHeader(record.meta, 'remote Session replica meta'),
+    events: record.events as SessionEvent[],
+    balanced: record.balanced,
+  }
+}
+
+/** Validate the destination result of one replica apply. */
+export function parseRemoteSessionReplicaApplyResult(value: unknown): RemoteSessionReplicaApplyResult {
+  const record = objectRecord(value, 'remote Session replica apply result')
+  const state = record.state
+  if (state !== 'created' && state !== 'advanced' && state !== 'unchanged' && state !== 'destination-ahead') {
+    throw new Error(`remote Session replica state is invalid: ${String(state)}`)
+  }
+  return {
+    sessionId: nonEmptyString(record.sessionId, 'remote Session replica sessionId'),
+    state,
+    sourceEventCount: nonnegativeInteger(record.sourceEventCount, 'remote Session replica sourceEventCount'),
+    destinationEventCount: nonnegativeInteger(record.destinationEventCount, 'remote Session replica destinationEventCount'),
+    appendedEventCount: nonnegativeInteger(record.appendedEventCount, 'remote Session replica appendedEventCount'),
+  }
+}
+
 function parseCursor(value: unknown): RemoteSyncCursor {
   const cursor = objectRecord(value, 'remote sync cursor')
   return {
@@ -215,8 +280,17 @@ function remoteScope(value: unknown): RemoteDeviceScope {
 
 function remoteCapability(value: unknown): RemoteSyncCapability {
   if (value === 'session.read' || value === 'workspace.read' || value === 'event.subscribe'
-    || value === 'session.command' || value === 'approval.respond') return value
+    || value === 'session.command' || value === 'approval.respond'
+    || value === 'session.replicate.read' || value === 'session.replicate.write') return value
   throw new Error(`remote sync capability is invalid: ${String(value)}`)
+}
+
+function sessionHeader(value: unknown, label: string): SessionHeader {
+  const record = objectRecord(value, label)
+  nonnegativeInteger(record.version, `${label}.version`)
+  nonEmptyString(record.id, `${label}.id`)
+  nonnegativeInteger(record.createdAt, `${label}.createdAt`)
+  return record as unknown as SessionHeader
 }
 
 function objectRecord(value: unknown, label: string): Record<string, unknown> {

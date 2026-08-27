@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import WebSocket, { WebSocketServer } from 'ws'
+import { interruptedTurnClosers, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionPersistence, SessionReplica, SessionReplicationResult } from '@deepseek-ai/dsh-session-persistence'
 import {
   RpcId,
   type ApiProxy, type HostFrame, type MuxFrame, type RpcRequest,
@@ -13,6 +15,8 @@ import {
   parseRemoteSyncCursor,
   type RemoteSyncCursor, type RemoteSyncEvent, type RemoteSyncFrame,
   type RemoteSyncDescription, type RemoteSyncResyncRequired, type RemoteSyncSnapshot,
+  type RemoteSessionReplicaApplyResult, type RemoteSessionReplicaDocument,
+  type RemoteSessionReplicaSummary,
 } from './remote-sync.ts'
 import type { RemoteDeviceScope } from './remote-auth-wire.ts'
 
@@ -163,7 +167,11 @@ export class RemoteSyncHub {
   private readonly sourceLoop: Promise<void>
   private readonly socketPumps = new Set<Promise<void>>()
 
-  constructor(private readonly api: ApiProxy, capacity: number) {
+  constructor(
+    private readonly api: ApiProxy,
+    capacity: number,
+    private readonly persistence?: Pick<SessionPersistence, 'listSnapshots' | 'inspect' | 'replicate'>,
+  ) {
     this.journal = new RemoteSyncJournal(capacity)
     this.sourceLoop = this.runSources()
   }
@@ -188,7 +196,12 @@ export class RemoteSyncHub {
         scope,
         capabilities: scope === 'pocket'
           ? ['session.read', 'workspace.read', 'event.subscribe', 'approval.respond']
-          : ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
+          : [
+            'session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond',
+            ...this.persistence === undefined
+              ? []
+              : ['session.replicate.read' as const, 'session.replicate.write' as const],
+          ],
         host: host.result.value,
       }
     }
@@ -224,6 +237,31 @@ export class RemoteSyncHub {
       }
     }
     throw new Error('remote sync snapshot cancelled')
+  }
+
+  /** List materialized Session identities and opaque revisions for handoff planning. */
+  async replicaList(signal?: AbortSignal): Promise<RemoteSessionReplicaSummary[]> {
+    const persistence = this.expectPersistence()
+    return (await persistence.listSnapshots(signal)).map(snapshot => ({
+      header: snapshot.header,
+      revision: String(snapshot.revision),
+    }))
+  }
+
+  /** Read one complete logical Session document without mutating its source. */
+  async replicaRead(sessionId: string, signal?: AbortSignal): Promise<RemoteSessionReplicaDocument> {
+    const inspected = await this.expectPersistence().inspect(SessionId(sessionId), signal)
+    return {
+      meta: inspected.meta,
+      events: inspected.events,
+      balanced: interruptedTurnClosers(inspected.events).length === 0,
+    }
+  }
+
+  /** Apply one balanced document using the persistence authority's prefix-compatible primitive. */
+  async replicaApply(replica: SessionReplica, signal?: AbortSignal): Promise<RemoteSessionReplicaApplyResult> {
+    const result: SessionReplicationResult = await this.expectPersistence().replicate(replica, signal)
+    return { ...result, sessionId: String(result.sessionId) }
   }
 
   /**
@@ -267,6 +305,11 @@ export class RemoteSyncHub {
     await new Promise<void>((resolve, reject) => {
       this.sockets.close((error) => { if (error === undefined) resolve(); else reject(error) })
     })
+  }
+
+  private expectPersistence(): Pick<SessionPersistence, 'listSnapshots' | 'inspect' | 'replicate'> {
+    if (this.persistence === undefined) throw new Error('remote Session replication is unavailable')
+    return this.persistence
   }
 
   private async runSources(): Promise<void> {

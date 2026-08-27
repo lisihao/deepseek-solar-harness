@@ -12,6 +12,10 @@ node 半侧在桥接或 upgrade 前守卫 `/api` 下的每个入口（`src/api-r
 
 `/api/events.mux` 与 `/api/events.host` 各接受一条 WebSocket upgrade，并只向浏览器发送对应的 `ServerRequest` 文本消息；客户端不会在这些 socket 上发送业务数据。任一 socket 结束都会使当前 connection generation 失败并重建两条流，连接就绪仍要求两条 socket 均已打开且 `host.describe` HTTP 调用成功。浏览器断开只会结算并释放它自己持有的 pump，不能表现为未处理的 Host rejection。Host teardown 会终止两条 socket、中止各自的 source，并等待 source 清理完成后再返回。普通网络 GET 这些路径会返回 426，不保留 SSE（Server-Sent Events）回退；`toFetchHandler` 的 SSE 编解码只服务进程内同构载体。
 
+## Remote Sync 与稳定 Session 交接
+
+Remote Sync 协议 1.2 保留 snapshot + cursor 投影，并为 cockpit/admin 客户端增加经过认证的 `replica.list`、`replica.read` 和 `replica.apply` 调用。只有挂载 `ctx.sessionPersistence` 时，Server 才声明 `session.replicate.read/write`。线路传输正典 `SessionHeader` 与完整事件日志；目标端把每次写入决策委托给 `SessionPersistence.replicate`，因此重试具备幂等性，而分叉或活动日志会明确失败。开放轮次可以远程观察，但会标记为不平衡，不能作为可恢复状态应用。这是显式权威交接，不是持续双写同步。
+
 ## 模型体验
 
 无。协议消费层只在浏览器与主机之间搬运已经组合好的消息；这里没有任何内容进入模型请求。
@@ -24,3 +28,4 @@ node 半侧在桥接或 upgrade 前守卫 `/api` 下的每个入口（`src/api-r
 
 - **History 会恢复未附加的会话**：打开 history 可能创建宿主侧 agent，并增加首次打开的延迟；没有仅从持久化读取的路径。
 - **`/api` 桥把每个请求体整体缓冲在内存里**：`maxRequestBodyBytes`（默认 160 MiB，按默认 100 MiB 图片总量上限经 base64 膨胀加信封余量得出）因此同时是单请求的驻留内存上界；要降低它而不缩小图片限额，需要流式请求体路径。
+- **副本读取目前是整份日志且无分页**：已结束会话作为一个逻辑文档传输。若要用于无界历史，必须先增加大日志分块。

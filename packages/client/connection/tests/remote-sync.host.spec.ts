@@ -204,6 +204,37 @@ describe('RemoteSyncHub', () => {
     await expect(hub.close()).rejects.toThrow()
   })
 
+  it('advertises and serves prefix-compatible Session replication only when persistence is mounted', async () => {
+    const header = { version: 0, id: 'session-replica', createdAt: 1 }
+    const events = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    const replicate = vi.fn(async () => ({
+      sessionId: 'session-replica', state: 'created' as const,
+      sourceEventCount: 2, destinationEventCount: 2, appendedEventCount: 2,
+    }))
+    const persistence = {
+      listSnapshots: async () => [{ header, revision: 'store:1' }],
+      inspect: async () => ({ meta: header, events }),
+      replicate,
+    }
+    const hub = new RemoteSyncHub(api(), 4, persistence as never)
+    await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({
+      capabilities: expect.arrayContaining(['session.replicate.read', 'session.replicate.write']),
+    })
+    await expect(hub.describe(new AbortController().signal, 'pocket')).resolves.not.toMatchObject({
+      capabilities: expect.arrayContaining(['session.replicate.read']),
+    })
+    await expect(hub.replicaList()).resolves.toEqual([{ header, revision: 'store:1' }])
+    await expect(hub.replicaRead('session-replica')).resolves.toEqual({ meta: header, events, balanced: true })
+    await expect(hub.replicaApply({ meta: header, events } as never)).resolves.toMatchObject({
+      sessionId: 'session-replica', state: 'created', appendedEventCount: 2,
+    })
+    expect(replicate).toHaveBeenCalledOnce()
+    await hub.close()
+  })
+
   it('retries projections if deployment changes during reads and supports cancellation', async () => {
     let describes = 0
     let snapshots = 0

@@ -4,6 +4,7 @@ import type { IncomingHttpHeaders } from 'node:http'
 import { createHash } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-attachment'
+import { SessionReplicationError, type SessionReplica } from '@deepseek-ai/dsh-session-persistence'
 import {
   RemoteAuthError,
   type RemoteAuthService,
@@ -42,9 +43,11 @@ export type {
 export { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 export {
   REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
+  parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
   parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
 } from './remote-sync.ts'
 export type {
+  RemoteSessionReplicaApplyResult, RemoteSessionReplicaDocument, RemoteSessionReplicaSummary,
   RemoteSyncCapability, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
   RemoteSyncResyncRequired, RemoteSyncSnapshot,
 } from './remote-sync.ts'
@@ -360,7 +363,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
     registerDownlink(MUX_EVENTS_PATH, (req, socket, head) => { downlinks.handleMux(req, socket, head) })
     registerDownlink(HOST_EVENTS_PATH, (req, socket, head) => { downlinks.handleHost(req, socket, head) })
     if (remoteSync) apiCtx.inject(['remoteAuth'], (authCtx) => {
-      const hub = new RemoteSyncHub(authCtx.apiProxy, remoteSyncJournalCapacity)
+      const hub = new RemoteSyncHub(
+        authCtx.apiProxy,
+        remoteSyncJournalCapacity,
+        authCtx.get('sessionPersistence'),
+      )
       const removeAuthRpc = connection.rpc.handle(
         REMOTE_AUTH_RPC_CHANNEL,
         async (endpoint, payload, _signal, requestContext) => remoteAuthCall(
@@ -373,7 +380,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
       )
       const removeSyncRpc = connection.rpc.handle(
         REMOTE_SYNC_RPC_CHANNEL,
-        async (endpoint, _payload, signal, requestContext) => {
+        async (endpoint, payload, signal, requestContext) => {
           const access = requireRemoteAccess(
             authCtx.remoteAuth,
             requestContext,
@@ -381,6 +388,37 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
           )
           if (endpoint === 'describe') return { ok: true, value: await hub.describe(signal, access.scope) }
           if (endpoint === 'snapshot') return { ok: true, value: await hub.snapshot(signal) }
+          if (endpoint === 'replica.list') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: await hub.replicaList(signal) }
+          }
+          if (endpoint === 'replica.read') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            return { ok: true, value: await hub.replicaRead(requiredString(body.sessionId, 'sessionId'), signal) }
+          }
+          if (endpoint === 'replica.apply') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            const events = body.events
+            if (!Array.isArray(events)) throw new ConnectionRpcHttpError(400, 'events must be an array')
+            try {
+              return {
+                ok: true,
+                value: await hub.replicaApply({ meta: body.meta, events } as SessionReplica, signal),
+              }
+            } catch (error) {
+              if (!(error instanceof SessionReplicationError)) throw error
+              return {
+                ok: false,
+                error: {
+                  code: 'internal' as const,
+                  message: `${error.code}: ${error.message}`,
+                  details: {},
+                },
+              }
+            }
+          }
           return {
             ok: false,
             error: {

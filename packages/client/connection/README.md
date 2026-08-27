@@ -12,6 +12,10 @@ The node half guards every entry under `/api` before bridging or upgrading (`src
 
 `/api/events.mux` and `/api/events.host` each accept a WebSocket upgrade and send only the corresponding `ServerRequest` text messages to the browser; the client sends no application data over these sockets. If either socket ends, the current connection generation fails and rebuilds both streams; readiness still requires both sockets to be open and the `host.describe` HTTP call to succeed. A browser disconnect settles and releases only its owned pump; it cannot surface as an unhandled Host rejection. Host teardown terminates both sockets, aborts their sources, and waits for source cleanup before returning. Ordinary network GETs to these paths return 426 with no SSE fallback; `toFetchHandler`'s SSE codec serves only the isomorphic in-process carrier.
 
+## Remote Sync and stable Session handoff
+
+Remote Sync protocol 1.2 keeps the snapshot-plus-cursor projection and adds authenticated `replica.list`, `replica.read`, and `replica.apply` calls for cockpit/admin clients. A Server advertises `session.replicate.read/write` only when `ctx.sessionPersistence` is mounted. The wire moves the canonical `SessionHeader` and complete event log; the destination delegates every write decision to `SessionPersistence.replicate`, so retries are idempotent and divergent or live logs fail loudly. An open turn may be observed remotely but is marked unbalanced and cannot be applied as recoverable state. This is explicit authority handoff, not continuous dual-write synchronization.
+
 ## Model Experience
 
 None, as the wire consumer layer moves already-composed messages between browser and host; nothing here reaches a model request.
@@ -24,3 +28,4 @@ None; this package neither assembles nor sends a provider request.
 
 - **History resumes an unattached session** — opening history may create the host-side agent and add latency to the first open; there is no persistence-only read path.
 - **The `/api` bridge buffers each request body in memory** — `maxRequestBodyBytes` (default 160 MiB, sized for the default 100 MiB aggregate image limit after base64 expansion plus envelope headroom) is therefore also the per-request resident bound; a streaming body path would be needed to lower it without shrinking the image limits.
+- **Replica reads are currently whole-log and unpaginated** — completed sessions are transferred as one logical document. Large-log chunking is required before using this path for unbounded histories.
