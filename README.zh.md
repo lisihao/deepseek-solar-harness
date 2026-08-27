@@ -88,6 +88,26 @@ flowchart TB
 
 这个控制平面比 prompt 级 supervisor 更强，因为 scheduler state 与 evidence 不依赖任何单一模型对话；它也比普通 graph library 更重，因为 daemon、artifact lineage、receipt protocol、approval state、release identity 与 Desktop projection 共同形成的是产品 operating model，而不只是开发 API。
 
+## 与相关项目的对比
+
+| 项目族 | 相对 DSH 更强之处 | DSH 更强之处 |
+| --- | --- | --- |
+| [上游 DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | 上游差异更小、贡献路径更简单、社区基线更统一 | Solar Desktop、受管插件源码闭环、治理化发布、持久 TaskGraph daemon、Resident Operator 路由、Continual Harness |
+| [OpenAI Codex](https://github.com/openai/codex)、Claude Code、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[OpenCode](https://github.com/anomalyco/opencode) | 启动与运维复杂度更低；model-native coding loop 高度优化；其中多个项目提供更广平台打包 | 外置持久编排、显式 effect/read/write scope、Operator-independent receipt 与 artifact、Provider 路由、可复现产品组合 |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | 任意 Python graph、checkpoint、interrupt、deployment integration 与应用嵌入的 library ergonomics 更成熟 | 集成 coding workbench、event-sourced model transcript、tool ABI、本地物理 Operator、Desktop、受管插件、源码到发布治理 |
+| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) 与 AutoGen 谱系 | 多语言企业 API、分布式/应用托管模式、广泛 Provider 生态和标准协作 pattern | 更具主张的本地 coding 控制平面、可执行 profile 组合、per-node capability sealing、本地 Resident Operator、产品源码闭环 |
+| AI4Research、GPT Researcher、Open Deep Research、OpenJiuwen DeepSearch、Octos 等深度研究流水线 | 领域化来源采集、证据综合、报告规划、引用与发布 workflow | 通用可执行 Agent runtime、coding tool、持久 Session、底层 capability seam、物理 Operator 编排、Desktop 生命周期 |
+
+DSH 不应替换所有专业研究流水线。在 Solar 类系统中，它更适合作为研究 Operator 下方的执行底座：研究专用 Artifact schema、citation support、coverage evaluation、Report Planner、Chapter Writer 与发布仍应由领域 service 负责，而 DSH 提供有界执行、状态、恢复、Operator 路由、工具和治理。
+
+## 优势
+
+1. **Durability 同时覆盖模型与非模型状态。** Session event 重建模型可见 history；TaskGraph state、receipt 与 artifact 独立于 conversation 持久存在。
+2. **Authority 比 prompt-supervised 系统更显式。** Node 声明 dependency、read/write scope、effect budget、capability budget、secret、timeout、retry 与 verification criticality。
+3. **扩展点是真实 runtime contract。** Service、Provider、Consumer、scope、event、configuration 与 disposal 都在代码中表示，而不是隐藏在一个 supervisor prompt 内。
+4. **产品可复现。** Desktop package closure、受管插件源码、accepted revision、license evidence 与 release identity 一起被跟踪。
+5. **强 coding agent 仍是可替换资源。** Codex、Claude Code 与 metered worker 可由 policy 选择，但不会取得 global scheduler、evidence graph 或 release authority。
+
 ## 关键技术设计
 
 ### Cordis 插件 runtime
@@ -132,26 +152,6 @@ Desktop 是 thin Electron host：Host runtime 仍然基于 Cordis，通过 loopb
 | Desktop 架构 | [`products/desktop/docs/architecture.en.md`](products/desktop/docs/architecture.en.md) | 说明 Electron、Host、Web client、profile、native runtime 与 packaging closure |
 | Plugin provenance | [`plugins/registry.yaml`](plugins/registry.yaml) | 记录 source、accepted revision、license evidence 与 native check |
 | 产品 identity | [`distribution/product.json`](distribution/product.json) | 定义 platform、Desktop version 与稳定 tag 合同 |
-
-## 与相关项目的对比
-
-| 项目族 | 相对 DSH 更强之处 | DSH 更强之处 |
-| --- | --- | --- |
-| [上游 DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | 上游差异更小、贡献路径更简单、社区基线更统一 | Solar Desktop、受管插件源码闭环、治理化发布、持久 TaskGraph daemon、Resident Operator 路由、Continual Harness |
-| [OpenAI Codex](https://github.com/openai/codex)、Claude Code、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[OpenCode](https://github.com/anomalyco/opencode) | 启动与运维复杂度更低；model-native coding loop 高度优化；其中多个项目提供更广平台打包 | 外置持久编排、显式 effect/read/write scope、Operator-independent receipt 与 artifact、Provider 路由、可复现产品组合 |
-| [LangGraph](https://github.com/langchain-ai/langgraph) | 任意 Python graph、checkpoint、interrupt、deployment integration 与应用嵌入的 library ergonomics 更成熟 | 集成 coding workbench、event-sourced model transcript、tool ABI、本地物理 Operator、Desktop、受管插件、源码到发布治理 |
-| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) 与 AutoGen 谱系 | 多语言企业 API、分布式/应用托管模式、广泛 Provider 生态和标准协作 pattern | 更具主张的本地 coding 控制平面、可执行 profile 组合、per-node capability sealing、本地 Resident Operator、产品源码闭环 |
-| AI4Research、GPT Researcher、Open Deep Research、OpenJiuwen DeepSearch、Octos 等深度研究流水线 | 领域化来源采集、证据综合、报告规划、引用与发布 workflow | 通用可执行 Agent runtime、coding tool、持久 Session、底层 capability seam、物理 Operator 编排、Desktop 生命周期 |
-
-DSH 不应替换所有专业研究流水线。在 Solar 类系统中，它更适合作为研究 Operator 下方的执行底座：研究专用 Artifact schema、citation support、coverage evaluation、Report Planner、Chapter Writer 与发布仍应由领域 service 负责，而 DSH 提供有界执行、状态、恢复、Operator 路由、工具和治理。
-
-## 优势
-
-1. **Durability 同时覆盖模型与非模型状态。** Session event 重建模型可见 history；TaskGraph state、receipt 与 artifact 独立于 conversation 持久存在。
-2. **Authority 比 prompt-supervised 系统更显式。** Node 声明 dependency、read/write scope、effect budget、capability budget、secret、timeout、retry 与 verification criticality。
-3. **扩展点是真实 runtime contract。** Service、Provider、Consumer、scope、event、configuration 与 disposal 都在代码中表示，而不是隐藏在一个 supervisor prompt 内。
-4. **产品可复现。** Desktop package closure、受管插件源码、accepted revision、license evidence 与 release identity 一起被跟踪。
-5. **强 coding agent 仍是可替换资源。** Codex、Claude Code 与 metered worker 可由 policy 选择，但不会取得 global scheduler、evidence graph 或 release authority。
 
 ## 限制与风险
 
