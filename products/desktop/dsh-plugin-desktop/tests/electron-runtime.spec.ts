@@ -488,6 +488,22 @@ describe('Electron compatibility runtime', () => {
     menu.find(item => item.label === 'Use Local Server')?.click?.()
     await vi.waitFor(() => { expect(useServer).toHaveBeenCalledOnce() })
     expect(configureFrontend).not.toHaveBeenCalled()
+
+    const registration = electron.browserWindows[0]?.webContents.on.mock.calls
+      .find(call => call[0] === 'will-frame-navigate')
+    const navigate = registration?.[1] as (event: {
+      url: string
+      isMainFrame: boolean
+      preventDefault(): void
+    }) => void
+    const configure = {
+      url: 'dsh-desktop://deployment/configure',
+      isMainFrame: true,
+      preventDefault: vi.fn(),
+    }
+    navigate(configure)
+    expect(configure.preventDefault).toHaveBeenCalledOnce()
+    await vi.waitFor(() => { expect(configureFrontend).toHaveBeenCalledOnce() })
     await release()
   })
 
