@@ -6,8 +6,11 @@ import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import type { DesktopShellMode } from './runtime.ts'
 
 export interface DesktopServerDeploymentState {
-  readonly version: 3
+  readonly version: 4
   readonly role: 'server'
+  readonly activeServerId?: string
+  readonly servers: readonly DesktopFrontendServer[]
+  readonly presentation: DesktopShellMode
 }
 
 interface DesktopFrontendServerBase {
@@ -29,7 +32,7 @@ export interface DesktopPairedServer extends DesktopFrontendServerBase {
 export type DesktopFrontendServer = DesktopTrustedTunnelServer | DesktopPairedServer
 
 export interface DesktopFrontendDeploymentState {
-  readonly version: 3
+  readonly version: 4
   readonly role: 'frontend'
   readonly activeServerId: string
   readonly servers: readonly DesktopFrontendServer[]
@@ -65,7 +68,12 @@ export interface ConfigureFrontendRequest {
   readonly presentation?: DesktopShellMode
 }
 
-const DEFAULT_STATE: DesktopServerDeploymentState = { version: 3, role: 'server' }
+const DEFAULT_STATE: DesktopServerDeploymentState = {
+  version: 4,
+  role: 'server',
+  servers: [],
+  presentation: 'compatibility',
+}
 
 /** Persistence owner for choosing a local Server or remote Frontend before Cordis boot. */
 export class DesktopDeploymentStateStore {
@@ -98,7 +106,7 @@ export class DesktopDeploymentStateStore {
       throw new Error('dsh-plugin-desktop: device name must contain 1 to 100 characters')
     }
     const current = await this.load()
-    const servers = current.role === 'frontend' ? [...current.servers] : []
+    const servers = [...current.servers]
     const requestedId = input.serverId?.trim()
     const requestedIndex = requestedId === undefined || requestedId === ''
       ? servers.findIndex(server => server.endpoint === endpoint.href)
@@ -154,11 +162,11 @@ export class DesktopDeploymentStateStore {
     if (requestedIndex >= 0) servers[requestedIndex] = server
     else servers.push(server)
     const state: DesktopFrontendDeploymentState = {
-      version: 3,
+      version: 4,
       role: 'frontend',
       activeServerId: id,
       servers,
-      presentation: input.presentation ?? (current.role === 'frontend' ? current.presentation : 'compatibility'),
+      presentation: input.presentation ?? current.presentation,
     }
     await this.persist(state)
     return state
@@ -166,29 +174,59 @@ export class DesktopDeploymentStateStore {
 
   async selectFrontend(serverId: string): Promise<DesktopFrontendDeploymentState> {
     const current = await this.load()
-    if (current.role !== 'frontend') throw new Error('dsh-plugin-desktop: no Frontend Servers are configured')
+    if (current.servers.length === 0) throw new Error('dsh-plugin-desktop: no Frontend Servers are configured')
     const id = nonEmptyString(serverId.trim(), 'serverId')
     if (!current.servers.some(server => server.id === id)) {
       throw new Error('dsh-plugin-desktop: Frontend Server id does not exist')
     }
-    const next = { ...current, activeServerId: id }
+    const next: DesktopFrontendDeploymentState = {
+      version: 4,
+      role: 'frontend',
+      activeServerId: id,
+      servers: current.servers,
+      presentation: current.presentation,
+    }
     await this.persist(next)
     return next
   }
 
   async removeFrontend(serverId: string): Promise<DesktopDeploymentState> {
     const current = await this.load()
-    if (current.role !== 'frontend') throw new Error('dsh-plugin-desktop: no Frontend Servers are configured')
+    if (current.servers.length === 0) throw new Error('dsh-plugin-desktop: no Frontend Servers are configured')
     const id = nonEmptyString(serverId.trim(), 'serverId')
     const servers = current.servers.filter(server => server.id !== id)
     if (servers.length === current.servers.length) {
       throw new Error('dsh-plugin-desktop: Frontend Server id does not exist')
     }
-    if (servers.length === 0) return this.useServer()
+    if (servers.length === 0) {
+      const next: DesktopServerDeploymentState = {
+        version: 4,
+        role: 'server',
+        servers: [],
+        presentation: current.presentation,
+      }
+      await this.persist(next)
+      return next
+    }
+    const activeServerId = current.activeServerId !== undefined
+      && servers.some(server => server.id === current.activeServerId)
+      ? current.activeServerId
+      : servers[0]!.id
+    if (current.role === 'server') {
+      const next: DesktopServerDeploymentState = {
+        version: 4,
+        role: 'server',
+        activeServerId,
+        servers,
+        presentation: current.presentation,
+      }
+      await this.persist(next)
+      return next
+    }
     const next: DesktopFrontendDeploymentState = {
       ...current,
       servers,
-      activeServerId: current.activeServerId === id ? servers[0]!.id : current.activeServerId,
+      activeServerId,
     }
     await this.persist(next)
     return next
@@ -207,8 +245,16 @@ export class DesktopDeploymentStateStore {
   }
 
   async useServer(): Promise<DesktopServerDeploymentState> {
-    await this.persist(DEFAULT_STATE)
-    return DEFAULT_STATE
+    const current = await this.load()
+    const next: DesktopServerDeploymentState = {
+      version: 4,
+      role: 'server',
+      ...current.activeServerId === undefined ? {} : { activeServerId: current.activeServerId },
+      servers: current.servers,
+      presentation: current.presentation,
+    }
+    await this.persist(next)
+    return next
   }
 
   async setPresentation(
@@ -333,31 +379,36 @@ export function activeFrontendServer(state: DesktopFrontendDeploymentState): Des
 
 function parseDeploymentState(value: unknown): DesktopDeploymentState {
   const state = objectRecord(value, 'deployment state')
-  if (state.version !== 1 && state.version !== 2 && state.version !== 3) {
+  if (state.version !== 1 && state.version !== 2 && state.version !== 3 && state.version !== 4) {
     throw new Error('dsh-plugin-desktop: unsupported deployment state version')
   }
-  if (state.role === 'server') return DEFAULT_STATE
-  if (state.role !== 'frontend') throw new Error('dsh-plugin-desktop: invalid deployment role')
-  const presentation = state.presentation
-  if (presentation !== 'compatibility' && presentation !== 'advanced') {
-    throw new Error('dsh-plugin-desktop: invalid Frontend presentation mode')
+  if (state.role === 'server') {
+    if (state.version !== 4) return DEFAULT_STATE
+    const presentation = parsePresentation(state.presentation)
+    const servers = parseFrontendServers(state.servers, true)
+    const activeServerId = state.activeServerId === undefined
+      ? undefined
+      : nonEmptyString(state.activeServerId, 'activeServerId')
+    if (activeServerId !== undefined && !servers.some(server => server.id === activeServerId)) {
+      throw new Error('dsh-plugin-desktop: active Frontend Server does not exist')
+    }
+    return {
+      version: 4,
+      role: 'server',
+      ...activeServerId === undefined ? {} : { activeServerId },
+      servers,
+      presentation,
+    }
   }
-  if (state.version === 3) {
-    if (!Array.isArray(state.servers) || state.servers.length === 0) {
-      throw new Error('dsh-plugin-desktop: Frontend Servers must be a non-empty array')
-    }
-    const servers = state.servers.map(parseFrontendServer)
-    if (new Set(servers.map(server => server.id)).size !== servers.length) {
-      throw new Error('dsh-plugin-desktop: Frontend Server ids must be unique')
-    }
-    if (new Set(servers.map(server => server.endpoint)).size !== servers.length) {
-      throw new Error('dsh-plugin-desktop: Frontend Server endpoints must be unique')
-    }
+  if (state.role !== 'frontend') throw new Error('dsh-plugin-desktop: invalid deployment role')
+  const presentation = parsePresentation(state.presentation)
+  if (state.version === 3 || state.version === 4) {
+    const servers = parseFrontendServers(state.servers, false)
     const activeServerId = nonEmptyString(state.activeServerId, 'activeServerId')
     if (!servers.some(server => server.id === activeServerId)) {
       throw new Error('dsh-plugin-desktop: active Frontend Server does not exist')
     }
-    return { version: 3, role: 'frontend', activeServerId, servers, presentation }
+    return { version: 4, role: 'frontend', activeServerId, servers, presentation }
   }
   const legacy = parseFrontendServer({
     id: 'legacy-default',
@@ -368,12 +419,33 @@ function parseDeploymentState(value: unknown): DesktopDeploymentState {
     encryptedCredential: state.encryptedCredential,
   })
   return {
-    version: 3,
+    version: 4,
     role: 'frontend',
     activeServerId: legacy.id,
     servers: [legacy],
     presentation,
   }
+}
+
+function parsePresentation(value: unknown): DesktopShellMode {
+  if (value !== 'compatibility' && value !== 'advanced') {
+    throw new Error('dsh-plugin-desktop: invalid Frontend presentation mode')
+  }
+  return value
+}
+
+function parseFrontendServers(value: unknown, allowEmpty: boolean): DesktopFrontendServer[] {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
+    throw new Error('dsh-plugin-desktop: Frontend Servers must be a non-empty array')
+  }
+  const servers = value.map(parseFrontendServer)
+  if (new Set(servers.map(server => server.id)).size !== servers.length) {
+    throw new Error('dsh-plugin-desktop: Frontend Server ids must be unique')
+  }
+  if (new Set(servers.map(server => server.endpoint)).size !== servers.length) {
+    throw new Error('dsh-plugin-desktop: Frontend Server endpoints must be unique')
+  }
+  return servers
 }
 
 function parseFrontendServer(value: unknown): DesktopFrontendServer {

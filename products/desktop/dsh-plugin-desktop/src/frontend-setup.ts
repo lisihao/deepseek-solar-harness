@@ -34,14 +34,14 @@ export class FrontendSetupController {
       const active = state.role === 'frontend' ? activeFrontendServer(state) : undefined
       return {
         role: state.role,
-        activeServerId: state.role === 'frontend' ? state.activeServerId : '',
-        servers: state.role === 'frontend' ? state.servers.map(server => ({
+        activeServerId: state.activeServerId ?? '',
+        servers: state.servers.map(server => ({
           id: server.id,
           label: server.label,
           endpoint: server.endpoint,
           deviceName: server.deviceName,
           authMode: server.authMode,
-        })) : [],
+        })),
         endpoint: active?.endpoint ?? '',
         deviceName: active?.deviceName ?? '',
         gitSync: this.gitSync.snapshot(),

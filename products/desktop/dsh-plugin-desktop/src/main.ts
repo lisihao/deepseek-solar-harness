@@ -100,7 +100,12 @@ async function start(): Promise<void> {
   let frontendSetup: FrontendSetupController | undefined
   let gitSync: DesktopGitSyncController | undefined
   let deploymentStore: DesktopDeploymentStateStore | undefined
-  let deploymentState: DesktopDeploymentState = { version: 3, role: 'server' }
+  let deploymentState: DesktopDeploymentState = {
+    version: 4,
+    role: 'server',
+    servers: [],
+    presentation: 'compatibility',
+  }
   let runtime!: ElectronDesktopRuntime
   const nativeExit = createDesktopExitCoordinator(
     {

@@ -40,12 +40,14 @@ describe('DesktopDeploymentStateStore', () => {
       },
     }
     const store = new DesktopDeploymentStateStore(root, secretStorage(), request)
-    await expect(store.load()).resolves.toEqual({ version: 3, role: 'server' })
+    await expect(store.load()).resolves.toEqual({
+      version: 4, role: 'server', servers: [], presentation: 'compatibility',
+    })
     const state = await store.configureFrontend({
       endpoint: 'https://server.example', pairingCode: '12345678', deviceName: 'MacBook',
     })
     expect(state).toMatchObject({
-      version: 3,
+      version: 4,
       role: 'frontend',
       servers: [expect.objectContaining({
         authMode: 'paired',
@@ -86,7 +88,7 @@ describe('DesktopDeploymentStateStore', () => {
       deviceName: 'MacBook',
     })
     expect(state).toEqual({
-      version: 3,
+      version: 4,
       role: 'frontend',
       activeServerId: expect.any(String),
       servers: [{
@@ -119,7 +121,7 @@ describe('DesktopDeploymentStateStore', () => {
       fetch: async () => { throw new Error('should not request while loading') },
     })
     await expect(store.load()).resolves.toEqual({
-      version: 3,
+      version: 4,
       role: 'frontend',
       activeServerId: 'legacy-default',
       servers: [{
@@ -154,7 +156,40 @@ describe('DesktopDeploymentStateStore', () => {
     expect(removed).toMatchObject({ role: 'frontend', activeServerId: second.activeServerId })
     if (removed.role !== 'frontend') throw new Error('expected remaining Frontend Server')
     expect(removed.servers).toHaveLength(1)
-    await expect(store.removeFrontend(removed.activeServerId)).resolves.toEqual({ version: 3, role: 'server' })
+    await expect(store.removeFrontend(removed.activeServerId)).resolves.toEqual({
+      version: 4, role: 'server', servers: [], presentation: 'compatibility',
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('retains the Server catalog while local Server mode is active and can switch back', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-local-server-catalog-'))
+    const fetch = vi.fn(async () => { throw new Error('trusted tunnels do not use remote auth') })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const remote = await store.configureFrontend({
+      label: 'Remote mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+      presentation: 'advanced',
+    })
+
+    const local = await store.useServer()
+    expect(local).toEqual({
+      version: 4,
+      role: 'server',
+      activeServerId: remote.activeServerId,
+      servers: remote.servers,
+      presentation: 'advanced',
+    })
+    await expect(new DesktopDeploymentStateStore(root, secretStorage(), { fetch }).load())
+      .resolves.toEqual(local)
+
+    const selected = await store.selectFrontend(remote.activeServerId)
+    expect(selected).toMatchObject({
+      version: 4,
+      role: 'frontend',
+      activeServerId: remote.activeServerId,
+      servers: remote.servers,
+      presentation: 'advanced',
+    })
     expect(fetch).not.toHaveBeenCalled()
   })
 
