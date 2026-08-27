@@ -193,7 +193,7 @@ describe('immutable compilation foundations', () => {
     expect(tables).toEqual(expect.arrayContaining([
       'runs', 'attempts', 'orchestration_events', 'compilation_artifacts', 'capability_bindings',
       'context_packets', 'node_execution_plans', 'capability_updates', 'command_receipts',
-      'autonomous_states',
+      'autonomous_states', 'cluster_election',
     ]))
     store.close()
   })
@@ -205,10 +205,12 @@ describe('immutable compilation foundations', () => {
     database.close()
 
     const store = new OrchestrationStore(root)
-    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(3)
+    expect(Number(store.db.prepare('PRAGMA user_version').get()?.user_version)).toBe(4)
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'command_receipts'").get())
       .toBeDefined()
     expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'autonomous_states'").get())
+      .toBeDefined()
+    expect(store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cluster_election'").get())
       .toBeDefined()
     store.close()
   })

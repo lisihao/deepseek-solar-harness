@@ -59,6 +59,17 @@ export interface DesktopDeploymentRequest {
   fetch(url: string | URL, init?: RequestInit): Promise<Response>
 }
 
+/** Read-only cluster authority returned by a configured Product Server probe. */
+export interface DesktopServerProbe {
+  readonly cluster?: {
+    readonly nodeId: string
+    readonly term: number
+    readonly role: 'follower' | 'candidate' | 'leader'
+    readonly leaderId?: string
+    readonly canSchedule: boolean
+  }
+}
+
 export interface ConfigureFrontendRequest {
   readonly serverId?: string
   readonly label?: string
@@ -252,7 +263,7 @@ export class DesktopDeploymentStateStore {
   }
 
   /** Prove that one configured Server serves the authenticated projection protocol. */
-  async probe(server: DesktopFrontendServer, accessToken?: string): Promise<void> {
+  async probe(server: DesktopFrontendServer, accessToken?: string): Promise<DesktopServerProbe> {
     const rpcId = crypto.randomUUID()
     const response = await this.request.fetch(new URL('/remote-sync/describe', server.endpoint), {
       method: 'POST',
@@ -270,6 +281,29 @@ export class DesktopDeploymentStateStore {
     if (record.rpcId !== rpcId) throw new Error('dsh-plugin-desktop: remote sync rpcId mismatch')
     const result = objectRecord(record.result, 'remote sync result')
     if (result.ok !== true) throw new Error('dsh-plugin-desktop: remote sync describe was rejected')
+    const value = objectRecord(result.value, 'remote sync description')
+    if (value.cluster === undefined) return {}
+    const cluster = objectRecord(value.cluster, 'remote sync cluster')
+    if (cluster.role !== 'follower' && cluster.role !== 'candidate' && cluster.role !== 'leader') {
+      throw new Error(`dsh-plugin-desktop: invalid remote cluster role ${String(cluster.role)}`)
+    }
+    if (!Number.isSafeInteger(cluster.term) || Number(cluster.term) < 0) {
+      throw new Error('dsh-plugin-desktop: invalid remote cluster term')
+    }
+    if (typeof cluster.canSchedule !== 'boolean') {
+      throw new Error('dsh-plugin-desktop: invalid remote cluster scheduling authority')
+    }
+    return {
+      cluster: {
+        nodeId: nonEmptyString(cluster.nodeId, 'cluster.nodeId'),
+        term: Number(cluster.term),
+        role: cluster.role,
+        ...cluster.leaderId === undefined ? {} : {
+          leaderId: nonEmptyString(cluster.leaderId, 'cluster.leaderId'),
+        },
+        canSchedule: cluster.canSchedule,
+      },
+    }
   }
 
   async useServer(): Promise<DesktopServerDeploymentState> {
@@ -388,13 +422,26 @@ export async function connectFrontendServer(
   const active = activeFrontendServer(state)
   const ordered = [active, ...state.servers.filter(server => server.id !== active.id)]
   const failures: Error[] = []
+  let reachableFollower: {
+    readonly server: DesktopFrontendServer
+    readonly access?: DesktopRemoteAccessSession
+  } | undefined
   for (const server of ordered) {
     const access = server.authMode === 'paired'
       ? new DesktopRemoteAccessSession(store, server, error => onCandidateError(server, error))
       : undefined
     try {
       await access?.start()
-      await store.probe(server, access?.accessToken())
+      const probe = await store.probe(server, access?.accessToken())
+      if (probe.cluster !== undefined && !probe.cluster.canSchedule) {
+        if (reachableFollower === undefined) {
+          reachableFollower = { server, ...access === undefined ? {} : { access } }
+        } else {
+          access?.stop()
+        }
+        continue
+      }
+      reachableFollower?.access?.stop()
       const selected = server.id === state.activeServerId ? state : await store.selectFrontend(server.id)
       return { state: selected, server, ...access === undefined ? {} : { access } }
     } catch (error) {
@@ -403,6 +450,11 @@ export async function connectFrontendServer(
       failures.push(failure)
       onCandidateError(server, failure)
     }
+  }
+  if (reachableFollower !== undefined) {
+    const { server, access } = reachableFollower
+    const selected = server.id === state.activeServerId ? state : await store.selectFrontend(server.id)
+    return { state: selected, server, ...access === undefined ? {} : { access } }
   }
   throw new AggregateError(failures, 'dsh-plugin-desktop: no configured Frontend Server is reachable')
 }

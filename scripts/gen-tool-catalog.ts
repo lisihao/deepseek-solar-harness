@@ -105,6 +105,11 @@ class CatalogOrchestrationService extends OrchestrationService {
   override resolveIndeterminate(): never { throw new Error('tool catalog never executes orchestration') }
   override resolveAutoRefineIndeterminate(): never { throw new Error('tool catalog never executes orchestration') }
   override proposeCapabilityUpdate(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterStatus(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterRequestVote(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterHeartbeat(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterExportReplica(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterInstallReplica(): never { throw new Error('tool catalog never executes orchestration') }
 }
 
 const root = resolve(import.meta.dirname, '..')

@@ -18,6 +18,8 @@ Remote Sync protocol 1.3 keeps the snapshot-plus-cursor projection and adds auth
 
 When `ctx.residentOperators` is mounted, the same authenticated channel advertises `operator.read/execute/interrupt`. A remote caller can inspect qualified native-subscription Providers, submit one durable command, detach immediately, reattach by turn id, read bounded structured progress, and interrupt the matching Session/turn pair. The Server's Resident daemon remains the sole command-receipt and native-session authority. Raw product transcripts and local Unix model-tool bridge addresses do not cross this boundary; remote model-tool bridge requests are rejected until a separately authenticated routed bridge exists.
 
+When `ctx.orchestrations` exposes cluster authority, every authenticated description may include a bounded read-only projection (`nodeId`, term, role, leader id, and `canSchedule`). This lets a Frontend with multiple configured Servers prefer the current majority-backed Leader without granting election authority. The `orchestration.cluster` control capability is advertised only to admin peers and carries vote, heartbeat, logical replica export, and term-fenced install. Production peers are expected to call those controls through authenticated loopback tunnels; a public Frontend bearer is not a cluster credential.
+
 ## Model Experience
 
 None, as the wire consumer layer moves already-composed messages between browser and host; nothing here reaches a model request.
@@ -31,3 +33,4 @@ None; this package neither assembles nor sends a provider request.
 - **History resumes an unattached session** — opening history may create the host-side agent and add latency to the first open; there is no persistence-only read path.
 - **The `/api` bridge buffers each request body in memory** — `maxRequestBodyBytes` (default 160 MiB, sized for the default 100 MiB aggregate image limit after base64 expansion plus envelope headroom) is therefore also the per-request resident bound; a streaming body path would be needed to lower it without shrinking the image limits.
 - **Replica reads are currently whole-log and unpaginated** — completed sessions are transferred as one logical document. Large-log chunking is required before using this path for unbounded histories.
+- **Orchestration cluster replicas are complete logical snapshots** — they are digest-verified and transactionally installed, but currently share the bounded Remote Sync request path. Incremental replication is required for unbounded orchestration stores.

@@ -13,6 +13,17 @@ import type {
   ResidentProviderStatus,
   ResidentTurnSnapshot,
 } from '@deepseek-ai/dsh-resident-operator'
+import type {
+  OrchestrationClusterHeartbeatRequest,
+  OrchestrationClusterHeartbeatResponse,
+  OrchestrationClusterInstallReceipt,
+  OrchestrationClusterInstallRequest,
+  OrchestrationClusterReplicaV1,
+  OrchestrationClusterStatus,
+  OrchestrationClusterVoteRequest,
+  OrchestrationClusterVoteResponse,
+  OrchestrationService,
+} from '@deepseek-ai/dsh-orchestration'
 import {
   RpcId,
   type ApiProxy, type HostFrame, type MuxFrame, type RpcRequest,
@@ -180,6 +191,10 @@ export class RemoteSyncHub {
     capacity: number,
     private readonly persistence?: Pick<SessionPersistence, 'listSnapshots' | 'inspect' | 'replicate'>,
     private readonly resident?: Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'>,
+    private readonly orchestration?: () => Pick<
+      OrchestrationService,
+      'clusterStatus' | 'clusterRequestVote' | 'clusterHeartbeat' | 'clusterExportReplica' | 'clusterInstallReplica'
+    > | undefined,
   ) {
     this.journal = new RemoteSyncJournal(capacity)
     this.sourceLoop = this.runSources()
@@ -196,6 +211,7 @@ export class RemoteSyncHub {
       const cursor = this.journal.cursor()
       const host = await this.api.host.describe({ rpcId: RpcId(randomUUID()), payload: {} })
       if (!host.result.ok) throw new Error(`host.describe failed: ${host.result.error.message}`)
+      const cluster = await this.orchestration?.()?.clusterStatus()
       if (this.journal.cursor().deploymentId !== cursor.deploymentId) continue
       return {
         protocol: REMOTE_SYNC_PROTOCOL,
@@ -213,8 +229,20 @@ export class RemoteSyncHub {
             ...this.resident === undefined
               ? []
               : ['operator.read' as const, 'operator.execute' as const, 'operator.interrupt' as const],
+            ...scope !== 'admin' || this.orchestration?.() === undefined
+              ? []
+              : ['orchestration.cluster' as const],
           ],
         host: host.result.value,
+        ...cluster === undefined ? {} : {
+          cluster: {
+            nodeId: cluster.nodeId,
+            term: cluster.term,
+            role: cluster.role,
+            ...cluster.leaderId === undefined ? {} : { leaderId: cluster.leaderId },
+            canSchedule: cluster.canSchedule,
+          },
+        },
       }
     }
     throw new Error('remote sync describe cancelled')
@@ -361,6 +389,31 @@ export class RemoteSyncHub {
     return this.expectResident().interrupt({ sessionId: sessionId as never, turnId: turnId as never })
   }
 
+  /** Read the local Product Server's bounded orchestration authority projection. */
+  clusterStatus(): Promise<OrchestrationClusterStatus | undefined> {
+    return this.expectOrchestration().clusterStatus()
+  }
+
+  /** Forward one authenticated vote request to the daemon-owned election state. */
+  clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse> {
+    return this.expectOrchestration().clusterRequestVote(request)
+  }
+
+  /** Forward one authenticated majority-lease heartbeat. */
+  clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse> {
+    return this.expectOrchestration().clusterHeartbeat(request)
+  }
+
+  /** Export one complete logical replica for an authenticated admin peer. */
+  clusterExportReplica(): Promise<OrchestrationClusterReplicaV1> {
+    return this.expectOrchestration().clusterExportReplica()
+  }
+
+  /** Install one term-fenced logical replica on the current follower. */
+  clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt> {
+    return this.expectOrchestration().clusterInstallReplica(request)
+  }
+
   /**
    * Accept a downlink-only WebSocket whose query names the snapshot cursor.
    * @param req - authenticated HTTP upgrade request.
@@ -412,6 +465,15 @@ export class RemoteSyncHub {
   private expectResident(): Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'> {
     if (this.resident === undefined) throw new Error('remote Resident execution is unavailable')
     return this.resident
+  }
+
+  private expectOrchestration(): Pick<
+    OrchestrationService,
+    'clusterStatus' | 'clusterRequestVote' | 'clusterHeartbeat' | 'clusterExportReplica' | 'clusterInstallReplica'
+  > {
+    const orchestration = this.orchestration?.()
+    if (orchestration === undefined) throw new Error('remote orchestration cluster control is unavailable')
+    return orchestration
   }
 
   private async runSources(): Promise<void> {

@@ -80,10 +80,12 @@ describe('Remote Sync wire parsing', () => {
       scope: 'cockpit',
       capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
       host: snapshot.host,
+      cluster: { nodeId: 'server-a', term: 4, role: 'leader', leaderId: 'server-a', canSchedule: true },
     }
     expect(parseRemoteSyncDescription(description)).toMatchObject({
       deploymentId: 'deployment-1', scope: 'cockpit',
       capabilities: ['session.read', 'workspace.read', 'event.subscribe', 'session.command', 'approval.respond'],
+      cluster: { nodeId: 'server-a', term: 4, role: 'leader', leaderId: 'server-a', canSchedule: true },
     })
     expect(() => parseRemoteSyncDescription({
       ...description, capabilities: [...description.capabilities, 'task.write'],
@@ -232,6 +234,12 @@ describe('Remote Sync wire parsing', () => {
       .toThrow('not an ISO instant')
     expect(() => parseRemoteSyncDescription({ ...description, protocol: { major: 1, minor: 1 } }))
       .toThrow('protocol mismatch')
+    expect(() => parseRemoteSyncDescription({
+      ...description, cluster: { nodeId: 'server-a', term: 1, role: 'primary', canSchedule: true },
+    })).toThrow('cluster role is invalid')
+    expect(() => parseRemoteSyncDescription({
+      ...description, cluster: { nodeId: 'server-a', term: -1, role: 'follower', canSchedule: false },
+    })).toThrow('non-negative safe integer')
 
     for (const value of [undefined, null, []]) {
       expect(() => parseRemoteSyncCursor(value)).toThrow('must be an object')

@@ -6,6 +6,12 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ResidentExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
+import type {
+  OrchestrationClusterHeartbeatRequest,
+  OrchestrationClusterInstallRequest,
+  OrchestrationClusterReplicaV1,
+  OrchestrationClusterVoteRequest,
+} from '@deepseek-ai/dsh-orchestration'
 import { SessionReplicationError, type SessionReplica } from '@deepseek-ai/dsh-session-persistence'
 import {
   RemoteAuthError,
@@ -54,7 +60,7 @@ export type {
   RemoteResidentModelOption, RemoteResidentProviderStatus, RemoteResidentQuotaPool,
   RemoteResidentQuotaWindow, RemoteResidentReasoningEffort, RemoteResidentTurnSnapshot,
   RemoteSessionReplicaApplyResult, RemoteSessionReplicaDocument, RemoteSessionReplicaSummary,
-  RemoteSyncCapability, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
+  RemoteSyncCapability, RemoteSyncClusterProjection, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
   RemoteSyncResyncRequired, RemoteSyncSnapshot,
 } from './remote-sync.ts'
 
@@ -374,6 +380,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         remoteSyncJournalCapacity,
         authCtx.get('sessionPersistence'),
         authCtx.get('residentOperators'),
+        () => authCtx.get('orchestrations'),
       )
       const removeAuthRpc = connection.rpc.handle(
         REMOTE_AUTH_RPC_CHANNEL,
@@ -476,6 +483,46 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
               requiredString(body.turnId, 'turnId'),
             )
             return { ok: true, value: { interrupted: true } }
+          }
+          if (endpoint === 'cluster.status') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: await hub.clusterStatus() }
+          }
+          if (endpoint === 'cluster.vote') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            const request: OrchestrationClusterVoteRequest = {
+              term: boundedInteger(body.term, 'term', 1, Number.MAX_SAFE_INTEGER),
+              candidateId: requiredString(body.candidateId, 'candidateId'),
+              commitIndex: boundedInteger(body.commitIndex, 'commitIndex', 0, Number.MAX_SAFE_INTEGER),
+            }
+            return { ok: true, value: await hub.clusterRequestVote(request) }
+          }
+          if (endpoint === 'cluster.heartbeat') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            const request: OrchestrationClusterHeartbeatRequest = {
+              term: boundedInteger(body.term, 'term', 1, Number.MAX_SAFE_INTEGER),
+              leaderId: requiredString(body.leaderId, 'leaderId'),
+              commitIndex: boundedInteger(body.commitIndex, 'commitIndex', 0, Number.MAX_SAFE_INTEGER),
+              leaseUntil: boundedInteger(body.leaseUntil, 'leaseUntil', 1, Number.MAX_SAFE_INTEGER),
+            }
+            return { ok: true, value: await hub.clusterHeartbeat(request) }
+          }
+          if (endpoint === 'cluster.export') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            return { ok: true, value: await hub.clusterExportReplica() }
+          }
+          if (endpoint === 'cluster.install') {
+            if (access.scope !== 'admin') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            recordPayload(body.replica)
+            const request: OrchestrationClusterInstallRequest = {
+              term: boundedInteger(body.term, 'term', 1, Number.MAX_SAFE_INTEGER),
+              leaderId: requiredString(body.leaderId, 'leaderId'),
+              replica: body.replica as OrchestrationClusterReplicaV1,
+            }
+            return { ok: true, value: await hub.clusterInstallReplica(request) }
           }
           return {
             ok: false,

@@ -290,6 +290,42 @@ describe('RemoteSyncHub', () => {
     await hub.close()
   })
 
+  it('advertises orchestration election control only to admin peers', async () => {
+    const clusterStatus = vi.fn(async () => ({
+      nodeId: 'a', memberIds: ['a', 'b', 'c'], term: 2, role: 'leader' as const,
+      leaderId: 'a', leaseUntil: 10_000, commitIndex: 7, quorum: 2, canSchedule: true,
+    }))
+    const clusterRequestVote = vi.fn(async () => ({ term: 3, voterId: 'a', granted: true, commitIndex: 7 }))
+    const clusterHeartbeat = vi.fn(async () => ({ term: 3, followerId: 'a', accepted: true, commitIndex: 7 }))
+    const clusterExportReplica = vi.fn(async () => ({
+      version: 1 as const, stateSchemaVersion: 4, commitIndex: 7,
+      capturedAt: '2026-08-27T12:00:00.000Z', tables: {}, artifacts: [],
+    }))
+    const clusterInstallReplica = vi.fn(async () => ({ nodeId: 'a', commitIndex: 7, state: 'applied' as const }))
+    const hub = new RemoteSyncHub(api(), 4, undefined, undefined, () => ({
+      clusterStatus, clusterRequestVote, clusterHeartbeat, clusterExportReplica, clusterInstallReplica,
+    }) as never)
+    await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({
+      capabilities: expect.arrayContaining(['orchestration.cluster']),
+      cluster: { nodeId: 'a', term: 2, role: 'leader', leaderId: 'a', canSchedule: true },
+    })
+    await expect(hub.describe(new AbortController().signal, 'cockpit')).resolves.toMatchObject({
+      capabilities: expect.not.arrayContaining(['orchestration.cluster']),
+      cluster: { nodeId: 'a', term: 2, role: 'leader', leaderId: 'a', canSchedule: true },
+    })
+    await expect(hub.clusterStatus()).resolves.toMatchObject({ leaderId: 'a', commitIndex: 7 })
+    await expect(hub.clusterRequestVote({ term: 3, candidateId: 'b', commitIndex: 7 }))
+      .resolves.toMatchObject({ granted: true })
+    await expect(hub.clusterHeartbeat({ term: 3, leaderId: 'b', commitIndex: 7, leaseUntil: 12_000 }))
+      .resolves.toMatchObject({ accepted: true })
+    await expect(hub.clusterExportReplica()).resolves.toMatchObject({ commitIndex: 7 })
+    await expect(hub.clusterInstallReplica({ term: 3, leaderId: 'b', replica: {} as never }))
+      .resolves.toMatchObject({ state: 'applied' })
+    expect(clusterRequestVote).toHaveBeenCalledOnce()
+    expect(clusterHeartbeat).toHaveBeenCalledOnce()
+    await hub.close()
+  })
+
   it('retries projections if deployment changes during reads and supports cancellation', async () => {
     let describes = 0
     let snapshots = 0

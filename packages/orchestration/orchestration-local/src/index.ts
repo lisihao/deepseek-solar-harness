@@ -8,6 +8,14 @@ import OrchestrationService, {
   type CapabilityUpdateRequest,
   type OrchestrationArtifactRef,
   type OrchestrationCompilationV1,
+  type OrchestrationClusterHeartbeatRequest,
+  type OrchestrationClusterHeartbeatResponse,
+  type OrchestrationClusterInstallReceipt,
+  type OrchestrationClusterInstallRequest,
+  type OrchestrationClusterReplicaV1,
+  type OrchestrationClusterStatus,
+  type OrchestrationClusterVoteRequest,
+  type OrchestrationClusterVoteResponse,
   type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompileRequest,
   type OrchestrationControlRequest,
@@ -95,6 +103,18 @@ class LocalOrchestrationService extends OrchestrationService {
 
   proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt> {
     return this.client.proposeCapabilityUpdate(request)
+  }
+
+  clusterStatus(): Promise<OrchestrationClusterStatus | undefined> { return this.client.clusterStatus() }
+  clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse> {
+    return this.client.clusterRequestVote(request)
+  }
+  clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse> {
+    return this.client.clusterHeartbeat(request)
+  }
+  clusterExportReplica(): Promise<OrchestrationClusterReplicaV1> { return this.client.clusterExportReplica() }
+  clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt> {
+    return this.client.clusterInstallReplica(request)
   }
 }
 

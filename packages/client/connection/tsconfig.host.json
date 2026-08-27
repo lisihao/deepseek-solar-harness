@@ -43,6 +43,9 @@
     },
     {
       "path": "../../physical-operator/physical-operator"
+    },
+    {
+      "path": "../../orchestration/orchestration"
     }
   ]
 }

@@ -81,6 +81,34 @@ describe('RemoteSyncHttpClient', () => {
     })
     await expect(remote.operatorProviders()).rejects.toThrow('internal: SESSION_BUSY: busy')
   })
+
+  it('validates vote and heartbeat responses at the remote cluster boundary', async () => {
+    const client = new RemoteSyncHttpClient('https://server.example', undefined, async (_input, init) => {
+      const call = JSON.parse(String(init?.body)) as { rpcId: string; method: string }
+      const value = call.method === 'cluster.vote'
+        ? { term: 2, voterId: 'b', granted: true, commitIndex: 7 }
+        : call.method === 'cluster.heartbeat'
+          ? { term: 2, followerId: 'b', accepted: true, commitIndex: 7 }
+          : { nodeId: 'b', commitIndex: 7, state: 'applied' }
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    })
+    await expect(client.clusterRequestVote({ term: 2, candidateId: 'a', commitIndex: 7 }))
+      .resolves.toEqual({ term: 2, voterId: 'b', granted: true, commitIndex: 7 })
+    await expect(client.clusterHeartbeat({ term: 2, leaderId: 'a', commitIndex: 7, leaseUntil: 10_000 }))
+      .resolves.toEqual({ term: 2, followerId: 'b', accepted: true, commitIndex: 7 })
+    await expect(client.clusterInstallReplica({ term: 2, leaderId: 'a', replica: {} as never }))
+      .resolves.toEqual({ nodeId: 'b', commitIndex: 7, state: 'applied' })
+
+    const invalid = new RemoteSyncHttpClient('https://server.example', undefined, async (_input, init) => {
+      const call = JSON.parse(String(init?.body)) as { rpcId: string }
+      return Response.json({
+        type: 'server-response', rpcId: call.rpcId,
+        result: { ok: true, value: { term: 2, voterId: 'b', granted: 'yes', commitIndex: 7 } },
+      })
+    })
+    await expect(invalid.clusterRequestVote({ term: 2, candidateId: 'a', commitIndex: 7 }))
+      .rejects.toThrow('granted must be boolean')
+  })
 })
 
 describe('RemotePhysicalOperator', () => {

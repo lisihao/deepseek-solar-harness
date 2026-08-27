@@ -60,6 +60,11 @@ import {
   type OrchestrationBlocker,
   type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompilationV1,
+  type OrchestrationClusterHeartbeatRequest,
+  type OrchestrationClusterInstallReceipt,
+  type OrchestrationClusterInstallRequest,
+  type OrchestrationClusterStatus,
+  type OrchestrationClusterVoteRequest,
   type OrchestrationControlRequest,
   type OrchestrationDecisionRequest,
   type OrchestrationEvent,
@@ -97,6 +102,13 @@ import {
   resolveAutonomousPolicy,
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
+import {
+  OrchestrationClusterElection,
+  RemoteSyncClusterPeerTransport,
+  readOrchestrationClusterConfig,
+  type OrchestrationClusterConfig,
+  type OrchestrationClusterPeerTransport,
+} from './cluster.ts'
 import { GitWorktreeManager } from './git-worktrees.ts'
 import { dependsTransitively, graphCertificate, nodesConflict, validateGraph } from './graph.ts'
 import {
@@ -119,7 +131,7 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 3
+export const ORCHESTRATION_PROTOCOL_VERSION = 4
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
@@ -135,6 +147,11 @@ export const ORCHESTRATION_METHODS = Object.freeze([
   'orchestration.resolve_indeterminate',
   'harness.auto_refine.resolve_indeterminate',
   'capability.propose_update',
+  'cluster.status',
+  'cluster.vote',
+  'cluster.heartbeat',
+  'cluster.export',
+  'cluster.install',
 ] as const)
 
 /**
@@ -419,6 +436,10 @@ export interface OrchestrationDaemonOptions {
   readonly modelWorkerProviders?: readonly ModelWorkerProvider[]
   /** Optional explicit remote execution members; omission follows the versioned root catalog. */
   readonly remoteOperatorServers?: readonly RemotePhysicalOperatorServer[]
+  /** Explicit cluster membership used by tests; omission follows root/cluster.json. */
+  readonly clusterConfig?: OrchestrationClusterConfig
+  /** Authenticated peer transport used by the majority-election control plane. */
+  readonly clusterTransport?: OrchestrationClusterPeerTransport
 }
 
 function requiredString(params: Record<string, unknown>, name: string): string {
@@ -759,6 +780,7 @@ export class OrchestrationDaemon {
   private readonly capacityRetryAfter = new Map<string, number>()
   private readonly worktrees: GitWorktreeManager
   private readonly autoRefine: DurableAutoRefineCoordinator
+  private readonly cluster: OrchestrationClusterElection | undefined
   private readonly recoveredRlmControllers: AbortController[] = []
   private readonly recoveredRlmDisposers: Array<() => void> = []
   private readonly remoteOperatorRegistrations = new Map<string, {
@@ -766,6 +788,7 @@ export class OrchestrationDaemon {
     readonly dispose: readonly (() => Promise<void>)[]
   }>()
   private remoteOperatorRefreshAt = 0
+  private clusterActionAt = 0
   private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
   private lockDescriptor: number | undefined
   private ticker: ReturnType<typeof setInterval> | undefined
@@ -783,6 +806,14 @@ export class OrchestrationDaemon {
       ...PRIME_AUTO_REFINE_DEFAULTS,
       ...options.autoRefine,
     })
+    const clusterConfig = options.clusterConfig ?? readOrchestrationClusterConfig(options.root)
+    this.cluster = clusterConfig === undefined
+      ? undefined
+      : new OrchestrationClusterElection(
+        clusterConfig,
+        this.store,
+        options.clusterTransport ?? new RemoteSyncClusterPeerTransport(),
+      )
     this.resident = options.residentClient ?? new ResidentDaemonClient({
       root: join(options.dshHome, 'resident-operators'),
       autoStart: true,
@@ -903,8 +934,8 @@ export class OrchestrationDaemon {
   private async dispatch(method: string, params: Record<string, unknown>): Promise<unknown> {
     switch (method) {
       case 'system.handshake': return this.handshake(params)
-      case 'orchestration.compile': return this.compile(params.request as never)
-      case 'orchestration.start': return this.startRun(requiredString(params, 'compilation_id'), params.approval_ref as string | undefined)
+      case 'orchestration.compile': this.requireClusterLeader(); return this.compile(params.request as never)
+      case 'orchestration.start': this.requireClusterLeader(); return this.startRun(requiredString(params, 'compilation_id'), params.approval_ref as string | undefined)
       case 'orchestration.list': return this.store.listRuns().map(value => value.snapshot)
       case 'orchestration.inspect': return this.store.getRun(requiredString(params, 'run_id')).snapshot
       case 'event.read': return this.store.readEvents(
@@ -915,11 +946,16 @@ export class OrchestrationDaemon {
       case 'artifact.read': return this.store.readArtifact(
         OrchestrationArtifactRef(requiredString(params, 'artifact_ref')),
       )
-      case 'orchestration.control': return this.control(params.request as never)
-      case 'orchestration.decide': return this.decide(params.request as never)
-      case 'orchestration.resolve_indeterminate': return this.resolveIndeterminate(params.request as never)
-      case 'harness.auto_refine.resolve_indeterminate': return this.resolveAutoRefineIndeterminate(params.request as never)
-      case 'capability.propose_update': return this.proposeCapabilityUpdate(params.request as never)
+      case 'orchestration.control': this.requireClusterLeader(); return this.control(params.request as never)
+      case 'orchestration.decide': this.requireClusterLeader(); return this.decide(params.request as never)
+      case 'orchestration.resolve_indeterminate': this.requireClusterLeader(); return this.resolveIndeterminate(params.request as never)
+      case 'harness.auto_refine.resolve_indeterminate': this.requireClusterLeader(); return this.resolveAutoRefineIndeterminate(params.request as never)
+      case 'capability.propose_update': this.requireClusterLeader(); return this.proposeCapabilityUpdate(params.request as never)
+      case 'cluster.status': return this.cluster?.status()
+      case 'cluster.vote': return this.expectCluster().requestVote(params.request as OrchestrationClusterVoteRequest)
+      case 'cluster.heartbeat': return this.expectCluster().heartbeat(params.request as OrchestrationClusterHeartbeatRequest)
+      case 'cluster.export': this.requireClusterLeader(); return this.store.exportClusterReplica()
+      case 'cluster.install': return this.installClusterReplica(params.request as OrchestrationClusterInstallRequest)
       case 'system.shutdown':
         setTimeout(() => { void this.close() }, 10)
         return { draining: true }
@@ -1253,6 +1289,60 @@ export class OrchestrationDaemon {
     return record
   }
 
+  private expectCluster(): OrchestrationClusterElection {
+    if (this.cluster === undefined) {
+      throw new OrchestrationError('orchestration cluster is not configured', 'ORCHESTRATION_UNAVAILABLE')
+    }
+    return this.cluster
+  }
+
+  private requireClusterLeader(): void {
+    if (this.cluster === undefined || this.cluster.canSchedule()) return
+    const status: OrchestrationClusterStatus = this.cluster.status()
+    throw new OrchestrationError(
+      status.leaderId === undefined
+        ? 'orchestration cluster has no majority-backed leader'
+        : `orchestration authority is held by cluster leader "${status.leaderId}"`,
+      'NOT_CLUSTER_LEADER',
+    )
+  }
+
+  private installClusterReplica(request: OrchestrationClusterInstallRequest): OrchestrationClusterInstallReceipt {
+    const cluster = this.expectCluster()
+    const status = cluster.status()
+    if (this.ticking || this.active.size > 0) {
+      throw new OrchestrationError('orchestration follower is busy and cannot install a cluster replica', 'ORCHESTRATION_UNAVAILABLE')
+    }
+    if (status.role !== 'follower' || status.term !== request.term
+      || status.leaderId !== request.leaderId || status.leaseUntil <= Date.now()) {
+      throw new OrchestrationError('orchestration cluster replica is not authorized by the current leader lease', 'NOT_CLUSTER_LEADER')
+    }
+    const state = this.store.installClusterReplica(request.replica)
+    return { nodeId: status.nodeId, commitIndex: this.store.commitIndex(), state }
+  }
+
+  private async replicateClusterAuthority(): Promise<void> {
+    if (this.cluster === undefined) return
+    const status = await this.cluster.renew()
+    if (!status.canSchedule) {
+      throw new OrchestrationError('orchestration cluster lost majority before physical dispatch', 'NOT_CLUSTER_LEADER')
+    }
+  }
+
+  private async refreshClusterAuthority(): Promise<void> {
+    if (this.cluster === undefined || Date.now() < this.clusterActionAt) return
+    const before = this.cluster.status()
+    const status = before.role === 'leader'
+      ? await this.cluster.renew()
+      : before.leaseUntil > Date.now()
+        ? before
+        : await this.cluster.campaign()
+    const memberOffset = Math.max(status.memberIds.indexOf(status.nodeId), 0) * 50
+    this.clusterActionAt = status.canSchedule
+      ? Date.now() + Math.max(Math.floor(this.cluster.config.leaseMs / 3), 250)
+      : Math.max(status.leaseUntil, Date.now()) + 100 + memberOffset
+  }
+
   private async refreshRemoteOperators(initial: boolean): Promise<void> {
     let servers: readonly RemotePhysicalOperatorServer[]
     try {
@@ -1294,11 +1384,13 @@ export class OrchestrationDaemon {
     if (this.ticking || this.closing) return
     this.ticking = true
     try {
+      await this.refreshClusterAuthority()
       if (Date.now() >= this.remoteOperatorRefreshAt) await this.refreshRemoteOperators(false)
       await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
       await this.reconcile()
       await this.ctx.rlmRuntime.pumpMessages()
       await this.ctx.rlmRuntime.pumpHeartbeats()
+      if (this.cluster !== undefined && !this.cluster.canSchedule()) return
       for (const record of this.store.listRuns()) {
         if (record.snapshot.state !== 'running') continue
         await this.advance(record)
@@ -1798,14 +1890,14 @@ export class OrchestrationDaemon {
   ): Promise<void> {
     if (plan.operatorPlan.mode === 'model-worker') {
       if (plan.rlmPlan?.enabled === true) {
-        this.dispatchModelWorkerRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
+        await this.dispatchModelWorkerRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
         return
       }
       await this.dispatchModelWorker(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
       return
     }
     if (plan.rlmPlan?.enabled === true) {
-      this.dispatchResidentRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
+      await this.dispatchResidentRlm(record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot)
       return
     }
     const timeout = attemptAbort(spec.timeoutMs)
@@ -1814,6 +1906,7 @@ export class OrchestrationDaemon {
     if (operator === undefined) throw new OrchestrationError(`physical operator is unavailable: ${plan.operatorPlan.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident')
     try {
+      await this.replicateClusterAuthority()
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
@@ -1868,25 +1961,32 @@ export class OrchestrationDaemon {
     contextPacket: ContextPacketV1,
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
-  ): void {
-    this.dispatchRlmAttempt(record, spec, plan, 'scheduler-owned-resident-rlm', (controller, physicalRuns) => (
+  ): Promise<void> {
+    return this.dispatchRlmAttempt(record, spec, plan, 'scheduler-owned-resident-rlm', (controller, physicalRuns) => (
       this.executeResidentRlm(
         record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
       )
     ))
   }
 
-  private dispatchRlmAttempt(
+  private async dispatchRlmAttempt(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
     contextIsolation: string,
     execute: (controller: AbortController, physicalRuns: PhysicalOperatorRun[]) => Promise<PhysicalOperatorResult>,
-  ): void {
+  ): Promise<void> {
     const timeout = attemptAbort(spec.timeoutMs)
     const { controller } = timeout
     const physicalRuns: PhysicalOperatorRun[] = []
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident-rlm')
+    try {
+      await this.replicateClusterAuthority()
+    } catch (error) {
+      timeout.clearTimeout()
+      this.failDispatch(acceptedAttempt, error)
+      return
+    }
     const result = execute(controller, physicalRuns)
     this.markAttemptRunning(record, spec, acceptedAttempt, {
       executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
@@ -3107,8 +3207,8 @@ export class OrchestrationDaemon {
     contextPacket: ContextPacketV1,
     capabilityPlan: CapabilityBindingPlanV1,
     harnessSnapshot?: ContinualHarnessSnapshotV1,
-  ): void {
-    this.dispatchRlmAttempt(record, spec, plan, 'model-worker-prime-rlm', (controller, physicalRuns) => (
+  ): Promise<void> {
+    return this.dispatchRlmAttempt(record, spec, plan, 'model-worker-prime-rlm', (controller, physicalRuns) => (
       this.executeModelWorkerRlm(
         record, spec, plan, contextPacket, capabilityPlan, harnessSnapshot, controller, physicalRuns,
       )
@@ -3173,7 +3273,7 @@ export class OrchestrationDaemon {
     }
   }
 
-  private dispatchModelWorker(
+  private async dispatchModelWorker(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
@@ -3185,6 +3285,7 @@ export class OrchestrationDaemon {
     const { controller } = timeout
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'model-worker')
     try {
+      await this.replicateClusterAuthority()
       const result = this.ctx.modelWorkers.execute({
         commandId: String(plan.executionId),
         workerId: plan.operatorPlan.operatorId,
@@ -3216,7 +3317,6 @@ export class OrchestrationDaemon {
       timeout.clearTimeout()
       this.failDispatch(acceptedAttempt, error)
     }
-    return Promise.resolve()
   }
 
   private acceptDispatch(

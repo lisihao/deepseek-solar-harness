@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -18,6 +19,7 @@ import {
   OrchestrationError,
   OrchestrationRunId,
   type LogicalTaskGraphV1,
+  type OrchestrationClusterReplicaV1,
   type OrchestrationCompilationV1,
   type OrchestrationEvent,
   type OrchestrationEventPage,
@@ -26,9 +28,13 @@ import {
 import type { IntentIRV1 } from '@deepseek-ai/dsh-intent-compiler'
 import { canonicalJson, canonicalSha256 } from './canonical.ts'
 import type { AutonomousRuntimeStateV1 } from './autonomous.ts'
+import type {
+  OrchestrationClusterElectionState,
+  OrchestrationClusterElectionStore,
+} from './cluster.ts'
 
 /** Forward-only SQLite schema version used by the strict daemon handshake. */
-export const ORCHESTRATION_STATE_SCHEMA_VERSION = 3
+export const ORCHESTRATION_STATE_SCHEMA_VERSION = 4
 
 /** Daemon-private state required to continue one public run projection. */
 export interface RuntimeRunRecord {
@@ -85,6 +91,22 @@ export interface OrchestrationCommandReceipt {
   readonly updatedAt: string
 }
 
+const REPLICA_TABLES = Object.freeze({
+  compilations: ['compilation_id', 'payload_json', 'created_at'],
+  runs: ['run_id', 'payload_json', 'state', 'revision', 'updated_at'],
+  attempts: ['run_id', 'node_id', 'attempt', 'generation', 'execution_id', 'state', 'execution_plan_ref', 'turn_id', 'error_code', 'error_message', 'created_at', 'updated_at'],
+  orchestration_events: ['sequence', 'run_id', 'node_id', 'attempt', 'generation', 'type', 'time', 'data_json'],
+  compilation_artifacts: ['artifact_ref', 'run_id', 'node_id', 'attempt', 'generation', 'created_at'],
+  capability_bindings: ['artifact_ref', 'run_id', 'node_id', 'attempt', 'generation', 'created_at'],
+  context_packets: ['artifact_ref', 'run_id', 'node_id', 'attempt', 'generation', 'created_at'],
+  node_execution_plans: ['artifact_ref', 'run_id', 'node_id', 'attempt', 'generation', 'created_at'],
+  capability_updates: ['update_id', 'run_id', 'node_id', 'generation', 'state', 'update_sha256', 'payload_json', 'created_at'],
+  command_receipts: ['command_id', 'method', 'request_sha256', 'state', 'response_json', 'error_code', 'error_message', 'created_at', 'updated_at'],
+  autonomous_states: ['run_id', 'node_id', 'attempt', 'payload_json', 'updated_at'],
+} as const)
+
+type ReplicaTable = keyof typeof REPLICA_TABLES
+
 function makePrivateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 })
   chmodSync(path, 0o700)
@@ -99,11 +121,12 @@ function optionalDatabaseString(value: unknown, column: string): string | undefi
 }
 
 /** Local orchestration state and artifacts, written only by the daemon. */
-export class OrchestrationStore {
+export class OrchestrationStore implements OrchestrationClusterElectionStore {
   /** Sole-writer SQLite connection. */
   readonly db: DatabaseSync
   /** Owner-private content-addressed artifact directory. */
   readonly artifactRoot: string
+  private clusterTracking = false
 
   constructor(readonly root: string) {
     makePrivateDirectory(root)
@@ -124,7 +147,12 @@ export class OrchestrationStore {
     else if (version === 1) {
       this.migrateSchema1To2()
       this.migrateSchema2To3()
-    } else if (version === 2) this.migrateSchema2To3()
+      this.migrateSchema3To4()
+    } else if (version === 2) {
+      this.migrateSchema2To3()
+      this.migrateSchema3To4()
+    } else if (version === 3) this.migrateSchema3To4()
+    this.clusterTracking = true
   }
 
   /** Close the SQLite writer connection. */
@@ -187,10 +215,12 @@ export class OrchestrationStore {
    * @param compilation - immutable certified compilation to persist.
    */
   saveCompilation(compilation: OrchestrationCompilationV1): void {
-    this.db.prepare(`
-      INSERT INTO compilations (compilation_id, payload_json, created_at)
-      VALUES (?, ?, ?)
-    `).run(compilation.compilationId, canonicalJson(compilation), new Date().toISOString())
+    this.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO compilations (compilation_id, payload_json, created_at)
+        VALUES (?, ?, ?)
+      `).run(compilation.compilationId, canonicalJson(compilation), new Date().toISOString())
+    })
   }
 
   /**
@@ -280,8 +310,13 @@ export class OrchestrationStore {
     readonly attempt?: number
     readonly generation?: number
   }): void {
-    this.db.prepare(`INSERT OR IGNORE INTO ${kind} (artifact_ref, run_id, node_id, attempt, generation, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(value.ref, value.runId ?? null, value.nodeId ?? null, value.attempt ?? null, value.generation ?? null, new Date().toISOString())
+    this.transaction(() => {
+      this.db.prepare(`INSERT OR IGNORE INTO ${kind} (artifact_ref, run_id, node_id, attempt, generation, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(
+          value.ref, value.runId ?? null, value.nodeId ?? null,
+          value.attempt ?? null, value.generation ?? null, new Date().toISOString(),
+        )
+    })
   }
 
   /**
@@ -289,21 +324,23 @@ export class OrchestrationStore {
    * @param attempt - physical-attempt receipt state.
    */
   saveAttempt(attempt: AttemptRecord): void {
-    this.db.prepare(`
-      INSERT INTO attempts (run_id, node_id, attempt, generation, execution_id, state, execution_plan_ref, turn_id, error_code, error_message, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(run_id, node_id, attempt) DO UPDATE SET
-        generation = excluded.generation,
-        state = excluded.state,
-        turn_id = excluded.turn_id,
-        error_code = excluded.error_code,
-        error_message = excluded.error_message,
-        updated_at = excluded.updated_at
-    `).run(
-      attempt.runId, attempt.nodeId, attempt.attempt, attempt.generation, attempt.executionId,
-      attempt.state, attempt.executionPlanRef, attempt.turnId ?? null, attempt.errorCode ?? null,
-      attempt.errorMessage ?? null, attempt.createdAt, attempt.updatedAt,
-    )
+    this.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO attempts (run_id, node_id, attempt, generation, execution_id, state, execution_plan_ref, turn_id, error_code, error_message, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(run_id, node_id, attempt) DO UPDATE SET
+          generation = excluded.generation,
+          state = excluded.state,
+          turn_id = excluded.turn_id,
+          error_code = excluded.error_code,
+          error_message = excluded.error_message,
+          updated_at = excluded.updated_at
+      `).run(
+        attempt.runId, attempt.nodeId, attempt.attempt, attempt.generation, attempt.executionId,
+        attempt.state, attempt.executionPlanRef, attempt.turnId ?? null, attempt.errorCode ?? null,
+        attempt.errorMessage ?? null, attempt.createdAt, attempt.updatedAt,
+      )
+    })
   }
 
   /**
@@ -319,13 +356,15 @@ export class OrchestrationStore {
     attempt: number,
     state: AutonomousRuntimeStateV1,
   ): void {
-    this.db.prepare(`
-      INSERT INTO autonomous_states (run_id, node_id, attempt, payload_json, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(run_id, node_id, attempt) DO UPDATE SET
-        payload_json = excluded.payload_json,
-        updated_at = excluded.updated_at
-    `).run(runId, nodeId, attempt, canonicalJson(state), new Date().toISOString())
+    this.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO autonomous_states (run_id, node_id, attempt, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(run_id, node_id, attempt) DO UPDATE SET
+          payload_json = excluded.payload_json,
+          updated_at = excluded.updated_at
+      `).run(runId, nodeId, attempt, canonicalJson(state), new Date().toISOString())
+    })
   }
 
   /**
@@ -380,14 +419,16 @@ export class OrchestrationStore {
     readonly updateSha256: string
     readonly payload: unknown
   }): void {
-    this.db.prepare(`
-      INSERT INTO capability_updates
-        (update_id, run_id, node_id, generation, state, update_sha256, payload_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      value.updateId, value.runId, value.nodeId, value.generation, value.state,
-      value.updateSha256, canonicalJson(value.payload), new Date().toISOString(),
-    )
+    this.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO capability_updates
+          (update_id, run_id, node_id, generation, state, update_sha256, payload_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        value.updateId, value.runId, value.nodeId, value.generation, value.state,
+        value.updateSha256, canonicalJson(value.payload), new Date().toISOString(),
+      )
+    })
   }
 
   /**
@@ -415,8 +456,10 @@ export class OrchestrationStore {
    */
   markCapabilityUpdates(updateIds: readonly string[], state: CapabilityUpdateRecord['state']): void {
     if (updateIds.length === 0) return
-    this.db.prepare(`UPDATE capability_updates SET state = ? WHERE update_id IN (${updateIds.map(() => '?').join(',')})`)
-      .run(state, ...updateIds)
+    this.transaction(() => {
+      this.db.prepare(`UPDATE capability_updates SET state = ? WHERE update_id IN (${updateIds.map(() => '?').join(',')})`)
+        .run(state, ...updateIds)
+    })
   }
 
   /**
@@ -448,11 +491,13 @@ export class OrchestrationStore {
    */
   acceptCommand(commandId: string, method: string, requestSha256: string): void {
     const time = new Date().toISOString()
-    this.db.prepare(`
-      INSERT INTO command_receipts
-        (command_id, method, request_sha256, state, created_at, updated_at)
-      VALUES (?, ?, ?, 'accepted', ?, ?)
-    `).run(commandId, method, requestSha256, time, time)
+    this.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO command_receipts
+          (command_id, method, request_sha256, state, created_at, updated_at)
+        VALUES (?, ?, ?, 'accepted', ?, ?)
+      `).run(commandId, method, requestSha256, time, time)
+    })
   }
 
   /**
@@ -461,11 +506,13 @@ export class OrchestrationStore {
    * @param response - bounded control response.
    */
   settleCommand(commandId: string, response: unknown): void {
-    this.db.prepare(`
-      UPDATE command_receipts
-      SET state = 'settled', response_json = ?, updated_at = ?
-      WHERE command_id = ? AND state = 'accepted'
-    `).run(canonicalJson(response), new Date().toISOString(), commandId)
+    this.transaction(() => {
+      this.db.prepare(`
+        UPDATE command_receipts
+        SET state = 'settled', response_json = ?, updated_at = ?
+        WHERE command_id = ? AND state = 'accepted'
+      `).run(canonicalJson(response), new Date().toISOString(), commandId)
+    })
   }
 
   /**
@@ -475,11 +522,13 @@ export class OrchestrationStore {
    * @param errorMessage - bounded diagnostic message.
    */
   failCommand(commandId: string, errorCode: string, errorMessage: string): void {
-    this.db.prepare(`
-      UPDATE command_receipts
-      SET state = 'failed', error_code = ?, error_message = ?, updated_at = ?
-      WHERE command_id = ? AND state = 'accepted'
-    `).run(errorCode, errorMessage, new Date().toISOString(), commandId)
+    this.transaction(() => {
+      this.db.prepare(`
+        UPDATE command_receipts
+        SET state = 'failed', error_code = ?, error_message = ?, updated_at = ?
+        WHERE command_id = ? AND state = 'accepted'
+      `).run(errorCode, errorMessage, new Date().toISOString(), commandId)
+    })
   }
 
   /**
@@ -487,11 +536,13 @@ export class OrchestrationStore {
    * @param commandId - accepted command identity.
    */
   markCommandIndeterminate(commandId: string): void {
-    this.db.prepare(`
-      UPDATE command_receipts
-      SET state = 'indeterminate', updated_at = ?
-      WHERE command_id = ? AND state = 'accepted'
-    `).run(new Date().toISOString(), commandId)
+    this.transaction(() => {
+      this.db.prepare(`
+        UPDATE command_receipts
+        SET state = 'indeterminate', updated_at = ?
+        WHERE command_id = ? AND state = 'accepted'
+      `).run(new Date().toISOString(), commandId)
+    })
   }
 
   /**
@@ -521,6 +572,120 @@ export class OrchestrationStore {
     return { events, nextSequence: events.at(-1)?.sequence ?? afterSequence }
   }
 
+  /** Restore the local term/vote coordinates used by the majority election state machine. */
+  loadElectionState(): OrchestrationClusterElectionState {
+    const row = this.db.prepare(`
+      SELECT current_term, voted_for, role, leader_id, lease_until FROM cluster_election WHERE singleton = 1
+    `).get() as Record<string, unknown>
+    const votedFor = optionalDatabaseString(row.voted_for, 'cluster voted_for')
+    const leaderId = optionalDatabaseString(row.leader_id, 'cluster leader_id')
+    return {
+      term: Number(row.current_term),
+      ...votedFor === undefined ? {} : { votedFor },
+      role: String(row.role) as OrchestrationClusterElectionState['role'],
+      ...leaderId === undefined ? {} : { leaderId },
+      leaseUntil: Number(row.lease_until),
+    }
+  }
+
+  /** Persist election state without advancing the replicated TaskGraph commit watermark. */
+  saveElectionState(state: OrchestrationClusterElectionState): void {
+    this.db.prepare(`
+      UPDATE cluster_election
+      SET current_term = ?, voted_for = ?, role = ?, leader_id = ?, lease_until = ?
+      WHERE singleton = 1
+    `).run(
+      state.term, state.votedFor ?? null, state.role, state.leaderId ?? null, state.leaseUntil,
+    )
+  }
+
+  /** Monotonic local data watermark compared before granting cluster authority. */
+  commitIndex(): number {
+    const row = this.db.prepare('SELECT commit_index FROM cluster_election WHERE singleton = 1').get() as { commit_index: number }
+    return Number(row.commit_index)
+  }
+
+  /** Export one complete logical state image and every referenced content-addressed artifact. */
+  exportClusterReplica(): OrchestrationClusterReplicaV1 {
+    const tables = Object.fromEntries(Object.keys(REPLICA_TABLES).map(table => [
+      table,
+      this.db.prepare(`SELECT * FROM ${table}`).all() as Record<string, string | number | null>[],
+    ]))
+    const artifacts = readdirSync(this.artifactRoot, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && /^[a-f0-9]{2}$/u.test(entry.name))
+      .flatMap(bucket => readdirSync(join(this.artifactRoot, bucket.name), { withFileTypes: true })
+        .filter(entry => entry.isFile() && /^[a-f0-9]{64}$/u.test(entry.name))
+        .map(entry => ({
+          ref: OrchestrationArtifactRef(`sha256:${entry.name}`),
+          json: readFileSync(join(this.artifactRoot, bucket.name, entry.name), 'utf8'),
+        })))
+      .sort((left, right) => String(left.ref).localeCompare(String(right.ref)))
+    return {
+      version: 1,
+      stateSchemaVersion: ORCHESTRATION_STATE_SCHEMA_VERSION,
+      commitIndex: this.commitIndex(),
+      capturedAt: new Date().toISOString(),
+      tables,
+      artifacts,
+    }
+  }
+
+  /** Replace follower data with a newer digest-verified leader image while retaining local election coordinates. */
+  installClusterReplica(replica: OrchestrationClusterReplicaV1): 'applied' | 'unchanged' {
+    if (replica.version !== 1 || replica.stateSchemaVersion !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
+      throw new OrchestrationError('orchestration cluster replica schema mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
+    }
+    if (!Number.isSafeInteger(replica.commitIndex) || replica.commitIndex < 0) {
+      throw new OrchestrationError('orchestration cluster replica commitIndex is invalid', 'ORCHESTRATION_UNAVAILABLE')
+    }
+    if (replica.commitIndex <= this.commitIndex()) return 'unchanged'
+    for (const [table, columns] of Object.entries(REPLICA_TABLES) as [ReplicaTable, readonly string[]][]) {
+      const rows = replica.tables[table]
+      if (!Array.isArray(rows)) throw new OrchestrationError(`orchestration cluster replica lacks ${table}`, 'ORCHESTRATION_UNAVAILABLE')
+      for (const row of rows) {
+        if (row === null || typeof row !== 'object' || Array.isArray(row)
+          || Object.keys(row).some(column => !columns.includes(column))
+          || columns.some(column => !(column in row))) {
+          throw new OrchestrationError(`orchestration cluster replica contains an invalid ${table} row`, 'ORCHESTRATION_UNAVAILABLE')
+        }
+      }
+    }
+    for (const artifact of replica.artifacts) {
+      let value: unknown
+      try { value = JSON.parse(artifact.json) } catch {
+        throw new OrchestrationError(`orchestration cluster artifact is invalid JSON: ${String(artifact.ref)}`, 'ORCHESTRATION_UNAVAILABLE')
+      }
+      const expected = `sha256:${canonicalSha256(value)}`
+      if (String(artifact.ref) !== expected) {
+        throw new OrchestrationError(`orchestration cluster artifact digest mismatch: ${String(artifact.ref)}`, 'ORCHESTRATION_UNAVAILABLE')
+      }
+      if (String(this.putArtifact(value)) !== expected) {
+        throw new OrchestrationError(`orchestration cluster artifact installation failed: ${String(artifact.ref)}`, 'ORCHESTRATION_UNAVAILABLE')
+      }
+    }
+    const deletionOrder: readonly ReplicaTable[] = [
+      'autonomous_states', 'capability_updates', 'attempts', 'orchestration_events',
+      'compilation_artifacts', 'capability_bindings', 'context_packets', 'node_execution_plans',
+      'runs', 'compilations', 'command_receipts',
+    ]
+    this.db.exec('BEGIN IMMEDIATE')
+    try {
+      this.db.exec('PRAGMA defer_foreign_keys = ON')
+      for (const table of deletionOrder) this.db.exec(`DELETE FROM ${table}`)
+      for (const [table, columns] of Object.entries(REPLICA_TABLES) as [ReplicaTable, readonly string[]][]) {
+        const placeholders = columns.map(() => '?').join(', ')
+        const statement = this.db.prepare(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`)
+        for (const row of replica.tables[table] ?? []) statement.run(...columns.map(column => row[column] ?? null))
+      }
+      this.db.prepare('UPDATE cluster_election SET commit_index = ? WHERE singleton = 1').run(replica.commitIndex)
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+    return 'applied'
+  }
+
   private insertEvent(event: Omit<OrchestrationEvent, 'sequence'>): void {
     this.db.prepare(`
       INSERT INTO orchestration_events
@@ -536,6 +701,9 @@ export class OrchestrationStore {
     this.db.exec('BEGIN IMMEDIATE')
     try {
       action()
+      if (this.clusterTracking) {
+        this.db.prepare('UPDATE cluster_election SET commit_index = commit_index + 1 WHERE singleton = 1').run()
+      }
       this.db.exec('COMMIT')
     } catch (error) {
       this.db.exec('ROLLBACK')
@@ -619,6 +787,18 @@ export class OrchestrationStore {
         PRIMARY KEY (run_id, node_id, attempt),
         FOREIGN KEY (run_id) REFERENCES runs(run_id)
       );
+      CREATE TABLE cluster_election (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        current_term INTEGER NOT NULL,
+        voted_for TEXT,
+        role TEXT NOT NULL,
+        leader_id TEXT,
+        lease_until INTEGER NOT NULL,
+        commit_index INTEGER NOT NULL
+      );
+      INSERT INTO cluster_election
+        (singleton, current_term, role, lease_until, commit_index)
+      VALUES (1, 0, 'follower', 0, 0);
       PRAGMA user_version = ${String(ORCHESTRATION_STATE_SCHEMA_VERSION)};
     `)
   }
@@ -655,6 +835,26 @@ export class OrchestrationStore {
           FOREIGN KEY (run_id) REFERENCES runs(run_id)
         );
         PRAGMA user_version = 3;
+      `)
+    })
+  }
+
+  private migrateSchema3To4(): void {
+    this.transaction(() => {
+      this.db.exec(`
+        CREATE TABLE cluster_election (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          current_term INTEGER NOT NULL,
+          voted_for TEXT,
+          role TEXT NOT NULL,
+          leader_id TEXT,
+          lease_until INTEGER NOT NULL,
+          commit_index INTEGER NOT NULL
+        );
+        INSERT INTO cluster_election
+          (singleton, current_term, role, lease_until, commit_index)
+        VALUES (1, 0, 'follower', 0, 0);
+        PRAGMA user_version = 4;
       `)
     })
   }

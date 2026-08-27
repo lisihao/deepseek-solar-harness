@@ -10,6 +10,14 @@ import {
   type CapabilityUpdateReceipt,
   type CapabilityUpdateRequest,
   type OrchestrationCompilationV1,
+  type OrchestrationClusterHeartbeatRequest,
+  type OrchestrationClusterHeartbeatResponse,
+  type OrchestrationClusterInstallReceipt,
+  type OrchestrationClusterInstallRequest,
+  type OrchestrationClusterReplicaV1,
+  type OrchestrationClusterStatus,
+  type OrchestrationClusterVoteRequest,
+  type OrchestrationClusterVoteResponse,
   type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompileRequest,
   type OrchestrationControlRequest,
@@ -163,6 +171,31 @@ export class OrchestrationDaemonClient {
    */
   proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt> {
     return this.request('capability.propose_update', { request })
+  }
+
+  /** Read this Product Server's bounded cluster authority state. */
+  clusterStatus(): Promise<OrchestrationClusterStatus | undefined> {
+    return this.request('cluster.status', {})
+  }
+
+  /** Forward an authenticated peer vote to the durable election state. */
+  clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse> {
+    return this.request('cluster.vote', { request })
+  }
+
+  /** Forward an authenticated leader heartbeat to the durable election state. */
+  clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse> {
+    return this.request('cluster.heartbeat', { request })
+  }
+
+  /** Export a complete logical state image for one authenticated follower. */
+  clusterExportReplica(): Promise<OrchestrationClusterReplicaV1> {
+    return this.request('cluster.export', {})
+  }
+
+  /** Install a term-fenced logical state image on a follower. */
+  clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt> {
+    return this.request('cluster.install', { request })
   }
 
   /**

@@ -50,6 +50,7 @@ export type RemoteSyncCapability =
   | 'operator.read'
   | 'operator.execute'
   | 'operator.interrupt'
+  | 'orchestration.cluster'
 
 /** Durable remote Resident turn identity returned before product execution settles. */
 export interface RemoteResidentAcceptedTurn {
@@ -185,6 +186,16 @@ export interface RemoteSyncDescription {
   readonly scope: RemoteDeviceScope
   readonly capabilities: readonly RemoteSyncCapability[]
   readonly host: ResponseValue<'host.describe'>
+  readonly cluster?: RemoteSyncClusterProjection
+}
+
+/** Read-only Scheduler-authority hint used by a Frontend with multiple configured Servers. */
+export interface RemoteSyncClusterProjection {
+  readonly nodeId: string
+  readonly term: number
+  readonly role: 'follower' | 'candidate' | 'leader'
+  readonly leaderId?: string
+  readonly canSchedule: boolean
 }
 
 /** One existing Host transport envelope assigned a deployment-global sequence. */
@@ -264,7 +275,8 @@ export function parseRemoteSyncDescription(value: unknown): RemoteSyncDescriptio
   if (!Array.isArray(record.capabilities)) throw new Error('capabilities must be an array')
   const capabilities = record.capabilities.map(remoteCapability)
   const host = hostDescribeValueSchema.parse(record.host) as ResponseValue<'host.describe'>
-  return { protocol, deploymentId, cursor, describedAt, scope, capabilities, host }
+  const cluster = record.cluster === undefined ? undefined : remoteClusterProjection(record.cluster)
+  return { protocol, deploymentId, cursor, describedAt, scope, capabilities, host, ...cluster === undefined ? {} : { cluster } }
 }
 
 /**
@@ -550,8 +562,24 @@ function remoteCapability(value: unknown): RemoteSyncCapability {
   if (value === 'session.read' || value === 'workspace.read' || value === 'event.subscribe'
     || value === 'session.command' || value === 'approval.respond'
     || value === 'session.replicate.read' || value === 'session.replicate.write'
-    || value === 'operator.read' || value === 'operator.execute' || value === 'operator.interrupt') return value
+    || value === 'operator.read' || value === 'operator.execute' || value === 'operator.interrupt'
+    || value === 'orchestration.cluster') return value
   throw new Error(`remote sync capability is invalid: ${String(value)}`)
+}
+
+function remoteClusterProjection(value: unknown): RemoteSyncClusterProjection {
+  const cluster = objectRecord(value, 'remote sync cluster')
+  if (cluster.role !== 'follower' && cluster.role !== 'candidate' && cluster.role !== 'leader') {
+    throw new Error(`remote sync cluster role is invalid: ${String(cluster.role)}`)
+  }
+  const leaderId = cluster.leaderId === undefined ? undefined : nonEmptyString(cluster.leaderId, 'cluster.leaderId')
+  return {
+    nodeId: nonEmptyString(cluster.nodeId, 'cluster.nodeId'),
+    term: nonnegativeInteger(cluster.term, 'cluster.term'),
+    role: cluster.role,
+    ...leaderId === undefined ? {} : { leaderId },
+    canSchedule: booleanValue(cluster.canSchedule, 'cluster.canSchedule'),
+  }
 }
 
 function arrayValue(value: unknown, label: string): unknown[] {

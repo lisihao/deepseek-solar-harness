@@ -473,6 +473,75 @@ export interface CapabilityUpdateReceipt {
   readonly errorCode?: string
 }
 
+/** Bounded Server-cluster authority projection; TaskGraph state remains owned by one elected Scheduler. */
+export interface OrchestrationClusterStatus {
+  readonly nodeId: string
+  readonly memberIds: readonly string[]
+  readonly term: number
+  readonly role: 'follower' | 'candidate' | 'leader'
+  readonly votedFor?: string
+  readonly leaderId?: string
+  readonly leaseUntil: number
+  readonly commitIndex: number
+  readonly quorum: number
+  readonly canSchedule: boolean
+}
+
+/** One term-fenced vote request from another configured Product Server. */
+export interface OrchestrationClusterVoteRequest {
+  readonly term: number
+  readonly candidateId: string
+  readonly commitIndex: number
+}
+
+/** Durable vote response from one configured member. */
+export interface OrchestrationClusterVoteResponse {
+  readonly term: number
+  readonly voterId: string
+  readonly granted: boolean
+  readonly commitIndex: number
+}
+
+/** Bounded majority-lease heartbeat from an elected Scheduler. */
+export interface OrchestrationClusterHeartbeatRequest {
+  readonly term: number
+  readonly leaderId: string
+  readonly commitIndex: number
+  readonly leaseUntil: number
+}
+
+/** Follower acknowledgement and its current replication watermark. */
+export interface OrchestrationClusterHeartbeatResponse {
+  readonly term: number
+  readonly followerId: string
+  readonly accepted: boolean
+  readonly commitIndex: number
+}
+
+/** Complete logical single-writer state replicated only across authenticated admin peers. */
+export interface OrchestrationClusterReplicaV1 {
+  readonly version: 1
+  readonly stateSchemaVersion: number
+  readonly commitIndex: number
+  readonly capturedAt: string
+  readonly tables: Readonly<Record<string, readonly Readonly<Record<string, string | number | null>>[]>>
+  readonly artifacts: readonly { readonly ref: OrchestrationArtifactRef; readonly json: string }[]
+}
+
+/** Term-fenced follower installation request from the current elected leader. */
+export interface OrchestrationClusterInstallRequest {
+  readonly term: number
+  readonly leaderId: string
+  readonly replica: OrchestrationClusterReplicaV1
+}
+
+/** Applied or idempotently retained follower watermark. */
+export interface OrchestrationClusterInstallReceipt {
+  readonly nodeId: string
+  readonly commitIndex: number
+  readonly state: 'applied' | 'unchanged'
+}
+
 /** Orchestration error taxonomy. */
 export type OrchestrationErrorCode =
   | 'GRAPH_INVALID'
@@ -492,6 +561,7 @@ export type OrchestrationErrorCode =
   | 'WORKSPACE_DIRTY'
   | 'INTEGRATION_FAILED'
   | 'INTEGRATION_CONFLICT'
+  | 'NOT_CLUSTER_LEADER'
   | 'ORCHESTRATION_VERSION_MISMATCH'
   | 'ORCHESTRATION_UNAVAILABLE'
 
@@ -583,6 +653,16 @@ export abstract class OrchestrationService extends Service {
    * @returns the durable update receipt.
    */
   abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
+  /** Read the local Server's bounded cluster authority projection. */
+  abstract clusterStatus(): Promise<OrchestrationClusterStatus | undefined>
+  /** Process one authenticated, configured-member vote request. */
+  abstract clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse>
+  /** Process one authenticated majority-lease heartbeat. */
+  abstract clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse>
+  /** Export one complete logical replica for authenticated cluster peers. */
+  abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
+  /** Install one term-fenced leader replica while this node is a follower. */
+  abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 }
 
 export type { CapabilityBindingPlanV1, ContextPacketV1 }

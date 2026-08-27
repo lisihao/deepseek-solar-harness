@@ -218,6 +218,69 @@ describe('DesktopDeploymentStateStore', () => {
     })
   })
 
+  it('prefers the reachable cluster leader over the persisted follower', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-leader-'))
+    const fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const endpoint = new URL(String(url))
+      const body = JSON.parse(String(init?.body)) as { rpcId: string }
+      const leader = endpoint.port === '23080'
+      return Response.json({
+        type: 'server-response', rpcId: body.rpcId,
+        result: {
+          ok: true,
+          value: {
+            deploymentId: leader ? 'leader' : 'follower',
+            cluster: {
+              nodeId: leader ? 'server-b' : 'server-a', term: 4,
+              role: leader ? 'leader' : 'follower', leaderId: 'server-b', canSchedule: leader,
+            },
+          },
+        },
+      })
+    })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const first = await store.configureFrontend({
+      label: 'Follower mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+    const second = await store.configureFrontend({
+      label: 'Leader mini', endpoint: 'http://127.0.0.1:23080', deviceName: 'MacBook',
+    })
+    const activeFollower = await store.selectFrontend(first.activeServerId)
+
+    await expect(connectFrontendServer(store, activeFollower)).resolves.toMatchObject({
+      state: { activeServerId: second.activeServerId },
+      server: { label: 'Leader mini' },
+    })
+  })
+
+  it('keeps the first reachable follower for read-only access when no leader is reachable', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-follower-only-'))
+    const fetch = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { rpcId: string }
+      return Response.json({
+        type: 'server-response', rpcId: body.rpcId,
+        result: {
+          ok: true,
+          value: {
+            deploymentId: 'follower',
+            cluster: {
+              nodeId: 'server-a', term: 4, role: 'follower', leaderId: 'server-b', canSchedule: false,
+            },
+          },
+        },
+      })
+    })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const state = await store.configureFrontend({
+      label: 'Follower mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+
+    await expect(connectFrontendServer(store, state)).resolves.toMatchObject({
+      state: { activeServerId: state.activeServerId },
+      server: { label: 'Follower mini' },
+    })
+  })
+
   it('retains the Server catalog while local Server mode is active and can switch back', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-local-server-catalog-'))
     const fetch = vi.fn(async () => { throw new Error('trusted tunnels do not use remote auth') })

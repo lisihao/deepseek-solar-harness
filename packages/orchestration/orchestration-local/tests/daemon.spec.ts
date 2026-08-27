@@ -12,6 +12,7 @@ import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-lo
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { OrchestrationDaemonClient } from '../src/client.ts'
 import { canonicalSha256 } from '../src/canonical.ts'
+import type { OrchestrationClusterPeerTransport } from '../src/cluster.ts'
 import { OrchestrationDaemon } from '../src/daemon.ts'
 import type { RemotePhysicalOperatorServer } from '../src/remote-physical-operator.ts'
 
@@ -286,6 +287,67 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('blocks Scheduler mutations until a majority lease is acquired', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'oc-'))
+    const root = join(home, 'orchestrations')
+    const resident = new FakeResidentClient()
+    let quorumAvailable = false
+    const replicatedCommitIndexes: number[] = []
+    const transport: OrchestrationClusterPeerTransport = {
+      requestVote: async (member, request) => {
+        if (!quorumAvailable) throw new Error('peer unavailable')
+        return { term: request.term, voterId: member.id, granted: member.id === 'b', commitIndex: 0 }
+      },
+      heartbeat: async (member, request) => {
+        if (!quorumAvailable) throw new Error('peer unavailable')
+        return { term: request.term, followerId: member.id, accepted: member.id === 'b', commitIndex: 0 }
+      },
+      installReplica: async (member, request) => {
+        if (replicatedCommitIndexes.length === 0) expect(resident.starts).toEqual([])
+        replicatedCommitIndexes.push(request.replica.commitIndex)
+        return { nodeId: member.id, commitIndex: request.replica.commitIndex, state: 'applied' }
+      },
+    }
+    const daemon = new OrchestrationDaemon({
+      root,
+      dshHome: home,
+      residentClient: resident as unknown as ResidentDaemonClient,
+      modelWorkerProviders: [],
+      schedulerIntervalMs: 10,
+      clusterConfig: {
+        version: 1,
+        nodeId: 'a',
+        leaseMs: 1_000,
+        members: [
+          { id: 'a', label: 'A', endpoint: 'http://a.example/' },
+          { id: 'b', label: 'B', endpoint: 'http://b.example/' },
+          { id: 'c', label: 'C', endpoint: 'http://c.example/' },
+        ],
+      },
+      clusterTransport: transport,
+    })
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    await expect(client.clusterStatus()).resolves.toMatchObject({ role: 'follower', canSchedule: false, quorum: 2 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    await expect(client.compile({ intent: { request: 'blocked fixture' }, graph: graph(workspace) }))
+      .rejects.toMatchObject({ code: 'NOT_CLUSTER_LEADER' })
+
+    quorumAvailable = true
+    await eventually(() => client.clusterStatus(), value => value?.canSchedule === true)
+    const compilation = await client.compile({ intent: { request: 'leader fixture' }, graph: graph(workspace) })
+    expect(compilation).toMatchObject({ graph: { title: 'integration graph' } })
+    const started = await client.start({ compilationId: compilation.compilationId })
+    await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+    expect(replicatedCommitIndexes.length).toBeGreaterThan(0)
+    expect(resident.starts).toEqual([
+      `codex:orch:${String(started.runId)}:code:1`,
+      `claude-code:orch:${String(started.runId)}:review:1`,
+    ])
+  })
+
   it('reattaches a remote subscription turn after Scheduler restart and projects its progress', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-ro-'))
     const root = join(home, 'orchestrations')
