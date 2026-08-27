@@ -328,7 +328,7 @@ interface ChildResult {
 
 function runShell(command: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<ChildResult> {
   return process.platform === 'win32'
-    ? runProcess('cmd.exe', ['/d', '/s', '/c', command], cwd, timeoutMs, signal)
+    ? runProcess('cmd.exe', ['/d', '/s', '/c', `"${command}"`], cwd, timeoutMs, signal, true)
     : runProcess('/bin/sh', ['-lc', command], cwd, timeoutMs, signal)
 }
 
@@ -338,6 +338,7 @@ function runProcess(
   cwd: string,
   timeoutMs: number,
   signal?: AbortSignal,
+  windowsVerbatimArguments = false,
 ): Promise<ChildResult> {
   signal?.throwIfAborted()
   return new Promise((resolvePromise, reject) => {
@@ -347,6 +348,7 @@ function runProcess(
       env: scrubbedParentEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      windowsVerbatimArguments,
     })
     let stdout = ''
     let stderr = ''

@@ -269,6 +269,31 @@ describe('host physical-operator routing', () => {
     }
   })
 
+  it('gives simultaneous model-tool bridge owners distinct endpoints', async () => {
+    const first = await setup({ mountTool: false })
+    const second = await setup({ mountTool: false })
+    const firstBridge = new PhysicalOperatorModelToolBridge(first.ctx)
+    const secondBridge = new PhysicalOperatorModelToolBridge(second.ctx)
+    const signal = new AbortController().signal
+    const schemas = [{
+      name: 'subscription_echo',
+      description: 'Echo through the real DSH tool runtime.',
+      parameters: { type: 'object' as const, properties: { value: { type: 'string' } }, required: ['value'] },
+    }]
+    const firstBinding = await firstBridge.bind('first', first.agent, schemas, signal)
+    const secondBinding = await secondBridge.bind('second', second.agent, schemas, signal)
+    try {
+      expect(firstBinding.descriptor?.socketPath).not.toBe(secondBinding.descriptor?.socketPath)
+    } finally {
+      firstBinding.release()
+      secondBinding.release()
+      await firstBridge.dispose()
+      await secondBridge.dispose()
+      await first.ctx.root.fiber.dispose()
+      await second.ctx.root.fiber.dispose()
+    }
+  })
+
   it('runs Claude Code as the first-class main model without a DeepSeek adapter', async () => {
     const { agent, deepseek, claude } = await setup({
       primary: 'claude-code',

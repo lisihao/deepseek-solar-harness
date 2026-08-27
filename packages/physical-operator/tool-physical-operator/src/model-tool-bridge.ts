@@ -49,17 +49,20 @@ function canonicalJson(value: unknown): string {
   throw new Error('model tool request contains a non-JSON value')
 }
 
+let nextEndpointId = 0
+
 function socketPath(): { readonly path: string; readonly directory?: string } {
   const root = resolveDshHome(process.env.DSH_HOME ?? join(homedir(), '.dsh'))
+  const endpointId = `${String(process.pid)}-${String(nextEndpointId++)}`
   if (process.platform === 'win32') {
     const identity = createHash('sha256').update(root).digest('hex').slice(0, 24)
-    return { path: `\\\\.\\pipe\\dsh-model-tools-${identity}` }
+    return { path: `\\\\.\\pipe\\dsh-model-tools-${identity}-${endpointId}` }
   }
   const directory = join(root, 'physical-operator')
-  return { path: join(directory, 'model-tools.sock'), directory }
+  return { path: join(directory, `model-tools-${endpointId}.sock`), directory }
 }
 
-/** One process-owned, stable-endpoint bridge. Bindings exist only while their Resident turn is attached. */
+/** One bridge-owned stable endpoint. Bindings exist only while their Resident turn is attached. */
 export class PhysicalOperatorModelToolBridge {
   private readonly endpoint = socketPath()
   private readonly bindings = new Map<string, Binding>()
