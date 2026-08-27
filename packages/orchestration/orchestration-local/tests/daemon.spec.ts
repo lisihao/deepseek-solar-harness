@@ -5,7 +5,8 @@ import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { RemotePhysicalOperatorServer } from '@deepseek-ai/dsh-client-connection'
 import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import { OrchestrationArtifactRef, type LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
@@ -18,6 +19,7 @@ const cleanup: Array<() => Promise<void>> = []
 const run = promisify(execFile)
 afterEach(async () => {
   for (const action of cleanup.splice(0).reverse()) await action()
+  vi.unstubAllGlobals()
 })
 
 type TestResult = { output: Array<{ type: 'text'; text: string }>; stopReason: 'completed' }
@@ -149,7 +151,7 @@ class FakeResidentClient {
 
   async inspectTurn(turnId: string) {
     const turn = this.turns.get(turnId)
-    if (turn === undefined) throw new Error('unknown turn')
+    if (turn === undefined) throw Object.assign(new Error('unknown turn'), { code: 'SESSION_UNAVAILABLE' })
     return { turnId, sessionId: 'session:recovered', commandId: 'command', stateRevision: 1, updatedAt: new Date().toISOString(), ...turn }
   }
 
@@ -256,12 +258,14 @@ function createDaemon(
   residentClient: FakeResidentClient,
   schedulerIntervalMs?: number,
   modelWorkerProviders?: readonly ModelWorkerProvider[],
+  remoteOperatorServers?: readonly RemotePhysicalOperatorServer[],
 ): OrchestrationDaemon {
   return new OrchestrationDaemon({
     root,
     dshHome,
     residentClient: residentClient as unknown as ResidentDaemonClient,
     modelWorkerProviders: modelWorkerProviders ?? [],
+    ...remoteOperatorServers === undefined ? {} : { remoteOperatorServers },
     ...schedulerIntervalMs === undefined ? {} : { schedulerIntervalMs },
   })
 }
@@ -282,6 +286,95 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('reattaches a remote subscription turn after Scheduler restart and projects its progress', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-ro-'))
+    const root = join(home, 'orchestrations')
+    const local = new FakeResidentClient()
+    const methods: string[] = []
+    let remoteSettled = false
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Remote Codex',
+      tags: ['coding'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: 'test', protocolHash: 'test',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', description: 'Fast worker',
+        supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true,
+        supportsAdaptiveThinking: true,
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      methods.push(call.method)
+      const value = call.method === 'operator.providers' ? [provider]
+        : call.method === 'operator.execute'
+          ? { sessionId: 'remote-session', turnId: 'remote-turn', stateRevision: 1 }
+          : call.method === 'operator.inspect'
+            ? remoteSettled ? {
+              commandId: 'remote-command', sessionId: 'remote-session', turnId: 'remote-turn',
+              state: 'settled', stateRevision: 2, updatedAt: '2026-08-27T12:00:01.000Z',
+              result: { output: [{ type: 'text', text: 'remote result' }], stopReason: 'completed' },
+            } : {
+              commandId: 'remote-command', sessionId: 'remote-session', turnId: 'remote-turn',
+              state: 'running', stateRevision: 1, updatedAt: '2026-08-27T12:00:00.000Z',
+            }
+            : call.method === 'operator.events'
+              ? {
+                events: [{
+                  sequence: 1, sessionId: 'remote-session', type: 'turn.progress',
+                  time: '2026-08-27T12:00:00.000Z', data: { turnId: 'remote-turn', phase: 'reasoning' },
+                }],
+                nextSequence: 1,
+              }
+              : { interrupted: true }
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    }))
+    const daemon = createDaemon(root, home, local, 10, [], [{
+      id: 'mini', label: 'Mac mini', endpoint: 'http://127.0.0.1:13300', pollIntervalMs: 10,
+    }])
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close() })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const compilation = await client.compile({
+      intent: { request: 'Analyze the fixture remotely.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'remote-read-only',
+        rlm: 'disabled', continualHarness: 'off', optimization: 'economy',
+      },
+      graph: {
+        ...fixture,
+        nodes: [{
+          ...fixture.nodes[0]!,
+          title: 'Analyze', task: 'Analyze the fixture without modifying files.', role: 'analysis',
+          writeScopes: [], operator: { preferredIds: ['remote.mini.codex'] },
+        }],
+      },
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running')
+    await daemon.close()
+    remoteSettled = true
+    const recoveredDaemon = createDaemon(root, home, local, 10, [], [{
+      id: 'mini', label: 'Mac mini', endpoint: 'http://127.0.0.1:13300', pollIntervalMs: 10,
+    }])
+    await recoveredDaemon.start()
+    cleanup.push(async () => { await recoveredDaemon.close(); await rm(home, { recursive: true, force: true }) })
+    const recoveredClient = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const completed = await eventually(() => recoveredClient.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ operatorId: 'remote.mini.codex', state: 'passed' })
+    expect(local.requests).toHaveLength(0)
+    const events = await recoveredClient.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.find(value => value.type === 'node.operator.progress')?.data).toMatchObject({
+      operatorId: 'remote.mini.codex', phase: 'reasoning',
+    })
+    expect(methods).toEqual(expect.arrayContaining([
+      'operator.providers', 'operator.execute', 'operator.inspect', 'operator.events',
+    ]))
+  })
+
   it('closes accepted control sockets before shutdown settles', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-close-'))
     const root = join(home, 'orchestrations')

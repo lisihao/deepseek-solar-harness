@@ -7,6 +7,10 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import {
+  createRemotePhysicalOperators,
+  type RemotePhysicalOperatorServer,
+} from '@deepseek-ai/dsh-client-connection'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
@@ -68,14 +72,18 @@ import PhysicalOperatorRuntime, {
   PhysicalOperatorExecutionId,
   PhysicalOperatorId,
   type PhysicalOperator,
+  type PhysicalOperatorAcceptedReceipt,
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorRun,
   type PhysicalOperatorProviderStartRequest,
+  type PhysicalOperatorQuotaPool,
+  type PhysicalOperatorResidentCatalog,
+  type PhysicalOperatorResidentModel,
   type PhysicalOperatorResult,
   type PhysicalOperatorModelToolBridgeV1,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
-import type { ResidentModelOption, ResidentProviderStatus, ResidentQuotaPool } from '@deepseek-ai/dsh-resident-operator'
+import type { ResidentProviderStatus, ResidentTurnSnapshot } from '@deepseek-ai/dsh-resident-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -90,6 +98,7 @@ import {
   LocalCapabilityCapsuleService,
 } from './providers.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
+import { readRemoteOperatorCatalog } from './remote-operators.ts'
 import {
   ORCHESTRATION_STATE_SCHEMA_VERSION,
   OrchestrationStore,
@@ -137,7 +146,8 @@ interface ActiveAttempt {
   readonly operatorId: string
   progressCursor: number
   progressSync?: Promise<void>
-  readonly run: { readonly result: Promise<PhysicalOperatorResult>; dispose(): Promise<void> }
+  readonly run: Pick<PhysicalOperatorRun, 'result' | 'dispose'>
+    & Partial<Pick<PhysicalOperatorRun, 'readEvents'>>
 }
 
 interface ResidentReceiptIdentity {
@@ -162,7 +172,6 @@ interface StartedResidentTurn {
 
 class OrchestrationResidentOperator implements PhysicalOperator {
   readonly descriptor
-  private readonly receipts = new Map<string, ResidentReceiptIdentity>()
 
   constructor(
     private readonly resident: ResidentDaemonClient,
@@ -181,6 +190,25 @@ class OrchestrationResidentOperator implements PhysicalOperator {
 
   availability() {
     return { available: true as const }
+  }
+
+  residentCatalog(): Promise<PhysicalOperatorResidentCatalog> {
+    return Promise.resolve({
+      operatorId: this.descriptor.id,
+      product: this.provider.product,
+      injectionBoundaries: this.provider.injectionBoundaries,
+      supportsModelToolBridge: true,
+      location: 'local',
+      supportsWorkspaceMutationReturn: true,
+      available: this.provider.available,
+      ...this.provider.unavailableReason === undefined ? {} : { unavailableReason: this.provider.unavailableReason },
+      ...this.provider.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: this.provider.quotaUnavailableReason },
+      authentication: this.provider.authentication,
+      productVersion: this.provider.productVersion,
+      protocolHash: this.provider.protocolHash,
+      models: this.provider.models,
+      ...this.provider.quotaPools === undefined ? {} : { quotaPools: this.provider.quotaPools },
+    })
   }
 
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
@@ -202,8 +230,20 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       signal: request.signal,
     })
     /* jscpd:ignore-end */
-    this.receipts.set(String(request.executionId), { sessionId: turn.sessionId, turnId: turn.turnId })
     return {
+      receipt: { sessionId: turn.sessionId, turnId: turn.turnId, stateRevision: turn.stateRevision },
+      readEvents: async (afterSequence, limit, signal) => {
+        const page = await this.resident.readEvents(turn.sessionId, afterSequence, limit, signal)
+        return {
+          events: page.events.map(value => ({
+            sequence: value.sequence,
+            type: value.type,
+            time: value.time,
+            data: value.data,
+          })),
+          nextSequence: page.nextSequence,
+        }
+      },
       result: turn.result.then(result => ({
         ...result,
         continuity: { sessionId: turn.sessionId, stateRevision: turn.stateRevision },
@@ -212,12 +252,94 @@ class OrchestrationResidentOperator implements PhysicalOperator {
     }
   }
 
-  takeReceipt(executionId: string): ResidentReceiptIdentity {
-    const receipt = this.receipts.get(executionId)
-    if (receipt === undefined) throw new OrchestrationError(`resident receipt was not published for ${executionId}`, 'ORCHESTRATION_UNAVAILABLE')
-    this.receipts.delete(executionId)
-    return receipt
+  async reattach(turnId: string): Promise<PhysicalOperatorProviderRun> {
+    let initial: ResidentTurnSnapshot
+    try {
+      initial = await this.resident.inspectTurn(turnId)
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && String(error.code) === 'SESSION_UNAVAILABLE') {
+        throw new OrchestrationError(error.message, 'COMMAND_INDETERMINATE')
+      }
+      throw error
+    }
+    const observation = new AbortController()
+    const receipt = {
+      sessionId: String(initial.sessionId),
+      turnId: String(initial.turnId),
+      stateRevision: initial.stateRevision,
+    }
+    const result = this.pollTurn(initial, observation.signal)
+    return {
+      receipt,
+      readEvents: async (afterSequence, limit, signal) => {
+        const page = await this.resident.readEvents(receipt.sessionId, afterSequence, limit, signal)
+        return {
+          events: page.events.map(value => ({
+            sequence: value.sequence,
+            type: value.type,
+            time: value.time,
+            data: value.data,
+          })),
+          nextSequence: page.nextSequence,
+        }
+      },
+      result,
+      dispose: async () => {
+        observation.abort(new Error('recovered Resident observer detached'))
+        await result.catch(() => undefined)
+      },
+    }
   }
+
+  interrupt(receipt: PhysicalOperatorAcceptedReceipt): Promise<void> {
+    return this.resident.interrupt(receipt.sessionId, receipt.turnId)
+  }
+
+  private async pollTurn(initial: ResidentTurnSnapshot, signal: AbortSignal): Promise<PhysicalOperatorResult> {
+    let turn = initial
+    while (true) {
+      if (turn.state === 'settled') {
+        if (turn.result === undefined) {
+          throw new OrchestrationError('settled Resident turn omitted its result', 'ORCHESTRATION_UNAVAILABLE')
+        }
+        return {
+          ...turn.result,
+          continuity: { sessionId: String(turn.sessionId), stateRevision: turn.stateRevision },
+        }
+      }
+      if (turn.state === 'indeterminate') {
+        throw new OrchestrationError(
+          turn.error?.message ?? 'Resident turn outcome is indeterminate',
+          'COMMAND_INDETERMINATE',
+        )
+      }
+      await observationDelay(250, signal)
+      turn = await this.resident.inspectTurn(String(turn.turnId))
+    }
+  }
+}
+
+function acceptedReceipt(run: PhysicalOperatorRun, executionId: string): PhysicalOperatorAcceptedReceipt {
+  if (run.receipt === undefined) {
+    throw new OrchestrationError(`resident receipt was not published for ${executionId}`, 'ORCHESTRATION_UNAVAILABLE')
+  }
+  return run.receipt
+}
+
+function observationDelay(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason)
+  return new Promise<void>((resolve, reject) => {
+    const complete = (): void => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }
+    const timer = setTimeout(complete, delayMs)
+    const abort = (): void => {
+      clearTimeout(timer)
+      reject(signal.reason)
+    }
+    signal.addEventListener('abort', abort, { once: true })
+  })
 }
 
 /** Daemon construction policy. */
@@ -236,6 +358,8 @@ export interface OrchestrationDaemonOptions {
    * credential-backed built-in Provider so offline acceptance cannot spend API quota.
    */
   readonly modelWorkerProviders?: readonly ModelWorkerProvider[]
+  /** Optional explicit remote execution members; omission follows the versioned root catalog. */
+  readonly remoteOperatorServers?: readonly RemotePhysicalOperatorServer[]
 }
 
 function requiredString(params: Record<string, unknown>, name: string): string {
@@ -441,7 +565,7 @@ function promptFromPlan(
   }]
 }
 
-function modelTier(model: ResidentModelOption): ModelExecutionOffer['tier'] {
+function modelTier(model: PhysicalOperatorResidentModel): ModelExecutionOffer['tier'] {
   const label = `${model.model} ${model.displayName}`.toLowerCase()
   if (/\b(?:sol|opus|fable)\b|xhigh|max|ultra/u.test(label)) return 'high'
   if (/\b(?:luna|spark|haiku|flash)\b/u.test(label)) return 'low'
@@ -535,12 +659,15 @@ function attemptAbort(timeoutMs: number | undefined): {
   }
 }
 
-function quotaForModel(pool: readonly ResidentQuotaPool[] | undefined, model: ResidentModelOption): ResidentQuotaPool | undefined {
+function quotaForModel(
+  pool: readonly PhysicalOperatorQuotaPool[] | undefined,
+  model: PhysicalOperatorResidentModel,
+): PhysicalOperatorQuotaPool | undefined {
   return pool?.find(value => value.models.includes(model.model))
 }
 
-function quotaGuard(provider: ResidentProviderStatus): NonNullable<ModelExecutionOffer['quotaGuard']> {
-  if (provider.operatorId === 'claude-code') {
+function quotaGuard(provider: PhysicalOperatorResidentCatalog): NonNullable<ModelExecutionOffer['quotaGuard']> {
+  if (provider.product === 'claude-code') {
     return {
       unknownQuota: 'block',
       protectedRemainingPercent: 20,
@@ -568,13 +695,18 @@ export class OrchestrationDaemon {
   private readonly transports = new Set<JsonRpcLineTransport>()
   private readonly sockets = new Set<Socket>()
   private readonly ctx = new Context()
-  private readonly physical = new Map<string, OrchestrationResidentOperator>()
   private readonly active = new Map<string, ActiveAttempt>()
+  private readonly reconcileRetryAfter = new Map<string, number>()
   private readonly capacityRetryAfter = new Map<string, number>()
   private readonly worktrees: GitWorktreeManager
   private readonly autoRefine: DurableAutoRefineCoordinator
   private readonly recoveredRlmControllers: AbortController[] = []
   private readonly recoveredRlmDisposers: Array<() => void> = []
+  private readonly remoteOperatorRegistrations = new Map<string, {
+    readonly signature: string
+    readonly dispose: readonly (() => Promise<void>)[]
+  }>()
+  private remoteOperatorRefreshAt = 0
   private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
   private lockDescriptor: number | undefined
   private ticker: ReturnType<typeof setInterval> | undefined
@@ -645,9 +777,9 @@ export class OrchestrationDaemon {
     })
     for (const provider of await this.resident.providers()) {
       const operator = new OrchestrationResidentOperator(this.resident, provider)
-      this.physical.set(provider.operatorId, operator)
       this.ctx.physicalOperators.registerOperator(operator)
     }
+    await this.refreshRemoteOperators(true)
     this.removeStaleSocket()
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => { reject(error) }
@@ -674,6 +806,10 @@ export class OrchestrationDaemon {
     this.ticker = undefined
     for (const controller of this.recoveredRlmControllers) controller.abort(new Error('orchestration daemon is closing'))
     for (const dispose of this.recoveredRlmDisposers.splice(0)) dispose()
+    for (const registration of this.remoteOperatorRegistrations.values()) {
+      await Promise.allSettled(registration.dispose.map(dispose => dispose()))
+    }
+    this.remoteOperatorRegistrations.clear()
     for (const transport of this.transports) transport.close()
     for (const socket of this.sockets) socket.end()
     await Promise.allSettled([...this.active.values()].map(value => value.run.dispose()))
@@ -1058,10 +1194,48 @@ export class OrchestrationDaemon {
     return record
   }
 
+  private async refreshRemoteOperators(initial: boolean): Promise<void> {
+    let servers: readonly RemotePhysicalOperatorServer[]
+    try {
+      servers = this.options.remoteOperatorServers ?? readRemoteOperatorCatalog(this.options.root)
+    } catch (error) {
+      if (initial) throw error
+      this.ctx.logger.warn(`remote operator catalog rejected: ${error instanceof Error ? error.message : String(error)}`)
+      this.remoteOperatorRefreshAt = Date.now() + 5_000
+      return
+    }
+    const desired = new Map(servers.map(server => [server.id, server] as const))
+    for (const [serverId, registration] of this.remoteOperatorRegistrations) {
+      if (desired.has(serverId)) continue
+      await Promise.allSettled(registration.dispose.map(dispose => dispose()))
+      this.remoteOperatorRegistrations.delete(serverId)
+    }
+    for (const server of servers) {
+      const signature = JSON.stringify(server)
+      const existing = this.remoteOperatorRegistrations.get(server.id)
+      if (existing?.signature === signature) continue
+      try {
+        const operators = await createRemotePhysicalOperators(server)
+        if (existing !== undefined) {
+          await Promise.allSettled(existing.dispose.map(dispose => dispose()))
+          this.remoteOperatorRegistrations.delete(server.id)
+        }
+        const dispose = operators.map(operator => this.ctx.physicalOperators.registerOperator(operator))
+        this.remoteOperatorRegistrations.set(server.id, { signature, dispose })
+      } catch (error) {
+        this.ctx.logger.warn(
+          `remote operator Server "${server.label}" unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    this.remoteOperatorRefreshAt = Date.now() + 5_000
+  }
+
   private async tick(): Promise<void> {
     if (this.ticking || this.closing) return
     this.ticking = true
     try {
+      if (Date.now() >= this.remoteOperatorRefreshAt) await this.refreshRemoteOperators(false)
       await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
       await this.reconcile()
       await this.ctx.rlmRuntime.pumpMessages()
@@ -1555,7 +1729,7 @@ export class OrchestrationDaemon {
     }
     const timeout = attemptAbort(spec.timeoutMs)
     const { controller } = timeout
-    const operator = this.physical.get(plan.operatorPlan.operatorId)
+    const operator = this.ctx.physicalOperators.getOperator(plan.operatorPlan.operatorId)
     if (operator === undefined) throw new OrchestrationError(`physical operator is unavailable: ${plan.operatorPlan.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident')
     try {
@@ -1568,7 +1742,7 @@ export class OrchestrationDaemon {
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
       })
-      const receipt = operator.takeReceipt(String(plan.executionId))
+      const receipt = acceptedReceipt(run, String(plan.executionId))
       const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', turnId: receipt.turnId, updatedAt: now() }
       this.store.saveAttempt(attempt)
       const current = this.store.getRun(String(record.snapshot.runId))
@@ -1906,7 +2080,8 @@ export class OrchestrationDaemon {
     const rootBeforeReview = await this.ctx.rlmRuntime.inspect(sessionId)
     const branchVersion = `${plan.planSha256}:${String(rootBeforeReview.stateRevision)}`
     const allocation = [plan.rlmWorkerPlan, plan.allocationPlan].find(value => (
-      value?.source === 'native-subscription' && this.physical.has(value.operatorId)
+      value?.source === 'native-subscription'
+      && this.ctx.physicalOperators.getOperator(value.operatorId) !== undefined
     ))
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
     if (allocation === undefined) {
@@ -2190,7 +2365,7 @@ export class OrchestrationDaemon {
         const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
           record, spec, plan, request.childSessionId, controller, error,
         )
-        if (this.physical.has(request.model.operatorId)) {
+        if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
           const started = await this.startResidentTurn(
             record,
             spec,
@@ -2460,7 +2635,7 @@ export class OrchestrationDaemon {
     const failed = (error: unknown): Promise<RlmChildExecutionResult> => this.failedRlmExecution(
       record, spec, plan, request.sessionId, controller, error,
     )
-    if (this.physical.has(request.model.operatorId)) {
+    if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
       const started = await this.startResidentTurn(
         record, spec, plan.executionWorkspace.path, executionId, request.model,
         prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId),
@@ -2614,7 +2789,7 @@ export class OrchestrationDaemon {
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
     residentLaneId?: string,
   ): Promise<StartedResidentTurn> {
-    const operator = this.physical.get(allocation.operatorId)
+    const operator = this.ctx.physicalOperators.getOperator(allocation.operatorId)
     if (operator === undefined) {
       throw new OrchestrationError(`physical operator is unavailable: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     }
@@ -2629,7 +2804,7 @@ export class OrchestrationDaemon {
       ...modelToolBridge === undefined ? {} : { modelToolBridge },
       ...residentLaneId === undefined ? {} : { residentLaneId },
     })
-    return { run, receipt: operator.takeReceipt(String(executionId)) }
+    return { run, receipt: acceptedReceipt(run, String(executionId)) }
   }
 
   private dispatchModelWorkerRlm(
@@ -2837,8 +3012,9 @@ export class OrchestrationDaemon {
   }
 
   private async syncActiveProgressUnchecked(active: ActiveAttempt): Promise<void> {
+    if (active.run.readEvents === undefined) return
     try {
-      const page = await this.resident.readEvents(active.sessionId, active.progressCursor, 200)
+      const page = await active.run.readEvents(active.progressCursor, 200)
       const progress = page.events.filter(value => (
         value.type === 'turn.progress'
         && value.data.turnId === active.turnId
@@ -3067,8 +3243,9 @@ export class OrchestrationDaemon {
   private residentOffers(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
-    providers: readonly ResidentProviderStatus[],
+    providers: readonly PhysicalOperatorResidentCatalog[],
     honorProfile: boolean,
+    requiresModelToolBridge = false,
   ): ModelExecutionOffer[] {
     const exhaustedOfferIds = new Set<string>()
     const exhaustedQuotaPoolIds = new Set<string>()
@@ -3084,38 +3261,43 @@ export class OrchestrationDaemon {
     const activeByOperator = new Map(
       this.ctx.physicalOperators.list().map(status => [String(status.id), status.active] as const),
     )
-    return providers.flatMap((provider) => {
-      const available = provider.available && provider.authentication === 'native-subscription'
-      return provider.models
-        .filter(model => !honorProfile || spec.operator?.profile?.model === undefined || model.model === spec.operator.profile.model)
-        .map((model): ModelExecutionOffer => {
-          const quotaPool = quotaForModel(provider.quotaPools, model)
-          const offerId = `${provider.operatorId}:${model.model}`
-          return {
-            offerId,
-            operatorId: provider.operatorId,
-            provider: provider.product,
-            model: model.model,
-            displayName: `${provider.displayName} · ${model.displayName}`,
-            source: 'native-subscription',
-            tier: modelTier(model),
-            available: available
+    const mutatesWorkspace = spec.writeScopes.length > 0 || spec.effectBudget.write.length > 0
+    return providers
+      .filter(provider => !requiresModelToolBridge || provider.supportsModelToolBridge)
+      .filter(provider => !mutatesWorkspace || provider.supportsWorkspaceMutationReturn)
+      .flatMap((provider) => {
+        const status = this.ctx.physicalOperators.status(String(provider.operatorId))
+        const available = provider.available && provider.authentication === 'native-subscription'
+        return provider.models
+          .filter(model => !honorProfile || spec.operator?.profile?.model === undefined || model.model === spec.operator.profile.model)
+          .map((model): ModelExecutionOffer => {
+            const quotaPool = quotaForModel(provider.quotaPools, model)
+            const offerId = `${provider.operatorId}:${model.model}`
+            return {
+              offerId,
+              operatorId: provider.operatorId,
+              provider: provider.product,
+              model: model.model,
+              displayName: `${status.displayName} · ${model.displayName}`,
+              source: 'native-subscription',
+              tier: modelTier(model),
+              available: available
               && !exhaustedOfferIds.has(offerId)
               && (quotaPool === undefined || !exhaustedQuotaPoolIds.has(quotaPool.poolId)),
-            maxConcurrency: provider.maxConcurrency,
-            activeCount: activeByOperator.get(provider.operatorId) ?? 0,
-            tags: provider.tags,
-            ...quotaPool === undefined ? {} : { quotaPool },
-            quotaGuard: quotaGuard(provider),
-            profile: {
-              model: model.model,
-              ...honorProfile && spec.operator?.profile?.effort !== undefined
-                ? { effort: spec.operator.profile.effort }
-                : model.defaultEffort === undefined ? {} : { effort: model.defaultEffort },
-            },
-          }
-        })
-    })
+              maxConcurrency: status.maxConcurrency,
+              activeCount: activeByOperator.get(provider.operatorId) ?? 0,
+              tags: status.tags,
+              ...quotaPool === undefined ? {} : { quotaPool },
+              quotaGuard: quotaGuard(provider),
+              profile: {
+                model: model.model,
+                ...honorProfile && spec.operator?.profile?.effort !== undefined
+                  ? { effort: spec.operator.profile.effort }
+                  : model.defaultEffort === undefined ? {} : { effort: model.defaultEffort },
+              },
+            }
+          })
+      })
   }
 
   private async selectRlmWorker(
@@ -3123,8 +3305,8 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     rlmPlan: RlmExecutionPlanV1,
   ): Promise<ModelAllocationPlan> {
-    const providers = await this.resident.providers()
-    const residentOffers = this.residentOffers(record, spec, providers, false)
+    const providers = await this.ctx.physicalOperators.residentCatalogs()
+    const residentOffers = this.residentOffers(record, spec, providers, false, true)
     const modelWorkerOffers = await this.ctx.modelWorkers.offers()
     const offers = [...residentOffers, ...modelWorkerOffers]
     const available = offers.filter(value => value.available)
@@ -3150,9 +3332,9 @@ export class OrchestrationDaemon {
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     rlmPlan: RlmExecutionPlanV1,
-  ): Promise<{ readonly provider?: ResidentProviderStatus; readonly allocation: ModelAllocationPlan }> {
-    const providers = await this.resident.providers()
-    const residentOffers = this.residentOffers(record, spec, providers, true)
+  ): Promise<{ readonly provider?: PhysicalOperatorResidentCatalog; readonly allocation: ModelAllocationPlan }> {
+    const providers = await this.ctx.physicalOperators.residentCatalogs()
+    const residentOffers = this.residentOffers(record, spec, providers, true, rlmPlan.enabled)
     const modelWorkerOffers = spec.writeScopes.length === 0
       && spec.effectBudget.write.length === 0
       && spec.effectBudget.execute.length === 0
@@ -3180,37 +3362,60 @@ export class OrchestrationDaemon {
 
   private async reconcile(): Promise<void> {
     for (const attempt of this.store.attempts(['accepted', 'running'])) {
-      if (this.active.has(`${attempt.runId}\0${attempt.nodeId}`)) continue
+      const key = `${attempt.runId}\0${attempt.nodeId}`
+      if (this.active.has(key) || (this.reconcileRetryAfter.get(key) ?? 0) > Date.now()) continue
       if (attempt.turnId === undefined) {
         this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: 'daemon restarted before a Resident turn identity was recorded', updatedAt: now() })
         continue
       }
+      const record = this.store.getRun(attempt.runId)
+      const operatorId = record.snapshot.nodes.find(value => value.id === attempt.nodeId)?.operatorId
+      if (operatorId === undefined) {
+        this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: 'recovered attempt has no sealed physical operator identity', updatedAt: now() })
+        continue
+      }
+      const operator = this.ctx.physicalOperators.getOperator(operatorId)
+      if (operator === undefined) {
+        this.reconcileRetryAfter.set(key, Date.now() + 2_000)
+        continue
+      }
+      if (operator.reattach === undefined) {
+        this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: `physical operator ${operatorId} cannot reattach its durable turn`, updatedAt: now() })
+        continue
+      }
       try {
-        const inspection = await this.resident.inspectTurn(attempt.turnId)
-        if (inspection.state === 'settled' && inspection.result !== undefined) {
-          const record = this.store.getRun(attempt.runId)
-          const recovered: ActiveAttempt = {
-            kind: 'resident',
-            runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
-            generation: attempt.generation, executionId: attempt.executionId,
-            sessionId: String(inspection.sessionId), turnId: attempt.turnId,
-            run: { result: Promise.resolve(inspection.result), dispose: async () => {} },
-            operatorId: record.snapshot.nodes.find(value => value.id === attempt.nodeId)?.operatorId ?? 'unknown',
-            progressCursor: 0,
-          }
-          await this.syncActiveProgress(recovered)
-          await this.settleAttempt(recovered, inspection.result)
-        } else if (inspection.state === 'indeterminate') {
-          this.applyIndeterminate({
-            ...attempt,
-            state: 'indeterminate',
-            ...inspection.error?.code === undefined ? {} : { errorCode: inspection.error.code },
-            ...inspection.error?.message === undefined ? {} : { errorMessage: inspection.error.message },
-            updatedAt: now(),
-          })
+        const run = await operator.reattach(attempt.turnId)
+        const receipt = run.receipt
+        if (receipt === undefined) throw new OrchestrationError('reattached Provider omitted its durable receipt', 'ORCHESTRATION_UNAVAILABLE')
+        const recovered: ActiveAttempt = {
+          kind: 'resident',
+          runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
+          generation: attempt.generation, executionId: attempt.executionId,
+          sessionId: receipt.sessionId, turnId: receipt.turnId,
+          run, operatorId, progressCursor: 0,
         }
+        this.reconcileRetryAfter.delete(key)
+        this.active.set(key, recovered)
+        await this.syncActiveProgress(recovered)
+        void run.result.then(
+          async (result) => {
+            if (this.closing) return
+            await this.syncActiveProgress(recovered)
+            await this.settleAttempt(recovered, result)
+          },
+          async (error: unknown) => {
+            if (this.closing) return
+            await this.syncActiveProgress(recovered)
+            this.failAttempt(recovered, error)
+          },
+        ).finally(() => { this.active.delete(key); void this.tick() })
       } catch (error) {
-        this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: error instanceof Error ? error.message : String(error), updatedAt: now() })
+        const code = error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE'
+        if (code === 'COMMAND_INDETERMINATE') {
+          this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: code, errorMessage: error instanceof Error ? error.message : String(error), updatedAt: now() })
+        } else {
+          this.reconcileRetryAfter.set(key, Date.now() + 2_000)
+        }
       }
     }
   }
@@ -3220,7 +3425,14 @@ export class OrchestrationDaemon {
   private async interruptActive(runId: string): Promise<void> {
     const active = [...this.active.values()].filter(value => value.runId === runId)
     await Promise.allSettled(active.map(async (value) => {
-      if (value.kind === 'resident') await this.resident.interrupt(value.sessionId, value.turnId)
+      if (value.kind === 'resident') {
+        const operator = this.ctx.physicalOperators.getOperator(value.operatorId)
+        await operator?.interrupt?.({
+          sessionId: value.sessionId,
+          turnId: value.turnId,
+          stateRevision: 0,
+        })
+      }
       await value.run.dispose()
     }))
   }

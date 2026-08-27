@@ -1634,6 +1634,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../../physical-operator/physical-operator
       '@deepseek-ai/dsh-resident-operator':
         specifier: workspace:^
         version: link:../../physical-operator/resident-operator
@@ -5946,6 +5949,9 @@ importers:
       '@deepseek-ai/dsh-capability-capsule':
         specifier: workspace:^
         version: link:../capability-capsule
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../../client/connection
       '@deepseek-ai/dsh-context-compiler':
         specifier: workspace:^
         version: link:../context-compiler

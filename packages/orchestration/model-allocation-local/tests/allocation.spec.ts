@@ -24,6 +24,28 @@ describe('subscription-first model allocation', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('keeps product affinity when a remote Server namespaces the operator id', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const result = await service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'execution', role: 'implementation', task: 'implement the code change',
+      preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 2,
+      offers: [
+        offer({
+          offerId: 'remote.mini.codex:luna', operatorId: 'remote.mini.codex',
+          provider: 'codex', model: 'luna', tier: 'low',
+        }),
+        offer({
+          offerId: 'remote.lab.claude:haiku', operatorId: 'remote.lab.claude-code',
+          provider: 'claude-code', model: 'haiku', tier: 'low',
+        }),
+      ],
+      now: '2026-08-27T12:00:00.000Z',
+    })
+    expect(result).toMatchObject({ operatorId: 'remote.mini.codex', provider: 'codex' })
+    await ctx.root.fiber.dispose()
+  })
+
   it('treats Spark as an independent pool and accelerates unused quota before reset', async () => {
     const ctx = new Context()
     const service = new SubscriptionFirstModelAllocation(ctx)

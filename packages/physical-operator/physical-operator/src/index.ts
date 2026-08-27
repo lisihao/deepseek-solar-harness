@@ -20,6 +20,7 @@ import type {
   PhysicalOperatorExecutionMode,
   PhysicalOperatorProviderRun,
   PhysicalOperatorProviderStartRequest,
+  PhysicalOperatorResidentCatalog,
   PhysicalOperatorRun,
   PhysicalOperatorStartRequest,
   PhysicalOperatorStatus,
@@ -31,6 +32,7 @@ export { PhysicalOperatorError } from './error.ts'
 export { PhysicalOperatorExecutionId, PhysicalOperatorId } from './types.ts'
 export type {
   PhysicalOperator,
+  PhysicalOperatorAcceptedReceipt,
   PhysicalOperatorAvailability,
   PhysicalOperatorDescriptor,
   PhysicalOperatorExecutionEndInfo,
@@ -38,6 +40,12 @@ export type {
   PhysicalOperatorExecutionPreference,
   PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorModelToolV1,
+  PhysicalOperatorProgressEvent,
+  PhysicalOperatorProgressPage,
+  PhysicalOperatorQuotaPool,
+  PhysicalOperatorQuotaWindow,
+  PhysicalOperatorResidentCatalog,
+  PhysicalOperatorResidentModel,
   PhysicalOperatorExecutionInfo,
   PhysicalOperatorReasoningEffort,
   PhysicalOperatorProviderRun,
@@ -143,6 +151,22 @@ export class PhysicalOperatorRuntime extends Service {
     return this.statusOf(this.expectOperator(id))
   }
 
+  /** Return every registered Resident model/quota catalog in registration order. */
+  async residentCatalogs(): Promise<PhysicalOperatorResidentCatalog[]> {
+    const catalogs = await Promise.all([...this.operators.values()].flatMap(async (operator) => {
+      if (operator.residentCatalog === undefined) return []
+      const catalog = await operator.residentCatalog()
+      if (catalog.operatorId !== operator.descriptor.id) {
+        throw new PhysicalOperatorError(
+          `physical operator "${operator.descriptor.id}" published catalog for "${catalog.operatorId}"`,
+          'INVALID_OPERATOR',
+        )
+      }
+      return [catalog]
+    }))
+    return catalogs.flat()
+  }
+
   /**
    * Admit and publish one execution. Capacity is reserved synchronously before
    * provider startup and released exactly once when the result settles.
@@ -212,6 +236,8 @@ export class PhysicalOperatorRuntime extends Service {
     return {
       id: identity.executionId,
       operatorId: stableId,
+      ...providerRun.receipt === undefined ? {} : { receipt: providerRun.receipt },
+      ...providerRun.readEvents === undefined ? {} : { readEvents: providerRun.readEvents.bind(providerRun) },
       result,
       dispose: () => providerRun.dispose(),
     }

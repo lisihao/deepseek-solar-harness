@@ -53,10 +53,10 @@ function qualityFit(offer: ModelExecutionOffer, request: ModelAllocationRequest)
 function productFit(offer: ModelExecutionOffer, request: ModelAllocationRequest): number {
   const text = `${request.role} ${request.task}`.toLowerCase()
   if (/architect|review|analysis|research|long.context|架构|审查|研究|长上下文/u.test(text)) {
-    return offer.operatorId === 'claude-code' ? 120 : 0
+    return offer.provider === 'claude-code' ? 120 : 0
   }
   if (/implement|debug|test|code|repo|实现|调试|测试|代码|仓库/u.test(text)) {
-    return offer.operatorId === 'codex' ? 120 : 0
+    return offer.provider === 'codex' ? 120 : 0
   }
   return 0
 }
