@@ -23,7 +23,7 @@ export type * from './types.ts'
 type CollaborationPolicy = 'auto' | 'direct' | 'codex' | 'claude-code'
 
 const RLM_OPTIONS = ['auto', 'enabled', 'disabled'] as const satisfies readonly RlmExecutionMode[]
-const HARNESS_OPTIONS = ['auto', 'off', 'session', 'workspace'] as const satisfies readonly ContinualHarnessMode[]
+const HARNESS_OPTIONS = ['auto', 'off', 'session', 'workspace', 'global'] as const satisfies readonly ContinualHarnessMode[]
 const OPTIMIZATION_OPTIONS = ['balanced', 'quality', 'speed', 'economy'] as const satisfies readonly ModelAllocationObjective[]
 const PLANNER_VERIFIER_OPTIONS = ['codex-sol', 'best-high-tier'] as const satisfies readonly PlannerVerifierPreference[]
 const EXECUTION_OPTIONS = ['luna-first', 'balanced'] as const satisfies readonly ExecutionModelPreference[]
@@ -162,14 +162,14 @@ export function apply(ctx: Context): void {
         ? { ...DEFAULT_PREFERENCES, ...event.data }
         : state,
       view: preferenceProjection,
-      stateVersion: 2,
+      stateVersion: 3,
     })
   })
   ctx.inject(['commands'], (commandCtx) => {
     commandCtx.commands.register({
       name: 'orchestration-strategy',
       description: 'Select RLM, Continuous Harness, optimization, planning/verifying model policy, and execution model policy',
-      input: { hint: '<rlm> <harness> <optimization> <codex-sol|best-high-tier> <luna-first|balanced>' },
+      input: { hint: '<rlm> <auto|off|session|workspace|global> <optimization> <codex-sol|best-high-tier> <luna-first|balanced>' },
       handler: ({ agent, rawInput }) => {
         const [
           rlm, continualHarness, optimization, plannerVerifierPreference, executionPreference, ...extra
@@ -180,7 +180,7 @@ export function apply(ctx: Context): void {
           || !PLANNER_VERIFIER_OPTIONS.some(value => value === plannerVerifierPreference)
           || !EXECUTION_OPTIONS.some(value => value === executionPreference)
           || extra.length > 0) {
-          return { kind: 'error', text: 'usage: /orchestration-strategy <auto|enabled|disabled> <auto|off|session|workspace> <balanced|quality|speed|economy> <codex-sol|best-high-tier> <luna-first|balanced>' }
+          return { kind: 'error', text: 'usage: /orchestration-strategy <auto|enabled|disabled> <auto|off|session|workspace|global> <balanced|quality|speed|economy> <codex-sol|best-high-tier> <luna-first|balanced>' }
         }
         const preferences = {
           rlm, continualHarness, optimization, plannerVerifierPreference, executionPreference,

@@ -74,7 +74,7 @@ export interface DesktopOrchestrationRun {
     route: 'taskgraph'
     sourceSessionId: string
     rlm?: 'auto' | 'enabled' | 'disabled'
-    continualHarness?: 'auto' | 'off' | 'session' | 'workspace'
+    continualHarness?: 'auto' | 'off' | 'session' | 'workspace' | 'global'
     optimization?: 'balanced' | 'quality' | 'speed' | 'economy'
     plannerVerifierPreference?: 'codex-sol' | 'best-high-tier'
     executionPreference?: 'luna-first' | 'balanced'

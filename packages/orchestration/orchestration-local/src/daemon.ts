@@ -30,7 +30,12 @@ import { ContinualHarnessSkillRuntime } from '@deepseek-ai/dsh-continual-harness
 import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
 import LlmRuntime, { type ContentBlock } from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
-import type { ModelAllocationPlan, ModelExecutionOffer, ModelTaskPhase } from '@deepseek-ai/dsh-model-allocation'
+import type {
+  ContinualHarnessMode,
+  ModelAllocationPlan,
+  ModelExecutionOffer,
+  ModelTaskPhase,
+} from '@deepseek-ai/dsh-model-allocation'
 import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
 import ModelWorkerRuntime, { type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
@@ -342,6 +347,12 @@ function observationDelay(delayMs: number, signal: AbortSignal): Promise<void> {
     }
     signal.addEventListener('abort', abort, { once: true })
   })
+}
+
+function selectedHarnessScope(mode: ContinualHarnessMode): ContinualHarnessScope | undefined {
+  if (mode === 'off') return undefined
+  if (mode === 'session' || mode === 'global') return mode
+  return 'workspace'
 }
 
 /** Daemon construction policy. */
@@ -1519,10 +1530,9 @@ export class OrchestrationDaemon {
       }, node)])
     }
     const harnessMode = record.snapshot.admission?.continualHarness ?? 'auto'
-    const harnessScope: ContinualHarnessScope | undefined = harnessMode === 'off'
-      || !spec.contextPolicy.allowedSourceKinds.includes('knowledge')
-      ? undefined
-      : harnessMode === 'session' ? 'session' : 'workspace'
+    const harnessScope = spec.contextPolicy.allowedSourceKinds.includes('knowledge')
+      ? selectedHarnessScope(harnessMode)
+      : undefined
     const harnessSnapshot = harnessScope === undefined ? undefined : await this.ctx.continualHarness.snapshot({
       workspace: record.snapshot.workspace,
       ...record.snapshot.admission?.sourceSessionId === undefined
@@ -1991,6 +2001,7 @@ export class OrchestrationDaemon {
     const receipts = [
       ...await this.ctx.continualHarness.flushRefinements({ ...common, scope: 'session', sessionId: String(sessionId) }),
       ...await this.ctx.continualHarness.flushRefinements({ ...common, scope: 'workspace' }),
+      ...await this.ctx.continualHarness.flushRefinements({ ...common, scope: 'global' }),
     ]
     if (receipts.length > 0) {
       this.store.appendEvents(receipts.map(receipt => event(record.snapshot.runId, `harness.refinement.${receipt.state}`, {
@@ -2167,17 +2178,30 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     runtimeSnapshot: Awaited<ReturnType<Context['rlmRuntime']['inspect']>>,
   ): Promise<string> {
-    const [session, global, sessionRefinements, workspaceRefinements, messages, events] = await Promise.all([
+    const [
+      session,
+      workspaceHarness,
+      globalHarness,
+      sessionRefinements,
+      workspaceRefinements,
+      globalRefinements,
+      messages,
+      events,
+    ] = await Promise.all([
       this.ctx.continualHarness.snapshot({
         workspace, sessionId: String(sessionId), scope: 'session', role: spec.role, task: spec.task, limit: 64,
       }),
       this.ctx.continualHarness.snapshot({
         workspace, scope: 'workspace', role: spec.role, task: spec.task, limit: 64,
       }),
+      this.ctx.continualHarness.snapshot({
+        workspace, scope: 'global', role: spec.role, task: spec.task, limit: 64,
+      }),
       this.ctx.continualHarness.listRefinements({
         workspace, sessionId: String(sessionId), scope: 'session', limit: 20,
       }),
       this.ctx.continualHarness.listRefinements({ workspace, scope: 'workspace', limit: 20 }),
+      this.ctx.continualHarness.listRefinements({ workspace, scope: 'global', limit: 20 }),
       this.ctx.rlmRuntime.readMessages({ sessionId, limit: 64 }),
       this.ctx.rlmRuntime.readEvents({
         sessionId, after: Math.max(0, runtimeSnapshot.eventCursor - 128), limit: 128,
@@ -2223,7 +2247,8 @@ export class OrchestrationDaemon {
         })),
       },
       session: { ...(project(session) as object), refinements: sessionRefinements.map(refinement) },
-      workspace: { ...(project(global) as object), refinements: workspaceRefinements.map(refinement) },
+      workspace: { ...(project(workspaceHarness) as object), refinements: workspaceRefinements.map(refinement) },
+      global: { ...(project(globalHarness) as object), refinements: globalRefinements.map(refinement) },
     })}`
   }
 
@@ -2449,7 +2474,13 @@ export class OrchestrationDaemon {
               : 'scheduled for the next native turn boundary with model-supplied instructions',
           }
         }
-        const scope = params.scope === 'workspace' ? 'workspace' as const : 'session' as const
+        if (params.scope !== undefined
+          && params.scope !== 'session'
+          && params.scope !== 'workspace'
+          && params.scope !== 'global') {
+          throw new OrchestrationError('Harness scope must be session, workspace, or global', 'GRAPH_INVALID')
+        }
+        const scope: ContinualHarnessScope = params.scope ?? 'session'
         const scoped = {
           ...params,
           workspace: plan.executionWorkspace.path,
@@ -2517,12 +2548,15 @@ export class OrchestrationDaemon {
   }
 
   private async listManagedSkills(workspace: string, sessionId: string): Promise<ContinualHarnessSkillDescriptorV1[]> {
-    const [global, local] = await Promise.all([
+    const [globalEntries, workspaceEntries, sessionEntries] = await Promise.all([
+      this.ctx.continualHarness.list({ workspace, scope: 'global', kind: 'skill' }),
       this.ctx.continualHarness.list({ workspace, scope: 'workspace', kind: 'skill' }),
       this.ctx.continualHarness.list({ workspace, sessionId, scope: 'session', kind: 'skill' }),
     ])
     const entries = new Map<string, ContinualHarnessManagedEntryV2>()
-    for (const entry of [...global, ...local]) entries.set(this.skillAlias(entry), entry)
+    for (const entry of [...globalEntries, ...workspaceEntries, ...sessionEntries]) {
+      entries.set(this.skillAlias(entry), entry)
+    }
     return [...entries.entries()].map(([alias, entry]) => {
       const { moduleId, callable } = this.managedSkillBinding(entry)
       return {
@@ -2545,11 +2579,14 @@ export class OrchestrationDaemon {
     if (typeof alias !== 'string' || args === null || typeof args !== 'object' || Array.isArray(args)) {
       throw new OrchestrationError('skills.call requires a managed alias and JSON object arguments', 'GRAPH_INVALID')
     }
-    const [global, local] = await Promise.all([
+    const [globalEntries, workspaceEntries, sessionEntries] = await Promise.all([
+      this.ctx.continualHarness.list({ workspace, scope: 'global', kind: 'skill' }),
       this.ctx.continualHarness.list({ workspace, scope: 'workspace', kind: 'skill' }),
       this.ctx.continualHarness.list({ workspace, sessionId, scope: 'session', kind: 'skill' }),
     ])
-    const entry = [...global, ...local].reverse().find(candidate => this.skillAlias(candidate) === alias)
+    const entry = [...globalEntries, ...workspaceEntries, ...sessionEntries]
+      .reverse()
+      .find(candidate => this.skillAlias(candidate) === alias)
     if (entry === undefined) throw new OrchestrationError(`managed TypeScript skill not found: ${alias}`, 'GRAPH_INVALID')
     const { moduleId, callable } = this.managedSkillBinding(entry)
     return this.ctx.continualHarnessSkills.invoke({
@@ -3144,7 +3181,8 @@ export class OrchestrationDaemon {
     const admission = record.snapshot.admission
     const harnessMode = admission?.continualHarness ?? 'auto'
     if (harnessMode !== 'off' && spec.contextPolicy.allowedSourceKinds.includes('knowledge')) {
-      const scope: ContinualHarnessScope = harnessMode === 'session' ? 'session' : 'workspace'
+      const scope = selectedHarnessScope(harnessMode)
+      if (scope === undefined) throw new OrchestrationError('enabled Harness mode omitted its scope', 'GRAPH_INVALID')
       const entry = await this.ctx.continualHarness.recordOutcome({
         runId: active.runId,
         nodeId: active.nodeId,

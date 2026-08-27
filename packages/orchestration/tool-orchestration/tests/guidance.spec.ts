@@ -38,11 +38,11 @@ describe('orchestration model guidance', () => {
     expect(foldOrchestrationPreferences([{
       type: 'orchestration/preferences',
       data: {
-        rlm: 'disabled', continualHarness: 'off', optimization: 'balanced',
+        rlm: 'disabled', continualHarness: 'global', optimization: 'balanced',
         plannerVerifierPreference: 'best-high-tier', executionPreference: 'balanced',
       },
     }])).toEqual({
-      rlm: 'disabled', continualHarness: 'off', optimization: 'balanced',
+      rlm: 'disabled', continualHarness: 'global', optimization: 'balanced',
       plannerVerifierPreference: 'best-high-tier', executionPreference: 'balanced',
     })
   })

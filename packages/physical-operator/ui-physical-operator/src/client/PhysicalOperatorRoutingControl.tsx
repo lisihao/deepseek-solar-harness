@@ -340,6 +340,7 @@ export function PhysicalOperatorRoutingControl({
                     <option value="off">关闭</option>
                     <option value="session">当前会话</option>
                     <option value="workspace">当前工作区</option>
+                    <option value="global">所有工作区（用户级）</option>
                   </select>
                 </label>
                 <label>

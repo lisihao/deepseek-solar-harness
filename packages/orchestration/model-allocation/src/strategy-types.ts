@@ -13,4 +13,4 @@ export type ExecutionModelPreference = 'luna-first' | 'balanced'
 export type RlmExecutionMode = 'auto' | 'enabled' | 'disabled'
 
 /** Durable Continuous Harness participation. */
-export type ContinualHarnessMode = 'auto' | 'off' | 'session' | 'workspace'
+export type ContinualHarnessMode = 'auto' | 'off' | 'session' | 'workspace' | 'global'

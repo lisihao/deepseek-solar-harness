@@ -541,7 +541,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     methods: [
       {
         signature: 'abstract snapshot(request: ContinualHarnessSnapshotRequest): Promise<ContinualHarnessSnapshotV1>',
-        description: 'Compile a bounded immutable snapshot for one session or workspace scope.',
+        description: 'Compile a bounded immutable snapshot for one session, workspace, or user-global scope.',
         parameters: [{ name: 'request', description: 'Scope, task, and entry-limit policy for the snapshot.' }],
         returns: 'The content-addressed Continuous Harness snapshot.',
       },
@@ -565,7 +565,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract list(request: ContinualHarnessListRequest): Promise<readonly ContinualHarnessManagedEntryV2[]>',
-        description: 'List managed entries in the selected session-local or workspace-global scope.',
+        description: 'List managed entries in the selected session, workspace, or user-global scope.',
         parameters: [{ name: 'request', description: 'scope, optional kind filter, and tombstone policy.' }],
         returns: 'matching managed entries in deterministic order.',
       },
@@ -3674,7 +3674,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ContinualHarnessMode',
-    declaration: 'export type ContinualHarnessMode = \'auto\' | \'off\' | \'session\' | \'workspace\';',
+    declaration: 'export type ContinualHarnessMode = \'auto\' | \'off\' | \'session\' | \'workspace\' | \'global\';',
   },
   {
     name: 'ContinualHarnessOutcomeRequest',
@@ -3718,7 +3718,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ContinualHarnessScope',
-    declaration: 'export type ContinualHarnessScope = \'session\' | \'workspace\';',
+    declaration: 'export type ContinualHarnessScope = \'session\' | \'workspace\' | \'global\';',
   },
   {
     name: 'ContinualHarnessScopeRequest',

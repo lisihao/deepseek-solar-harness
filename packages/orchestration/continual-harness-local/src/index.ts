@@ -22,6 +22,7 @@ import ContinualHarnessService, {
   type ContinualHarnessRefinementPlanRequest,
   type ContinualHarnessRefinementPlanV1,
   type ContinualHarnessRollbackRequest,
+  type ContinualHarnessScope,
   type ContinualHarnessScopeRequest,
   type ContinualHarnessSnapshotRequest,
   type ContinualHarnessSnapshotV1,
@@ -83,7 +84,8 @@ function tokens(value: string): string[] {
   return [...new Set(value.toLowerCase().split(/[^\p{L}\p{N}_.-]+/u).filter(word => word.length >= 2))].sort()
 }
 
-function scopeId(request: { readonly scope: 'session' | 'workspace'; readonly workspace: string; readonly sessionId?: string }): string {
+function scopeId(request: { readonly scope: ContinualHarnessScope; readonly workspace: string; readonly sessionId?: string }): string {
+  if (request.scope === 'global') return 'global'
   if (request.scope === 'workspace') return request.workspace
   if (request.sessionId === undefined || request.sessionId.length === 0) {
     throw new ContinualHarnessError('session-scoped Continuous Harness requires sessionId', 'HARNESS_INVALID')
@@ -91,7 +93,7 @@ function scopeId(request: { readonly scope: 'session' | 'workspace'; readonly wo
   return request.sessionId
 }
 
-function managedScope(request: ContinualHarnessScopeRequest): { readonly scope: 'session' | 'workspace'; readonly scopeId: string } {
+function managedScope(request: ContinualHarnessScopeRequest): { readonly scope: ContinualHarnessScope; readonly scopeId: string } {
   const scope = request.scope ?? 'session'
   return { scope, scopeId: scopeId({ ...request, scope }) }
 }
@@ -489,12 +491,22 @@ export class LocalContinualHarness extends ContinualHarnessService {
     return entry
   }
 
-  private latestManaged(document: StoreDocument, scope: 'session' | 'workspace', id: string, entryId: string): ContinualHarnessManagedEntryV2 | undefined {
+  private latestManaged(
+    document: StoreDocument,
+    scope: ContinualHarnessScope,
+    id: string,
+    entryId: string,
+  ): ContinualHarnessManagedEntryV2 | undefined {
     return document.managedEntries.filter(entry => entry.scope === scope && entry.scopeId === id && entry.entryId === entryId)
       .sort((left, right) => right.entryVersion - left.entryVersion)[0]
   }
 
-  private requireManaged(document: StoreDocument, scope: 'session' | 'workspace', id: string, entryId: string): ContinualHarnessManagedEntryV2 {
+  private requireManaged(
+    document: StoreDocument,
+    scope: ContinualHarnessScope,
+    id: string,
+    entryId: string,
+  ): ContinualHarnessManagedEntryV2 {
     const entry = this.latestManaged(document, scope, id, entryId)
     if (entry === undefined) throw new ContinualHarnessError(`managed harness entry not found: ${entryId}`, 'HARNESS_NOT_FOUND')
     return entry
@@ -575,7 +587,7 @@ export class LocalContinualHarness extends ContinualHarnessService {
 
   private proposedRefinement(
     refinementId: string,
-    scope: ContinualHarnessManagedEntryV2['scope'],
+    scope: ContinualHarnessScope,
     scopeId: string,
   ): StoredRefinement {
     const stored = this.document.refinements.find(value => value.plan.refinementId === refinementId

@@ -38,7 +38,7 @@ describe('local Continuous Harness', () => {
     await ctx.root.fiber.dispose()
   })
 
-  it('provides versioned session-local and workspace-global CRUD without mutating base prompts', async () => {
+  it('provides versioned session, workspace, and cross-repository global CRUD without mutating base prompts', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-continual-harness-crud-'))
     const ctx = new Context()
     const service = new LocalContinualHarness(ctx, root)
@@ -79,6 +79,17 @@ describe('local Continuous Harness', () => {
     expect(await service.list({ workspace: '/repo', sessionId: 'session-1' })).not.toContainEqual(skill)
     await expect(service.snapshot({ workspace: '/repo', scope: 'workspace', role: 'verification', task: 'focused verification', limit: 8 }))
       .resolves.toMatchObject({ managedEntries: [{ entryId: skill.entryId, kind: 'skill' }] })
+
+    const globalMemory = await service.create({
+      workspace: '/repo-a', scope: 'global', kind: 'memory', title: 'User-wide convention',
+      content: 'Reuse unchanged acceptance evidence across repositories', provenance: 'fixture',
+    })
+    expect(globalMemory).toMatchObject({ scope: 'global', scopeId: 'global' })
+    expect(await service.list({ workspace: '/repo-b', scope: 'global' })).toEqual([globalMemory])
+    expect(await service.list({ workspace: '/repo-b', scope: 'workspace' })).toEqual([])
+    await expect(service.snapshot({
+      workspace: '/repo-b', scope: 'global', role: 'verification', task: 'acceptance evidence', limit: 8,
+    })).resolves.toMatchObject({ scope: 'global', scopeId: 'global', managedEntries: [{ entryId: globalMemory.entryId }] })
     await ctx.root.fiber.dispose()
   })
 
