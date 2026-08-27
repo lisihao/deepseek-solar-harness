@@ -1,8 +1,9 @@
 /** Frontend reconnect/resume and explicit-resync behavior. */
 
 import { describe, expect, it, vi } from 'vitest'
-import { RemoteSyncController } from '../src/client/remote-sync-controller.ts'
-import type { RemoteSyncClient } from '../src/client/remote-sync-client.ts'
+import {
+  RemoteSyncController, type RemoteSyncProjectionClient,
+} from '../src/client/remote-sync-controller.ts'
 import type {
   RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame, RemoteSyncSnapshot,
 } from '../src/remote-sync.ts'
@@ -49,7 +50,7 @@ describe('RemoteSyncController', () => {
     let snapshots = 0
     let subscriptions = 0
     const requested: RemoteSyncCursor[] = []
-    const client: RemoteSyncClient = {
+    const client: RemoteSyncProjectionClient = {
       describe: async () => description(subscriptions === 0 ? 1 : 2),
       snapshot: async () => { snapshots += 1; return snapshot(0) },
       events: (cursor, signal, onOpen) => (async function * (): AsyncGenerator<RemoteSyncFrame> {
@@ -86,7 +87,7 @@ describe('RemoteSyncController', () => {
     let snapshotCalls = 0
     let subscriptionCalls = 0
     let replacements = 0
-    const client: RemoteSyncClient = {
+    const client: RemoteSyncProjectionClient = {
       describe: async () => description(snapshotCalls === 0 ? 0 : 5),
       snapshot: async () => snapshot(snapshotCalls++ === 0 ? 0 : 5),
       events: (_cursor, signal, onOpen) => (async function * (): AsyncGenerator<RemoteSyncFrame> {
@@ -125,7 +126,7 @@ describe('RemoteSyncController', () => {
       snapshot(0, 'deployment-2'),
     ]
     let subscription = 0
-    const client: RemoteSyncClient = {
+    const client: RemoteSyncProjectionClient = {
       describe: async () => descriptions.shift() ?? description(0, 'deployment-2'),
       snapshot: async () => snapshots.shift() ?? snapshot(0, 'deployment-2'),
       events: (_cursor, signal) => (async function * (): AsyncGenerator<RemoteSyncFrame> {
@@ -154,7 +155,7 @@ describe('RemoteSyncController', () => {
 
   it('retries immediately when snapshot and description deployments disagree', async () => {
     let snapshots = 0
-    const client: RemoteSyncClient = {
+    const client: RemoteSyncProjectionClient = {
       describe: async () => description(0),
       snapshot: async () => snapshot(0, snapshots++ === 0 ? 'deployment-other' : 'deployment-1'),
       events: (_cursor, signal) => (async function * (): AsyncGenerator<RemoteSyncFrame> {
@@ -177,7 +178,7 @@ describe('RemoteSyncController', () => {
     const states: string[] = []
     const errors: unknown[] = []
     let eventCalls = 0
-    const client: RemoteSyncClient = {
+    const client: RemoteSyncProjectionClient = {
       describe: async () => description(1),
       snapshot: async () => snapshot(0),
       events: (_cursor, signal, onOpen) => (async function * (): AsyncGenerator<RemoteSyncFrame> {
@@ -209,7 +210,7 @@ describe('RemoteSyncController', () => {
   })
 
   it('rejects an invalid retry delay after a recoverable client failure', async () => {
-    const client: RemoteSyncClient = {
+    const client: RemoteSyncProjectionClient = {
       describe: async () => { throw new Error('offline') },
       snapshot: async () => snapshot(0),
       events: () => (async function * (): AsyncGenerator<RemoteSyncFrame> {})(),
@@ -222,7 +223,7 @@ describe('RemoteSyncController', () => {
   })
 
   it('stops cleanly when an in-flight client operation rejects after abort', async () => {
-    const client: RemoteSyncClient = {
+    const client: RemoteSyncProjectionClient = {
       describe: async (signal) => {
         if (signal === undefined) throw new Error('test client requires an abort signal')
         await waitForAbort(signal)
@@ -242,7 +243,7 @@ describe('RemoteSyncController', () => {
 
   it('aborts the default reconnect delay without publishing another error', async () => {
     const errors: unknown[] = []
-    const client: RemoteSyncClient = {
+    const client: RemoteSyncProjectionClient = {
       describe: async () => { throw new Error('offline') },
       snapshot: async () => snapshot(0),
       events: () => (async function * (): AsyncGenerator<RemoteSyncFrame> {})(),
