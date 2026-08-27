@@ -115,7 +115,12 @@ export class RemoteSyncHttpClient {
     await this.call('operator.interrupt', { sessionId, turnId }, signal)
   }
 
-  /** Request one term-fenced vote from a configured orchestration peer. */
+  /**
+   * Request one term-fenced vote from a configured orchestration peer.
+   * @param request - candidate term and replication watermark.
+   * @param signal - optional request cancellation signal.
+   * @returns the peer's validated vote response.
+   */
   async clusterRequestVote(
     request: OrchestrationClusterVoteRequest,
     signal?: AbortSignal,
@@ -123,7 +128,12 @@ export class RemoteSyncHttpClient {
     return clusterVoteResponse(await this.call('cluster.vote', request, signal))
   }
 
-  /** Renew one majority-backed orchestration leader lease. */
+  /**
+   * Renew one majority-backed orchestration leader lease.
+   * @param request - elected leader term, lease, and replication watermark.
+   * @param signal - optional request cancellation signal.
+   * @returns the peer's validated lease acknowledgement.
+   */
   async clusterHeartbeat(
     request: OrchestrationClusterHeartbeatRequest,
     signal?: AbortSignal,
@@ -131,7 +141,12 @@ export class RemoteSyncHttpClient {
     return clusterHeartbeatResponse(await this.call('cluster.heartbeat', request, signal))
   }
 
-  /** Install one term-fenced logical TaskGraph replica on a follower. */
+  /**
+   * Install one term-fenced logical TaskGraph replica on a follower.
+   * @param request - elected leader coordinates and logical state image.
+   * @param signal - optional request cancellation signal.
+   * @returns the follower's validated installation receipt.
+   */
   async clusterInstallReplica(
     request: OrchestrationClusterInstallRequest,
     signal?: AbortSignal,

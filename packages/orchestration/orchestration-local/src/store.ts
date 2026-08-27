@@ -599,13 +599,19 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
     )
   }
 
-  /** Monotonic local data watermark compared before granting cluster authority. */
+  /**
+   * Read the monotonic local data watermark compared before granting cluster authority.
+   * @returns the current durable commit index.
+   */
   commitIndex(): number {
     const row = this.db.prepare('SELECT commit_index FROM cluster_election WHERE singleton = 1').get() as { commit_index: number }
-    return Number(row.commit_index)
+    return row.commit_index
   }
 
-  /** Export one complete logical state image and every referenced content-addressed artifact. */
+  /**
+   * Export one complete logical state image and every referenced content-addressed artifact.
+   * @returns the complete logical cluster replica.
+   */
   exportClusterReplica(): OrchestrationClusterReplicaV1 {
     const tables = Object.fromEntries(Object.keys(REPLICA_TABLES).map(table => [
       table,
@@ -630,9 +636,13 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
     }
   }
 
-  /** Replace follower data with a newer digest-verified leader image while retaining local election coordinates. */
+  /**
+   * Replace follower data with a newer digest-verified leader image while retaining local election coordinates.
+   * @param replica - complete leader image to install.
+   * @returns whether the image advanced local durable state.
+   */
   installClusterReplica(replica: OrchestrationClusterReplicaV1): 'applied' | 'unchanged' {
-    if (replica.version !== 1 || replica.stateSchemaVersion !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
+    if (replica.stateSchemaVersion !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
       throw new OrchestrationError('orchestration cluster replica schema mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
     if (!Number.isSafeInteger(replica.commitIndex) || replica.commitIndex < 0) {
@@ -642,7 +652,8 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
     for (const [table, columns] of Object.entries(REPLICA_TABLES) as [ReplicaTable, readonly string[]][]) {
       const rows = replica.tables[table]
       if (!Array.isArray(rows)) throw new OrchestrationError(`orchestration cluster replica lacks ${table}`, 'ORCHESTRATION_UNAVAILABLE')
-      for (const row of rows) {
+      for (const entry of rows) {
+        const row: unknown = entry
         if (row === null || typeof row !== 'object' || Array.isArray(row)
           || Object.keys(row).some(column => !columns.includes(column))
           || columns.some(column => !(column in row))) {

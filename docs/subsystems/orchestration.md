@@ -353,9 +353,42 @@ abstract resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterm
  * @returns the durable update receipt.
  */
 abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
+
+/**
+ * Read the local Server's bounded cluster authority projection.
+ * @returns the current cluster status, or undefined in standalone mode.
+ */
+abstract clusterStatus(): Promise<OrchestrationClusterStatus | undefined>
+
+/**
+ * Process one authenticated, configured-member vote request.
+ * @param request - candidate term and replication watermark.
+ * @returns this member's term-fenced vote response.
+ */
+abstract clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse>
+
+/**
+ * Process one authenticated majority-lease heartbeat.
+ * @param request - elected leader term, lease, and replication watermark.
+ * @returns this follower's lease acknowledgement.
+ */
+abstract clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse>
+
+/**
+ * Export one complete logical replica for authenticated cluster peers.
+ * @returns the current durable TaskGraph state image.
+ */
+abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
+
+/**
+ * Install one term-fenced leader replica while this node is a follower.
+ * @param request - elected leader coordinates and logical state image.
+ * @returns the follower's applied or unchanged watermark.
+ */
+abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:513`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:583`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 

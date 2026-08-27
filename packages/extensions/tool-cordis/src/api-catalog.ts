@@ -1176,6 +1176,36 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'request', description: 'requested capability change.' }],
         returns: 'the durable update receipt.',
       },
+      {
+        signature: 'abstract clusterStatus(): Promise<OrchestrationClusterStatus | undefined>',
+        description: 'Read the local Server\'s bounded cluster authority projection.',
+        parameters: [],
+        returns: 'the current cluster status, or undefined in standalone mode.',
+      },
+      {
+        signature: 'abstract clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse>',
+        description: 'Process one authenticated, configured-member vote request.',
+        parameters: [{ name: 'request', description: 'candidate term and replication watermark.' }],
+        returns: 'this member\'s term-fenced vote response.',
+      },
+      {
+        signature: 'abstract clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse>',
+        description: 'Process one authenticated majority-lease heartbeat.',
+        parameters: [{ name: 'request', description: 'elected leader term, lease, and replication watermark.' }],
+        returns: 'this follower\'s lease acknowledgement.',
+      },
+      {
+        signature: 'abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>',
+        description: 'Export one complete logical replica for authenticated cluster peers.',
+        parameters: [],
+        returns: 'the current durable TaskGraph state image.',
+      },
+      {
+        signature: 'abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>',
+        description: 'Install one term-fenced leader replica while this node is a follower.',
+        parameters: [{ name: 'request', description: 'elected leader coordinates and logical state image.' }],
+        returns: 'the follower\'s applied or unchanged watermark.',
+      },
     ],
   },
   {
@@ -4435,6 +4465,38 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OrchestrationBlocker',
     declaration: 'export interface OrchestrationBlocker {\n    readonly code: string;\n    readonly message: string;\n    readonly nodeId?: string;\n}',
+  },
+  {
+    name: 'OrchestrationClusterHeartbeatRequest',
+    declaration: 'export interface OrchestrationClusterHeartbeatRequest {\n    readonly term: number;\n    readonly leaderId: string;\n    readonly commitIndex: number;\n    readonly leaseUntil: number;\n}',
+  },
+  {
+    name: 'OrchestrationClusterHeartbeatResponse',
+    declaration: 'export interface OrchestrationClusterHeartbeatResponse {\n    readonly term: number;\n    readonly followerId: string;\n    readonly accepted: boolean;\n    readonly commitIndex: number;\n}',
+  },
+  {
+    name: 'OrchestrationClusterInstallReceipt',
+    declaration: 'export interface OrchestrationClusterInstallReceipt {\n    readonly nodeId: string;\n    readonly commitIndex: number;\n    readonly state: \'applied\' | \'unchanged\';\n}',
+  },
+  {
+    name: 'OrchestrationClusterInstallRequest',
+    declaration: 'export interface OrchestrationClusterInstallRequest {\n    readonly term: number;\n    readonly leaderId: string;\n    readonly replica: OrchestrationClusterReplicaV1;\n}',
+  },
+  {
+    name: 'OrchestrationClusterReplicaV1',
+    declaration: 'export interface OrchestrationClusterReplicaV1 {\n    readonly version: 1;\n    readonly stateSchemaVersion: number;\n    readonly commitIndex: number;\n    readonly capturedAt: string;\n    readonly tables: Readonly<Record<string, readonly Readonly<Record<string, string | number | null>>[]>>;\n    readonly artifacts: readonly {\n        readonly ref: OrchestrationArtifactRef;\n        readonly json: string;\n    }[];\n}',
+  },
+  {
+    name: 'OrchestrationClusterStatus',
+    declaration: 'export interface OrchestrationClusterStatus {\n    readonly nodeId: string;\n    readonly memberIds: readonly string[];\n    readonly term: number;\n    readonly role: \'follower\' | \'candidate\' | \'leader\';\n    readonly votedFor?: string;\n    readonly leaderId?: string;\n    readonly leaseUntil: number;\n    readonly commitIndex: number;\n    readonly quorum: number;\n    readonly canSchedule: boolean;\n}',
+  },
+  {
+    name: 'OrchestrationClusterVoteRequest',
+    declaration: 'export interface OrchestrationClusterVoteRequest {\n    readonly term: number;\n    readonly candidateId: string;\n    readonly commitIndex: number;\n}',
+  },
+  {
+    name: 'OrchestrationClusterVoteResponse',
+    declaration: 'export interface OrchestrationClusterVoteResponse {\n    readonly term: number;\n    readonly voterId: string;\n    readonly granted: boolean;\n    readonly commitIndex: number;\n}',
   },
   {
     name: 'OrchestrationCompilationV1',

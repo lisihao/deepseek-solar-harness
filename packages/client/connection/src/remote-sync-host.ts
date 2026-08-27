@@ -389,27 +389,45 @@ export class RemoteSyncHub {
     return this.expectResident().interrupt({ sessionId: sessionId as never, turnId: turnId as never })
   }
 
-  /** Read the local Product Server's bounded orchestration authority projection. */
+  /**
+   * Read the local Product Server's bounded orchestration authority projection.
+   * @returns the current cluster status, or undefined in standalone mode.
+   */
   clusterStatus(): Promise<OrchestrationClusterStatus | undefined> {
     return this.expectOrchestration().clusterStatus()
   }
 
-  /** Forward one authenticated vote request to the daemon-owned election state. */
+  /**
+   * Forward one authenticated vote request to the daemon-owned election state.
+   * @param request - candidate term and replication watermark.
+   * @returns this member's term-fenced vote response.
+   */
   clusterRequestVote(request: OrchestrationClusterVoteRequest): Promise<OrchestrationClusterVoteResponse> {
     return this.expectOrchestration().clusterRequestVote(request)
   }
 
-  /** Forward one authenticated majority-lease heartbeat. */
+  /**
+   * Forward one authenticated majority-lease heartbeat.
+   * @param request - elected leader term, lease, and replication watermark.
+   * @returns this follower's lease acknowledgement.
+   */
   clusterHeartbeat(request: OrchestrationClusterHeartbeatRequest): Promise<OrchestrationClusterHeartbeatResponse> {
     return this.expectOrchestration().clusterHeartbeat(request)
   }
 
-  /** Export one complete logical replica for an authenticated admin peer. */
+  /**
+   * Export one complete logical replica for an authenticated admin peer.
+   * @returns the current durable TaskGraph state image.
+   */
   clusterExportReplica(): Promise<OrchestrationClusterReplicaV1> {
     return this.expectOrchestration().clusterExportReplica()
   }
 
-  /** Install one term-fenced logical replica on the current follower. */
+  /**
+   * Install one term-fenced logical replica on the current follower.
+   * @param request - elected leader coordinates and logical state image.
+   * @returns the follower's applied or unchanged watermark.
+   */
   clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt> {
     return this.expectOrchestration().clusterInstallReplica(request)
   }

@@ -304,14 +304,16 @@ describe('RemoteSyncHub', () => {
     const clusterInstallReplica = vi.fn(async () => ({ nodeId: 'a', commitIndex: 7, state: 'applied' as const }))
     const hub = new RemoteSyncHub(api(), 4, undefined, undefined, () => ({
       clusterStatus, clusterRequestVote, clusterHeartbeat, clusterExportReplica, clusterInstallReplica,
-    }) as never)
-    await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({
-      capabilities: expect.arrayContaining(['orchestration.cluster']),
-      cluster: { nodeId: 'a', term: 2, role: 'leader', leaderId: 'a', canSchedule: true },
+    }))
+    const adminDescription = await hub.describe(new AbortController().signal, 'admin')
+    expect(adminDescription.capabilities).toContain('orchestration.cluster')
+    expect(adminDescription.cluster).toMatchObject({
+      nodeId: 'a', term: 2, role: 'leader', leaderId: 'a', canSchedule: true,
     })
-    await expect(hub.describe(new AbortController().signal, 'cockpit')).resolves.toMatchObject({
-      capabilities: expect.not.arrayContaining(['orchestration.cluster']),
-      cluster: { nodeId: 'a', term: 2, role: 'leader', leaderId: 'a', canSchedule: true },
+    const cockpitDescription = await hub.describe(new AbortController().signal, 'cockpit')
+    expect(cockpitDescription.capabilities).not.toContain('orchestration.cluster')
+    expect(cockpitDescription.cluster).toMatchObject({
+      nodeId: 'a', term: 2, role: 'leader', leaderId: 'a', canSchedule: true,
     })
     await expect(hub.clusterStatus()).resolves.toMatchObject({ leaderId: 'a', commitIndex: 7 })
     await expect(hub.clusterRequestVote({ term: 3, candidateId: 'b', commitIndex: 7 }))

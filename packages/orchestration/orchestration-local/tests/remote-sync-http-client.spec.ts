@@ -84,7 +84,8 @@ describe('RemoteSyncHttpClient', () => {
 
   it('validates vote and heartbeat responses at the remote cluster boundary', async () => {
     const client = new RemoteSyncHttpClient('https://server.example', undefined, async (_input, init) => {
-      const call = JSON.parse(String(init?.body)) as { rpcId: string; method: string }
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
       const value = call.method === 'cluster.vote'
         ? { term: 2, voterId: 'b', granted: true, commitIndex: 7 }
         : call.method === 'cluster.heartbeat'
@@ -100,7 +101,8 @@ describe('RemoteSyncHttpClient', () => {
       .resolves.toEqual({ nodeId: 'b', commitIndex: 7, state: 'applied' })
 
     const invalid = new RemoteSyncHttpClient('https://server.example', undefined, async (_input, init) => {
-      const call = JSON.parse(String(init?.body)) as { rpcId: string }
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const call = JSON.parse(init.body) as { rpcId: string }
       return Response.json({
         type: 'server-response', rpcId: call.rpcId,
         result: { ok: true, value: { term: 2, voterId: 'b', granted: 'yes', commitIndex: 7 } },
@@ -210,10 +212,9 @@ describe('RemotePhysicalOperator', () => {
       id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', pollIntervalMs: 1,
     }, request)
 
-    await expect(operator?.residentCatalog()).resolves.toMatchObject({
-      operatorId: 'remote.mini.codex', available: false,
-      unavailableReason: expect.stringContaining('qualification failed'),
-    })
+    const unavailableCatalog = await operator?.residentCatalog()
+    expect(unavailableCatalog).toMatchObject({ operatorId: 'remote.mini.codex', available: false })
+    expect(unavailableCatalog?.unavailableReason).toContain('qualification failed')
     expect(operator?.availability()).toMatchObject({ available: false })
     await expect(operator?.residentCatalog()).resolves.toMatchObject({
       operatorId: 'remote.mini.codex', available: true,

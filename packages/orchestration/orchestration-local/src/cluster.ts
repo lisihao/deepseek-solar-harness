@@ -110,7 +110,11 @@ function nonBlank(value: unknown, label: string): string {
   return value
 }
 
-/** Read optional cluster membership; absence preserves standalone scheduling. */
+/**
+ * Read optional cluster membership; absence preserves standalone scheduling.
+ * @param root - resident orchestration state root containing cluster.json.
+ * @returns the validated fixed-member configuration, or undefined when absent.
+ */
 export function readOrchestrationClusterConfig(root: string): OrchestrationClusterConfig | undefined {
   const path = join(root, 'cluster.json')
   if (!existsSync(path)) return undefined
@@ -163,7 +167,10 @@ export class OrchestrationClusterElection {
     this.state = store.loadElectionState()
   }
 
-  /** Current term, role, quorum, and local scheduling authority. */
+  /**
+   * Read the current term, role, quorum, and local scheduling authority.
+   * @returns the bounded cluster authority projection.
+   */
   status(): OrchestrationClusterStatus {
     return {
       ...this.state,
@@ -175,14 +182,21 @@ export class OrchestrationClusterElection {
     }
   }
 
-  /** True only while this node holds a non-expired majority-backed lease. */
+  /**
+   * Test whether this node holds a non-expired majority-backed lease.
+   * @returns true only while this node may schedule mutations.
+   */
   canSchedule(): boolean {
     return this.state.role === 'leader'
       && this.state.leaderId === this.config.nodeId
       && this.state.leaseUntil > this.clock()
   }
 
-  /** Persist one term-fenced vote exactly once per term. */
+  /**
+   * Persist one term-fenced vote exactly once per term.
+   * @param request - candidate term and replication watermark.
+   * @returns this member's term-fenced vote response.
+   */
   requestVote(request: OrchestrationClusterVoteRequest): OrchestrationClusterVoteResponse {
     this.expectMember(request.candidateId)
     if (!Number.isSafeInteger(request.term) || request.term < 1) throw new Error('cluster vote term must be positive')
@@ -200,7 +214,11 @@ export class OrchestrationClusterElection {
     return this.voteResponse(true)
   }
 
-  /** Accept a leader only for the current/newer term and never extend beyond one configured lease. */
+  /**
+   * Accept a leader only for the current/newer term and never extend beyond one configured lease.
+   * @param request - elected leader term, lease, and replication watermark.
+   * @returns this follower's lease acknowledgement.
+   */
   heartbeat(request: OrchestrationClusterHeartbeatRequest): OrchestrationClusterHeartbeatResponse {
     this.expectMember(request.leaderId)
     if (!Number.isSafeInteger(request.term) || request.term < 1) throw new Error('cluster heartbeat term must be positive')
@@ -219,7 +237,10 @@ export class OrchestrationClusterElection {
     return this.heartbeatResponse(true)
   }
 
-  /** Campaign once; a majority is mandatory and unavailable peers count as no votes. */
+  /**
+   * Campaign once; a majority is mandatory and unavailable peers count as no votes.
+   * @returns cluster status after the election and initial lease attempt.
+   */
   async campaign(): Promise<OrchestrationClusterStatus> {
     if (this.state.leaseUntil > this.clock() && this.state.leaderId !== undefined) return this.status()
     const term = this.state.term + 1
@@ -253,7 +274,10 @@ export class OrchestrationClusterElection {
     return this.renew()
   }
 
-  /** Renew leadership only when a majority acknowledges the same term. */
+  /**
+   * Renew leadership only when a majority acknowledges the same term.
+   * @returns cluster status after replication and lease renewal.
+   */
   async renew(): Promise<OrchestrationClusterStatus> {
     if (this.state.role !== 'leader' || this.state.leaderId !== this.config.nodeId) return this.status()
     const leaseUntil = this.clock() + this.config.leaseMs
