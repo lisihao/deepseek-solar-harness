@@ -44,6 +44,7 @@ export type {
   PhysicalOperatorProgressPage,
   PhysicalOperatorQuotaPool,
   PhysicalOperatorQuotaWindow,
+  PhysicalOperatorUsage,
   PhysicalOperatorResidentCatalog,
   PhysicalOperatorResidentModel,
   PhysicalOperatorExecutionInfo,

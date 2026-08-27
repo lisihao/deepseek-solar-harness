@@ -661,7 +661,18 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     const output = final.subtype === 'success' && final.result.trim().length > 0
       ? [{ type: 'text' as const, text: final.result }]
       : []
-    return { output, stopReason, nativeSessionId }
+    return {
+      output,
+      stopReason,
+      nativeSessionId,
+      usage: {
+        inputTokens: final.usage.input_tokens,
+        outputTokens: final.usage.output_tokens,
+        cacheReadInputTokens: final.usage.cache_read_input_tokens,
+        cacheWriteInputTokens: final.usage.cache_creation_input_tokens,
+        costUsd: final.total_cost_usd,
+      },
+    }
   }
 
   async compact(request: ResidentDriverCompactRequest): Promise<{ nativeSessionId: string }> {

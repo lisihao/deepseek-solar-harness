@@ -432,11 +432,34 @@ describe('CodexAppServerWire', () => {
       agentMessage('unphased', null),
       agentMessage('first final', 'final_answer'),
       agentMessage('last final', 'final_answer'),
+      {
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: 'thread-1', turnId: 'turn-1',
+          tokenUsage: {
+            total: {
+              totalTokens: 180, inputTokens: 150, cachedInputTokens: 90,
+              cacheWriteInputTokens: 3, outputTokens: 30, reasoningOutputTokens: 10,
+            },
+            last: {
+              totalTokens: 48, inputTokens: 40, cachedInputTokens: 12,
+              cacheWriteInputTokens: 2, outputTokens: 8, reasoningOutputTokens: 3,
+            },
+            modelContextWindow: 258_400,
+          },
+        },
+      },
       turnCompleted('completed'),
     )
     await expect(result).resolves.toEqual({
       output: [{ type: 'text', text: 'last final' }],
       stopReason: 'completed',
+      usage: {
+        inputTokens: 28,
+        outputTokens: 8,
+        cacheReadInputTokens: 12,
+        cacheWriteInputTokens: 2,
+      },
     })
     expect(wire.collectOutput()).toEqual([{ type: 'text', text: 'last final' }])
     wire.close()

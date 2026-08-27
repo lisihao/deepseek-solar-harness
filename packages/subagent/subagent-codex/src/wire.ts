@@ -9,7 +9,7 @@
 
 import type { Readable, Writable } from 'node:stream'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
+import type { SubagentResult, SubagentUsage } from '@deepseek-ai/dsh-subagent'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 
 type JsonObject = Record<string, unknown>
@@ -87,6 +87,28 @@ function string(value: unknown, label: string): string {
     throw new Error(`subagent-codex: app-server returned invalid ${label}`)
   }
   return value
+}
+
+function tokenCount(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new Error(`subagent-codex: app-server returned invalid ${label}`)
+  }
+  return Number(value)
+}
+
+function tokenUsage(value: unknown): SubagentUsage {
+  const usage = object(value, 'turn token usage')
+  const totalInputTokens = tokenCount(usage.inputTokens, 'turn inputTokens')
+  const cacheReadInputTokens = tokenCount(usage.cachedInputTokens, 'turn cachedInputTokens')
+  const cacheWriteInputTokens = usage.cacheWriteInputTokens === undefined
+    ? 0
+    : tokenCount(usage.cacheWriteInputTokens, 'turn cacheWriteInputTokens')
+  return {
+    inputTokens: Math.max(0, totalInputTokens - cacheReadInputTokens),
+    outputTokens: tokenCount(usage.outputTokens, 'turn outputTokens'),
+    cacheReadInputTokens,
+    cacheWriteInputTokens,
+  }
 }
 
 function rateLimitWindow(value: unknown, label: string): CodexAppServerRateLimitWindow {
@@ -186,6 +208,7 @@ export class CodexAppServerWire {
   }> = []
   private lastFinalAnswer: string | undefined
   private lastUnphasedAnswer: string | undefined
+  private lastUsage: SubagentUsage | undefined
   private closed = false
 
   constructor(
@@ -414,7 +437,11 @@ export class CodexAppServerWire {
     const terminal = object(completed.turn, 'turn/completed turn')
     const status = terminal.status
     if (isContextWindowExceeded(terminal)) {
-      return { output: this.collectOutput(), stopReason: 'max-tokens' }
+      return {
+        output: this.collectOutput(),
+        stopReason: 'max-tokens',
+        ...this.lastUsage === undefined ? {} : { usage: this.lastUsage },
+      }
     }
     if (status !== 'completed') {
       const detail = status === 'failed'
@@ -426,7 +453,11 @@ export class CodexAppServerWire {
     if (output.length === 0) {
       throw new Error('subagent-codex: Codex completed without a final answer')
     }
-    return { output, stopReason: 'completed' }
+    return {
+      output,
+      stopReason: 'completed',
+      ...this.lastUsage === undefined ? {} : { usage: this.lastUsage },
+    }
   }
 
   /**
@@ -587,6 +618,22 @@ export class CodexAppServerWire {
       if (this.turnCompleted !== undefined && this.turnId === undefined) {
         this.observePendingTurnId(string(turn.id, 'turn/started turn id'))
       }
+      return
+    }
+    if (method === 'thread/tokenUsage/updated') {
+      const threadId = string(params.threadId, 'thread/tokenUsage/updated thread id')
+      if (threadId !== this.threadId) return
+      const id = string(params.turnId, 'thread/tokenUsage/updated turn id')
+      if (this.turnId === undefined) {
+        if (this.turnCompleted !== undefined) {
+          this.observePendingTurnId(id)
+          this.earlyTurnNotifications.push({ method, params })
+        }
+        return
+      }
+      if (id !== this.turnId) return
+      const usage = object(params.tokenUsage, 'thread/tokenUsage/updated tokenUsage')
+      this.lastUsage = tokenUsage(usage.last)
       return
     }
     if (method === 'item/completed') {

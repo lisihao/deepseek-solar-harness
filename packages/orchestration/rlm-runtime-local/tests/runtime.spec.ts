@@ -610,8 +610,10 @@ describe('LocalRlmRuntime', () => {
         expectedStateRevision: usageRevision,
         inputTokens: 3,
         outputTokens: 2,
+        cacheReadInputTokens: 7,
+        cacheWriteInputTokens: 1,
       })
-      expect(firstUsage).toMatchObject({ active: true, status: 'active', tokensUsed: 5, timeUsedSeconds: 2 })
+      expect(firstUsage).toMatchObject({ active: true, status: 'active', tokensUsed: 6, timeUsedSeconds: 2 })
 
       const pauseRevision = (await first.service.inspect(first.sessionId)).stateRevision
       const paused = await first.service.setGoal({
@@ -623,7 +625,7 @@ describe('LocalRlmRuntime', () => {
         continuationBudget: 2,
         reason: 'waiting for evidence',
       })
-      expect(paused).toMatchObject({ active: false, status: 'paused', tokensUsed: 5, timeUsedSeconds: 2, lastReason: 'waiting for evidence' })
+      expect(paused).toMatchObject({ active: false, status: 'paused', tokensUsed: 6, timeUsedSeconds: 2, lastReason: 'waiting for evidence' })
       vi.setSystemTime(new Date('2026-08-24T00:00:12.500Z'))
       await expect(first.service.inspect(first.sessionId)).resolves.toMatchObject({ goal: { timeUsedSeconds: 2 } })
 
@@ -642,8 +644,10 @@ describe('LocalRlmRuntime', () => {
         sessionId: first.sessionId,
         commandId: RlmCommandId('goal-usage-two'),
         expectedStateRevision: finalUsageRevision,
-        inputTokens: 4,
-        outputTokens: 1,
+        inputTokens: 3,
+        outputTokens: 0,
+        cacheReadInputTokens: 20,
+        cacheWriteInputTokens: 1,
       })
       expect(exhausted).toMatchObject({
         active: false,
@@ -656,8 +660,10 @@ describe('LocalRlmRuntime', () => {
         sessionId: first.sessionId,
         commandId: RlmCommandId('goal-usage-two'),
         expectedStateRevision: finalUsageRevision,
-        inputTokens: 4,
-        outputTokens: 1,
+        inputTokens: 3,
+        outputTokens: 0,
+        cacheReadInputTokens: 20,
+        cacheWriteInputTokens: 1,
       })).resolves.toEqual(exhausted)
 
       const errorRevision = (await first.service.inspect(first.sessionId)).stateRevision

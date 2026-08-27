@@ -705,6 +705,7 @@ describe('orchestration daemon', () => {
     await eventually(() => client.inspect(String(noGoalRun.runId)), value => value.state === 'completed')
     const noGoalEvents = await client.readEvents({ runId: noGoalRun.runId, limit: 200 })
     expect(noGoalEvents.events.filter(value => value.type === 'rlm.goal.usage')).toHaveLength(0)
+    expect(noGoalEvents.events.filter(value => value.type === 'rlm.usage')).toHaveLength(1)
 
     worker.onExecute = async (request) => {
       if (request.commandId.endsWith(':rlm:root')) {
@@ -725,6 +726,23 @@ describe('orchestration daemon', () => {
     const goalRun = await client.start({ compilationId: goalCompilation.compilationId })
     await eventually(() => client.inspect(String(goalRun.runId)), value => value.state === 'completed')
     const goalEvents = await client.readEvents({ runId: goalRun.runId, limit: 300 })
+    const allUsageEvents = goalEvents.events.filter(value => value.type === 'rlm.usage')
+    expect(allUsageEvents).toHaveLength(5)
+    expect(allUsageEvents.map(value => value.data.source).sort()).toEqual([
+      'child',
+      'child',
+      'goal-continuation',
+      'goal-continuation',
+      'root',
+    ])
+    expect(allUsageEvents.at(-1)?.data).toMatchObject({
+      operatorId: 'deepseek-keyless-fixture',
+      authMode: 'api',
+      inputTokens: 5,
+      outputTokens: 2,
+      cacheReadInputTokens: 0,
+      cacheWriteInputTokens: 0,
+    })
     const usageEvents = goalEvents.events.filter(value => value.type === 'rlm.goal.usage')
     expect(usageEvents).toHaveLength(4)
     expect(usageEvents.map(value => value.data.source).sort()).toEqual([

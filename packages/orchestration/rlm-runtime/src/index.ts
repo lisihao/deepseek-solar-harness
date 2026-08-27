@@ -59,6 +59,7 @@ export interface RlmRuntimeLimitsV1 {
 export interface RlmModelSelectionV1 {
   readonly operatorId: string
   readonly model: string
+  readonly source?: 'native-subscription' | 'metered-api'
   readonly profile?: PhysicalOperatorExecutionPreference
 }
 
@@ -108,6 +109,8 @@ export interface RlmChildExecutionResult {
     readonly authMode: 'subscription' | 'api' | 'local'
     readonly inputTokens?: number
     readonly outputTokens?: number
+    readonly cacheReadInputTokens?: number
+    readonly cacheWriteInputTokens?: number
     readonly costUsd?: number
   }
 }
@@ -447,6 +450,10 @@ export interface RlmGoalUsageAccountRequest {
   readonly expectedStateRevision: number
   readonly inputTokens: number
   readonly outputTokens: number
+  /** Cache-read tokens are retained for Trace but do not consume the Prime goal budget. */
+  readonly cacheReadInputTokens?: number
+  /** Cache-write tokens consume the Prime goal budget. */
+  readonly cacheWriteInputTokens?: number
 }
 
 /** Structured runtime failures. */

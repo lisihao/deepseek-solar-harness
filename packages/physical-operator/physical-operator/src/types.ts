@@ -193,12 +193,23 @@ export interface PhysicalOperatorStopReasonMap {
 /** Terminal reason union for a physical-operator execution. */
 export type PhysicalOperatorStopReason = PhysicalOperatorStopReasonMap[keyof PhysicalOperatorStopReasonMap]
 
+/** Product-reported token and cost usage for one physical execution. */
+export interface PhysicalOperatorUsage {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadInputTokens?: number
+  readonly cacheWriteInputTokens?: number
+  readonly costUsd?: number
+}
+
 /** Provider-neutral terminal result. */
 export interface PhysicalOperatorResult {
   /** Final or partial canonical content returned by the backing execution. */
   readonly output: ContentBlock[]
   /** Why the execution ended. Only `completed` is a successful result. */
   readonly stopReason: PhysicalOperatorStopReason
+  /** Native product usage when the Provider exposes authoritative counters. */
+  readonly usage?: PhysicalOperatorUsage
   /** Opaque durable continuation identity returned only by resident executions. */
   readonly continuity?: {
     readonly sessionId: string

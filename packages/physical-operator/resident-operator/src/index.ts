@@ -12,6 +12,7 @@ import type {
   PhysicalOperatorExecutionPreference,
   PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorReasoningEffort,
+  PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentOperatorError } from './error.ts'
 
@@ -264,6 +265,7 @@ export interface ResidentExecuteRequest {
 export interface ResidentTurnResult {
   readonly output: ContentBlock[]
   readonly stopReason: ResidentStopReason
+  readonly usage?: PhysicalOperatorUsage
   readonly resultRef?: string
 }
 

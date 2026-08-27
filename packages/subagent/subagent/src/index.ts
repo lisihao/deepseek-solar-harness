@@ -80,6 +80,7 @@ export type {
   SubagentCapabilities,
   SubagentProvider,
   SubagentResult,
+  SubagentUsage,
   SubagentRun,
   SubagentStartRequest,
   SubagentStopReason,

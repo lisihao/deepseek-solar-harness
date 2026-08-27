@@ -28,7 +28,7 @@ import type {
 } from '@deepseek-ai/dsh-continual-harness'
 import { ContinualHarnessSkillRuntime } from '@deepseek-ai/dsh-continual-harness'
 import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
-import LlmRuntime, { type ContentBlock } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { type ContentBlock, type TokenUsage } from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   ContinualHarnessMode,
@@ -82,6 +82,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorResidentModel,
   type PhysicalOperatorResult,
   type PhysicalOperatorModelToolBridgeV1,
+  type PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import type { ResidentProviderStatus, ResidentTurnSnapshot } from '@deepseek-ai/dsh-resident-operator'
@@ -173,6 +174,44 @@ interface PreparedRlmExecution {
 interface StartedResidentTurn {
   readonly run: PhysicalOperatorRun
   readonly receipt: ResidentReceiptIdentity
+}
+
+type RlmUsageResult = Pick<PhysicalOperatorResult, 'stopReason' | 'usage'>
+  | Pick<ModelWorkerResult, 'stopReason' | 'usage'>
+
+function isPhysicalOperatorUsage(
+  usage: PhysicalOperatorUsage | TokenUsage,
+): usage is PhysicalOperatorUsage {
+  return 'cacheReadInputTokens' in usage || 'cacheWriteInputTokens' in usage
+}
+
+function rlmAuthMode(
+  source: 'native-subscription' | 'metered-api' | undefined,
+  operatorId: string,
+): 'api' | 'subscription' {
+  if (source !== undefined) return source === 'metered-api' ? 'api' : 'subscription'
+  return operatorId.startsWith('deepseek') ? 'api' : 'subscription'
+}
+
+function rlmUsage(result: RlmUsageResult): {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadInputTokens: number
+  readonly cacheWriteInputTokens: number
+  readonly costUsd?: number
+} | undefined {
+  const usage = result.usage
+  if (usage === undefined) return undefined
+  const physical = isPhysicalOperatorUsage(usage)
+  const cacheReadInputTokens = physical ? usage.cacheReadInputTokens ?? 0 : usage.cacheReadTokens ?? 0
+  const cacheWriteInputTokens = physical ? usage.cacheWriteInputTokens ?? 0 : usage.cacheWriteTokens ?? 0
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadInputTokens,
+    cacheWriteInputTokens,
+    ...physical && usage.costUsd !== undefined ? { costUsd: usage.costUsd } : {},
+  }
 }
 
 class OrchestrationResidentOperator implements PhysicalOperator {
@@ -1860,11 +1899,13 @@ export class OrchestrationDaemon {
       model: {
         operatorId: plan.allocationPlan.operatorId,
         model: plan.allocationPlan.model,
+        source: plan.allocationPlan.source,
         ...plan.allocationPlan.profile === undefined ? {} : { profile: plan.allocationPlan.profile },
       },
       ...plan.rlmWorkerPlan === undefined ? {} : { defaultChildModel: {
         operatorId: plan.rlmWorkerPlan.operatorId,
         model: plan.rlmWorkerPlan.model,
+        source: plan.rlmWorkerPlan.source,
         ...plan.rlmWorkerPlan.profile === undefined ? {} : { profile: plan.rlmWorkerPlan.profile },
       } },
       limits: {
@@ -1941,6 +1982,13 @@ export class OrchestrationDaemon {
         operatorId: plan.allocationPlan.operatorId, model: plan.allocationPlan.model,
       }, node)])
       const rootResult = await root.run.result
+      await this.accountRlmGoalUsage(
+        record,
+        plan,
+        'root',
+        String(rootExecutionId),
+        rootResult,
+      )
       return await this.settleRlmExecution(record, spec, plan, prepared, rootResult)
     } catch (error) {
       controller.abort()
@@ -2358,9 +2406,12 @@ export class OrchestrationDaemon {
           settled: PhysicalOperatorResult,
           workerResult?: ModelWorkerResult,
         ): Promise<RlmChildExecutionResult> => {
-          if (workerResult !== undefined) {
-            await this.accountRlmGoalUsage(record, plan, 'child', String(executionId), workerResult)
-          }
+          const accounted = workerResult ?? settled
+          await this.accountRlmGoalUsage(record, plan, 'child', String(executionId), accounted, {
+            operatorId: request.model.operatorId,
+            model: request.model.model,
+            authMode: rlmAuthMode(request.model.source, request.model.operatorId),
+          })
           const artifactRef = this.store.putArtifact({
             kind: 'prime-rlm-child-result', runId, nodeId: spec.id,
             childId: String(request.childId), childSessionId: String(request.childSessionId),
@@ -2381,11 +2432,20 @@ export class OrchestrationDaemon {
             stopReason: settled.stopReason,
           }, node)])
           await this.flushRlmHarnessBoundary(record, spec, plan, request.childSessionId, 'turn-end')
+          const usage = rlmUsage(accounted)
           return {
             status,
             output: settled.output,
             resultRef: String(artifactRef),
             outputPreview: preview.slice(0, 8_000),
+            ...usage === undefined ? {} : {
+              usage: {
+                provider: request.model.operatorId,
+                model: request.model.model,
+                authMode: rlmAuthMode(request.model.source, request.model.operatorId),
+                ...usage,
+              },
+            },
             ...status === 'failed' ? { error: `native child stopped with ${settled.stopReason}` } : {},
           }
         }
@@ -2645,9 +2705,19 @@ export class OrchestrationDaemon {
       result: PhysicalOperatorResult,
       workerResult?: ModelWorkerResult,
     ): Promise<RlmChildExecutionResult> => {
-      if (request.source === 'goal' && workerResult !== undefined) {
-        await this.accountRlmGoalUsage(record, plan, 'goal-continuation', String(request.commandId), workerResult)
-      }
+      const accounted = workerResult ?? result
+      await this.accountRlmGoalUsage(
+        record,
+        plan,
+        request.source === 'goal' ? 'goal-continuation' : 'continuation',
+        String(request.commandId),
+        accounted,
+        {
+          operatorId: request.model.operatorId,
+          model: request.model.model,
+          authMode: rlmAuthMode(request.model.source, request.model.operatorId),
+        },
+      )
       const artifactRef = this.store.putArtifact({
         kind: `prime-rlm-${request.source}-continuation`,
         runId: String(record.snapshot.runId), nodeId: spec.id,
@@ -2665,9 +2735,18 @@ export class OrchestrationDaemon {
         artifactRef: String(artifactRef), stopReason: result.stopReason,
       }, record.snapshot.nodes.find(value => value.id === spec.id))])
       await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')
+      const usage = rlmUsage(accounted)
       return {
         status, output: result.output, resultRef: String(artifactRef),
         outputPreview: operatorOutputPreview(result.output).outputPreview,
+        ...usage === undefined ? {} : {
+          usage: {
+            provider: request.model.operatorId,
+            model: request.model.model,
+            authMode: rlmAuthMode(request.model.source, request.model.operatorId),
+            ...usage,
+          },
+        },
         ...status === 'failed' ? { error: `continuation stopped with ${result.stopReason}` } : {},
       }
     }
@@ -2768,13 +2847,30 @@ export class OrchestrationDaemon {
   private async accountRlmGoalUsage(
     record: RuntimeRunRecord,
     plan: NodeExecutionPlanV1,
-    source: 'root' | 'child' | 'goal-continuation',
+    source: 'root' | 'child' | 'goal-continuation' | 'continuation',
     sourceCommandId: string,
-    result: Pick<ModelWorkerResult, 'stopReason' | 'usage'>,
+    result: RlmUsageResult,
+    attribution: {
+      readonly operatorId: string
+      readonly model: string
+      readonly authMode: 'api' | 'subscription'
+    } = {
+      operatorId: plan.allocationPlan.operatorId,
+      model: plan.allocationPlan.model,
+      authMode: rlmAuthMode(plan.allocationPlan.source, plan.allocationPlan.operatorId),
+    },
   ): Promise<void> {
-    const usage = result.usage
-    if (usage === undefined || result.stopReason === 'error' || result.stopReason === 'aborted') return
+    const usage = rlmUsage(result)
+    if (usage === undefined) return
     const sessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
+    this.store.appendEvents([event(record.snapshot.runId, 'rlm.usage', {
+      runtimeSessionId: String(sessionId),
+      source,
+      sourceCommandId,
+      ...attribution,
+      stopReason: result.stopReason,
+      ...usage,
+    }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])
     const queueKey = String(sessionId)
     const previous = this.rlmGoalUsageQueues.get(queueKey) ?? Promise.resolve()
     const queued = previous.catch(() => undefined).then(async () => {
@@ -2788,6 +2884,8 @@ export class OrchestrationDaemon {
             expectedStateRevision: snapshot.stateRevision,
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            cacheWriteInputTokens: usage.cacheWriteInputTokens,
           })
           this.store.appendEvents([event(record.snapshot.runId, 'rlm.goal.usage', {
             runtimeSessionId: String(sessionId),
@@ -2795,6 +2893,8 @@ export class OrchestrationDaemon {
             sourceCommandId,
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            cacheWriteInputTokens: usage.cacheWriteInputTokens,
             tokensUsed: goal.tokensUsed,
             status: goal.status,
           }, record.snapshot.nodes.find(value => value.id === plan.nodeId))])

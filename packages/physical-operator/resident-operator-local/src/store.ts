@@ -636,6 +636,7 @@ export class ResidentStore {
         storedResult = {
           output: [{ type: 'text', text: `Resident result stored at ${resultRef}.` }],
           stopReason: result.stopReason,
+          ...result.usage === undefined ? {} : { usage: result.usage },
           resultRef,
         }
       }
@@ -649,6 +650,13 @@ export class ResidentStore {
         commandId,
         turnId: receipt.turn_id,
         stopReason: result.stopReason,
+        ...result.usage === undefined ? {} : {
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          cacheReadInputTokens: result.usage.cacheReadInputTokens ?? 0,
+          cacheWriteInputTokens: result.usage.cacheWriteInputTokens ?? 0,
+          ...result.usage.costUsd === undefined ? {} : { costUsd: result.usage.costUsd },
+        },
         resultRef,
       }, now)
       return this.inspectTurn(receipt.turn_id)
