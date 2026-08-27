@@ -86,7 +86,7 @@ describe('Prime-compatible Autonomous host policy', () => {
   it('does not rerun an unchanged failed gate and advances the retry budget', async () => {
     const workspace = await gitWorkspace()
     const counter = join(workspace, '.counter')
-    const gate = `${process.execPath} -e "const fs=require('fs');fs.appendFileSync('${counter}','run\\n');process.exit(1)"`
+    const gate = `${process.execPath} -e "const fs=require('fs');fs.appendFileSync('.counter','run\\n');process.exit(1)"`
     const policy = resolveAutonomousPolicy({
       mode: 'enabled',
       maxContinuations: 4,
@@ -149,7 +149,7 @@ describe('Prime-compatible Autonomous host policy', () => {
     const workspace = await gitWorkspace()
     const pidFile = join(workspace, '.gate-pid')
     const controller = new AbortController()
-    const gateScript = `require('fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{},1000)`
+    const gateScript = "require('fs').writeFileSync('.gate-pid',String(process.pid));setInterval(()=>{},1000)"
     const policy = resolveAutonomousPolicy({
       mode: 'enabled',
       gates: {
