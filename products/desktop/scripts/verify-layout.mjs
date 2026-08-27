@@ -23,6 +23,8 @@ const noteRecordPath = `${noteDirectory}/${noteName}.i18n.yaml`
 const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-atomic-write',
   '@deepseek-ai/dsh-client-connection',
+  '@deepseek-ai/dsh-client-hmr',
+  '@deepseek-ai/dsh-client-modules',
   '@deepseek-ai/dsh-home-paths',
   '@deepseek-ai/dsh-physical-operator',
   '@deepseek-ai/dsh-physical-operator-resident',
@@ -34,7 +36,9 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-client-ui-sidebar',
   '@deepseek-ai/dsh-client-ui-remote-modules',
   '@deepseek-ai/dsh-host-apiproxy',
+  '@deepseek-ai/dsh-host-frontend-static',
   '@deepseek-ai/dsh-host-remote-auth',
+  '@deepseek-ai/dsh-host-webserver',
   '@deepseek-ai/dsh-session-projection-cache',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',

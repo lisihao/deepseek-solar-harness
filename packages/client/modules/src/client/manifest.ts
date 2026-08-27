@@ -219,6 +219,15 @@ export interface ClientModuleLoader {
    */
   prefetch(id: string): Promise<void>
   /**
+   * Replace one graph row's content revision before an HMR prefetch. The host
+   * announces the revision over the rebuild channel; recording it here makes
+   * the next script URL content-addressed instead of reusing the immutable
+   * boot-time URL.
+   * @param id - graph entry name.
+   * @param revision - host-announced bundle revision.
+   */
+  updateRevision(id: string, revision: string): void
+  /**
    * Full reset of one module: drop its registered factory and materialized
    * record so the next prefetch/import reloads it (the HMR invalidation hook).
    * @param id - entry name to invalidate.
