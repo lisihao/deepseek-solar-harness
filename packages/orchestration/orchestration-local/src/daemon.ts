@@ -10,7 +10,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
   createRemotePhysicalOperators,
   type RemotePhysicalOperatorServer,
-} from '@deepseek-ai/dsh-client-connection'
+} from '@deepseek-ai/dsh-client-connection/remote-operator'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'

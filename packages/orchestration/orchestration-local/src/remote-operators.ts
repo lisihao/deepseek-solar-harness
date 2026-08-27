@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { RemotePhysicalOperatorServer } from '@deepseek-ai/dsh-client-connection'
+import type { RemotePhysicalOperatorServer } from '@deepseek-ai/dsh-client-connection/remote-operator'
 
 export const REMOTE_OPERATOR_CATALOG_VERSION = 1
 

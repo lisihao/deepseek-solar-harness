@@ -36,9 +36,6 @@ export type {
   HostConnectionRpc,
 } from './rpc.ts'
 export { HostConnectionService } from './rpc-host.ts'
-export { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
-export { createRemotePhysicalOperators, RemotePhysicalOperator } from './remote-physical-operator.ts'
-export type { RemotePhysicalOperatorServer } from './remote-physical-operator.ts'
 export { REMOTE_AUTH_RPC_CHANNEL } from './remote-auth-wire.ts'
 export type {
   RemoteAccessSession, RemoteDeviceCredential, RemoteDeviceScope,
