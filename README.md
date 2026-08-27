@@ -88,6 +88,26 @@ The deliberate separation is between the interactive transcript and the orchestr
 
 The control plane is stronger than a prompt-level supervisor because scheduler state and evidence are outside any one model conversation. It is also heavier than a library graph: the daemon, artifact lineage, receipt protocol, approval states, release identity, and Desktop projections create a product operating model rather than only a developer API.
 
+## Comparison with related projects
+
+| Project family | Where it is stronger than DSH | Where DSH is stronger |
+| --- | --- | --- |
+| [Upstream DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | Smaller upstream delta, simpler contribution path, broader community baseline | Solar Desktop, managed-plugin source closure, governed releases, persistent TaskGraph daemon, resident-operator routing, Continual Harness |
+| [OpenAI Codex](https://github.com/openai/codex), Claude Code, [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://github.com/anomalyco/opencode) | Lower startup and operational complexity; highly optimized model-native coding loops; broader platform packaging in several cases | External durable orchestration, explicit effect/read/write scopes, operator-independent receipts and artifacts, provider routing, reproducible product composition |
+| [LangGraph](https://github.com/langchain-ai/langgraph) | Mature library ergonomics for arbitrary Python graphs, checkpoints, interrupts, deployment integrations, and application embedding | Integrated coding workbench, event-sourced model transcript, tool ABI, local physical operators, Desktop, managed plugins, source-to-release governance |
+| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) and AutoGen lineage | Multi-language enterprise APIs, distributed/application hosting patterns, broad provider ecosystem, standard collaboration patterns | More opinionated local coding control plane, executable profile composition, per-node capability sealing, local Resident operators, product-source closure |
+| Deep-research pipelines such as AI4Research, GPT Researcher, Open Deep Research, OpenJiuwen DeepSearch, and Octos | Domain-specific source collection, evidence synthesis, report planning, citation and publishing workflows | General executable agent runtime, coding tools, durable sessions, low-level capability seams, physical-operator orchestration, Desktop lifecycle |
+
+DSH should not replace every specialized research pipeline. Its best role for Solar-style systems is the execution substrate beneath research Operators: research-specific Artifact schemas, citation support, coverage evaluation, Report Planner, Chapter Writer, and publication remain domain services, while DSH supplies bounded execution, state, recovery, operator routing, tools, and governance.
+
+## Strengths
+
+1. **Durability spans model and non-model state.** Session events reconstruct model-visible history; TaskGraph state, receipts, and artifacts survive outside the conversation.
+2. **Authority is more explicit than in prompt-supervised systems.** Nodes declare dependencies, read/write scopes, effect budgets, capability budgets, secrets, timeout, retry, and verification criticality.
+3. **Extension points are real runtime contracts.** Services, providers, consumers, scopes, events, configuration, and disposal are represented in code rather than hidden in one supervisor prompt.
+4. **The product is reproducible.** Desktop package closure, managed-plugin sources, accepted revisions, license evidence, and release identity are tracked together.
+5. **Strong coding agents remain replaceable resources.** Codex, Claude Code, and metered workers can be selected by policy without surrendering outer-loop state authority to their private transcript.
+
 ## Key technical designs
 
 ### Cordis plugin runtime
@@ -132,26 +152,6 @@ Desktop is a thin Electron host: the Host runtime remains Cordis-based, serves t
 | Desktop architecture | [`products/desktop/docs/architecture.en.md`](products/desktop/docs/architecture.en.md) | Documents Electron, Host, Web client, profiles, native runtime, and packaging closure |
 | Plugin provenance | [`plugins/registry.yaml`](plugins/registry.yaml) | Records source, accepted revision, license evidence, and native checks |
 | Product identity | [`distribution/product.json`](distribution/product.json) | Defines platform, Desktop version, and stable tag contract |
-
-## Comparison with related projects
-
-| Project family | Where it is stronger than DSH | Where DSH is stronger |
-| --- | --- | --- |
-| [Upstream DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | Smaller upstream delta, simpler contribution path, broader community baseline | Solar Desktop, managed-plugin source closure, governed releases, persistent TaskGraph daemon, resident-operator routing, Continual Harness |
-| [OpenAI Codex](https://github.com/openai/codex), Claude Code, [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://github.com/anomalyco/opencode) | Lower startup and operational complexity; highly optimized model-native coding loops; broader platform packaging in several cases | External durable orchestration, explicit effect/read/write scopes, operator-independent receipts and artifacts, provider routing, reproducible product composition |
-| [LangGraph](https://github.com/langchain-ai/langgraph) | Mature library ergonomics for arbitrary Python graphs, checkpoints, interrupts, deployment integrations, and application embedding | Integrated coding workbench, event-sourced model transcript, tool ABI, local physical operators, Desktop, managed plugins, source-to-release governance |
-| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) and AutoGen lineage | Multi-language enterprise APIs, distributed/application hosting patterns, broad provider ecosystem, standard collaboration patterns | More opinionated local coding control plane, executable profile composition, per-node capability sealing, local Resident operators, product-source closure |
-| Deep-research pipelines such as AI4Research, GPT Researcher, Open Deep Research, OpenJiuwen DeepSearch, and Octos | Domain-specific source collection, evidence synthesis, report planning, citation and publishing workflows | General executable agent runtime, coding tools, durable sessions, low-level capability seams, physical-operator orchestration, Desktop lifecycle |
-
-DSH should not replace every specialized research pipeline. Its best role for Solar-style systems is the execution substrate beneath research Operators: research-specific Artifact schemas, citation support, coverage evaluation, Report Planner, Chapter Writer, and publication remain domain services, while DSH supplies bounded execution, state, recovery, operator routing, tools, and governance.
-
-## Strengths
-
-1. **Durability spans model and non-model state.** Session events reconstruct model-visible history; TaskGraph state, receipts, and artifacts survive outside the conversation.
-2. **Authority is more explicit than in prompt-supervised systems.** Nodes declare dependencies, read/write scopes, effect budgets, capability budgets, secrets, timeout, retry, and verification criticality.
-3. **Extension points are real runtime contracts.** Services, providers, consumers, scopes, events, configuration, and disposal are represented in code rather than hidden in one supervisor prompt.
-4. **The product is reproducible.** Desktop package closure, managed-plugin sources, accepted revisions, license evidence, and release identity are tracked together.
-5. **Strong coding agents remain replaceable resources.** Codex, Claude Code, and metered workers can be selected by policy without surrendering outer-loop state authority to their private transcript.
 
 ## Constraints and risks
 
