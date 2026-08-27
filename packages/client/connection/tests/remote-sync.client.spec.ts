@@ -2,7 +2,10 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
+  parseRemoteResidentAcceptedTurn, parseRemoteResidentEventPage, parseRemoteResidentProviders,
+  parseRemoteResidentTurn, parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument,
+  parseRemoteSessionReplicaList, parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame,
+  parseRemoteSyncSnapshot,
 } from '../src/remote-sync.ts'
 import { setBrowserRemoteAccessToken } from '../src/client/browser-access-token.ts'
 import { WebRemoteSyncClient } from '../src/client/remote-sync-client.ts'
@@ -204,6 +207,138 @@ describe('Remote Sync wire parsing', () => {
     ])
   })
 
+  it('validates every remote replication and Resident wire variant', () => {
+    const header = { version: 0, id: 'session-replica', createdAt: 1 }
+    const events = [
+      { type: 'turn/start', seq: 0, time: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 1, time: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    expect(parseRemoteSessionReplicaList([{ header, revision: 'store:1' }])).toHaveLength(1)
+    expect(parseRemoteSessionReplicaDocument({ meta: header, events, balanced: true })).toMatchObject({ balanced: true })
+    for (const state of ['created', 'advanced', 'unchanged', 'destination-ahead'] as const) {
+      expect(parseRemoteSessionReplicaApplyResult({
+        sessionId: 'session-replica', state, sourceEventCount: 2, destinationEventCount: 2, appendedEventCount: 0,
+      })).toMatchObject({ state })
+    }
+    expect(parseRemoteResidentAcceptedTurn({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0,
+    })).toMatchObject({ stateRevision: 0 })
+
+    const provider = {
+      operatorId: 'claude-code', product: 'claude-code', displayName: 'Claude Code', description: '',
+      tags: ['architecture'], maxConcurrency: 1,
+      injectionBoundaries: ['pre-dispatch', 'next-turn', 'checkpoint'],
+      available: false, unavailableReason: 'auth required', quotaUnavailableReason: 'unknown quota',
+      authentication: 'unqualified', productVersion: '2.1.0', protocolHash: 'schema-2',
+      models: [{
+        model: 'sonnet', resolvedModel: 'claude-sonnet-4-6', displayName: 'Sonnet', description: '',
+        supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+        isDefault: false, supportsAdaptiveThinking: false,
+      }],
+      quotaPools: [{
+        poolId: 'claude-main', displayName: 'Claude', models: ['sonnet'], meter: 'native-subscription',
+        primary: { usedPercent: 25, resetsAt: 10, windowDurationMinutes: 300 },
+        secondary: { usedPercent: 50 }, observedAt: '2026-08-27T12:00:00.000Z',
+      }, {
+        poolId: 'claude-secondary', displayName: 'Claude secondary', models: [], meter: 'native-subscription',
+        observedAt: '2026-08-27T12:00:00.000Z',
+      }],
+    }
+    expect(parseRemoteResidentProviders([provider])).toMatchObject([{
+      authentication: 'unqualified', unavailableReason: 'auth required',
+      models: [{ resolvedModel: 'claude-sonnet-4-6' }],
+      quotaPools: [
+        { primary: { resetsAt: 10, windowDurationMinutes: 300 }, secondary: { usedPercent: 50 } },
+        { poolId: 'claude-secondary' },
+      ],
+    }])
+
+    const baseTurn = {
+      commandId: 'command-1', turnId: 'turn-1', sessionId: 'session-1',
+      stateRevision: 1, updatedAt: '2026-08-27T12:00:00.000Z',
+    }
+    for (const state of ['accepted', 'running', 'settled', 'indeterminate'] as const) {
+      expect(parseRemoteResidentTurn({ ...baseTurn, state })).toMatchObject({ state })
+    }
+    for (const stopReason of ['completed', 'aborted', 'error', 'max-tokens', 'refusal'] as const) {
+      expect(parseRemoteResidentTurn({
+        ...baseTurn, state: 'settled', stopReason, taskLabel: 'task', nativeTurnId: 'native-turn',
+        resultRef: 'sha256:outer',
+        result: { output: [], stopReason, resultRef: 'sha256:inner' },
+        error: { code: 'PRODUCT_ERROR', message: 'stopped' },
+      })).toMatchObject({ stopReason, result: { stopReason }, error: { code: 'PRODUCT_ERROR' } })
+    }
+    expect(parseRemoteResidentEventPage({
+      events: [{
+        sequence: 1, sessionId: 'session-1', type: 'turn.progress',
+        time: '2026-08-27T12:00:00.000Z', data: { phase: 'running' },
+      }],
+      nextSequence: 1,
+    })).toMatchObject({ events: [{ sequence: 1 }], nextSequence: 1 })
+  })
+
+  it('rejects malformed remote replication and Resident wire payloads', () => {
+    const header = { version: 0, id: 'session-replica', createdAt: 1 }
+    expect(() => parseRemoteSessionReplicaList({})).toThrow('must be an array')
+    expect(() => parseRemoteSessionReplicaList([{ header: { ...header, id: '' }, revision: 'store:1' }]))
+      .toThrow('must be a non-empty string')
+    expect(() => parseRemoteSessionReplicaDocument({ meta: header, events: {}, balanced: true }))
+      .toThrow('events must be an array')
+    expect(() => parseRemoteSessionReplicaDocument({ meta: header, events: [], balanced: 'yes' }))
+      .toThrow('balanced must be a boolean')
+    expect(() => parseRemoteSessionReplicaApplyResult({
+      sessionId: 'session-replica', state: 'merged', sourceEventCount: 0, destinationEventCount: 0, appendedEventCount: 0,
+    })).toThrow('state is invalid')
+
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: '', tags: [],
+      maxConcurrency: 1, injectionBoundaries: ['pre-dispatch'], available: true,
+      authentication: 'native-subscription', productVersion: '1', protocolHash: 'schema', models: [{
+        model: 'sol', displayName: 'Sol', description: '', supportedEfforts: ['medium'],
+        defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true,
+      }],
+    }
+    expect(() => parseRemoteResidentProviders({})).toThrow('must be an array')
+    expect(() => parseRemoteResidentProviders([{ ...provider, authentication: 'api-key' }]))
+      .toThrow('authentication is invalid')
+    expect(() => parseRemoteResidentProviders([{ ...provider, injectionBoundaries: ['live'] }]))
+      .toThrow('invalid boundary')
+    expect(() => parseRemoteResidentProviders([{ ...provider, description: 1 }]))
+      .toThrow('must be a string')
+    expect(() => parseRemoteResidentProviders([{ ...provider, available: 'yes' }]))
+      .toThrow('must be a boolean')
+    expect(() => parseRemoteResidentProviders([{
+      ...provider, models: [{ ...provider.models[0], supportedEfforts: ['impossible'] }],
+    }])).toThrow('is invalid')
+    expect(() => parseRemoteResidentProviders([{
+      ...provider, quotaPools: [{
+        poolId: 'pool', displayName: 'Pool', models: [], meter: 'api',
+        observedAt: '2026-08-27T12:00:00.000Z',
+      }],
+    }])).toThrow('meter is invalid')
+    for (const usedPercent of ['25', Number.NaN, -1, 101]) {
+      expect(() => parseRemoteResidentProviders([{
+        ...provider, quotaPools: [{
+          poolId: 'pool', displayName: 'Pool', models: [], meter: 'native-subscription',
+          primary: { usedPercent }, observedAt: '2026-08-27T12:00:00.000Z',
+        }],
+      }])).toThrow('between 0 and 100')
+    }
+
+    const baseTurn = {
+      commandId: 'command-1', turnId: 'turn-1', sessionId: 'session-1', state: 'running',
+      stateRevision: 1, updatedAt: '2026-08-27T12:00:00.000Z',
+    }
+    expect(() => parseRemoteResidentTurn({ ...baseTurn, state: 'queued' })).toThrow('state is invalid')
+    expect(() => parseRemoteResidentTurn({ ...baseTurn, stopReason: 'unknown' })).toThrow('stopReason is invalid')
+    expect(() => parseRemoteResidentTurn({ ...baseTurn, result: { output: {}, stopReason: 'completed' } }))
+      .toThrow('result.output must be an array')
+    expect(() => parseRemoteResidentTurn({
+      ...baseTurn, result: { output: [], stopReason: 'unknown' },
+    })).toThrow('result.stopReason is invalid')
+    expect(() => parseRemoteResidentEventPage({ events: {}, nextSequence: 0 })).toThrow('must be an array')
+  })
+
   it('accepts a complete snapshot and rejects protocol or deployment mismatch', () => {
     expect(parseRemoteSyncSnapshot(snapshot)).toMatchObject({
       deploymentId: 'deployment-1', cursor: { sequence: 7 },
@@ -240,6 +375,9 @@ describe('Remote Sync wire parsing', () => {
     expect(() => parseRemoteSyncDescription({
       ...description, cluster: { nodeId: 'server-a', term: -1, role: 'follower', canSchedule: false },
     })).toThrow('non-negative safe integer')
+    expect(parseRemoteSyncDescription({
+      ...description, cluster: { nodeId: 'server-a', term: 1, role: 'follower', canSchedule: false },
+    }).cluster).toEqual({ nodeId: 'server-a', term: 1, role: 'follower', canSchedule: false })
 
     for (const value of [undefined, null, []]) {
       expect(() => parseRemoteSyncCursor(value)).toThrow('must be an object')

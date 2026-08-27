@@ -283,9 +283,12 @@ describe('RemoteSyncHub', () => {
     } as never)).resolves.toEqual({ sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 })
     expect(dispose).toHaveBeenCalledOnce()
     await expect(hub.operatorInspectTurn('resident-turn')).resolves.toMatchObject({ state: 'running' })
-    await expect(hub.operatorReadEvents('resident-session', 0, 100)).resolves.toEqual({ events: [], nextSequence: 0 })
+    const signal = new AbortController().signal
+    await expect(hub.operatorReadEvents('resident-session', 0, 100, signal)).resolves.toEqual({ events: [], nextSequence: 0 })
+    await expect(hub.operatorReadEvents('resident-session', 1, 10)).resolves.toEqual({ events: [], nextSequence: 0 })
     await expect(hub.operatorInterrupt('resident-session', 'resident-turn')).resolves.toBeUndefined()
-    expect(readEvents).toHaveBeenCalledWith(expect.objectContaining({ afterSequence: 0, limit: 100 }))
+    expect(readEvents).toHaveBeenCalledWith(expect.objectContaining({ afterSequence: 0, limit: 100, signal }))
+    expect(readEvents).toHaveBeenCalledWith(expect.objectContaining({ afterSequence: 1, limit: 10 }))
     expect(interrupt).toHaveBeenCalledOnce()
     await hub.close()
   })
@@ -326,6 +329,27 @@ describe('RemoteSyncHub', () => {
     expect(clusterRequestVote).toHaveBeenCalledOnce()
     expect(clusterHeartbeat).toHaveBeenCalledOnce()
     await hub.close()
+  })
+
+  it('omits an unknown cluster leader and fails loud when optional authority seams are absent', async () => {
+    const clusterStatus = vi.fn(async () => ({
+      nodeId: 'a', memberIds: ['a'], term: 1, role: 'candidate' as const,
+      leaseUntil: 0, commitIndex: 0, quorum: 1, canSchedule: false,
+    }))
+    const hub = new RemoteSyncHub(api(), 4, undefined, undefined, () => ({
+      clusterStatus,
+      clusterRequestVote: vi.fn(), clusterHeartbeat: vi.fn(), clusterExportReplica: vi.fn(), clusterInstallReplica: vi.fn(),
+    }) as never)
+    await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({
+      cluster: { nodeId: 'a', role: 'candidate', canSchedule: false },
+    })
+    await hub.close()
+
+    const standalone = new RemoteSyncHub(api(), 4)
+    await expect(standalone.replicaList()).rejects.toThrow('replication is unavailable')
+    expect(() => standalone.operatorProviders()).toThrow('Resident execution is unavailable')
+    expect(() => standalone.clusterStatus()).toThrow('cluster control is unavailable')
+    await standalone.close()
   })
 
   it('retries projections if deployment changes during reads and supports cancellation', async () => {

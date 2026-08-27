@@ -297,6 +297,53 @@ describe('SessionPersistence prefix-compatible replication', () => {
     }
   })
 
+  it('supports an empty source, reports destination-ahead, and rejects metadata replacement', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(MemoryPersistence)
+    try {
+      const empty = meta('replica-empty', '/work')
+      await expect(ctx.sessionPersistence.replicate({ meta: empty, events: [] })).resolves.toMatchObject({
+        state: 'created', destinationEventCount: 0, appendedEventCount: 0,
+      })
+
+      const header = meta('replica-ahead', '/work')
+      await ctx.sessionPersistence.replicate({ meta: header, events: oneTurnLog() })
+      await expect(ctx.sessionPersistence.replicate({ meta: header, events: [] })).resolves.toMatchObject({
+        state: 'destination-ahead', destinationEventCount: 6, appendedEventCount: 0,
+      })
+      await expect(ctx.sessionPersistence.replicate({
+        meta: { ...header, cwd: '/another-workspace' }, events: oneTurnLog(),
+      })).rejects.toMatchObject({ code: 'SESSION_IDENTITY_CONFLICT' } satisfies Partial<SessionReplicationError>)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('serializes concurrent replication for the same Session identity', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(MemoryPersistence)
+    try {
+      const header = meta('replica-serialized', '/work')
+      const original = ctx.sessionPersistence.listSnapshots.bind(ctx.sessionPersistence)
+      let release!: () => void
+      const blocked = new Promise<void>((resolve) => { release = resolve })
+      vi.spyOn(ctx.sessionPersistence, 'listSnapshots')
+        .mockImplementationOnce(async (signal) => { await blocked; return await original(signal) })
+        .mockImplementation(original)
+
+      const events = oneTurnLog()
+      const first = ctx.sessionPersistence.replicate({ meta: header, events })
+      const second = ctx.sessionPersistence.replicate({ meta: header, events })
+      release()
+      await expect(first).resolves.toMatchObject({ state: 'created' })
+      await expect(second).resolves.toMatchObject({ state: 'unchanged' })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('refuses a live destination, an open source turn, and divergent history', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)

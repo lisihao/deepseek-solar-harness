@@ -114,6 +114,13 @@ describe('ModelsSettingsStore', () => {
     expect(store.store.getSnapshot().activeModelProviders).toEqual(['dsh-physical-operator'])
   })
 
+  it('keeps API-key settings available when the active model catalog is unavailable', async () => {
+    const { face } = api({ models: () => Promise.resolve(fail('model catalog unavailable')) })
+    const store = new ModelsSettingsStore(face)
+    await store.load()
+    expect(store.store.getSnapshot()).toMatchObject({ status: 'ready', activeModelProviders: [] })
+  })
+
   it('degrades the credential badge, not the page, when the credential domain fails', async () => {
     const { face } = api({ describeCredentials: () => Promise.resolve(fail('no provider')) })
     const store = new ModelsSettingsStore(face)

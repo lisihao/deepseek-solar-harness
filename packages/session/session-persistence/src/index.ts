@@ -287,9 +287,7 @@ export abstract class SessionPersistence extends Service {
   replicate(replica: SessionReplica, signal?: AbortSignal): Promise<SessionReplicationResult> {
     const id = SessionId(String(replica.meta.id))
     const previous = this.replicationChains.get(id) ?? Promise.resolve()
-    let started = false
     const operation = previous.then(async () => {
-      started = true
       signal?.throwIfAborted()
       return await this.replicateCore(id, replica, signal)
     })
@@ -297,9 +295,6 @@ export abstract class SessionPersistence extends Service {
     this.replicationChains.set(id, tail)
     return operation.finally(() => {
       if (this.replicationChains.get(id) === tail) this.replicationChains.delete(id)
-    }).catch((error: unknown) => {
-      if (!started && signal?.aborted === true) signal.throwIfAborted()
-      throw error
     })
   }
 
