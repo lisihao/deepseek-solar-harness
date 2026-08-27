@@ -161,6 +161,12 @@ describe('real @openai/codex 0.149.1 product', () => {
     await expect(run.result).resolves.toEqual({
       output: [{ type: 'text', text: sentinel }],
       stopReason: 'completed',
+      usage: {
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        inputTokens: 10,
+        outputTokens: 1,
+      },
     })
     await run.dispose()
 

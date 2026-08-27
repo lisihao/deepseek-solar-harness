@@ -90,6 +90,12 @@ import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { DurableAutoRefineCoordinator, PRIME_AUTO_REFINE_DEFAULTS, type AutoRefineReview } from './auto-refine.ts'
+import {
+  accountAutonomousUsage,
+  createAutonomousState,
+  nextAutonomousDecision,
+  resolveAutonomousPolicy,
+} from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
 import { GitWorktreeManager } from './git-worktrees.ts'
 import { dependsTransitively, graphCertificate, nodesConflict, validateGraph } from './graph.ts'
@@ -113,7 +119,7 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 2
+export const ORCHESTRATION_PROTOCOL_VERSION = 3
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
@@ -169,6 +175,7 @@ interface PreparedRlmExecution {
   readonly bindings: RlmRuntimeHostBindings
   readonly bridge: PhysicalOperatorModelToolBridgeV1
   readonly rootPrompt: readonly ContentBlock[]
+  readonly signal: AbortSignal
 }
 
 interface StartedResidentTurn {
@@ -1623,6 +1630,7 @@ export class OrchestrationDaemon {
     this.store.saveRun(record, [event(record.snapshot.runId, 'context.compiled', {
       ref: String(contextPacketRef), sha256: contextPacket.packetSha256, degradedSources: contextPacket.degradedSources,
     }, node)])
+    const requestedAutonomousMode = spec.autonomous?.mode ?? record.snapshot.admission?.autonomous ?? 'disabled'
     const rlmPlan = await this.ctx.rlmStrategy.resolve({
       runId,
       nodeId,
@@ -1630,7 +1638,9 @@ export class OrchestrationDaemon {
       role: spec.role,
       task: spec.task,
       objective: record.snapshot.admission?.optimization ?? 'balanced',
-      requestedMode: spec.rlm?.mode ?? record.snapshot.admission?.rlm ?? 'auto',
+      requestedMode: requestedAutonomousMode === 'enabled'
+        ? 'enabled'
+        : spec.rlm?.mode ?? record.snapshot.admission?.rlm ?? 'auto',
       ...spec.rlm === undefined ? {} : { requestedBudget: {
         maxDepth: spec.rlm.maxDepth,
         maxChildren: spec.rlm.maxChildren,
@@ -1644,6 +1654,24 @@ export class OrchestrationDaemon {
     this.store.saveRun(record, [event(record.snapshot.runId, 'rlm.resolved', {
       ref: String(rlmPlanRef), enabled: rlmPlan.enabled, reason: rlmPlan.reason,
       fidelity: rlmPlan.fidelity, planSha256: rlmPlan.planSha256,
+    }, node)])
+    const autonomousPolicy = resolveAutonomousPolicy(
+      spec.autonomous,
+      record.snapshot.admission?.autonomous,
+      rlmPlan.enabled,
+    )
+    const autonomousPolicyRef = this.store.putArtifact(autonomousPolicy)
+    this.store.recordArtifact('compilation_artifacts', {
+      ref: String(autonomousPolicyRef), runId, nodeId, attempt, generation: node.capabilityGeneration,
+    })
+    this.store.saveRun(record, [event(record.snapshot.runId, 'rlm.autonomous.resolved', {
+      ref: String(autonomousPolicyRef), enabled: autonomousPolicy.enabled,
+      policySha256: autonomousPolicy.policySha256,
+      gateCount: autonomousPolicy.gates.commands.length,
+      maxContinuations: autonomousPolicy.maxContinuations,
+      maxTurns: autonomousPolicy.maxTurns,
+      maxTokens: autonomousPolicy.maxTokens,
+      timeoutMs: autonomousPolicy.timeoutMs,
     }, node)])
     const selected = await this.selectOperator(record, spec, rlmPlan)
     const rlmWorkerPlan = rlmPlan.enabled && rlmPlan.fidelity === 'dsh-optimized' && rlmPlan.maxTurns > 1
@@ -1704,6 +1732,7 @@ export class OrchestrationDaemon {
       contextPacketRef,
       allocationPlanRef,
       allocationPlan: allocation,
+      autonomousPolicy,
       ...rlmWorkerPlan === undefined ? {} : { rlmWorkerPlan },
       ...harnessSnapshotRef === undefined ? {} : { harnessSnapshotRef },
       rlmPlan,
@@ -1735,6 +1764,7 @@ export class OrchestrationDaemon {
       modelSource: allocation.source,
       ...allocation.quotaPoolId === undefined ? {} : { quotaPoolId: allocation.quotaPoolId },
       rlm: rlmPlan.enabled ? 'enabled' as const : 'disabled' as const,
+      autonomous: autonomousPolicy.enabled ? 'enabled' as const : 'disabled' as const,
       capabilityPlanRef,
       contextPacketRef,
       executionPlanRef: planRef,
@@ -1923,6 +1953,11 @@ export class OrchestrationDaemon {
         },
       },
     }, bindings)
+    const autonomousPolicy = plan.autonomousPolicy
+    if (autonomousPolicy?.enabled === true
+      && this.store.autonomousState(runId, spec.id, plan.attempt) === undefined) {
+      this.store.saveAutonomousState(runId, spec.id, plan.attempt, createAutonomousState(autonomousPolicy))
+    }
     const bridge = await this.ctx.rlmRuntime.modelToolBridge(rootSessionId)
     const rootPrompt = primeRlmRootPrompt(
       promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan),
@@ -1933,11 +1968,13 @@ export class OrchestrationDaemon {
       runtimeSessionId: String(rootSessionId), planSha256: rlmPlan.planSha256,
       fidelity: rlmPlan.fidelity,
       maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
+      autonomous: autonomousPolicy?.enabled === true,
+      autonomousPolicySha256: autonomousPolicy?.policySha256 ?? null,
       rootOperatorId: plan.allocationPlan.operatorId, rootModel: plan.allocationPlan.model,
       tool: 'typescript_repl', topologyOwner: 'model',
       ...executor === 'model-worker' ? { executor } : {},
     }, node)])
-    return { rlmPlan, runId, node, rootSessionId, bindings, bridge, rootPrompt }
+    return { rlmPlan, runId, node, rootSessionId, bindings, bridge, rootPrompt, signal: controller.signal }
   }
 
   private async executeResidentRlm(
@@ -2005,13 +2042,24 @@ export class OrchestrationDaemon {
     prepared: PreparedRlmExecution,
     rootResult: PhysicalOperatorResult,
   ): Promise<PhysicalOperatorResult> {
-    const { rootSessionId, bindings, node } = prepared
+    const { rootSessionId, bindings, node, signal } = prepared
     await this.flushRlmHarnessBoundary(record, spec, plan, rootSessionId, 'turn-end')
     const drained = await this.ctx.rlmRuntime.drain(rootSessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
     const afterMessages = drained.lastContinuation?.output === undefined
       ? rootResult
       : { output: [...drained.lastContinuation.output], stopReason: 'completed' as const }
-    const result = await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
+    const result = plan.autonomousPolicy?.enabled === true
+      ? await this.continueAutonomousRlm(
+        record,
+        spec,
+        plan,
+        rootSessionId,
+        bindings,
+        afterMessages,
+        `${String(plan.executionId)}:rlm:root`,
+        signal,
+      )
+      : await this.continueActiveRlmGoal(rootSessionId, bindings, afterMessages, spec.timeoutMs)
     const snapshot = await this.ctx.rlmRuntime.inspect(rootSessionId)
     this.store.appendEvents([event(record.snapshot.runId, 'rlm.execution.settled', {
       executionId: String(plan.executionId), runtimeSessionId: String(rootSessionId),
@@ -2698,7 +2746,9 @@ export class OrchestrationDaemon {
           ? 'Audit the objective. Call await goal.complete() only when every requirement is actually achieved; otherwise make concrete progress within this continuation.'
           : request.source === 'heartbeat'
             ? 'Treat this heartbeat as scheduled new work. Use explicit family messages for any recursive results.'
-            : `Process the queued family message using ${request.deliveryMode} ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.`,
+            : request.source === 'autonomous'
+              ? 'This follow-up was injected by the host Autonomous policy. Do not claim completion from prose; make concrete progress and let the host quality gates decide.'
+              : `Process the queued family message using ${request.deliveryMode} ordering, make any required progress, and reply through agentMessage.send() when another family member needs the result.`,
       ].join('\n'),
     }]
     const settle = async (
@@ -2709,7 +2759,9 @@ export class OrchestrationDaemon {
       await this.accountRlmGoalUsage(
         record,
         plan,
-        request.source === 'goal' ? 'goal-continuation' : 'continuation',
+        request.source === 'goal'
+          ? 'goal-continuation'
+          : request.source === 'autonomous' ? 'autonomous-continuation' : 'continuation',
         String(request.commandId),
         accounted,
         {
@@ -2806,6 +2858,108 @@ export class OrchestrationDaemon {
     }
   }
 
+  private async continueAutonomousRlm(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    sessionId: RlmRuntimeSessionId,
+    bindings: RlmRuntimeHostBindings,
+    initial: PhysicalOperatorResult,
+    initialCommandId: string,
+    signal: AbortSignal,
+  ): Promise<PhysicalOperatorResult> {
+    const policy = plan.autonomousPolicy
+    if (policy?.enabled !== true) return initial
+    let result = initial
+    let commandId = initialCommandId
+    for (;;) {
+      const current = this.store.autonomousState(String(record.snapshot.runId), spec.id, plan.attempt)
+        ?? createAutonomousState(policy)
+      const accounted = accountAutonomousUsage(current, commandId, result.usage)
+      this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, accounted)
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.usage', {
+        runtimeSessionId: String(sessionId), commandId,
+        turnsUsed: accounted.turnsUsed, tokensUsed: accounted.tokensUsed,
+        inputTokens: result.usage?.inputTokens ?? 0,
+        outputTokens: result.usage?.outputTokens ?? 0,
+        cacheReadInputTokens: result.usage?.cacheReadInputTokens ?? 0,
+        cacheWriteInputTokens: result.usage?.cacheWriteInputTokens ?? 0,
+      }, record.snapshot.nodes.find(value => value.id === spec.id))])
+      if (result.stopReason === 'error' || result.stopReason === 'aborted') {
+        throw new OrchestrationError(
+          `Autonomous root turn stopped with ${result.stopReason}`,
+          'ORCHESTRATION_UNAVAILABLE',
+        )
+      }
+      const decision = await nextAutonomousDecision(
+        policy,
+        accounted,
+        plan.executionWorkspace.path,
+        signal,
+      )
+      this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, decision.state)
+      if (decision.action === 'complete') {
+        this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.stopped', {
+          runtimeSessionId: String(sessionId), reason: decision.reason,
+          continuationsUsed: decision.state.continuationsUsed,
+          turnsUsed: decision.state.turnsUsed,
+          tokensUsed: decision.state.tokensUsed,
+          gateAttempts: decision.state.gateAttempts,
+        }, record.snapshot.nodes.find(value => value.id === spec.id))])
+        if (decision.reason === 'gate_passed') return result
+        throw new OrchestrationError(
+          decision.reason === 'gate_retry_exhausted'
+            ? 'Autonomous quality-gate retry budget was exhausted without terminal evidence'
+            : `Autonomous Mode stopped at ${decision.reason} without a passing quality gate`,
+          decision.reason === 'gate_retry_exhausted'
+            ? 'AUTONOMOUS_GATE_RETRY_EXHAUSTED'
+            : 'AUTONOMOUS_LIMIT_REACHED',
+        )
+      }
+      if (bindings.dispatchContinuation === undefined) {
+        throw new OrchestrationError('RLM host cannot dispatch an Autonomous continuation', 'ORCHESTRATION_UNAVAILABLE')
+      }
+      commandId = `${String(sessionId)}:autonomous-continuation:${String(decision.state.continuationsUsed)}`
+      this.store.appendEvents([event(record.snapshot.runId, 'rlm.autonomous.continuation.requested', {
+        runtimeSessionId: String(sessionId), commandId, reason: decision.reason,
+        continuationsUsed: decision.state.continuationsUsed,
+        promptPreview: decision.prompt.slice(0, 2_000),
+      }, record.snapshot.nodes.find(value => value.id === spec.id))])
+      const runtime = await this.ctx.rlmRuntime.inspect(sessionId)
+      const execution = await bindings.dispatchContinuation({
+        sessionId,
+        commandId: RlmCommandId(commandId),
+        instruction: decision.prompt,
+        source: 'autonomous',
+        deliveryMode: 'follow_up',
+        model: runtime.model,
+      })
+      await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
+      const continuation = await execution.result
+      if (continuation.status !== 'settled') {
+        throw Object.assign(new Error(continuation.error ?? `Autonomous continuation became ${continuation.status}`), {
+          code: continuation.status === 'indeterminate' ? 'NODE_INDETERMINATE' : 'ORCHESTRATION_UNAVAILABLE',
+        })
+      }
+      result = {
+        output: [...(continuation.output ?? [])],
+        stopReason: 'completed',
+        ...continuation.usage === undefined ? {} : { usage: {
+          inputTokens: continuation.usage.inputTokens ?? 0,
+          outputTokens: continuation.usage.outputTokens ?? 0,
+          cacheReadInputTokens: continuation.usage.cacheReadInputTokens ?? 0,
+          cacheWriteInputTokens: continuation.usage.cacheWriteInputTokens ?? 0,
+          ...continuation.usage.costUsd === undefined ? {} : { costUsd: continuation.usage.costUsd },
+        } },
+      }
+      const drained = await this.ctx.rlmRuntime.drain(sessionId, Math.min(spec.timeoutMs ?? 120_000, 300_000))
+      if (drained.lastContinuation?.output !== undefined) result = {
+        ...result,
+        output: [...drained.lastContinuation.output],
+      }
+    }
+  }
+
   private async continueActiveRlmGoal(
     sessionId: RlmRuntimeSessionId,
     bindings: RlmRuntimeHostBindings,
@@ -2847,7 +3001,7 @@ export class OrchestrationDaemon {
   private async accountRlmGoalUsage(
     record: RuntimeRunRecord,
     plan: NodeExecutionPlanV1,
-    source: 'root' | 'child' | 'goal-continuation' | 'continuation',
+    source: 'root' | 'child' | 'goal-continuation' | 'autonomous-continuation' | 'continuation',
     sourceCommandId: string,
     result: RlmUsageResult,
     attribution: {
@@ -3011,6 +3165,7 @@ export class OrchestrationDaemon {
       )
       return await this.settleRlmExecution(record, spec, plan, prepared, {
         output: [...rootResult.output], stopReason: rootResult.stopReason,
+        ...rootResult.usage === undefined ? {} : { usage: rootResult.usage },
       })
     } catch (error) {
       this.recordRlmFailure(record, plan, prepared, error)

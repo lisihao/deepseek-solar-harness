@@ -508,6 +508,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
   runId: string
   maxParallel: number
   rlm: RlmExecutionMode
+  autonomous: RlmAutonomousMode
   continualHarness: ContinualHarnessMode
   optimization: ModelAllocationObjective
   plannerVerifierPreference: PlannerVerifierPreference
@@ -515,7 +516,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 }
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:38`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:40`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -526,7 +527,7 @@ Source: [`packages/orchestration/tool-orchestration/src/index.ts:38`](../package
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:50`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:53`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 

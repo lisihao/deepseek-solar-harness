@@ -136,7 +136,7 @@ export interface RlmRuntimeHostBindings {
     readonly sessionId: RlmRuntimeSessionId
     readonly commandId: RlmCommandId
     readonly instruction: string
-    readonly source: 'goal' | 'heartbeat' | 'message'
+    readonly source: 'goal' | 'heartbeat' | 'message' | 'autonomous'
     readonly deliveryMode: 'steer' | 'follow_up'
     readonly model: RlmModelSelectionV1
   }): Promise<RlmChildExecution>

@@ -579,7 +579,7 @@ export interface ToolResultPruneConfig {
 export type Config = string
 ```
 
-来源：[`packages/orchestration/continual-harness-local/src/index.ts:34`](../packages/orchestration/continual-harness-local/src/index.ts)
+来源：[`packages/orchestration/continual-harness-local/src/index.ts:35`](../packages/orchestration/continual-harness-local/src/index.ts)
 
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 

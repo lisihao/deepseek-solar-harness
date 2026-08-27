@@ -18,6 +18,8 @@ Status: implemented
 
 模型分配会随每次准入记录两项相互独立的路由偏好。`plannerVerifierPreference=codex-sol` 会在规划与验证 gate 优先选择已通过资格审查的 Codex Sol lane；`best-high-tier` 保留与 Provider 无关的高阶模型评分。`executionPreference=luna-first` 会为编码 leaf 优先选择已通过资格审查的 Codex Luna lane；`balanced` 保留普通的产品、等级、配额与容量评分。产品默认采用这组 Codex 优化策略，但显式算子／模型请求仍具有权威；优先 family 不可用时，只在已经通过资格审查的候选集合内回退，不会改变 Graph 权威。
 
+Autonomous Mode 是围绕单个 RLM 节点的另一项可选宿主策略。它的不可变 Attempt 策略会在第一份物理 Receipt 前封存，其持久状态由 `dsh-orchestratord` 写入，每次 continuation 都会复用现有 RLM lane，而不是创建另一张 Graph 或另一套 Scheduler。宿主质量门禁先于 continuation、turn、token 与耗时限制执行；门禁通过可以完成节点，限制或重试预算耗尽则仍然是失败。该策略默认禁用，并且与模型创建的 RLM Goal 相互独立。
+
 Continuous Harness 保持三个相互独立的作用域。会话条目只留在一个 RLM family 内，工作区条目只留在一个规范化仓库内，而用户全局条目使用所有者本地 Harness Store 中稳定的 `global` 身份，因此可以跨仓库可见。解析优先级为 `global < workspace < session`；每次 Attempt 仍会封存一个不可变快照，因此后续 refinement 不能修改已经 accepted 的 Plan。
 
 每次 orchestration Attempt 都必须使用内置 `context.clean-task` capability。它的指令 Capsule 要求原生算子把 Context Packet 与声明的 upstream 引用视为完整任务上下文，并让 child agent 使用空历史，而不是 `fork_turns: all`。Attempt 使用唯一 Resident lane；daemon 按算子、规范化工作区和 lane 确定 Session，因此并行节点可以通过一个已通过资格审查的 Codex 或 Claude Code 宿主执行，而不会共享原生 thread。现有状态迁移到 `legacy` lane。
@@ -42,4 +44,4 @@ Desktop 投影相同的持久事实。“物理算子”面板会区分已通过
 
 ## 验证
 
-路由测试固定智能协作 TaskGraph 准入与四个可见策略标签。分配测试对比 Codex Sol 与 Provider 中立的高阶规划，并对比 Luna-first 与 balanced 执行，包括密封 Plan 中保留的 rationale。Harness 测试证明同一个全局条目可从两个仓库读取，而工作区条目继续隔离。Scheduler 测试固定无冲突并行派发、scope 冲突等待、每 Attempt 新 lane、clean-task Capsule 注入，以及无阶段 barrier 完成。Resident Store 测试固定 lane 间并发、lane 内 single-flight 和 schema v3 历史迁移到 `legacy`。Desktop 测试固定可见 Trace 内的准入、worker、Capsule、算子与 lane 细节。
+路由测试固定智能协作 TaskGraph 准入与四个可见策略标签。分配测试对比 Codex Sol 与 Provider 中立的高阶规划，并对比 Luna-first 与 balanced 执行，包括密封 Plan 中保留的 rationale。Harness 测试证明同一个全局条目可从两个仓库读取，而工作区条目继续隔离。Scheduler 测试固定无冲突并行派发、scope 冲突等待、每 Attempt 新 lane、clean-task Capsule 注入，以及无阶段 barrier 完成。Resident Store 测试固定 lane 间并发、lane 内 single-flight 和 schema v3 历史迁移到 `legacy`。Desktop 测试固定可见 Trace 内的准入、worker、Capsule、算子与 lane 细节。无密钥 Autonomous 可运行快照固定策略解析、root token 用量统计、宿主门禁结算、同 lane 复用，以及限制耗尽不能让 TaskGraph 节点通过。进程测试还固定凭据清理与取消时等待进程树完全停稳。

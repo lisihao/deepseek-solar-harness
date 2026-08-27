@@ -16,6 +16,8 @@ The Graph is an execution permission ceiling rather than a prompt template. Caps
 
 The orchestration daemon survives Desktop and DSH client shutdown. It calls the provider-neutral physical-operator seam in Resident mode and reconciles accepted attempts through stable execution identities. DSH Session stores only bounded tool projections; SQLite and content-addressed Artifacts retain authoritative orchestration state.
 
+An RLM node can additionally select Prime-compatible Autonomous Mode as `disabled | auto | enabled`; it is disabled by default. The daemon seals one immutable host policy per Attempt, persists token/turn/continuation and gate state, runs declared host quality gates before evaluating limits, and resumes the same RLM lane only while budget remains. Gate success can complete the node; exhausted limits never become success. This policy is neither a Goal nor another Scheduler, and its shell commands require the Graph's explicit `autonomous-gate` execute effect.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -353,7 +355,7 @@ abstract resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterm
 abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:466`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:513`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 
@@ -626,7 +628,7 @@ abstract reconcile(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSna
 abstract resolveIndeterminate(request: RlmIndeterminateResolutionRequest): Promise<RlmCommandReceiptSnapshotV1>
 ```
 
-Source: [`packages/orchestration/rlm-runtime/src/index.ts:480`](../../packages/orchestration/rlm-runtime/src/index.ts)
+Source: [`packages/orchestration/rlm-runtime/src/index.ts:487`](../../packages/orchestration/rlm-runtime/src/index.ts)
 
 <a id="ctxrlmstrategy--rlmstrategyservice-abstract-seam"></a>
 

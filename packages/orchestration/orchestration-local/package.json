@@ -44,7 +44,8 @@
     "@deepseek-ai/dsh-physical-operator": "workspace:^",
     "@deepseek-ai/dsh-resident-operator-local": "workspace:^",
     "@deepseek-ai/dsh-sdk-protocol": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^"
+    "@deepseek-ai/dsh-session": "workspace:^",
+    "@deepseek-ai/dsh-subprocess": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -73,6 +74,7 @@
     "@deepseek-ai/dsh-physical-operator": "workspace:^",
     "@deepseek-ai/dsh-resident-operator-local": "workspace:^",
     "@deepseek-ai/dsh-sdk-protocol": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^"
+    "@deepseek-ai/dsh-session": "workspace:^",
+    "@deepseek-ai/dsh-subprocess": "workspace:^"
   }
 }

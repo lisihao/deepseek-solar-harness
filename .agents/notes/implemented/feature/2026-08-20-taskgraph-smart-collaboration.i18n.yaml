@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-20-taskgraph-smart-collaboration.md
-2026-08-20-taskgraph-smart-collaboration.md: 90c0c5f774a3eafb7ac054ac626d6c87a835c489
-2026-08-20-taskgraph-smart-collaboration.zh.md: 61427ef35046d6d83428d00a0cf78cbc50931a6c
+2026-08-20-taskgraph-smart-collaboration.md: 2619993c4bd6bf8f1d84e320c1e408930d91fbc6
+2026-08-20-taskgraph-smart-collaboration.zh.md: b806c23eddb490f03526aebaa8cf75e5c45d64fc

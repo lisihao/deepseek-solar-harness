@@ -664,6 +664,122 @@ describe('orchestration daemon', () => {
     expect(events.events.some(value => value.type === 'rlm.goal.continuation.settled')).toBe(true)
   })
 
+  it('runs Prime Autonomous quality gates in the same sealed RLM lane and lets a passing gate complete', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-auto-pass-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Let the host verifier decide completion.' },
+      graph: {
+        ...fixture,
+        nodes: [{
+          ...baseNode,
+          role: 'recursive synthesis',
+          effectBudget: { ...baseNode.effectBudget, execute: ['autonomous-gate'] },
+          rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
+          autonomous: {
+            mode: 'enabled',
+            gates: { commands: [`${process.execPath} -e "process.exit(0)"`] },
+          },
+        }],
+      },
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled', autonomous: 'enabled' })
+    expect(fake.requests).toHaveLength(1)
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.find(value => value.type === 'rlm.autonomous.resolved')?.data).toMatchObject({
+      enabled: true,
+      gateCount: 1,
+    })
+    expect(events.events.find(value => value.type === 'rlm.autonomous.stopped')?.data).toMatchObject({
+      reason: 'gate_passed',
+      continuationsUsed: 0,
+      turnsUsed: 1,
+    })
+    expect(events.events.filter(value => value.type.startsWith('rlm.autonomous.')).map(value => ({
+      type: value.type,
+      ...value.type === 'rlm.autonomous.resolved' ? {
+        enabled: value.data.enabled,
+        gateCount: value.data.gateCount,
+      } : value.type === 'rlm.autonomous.usage' ? {
+        turnsUsed: value.data.turnsUsed,
+        tokensUsed: value.data.tokensUsed,
+      } : {
+        reason: value.data.reason,
+        continuationsUsed: value.data.continuationsUsed,
+        turnsUsed: value.data.turnsUsed,
+      },
+    }))).toMatchInlineSnapshot(`
+      [
+        {
+          "enabled": true,
+          "gateCount": 1,
+          "type": "rlm.autonomous.resolved",
+        },
+        {
+          "tokensUsed": 0,
+          "turnsUsed": 1,
+          "type": "rlm.autonomous.usage",
+        },
+        {
+          "continuationsUsed": 0,
+          "reason": "gate_passed",
+          "turnsUsed": 1,
+          "type": "rlm.autonomous.stopped",
+        },
+      ]
+    `)
+  })
+
+  it('does not report Autonomous limit exhaustion as a successful TaskGraph node', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-auto-limit-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Bound autonomous work without a host verifier.' },
+      graph: {
+        ...fixture,
+        nodes: [{
+          ...baseNode,
+          role: 'recursive synthesis',
+          retryPolicy: { ...baseNode.retryPolicy, maxAttempts: 1 },
+          rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
+          autonomous: { mode: 'enabled', maxContinuations: 1 },
+        }],
+      },
+    })
+    const run = await client.start({ compilationId: compilation.compilationId })
+    const failed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'failed')
+    expect(failed.nodes[0]).toMatchObject({ state: 'failed', autonomous: 'enabled' })
+    expect(fake.requests).toHaveLength(2)
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.find(value => value.type === 'rlm.autonomous.stopped')?.data).toMatchObject({
+      reason: 'maxContinuations',
+      continuationsUsed: 1,
+    })
+    expect(events.events.find(value => value.type === 'node.failed')?.data).toMatchObject({
+      code: 'AUTONOMOUS_LIMIT_REACHED',
+    })
+  })
+
   it('serially accounts keyless DeepSeek root, concurrent child, and active goal-continuation usage', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-rlm-goal-usage-'))
     const root = join(home, 'orchestrations')

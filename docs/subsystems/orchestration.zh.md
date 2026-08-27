@@ -16,6 +16,8 @@ Graph 是执行权限天花板，不是 prompt 模板。Capsule 解析可以实�
 
 编排 daemon 在 Desktop 和 DSH 客户端关闭后继续存在。它以 Resident 模式调用与 Provider 无关的物理算子 seam，并通过稳定 execution identity 对账 accepted Attempt。DSH Session 只保存有界工具投影；SQLite 与内容寻址 Artifact 保存权威编排状态。
 
+RLM 节点还可以把与 Prime 兼容的 Autonomous Mode 选择为 `disabled | auto | enabled`；它默认禁用。daemon 会为每个 Attempt 封存一份不可变宿主策略，持久化 token、turn、continuation 和门禁状态，先运行声明的宿主质量门禁，再检查限制，并且只在预算仍有余量时续接同一条 RLM lane。门禁通过可以完成节点；限制耗尽绝不会变成成功。该策略既不是 Goal，也不是另一套 Scheduler；其 shell 命令需要 Graph 显式声明 `autonomous-gate` execute effect。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -353,7 +355,7 @@ abstract resolveAutoRefineIndeterminate(request: OrchestrationAutoRefineIndeterm
 abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:466`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:513`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 
@@ -626,7 +628,7 @@ abstract reconcile(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSna
 abstract resolveIndeterminate(request: RlmIndeterminateResolutionRequest): Promise<RlmCommandReceiptSnapshotV1>
 ```
 
-Source: [`packages/orchestration/rlm-runtime/src/index.ts:480`](../../packages/orchestration/rlm-runtime/src/index.ts)
+Source: [`packages/orchestration/rlm-runtime/src/index.ts:487`](../../packages/orchestration/rlm-runtime/src/index.ts)
 
 <a id="ctxrlmstrategy--rlmstrategyservice-abstract-seam"></a>
 

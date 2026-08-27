@@ -25,9 +25,10 @@ import {
 } from '@deepseek-ai/dsh-orchestration'
 import type { IntentIRV1 } from '@deepseek-ai/dsh-intent-compiler'
 import { canonicalJson, canonicalSha256 } from './canonical.ts'
+import type { AutonomousRuntimeStateV1 } from './autonomous.ts'
 
 /** Forward-only SQLite schema version used by the strict daemon handshake. */
-export const ORCHESTRATION_STATE_SCHEMA_VERSION = 2
+export const ORCHESTRATION_STATE_SCHEMA_VERSION = 3
 
 /** Daemon-private state required to continue one public run projection. */
 export interface RuntimeRunRecord {
@@ -120,7 +121,10 @@ export class OrchestrationStore {
       )
     }
     if (version === 0) this.createSchema()
-    else if (version === 1) this.migrateSchema1To2()
+    else if (version === 1) {
+      this.migrateSchema1To2()
+      this.migrateSchema2To3()
+    } else if (version === 2) this.migrateSchema2To3()
   }
 
   /** Close the SQLite writer connection. */
@@ -300,6 +304,42 @@ export class OrchestrationStore {
       attempt.state, attempt.executionPlanRef, attempt.turnId ?? null, attempt.errorCode ?? null,
       attempt.errorMessage ?? null, attempt.createdAt, attempt.updatedAt,
     )
+  }
+
+  /**
+   * Persist the host-side Autonomous state after each usage, gate, and continuation transition.
+   * @param runId - owning orchestration run.
+   * @param nodeId - owning logical node.
+   * @param attempt - physical attempt generation.
+   * @param state - exact host-side state to restore after restart.
+   */
+  saveAutonomousState(
+    runId: string,
+    nodeId: string,
+    attempt: number,
+    state: AutonomousRuntimeStateV1,
+  ): void {
+    this.db.prepare(`
+      INSERT INTO autonomous_states (run_id, node_id, attempt, payload_json, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(run_id, node_id, attempt) DO UPDATE SET
+        payload_json = excluded.payload_json,
+        updated_at = excluded.updated_at
+    `).run(runId, nodeId, attempt, canonicalJson(state), new Date().toISOString())
+  }
+
+  /**
+   * Restore one attempt's exact host-side Autonomous counters after daemon restart.
+   * @param runId - owning orchestration run.
+   * @param nodeId - owning logical node.
+   * @param attempt - physical attempt generation.
+   * @returns the persisted state, or undefined before the first transition.
+   */
+  autonomousState(runId: string, nodeId: string, attempt: number): AutonomousRuntimeStateV1 | undefined {
+    const row = this.db.prepare(`
+      SELECT payload_json FROM autonomous_states WHERE run_id = ? AND node_id = ? AND attempt = ?
+    `).get(runId, nodeId, attempt) as { payload_json: string } | undefined
+    return row === undefined ? undefined : JSON.parse(row.payload_json) as AutonomousRuntimeStateV1
   }
 
   /**
@@ -570,6 +610,15 @@ export class OrchestrationStore {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE autonomous_states (
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (run_id, node_id, attempt),
+        FOREIGN KEY (run_id) REFERENCES runs(run_id)
+      );
       PRAGMA user_version = ${String(ORCHESTRATION_STATE_SCHEMA_VERSION)};
     `)
   }
@@ -589,6 +638,23 @@ export class OrchestrationStore {
           updated_at TEXT NOT NULL
         );
         PRAGMA user_version = 2;
+      `)
+    })
+  }
+
+  private migrateSchema2To3(): void {
+    this.transaction(() => {
+      this.db.exec(`
+        CREATE TABLE autonomous_states (
+          run_id TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          attempt INTEGER NOT NULL,
+          payload_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (run_id, node_id, attempt),
+          FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+        PRAGMA user_version = 3;
       `)
     })
   }

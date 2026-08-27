@@ -577,7 +577,7 @@ Source: [`packages/compaction/compaction-tool-result-pruner/src/types.ts:4`](../
 export type Config = string
 ```
 
-Source: [`packages/orchestration/continual-harness-local/src/index.ts:34`](../packages/orchestration/continual-harness-local/src/index.ts)
+Source: [`packages/orchestration/continual-harness-local/src/index.ts:35`](../packages/orchestration/continual-harness-local/src/index.ts)
 
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 

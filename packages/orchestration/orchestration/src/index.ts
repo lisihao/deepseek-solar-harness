@@ -54,6 +54,44 @@ export interface OrchestrationAcceptanceRequirement {
   readonly kind: 'operator-completed' | 'artifact-present' | 'human-review'
 }
 
+/** User/system selection for Prime-compatible host-driven continuation. */
+export type RlmAutonomousMode = 'auto' | 'enabled' | 'disabled'
+
+/** Shell quality gates evaluated by the orchestration host after every completed assistant turn. */
+export interface RlmAutonomousGateConfigV1 {
+  readonly commands: readonly string[]
+  readonly maxRetries?: number
+  readonly timeoutMs?: number
+}
+
+/** Optional graph input for Prime-compatible Autonomous Mode. */
+export interface RlmAutonomousConfigV1 {
+  readonly mode: RlmAutonomousMode
+  readonly maxContinuations?: number
+  readonly maxTurns?: number
+  readonly maxTokens?: number
+  readonly timeoutMs?: number
+  readonly continuationPrompt?: string
+  readonly gates?: RlmAutonomousGateConfigV1
+}
+
+/** Fully resolved immutable Autonomous policy sealed into one physical attempt. */
+export interface RlmAutonomousPolicyV1 {
+  readonly version: 1
+  readonly enabled: boolean
+  readonly maxContinuations: number
+  readonly maxTurns: number
+  readonly maxTokens: number
+  readonly timeoutMs: number
+  readonly continuationPrompt: string
+  readonly gates: {
+    readonly commands: readonly string[]
+    readonly maxRetries: number
+    readonly timeoutMs: number
+  }
+  readonly policySha256: string
+}
+
 /** Immutable per-attempt Workbench contract retained as the execution task artifact. */
 export interface WorkbenchTaskContractV1 {
   readonly version: 1
@@ -134,6 +172,8 @@ export interface OrchestrationNodeSpecV1 {
     readonly maxChildren: number
     readonly maxTurns: number
   }
+  /** Prime-compatible host policy; disabled unless explicitly or automatically admitted. */
+  readonly autonomous?: RlmAutonomousConfigV1
   readonly operator?: {
     readonly preferredIds?: readonly string[]
     readonly profile?: PhysicalOperatorExecutionPreference
@@ -194,6 +234,8 @@ export interface OrchestrationAdmissionTraceV1 {
   readonly sourceSessionId: string
   /** Independent user/system choice; RLM is a node strategy, not an operator. */
   readonly rlm?: RlmExecutionMode
+  /** Autonomous continuation is independent from Goal and reuses the same RLM/TaskGraph authority. */
+  readonly autonomous?: RlmAutonomousMode
   /** Continuous Harness can be disabled, scoped to this Session, or scoped to a workspace. */
   readonly continualHarness?: ContinualHarnessMode
   /** Global quality/cost/throughput preference consumed by the allocation Provider. */
@@ -283,6 +325,8 @@ export interface NodeExecutionPlanV1 {
   readonly allocationPlanRef: OrchestrationArtifactRef
   readonly allocationPlan: ModelAllocationPlan
   readonly rlmPlan?: RlmExecutionPlanV1
+  /** Host continuation/gate policy sealed before the first physical receipt is accepted. */
+  readonly autonomousPolicy?: RlmAutonomousPolicyV1
   /** Cost-aware child allocation used only by Smart Auto; Prime Strict inherits the parent. */
   readonly rlmWorkerPlan?: ModelAllocationPlan
   readonly harnessSnapshotRef?: OrchestrationArtifactRef
@@ -312,6 +356,7 @@ export interface OrchestrationNodeSnapshot {
   readonly modelSource?: 'native-subscription' | 'metered-api'
   readonly quotaPoolId?: string
   readonly rlm?: RlmExecutionMode
+  readonly autonomous?: RlmAutonomousMode
   readonly capabilityPlanRef?: OrchestrationArtifactRef
   readonly contextPacketRef?: OrchestrationArtifactRef
   readonly executionPlanRef?: OrchestrationArtifactRef
@@ -439,6 +484,8 @@ export type OrchestrationErrorCode =
   | 'NODE_INDETERMINATE'
   | 'CAPABILITY_RECOMPILE_REQUIRED'
   | 'CAPABILITY_HOTSWAP_UNSUPPORTED'
+  | 'AUTONOMOUS_LIMIT_REACHED'
+  | 'AUTONOMOUS_GATE_RETRY_EXHAUSTED'
   | 'COMMAND_CONFLICT'
   | 'COMMAND_INDETERMINATE'
   | 'WORKSPACE_INVALID'

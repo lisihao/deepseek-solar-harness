@@ -4422,7 +4422,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationAdmissionTraceV1',
-    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly sourceSessionId: string;\n    readonly rlm?: RlmExecutionMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
+    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly sourceSessionId: string;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
   },
   {
     name: 'OrchestrationArtifactRef',
@@ -4470,11 +4470,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationNodeSnapshot',
-    declaration: 'export interface OrchestrationNodeSnapshot {\n    readonly id: string;\n    readonly title: string;\n    readonly role: string;\n    readonly dependsOn: readonly string[];\n    readonly state: OrchestrationNodeState;\n    readonly attempt: number;\n    readonly capabilityGeneration: number;\n    readonly operatorId?: string;\n    readonly operatorProfile?: PhysicalOperatorExecutionPreference;\n    readonly model?: string;\n    readonly modelTier?: ModelExecutionOffer[\'tier\'];\n    readonly modelSource?: \'native-subscription\' | \'metered-api\';\n    readonly quotaPoolId?: string;\n    readonly rlm?: RlmExecutionMode;\n    readonly capabilityPlanRef?: OrchestrationArtifactRef;\n    readonly contextPacketRef?: OrchestrationArtifactRef;\n    readonly executionPlanRef?: OrchestrationArtifactRef;\n    readonly evidenceRefs: readonly OrchestrationArtifactRef[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly waitReason?: OrchestrationBlocker;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface OrchestrationNodeSnapshot {\n    readonly id: string;\n    readonly title: string;\n    readonly role: string;\n    readonly dependsOn: readonly string[];\n    readonly state: OrchestrationNodeState;\n    readonly attempt: number;\n    readonly capabilityGeneration: number;\n    readonly operatorId?: string;\n    readonly operatorProfile?: PhysicalOperatorExecutionPreference;\n    readonly model?: string;\n    readonly modelTier?: ModelExecutionOffer[\'tier\'];\n    readonly modelSource?: \'native-subscription\' | \'metered-api\';\n    readonly quotaPoolId?: string;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly capabilityPlanRef?: OrchestrationArtifactRef;\n    readonly contextPacketRef?: OrchestrationArtifactRef;\n    readonly executionPlanRef?: OrchestrationArtifactRef;\n    readonly evidenceRefs: readonly OrchestrationArtifactRef[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly waitReason?: OrchestrationBlocker;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'OrchestrationNodeSpecV1',
-    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
+    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly autonomous?: RlmAutonomousConfigV1;\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
   },
   {
     name: 'OrchestrationNodeState',
@@ -4594,7 +4594,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorResult',
-    declaration: 'export interface PhysicalOperatorResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n    readonly continuity?: {\n        readonly sessionId: string;\n        readonly stateRevision: number;\n    };\n}',
+    declaration: 'export interface PhysicalOperatorResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly continuity?: {\n        readonly sessionId: string;\n        readonly stateRevision: number;\n    };\n}',
   },
   {
     name: 'PhysicalOperatorRun',
@@ -4615,6 +4615,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PhysicalOperatorStopReasonMap',
     declaration: 'export interface PhysicalOperatorStopReasonMap {\n    completed: \'completed\';\n    aborted: \'aborted\';\n    error: \'error\';\n    \'max-tokens\': \'max-tokens\';\n    refusal: \'refusal\';\n}',
+  },
+  {
+    name: 'PhysicalOperatorUsage',
+    declaration: 'export interface PhysicalOperatorUsage {\n    readonly inputTokens: number;\n    readonly outputTokens: number;\n    readonly cacheReadInputTokens?: number;\n    readonly cacheWriteInputTokens?: number;\n    readonly costUsd?: number;\n}',
   },
   {
     name: 'PlanCertificateV1',
@@ -4862,7 +4866,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentTurnResult',
-    declaration: 'export interface ResidentTurnResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: ResidentStopReason;\n    readonly resultRef?: string;\n}',
+    declaration: 'export interface ResidentTurnResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: ResidentStopReason;\n    readonly usage?: PhysicalOperatorUsage;\n    readonly resultRef?: string;\n}',
   },
   {
     name: 'ResidentTurnSnapshot',
@@ -4905,6 +4909,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
   },
   {
+    name: 'RlmAutonomousConfigV1',
+    declaration: 'export interface RlmAutonomousConfigV1 {\n    readonly mode: RlmAutonomousMode;\n    readonly maxContinuations?: number;\n    readonly maxTurns?: number;\n    readonly maxTokens?: number;\n    readonly timeoutMs?: number;\n    readonly continuationPrompt?: string;\n    readonly gates?: RlmAutonomousGateConfigV1;\n}',
+  },
+  {
+    name: 'RlmAutonomousGateConfigV1',
+    declaration: 'export interface RlmAutonomousGateConfigV1 {\n    readonly commands: readonly string[];\n    readonly maxRetries?: number;\n    readonly timeoutMs?: number;\n}',
+  },
+  {
+    name: 'RlmAutonomousMode',
+    declaration: 'export type RlmAutonomousMode = \'auto\' | \'enabled\' | \'disabled\';',
+  },
+  {
     name: 'RlmBudgetV1',
     declaration: 'export interface RlmBudgetV1 {\n    readonly maxDepth: number;\n    readonly maxChildren: number;\n    readonly maxTurns: number;\n}',
   },
@@ -4922,7 +4938,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmChildExecutionResult',
-    declaration: 'export interface RlmChildExecutionResult {\n    readonly status: \'settled\' | \'failed\' | \'indeterminate\';\n    readonly output?: readonly ContentBlock[];\n    readonly resultRef?: string;\n    readonly outputPreview?: string;\n    readonly error?: string;\n    readonly messages?: readonly Omit<RlmMessageSendRequest, \'commandId\' | \'fromSessionId\'>[];\n    readonly usage?: {\n        readonly provider: string;\n        readonly model: string;\n        readonly authMode: \'subscription\' | \'api\' | \'local\';\n        readonly inputTokens?: number;\n        readonly outputTokens?: number;\n        readonly costUsd?: number;\n    };\n}',
+    declaration: 'export interface RlmChildExecutionResult {\n    readonly status: \'settled\' | \'failed\' | \'indeterminate\';\n    readonly output?: readonly ContentBlock[];\n    readonly resultRef?: string;\n    readonly outputPreview?: string;\n    readonly error?: string;\n    readonly messages?: readonly Omit<RlmMessageSendRequest, \'commandId\' | \'fromSessionId\'>[];\n    readonly usage?: {\n        readonly provider: string;\n        readonly model: string;\n        readonly authMode: \'subscription\' | \'api\' | \'local\';\n        readonly inputTokens?: number;\n        readonly outputTokens?: number;\n        readonly cacheReadInputTokens?: number;\n        readonly cacheWriteInputTokens?: number;\n        readonly costUsd?: number;\n    };\n}',
   },
   {
     name: 'RlmChildHandleV1',
@@ -5006,7 +5022,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmGoalUsageAccountRequest',
-    declaration: 'export interface RlmGoalUsageAccountRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly expectedStateRevision: number;\n    readonly inputTokens: number;\n    readonly outputTokens: number;\n}',
+    declaration: 'export interface RlmGoalUsageAccountRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly expectedStateRevision: number;\n    readonly inputTokens: number;\n    readonly outputTokens: number;\n    readonly cacheReadInputTokens?: number;\n    readonly cacheWriteInputTokens?: number;\n}',
   },
   {
     name: 'RlmGoalV1',
@@ -5054,7 +5070,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmModelSelectionV1',
-    declaration: 'export interface RlmModelSelectionV1 {\n    readonly operatorId: string;\n    readonly model: string;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n}',
+    declaration: 'export interface RlmModelSelectionV1 {\n    readonly operatorId: string;\n    readonly model: string;\n    readonly source?: \'native-subscription\' | \'metered-api\';\n    readonly profile?: PhysicalOperatorExecutionPreference;\n}',
   },
   {
     name: 'RlmModelToolBridgeV1',
@@ -5070,7 +5086,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmRuntimeHostBindings',
-    declaration: 'export interface RlmRuntimeHostBindings {\n    dispatchChild(request: RlmChildSpawnRequest & {\n        readonly childId: RlmChildId;\n        readonly childSessionId: RlmRuntimeSessionId;\n        readonly depth: number;\n        readonly model: RlmModelSelectionV1;\n    }): Promise<RlmChildExecution>;\n    dispatchContinuation?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly commandId: RlmCommandId;\n        readonly instruction: string;\n        readonly source: \'goal\' | \'heartbeat\' | \'message\';\n        readonly deliveryMode: \'steer\' | \'follow_up\';\n        readonly model: RlmModelSelectionV1;\n    }): Promise<RlmChildExecution>;\n    hostRequest?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly method: \'harness.list\' | \'harness.get\' | \'harness.create\' | \'harness.update\' | \'harness.delete\' | \'harness.plan_refinement\' | \'harness.apply_refinement\' | \'harness.rollback\' | \'compact.status\' | \'compact.run\' | \'skills.list\' | \'skills.call\';\n        readonly params: Readonly<Record<string, RlmJsonValue>>;\n    }): Promise<RlmJsonValue>;\n}',
+    declaration: 'export interface RlmRuntimeHostBindings {\n    dispatchChild(request: RlmChildSpawnRequest & {\n        readonly childId: RlmChildId;\n        readonly childSessionId: RlmRuntimeSessionId;\n        readonly depth: number;\n        readonly model: RlmModelSelectionV1;\n    }): Promise<RlmChildExecution>;\n    dispatchContinuation?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly commandId: RlmCommandId;\n        readonly instruction: string;\n        readonly source: \'goal\' | \'heartbeat\' | \'message\' | \'autonomous\';\n        readonly deliveryMode: \'steer\' | \'follow_up\';\n        readonly model: RlmModelSelectionV1;\n    }): Promise<RlmChildExecution>;\n    hostRequest?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly method: \'harness.list\' | \'harness.get\' | \'harness.create\' | \'harness.update\' | \'harness.delete\' | \'harness.plan_refinement\' | \'harness.apply_refinement\' | \'harness.rollback\' | \'compact.status\' | \'compact.run\' | \'skills.list\' | \'skills.call\';\n        readonly params: Readonly<Record<string, RlmJsonValue>>;\n    }): Promise<RlmJsonValue>;\n}',
   },
   {
     name: 'RlmRuntimeLimitsV1',
@@ -5606,7 +5622,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentResult',
-    declaration: 'export interface SubagentResult {\n    readonly output: ContentBlock[];\n    readonly structured?: unknown;\n    readonly stopReason: SubagentStopReason;\n}',
+    declaration: 'export interface SubagentResult {\n    readonly output: ContentBlock[];\n    readonly structured?: unknown;\n    readonly stopReason: SubagentStopReason;\n    readonly usage?: SubagentUsage;\n}',
   },
   {
     name: 'SubagentRun',
@@ -5639,6 +5655,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SubagentStopReasonMap',
     declaration: 'export interface SubagentStopReasonMap {\n    completed: \'completed\';\n    aborted: \'aborted\';\n    error: \'error\';\n    \'max-tokens\': \'max-tokens\';\n    refusal: \'refusal\';\n}',
+  },
+  {
+    name: 'SubagentUsage',
+    declaration: 'export interface SubagentUsage {\n    readonly inputTokens: number;\n    readonly outputTokens: number;\n    readonly cacheReadInputTokens?: number;\n    readonly cacheWriteInputTokens?: number;\n    readonly costUsd?: number;\n}',
   },
   {
     name: 'SubprocessCollect',

@@ -50,6 +50,7 @@ export interface DesktopOrchestrationNode {
   modelSource?: 'native-subscription' | 'metered-api'
   quotaPoolId?: string
   rlm?: 'auto' | 'enabled' | 'disabled'
+  autonomous?: 'auto' | 'enabled' | 'disabled'
   capabilityPlanRef?: string
   contextPacketRef?: string
   executionPlanRef?: string
@@ -74,6 +75,7 @@ export interface DesktopOrchestrationRun {
     route: 'taskgraph'
     sourceSessionId: string
     rlm?: 'auto' | 'enabled' | 'disabled'
+    autonomous?: 'auto' | 'enabled' | 'disabled'
     continualHarness?: 'auto' | 'off' | 'session' | 'workspace' | 'global'
     optimization?: 'balanced' | 'quality' | 'speed' | 'economy'
     plannerVerifierPreference?: 'codex-sol' | 'best-high-tier'
