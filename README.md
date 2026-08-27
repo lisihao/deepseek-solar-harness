@@ -4,8 +4,7 @@ English | [简体中文](README.zh.md)
 
 **A governed, plugin-composed agent runtime and macOS workbench with durable TaskGraph orchestration.**
 
-> [!IMPORTANT]
-> DeepSeek-Solar-Harness (`DSH`) is a community downstream distribution of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), not an official DeepSeek AI release. This analysis is pinned to `solar@a3cd4397efc5294704e9d7384515ab285f81bd06` on 2026-08-27 and DSH Desktop `3.6.6`. The accepted product contract currently covers macOS; machine-readable manifests remain authoritative after this snapshot.
+**Snapshot:** DeepSeek-Solar-Harness (`DSH`) is a community downstream distribution of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), not an official DeepSeek AI release. This analysis is pinned to `solar@a3cd4397efc5294704e9d7384515ab285f81bd06` on 2026-08-27 and DSH Desktop `3.6.6`. The accepted product contract currently covers macOS; machine-readable manifests remain authoritative after this snapshot.
 
 ## Positioning
 
@@ -179,6 +178,8 @@ DSH should not replace every specialized research pipeline. Its best role for So
 - The primary deliverable is a cloud-native Python/.NET/Go workflow service rather than a local macOS workbench.
 - Immediate multi-node distributed scheduling, multi-region availability, or enterprise hosted control planes are mandatory.
 - The core problem is domain-specific research evidence and report generation and no general coding/runtime substrate is needed.
+
+<a id="run"></a><a id="run-from-source"></a>
 
 ## Development
 

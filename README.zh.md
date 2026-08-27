@@ -4,8 +4,7 @@
 
 **一个具备治理闭环、插件化组合、持久 TaskGraph 编排能力的 Agent Runtime 与 macOS 工作台。**
 
-> [!IMPORTANT]
-> DeepSeek-Solar-Harness（`DSH`）是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的社区下游发行版，不是 DeepSeek AI 官方发行版。本分析固定在 2026-08-27 的 `solar@a3cd4397efc5294704e9d7384515ab285f81bd06`，对应 DSH Desktop `3.6.6`。当前已接受的产品合同只覆盖 macOS；在该快照之后，机器可读 manifest 仍是事实来源。
+**快照说明：** DeepSeek-Solar-Harness（`DSH`）是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的社区下游发行版，不是 DeepSeek AI 官方发行版。本分析固定在 2026-08-27 的 `solar@a3cd4397efc5294704e9d7384515ab285f81bd06`，对应 DSH Desktop `3.6.6`。当前已接受的产品合同只覆盖 macOS；在该快照之后，机器可读 manifest 仍是事实来源。
 
 ## 项目定位
 
@@ -179,6 +178,8 @@ DSH 不应替换所有专业研究流水线。在 Solar 类系统中，它更适
 - 主要交付物是 cloud-native Python/.NET/Go workflow service，而不是本地 macOS workbench。
 - 必须立即具备多节点分布式调度、multi-region availability 或 enterprise hosted control plane。
 - 核心问题仅是领域化研究证据与报告生成，并不需要通用 coding/runtime 底座。
+
+<a id="run"></a><a id="run-from-source"></a>
 
 ## 开发
 
