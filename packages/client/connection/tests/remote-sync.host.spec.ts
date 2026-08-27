@@ -339,7 +339,7 @@ describe('RemoteSyncHub', () => {
     const hub = new RemoteSyncHub(api(), 4, undefined, undefined, () => ({
       clusterStatus,
       clusterRequestVote: vi.fn(), clusterHeartbeat: vi.fn(), clusterExportReplica: vi.fn(), clusterInstallReplica: vi.fn(),
-    }) as never)
+    }))
     await expect(hub.describe(new AbortController().signal, 'admin')).resolves.toMatchObject({
       cluster: { nodeId: 'a', role: 'candidate', canSchedule: false },
     })

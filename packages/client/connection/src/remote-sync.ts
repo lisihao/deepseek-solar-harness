@@ -92,7 +92,11 @@ export interface RemoteResidentQuotaPool {
   readonly observedAt: string
 }
 
-/** Pure-data remote capacity DTO; it does not import the Host Resident Service identity. */
+// This is an independently versioned browser wire ABI. Importing the Host
+// Resident Service Definition here crosses the client build boundary, so the
+// deliberately mirrored fields are checked by protocol parsers and tests.
+/* jscpd:ignore-start */
+/** Browser-safe availability and model catalog for one remote Resident Provider. */
 export interface RemoteResidentProviderStatus {
   readonly operatorId: string
   readonly product: string
@@ -110,6 +114,7 @@ export interface RemoteResidentProviderStatus {
   readonly models: readonly RemoteResidentModelOption[]
   readonly quotaPools?: readonly RemoteResidentQuotaPool[]
 }
+/* jscpd:ignore-end */
 
 /** Serializable remote execution request; product-local tool sockets never enter this DTO. */
 export interface RemoteResidentExecuteRequest {
@@ -153,6 +158,98 @@ export interface RemoteResidentEventPage {
     readonly data: Readonly<Record<string, unknown>>
   }[]
   readonly nextSequence: number
+}
+
+/** Product-neutral Resident commands over any authenticated remote-sync transport. */
+export class RemoteResidentProtocolClient {
+  constructor(
+    private readonly call: (method: string, payload: unknown, signal?: AbortSignal) => Promise<unknown>,
+  ) {}
+
+  /**
+   * List qualified remote Resident Providers.
+   * @param signal - optional transport cancellation signal.
+   * @returns validated Provider status projections.
+   */
+  providers(signal?: AbortSignal): Promise<RemoteResidentProviderStatus[]> {
+    return this.call('operator.providers', {}, signal).then(parseRemoteResidentProviders)
+  }
+
+  /**
+   * Submit one idempotent turn to a remote Resident Provider.
+   * @param request - durable command and workspace identity.
+   * @param signal - optional transport cancellation signal.
+   * @returns the accepted durable turn identity.
+   */
+  execute(request: RemoteResidentExecuteRequest, signal?: AbortSignal): Promise<RemoteResidentAcceptedTurn> {
+    return this.call('operator.execute', request, signal).then(parseRemoteResidentAcceptedTurn)
+  }
+
+  /**
+   * Inspect one durable remote Resident turn.
+   * @param turnId - durable turn identity returned by execute.
+   * @param signal - optional transport cancellation signal.
+   * @returns the current validated turn projection.
+   */
+  inspect(turnId: string, signal?: AbortSignal): Promise<RemoteResidentTurnSnapshot> {
+    return this.call('operator.inspect', { turnId }, signal).then(parseRemoteResidentTurn)
+  }
+
+  /**
+   * Read one bounded page of remote Resident progress events.
+   * @param sessionId - durable Resident Session identity.
+   * @param afterSequence - exclusive event cursor.
+   * @param limit - maximum events to return.
+   * @param signal - optional transport cancellation signal.
+   * @returns ordered progress events and the next cursor.
+   */
+  events(
+    sessionId: string,
+    afterSequence: number,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<RemoteResidentEventPage> {
+    return this.call('operator.events', { sessionId, afterSequence, limit }, signal)
+      .then(parseRemoteResidentEventPage)
+  }
+
+  /**
+   * Interrupt one active remote Resident turn without deleting its Session.
+   * @param sessionId - durable Resident Session identity.
+   * @param turnId - active turn identity.
+   * @param signal - optional transport cancellation signal.
+   * @returns completion after the remote control plane accepts the interrupt.
+   */
+  async interrupt(sessionId: string, turnId: string, signal?: AbortSignal): Promise<void> {
+    await this.call('operator.interrupt', { sessionId, turnId }, signal)
+  }
+}
+
+/** Bound Resident command surface embedded by browser and headless transports. */
+export interface RemoteResidentProtocolBindings {
+  readonly operatorProviders: RemoteResidentProtocolClient['providers']
+  readonly operatorExecute: RemoteResidentProtocolClient['execute']
+  readonly operatorInspect: RemoteResidentProtocolClient['inspect']
+  readonly operatorEvents: RemoteResidentProtocolClient['events']
+  readonly operatorInterrupt: RemoteResidentProtocolClient['interrupt']
+}
+
+/**
+ * Bind the shared Resident command protocol to one transport-specific RPC function.
+ * @param call - authenticated transport-specific RPC function.
+ * @returns bound Resident commands for embedding in a transport client.
+ */
+export function bindRemoteResidentProtocol(
+  call: (method: string, payload: unknown, signal?: AbortSignal) => Promise<unknown>,
+): RemoteResidentProtocolBindings {
+  const resident = new RemoteResidentProtocolClient(call)
+  return {
+    operatorProviders: resident.providers.bind(resident),
+    operatorExecute: resident.execute.bind(resident),
+    operatorInspect: resident.inspect.bind(resident),
+    operatorEvents: resident.events.bind(resident),
+    operatorInterrupt: resident.interrupt.bind(resident),
+  }
 }
 
 /** One materialized Session available for an explicit single-writer handoff. */

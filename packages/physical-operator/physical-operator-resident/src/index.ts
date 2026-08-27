@@ -12,7 +12,7 @@ import {
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResidentCatalog,
 } from '@deepseek-ai/dsh-physical-operator'
-import { ResidentOperatorCommandId, type ResidentTurn } from '@deepseek-ai/dsh-resident-operator'
+import { residentProgressPage, ResidentOperatorCommandId, type ResidentTurn } from '@deepseek-ai/dsh-resident-operator'
 import type { SubagentProvider, SubagentRun } from '@deepseek-ai/dsh-subagent'
 
 export const name = 'physical-operator-resident'
@@ -197,15 +197,7 @@ class DualModePhysicalOperator implements PhysicalOperator {
           limit,
           ...signal === undefined ? {} : { signal },
         })
-        return {
-          events: page.events.map(value => ({
-            sequence: value.sequence,
-            type: value.type,
-            time: value.time,
-            data: value.data,
-          })),
-          nextSequence: page.nextSequence,
-        }
+        return residentProgressPage(page)
       },
       result: turn.result.then(result => ({
         output: result.output,

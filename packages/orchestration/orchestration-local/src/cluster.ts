@@ -262,13 +262,7 @@ export class OrchestrationClusterElection {
       if (response.term === term && response.granted) votes += 1
     }
     if (votes < this.quorum) {
-      this.persist({
-        term: this.state.term,
-        ...this.state.votedFor === undefined ? {} : { votedFor: this.state.votedFor },
-        role: 'follower',
-        leaseUntil: 0,
-      })
-      return this.status()
+      return this.loseQuorum()
     }
     this.persist({ ...this.state, role: 'leader', leaderId: this.config.nodeId, leaseUntil: 0 })
     return this.renew()
@@ -321,13 +315,7 @@ export class OrchestrationClusterElection {
       }
     }
     if (acknowledgements < this.quorum) {
-      this.persist({
-        term: this.state.term,
-        ...this.state.votedFor === undefined ? {} : { votedFor: this.state.votedFor },
-        role: 'follower',
-        leaseUntil: 0,
-      })
-      return this.status()
+      return this.loseQuorum()
     }
     this.persist({ ...this.state, leaseUntil })
     return this.status()
@@ -346,6 +334,16 @@ export class OrchestrationClusterElection {
 
   private voteResponse(granted: boolean): OrchestrationClusterVoteResponse {
     return { term: this.state.term, voterId: this.config.nodeId, granted, commitIndex: this.store.commitIndex() }
+  }
+
+  private loseQuorum(): OrchestrationClusterStatus {
+    this.persist({
+      term: this.state.term,
+      ...this.state.votedFor === undefined ? {} : { votedFor: this.state.votedFor },
+      role: 'follower',
+      leaseUntil: 0,
+    })
+    return this.status()
   }
 
   private heartbeatResponse(accepted: boolean): OrchestrationClusterHeartbeatResponse {

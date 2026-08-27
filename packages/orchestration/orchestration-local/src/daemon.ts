@@ -90,11 +90,12 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
-import type { ResidentProviderStatus, ResidentTurnSnapshot } from '@deepseek-ai/dsh-resident-operator'
+import { residentProgressPage, type ResidentProviderStatus, type ResidentTurnSnapshot } from '@deepseek-ai/dsh-resident-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { DurableAutoRefineCoordinator, PRIME_AUTO_REFINE_DEFAULTS, type AutoRefineReview } from './auto-refine.ts'
+import { abortableDelay } from './abortable-delay.ts'
 import {
   accountAutonomousUsage,
   createAutonomousState,
@@ -238,6 +239,24 @@ function rlmUsage(result: RlmUsageResult): {
   }
 }
 
+function rlmAttributedUsage(
+  result: RlmUsageResult,
+  model: {
+    readonly operatorId: string
+    readonly model: string
+    readonly source?: 'native-subscription' | 'metered-api'
+  },
+): RlmChildExecutionResult['usage'] {
+  const usage = rlmUsage(result)
+  if (usage === undefined) return undefined
+  return {
+    provider: model.operatorId,
+    model: model.model,
+    authMode: rlmAuthMode(model.source, model.operatorId),
+    ...usage,
+  }
+}
+
 class OrchestrationResidentOperator implements PhysicalOperator {
   readonly descriptor
 
@@ -302,15 +321,7 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       receipt: { sessionId: turn.sessionId, turnId: turn.turnId, stateRevision: turn.stateRevision },
       readEvents: async (afterSequence, limit, signal) => {
         const page = await this.resident.readEvents(turn.sessionId, afterSequence, limit, signal)
-        return {
-          events: page.events.map(value => ({
-            sequence: value.sequence,
-            type: value.type,
-            time: value.time,
-            data: value.data,
-          })),
-          nextSequence: page.nextSequence,
-        }
+        return residentProgressPage(page)
       },
       result: turn.result.then(result => ({
         ...result,
@@ -341,15 +352,7 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       receipt,
       readEvents: async (afterSequence, limit, signal) => {
         const page = await this.resident.readEvents(receipt.sessionId, afterSequence, limit, signal)
-        return {
-          events: page.events.map(value => ({
-            sequence: value.sequence,
-            type: value.type,
-            time: value.time,
-            data: value.data,
-          })),
-          nextSequence: page.nextSequence,
-        }
+        return residentProgressPage(page)
       },
       result,
       dispose: async () => {
@@ -381,7 +384,7 @@ class OrchestrationResidentOperator implements PhysicalOperator {
           'COMMAND_INDETERMINATE',
         )
       }
-      await observationDelay(250, signal)
+      await abortableDelay(250, signal)
       turn = await this.resident.inspectTurn(String(turn.turnId))
     }
   }
@@ -392,24 +395,6 @@ function acceptedReceipt(run: PhysicalOperatorRun, executionId: string): Physica
     throw new OrchestrationError(`resident receipt was not published for ${executionId}`, 'ORCHESTRATION_UNAVAILABLE')
   }
   return run.receipt
-}
-
-function observationDelay(delayMs: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
-    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('operator observation aborted'))
-  }
-  return new Promise<void>((resolve, reject) => {
-    const complete = (): void => {
-      signal.removeEventListener('abort', abort)
-      resolve()
-    }
-    const timer = setTimeout(complete, delayMs)
-    const abort = (): void => {
-      clearTimeout(timer)
-      reject(signal.reason instanceof Error ? signal.reason : new Error('operator observation aborted'))
-    }
-    signal.addEventListener('abort', abort, { once: true })
-  })
 }
 
 function selectedHarnessScope(mode: ContinualHarnessMode): ContinualHarnessScope | undefined {
@@ -2580,19 +2565,14 @@ export class OrchestrationDaemon {
             stopReason: settled.stopReason,
           }, node)])
           await this.flushRlmHarnessBoundary(record, spec, plan, request.childSessionId, 'turn-end')
-          const usage = rlmUsage(accounted)
+          const usage = rlmAttributedUsage(accounted, request.model)
           return {
             status,
             output: settled.output,
             resultRef: String(artifactRef),
             outputPreview: preview.slice(0, 8_000),
             ...usage === undefined ? {} : {
-              usage: {
-                provider: request.model.operatorId,
-                model: request.model.model,
-                authMode: rlmAuthMode(request.model.source, request.model.operatorId),
-                ...usage,
-              },
+              usage,
             },
             ...status === 'failed' ? { error: `native child stopped with ${settled.stopReason}` } : {},
           }
@@ -2887,17 +2867,12 @@ export class OrchestrationDaemon {
         artifactRef: String(artifactRef), stopReason: result.stopReason,
       }, record.snapshot.nodes.find(value => value.id === spec.id))])
       await this.flushRlmHarnessBoundary(record, spec, plan, request.sessionId, 'turn-end')
-      const usage = rlmUsage(accounted)
+      const usage = rlmAttributedUsage(accounted, request.model)
       return {
         status, output: result.output, resultRef: String(artifactRef),
         outputPreview: operatorOutputPreview(result.output).outputPreview,
         ...usage === undefined ? {} : {
-          usage: {
-            provider: request.model.operatorId,
-            model: request.model.model,
-            authMode: rlmAuthMode(request.model.source, request.model.operatorId),
-            ...usage,
-          },
+          usage,
         },
         ...status === 'failed' ? { error: `continuation stopped with ${result.stopReason}` } : {},
       }

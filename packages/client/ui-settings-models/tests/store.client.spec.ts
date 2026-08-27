@@ -114,6 +114,18 @@ describe('ModelsSettingsStore', () => {
     expect(store.store.getSnapshot().activeModelProviders).toEqual(['dsh-physical-operator'])
   })
 
+  it('does not treat an API adapter catalog as usable before its credential is configured', async () => {
+    const { face } = api({
+      models: () => Promise.resolve(ok({
+        groups: [{ id: 'deepseek-official', name: 'DeepSeek', models: [{ id: 'deepseek-v4-flash', name: 'V4 Flash' }] }],
+        failures: [],
+      })),
+    })
+    const store = new ModelsSettingsStore(face)
+    await store.load()
+    expect(store.store.getSnapshot().activeModelProviders).toEqual([])
+  })
+
   it('keeps API-key settings available when the active model catalog is unavailable', async () => {
     const { face } = api({ models: () => Promise.resolve(fail('model catalog unavailable')) })
     const store = new ModelsSettingsStore(face)

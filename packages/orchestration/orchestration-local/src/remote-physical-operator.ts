@@ -11,11 +11,13 @@ import {
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
 import type { RemoteResidentProviderStatus, RemoteResidentTurnSnapshot } from '@deepseek-ai/dsh-client-connection'
+import { residentProgressPage } from '@deepseek-ai/dsh-resident-operator'
 import {
   RemoteSyncHttpClient,
   RemoteSyncRejectedError,
   RemoteSyncTransportError,
 } from './remote-sync-http-client.ts'
+import { abortableDelay } from './abortable-delay.ts'
 
 /** One independently addressable DSH Server execution member. */
 export interface RemotePhysicalOperatorServer {
@@ -33,24 +35,6 @@ function alias(serverId: string, nativeOperatorId: string): string {
     throw new Error('remote physical operator server id must use lowercase letters, digits, dots, underscores, or hyphens')
   }
   return `remote.${serverId}.${nativeOperatorId}`
-}
-
-function wait(delayMs: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
-    return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error('remote operator wait aborted'))
-  }
-  return new Promise<void>((resolve, reject) => {
-    const complete = (): void => {
-      signal.removeEventListener('abort', abort)
-      resolve()
-    }
-    const timer = setTimeout(complete, delayMs)
-    const abort = (): void => {
-      clearTimeout(timer)
-      reject(signal.reason instanceof Error ? signal.reason : new Error('remote operator wait aborted'))
-    }
-    signal.addEventListener('abort', abort, { once: true })
-  })
 }
 
 /** One remote Server's native product projected through the Physical Operator seam. */
@@ -205,15 +189,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       receipt: accepted,
       readEvents: async (afterSequence, limit, signal) => {
         const page = await this.client.operatorEvents(accepted.sessionId, afterSequence, limit, signal)
-        return {
-          events: page.events.map(value => ({
-            sequence: value.sequence,
-            type: value.type,
-            time: value.time,
-            data: value.data,
-          })),
-          nextSequence: page.nextSequence,
-        }
+        return residentProgressPage(page)
       },
       result,
       // Detach only: the remote daemon retains Receipt, Session, and native execution.
@@ -234,7 +210,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         if (signal.aborted) throw error
         if (error instanceof RemoteSyncTransportError) {
           this.unavailableReason = `${this.server.label} temporarily unreachable: ${error.message}`
-          await wait(this.server.pollIntervalMs ?? 250, signal)
+          await abortableDelay(this.server.pollIntervalMs ?? 250, signal)
           continue
         }
         this.unavailableReason = `${this.server.label} turn inspection failed: ${renderError(error)}`
@@ -260,7 +236,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
           'COMMAND_INDETERMINATE',
         )
       }
-      await wait(this.server.pollIntervalMs ?? 250, signal)
+      await abortableDelay(this.server.pollIntervalMs ?? 250, signal)
     }
   }
 }

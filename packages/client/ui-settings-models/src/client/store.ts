@@ -134,9 +134,13 @@ export class ModelsSettingsStore {
       if (!providersResponse.result.ok) throw new Error(providersResponse.result.error.message)
       if (!settingsResponse.result.ok) throw new Error(settingsResponse.result.error.message)
       providers = providersResponse.result.value.providers
+      // `llm.models` is advisory: API adapters advertise models even before
+      // their credential is usable. The physical-operator router is the one
+      // model route whose non-empty catalog already means a qualified native
+      // subscription operator is available.
       const activeModelProviders = modelsResponse.result.ok
         ? modelsResponse.result.value.groups
-          .filter(group => group.models.length > 0)
+          .filter(group => group.id === 'dsh-physical-operator' && group.models.length > 0)
           .map(group => group.id)
         : []
       writable = settingsResponse.result.value.writable

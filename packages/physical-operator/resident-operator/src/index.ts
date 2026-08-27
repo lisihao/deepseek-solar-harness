@@ -11,6 +11,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionPreference,
   PhysicalOperatorModelToolBridgeV1,
+  PhysicalOperatorProgressPage,
   PhysicalOperatorReasoningEffort,
   PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
@@ -299,6 +300,23 @@ export interface ResidentEventReadRequest {
 export interface ResidentEventPage {
   readonly events: ResidentEvent[]
   readonly nextSequence: number
+}
+
+/**
+ * Project a Resident event page onto the provider-neutral Physical Operator trace contract.
+ * @param page - ordered Resident events and their exclusive next cursor.
+ * @returns the provider-neutral Physical Operator progress page.
+ */
+export function residentProgressPage(
+  page: {
+    readonly events: readonly Pick<ResidentEvent, 'sequence' | 'type' | 'time' | 'data'>[]
+    readonly nextSequence: number
+  },
+): PhysicalOperatorProgressPage {
+  return {
+    events: page.events.map(({ sequence, type, time, data }) => ({ sequence, type, time, data })),
+    nextSequence: page.nextSequence,
+  }
 }
 
 /** Matching Session and turn identities for a trusted interrupt. */
