@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  connectFrontendServer,
   DesktopDeploymentStateStore,
   type DesktopDeploymentRequest,
   type DesktopSecretStorage,
@@ -160,6 +161,61 @@ describe('DesktopDeploymentStateStore', () => {
       version: 4, role: 'server', servers: [], presentation: 'compatibility',
     })
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('fails over to the first reachable configured Server and persists the elected ingress', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-failover-'))
+    const probes: string[] = []
+    const fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      const endpoint = new URL(String(url))
+      probes.push(endpoint.origin)
+      if (endpoint.port === '13080') return new Response('offline', { status: 503 })
+      const body = JSON.parse(String(init?.body)) as { rpcId: string }
+      return Response.json({
+        type: 'server-response', rpcId: body.rpcId,
+        result: { ok: true, value: { deploymentId: 'lab' } },
+      })
+    })
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const first = await store.configureFrontend({
+      label: 'Primary mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+    const second = await store.configureFrontend({
+      label: 'Lab mini', endpoint: 'http://127.0.0.1:23080', deviceName: 'MacBook',
+    })
+    const activeFirst = await store.selectFrontend(first.activeServerId)
+
+    await expect(connectFrontendServer(store, activeFirst)).resolves.toMatchObject({
+      state: { activeServerId: second.activeServerId },
+      server: { id: second.activeServerId, label: 'Lab mini' },
+    })
+    expect(probes).toEqual(['http://127.0.0.1:13080', 'http://127.0.0.1:23080'])
+    await expect(store.load()).resolves.toMatchObject({
+      role: 'frontend', activeServerId: second.activeServerId,
+    })
+  })
+
+  it('reports every failed configured Server without discarding the catalog', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-failover-none-'))
+    const fetch = vi.fn(async () => new Response('offline', { status: 503 }))
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), { fetch })
+    const first = await store.configureFrontend({
+      label: 'Primary mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+    const second = await store.configureFrontend({
+      label: 'Lab mini', endpoint: 'http://127.0.0.1:23080', deviceName: 'MacBook',
+    })
+    const failures: string[] = []
+
+    await expect(connectFrontendServer(store, second, server => { failures.push(server.label) }))
+      .rejects.toThrow('no configured Frontend Server is reachable')
+    expect(failures).toEqual(['Lab mini', 'Primary mini'])
+    await expect(store.load()).resolves.toMatchObject({
+      role: 'frontend', activeServerId: second.activeServerId, servers: expect.arrayContaining([
+        expect.objectContaining({ id: first.activeServerId }),
+        expect.objectContaining({ id: second.activeServerId }),
+      ]),
+    })
   })
 
   it('retains the Server catalog while local Server mode is active and can switch back', async () => {

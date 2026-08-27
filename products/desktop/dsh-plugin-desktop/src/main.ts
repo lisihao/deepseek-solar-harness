@@ -21,7 +21,7 @@ import { installProfilePackageResolver } from './module-resolution.ts'
 import { installNativeProductRuntime } from './native-product-runtime.ts'
 import { packagedDependencyPath, unpackedAsarPath } from './packaged-runtime-path.ts'
 import {
-  activeFrontendServer,
+  connectFrontendServer,
   DesktopDeploymentStateStore,
   DesktopRemoteAccessSession,
   type DesktopDeploymentState,
@@ -241,17 +241,19 @@ async function start(): Promise<void> {
       () => runtime.requestRestart(),
     )
     if (deploymentState.role === 'frontend') {
-      const state = deploymentState
-      const server = activeFrontendServer(state)
-      const access = server.authMode === 'paired'
-        ? new DesktopRemoteAccessSession(deploymentStore, server, (cause) => {
-            process.stderr.write(
-              `${BIN_NAME}: failed to refresh remote access: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-            )
-          })
-        : undefined
+      let state = deploymentState
+      let access: DesktopRemoteAccessSession | undefined
       try {
-        await access?.start()
+        const connected = await connectFrontendServer(deploymentStore, state, (candidate, cause) => {
+          process.stderr.write(
+            `${BIN_NAME}: Frontend Server ${candidate.label} unavailable: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+          )
+        })
+        state = connected.state
+        deploymentState = connected.state
+        const server = connected.server
+        const connectedAccess = connected.access
+        access = connectedAccess
         frontendAccess = access
         const endpoint = new URL(server.endpoint)
         const renderer = new URL(endpoint)
@@ -268,24 +270,24 @@ async function start(): Promise<void> {
           minHeight: 640,
           url: renderer.href,
           productName: PRODUCT_NAME,
-          windowTitle: 'Remote Frontend',
+          windowTitle: `Remote Frontend · ${server.label}`,
           retryUnavailableNavigation: true,
           iconPath: desktopAssetPath(process.platform === 'darwin' ? 'app-icon-mac.png' : 'app-icon.png'),
           trayIcons: {
             templatePath: desktopAssetPath('tray-iconTemplate.png'),
             bluePath: desktopAssetPath('tray-icon-blue.png'),
           },
-          ...access === undefined ? {} : {
+          ...connectedAccess === undefined ? {} : {
             remoteAccess: {
               origin: endpoint.origin,
-              accessToken: () => access.accessToken(),
+              accessToken: () => connectedAccess.accessToken(),
             },
           },
           ...billingBaseline === undefined ? {} : {
             frontendBilling: {
               origin: endpoint.origin,
               baseline: billingBaseline,
-              ...(access === undefined ? {} : { accessToken: () => access.accessToken() }),
+              ...(connectedAccess === undefined ? {} : { accessToken: () => connectedAccess.accessToken() }),
             },
           },
           readThemeSource: () => 'system',

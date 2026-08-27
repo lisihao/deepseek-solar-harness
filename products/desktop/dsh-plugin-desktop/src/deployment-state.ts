@@ -68,6 +68,13 @@ export interface ConfigureFrontendRequest {
   readonly presentation?: DesktopShellMode
 }
 
+/** One reachable Frontend Server together with its memory-only access session. */
+export interface DesktopFrontendConnection {
+  readonly state: DesktopFrontendDeploymentState
+  readonly server: DesktopFrontendServer
+  readonly access?: DesktopRemoteAccessSession
+}
+
 const DEFAULT_STATE: DesktopServerDeploymentState = {
   version: 4,
   role: 'server',
@@ -244,6 +251,27 @@ export class DesktopDeploymentStateStore {
     return parseAccessSession(value)
   }
 
+  /** Prove that one configured Server serves the authenticated projection protocol. */
+  async probe(server: DesktopFrontendServer, accessToken?: string): Promise<void> {
+    const rpcId = crypto.randomUUID()
+    const response = await this.request.fetch(new URL('/remote-sync/describe', server.endpoint), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...accessToken === undefined ? {} : { authorization: `Bearer ${accessToken}` },
+      },
+      body: JSON.stringify({ type: 'client-request', rpcId, method: 'describe', payload: {} }),
+    })
+    if (!response.ok) {
+      throw new Error(`dsh-plugin-desktop: Frontend Server probe failed: HTTP ${String(response.status)}`)
+    }
+    const envelope: unknown = await response.json()
+    const record = objectRecord(envelope, 'remote sync response')
+    if (record.rpcId !== rpcId) throw new Error('dsh-plugin-desktop: remote sync rpcId mismatch')
+    const result = objectRecord(record.result, 'remote sync result')
+    if (result.ok !== true) throw new Error('dsh-plugin-desktop: remote sync describe was rejected')
+  }
+
   async useServer(): Promise<DesktopServerDeploymentState> {
     const current = await this.load()
     const next: DesktopServerDeploymentState = {
@@ -346,6 +374,37 @@ export class DesktopRemoteAccessSession {
       void this.refresh().catch(error => { this.onRefreshError(error) })
     }, delay)
   }
+}
+
+/**
+ * Select the first actually reachable Server, preferring the persisted leader.
+ * A failed candidate is never deleted; a later launch can qualify it again.
+ */
+export async function connectFrontendServer(
+  store: DesktopDeploymentStateStore,
+  state: DesktopFrontendDeploymentState,
+  onCandidateError: (server: DesktopFrontendServer, error: unknown) => void = () => {},
+): Promise<DesktopFrontendConnection> {
+  const active = activeFrontendServer(state)
+  const ordered = [active, ...state.servers.filter(server => server.id !== active.id)]
+  const failures: Error[] = []
+  for (const server of ordered) {
+    const access = server.authMode === 'paired'
+      ? new DesktopRemoteAccessSession(store, server, error => onCandidateError(server, error))
+      : undefined
+    try {
+      await access?.start()
+      await store.probe(server, access?.accessToken())
+      const selected = server.id === state.activeServerId ? state : await store.selectFrontend(server.id)
+      return { state: selected, server, ...access === undefined ? {} : { access } }
+    } catch (error) {
+      access?.stop()
+      const failure = error instanceof Error ? error : new Error(String(error))
+      failures.push(failure)
+      onCandidateError(server, failure)
+    }
+  }
+  throw new AggregateError(failures, 'dsh-plugin-desktop: no configured Frontend Server is reachable')
 }
 
 function parseEndpoint(input: string): URL {
