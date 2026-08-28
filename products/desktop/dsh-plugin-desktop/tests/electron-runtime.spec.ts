@@ -74,6 +74,7 @@ const electron = vi.hoisted(() => {
   const webContents = {
     on: vi.fn(),
     off: vi.fn(),
+    executeJavaScript: vi.fn(async (_source: string) => undefined),
     setWindowOpenHandler: vi.fn(),
     session: {
       fetch: vi.fn(async () => new Response('', { status: 200 })),
@@ -233,6 +234,8 @@ describe('Electron compatibility runtime', () => {
     electron.loadURL.mockResolvedValue(undefined)
     electron.webContents.session.fetch.mockReset()
     electron.webContents.session.fetch.mockResolvedValue(new Response('', { status: 200 }))
+    electron.webContents.executeJavaScript.mockReset()
+    electron.webContents.executeJavaScript.mockResolvedValue(undefined)
     electron.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
     electron.shell.openPath.mockResolvedValue('')
     electron.nativeTheme.themeSource = 'system'
@@ -489,6 +492,19 @@ describe('Electron compatibility runtime', () => {
     await vi.waitFor(() => { expect(useServer).toHaveBeenCalledOnce() })
     expect(configureFrontend).not.toHaveBeenCalled()
 
+    const didFinishLoad = electron.webContents.on.mock.calls
+      .find(call => call[0] === 'did-finish-load')?.[1] as (() => void)
+    expect(didFinishLoad).toEqual(expect.any(Function))
+    didFinishLoad()
+    await vi.waitFor(() => { expect(electron.webContents.executeJavaScript).toHaveBeenCalledOnce() })
+    const ownerSurface = String(electron.webContents.executeJavaScript.mock.calls[0]?.[0])
+    expect(ownerSurface).toContain('solar-desktop-brand')
+    expect(ownerSurface).toContain(`DSH Desktop v${productVersion}`)
+    expect(ownerSurface).toContain('Server / Git 同步')
+    expect(ownerSurface).toContain('切换到本地 Server')
+    expect(ownerSurface).toContain('dsh-desktop://deployment/configure')
+    expect(ownerSurface).toContain('dsh-desktop://deployment/local-server')
+
     const registration = electron.browserWindows[0]?.webContents.on.mock.calls
       .find(call => call[0] === 'will-frame-navigate')
     const navigate = registration?.[1] as (event: {
@@ -505,6 +521,7 @@ describe('Electron compatibility runtime', () => {
     expect(configure.preventDefault).toHaveBeenCalledOnce()
     await vi.waitFor(() => { expect(configureFrontend).toHaveBeenCalledOnce() })
     await release()
+    expect(electron.webContents.off).toHaveBeenCalledWith('did-finish-load', didFinishLoad)
   })
 
   it('keeps main navigation origin-locked while allowing loopback Remote Module frames', async () => {
