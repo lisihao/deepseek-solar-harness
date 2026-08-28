@@ -177,8 +177,9 @@ export class OrchestrationDaemonClient {
    * Read this Product Server's bounded cluster authority state.
    * @returns the current cluster status, or undefined in standalone mode.
    */
-  clusterStatus(): Promise<OrchestrationClusterStatus | undefined> {
-    return this.request('cluster.status', {})
+  async clusterStatus(): Promise<OrchestrationClusterStatus | undefined> {
+    const status = await this.request<OrchestrationClusterStatus | null>('cluster.status', {})
+    return status ?? undefined
   }
 
   /**
