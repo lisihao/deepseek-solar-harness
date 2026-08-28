@@ -18,6 +18,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
 import { CONFIGURE_DEPLOYMENT_URL, USE_LOCAL_SERVER_URL } from './deployment-links.ts'
+import { solarBrandLabel } from './client/SolarBrand.tsx'
+import { SOLAR_BRAND_STYLES } from './client/styles.ts'
 import { startFrontendBillingBridge, type FrontendBillingBridge } from './frontend-billing.ts'
 import { packagedDependencyPath } from './packaged-runtime-path.ts'
 import type {
@@ -64,6 +66,43 @@ export function desktopProductVersion(moduleUrl: string = import.meta.url): stri
 }
 
 const PRODUCT_VERSION = desktopProductVersion()
+
+/** Build the idempotent Desktop-owned footer installed over a remote Frontend page. */
+export function frontendOwnerSurfaceScript(productVersion: string): string {
+  const label = solarBrandLabel(productVersion)
+  return `(() => {
+    if (document.querySelector('[data-testid="solar-desktop-brand"]') !== null) return;
+    const style = document.createElement('style');
+    style.dataset.plugin = 'dsh-plugin-desktop';
+    style.dataset.pluginCss = 'dsh-plugin-desktop/solar-brand';
+    style.textContent = ${JSON.stringify(SOLAR_BRAND_STYLES)};
+    document.head.appendChild(style);
+    const footer = document.createElement('footer');
+    footer.className = 'dshDesktopSolarFooter';
+    footer.dataset.testid = 'solar-desktop-brand';
+    footer.setAttribute('role', 'note');
+    footer.setAttribute('aria-label', ${JSON.stringify(label)});
+    footer.title = ${JSON.stringify(label)};
+    const marker = document.createElement('span');
+    marker.className = 'dshDesktopSolarFooterLabel';
+    marker.textContent = ${JSON.stringify(label)};
+    footer.appendChild(marker);
+    const addButton = (testid, text, title, target) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'dshDesktopUseLocalServer';
+      button.dataset.testid = testid;
+      button.textContent = text;
+      button.title = title;
+      button.addEventListener('click', () => { window.location.assign(target); });
+      footer.appendChild(button);
+    };
+    addButton('desktop-configure-deployment', 'Server / Git 同步', '配置远程 Server 与仅提交态的 GitHub/Tailscale Git 同步', ${JSON.stringify(CONFIGURE_DEPLOYMENT_URL)});
+    addButton('desktop-use-local-server', '切换到本地 Server', '停止使用远程 Frontend，并以本机完整 DSH Server 重启', ${JSON.stringify(USE_LOCAL_SERVER_URL)});
+    document.body.dataset.dshDesktopProductFooter = 'true';
+    document.body.appendChild(footer);
+  })()`
+}
 
 /** Build the local recovery surface shown while a Frontend Server is unreachable. */
 export function frontendRecoveryPageUrl(): string {
@@ -598,6 +637,12 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       window.hide()
     }
     const preserveBlankTitle = (event: Electron.Event): void => { event.preventDefault() }
+    const installFrontendOwnerSurface = (): void => {
+      if (spec.requestUseLocalServer === undefined && this.deployment?.currentRole() !== 'frontend') return
+      void window.webContents.executeJavaScript(frontendOwnerSurfaceScript(PRODUCT_VERSION)).catch((cause: unknown) => {
+        process.stderr.write(`dsh-plugin-desktop: failed to install Frontend owner surface: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+      })
+    }
     const navigate = (event: Electron.Event<Electron.WebContentsWillFrameNavigateEventParams>): void => {
       let target: URL | undefined
       try {
@@ -638,6 +683,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     window.on('page-title-updated', preserveBlankTitle)
     window.webContents.on('will-frame-navigate', navigate)
     window.webContents.on('will-redirect', navigate)
+    window.webContents.on('did-finish-load', installFrontendOwnerSurface)
     window.webContents.setWindowOpenHandler(({ url }) => {
       try {
         const target = new URL(url)
@@ -693,6 +739,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     } catch (cause) {
       app.off('activate', show)
       window.off('page-title-updated', preserveBlankTitle)
+      window.webContents.off('did-finish-load', installFrontendOwnerSurface)
       if (navigationRetry !== undefined) clearTimeout(navigationRetry)
       tray?.off('click', show)
       tray?.destroy()
@@ -721,6 +768,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       window.off('page-title-updated', preserveBlankTitle)
       window.webContents.off('will-frame-navigate', navigate)
       window.webContents.off('will-redirect', navigate)
+      window.webContents.off('did-finish-load', installFrontendOwnerSurface)
       if (navigationRetry !== undefined) clearTimeout(navigationRetry)
       if (previousApplicationMenu !== undefined) Menu.setApplicationMenu(previousApplicationMenu)
       mountedTray.off('click', show)
