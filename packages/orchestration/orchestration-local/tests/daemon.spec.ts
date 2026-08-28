@@ -287,6 +287,17 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('returns no cluster status when standalone mode is configured', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'oc-standalone-'))
+    const root = join(home, 'orchestrations')
+    const daemon = createDaemon(root, home, new FakeResidentClient())
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    await expect(client.clusterStatus()).resolves.toBeUndefined()
+  })
+
   it('blocks Scheduler mutations until a majority lease is acquired', async () => {
     const home = await mkdtemp(join(tmpdir(), 'oc-'))
     const root = join(home, 'orchestrations')

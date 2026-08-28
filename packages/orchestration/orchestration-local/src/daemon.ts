@@ -936,7 +936,7 @@ export class OrchestrationDaemon {
       case 'orchestration.resolve_indeterminate': this.requireClusterLeader(); return this.resolveIndeterminate(params.request as never)
       case 'harness.auto_refine.resolve_indeterminate': this.requireClusterLeader(); return this.resolveAutoRefineIndeterminate(params.request as never)
       case 'capability.propose_update': this.requireClusterLeader(); return this.proposeCapabilityUpdate(params.request as never)
-      case 'cluster.status': return this.cluster?.status()
+      case 'cluster.status': return this.cluster?.status() ?? null
       case 'cluster.vote': return this.expectCluster().requestVote(params.request as OrchestrationClusterVoteRequest)
       case 'cluster.heartbeat': return this.expectCluster().heartbeat(params.request as OrchestrationClusterHeartbeatRequest)
       case 'cluster.export': this.requireClusterLeader(); return this.store.exportClusterReplica()
