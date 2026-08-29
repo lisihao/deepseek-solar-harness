@@ -786,7 +786,7 @@ export interface DebateTaskGraphAdapterOptions {
 }
 ```
 
-来源：[`packages/orchestration/debate-orchestration/src/index.ts:41`](../packages/orchestration/debate-orchestration/src/index.ts)
+来源：[`packages/orchestration/debate-orchestration/src/index.ts:42`](../packages/orchestration/debate-orchestration/src/index.ts)
 
 <a id="deepseek-aidsh-e2b"></a>
 

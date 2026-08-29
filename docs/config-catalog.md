@@ -784,7 +784,7 @@ export interface DebateTaskGraphAdapterOptions {
 }
 ```
 
-Source: [`packages/orchestration/debate-orchestration/src/index.ts:41`](../packages/orchestration/debate-orchestration/src/index.ts)
+Source: [`packages/orchestration/debate-orchestration/src/index.ts:42`](../packages/orchestration/debate-orchestration/src/index.ts)
 
 <a id="deepseek-aidsh-e2b"></a>
 
