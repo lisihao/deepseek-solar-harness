@@ -1,0 +1,12 @@
+# Live composition for the Debate ACP snapshot. The fixture Provider is
+# provider-neutral and never starts an external model or physical operator.
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - insert:
+          - id: debate-fixture
+            name: './tests/fixtures/debate-loader.ts'
+          - id: tool-debate
+            name: '@deepseek-ai/dsh-tool-debate'

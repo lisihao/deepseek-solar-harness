@@ -229,7 +229,9 @@ export class RemoteSyncHub {
             ...this.resident === undefined
               ? []
               : ['operator.read' as const, 'operator.execute' as const, 'operator.interrupt' as const],
-            ...scope !== 'admin' || this.orchestration?.() === undefined
+            // A mounted orchestration Provider also serves standalone Servers;
+            // only a concrete cluster status means cluster control exists.
+            ...scope !== 'admin' || cluster === undefined
               ? []
               : ['orchestration.cluster' as const],
           ],

@@ -18,12 +18,18 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: 0.25.1
         version: 0.25.1(zod@4.4.3)
+      '@deepseek-ai/dsh-debate':
+        specifier: workspace:^
+        version: link:packages/orchestration/debate
       '@deepseek-ai/dsh-orchestration':
         specifier: workspace:^
         version: link:packages/orchestration/orchestration
       '@deepseek-ai/dsh-physical-operator':
         specifier: workspace:^
         version: link:packages/physical-operator/physical-operator
+      '@deepseek-ai/dsh-tool-debate':
+        specifier: workspace:^
+        version: link:packages/orchestration/tool-debate
       '@deepseek-ai/dsh-tool-orchestration':
         specifier: workspace:^
         version: link:packages/orchestration/tool-orchestration
@@ -710,6 +716,9 @@ importers:
       '@deepseek-ai/dsh-tool-cordis':
         specifier: workspace:*
         version: link:../packages/extensions/tool-cordis
+      '@deepseek-ai/dsh-tool-debate':
+        specifier: workspace:*
+        version: link:../packages/orchestration/tool-debate
       '@deepseek-ai/dsh-tool-fs':
         specifier: workspace:*
         version: link:../packages/fs/tool-fs
@@ -1306,6 +1315,15 @@ importers:
       '@deepseek-ai/dsh-continual-harness-local':
         specifier: workspace:^
         version: link:../../orchestration/continual-harness-local
+      '@deepseek-ai/dsh-debate':
+        specifier: workspace:^
+        version: link:../../orchestration/debate
+      '@deepseek-ai/dsh-debate-local':
+        specifier: workspace:^
+        version: link:../../orchestration/debate-local
+      '@deepseek-ai/dsh-debate-orchestration':
+        specifier: workspace:^
+        version: link:../../orchestration/debate-orchestration
       '@deepseek-ai/dsh-model-allocation':
         specifier: workspace:^
         version: link:../../orchestration/model-allocation
@@ -1333,9 +1351,15 @@ importers:
       '@deepseek-ai/dsh-rlm-strategy-local':
         specifier: workspace:^
         version: link:../../orchestration/rlm-strategy-local
+      '@deepseek-ai/dsh-tool-debate':
+        specifier: workspace:^
+        version: link:../../orchestration/tool-debate
       '@deepseek-ai/dsh-tool-orchestration':
         specifier: workspace:^
         version: link:../../orchestration/tool-orchestration
+      '@deepseek-ai/dsh-ui-debate':
+        specifier: workspace:^
+        version: link:../../orchestration/ui-debate
       '@deepseek-ai/dsh-ui-orchestration':
         specifier: workspace:^
         version: link:../../orchestration/ui-orchestration
@@ -5814,6 +5838,65 @@ importers:
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
 
+  packages/orchestration/debate:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+
+  packages/orchestration/debate-local:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-atomic-write':
+        specifier: workspace:^
+        version: link:../../util/atomic-write
+      '@deepseek-ai/dsh-debate':
+        specifier: workspace:^
+        version: link:../debate
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+
+  packages/orchestration/debate-orchestration:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-debate':
+        specifier: workspace:^
+        version: link:../debate
+      '@deepseek-ai/dsh-debate-local':
+        specifier: workspace:^
+        version: link:../debate-local
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../util/home-paths
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-orchestration':
+        specifier: workspace:^
+        version: link:../orchestration
+      '@deepseek-ai/dsh-orchestration-local':
+        specifier: workspace:^
+        version: link:../orchestration-local
+
   packages/orchestration/intent-compiler:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -6098,6 +6181,42 @@ importers:
         specifier: workspace:^
         version: link:../rlm-strategy
 
+  packages/orchestration/tool-debate:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:^
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-commands':
+        specifier: workspace:^
+        version: link:../../interaction/commands
+      '@deepseek-ai/dsh-debate':
+        specifier: workspace:^
+        version: link:../debate
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-session-projection':
+        specifier: workspace:^
+        version: link:../../session/session-projection
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../../core/system-prompt
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+
   packages/orchestration/tool-orchestration:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -6131,6 +6250,48 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
+  packages/orchestration/ui-debate:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../../client/connection
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: workspace:^
+        version: link:../../client/runtime
+      '@deepseek-ai/dsh-client-ui-conversation':
+        specifier: workspace:^
+        version: link:../../client/ui-conversation
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: workspace:^
+        version: link:../../client/ui-slots
+      '@deepseek-ai/dsh-debate':
+        specifier: workspace:^
+        version: link:../debate
+      '@deepseek-ai/dsh-host-remote-auth':
+        specifier: workspace:^
+        version: link:../../host/remote-auth
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:^
+        version: link:../../host/webserver
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@types/react':
+        specifier: ~18.3.1
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.1
+        version: 18.3.7(@types/react@18.3.31)
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+
   packages/orchestration/ui-orchestration:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -6160,6 +6321,9 @@ importers:
       '@deepseek-ai/dsh-orchestration':
         specifier: workspace:^
         version: link:../orchestration
+      '@deepseek-ai/dsh-rlm-runtime':
+        specifier: workspace:^
+        version: link:../rlm-runtime
       '@types/react':
         specifier: ~18.3.1
         version: 18.3.31
@@ -6406,6 +6570,9 @@ importers:
       '@deepseek-ai/dsh-resident-operator':
         specifier: workspace:^
         version: link:../resident-operator
+      '@deepseek-ai/dsh-tool-debate':
+        specifier: workspace:^
+        version: link:../../orchestration/tool-debate
       '@deepseek-ai/dsh-tool-orchestration':
         specifier: workspace:^
         version: link:../../orchestration/tool-orchestration

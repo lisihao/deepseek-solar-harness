@@ -11,6 +11,7 @@
     { "path": "../../host/remote-auth" },
     { "path": "../../host/webserver" },
     { "path": "../orchestration" },
+    { "path": "../rlm-runtime" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

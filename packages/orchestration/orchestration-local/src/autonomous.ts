@@ -3,10 +3,14 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { lstat, readFile, readlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import type {
-  RlmAutonomousConfigV1,
-  RlmAutonomousMode,
-  RlmAutonomousPolicyV1,
+import {
+  OrchestrationError,
+  type AutonomousEndConditionCheckV1,
+  type AutonomousEndConditionStatusV1,
+  type AutonomousEndConditionV1,
+  type RlmAutonomousConfigV1,
+  type RlmAutonomousMode,
+  type RlmAutonomousPolicyV1,
 } from '@deepseek-ai/dsh-orchestration'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { canonicalSha256 } from './canonical.ts'
@@ -37,6 +41,45 @@ export interface AutonomousGateFailureV1 {
   readonly output: string
 }
 
+/** Host-observable status supplied to one task-specific end-condition round. */
+export interface AutonomousEndConditionEvidenceV1 {
+  readonly acceptance?: Readonly<Record<string, AutonomousEndConditionStatusV1>>
+  readonly artifacts?: Readonly<Record<string, AutonomousEndConditionStatusV1>>
+  /** Results returned by a separately registered evaluator when no function is installed. */
+  readonly evaluators?: Readonly<Record<string, AutonomousEndConditionStatusV1>>
+}
+
+/** Request passed to an optional host evaluator implementation. */
+export interface AutonomousEndConditionEvaluatorRequestV1 {
+  readonly check: AutonomousEndConditionCheckV1
+  readonly evidence: AutonomousEndConditionEvidenceV1
+  readonly round: number
+}
+
+/** Independent evaluator seam; the evaluator is never serialized into the graph or state. */
+export type AutonomousEndConditionEvaluatorV1 = (
+  request: AutonomousEndConditionEvaluatorRequestV1,
+) => AutonomousEndConditionStatusV1 | Promise<AutonomousEndConditionStatusV1>
+
+/** One check result retained as part of the immutable round result. */
+export interface AutonomousEndConditionCheckResultV1 {
+  readonly id: string
+  readonly kind: AutonomousEndConditionCheckV1['kind']
+  readonly ref: string
+  readonly status: AutonomousEndConditionStatusV1
+}
+
+/** Immutable, restart-compatible result of one task-specific evaluation round. */
+export interface AutonomousEndConditionResultV1 {
+  readonly version: 1
+  readonly conditionSha256: string
+  readonly operator: AutonomousEndConditionV1['operator']
+  readonly round: number
+  readonly status: AutonomousEndConditionStatusV1
+  readonly checks: readonly AutonomousEndConditionCheckResultV1[]
+  readonly reason: 'all_checks_passed' | 'one_or_more_checks_passed' | 'one_or_more_checks_failed' | 'one_or_more_checks_unknown' | 'no_checks_passed'
+}
+
 /** Durable per-attempt state; the Scheduler remains the only execution authority. */
 export interface AutonomousRuntimeStateV1 {
   readonly version: 1
@@ -49,18 +92,19 @@ export interface AutonomousRuntimeStateV1 {
   readonly gateAttempts: Readonly<Record<string, number>>
   readonly lastGateFailure?: AutonomousGateFailureV1
   readonly lastGateWorkspaceFingerprint?: string
+  readonly lastEndCondition?: AutonomousEndConditionResultV1
   readonly terminalReason?: AutonomousTerminalReason
 }
 
 /** First exhausted host budget in Prime Agent's published evaluation order. */
 export type AutonomousLimitReason = 'maxContinuations' | 'maxTurns' | 'maxTokens' | 'timeoutMs'
 /** Durable reason why host-driven Autonomous Mode stopped this attempt. */
-export type AutonomousTerminalReason = 'gate_passed' | 'gate_retry_exhausted' | AutonomousLimitReason | 'disabled'
+export type AutonomousTerminalReason = 'gate_passed' | 'end_condition_passed' | 'gate_retry_exhausted' | AutonomousLimitReason | 'disabled'
 
 /** Scheduler action produced after host gates and limits are evaluated. */
 export type AutonomousDecisionV1 =
   | { readonly action: 'complete'; readonly state: AutonomousRuntimeStateV1; readonly reason: AutonomousTerminalReason }
-  | { readonly action: 'continue'; readonly state: AutonomousRuntimeStateV1; readonly reason: 'gate_failed' | 'missing_terminal_evidence'; readonly prompt: string }
+  | { readonly action: 'continue'; readonly state: AutonomousRuntimeStateV1; readonly reason: 'gate_failed' | 'end_condition_failed' | 'end_condition_unknown' | 'missing_terminal_evidence'; readonly prompt: string }
 
 /** Provider usage counters used by durable Autonomous budget accounting. */
 export interface AutonomousUsageV1 {
@@ -72,6 +116,121 @@ export interface AutonomousUsageV1 {
 
 const MAX_GATE_OUTPUT_CHARS = 6_000
 const MAX_CHILD_OUTPUT_CHARS = 1024 * 1024
+
+function isEndConditionStatus(value: unknown): value is AutonomousEndConditionStatusV1 {
+  return value === 'pass' || value === 'fail' || value === 'unknown'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validateEndConditionShape(value: unknown): asserts value is AutonomousEndConditionV1 {
+  if (!isRecord(value) || value.version !== 1) {
+    throw new OrchestrationError('autonomous end condition version must be 1', 'GRAPH_INVALID')
+  }
+  if (value.operator !== 'all' && value.operator !== 'any') {
+    throw new OrchestrationError('autonomous end condition operator is unsupported', 'GRAPH_INVALID')
+  }
+  if (!Array.isArray(value.checks) || value.checks.length === 0 || value.checks.length > 16) {
+    throw new OrchestrationError('autonomous end condition must contain 1 through 16 checks', 'GRAPH_INVALID')
+  }
+  const ids = new Set<string>()
+  for (const [index, candidate] of value.checks.entries()) {
+    if (!isRecord(candidate)) {
+      throw new OrchestrationError(`autonomous end condition check ${String(index)} must be an object`, 'GRAPH_INVALID')
+    }
+    const id = candidate.id
+    if (typeof id !== 'string' || id.length === 0 || id.trim() !== id || id.length > 128) {
+      throw new OrchestrationError(`autonomous end condition check ${String(index)} id is invalid`, 'GRAPH_INVALID')
+    }
+    if (ids.has(id)) {
+      throw new OrchestrationError(`autonomous end condition check id is duplicated: ${id}`, 'GRAPH_INVALID')
+    }
+    ids.add(id)
+    const kind = candidate.kind
+    if (kind !== 'acceptance' && kind !== 'artifact-present' && kind !== 'evaluator') {
+      throw new OrchestrationError(`autonomous end condition check ${id} kind is unsupported`, 'GRAPH_INVALID')
+    }
+    const ref = candidate.ref
+    if (typeof ref !== 'string' || ref.length === 0 || ref.trim() !== ref || ref.length > 256) {
+      throw new OrchestrationError(`autonomous end condition check ${id} ref is invalid`, 'GRAPH_INVALID')
+    }
+  }
+}
+
+function evidenceStatus(
+  check: AutonomousEndConditionCheckV1,
+  evidence: AutonomousEndConditionEvidenceV1,
+): AutonomousEndConditionStatusV1 {
+  const values = check.kind === 'acceptance'
+    ? evidence.acceptance
+    : check.kind === 'artifact-present' ? evidence.artifacts : evidence.evaluators
+  return values?.[check.ref] ?? 'unknown'
+}
+
+function combinedStatus(
+  operator: AutonomousEndConditionV1['operator'],
+  checks: readonly AutonomousEndConditionCheckResultV1[],
+): { readonly status: AutonomousEndConditionStatusV1; readonly reason: AutonomousEndConditionResultV1['reason'] } {
+  const passed = checks.filter(check => check.status === 'pass').length
+  const failed = checks.filter(check => check.status === 'fail').length
+  const unknown = checks.length - passed - failed
+  if (operator === 'all') {
+    if (failed > 0) return { status: 'fail', reason: 'one_or_more_checks_failed' }
+    if (unknown > 0) return { status: 'unknown', reason: 'one_or_more_checks_unknown' }
+    return { status: 'pass', reason: 'all_checks_passed' }
+  }
+  if (passed > 0) return { status: 'pass', reason: 'one_or_more_checks_passed' }
+  if (unknown > 0) return { status: 'unknown', reason: 'one_or_more_checks_unknown' }
+  return { status: 'fail', reason: failed > 0 ? 'one_or_more_checks_failed' : 'no_checks_passed' }
+}
+
+/**
+ * Evaluate one task-specific end condition without mutating durable state.
+ *
+ * Missing evidence is deliberately `unknown`; it cannot be treated as a pass
+ * when a run is out of budget. The optional evaluator map is an execution seam
+ * only and is never persisted in a graph, policy, or runtime state snapshot.
+ *
+ * @param condition - immutable task-specific condition.
+ * @param evidence - host-observable statuses for this round.
+ * @param round - durable round/turn number.
+ * @param evaluators - optional independently registered evaluator functions.
+ * @returns explicit pass, fail, or unknown result for this round.
+ */
+export async function evaluateAutonomousEndCondition(
+  condition: AutonomousEndConditionV1,
+  evidence: AutonomousEndConditionEvidenceV1,
+  round = 0,
+  evaluators?: Readonly<Record<string, AutonomousEndConditionEvaluatorV1>>,
+): Promise<AutonomousEndConditionResultV1> {
+  validateEndConditionShape(condition)
+  if (!Number.isSafeInteger(round) || round < 0) {
+    throw new OrchestrationError('autonomous end condition round must be a non-negative integer', 'GRAPH_INVALID')
+  }
+  const checks = await Promise.all(condition.checks.map(async (check): Promise<AutonomousEndConditionCheckResultV1> => {
+    let status = evidenceStatus(check, evidence)
+    const evaluator = check.kind === 'evaluator' ? evaluators?.[check.ref] : undefined
+    if (evaluator !== undefined) {
+      status = await evaluator({ check, evidence, round })
+    }
+    if (!isEndConditionStatus(status)) {
+      throw new OrchestrationError(`autonomous evaluator ${check.ref} returned an invalid status`, 'ORCHESTRATION_UNAVAILABLE')
+    }
+    return { id: check.id, kind: check.kind, ref: check.ref, status }
+  }))
+  const combined = combinedStatus(condition.operator, checks)
+  return {
+    version: 1,
+    conditionSha256: canonicalSha256(condition),
+    operator: condition.operator,
+    round,
+    status: combined.status,
+    checks,
+    reason: combined.reason,
+  }
+}
 
 function withoutGateFailure(state: AutonomousRuntimeStateV1): AutonomousRuntimeStateV1 {
   const {
@@ -96,6 +255,11 @@ export function resolveAutonomousPolicy(
 ): RlmAutonomousPolicyV1 {
   const mode = config?.mode ?? admissionMode ?? 'disabled'
   const enabled = mode === 'enabled' || (mode === 'auto' && rlmEnabled)
+  const endCondition = config?.endCondition === undefined ? undefined : {
+    version: 1 as const,
+    operator: config.endCondition.operator,
+    checks: config.endCondition.checks.map(check => ({ ...check })),
+  }
   const fields = {
     version: 1 as const,
     enabled,
@@ -109,6 +273,7 @@ export function resolveAutonomousPolicy(
       maxRetries: config?.gates?.maxRetries ?? DEFAULT_AUTONOMOUS_LIMITS.gateMaxRetries,
       timeoutMs: config?.gates?.timeoutMs ?? DEFAULT_AUTONOMOUS_LIMITS.gateTimeoutMs,
     },
+    ...endCondition === undefined ? {} : { endCondition },
   }
   return { ...fields, policySha256: canonicalSha256(fields) }
 }
@@ -182,6 +347,8 @@ export function autonomousLimitReason(
  * @param workspace Canonical workspace whose state gates inspect.
  * @param signal Abort signal owned by the Scheduler attempt.
  * @param now Clock sample used by prompts and elapsed-time limits.
+ * @param endConditionEvidence Task-specified Evidence already materialized by the host.
+ * @param evaluators Registered task-specific end-condition evaluators.
  * @returns Durable terminal or continuation decision.
  */
 export async function nextAutonomousDecision(
@@ -190,6 +357,8 @@ export async function nextAutonomousDecision(
   workspace: string,
   signal?: AbortSignal,
   now = new Date(),
+  endConditionEvidence?: AutonomousEndConditionEvidenceV1,
+  evaluators?: Readonly<Record<string, AutonomousEndConditionEvaluatorV1>>,
 ): Promise<AutonomousDecisionV1> {
   signal?.throwIfAborted()
   if (!policy.enabled || !state.enabled) {
@@ -198,26 +367,58 @@ export async function nextAutonomousDecision(
   if (state.terminalReason !== undefined) {
     return { action: 'complete', state, reason: state.terminalReason }
   }
-  const gate = await refreshQualityGates(policy, state, workspace, signal)
+  const evaluatedState = policy.endCondition === undefined
+    ? state
+    : {
+      ...state,
+      lastEndCondition: await evaluateAutonomousEndCondition(
+        policy.endCondition,
+        endConditionEvidence ?? {},
+        state.turnsUsed,
+        evaluators,
+      ),
+    }
+  const gate = await refreshQualityGates(policy, evaluatedState, workspace, signal)
   signal?.throwIfAborted()
-  if (gate?.result === 'passed') {
-    const settled = { ...gate.state, terminalReason: 'gate_passed' as const }
-    return { action: 'complete', state: settled, reason: 'gate_passed' }
+  const condition = (gate?.state ?? evaluatedState).lastEndCondition
+  const gatesPassed = gate?.result === 'passed'
+  const conditionPassed = policy.endCondition === undefined || condition?.status === 'pass'
+  const terminalEvidencePassed = conditionPassed && (
+    gatesPassed || (policy.endCondition !== undefined && policy.gates.commands.length === 0)
+  )
+  if (terminalEvidencePassed) {
+    const settled = {
+      ...(gate?.state ?? evaluatedState),
+      terminalReason: policy.endCondition === undefined ? 'gate_passed' as const : 'end_condition_passed' as const,
+    }
+    return {
+      action: 'complete',
+      state: settled,
+      reason: settled.terminalReason,
+    }
   }
-  const limit = autonomousLimitReason(policy, gate?.state ?? state, now)
+  const limit = autonomousLimitReason(policy, gate?.state ?? evaluatedState, now)
   if (gate?.result === 'retry_exhausted') {
     const settled = { ...gate.state, terminalReason: 'gate_retry_exhausted' as const }
     return { action: 'complete', state: settled, reason: 'gate_retry_exhausted' }
   }
   if (limit !== undefined) {
-    const settled = { ...(gate?.state ?? state), terminalReason: limit }
+    const settled = { ...(gate?.state ?? evaluatedState), terminalReason: limit }
     return { action: 'complete', state: settled, reason: limit }
   }
-  const next = { ...(gate?.state ?? state), continuationsUsed: (gate?.state ?? state).continuationsUsed + 1 }
+  const base = gate?.state ?? evaluatedState
+  const next = { ...base, continuationsUsed: base.continuationsUsed + 1 }
+  const reason = gate?.result === 'failed'
+    ? 'gate_failed' as const
+    : condition?.status === 'fail'
+      ? 'end_condition_failed' as const
+      : condition?.status === 'unknown'
+        ? 'end_condition_unknown' as const
+        : 'missing_terminal_evidence' as const
   return {
     action: 'continue',
     state: next,
-    reason: gate?.result === 'failed' ? 'gate_failed' : 'missing_terminal_evidence',
+    reason,
     prompt: gate?.result === 'failed' && next.lastGateFailure !== undefined
       ? gateFailurePrompt(next.lastGateFailure, policy.gates.maxRetries, now)
       : policy.continuationPrompt,
@@ -399,8 +600,12 @@ function runProcess(
       stderr = append(stderr, error.message)
       finish({ status: child.exitCode, signal: child.signalCode, stdout, stderr, timedOut, outputTruncated })
     })
-    child.once('close', (status, childSignal) => {
+    child.once('close', (status, childSignal) => { void (async () => {
+      if (settled) return
       if (abortError !== undefined) {
+        if (child.pid !== undefined && process.platform !== 'win32') {
+          await waitForProcessGroupExit(child.pid)
+        }
         settled = true
         clearTimeout(timer)
         signal?.removeEventListener('abort', aborted)
@@ -408,10 +613,22 @@ function runProcess(
       } else {
         finish({ status, signal: childSignal, stdout, stderr, timedOut, outputTruncated })
       }
-    })
+    })() })
     signal?.addEventListener('abort', aborted, { once: true })
     if (signal?.aborted === true) aborted()
   })
+}
+
+async function waitForProcessGroupExit(processGroupId: number): Promise<void> {
+  for (;;) {
+    try {
+      process.kill(-processGroupId, 0)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return
+      throw error
+    }
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 10))
+  }
 }
 
 function truncateGateOutput(output: string, alreadyTruncated: boolean): string {

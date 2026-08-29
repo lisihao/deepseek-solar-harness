@@ -52,6 +52,9 @@ function print(value: unknown): void {
 export async function runResidentCommand(args: readonly string[]): Promise<number> {
   try {
     switch (args[0]) {
+      case 'authenticate':
+        print(await client(true).authenticate(requireArg(args, 1, 'an operator id')))
+        return 0
       case 'list':
         print(await client(true).list())
         return 0

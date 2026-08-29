@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import PhysicalOperatorRuntime from '@deepseek-ai/dsh-physical-operator'
+import PhysicalOperatorRuntime, { type PhysicalOperatorUsage } from '@deepseek-ai/dsh-physical-operator'
 import ResidentOperatorService, {
   ResidentOperatorCommandId,
   ResidentOperatorSessionId,
@@ -43,6 +43,14 @@ class OneShotProvider implements SubagentProvider {
 
 class ResidentStub extends ResidentOperatorService {
   requests: ResidentExecuteRequest[] = []
+
+  constructor(
+    ctx: Context,
+    private readonly usage?: PhysicalOperatorUsage,
+  ) {
+    super(ctx)
+  }
+
   providers() { return Promise.resolve([]) }
   execute(request: ResidentExecuteRequest) {
     this.requests.push(request)
@@ -50,7 +58,11 @@ class ResidentStub extends ResidentOperatorService {
       turnId: ResidentOperatorTurnId('turn'),
       sessionId: ResidentOperatorSessionId('resident-session'),
       stateRevision: 7,
-      result: Promise.resolve({ output: [{ type: 'text' as const, text: 'resident' }], stopReason: 'completed' as const }),
+      result: Promise.resolve({
+        output: [{ type: 'text' as const, text: 'resident' }],
+        stopReason: 'completed' as const,
+        ...this.usage === undefined ? {} : { usage: this.usage },
+      }),
       dispose: () => Promise.resolve(),
     })
   }
@@ -68,7 +80,14 @@ describe('physical-operator-resident', () => {
     const ctx = new Context()
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(PhysicalOperatorRuntime)
-    new ResidentStub(ctx)
+    const usage = {
+      inputTokens: 17,
+      outputTokens: 9,
+      cacheReadInputTokens: 23,
+      cacheWriteInputTokens: 4,
+      costUsd: 0.42,
+    }
+    new ResidentStub(ctx, usage)
     await ctx.plugin(provider, {
       operators: [{
         id: 'analysis-worker', residentProvider: 'analysis-worker',
@@ -88,7 +107,7 @@ describe('physical-operator-resident', () => {
       mode: 'resident', prompt: [{ type: 'text', text: 'analyze the fixture' }],
       parent: parent(), signal: new AbortController().signal,
     })
-    await expect(resident.result).resolves.toMatchObject({ stopReason: 'completed' })
+    await expect(resident.result).resolves.toMatchObject({ stopReason: 'completed', usage })
     expect((ctx.residentOperators as ResidentStub).requests[0]).toMatchObject({
       operatorId: 'analysis-worker', laneId: 'parent',
     })

@@ -79,6 +79,10 @@ class LocalResidentOperatorService extends ResidentOperatorService {
     return this.client.providers()
   }
 
+  override authenticate(operatorId: string): Promise<ResidentProviderStatus> {
+    return this.client.authenticate(operatorId)
+  }
+
   /** Ensure the configured detached daemon owns the socket before dependants start. */
   ready(): Promise<void> {
     return this.client.ready()

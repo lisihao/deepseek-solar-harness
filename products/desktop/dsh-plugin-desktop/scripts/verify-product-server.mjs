@@ -3,8 +3,6 @@
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 
 const REQUIRED_CLIENT_IDS = [
   '@deepseek-ai/dsh-client-ui-remote-modules',
@@ -55,6 +53,60 @@ function parseBootManifest(html) {
   return JSON.parse(match[1])
 }
 
+async function remoteSyncCall(baseUrl, method, payload = {}) {
+  const rpcId = `product-server-${method}`
+  const response = await fetch(`${baseUrl}/remote-sync/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId, method, payload }),
+  })
+  if (!response.ok) throw new Error(`remote sync ${method} returned HTTP ${String(response.status)}`)
+  const envelope = await response.json()
+  if (envelope.rpcId !== rpcId || envelope.result?.ok !== true) {
+    throw new Error(`remote sync ${method} returned an invalid RPC response`)
+  }
+  return envelope.result.value
+}
+
+async function waitForRemoteSync(baseUrl, child, output) {
+  const deadline = Date.now() + 30_000
+  let lastStatus = 'unreachable'
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`product server exited ${String(child.exitCode)} before Remote Sync readiness\n${output()}`)
+    }
+    try {
+      const response = await fetch(`${baseUrl}/remote-sync/describe`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'client-request',
+          rpcId: 'product-server-describe',
+          method: 'describe',
+          payload: {},
+        }),
+      })
+      lastStatus = String(response.status)
+      if (response.ok) {
+        const envelope = await response.json()
+        if (envelope.rpcId !== 'product-server-describe' || envelope.result?.ok !== true) {
+          throw new Error('remote sync describe returned an invalid RPC response')
+        }
+        return envelope.result.value
+      }
+      if (![404, 405, 503].includes(response.status)) {
+        throw new Error(`remote sync describe returned HTTP ${String(response.status)}`)
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('invalid RPC response')) throw error
+      if (error instanceof Error && error.message.startsWith('remote sync describe returned HTTP')) throw error
+      lastStatus = error instanceof Error ? error.message : String(error)
+    }
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  throw new Error(`product server Remote Sync did not become ready within 30s (last=${lastStatus})\n${output()}`)
+}
+
 async function stop(child) {
   if (child.exitCode !== null) return
   child.kill('SIGTERM')
@@ -71,7 +123,11 @@ async function stop(child) {
   throw new Error('product server did not stop within its bounded shutdown window')
 }
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-product-server-verify-'))
+// Keep the generated DSH_HOME short: macOS limits Unix-domain socket paths to
+// roughly 104 bytes, and the resident daemon's control socket is nested under
+// this directory.  The default tmpdir path can already consume most of that
+// budget before the test prefix is added.
+const home = mkdtempSync('/tmp/dsh-product-verify-')
 const port = await availablePort()
 let stdout = ''
 let stderr = ''
@@ -102,6 +158,23 @@ try {
     const response = await fetch(new URL(entry.url, baseUrl))
     if (!response.ok) throw new Error(`client ${String(entry.id)} returned HTTP ${String(response.status)}`)
   }
+  // WebServer becomes reachable before optional resident/orchestration
+  // authorities finish their daemon handshakes. Wait for the actual Remote
+  // Sync route, otherwise this smoke would race the intended composition seam
+  // and observe the SPA fallback's 405.
+  const description = await waitForRemoteSync(baseUrl, child, () => `${stdout}\n${stderr}`)
+  for (const capability of ['operator.read', 'operator.execute', 'operator.interrupt']) {
+    if (!description.capabilities?.includes(capability)) {
+      throw new Error(`product server Remote Sync is missing ${capability}`)
+    }
+  }
+  if (description.capabilities?.includes('orchestration.cluster')) {
+    throw new Error('standalone product server advertised an unconfigured orchestration cluster')
+  }
+  const providers = await remoteSyncCall(baseUrl, 'operator.providers')
+  if (!Array.isArray(providers) || providers.length === 0) {
+    throw new Error('product server Remote Sync returned no resident providers')
+  }
   evidence = {
     status: 'ok',
     http: 200,
@@ -109,6 +182,9 @@ try {
     requiredClients: REQUIRED_CLIENT_IDS.length,
     browsePicker: true,
     nativePicker: false,
+    remoteResident: true,
+    residentProviders: providers.length,
+    standaloneCluster: false,
     rev: boot.rev,
   }
 } finally {

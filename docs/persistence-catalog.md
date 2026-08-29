@@ -389,6 +389,35 @@ Types: [ContentBlock](subsystems/core.md) · [TokenUsage](subsystems/llm-streami
 
 Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compaction/compaction/src/types.ts)
 
+### `debate/*`
+
+<a id="debateadmission--log-only"></a>
+
+#### `debate/admission` — log-only
+
+```ts persistence-catalog
+/** Durable bounded link from a model tool call to the admitted Debate run. */
+'debate/admission': {
+  readonly runId: string
+  readonly mode: DebateExecutionMode
+  readonly revision: number
+  readonly state: string
+}
+```
+
+Source: [`packages/orchestration/tool-debate/src/index.ts:41`](../packages/orchestration/tool-debate/src/index.ts)
+
+<a id="debatepreferences--log-only"></a>
+
+#### `debate/preferences` — log-only
+
+```ts persistence-catalog
+/** Whole-value strategy for future Debate admissions in this Session. */
+'debate/preferences': DebateExecutionPreferences
+```
+
+Source: [`packages/orchestration/tool-debate/src/index.ts:39`](../packages/orchestration/tool-debate/src/index.ts)
+
 ### `feedback/*`
 
 <a id="feedbackrecord--log-only"></a>
@@ -568,7 +597,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:68`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:71`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -582,7 +611,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:68`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:80`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:83`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -596,7 +625,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:80`](..
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:53`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:56`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -610,7 +639,25 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:53`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:55`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:58`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatorprogress--log-only"></a>
+
+#### `physical-operator/progress` — log-only
+
+```ts persistence-catalog
+/** One bounded native Resident observation copied into this Session's ignorable Trace. */
+'physical-operator/progress': {
+  commandId: string
+  operatorId: string
+  sequence: number
+  type: string
+  time: string
+  data: Record<string, JsonValue>
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:88`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -627,7 +674,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:55`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:60`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:63`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-call--log-only"></a>
 
@@ -642,7 +689,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:60`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:85`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:104`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -657,7 +704,23 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:85`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:91`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:110`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortrace-degraded--log-only"></a>
+
+#### `physical-operator/trace-degraded` — log-only
+
+```ts persistence-catalog
+/** Resident progress could not be projected completely into this Session Trace. */
+'physical-operator/trace-degraded': {
+  commandId: string
+  operatorId: string
+  code: 'PROGRESS_UNAVAILABLE'
+  message: string
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:97`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

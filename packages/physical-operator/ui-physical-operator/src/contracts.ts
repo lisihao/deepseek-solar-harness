@@ -15,8 +15,14 @@ export interface DesktopResidentProvider {
   unavailableReason?: string
   quotaUnavailableReason?: string
   authentication: 'native-subscription' | 'unqualified'
+  supportsExplicitAuthentication?: boolean
   productVersion: string
   models: DesktopResidentModel[]
+}
+
+/** Result returned after one explicit owner-local product login flow. */
+export interface DesktopResidentAuthenticationResponse {
+  provider: DesktopResidentProvider
 }
 
 /** Browser-facing model and effort capabilities for one provider model. */

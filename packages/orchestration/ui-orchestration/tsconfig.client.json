@@ -8,6 +8,7 @@
   "files": [
     "src/client/index.ts",
     "src/client/OrchestrationsPanel.tsx",
+    "src/client/RlmAgentsView.tsx",
     "src/client/styles.ts",
     "src/client/timestamp.ts",
     "src/contracts.ts"

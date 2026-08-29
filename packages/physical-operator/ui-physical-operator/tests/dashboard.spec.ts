@@ -5,9 +5,81 @@ import {
   ResidentOperatorTurnId,
 } from '@deepseek-ai/dsh-resident-operator'
 import { describe, expect, it, vi } from 'vitest'
-import { readResidentDashboard } from '../src/dashboard.ts'
+import { readResidentDashboard, registerResidentDashboard } from '../src/dashboard.ts'
+
+function responseRecorder(): {
+  response: { writeHead: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
+  status: () => number | undefined
+  json: () => unknown
+} {
+  const writeHead = vi.fn()
+  const end = vi.fn()
+  return {
+    response: { writeHead, end },
+    status: () => writeHead.mock.calls[0]?.[0] as number | undefined,
+    json: () => JSON.parse(String(end.mock.calls[0]?.[0])) as unknown,
+  }
+}
 
 describe('Resident Operator Desktop projection', () => {
+  it('allows explicit login only from the owner-local browser route', async () => {
+    let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
+    const authenticate = vi.fn(async () => ({
+      operatorId: 'claude-code',
+      product: 'claude-code',
+      displayName: 'Claude Code',
+      description: 'Test provider',
+      tags: ['subscription'],
+      maxConcurrency: 1,
+      injectionBoundaries: ['pre-dispatch'] as const,
+      available: true,
+      authentication: 'native-subscription' as const,
+      productVersion: 'test',
+      protocolHash: 'test',
+      models: [],
+    }))
+    const remoteAuth = {
+      authenticate: (token: string) => token === 'valid'
+        ? { deviceId: 'remote', deviceName: 'Remote', scope: 'admin' as const }
+        : undefined,
+    }
+    const ctx = {
+      residentOperators: { authenticate },
+      webServer: {
+        register: vi.fn((route: { handler: typeof handler }) => {
+          handler = route.handler
+          return () => {}
+        }),
+      },
+      get: (key: string) => key === 'remoteAuth' ? remoteAuth : undefined,
+      logger: { warn: vi.fn() },
+    } as unknown as Context
+    registerResidentDashboard(ctx)
+    if (handler === undefined) throw new Error('dashboard route was not registered')
+
+    const local = responseRecorder()
+    await handler({
+      method: 'POST',
+      url: '/api/resident-operators?operator_id=claude-code',
+      headers: { host: '127.0.0.1:13080', origin: 'http://127.0.0.1:13080' },
+      socket: { remoteAddress: '127.0.0.1' },
+    }, local.response)
+    expect(local.status()).toBe(200)
+    expect(local.json()).toMatchObject({ provider: { operatorId: 'claude-code', available: true } })
+    expect(authenticate).toHaveBeenCalledOnce()
+
+    const remote = responseRecorder()
+    await handler({
+      method: 'POST',
+      url: '/api/resident-operators?operator_id=claude-code',
+      headers: { host: 'server.test', authorization: 'Bearer valid' },
+      socket: { remoteAddress: '100.64.0.2' },
+    }, remote.response)
+    expect(remote.status()).toBe(403)
+    expect(remote.json()).toEqual({ error: 'LOCAL_OWNER_REQUIRED' })
+    expect(authenticate).toHaveBeenCalledOnce()
+  })
+
   it('reconnects to daemon-owned session, progress, and settled result state', async () => {
     const sessionId = ResidentOperatorSessionId('session-1')
     const turnId = ResidentOperatorTurnId('turn-1')

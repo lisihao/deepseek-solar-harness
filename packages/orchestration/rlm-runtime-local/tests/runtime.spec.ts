@@ -1,12 +1,15 @@
-import { copyFile, mkdtemp, readFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { createConnection } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import {
+  RLM_TYPESCRIPT_REPL_TOOL_SCHEMA,
+  RlmControlCallerId,
   RlmCommandId,
   RlmRuntimeSessionId,
   type RlmChildExecutionResult,
+  type RlmChildExecutionOptionsV1,
   type RlmRuntimeHostBindings,
 } from '@deepseek-ai/dsh-rlm-runtime'
 import { describe, expect, it, vi } from 'vitest'
@@ -31,18 +34,130 @@ async function waitUntil(accept: () => boolean | Promise<boolean>): Promise<void
 const limits = { maxDepth: 3, maxChildren: 4, maxTurns: 12, maxCellMs: 2_000, maxOutputBytes: 64 * 1024 } as const
 const model = { operatorId: 'codex', model: 'gpt-5.6-luna' } as const
 
-async function runtime(root: string, bindings: RlmRuntimeHostBindings) {
+async function runtime(
+  root: string,
+  bindings: RlmRuntimeHostBindings,
+  executionOptions?: RlmChildExecutionOptionsV1,
+) {
   const ctx = new Context()
   const service = new LocalRlmRuntime(ctx, root)
   const sessionId = RlmRuntimeSessionId('rlm-session-root')
   await service.create({
     sessionId, commandId: RlmCommandId('create-root'), executionId: 'execution-root', workspace: root,
     task: 'solve a bounded task', model, limits, context: { objective: 'test' },
+    ...executionOptions === undefined ? {} : { executionOptions },
   }, bindings)
   return { ctx, service, sessionId }
 }
 
 describe('LocalRlmRuntime', () => {
+  it('provides an exclusive persistent Agents View control lease and routes input through continuations', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-control-lease-'))
+    const continuationRequests: string[] = []
+    const bindings: RlmRuntimeHostBindings = {
+      dispatchChild: () => { throw new Error('not used') },
+      dispatchContinuation: async (request) => {
+        continuationRequests.push(request.instruction)
+        return {
+          nativeSessionId: 'native-control-session',
+          nativeTurnId: String(request.commandId),
+          result: Promise.resolve({ status: 'settled', output: [{ type: 'text', text: 'control accepted' }] }),
+          interrupt: () => Promise.resolve(),
+        }
+      },
+    }
+    const first = await runtime(root, bindings)
+    const attached = await first.service.attach({
+      version: 1,
+      sessionId: first.sessionId,
+      commandId: RlmCommandId('control-attach-a'),
+      callerId: RlmControlCallerId('agents-view-a'),
+    })
+    expect(attached).toMatchObject({
+      version: 1,
+      lease: { version: 1, sessionId: first.sessionId, callerId: 'agents-view-a' },
+      snapshot: { sessionId: first.sessionId },
+      eventCursor: attached.snapshot.eventCursor,
+    })
+    await expect(first.service.attach({
+      version: 1,
+      sessionId: first.sessionId,
+      commandId: RlmCommandId('control-attach-b'),
+      callerId: RlmControlCallerId('agents-view-b'),
+    })).rejects.toMatchObject({ code: 'RLM_CONTROL_BUSY' })
+
+    const input = {
+      version: 1 as const,
+      sessionId: first.sessionId,
+      leaseId: attached.lease.leaseId,
+      commandId: RlmCommandId('control-input-a'),
+      text: 'continue with the current evidence',
+    }
+    const accepted = await first.service.input(input)
+    await expect(first.service.input(input)).resolves.toEqual(accepted)
+    expect(accepted).toMatchObject({ version: 1, deliveryStatus: 'delivered', effectiveMode: 'follow_up' })
+    expect(continuationRequests).toHaveLength(1)
+    await expect(first.service.input({ ...input, text: 'different command' })).rejects.toMatchObject({ code: 'RLM_COMMAND_CONFLICT' })
+
+    const detached = await first.service.detach({
+      version: 1,
+      sessionId: first.sessionId,
+      leaseId: attached.lease.leaseId,
+      commandId: RlmCommandId('control-detach-a'),
+    })
+    await expect(first.service.detach({
+      version: 1,
+      sessionId: first.sessionId,
+      leaseId: attached.lease.leaseId,
+      commandId: RlmCommandId('control-detach-a'),
+    })).resolves.toEqual(detached)
+    await expect(first.service.input({ ...input, commandId: RlmCommandId('control-input-after-detach') }))
+      .rejects.toMatchObject({ code: 'RLM_CONTROL_LEASE_INVALID' })
+    await first.ctx.root.fiber.dispose()
+
+    const recoveredContext = new Context()
+    const recovered = new LocalRlmRuntime(recoveredContext, root)
+    await recovered.bindHost(first.sessionId, bindings)
+    const recoveredAttach = await recovered.attach({
+      version: 1,
+      sessionId: first.sessionId,
+      commandId: RlmCommandId('control-attach-after-restart'),
+      callerId: RlmControlCallerId('agents-view-after-restart'),
+    })
+    expect(recoveredAttach.snapshot.eventCursor).toBeGreaterThan(attached.eventCursor)
+    await recoveredContext.root.fiber.dispose()
+  })
+
+  it('reclaims a control lease persisted by a dead runtime owner without replaying input', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-control-reclaim-'))
+    const first = await runtime(root, { dispatchChild: () => { throw new Error('not used') } })
+    const attached = await first.service.attach({
+      version: 1,
+      sessionId: first.sessionId,
+      commandId: RlmCommandId('control-reclaim-attach-a'),
+      callerId: RlmControlCallerId('agents-view-a'),
+    })
+    const statePath = join(root, 'state.json')
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as {
+      controlLeases: Array<Record<string, unknown>>
+    }
+    state.controlLeases[0]!.ownerPid = Number.MAX_SAFE_INTEGER
+    const recoveredRoot = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-control-reclaim-recovered-'))
+    await writeFile(join(recoveredRoot, 'state.json'), `${JSON.stringify(state)}\n`, { mode: 0o600 })
+    const recoveredContext = new Context()
+    const recovered = new LocalRlmRuntime(recoveredContext, recoveredRoot)
+    const reclaimed = await recovered.attach({
+      version: 1,
+      sessionId: first.sessionId,
+      commandId: RlmCommandId('control-reclaim-attach-b'),
+      callerId: RlmControlCallerId('agents-view-b'),
+    })
+    expect(reclaimed.lease.leaseId).not.toBe(attached.lease.leaseId)
+    expect(reclaimed.lease.callerId).toBe('agents-view-b')
+    await recoveredContext.root.fiber.dispose()
+    await first.ctx.root.fiber.dispose()
+  })
+
   it('maps logical session identities to portable content-addressed directories', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-portable-session-'))
     const ctx = new Context()
@@ -336,6 +451,67 @@ describe('LocalRlmRuntime', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('inherits the sealed parent execution options without exposing a child override path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-prime-execution-options-'))
+    const ctx = new Context()
+    const service = new LocalRlmRuntime(ctx, root)
+    const sessionId = RlmRuntimeSessionId('rlm-session-prime-execution-options')
+    const parentModel = {
+      operatorId: 'claude-code', model: 'claude-opus-4-1', profile: { model: 'claude-opus-4-1', effort: 'max' as const },
+    }
+    const executionOptions = {
+      version: 1,
+      tools: [{
+        name: 'workspace.read', description: 'Read a bounded workspace artifact', parameters: { type: 'object' },
+      }],
+      skills: [{
+        alias: 'repo-inspect', title: 'Repository inspection', callable: 'repo.inspect', available: true,
+      }],
+      retryPolicy: {
+        mode: 'normal', maxRetries: 2, retryableCodes: ['TIMEOUT'],
+        initialDelayMs: 25, maxDelayMs: 100, jitterRatio: 0,
+      },
+      capabilityContext: {
+        contextPacketRef: 'sha256:context',
+        capabilityPlanRef: 'sha256:capability',
+        graphCertificateHash: 'sha256:graph',
+      },
+    } as const satisfies RlmChildExecutionOptionsV1
+    const dispatched: Array<{ model: unknown; executionOptions: unknown }> = []
+    const bindings: RlmRuntimeHostBindings = {
+      dispatchChild: async (request) => {
+        dispatched.push({ model: request.model, executionOptions: request.executionOptions })
+        return {
+          nativeSessionId: `native-${request.name}`, nativeTurnId: `turn-${request.name}`,
+          result: Promise.resolve({ status: 'settled' }), interrupt: () => Promise.resolve(),
+        }
+      },
+    }
+    await service.create({
+      sessionId, commandId: RlmCommandId('create-prime-execution-options'), executionId: 'execution-prime-execution-options',
+      workspace: root, task: 'preserve parent execution context', model: parentModel, executionOptions, limits,
+    }, bindings)
+    await service.executeCell({
+      sessionId, commandId: RlmCommandId('spawn-prime-execution-options'),
+      code: 'await rlm("inherit execution options", { name: "inherited-options" })',
+    })
+    const child = (await service.listChildren(sessionId))[0]!
+    expect(dispatched).toEqual([{ model: parentModel, executionOptions }])
+    await expect(service.inspect(child.sessionId)).resolves.toMatchObject({
+      model: parentModel,
+      executionOptions,
+    })
+    await ctx.root.fiber.dispose()
+
+    const recoveredContext = new Context()
+    const recovered = new LocalRlmRuntime(recoveredContext, root)
+    await expect(recovered.inspect(child.sessionId)).resolves.toMatchObject({
+      model: parentModel,
+      executionOptions,
+    })
+    await recoveredContext.root.fiber.dispose()
+  })
+
   it('rejects unknown rlm() options instead of silently ignoring them', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-prime-options-'))
     let dispatches = 0
@@ -348,7 +524,7 @@ describe('LocalRlmRuntime', () => {
     await expect(service.executeCell({
       sessionId, commandId: RlmCommandId('spawn-unknown-option'),
       code: 'await rlm("invalid", { name: "invalid", tools: ["bash"], retries: 2 })',
-    })).rejects.toThrow('Unsupported rlm() options: retries, tools')
+    })).rejects.toMatchObject({ code: 'RLM_INVALID', message: 'Unsupported rlm() options: retries, tools' })
     expect(dispatches).toBe(0)
     await ctx.root.fiber.dispose()
   })
@@ -903,9 +1079,6 @@ describe('LocalRlmRuntime', () => {
       dispatchChild: () => { throw new Error('not used') },
       hostRequest: async (request) => {
         requests.push({ method: request.method, params: request.params })
-        if (request.method === 'skills.list') {
-          return [{ alias: 'summarize', title: 'Summarize', callable: 'summarize', available: true }]
-        }
         if (request.method === 'skills.call') {
           const alias = request.params.alias
           if (typeof alias !== 'string') throw new Error('expected managed skill alias')
@@ -914,7 +1087,10 @@ describe('LocalRlmRuntime', () => {
         throw new Error(`unexpected host method ${request.method}`)
       },
     }
-    const { ctx, service, sessionId } = await runtime(root, bindings)
+    const { ctx, service, sessionId } = await runtime(root, bindings, {
+      version: 1,
+      skills: [{ alias: 'summarize', title: 'Summarize', callable: 'summarize', available: true }],
+    })
     const cell = {
       sessionId,
       commandId: RlmCommandId('managed-skill-call'),
@@ -934,7 +1110,6 @@ describe('LocalRlmRuntime', () => {
     })
     await expect(service.executeCell(cell)).resolves.toEqual(first)
     expect(requests).toEqual([
-      { method: 'skills.list', params: {} },
       { method: 'skills.call', params: { alias: 'summarize', args: { text: 'bounded evidence' } } },
     ])
     const invalid = await service.executeCell({
@@ -944,18 +1119,30 @@ describe('LocalRlmRuntime', () => {
         'const path = await skills.call("../arbitrary-import", {});',
         'const scoped = await skills.call("@scope/pkg", {});',
         'const dotted = await skills.call("internal.module", {});',
-        '({ path, scoped, dotted })',
+        'const unlisted = await skills.call("not-sealed", {});',
+        '({ path, scoped, dotted, unlisted })',
       ].join('\n'),
     })
     const rejected = {
       ok: false,
       error: { code: 'RLM_INVALID', message: 'skills.call requires a Host-issued managed skill alias, not a module path' },
     }
-    expect(invalid.value).toEqual({ path: rejected, scoped: rejected, dotted: rejected })
+    expect(invalid.value).toEqual({
+      path: rejected,
+      scoped: rejected,
+      dotted: rejected,
+      unlisted: {
+        ok: false,
+        error: {
+          code: 'RLM_INVALID',
+          message: 'managed skill is absent from the sealed parent execution: not-sealed',
+        },
+      },
+    })
     await expect(service.inspectReceipt(RlmCommandId('invalid-skill-call'))).resolves.toMatchObject({
       state: 'settled',
     })
-    expect(requests).toHaveLength(2)
+    expect(requests).toHaveLength(1)
     await ctx.root.fiber.dispose()
   })
 
@@ -1017,7 +1204,16 @@ describe('LocalRlmRuntime', () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-bridge-'))
     const { ctx, service, sessionId } = await runtime(root, { dispatchChild: () => { throw new Error('not used') } })
     const bridge = await service.modelToolBridge(sessionId)
-    expect(bridge).toMatchObject({ version: 1, sessionId, tools: [{ name: 'typescript_repl' }] })
+    expect(bridge).toMatchObject({
+      version: 1,
+      sessionId,
+      tools: [{
+        name: RLM_TYPESCRIPT_REPL_TOOL_SCHEMA.name,
+        description: RLM_TYPESCRIPT_REPL_TOOL_SCHEMA.description,
+        inputSchema: RLM_TYPESCRIPT_REPL_TOOL_SCHEMA.parameters,
+      }],
+    })
+    expect(bridge.tools[0]?.inputSchema).toEqual(RLM_TYPESCRIPT_REPL_TOOL_SCHEMA.parameters)
     const socket = createConnection(bridge.socketPath)
     await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
     const transport = new JsonRpcLineTransport(socket, socket)

@@ -173,7 +173,7 @@ abstract flushRefinements(request: ContinualHarnessRefinementFlushRequest): Prom
 abstract rollback(request: ContinualHarnessRollbackRequest): Promise<ContinualHarnessRefinementPlanV1>
 ```
 
-Source: [`packages/orchestration/continual-harness/src/index.ts:326`](../../packages/orchestration/continual-harness/src/index.ts)
+Source: [`packages/orchestration/continual-harness/src/index.ts:340`](../../packages/orchestration/continual-harness/src/index.ts)
 
 <a id="ctxcontinualharnessskills--continualharnessskillruntime"></a>
 
@@ -205,7 +205,51 @@ has(moduleId: string, callable: string): boolean
 async invoke(request: { readonly moduleId: string readonly callable: string readonly args: Readonly<Record<string, ContinualHarnessJsonValue>> readonly workspace: string readonly sessionId: string readonly entryId: string }): Promise<ContinualHarnessJsonValue>
 ```
 
-Source: [`packages/orchestration/continual-harness/src/index.ts:270`](../../packages/orchestration/continual-harness/src/index.ts)
+Source: [`packages/orchestration/continual-harness/src/index.ts:284`](../../packages/orchestration/continual-harness/src/index.ts)
+
+<a id="ctxdebates--debateservice-abstract-seam"></a>
+
+### `ctx.debates` — `DebateService` (abstract seam)
+
+Provider-neutral Debate service; it never owns scheduling, storage, or model execution.
+
+```ts cordis-catalog
+/**
+ * Admit one debate request through the existing TaskGraph/RLM consumer seam.
+ * @param request - validated provider request with policy and optional parent execution identity.
+ * @returns the accepted run projection.
+ */
+abstract start(request: DebateStartRequestV1): Promise<DebateRunSnapshotV1>
+
+/**
+ * List bounded run projections supplied by the Provider.
+ * @returns the Provider's bounded run summaries.
+ */
+abstract list(): Promise<readonly DebateRunSummaryV1[]>
+
+/**
+ * Inspect one run projection.
+ * @param runId - stable run identity to inspect.
+ * @returns the selected run projection.
+ */
+abstract inspect(runId: string): Promise<DebateRunSnapshotV1>
+
+/**
+ * Read append-only debate events for a UI or other projection Consumer.
+ * @param request - run identity and bounded event-page cursor.
+ * @returns one bounded event page.
+ */
+abstract readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV1>
+
+/**
+ * Apply an explicit approval, pause, resume, stop, or reject decision.
+ * @param request - revision-fenced control command.
+ * @returns the updated run projection.
+ */
+abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>
+```
+
+Source: [`packages/orchestration/debate/src/index.ts:341`](../../packages/orchestration/debate/src/index.ts)
 
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 
@@ -239,7 +283,7 @@ Scheduler-facing Service Definition; implementations remain replaceable plugins.
 abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
 ```
 
-Source: [`packages/orchestration/model-allocation/src/index.ts:109`](../../packages/orchestration/model-allocation/src/index.ts)
+Source: [`packages/orchestration/model-allocation/src/index.ts:156`](../../packages/orchestration/model-allocation/src/index.ts)
 
 <a id="ctxmodelworkers--modelworkerruntime"></a>
 
@@ -388,7 +432,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:583`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:632`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 
@@ -425,6 +469,27 @@ abstract list(): Promise<readonly RlmRuntimeSessionSnapshotV1[]>
  * @returns current snapshot.
  */
 abstract inspect(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSnapshotV1>
+
+/**
+ * Establish one exclusive external control lease over a durable session.
+ * @param request - versioned caller and command identity.
+ * @returns lease, current snapshot, and event cursor.
+ */
+abstract attach(request: RlmControlAttachRequestV1): Promise<RlmControlAttachResultV1>
+
+/**
+ * Submit controller input through the existing message/continuation path.
+ * @param request - lease-bound, idempotent input command.
+ * @returns durable input receipt.
+ */
+abstract input(request: RlmControlInputRequestV1): Promise<RlmControlInputResultV1>
+
+/**
+ * Release one external control lease.
+ * @param request - lease-bound idempotent detach command.
+ * @returns durable detach receipt.
+ */
+abstract detach(request: RlmControlDetachRequestV1): Promise<RlmControlDetachResultV1>
 
 /**
  * Inspect one command receipt.
@@ -661,7 +726,7 @@ abstract reconcile(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSna
 abstract resolveIndeterminate(request: RlmIndeterminateResolutionRequest): Promise<RlmCommandReceiptSnapshotV1>
 ```
 
-Source: [`packages/orchestration/rlm-runtime/src/index.ts:487`](../../packages/orchestration/rlm-runtime/src/index.ts)
+Source: [`packages/orchestration/rlm-runtime/src/index.ts:617`](../../packages/orchestration/rlm-runtime/src/index.ts)
 
 <a id="ctxrlmstrategy--rlmstrategyservice-abstract-seam"></a>
 

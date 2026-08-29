@@ -32,11 +32,12 @@ import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v8 method set advertised by daemon handshake. */
+/** Public protocol-v10 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
   'system.shutdown',
   'operator.list',
+  'operator.authenticate',
   'session.list',
   'session.inspect',
   'turn.execute',
@@ -266,6 +267,7 @@ export class ResidentDaemon {
   private readonly active = new Map<string, ActiveTurn>()
   private readonly activeCompactions = new Map<string, ActiveCompaction>()
   private readonly qualifications = new Map<string, Promise<ResidentProviderStatus>>()
+  private readonly authentications = new Map<string, Promise<ResidentProviderStatus>>()
   private lockDescriptor: number | undefined
   private closing = false
   private readonly closedResolver = Promise.withResolvers<void>()
@@ -357,6 +359,8 @@ export class ResidentDaemon {
         const providers = await this.providerStatuses()
         return { providers, sessions: this.store.list() }
       }
+      case 'operator.authenticate':
+        return this.authenticate(stringParam(params, 'operator_id'))
       case 'session.list':
         return { sessions: this.store.list() }
       case 'session.inspect':
@@ -438,12 +442,43 @@ export class ResidentDaemon {
   private qualify(driver: ResidentProductDriver): Promise<ResidentProviderStatus> {
     const current = this.qualifications.get(driver.operatorId)
     if (current !== undefined) return current
-    const pending = driver.qualify().finally(() => {
+    const pending = driver.qualify().then(status => ({
+      ...status,
+      supportsExplicitAuthentication: driver.authenticate !== undefined,
+    })).finally(() => {
       if (this.qualifications.get(driver.operatorId) === pending) {
         this.qualifications.delete(driver.operatorId)
       }
     })
     this.qualifications.set(driver.operatorId, pending)
+    return pending
+  }
+
+  private authenticate(operatorId: string): Promise<ResidentProviderStatus> {
+    const current = this.authentications.get(operatorId)
+    if (current !== undefined) return current
+    const driver = this.drivers.get(operatorId)
+    if (driver === undefined) {
+      throw new ResidentOperatorError(`no resident provider for ${operatorId}`, 'SESSION_UNAVAILABLE')
+    }
+    if (driver.authenticate === undefined) {
+      throw new ResidentOperatorError(
+        `resident provider ${operatorId} does not support explicit authentication`,
+        'SESSION_UNAVAILABLE',
+      )
+    }
+    const authenticate = driver.authenticate.bind(driver)
+    const pending = (async () => {
+      const status = await this.qualify(driver)
+      if (status.available && status.authentication === 'native-subscription') return status
+      const authenticated = await authenticate()
+      return { ...authenticated, supportsExplicitAuthentication: true }
+    })().finally(() => {
+      if (this.authentications.get(operatorId) === pending) {
+        this.authentications.delete(operatorId)
+      }
+    })
+    this.authentications.set(operatorId, pending)
     return pending
   }
 

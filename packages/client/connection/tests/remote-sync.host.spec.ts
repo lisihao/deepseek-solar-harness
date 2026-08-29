@@ -345,6 +345,15 @@ describe('RemoteSyncHub', () => {
     })
     await hub.close()
 
+    const standaloneOrchestration = new RemoteSyncHub(api(), 4, undefined, undefined, () => ({
+      clusterStatus: vi.fn(async () => undefined),
+      clusterRequestVote: vi.fn(), clusterHeartbeat: vi.fn(), clusterExportReplica: vi.fn(), clusterInstallReplica: vi.fn(),
+    }))
+    const standaloneDescription = await standaloneOrchestration.describe(new AbortController().signal, 'admin')
+    expect(standaloneDescription.capabilities).not.toContain('orchestration.cluster')
+    expect(standaloneDescription.cluster).toBeUndefined()
+    await standaloneOrchestration.close()
+
     const standalone = new RemoteSyncHub(api(), 4)
     await expect(standalone.replicaList()).rejects.toThrow('replication is unavailable')
     expect(() => standalone.operatorProviders()).toThrow('Resident execution is unavailable')

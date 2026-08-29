@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.7.3",
+  "version": "3.8.0",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -171,6 +171,9 @@
     "@deepseek-ai/dsh-cordis-host-runner": "0.1.0-rc.6",
     "@deepseek-ai/dsh-credentials": "0.1.0-rc.6",
     "@deepseek-ai/dsh-credentials-local": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-debate": "file:vendor/dsh-packages/deepseek-ai-dsh-debate-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-debate-local": "file:vendor/dsh-packages/deepseek-ai-dsh-debate-local-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-debate-orchestration": "file:vendor/dsh-packages/deepseek-ai-dsh-debate-orchestration-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-fs": "0.1.0-rc.6",
     "@deepseek-ai/dsh-fs-local": "0.1.0-rc.6",
     "@deepseek-ai/dsh-goal": "0.1.0-rc.6",
@@ -241,6 +244,7 @@
     "@deepseek-ai/dsh-terminal": "0.1.0-rc.6",
     "@deepseek-ai/dsh-timeout": "0.1.0-rc.6",
     "@deepseek-ai/dsh-token-meter": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tool-debate": "file:vendor/dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-tool-markdown": "file:vendor/dsh-packages/deepseek-ai-dsh-tool-markdown-0.0.1.tgz",
     "@deepseek-ai/dsh-tool-orchestration": "file:vendor/dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-tool-physical-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz",
@@ -251,6 +255,7 @@
     "@deepseek-ai/dsh-tools": "file:vendor/dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-registry": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-ui-debate": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-ui-orchestration": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-ui-physical-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-user-approval": "0.1.0-rc.6",

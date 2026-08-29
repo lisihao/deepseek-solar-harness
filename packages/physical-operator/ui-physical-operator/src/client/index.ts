@@ -50,6 +50,7 @@ export function apply(ctx: ClientContext): void {
       },
       selectOrchestrationStrategy: async (
         rlm,
+        autonomous,
         continualHarness,
         optimization,
         plannerVerifierPreference,
@@ -57,10 +58,16 @@ export function apply(ctx: ClientContext): void {
       ) => {
         const result = await ctx.remote.commands.execute(
           sessionId,
-          `/orchestration-strategy ${rlm} ${continualHarness} ${optimization} ${plannerVerifierPreference} ${executionPreference}`,
+          `/orchestration-strategy ${rlm} ${autonomous} ${continualHarness} ${optimization} ${plannerVerifierPreference} ${executionPreference}`,
         )
         if (!result.ok) return `${result.error.message} (${result.error.code})`
         if (result.value === undefined) return 'unknown command: /orchestration-strategy'
+        return null
+      },
+      selectDebateMode: async (mode) => {
+        const result = await ctx.remote.commands.execute(sessionId, `/debate-mode ${mode}`)
+        if (!result.ok) return `${result.error.message} (${result.error.code})`
+        if (result.value === undefined) return 'unknown command: /debate-mode'
         return null
       },
     }),

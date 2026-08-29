@@ -5,6 +5,12 @@ import { OrchestrationsPanel } from './OrchestrationsPanel.tsx'
 import { installOrchestrationStyles } from './styles.ts'
 
 export { OrchestrationsPanel } from './OrchestrationsPanel.tsx'
+export {
+  controlRlmAgents,
+  loadRlmAgentsDashboard,
+  RlmAgentsView,
+} from './RlmAgentsView.tsx'
+export type { BrowserRequest } from './RlmAgentsView.tsx'
 
 /** Browser services required by the durable orchestration surface. */
 export const inject = ['slots', 'connection']

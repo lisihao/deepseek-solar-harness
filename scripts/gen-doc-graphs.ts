@@ -252,6 +252,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Provides bounded session/workspace outcome context while the TaskGraph daemon remains the only orchestration state authority.',
   },
   {
+    key: 'debates',
+    pkg: 'debate',
+    title: 'Provider-neutral bounded debate seam',
+    mode: 'seam',
+    implementations: ['debate-local'],
+    note: 'Defines bounded roster, round, evidence, dissent, convergence, and control records; a TaskGraph or RLM Consumer remains responsible for execution ownership and capability selection.',
+  },
+  {
     key: 'continualHarnessSkills',
     pkg: 'continual-harness',
     title: 'Continuous Harness TypeScript skill registry',

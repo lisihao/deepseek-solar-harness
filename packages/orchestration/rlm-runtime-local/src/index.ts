@@ -9,6 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { writeFileAtomicSync } from '@deepseek-ai/dsh-atomic-write'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import RlmRuntimeService, {
+  RLM_TYPESCRIPT_REPL_TOOL_SCHEMA,
   RlmChildId,
   RlmCommandId,
   RlmRuntimeError,
@@ -17,6 +18,7 @@ import RlmRuntimeService, {
   type RlmCellResultV1,
   type RlmChildExecution,
   type RlmChildExecutionResult,
+  type RlmChildExecutionOptionsV1,
   type RlmChildHandleV1,
   type RlmChildSnapshotV1,
   type RlmChildSpawnRequest,
@@ -24,6 +26,14 @@ import RlmRuntimeService, {
   type RlmCompactRunOutcomeV1,
   type RlmCompactRunRequest,
   type RlmCompactRunResultV1,
+  type RlmControlAttachRequestV1,
+  type RlmControlAttachResultV1,
+  RlmControlCallerId,
+  type RlmControlDetachRequestV1,
+  type RlmControlDetachResultV1,
+  type RlmControlInputRequestV1,
+  type RlmControlInputResultV1,
+  RlmControlLeaseId,
   type RlmDrainResultV1,
   type RlmEventReadRequest,
   type RlmFamilyRosterV1,
@@ -58,11 +68,51 @@ const MAX_PENDING_MESSAGES_PER_SESSION = 20
 const MESSAGE_RATE_LIMIT_CAPACITY = 3
 const MESSAGE_RATE_LIMIT_REFILL_MS = 1_000
 const MAX_GOAL_OBJECTIVE_CHARS = 4_000
+const CONTROL_LEASE_RECLAIM_EVENT = 'rlm.control.lease_reclaimed'
+
+/** Live Providers in this process; persisted owner ids from a dead process are reclaimable. */
+const activeRuntimeOwners = new Map<string, Set<string>>()
+
+function registerRuntimeOwner(root: string, instanceId: string): void {
+  const owners = activeRuntimeOwners.get(root) ?? new Set<string>()
+  owners.add(instanceId)
+  activeRuntimeOwners.set(root, owners)
+}
+
+function unregisterRuntimeOwner(root: string, instanceId: string): void {
+  const owners = activeRuntimeOwners.get(root)
+  if (owners === undefined) return
+  owners.delete(instanceId)
+  if (owners.size === 0) activeRuntimeOwners.delete(root)
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM means the process exists but cannot be signalled. Invalid or
+    // missing PIDs are not live owners and therefore may be reclaimed.
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
 
 interface StoredSession {
   snapshot: RlmRuntimeSessionSnapshotV1
   context: Readonly<Record<string, RlmJsonValue>>
   variables: readonly PersistedVariable[]
+}
+
+interface StoredControlLease {
+  readonly version: 1
+  readonly sessionId: string
+  readonly leaseId: string
+  readonly callerId: string
+  readonly ownerInstanceId: string
+  readonly ownerPid: number
+  readonly acquiredAt: string
+  lastSeenAt: string
 }
 
 interface StoredReceipt {
@@ -93,7 +143,7 @@ interface StoreDocumentV2 extends Omit<StoreDocumentV1, 'version' | 'messages'> 
   heartbeats: RlmHeartbeatV1[]
 }
 
-interface StoreDocument {
+interface StoreDocumentV3 {
   readonly version: 3
   eventSequence: number
   sessions: StoredSession[]
@@ -101,6 +151,17 @@ interface StoreDocument {
   messages: RlmMessageV1[]
   events: RlmRuntimeEventV1[]
   heartbeats: RlmHeartbeatV1[]
+}
+
+interface StoreDocument {
+  readonly version: 4
+  eventSequence: number
+  sessions: StoredSession[]
+  receipts: StoredReceipt[]
+  messages: RlmMessageV1[]
+  events: RlmRuntimeEventV1[]
+  heartbeats: RlmHeartbeatV1[]
+  controlLeases: StoredControlLease[]
 }
 
 // Kept local so the persistent RLM state owner does not acquire a runtime
@@ -171,6 +232,8 @@ function runtimeErrorCode(value: string | undefined): ConstructorParameters<type
     case 'RLM_FAMILY_VIOLATION':
     case 'RLM_CELL_TIMEOUT':
     case 'RLM_OUTPUT_LIMIT':
+    case 'RLM_CONTROL_BUSY':
+    case 'RLM_CONTROL_LEASE_INVALID':
       return value
     default:
       return 'RLM_UNAVAILABLE'
@@ -180,6 +243,11 @@ function nonBlank(value: string, label: string): string {
   const result = value.trim()
   if (result.length === 0) throw new RlmRuntimeError(`${label} must be non-blank`, 'RLM_INVALID')
   return result
+}
+
+function controlText(value: unknown, label: string): string {
+  if (typeof value !== 'string') throw new RlmRuntimeError(`${label} must be a string`, 'RLM_INVALID')
+  return nonBlank(value, label)
 }
 
 interface PrimeRlmSpawnOptions {
@@ -270,6 +338,8 @@ function parseInterval(value: string | undefined): { readonly expression: string
 export class LocalRlmRuntime extends RlmRuntimeService {
   private readonly filename: string
   private readonly sessionsRoot: string
+  private readonly runtimeOwnerKey: string
+  private readonly runtimeInstanceId = `rlm-runtime-${randomUUID()}`
   private readonly bindings = new Map<string, RlmRuntimeHostBindings>()
   private readonly kernels = new Map<string, PersistentTypeScriptKernel>()
   private readonly kernelCommands = new Map<string, { cellCommandId: RlmCommandId; callOrdinal: number }>()
@@ -285,6 +355,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   constructor(ctx: Context, root: Config) {
     super(ctx)
+    this.runtimeOwnerKey = resolve(root)
     mkdirSync(root, { recursive: true, mode: 0o700 })
     chmodSync(root, 0o700)
     this.sessionsRoot = join(root, 'sessions')
@@ -292,6 +363,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     chmodSync(this.sessionsRoot, 0o700)
     this.filename = join(root, 'state.json')
     this.document = this.load()
+    registerRuntimeOwner(this.runtimeOwnerKey, this.runtimeInstanceId)
     const accountingStartedAt = Date.now()
     for (const session of this.document.sessions) {
       if (session.snapshot.goal?.status === 'active') this.goalAccountingStartedAt.set(String(session.snapshot.sessionId), accountingStartedAt)
@@ -312,6 +384,8 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     })
     ctx.effect(function* (this: LocalRlmRuntime) {
       yield async () => {
+        this.releaseOwnedControlLeases()
+        unregisterRuntimeOwner(this.runtimeOwnerKey, this.runtimeInstanceId)
         this.persistActiveGoalWallClock()
         for (const kernel of this.kernels.values()) kernel.dispose()
         this.kernels.clear()
@@ -349,6 +423,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       task: nonBlank(request.task, 'task'),
       model: request.model,
       ...request.defaultChildModel === undefined ? {} : { defaultChildModel: request.defaultChildModel },
+      ...request.executionOptions === undefined ? {} : { executionOptions: request.executionOptions },
       limits: request.limits,
       depth: 0,
       lifecycle: 'idle',
@@ -386,6 +461,163 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   inspect(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSnapshotV1> {
     return Promise.resolve(this.snapshotWithCurrentGoal(this.requireSession(sessionId)))
+  }
+
+  // oxlint-disable-next-line require-await -- Service validation must reject through its Promise contract.
+  async attach(request: RlmControlAttachRequestV1): Promise<RlmControlAttachResultV1> {
+    const session = this.requireSession(request.sessionId)
+    const callerId = controlText(request.callerId, 'control callerId')
+    const requestHash = sha256({
+      version: request.version,
+      sessionId: String(request.sessionId),
+      commandId: String(request.commandId),
+      callerId,
+    })
+    const duplicate = this.receipt<RlmControlAttachResultV1>(String(request.commandId), requestHash)
+    if (duplicate !== undefined) return duplicate
+
+    const timestamp = now()
+    const current = this.document.controlLeases.find(value => value.sessionId === String(request.sessionId))
+    let lease: StoredControlLease
+    if (current !== undefined && this.controlLeaseOwnerLive(current)) {
+      if (current.ownerInstanceId !== this.runtimeInstanceId || current.callerId !== callerId) {
+        throw new RlmRuntimeError(`RLM session already has an active control lease: ${String(request.sessionId)}`, 'RLM_CONTROL_BUSY')
+      }
+      current.lastSeenAt = timestamp
+      lease = current
+    } else {
+      lease = {
+        version: 1,
+        sessionId: String(request.sessionId),
+        leaseId: `rlm-control-${randomUUID()}`,
+        callerId,
+        ownerInstanceId: this.runtimeInstanceId,
+        ownerPid: process.pid,
+        acquiredAt: timestamp,
+        lastSeenAt: timestamp,
+      }
+      if (current === undefined) {
+        this.document.controlLeases.push(lease)
+        this.appendEvent(request.sessionId, 'rlm.control.attached', {
+          leaseId: lease.leaseId,
+          callerId: lease.callerId,
+        })
+      } else {
+        const index = this.document.controlLeases.indexOf(current)
+        this.document.controlLeases[index] = lease
+        this.appendEvent(request.sessionId, CONTROL_LEASE_RECLAIM_EVENT, {
+          leaseId: lease.leaseId,
+          previousLeaseId: current.leaseId,
+          callerId: lease.callerId,
+        })
+      }
+    }
+    const result = this.controlAttachResult(session, lease)
+    this.settleReceipt(String(request.commandId), requestHash, result, request.sessionId, 'control.attach')
+    this.persist()
+    return result
+  }
+
+  async input(request: RlmControlInputRequestV1): Promise<RlmControlInputResultV1> {
+    const session = this.requireSession(request.sessionId)
+    const leaseId = controlText(request.leaseId, 'control leaseId')
+    this.requireControlLease(request.sessionId, leaseId)
+    const text = controlText(request.text, 'control input')
+    if (text.length > MAX_MESSAGE_CHARS) throw new RlmRuntimeError(`RLM control input is too long: ${String(text.length)} chars exceeds ${String(MAX_MESSAGE_CHARS)}`, 'RLM_INVALID')
+    const mode = request.mode ?? 'auto'
+    const artifactRefs = [...new Set(request.artifactRefs ?? [])].sort()
+    const requestHash = sha256({
+      version: request.version,
+      sessionId: String(request.sessionId),
+      leaseId,
+      commandId: String(request.commandId),
+      text,
+      mode,
+      artifactRefs,
+    })
+    const duplicate = this.receipt<RlmControlInputResultV1>(String(request.commandId), requestHash)
+    if (duplicate !== undefined) return duplicate
+    const lease = this.requireControlLease(request.sessionId, leaseId)
+    const pending = this.document.messages.filter(message => message.toSessionId === request.sessionId && message.deliveryStatus === 'queued').length
+    if (pending >= MAX_PENDING_MESSAGES_PER_SESSION) throw new RlmRuntimeError(`RLM target has ${String(pending)} queued messages; limit is ${String(MAX_PENDING_MESSAGES_PER_SESSION)}`, 'RLM_BUDGET_EXCEEDED')
+    const targetBusy = this.activeExecutions.has(String(request.sessionId)) || session.snapshot.lifecycle === 'running'
+    const effectiveMode = mode === 'auto' ? targetBusy ? 'steer' as const : 'follow_up' as const : mode
+    const timestamp = now()
+    const message: RlmMessageV1 = {
+      version: 1,
+      commandId: request.commandId,
+      fromSessionId: request.sessionId,
+      toSessionId: request.sessionId,
+      mode,
+      text,
+      artifactRefs,
+      messageId: `rlm-control-message-${randomUUID()}`,
+      source: 'control',
+      controlLeaseId: RlmControlLeaseId(lease.leaseId),
+      effectiveMode,
+      deliveryStatus: 'queued',
+      queuedAt: timestamp,
+      createdAt: timestamp,
+    }
+    this.acceptReceipt(String(request.commandId), requestHash, request.sessionId, 'control.input')
+    this.document.messages.push(message)
+    lease.lastSeenAt = timestamp
+    this.appendEvent(request.sessionId, 'rlm.control.input.queued', {
+      commandId: String(request.commandId),
+      messageId: message.messageId,
+      effectiveMode,
+    })
+    this.persist()
+    await this.pumpMessages(request.sessionId)
+    const delivered = this.document.messages.find(value => value.messageId === message.messageId)
+    if (delivered === undefined) throw new RlmRuntimeError(`RLM control input disappeared: ${message.messageId}`, 'RLM_UNAVAILABLE')
+    const current = this.requireSession(request.sessionId).snapshot
+    const result: RlmControlInputResultV1 = {
+      version: 1,
+      sessionId: request.sessionId,
+      leaseId: RlmControlLeaseId(lease.leaseId),
+      commandId: request.commandId,
+      messageId: message.messageId,
+      effectiveMode: message.effectiveMode,
+      deliveryStatus: delivered.deliveryStatus,
+      stateRevision: current.stateRevision,
+      eventCursor: current.eventCursor,
+    }
+    this.settleReceipt(String(request.commandId), requestHash, result, request.sessionId, 'control.input')
+    this.persist()
+    return result
+  }
+
+  // oxlint-disable-next-line require-await -- Service validation must reject through its Promise contract.
+  async detach(request: RlmControlDetachRequestV1): Promise<RlmControlDetachResultV1> {
+    const session = this.requireSession(request.sessionId)
+    const leaseId = controlText(request.leaseId, 'control leaseId')
+    const requestHash = sha256({
+      version: request.version,
+      sessionId: String(request.sessionId),
+      leaseId,
+      commandId: String(request.commandId),
+    })
+    const duplicate = this.receipt<RlmControlDetachResultV1>(String(request.commandId), requestHash)
+    if (duplicate !== undefined) return duplicate
+    const current = this.document.controlLeases.find(value => value.sessionId === String(request.sessionId))
+    if (current !== undefined && current.leaseId !== leaseId) {
+      throw new RlmRuntimeError(`RLM control lease is not current for session: ${String(request.sessionId)}`, 'RLM_CONTROL_LEASE_INVALID')
+    }
+    if (current !== undefined) {
+      this.document.controlLeases.splice(this.document.controlLeases.indexOf(current), 1)
+      this.appendEvent(request.sessionId, 'rlm.control.detached', { leaseId })
+    }
+    const result: RlmControlDetachResultV1 = {
+      version: 1,
+      sessionId: request.sessionId,
+      leaseId: RlmControlLeaseId(leaseId),
+      detached: true,
+      eventCursor: session.snapshot.eventCursor,
+    }
+    this.settleReceipt(String(request.commandId), requestHash, result, request.sessionId, 'control.detach')
+    this.persist()
+    return result
   }
 
   inspectReceipt(commandId: RlmCommandId): Promise<RlmCommandReceiptSnapshotV1> {
@@ -530,14 +762,9 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       socketPath: this.bridgeSocketPath,
       sessionId: String(sessionId),
       tools: [{
-        name: 'typescript_repl',
-        description: 'Execute one TypeScript cell in the persistent RLM namespace. Use context as programmable state; await rlm(task, { name, model }) to admit asynchronous child agents. rlm returns only a handle. Results arrive through agentMessage or artifacts.',
-        inputSchema: {
-          type: 'object',
-          properties: { code: { type: 'string', description: 'TypeScript cell with persistent lexical variables and top-level await.' } },
-          required: ['code'],
-          additionalProperties: false,
-        },
+        name: RLM_TYPESCRIPT_REPL_TOOL_SCHEMA.name,
+        description: RLM_TYPESCRIPT_REPL_TOOL_SCHEMA.description,
+        inputSchema: RLM_TYPESCRIPT_REPL_TOOL_SCHEMA.parameters,
       }],
     }
   }
@@ -603,6 +830,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       parentSessionId: parent.snapshot.sessionId, parentChildId: childId,
       workspace: parent.snapshot.workspace, sessionDir, task, model,
       ...parent.snapshot.defaultChildModel === undefined ? {} : { defaultChildModel: parent.snapshot.defaultChildModel },
+      ...parent.snapshot.executionOptions === undefined ? {} : { executionOptions: parent.snapshot.executionOptions },
       limits: parent.snapshot.limits, depth,
       lifecycle: 'idle', stateRevision: 0, eventCursor: this.document.eventSequence, children: [],
       restorableVariables: [], degradedVariables: [], createdAt, updatedAt: createdAt,
@@ -614,7 +842,10 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     this.appendEvent(parent.snapshot.sessionId, 'rlm.child.accepted', { childId: String(childId), childSessionId: String(childSessionId), name, depth }, childId)
     this.persist()
     try {
-      const execution = await bindings.dispatchChild({ ...request, name, task, childId, childSessionId, depth, model })
+      const executionOptions: RlmChildExecutionOptionsV1 = parent.snapshot.executionOptions ?? { version: 1 }
+      const execution = await bindings.dispatchChild({
+        ...request, name, task, childId, childSessionId, depth, model, executionOptions,
+      })
       await this.trackExecution(childSessionId, execution)
       this.replaceChild(parent.snapshot.sessionId, childId, {
         lifecycle: 'running', nativeSessionId: execution.nativeSessionId, nativeTurnId: execution.nativeTurnId, updatedAt: now(),
@@ -1139,6 +1370,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
           source: 'heartbeat',
           deliveryMode: claim.heartbeat.deliveryMode,
           model: session.snapshot.model,
+          executionOptions: session.snapshot.executionOptions ?? { version: 1 },
         })
         admitted += 1
         this.appendEvent(claim.heartbeat.sessionId, 'rlm.heartbeat.running', {
@@ -1324,17 +1556,23 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       skill: async (method, params) => {
         const bindings = this.bindings.get(key)
         if (bindings?.hostRequest === undefined) throw new RlmRuntimeError(`RLM host does not provide ${method}`, 'RLM_UNAVAILABLE')
-        if (method === 'skills.call') {
-          const skillAlias = params.alias
-          const argumentsValue = params.args
-          if (typeof skillAlias !== 'string'
-            || skillAlias.length > 128
-            || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(skillAlias)) {
-            throw new RlmRuntimeError('skills.call requires a Host-issued managed skill alias, not a module path', 'RLM_INVALID')
-          }
-          if (argumentsValue === null || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) {
-            throw new RlmRuntimeError('skills.call requires a JSON object of arguments', 'RLM_INVALID')
-          }
+        const inheritedSkills = session.snapshot.executionOptions?.skills ?? []
+        if (method === 'skills.list') {
+          return inheritedSkills.map(({ alias, title, callable, available }) => ({ alias, title, callable, available }))
+        }
+        const skillAlias = params.alias
+        const argumentsValue = params.args
+        if (typeof skillAlias !== 'string'
+          || skillAlias.length > 128
+          || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(skillAlias)) {
+          throw new RlmRuntimeError('skills.call requires a Host-issued managed skill alias, not a module path', 'RLM_INVALID')
+        }
+        if (argumentsValue === null || typeof argumentsValue !== 'object' || Array.isArray(argumentsValue)) {
+          throw new RlmRuntimeError('skills.call requires a JSON object of arguments', 'RLM_INVALID')
+        }
+        const inherited = inheritedSkills.find(skill => skill.alias === skillAlias)
+        if (inherited === undefined || !inherited.available) {
+          throw new RlmRuntimeError(`managed skill is absent from the sealed parent execution: ${skillAlias}`, 'RLM_INVALID')
         }
         return bindings.hostRequest({ sessionId: session.snapshot.sessionId, method, params })
       },
@@ -1465,11 +1703,14 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         })[0]
       if (message === undefined) return 0
       try {
+        const instructionPrefix = message.source === 'control'
+          ? 'Controller input:'
+          : `Agent message from ${String(message.fromSessionId)}:`
         const execution = await bindings.dispatchContinuation({
           sessionId,
           commandId: RlmCommandId(`${message.messageId}:deliver`),
           instruction: [
-            `Agent message from ${String(message.fromSessionId)}:`,
+            instructionPrefix,
             message.text,
             ...message.artifactRefs === undefined || message.artifactRefs.length === 0
               ? []
@@ -1478,6 +1719,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
           source: 'message',
           deliveryMode: message.effectiveMode,
           model: session.snapshot.model,
+          executionOptions: session.snapshot.executionOptions ?? { version: 1 },
         })
         const { deliveryError: _deliveryError, ...messageWithoutError } = message
         const delivered: RlmMessageV1 = {
@@ -1708,6 +1950,51 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     return session
   }
 
+  private controlLeaseOwnerLive(lease: StoredControlLease): boolean {
+    if (lease.ownerInstanceId === this.runtimeInstanceId) return true
+    if (activeRuntimeOwners.get(this.runtimeOwnerKey)?.has(lease.ownerInstanceId) === true) return true
+    return processIsAlive(lease.ownerPid)
+  }
+
+  private requireControlLease(sessionId: RlmRuntimeSessionId, leaseId: string): StoredControlLease {
+    const lease = this.document.controlLeases.find(value => value.sessionId === String(sessionId))
+    if (lease === undefined || lease.leaseId !== leaseId) {
+      throw new RlmRuntimeError(`RLM control lease is not active for session: ${String(sessionId)}`, 'RLM_CONTROL_LEASE_INVALID')
+    }
+    return lease
+  }
+
+  private controlAttachResult(session: StoredSession, lease: StoredControlLease): RlmControlAttachResultV1 {
+    const snapshot = this.snapshotWithCurrentGoal(session)
+    return {
+      version: 1,
+      lease: {
+        version: 1,
+        leaseId: RlmControlLeaseId(lease.leaseId),
+        sessionId: session.snapshot.sessionId,
+        callerId: RlmControlCallerId(lease.callerId),
+        acquiredAt: lease.acquiredAt,
+        lastSeenAt: lease.lastSeenAt,
+      },
+      snapshot,
+      eventCursor: snapshot.eventCursor,
+    }
+  }
+
+  private releaseOwnedControlLeases(): void {
+    const owned = this.document.controlLeases.filter(value => value.ownerInstanceId === this.runtimeInstanceId)
+    if (owned.length === 0) return
+    this.document.controlLeases = this.document.controlLeases.filter(value => value.ownerInstanceId !== this.runtimeInstanceId)
+    for (const lease of owned) {
+      this.appendEvent(RlmRuntimeSessionId(lease.sessionId), 'rlm.control.detached', {
+        leaseId: lease.leaseId,
+        callerId: lease.callerId,
+        reason: 'runtime_disposed',
+      })
+    }
+    this.persist()
+  }
+
   private updateSession(session: StoredSession, patch: Partial<RlmRuntimeSessionSnapshotV1>): void {
     session.snapshot = { ...session.snapshot, ...patch, updatedAt: now(), eventCursor: this.document.eventSequence }
   }
@@ -1807,19 +2094,20 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   private load(): StoreDocument {
     try {
-      const parsed = JSON.parse(readFileSync(this.filename, 'utf8')) as StoreDocument | StoreDocumentV2 | StoreDocumentV1
+      const parsed = JSON.parse(readFileSync(this.filename, 'utf8')) as StoreDocument | StoreDocumentV3 | StoreDocumentV2 | StoreDocumentV1
       // Durable JSON is an untrusted boundary; supported historical shapes are validated before migration.
       // oxlint-disable typescript/no-unnecessary-condition
-      if ((parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3)
+      if ((parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4)
         || !Array.isArray(parsed.sessions) || !Array.isArray(parsed.receipts)
         || !Array.isArray(parsed.messages) || !Array.isArray(parsed.events) || !Number.isSafeInteger(parsed.eventSequence)
-        || (parsed.version !== 1 && !Array.isArray(parsed.heartbeats))) {
+        || (parsed.version !== 1 && !Array.isArray(parsed.heartbeats))
+        || (parsed.version === 4 && !Array.isArray(parsed.controlLeases))) {
         throw new RlmRuntimeError('RLM runtime state has an unsupported shape', 'RLM_UNAVAILABLE')
       }
       const loadedAt = now()
       return {
         ...parsed,
-        version: 3,
+        version: 4,
         sessions: parsed.sessions.map((session) => {
           const goal = normalizedGoal(session.snapshot.goal, loadedAt)
           return {
@@ -1840,10 +2128,22 @@ export class LocalRlmRuntime extends RlmRuntimeService {
           }
         }),
         heartbeats: parsed.version === 1 ? [] : parsed.heartbeats,
+        controlLeases: parsed.version === 4 ? parsed.controlLeases.map((lease) => {
+          if (lease === null || typeof lease !== 'object' || Array.isArray(lease)) {
+            throw new RlmRuntimeError('RLM control lease has an unsupported shape', 'RLM_UNAVAILABLE')
+          }
+          const value = lease as Partial<StoredControlLease>
+          if (value.version !== 1 || typeof value.sessionId !== 'string' || typeof value.leaseId !== 'string'
+            || typeof value.callerId !== 'string' || typeof value.ownerInstanceId !== 'string'
+            || !Number.isSafeInteger(value.ownerPid) || typeof value.acquiredAt !== 'string' || typeof value.lastSeenAt !== 'string') {
+            throw new RlmRuntimeError('RLM control lease has an unsupported shape', 'RLM_UNAVAILABLE')
+          }
+          return { ...value, version: 1 } as StoredControlLease
+        }) : [],
       }
       // oxlint-enable typescript/no-unnecessary-condition
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 3, eventSequence: 0, sessions: [], receipts: [], messages: [], events: [], heartbeats: [] }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 4, eventSequence: 0, sessions: [], receipts: [], messages: [], events: [], heartbeats: [], controlLeases: [] }
       throw error
     }
   }

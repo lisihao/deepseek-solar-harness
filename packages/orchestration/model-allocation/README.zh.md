@@ -6,6 +6,18 @@
 
 本包没有模型可见面；编排 Consumer 会把选定计划保存为已封存执行工件和有界事件。
 
+## Adaptive execution preference
+
+`ModelAllocationRequest` 可以携带 `adaptiveExecutionPreference`，包括 `version: 1`、`executionRisk`（`low`、`medium` 或 `high`）、非负的 `priorFailures` 计数和可选的 `crossDomain` 标记。该字段出现时，单个编程执行请求启用一个小而确定性的策略：
+
+- 低风险且首次执行优先 Codex Luna；
+- 中/高风险、跨域工作或此前已有失败优先 Codex Terra；
+- 目标模型族缺席时回到现有评分，不失败，也不静默伪造模型。
+
+Planning 与 verification 可以明确优先 Codex Sol、Claude Opus/Fable，或当前可用的最佳高阶 Offer。Execution 可以选择 Codex Luna/Terra 自适应路线、Claude Sonnet，或 Provider 中立评分。Adaptive 提示不会绕过配额准入、原生订阅优先或计费 API 最后兜底规则；省略提示时会严格保持已选择的执行策略。
+
+Provider 应在不可信边界调用 `validateAdaptiveExecutionPreference`。未知字段、错误版本、非有限/非整数的失败计数和无效风险值都会 fail closed。
+
 ## 模型体验
 
 无直接影响，因为本 seam 不直接贡献模型可见内容。

@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 Provider-neutral Continuous Harness seam. It snapshots bounded entries for a TaskGraph node and manages versioned prompt addenda, memories, TypeScript skills, and subagent definitions. It is not another Scheduler, model provider, or transcript store.
 
-Managed entries use optimistic concurrency in session-local, workspace, or user-global scope. The global scope has one stable identity under the owner's DSH home, so the same entry is visible across repositories without being copied into either workspace. Refinement planning does not mutate the active harness; apply runs at a declared turn boundary, reports each edit independently, and records only successful edits for explicit rollback. The immutable base prompt cannot be changed.
+Managed entries use optimistic concurrency in session-local, workspace, or user-global scope. Read operations with no explicit scope resolve an overlay in `session` → normalized `workspace` → user-global order; a narrower entry id shadows the same id at a broader scope, while an explicit scope remains exact. Writes with no explicit scope remain session-local. The global scope has one stable identity under the owner's DSH home, so the same entry is visible across repositories without being copied into either workspace. Refinement planning does not mutate the active harness; apply runs at a declared turn boundary, reports each edit independently, and records only successful edits for explicit rollback. The immutable base prompt cannot be changed.
 
 The Scheduler consumes only immutable snapshots and records bounded Evidence references after settlement.
 

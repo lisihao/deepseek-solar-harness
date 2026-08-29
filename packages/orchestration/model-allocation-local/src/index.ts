@@ -3,6 +3,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import ModelAllocationService, {
   ModelAllocationError,
+  validateAdaptiveExecutionPreference,
+  type AdaptiveExecutionPreferenceV1,
   type ModelAllocationPlan,
   type ModelAllocationRequest,
   type ModelExecutionOffer,
@@ -67,23 +69,59 @@ function isCodingExecution(request: ModelAllocationRequest): boolean {
     .test(`${request.role} ${request.task}`.toLowerCase())
 }
 
-function codexFamily(offer: ModelExecutionOffer, family: 'sol' | 'luna'): boolean {
+function adaptiveTarget(
+  request: ModelAllocationRequest,
+  preference: AdaptiveExecutionPreferenceV1 | undefined,
+): 'luna' | 'terra' | undefined {
+  if (preference === undefined || !isCodingExecution(request)) return undefined
+  const escalated = preference.executionRisk !== 'low'
+    || preference.priorFailures > 0
+    || preference.crossDomain === true
+  return escalated ? 'terra' : 'luna'
+}
+
+function codexFamily(offer: ModelExecutionOffer, family: 'sol' | 'luna' | 'terra'): boolean {
   return offer.provider === 'codex'
     && new RegExp(`(?:^|[._-])${family}(?:$|[._-])`, 'u').test(offer.model.toLowerCase())
+}
+
+function claudeFamily(offer: ModelExecutionOffer, family: 'frontier' | 'sonnet'): boolean {
+  if (offer.provider !== 'claude-code') return false
+  const model = `${offer.model} ${offer.displayName}`.toLowerCase()
+  return family === 'frontier'
+    ? /(?:^|[ ._-])(opus|fable)(?:$|[ ._-])/u.test(model)
+    : /(?:^|[ ._-])sonnet(?:$|[ ._-])/u.test(model)
 }
 
 function policyCandidates(
   candidates: readonly ModelExecutionOffer[],
   request: ModelAllocationRequest,
+  adaptivePreference: AdaptiveExecutionPreferenceV1 | undefined,
 ): readonly ModelExecutionOffer[] {
   if ((request.phase === 'planning' || request.phase === 'verification')
     && request.plannerVerifierPreference === 'codex-sol') {
     const sol = candidates.filter(offer => offer.tier === 'high' && codexFamily(offer, 'sol'))
     if (sol.length > 0) return sol
   }
+  if ((request.phase === 'planning' || request.phase === 'verification')
+    && request.plannerVerifierPreference === 'claude-frontier') {
+    const frontier = candidates.filter(offer => offer.tier === 'high' && claudeFamily(offer, 'frontier'))
+    if (frontier.length > 0) return frontier
+  }
+  const target = request.executionPreference === 'claude-sonnet'
+    ? undefined
+    : adaptiveTarget(request, adaptivePreference)
+  if (target !== undefined) {
+    const preferred = candidates.filter(offer => codexFamily(offer, target))
+    if (preferred.length > 0) return preferred
+  }
   if (request.executionPreference === 'luna-first' && isCodingExecution(request)) {
     const luna = candidates.filter(offer => codexFamily(offer, 'luna'))
     if (luna.length > 0) return luna
+  }
+  if (request.executionPreference === 'claude-sonnet' && request.phase === 'execution') {
+    const sonnet = candidates.filter(offer => claudeFamily(offer, 'sonnet'))
+    if (sonnet.length > 0) return sonnet
   }
   return candidates
 }
@@ -134,6 +172,9 @@ function suggestedParallelism(request: ModelAllocationRequest, qualified: readon
 /** Public deterministic Provider, separately mountable from the Scheduler. */
 export class SubscriptionFirstModelAllocation extends ModelAllocationService {
   allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan> {
+    const adaptivePreference = request.adaptiveExecutionPreference === undefined
+      ? undefined
+      : validateAdaptiveExecutionPreference(request.adaptiveExecutionPreference)
     const qualified = request.offers.filter(offer => offer.available && quotaAdmitted(offer))
     const explicitQualified = request.preferredOperatorIds.length === 0
       ? qualified
@@ -165,13 +206,16 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
     const qualityCandidates = requiresHighTier && candidates.some(offer => offer.tier === 'high')
       ? candidates.filter(offer => offer.tier === 'high')
       : candidates
-    const routedCandidates = policyCandidates(qualityCandidates, request)
+    const routedCandidates = policyCandidates(qualityCandidates, request, adaptivePreference)
     const nowSeconds = Math.floor(Date.parse(request.now) / 1_000)
     const [selected] = [...routedCandidates].sort((left, right) => {
       const difference = score(right, request, nowSeconds) - score(left, request, nowSeconds)
       return difference === 0 ? left.offerId.localeCompare(right.offerId) : difference
     })
     if (selected === undefined) throw new ModelAllocationError('no qualified model execution capacity is available', 'NO_MODEL_CAPACITY')
+    const adaptiveTargetModel = adaptiveTarget(request, adaptivePreference)
+    const adaptiveTargetAvailable = adaptiveTargetModel !== undefined
+      && candidates.some(offer => codexFamily(offer, adaptiveTargetModel))
     const urgentCapacity = candidates.filter(offer => offer.quotaPool !== undefined
       && offer.quotaGuard?.accelerateBeforeReset !== false && (
       resetUrgency(offer.quotaPool.primary, nowSeconds) > 0 || resetUrgency(offer.quotaPool.secondary, nowSeconds) > 0
@@ -192,9 +236,20 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
         ...request.plannerVerifierPreference === 'codex-sol' && codexFamily(selected, 'sol')
           ? ['codex-sol-planner-verifier']
           : [],
+        ...request.plannerVerifierPreference === 'claude-frontier' && claudeFamily(selected, 'frontier')
+          ? ['claude-frontier-planner-verifier']
+          : [],
         ...request.executionPreference === 'luna-first' && codexFamily(selected, 'luna')
           ? ['codex-luna-worker']
           : [],
+        ...request.executionPreference === 'claude-sonnet' && claudeFamily(selected, 'sonnet')
+          ? ['claude-sonnet-worker']
+          : [],
+        ...adaptiveTargetModel !== undefined && codexFamily(selected, adaptiveTargetModel)
+          ? [`adaptive-codex-${adaptiveTargetModel}-${adaptiveTargetModel === 'luna' ? 'low-risk' : 'escalated'}`]
+          : adaptiveTargetModel !== undefined && !adaptiveTargetAvailable
+            ? [`adaptive-${adaptiveTargetModel}-unavailable-fallback`]
+            : [],
         ...selected.quotaPool === undefined ? [] : [`quota-pool:${selected.quotaPool.poolId}`],
         ...selected.quotaGuard === undefined || selected.quotaGuard.protectedRemainingPercent === 0
           ? []

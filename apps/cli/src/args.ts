@@ -220,10 +220,10 @@ export function parseDshArgs(argv: readonly string[], version: string): DshInvoc
   const resident = program.command('resident').description('manage and inspect the local resident physical-operator daemon')
   resident
     .allowUnknownOption()
-    .argument('[args...]', 'resident command and arguments (list, inspect, attach, interrupt, reset, daemon)')
+    .argument('[args...]', 'resident command and arguments (authenticate, list, inspect, attach, interrupt, reset, daemon)')
     .action((args: string[]) => {
       rejectParentOptions('resident')
-      if (args.length === 0) program.error('error: resident needs a command (list, inspect, attach, interrupt, reset, resolve-indeterminate, daemon)')
+      if (args.length === 0) program.error('error: resident needs a command (authenticate, list, inspect, attach, interrupt, reset, resolve-indeterminate, daemon)')
       resolved = { mode: 'resident', args }
     })
 

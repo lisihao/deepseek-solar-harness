@@ -74,6 +74,9 @@ flowchart LR
   pkg_continual_harness["continual-harness"]
   svc_continualHarness["ctx.continualHarness<br/>Continuous Harness snapshot and outcome seam"]
   pkg_continual_harness_local["continual-harness-local"]
+  pkg_debate["debate"]
+  svc_debates["ctx.debates<br/>Provider-neutral bounded debate seam"]
+  pkg_debate_local["debate-local"]
   svc_continualHarnessSkills["ctx.continualHarnessSkills<br/>Continuous Harness TypeScript skill registry"]
   pkg_model_allocation["model-allocation"]
   svc_modelAllocation["ctx.modelAllocation<br/>Quota-aware model allocation seam"]
@@ -259,6 +262,8 @@ flowchart LR
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
   pkg_credentials_local --> svc_credentials
+  pkg_debate --> svc_debates
+  pkg_debate_local --> svc_debates
   pkg_directory_picker --> svc_directoryPicker
   pkg_directory_picker_browse --> svc_directoryPicker
   pkg_directory_picker_native --> svc_directoryPicker
@@ -505,6 +510,7 @@ flowchart LR
 | `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 在 token、溯源、脱敏和降级策略下投影认证过的来源，但不成为事实源。 |
 | `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | 在 Graph Certificate 下晚绑定内容寻址的能力 Manifest；绑定只能实现或缩小权限。 |
 | `ctx.continualHarness` | `seam` | [`continual-harness`](../packages/orchestration/continual-harness) | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 提供有界的会话／工作区结果上下文，TaskGraph daemon 仍是唯一编排状态权威。 |
+| `ctx.debates` | `seam` | [`debate`](../packages/orchestration/debate) | [`debate-local`](../packages/orchestration/debate-local) | - | - | 定义有界议程、回合、证据、异议、收敛和控制记录；TaskGraph 或 RLM Consumer 仍负责执行所有权和能力选择。 |
 | `ctx.continualHarnessSkills` | `core` | [`continual-harness`](../packages/orchestration/continual-harness) | - | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | - | 注册可信 TypeScript 模块，并且只调用明确允许的模块／可调用项组合；生成的 Harness 内容不能在运行时创建可执行代码。 |
 | `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 选择合格的订阅优先执行 Offer 并建议并行度，但不派发任务。 |
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 注册与 Provider 无关的一次性模型通道；计费 DeepSeek Provider 仍是最后兜底执行路径。 |

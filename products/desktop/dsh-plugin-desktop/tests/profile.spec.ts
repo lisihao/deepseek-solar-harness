@@ -91,6 +91,10 @@ describe('desktop profile composition', () => {
       name: '@deepseek-ai/dsh-orchestration-local',
       config: expect.objectContaining({ autoStart: true }),
     }))
+    expect(rows.find(row => row.id === 'connection')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-client-connection',
+      inject: ['webRuntime', 'webStartup', 'residentOperators', 'orchestrations'],
+    }))
     expect(rows.find(row => row.id === 'ui-remote-modules')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-client-ui-remote-modules',
       disabled: false,
@@ -115,6 +119,22 @@ describe('desktop profile composition', () => {
       'desktop-profiles',
       'desktop-updates',
     ]) expect(rowIds).not.toContain(desktopRow)
+  })
+
+  it('selects the native Codex operator by default on Desktop and Product Server', () => {
+    const home = temporaryHome()
+    const desktopRows = composeEntries([prepareDesktopProfile(undefined, home, 'darwin').patches])
+    const serverRows = composeEntries([prepareProductServerProfile(undefined, home, 'darwin').patches])
+
+    for (const rows of [desktopRows, serverRows]) {
+      expect(rows.find(row => row.id === 'agent-default-model')).toEqual(expect.objectContaining({
+        name: '@deepseek-ai/dsh-agent-default-model',
+        config: {
+          provider: 'dsh-physical-operator',
+          model: 'codex',
+        },
+      }))
+    }
   })
 
   it('keeps the Product Server compatibility layout when Desktop settings request advanced', () => {
@@ -143,6 +163,7 @@ describe('desktop profile composition', () => {
     const adapterRows = new Set([
       'webserver',
       'web-runtime',
+      'connection',
       'directory-picker',
       'desktop-shell',
       'desktop-terminal',

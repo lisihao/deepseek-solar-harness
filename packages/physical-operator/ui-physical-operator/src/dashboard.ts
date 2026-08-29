@@ -1,4 +1,4 @@
-/** Read-only Resident Operator projection served to the local Desktop renderer. */
+/** Resident Operator projection and explicit owner-local authentication action. */
 
 import type { ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
@@ -68,7 +68,7 @@ async function assembleResidentDashboard(
 }
 
 /**
- * Register the authenticated read-only route for the Resident browser panel.
+ * Register the authenticated Resident route for projection and explicit owner-local login.
  * @param ctx - Host context carrying Web Server, Remote Auth, and Resident services.
  * @returns a disposer that unregisters the route.
  */
@@ -85,12 +85,35 @@ export function registerResidentDashboard(ctx: Context): () => void {
         })
         return
       }
+      const url = new URL(request.url ?? RESIDENT_DASHBOARD_PATH, 'http://127.0.0.1')
+      if (request.method === 'POST') {
+        if (!authority.local) {
+          sendJson(response, 403, { error: 'LOCAL_OWNER_REQUIRED' })
+          return
+        }
+        const operatorId = url.searchParams.get('operator_id')
+        if (operatorId === null || operatorId.trim().length === 0) {
+          sendJson(response, 400, { error: 'OPERATOR_ID_REQUIRED' })
+          return
+        }
+        try {
+          const provider = await ctx.residentOperators.authenticate(operatorId)
+          providerCache = undefined
+          sendJson(response, 200, { provider: providerValue(provider) })
+        } catch (cause) {
+          ctx.logger.warn(cause)
+          sendJson(response, 503, {
+            error: 'RESIDENT_AUTHENTICATION_FAILED',
+            message: cause instanceof Error ? cause.message : String(cause),
+          })
+        }
+        return
+      }
       if (request.method !== 'GET') {
-        response.writeHead(405, { Allow: 'GET' })
+        response.writeHead(405, { Allow: 'GET, POST' })
         response.end()
         return
       }
-      const url = new URL(request.url ?? RESIDENT_DASHBOARD_PATH, 'http://127.0.0.1')
       const sessionId = url.searchParams.get('session_id') ?? undefined
       try {
         const [providers, sessions] = await Promise.all([
@@ -129,6 +152,9 @@ function providerValue(provider: ResidentProviderStatus): DesktopResidentProvide
       quotaUnavailableReason: provider.quotaUnavailableReason,
     },
     authentication: provider.authentication,
+    ...provider.supportsExplicitAuthentication === undefined ? {} : {
+      supportsExplicitAuthentication: provider.supportsExplicitAuthentication,
+    },
     productVersion: provider.productVersion,
     models: provider.models.map(model => ({
       model: model.model,

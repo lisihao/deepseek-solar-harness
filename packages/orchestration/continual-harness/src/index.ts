@@ -5,6 +5,11 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 
 /** Durable scope used to select Continuous Harness entries. */
 export type ContinualHarnessScope = 'session' | 'workspace' | 'global'
+/** One scope identity selected by an explicit request or automatic fallback. */
+export interface ContinualHarnessScopeRefV1 {
+  readonly scope: ContinualHarnessScope
+  readonly scopeId: string
+}
 /** Supported bounded entry categories. */
 export type ContinualHarnessEntryKind = 'instruction' | 'memory' | 'skill' | 'subagent-pattern' | 'outcome'
 /** Prime-compatible mutable harness entry categories. */
@@ -77,7 +82,13 @@ export interface ContinualHarnessManagedEntryV2 {
   readonly digest: string
 }
 
-/** Resolve the durable scope identity for managed harness operations. */
+/**
+ * Resolve the durable scope identity for managed harness operations.
+ *
+ * An omitted scope is automatic for reads (`session` → `workspace` → `global`)
+ * and remains session-local for writes, preserving the original CRUD default.
+ * Supplying a scope always selects exactly that scope.
+ */
 export interface ContinualHarnessScopeRequest {
   readonly workspace: string
   readonly sessionId?: string
@@ -219,7 +230,8 @@ export interface ContinualHarnessRollbackRequest extends ContinualHarnessScopeRe
 export interface ContinualHarnessSnapshotRequest {
   readonly workspace: string
   readonly sessionId?: string
-  readonly scope: ContinualHarnessScope
+  /** Omission enables the session → normalized workspace → user-global chain. */
+  readonly scope?: ContinualHarnessScope
   readonly role: string
   readonly task: string
   readonly limit: number
@@ -234,6 +246,8 @@ export interface ContinualHarnessSnapshotV1 {
   readonly entries: readonly ContinualHarnessEntryV1[]
   /** Active Prime-style prompt, memory, skill, and subagent definitions. */
   readonly managedEntries: readonly ContinualHarnessManagedEntryV2[]
+  /** Scope order considered for an automatic snapshot; explicit requests contain one item. */
+  readonly scopeChain?: readonly ContinualHarnessScopeRefV1[]
   readonly generatedAt: string
   readonly snapshotSha256: string
 }

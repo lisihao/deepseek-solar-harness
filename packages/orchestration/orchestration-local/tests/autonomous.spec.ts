@@ -8,6 +8,7 @@ import {
   autonomousLimitReason,
   createAutonomousState,
   DEFAULT_AUTONOMOUS_LIMITS,
+  evaluateAutonomousEndCondition,
   nextAutonomousDecision,
   resolveAutonomousPolicy,
 } from '../src/autonomous.ts'
@@ -44,6 +45,125 @@ async function gitWorkspace(): Promise<string> {
 }
 
 describe('Prime-compatible Autonomous host policy', () => {
+  it('evaluates acceptance, artifact, and evaluator checks with explicit round status', async () => {
+    const condition = {
+      version: 1 as const,
+      operator: 'all' as const,
+      checks: [
+        { id: 'acceptance', kind: 'acceptance' as const, ref: 'tests' },
+        { id: 'artifact', kind: 'artifact-present' as const, ref: 'report' },
+        { id: 'review', kind: 'evaluator' as const, ref: 'quality.review' },
+      ],
+    }
+    const evaluatorRounds: number[] = []
+    const passed = await evaluateAutonomousEndCondition(condition, {
+      acceptance: { tests: 'pass' },
+      artifacts: { report: 'pass' },
+    }, 2, {
+      'quality.review': ({ round }) => {
+        evaluatorRounds.push(round)
+        return 'pass'
+      },
+    })
+    expect(passed).toMatchObject({ version: 1, round: 2, status: 'pass', reason: 'all_checks_passed' })
+    expect(passed.checks.map(check => check.status)).toEqual(['pass', 'pass', 'pass'])
+    expect(evaluatorRounds).toEqual([2])
+
+    await expect(evaluateAutonomousEndCondition(condition, {
+      acceptance: { tests: 'fail' },
+      artifacts: { report: 'pass' },
+      evaluators: { 'quality.review': 'pass' },
+    }, 3)).resolves.toMatchObject({ status: 'fail', reason: 'one_or_more_checks_failed', round: 3 })
+
+    await expect(evaluateAutonomousEndCondition(condition, {
+      acceptance: { tests: 'pass' },
+      artifacts: { report: 'pass' },
+    }, 4)).resolves.toMatchObject({ status: 'unknown', reason: 'one_or_more_checks_unknown', round: 4 })
+  })
+
+  it('supports any conditions without allowing an unknown result to pass', async () => {
+    const condition = {
+      version: 1 as const,
+      operator: 'any' as const,
+      checks: [
+        { id: 'first', kind: 'evaluator' as const, ref: 'first' },
+        { id: 'second', kind: 'evaluator' as const, ref: 'second' },
+      ],
+    }
+    await expect(evaluateAutonomousEndCondition(condition, { evaluators: { first: 'fail', second: 'unknown' } }))
+      .resolves.toMatchObject({ status: 'unknown' })
+    await expect(evaluateAutonomousEndCondition(condition, { evaluators: { first: 'fail', second: 'fail' } }))
+      .resolves.toMatchObject({ status: 'fail' })
+  })
+
+  it('fails closed for invalid condition versions, check limits, and evaluator results', async () => {
+    const check = { id: 'done', kind: 'evaluator' as const, ref: 'done' }
+    await expect(evaluateAutonomousEndCondition({ version: 2 as 1, operator: 'all', checks: [check] }, {}))
+      .rejects.toThrow('version must be 1')
+    await expect(evaluateAutonomousEndCondition({
+      version: 1,
+      operator: 'all',
+      checks: Array.from({ length: 17 }, (_, index) => ({ ...check, id: `done-${String(index)}` })),
+    }, {})).rejects.toThrow('1 through 16')
+    await expect(evaluateAutonomousEndCondition({ version: 1, operator: 'all', checks: [check] }, {}, 1, {
+      done: () => 'invalid' as never,
+    })).rejects.toThrow('invalid status')
+  })
+
+  it('uses a task-specific condition as the only successful terminal evidence', async () => {
+    const policy = resolveAutonomousPolicy({
+      mode: 'enabled',
+      endCondition: {
+        version: 1,
+        operator: 'all',
+        checks: [{ id: 'done', kind: 'acceptance', ref: 'done' }],
+      },
+    }, undefined, true)
+    const initial = createAutonomousState(policy)
+    const failed = await nextAutonomousDecision(policy, initial, await gitWorkspace(), undefined, new Date(), {
+      acceptance: { done: 'fail' },
+    })
+    expect(failed).toMatchObject({ action: 'continue', reason: 'end_condition_failed' })
+    if (failed.action !== 'continue') throw new Error('expected continuation')
+    const unknownAtLimit = await nextAutonomousDecision(policy, {
+      ...failed.state,
+      continuationsUsed: policy.maxContinuations,
+    }, await gitWorkspace(), undefined, new Date(), {
+      acceptance: { done: 'unknown' },
+    })
+    expect(unknownAtLimit).toMatchObject({ action: 'complete', reason: 'maxContinuations' })
+    if (unknownAtLimit.action !== 'complete') throw new Error('expected terminal limit')
+    expect(unknownAtLimit.state.lastEndCondition?.status).toBe('unknown')
+
+    const passed = await nextAutonomousDecision(policy, initial, await gitWorkspace(), undefined, new Date(), {
+      acceptance: { done: 'pass' },
+    })
+    expect(passed).toMatchObject({ action: 'complete', reason: 'end_condition_passed' })
+  })
+
+  it('keeps the end-condition round result stable across durable JSON restart', async () => {
+    const policy = resolveAutonomousPolicy({
+      mode: 'enabled',
+      endCondition: {
+        version: 1,
+        operator: 'all',
+        checks: [{ id: 'done', kind: 'acceptance', ref: 'done' }],
+      },
+    }, undefined, true)
+    const workspace = await gitWorkspace()
+    const first = await nextAutonomousDecision(policy, createAutonomousState(policy), workspace, undefined, new Date('2026-08-27T01:00:00.000Z'), {
+      acceptance: { done: 'unknown' },
+    })
+    if (first.action !== 'continue') throw new Error('expected continuation')
+    const restored = JSON.parse(JSON.stringify(first.state)) as typeof first.state
+    expect(restored.lastEndCondition).toEqual(first.state.lastEndCondition)
+    expect(restored.lastEndCondition?.status).toBe('unknown')
+    expect(policy.policySha256).toBe(resolveAutonomousPolicy({
+      mode: 'enabled',
+      ...(policy.endCondition === undefined ? {} : { endCondition: policy.endCondition }),
+    }, undefined, true).policySha256)
+  })
+
   it('seals official defaults and counts cache-write but not cache-read tokens', () => {
     const policy = resolveAutonomousPolicy({ mode: 'enabled' }, undefined, true)
     expect(policy).toMatchObject({

@@ -1,0 +1,26 @@
+# Keyless replay composition for the Debate ACP snapshot. It preserves the
+# normal ACP host and replaces only the parent model with the deterministic
+# transcript replay. The Debate Provider is a local fixture, so no external
+# operator, subscription, API key, or paid call is involved.
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@deepseek-ai/dsh-llm-deepseek'
+        disabled: true
+      - insert:
+          - id: llm-replay
+            name: '@deepseek-ai/dsh-llm-replay'
+            config:
+              providers:
+                - id: deepseek-official
+                  name: DeepSeek replay fixture
+                  models:
+                    - id: deepseek-v4-flash
+                    - id: deepseek-v4-pro
+          - id: debate-fixture
+            name: './tests/fixtures/debate-loader.ts'
+          - id: tool-debate
+            name: '@deepseek-ai/dsh-tool-debate'

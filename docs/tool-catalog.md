@@ -19,6 +19,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: code` / `mode: both` (see the Code Mode Agent Note). Under `code` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
 | `@deepseek-ai/dsh-tool-physical-operator` | `physical_operator` | `ctx.tools`, `ctx.physicalOperators`, `a calling Agent for action=run` | `tool/call`, `tool/result`, `physical-operator lifecycle through the selected provider` | - | The schema exposes stable physical-operator ids rather than provider transports. Deployments register operators separately; the catalog intentionally harvests the empty-registry schema. |
+| `@deepseek-ai/dsh-tool-debate` | `debate` | `ctx.tools`, `ctx.systemPrompt`, `ctx.debates` | `tool/call`, `tool/result`, `debate lifecycle through ctx.debates` | - | The model-facing Consumer depends only on the provider-neutral ctx.debates seam; the catalog substitute cannot execute and does not start the local Debate Provider. |
 | `@deepseek-ai/dsh-tool-orchestration` | `orchestration` | `ctx.tools`, `ctx.systemPrompt`, `ctx.orchestrations` | `tool/call`, `tool/result`, `durable orchestration runs through ctx.orchestrations` | - | The model-facing Consumer depends only on the provider-neutral ctx.orchestrations seam; the catalog substitute cannot execute and does not start the local daemon. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\...` paths and `$env:NAME` variables. |
@@ -225,6 +226,69 @@ Discover and run deployment-defined physical operators. Use action=list to inspe
 Source: [`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 The schema exposes stable physical-operator ids rather than provider transports. Deployments register operators separately; the catalog intentionally harvests the empty-registry schema.
+
+<a id="deepseek-aidsh-tool-debate"></a>
+
+## `@deepseek-ai/dsh-tool-debate`
+
+### `debate`
+
+Start a bounded multi-agent debate, list or inspect persistent runs, or apply an explicit revision-fenced control action.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "start",
+        "list",
+        "inspect",
+        "control"
+      ]
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Debate question or instruction; required for start."
+    },
+    "objective": {
+      "type": "string",
+      "description": "Optional concise decision objective for start."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Persistent Debate run id; required for inspect/control."
+    },
+    "expected_revision": {
+      "type": "number",
+      "description": "Current run revision; required for control."
+    },
+    "control_action": {
+      "type": "string",
+      "description": "Explicit control decision.",
+      "enum": [
+        "approve",
+        "reject",
+        "pause",
+        "resume",
+        "stop"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human reason; required for control."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+Source: [`packages/orchestration/tool-debate/src/index.ts`](../packages/orchestration/tool-debate/src/index.ts)
+
+The model-facing Consumer depends only on the provider-neutral ctx.debates seam; the catalog substitute cannot execute and does not start the local Debate Provider.
 
 <a id="deepseek-aidsh-tool-orchestration"></a>
 

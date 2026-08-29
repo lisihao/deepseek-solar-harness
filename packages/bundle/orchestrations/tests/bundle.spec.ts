@@ -15,7 +15,14 @@ describe('orchestrations bundle', () => {
     expect(manifest.dsh?.bundle?.patch).toBe('./cordis.patch.yml')
     const parsed = yaml.load(readFileSync(resolve(root, 'cordis.patch.yml'), 'utf8'), { schema: entryListSchema })
     const rows = (parsed as Array<{ insert?: Array<{ id?: string; name?: string }> }>).flatMap(value => value.insert ?? [])
-    expect(rows.map(value => value.id)).toEqual(['orchestration-local', 'tool-orchestration', 'ui-orchestration'])
+    expect(rows.map(value => value.id)).toEqual([
+      'orchestration-local',
+      'debate-orchestration',
+      'tool-orchestration',
+      'tool-debate',
+      'ui-debate',
+      'ui-orchestration',
+    ])
     for (const row of rows) expect(manifest.dependencies).toHaveProperty(String(row.name))
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-rlm-runtime')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-rlm-runtime-local')
@@ -49,6 +56,21 @@ describe('orchestrations bundle', () => {
       expect(values).not.toContain(local)
       expect(values).not.toContain('@deepseek-ai/dsh-resident-operator-local')
     }
+    const debateBinding = dependencies('debate-orchestration')
+    expect(debateBinding).toContain('@deepseek-ai/dsh-debate')
+    expect(debateBinding).toContain('@deepseek-ai/dsh-debate-local')
+    expect(debateBinding).toContain('@deepseek-ai/dsh-orchestration')
+    expect(debateBinding).not.toContain('@deepseek-ai/dsh-physical-operator')
+    expect(debateBinding).not.toContain('@deepseek-ai/dsh-orchestration-local')
+    const debateConsumer = dependencies('tool-debate')
+    expect(debateConsumer).toContain('@deepseek-ai/dsh-debate')
+    expect(debateConsumer).not.toContain('@deepseek-ai/dsh-debate-local')
+    expect(debateConsumer).not.toContain('@deepseek-ai/dsh-physical-operator')
+    const debateUi = dependencies('ui-debate')
+    expect(debateUi).toContain('@deepseek-ai/dsh-debate')
+    expect(debateUi).not.toContain('@deepseek-ai/dsh-debate-local')
+    expect(debateUi).not.toContain('@deepseek-ai/dsh-orchestration-local')
+    expect(debateUi).not.toContain('@deepseek-ai/dsh-physical-operator')
     const provider = dependencies('orchestration-local')
     for (const seam of seams) expect(provider).toContain(seam)
   })

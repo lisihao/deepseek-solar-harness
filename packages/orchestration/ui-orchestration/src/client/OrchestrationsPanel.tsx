@@ -10,6 +10,7 @@ import type {
 import { ORCHESTRATION_DASHBOARD_PATH } from '../contracts.ts'
 import { formatLocalTimestamp } from './timestamp.ts'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import { RlmAgentsView } from './RlmAgentsView.tsx'
 
 type BrowserRequest = ConnectionHandle['request']
 
@@ -168,6 +169,7 @@ export function OrchestrationsPanel({ request: browserRequest }: { request: Brow
               <GraphView
                 run={selectedRun}
                 events={dashboard?.events ?? []}
+                browserRequest={browserRequest}
                 controlPending={controlPending}
                 onControl={submit}
               />
@@ -226,9 +228,11 @@ function RunList(props: {
   </div>
 }
 
-function GraphView(props: {
+/** Render one selected TaskGraph plus its bounded RLM Agents consumer. */
+export function GraphView(props: {
   run?: DesktopOrchestrationRun | undefined
   events: DesktopOrchestrationEvent[]
+  browserRequest: BrowserRequest
   controlPending: boolean
   onControl: (request: DesktopOrchestrationControlRequest) => Promise<void>
 }) {
@@ -246,6 +250,8 @@ function GraphView(props: {
   const rlmChildren = props.events.filter(event => event.type === 'rlm.child.dispatched').length
   const rlmChildrenSettled = props.events.filter(event => event.type === 'rlm.child.settled').length
   const rlmMessages = props.events.filter(event => event.type === 'rlm.message.continuation.settled').length
+  const rlmRoot = [...props.events].reverse().find(event => event.type === 'rlm.root.dispatched')
+  const rlmRootSessionId = typeof rlmRoot?.data.runtimeSessionId === 'string' ? rlmRoot.data.runtimeSessionId : undefined
   const autonomousPolicy = [...props.events].reverse().find(event => event.type === 'rlm.autonomous.resolved')
   const autonomousStopped = [...props.events].reverse().find(event => event.type === 'rlm.autonomous.stopped')
   const autonomousContinuations = props.events.filter(event => event.type === 'rlm.autonomous.continuation.requested').length
@@ -271,8 +277,8 @@ function GraphView(props: {
         · Graph 上限 {String(run.maxParallel ?? 1)} · {String(readyWorkers)} 个可派发
       </p>
       <p>
-        模型分工：{run.admission?.plannerVerifierPreference === 'best-high-tier' ? '最佳高阶模型规划/验证' : 'Codex Sol 优先规划/验证'}
-        · {run.admission?.executionPreference === 'balanced' ? '调度器综合选择执行模型' : 'Codex Luna 优先执行代码节点'}
+        模型分工：{executionPreferenceLabel(run.admission?.executionPreference)}
+        {' · '}{plannerVerifierPreferenceLabel(run.admission?.plannerVerifierPreference)}
       </p>
       <p>上下文：{cleanContext ? 'Clean-task Capsule 已注入 · fresh native lane' : '等待 Capsule 解析'}</p>
     </div>
@@ -292,6 +298,7 @@ function GraphView(props: {
         </>
         : <p>本 Run 不创建 RLM Session，不挂载 typescript_repl，也不递归启动子 Agent。</p>}
     </div>
+    {rlmEnabled && <RlmAgentsView request={props.browserRequest} preferredSessionId={rlmRootSessionId} />}
     <div className="dshDesktopOrchestrationPipeline" aria-label="编译流水线">
       <Stage label="Intent" complete={eventTypes.has('intent.compiled')} />
       <Stage label="Graph" complete={eventTypes.has('graph.compiled')} />
@@ -433,6 +440,22 @@ export function collaborationPolicyLabel(policy: 'auto' | 'direct' | 'codex' | '
     codex: '优先 Codex',
     'claude-code': '优先 Claude Code',
   } as Record<string, string>)[String(policy)] ?? '历史策略 N/A'
+}
+
+/** Present the persisted adaptive execution route without implying a fixed worker model. */
+export function executionPreferenceLabel(preference: 'luna-first' | 'claude-sonnet' | 'balanced' | undefined): string {
+  if (preference === 'luna-first') return '低风险首轮 Luna，失败/中高风险升级 Terra'
+  if (preference === 'claude-sonnet') return 'Claude Sonnet 优先执行'
+  return '调度器综合选择执行模型'
+}
+
+/** Present the independent high-tier planning and verification preference. */
+export function plannerVerifierPreferenceLabel(
+  preference: 'codex-sol' | 'claude-frontier' | 'best-high-tier' | undefined,
+): string {
+  if (preference === 'claude-frontier') return 'Claude Opus/Fable 规划验证'
+  if (preference === 'best-high-tier') return '最佳高阶模型规划验证'
+  return 'Codex Sol 规划验证'
 }
 
 /** Summarize collaboration decisions that matter in the visible Trace. */

@@ -78,6 +78,28 @@ describe('ResidentStore', () => {
     store.close()
   })
 
+  it('preserves absent optional usage buckets in the settled event', () => {
+    const store = new ResidentStore(root())
+    const accepted = store.accept('usage-unknown', 'usage-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    store.settle('usage-unknown', {
+      output: [],
+      stopReason: 'completed',
+      usage: { inputTokens: 17, outputTokens: 9, costUsd: 0.42 },
+    })
+
+    const event = store.readEvents(accepted.sessionId).events.find(value => value.type === 'turn.settled')
+    expect(event?.data).toMatchObject({
+      commandId: 'usage-unknown',
+      stopReason: 'completed',
+      inputTokens: 17,
+      outputTokens: 9,
+      costUsd: 0.42,
+    })
+    expect(event?.data).not.toHaveProperty('cacheReadInputTokens')
+    expect(event?.data).not.toHaveProperty('cacheWriteInputTokens')
+    store.close()
+  })
+
   it('admits independent lanes concurrently while keeping each lane single-flight', () => {
     const store = new ResidentStore(root())
     const first = store.accept('lane-one', 'hash-one', 'codex', '/workspace', PROFILE, PROFILE_SOURCE, undefined, undefined, 'run:A')

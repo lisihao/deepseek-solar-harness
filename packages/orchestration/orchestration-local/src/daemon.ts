@@ -40,6 +40,7 @@ import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-
 import ModelWorkerRuntime, { type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
 import {
+  RLM_TYPESCRIPT_REPL_TOOL_SCHEMA,
   RlmCommandId,
   RlmRuntimeSessionId,
   type RlmChildExecution,
@@ -68,10 +69,12 @@ import {
   type OrchestrationControlRequest,
   type OrchestrationDecisionRequest,
   type OrchestrationEvent,
+  type OrchestrationExecutionEvidenceV1,
   type OrchestrationIndeterminateRequest,
   type OrchestrationNodeSnapshot,
   type OrchestrationNodeSpecV1,
   type OrchestrationRunSnapshot,
+  type OrchestrationStartRequest,
   type WorkbenchTaskContractV1,
 } from '@deepseek-ai/dsh-orchestration'
 import PhysicalOperatorRuntime, {
@@ -98,6 +101,8 @@ import { DurableAutoRefineCoordinator, PRIME_AUTO_REFINE_DEFAULTS, type AutoRefi
 import { abortableDelay } from './abortable-delay.ts'
 import {
   accountAutonomousUsage,
+  type AutonomousEndConditionEvidenceV1,
+  type AutonomousEndConditionEvaluatorV1,
   createAutonomousState,
   nextAutonomousDecision,
   resolveAutonomousPolicy,
@@ -132,7 +137,7 @@ import {
 } from './store.ts'
 
 /** Local orchestration control protocol version. */
-export const ORCHESTRATION_PROTOCOL_VERSION = 4
+export const ORCHESTRATION_PROTOCOL_VERSION = 5
 
 /** Methods required by the strict client handshake. */
 export const ORCHESTRATION_METHODS = Object.freeze([
@@ -419,6 +424,8 @@ export interface OrchestrationDaemonOptions {
    * credential-backed built-in Provider so offline acceptance cannot spend API quota.
    */
   readonly modelWorkerProviders?: readonly ModelWorkerProvider[]
+  /** Trusted task-specified Autonomous evaluators; evaluator functions never enter durable state. */
+  readonly autonomousEndConditionEvaluators?: Readonly<Record<string, AutonomousEndConditionEvaluatorV1>>
   /** Optional explicit remote execution members; omission follows the versioned root catalog. */
   readonly remoteOperatorServers?: readonly RemotePhysicalOperatorServer[]
   /** Explicit cluster membership used by tests; omission follows root/cluster.json. */
@@ -920,7 +927,14 @@ export class OrchestrationDaemon {
     switch (method) {
       case 'system.handshake': return this.handshake(params)
       case 'orchestration.compile': this.requireClusterLeader(); return this.compile(params.request as never)
-      case 'orchestration.start': this.requireClusterLeader(); return this.startRun(requiredString(params, 'compilation_id'), params.approval_ref as string | undefined)
+      case 'orchestration.start': {
+        this.requireClusterLeader()
+        return this.startRun({
+          commandId: requiredString(params, 'command_id'),
+          compilationId: requiredString(params, 'compilation_id'),
+          ...params.approval_ref === undefined ? {} : { approvalRef: requiredString(params, 'approval_ref') },
+        })
+      }
       case 'orchestration.list': return this.store.listRuns().map(value => value.snapshot)
       case 'orchestration.inspect': return this.store.getRun(requiredString(params, 'run_id')).snapshot
       case 'event.read': return this.store.readEvents(
@@ -1007,7 +1021,15 @@ export class OrchestrationDaemon {
     return compilation
   }
 
-  private startRun(compilationId: string, approvalRef?: string): OrchestrationRunSnapshot {
+  private startRun(request: OrchestrationStartRequest): OrchestrationRunSnapshot {
+    return this.withCommandReceipt(
+      'orchestration.start',
+      request,
+      () => this.startRunUnchecked(request.compilationId, request.approvalRef),
+    )
+  }
+
+  private startRunUnchecked(compilationId: string, approvalRef?: string): OrchestrationRunSnapshot {
     const compilation = this.store.getCompilation(compilationId)
     const runId = OrchestrationRunId(`run-${randomUUID()}`)
     const createdAt = now()
@@ -2005,6 +2027,8 @@ export class OrchestrationDaemon {
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
     const rootSessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
     const bindings = this.rlmHostBindings(record, spec, plan, controller, physicalRuns)
+    const managedSkills = (await this.listManagedSkills(plan.executionWorkspace.path, String(rootSessionId)))
+      .map(({ alias, title, callable, available }) => ({ alias, title, callable, available }))
     await this.ctx.rlmRuntime.create({
       sessionId: rootSessionId,
       commandId: RlmCommandId(`${String(plan.executionId)}:rlm:create`),
@@ -2023,6 +2047,27 @@ export class OrchestrationDaemon {
         source: plan.rlmWorkerPlan.source,
         ...plan.rlmWorkerPlan.profile === undefined ? {} : { profile: plan.rlmWorkerPlan.profile },
       } },
+      executionOptions: {
+        version: 1,
+        tools: [RLM_TYPESCRIPT_REPL_TOOL_SCHEMA],
+        skills: managedSkills,
+        capabilityContext: {
+          contextPacketRef: String(plan.contextPacketRef),
+          capabilityPlanRef: String(plan.capabilityPlanRef),
+          graphCertificateHash: plan.graphCertificateHash,
+          capabilityGeneration: plan.capabilityGeneration,
+          effectiveReadScopes: [...plan.effectiveReadScopes],
+          effectiveWriteScopes: [...plan.effectiveWriteScopes],
+          effectiveEffects: {
+            read: [...plan.effectiveEffects.read],
+            write: [...plan.effectiveEffects.write],
+            execute: [...plan.effectiveEffects.execute],
+            network: [...plan.effectiveEffects.network],
+            cost: [...plan.effectiveEffects.cost],
+            risk: [...plan.effectiveEffects.risk],
+          },
+        },
+      },
       limits: {
         maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
         maxCellMs: Math.min(spec.timeoutMs ?? 120_000, 300_000), maxOutputBytes: 512 * 1024,
@@ -2966,11 +3011,17 @@ export class OrchestrationDaemon {
           'ORCHESTRATION_UNAVAILABLE',
         )
       }
+      const endConditionEvidence = policy.endCondition === undefined
+        ? undefined
+        : await this.autonomousEndConditionEvidence(spec, sessionId, result)
       const decision = await nextAutonomousDecision(
         policy,
         accounted,
         plan.executionWorkspace.path,
         signal,
+        new Date(),
+        endConditionEvidence,
+        this.options.autonomousEndConditionEvaluators,
       )
       this.store.saveAutonomousState(String(record.snapshot.runId), spec.id, plan.attempt, decision.state)
       if (decision.action === 'complete') {
@@ -2981,7 +3032,7 @@ export class OrchestrationDaemon {
           tokensUsed: decision.state.tokensUsed,
           gateAttempts: decision.state.gateAttempts,
         }, record.snapshot.nodes.find(value => value.id === spec.id))])
-        if (decision.reason === 'gate_passed') return result
+        if (decision.reason === 'gate_passed' || decision.reason === 'end_condition_passed') return result
         throw new OrchestrationError(
           decision.reason === 'gate_retry_exhausted'
             ? 'Autonomous quality-gate retry budget was exhausted without terminal evidence'
@@ -3008,6 +3059,7 @@ export class OrchestrationDaemon {
         source: 'autonomous',
         deliveryMode: 'follow_up',
         model: runtime.model,
+        executionOptions: runtime.executionOptions ?? { version: 1 },
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
@@ -3035,6 +3087,41 @@ export class OrchestrationDaemon {
     }
   }
 
+  /**
+   * Project only host-observable terminal evidence into one Autonomous round.
+   * Missing named artifacts and human review remain unknown; they never become
+   * apparent success merely because the native model said it was finished.
+   */
+  private async autonomousEndConditionEvidence(
+    spec: OrchestrationNodeSpecV1,
+    sessionId: RlmRuntimeSessionId,
+    result: PhysicalOperatorResult,
+  ): Promise<AutonomousEndConditionEvidenceV1> {
+    const messages = []
+    for (;;) {
+      const page = await this.ctx.rlmRuntime.readMessages({ sessionId, after: messages.length, limit: 500 })
+      messages.push(...page)
+      if (page.length < 500) break
+    }
+    const reportedArtifacts = new Set(messages.flatMap(message => message.artifactRefs ?? []))
+    const requiredArtifacts = spec.requiredArtifacts
+      ?? spec.acceptance.filter(value => value.kind === 'artifact-present').map(value => value.id)
+    const artifacts = Object.fromEntries(requiredArtifacts.map(artifact => [
+      artifact,
+      reportedArtifacts.has(artifact) ? 'pass' as const : 'unknown' as const,
+    ]))
+    const acceptance = Object.fromEntries(spec.acceptance.map((requirement) => {
+      if (requirement.kind === 'operator-completed') {
+        return [requirement.id, result.stopReason === 'completed' ? 'pass' as const : 'fail' as const]
+      }
+      if (requirement.kind === 'artifact-present') {
+        return [requirement.id, artifacts[requirement.id] ?? 'unknown' as const]
+      }
+      return [requirement.id, 'unknown' as const]
+    }))
+    return { acceptance, artifacts }
+  }
+
   private async continueActiveRlmGoal(
     sessionId: RlmRuntimeSessionId,
     bindings: RlmRuntimeHostBindings,
@@ -3057,6 +3144,7 @@ export class OrchestrationDaemon {
         source: 'goal',
         deliveryMode: 'follow_up',
         model: snapshot.model,
+        executionOptions: snapshot.executionOptions ?? { version: 1 },
       })
       await this.ctx.rlmRuntime.trackExecution(sessionId, execution)
       const continuation = await execution.result
@@ -3283,7 +3371,12 @@ export class OrchestrationDaemon {
               ...workerResult.usage,
             }, next.snapshot.nodes.find(value => value.id === spec.id))])
           }
-          return { output: [...workerResult.output], stopReason: workerResult.stopReason }
+          const usage = rlmUsage(workerResult)
+          return {
+            output: [...workerResult.output],
+            stopReason: workerResult.stopReason,
+            ...usage === undefined ? {} : { usage },
+          }
         }).finally(timeout.clearTimeout),
         dispose: (): Promise<void> => { timeout.clearTimeout(); controller.abort(); return Promise.resolve() },
       }
@@ -3419,12 +3512,15 @@ export class OrchestrationDaemon {
       this.store.saveAttempt({ ...attempt, state: 'failed', errorCode: 'GENERATION_FENCED', errorMessage: 'late result belongs to an older attempt or capability generation', updatedAt: now() })
       return
     }
-    const evidenceRef = this.store.putArtifact({
-      executionId: active.executionId,
+    const evidence: OrchestrationExecutionEvidenceV1 = {
+      version: 1,
+      executionId: PhysicalOperatorExecutionId(active.executionId),
       stopReason: result.stopReason,
       output: result.output,
+      ...result.usage === undefined ? {} : { usage: result.usage },
       ...result.continuity === undefined ? {} : { continuity: result.continuity },
-    })
+    }
+    const evidenceRef = this.store.putArtifact(evidence)
     const spec = record.graph.nodes.find(value => value.id === active.nodeId)
     if (spec === undefined) {
       this.failAttempt(active, new OrchestrationError(`graph node disappeared: ${active.nodeId}`, 'GRAPH_INVALID'))
@@ -3712,16 +3808,25 @@ export class OrchestrationDaemon {
       && spec.effectBudget.execute.length === 0
       ? await this.ctx.modelWorkers.offers()
       : []
+    const phase = nodePhase(spec)
+    const priorFailures = record.snapshot.nodes.find(value => value.id === spec.id)?.attempt ?? 0
     const allocation = await this.ctx.modelAllocation.allocate({
       runId: String(record.snapshot.runId),
       nodeId: spec.id,
-      phase: nodePhase(spec),
+      phase,
       role: spec.role,
       task: spec.task,
       preferredOperatorIds: spec.operator?.preferredIds ?? [],
       objective: record.snapshot.admission?.optimization ?? 'balanced',
       plannerVerifierPreference: record.snapshot.admission?.plannerVerifierPreference ?? 'codex-sol',
       executionPreference: record.snapshot.admission?.executionPreference ?? 'luna-first',
+      ...phase === 'execution' ? {
+        adaptiveExecutionPreference: {
+          version: 1 as const,
+          executionRisk: record.graph.risk,
+          priorFailures,
+        },
+      } : {},
       rlm: rlmPlan.enabled ? 'enabled' : 'disabled',
       graphMaxParallel: record.graph.maxParallel,
       offers: [...residentOffers, ...modelWorkerOffers],

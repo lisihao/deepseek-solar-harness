@@ -95,6 +95,13 @@ Abstract provider-neutral resident session/control surface.
 abstract providers(): Promise<ResidentProviderStatus[]>
 
 /**
+ * Start one explicit owner-local native-subscription login flow.
+ * @param _operatorId - product identity whose configured Driver owns the flow.
+ * @returns the provider status after the product CLI completes authentication.
+ */
+authenticate(_operatorId: string): Promise<ResidentProviderStatus>
+
+/**
  * Admit or replay one durable command for its operator/workspace/lane Session.
  * @param request - command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.
  * @returns a holder-owned turn whose result settles independently.
@@ -157,7 +164,7 @@ compact(_request: ResidentCompactRequest): Promise<ResidentCompactResult>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:365`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:372`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

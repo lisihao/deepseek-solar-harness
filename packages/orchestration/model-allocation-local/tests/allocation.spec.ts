@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
+import { validateAdaptiveExecutionPreference, type AdaptiveExecutionPreferenceV1, type ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import { SubscriptionFirstModelAllocation } from '../src/index.ts'
 
 const offer = (overrides: Partial<ModelExecutionOffer>): ModelExecutionOffer => ({
@@ -10,6 +10,109 @@ const offer = (overrides: Partial<ModelExecutionOffer>): ModelExecutionOffer => 
 })
 
 describe('subscription-first model allocation', () => {
+  const adaptiveCases: readonly {
+    name: string
+    preference: AdaptiveExecutionPreferenceV1
+    expectedModel: string
+    rationale: string
+  }[] = [
+    {
+      name: 'low-risk first attempt',
+      preference: { version: 1, executionRisk: 'low', priorFailures: 0 },
+      expectedModel: 'luna',
+      rationale: 'adaptive-codex-luna-low-risk',
+    },
+    {
+      name: 'medium-risk execution',
+      preference: { version: 1, executionRisk: 'medium', priorFailures: 0 },
+      expectedModel: 'terra',
+      rationale: 'adaptive-codex-terra-escalated',
+    },
+    {
+      name: 'high-risk execution',
+      preference: { version: 1, executionRisk: 'high', priorFailures: 0 },
+      expectedModel: 'terra',
+      rationale: 'adaptive-codex-terra-escalated',
+    },
+    {
+      name: 'cross-domain execution',
+      preference: { version: 1, executionRisk: 'low', priorFailures: 0, crossDomain: true },
+      expectedModel: 'terra',
+      rationale: 'adaptive-codex-terra-escalated',
+    },
+    {
+      name: 'execution after a failure',
+      preference: { version: 1, executionRisk: 'low', priorFailures: 1 },
+      expectedModel: 'terra',
+      rationale: 'adaptive-codex-terra-escalated',
+    },
+  ]
+
+  it.each(adaptiveCases)('uses $expectedModel for $name', async ({ preference, expectedModel, rationale }) => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const result = await service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'execution', role: 'worker', task: 'implement the repository change',
+      preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 4,
+      adaptiveExecutionPreference: preference,
+      offers: [
+        offer({ offerId: 'codex:luna', model: 'luna', tier: 'low' }),
+        offer({ offerId: 'codex:terra', model: 'terra', tier: 'medium' }),
+      ],
+      now: '2026-08-28T00:00:00.000Z',
+    })
+    expect(result.model).toBe(expectedModel)
+    expect(result.rationale).toContain(rationale)
+    await ctx.root.fiber.dispose()
+  })
+
+  it('falls back to the existing scorer when an adaptive target model is absent', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const result = await service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'execution', role: 'worker', task: 'implement the repository change',
+      preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 4,
+      adaptiveExecutionPreference: { version: 1, executionRisk: 'high', priorFailures: 2 },
+      offers: [offer({ offerId: 'codex:luna', model: 'luna', tier: 'low' })],
+      now: '2026-08-28T00:00:00.000Z',
+    })
+    expect(result.model).toBe('luna')
+    expect(result.rationale).toContain('adaptive-terra-unavailable-fallback')
+    await ctx.root.fiber.dispose()
+  })
+
+  it('keeps an explicit Codex Sol planning gate ahead of adaptive execution hints', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const result = await service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'planning', role: 'architect', task: 'plan the implementation',
+      preferredOperatorIds: [], objective: 'balanced', rlm: 'disabled', graphMaxParallel: 4,
+      plannerVerifierPreference: 'codex-sol',
+      adaptiveExecutionPreference: { version: 1, executionRisk: 'high', priorFailures: 1 },
+      offers: [
+        offer({ offerId: 'codex:sol', model: 'sol', tier: 'high' }),
+        offer({ offerId: 'codex:terra', model: 'terra', tier: 'medium' }),
+      ],
+      now: '2026-08-28T00:00:00.000Z',
+    })
+    expect(result.model).toBe('sol')
+    expect(result.rationale).toContain('codex-sol-planner-verifier')
+    await ctx.root.fiber.dispose()
+  })
+
+  it('rejects unknown adaptive fields and unsafe numeric values at the Provider boundary', () => {
+    expect(() => validateAdaptiveExecutionPreference({ version: 1, executionRisk: 'low', priorFailures: 0, extra: true }))
+      .toThrow(expect.objectContaining({ code: 'MODEL_ALLOCATION_INVALID' }))
+    expect(() => validateAdaptiveExecutionPreference({ version: 2, executionRisk: 'low', priorFailures: 0 }))
+      .toThrow('version')
+    expect(() => validateAdaptiveExecutionPreference({ version: 1, executionRisk: 'low', priorFailures: -1 }))
+      .toThrow('priorFailures')
+    expect(() => validateAdaptiveExecutionPreference({ version: 1, executionRisk: 'low', priorFailures: 1.5 }))
+      .toThrow('priorFailures')
+    expect(() => validateAdaptiveExecutionPreference({ version: 1, executionRisk: 'low', priorFailures: 0, crossDomain: 'yes' }))
+      .toThrow('crossDomain')
+  })
+
   it('uses high-tier subscription planning and low-tier parallel workers', async () => {
     const ctx = new Context()
     const service = new SubscriptionFirstModelAllocation(ctx)
@@ -59,6 +162,43 @@ describe('subscription-first model allocation', () => {
       ...common, phase: 'execution', role: 'implementation', task: 'implement the repository change',
       plannerVerifierPreference: 'best-high-tier', executionPreference: 'balanced',
     })).resolves.toMatchObject({ model: 'gpt-5.6-terra' })
+    await ctx.root.fiber.dispose()
+  })
+
+  it('offers Claude frontier planning and Sonnet execution as first-class switchable preferences', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const offers = [
+      offer({ offerId: 'codex:sol', model: 'gpt-5.6-sol', tier: 'high' }),
+      offer({ offerId: 'codex:terra', model: 'gpt-5.6-terra', tier: 'medium' }),
+      offer({
+        offerId: 'claude:fable', operatorId: 'claude-code', provider: 'claude-code',
+        model: 'claude-fable-5', displayName: 'Claude Fable', tier: 'high',
+      }),
+      offer({
+        offerId: 'claude:sonnet', operatorId: 'claude-code', provider: 'claude-code',
+        model: 'claude-sonnet-5', displayName: 'Claude Sonnet', tier: 'medium',
+      }),
+    ]
+    const common = {
+      runId: 'r', nodeId: 'n', role: 'architect', task: 'review and implement the repository change',
+      preferredOperatorIds: [], objective: 'balanced' as const, rlm: 'disabled' as const,
+      graphMaxParallel: 4, offers, now: '2026-08-29T00:00:00.000Z',
+    }
+    const frontier = await service.allocate({
+      ...common, phase: 'planning', plannerVerifierPreference: 'claude-frontier', executionPreference: 'balanced',
+    })
+    expect(frontier).toMatchObject({ operatorId: 'claude-code', model: 'claude-fable-5' })
+    expect(frontier.rationale).toContain('claude-frontier-planner-verifier')
+
+    const sonnet = await service.allocate({
+      ...common, phase: 'execution', role: 'implementation',
+      plannerVerifierPreference: 'best-high-tier', executionPreference: 'claude-sonnet',
+      adaptiveExecutionPreference: { version: 1, executionRisk: 'high', priorFailures: 2 },
+    })
+    expect(sonnet).toMatchObject({ operatorId: 'claude-code', model: 'claude-sonnet-5' })
+    expect(sonnet.rationale).toContain('claude-sonnet-worker')
+    expect(sonnet.rationale).not.toContain('adaptive-codex-terra-escalated')
     await ctx.root.fiber.dispose()
   })
 

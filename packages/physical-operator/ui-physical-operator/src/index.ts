@@ -11,7 +11,7 @@ export * from './presentation.ts'
 export const name = 'ui-physical-operator'
 export const inject = ['residentOperators', 'webServer']
 
-/** Register the authenticated read-only Resident projection. */
+/** Register the authenticated Resident projection and owner-local login action. */
 export function apply(ctx: Context): void {
   ctx.effect(() => registerResidentDashboard(ctx), 'ui-physical-operator: Resident dashboard route')
 }
