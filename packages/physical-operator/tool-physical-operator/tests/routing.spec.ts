@@ -27,6 +27,12 @@ import PhysicalOperatorRuntime, {
 import * as tool from '../src/index.ts'
 import { PhysicalOperatorModelToolBridge } from '../src/model-tool-bridge.ts'
 
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionDataMap {
+    'debate/preferences': { readonly mode: 'auto' | 'enabled' | 'disabled' }
+  }
+}
+
 class CountingDeepSeek extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
 
@@ -517,6 +523,23 @@ describe('host physical-operator routing', () => {
     await automatic.agent.whenIdle()
     expect(automatic.codex.requests).toHaveLength(1)
     expect(automatic.deepseek.requests).toHaveLength(0)
+  })
+
+  it('yields Smart Auto host routing when the Session explicitly enables Debate', async () => {
+    const { agent, deepseek, codex, claude } = await setup()
+    agent.session.append('debate/preferences', { mode: 'enabled' }, { ignorable: true })
+
+    send(agent, '请深度分析 DSH 是否代表 Agent 架构趋势。')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(1)
+    expect(codex.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(0)
+    const decision = agent.session.events.find(event => event.type === 'physical-operator/routing-decision')
+    if (decision?.type !== 'physical-operator/routing-decision') throw new Error('missing routing decision')
+    expect(decision.data.policy).toBe('auto')
+    expect(decision.data.route).toBe('taskgraph-candidate')
+    expect(decision.data.reason).toContain('Debate')
   })
 
   it('keeps a parallel Smart Auto task on the main model for TaskGraph admission and logs the decision', async () => {

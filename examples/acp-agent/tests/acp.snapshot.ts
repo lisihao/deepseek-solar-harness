@@ -159,9 +159,9 @@ const SCENARIOS: Scenario[] = [
     configPath: PRODUCT_SUBAGENT_BOTH_CONFIG,
   },
   // Authored keyless Debate composition: the fixture seeds the session's
-  // Debate preference, then the replayed parent calls the real `debate` tool.
-  // The fixture Provider returns an approval-pending run and never starts an
-  // external operator.
+  // Debate preference, then the real host adapter admits the prompt directly
+  // without a preliminary parent-model call. The fixture Provider returns an
+  // approval-pending run and never starts an external operator.
   {
     name: 'debate-tool-turn',
     hasModelTurn: true,

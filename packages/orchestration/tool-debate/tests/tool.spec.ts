@@ -1,5 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import DebateService, {
   type DebateControlRequestV1,
@@ -9,7 +10,7 @@ import DebateService, {
   type DebateRunSummaryV1,
   type DebateStartRequestV1,
 } from '@deepseek-ai/dsh-debate'
-import LlmRuntime, { CallId } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -148,6 +149,27 @@ async function setup() {
   return { ctx, agent, provider: ctx.debates as ScriptedDebates }
 }
 
+async function setupAutomatic() {
+  const ctx = new Context()
+  contexts.push(ctx)
+  await ctx.plugin(LlmRuntime)
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(CommandRuntime)
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(ScriptedDebates)
+  await ctx.plugin(tool)
+  const agent = ctx.agentLoop.create(
+    SessionId('session-debate-automatic'),
+    { provider: 'unavailable-primary', model: 'unavailable-primary' },
+    { cwd: '/workspace' },
+  )
+  return { ctx, agent, provider: ctx.debates as ScriptedDebates }
+}
+
 let calls = 0
 function call(ctx: Context, agent: Agent | undefined, argumentsValue: unknown, callId?: string) {
   return ctx.tools.execute({
@@ -165,6 +187,44 @@ function resultValue(result: Awaited<ReturnType<typeof call>>): Record<string, u
 }
 
 describe('debate model Consumer', () => {
+  it('lets an explicitly enabled Debate own the user turn without calling a primary model', async () => {
+    const { ctx, agent, provider } = await setupAutomatic()
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Should DSH adopt this architecture?' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    expect(provider.starts, JSON.stringify(agent.session.events, null, 2)).toHaveLength(1)
+    expect(provider.starts[0]).toMatchObject({
+      prompt: 'Should DSH adopt this architecture?',
+      workspace: '/workspace',
+      sourceSessionId: 'session-debate-automatic',
+      execution: { version: 1, kind: 'standalone' },
+      policy: { mode: 'enabled' },
+    })
+    const dispatch = agent.session.events.find(event => event.type === 'debate/dispatch')
+    if (dispatch?.type !== 'debate/dispatch') throw new Error('missing debate dispatch')
+    expect(provider.starts[0]?.commandId).toBe(
+      `debate-host:session-debate-automatic:${dispatch.data.promptMessageId}`,
+    )
+    expect(dispatch.ignorable).toBe(true)
+    expect(typeof dispatch.data.promptMessageId).toBe('string')
+    expect(dispatch.data.turn).toBe(1)
+    expect(dispatch.data.step).toBe(1)
+    expect(agent.session.events.find(event => event.type === 'debate/admission')).toMatchObject({
+      ignorable: true,
+      data: { runId: 'debate-run-1', state: 'completed' },
+    })
+    const assistant = [...agent.session.events].reverse().find(event => event.type === 'assistant/message')
+    if (assistant?.type !== 'assistant/message') throw new Error('missing assistant response')
+    const response = assistant.data.message.content[0]
+    expect(response?.type).toBe('text')
+    expect(response?.type === 'text' ? response.text : '').toContain('Decision summary')
+  })
+
   it('keeps legacy Sessions disabled and persists an ignorable whole-value mode', async () => {
     const { ctx, agent } = await setup()
     expect(tool.foldDebatePreferences([])).toEqual({ mode: 'disabled' })
