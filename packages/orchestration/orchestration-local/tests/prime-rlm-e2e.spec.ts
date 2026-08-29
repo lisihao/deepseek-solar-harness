@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -259,6 +259,35 @@ async function e2eHarness(prefix: string): Promise<{
   const root = join(home, 'orchestrations')
   const workspace = join(home, 'workspace')
   await mkdir(workspace)
+  const harnessRoot = join(root, 'continual-harness')
+  await mkdir(harnessRoot, { recursive: true })
+  const seededAt = '2026-08-24T00:00:00.000Z'
+  await writeFile(join(harnessRoot, 'state.json'), JSON.stringify({
+    version: 3,
+    generation: 1,
+    legacyEntries: [],
+    managedEntries: [{
+      version: 2,
+      entryId: 'summarize-evidence',
+      entryVersion: 1,
+      scope: 'global',
+      scopeId: 'global',
+      kind: 'skill',
+      title: 'Summarize evidence',
+      content: 'Summarize bounded evidence through the trusted TypeScript Provider.',
+      reference: { type: 'typescript', import: 'prime-e2e-skill-provider', callable: 'summarizeEvidence' },
+      arguments: { text: '' },
+      tags: [],
+      evidenceRefs: [],
+      provenance: 'prime-e2e-fixture',
+      immutableBase: true,
+      createdAt: seededAt,
+      updatedAt: seededAt,
+      digest: 'prime-e2e-seeded-skill',
+    }],
+    refinements: [],
+    refinementQueue: [],
+  }), 'utf8')
   const resident = new KeylessResidentProvider()
   const skillProviderModule = fileURLToPath(new URL('./fixtures/managed-skill-provider.ts', import.meta.url))
   const daemon = new OrchestrationDaemon({
@@ -303,7 +332,7 @@ describe('Prime-compatible orchestration offline E2E', () => {
         admission: admission({ sourceSessionId: direct.sourceSessionId, rlm: direct.rlm }),
         graph: taskGraph(fixture.workspace, [node('direct', direct.task, { operatorId: 'codex' })]),
       })
-      const run = await fixture.client.start({ compilationId: compiled.compilationId })
+      const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
       const complete = await eventually(() => fixture.client.inspect(String(run.runId)), value => value.state === 'completed')
       expect(complete.nodes[0]).toMatchObject({ state: 'passed', rlm: 'disabled' })
       const request = fixture.resident.requests.at(-1)
@@ -324,13 +353,8 @@ describe('Prime-compatible orchestration offline E2E', () => {
           '  rlm("produce independent evidence A", { name: "worker-a" }),',
           '  rlm("produce independent evidence B", { name: "worker-b" }),',
           ']);',
-          'const managedSkill = await harness.create({',
-          '  entryId: "summarize-evidence", kind: "skill", title: "Summarize evidence",',
-          '  content: "Summarize bounded evidence through the trusted TypeScript Provider.",',
-          '  reference: { type: "typescript", import: "prime-e2e-skill-provider", callable: "summarizeEvidence" },',
-          '  arguments: { text: "" }, provenance: "prime-e2e"',
-          '});',
           'const skillCatalog = await skills.list();',
+          'const managedSkill = skillCatalog.result.find(skill => skill.alias === "summarize-evidence");',
           'const skillResult = await skills.call("summarize-evidence", { text: "bounded family evidence" });',
           'const proposal = await harness.planRefinement({',
           '  trigger: "prime-e2e",',
@@ -349,7 +373,7 @@ describe('Prime-compatible orchestration offline E2E', () => {
           'const compactNonce = "namespace-survives-native-compact";',
           'const nativeCompact = await compact.run();',
           'await goal.create("finish after both family messages arrive", { continuationBudget: 2 });',
-          '({ childCount: children.length, refinementState: queued.state, managedSkill: managedSkill.entryId, skillCatalog, skillResult, nativeCompact })',
+          '({ childCount: children.length, refinementState: queued.state, managedSkill: managedSkill.alias, skillCatalog, skillResult, nativeCompact })',
         ].join('\n'))
       } else if (request.commandId.includes(':goal-continuation:')) {
         result = await callTypescriptRepl(request, `goal:${request.commandId}`, [
@@ -376,7 +400,7 @@ describe('Prime-compatible orchestration offline E2E', () => {
         knowledge: true,
       })]),
     })
-    const explicitRun = await fixture.client.start({ compilationId: explicitCompiled.compilationId })
+    const explicitRun = await fixture.client.start({ commandId: `start:${explicitCompiled.compilationId}`, compilationId: explicitCompiled.compilationId })
     const explicitComplete = await eventually(
       () => fixture.client.inspect(String(explicitRun.runId)),
       value => value.state === 'completed',
@@ -445,7 +469,7 @@ describe('Prime-compatible orchestration offline E2E', () => {
       admission: admission({ sourceSessionId: 'auto-complex', rlm: 'auto', continualHarness: 'off' }),
       graph: taskGraph(fixture.workspace, [node('auto-rlm', 'Recursively explore two alternatives.', { role: 'synthesis' })]),
     })
-    const autoRun = await fixture.client.start({ compilationId: autoCompiled.compilationId })
+    const autoRun = await fixture.client.start({ commandId: `start:${autoCompiled.compilationId}`, compilationId: autoCompiled.compilationId })
     const autoComplete = await eventually(() => fixture.client.inspect(String(autoRun.runId)), value => value.state === 'completed')
     expect(autoComplete.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled' })
     const autoEvents = await fixture.client.readEvents({ runId: autoRun.runId, limit: 300 })
@@ -469,7 +493,7 @@ describe('Prime-compatible orchestration offline E2E', () => {
         node('shared-b', 'Shared writer B.', { dependsOn: ['parallel-a', 'parallel-b'], writeScopes: ['shared'], operatorId: 'claude-code' }),
       ], 4),
     })
-    const run = await fixture.client.start({ compilationId: compiled.compilationId })
+    const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
     await eventually(
       () => fixture.client.inspect(String(run.runId)),
       value => value.nodes.filter(candidate => candidate.state === 'running').length === 2,

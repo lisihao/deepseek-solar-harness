@@ -1,10 +1,16 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   collaborationPolicyLabel,
   controlOrchestration,
   eventDetail,
+  executionPreferenceLabel,
+  plannerVerifierPreferenceLabel,
+  GraphView,
   loadOrchestrationDashboard,
 } from '../src/client/OrchestrationsPanel.tsx'
+import { controlRlmAgents, loadRlmAgentsDashboard } from '../src/client/RlmAgentsView.tsx'
 import { formatLocalTimestamp } from '../src/client/timestamp.ts'
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -73,6 +79,83 @@ describe('orchestration Desktop panel transport', () => {
       'X-DSH-Orchestration-Control': '1',
     })
     expect(fetch.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ commandId: 'command-pause-1', action: 'pause', runId: 'run-1', expectedRevision: 3, reason: 'test' }))
+  })
+
+  it('uses the versioned RLM Agents projection and never puts a lease in the browser request', async () => {
+    const dashboard = {
+      version: 1,
+      generatedAt: '2026-08-28T00:00:00.000Z',
+      sessions: [],
+      selectedSessionId: 'rlm:root',
+      messages: [],
+    }
+    const receipt = {
+      version: 1,
+      action: 'attach',
+      sessionId: 'rlm:root',
+      attachment: 'attached',
+      eventCursor: 3,
+    }
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+      new Response(JSON.stringify(init?.method === 'POST' ? receipt : dashboard), { status: 200 })
+    ))
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:3080' } })
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(loadRlmAgentsDashboard('rlm:root')).resolves.toEqual(dashboard)
+    const readUrl = fetch.mock.calls[0]?.[0]
+    expect(readUrl).toBeInstanceOf(URL)
+    if (!(readUrl instanceof URL)) throw new Error('RLM Agents request must use URL')
+    expect(readUrl.href).toBe('http://127.0.0.1:3080/api/orchestrations/rlm-agents?session_id=rlm%3Aroot')
+
+    const intent = { version: 1 as const, action: 'attach' as const, commandId: 'attach-1', sessionId: 'rlm:root' }
+    await expect(controlRlmAgents(intent)).resolves.toEqual(receipt)
+    expect(fetch.mock.calls[1]?.[0]).toBe('/api/orchestrations/rlm-agents')
+    expect(fetch.mock.calls[1]?.[1]?.method).toBe('POST')
+    expect(fetch.mock.calls[1]?.[1]?.headers).toEqual({
+      'Content-Type': 'application/json',
+      'X-DSH-Orchestration-Control': '1',
+    })
+    expect(fetch.mock.calls[1]?.[1]?.body).toBe(JSON.stringify(intent))
+    expect(fetch.mock.calls[1]?.[1]?.body).not.toContain('lease')
+  })
+
+  it('renders the persisted Luna-first adaptive execution route', () => {
+    const markup = renderToStaticMarkup(createElement(GraphView, {
+      run: {
+        runId: 'run-1',
+        title: 'Adaptive execution',
+        workspace: '/tmp/workspace',
+        state: 'running',
+        revision: 1,
+        graphRevision: 1,
+        admission: {
+          policy: 'codex',
+          route: 'taskgraph',
+          sourceSessionId: 'source-1',
+          plannerVerifierPreference: 'codex-sol',
+          executionPreference: 'luna-first',
+        },
+        certificate: {
+          certificateSha256: 'a'.repeat(64),
+          graphSha256: 'b'.repeat(64),
+          maximumRisk: 'low',
+          requiresApproval: false,
+        },
+        nodes: [],
+        blockers: [],
+        createdAt: '2026-08-28T00:00:00.000Z',
+        updatedAt: '2026-08-28T00:00:00.000Z',
+      },
+      events: [],
+      browserRequest: async () => new Response(),
+      controlPending: false,
+      onControl: async () => {},
+    }))
+    expect(markup).toContain('低风险首轮 Luna，失败/中高风险升级 Terra · Codex Sol 规划验证')
+    expect(executionPreferenceLabel('luna-first')).toBe('低风险首轮 Luna，失败/中高风险升级 Terra')
+    expect(executionPreferenceLabel('claude-sonnet')).toBe('Claude Sonnet 优先执行')
+    expect(plannerVerifierPreferenceLabel('claude-frontier')).toBe('Claude Opus/Fable 规划验证')
   })
 
   it('makes every collaboration preference and worker dispatch visible in Trace', () => {

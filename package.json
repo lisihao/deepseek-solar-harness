@@ -147,8 +147,10 @@
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "0.25.1",
+    "@deepseek-ai/dsh-debate": "workspace:^",
     "@deepseek-ai/dsh-orchestration": "workspace:^",
     "@deepseek-ai/dsh-physical-operator": "workspace:^",
+    "@deepseek-ai/dsh-tool-debate": "workspace:^",
     "@deepseek-ai/dsh-tool-orchestration": "workspace:^",
     "@deepseek-ai/dsh-tool-physical-operator": "workspace:^",
     "@deepseek-ai/dsh-tool-session-query": "workspace:^",

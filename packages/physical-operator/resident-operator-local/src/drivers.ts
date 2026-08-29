@@ -43,6 +43,7 @@ import { openCodexDaemonStream } from './codex-transport.ts'
 import { callModelToolBridge, claudeMcpRequestId, modelToolCommandId } from './model-tool-bridge.ts'
 
 const execFileAsync = promisify(execFile)
+const CLAUDE_AUTH_LOGIN_TIMEOUT_MS = 10 * 60_000
 
 /** Qualified Claude Code CLI version for this Resident build. */
 export const EXPECTED_CLAUDE_CLI_VERSION = '2.1.239 (Claude Code)'
@@ -513,6 +514,24 @@ export function codexExecutionFailure(error: unknown): ResidentOperatorError {
 /** Claude Code Agent SDK Driver using persisted native subscription Sessions. */
 export class ClaudeCodeResidentDriver implements ResidentProductDriver {
   readonly operatorId = 'claude-code' as const
+
+  async authenticate(): Promise<ResidentProviderStatus> {
+    const executable = resolveProductExecutable('claude')
+    try {
+      await execFileAsync(executable, ['auth', 'login'], {
+        encoding: 'utf8',
+        env: claudeEnvironment(),
+        timeout: CLAUDE_AUTH_LOGIN_TIMEOUT_MS,
+        maxBuffer: 2 * 1024 * 1024,
+      })
+    } catch (error) {
+      throw new ResidentOperatorError(
+        `Claude Code subscription login failed: ${error instanceof Error ? error.message : String(error)}`,
+        'AUTH_MODE_MISMATCH',
+      )
+    }
+    return this.qualify()
+  }
 
   async qualify(): Promise<ResidentProviderStatus> {
     try {

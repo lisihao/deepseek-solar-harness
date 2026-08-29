@@ -7,8 +7,17 @@
         autoStart: true
         connectTimeoutMs: 5000
 
+    - id: debate-orchestration
+      name: '@deepseek-ai/dsh-debate-orchestration'
+
     - id: tool-orchestration
       name: '@deepseek-ai/dsh-tool-orchestration'
+
+    - id: tool-debate
+      name: '@deepseek-ai/dsh-tool-debate'
+
+    - id: ui-debate
+      name: '@deepseek-ai/dsh-ui-debate'
 
     - id: ui-orchestration
       name: '@deepseek-ai/dsh-ui-orchestration'

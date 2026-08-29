@@ -15,6 +15,7 @@ export type {
   PlannerVerifierPreference,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation/strategy-types'
+export type { RlmAutonomousMode } from '@deepseek-ai/dsh-orchestration'
 
 /** User-selected orchestration strategy persisted in the current Session. */
 export interface OrchestrationExecutionPreferences {

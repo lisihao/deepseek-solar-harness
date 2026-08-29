@@ -615,6 +615,177 @@ export interface Config {
 
 Source: [`packages/credentials/credentials-local/src/index.ts:55`](../packages/credentials/credentials-local/src/index.ts)
 
+<a id="deepseek-aidsh-debate-local"></a>
+
+## `@deepseek-ai/dsh-debate-local`
+
+```ts config-catalog
+/** Accepted constructor input for production config, test seams, or a legacy root path. */
+export type LocalDebateConfig = Config | LocalDebateProviderOptions | string
+
+/** Cordis configuration for the local Provider. */
+export interface Config {
+  /** Owner-private directory containing the Provider state file. */
+  readonly root: string
+  /** Injected round executor; omitted only when constructing a Provider for inspection. */
+  readonly executor?: DebateRoundExecutor
+  /** Stable Provider identity written to run provenance. */
+  readonly providerId?: string
+  /** Provider implementation version written to run provenance. */
+  readonly providerVersion?: string
+}
+
+/** Programmatic options, including deterministic test seams. */
+export interface LocalDebateProviderOptions extends Config {
+  /** Owner-private directory containing the Provider state file. */
+  readonly root: string
+  /** Injected executor that maps one Debate round to the existing Scheduler. */
+  readonly executor: DebateRoundExecutor
+  /** Clock used for durable timestamps; production defaults to wall time. */
+  readonly clock?: () => string
+  /** Run-id source; production defaults to random UUIDs. */
+  readonly idFactory?: () => string
+}
+
+/** Production executor: one round maps to one durable TaskGraph. */
+export type DebateRoundExecutor = DebateRoundExecutorPort
+
+/** Existing-Scheduler execution port consumed by the local Debate owner. */
+export interface DebateRoundExecutorPort {
+  /** Execute one complete round without creating another Scheduler. */
+  executeRound(request: DebateRoundExecutionRequestV1): Promise<DebateRoundExecutionResultV1>
+}
+
+/** One immutable round admitted as one TaskGraph. */
+export interface DebateRoundExecutionRequestV1 {
+  /** Request schema version. */
+  readonly version: 1
+  /** Stable Debate run identity. */
+  readonly runId: string
+  /** One-based round number. */
+  readonly round: number
+  /** Participant turns followed by the decision judge. */
+  readonly turns: readonly DebateTurnRequestV1[]
+  /** Certified maximum parallel participant count for this round. */
+  readonly maxParallel: number
+  /** Cancellation signal for the complete TaskGraph round. */
+  readonly signal?: AbortSignal
+}
+
+/** Slot-keyed results returned after the round TaskGraph reaches a terminal state. */
+export interface DebateRoundExecutionResultV1 {
+  /** Result schema version. */
+  readonly version: 1
+  /** Completed turn result indexed by its roster slot identity. */
+  readonly resultsBySlot: Readonly<Record<string, DebateTurnResultV1>>
+}
+
+/** Input sent to one roster slot by the local Provider. */
+export interface DebateTurnRequestV1 {
+  /** Request schema version. */
+  readonly version: 1
+  /** Stable Debate run identity. */
+  readonly runId: string
+  /** Canonical workspace admitted by the existing TaskGraph Scheduler. */
+  readonly workspace: string
+  /** One-based round number being executed. */
+  readonly round: number
+  /** Stable roster slot identity. */
+  readonly slotId: string
+  /** Fixed role assigned to the slot. */
+  readonly role: DebateRoleId
+  /** Fixed role persona retained in the sealed TaskGraph node task. */
+  readonly persona: DebateRolePersonaV1
+  /** Deployment-owned physical operator identity. */
+  readonly operatorId: string
+  /** Model identifier selected for the slot. */
+  readonly model: string
+  /** Qualified model tier retained from the fixed roster. */
+  readonly tier: DebateModelTier
+  /** Qualified accounting/authentication source retained from the fixed roster. */
+  readonly source: DebateModelSource
+  /** Protocol phase for this turn. */
+  readonly phase: DebateTurnPhase
+  /** Prompt assembled for this role and round. */
+  readonly prompt: string
+  /** Optional objective carried from the start request. */
+  readonly objective?: string
+  /** Source identities carried without copying their contents into Debate state. */
+  readonly sourceRefs: readonly DebateSourceRefV1[]
+  /** Optional parent execution lineage retained through the TaskGraph admission. */
+  readonly execution?: DebateExecutionRefV1
+  /** Source DSH Session retained for orchestration Trace lineage. */
+  readonly sourceSessionId?: string
+  /** Claims settled before this turn began. */
+  readonly priorLedger: DebateClaimLedgerV1
+  /** Dissent retained before this turn began. */
+  readonly priorDissent: readonly DebateDissentV1[]
+  /** Unresolved gaps retained before this turn began. */
+  readonly priorUnresolved: readonly DebateUnresolvedV1[]
+  /** Cancellation signal for the current execution attempt. */
+  readonly signal?: AbortSignal
+}
+
+/** Result returned by one injected executor turn; no model or CLI is assumed. */
+export interface DebateTurnResultV1 {
+  /** Calibrated confidence for this complete turn, required even when no claim is emitted. */
+  readonly confidence: number
+  /** Optional durable reference to the complete turn output. */
+  readonly outputRef?: string
+  /** Optional bounded preview of the turn output. */
+  readonly outputPreview?: string
+  /** Claims contributed by this turn. */
+  readonly claims?: readonly DebateClaimV1[]
+  /** Optional complete ledger supplied by the executor. */
+  readonly claimLedger?: DebateClaimLedgerV1
+  /** Minority positions preserved by this turn. */
+  readonly dissent?: readonly DebateDissentV1[]
+  /** Gaps that remain unresolved after this turn. */
+  readonly unresolved?: readonly DebateUnresolvedV1[]
+  /** Evidence identities referenced by this turn. */
+  readonly evidenceRefs?: readonly DebateEvidenceRefV1[]
+  /** Provider-reported token and cost accounting. */
+  readonly usage?: DebateUsageV1
+}
+
+/** Round phase supplied to the injected executor. */
+export type DebateTurnPhase = 'blind-independent' | 'claim-ledger' | 'high-severity-unresolved'
+```
+
+Depends on: [`DebateClaimLedgerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimV1`](../packages/orchestration/debate/src/index.ts) · [`DebateDissentV1`](../packages/orchestration/debate/src/index.ts) · [`DebateEvidenceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateExecutionRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateModelSource`](../packages/orchestration/debate/src/index.ts) · [`DebateModelTier`](../packages/orchestration/debate/src/index.ts) · [`DebateRoleId`](../packages/orchestration/debate/src/index.ts) · [`DebateRolePersonaV1`](../packages/orchestration/debate/src/index.ts) · [`DebateSourceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUnresolvedV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUsageV1`](../packages/orchestration/debate/src/index.ts)
+
+Source: [`packages/orchestration/debate-local/src/types.ts:147`](../packages/orchestration/debate-local/src/types.ts)
+
+<a id="deepseek-aidsh-debate-orchestration"></a>
+
+## `@deepseek-ai/dsh-debate-orchestration`
+
+Requires: `orchestrations`
+
+```ts config-catalog
+/** Loader configuration for the local Debate owner and TaskGraph adapter. */
+export interface Config extends DebateTaskGraphAdapterOptions {
+  /** Optional DSH home; defaults to the ordinary harness-owned location. */
+  readonly dshHome?: string
+  /** Stable Provider identity retained in Debate provenance. */
+  readonly providerId?: string
+  /** Provider version retained in Debate provenance. */
+  readonly providerVersion?: string
+}
+
+/** Options that bound one adapter-owned TaskGraph admission. */
+export interface DebateTaskGraphAdapterOptions {
+  /** Maximum number of independent Debate nodes admitted in one round. */
+  readonly maxParallel?: number
+  /** Poll interval used while the durable run is still executing. */
+  readonly pollIntervalMs?: number
+  /** Wall-clock bound for one adapter call. */
+  readonly timeoutMs?: number
+}
+```
+
+Source: [`packages/orchestration/debate-orchestration/src/index.ts:41`](../packages/orchestration/debate-orchestration/src/index.ts)
+
 <a id="deepseek-aidsh-e2b"></a>
 
 ## `@deepseek-ai/dsh-e2b`
@@ -1652,7 +1823,7 @@ Source: [`packages/physical-operator/resident-operator-local/src/index.ts:39`](.
 export type Config = string
 ```
 
-Source: [`packages/orchestration/rlm-runtime-local/src/index.ts:54`](../packages/orchestration/rlm-runtime-local/src/index.ts)
+Source: [`packages/orchestration/rlm-runtime-local/src/index.ts:64`](../packages/orchestration/rlm-runtime-local/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -3286,9 +3457,11 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
+- `@deepseek-ai/dsh-tool-debate` — requires `debates` · `tools` · `systemPrompt` ([`packages/orchestration/tool-debate/src/index.ts`](../packages/orchestration/tool-debate/src/index.ts))
 - `@deepseek-ai/dsh-tool-orchestration` — requires `orchestrations` · `tools` · `systemPrompt` ([`packages/orchestration/tool-orchestration/src/index.ts`](../packages/orchestration/tool-orchestration/src/index.ts))
 - `@deepseek-ai/dsh-tool-physical-operator` — requires `tools` · `physicalOperators` · `systemPrompt` · `llm` · `agents` ([`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
+- `@deepseek-ai/dsh-ui-debate` — requires `debates` · `webServer` ([`packages/orchestration/ui-debate/src/index.ts`](../packages/orchestration/ui-debate/src/index.ts))
 - `@deepseek-ai/dsh-ui-orchestration` — requires `orchestrations` · `webServer` ([`packages/orchestration/ui-orchestration/src/index.ts`](../packages/orchestration/ui-orchestration/src/index.ts))
 - `@deepseek-ai/dsh-ui-physical-operator` — requires `residentOperators` · `webServer` ([`packages/physical-operator/ui-physical-operator/src/index.ts`](../packages/physical-operator/ui-physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
@@ -3305,6 +3478,7 @@ Abstract service classes — a deployment loads a concrete implementation packag
 - `@deepseek-ai/dsh-context-compiler` — abstract `ContextCompilerService` ([`packages/orchestration/context-compiler/src/index.ts`](../packages/orchestration/context-compiler/src/index.ts))
 - `@deepseek-ai/dsh-continual-harness` — abstract `ContinualHarnessService` ([`packages/orchestration/continual-harness/src/index.ts`](../packages/orchestration/continual-harness/src/index.ts))
 - `@deepseek-ai/dsh-credentials` — abstract `CredentialProvider` ([`packages/credentials/credentials/src/index.ts`](../packages/credentials/credentials/src/index.ts))
+- `@deepseek-ai/dsh-debate` — abstract `DebateService` ([`packages/orchestration/debate/src/index.ts`](../packages/orchestration/debate/src/index.ts))
 - `@deepseek-ai/dsh-fs` — abstract `FileSystem` ([`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker` — abstract `DirectoryPicker` ([`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts))
 - `@deepseek-ai/dsh-intent-compiler` — abstract `IntentCompilerService` ([`packages/orchestration/intent-compiler/src/index.ts`](../packages/orchestration/intent-compiler/src/index.ts))

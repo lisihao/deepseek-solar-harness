@@ -16,7 +16,9 @@ import {
   type GenerateOptions,
   type LlmCallConfig,
   type StreamChunk,
+  type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
+import { isJsonValue } from '@deepseek-ai/dsh-session'
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -28,6 +30,7 @@ import type {
   PhysicalOperatorResult,
   PhysicalOperatorRun,
   PhysicalOperatorStatus,
+  PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
 import { PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import type {} from '@deepseek-ai/dsh-commands'
@@ -80,6 +83,22 @@ declare module '@deepseek-ai/dsh-session/types' {
     'physical-operator/dispatch-terminal': {
       commandId: string
       code: string
+    }
+    /** One bounded native Resident observation copied into this Session's ignorable Trace. */
+    'physical-operator/progress': {
+      commandId: string
+      operatorId: string
+      sequence: number
+      type: string
+      time: string
+      data: Record<string, JsonValue>
+    }
+    /** Resident progress could not be projected completely into this Session Trace. */
+    'physical-operator/trace-degraded': {
+      commandId: string
+      operatorId: string
+      code: 'PROGRESS_UNAVAILABLE'
+      message: string
     }
     /** One Resident-native model call into the current Agent's real DSH tool surface. */
     'physical-operator/tool-call': {
@@ -601,8 +620,16 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         ...dispatch.residentProfile === undefined ? {} : { residentProfile: dispatch.residentProfile },
       })
       const result = await run.result
+      await projectResidentProgress(this.ctx, agent, run, dispatch.commandId)
+      if (result.stopReason === 'error' || result.stopReason === 'refusal') {
+        agent.session.append('physical-operator/dispatch-terminal', {
+          commandId: dispatch.commandId,
+          code: terminalCodeFor(result.stopReason),
+        }, { ignorable: true })
+      }
       yield* resultChunks(result)
     } catch (error) {
+      if (run !== undefined) await projectResidentProgress(this.ctx, agent, run, dispatch.commandId)
       if (!signal.aborted) {
         agent.session.append('physical-operator/dispatch-terminal', {
           commandId: dispatch.commandId,
@@ -899,10 +926,127 @@ function* resultChunks(result: PhysicalOperatorResult): Generator<StreamChunk> {
     else if (block.type === 'reasoning') yield { type: 'reasoning-delta', index, text: block.text }
     yield { type: 'block-end', index, block }
   }
-  yield { type: 'usage', usage: { inputTokens: 0, outputTokens: 0 } }
+  const usage = tokenUsageFor(result.usage)
+  if (usage !== undefined) yield { type: 'usage', usage }
   yield {
     type: 'finish',
-    reason: result.stopReason === 'max-tokens' ? { kind: 'max-tokens' } : { kind: 'stop' },
+    reason: finishReasonFor(result.stopReason),
+  }
+}
+
+type FinishReason = Extract<StreamChunk, { type: 'finish' }>['reason']
+
+function finishReasonFor(stopReason: PhysicalOperatorResult['stopReason']): FinishReason {
+  switch (stopReason) {
+    case 'completed': return { kind: 'stop' }
+    case 'max-tokens': return { kind: 'max-tokens' }
+    case 'aborted': return {
+      kind: 'aborted',
+      failure: { message: 'physical operator execution was aborted', code: 'OPERATOR_ABORTED' },
+    }
+    case 'error': return {
+      kind: 'error',
+      failure: { message: 'physical operator execution failed', code: terminalCodeFor('error') },
+    }
+    case 'refusal': return {
+      kind: 'error',
+      failure: { message: 'physical operator refused the request', code: terminalCodeFor('refusal') },
+    }
+    default: return {
+      kind: 'error',
+      failure: {
+        message: `physical operator execution ended abnormally (${String(stopReason)})`,
+        code: 'OPERATOR_ERROR',
+      },
+    }
+  }
+}
+
+function terminalCodeFor(stopReason: 'error' | 'refusal'): string {
+  return stopReason === 'error' ? 'OPERATOR_ERROR' : 'OPERATOR_REFUSED'
+}
+
+const PHYSICAL_OPERATOR_PROGRESS_PAGE_LIMIT = 100
+
+/**
+ * Copy the settled Resident event page into the owning DSH Session. The
+ * provider page is process/durable-boundary data, so only lossless JSON
+ * records for this command are admitted; older/replayed pages are deduped by
+ * their native sequence. A read failure remains observable in the host log
+ * without replacing the model result that already settled.
+ */
+async function projectResidentProgress(
+  ctx: Context,
+  agent: Agent,
+  run: PhysicalOperatorRun,
+  commandId: string,
+): Promise<void> {
+  if (run.readEvents === undefined) return
+  const projected = new Set<number>()
+  for (const event of agent.session.events) {
+    if (event.type === 'physical-operator/progress' && event.data.commandId === commandId) {
+      projected.add(event.data.sequence)
+    }
+  }
+  let afterSequence = 0
+  try {
+    while (true) {
+      const page = await run.readEvents(afterSequence, PHYSICAL_OPERATOR_PROGRESS_PAGE_LIMIT)
+      if (page.events.length === 0) return
+      let lastSequence = afterSequence
+      for (const event of page.events) {
+        if (!Number.isSafeInteger(event.sequence) || event.sequence <= lastSequence) {
+          throw new Error(`invalid progress sequence for physical operator command ${commandId}`)
+        }
+        const payload: unknown = event.data
+        if (typeof event.type !== 'string' || typeof event.time !== 'string'
+          || !isJsonValue(payload) || payload === null || Array.isArray(payload)) {
+          throw new Error(`invalid progress payload for physical operator command ${commandId}`)
+        }
+        lastSequence = event.sequence
+        const data = payload as Record<string, JsonValue>
+        if (data.commandId !== commandId || projected.has(event.sequence)) continue
+        agent.session.append('physical-operator/progress', {
+          commandId,
+          operatorId: String(run.operatorId),
+          sequence: event.sequence,
+          type: event.type,
+          time: event.time,
+          data,
+        }, { ignorable: true })
+        projected.add(event.sequence)
+      }
+      afterSequence = lastSequence
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    agent.session.append('physical-operator/trace-degraded', {
+      commandId,
+      operatorId: String(run.operatorId),
+      code: 'PROGRESS_UNAVAILABLE',
+      message,
+    }, { ignorable: true })
+    ctx.logger.warn(`physical-operator: progress projection for "${commandId}" failed: ${message}`)
+  }
+}
+
+/**
+ * Adapt native physical-operator accounting to the LLM stream vocabulary.
+ *
+ * The two contracts deliberately use different cache field names: the
+ * physical seam keeps the product-neutral `*InputTokens` names while the LLM
+ * stream uses the disjoint `cache*Tokens` buckets consumed by Session and
+ * billing projections.  No synthetic zero sample is emitted when a product
+ * has no authoritative counters; absence must remain distinguishable from a
+ * real zero-token response.
+ */
+function tokenUsageFor(usage: PhysicalOperatorUsage | undefined): TokenUsage | undefined {
+  if (usage === undefined) return undefined
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...usage.cacheReadInputTokens === undefined ? {} : { cacheReadTokens: usage.cacheReadInputTokens },
+    ...usage.cacheWriteInputTokens === undefined ? {} : { cacheWriteTokens: usage.cacheWriteInputTokens },
   }
 }
 

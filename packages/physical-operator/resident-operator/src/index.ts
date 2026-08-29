@@ -20,7 +20,7 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 9
+export const RESIDENT_PROTOCOL_VERSION = 10
 /** Current forward-only daemon state schema version. */
 export const RESIDENT_STATE_SCHEMA_VERSION = 5
 
@@ -134,6 +134,8 @@ export interface ResidentProviderStatus {
   /** Non-fatal quota telemetry failure; execution remains available with unknown allowance. */
   readonly quotaUnavailableReason?: string
   readonly authentication: 'native-subscription' | 'unqualified'
+  /** Whether the configured Driver exposes an explicit owner-local login action. */
+  readonly supportsExplicitAuthentication?: boolean
   readonly productVersion: string
   readonly protocolHash: string
   readonly models: readonly ResidentModelOption[]
@@ -175,6 +177,11 @@ export interface ResidentProductDriver {
   readonly operatorId: string
   /** @returns current version, protocol, and native-subscription qualification. */
   qualify(): Promise<ResidentProviderStatus>
+  /**
+   * Start one explicit owner-initiated native-subscription login flow.
+   * Drivers must not read, copy, or persist product credentials themselves.
+   */
+  authenticate?(): Promise<ResidentProviderStatus>
   /**
    * Execute or resume one native product turn.
    * @param request - canonical workspace, prompt, prior native Session, signal, and progress callbacks.
@@ -372,6 +379,15 @@ export abstract class ResidentOperatorService extends Service {
    * @returns current version, protocol, and native-subscription availability snapshots.
    */
   abstract providers(): Promise<ResidentProviderStatus[]>
+
+  /**
+   * Start one explicit owner-local native-subscription login flow.
+   * @param _operatorId - product identity whose configured Driver owns the flow.
+   * @returns the provider status after the product CLI completes authentication.
+   */
+  authenticate(_operatorId: string): Promise<ResidentProviderStatus> {
+    throw new ResidentOperatorError('Resident Provider does not support explicit authentication', 'SESSION_UNAVAILABLE')
+  }
 
   /**
    * Admit or replay one durable command for its operator/workspace/lane Session.

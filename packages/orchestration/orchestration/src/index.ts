@@ -19,8 +19,13 @@ import type {
   PlannerVerifierPreference,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation'
-import { HarnessError } from '@deepseek-ai/dsh-llm'
-import type { PhysicalOperatorExecutionId, PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
+import { HarnessError, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {
+  PhysicalOperatorExecutionId,
+  PhysicalOperatorExecutionPreference,
+  PhysicalOperatorStopReason,
+  PhysicalOperatorUsage,
+} from '@deepseek-ai/dsh-physical-operator'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
 
 /** Opaque orchestration run identity. */
@@ -57,6 +62,31 @@ export interface OrchestrationAcceptanceRequirement {
 /** User/system selection for Prime-compatible host-driven continuation. */
 export type RlmAutonomousMode = 'auto' | 'enabled' | 'disabled'
 
+/** Explicit result of one task-specific Autonomous end-condition check. */
+export type AutonomousEndConditionStatusV1 = 'pass' | 'fail' | 'unknown'
+
+/** One versioned check in a task-specific Autonomous end condition. */
+export interface AutonomousEndConditionCheckV1 {
+  /** Stable check identity used in persisted round results. */
+  readonly id: string
+  /** The host-owned evidence source used to evaluate this check. */
+  readonly kind: 'acceptance' | 'artifact-present' | 'evaluator'
+  /** Acceptance id, artifact id, or registered evaluator id. */
+  readonly ref: string
+}
+
+/**
+ * Immutable task-specific Autonomous termination contract.
+ *
+ * The contract is data only. It never embeds executable code; `evaluator` refs
+ * are resolved by a separately registered host evaluator seam.
+ */
+export interface AutonomousEndConditionV1 {
+  readonly version: 1
+  readonly operator: 'all' | 'any'
+  readonly checks: readonly AutonomousEndConditionCheckV1[]
+}
+
 /** Shell quality gates evaluated by the orchestration host after every completed assistant turn. */
 export interface RlmAutonomousGateConfigV1 {
   readonly commands: readonly string[]
@@ -73,6 +103,8 @@ export interface RlmAutonomousConfigV1 {
   readonly timeoutMs?: number
   readonly continuationPrompt?: string
   readonly gates?: RlmAutonomousGateConfigV1
+  /** Optional task-specific terminal condition evaluated after each round. */
+  readonly endCondition?: AutonomousEndConditionV1
 }
 
 /** Fully resolved immutable Autonomous policy sealed into one physical attempt. */
@@ -89,6 +121,8 @@ export interface RlmAutonomousPolicyV1 {
     readonly maxRetries: number
     readonly timeoutMs: number
   }
+  /** Immutable task-specific terminal condition, when configured. */
+  readonly endCondition?: AutonomousEndConditionV1
   readonly policySha256: string
 }
 
@@ -263,8 +297,23 @@ export interface OrchestrationCompilationV1 {
 
 /** Start one accepted compilation. */
 export interface OrchestrationStartRequest {
+  /** Caller-stable identity reused when the same start request is retried. */
+  readonly commandId: string
   readonly compilationId: string
   readonly approvalRef?: string
+}
+
+/** Immutable terminal Evidence retained for one physical execution attempt. */
+export interface OrchestrationExecutionEvidenceV1 {
+  readonly version: 1
+  readonly executionId: PhysicalOperatorExecutionId
+  readonly stopReason: PhysicalOperatorStopReason
+  readonly output: readonly ContentBlock[]
+  readonly usage?: PhysicalOperatorUsage
+  readonly continuity?: {
+    readonly sessionId: string
+    readonly stateRevision: number
+  }
 }
 
 /** Run lifecycle retained independently from health and blockers. */

@@ -84,6 +84,7 @@ export class OrchestrationDaemonClient {
    */
   start(request: OrchestrationStartRequest): Promise<OrchestrationRunSnapshot> {
     return this.request('orchestration.start', {
+      command_id: request.commandId,
       compilation_id: request.compilationId,
       ...request.approvalRef === undefined ? {} : { approval_ref: request.approvalRef },
     })

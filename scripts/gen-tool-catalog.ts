@@ -29,6 +29,7 @@ import type { ImageAttachmentLimits, ImageAttachmentRef, SaveImageAttachment, St
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import PlanModeController from '@deepseek-ai/dsh-plan-mode'
 import PhysicalOperatorRuntime from '@deepseek-ai/dsh-physical-operator'
+import DebateService from '@deepseek-ai/dsh-debate'
 import OrchestrationService from '@deepseek-ai/dsh-orchestration'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import * as WebSearchExa from '@deepseek-ai/dsh-web-search-exa'
@@ -57,6 +58,7 @@ import * as ToolSchedule from '@deepseek-ai/dsh-schedule'
 import Lsp from '@deepseek-ai/dsh-lsp'
 import * as ToolLsp from '@deepseek-ai/dsh-tool-lsp'
 import * as ToolPhysicalOperator from '@deepseek-ai/dsh-tool-physical-operator'
+import * as ToolDebate from '@deepseek-ai/dsh-tool-debate'
 import * as ToolOrchestration from '@deepseek-ai/dsh-tool-orchestration'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import * as ToolSessionQuery from '@deepseek-ai/dsh-tool-session-query'
@@ -110,6 +112,15 @@ class CatalogOrchestrationService extends OrchestrationService {
   override clusterHeartbeat(): never { throw new Error('tool catalog never executes orchestration') }
   override clusterExportReplica(): never { throw new Error('tool catalog never executes orchestration') }
   override clusterInstallReplica(): never { throw new Error('tool catalog never executes orchestration') }
+}
+
+/** Schema-harvest-only Debate seam; no method can execute in the catalog pass. */
+class CatalogDebateService extends DebateService {
+  override start(): never { throw new Error('tool catalog never executes Debate') }
+  override list(): never { throw new Error('tool catalog never executes Debate') }
+  override inspect(): never { throw new Error('tool catalog never executes Debate') }
+  override readEvents(): never { throw new Error('tool catalog never executes Debate') }
+  override control(): never { throw new Error('tool catalog never executes Debate') }
 }
 
 const root = resolve(import.meta.dirname, '..')
@@ -260,6 +271,20 @@ const TOOL_PACKAGES: ToolPackage[] = [
     note:
       'The schema exposes stable physical-operator ids rather than provider transports. '
       + 'Deployments register operators separately; the catalog intentionally harvests the empty-registry schema.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-debate',
+    dir: 'tool-debate',
+    source: 'packages/orchestration/tool-debate/src/index.ts',
+    requires: ['ctx.tools', 'ctx.systemPrompt', 'ctx.debates'],
+    writes: ['tool/call', 'tool/result', 'debate lifecycle through ctx.debates'],
+    async mount(ctx) {
+      await ctx.plugin(CatalogDebateService)
+      await ctx.plugin(ToolDebate)
+    },
+    note:
+      'The model-facing Consumer depends only on the provider-neutral ctx.debates seam; '
+      + 'the catalog substitute cannot execute and does not start the local Debate Provider.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-orchestration',

@@ -913,6 +913,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-agent-preset AgentPresetLabel id \'agent-preset\'',
       'client-ui-jobs JobListAction id \'job-list\'',
       'client-ui-subagent SubagentCatalogAction id \'subagent-catalog\'',
+      'ui-debate DebatePanel id \'debate-dashboard\'',
       'ui-orchestration OrchestrationsPanel id \'durable-orchestrations\'',
       'ui-physical-operator ResidentOperatorsPanel id \'resident-physical-operators\'',
     ],

@@ -4,6 +4,8 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
 import type {
+  AdaptiveExecutionRisk,
+  AdaptiveExecutionPreferenceV1,
   ExecutionModelPreference,
   ModelAllocationObjective,
   PlannerVerifierPreference,
@@ -11,6 +13,49 @@ import type {
 } from './strategy-types.ts'
 
 export type * from './strategy-types.ts'
+
+const ADAPTIVE_EXECUTION_RISKS = new Set<AdaptiveExecutionRisk>(['low', 'medium', 'high'])
+
+/** Stable allocation failure codes used by Service-boundary validation. */
+export type ModelAllocationErrorCode =
+  | 'NO_MODEL_CAPACITY'
+  | 'MODEL_CAPACITY_BUSY'
+  | 'EXPLICIT_MODEL_UNAVAILABLE'
+  | 'MODEL_ALLOCATION_INVALID'
+
+function allocationInvalid(path: string, message: string): never {
+  throw new ModelAllocationError(`${path}: ${message}`, 'MODEL_ALLOCATION_INVALID')
+}
+
+/**
+ * Validate one adaptive preference received at a Provider boundary.
+ * @param value - untrusted allocation preference.
+ * @returns validated version-1 adaptive preference.
+ */
+export function validateAdaptiveExecutionPreference(value: unknown): AdaptiveExecutionPreferenceV1 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) allocationInvalid('adaptiveExecutionPreference', 'must be an object')
+  const record = value as Record<string, unknown>
+  const allowed = new Set(['version', 'executionRisk', 'priorFailures', 'crossDomain'])
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) allocationInvalid(`adaptiveExecutionPreference.${key}`, 'unknown field')
+  }
+  if (record.version !== 1) allocationInvalid('adaptiveExecutionPreference.version', 'must be 1')
+  if (typeof record.executionRisk !== 'string' || !ADAPTIVE_EXECUTION_RISKS.has(record.executionRisk as AdaptiveExecutionRisk)) {
+    allocationInvalid('adaptiveExecutionPreference.executionRisk', 'must be low, medium, or high')
+  }
+  if (typeof record.priorFailures !== 'number' || !Number.isSafeInteger(record.priorFailures) || record.priorFailures < 0) {
+    allocationInvalid('adaptiveExecutionPreference.priorFailures', 'must be a non-negative safe integer')
+  }
+  if (record.crossDomain !== undefined && typeof record.crossDomain !== 'boolean') {
+    allocationInvalid('adaptiveExecutionPreference.crossDomain', 'must be a boolean')
+  }
+  return {
+    version: 1,
+    executionRisk: record.executionRisk as AdaptiveExecutionRisk,
+    priorFailures: record.priorFailures,
+    crossDomain: record.crossDomain === true,
+  }
+}
 /** Position of a node in a quality-gated TaskGraph. */
 export type ModelTaskPhase = 'planning' | 'execution' | 'verification' | 'synthesis'
 
@@ -73,6 +118,8 @@ export interface ModelAllocationRequest {
   readonly objective: ModelAllocationObjective
   readonly plannerVerifierPreference?: PlannerVerifierPreference
   readonly executionPreference?: ExecutionModelPreference
+  /** Optional adaptive hint; omission preserves the existing preference behavior. */
+  readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1
   readonly rlm: RlmExecutionMode
   readonly graphMaxParallel: number
   readonly offers: readonly ModelExecutionOffer[]
@@ -95,7 +142,7 @@ export interface ModelAllocationPlan {
 
 /** Structured model-capacity or explicit-selection failure. */
 export class ModelAllocationError extends HarnessError {
-  constructor(message: string, code: 'NO_MODEL_CAPACITY' | 'MODEL_CAPACITY_BUSY' | 'EXPLICIT_MODEL_UNAVAILABLE') {
+  constructor(message: string, code: ModelAllocationErrorCode) {
     super(message, code)
     this.name = 'ModelAllocationError'
   }

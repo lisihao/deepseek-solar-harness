@@ -2,7 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import { HarnessError, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { HarnessError, type ContentBlock, type ResolvedRetryPolicy, type ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
 
 /** Stable identity of one root or child RLM session. */
@@ -29,6 +29,22 @@ export type RlmCommandId = Branded<'RlmCommandId'>
  * @returns branded command identity.
  */
 export const RlmCommandId = (value: string): RlmCommandId => value as RlmCommandId
+/** Identity of one external controller (for example the Prime Agents View). */
+export type RlmControlCallerId = Branded<'RlmControlCallerId'>
+/**
+ * Brand a validated external controller identity.
+ * @param value - validated opaque caller identity.
+ * @returns branded caller identity.
+ */
+export const RlmControlCallerId = (value: string): RlmControlCallerId => value as RlmControlCallerId
+/** Durable identity of one exclusive RLM control lease. */
+export type RlmControlLeaseId = Branded<'RlmControlLeaseId'>
+/**
+ * Brand a validated control lease identity.
+ * @param value - validated opaque lease identity.
+ * @returns branded lease identity.
+ */
+export const RlmControlLeaseId = (value: string): RlmControlLeaseId => value as RlmControlLeaseId
 
 /** JSON-compatible value exposed by the TypeScript REPL. */
 export type RlmJsonValue = null | boolean | number | string | RlmJsonValue[] | { readonly [key: string]: RlmJsonValue }
@@ -63,6 +79,26 @@ export interface RlmModelSelectionV1 {
   readonly profile?: PhysicalOperatorExecutionPreference
 }
 
+/**
+ * Versioned execution context inherited by every Prime RLM child.
+ *
+ * Model/provider/profile remain in {@link RlmModelSelectionV1}; this object
+ * carries the other parent-owned execution inputs without exposing a second
+ * model-selection authority. The TypeScript runtime never mutates this
+ * object, and each child receives the exact sealed value from its parent.
+ */
+export interface RlmChildExecutionOptionsV1 {
+  readonly version: 1
+  /** Model-visible tool schemas owned by the parent execution. */
+  readonly tools?: readonly ToolSchema[]
+  /** Host-issued managed Skill descriptors available to the parent. */
+  readonly skills?: readonly RlmManagedSkillDescriptorV1[]
+  /** Provider-owned retry authority resolved for the parent model route. */
+  readonly retryPolicy?: ResolvedRetryPolicy
+  /** Sealed context/capability references; raw prompts and secrets are excluded. */
+  readonly capabilityContext?: Readonly<Record<string, RlmJsonValue>>
+}
+
 /** Request that creates or idempotently reopens one RLM root. */
 export interface RlmRuntimeCreateRequest {
   readonly sessionId: RlmRuntimeSessionId
@@ -73,6 +109,8 @@ export interface RlmRuntimeCreateRequest {
   readonly model: RlmModelSelectionV1
   /** Sealed economy-first allocation used when `rlm()` omits an explicit model. */
   readonly defaultChildModel?: RlmModelSelectionV1
+  /** Sealed parent execution inputs inherited by Prime children. */
+  readonly executionOptions?: RlmChildExecutionOptionsV1
   readonly limits: RlmRuntimeLimitsV1
   readonly context?: Readonly<Record<string, RlmJsonValue>>
 }
@@ -130,6 +168,7 @@ export interface RlmRuntimeHostBindings {
     readonly childSessionId: RlmRuntimeSessionId
     readonly depth: number
     readonly model: RlmModelSelectionV1
+    readonly executionOptions: RlmChildExecutionOptionsV1
   }): Promise<RlmChildExecution>
   /** Continue one root session for a persistent goal or scheduled heartbeat. */
   dispatchContinuation?(request: {
@@ -139,6 +178,8 @@ export interface RlmRuntimeHostBindings {
     readonly source: 'goal' | 'heartbeat' | 'message' | 'autonomous'
     readonly deliveryMode: 'steer' | 'follow_up'
     readonly model: RlmModelSelectionV1
+    /** Optional for legacy host continuations; LocalRlmRuntime supplies the sealed value. */
+    readonly executionOptions?: RlmChildExecutionOptionsV1
   }): Promise<RlmChildExecution>
   /** Forward typed kernel capabilities whose authority lives outside the RLM Provider. */
   hostRequest?(request: {
@@ -260,6 +301,8 @@ export interface RlmRuntimeSessionSnapshotV1 {
   readonly model: RlmModelSelectionV1
   /** Sealed default for recursively admitted children; never inferred inside the runtime. */
   readonly defaultChildModel?: RlmModelSelectionV1
+  /** Sealed parent execution inputs inherited by recursively admitted children. */
+  readonly executionOptions?: RlmChildExecutionOptionsV1
   readonly limits: RlmRuntimeLimitsV1
   readonly depth: number
   readonly lifecycle: 'idle' | 'running' | 'degraded' | 'stopped'
@@ -271,6 +314,73 @@ export interface RlmRuntimeSessionSnapshotV1 {
   readonly goal?: RlmGoalV1
   readonly createdAt: string
   readonly updatedAt: string
+}
+
+/** Versioned exclusive control lease returned to an external Agents View. */
+export interface RlmControlLeaseV1 {
+  readonly version: 1
+  readonly leaseId: RlmControlLeaseId
+  readonly sessionId: RlmRuntimeSessionId
+  readonly callerId: RlmControlCallerId
+  readonly acquiredAt: string
+  readonly lastSeenAt: string
+}
+
+/** Attach one external controller to a durable RLM session. */
+export interface RlmControlAttachRequestV1 {
+  readonly version: 1
+  readonly sessionId: RlmRuntimeSessionId
+  readonly commandId: RlmCommandId
+  readonly callerId: RlmControlCallerId
+}
+
+/** Current session state and cursor returned by a successful attach. */
+export interface RlmControlAttachResultV1 {
+  readonly version: 1
+  readonly lease: RlmControlLeaseV1
+  readonly snapshot: RlmRuntimeSessionSnapshotV1
+  readonly eventCursor: number
+}
+
+/** Input accepted from an attached external controller. */
+export interface RlmControlInputRequestV1 {
+  readonly version: 1
+  readonly sessionId: RlmRuntimeSessionId
+  readonly leaseId: RlmControlLeaseId
+  readonly commandId: RlmCommandId
+  readonly text: string
+  readonly mode?: RlmMessageMode
+  readonly artifactRefs?: readonly string[]
+}
+
+/** Receipt returned for one controller input enqueued into the existing continuation path. */
+export interface RlmControlInputResultV1 {
+  readonly version: 1
+  readonly sessionId: RlmRuntimeSessionId
+  readonly leaseId: RlmControlLeaseId
+  readonly commandId: RlmCommandId
+  readonly messageId: string
+  readonly effectiveMode: 'steer' | 'follow_up'
+  readonly deliveryStatus: 'queued' | 'delivered'
+  readonly stateRevision: number
+  readonly eventCursor: number
+}
+
+/** Release one external controller lease. */
+export interface RlmControlDetachRequestV1 {
+  readonly version: 1
+  readonly sessionId: RlmRuntimeSessionId
+  readonly leaseId: RlmControlLeaseId
+  readonly commandId: RlmCommandId
+}
+
+/** Idempotent detach result. */
+export interface RlmControlDetachResultV1 {
+  readonly version: 1
+  readonly sessionId: RlmRuntimeSessionId
+  readonly leaseId: RlmControlLeaseId
+  readonly detached: true
+  readonly eventCursor: number
 }
 
 /** Execute one cell in the persistent TypeScript namespace. */
@@ -352,6 +462,20 @@ export interface RlmModelToolBridgeV1 {
   }]
 }
 
+/** Canonical model-visible TypeScript REPL schema shared by all RLM consumers. */
+export const RLM_TYPESCRIPT_REPL_TOOL_SCHEMA = {
+  name: 'typescript_repl',
+  description: 'Execute one TypeScript cell in the persistent RLM namespace. Use context as programmable state; await rlm(task, { name, model }) to admit asynchronous child agents. rlm returns only a handle. Results arrive through agentMessage or artifacts.',
+  parameters: {
+    type: 'object',
+    properties: {
+      code: { type: 'string', description: 'TypeScript cell with persistent lexical variables and top-level await.' },
+    },
+    required: ['code'],
+    additionalProperties: false,
+  },
+} as const satisfies ToolSchema
+
 /** Family-scoped message delivery mode matching Prime Agent v0.8.0. */
 export type RlmMessageMode = 'auto' | 'steer' | 'follow_up'
 
@@ -369,6 +493,10 @@ export interface RlmMessageSendRequest {
 export interface RlmMessageV1 extends RlmMessageSendRequest {
   readonly version: 1
   readonly messageId: string
+  /** Origin used by the local control plane; omitted for Agent-to-Agent messages. */
+  readonly source?: 'agent' | 'control'
+  /** Lease that authorized a control-origin message. */
+  readonly controlLeaseId?: RlmControlLeaseId
   readonly effectiveMode: 'steer' | 'follow_up'
   readonly deliveryStatus: 'queued' | 'delivered'
   readonly queuedAt: string
@@ -470,6 +598,8 @@ export type RlmRuntimeErrorCode =
   | 'RLM_FAMILY_VIOLATION'
   | 'RLM_CELL_TIMEOUT'
   | 'RLM_OUTPUT_LIMIT'
+  | 'RLM_CONTROL_BUSY'
+  | 'RLM_CONTROL_LEASE_INVALID'
 
 /** Provider-neutral RLM runtime error. */
 export class RlmRuntimeError extends HarnessError {
@@ -515,6 +645,24 @@ export abstract class RlmRuntimeService extends Service {
    * @returns current snapshot.
    */
   abstract inspect(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSnapshotV1>
+  /**
+   * Establish one exclusive external control lease over a durable session.
+   * @param request - versioned caller and command identity.
+   * @returns lease, current snapshot, and event cursor.
+   */
+  abstract attach(request: RlmControlAttachRequestV1): Promise<RlmControlAttachResultV1>
+  /**
+   * Submit controller input through the existing message/continuation path.
+   * @param request - lease-bound, idempotent input command.
+   * @returns durable input receipt.
+   */
+  abstract input(request: RlmControlInputRequestV1): Promise<RlmControlInputResultV1>
+  /**
+   * Release one external control lease.
+   * @param request - lease-bound idempotent detach command.
+   * @returns durable detach receipt.
+   */
+  abstract detach(request: RlmControlDetachRequestV1): Promise<RlmControlDetachResultV1>
   /**
    * Inspect one command receipt.
    * @param commandId - caller-generated command identity.

@@ -65,6 +65,7 @@ const BACKGROUND_TASK_ADMISSION_CONFIG = fileURLToPath(
 )
 const PRODUCT_SUBAGENT_CODEX_CONFIG = fileURLToPath(new URL('../product-subagent-codex.cordis.yml', import.meta.url))
 const PRODUCT_SUBAGENT_BOTH_CONFIG = fileURLToPath(new URL('../product-subagent-both.cordis.yml', import.meta.url))
+const DEBATE_CONFIG = fileURLToPath(new URL('../debate.cordis.yml', import.meta.url))
 const FS_DIFF_BOUND_CONFIG = fileURLToPath(new URL('./fs-diff-bound.cordis.yml', import.meta.url))
 const SNAPSHOTS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'snapshots')
 const PACKED_CHUNKS_SOURCE = 'hook-cc-pretool-deny'
@@ -156,6 +157,18 @@ const SCENARIOS: Scenario[] = [
     headerClass: 'product-subagent-both',
     systemPromptSource: 'product-subagent-codex',
     configPath: PRODUCT_SUBAGENT_BOTH_CONFIG,
+  },
+  // Authored keyless Debate composition: the fixture seeds the session's
+  // Debate preference, then the replayed parent calls the real `debate` tool.
+  // The fixture Provider returns an approval-pending run and never starts an
+  // external operator.
+  {
+    name: 'debate-tool-turn',
+    hasModelTurn: true,
+    recorded: false,
+    pinsHeader: true,
+    headerClass: 'debate',
+    configPath: DEBATE_CONFIG,
   },
   {
     name: 'session-title-after-turn',

@@ -24,6 +24,56 @@ function optionalPositiveInteger(value: unknown, name: string, maximum: number):
   }
 }
 
+function validateAutonomousEndCondition(value: unknown, node: OrchestrationNodeSpecV1): void {
+  if (!isRecord(value) || value.version !== 1) {
+    throw new OrchestrationError(`node ${node.id} autonomous endCondition version must be 1`, 'GRAPH_INVALID')
+  }
+  if (value.operator !== 'all' && value.operator !== 'any') {
+    throw new OrchestrationError(`node ${node.id} autonomous endCondition operator is unsupported`, 'GRAPH_INVALID')
+  }
+  if (!Array.isArray(value.checks) || value.checks.length === 0 || value.checks.length > 16) {
+    throw new OrchestrationError(`node ${node.id} autonomous endCondition checks must contain 1 through 16 entries`, 'GRAPH_INVALID')
+  }
+  const checks: unknown[] = value.checks
+  const rawAcceptance = (node as unknown as Record<string, unknown>).acceptance
+  const acceptanceValues: unknown[] = Array.isArray(rawAcceptance) ? rawAcceptance : []
+  const acceptanceIds = new Set<string>()
+  const rawArtifacts = (node as unknown as Record<string, unknown>).requiredArtifacts
+  const artifactIds = new Set<string>(Array.isArray(rawArtifacts)
+    ? rawArtifacts.filter((entry): entry is string => typeof entry === 'string')
+    : [])
+  for (const entry of acceptanceValues) {
+    if (!isRecord(entry) || typeof entry.id !== 'string') continue
+    acceptanceIds.add(entry.id)
+    if (entry.kind === 'artifact-present') artifactIds.add(entry.id)
+  }
+  const checkIds = new Set<string>()
+  for (const [index, candidate] of checks.entries()) {
+    const prefix = `node ${node.id} autonomous endCondition checks[${String(index)}]`
+    if (!isRecord(candidate)) throw new OrchestrationError(`${prefix} must be an object`, 'GRAPH_INVALID')
+    if (typeof candidate.id !== 'string' || candidate.id.length === 0 || candidate.id.trim() !== candidate.id || candidate.id.length > 128) {
+      throw new OrchestrationError(`${prefix}.id must be a non-blank trimmed string no longer than 128 characters`, 'GRAPH_INVALID')
+    }
+    if (checkIds.has(candidate.id)) throw new OrchestrationError(`${prefix}.id is duplicated`, 'GRAPH_INVALID')
+    checkIds.add(candidate.id)
+    if (!['acceptance', 'artifact-present', 'evaluator'].includes(String(candidate.kind))) {
+      throw new OrchestrationError(`${prefix}.kind is unsupported`, 'GRAPH_INVALID')
+    }
+    if (typeof candidate.ref !== 'string' || candidate.ref.length === 0 || candidate.ref.trim() !== candidate.ref || candidate.ref.length > 256) {
+      throw new OrchestrationError(`${prefix}.ref must be a non-blank trimmed string no longer than 256 characters`, 'GRAPH_INVALID')
+    }
+    if (candidate.kind === 'acceptance' && !acceptanceIds.has(candidate.ref)) {
+      throw new OrchestrationError(`${prefix}.ref does not name a node acceptance requirement`, 'GRAPH_INVALID')
+    }
+    if (candidate.kind === 'artifact-present' && !artifactIds.has(candidate.ref)) {
+      throw new OrchestrationError(`${prefix}.ref does not name a required artifact`, 'GRAPH_INVALID')
+    }
+    if (candidate.kind === 'evaluator' && !/^[a-z][a-z0-9._-]{0,127}$/u.test(candidate.ref)) {
+      throw new OrchestrationError(`${prefix}.ref is not a valid evaluator id`, 'GRAPH_INVALID')
+    }
+  }
+}
+
 /**
  * Validate one untrusted graph at the durable/wire boundary.
  * @param value - untrusted version-one logical graph.
@@ -125,6 +175,9 @@ export function validateGraph(value: unknown): string[] {
             'GRAPH_INVALID',
           )
         }
+      }
+      if (node.autonomous?.endCondition !== undefined) {
+        validateAutonomousEndCondition(node.autonomous.endCondition, node)
       }
       if (node.autonomous !== undefined && node.autonomous.mode !== 'disabled' && node.rlm?.mode === 'disabled') {
         throw new OrchestrationError(`node ${node.id} cannot enable Autonomous Mode while RLM is disabled`, 'GRAPH_INVALID')

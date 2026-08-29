@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -12,6 +12,7 @@ import {
   claudeEnvironment,
   claudeCompactPrompt,
   claudeResultFailure,
+  ClaudeCodeResidentDriver,
   codexExecutionFailure,
   collectCodexModelsAndQuota,
   CodexResidentDriver,
@@ -33,6 +34,51 @@ const model = {
 } as const
 
 describe('Claude Code resident driver environment', () => {
+  it.runIf(process.platform !== 'win32')('starts explicit login with the resolved CLI and a credential-scrubbed environment', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-claude-auth-'))
+    const executable = join(root, 'claude')
+    const marker = join(root, 'invocation.txt')
+    const previousPath = process.env.PATH
+    const previousMarker = process.env.TEST_CLAUDE_AUTH_MARKER
+    const previousApiKey = process.env.ANTHROPIC_API_KEY
+    class QualifiedAfterLoginDriver extends ClaudeCodeResidentDriver {
+      override qualify() {
+        return Promise.resolve({
+          operatorId: 'claude-code',
+          product: 'claude-code',
+          displayName: 'Claude Code',
+          description: 'Test provider',
+          tags: ['subscription'],
+          maxConcurrency: 1,
+          injectionBoundaries: ['pre-dispatch'] as const,
+          available: true,
+          authentication: 'native-subscription' as const,
+          productVersion: 'test',
+          protocolHash: 'test',
+          models: [],
+        })
+      }
+    }
+    try {
+      writeFileSync(executable, '#!/bin/sh\nprintf \'%s|%s\' "$*" "${ANTHROPIC_API_KEY-unset}" > "$TEST_CLAUDE_AUTH_MARKER"\n')
+      chmodSync(executable, 0o700)
+      process.env.PATH = root
+      process.env.TEST_CLAUDE_AUTH_MARKER = marker
+      process.env.ANTHROPIC_API_KEY = 'must-not-leak'
+
+      await expect(new QualifiedAfterLoginDriver().authenticate()).resolves.toMatchObject({ available: true })
+      expect(readFileSync(marker, 'utf8')).toBe('auth login|unset')
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+      if (previousMarker === undefined) delete process.env.TEST_CLAUDE_AUTH_MARKER
+      else process.env.TEST_CLAUDE_AUTH_MARKER = previousMarker
+      if (previousApiKey === undefined) delete process.env.ANTHROPIC_API_KEY
+      else process.env.ANTHROPIC_API_KEY = previousApiKey
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('uses Claude Code native /compact and preserves optional instructions', () => {
     expect(claudeCompactPrompt()).toBe('/compact')
     expect(claudeCompactPrompt('retain architectural decisions')).toBe('/compact retain architectural decisions')

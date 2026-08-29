@@ -2,12 +2,12 @@
 
 English | [中文](README.zh.md)
 
-This dual-face plugin exposes the daemon-owned Resident physical-operator projection at `/api/resident-operators` and registers the matching browser controls. The Host face accepts loopback owner requests and paired remote-device bearers, serves GET only, and never writes Resident state. The Client face adds the Resident status panel and the session-scoped collaboration/model/effort selector to any DSH browser shell.
+This dual-face plugin exposes the daemon-owned Resident physical-operator projection at `/api/resident-operators` and registers the matching browser controls. The Host face accepts read-only GET from loopback owners and paired remote devices. A POST can start native product authentication only from a loopback owner request; remote Frontends receive guidance to authenticate on the Server itself. The Client face adds the Resident status panel and the session-scoped collaboration/model/effort selector to any DSH browser shell. The collaboration popover is positioned against the current viewport and separates frequent controls from TaskGraph advanced scheduling, so a new-session composer does not hide options above the window. Codex and Claude Code render their own live model catalogs, effort wording, and planning/execution strategies.
 
 ## Authority
 
 - `dsh-resident-operatord` remains the only Session, Receipt, Lease, and Event writer.
-- The Host route reads `ctx.residentOperators`; it does not copy prompts, native transcripts, or durable state.
+- The Host route reads `ctx.residentOperators`; its owner-local authentication action invokes the product flow without copying credentials, prompts, native transcripts, or durable state.
 - The Client depends on capability seams and same-origin authenticated HTTP, not on Electron or DSH Desktop.
 - Routing changes use logged host commands; the browser panel cannot call the daemon control socket directly.
 
@@ -21,4 +21,4 @@ None from the dashboard. A selected execution policy affects later dispatch only
 
 ## Known Limitations and Deferred Work
 
-- The first release exposes read-only Resident status remotely; interrupt and reset remain trusted local management operations.
+- Remote devices expose read-only Resident status; authentication, interrupt, and reset remain trusted owner-local management operations.

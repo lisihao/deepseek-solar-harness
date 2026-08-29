@@ -1,8 +1,8 @@
 /** Owner-local persistent Continuous Harness Provider. @module @deepseek-ai/dsh-continual-harness-local */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { chmodSync, mkdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { writeFileAtomicSync } from '@deepseek-ai/dsh-atomic-write'
 import ContinualHarnessService, {
@@ -84,18 +84,64 @@ function tokens(value: string): string[] {
   return [...new Set(value.toLowerCase().split(/[^\p{L}\p{N}_.-]+/u).filter(word => word.length >= 2))].sort()
 }
 
+function normalizedWorkspace(value: string): string {
+  const workspace = resolve(requiredText(value, 'workspace'))
+  if (!existsSync(workspace)) return workspace
+  try {
+    return realpathSync(workspace)
+  } catch (error) {
+    throw new ContinualHarnessError(
+      `workspace cannot be normalized: ${error instanceof Error ? error.message : String(error)}`,
+      'HARNESS_INVALID',
+    )
+  }
+}
+
 function scopeId(request: { readonly scope: ContinualHarnessScope; readonly workspace: string; readonly sessionId?: string }): string {
   if (request.scope === 'global') return 'global'
-  if (request.scope === 'workspace') return request.workspace
+  if (request.scope === 'workspace') return normalizedWorkspace(request.workspace)
   if (request.sessionId === undefined || request.sessionId.length === 0) {
     throw new ContinualHarnessError('session-scoped Continuous Harness requires sessionId', 'HARNESS_INVALID')
   }
-  return request.sessionId
+  return requiredText(request.sessionId, 'sessionId')
 }
 
 function managedScope(request: ContinualHarnessScopeRequest): { readonly scope: ContinualHarnessScope; readonly scopeId: string } {
   const scope = request.scope ?? 'session'
   return { scope, scopeId: scopeId({ ...request, scope }) }
+}
+
+function automaticScopeChain(
+  request: ContinualHarnessScopeRequest,
+): readonly { readonly scope: ContinualHarnessScope; readonly scopeId: string }[] {
+  const chain: { scope: ContinualHarnessScope; scopeId: string }[] = []
+  if (request.sessionId !== undefined) {
+    chain.push({ scope: 'session', scopeId: scopeId({ ...request, scope: 'session' }) })
+  }
+  chain.push({ scope: 'workspace', scopeId: scopeId({ ...request, scope: 'workspace' }) })
+  chain.push({ scope: 'global', scopeId: 'global' })
+  return chain
+}
+
+function readScopeChain(
+  request: ContinualHarnessScopeRequest,
+): readonly { readonly scope: ContinualHarnessScope; readonly scopeId: string }[] {
+  return request.scope === undefined
+    ? automaticScopeChain(request)
+    : [{ scope: request.scope, scopeId: scopeId({ ...request, scope: request.scope }) }]
+}
+
+function scopeKey(scope: ContinualHarnessScope, id: string): string {
+  return `${scope}:${id}`
+}
+
+function matchesScope(
+  scope: ContinualHarnessScope,
+  storedId: string,
+  target: { readonly scope: ContinualHarnessScope; readonly scopeId: string },
+): boolean {
+  return scope === target.scope
+    && (scope === 'workspace' ? normalizedWorkspace(storedId) === target.scopeId : storedId === target.scopeId)
 }
 
 function requiredText(value: string, label: string): string {
@@ -144,13 +190,23 @@ export class LocalContinualHarness extends ContinualHarnessService {
     if (!Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 64) {
       throw new ContinualHarnessError('Continuous Harness snapshot limit must be from 1 through 64', 'HARNESS_INVALID')
     }
-    const id = scopeId(request)
+    const scopeChain = readScopeChain(request)
     const wanted = new Set(tokens(`${request.role} ${request.task}`))
     const managedLatest = new Map<string, ContinualHarnessManagedEntryV2>()
-    for (const entry of this.document.managedEntries) {
-      if (entry.scope !== request.scope || entry.scopeId !== id) continue
-      const current = managedLatest.get(entry.entryId)
-      if (current === undefined || current.entryVersion < entry.entryVersion) managedLatest.set(entry.entryId, entry)
+    const populatedScopes = new Set<string>()
+    for (const target of scopeChain) {
+      const currentScope = new Map<string, ContinualHarnessManagedEntryV2>()
+      for (const entry of this.document.managedEntries) {
+        if (!matchesScope(entry.scope, entry.scopeId, target)) continue
+        populatedScopes.add(scopeKey(target.scope, target.scopeId))
+        const current = currentScope.get(entry.entryId)
+        if (current === undefined || current.entryVersion < entry.entryVersion) currentScope.set(entry.entryId, entry)
+      }
+      for (const entry of currentScope.values()) {
+        // A session/workspace entry shadows the same id at a broader scope,
+        // including a tombstone used to hide an inherited entry.
+        if (!managedLatest.has(entry.entryId)) managedLatest.set(entry.entryId, entry)
+      }
     }
     const managedEntries = [...managedLatest.values()]
       .filter(entry => entry.deletedAt === undefined)
@@ -161,21 +217,34 @@ export class LocalContinualHarness extends ContinualHarnessService {
       .slice(0, request.limit)
       .map(value => value.entry)
     const remaining = Math.max(0, request.limit - managedEntries.length)
-    const entries = this.document.legacyEntries
-      .filter(entry => entry.scope === request.scope && entry.scopeId === id)
+    const legacyLatest = new Map<string, ContinualHarnessEntryV1>()
+    for (const target of scopeChain) {
+      for (const entry of this.document.legacyEntries) {
+        if (!matchesScope(entry.scope, entry.scopeId, target)) continue
+        populatedScopes.add(scopeKey(target.scope, target.scopeId))
+        if (!legacyLatest.has(entry.entryId)) legacyLatest.set(entry.entryId, entry)
+      }
+    }
+    const entries = [...legacyLatest.values()]
       .map(entry => ({ entry, score: entry.tags.filter(tag => wanted.has(tag)).length }))
       .sort((left, right) => right.score - left.score
         || right.entry.createdAt.localeCompare(left.entry.createdAt)
         || left.entry.entryId.localeCompare(right.entry.entryId))
       .slice(0, remaining)
       .map(value => value.entry)
+    const anchor = scopeChain.find(target => populatedScopes.has(scopeKey(target.scope, target.scopeId)))
+      ?? scopeChain[0]
+    if (anchor === undefined) {
+      throw new ContinualHarnessError('Continuous Harness scope chain is empty', 'HARNESS_INVALID')
+    }
     const base = {
       version: 1 as const,
-      scope: request.scope,
-      scopeId: id,
+      scope: anchor.scope,
+      scopeId: anchor.scopeId,
       generation: this.document.generation,
       entries,
       managedEntries,
+      scopeChain,
       generatedAt: new Date().toISOString(),
     }
     return Promise.resolve({ ...base, snapshotSha256: sha256(base) })
@@ -215,19 +284,30 @@ export class LocalContinualHarness extends ContinualHarnessService {
   }
 
   get(request: ContinualHarnessScopeRequest & { readonly entryId: string }): Promise<ContinualHarnessManagedEntryV2> {
-    const { scope, scopeId: id } = managedScope(request)
-    return Promise.resolve(this.requireManaged(this.document, scope, id, request.entryId))
+    for (const target of readScopeChain(request)) {
+      const entry = this.latestManaged(this.document, target.scope, target.scopeId, request.entryId)
+      if (entry !== undefined) return Promise.resolve(entry)
+    }
+    throw new ContinualHarnessError(`managed harness entry not found: ${request.entryId}`, 'HARNESS_NOT_FOUND')
   }
 
   list(request: ContinualHarnessListRequest): Promise<readonly ContinualHarnessManagedEntryV2[]> {
-    const { scope, scopeId: id } = managedScope(request)
     const latest = new Map<string, ContinualHarnessManagedEntryV2>()
-    for (const entry of this.document.managedEntries) {
-      if (entry.scope !== scope || entry.scopeId !== id || (request.kind !== undefined && entry.kind !== request.kind)) continue
-      const current = latest.get(entry.entryId)
-      if (current === undefined || current.entryVersion < entry.entryVersion) latest.set(entry.entryId, entry)
+    for (const target of readScopeChain(request)) {
+      const currentScope = new Map<string, ContinualHarnessManagedEntryV2>()
+      for (const entry of this.document.managedEntries) {
+        if (!matchesScope(entry.scope, entry.scopeId, target)) continue
+        const current = currentScope.get(entry.entryId)
+        if (current === undefined || current.entryVersion < entry.entryVersion) currentScope.set(entry.entryId, entry)
+      }
+      for (const entry of currentScope.values()) {
+        // The narrowest scope wins for the same entry id; tombstones shadow
+        // broader entries when includeDeleted is false as well.
+        if (!latest.has(entry.entryId)) latest.set(entry.entryId, entry)
+      }
     }
     return Promise.resolve([...latest.values()]
+      .filter(entry => request.kind === undefined || entry.kind === request.kind)
       .filter(entry => request.includeDeleted === true || entry.deletedAt === undefined)
       .sort((left, right) => left.kind.localeCompare(right.kind)
         || left.title.localeCompare(right.title)
@@ -235,14 +315,14 @@ export class LocalContinualHarness extends ContinualHarnessService {
   }
 
   listRefinements(request: ContinualHarnessRefinementListRequest): Promise<readonly ContinualHarnessRefinementPlanV1[]> {
-    const { scope, scopeId: id } = managedScope(request)
     const limit = request.limit ?? 20
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
       throw new ContinualHarnessError('refinement history limit must be between 1 and 100', 'HARNESS_INVALID')
     }
+    const scopes = readScopeChain(request)
     return Promise.resolve(this.document.refinements
       .map(value => value.plan)
-      .filter(plan => plan.scope === scope && plan.scopeId === id)
+      .filter(plan => scopes.some(target => matchesScope(plan.scope, plan.scopeId, target)))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.refinementId.localeCompare(left.refinementId))
       .slice(0, limit)
       .map(plan => structuredClone(plan)))

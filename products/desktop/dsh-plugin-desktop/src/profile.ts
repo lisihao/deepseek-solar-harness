@@ -83,6 +83,11 @@ const DESKTOP_WINDOWS_PWSH_SANDBOX_PACKAGE = 'dsh-plugin-desktop/windows-pwsh-sa
 const DEFAULT_DESKTOP_SHELL_MODE: DesktopShellMode = 'compatibility'
 const PRODUCT_MODULE_BASE_DIR = '.dsh-product-runtime'
 const SETTINGS_FILE_PACKAGE = '@deepseek-ai/dsh-settings-file'
+const AGENT_DEFAULT_MODEL_PACKAGE = '@deepseek-ai/dsh-agent-default-model'
+const PRODUCT_DEFAULT_AGENT_MODEL = Object.freeze({
+  provider: 'dsh-physical-operator',
+  model: 'codex',
+})
 const DESKTOP_SETTINGS_NAMESPACE = 'dsh-desktop'
 const UI_LAYOUT_PACKAGE = '@deepseek-ai/dsh-client-ui-layout'
 const UI_SIDEBAR_PACKAGE = '@deepseek-ai/dsh-client-ui-sidebar'
@@ -477,6 +482,21 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
     id: 'settings',
     config: settingsConfig,
   })
+  const agentDefaultModel = rows.get('agent-default-model')
+  if (agentDefaultModel?.name !== AGENT_DEFAULT_MODEL_PACKAGE) {
+    throw new Error(`${BIN_NAME}: product profile must use ${AGENT_DEFAULT_MODEL_PACKAGE} in the agent-default-model row`)
+  }
+  // Product composition prefers the native Codex physical operator for a
+  // clean install.  AgentDefaultModelConfig layers the user's persisted
+  // `agent-default-model` settings section over this value at runtime, so an
+  // existing explicit selection remains authoritative.
+  patches.push({
+    id: 'agent-default-model',
+    config: {
+      ...rowConfig(agentDefaultModel),
+      ...PRODUCT_DEFAULT_AGENT_MODEL,
+    },
+  })
   if (mode === 'advanced') {
     for (const [id, packageName] of [
       ['ui-layout', UI_LAYOUT_PACKAGE],
@@ -539,6 +559,16 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
       instances: Array.isArray(configuredInstances) ? configuredInstances : [],
     },
   })
+  if (adapter === 'server') {
+    // The Web bundle's connection row is declared before the optional product
+    // bundles.  Remote Sync captures these seams during its API-proxy
+    // injection, so the Server must wait for both authorities instead of
+    // permanently capturing an undefined optional service.
+    patches.push({
+      id: 'connection',
+      inject: ['webRuntime', 'webStartup', 'residentOperators', 'orchestrations'],
+    })
+  }
   if (!rows.has('webserver')) {
     throw new Error(`${BIN_NAME}: desktop profile has no webserver row`)
   }

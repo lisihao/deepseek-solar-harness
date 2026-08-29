@@ -72,6 +72,9 @@ flowchart LR
   pkg_continual_harness["continual-harness"]
   svc_continualHarness["ctx.continualHarness<br/>Continuous Harness snapshot and outcome seam"]
   pkg_continual_harness_local["continual-harness-local"]
+  pkg_debate["debate"]
+  svc_debates["ctx.debates<br/>Provider-neutral bounded debate seam"]
+  pkg_debate_local["debate-local"]
   svc_continualHarnessSkills["ctx.continualHarnessSkills<br/>Continuous Harness TypeScript skill registry"]
   pkg_model_allocation["model-allocation"]
   svc_modelAllocation["ctx.modelAllocation<br/>Quota-aware model allocation seam"]
@@ -257,6 +260,8 @@ flowchart LR
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
   pkg_credentials_local --> svc_credentials
+  pkg_debate --> svc_debates
+  pkg_debate_local --> svc_debates
   pkg_directory_picker --> svc_directoryPicker
   pkg_directory_picker_browse --> svc_directoryPicker
   pkg_directory_picker_native --> svc_directoryPicker
@@ -503,6 +508,7 @@ flowchart LR
 | `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers project certified sources under token, lineage, redaction, and degradation policy without becoming a source of record. |
 | `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Late-binds content-addressed capability manifests under the Graph certificate; bindings may only implement or narrow authority. |
 | `ctx.continualHarness` | `seam` | [`continual-harness`](../packages/orchestration/continual-harness) | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Provides bounded session/workspace outcome context while the TaskGraph daemon remains the only orchestration state authority. |
+| `ctx.debates` | `seam` | [`debate`](../packages/orchestration/debate) | [`debate-local`](../packages/orchestration/debate-local) | - | - | Defines bounded roster, round, evidence, dissent, convergence, and control records; a TaskGraph or RLM Consumer remains responsible for execution ownership and capability selection. |
 | `ctx.continualHarnessSkills` | `core` | [`continual-harness`](../packages/orchestration/continual-harness) | - | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | - | Registers trusted TypeScript modules and invokes only an explicitly allowed module/callable pair; generated harness content cannot create executable code at runtime. |
 | `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Selects qualified subscription-first execution offers and recommends parallelism without dispatching work. |
 | `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path. |

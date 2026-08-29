@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -76,7 +76,7 @@ describe('local Continuous Harness', () => {
       arguments: { package: 'rlm-runtime' }, provenance: 'fixture',
     })
     expect(await service.list({ workspace: '/repo', scope: 'workspace' })).toEqual([skill])
-    expect(await service.list({ workspace: '/repo', sessionId: 'session-1' })).not.toContainEqual(skill)
+    expect(await service.list({ workspace: '/repo', sessionId: 'session-1', scope: 'session' })).not.toContainEqual(skill)
     await expect(service.snapshot({ workspace: '/repo', scope: 'workspace', role: 'verification', task: 'focused verification', limit: 8 }))
       .resolves.toMatchObject({ managedEntries: [{ entryId: skill.entryId, kind: 'skill' }] })
 
@@ -91,6 +91,75 @@ describe('local Continuous Harness', () => {
       workspace: '/repo-b', scope: 'global', role: 'verification', task: 'acceptance evidence', limit: 8,
     })).resolves.toMatchObject({ scope: 'global', scopeId: 'global', managedEntries: [{ entryId: globalMemory.entryId }] })
     await ctx.root.fiber.dispose()
+  })
+
+  it('resolves automatic session, normalized workspace, and cross-repository global scopes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-continual-harness-auto-scope-'))
+    const workspaceA = await mkdtemp(join(tmpdir(), 'dsh-continual-harness-workspace-a-'))
+    const workspaceB = await mkdtemp(join(tmpdir(), 'dsh-continual-harness-workspace-b-'))
+    const aliasParent = await mkdtemp(join(tmpdir(), 'dsh-continual-harness-workspace-alias-'))
+    const workspaceAlias = join(aliasParent, 'repo-a-link')
+    await symlink(workspaceA, workspaceAlias, 'dir')
+    const ctx = new Context()
+    const service = new LocalContinualHarness(ctx, root)
+    const globalShared = await service.create({
+      workspace: workspaceB, scope: 'global', entryId: 'shared', kind: 'memory', title: 'Shared global',
+      content: 'global default', provenance: 'fixture',
+    })
+    const globalOnly = await service.create({
+      workspace: workspaceB, scope: 'global', entryId: 'global-only', kind: 'memory', title: 'Global only',
+      content: 'global fallback', provenance: 'fixture',
+    })
+    const workspaceShared = await service.create({
+      workspace: workspaceA, scope: 'workspace', entryId: 'shared', kind: 'memory', title: 'Shared workspace',
+      content: 'workspace override', provenance: 'fixture',
+    })
+    const workspaceOnly = await service.create({
+      workspace: workspaceA, scope: 'workspace', entryId: 'workspace-only', kind: 'memory', title: 'Workspace only',
+      content: 'workspace default', provenance: 'fixture',
+    })
+    const sessionShared = await service.create({
+      workspace: workspaceA, sessionId: 'session-a', entryId: 'shared', kind: 'memory', title: 'Shared session',
+      content: 'session override', provenance: 'fixture',
+    })
+    const sessionOnly = await service.create({
+      workspace: workspaceA, sessionId: 'session-a', entryId: 'session-only', kind: 'memory', title: 'Session only',
+      content: 'session default', provenance: 'fixture',
+    })
+
+    const automatic = await service.list({ workspace: workspaceAlias, sessionId: 'session-a' })
+    expect(new Map(automatic.map(entry => [entry.entryId, entry.content]))).toEqual(new Map([
+      [sessionShared.entryId, 'session override'],
+      [sessionOnly.entryId, 'session default'],
+      [workspaceOnly.entryId, 'workspace default'],
+      [globalOnly.entryId, 'global fallback'],
+    ]))
+    await expect(service.get({ workspace: workspaceAlias, sessionId: 'session-a', entryId: 'shared' }))
+      .resolves.toMatchObject({ content: 'session override', scope: 'session', scopeId: 'session-a' })
+    await expect(service.list({ workspace: workspaceAlias, sessionId: 'session-a', scope: 'workspace' }))
+      .resolves.toEqual([workspaceShared, workspaceOnly])
+
+    const snapshot = await service.snapshot({
+      workspace: workspaceAlias, sessionId: 'session-a', role: 'verification', task: 'scope fallback', limit: 20,
+    })
+    expect(snapshot).toMatchObject({
+      scope: 'session', scopeId: 'session-a',
+      scopeChain: [
+        { scope: 'session', scopeId: 'session-a' },
+        { scope: 'workspace', scopeId: workspaceShared.scopeId },
+        { scope: 'global', scopeId: 'global' },
+      ],
+    })
+    expect(snapshot.managedEntries.find(entry => entry.entryId === 'shared')).toMatchObject({ content: 'session override' })
+
+    await ctx.root.fiber.dispose()
+    const recoveredContext = new Context()
+    const recovered = new LocalContinualHarness(recoveredContext, root)
+    await expect(recovered.list({ workspace: workspaceA, sessionId: 'session-b' })).resolves.toEqual([
+      globalOnly, workspaceShared, workspaceOnly,
+    ])
+    await expect(recovered.list({ workspace: workspaceB })).resolves.toEqual([globalOnly, globalShared])
+    await recoveredContext.root.fiber.dispose()
   })
 
   it('plans without mutation, applies at a turn boundary, and rolls back as a new generation', async () => {

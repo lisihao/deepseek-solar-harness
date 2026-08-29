@@ -653,8 +653,12 @@ export class ResidentStore {
         ...result.usage === undefined ? {} : {
           inputTokens: result.usage.inputTokens,
           outputTokens: result.usage.outputTokens,
-          cacheReadInputTokens: result.usage.cacheReadInputTokens ?? 0,
-          cacheWriteInputTokens: result.usage.cacheWriteInputTokens ?? 0,
+          ...result.usage.cacheReadInputTokens === undefined
+            ? {}
+            : { cacheReadInputTokens: result.usage.cacheReadInputTokens },
+          ...result.usage.cacheWriteInputTokens === undefined
+            ? {}
+            : { cacheWriteInputTokens: result.usage.cacheWriteInputTokens },
           ...result.usage.costUsd === undefined ? {} : { costUsd: result.usage.costUsd },
         },
         resultRef,

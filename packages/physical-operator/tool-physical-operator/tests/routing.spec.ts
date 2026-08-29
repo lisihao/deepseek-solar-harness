@@ -19,6 +19,7 @@ import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import PhysicalOperatorRuntime, {
   PhysicalOperatorId,
   type PhysicalOperator,
+  type PhysicalOperatorProgressEvent,
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
@@ -53,6 +54,10 @@ class DurableOperator implements PhysicalOperator {
     readonly id: 'codex' | 'claude-code',
     private readonly immediate = true,
     private readonly bridgeToolName?: string,
+    private readonly usage?: PhysicalOperatorResult['usage'],
+    private readonly progressPhases: readonly string[] = [],
+    private readonly stopReason: PhysicalOperatorResult['stopReason'] = 'completed',
+    private readonly progressError?: string,
   ) {
     this.descriptor = {
       id: PhysicalOperatorId(id),
@@ -82,10 +87,7 @@ class DurableOperator implements PhysicalOperator {
     const bridged = this.bridgeToolName === undefined
       ? undefined
       : await callBridgeTool(request, this.bridgeToolName, { value: 'hello' })
-    if (created && this.immediate) receipt.result.resolve({
-      output: [{ type: 'text', text: bridged === undefined ? `${this.id} resident answer` : JSON.stringify(bridged) }],
-      stopReason: 'completed',
-    })
+    if (created && this.immediate) receipt.result.resolve(this.resultValue(bridged))
     const activeReceipt = receipt
     const callerResult = new Promise<PhysicalOperatorResult>((resolve, reject) => {
       const abort = (): void => {
@@ -102,7 +104,48 @@ class DurableOperator implements PhysicalOperator {
         },
       )
     })
-    return { result: callerResult, dispose: async () => {} }
+    const progressEvents: readonly PhysicalOperatorProgressEvent[] = [
+      ...this.progressPhases.map((phase, index): PhysicalOperatorProgressEvent => ({
+        sequence: index + 1,
+        type: 'turn.progress',
+        time: new Date(index + 1).toISOString(),
+        data: { commandId: id, phase },
+      })),
+      {
+        sequence: this.progressPhases.length + 1,
+        type: 'turn.settled',
+        time: new Date(this.progressPhases.length + 1).toISOString(),
+        data: {
+          commandId: id,
+          stopReason: this.stopReason,
+          ...this.usage === undefined ? {} : {
+            inputTokens: this.usage.inputTokens,
+            outputTokens: this.usage.outputTokens,
+            ...this.usage.cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens: this.usage.cacheReadInputTokens },
+            ...this.usage.cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens: this.usage.cacheWriteInputTokens },
+          },
+        },
+      },
+    ]
+    return {
+      readEvents: async (afterSequence, limit) => {
+        if (this.progressError !== undefined) throw new Error(this.progressError)
+        return {
+          events: progressEvents.filter(event => event.sequence > afterSequence).slice(0, limit),
+          nextSequence: progressEvents.filter(event => event.sequence > afterSequence).at(-1)?.sequence ?? afterSequence,
+        }
+      },
+      result: callerResult,
+      dispose: async () => {},
+    }
+  }
+
+  private resultValue(bridged: unknown): PhysicalOperatorResult {
+    return {
+      output: [{ type: 'text', text: bridged === undefined ? `${this.id} resident answer` : JSON.stringify(bridged) }],
+      stopReason: this.stopReason,
+      ...this.usage === undefined ? {} : { usage: this.usage },
+    }
   }
 }
 
@@ -133,6 +176,10 @@ async function callBridgeTool(
 async function setup(options: {
   codexImmediate?: boolean
   codexBridgeTool?: string
+  codexUsage?: PhysicalOperatorResult['usage']
+  codexProgressPhases?: readonly string[]
+  codexStopReason?: PhysicalOperatorResult['stopReason']
+  codexProgressError?: string
   primary?: 'deepseek' | 'codex' | 'claude-code'
   registerDeepSeek?: boolean
   mountTool?: boolean
@@ -163,7 +210,15 @@ async function setup(options: {
       return Promise.resolve(`subscription:${args.value}`)
     },
   }))
-  const codex = new DurableOperator('codex', options.codexImmediate ?? true, options.codexBridgeTool)
+  const codex = new DurableOperator(
+    'codex',
+    options.codexImmediate ?? true,
+    options.codexBridgeTool,
+    options.codexUsage,
+    options.codexProgressPhases,
+    options.codexStopReason,
+    options.codexProgressError,
+  )
   const claude = new DurableOperator('claude-code')
   ctx.physicalOperators.registerOperator(codex)
   ctx.physicalOperators.registerOperator(claude)
@@ -231,6 +286,123 @@ describe('host physical-operator routing', () => {
     expect(answer?.type === 'text' ? answer.text : '').toContain('subscription:hello')
     expect(agent.session.events.some(event => event.type === 'physical-operator/tool-call')).toBe(true)
     expect(agent.session.events.some(event => event.type === 'physical-operator/tool-result')).toBe(true)
+  })
+
+  it('carries Resident product usage into the durable assistant message for billing', async () => {
+    const { agent, deepseek } = await setup({
+      primary: 'codex',
+      registerDeepSeek: false,
+      codexUsage: {
+        inputTokens: 17,
+        outputTokens: 9,
+        cacheReadInputTokens: 23,
+        cacheWriteInputTokens: 4,
+        costUsd: 0.42,
+      },
+    })
+
+    send(agent, '你好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    const message = [...agent.session.events].reverse().find(event => event.type === 'assistant/message')
+    expect(message?.type === 'assistant/message' ? message.data.usage : undefined).toEqual({
+      inputTokens: 17,
+      outputTokens: 9,
+      cacheReadTokens: 23,
+      cacheWriteTokens: 4,
+    })
+  })
+
+  it('keeps unknown optional usage buckets absent instead of fabricating zero tokens', async () => {
+    const { agent, deepseek } = await setup({
+      primary: 'codex',
+      registerDeepSeek: false,
+      codexUsage: { inputTokens: 17, outputTokens: 9 },
+    })
+
+    send(agent, '你好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    const message = [...agent.session.events].reverse().find(event => event.type === 'assistant/message')
+    expect(message?.type === 'assistant/message' ? message.data.usage : undefined).toEqual({
+      inputTokens: 17,
+      outputTokens: 9,
+    })
+  })
+
+  it('projects native Resident progress and terminal stop into ignorable Session Trace', async () => {
+    const { agent, deepseek } = await setup({
+      primary: 'codex',
+      registerDeepSeek: false,
+      codexProgressPhases: ['connecting', 'tool_activity', 'finalizing'],
+    })
+
+    send(agent, '你好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    const progress = agent.session.events.filter(event => event.type === 'physical-operator/progress')
+    expect(progress).toHaveLength(4)
+    expect(progress.every(event => event.ignorable === true)).toBe(true)
+    expect(progress.map(event => event.type === 'physical-operator/progress' ? event.data.data.phase : undefined))
+      .toEqual(['connecting', 'tool_activity', 'finalizing', undefined])
+    const terminal = progress.at(-1)
+    if (terminal?.type !== 'physical-operator/progress') throw new Error('expected a terminal progress event')
+    expect(terminal.data.commandId).toMatch(/^resident-[0-9a-f]{32}$/u)
+    expect(terminal.data.operatorId).toBe('codex')
+    expect(terminal.data.type).toBe('turn.settled')
+    expect(terminal.data.data).toMatchObject({ commandId: terminal.data.commandId, stopReason: 'completed' })
+    expect(JSON.stringify(progress)).not.toContain('你好')
+  })
+
+  it('keeps a settled answer while marking a failed Resident progress projection degraded', async () => {
+    const { agent } = await setup({
+      primary: 'codex',
+      registerDeepSeek: false,
+      codexProgressError: 'remote event stream disconnected',
+    })
+
+    send(agent, '你好')
+    await agent.whenIdle()
+
+    expect(lastAssistantMessage(agent).content).toEqual([{ type: 'text', text: 'codex resident answer' }])
+    expect(agent.session.events.find(event => event.type === 'physical-operator/trace-degraded')).toMatchObject({
+      ignorable: true,
+      data: {
+        operatorId: 'codex',
+        code: 'PROGRESS_UNAVAILABLE',
+        message: 'remote event stream disconnected',
+      },
+    })
+  })
+
+  it.each([
+    ['aborted', 'error'],
+    ['error', 'error'],
+    ['refusal', 'error'],
+  ] as const)('preserves a native %s terminal reason in the DSH turn Trace', async (stopReason, expectedKind) => {
+    const { agent, deepseek } = await setup({
+      primary: 'codex',
+      registerDeepSeek: false,
+      codexStopReason: stopReason,
+    })
+
+    send(agent, '你好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    const turnEnd = [...agent.session.events].reverse().find(event => event.type === 'turn/end')
+    expect(turnEnd?.type === 'turn/end' ? turnEnd.data.reason.kind : undefined).toBe(expectedKind)
+    expect(agent.session.events.some(event => (
+      event.type === 'physical-operator/progress'
+      && event.data.data.stopReason === stopReason
+    ))).toBe(true)
+    expect(agent.session.events.some(event => (
+      event.type === 'physical-operator/dispatch-terminal'
+      && event.data.code === (stopReason === 'aborted' ? undefined : `OPERATOR_${stopReason === 'refusal' ? 'REFUSED' : 'ERROR'}`)
+    ))).toBe(stopReason !== 'aborted')
   })
 
   it('does not replay a bridged tool command whose persisted result is indeterminate', async () => {

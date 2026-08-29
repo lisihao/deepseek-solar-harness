@@ -162,6 +162,46 @@ class BlockingQualificationDriver extends MemoryDriver {
   }
 }
 
+class BlockingAuthenticationDriver extends MemoryDriver {
+  authenticationCount = 0
+  readonly authenticationEntered: Promise<void>
+  readonly releaseAuthentication: () => void
+  private readonly markAuthenticationEntered: () => void
+  private readonly authenticationReleased: Promise<void>
+  private authenticated = false
+
+  constructor() {
+    super()
+    let markAuthenticationEntered = (): void => {}
+    let releaseAuthentication = (): void => {}
+    this.authenticationEntered = new Promise<void>((resolve) => { markAuthenticationEntered = resolve })
+    this.authenticationReleased = new Promise<void>((resolve) => { releaseAuthentication = resolve })
+    this.markAuthenticationEntered = markAuthenticationEntered
+    this.releaseAuthentication = releaseAuthentication
+  }
+
+  override async qualify(): Promise<ResidentProviderStatus> {
+    const status = await super.qualify()
+    return this.authenticated
+      ? status
+      : {
+        ...status,
+        available: false,
+        authentication: 'unqualified',
+        unavailableReason: 'subscription login required',
+        models: [],
+      }
+  }
+
+  async authenticate(): Promise<ResidentProviderStatus> {
+    this.authenticationCount += 1
+    this.markAuthenticationEntered()
+    await this.authenticationReleased
+    this.authenticated = true
+    return this.qualify()
+  }
+}
+
 class BlockingDriver extends MemoryDriver {
   override async execute(request: ResidentDriverExecuteRequest) {
     const session = request.nativeSessionId ?? 'native-blocking'
@@ -253,6 +293,29 @@ function client(root: string): ResidentDaemonClient {
 }
 
 describe('ResidentDaemon', () => {
+  it('coalesces concurrent explicit authentication for one native product', async () => {
+    const root = temporaryRoot()
+    const driver = new BlockingAuthenticationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    await connected.ready()
+    const first = connected.authenticate('codex')
+    const second = connected.authenticate('codex')
+    try {
+      await driver.authenticationEntered
+      await new Promise<void>(resolve => setTimeout(resolve, 25))
+      expect(driver.authenticationCount).toBe(1)
+    } finally {
+      driver.releaseAuthentication()
+      await expect(Promise.all([first, second])).resolves.toEqual([
+        expect.objectContaining({ operatorId: 'codex', available: true }),
+        expect.objectContaining({ operatorId: 'codex', available: true }),
+      ])
+      await daemon.close()
+    }
+  })
+
   it('lists durable sessions without requalifying native subscription products', async () => {
     const root = temporaryRoot()
     const driver = new BlockingQualificationDriver()

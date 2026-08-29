@@ -29,6 +29,7 @@ const REQUIRED_METHODS = Object.freeze([
   'system.handshake',
   'system.shutdown',
   'operator.list',
+  'operator.authenticate',
   'session.list',
   'session.inspect',
   'turn.execute',
@@ -133,6 +134,15 @@ export class ResidentDaemonClient {
    */
   async providers(): Promise<ResidentProviderStatus[]> {
     return (await this.request<ProviderResponse>('operator.list', {})).providers
+  }
+
+  /**
+   * Start one explicit owner-local native-subscription login flow.
+   * @param operatorId - configured native product operator identity.
+   * @returns refreshed Provider qualification after the owner action.
+   */
+  authenticate(operatorId: string): Promise<ResidentProviderStatus> {
+    return this.request('operator.authenticate', { operator_id: operatorId })
   }
 
   /**

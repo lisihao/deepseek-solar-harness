@@ -202,6 +202,11 @@ class DualModePhysicalOperator implements PhysicalOperator {
       result: turn.result.then(result => ({
         output: result.output,
         stopReason: result.stopReason,
+        // Preserve the native product counters across the Resident-to-physical
+        // operator seam.  The Resident store already persists this optional
+        // provider-neutral value; dropping it here makes every Host adapter
+        // appear to have used zero tokens.
+        ...result.usage === undefined ? {} : { usage: result.usage },
         continuity: {
           sessionId: String(turn.sessionId),
           stateRevision: turn.stateRevision,

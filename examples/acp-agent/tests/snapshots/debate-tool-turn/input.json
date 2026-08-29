@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "initialize" },
+    { "op": "newSession" },
+    { "op": "prompt", "text": "Use the debate tool to compare the two fixture options, then reply with exactly DEBATE_READY." }
+  ]
+}

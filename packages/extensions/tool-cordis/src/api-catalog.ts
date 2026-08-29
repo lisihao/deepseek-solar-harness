@@ -674,6 +674,43 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'debates',
+    summary: 'Provider-neutral Debate service; it never owns scheduling, storage, or model execution.',
+    description: 'Provider-neutral Debate service; it never owns scheduling, storage, or model execution.',
+    methods: [
+      {
+        signature: 'abstract start(request: DebateStartRequestV1): Promise<DebateRunSnapshotV1>',
+        description: 'Admit one debate request through the existing TaskGraph/RLM consumer seam.',
+        parameters: [{ name: 'request', description: 'validated provider request with policy and optional parent execution identity.' }],
+        returns: 'the accepted run projection.',
+      },
+      {
+        signature: 'abstract list(): Promise<readonly DebateRunSummaryV1[]>',
+        description: 'List bounded run projections supplied by the Provider.',
+        parameters: [],
+        returns: 'the Provider\'s bounded run summaries.',
+      },
+      {
+        signature: 'abstract inspect(runId: string): Promise<DebateRunSnapshotV1>',
+        description: 'Inspect one run projection.',
+        parameters: [{ name: 'runId', description: 'stable run identity to inspect.' }],
+        returns: 'the selected run projection.',
+      },
+      {
+        signature: 'abstract readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV1>',
+        description: 'Read append-only debate events for a UI or other projection Consumer.',
+        parameters: [{ name: 'request', description: 'run identity and bounded event-page cursor.' }],
+        returns: 'one bounded event page.',
+      },
+      {
+        signature: 'abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>',
+        description: 'Apply an explicit approval, pause, resume, stop, or reject decision.',
+        parameters: [{ name: 'request', description: 'revision-fenced control command.' }],
+        returns: 'the updated run projection.',
+      },
+    ],
+  },
+  {
     key: 'directoryPicker',
     summary: 'Abstract directory-picking service.',
     description: 'Abstract directory-picking service. Subclass, implement `capability()`, and load the subclass as a plugin — it registers as `ctx.directoryPicker` (one implementation per context; loading a second throws, cordis\' standard duplicate-service behavior). The capability object must be stable for the service lifetime: consumers may capture it across calls.',
@@ -1381,6 +1418,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'current version, protocol, and native-subscription availability snapshots.',
       },
       {
+        signature: 'authenticate(_operatorId: string): Promise<ResidentProviderStatus>',
+        description: 'Start one explicit owner-local native-subscription login flow.',
+        parameters: [{ name: '_operatorId', description: 'product identity whose configured Driver owns the flow.' }],
+        returns: 'the provider status after the product CLI completes authentication.',
+      },
+      {
         signature: 'abstract execute(request: ResidentExecuteRequest): Promise<ResidentTurn>',
         description: 'Admit or replay one durable command for its operator/workspace/lane Session.',
         parameters: [{ name: 'request', description: 'command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.' }],
@@ -1464,6 +1507,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Inspect one runtime session.',
         parameters: [{ name: 'sessionId', description: 'durable session identity.' }],
         returns: 'current snapshot.',
+      },
+      {
+        signature: 'abstract attach(request: RlmControlAttachRequestV1): Promise<RlmControlAttachResultV1>',
+        description: 'Establish one exclusive external control lease over a durable session.',
+        parameters: [{ name: 'request', description: 'versioned caller and command identity.' }],
+        returns: 'lease, current snapshot, and event cursor.',
+      },
+      {
+        signature: 'abstract input(request: RlmControlInputRequestV1): Promise<RlmControlInputResultV1>',
+        description: 'Submit controller input through the existing message/continuation path.',
+        parameters: [{ name: 'request', description: 'lease-bound, idempotent input command.' }],
+        returns: 'durable input receipt.',
+      },
+      {
+        signature: 'abstract detach(request: RlmControlDetachRequestV1): Promise<RlmControlDetachResultV1>',
+        description: 'Release one external control lease.',
+        parameters: [{ name: 'request', description: 'lease-bound idempotent detach command.' }],
+        returns: 'durable detach receipt.',
       },
       {
         signature: 'abstract inspectReceipt(commandId: RlmCommandId): Promise<RlmCommandReceiptSnapshotV1>',
@@ -3359,6 +3420,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
   {
+    name: 'AdaptiveExecutionPreferenceV1',
+    declaration: 'export interface AdaptiveExecutionPreferenceV1 {\n    readonly version: 1;\n    readonly executionRisk: AdaptiveExecutionRisk;\n    readonly priorFailures: number;\n    readonly crossDomain?: boolean;\n}',
+  },
+  {
+    name: 'AdaptiveExecutionRisk',
+    declaration: 'export type AdaptiveExecutionRisk = \'low\' | \'medium\' | \'high\';',
+  },
+  {
     name: 'Agent',
     declaration: 'export interface Agent {\n    readonly id: SessionId;\n    readonly options: AgentOptions;\n    readonly session: Session;\n    readonly inbox: Inbox;\n    readonly status: AgentStatus;\n    readonly ctx: Context;\n    cancel(cause: AgentCancelCause, options?: CancelOptions): void;\n    whenIdle(): Promise<void>;\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n    send(message: UserMessage, target: InboxTarget, wakeup: boolean): void;\n    followup(message: UserMessage): void;\n    steer(message: UserMessage): void;\n    inject(message: UserMessage): void;\n}',
   },
@@ -3457,6 +3526,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'AttachmentId',
     declaration: 'export type AttachmentId = Branded<\'AttachmentId\'>;',
+  },
+  {
+    name: 'AutonomousEndConditionCheckV1',
+    declaration: 'export interface AutonomousEndConditionCheckV1 {\n    readonly id: string;\n    readonly kind: \'acceptance\' | \'artifact-present\' | \'evaluator\';\n    readonly ref: string;\n}',
+  },
+  {
+    name: 'AutonomousEndConditionV1',
+    declaration: 'export interface AutonomousEndConditionV1 {\n    readonly version: 1;\n    readonly operator: \'all\' | \'any\';\n    readonly checks: readonly AutonomousEndConditionCheckV1[];\n}',
   },
   {
     name: 'BackendRegistry',
@@ -3751,16 +3828,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ContinualHarnessScope = \'session\' | \'workspace\' | \'global\';',
   },
   {
+    name: 'ContinualHarnessScopeRefV1',
+    declaration: 'export interface ContinualHarnessScopeRefV1 {\n    readonly scope: ContinualHarnessScope;\n    readonly scopeId: string;\n}',
+  },
+  {
     name: 'ContinualHarnessScopeRequest',
     declaration: 'export interface ContinualHarnessScopeRequest {\n    readonly workspace: string;\n    readonly sessionId?: string;\n    readonly scope?: ContinualHarnessScope;\n}',
   },
   {
     name: 'ContinualHarnessSnapshotRequest',
-    declaration: 'export interface ContinualHarnessSnapshotRequest {\n    readonly workspace: string;\n    readonly sessionId?: string;\n    readonly scope: ContinualHarnessScope;\n    readonly role: string;\n    readonly task: string;\n    readonly limit: number;\n}',
+    declaration: 'export interface ContinualHarnessSnapshotRequest {\n    readonly workspace: string;\n    readonly sessionId?: string;\n    readonly scope?: ContinualHarnessScope;\n    readonly role: string;\n    readonly task: string;\n    readonly limit: number;\n}',
   },
   {
     name: 'ContinualHarnessSnapshotV1',
-    declaration: 'export interface ContinualHarnessSnapshotV1 {\n    readonly version: 1;\n    readonly scope: ContinualHarnessScope;\n    readonly scopeId: string;\n    readonly generation: number;\n    readonly entries: readonly ContinualHarnessEntryV1[];\n    readonly managedEntries: readonly ContinualHarnessManagedEntryV2[];\n    readonly generatedAt: string;\n    readonly snapshotSha256: string;\n}',
+    declaration: 'export interface ContinualHarnessSnapshotV1 {\n    readonly version: 1;\n    readonly scope: ContinualHarnessScope;\n    readonly scopeId: string;\n    readonly generation: number;\n    readonly entries: readonly ContinualHarnessEntryV1[];\n    readonly managedEntries: readonly ContinualHarnessManagedEntryV2[];\n    readonly scopeChain?: readonly ContinualHarnessScopeRefV1[];\n    readonly generatedAt: string;\n    readonly snapshotSha256: string;\n}',
   },
   {
     name: 'ContinualHarnessTypeScriptSkillModule',
@@ -3821,6 +3902,186 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CredentialRef',
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
+  },
+  {
+    name: 'DebateAgentTurnState',
+    declaration: 'export type DebateAgentTurnState = \'planned\' | \'dispatched\' | \'settled\' | \'failed\' | \'indeterminate\';',
+  },
+  {
+    name: 'DebateAgentTurnV1',
+    declaration: 'export interface DebateAgentTurnV1 {\n    readonly version: 1;\n    readonly round: number;\n    readonly slotId: string;\n    readonly role: DebateRoleId;\n    readonly operatorId: string;\n    readonly model: string;\n    readonly state: DebateAgentTurnState;\n    readonly outputRef?: string;\n    readonly outputPreview?: string;\n    readonly claimIds: readonly string[];\n    readonly evidenceRefs: readonly DebateEvidenceRefV1[];\n    readonly usage?: DebateUsageV1;\n    readonly startedAt?: string;\n    readonly settledAt?: string;\n    readonly errorCode?: string;\n}',
+  },
+  {
+    name: 'DebateBudgetV1',
+    declaration: 'export interface DebateBudgetV1 {\n    readonly version: 1;\n    readonly maxRounds: number;\n    readonly maxTurnsPerAgent: number;\n    readonly maxAgentsPerRound: number;\n    readonly maxInputTokens: number;\n    readonly maxOutputTokens: number;\n    readonly maxTotalTokens: number;\n    readonly maxCostUsd?: number;\n}',
+  },
+  {
+    name: 'DebateClaimLedgerV1',
+    declaration: 'export interface DebateClaimLedgerV1 {\n    readonly version: 1;\n    readonly claims: readonly DebateClaimV1[];\n    readonly coverage: number;\n    readonly digest: string;\n}',
+  },
+  {
+    name: 'DebateClaimSeverity',
+    declaration: 'export type DebateClaimSeverity = \'low\' | \'medium\' | \'high\' | \'critical\';',
+  },
+  {
+    name: 'DebateClaimStatus',
+    declaration: 'export type DebateClaimStatus = \'open\' | \'supported\' | \'refuted\' | \'settled\' | \'unresolved\';',
+  },
+  {
+    name: 'DebateClaimV1',
+    declaration: 'export interface DebateClaimV1 {\n    readonly version: 1;\n    readonly claimId: string;\n    readonly statement: string;\n    readonly status: DebateClaimStatus;\n    readonly severity: DebateClaimSeverity;\n    readonly confidence: number;\n    readonly supportingSlotIds: readonly string[];\n    readonly opposingSlotIds: readonly string[];\n    readonly evidenceRefs: readonly DebateEvidenceRefV1[];\n    readonly rationale?: string;\n}',
+  },
+  {
+    name: 'DebateControlAction',
+    declaration: 'export type DebateControlAction = \'approve\' | \'reject\' | \'pause\' | \'resume\' | \'stop\';',
+  },
+  {
+    name: 'DebateControlRequestV1',
+    declaration: 'export interface DebateControlRequestV1 {\n    readonly version: 1;\n    readonly commandId: string;\n    readonly runId: string;\n    readonly expectedRevision: number;\n    readonly action: DebateControlAction;\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'DebateConvergencePolicyV1',
+    declaration: 'export interface DebateConvergencePolicyV1 {\n    readonly version: 1;\n    readonly scoreThreshold: number;\n    readonly minSettledAgents: number;\n    readonly maxUnresolvedHighSeverity: number;\n    readonly requireEvidenceForCritical: boolean;\n    readonly earlyStop: boolean;\n}',
+  },
+  {
+    name: 'DebateConvergenceStatus',
+    declaration: 'export type DebateConvergenceStatus = \'converged\' | \'continue\' | \'budget_limited\' | \'max_rounds\';',
+  },
+  {
+    name: 'DebateConvergenceV1',
+    declaration: 'export interface DebateConvergenceV1 {\n    readonly version: 1;\n    readonly status: DebateConvergenceStatus;\n    readonly score: number;\n    readonly threshold: number;\n    readonly disagreement: number;\n    readonly coverage: number;\n    readonly unresolvedHighSeverity: number;\n    readonly settledAgents: number;\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'DebateCostSummaryV1',
+    declaration: 'export interface DebateCostSummaryV1 {\n    readonly version: 1;\n    readonly usageStatus: \'known\' | \'partial\' | \'unknown\';\n    readonly costStatus: \'known\' | \'partial\' | \'unknown\';\n    readonly inputTokens?: number;\n    readonly outputTokens?: number;\n    readonly cacheReadInputTokens?: number;\n    readonly cacheWriteInputTokens?: number;\n    readonly costUsd?: number;\n    readonly unknownUsageTurns: number;\n    readonly unknownCostTurns: number;\n    readonly bySlot: readonly DebateSlotCostV1[];\n}',
+  },
+  {
+    name: 'DebateDissentV1',
+    declaration: 'export interface DebateDissentV1 {\n    readonly version: 1;\n    readonly slotId: string;\n    readonly claimId: string;\n    readonly position: string;\n    readonly reason: string;\n    readonly confidence: number;\n    readonly evidenceRefs: readonly DebateEvidenceRefV1[];\n}',
+  },
+  {
+    name: 'DebateEventPageV1',
+    declaration: 'export interface DebateEventPageV1 {\n    readonly events: readonly DebateEventV1[];\n    readonly nextSequence: number;\n}',
+  },
+  {
+    name: 'DebateEventReadRequestV1',
+    declaration: 'export interface DebateEventReadRequestV1 {\n    readonly runId: string;\n    readonly afterSequence?: number;\n    readonly limit?: number;\n}',
+  },
+  {
+    name: 'DebateEventType',
+    declaration: 'export type DebateEventType = \'debate.planned\' | \'debate.roster.qualified\' | \'debate.roster.rejected\' | \'debate.admitted\' | \'debate.round.started\' | \'debate.agent.dispatched\' | \'debate.agent.settled\' | \'debate.agent.failed\' | \'debate.agent.indeterminate\' | \'debate.claims.compiled\' | \'debate.convergence.evaluated\' | \'debate.synthesis.started\' | \'debate.synthesis.settled\' | \'debate.cost.accounted\' | \'debate.stopped\' | \'debate.failed\' | \'debate.indeterminate\';',
+  },
+  {
+    name: 'DebateEventV1',
+    declaration: 'export interface DebateEventV1 {\n    readonly version: 1;\n    readonly sequence: number;\n    readonly runId: string;\n    readonly revision: number;\n    readonly generation: number;\n    readonly round?: number;\n    readonly slotId?: string;\n    readonly type: DebateEventType;\n    readonly createdAt: string;\n    readonly data: Readonly<Record<string, DebateJsonValue>>;\n}',
+  },
+  {
+    name: 'DebateEvidenceRefV1',
+    declaration: 'export interface DebateEvidenceRefV1 {\n    readonly version: 1;\n    readonly ref: string;\n    readonly kind: \'source\' | \'artifact\' | \'observation\' | \'quote\';\n    readonly digest?: string;\n}',
+  },
+  {
+    name: 'DebateEvidenceSummaryV1',
+    declaration: 'export interface DebateEvidenceSummaryV1 {\n    readonly version: 1;\n    readonly refs: readonly DebateEvidenceRefV1[];\n    readonly coverage: number;\n    readonly missingRefs: readonly string[];\n    readonly lineage: readonly string[];\n}',
+  },
+  {
+    name: 'DebateExecutionKind',
+    declaration: 'export type DebateExecutionKind = \'standalone\' | \'taskgraph-node\' | \'rlm-session\';',
+  },
+  {
+    name: 'DebateExecutionRefV1',
+    declaration: 'export interface DebateExecutionRefV1 {\n    readonly version: 1;\n    readonly kind: DebateExecutionKind;\n    readonly runId?: string;\n    readonly nodeId?: string;\n    readonly sessionId?: string;\n}',
+  },
+  {
+    name: 'DebateJsonValue',
+    declaration: 'export type DebateJsonValue = null | boolean | number | string | readonly DebateJsonValue[] | {\n    readonly [key: string]: DebateJsonValue;\n};',
+  },
+  {
+    name: 'DebateLifecycle',
+    declaration: 'export type DebateLifecycle = \'planned\' | \'awaiting_approval\' | \'admitting\' | \'round_running\' | \'reviewing\' | \'converged\' | \'next_round\' | \'budget_limited\' | \'max_rounds\' | \'synthesizing\' | \'completed\' | \'stopped\' | \'failed\' | \'indeterminate\';',
+  },
+  {
+    name: 'DebateMode',
+    declaration: 'export type DebateMode = \'auto\' | \'enabled\' | \'disabled\';',
+  },
+  {
+    name: 'DebateModelSource',
+    declaration: 'export type DebateModelSource = \'native-subscription\' | \'metered-api\' | \'local\';',
+  },
+  {
+    name: 'DebateModelTier',
+    declaration: 'export type DebateModelTier = \'low\' | \'medium\' | \'high\';',
+  },
+  {
+    name: 'DebatePolicyV1',
+    declaration: 'export interface DebatePolicyV1 {\n    readonly version: 1;\n    readonly mode: DebateMode;\n    readonly roster: readonly DebateRoleSpecV1[];\n    readonly budget: DebateBudgetV1;\n    readonly rounds: DebateRoundStrategyV1;\n    readonly convergence: DebateConvergencePolicyV1;\n    readonly preserveDissent: boolean;\n}',
+  },
+  {
+    name: 'DebateProvenanceV1',
+    declaration: 'export interface DebateProvenanceV1 {\n    readonly version: 1;\n    readonly providerId: string;\n    readonly providerVersion: string;\n    readonly requestSha256: string;\n    readonly policySha256: string;\n    readonly sourceSessionId?: string;\n    readonly parentRunId?: string;\n    readonly parentNodeId?: string;\n    readonly parentRlmSessionId?: string;\n    readonly outputSha256?: string;\n}',
+  },
+  {
+    name: 'DebateRoleId',
+    declaration: 'export type DebateRoleId = \'constructive-proposer\' | \'skeptical-falsifier\' | \'evidence-auditor\' | \'decision-judge\';',
+  },
+  {
+    name: 'DebateRoleKind',
+    declaration: 'export type DebateRoleKind = \'participant\' | \'judge\';',
+  },
+  {
+    name: 'DebateRolePersonaV1',
+    declaration: 'export interface DebateRolePersonaV1 {\n    readonly title: string;\n    readonly mandate: string;\n    readonly stance: string;\n    readonly instructions: readonly string[];\n}',
+  },
+  {
+    name: 'DebateRoleSpecV1',
+    declaration: 'export interface DebateRoleSpecV1 {\n    readonly version: 1;\n    readonly role: DebateRoleId;\n    readonly kind: DebateRoleKind;\n    readonly operatorId: string;\n    readonly model: string;\n    readonly tier: DebateModelTier;\n    readonly source: DebateModelSource;\n    readonly persona: DebateRolePersonaV1;\n    readonly required?: boolean;\n}',
+  },
+  {
+    name: 'DebateRoundSnapshotV1',
+    declaration: 'export interface DebateRoundSnapshotV1 {\n    readonly version: 1;\n    readonly round: number;\n    readonly state: DebateRoundState;\n    readonly turns: readonly DebateAgentTurnV1[];\n    readonly claimLedger: DebateClaimLedgerV1;\n    readonly dissent: readonly DebateDissentV1[];\n    readonly unresolved: readonly DebateUnresolvedV1[];\n    readonly convergence?: DebateConvergenceV1;\n}',
+  },
+  {
+    name: 'DebateRoundState',
+    declaration: 'export type DebateRoundState = \'planned\' | \'running\' | \'reviewing\' | \'completed\' | \'failed\' | \'indeterminate\';',
+  },
+  {
+    name: 'DebateRoundStrategyV1',
+    declaration: 'export interface DebateRoundStrategyV1 {\n    readonly version: 1;\n    readonly firstRound: \'blind-independent\';\n    readonly followUp: \'claim-ledger\';\n    readonly escalation: \'high-severity-unresolved\';\n}',
+  },
+  {
+    name: 'DebateRunSnapshotV1',
+    declaration: 'export interface DebateRunSnapshotV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly revision: number;\n    readonly state: DebateLifecycle;\n    readonly mode: DebateMode;\n    readonly promptSha256: string;\n    readonly objective?: string;\n    readonly policy: DebatePolicyV1;\n    readonly roster: readonly DebateRoleSpecV1[];\n    readonly currentRound: number;\n    readonly rounds: readonly DebateRoundSnapshotV1[];\n    readonly claimLedger: DebateClaimLedgerV1;\n    readonly dissent: readonly DebateDissentV1[];\n    readonly unresolved: readonly DebateUnresolvedV1[];\n    readonly evidence: DebateEvidenceSummaryV1;\n    readonly cost: DebateCostSummaryV1;\n    readonly provenance: DebateProvenanceV1;\n    readonly synthesis?: DebateSynthesisV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'DebateRunSummaryV1',
+    declaration: 'export interface DebateRunSummaryV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly state: DebateLifecycle;\n    readonly mode: DebateMode;\n    readonly currentRound: number;\n    readonly revision: number;\n    readonly unresolvedCount: number;\n    readonly cost: DebateCostSummaryV1;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'DebateSlotCostV1',
+    declaration: 'export interface DebateSlotCostV1 {\n    readonly version: 1;\n    readonly slotId: string;\n    readonly model: string;\n    readonly usage: DebateUsageV1;\n}',
+  },
+  {
+    name: 'DebateSourceRefV1',
+    declaration: 'export interface DebateSourceRefV1 {\n    readonly version: 1;\n    readonly ref: string;\n    readonly kind: \'artifact\' | \'evidence\' | \'context\' | \'document\' | \'url\';\n    readonly digest?: string;\n}',
+  },
+  {
+    name: 'DebateStartRequestV1',
+    declaration: 'export interface DebateStartRequestV1 {\n    readonly version: 1;\n    readonly commandId: string;\n    readonly workspace: string;\n    readonly prompt: string;\n    readonly objective?: string;\n    readonly policy: DebatePolicyV1;\n    readonly sourceRefs?: readonly DebateSourceRefV1[];\n    readonly execution?: DebateExecutionRefV1;\n    readonly sourceSessionId?: string;\n}',
+  },
+  {
+    name: 'DebateSynthesisState',
+    declaration: 'export type DebateSynthesisState = \'pending\' | \'running\' | \'settled\' | \'failed\';',
+  },
+  {
+    name: 'DebateSynthesisV1',
+    declaration: 'export interface DebateSynthesisV1 {\n    readonly version: 1;\n    readonly state: DebateSynthesisState;\n    readonly artifactRef?: string;\n    readonly outputPreview?: string;\n    readonly unresolvedClaimIds: readonly string[];\n    readonly dissentCount: number;\n}',
+  },
+  {
+    name: 'DebateUnresolvedV1',
+    declaration: 'export interface DebateUnresolvedV1 {\n    readonly version: 1;\n    readonly claimId: string;\n    readonly description: string;\n    readonly severity: DebateClaimSeverity;\n    readonly blocking: boolean;\n    readonly reason: string;\n    readonly requiredEvidenceRefs: readonly DebateEvidenceRefV1[];\n}',
+  },
+  {
+    name: 'DebateUsageV1',
+    declaration: 'export interface DebateUsageV1 {\n    readonly inputTokens: number;\n    readonly outputTokens: number;\n    readonly cacheReadInputTokens?: number;\n    readonly cacheWriteInputTokens?: number;\n    readonly costUsd?: number;\n}',
   },
   {
     name: 'DeviceCredential',
@@ -3936,7 +4197,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ExecutionModelPreference',
-    declaration: 'export type ExecutionModelPreference = \'luna-first\' | \'balanced\';',
+    declaration: 'export type ExecutionModelPreference = \'luna-first\' | \'claude-sonnet\' | \'balanced\';',
   },
   {
     name: 'FileDiff',
@@ -4388,7 +4649,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelAllocationRequest',
-    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
+    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
   },
   {
     name: 'ModelExecutionOffer',
@@ -4560,7 +4821,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationStartRequest',
-    declaration: 'export interface OrchestrationStartRequest {\n    readonly compilationId: string;\n    readonly approvalRef?: string;\n}',
+    declaration: 'export interface OrchestrationStartRequest {\n    readonly commandId: string;\n    readonly compilationId: string;\n    readonly approvalRef?: string;\n}',
   },
   {
     name: 'PairingChallenge',
@@ -4688,7 +4949,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PlannerVerifierPreference',
-    declaration: 'export type PlannerVerifierPreference = \'codex-sol\' | \'best-high-tier\';',
+    declaration: 'export type PlannerVerifierPreference = \'codex-sol\' | \'claude-frontier\' | \'best-high-tier\';',
   },
   {
     name: 'PostToolDecision',
@@ -4896,7 +5157,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentProviderStatus',
-    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n    readonly quotaPools?: readonly ResidentQuotaPool[];\n}',
+    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly supportsExplicitAuthentication?: boolean;\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n    readonly quotaPools?: readonly ResidentQuotaPool[];\n}',
   },
   {
     name: 'ResidentQuotaPool',
@@ -4972,7 +5233,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmAutonomousConfigV1',
-    declaration: 'export interface RlmAutonomousConfigV1 {\n    readonly mode: RlmAutonomousMode;\n    readonly maxContinuations?: number;\n    readonly maxTurns?: number;\n    readonly maxTokens?: number;\n    readonly timeoutMs?: number;\n    readonly continuationPrompt?: string;\n    readonly gates?: RlmAutonomousGateConfigV1;\n}',
+    declaration: 'export interface RlmAutonomousConfigV1 {\n    readonly mode: RlmAutonomousMode;\n    readonly maxContinuations?: number;\n    readonly maxTurns?: number;\n    readonly maxTokens?: number;\n    readonly timeoutMs?: number;\n    readonly continuationPrompt?: string;\n    readonly gates?: RlmAutonomousGateConfigV1;\n    readonly endCondition?: AutonomousEndConditionV1;\n}',
   },
   {
     name: 'RlmAutonomousGateConfigV1',
@@ -4997,6 +5258,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RlmChildExecution',
     declaration: 'export interface RlmChildExecution {\n    readonly nativeSessionId: string;\n    readonly nativeTurnId: string;\n    readonly result: Promise<RlmChildExecutionResult>;\n    interrupt(): Promise<void>;\n}',
+  },
+  {
+    name: 'RlmChildExecutionOptionsV1',
+    declaration: 'export interface RlmChildExecutionOptionsV1 {\n    readonly version: 1;\n    readonly tools?: readonly ToolSchema[];\n    readonly skills?: readonly RlmManagedSkillDescriptorV1[];\n    readonly retryPolicy?: ResolvedRetryPolicy;\n    readonly capabilityContext?: Readonly<Record<string, RlmJsonValue>>;\n}',
   },
   {
     name: 'RlmChildExecutionResult',
@@ -5041,6 +5306,42 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RlmCompactRunResultV1',
     declaration: 'export interface RlmCompactRunResultV1 extends RlmCompactRunOutcomeV1 {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly stateRevision: number;\n    readonly restorableVariables: readonly string[];\n    readonly degradedVariables: readonly string[];\n}',
+  },
+  {
+    name: 'RlmControlAttachRequestV1',
+    declaration: 'export interface RlmControlAttachRequestV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly callerId: RlmControlCallerId;\n}',
+  },
+  {
+    name: 'RlmControlAttachResultV1',
+    declaration: 'export interface RlmControlAttachResultV1 {\n    readonly version: 1;\n    readonly lease: RlmControlLeaseV1;\n    readonly snapshot: RlmRuntimeSessionSnapshotV1;\n    readonly eventCursor: number;\n}',
+  },
+  {
+    name: 'RlmControlCallerId',
+    declaration: 'export type RlmControlCallerId = Branded<\'RlmControlCallerId\'>;',
+  },
+  {
+    name: 'RlmControlDetachRequestV1',
+    declaration: 'export interface RlmControlDetachRequestV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly leaseId: RlmControlLeaseId;\n    readonly commandId: RlmCommandId;\n}',
+  },
+  {
+    name: 'RlmControlDetachResultV1',
+    declaration: 'export interface RlmControlDetachResultV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly leaseId: RlmControlLeaseId;\n    readonly detached: true;\n    readonly eventCursor: number;\n}',
+  },
+  {
+    name: 'RlmControlInputRequestV1',
+    declaration: 'export interface RlmControlInputRequestV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly leaseId: RlmControlLeaseId;\n    readonly commandId: RlmCommandId;\n    readonly text: string;\n    readonly mode?: RlmMessageMode;\n    readonly artifactRefs?: readonly string[];\n}',
+  },
+  {
+    name: 'RlmControlInputResultV1',
+    declaration: 'export interface RlmControlInputResultV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly leaseId: RlmControlLeaseId;\n    readonly commandId: RlmCommandId;\n    readonly messageId: string;\n    readonly effectiveMode: \'steer\' | \'follow_up\';\n    readonly deliveryStatus: \'queued\' | \'delivered\';\n    readonly stateRevision: number;\n    readonly eventCursor: number;\n}',
+  },
+  {
+    name: 'RlmControlLeaseId',
+    declaration: 'export type RlmControlLeaseId = Branded<\'RlmControlLeaseId\'>;',
+  },
+  {
+    name: 'RlmControlLeaseV1',
+    declaration: 'export interface RlmControlLeaseV1 {\n    readonly version: 1;\n    readonly leaseId: RlmControlLeaseId;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly callerId: RlmControlCallerId;\n    readonly acquiredAt: string;\n    readonly lastSeenAt: string;\n}',
   },
   {
     name: 'RlmDrainResultV1',
@@ -5115,6 +5416,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type RlmJsonValue = null | boolean | number | string | RlmJsonValue[] | {\n    readonly [key: string]: RlmJsonValue;\n};',
   },
   {
+    name: 'RlmManagedSkillDescriptorV1',
+    declaration: 'export interface RlmManagedSkillDescriptorV1 {\n    readonly alias: string;\n    readonly title: string;\n    readonly callable: string;\n    readonly available: boolean;\n}',
+  },
+  {
     name: 'RlmMessageMode',
     declaration: 'export type RlmMessageMode = \'auto\' | \'steer\' | \'follow_up\';',
   },
@@ -5128,7 +5433,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmMessageV1',
-    declaration: 'export interface RlmMessageV1 extends RlmMessageSendRequest {\n    readonly version: 1;\n    readonly messageId: string;\n    readonly effectiveMode: \'steer\' | \'follow_up\';\n    readonly deliveryStatus: \'queued\' | \'delivered\';\n    readonly queuedAt: string;\n    readonly deliveredAt?: string;\n    readonly deliveryError?: string;\n    readonly createdAt: string;\n}',
+    declaration: 'export interface RlmMessageV1 extends RlmMessageSendRequest {\n    readonly version: 1;\n    readonly messageId: string;\n    readonly source?: \'agent\' | \'control\';\n    readonly controlLeaseId?: RlmControlLeaseId;\n    readonly effectiveMode: \'steer\' | \'follow_up\';\n    readonly deliveryStatus: \'queued\' | \'delivered\';\n    readonly queuedAt: string;\n    readonly deliveredAt?: string;\n    readonly deliveryError?: string;\n    readonly createdAt: string;\n}',
   },
   {
     name: 'RlmModelSelectionV1',
@@ -5140,7 +5445,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmRuntimeCreateRequest',
-    declaration: 'export interface RlmRuntimeCreateRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly executionId: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly context?: Readonly<Record<string, RlmJsonValue>>;\n}',
+    declaration: 'export interface RlmRuntimeCreateRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly executionId: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly executionOptions?: RlmChildExecutionOptionsV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly context?: Readonly<Record<string, RlmJsonValue>>;\n}',
   },
   {
     name: 'RlmRuntimeEventV1',
@@ -5148,7 +5453,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmRuntimeHostBindings',
-    declaration: 'export interface RlmRuntimeHostBindings {\n    dispatchChild(request: RlmChildSpawnRequest & {\n        readonly childId: RlmChildId;\n        readonly childSessionId: RlmRuntimeSessionId;\n        readonly depth: number;\n        readonly model: RlmModelSelectionV1;\n    }): Promise<RlmChildExecution>;\n    dispatchContinuation?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly commandId: RlmCommandId;\n        readonly instruction: string;\n        readonly source: \'goal\' | \'heartbeat\' | \'message\' | \'autonomous\';\n        readonly deliveryMode: \'steer\' | \'follow_up\';\n        readonly model: RlmModelSelectionV1;\n    }): Promise<RlmChildExecution>;\n    hostRequest?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly method: \'harness.list\' | \'harness.get\' | \'harness.create\' | \'harness.update\' | \'harness.delete\' | \'harness.plan_refinement\' | \'harness.apply_refinement\' | \'harness.rollback\' | \'compact.status\' | \'compact.run\' | \'skills.list\' | \'skills.call\';\n        readonly params: Readonly<Record<string, RlmJsonValue>>;\n    }): Promise<RlmJsonValue>;\n}',
+    declaration: 'export interface RlmRuntimeHostBindings {\n    dispatchChild(request: RlmChildSpawnRequest & {\n        readonly childId: RlmChildId;\n        readonly childSessionId: RlmRuntimeSessionId;\n        readonly depth: number;\n        readonly model: RlmModelSelectionV1;\n        readonly executionOptions: RlmChildExecutionOptionsV1;\n    }): Promise<RlmChildExecution>;\n    dispatchContinuation?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly commandId: RlmCommandId;\n        readonly instruction: string;\n        readonly source: \'goal\' | \'heartbeat\' | \'message\' | \'autonomous\';\n        readonly deliveryMode: \'steer\' | \'follow_up\';\n        readonly model: RlmModelSelectionV1;\n        readonly executionOptions?: RlmChildExecutionOptionsV1;\n    }): Promise<RlmChildExecution>;\n    hostRequest?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly method: \'harness.list\' | \'harness.get\' | \'harness.create\' | \'harness.update\' | \'harness.delete\' | \'harness.plan_refinement\' | \'harness.apply_refinement\' | \'harness.rollback\' | \'compact.status\' | \'compact.run\' | \'skills.list\' | \'skills.call\';\n        readonly params: Readonly<Record<string, RlmJsonValue>>;\n    }): Promise<RlmJsonValue>;\n}',
   },
   {
     name: 'RlmRuntimeLimitsV1',
@@ -5160,7 +5465,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmRuntimeSessionSnapshotV1',
-    declaration: 'export interface RlmRuntimeSessionSnapshotV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly executionId: string;\n    readonly parentSessionId?: RlmRuntimeSessionId;\n    readonly parentChildId?: RlmChildId;\n    readonly workspace: string;\n    readonly sessionDir: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly depth: number;\n    readonly lifecycle: \'idle\' | \'running\' | \'degraded\' | \'stopped\';\n    readonly stateRevision: number;\n    readonly eventCursor: number;\n    readonly children: readonly RlmChildSnapshotV1[];\n    readonly restorableVariables: readonly string[];\n    readonly degradedVariables: readonly string[];\n    readonly goal?: RlmGoalV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface RlmRuntimeSessionSnapshotV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly executionId: string;\n    readonly parentSessionId?: RlmRuntimeSessionId;\n    readonly parentChildId?: RlmChildId;\n    readonly workspace: string;\n    readonly sessionDir: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly executionOptions?: RlmChildExecutionOptionsV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly depth: number;\n    readonly lifecycle: \'idle\' | \'running\' | \'degraded\' | \'stopped\';\n    readonly stateRevision: number;\n    readonly eventCursor: number;\n    readonly children: readonly RlmChildSnapshotV1[];\n    readonly restorableVariables: readonly string[];\n    readonly degradedVariables: readonly string[];\n    readonly goal?: RlmGoalV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'RlmStrategyRequest',

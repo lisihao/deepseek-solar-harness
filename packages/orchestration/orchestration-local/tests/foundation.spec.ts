@@ -237,4 +237,40 @@ describe('immutable compilation foundations', () => {
       }],
     })).toEqual(['A'])
   })
+
+  it('strictly validates task-specific Autonomous end-condition references', async () => {
+    const workspace = await temporary()
+    const fixture = graph(workspace)
+    const node = fixture.nodes[0]!
+    const base = {
+      ...node,
+      rlm: { mode: 'enabled' as const, maxDepth: 1, maxChildren: 1, maxTurns: 2 },
+      autonomous: {
+        mode: 'enabled' as const,
+        endCondition: {
+          version: 1 as const,
+          operator: 'all' as const,
+          checks: [{ id: 'done-check', kind: 'acceptance' as const, ref: 'done' }],
+        },
+      },
+    }
+    expect(validateGraph({ ...fixture, nodes: [base] })).toEqual(['A'])
+    expect(() => validateGraph({
+      ...fixture,
+      nodes: [{
+        ...base,
+        autonomous: { ...base.autonomous, endCondition: { ...base.autonomous.endCondition, checks: [{ ...base.autonomous.endCondition.checks[0]!, ref: 'missing' }] } },
+      }],
+    })).toThrow(/does not name a node acceptance requirement/u)
+    expect(() => validateGraph({
+      ...fixture,
+      nodes: [{
+        ...base,
+        autonomous: { ...base.autonomous, endCondition: { ...base.autonomous.endCondition, checks: [
+          ...base.autonomous.endCondition.checks,
+          { id: 'done-check', kind: 'evaluator' as const, ref: 'review' },
+        ] } },
+      }],
+    })).toThrow(/duplicated/u)
+  })
 })

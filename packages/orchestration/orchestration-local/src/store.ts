@@ -78,7 +78,7 @@ export interface CapabilityUpdateRecord {
   }
 }
 
-/** Durable idempotency receipt for one remotely retryable control command. */
+/** Durable idempotency receipt for one remotely retryable orchestration command. */
 export interface OrchestrationCommandReceipt {
   readonly commandId: string
   readonly method: string
@@ -463,7 +463,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
   }
 
   /**
-   * Read one durable remote-control command receipt.
+   * Read one durable orchestration command receipt.
    * @param commandId - caller-stable command identity.
    * @returns the receipt when it exists.
    */
@@ -486,7 +486,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
   /**
    * Persist acceptance before any control mutation is attempted.
    * @param commandId - caller-stable command identity.
-   * @param method - requested orchestration control method.
+   * @param method - requested orchestration method.
    * @param requestSha256 - canonical request digest.
    */
   acceptCommand(commandId: string, method: string, requestSha256: string): void {
@@ -503,7 +503,7 @@ export class OrchestrationStore implements OrchestrationClusterElectionStore {
   /**
    * Cache one successful command result for identical transport retries.
    * @param commandId - accepted command identity.
-   * @param response - bounded control response.
+   * @param response - bounded command response.
    */
   settleCommand(commandId: string, response: unknown): void {
     this.transaction(() => {

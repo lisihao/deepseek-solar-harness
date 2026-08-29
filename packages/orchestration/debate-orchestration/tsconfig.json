@@ -1,0 +1,15 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cosmokit" },
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../util/home-paths" },
+    { "path": "../debate" },
+    { "path": "../debate-local" },
+    { "path": "../orchestration" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

@@ -7,7 +7,11 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
-import { OrchestrationArtifactRef, type LogicalTaskGraphV1 } from '@deepseek-ai/dsh-orchestration'
+import {
+  OrchestrationArtifactRef,
+  type LogicalTaskGraphV1,
+  type OrchestrationExecutionEvidenceV1,
+} from '@deepseek-ai/dsh-orchestration'
 import type { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { OrchestrationDaemonClient } from '../src/client.ts'
@@ -23,7 +27,11 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-type TestResult = { output: Array<{ type: 'text'; text: string }>; stopReason: 'completed' }
+type TestResult = {
+  output: Array<{ type: 'text'; text: string }>
+  stopReason: 'completed'
+  usage?: { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; costUsd?: number }
+}
 interface FakeResidentRequest {
   commandId: string
   operatorId: string
@@ -95,6 +103,7 @@ class FakeResidentClient {
       models: operatorId === 'codex'
         ? [
           { model: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', efforts: ['medium'], defaultEffort: 'medium' },
+          { model: 'gpt-5.6-terra', displayName: 'GPT-5.6 Terra', efforts: ['high'], defaultEffort: 'high' },
           { model: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol', efforts: ['high'], defaultEffort: 'high' },
         ]
         : [
@@ -124,7 +133,11 @@ class FakeResidentClient {
       time: `2026-08-21T00:00:0${String(index)}.000Z`,
       data: { turnId, phase },
     })))
-    const result = { output: [{ type: 'text' as const, text: `completed ${request.commandId}` }], stopReason: 'completed' as const }
+    const result = {
+      output: [{ type: 'text' as const, text: `completed ${request.commandId}` }],
+      stopReason: 'completed' as const,
+      usage: { inputTokens: 11, outputTokens: 7, cacheReadInputTokens: 3, costUsd: 0.01 },
+    }
     const resultPromise = this.failNext > 0
       ? (() => {
         this.failNext -= 1
@@ -229,6 +242,14 @@ async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boole
     }
     await new Promise(resolve => setTimeout(resolve, 20))
   }
+}
+
+function startCompilation(
+  client: OrchestrationDaemonClient,
+  compilationId: string,
+  commandId = `start:${compilationId}`,
+) {
+  return client.start({ commandId, compilationId })
 }
 
 function graph(workspace: string, risk: 'low' | 'medium' = 'low'): LogicalTaskGraphV1 {
@@ -350,7 +371,7 @@ describe('orchestration daemon', () => {
     await eventually(() => client.clusterStatus(), value => value?.canSchedule === true)
     const compilation = await client.compile({ intent: { request: 'leader fixture' }, graph: graph(workspace) })
     expect(compilation).toMatchObject({ graph: { title: 'integration graph' } })
-    const started = await client.start({ compilationId: compilation.compilationId })
+    const started = await startCompilation(client, compilation.compilationId)
     await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
     expect(replicatedCommitIndexes.length).toBeGreaterThan(0)
     expect(resident.starts).toEqual([
@@ -426,7 +447,7 @@ describe('orchestration daemon', () => {
         }],
       },
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running')
     await daemon.close()
     remoteSettled = true
@@ -533,7 +554,7 @@ describe('orchestration daemon', () => {
       },
       graph: rlmGraph,
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
     expect(completed.nodes[0]).toMatchObject({ operatorId: 'claude-code', rlm: 'enabled', state: 'passed' })
     expect(fake.requests).toHaveLength(3)
@@ -618,7 +639,7 @@ describe('orchestration daemon', () => {
       },
       graph: independentGraph,
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const concurrent = await eventually(
       () => client.inspect(String(run.runId)),
       value => value.nodes.filter(node => node.state === 'running').length === 2,
@@ -657,7 +678,7 @@ describe('orchestration daemon', () => {
         ],
       },
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
     expect(completed.nodes[0]).toMatchObject({ state: 'passed', rlm: 'disabled' })
     expect(fake.requests).toHaveLength(1)
@@ -686,7 +707,7 @@ describe('orchestration daemon', () => {
         nodes: [{ ...rlmNode, role: 'recursive synthesis', task: 'Recursively synthesize alternatives.' }],
       },
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running' && firstFake.requests.length === 1)
     await first.close()
 
@@ -727,7 +748,7 @@ describe('orchestration daemon', () => {
       intent: { request: 'Complete a persistent goal.' },
       graph: { ...fixture, nodes: [{ ...rlmNode, role: 'recursive synthesis', task: 'Complete one persistent goal.' }] },
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
     expect(completed.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled' })
     expect(fake.requests).toHaveLength(2)
@@ -765,7 +786,7 @@ describe('orchestration daemon', () => {
         }],
       },
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
     expect(completed.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled', autonomous: 'enabled' })
     expect(fake.requests).toHaveLength(1)
@@ -814,6 +835,61 @@ describe('orchestration daemon', () => {
     `)
   })
 
+  it('settles a task-specific Autonomous end condition from host evidence and a registered evaluator', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-aec-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const evaluator = vi.fn(() => 'pass' as const)
+    const daemon = new OrchestrationDaemon({
+      root,
+      dshHome: home,
+      residentClient: fake as unknown as ResidentDaemonClient,
+      modelWorkerProviders: [],
+      schedulerIntervalMs: 10,
+      autonomousEndConditionEvaluators: { quality: evaluator },
+    })
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...baseNode } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Stop when the declared completion evidence is observed.' },
+      graph: {
+        ...fixture,
+        nodes: [{
+          ...baseNode,
+          role: 'recursive synthesis',
+          rlm: { mode: 'enabled', maxDepth: 1, maxChildren: 2, maxTurns: 4 },
+          autonomous: {
+            mode: 'enabled',
+            endCondition: {
+              version: 1,
+              operator: 'all',
+              checks: [
+                { id: 'completed', kind: 'acceptance', ref: 'done' },
+                { id: 'quality', kind: 'evaluator', ref: 'quality' },
+              ],
+            },
+          },
+        }],
+      },
+    })
+    const run = await startCompilation(client, compilation.compilationId)
+    const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ state: 'passed', autonomous: 'enabled' })
+    expect(fake.requests).toHaveLength(1)
+    expect(evaluator).toHaveBeenCalledOnce()
+    const events = await client.readEvents({ runId: run.runId, limit: 200 })
+    expect(events.events.find(value => value.type === 'rlm.autonomous.stopped')?.data).toMatchObject({
+      reason: 'end_condition_passed',
+      continuationsUsed: 0,
+      turnsUsed: 1,
+    })
+  })
+
   it('does not report Autonomous limit exhaustion as a successful TaskGraph node', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-auto-limit-'))
     const root = join(home, 'orchestrations')
@@ -839,7 +915,7 @@ describe('orchestration daemon', () => {
         }],
       },
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const failed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'failed')
     expect(failed.nodes[0]).toMatchObject({ state: 'failed', autonomous: 'enabled' })
     expect(fake.requests).toHaveLength(2)
@@ -850,6 +926,48 @@ describe('orchestration daemon', () => {
     })
     expect(events.events.find(value => value.type === 'node.failed')?.data).toMatchObject({
       code: 'AUTONOMOUS_LIMIT_REACHED',
+    })
+  })
+
+  it('retains normalized usage in non-RLM model-worker Evidence', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-mwu-'))
+    const root = join(home, 'orchestrations')
+    const resident = new FakeResidentClient()
+    resident.available = false
+    const worker = new KeylessModelWorker()
+    const daemon = createDaemon(root, home, resident, 10, [worker])
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...node } = fixture.nodes[0]!
+    const compilation = await client.compile({
+      intent: { request: 'Retain one-shot model usage in Evidence.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'model-worker-usage-fixture',
+        rlm: 'disabled', continualHarness: 'off', optimization: 'economy',
+      },
+      graph: {
+        ...fixture,
+        nodes: [{ ...node, role: 'analysis', writeScopes: [] }],
+      },
+    })
+    const run = await startCompilation(client, compilation.compilationId)
+    const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+    const evidenceRef = completed.nodes[0]?.evidenceRefs[0]
+    expect(evidenceRef).toBeDefined()
+    const evidence = await client.readArtifact(evidenceRef!) as OrchestrationExecutionEvidenceV1
+    expect(evidence).toMatchObject({
+      version: 1,
+      stopReason: 'completed',
+      usage: {
+        inputTokens: 3,
+        outputTokens: 1,
+        cacheReadInputTokens: 0,
+        cacheWriteInputTokens: 0,
+      },
     })
   })
 
@@ -890,7 +1008,7 @@ describe('orchestration daemon', () => {
       admission,
       graph: rlmGraph,
     })
-    const noGoalRun = await client.start({ compilationId: noGoalCompilation.compilationId })
+    const noGoalRun = await startCompilation(client, noGoalCompilation.compilationId)
     await eventually(() => client.inspect(String(noGoalRun.runId)), value => value.state === 'completed')
     const noGoalEvents = await client.readEvents({ runId: noGoalRun.runId, limit: 200 })
     expect(noGoalEvents.events.filter(value => value.type === 'rlm.goal.usage')).toHaveLength(0)
@@ -912,7 +1030,7 @@ describe('orchestration daemon', () => {
       admission,
       graph: rlmGraph,
     })
-    const goalRun = await client.start({ compilationId: goalCompilation.compilationId })
+    const goalRun = await startCompilation(client, goalCompilation.compilationId)
     await eventually(() => client.inspect(String(goalRun.runId)), value => value.state === 'completed')
     const goalEvents = await client.readEvents({ runId: goalRun.runId, limit: 300 })
     const allUsageEvents = goalEvents.events.filter(value => value.type === 'rlm.usage')
@@ -958,7 +1076,7 @@ describe('orchestration daemon', () => {
     cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
     const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
     const compilation = await client.compile({ intent: { request: 'Implement then review.' }, graph: graph(home) })
-    const started = await client.start({ compilationId: compilation.compilationId })
+    const started = await startCompilation(client, compilation.compilationId)
     const settled = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
     expect(settled.nodes.map(value => value.state)).toEqual(['passed', 'passed'])
     expect(settled.nodes).toEqual([
@@ -991,13 +1109,19 @@ describe('orchestration daemon', () => {
       stopReason: 'completed',
     })
     expect(String(codexEvidence?.data.outputPreview)).toContain('completed orch:')
-    const evidence = await client.readArtifact(OrchestrationArtifactRef(String(codexEvidence?.data.evidenceRef))) as {
-      output: Array<{ type: string; text: string }>
-    }
-    expect(evidence.output).toEqual([{
-      type: 'text',
-      text: `completed orch:${String(started.runId)}:code:1`,
-    }])
+    const evidence = await client.readArtifact(
+      OrchestrationArtifactRef(String(codexEvidence?.data.evidenceRef)),
+    ) as OrchestrationExecutionEvidenceV1
+    expect(evidence).toMatchObject({
+      version: 1,
+      output: [{ type: 'text', text: `completed orch:${String(started.runId)}:code:1` }],
+      usage: {
+        inputTokens: 11,
+        outputTokens: 7,
+        cacheReadInputTokens: 3,
+        costUsd: 0.01,
+      },
+    })
     expect(events.events.filter(value => value.type === 'node.operator.progress').map(value => value.data.phase))
       .toEqual(expect.arrayContaining(['reasoning', 'tool_activity', 'finalizing']))
   })
@@ -1031,7 +1155,7 @@ describe('orchestration daemon', () => {
       intent: { request: 'Implement and verify in isolated branches.' },
       graph: { ...fixture, baseSha, workspaceIsolation: 'git-worktree' },
     })
-    const started = await client.start({ compilationId: compilation.compilationId })
+    const started = await startCompilation(client, compilation.compilationId)
     const settled = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
     expect(settled.nodes.map(value => value.state)).toEqual(['passed', 'passed'])
     await expect(readFile(join(repository, 'implementation.txt'), 'utf8')).resolves.toBe('codex\n')
@@ -1053,7 +1177,7 @@ describe('orchestration daemon', () => {
     const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
     const compilation = await client.compile({ intent: { request: 'TBD: clarify the required outcome.' }, graph: graph(home) })
     expect(compilation.requiresClarification).toBe(true)
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     expect(run.state).toBe('awaiting_clarification')
     await new Promise(resolve => setTimeout(resolve, 40))
     expect(fake.starts).toEqual([])
@@ -1075,7 +1199,7 @@ describe('orchestration daemon', () => {
         : value),
     }
     const compilation = await client.compile({ intent: { request: 'Context failure fixture.' }, graph: tinyContext })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const failed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'failed')
     expect(failed.nodes[0]).toMatchObject({ state: 'blocked' })
     expect(failed.nodes[0]?.blockers[0]?.code).toBe('CONTEXT_BUDGET_EXCEEDED')
@@ -1090,7 +1214,7 @@ describe('orchestration daemon', () => {
     await first.start()
     const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
     const compilation = await client.compile({ intent: { request: 'Approval fixture.' }, graph: graph(home, 'medium') })
-    const started = await client.start({ compilationId: compilation.compilationId })
+    const started = await startCompilation(client, compilation.compilationId)
     expect(started.state).toBe('awaiting_approval')
     await first.close()
     const second = createDaemon(root, home, fake)
@@ -1103,6 +1227,44 @@ describe('orchestration daemon', () => {
     await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
   })
 
+  it('reuses one caller-stable start command and fences an accepted crash without replay', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-start-receipt-'))
+    const root = join(home, 'o')
+    const fake = new FakeResidentClient()
+    fake.defer = true
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const firstCompilation = await client.compile({
+      intent: { request: 'Start receipt fixture one.' },
+      graph: graph(home),
+    })
+    const secondCompilation = await client.compile({
+      intent: { request: 'Start receipt fixture two.' },
+      graph: graph(home),
+    })
+    const request = { commandId: 'start-command-1', compilationId: firstCompilation.compilationId }
+    const started = await client.start(request)
+    expect(await client.start(request)).toEqual(started)
+    expect(await client.list()).toHaveLength(1)
+    await expect(client.start({
+      commandId: request.commandId,
+      compilationId: secondCompilation.compilationId,
+    })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
+
+    const crashedRequest = { commandId: 'start-command-crashed', compilationId: secondCompilation.compilationId }
+    daemon.store.acceptCommand(
+      crashedRequest.commandId,
+      'orchestration.start',
+      canonicalSha256({ method: 'orchestration.start', request: crashedRequest }),
+    )
+    await expect(client.start(crashedRequest)).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
+    expect(daemon.store.commandReceipt(crashedRequest.commandId)?.state).toBe('indeterminate')
+    expect(await client.list()).toHaveLength(1)
+    fake.resolveAllDeferred()
+  })
+
   it('returns one cached control result for an identical command and rejects identity reuse', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-command-receipt-'))
     const root = join(home, 'o')
@@ -1113,7 +1275,7 @@ describe('orchestration daemon', () => {
     cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
     const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
     const compilation = await client.compile({ intent: { request: 'Command receipt fixture.' }, graph: graph(home, 'medium') })
-    const started = await client.start({ compilationId: compilation.compilationId })
+    const started = await startCompilation(client, compilation.compilationId)
     const request = {
       commandId: 'approve-command-1', runId: started.runId, expectedRevision: started.revision,
       decision: 'approve' as const, reason: 'approve once',
@@ -1134,7 +1296,7 @@ describe('orchestration daemon', () => {
     await first.start()
     const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
     const compilation = await client.compile({ intent: { request: 'Active restart fixture.' }, graph: graph(home) })
-    const started = await client.start({ compilationId: compilation.compilationId })
+    const started = await startCompilation(client, compilation.compilationId)
     await eventually(() => client.inspect(String(started.runId)), value => value.nodes[0]?.state === 'running')
     await first.close()
     const second = createDaemon(root, home, fake, 10)
@@ -1164,7 +1326,7 @@ describe('orchestration daemon', () => {
       intent: { request: 'Capability update fixture.' },
       graph: { ...base, nodes: base.nodes.map(value => value.id === 'code' ? { ...value, capabilityBudget: ['extra.instruction'] } : value) },
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const queued = await client.proposeCapabilityUpdate({
       runId: run.runId, nodeId: 'code', expectedRevision: run.revision,
       requestedCapabilities: ['extra.instruction'], applyAt: 'next-turn',
@@ -1183,7 +1345,7 @@ describe('orchestration daemon', () => {
     cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
     const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
     const compilation = await client.compile({ intent: { request: 'Running hot-swap fixture.' }, graph: graph(home) })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const running = await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running')
     const rejected = await client.proposeCapabilityUpdate({
       runId: run.runId, nodeId: 'code', expectedRevision: running.revision,
@@ -1211,7 +1373,7 @@ describe('orchestration daemon', () => {
       nodes: base.nodes.map(value => value.id === 'code' ? { ...value, capabilityBudget: ['extra.instruction'] } : value),
     }
     const compilation = await client.compile({ intent: { request: 'Next turn fixture.' }, graph: updateGraph })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const running = await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running')
     const queued = await client.proposeCapabilityUpdate({
       runId: run.runId, nodeId: 'code', expectedRevision: running.revision,
@@ -1235,7 +1397,7 @@ describe('orchestration daemon', () => {
     cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
     const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
     const compilation = await client.compile({ intent: { request: 'Expansion fixture.' }, graph: graph(home, 'medium') })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const receipt = await client.proposeCapabilityUpdate({
       runId: run.runId, nodeId: 'code', expectedRevision: run.revision,
       requestedCapabilities: ['network.admin'], applyAt: 'next-turn',
@@ -1271,7 +1433,7 @@ describe('orchestration daemon', () => {
       })),
     }
     const compilation = await client.compile({ intent: { request: 'Parallel fixture.' }, graph: parallel })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     await eventually(() => client.inspect(String(run.runId)), value => value.nodes.every(node => node.state === 'running'))
     expect(fake.starts).toHaveLength(2)
     expect(fake.requests.map(request => request.laneId)).toEqual([
@@ -1311,7 +1473,7 @@ describe('orchestration daemon', () => {
       })),
     }
     const compilation = await client.compile({ intent: { request: 'Capacity fixture.' }, graph: capacityBound })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const limited = await eventually(
       () => client.inspect(String(run.runId)),
       value => value.nodes.filter(node => node.state === 'running').length === 1
@@ -1335,7 +1497,7 @@ describe('orchestration daemon', () => {
     cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
     const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
     const compilation = await client.compile({ intent: { request: 'Pinned provider fixture.' }, graph: graph(home) })
-    const started = await client.start({ compilationId: compilation.compilationId })
+    const started = await startCompilation(client, compilation.compilationId)
     const failed = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'failed')
     expect(fake.starts).toHaveLength(1)
     expect(fake.starts[0]).toMatch(/^codex:/u)
@@ -1365,7 +1527,7 @@ describe('orchestration daemon', () => {
       }],
     }
     const compilation = await client.compile({ intent: { request: 'Quota-protected planning fixture.' }, graph: quotaProtected })
-    const started = await client.start({ compilationId: compilation.compilationId })
+    const started = await startCompilation(client, compilation.compilationId)
     await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
     expect(fake.requests).toHaveLength(1)
     expect(fake.requests[0]).toMatchObject({ operatorId: 'codex', profile: { model: 'gpt-5.6-sol' } })
@@ -1389,7 +1551,7 @@ describe('orchestration daemon', () => {
       })),
     }
     const compilation = await client.compile({ intent: { request: 'Conflict fixture.' }, graph: conflicting })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const waiting = await eventually(
       () => client.inspect(String(run.runId)),
       value => value.nodes.some(node => node.state === 'running') && value.nodes.some(node => node.waitReason?.code === 'SCOPE_CONFLICT'),
@@ -1412,7 +1574,7 @@ describe('orchestration daemon', () => {
       } : value),
     }
     const retryCompilation = await client.compile({ intent: { request: 'Retry fixture.' }, graph: retryGraph })
-    const retryRun = await client.start({ compilationId: retryCompilation.compilationId })
+    const retryRun = await startCompilation(client, retryCompilation.compilationId)
     const retried = await eventually(() => client.inspect(String(retryRun.runId)), value => value.state === 'completed')
     expect(retried.nodes[0]).toMatchObject({ state: 'passed', attempt: 2 })
   })
@@ -1443,10 +1605,10 @@ describe('orchestration daemon', () => {
       },
       graph: retryGraph,
     })
-    const run = await client.start({ compilationId: compilation.compilationId })
+    const run = await startCompilation(client, compilation.compilationId)
     const completed = await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
     expect(completed.nodes[0]).toMatchObject({ state: 'passed', attempt: 2 })
     expect(fake.requests[0]?.profile?.model).toBe('gpt-5.6-luna')
-    expect(fake.requests[1]?.profile?.model).not.toBe('gpt-5.6-luna')
+    expect(fake.requests[1]?.profile?.model).toBe('gpt-5.6-terra')
   })
 })

@@ -73,6 +73,8 @@ describe('parseDshArgs', () => {
   })
 
   it('routes resident management commands without a profile boot', () => {
+    expect(parse(['resident', 'authenticate', 'claude-code']))
+      .toEqual({ mode: 'resident', args: ['authenticate', 'claude-code'] })
     expect(parse(['resident', 'list'])).toEqual({ mode: 'resident', args: ['list'] })
     expect(parse(['resident', 'attach', 'session-1', '--read-only', '--once']))
       .toEqual({ mode: 'resident', args: ['attach', 'session-1', '--read-only', '--once'] })

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
   DesktopResidentDashboard,
+  DesktopResidentAuthenticationResponse,
   DesktopResidentActivity,
   DesktopResidentEvent,
   DesktopResidentSession,
@@ -31,12 +32,28 @@ export async function loadResidentDashboard(
   return await response.json() as DesktopResidentDashboard
 }
 
+/** Start one explicit owner-local native-subscription login flow. */
+export async function authenticateResidentOperator(
+  operatorId: string,
+  request: BrowserRequest = globalThis.fetch,
+): Promise<DesktopResidentAuthenticationResponse> {
+  const url = new URL(RESIDENT_DASHBOARD_PATH, window.location.origin)
+  url.searchParams.set('operator_id', operatorId)
+  const response = await request(url, { method: 'POST', cache: 'no-store' })
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(`Resident Operator login failed (${String(response.status)}): ${message}`)
+  }
+  return await response.json() as DesktopResidentAuthenticationResponse
+}
+
 /** Session-header action and local read-only overlay for persistent physical operators. */
 export function ResidentOperatorsPanel({ request }: { request: BrowserRequest }) {
   const [open, setOpen] = useState(false)
   const [selectedSessionId, setSelectedSessionId] = useState<string>()
   const [dashboard, setDashboard] = useState<DesktopResidentDashboard>()
   const [error, setError] = useState<string>()
+  const [authenticating, setAuthenticating] = useState<string>()
 
   useEffect(() => {
     const controller = new AbortController()
@@ -83,6 +100,20 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
   const generatedTime = dashboard === undefined
     ? undefined
     : formatResidentTimestamp(dashboard.generatedAt, dashboard.generatedAt, timeZone)
+  const remoteFrontend = new URL(window.location.href).searchParams.get('dsh-deployment-role') === 'frontend'
+
+  const authenticate = async (operatorId: string): Promise<void> => {
+    setAuthenticating(operatorId)
+    setError(undefined)
+    try {
+      await authenticateResidentOperator(operatorId, request)
+      setDashboard(await loadResidentDashboard(selectedSessionId, undefined, request))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setAuthenticating(undefined)
+    }
+  }
 
   return (
     <>
@@ -130,7 +161,20 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
                       <div>
                         <strong>{provider.displayName}</strong>
                         <small>{provider.productVersion} · {String(provider.models.length)} 个模型</small>
+                        {!provider.available && provider.unavailableReason !== undefined && <small>{provider.unavailableReason}</small>}
                         {provider.quotaUnavailableReason !== undefined && <small>配额状态暂不可用，执行仍可继续</small>}
+                        {!provider.available && provider.authentication === 'unqualified' && provider.supportsExplicitAuthentication && (
+                          remoteFrontend
+                            ? <small>请在服务器本机完成订阅登录</small>
+                            : <button
+                              type="button"
+                              className="dshDesktopResidentAuthenticate"
+                              disabled={authenticating !== undefined}
+                              onClick={() => { void authenticate(provider.operatorId) }}
+                            >
+                              {authenticating === provider.operatorId ? '正在打开登录…' : `登录 ${provider.displayName}`}
+                            </button>
+                        )}
                       </div>
                       <em>{provider.available ? '订阅可用' : '不可用'}</em>
                     </div>
