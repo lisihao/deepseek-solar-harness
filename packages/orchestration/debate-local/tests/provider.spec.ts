@@ -269,6 +269,7 @@ describe('local Debate Provider', () => {
     expect(limited.cost.inputTokens).toBeUndefined()
     expect(limited.cost.outputTokens).toBeUndefined()
     expect(limited.cost.costUsd).toBeUndefined()
+    expect(limited.synthesis).toMatchObject({ state: 'settled' })
   })
 
   it('keeps repeated missing account cost unknown without synthesizing a zero subtotal', async () => {
@@ -339,6 +340,7 @@ describe('local Debate Provider', () => {
     })
     expect(maxed.state).toBe('max_rounds')
     expect(maxed.rounds).toHaveLength(2)
+    expect(maxed.synthesis).toMatchObject({ state: 'settled' })
   })
 
   it('rejects a new follow-up claim instead of expanding outside the ledger', async () => {
