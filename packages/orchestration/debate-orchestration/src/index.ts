@@ -1,6 +1,7 @@
 /** Debate execution adapter over the existing durable TaskGraph Scheduler. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { DebateError } from '@deepseek-ai/dsh-debate'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -388,7 +389,7 @@ export const inject = ['orchestrations']
 export function apply(ctx: Context, config: Config): void {
   const executor = new DebateTaskGraphRoundExecutor(ctx.orchestrations, config)
   ctx.plugin(LocalDebateProvider, {
-    root: `${resolveDshHome(config.dshHome)}/debates`,
+    root: join(resolveDshHome(config.dshHome), 'debates'),
     executor,
     ...(config.providerId === undefined ? {} : { providerId: config.providerId }),
     ...(config.providerVersion === undefined ? {} : { providerVersion: config.providerVersion }),
