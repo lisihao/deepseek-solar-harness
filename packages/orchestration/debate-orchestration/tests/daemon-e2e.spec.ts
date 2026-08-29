@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import type { DebatePolicyV1 } from '@deepseek-ai/dsh-debate'
 import { LocalDebateProvider } from '@deepseek-ai/dsh-debate-local'
@@ -222,7 +223,8 @@ describe('Debate real TaskGraph binding', () => {
 
   it('completes one Debate through the real daemon with parallel participants and an Evidence-fenced judge', async () => {
     // Keep the Unix socket path below the macOS sockaddr_un length limit.
-    const home = await mkdtemp('/tmp/dsh-debate-e2e-')
+    const temporaryRoot = process.platform === 'win32' ? tmpdir() : '/tmp'
+    const home = await mkdtemp(join(temporaryRoot, 'dsh-debate-e2e-'))
     const orchestrationRoot = join(home, 'orchestrations')
     const workspace = join(home, 'workspace')
     await mkdir(workspace)
