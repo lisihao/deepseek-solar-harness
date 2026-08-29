@@ -10,6 +10,8 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 export type BrowserRequest = ConnectionHandle['request']
 
 /** Read the bounded, text-free RLM Agents projection from the same-origin Host. */
+/* jscpd:ignore-start -- this independently unloadable plugin owns its endpoint
+ * loader and cannot import the Resident plugin's superficially similar client. */
 export async function loadRlmAgentsDashboard(
   sessionId?: string,
   signal?: AbortSignal,
@@ -26,6 +28,7 @@ export async function loadRlmAgentsDashboard(
   }
   return await response.json() as DesktopRlmAgentsDashboardV1
 }
+/* jscpd:ignore-end */
 
 /** Submit versioned RLM control intent while the Host retains the lease credential. */
 export async function controlRlmAgents(
@@ -64,6 +67,8 @@ export function RlmAgentsView(props: { request: BrowserRequest; preferredSession
     setError(undefined)
   }, [props.request, selectedSessionId])
 
+  /* jscpd:ignore-start -- RLM Agents owns an independent polling projection;
+   * importing another plugin's lifecycle would violate unloadability. */
   useEffect(() => {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -82,6 +87,7 @@ export function RlmAgentsView(props: { request: BrowserRequest; preferredSession
       if (timer !== undefined) clearTimeout(timer)
     }
   }, [refresh])
+  /* jscpd:ignore-end */
 
   useEffect(() => {
     if (dashboard === undefined) return

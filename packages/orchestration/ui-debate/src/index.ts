@@ -44,6 +44,9 @@ export function remoteDebateControlAllowed(scope: RemoteDeviceScope, action: Des
   return action === 'approve' || action === 'reject' || action === 'pause' || action === 'resume'
 }
 
+/* jscpd:ignore-start -- the independently unloadable Debate Host plugin owns
+ * its transport boundary; sharing these helpers with orchestration would add a
+ * forbidden cross-plugin runtime dependency. */
 function sendJson(response: ServerResponse, status: number, value: unknown): void {
   const encoded = Buffer.from(JSON.stringify(value))
   response.statusCode = status
@@ -66,6 +69,7 @@ async function readBody(request: IncomingMessage): Promise<Record<string, unknow
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('control request must be an object')
   return parsed as Record<string, unknown>
 }
+/* jscpd:ignore-end */
 
 function requiredString(body: Record<string, unknown>, key: string, max = 4_096): string {
   const value = body[key]
@@ -293,6 +297,8 @@ function httpStatus(error: unknown): number {
 
 /** Register the authenticated Debate projection and revision-fenced control route. */
 export function apply(ctx: Context): void {
+  /* jscpd:ignore-start -- authenticated exact-route wiring is deliberately
+   * local to this plugin so Debate can be installed and removed independently. */
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: DEBATE_DASHBOARD_PATH,
@@ -334,4 +340,5 @@ export function apply(ctx: Context): void {
       }
     },
   }), 'ui-debate: dashboard route')
+  /* jscpd:ignore-end */
 }

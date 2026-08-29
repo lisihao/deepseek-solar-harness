@@ -115,6 +115,22 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   response.end(encoded)
 }
 
+function authorizeDashboardRequest(
+  ctx: Context,
+  request: IncomingMessage,
+  response: ServerResponse,
+): ReturnType<typeof authorizeRemoteRequest> {
+  const remoteAuth = ctx.get('remoteAuth')
+  const authority = authorizeRemoteRequest(request, remoteAuth)
+  if (authority === undefined) {
+    const unavailable = remoteAuth === undefined
+    sendJson(response, unavailable ? 503 : 401, {
+      error: unavailable ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
+    })
+  }
+  return authority
+}
+
 async function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Uint8Array[] = []
   let bytes = 0
@@ -446,15 +462,8 @@ export function apply(ctx: Context): void {
       path: ORCHESTRATION_DASHBOARD_PATH,
       handler: async (request, response) => {
         try {
-          const remoteAuth = ctx.get('remoteAuth')
-          const authority = authorizeRemoteRequest(request, remoteAuth)
-          if (authority === undefined) {
-            const unavailable = remoteAuth === undefined
-            sendJson(response, unavailable ? 503 : 401, {
-              error: unavailable ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
-            })
-            return
-          }
+          const authority = authorizeDashboardRequest(ctx, request, response)
+          if (authority === undefined) return
           if (request.method === 'GET') {
             const url = new URL(request.url ?? ORCHESTRATION_DASHBOARD_PATH, 'http://127.0.0.1')
             sendJson(response, 200, await readProjection(ctx, url))
@@ -490,15 +499,8 @@ export function apply(ctx: Context): void {
       path: ORCHESTRATION_RLM_AGENTS_PATH,
       handler: async (request, response) => {
         try {
-          const remoteAuth = ctx.get('remoteAuth')
-          const authority = authorizeRemoteRequest(request, remoteAuth)
-          if (authority === undefined) {
-            const unavailable = remoteAuth === undefined
-            sendJson(response, unavailable ? 503 : 401, {
-              error: unavailable ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
-            })
-            return
-          }
+          const authority = authorizeDashboardRequest(ctx, request, response)
+          if (authority === undefined) return
           const rlmRuntime = ctx.get('rlmRuntime')
           if (rlmRuntime === undefined) {
             sendJson(response, 503, { error: 'RLM_UNAVAILABLE', message: RLM_CONTROL_ERROR_MESSAGES.RLM_UNAVAILABLE })

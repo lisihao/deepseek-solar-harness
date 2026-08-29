@@ -721,6 +721,9 @@ export class LocalDebateProvider extends DebateService {
       if (policy.mode === 'disabled') {
         this.appendEvent(run, 'debate.stopped', { action: 'disabled', reason: 'debate policy is disabled' }, { state: 'stopped' })
       }
+      /* jscpd:ignore-start -- start and control intentionally retain separate
+       * receipt transitions; combining them would blur their distinct durable
+       * command methods for a small amount of settlement plumbing. */
       if (policy.mode === 'auto') {
         this.transitionCommand(normalized.commandId, 'running')
         return { runId, execute: true as const }
@@ -735,6 +738,7 @@ export class LocalDebateProvider extends DebateService {
       return this.drive(admission.runId, normalized.commandId, 'auto')
     }
     return admission.response
+    /* jscpd:ignore-end */
   }
 
   /** List all persisted runs in deterministic newest-first order. */

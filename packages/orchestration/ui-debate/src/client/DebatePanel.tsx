@@ -70,6 +70,8 @@ export function DebatePanel({ request: browserRequest }: { request: BrowserReque
     setError(undefined)
   }, [browserRequest, open, selectedRunId])
 
+  /* jscpd:ignore-start -- this polling lifecycle belongs to the independently
+   * unloadable Debate client plugin; cross-plugin value imports are forbidden. */
   useEffect(() => {
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -88,6 +90,7 @@ export function DebatePanel({ request: browserRequest }: { request: BrowserReque
       if (timer !== undefined) clearTimeout(timer)
     }
   }, [open, refresh])
+  /* jscpd:ignore-end */
 
   useEffect(() => {
     if (!open || dashboard === undefined || selectedRunId !== undefined) return
