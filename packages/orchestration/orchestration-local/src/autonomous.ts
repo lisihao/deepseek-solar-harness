@@ -600,8 +600,12 @@ function runProcess(
       stderr = append(stderr, error.message)
       finish({ status: child.exitCode, signal: child.signalCode, stdout, stderr, timedOut, outputTruncated })
     })
-    child.once('close', (status, childSignal) => {
+    child.once('close', (status, childSignal) => { void (async () => {
+      if (settled) return
       if (abortError !== undefined) {
+        if (child.pid !== undefined && process.platform !== 'win32') {
+          await waitForProcessGroupExit(child.pid)
+        }
         settled = true
         clearTimeout(timer)
         signal?.removeEventListener('abort', aborted)
@@ -609,10 +613,22 @@ function runProcess(
       } else {
         finish({ status, signal: childSignal, stdout, stderr, timedOut, outputTruncated })
       }
-    })
+    })() })
     signal?.addEventListener('abort', aborted, { once: true })
     if (signal?.aborted === true) aborted()
   })
+}
+
+async function waitForProcessGroupExit(processGroupId: number): Promise<void> {
+  for (;;) {
+    try {
+      process.kill(-processGroupId, 0)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return
+      throw error
+    }
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 10))
+  }
 }
 
 function truncateGateOutput(output: string, alreadyTruncated: boolean): string {
