@@ -16,7 +16,10 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { PhysicalOperatorReasoningEffort } from '@deepseek-ai/dsh-physical-operator'
+import type {
+  PhysicalOperatorNativeToolPolicy,
+  PhysicalOperatorReasoningEffort,
+} from '@deepseek-ai/dsh-physical-operator'
 import type {
   ResidentDriverExecuteRequest,
   ResidentDriverCompactRequest,
@@ -443,6 +446,28 @@ function textPrompt(prompt: readonly ContentBlock[], product: string): string[] 
   return texts
 }
 
+/** Append the sealed no-tool contract to the product-owned instruction channel. */
+export function nativeToolSystemPrompt(
+  systemPrompt: string | undefined,
+  policy?: PhysicalOperatorNativeToolPolicy,
+): string | undefined {
+  if (policy !== 'disabled') return systemPrompt
+  const noTools = [
+    'This execution plan grants no native tool authority.',
+    'Do not invoke shell, filesystem, network, browser, search, MCP, or other product tools.',
+    'Reason only from the supplied prompt and return the requested text answer directly.',
+  ].join(' ')
+  return systemPrompt === undefined ? noTools : `${systemPrompt}\n\n${noTools}`
+}
+
+/** Agent SDK options that remove Claude Code's built-in tool surface for a sealed no-tool turn. */
+export function claudeNativeToolOptions(policy?: PhysicalOperatorNativeToolPolicy): {
+  readonly tools?: []
+  readonly allowedTools?: string[]
+} {
+  return policy === 'disabled' ? { tools: [], allowedTools: [] } : {}
+}
+
 async function command(command: string, args: string[]): Promise<{ stdout: string; stderr: string; executable: string }> {
   try {
     const executable = resolveProductExecutable(command)
@@ -591,6 +616,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     let approvalRequired: string | undefined
     const running = new Set<string>()
     const modelToolBridge = ensureModelToolBridge(request)
+    const effectiveSystemPrompt = nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy)
     const modelToolNames = new Set(modelToolBridge === undefined ? [] : claudeQualifiedToolNames(modelToolBridge))
     const canUseTool: CanUseTool = (toolName, _input, options) => {
       if (modelToolNames.has(toolName)) return Promise.resolve({ behavior: 'allow' })
@@ -620,10 +646,11 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
           ? { thinking: { type: 'adaptive' as const } }
           : {},
         ...nativeSessionId === undefined ? {} : { resume: nativeSessionId },
-        ...request.systemPrompt === undefined ? {} : {
-          systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: request.systemPrompt },
+        ...effectiveSystemPrompt === undefined ? {} : {
+          systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: effectiveSystemPrompt },
         },
         disallowedTools: ['AskUserQuestion'],
+        ...claudeNativeToolOptions(request.nativeToolPolicy),
         ...modelToolBridge === undefined || rlmServer === undefined ? {} : {
           ...isRlmOnlyBridge(modelToolBridge) ? { tools: [] as const } : {},
           allowedTools: [...modelToolNames],
@@ -830,9 +857,21 @@ export class CodexResidentDriver implements ResidentProductDriver {
       wire.start()
       await wire.initialize(request.signal)
       if (request.nativeSessionId === undefined) {
-        await wire.startThread(request.workspace, request.signal, false, request.profile, request.systemPrompt)
+        await wire.startThread(
+          request.workspace,
+          request.signal,
+          false,
+          request.profile,
+          nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy),
+        )
       } else {
-        await wire.resumeThread(request.nativeSessionId, request.workspace, request.signal, request.profile, request.systemPrompt)
+        await wire.resumeThread(
+          request.nativeSessionId,
+          request.workspace,
+          request.signal,
+          request.profile,
+          nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy),
+        )
       }
       const threadId = wire.currentThreadId
       if (threadId === undefined) {

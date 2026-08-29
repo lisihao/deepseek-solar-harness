@@ -10,6 +10,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionPreference,
   PhysicalOperatorModelToolBridgeV1,
+  PhysicalOperatorNativeToolPolicy,
   PhysicalOperatorReasoningEffort,
 } from '@deepseek-ai/dsh-physical-operator'
 import {
@@ -32,7 +33,7 @@ import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v10 method set advertised by daemon handshake. */
+/** Public protocol-v11 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
   'system.shutdown',
@@ -224,6 +225,14 @@ function modelToolBridgeParam(params: Record<string, unknown>): PhysicalOperator
   })
   if (tools.length === 0) throw new ResidentOperatorError('resident model tool bridge must contain at least one tool', 'INVALID_RESULT')
   return { version: 1, socketPath: bridge.socketPath, sessionId: bridge.sessionId, tools }
+}
+
+function nativeToolPolicyParam(params: Record<string, unknown>): PhysicalOperatorNativeToolPolicy {
+  const value = params.native_tool_policy ?? 'inherit'
+  if (value !== 'inherit' && value !== 'disabled') {
+    throw new ResidentOperatorError('resident protocol native_tool_policy is unsupported', 'INVALID_RESULT')
+  }
+  return value
 }
 
 function safeDiagnostic(message: string, prompt: readonly ContentBlock[]): string {
@@ -493,6 +502,10 @@ export class ResidentDaemon {
     const systemPrompt = systemPromptParam(params)
     const requestedProfile = profileParam(params)
     const modelToolBridge = modelToolBridgeParam(params)
+    const nativeToolPolicy = nativeToolPolicyParam(params)
+    if (nativeToolPolicy === 'disabled' && modelToolBridge !== undefined) {
+      throw new ResidentOperatorError('a no-tool resident turn cannot expose a model tool bridge', 'INVALID_RESULT')
+    }
     const supersedesCommandId = params.supersedes_command_id === undefined
       ? undefined
       : stringParam(params, 'supersedes_command_id')
@@ -535,6 +548,7 @@ export class ResidentDaemon {
       laneId,
       modelToolBridge,
       systemPrompt,
+      nativeToolPolicy,
     )
     const accepted = this.store.accept(
       commandId,
@@ -558,6 +572,7 @@ export class ResidentDaemon {
         systemPrompt,
         resolved.profile,
         modelToolBridge,
+        nativeToolPolicy,
         controller,
       )
       this.active.set(accepted.turnId, { commandId, controller, done })
@@ -650,6 +665,7 @@ export class ResidentDaemon {
     systemPrompt: string | undefined,
     profile: Parameters<ResidentProductDriver['execute']>[0]['profile'],
     modelToolBridge: PhysicalOperatorModelToolBridgeV1 | undefined,
+    nativeToolPolicy: PhysicalOperatorNativeToolPolicy,
     controller: AbortController,
   ): Promise<void> {
     const heartbeat = setInterval(
@@ -667,6 +683,7 @@ export class ResidentDaemon {
         ...systemPrompt === undefined ? {} : { systemPrompt },
         profile,
         ...modelToolBridge === undefined ? {} : { modelToolBridge },
+        nativeToolPolicy,
         ...nativeSessionId === undefined ? {} : { nativeSessionId },
         signal: controller.signal,
         onRunning: (nativeSessionId, nativeTurnId) => {

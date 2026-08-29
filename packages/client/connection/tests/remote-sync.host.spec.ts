@@ -270,19 +270,52 @@ describe('RemoteSyncHub', () => {
     const resident = {
       providers: async () => [provider], execute, inspectTurn, readEvents, interrupt,
     }
-    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never)
+    const qualification = vi.fn(async () => ({ available: true }))
+    const materializeWorkspace = vi.fn(async (identity: unknown) => ({
+      version: 1, identity, path: '/srv/materialized/project/packages/core',
+    }))
+    const renewWorkspace = vi.fn(async () => undefined)
+    const releaseWorkspace = vi.fn(async () => undefined)
+    const readResidentArtifact = vi.fn(async (ref: string) => ({ ref, json: '{}' }))
+    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => ({
+      qualification, materializeWorkspace, renewWorkspace, releaseWorkspace, readResidentArtifact,
+    }) as never)
     const adminDescription = await hub.describe(new AbortController().signal, 'admin')
     expect(adminDescription.capabilities).toEqual(expect.arrayContaining([
       'operator.read', 'operator.execute', 'operator.interrupt',
+      'operator.workspace.materialize', 'operator.artifact.read',
     ]))
     const pocketDescription = await hub.describe(new AbortController().signal, 'pocket')
     expect(pocketDescription.capabilities).not.toContain('operator.execute')
+    const legacyDescription = await hub.describe(
+      new AbortController().signal,
+      'admin',
+      { major: 1, minor: 3 },
+    )
+    expect(legacyDescription.protocol).toEqual({ major: 1, minor: 3 })
+    expect(legacyDescription.capabilities).toContain('operator.read')
+    expect(legacyDescription.capabilities).not.toEqual(expect.arrayContaining([
+      'operator.execute', 'operator.workspace.materialize', 'operator.artifact.read',
+    ]))
     await expect(hub.operatorProviders()).resolves.toEqual([provider])
     await expect(hub.operatorExecute({
-      commandId: 'command-1', operatorId: 'codex', workspace: '/repo', laneId: 'lane-1', prompt: [],
-    } as never)).resolves.toEqual({ sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 })
+      commandId: 'command-1', operatorId: 'codex', laneId: 'lane-1', prompt: [],
+      nativeToolPolicy: 'disabled',
+      workspaceIdentity: {
+        version: 1, repository: 'github.com/lisihao/project', commit: 'a'.repeat(40), subdir: 'packages/core',
+      },
+    })).resolves.toEqual({ sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 })
+    expect(materializeWorkspace).toHaveBeenCalledOnce()
+    expect(materializeWorkspace).toHaveBeenCalledWith(expect.anything(), 'command-1')
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      commandId: 'command-1', workspace: '/srv/materialized/project/packages/core', nativeToolPolicy: 'disabled',
+    }))
     expect(dispose).toHaveBeenCalledOnce()
+    await expect(hub.operatorReadArtifact(`sha256:${'a'.repeat(64)}`)).resolves.toEqual({
+      ref: `sha256:${'a'.repeat(64)}`, json: '{}',
+    })
     await expect(hub.operatorInspectTurn('resident-turn')).resolves.toMatchObject({ state: 'running' })
+    expect(renewWorkspace).toHaveBeenCalledWith('command-1')
     const signal = new AbortController().signal
     await expect(hub.operatorReadEvents('resident-session', 0, 100, signal)).resolves.toEqual({ events: [], nextSequence: 0 })
     await expect(hub.operatorReadEvents('resident-session', 1, 10)).resolves.toEqual({ events: [], nextSequence: 0 })
@@ -290,6 +323,26 @@ describe('RemoteSyncHub', () => {
     expect(readEvents).toHaveBeenCalledWith(expect.objectContaining({ afterSequence: 0, limit: 100, signal }))
     expect(readEvents).toHaveBeenCalledWith(expect.objectContaining({ afterSequence: 1, limit: 10 }))
     expect(interrupt).toHaveBeenCalledOnce()
+    await hub.close()
+  })
+
+  it('keeps an unqualified local execution host read-only instead of falsely advertising execute', async () => {
+    const resident = {
+      providers: async () => [], execute: vi.fn(), inspectTurn: vi.fn(), readEvents: vi.fn(), interrupt: vi.fn(),
+    }
+    const qualification = vi.fn(async () => ({ available: false, reason: 'no repository can be materialized' }))
+    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => ({
+      qualification,
+      materializeWorkspace: vi.fn(), renewWorkspace: vi.fn(), releaseWorkspace: vi.fn(), readResidentArtifact: vi.fn(),
+    }) as never)
+    const description = await hub.describe(new AbortController().signal, 'admin')
+    expect(description.capabilities).toContain('operator.read')
+    expect(description.capabilities).not.toContain('operator.execute')
+    await expect(hub.operatorExecute({
+      commandId: 'command-1', operatorId: 'codex', laneId: 'lane-1', prompt: [],
+      workspaceIdentity: { version: 1, repository: 'github.com/lisihao/project', commit: 'a'.repeat(40) },
+    })).rejects.toThrow('no repository can be materialized')
+    expect(resident.execute).not.toHaveBeenCalled()
     await hub.close()
   })
 

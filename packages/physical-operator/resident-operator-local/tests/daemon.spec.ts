@@ -71,6 +71,7 @@ class MemoryDriver implements ResidentProductDriver {
   readonly operatorId = 'codex' as const
   readonly profiles: ResidentDriverExecuteRequest['profile'][] = []
   readonly systemPrompts: Array<string | undefined> = []
+  readonly nativeToolPolicies: Array<ResidentDriverExecuteRequest['nativeToolPolicy']> = []
   readonly commandIds: string[] = []
   readonly compactions: ResidentDriverCompactRequest[] = []
   constructor(readonly counts = new Map<string, number>()) {}
@@ -96,6 +97,7 @@ class MemoryDriver implements ResidentProductDriver {
     this.commandIds.push(String(request.commandId))
     this.profiles.push(request.profile)
     this.systemPrompts.push(request.systemPrompt)
+    this.nativeToolPolicies.push(request.nativeToolPolicy)
     request.onProgress('connecting')
     const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
     const count = (this.counts.get(session) ?? 0) + 1
@@ -793,6 +795,38 @@ describe('ResidentDaemon', () => {
       modelToolBridge: { ...modelToolBridge, sessionId: 'another-rlm-session' },
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
+    await daemon.close()
+  })
+
+  it('seals native tool authority into the receipt and forwards it to the Driver', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new MemoryDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    const first = await connected.execute({
+      commandId: 'no-tools', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'reason only' }], nativeToolPolicy: 'disabled',
+      signal: new AbortController().signal,
+    })
+    await first.result
+    expect(driver.nativeToolPolicies).toEqual(['disabled'])
+    await expect(connected.execute({
+      commandId: 'no-tools', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'reason only' }], nativeToolPolicy: 'inherit',
+      signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'COMMAND_CONFLICT' })
+    await expect(connected.execute({
+      commandId: 'contradictory-tools', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'reason only' }], nativeToolPolicy: 'disabled',
+      modelToolBridge: {
+        version: 1, socketPath: join(root, 'bridge.sock'), sessionId: 'bridge-session',
+        tools: [{ name: 'echo', description: 'Echo.', inputSchema: { type: 'object' } }],
+      },
+      signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
     await daemon.close()
   })
 })

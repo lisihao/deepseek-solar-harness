@@ -7,7 +7,11 @@ import { createConnection } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
-import type { PhysicalOperatorExecutionPreference, PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
+import type {
+  PhysicalOperatorExecutionPreference,
+  PhysicalOperatorModelToolBridgeV1,
+  PhysicalOperatorNativeToolPolicy,
+} from '@deepseek-ai/dsh-physical-operator'
 import {
   ResidentOperatorError,
   ResidentOperatorSessionId,
@@ -187,6 +191,7 @@ export class ResidentDaemonClient {
     systemPrompt?: string
     profile?: PhysicalOperatorExecutionPreference
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1
+    nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
     signal: AbortSignal
   }): Promise<{
     turnId: string
@@ -209,6 +214,7 @@ export class ResidentDaemonClient {
       ...request.systemPrompt === undefined ? {} : { system_prompt: request.systemPrompt },
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { model_tool_bridge: request.modelToolBridge },
+      native_tool_policy: request.nativeToolPolicy ?? 'inherit',
     }, request.signal)
     let settled = false
     const observation = new AbortController()

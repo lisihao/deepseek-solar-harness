@@ -451,6 +451,7 @@ describe('Electron compatibility runtime', () => {
           cacheReadTokens: 23_318_912,
           outputTokens: 200_035,
         },
+        sources: [{ id: 'primary', label: 'Primary', origin: 'http://127.0.0.1:43120' }],
       },
     })
     await runtime.mountScheduled()
@@ -500,7 +501,7 @@ describe('Electron compatibility runtime', () => {
     const ownerSurface = String(electron.webContents.executeJavaScript.mock.calls[0]?.[0])
     expect(ownerSurface).toContain('solar-desktop-brand')
     expect(ownerSurface).toContain(`DSH Desktop v${productVersion}`)
-    expect(ownerSurface).toContain('Server / Git 同步')
+    expect(ownerSurface).toContain('部署 / 同步')
     expect(ownerSurface).toContain('切换到本地 Server')
     expect(ownerSurface).toContain('dsh-desktop://deployment/configure')
     expect(ownerSurface).toContain('dsh-desktop://deployment/local-server')

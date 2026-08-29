@@ -99,7 +99,7 @@ describe('Solar desktop branding', () => {
       if (configure === undefined || useLocal === undefined) throw new Error('expected two Frontend deployment buttons')
       expect(footer.appendChild).toHaveBeenNthCalledWith(2, configure)
       expect(footer.appendChild).toHaveBeenNthCalledWith(3, useLocal)
-      expect(configure?.textContent).toBe('Server / Git 同步')
+      expect(configure?.textContent).toBe('部署 / 同步')
       expect(useLocal.textContent).toBe('切换到本地 Server')
       const configureClick = configure?.addEventListener.mock.calls[0]?.[1] as (() => void)
       const useLocalClick = useLocal.addEventListener.mock.calls[0]?.[1] as (() => void)

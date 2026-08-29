@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.8.1",
+  "version": "3.9.0",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -101,7 +101,8 @@
     "verify:cli": "node scripts/verify-cli-runtime.mjs",
     "verify:loader": "node scripts/verify-loader-boot.mjs",
     "verify:profile": "node scripts/verify-profile-boot.mjs",
-    "verify:product-server": "node scripts/verify-product-server.mjs",
+    "verify:product-server": "node --test scripts/product-server-processes.spec.mjs && node scripts/verify-product-server.mjs",
+    "verify:product-server-install": "node --test scripts/install-product-server.spec.mjs scripts/product-server-processes.spec.mjs",
     "verify:composition-package": "node scripts/verify-packaged-composition-smoke.mjs",
     "verify:resident-package": "node scripts/verify-packaged-resident-smoke.mjs",
     "verify:resident-execution": "node scripts/verify-packaged-resident-smoke.mjs --execute",
@@ -277,7 +278,7 @@
     "dsh-codegraph": "file:vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz",
     "dsh-llm-fallbacks": "file:vendor/dsh-packages/dsh-llm-fallbacks-0.3.3-solar.1.tgz",
     "dsh-mnemon": "file:vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz",
-    "dsh-web-billing": "file:vendor/dsh-packages/dsh-web-billing-1.1.5.tgz",
+    "dsh-web-billing": "file:vendor/dsh-packages/dsh-web-billing-1.1.6.tgz",
     "node-addon-require-builtin": "^0.1.4",
     "pnpm": "11.7.0",
     "react": "18.3.1",

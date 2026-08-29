@@ -171,6 +171,34 @@ test('Frontend accepts an Electron-bridged total without adding the local baseli
   assert.doesNotMatch(text, /¥23\.61/)
 })
 
+test('Frontend renders every Server billing source and partial availability', async () => {
+  const loaded = await loadBadge({ open: true })
+  const baseline = {
+    calls: 10,
+    cost: 1.25,
+    costUsd: 0.18,
+    inputTokens: 100,
+    cacheReadTokens: 200,
+    outputTokens: 30,
+  }
+  const tree = renderBadge(loaded.Badge, loaded.dictionaries, {
+    open: true,
+    desktopFrontend: {
+      baseline,
+      serverTotals: totals,
+      sources: [
+        { id: 'leader', label: 'Mac mini Leader', origin: 'https://leader.example', status: 'ready', totals },
+        { id: 'worker', label: 'Worker B', origin: 'https://worker.example', status: 'unavailable', error: 'HTTP 503' },
+      ],
+    },
+  })
+  const text = textOf(tree)
+  assert.match(text, /费用来源/)
+  assert.match(text, /MacBook 历史.*¥1\.25/)
+  assert.match(text, /Mac mini Leader.*¥0\.368/)
+  assert.match(text, /Worker B.*不可用/)
+})
+
 test('mounts the cumulative badge in the sidebar instead of the crowded composer surface', async () => {
   const source = await readFile(CLIENT_URL, 'utf8')
   assert.match(source, /ctx\.slots\.inject\("sidebar\.footer\.action"/)

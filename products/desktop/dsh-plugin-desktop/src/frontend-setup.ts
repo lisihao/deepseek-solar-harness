@@ -191,11 +191,13 @@ function frontendSetupPage(): string {
     .server-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}.server-actions button{border:1px solid #343b49;border-radius:8px;padding:9px;background:#202632;color:#e9edf5;cursor:pointer}.danger{color:#ffb0b0!important}
     #status{min-height:42px;margin-top:18px;padding:10px 12px;border-radius:9px;background:#171b24;color:#aeb6c6;font-size:13px}.error{color:#ff9e9e!important}
     small{display:block;color:#7f899b;margin-top:8px;line-height:1.45}.inline{display:flex;align-items:center;gap:10px;margin:12px 0}.inline input{width:auto}.inline label{margin:0}.sync-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.sync-grid .wide{grid-column:1/-1}
+    .role-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:18px 0 26px}.role-card{border:1px solid #343b49;border-radius:12px;padding:13px;background:#171b24}.role-card strong{display:block;color:#f3f6fc;font-size:14px;margin-bottom:5px}.role-card span{display:block;color:#8f99aa;font-size:12px;line-height:1.45}.boundary{border-left:3px solid #4c8dff;background:#171b24;border-radius:0 10px 10px 0;padding:11px 13px;color:#aeb6c6;font-size:12px;line-height:1.55;margin:10px 0 18px}
   </style>
 </head>
 <body>
   <h1>连接远程 DSH Server</h1>
-  <p>一个 Frontend 可以保存多个 DSH Server。选择当前 Server 后，应用会重启并连接对应的远端状态。</p>
+  <p>一个 Frontend 可以保存多个 DSH Server。手动选择会重启并建立新的权威入口；运行中的 Leader 变化会自动重选并重新挂载，不需要重启应用。</p>
+  <div class="role-grid"><div class="role-card"><strong>本机 Server</strong><span>在这台 MacBook 启动完整 Host 与全部本地插件，数据与执行权威都在本机。</span></div><div class="role-card"><strong>远程 Frontend</strong><span>只渲染所选 Server 的插件与状态，不在 MacBook 偷启第二个 Host；可保存多个 Server 并跟随 Leader。</span></div></div>
   <label for="servers">已配置 Server</label>
   <select id="servers"><option value="">尚未配置</option></select>
   <div class="server-actions"><button id="switch" type="button">切换到选中项</button><button id="new" type="button">新增 Server</button><button class="danger" id="remove" type="button">删除选中项</button></div>
@@ -213,6 +215,7 @@ function frontendSetupPage(): string {
   </form>
   <h2>后台 Git commit 同步</h2>
   <p>只同步干净工作树中已经提交的 commit。不会复制 DSH Session、SQLite/WAL，也不会自动提交修改。GitHub remote 始终是权威；可选 Tailscale/SSH Git remote 只预取对象。</p>
+  <div class="boundary"><strong>同步边界：</strong>Git 只搬运源码 commit，不搬运正在执行的任务或数据库。远端 Server 仍是其 active Run 的唯一写者。</div>
   <div class="inline"><input id="sync-enabled" type="checkbox"><label for="sync-enabled">启动后台同步</label><label for="sync-interval">间隔（分钟）</label><input id="sync-interval" type="number" min="1" max="1440" value="10"></div>
   <label for="sync-repositories">已配置仓库</label>
   <select id="sync-repositories"><option value="">尚未配置</option></select>
@@ -229,6 +232,7 @@ function frontendSetupPage(): string {
   <div id="sync-status">尚未运行 Git 同步。</div>
   <h2>后台 Session 进展同步</h2>
   <p>存活回合由 Frontend 实时查看；这里只快进复制已经闭合的 Session 日志。Frontend 模式会先安全暂存，切到本机 Server 后导入；不会复制 SQLite/WAL，也不会建立两个写者。</p>
+  <div class="boundary"><strong>同步边界：</strong>只同步已经闭合且前缀一致的 Session 日志。进行中的回合通过远端投影查看，不会在本机继续写入。</div>
   <div class="inline"><input id="session-sync-enabled" type="checkbox"><label for="session-sync-enabled">启动后台同步</label><label for="session-sync-interval">间隔（分钟）</label><input id="session-sync-interval" type="number" min="1" max="1440" value="10"></div>
   <label for="session-sync-direction">方向</label>
   <select id="session-sync-direction"><option value="pull">远端 → 本机</option><option value="push">本机 → 远端</option><option value="bidirectional">双向快进</option></select>
@@ -239,7 +243,7 @@ function frontendSetupPage(): string {
     const api=window.dshFrontendSetup,status=document.getElementById('status'),servers=document.getElementById('servers'),label=document.getElementById('label'),endpoint=document.getElementById('endpoint'),code=document.getElementById('code'),device=document.getElementById('device'),form=document.getElementById('form'),syncEnabled=document.getElementById('sync-enabled'),syncInterval=document.getElementById('sync-interval'),syncRepositoriesSelect=document.getElementById('sync-repositories'),syncLabel=document.getElementById('sync-label'),syncPath=document.getElementById('sync-path'),syncAuthority=document.getElementById('sync-authority'),syncBranch=document.getElementById('sync-branch'),syncDirection=document.getElementById('sync-direction'),syncAccelerator=document.getElementById('sync-accelerator'),syncStatus=document.getElementById('sync-status'),sessionSyncEnabled=document.getElementById('session-sync-enabled'),sessionSyncInterval=document.getElementById('session-sync-interval'),sessionSyncDirection=document.getElementById('session-sync-direction'),sessionSyncStatus=document.getElementById('session-sync-status');let current={role:'server',activeServerId:'',servers:[]},editingId='',syncRepositories=[],editingSyncId='';
     const updateAuth=()=>{try{const url=new URL(endpoint.value),host=url.hostname,loopback=host==='127.0.0.1'||host==='localhost'||host==='[::1]',saved=current.servers.find(item=>item.id===editingId),reuse=saved?.authMode==='paired'&&saved.endpoint===url.href&&saved.deviceName===device.value;code.required=!loopback&&!reuse;code.disabled=loopback;code.placeholder=loopback?'SSH 隧道已认证，无需配对码':reuse?'凭据未变化，留空即可复用':'请输入 Server 生成的 8 位配对码'}catch{code.required=true;code.disabled=false}};
     const loadServer=id=>{const server=current.servers.find(item=>item.id===id);editingId=server?.id||'';label.value=server?.label||'';endpoint.value=server?.endpoint||'';device.value=server?.deviceName||'MacBook';code.value='';updateAuth()};
-    const render=value=>{current=value;servers.replaceChildren();if(value.servers.length===0){const option=document.createElement('option');option.value='';option.textContent='尚未配置';servers.append(option)}else for(const server of value.servers){const option=document.createElement('option');option.value=server.id;option.textContent=server.label+' · '+server.endpoint;servers.append(option)}servers.value=value.activeServerId||value.servers[0]?.id||'';loadServer(servers.value);status.textContent=value.role==='frontend'?'当前 Frontend 已保存 '+value.servers.length+' 个 Server。':'当前使用本机 Server。'};
+    const render=value=>{current=value;servers.replaceChildren();if(value.servers.length===0){const option=document.createElement('option');option.value='';option.textContent='尚未配置';servers.append(option)}else for(const server of value.servers){const option=document.createElement('option');option.value=server.id;option.textContent=(server.id===value.activeServerId?'● ':'')+server.label+' · '+server.endpoint;servers.append(option)}servers.value=value.activeServerId||value.servers[0]?.id||'';loadServer(servers.value);status.textContent=value.role==='frontend'?'远程 Frontend · 已保存 '+value.servers.length+' 个 Server · 自动跟随可调度 Leader。':'本机 Server · 完整 Host 与插件在此设备运行。'};
     endpoint.addEventListener('input',updateAuth);
     device.addEventListener('input',updateAuth);
     servers.addEventListener('change',()=>{loadServer(servers.value)});

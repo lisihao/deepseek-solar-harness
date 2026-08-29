@@ -353,6 +353,8 @@ export interface PhysicalOperatorPlanV1 {
   readonly operatorId: string
   readonly mode: 'resident' | 'model-worker'
   readonly profile?: PhysicalOperatorExecutionPreference
+  /** Native product tool authority sealed from the graph scopes/effects. */
+  readonly nativeToolPolicy: 'inherit' | 'disabled'
   readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
 }
 

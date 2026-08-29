@@ -52,8 +52,19 @@ describe('orchestration cluster config', () => {
       nodeId: 'a',
       leaseMs: 4_000,
       members: [
-        { id: 'a', label: 'A', endpoint: 'http://127.0.0.1:13080' },
-        { id: 'b', label: 'B', endpoint: 'https://b.example/dsh' },
+        {
+          id: 'a', label: 'A', endpoint: 'http://127.0.0.1:13080',
+          remoteExecution: {
+            enabled: true,
+            repositories: [{
+              repository: 'git@github.com:lisihao/project.git', source: '/srv/git/project',
+            }],
+          },
+        },
+        {
+          id: 'b', label: 'B', endpoint: 'https://b.example/dsh',
+          remoteExecution: { enabled: false, repositories: [] },
+        },
       ],
     }))
     expect(readOrchestrationClusterConfig(root)).toEqual({
@@ -61,8 +72,17 @@ describe('orchestration cluster config', () => {
       nodeId: 'a',
       leaseMs: 4_000,
       members: [
-        { id: 'a', label: 'A', endpoint: 'http://127.0.0.1:13080/' },
-        { id: 'b', label: 'B', endpoint: 'https://b.example/dsh' },
+        {
+          id: 'a', label: 'A', endpoint: 'http://127.0.0.1:13080/',
+          remoteExecution: {
+            enabled: true,
+            repositories: [{ repository: 'github.com/lisihao/project', source: '/srv/git/project' }],
+          },
+        },
+        {
+          id: 'b', label: 'B', endpoint: 'https://b.example/dsh',
+          remoteExecution: { enabled: false, repositories: [] },
+        },
       ],
     })
     expect(readOrchestrationClusterConfig(mkdtempSync(join(tmpdir(), 'dsh-no-cluster-')))).toBeUndefined()
@@ -72,6 +92,40 @@ describe('orchestration cluster config', () => {
       members: [{ id: 'a', label: 'A', endpoint: 'http://a.example' }],
     }))
     expect(() => readOrchestrationClusterConfig(root)).toThrow('absent from members')
+  })
+
+  it('accepts only absolute local or credential-free https/ssh repository sources', () => {
+    const validSources = ['/srv/git/project', 'https://github.com/lisihao/project.git', 'ssh://github.com/lisihao/project.git']
+    for (const source of validSources) {
+      const root = mkdtempSync(join(tmpdir(), 'dsh-orchestration-source-valid-'))
+      writeFileSync(join(root, 'cluster.json'), JSON.stringify({
+        version: 1, nodeId: 'a', members: [{
+          id: 'a', label: 'A', endpoint: 'http://a.example',
+          remoteExecution: {
+            enabled: true,
+            repositories: [{ repository: 'github.com/lisihao/project', source }],
+          },
+        }],
+      }))
+      expect(readOrchestrationClusterConfig(root)?.members[0]?.remoteExecution?.repositories[0]?.source).toBe(source)
+    }
+    for (const source of [
+      'relative/project', 'git@github.com:lisihao/project.git',
+      'https://token@github.com/lisihao/project.git', 'ssh://git@github.com/lisihao/project.git',
+      'file:///srv/git/project', 'https://github.com/lisihao/another.git',
+    ]) {
+      const root = mkdtempSync(join(tmpdir(), 'dsh-orchestration-source-invalid-'))
+      writeFileSync(join(root, 'cluster.json'), JSON.stringify({
+        version: 1, nodeId: 'a', members: [{
+          id: 'a', label: 'A', endpoint: 'http://a.example',
+          remoteExecution: {
+            enabled: true,
+            repositories: [{ repository: 'github.com/lisihao/project', source }],
+          },
+        }],
+      }))
+      expect(() => readOrchestrationClusterConfig(root)).toThrow()
+    }
   })
 })
 
@@ -216,5 +270,54 @@ describe('OrchestrationClusterElection', () => {
     clock = 14_000
     expect(election.status().canSchedule).toBe(false)
     expect(() => election.heartbeat({ term: 2, leaderId: 'unknown', commitIndex: 0, leaseUntil: 15_000 })).toThrow('not a configured member')
+  })
+
+  it('fences an old campaign superseded by a higher-term heartbeat while votes are pending', async () => {
+    const store = new MemoryElectionStore()
+    const votes = Promise.withResolvers<{
+      term: number
+      voterId: string
+      granted: boolean
+      commitIndex: number
+    }>()
+    let requestCount = 0
+    const election = new OrchestrationClusterElection(config(), store, {
+      requestVote: async () => { requestCount += 1; return votes.promise },
+      heartbeat: async () => { throw new Error('stale campaign must not renew') },
+      installReplica: async () => { throw new Error('unused') },
+    }, () => 1_000)
+    const first = election.campaign()
+    const second = election.campaign()
+    await Promise.resolve()
+    expect(requestCount).toBe(2)
+    expect(election.heartbeat({ term: 2, leaderId: 'b', commitIndex: 0, leaseUntil: 5_000 }))
+      .toMatchObject({ accepted: true, term: 2 })
+    votes.resolve({ term: 1, voterId: 'b', granted: true, commitIndex: 0 })
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ term: 2, role: 'follower', leaderId: 'b', canSchedule: false }),
+      expect.objectContaining({ term: 2, role: 'follower', leaderId: 'b', canSchedule: false }),
+    ])
+    expect(requestCount).toBe(2)
+  })
+
+  it('fences an old lease renewal superseded while heartbeat responses are pending', async () => {
+    const store = new MemoryElectionStore()
+    store.state = { term: 1, role: 'leader', leaderId: 'a', leaseUntil: 2_000 }
+    const response = Promise.withResolvers<{
+      term: number
+      followerId: string
+      accepted: boolean
+      commitIndex: number
+    }>()
+    const election = new OrchestrationClusterElection(config(), store, {
+      requestVote: async () => { throw new Error('unused') },
+      heartbeat: async () => response.promise,
+      installReplica: async () => { throw new Error('unused') },
+    }, () => 1_000)
+    const renewal = election.renew()
+    await Promise.resolve()
+    election.heartbeat({ term: 2, leaderId: 'b', commitIndex: 0, leaseUntil: 5_000 })
+    response.resolve({ term: 1, followerId: 'b', accepted: true, commitIndex: 0 })
+    await expect(renewal).resolves.toMatchObject({ term: 2, role: 'follower', leaderId: 'b', canSchedule: false })
   })
 })

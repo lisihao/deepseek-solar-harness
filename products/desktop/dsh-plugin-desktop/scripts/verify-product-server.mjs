@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { stopProductServerDaemons } from './product-server-processes.mjs'
 
 const REQUIRED_CLIENT_IDS = [
   '@deepseek-ai/dsh-client-ui-remote-modules',
@@ -198,7 +199,11 @@ try {
   try {
     await stop(child)
   } finally {
-    rmSync(home, { recursive: true, force: true })
+    try {
+      await stopProductServerDaemons(home)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   }
 }
 process.stdout.write(`${JSON.stringify(evidence)}\n`)

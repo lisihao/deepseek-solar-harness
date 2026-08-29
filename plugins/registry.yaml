@@ -169,11 +169,11 @@ managed:
       - corepack pnpm --ignore-workspace run test
   - id: web-billing
     path: plugins/managed/web-billing
-    package: dsh-web-billing@1.1.5
+    package: dsh-web-billing@1.1.6
     source: https://github.com/lisihao/dsh-web-billing.git
     upstream: https://github.com/bpc-oss/dsh-web-billing.git
-    source_branch: codex/expose-billing-scope
-    accepted_sha: 690fdb1172366e139e590c4a8fe3f11c95b7ac90
+    source_branch: master
+    accepted_sha: ad5ba92b921ba45ff0cb5e6d98406adfe4fbda20
     license: MIT
     license_status: license-file
     license_evidence: plugins/managed/web-billing/LICENSE

@@ -14,9 +14,11 @@ node 半侧在桥接或 upgrade 前守卫 `/api` 下的每个入口（`src/api-r
 
 ## Remote Sync 与稳定 Session 交接
 
-Remote Sync 协议 1.3 保留 snapshot + cursor 投影，并为 cockpit/admin 客户端增加经过认证的 Session 交接与 Resident 执行控制。只有挂载 `ctx.sessionPersistence` 时，Server 才声明 `session.replicate.read/write`；副本目录只包含没有开放回合的完整日志。线路传输正典 `SessionHeader` 与完整事件日志，目标端把每次写入决策委托给 `SessionPersistence.replicate`，因此重试具备幂等性，而分叉或活动日志会明确失败。这是显式权威交接，不是持续双写同步。
+Remote Sync 协议 1.4 保留 snapshot + cursor 投影，并为 cockpit/admin 客户端增加经过认证的 Session 交接与可复现的 Resident 执行控制。只有挂载 `ctx.sessionPersistence` 时，Server 才声明 `session.replicate.read/write`；副本目录只包含没有开放回合的完整日志。线路传输正典 `SessionHeader` 与完整事件日志，目标端把每次写入决策委托给 `SessionPersistence.replicate`，因此重试具备幂等性，而分叉或活动日志会明确失败。这是显式权威交接，不是持续双写同步。
 
-挂载 `ctx.residentOperators` 后，同一认证通道还会声明 `operator.read/execute/interrupt`。远端调用方可以查看经过资格审查的原生订阅 Provider，提交一条持久命令后立即断开，再按 turn id 重连、读取有界结构化进展，并中断匹配的 Session／turn。Server 自身的 Resident daemon 仍是唯一命令回执与原生会话权威。原始产品 transcript 与本机 Unix 模型工具桥地址不会跨越该边界；在单独的认证路由桥完成前，远端 model-tool bridge 请求会明确拒绝。
+挂载 `ctx.residentOperators` 后，同一认证通道会声明 `operator.read/interrupt`。只有协议 1.4 客户端、独立 `ctx.remoteOperatorHost` Provider 已完成资格审查、本节点启用远程执行且至少一个允许仓库可物化时，才会声明 `operator.execute`、`operator.workspace.materialize` 与 `operator.artifact.read`。协议 1.3 在滚动升级期间仍可读取投影，但不能提交新的执行 DTO 或读取其产物。调用方发送不含凭据的规范仓库身份、精确干净 commit 与可选仓库相对子目录，而不是自身绝对文件路径。Host Provider 会核验本地仓库允许列表，建立不可写 Git 对象缓存和按 command 隔离且带租约的可写 checkout，并且只把这个 Server 本地 checkout 交给 Resident。仓库凭据和配置的 source 位置都不会进入线路 DTO。
+
+远端调用方可以查看经过资格审查的原生订阅 Provider，提交一条持久命令后立即断开，再按 turn id 重连、读取有界结构化进展，并中断匹配的 Session／turn。超大已结算结果返回 `sha256:` 引用；`operator.artifact.read` 会在 Server deadline 内返回最多 8 MiB 的精确不可变 JSON，使调用方能验证远端 digest、校验完整 Resident 结果，并写入自己的本地 CAS。Server 自身的 Resident daemon 仍是唯一命令回执与原生会话权威。原始产品 transcript 与本机 Unix 模型工具桥地址不会跨越该边界；在单独的认证路由桥完成前，远端 model-tool bridge 请求会明确拒绝。
 
 当 `ctx.orchestrations` 暴露集群权威时，每个经过认证的 description 都可以带有有界只读投影（`nodeId`、term、role、leader id 和 `canSchedule`）。这样，配置了多个 Server 的 Frontend 可以优先连接当前持有多数租约的 Leader，而不会获得选举权威。`orchestration.cluster` 控制能力只向 admin peer 声明，承载 vote、heartbeat、逻辑副本 export 和受 term 约束的 install。生产 peer 应当通过经过认证的回环隧道调用这些控制操作；普通 Frontend bearer 不是集群凭据。
 
@@ -34,3 +36,4 @@ Remote Sync 协议 1.3 保留 snapshot + cursor 投影，并为 cockpit/admin �
 - **`/api` 桥把每个请求体整体缓冲在内存里**：`maxRequestBodyBytes`（默认 160 MiB，按默认 100 MiB 图片总量上限经 base64 膨胀加信封余量得出）因此同时是单请求的驻留内存上界；要降低它而不缩小图片限额，需要流式请求体路径。
 - **副本读取目前是整份日志且无分页**：已结束会话作为一个逻辑文档传输。若要用于无界历史，必须先增加大日志分块。
 - **编排集群副本目前是完整逻辑快照**：它会校验 digest 并以事务安装，但目前仍共用有界 Remote Sync 请求路径。无界编排存储需要增量复制。
+- **远程结果传输限制为 8 MiB 的精确 JSON**：更大的产品输出会继续留在执行 Resident Host，直到未来版本化流式 Artifact 传输。

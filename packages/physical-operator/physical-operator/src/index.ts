@@ -40,6 +40,7 @@ export type {
   PhysicalOperatorExecutionPreference,
   PhysicalOperatorModelToolBridgeV1,
   PhysicalOperatorModelToolV1,
+  PhysicalOperatorNativeToolPolicy,
   PhysicalOperatorProgressEvent,
   PhysicalOperatorProgressPage,
   PhysicalOperatorQuotaPool,

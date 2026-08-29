@@ -316,6 +316,69 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('waits for an in-flight election tick before closing daemon-owned state', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'oc-close-quiescence-'))
+    const root = join(home, 'orchestrations')
+    const voteStarted = Promise.withResolvers<undefined>()
+    const vote = Promise.withResolvers<{ term: number; voterId: string; granted: boolean; commitIndex: number }>()
+    const daemon = new OrchestrationDaemon({
+      root,
+      dshHome: home,
+      residentClient: new FakeResidentClient() as unknown as ResidentDaemonClient,
+      modelWorkerProviders: [],
+      schedulerIntervalMs: 60_000,
+      clusterConfig: {
+        version: 1, nodeId: 'a', leaseMs: 1_000,
+        members: [
+          { id: 'a', label: 'A', endpoint: 'http://a.example/' },
+          { id: 'b', label: 'B', endpoint: 'http://b.example/' },
+          { id: 'c', label: 'C', endpoint: 'http://c.example/' },
+        ],
+      },
+      clusterTransport: {
+        requestVote: async () => { voteStarted.resolve(undefined); return vote.promise },
+        heartbeat: async (member, request) => ({
+          term: request.term, followerId: member.id, accepted: member.id === 'b', commitIndex: 0,
+        }),
+        installReplica: async (member, request) => ({
+          nodeId: member.id, commitIndex: request.replica.commitIndex, state: 'applied',
+        }),
+      },
+    })
+    await daemon.start()
+    await voteStarted.promise
+    let closed = false
+    const closing = daemon.close().then(() => { closed = true })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(closed).toBe(false)
+    vote.resolve({ term: 1, voterId: 'b', granted: true, commitIndex: 0 })
+    await closing
+    expect(closed).toBe(true)
+    await rm(home, { recursive: true, force: true })
+  })
+
+  it('persists a bounded fatal diagnostic when a detached scheduler tick rejects', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'oc-tick-fatal-'))
+    const root = join(home, 'orchestrations')
+    const daemon = createDaemon(root, home, new FakeResidentClient(), 60_000)
+    await daemon.start()
+    const internals = daemon as unknown as {
+      tickInFlight?: Promise<void>
+      runTick: () => Promise<void>
+      triggerTick: () => void
+    }
+    await internals.tickInFlight
+    internals.runTick = async () => { throw new Error(`fatal-${'x'.repeat(5_000)}`) }
+    internals.triggerTick()
+    const diagnostic = await eventually(async () => {
+      try { return JSON.parse(await readFile(join(root, 'scheduler-fatal.json'), 'utf8')) as { message: string } }
+      catch { return { message: '' } }
+    }, value => value.message.startsWith('fatal-'))
+    expect(diagnostic.message.length).toBe(4_096)
+    await daemon.close()
+    await rm(home, { recursive: true, force: true })
+  })
+
   it('returns no cluster status when standalone mode is configured', async () => {
     const home = await mkdtemp(join(tmpdir(), 'oc-standalone-'))
     const root = join(home, 'orchestrations')
@@ -439,6 +502,13 @@ describe('orchestration daemon', () => {
     const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
     const workspace = join(home, 'workspace')
     await mkdir(workspace)
+    await writeFile(join(workspace, 'fixture.txt'), 'remote reattach fixture\n')
+    await run('git', ['init', '--initial-branch=main'], { cwd: workspace })
+    await run('git', ['config', 'user.name', 'DSH Test'], { cwd: workspace })
+    await run('git', ['config', 'user.email', 'dsh-test@example.invalid'], { cwd: workspace })
+    await run('git', ['add', '.'], { cwd: workspace })
+    await run('git', ['commit', '-m', 'fixture'], { cwd: workspace })
+    await run('git', ['remote', 'add', 'origin', 'https://github.com/lisihao/remote-fixture.git'], { cwd: workspace })
     const fixture = graph(workspace)
     const compilation = await client.compile({
       intent: { request: 'Analyze the fixture remotely.' },
@@ -455,8 +525,8 @@ describe('orchestration daemon', () => {
         }],
       },
     })
-    const run = await startCompilation(client, compilation.compilationId)
-    await eventually(() => client.inspect(String(run.runId)), value => value.nodes[0]?.state === 'running')
+    const orchestrationRun = await startCompilation(client, compilation.compilationId)
+    await eventually(() => client.inspect(String(orchestrationRun.runId)), value => value.nodes[0]?.state === 'running')
     await daemon.close()
     remoteSettled = true
     const recoveredDaemon = createDaemon(root, home, local, 10, [], [{
@@ -465,10 +535,13 @@ describe('orchestration daemon', () => {
     await recoveredDaemon.start()
     cleanup.push(async () => { await recoveredDaemon.close(); await rm(home, { recursive: true, force: true }) })
     const recoveredClient = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
-    const completed = await eventually(() => recoveredClient.inspect(String(run.runId)), value => value.state === 'completed')
+    const completed = await eventually(
+      () => recoveredClient.inspect(String(orchestrationRun.runId)),
+      value => value.state === 'completed',
+    )
     expect(completed.nodes[0]).toMatchObject({ operatorId: 'remote.mini.codex', state: 'passed' })
     expect(local.requests).toHaveLength(0)
-    const events = await recoveredClient.readEvents({ runId: run.runId, limit: 200 })
+    const events = await recoveredClient.readEvents({ runId: orchestrationRun.runId, limit: 200 })
     expect(events.events.find(value => value.type === 'node.operator.progress')?.data).toMatchObject({
       operatorId: 'remote.mini.codex', phase: 'reasoning',
     })

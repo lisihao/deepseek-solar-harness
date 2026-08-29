@@ -12,7 +12,7 @@ Electron 可执行文件只包含最小启动代码。它获取单实例锁、�
 
 同一 package 还提供 `dsh-product-server`，它是远程部署使用的纯 Node Host Adapter。Desktop 与 Product Server 都从唯一的封装产品组合生成，因此会加载相同的 Resident、Orchestration、AgentTeams、Billing、Remote Modules、RLM／Continuous Harness、模型分配、记忆、治理和产品 UI row。只有 Host Adapter row 不同：Desktop 拥有 Electron 窗口、托盘、终端、profile 与更新 effect；Product Server 拥有持久 Web endpoint，为远程客户端固定使用浏览器目录选择器，并始终保留 compatibility 浏览器布局，因为它不会加载 Electron 所有的 advanced layout provider。普通 `dsh server` 命令仍是兼容上游的裸 Server profile，不是 DSH Desktop 产品部署。
 
-DSH Desktop 保存一个带名称的 Product Server 列表和一项当前 Server 选择，且这两项不依赖当前部署角色。原生 **Connect to Remote Server…** 窗口可新增、编辑、选择和删除条目；切换当前条目会让 Frontend 重启并连接对应 endpoint，而不会启动本机 Host。Frontend 启动时，Desktop 会先通过经过认证的投影协议资格检查上次选择；若该项不可达，则按用户定义的顺序尝试其余条目。成功接管的备用项会成为持久化的当前 Server，并显示在原生窗口标题中。若全部条目均不可用，系统会保留完整目录并打开本地部署恢复界面，不会静默启动本机 Host。切回本机 Server 后，系统仍保留完整列表、最后选择和呈现模式，因此用户无需重新配置就能再次选择任一已保存 Server。已有的单 Server 部署状态会迁移为列表中的第一个条目。`http://127.0.0.1:13080` 这类 loopback endpoint 通常通过 owner 控制的 SSH 本地转发访问 Product Server，会直接使用已经认证的隧道，不再要求第二份配对码或 Keychain 凭据。手机／pocket 等直接访问远程 HTTPS 的客户端仍使用一次性配对挑战、加密持久设备凭据和短期访问 session。
+DSH Desktop 保存一个带名称的 Product Server 列表和一项当前 Server 选择，且这两项不依赖当前部署角色。原生 **Connect to Remote Server…** 窗口可新增、编辑、选择和删除条目；手工切换当前条目会让 Frontend 重启并连接对应 endpoint，而不会启动本机 Host。连接建立后，Desktop 自有 monitor 会持续资格检查整个目录；发现新的可调度 Leader 时，只重新挂载浏览器 generation，不重启应用。成功接管的备用项会成为持久化的当前 Server，并显示在原生窗口标题中。若全部条目均不可用，系统会保留完整目录并打开本地部署恢复界面，不会静默启动本机 Host。切回本机 Server 后，系统仍保留完整列表、最后选择和呈现模式，因此用户无需重新配置就能再次选择任一已保存 Server。已有的单 Server 部署状态会迁移为列表中的第一个条目。`http://127.0.0.1:13080` 这类 loopback endpoint 通常通过 owner 控制的 SSH 本地转发访问 Product Server，会直接使用已经认证的隧道，不再要求第二份配对码或 Keychain 凭据。手机／pocket 等直接访问远程 HTTPS 的客户端仍使用一次性配对挑战、加密持久设备凭据和短期访问 session。Frontend billing bridge 会读取每个已配置 Server 的账本，只加一次未启动的 MacBook 历史，并在费用面板保留各 Server 的 ready/unavailable 来源明细。
 
 Electron 持有原生 **Deployment** 菜单，以及当前 Frontend Server 无法加载时显示的本地恢复页面。两处都提供不依赖远程 Client bundle 的 **Use Local Server** 与 **Connect to Remote Server…**。Desktop 页脚始终直接暴露 Server 配置；在 Frontend 角色下还会额外暴露 **Use Local Server**。
 
@@ -122,6 +122,14 @@ yarn dev
 node lib/bin.js --help
 node lib/bin.js --version
 node lib/product-server-bin.js --host 127.0.0.1 --port 3080 --trusted-host mini.example:3080
+```
+
+Mac mini 必须从固定 GitHub Release 自行安装 Product Server，不复制 MacBook 产物。安装器会验证 tag 与 commit 的绑定，在 Mac mini 本机构建并执行 release-shaped Product Server 冒烟，原子切换 LaunchAgent，将上一份 release 保留为 `rollback`，随后验证 HTTP、Remote Sync 以及 `operator.read/execute/interrupt`：
+
+```sh
+node scripts/install-product-server.mjs \
+  --ref DSH-desktop-v3.9.0 \
+  --commit <正式发布的完整-40-位-commit>
 ```
 
 ## 插件工作流
