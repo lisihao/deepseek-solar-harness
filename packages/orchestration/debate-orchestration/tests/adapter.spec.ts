@@ -1,3 +1,4 @@
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { DebateTurnRequestV1 } from '@deepseek-ai/dsh-debate-local'
 import {
@@ -86,7 +87,9 @@ describe('Debate TaskGraph round adapter', () => {
 
     apply(ctx as never, Config({ dshHome: '/tmp/dsh-debate-home' }))
 
-    expect(installed).toEqual([expect.objectContaining({ root: '/tmp/dsh-debate-home/debates' })])
+    expect(installed).toEqual([
+      expect.objectContaining({ root: join(resolve('/tmp/dsh-debate-home'), 'debates') }),
+    ])
   })
 
   it('plans participants in parallel and fences the judge behind every participant', () => {
