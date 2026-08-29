@@ -95,7 +95,14 @@ async function waitForRemoteSync(baseUrl, child, output) {
         return envelope.result.value
       }
       if (![404, 405, 503].includes(response.status)) {
-        throw new Error(`remote sync describe returned HTTP ${String(response.status)}`)
+        const body = await response.text()
+        if (response.status === 500 && body.includes('orchestration daemon did not become ready')) {
+          lastStatus = `${String(response.status)} ${body}`
+        } else {
+          throw new Error(
+            `remote sync describe returned HTTP ${String(response.status)}: ${body}\n${output()}`,
+          )
+        }
       }
     } catch (error) {
       if (error instanceof Error && error.message.includes('invalid RPC response')) throw error

@@ -268,6 +268,9 @@ export function apply(ctx: Context): void {
     let route = byPosition?.get(key)
     byPosition?.delete(key)
     route ??= dispatchForPosition(agent.session.events, turn, step)
+    if (route === undefined && base.provider === ROUTER_PROVIDER && debateEnabled(agent.session.events)) {
+      return base
+    }
     if (route === undefined && base.provider === ROUTER_PROVIDER) {
       const fallback = recoverFallbackConfig(agent, fallbackConfigs.get(agent))
       if (fallback !== undefined) {
@@ -689,6 +692,14 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
     }
   }
   if (current === undefined) return undefined
+  if (debateEnabled(agent.session.events)) {
+    return {
+      policy,
+      route: 'taskgraph-candidate',
+      requestedByMessageId: current.id,
+      reason: '当前会话已明确启用 Debate，由 Debate Consumer 通过唯一 TaskGraph 调度器接管',
+    }
+  }
   const text = textContent(current.content)
   const explicit = explicitOperator(text)
   if (explicit !== undefined) return residentDecision(agent, current.id, policy, explicit, '当前请求显式指定物理算子')
@@ -740,6 +751,15 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
   return automatic === undefined
     ? primaryDecision(current.id, policy, '未发现需要物理算子或 TaskGraph 的工作')
     : residentDecision(agent, current.id, policy, automatic, '智能协作选择一个有界 Resident worker')
+}
+
+function debateEnabled(events: readonly SessionEvent[]): boolean {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as { readonly type: string; readonly data: unknown }
+    if (event.type !== 'debate/preferences') continue
+    return (event.data as { readonly mode?: unknown }).mode === 'enabled'
+  }
+  return false
 }
 
 function residentDecision(

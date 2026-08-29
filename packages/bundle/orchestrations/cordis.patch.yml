@@ -5,7 +5,7 @@
       name: '@deepseek-ai/dsh-orchestration-local'
       config:
         autoStart: true
-        connectTimeoutMs: 5000
+        connectTimeoutMs: 15000
 
     - id: debate-orchestration
       name: '@deepseek-ai/dsh-debate-orchestration'

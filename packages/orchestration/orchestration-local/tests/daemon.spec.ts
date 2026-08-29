@@ -109,6 +109,14 @@ class FakeResidentClient {
         : [
           { model: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', efforts: [] },
           { model: 'claude-opus-4-6', displayName: 'Claude Opus 4.6', efforts: [] },
+          {
+            model: 'claude-fable-5[1m]', resolvedModel: 'claude-fable-5',
+            displayName: 'Claude Fable 5', efforts: [],
+          },
+          {
+            model: 'opus', resolvedModel: 'claude-opus-5',
+            displayName: 'Claude Opus 5', efforts: [],
+          },
         ],
       ...operatorId !== 'claude-code' || !this.claudeQuotaKnown ? {} : {
         quotaPools: [{
@@ -1532,6 +1540,42 @@ describe('orchestration daemon', () => {
     expect(fake.requests).toHaveLength(1)
     expect(fake.requests[0]).toMatchObject({ operatorId: 'codex', profile: { model: 'gpt-5.6-sol' } })
   })
+
+  it('canonicalizes explicit Claude resolved-model bindings and admits them when quota telemetry is unknown', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-claude-explicit-'))
+    const root = join(home, 'o')
+    const fake = new FakeResidentClient()
+    fake.claudeQuotaKnown = false
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const base = graph(home)
+    const explicitClaude = {
+      ...base,
+      maxParallel: 1,
+      nodes: base.nodes.map((node, index) => ({
+        ...node,
+        id: index === 0 ? 'fable' : 'opus',
+        dependsOn: index === 0 ? [] : ['fable'],
+        readScopes: [],
+        writeScopes: [],
+        operator: {
+          preferredIds: ['claude-code'],
+          profile: { model: index === 0 ? 'claude-fable-5' : 'claude-opus-5' },
+        },
+      })),
+    }
+    const compilation = await client.compile({ intent: { request: 'Explicit Claude Debate roster fixture.' }, graph: explicitClaude })
+    const started = await startCompilation(client, compilation.compilationId)
+    const completed = await eventually(
+      () => client.inspect(String(started.runId)),
+      value => value.state === 'completed' || value.state === 'failed' || value.state === 'indeterminate',
+    )
+    expect(completed.state, JSON.stringify(completed, null, 2)).toBe('completed')
+    expect(completed.nodes.every(node => node.state === 'passed')).toBe(true)
+    expect(fake.requests.map(request => request.profile?.model).sort()).toEqual(['claude-fable-5[1m]', 'opus'])
+  }, 10_000)
 
   it('serializes conflicting scopes and retries only an explicitly retryable failure', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-conflict-retry-'))

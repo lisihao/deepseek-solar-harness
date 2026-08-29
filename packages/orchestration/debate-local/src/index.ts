@@ -1109,11 +1109,15 @@ export class LocalDebateProvider extends DebateService {
       ...(run.snapshot.cost.outputTokens === undefined ? {} : { outputTokens: run.snapshot.cost.outputTokens }),
       ...(run.snapshot.cost.costUsd === undefined ? {} : { costUsd: run.snapshot.cost.costUsd }),
     }, { cost: run.snapshot.cost }, { round: number })
-    if (convergence.status === 'converged') {
-      this.synthesize(run, completedRound)
-      return 'converged'
+    if (convergence.status !== 'continue') {
+      this.synthesize(
+        run,
+        completedRound,
+        convergence.status === 'converged' ? 'completed' : convergence.status,
+      )
+      return convergence.status === 'converged' ? 'converged' : 'terminal'
     }
-    return convergence.status === 'continue' ? 'continue' : 'terminal'
+    return 'continue'
   }
 
   private convergence(
@@ -1189,7 +1193,11 @@ export class LocalDebateProvider extends DebateService {
     }
   }
 
-  private synthesize(run: StoredRun, round: DebateRoundSnapshotV1): void {
+  private synthesize(
+    run: StoredRun,
+    round: DebateRoundSnapshotV1,
+    finalState: 'completed' | 'budget_limited' | 'max_rounds',
+  ): void {
     const judge = [...round.turns].reverse().find(turn => turn.role === 'decision-judge' && turn.state === 'settled')
     const running = {
       version: 1 as const,
@@ -1208,7 +1216,7 @@ export class LocalDebateProvider extends DebateService {
     }
     this.appendEvent(run, 'debate.synthesis.settled', {
       round: round.round, unresolvedClaimIds: settled.unresolvedClaimIds, dissentCount: settled.dissentCount,
-    }, { state: 'completed', synthesis: settled }, { round: round.round })
+    }, { state: finalState, synthesis: settled }, { round: round.round })
   }
 
   private async executeRound(

@@ -14,7 +14,9 @@ describe('orchestrations bundle', () => {
     }
     expect(manifest.dsh?.bundle?.patch).toBe('./cordis.patch.yml')
     const parsed = yaml.load(readFileSync(resolve(root, 'cordis.patch.yml'), 'utf8'), { schema: entryListSchema })
-    const rows = (parsed as Array<{ insert?: Array<{ id?: string; name?: string }> }>).flatMap(value => value.insert ?? [])
+    const rows = (parsed as Array<{
+      insert?: Array<{ id?: string; name?: string; config?: Record<string, unknown> }>
+    }>).flatMap(value => value.insert ?? [])
     expect(rows.map(value => value.id)).toEqual([
       'orchestration-local',
       'debate-orchestration',
@@ -23,6 +25,7 @@ describe('orchestrations bundle', () => {
       'ui-debate',
       'ui-orchestration',
     ])
+    expect(rows[0]?.config).toMatchObject({ autoStart: true, connectTimeoutMs: 15_000 })
     for (const row of rows) expect(manifest.dependencies).toHaveProperty(String(row.name))
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-rlm-runtime')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-rlm-runtime-local')

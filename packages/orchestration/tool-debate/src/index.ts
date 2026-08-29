@@ -1,13 +1,23 @@
 /** Model-facing Consumer and per-session policy for the provider-neutral Debate seam. */
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
+import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   type DebateControlAction,
+  DebateError,
   type DebatePolicyV1,
   type DebateRunSnapshotV1,
   type DebateRunSummaryV1,
   type DebateStartRequestV1,
 } from '@deepseek-ai/dsh-debate'
+import {
+  isAgentLoopRequest,
+  LlmAdapter,
+  type ContentBlock,
+  type GenerateOptions,
+  type StreamChunk,
+  type TokenUsage,
+} from '@deepseek-ai/dsh-llm'
 import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
 import { z as zod } from 'zod'
 import type {} from '@deepseek-ai/dsh-commands'
@@ -23,6 +33,8 @@ export type * from './types.ts'
 export const name = 'tool-debate'
 export const inject = ['debates', 'tools', 'systemPrompt']
 
+const DEBATE_HOST_PROVIDER = 'dsh-debate-host'
+const DEBATE_HOST_MODEL = 'debate'
 const MODE_OPTIONS = ['auto', 'enabled', 'disabled'] as const satisfies readonly DebateExecutionMode[]
 const DEFAULT_PREFERENCES: DebateExecutionPreferences = { mode: 'disabled' }
 const MAX_LIST_ITEMS = 20
@@ -44,7 +56,33 @@ declare module '@deepseek-ai/dsh-session/types' {
       readonly revision: number
       readonly state: string
     }
+    /**
+     * Durable host admission for one user message while Debate is explicitly enabled.
+     * @param commandId Idempotent Debate command identity.
+     * @param promptMessageId User message owned by this admission.
+     * @param turn Agent turn receiving the message.
+     * @param step Agent step replaced by the Debate host adapter.
+     */
+    'debate/dispatch': {
+      readonly commandId: string
+      readonly promptMessageId: string
+      readonly turn: number
+      readonly step: number
+    }
   }
+}
+
+interface HostMessage {
+  readonly id: string
+  readonly content: readonly ContentBlock[]
+  readonly source: { readonly kind: string }
+}
+
+interface DebateHostDispatch {
+  readonly commandId: string
+  readonly promptMessageId: string
+  readonly turn: number
+  readonly step: number
 }
 
 type ToolArgs = {
@@ -214,6 +252,139 @@ function commandId(sessionId: string | undefined, callId: string): string {
   return `debate-tool-${digest}`
 }
 
+function hostCommandId(sessionId: string, messageId: string): string {
+  return `debate-host:${sessionId}:${messageId}`
+}
+
+function latestDirectUser(messages: readonly HostMessage[]): HostMessage | undefined {
+  return [...messages].reverse().find(message => message.source.kind === 'user')
+}
+
+function messageText(message: HostMessage): string {
+  return message.content
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+    .map(block => block.text)
+    .join('\n')
+    .trim()
+}
+
+function dispatchForPosition(
+  events: readonly { readonly type: string; readonly data: unknown }[],
+  turn: number,
+  step: number,
+): DebateHostDispatch | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'debate/dispatch') continue
+    const data = event.data as Partial<DebateHostDispatch>
+    if (data.turn === turn && data.step === step
+      && typeof data.commandId === 'string' && typeof data.promptMessageId === 'string') {
+      return data as DebateHostDispatch
+    }
+  }
+  return undefined
+}
+
+function dispatchForPrompt(
+  events: readonly { readonly type: string; readonly data: unknown }[],
+  promptMessageId: string,
+): DebateHostDispatch | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event?.type !== 'debate/dispatch') continue
+    const data = event.data as Partial<DebateHostDispatch>
+    if (data.promptMessageId === promptMessageId
+      && typeof data.commandId === 'string'
+      && Number.isSafeInteger(data.turn)
+      && Number.isSafeInteger(data.step)) {
+      return data as DebateHostDispatch
+    }
+  }
+  return undefined
+}
+
+function hasAdmission(events: readonly { readonly type: string; readonly data: unknown }[], runId: string): boolean {
+  return events.some(event => event.type === 'debate/admission'
+    && (event.data as { readonly runId?: unknown }).runId === runId)
+}
+
+function runText(run: DebateRunSnapshotV1): string {
+  const summary = run.synthesis?.outputPreview
+    ?? `Debate run is ${run.state}; inspect ${run.runId} for its current durable state.`
+  return [
+    summary,
+    '',
+    `Debate Run: ${run.runId}`,
+    `State: ${run.state}`,
+    `Rounds: ${String(run.currentRound)}`,
+    ...run.synthesis?.artifactRef === undefined ? [] : [`Artifact: ${run.synthesis.artifactRef}`],
+    ...run.unresolved.length === 0 ? [] : [`Unresolved: ${String(run.unresolved.length)}`],
+    ...run.dissent.length === 0 ? [] : [`Dissent: ${String(run.dissent.length)}`],
+  ].join('\n')
+}
+
+function runUsage(run: DebateRunSnapshotV1): TokenUsage | undefined {
+  const inputTokens = run.cost.inputTokens
+  const outputTokens = run.cost.outputTokens
+  if (inputTokens === undefined || outputTokens === undefined) return undefined
+  return {
+    inputTokens,
+    outputTokens,
+    ...run.cost.cacheReadInputTokens === undefined ? {} : { cacheReadTokens: run.cost.cacheReadInputTokens },
+    ...run.cost.cacheWriteInputTokens === undefined ? {} : { cacheWriteTokens: run.cost.cacheWriteInputTokens },
+  }
+}
+
+class DebateHostAdapter extends LlmAdapter {
+  constructor(private readonly ctx: Context) { super() }
+
+  override listModels(provider: string): Promise<readonly { provider: string; id: string; name: string }[]> {
+    return Promise.resolve([{ provider, id: DEBATE_HOST_MODEL, name: 'Debate' }])
+  }
+
+  async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    if (!isAgentLoopRequest(options)) throw new Error('Debate host adapter only accepts an Agent Loop request')
+    const agent = this.ctx.agents.requireInitiator()
+    const current = latestDirectUser(options.messages)
+    if (current === undefined) throw new Error('Debate host adapter requires a current user message')
+    const dispatch = dispatchForPrompt(agent.session.events, current.id)
+    if (dispatch === undefined) throw new Error(`Debate host adapter has no durable dispatch for ${current.id}`)
+    const prompt = messageText(current)
+    if (prompt.length === 0) throw new DebateError('Debate requires a text prompt', 'DEBATE_INVALID')
+    const workspace = agent.session.header.cwd
+    if (workspace === undefined || workspace.length === 0) {
+      throw new DebateError('Debate requires a Session workspace', 'DEBATE_INVALID')
+    }
+    const run = await this.ctx.debates.start({
+      version: 1,
+      commandId: dispatch.commandId,
+      workspace,
+      prompt,
+      policy: { ...DEFAULT_DEBATE_POLICY, mode: 'enabled' },
+      execution: { version: 1, kind: 'standalone' },
+      sourceSessionId: String(agent.id),
+    })
+    if (!hasAdmission(agent.session.events, run.runId)) {
+      agent.session.append('debate/admission', {
+        runId: run.runId,
+        mode: 'enabled',
+        revision: run.revision,
+        state: run.state,
+      }, { ignorable: true })
+    }
+    if (run.state === 'failed' || run.state === 'indeterminate') {
+      throw new DebateError(`Debate run ${run.runId} ended as ${run.state}`, 'DEBATE_PROVIDER_UNAVAILABLE')
+    }
+    const text = runText(run)
+    yield { type: 'block-start', index: 0, blockType: 'text' }
+    yield { type: 'text-delta', index: 0, text }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+    const usage = runUsage(run)
+    if (usage !== undefined) yield { type: 'usage', usage }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  }
+}
+
 function requiredRunId(args: ToolArgs): string {
   if (args.run_id === undefined || args.run_id.trim().length === 0) {
     throw new Error('run_id is required for this action')
@@ -223,6 +394,30 @@ function requiredRunId(args: ToolArgs): string {
 
 /** Register the Debate tool, durable per-session mode command, and client projection. */
 export function apply(ctx: Context): void {
+  ctx.inject(['llm', 'agents'], (hostCtx) => {
+    hostCtx.llm.registerAdapter([DEBATE_HOST_PROVIDER], new DebateHostAdapter(hostCtx))
+
+    hostCtx.on('agent/pre-step', async ({ agent, turn, step }, next): Promise<PreStepDecision> => {
+      const decision = await next()
+      if (decision.kind !== 'enter' || foldDebatePreferences(agent.session.events).mode !== 'enabled') return decision
+      const current = latestDirectUser(decision.messages)
+      if (current === undefined || dispatchForPosition(agent.session.events, turn, step) !== undefined) return decision
+      agent.session.append('debate/dispatch', {
+        commandId: hostCommandId(String(agent.id), current.id),
+        promptMessageId: current.id,
+        turn,
+        step,
+      }, { ignorable: true })
+      return decision
+    })
+
+    hostCtx.on('agent/request', async ({ agent, turn, step }, next) => {
+      const base = await next()
+      if (dispatchForPosition(agent.session.events, turn, step) === undefined) return base
+      const { reasoningEffort: _reasoningEffort, ...portable } = base
+      return { ...portable, provider: DEBATE_HOST_PROVIDER, model: DEBATE_HOST_MODEL }
+    })
+  })
   ctx.systemPrompt.section({ name: 'tool:debate', order: 119, text: debateGuidance })
 
   ctx.inject(['sessionProjections'], (projectionCtx) => {

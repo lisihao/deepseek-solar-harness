@@ -3735,7 +3735,10 @@ export class OrchestrationDaemon {
         const status = this.ctx.physicalOperators.status(String(provider.operatorId))
         const available = provider.available && provider.authentication === 'native-subscription'
         return provider.models
-          .filter(model => !honorProfile || spec.operator?.profile?.model === undefined || model.model === spec.operator.profile.model)
+          .filter(model => !honorProfile
+            || spec.operator?.profile?.model === undefined
+            || model.model === spec.operator.profile.model
+            || model.resolvedModel === spec.operator.profile.model)
           .map((model): ModelExecutionOffer => {
             const quotaPool = quotaForModel(provider.quotaPools, model)
             const offerId = `${provider.operatorId}:${model.model}`
@@ -3754,7 +3757,9 @@ export class OrchestrationDaemon {
               activeCount: activeByOperator.get(provider.operatorId) ?? 0,
               tags: status.tags,
               ...quotaPool === undefined ? {} : { quotaPool },
-              quotaGuard: quotaGuard(provider),
+              quotaGuard: spec.operator?.preferredIds?.includes(provider.operatorId) === true
+                ? { ...quotaGuard(provider), unknownQuota: 'allow' }
+                : quotaGuard(provider),
               profile: {
                 model: model.model,
                 ...honorProfile && spec.operator?.profile?.effort !== undefined

@@ -5,6 +5,8 @@
   "references": [
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
+    { "path": "../../core/agent" },
+    { "path": "../../llm/llm" },
     { "path": "../../core/tools" },
     { "path": "../../interaction/commands" },
     { "path": "../../core/system-prompt" },
