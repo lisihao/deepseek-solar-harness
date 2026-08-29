@@ -951,9 +951,11 @@ flowchart TD
   pkg_rlm_strategy --> pkg_invariants
   pkg_rlm_strategy --> pkg_llm
   pkg_rlm_strategy --> pkg_model_allocation
+  pkg_tool_debate --> pkg_agent
   pkg_tool_debate --> pkg_commands
   pkg_tool_debate --> pkg_debate
   pkg_tool_debate --> pkg_invariants
+  pkg_tool_debate --> pkg_llm
   pkg_tool_debate --> pkg_session
   pkg_tool_debate --> pkg_session_projection
   pkg_tool_debate --> pkg_system_prompt
@@ -1804,7 +1806,7 @@ flowchart TD
 | [`mcp-client`](../packages/mcp/mcp-client) | `mcp` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout), [`tools`](../packages/core/tools) |
 | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`model-allocation`](../packages/orchestration/model-allocation) |
 | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation) |
-| [`tool-debate`](../packages/orchestration/tool-debate) | `orchestration` | [`commands`](../packages/interaction/commands), [`debate`](../packages/orchestration/debate), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
+| [`tool-debate`](../packages/orchestration/tool-debate) | `orchestration` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`debate`](../packages/orchestration/debate), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`schedule`](../packages/schedule/schedule) | `schedule` | [`agent`](../packages/core/agent), [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`tools`](../packages/core/tools) |
 | [`session-checkpoint-policy`](../packages/session/session-checkpoint-policy) | `session` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`tools`](../packages/core/tools) |
 | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | `session` | [`anonymous-user-id`](../packages/identity/anonymous-user-id), [`command-feedback`](../packages/feedback/command-feedback), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-telemetry`](../packages/session/session-telemetry) |
