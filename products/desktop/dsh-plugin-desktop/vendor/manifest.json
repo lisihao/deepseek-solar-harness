@@ -237,7 +237,7 @@
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "d95a8e62b21491a58da5385cc90fa99f695dcc77791d3f586c91508231a4ce15",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "7c481bcf802f56fb6082b2883126cc49ad4c95cc07054558e1ac59cbfbe64a9a",
     "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "a8850ba87912ff75561b7dc3ad06834b1fdd126bc0c8275e086ebd8803bdd631",
-    "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "cd30a4dbd86a7b120f536d7879040f020ca599bf5bc7e1029dbd441f605f9b56",
+    "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "00455d9f3cf2a1bb4703c857009f2d278f48044a4c102841a6aeb6332b9698d8",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "b955ad4861099800bcdeb6ac79f4617622f2704d7bf726df780af0483bd8bac8",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "69a959f9bce6d77b84228864070e840ffa19d71c7054263dee79d1a2c04d09ac",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "f0553a19664f100c49539b2469bfb42f95e7fe02736c8775409b835c947f2065",
