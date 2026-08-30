@@ -311,11 +311,27 @@ describe('RemoteSyncHub', () => {
       commandId: 'command-1', workspace: '/srv/materialized/project/packages/core', nativeToolPolicy: 'disabled',
     }))
     expect(dispose).toHaveBeenCalledOnce()
+    await expect(hub.operatorExecute({
+      commandId: 'command-2', operatorId: 'codex', laneId: 'lane-1', prompt: [],
+      taskLabel: 'label', systemPrompt: 'system', profile: { model: 'sol' },
+      workspaceIdentity: {
+        version: 1, repository: 'github.com/lisihao/project', commit: 'b'.repeat(40),
+      },
+    })).resolves.toMatchObject({ sessionId: 'resident-session' })
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
+      taskLabel: 'label', systemPrompt: 'system', profile: { model: 'sol' },
+    }))
     await expect(hub.operatorReadArtifact(`sha256:${'a'.repeat(64)}`)).resolves.toEqual({
       ref: `sha256:${'a'.repeat(64)}`, json: '{}',
     })
     await expect(hub.operatorInspectTurn('resident-turn')).resolves.toMatchObject({ state: 'running' })
     expect(renewWorkspace).toHaveBeenCalledWith('command-1')
+    inspectTurn.mockResolvedValueOnce({
+      commandId: 'command-2', sessionId: 'resident-session', turnId: 'settled-turn',
+      state: 'settled', stateRevision: 3, updatedAt: '2026-08-27T12:01:00.000Z',
+    })
+    await hub.operatorInspectTurn('settled-turn')
+    expect(releaseWorkspace).toHaveBeenCalledWith('command-2')
     const signal = new AbortController().signal
     await expect(hub.operatorReadEvents('resident-session', 0, 100, signal)).resolves.toEqual({ events: [], nextSequence: 0 })
     await expect(hub.operatorReadEvents('resident-session', 1, 10)).resolves.toEqual({ events: [], nextSequence: 0 })
@@ -344,6 +360,27 @@ describe('RemoteSyncHub', () => {
     })).rejects.toThrow('no repository can be materialized')
     expect(resident.execute).not.toHaveBeenCalled()
     await hub.close()
+  })
+
+  it('uses the default qualification error and fails loudly without the workspace host seam', async () => {
+    const resident = {
+      providers: async () => [], execute: vi.fn(), inspectTurn: vi.fn(async () => ({
+        commandId: 'command-1', sessionId: 'session-1', turnId: 'turn-1', state: 'running',
+        stateRevision: 1, updatedAt: '2026-08-27T12:00:00.000Z',
+      })), readEvents: vi.fn(), interrupt: vi.fn(),
+    }
+    const unavailable = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => ({
+      qualification: async () => ({ available: false }),
+      materializeWorkspace: vi.fn(), renewWorkspace: vi.fn(), releaseWorkspace: vi.fn(), readResidentArtifact: vi.fn(),
+    }))
+    await expect(unavailable.operatorExecute({
+      commandId: 'command-1', operatorId: 'codex', laneId: 'lane', prompt: [],
+      workspaceIdentity: { version: 1, repository: 'github.com/lisihao/project', commit: 'a'.repeat(40) },
+    })).rejects.toThrow('remote execution host is unavailable')
+    const missing = new RemoteSyncHub(api(), 4, undefined, resident as never)
+    expect(() => missing.operatorReadArtifact(`sha256:${'a'.repeat(64)}`)).toThrow('workspace and artifact host is unavailable')
+    await expect(missing.operatorInspectTurn('turn-1')).resolves.toMatchObject({ state: 'running' })
+    await Promise.all([unavailable.close(), missing.close()])
   })
 
   it('advertises orchestration election control only to admin peers', async () => {

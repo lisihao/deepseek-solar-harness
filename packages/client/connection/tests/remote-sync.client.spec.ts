@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  canonicalRemoteRepositoryIdentity, REMOTE_RESIDENT_ARTIFACT_MAX_BYTES,
   parseRemoteResidentAcceptedTurn, parseRemoteResidentArtifact, parseRemoteResidentEventPage,
   parseRemoteResidentProviders, parseRemoteResidentTurn, parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument,
   parseRemoteSessionReplicaList, parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame,
@@ -288,6 +289,17 @@ describe('Remote Sync wire parsing', () => {
         error: { code: 'PRODUCT_ERROR', message: 'stopped' },
       })).toMatchObject({ stopReason, result: { stopReason }, error: { code: 'PRODUCT_ERROR' } })
     }
+    expect(parseRemoteResidentTurn({
+      ...baseTurn, state: 'settled',
+      result: {
+        output: [], stopReason: 'completed',
+        usage: { inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheWriteInputTokens: 4, costUsd: 0.01 },
+      },
+    })).toMatchObject({ result: { usage: { cacheReadInputTokens: 3, cacheWriteInputTokens: 4, costUsd: 0.01 } } })
+    expect(parseRemoteResidentTurn({
+      ...baseTurn, state: 'settled',
+      result: { output: [], stopReason: 'completed', usage: { inputTokens: 1, outputTokens: 2 } },
+    })).toMatchObject({ result: { usage: { inputTokens: 1, outputTokens: 2 } } })
     expect(parseRemoteResidentEventPage({
       events: [{
         sequence: 1, sessionId: 'session-1', type: 'turn.progress',
@@ -361,6 +373,25 @@ describe('Remote Sync wire parsing', () => {
       ref: 'sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', json: '{}',
     })).toMatchObject({ json: '{}' })
     expect(() => parseRemoteResidentArtifact({ ref: 'sha256:bad', json: '{}' })).toThrow('ref is invalid')
+    expect(() => parseRemoteResidentArtifact({
+      ref: `sha256:${'a'.repeat(64)}`, json: 'x'.repeat(REMOTE_RESIDENT_ARTIFACT_MAX_BYTES + 1),
+    })).toThrow('exceeds')
+    expect(() => parseRemoteResidentArtifact({ ref: `sha256:${'a'.repeat(64)}`, json: '{' })).toThrow('invalid JSON')
+    for (const costUsd of ['1', Number.NaN, -1]) {
+      expect(() => parseRemoteResidentTurn({
+        ...baseTurn,
+        result: { output: [], stopReason: 'completed', usage: { inputTokens: 1, outputTokens: 2, costUsd } },
+      })).toThrow('costUsd')
+    }
+  })
+
+  it('canonicalizes supported repository identities and rejects ambiguous or credentialed forms', () => {
+    expect(canonicalRemoteRepositoryIdentity('git@GitHub.com:lisihao/project.git')).toBe('github.com/lisihao/project')
+    expect(canonicalRemoteRepositoryIdentity('https://GitHub.com/lisihao/project.git')).toBe('github.com/lisihao/project')
+    expect(canonicalRemoteRepositoryIdentity('ssh://git@github.com/lisihao/project.git')).toBe('github.com/lisihao/project')
+    for (const value of ['', ' github.com/lisihao/project', 'github.com', 'https://user:secret@example.com/repo', 'https://user@example.com/repo', 'ftp://example.com/repo', 'https://example.com/', 'github.com/a//b', 'github.com/a/../b']) {
+      expect(() => canonicalRemoteRepositoryIdentity(value)).toThrow()
+    }
   })
 
   it('accepts a complete snapshot and rejects protocol or deployment mismatch', () => {
