@@ -25,6 +25,19 @@ export interface DesktopResidentAuthenticationResponse {
   provider: DesktopResidentProvider
 }
 
+/** Owner-actionable reason for one failed native subscription login attempt. */
+export type DesktopResidentAuthenticationFailureReason =
+  | 'auth_required'
+  | 'network_unavailable'
+  | 'callback_listener_missing'
+
+/** JSON error returned after one explicit native subscription login fails. */
+export interface DesktopResidentAuthenticationFailure {
+  error: 'RESIDENT_AUTHENTICATION_FAILED'
+  reason: DesktopResidentAuthenticationFailureReason
+  message: string
+}
+
 /** Browser-facing model and effort capabilities for one provider model. */
 export interface DesktopResidentModel {
   model: string

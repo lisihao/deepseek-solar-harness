@@ -12,6 +12,7 @@ import type {
   ResidentTurnSummary,
 } from '@deepseek-ai/dsh-resident-operator'
 import type {
+  DesktopResidentAuthenticationFailureReason,
   DesktopResidentDashboard,
   DesktopResidentEvent,
   DesktopResidentProvider,
@@ -104,6 +105,7 @@ export function registerResidentDashboard(ctx: Context): () => void {
           ctx.logger.warn(cause)
           sendJson(response, 503, {
             error: 'RESIDENT_AUTHENTICATION_FAILED',
+            reason: authenticationFailureReason(cause),
             message: cause instanceof Error ? cause.message : String(cause),
           })
         }
@@ -135,6 +137,19 @@ export function registerResidentDashboard(ctx: Context): () => void {
       }
     },
   })
+}
+
+function authenticationFailureReason(cause: unknown): DesktopResidentAuthenticationFailureReason {
+  const code = typeof cause === 'object' && cause !== null && 'code' in cause
+    ? String(cause.code)
+    : undefined
+  switch (code) {
+    case 'NETWORK_UNAVAILABLE': return 'network_unavailable'
+    case 'CALLBACK_LISTENER_MISSING': return 'callback_listener_missing'
+    case 'AUTH_REQUIRED':
+    case 'AUTH_MODE_MISMATCH':
+    default: return 'auth_required'
+  }
 }
 
 function providerValue(provider: ResidentProviderStatus): DesktopResidentProvider {

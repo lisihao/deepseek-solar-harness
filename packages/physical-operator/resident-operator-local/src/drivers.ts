@@ -48,6 +48,12 @@ import { callModelToolBridge, claudeMcpRequestId, modelToolCommandId } from './m
 const execFileAsync = promisify(execFile)
 const CLAUDE_AUTH_LOGIN_TIMEOUT_MS = 10 * 60_000
 
+/** Stable Claude subscription-login failure codes carried over Resident IPC. */
+export type ClaudeAuthenticationFailureCode =
+  | 'AUTH_REQUIRED'
+  | 'NETWORK_UNAVAILABLE'
+  | 'CALLBACK_LISTENER_MISSING'
+
 /** Qualified Claude Code CLI version for this Resident build. */
 export const EXPECTED_CLAUDE_CLI_VERSION = '2.1.239 (Claude Code)'
 /** Official Claude Agent SDK version compiled into this Resident build. */
@@ -105,6 +111,30 @@ export function isClaudeNativeSubscription(status: Readonly<Record<string, unkno
   return status.loggedIn === true
     && status.authMethod === 'claude.ai'
     && status.apiProvider === 'firstParty'
+}
+
+/**
+ * Classify one failed explicit Claude subscription-login attempt.
+ *
+ * The native CLI owns OAuth and its loopback callback listener. DSH only
+ * reports the observed terminal failure and never starts a replacement login
+ * attempt on behalf of polling or qualification.
+ *
+ * @param error Failure emitted by `claude auth login`.
+ * @returns Stable failure code for the owner-local UI.
+ */
+export function claudeAuthenticationFailureCode(error: unknown): ClaudeAuthenticationFailureCode {
+  const detail = error instanceof Error ? error.message : String(error)
+  if (
+    /(?:callback|redirect(?:_uri| uri)?|loopback)/iu.test(detail)
+    || /(?:localhost|127\.0\.0\.1)(?::\d+)?[^\n]*(?:ECONNREFUSED|connection refused|refused to connect)/iu.test(detail)
+    || /(?:ECONNREFUSED|connection refused|refused to connect)[^\n]*(?:localhost|127\.0\.0\.1)(?::\d+)?/iu.test(detail)
+  ) return 'CALLBACK_LISTENER_MISSING'
+  if (
+    /\b(?:EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|ECONNRESET|EPIPE)\b/iu.test(detail)
+    || /(?:network (?:is )?unavailable|unable to connect|connection timed out|certificate verification|fetch failed)/iu.test(detail)
+  ) return 'NETWORK_UNAVAILABLE'
+  return 'AUTH_REQUIRED'
 }
 
 function environmentValue(environment: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -559,9 +589,11 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
         maxBuffer: 2 * 1024 * 1024,
       })
     } catch (error) {
+      const code = claudeAuthenticationFailureCode(error)
       throw new ResidentOperatorError(
         `Claude Code subscription login failed: ${error instanceof Error ? error.message : String(error)}`,
-        'AUTH_MODE_MISMATCH',
+        code,
+        { cause: error },
       )
     }
     return this.qualify()

@@ -23,6 +23,7 @@ import {
 } from '@deepseek-ai/dsh-resident-operator'
 import {
   ClaudeCodeResidentDriver,
+  claudeAuthenticationFailureCode,
   CodexResidentDriver,
   EXPECTED_CLAUDE_CLI_VERSION,
   EXPECTED_CODEX_CLI_VERSION,
@@ -480,6 +481,17 @@ export class ResidentDaemon {
     const pending = (async () => {
       const status = await this.qualify(driver)
       if (status.available && status.authentication === 'native-subscription') return status
+      if (operatorId === 'claude-code' && status.authentication !== 'native-subscription') {
+        const reason = status.unavailableReason ?? 'Claude Code qualification is unavailable'
+        const nativeLoginRequired = reason === 'Claude Code is not authenticated with a claude.ai subscription'
+        if (!nativeLoginRequired) {
+          const classified = claudeAuthenticationFailureCode(reason)
+          throw new ResidentOperatorError(
+            reason,
+            classified === 'AUTH_REQUIRED' ? 'RUNTIME_UNAVAILABLE' : classified,
+          )
+        }
+      }
       const authenticated = await authenticate()
       return { ...authenticated, supportsExplicitAuthentication: true }
     })().finally(() => {
