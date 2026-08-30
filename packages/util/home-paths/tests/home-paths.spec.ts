@@ -44,12 +44,15 @@ describe('dsh path helpers', () => {
     expect(localIpcAddress(`${root}-other`, 'control', 'darwin')).not.toBe(first)
   })
 
-  it.skipIf(process.platform === 'win32')('uses the bounded POSIX temporary root when the configured temporary root is too long', () => {
-    vi.stubEnv('TMPDIR', join('/tmp', 'temporary-root'.repeat(12)))
+  it('uses the bounded POSIX temporary root when the configured temporary root is too long', () => {
+    const oversizedTemporaryRoot = join(resolve('/'), 'temporary-root'.repeat(12))
+    vi.stubEnv('TMPDIR', oversizedTemporaryRoot)
+    vi.stubEnv('TMP', oversizedTemporaryRoot)
+    vi.stubEnv('TEMP', oversizedTemporaryRoot)
     const root = join('/private', 'dsh-product-server'.repeat(12), 'orchestration')
     const address = localIpcAddress(root, 'control', 'darwin')
 
-    expect(address).toMatch(/^\/tmp\/dsh-ipc-[a-f0-9]{12}\/control-[a-f0-9]{24}\.sock$/u)
+    expect(address).toMatch(/^[/\\]tmp[/\\]dsh-ipc-[a-f0-9]{12}[/\\]control-[a-f0-9]{24}\.sock$/u)
     expect(Buffer.byteLength(address)).toBeLessThanOrEqual(103)
   })
 
