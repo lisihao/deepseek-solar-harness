@@ -284,23 +284,41 @@ class OrchestrationResidentOperator implements PhysicalOperator {
     return { available: true as const }
   }
 
-  residentCatalog(): Promise<PhysicalOperatorResidentCatalog> {
-    return Promise.resolve({
+  async residentCatalog(): Promise<PhysicalOperatorResidentCatalog> {
+    const provider = (await this.resident.providers())
+      .find(value => value.operatorId === this.provider.operatorId)
+    if (provider === undefined) {
+      return {
+        operatorId: this.descriptor.id,
+        product: this.provider.product,
+        injectionBoundaries: this.provider.injectionBoundaries,
+        supportsModelToolBridge: true,
+        location: 'local',
+        supportsWorkspaceMutationReturn: true,
+        available: false,
+        unavailableReason: 'Resident provider is no longer registered',
+        authentication: 'unqualified',
+        productVersion: this.provider.productVersion,
+        protocolHash: this.provider.protocolHash,
+        models: [],
+      }
+    }
+    return {
       operatorId: this.descriptor.id,
-      product: this.provider.product,
-      injectionBoundaries: this.provider.injectionBoundaries,
+      product: provider.product,
+      injectionBoundaries: provider.injectionBoundaries,
       supportsModelToolBridge: true,
       location: 'local',
       supportsWorkspaceMutationReturn: true,
-      available: this.provider.available,
-      ...this.provider.unavailableReason === undefined ? {} : { unavailableReason: this.provider.unavailableReason },
-      ...this.provider.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: this.provider.quotaUnavailableReason },
-      authentication: this.provider.authentication,
-      productVersion: this.provider.productVersion,
-      protocolHash: this.provider.protocolHash,
-      models: this.provider.models,
-      ...this.provider.quotaPools === undefined ? {} : { quotaPools: this.provider.quotaPools },
-    })
+      available: provider.available,
+      ...provider.unavailableReason === undefined ? {} : { unavailableReason: provider.unavailableReason },
+      ...provider.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: provider.quotaUnavailableReason },
+      authentication: provider.authentication,
+      productVersion: provider.productVersion,
+      protocolHash: provider.protocolHash,
+      models: provider.models,
+      ...provider.quotaPools === undefined ? {} : { quotaPools: provider.quotaPools },
+    }
   }
 
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {

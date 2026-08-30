@@ -1588,6 +1588,28 @@ describe('orchestration daemon', () => {
     })
   })
 
+  it('refreshes Resident provider qualification after daemon startup', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-provider-refresh-'))
+    const root = join(home, 'o')
+    const fake = new FakeResidentClient()
+    fake.unavailableOperators.add('claude-code')
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    fake.unavailableOperators.delete('claude-code')
+
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const compilation = await client.compile({ intent: { request: 'Provider refresh fixture.' }, graph: graph(home) })
+    const started = await startCompilation(client, compilation.compilationId)
+    const completed = await eventually(
+      () => client.inspect(String(started.runId)),
+      value => value.state === 'completed' || value.state === 'failed' || value.state === 'indeterminate',
+    )
+
+    expect(completed.state, JSON.stringify(completed, null, 2)).toBe('completed')
+    expect(fake.starts.some(value => value.startsWith('claude-code:'))).toBe(true)
+  })
+
   it('does not auto-schedule Claude while its protected subscription quota is unknown', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-claude-quota-'))
     const root = join(home, 'o')
