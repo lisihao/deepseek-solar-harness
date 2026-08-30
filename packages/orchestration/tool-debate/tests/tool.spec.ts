@@ -189,6 +189,27 @@ function resultValue(result: Awaited<ReturnType<typeof call>>): Record<string, u
 }
 
 describe('debate model Consumer', () => {
+  it('uses a one-round three-role budget when the user explicitly asks for a concise result', () => {
+    const policy = tool.debatePolicyForPrompt('请简洁讨论并给出三条结论')
+    expect(policy.roster.map(role => role.role)).toEqual([
+      'constructive-proposer',
+      'skeptical-falsifier',
+      'decision-judge',
+    ])
+    expect(policy.budget).toMatchObject({
+      maxRounds: 1,
+      maxTurnsPerAgent: 1,
+      maxAgentsPerRound: 3,
+      maxTotalTokens: 80_000,
+      maxCostUsd: 2,
+    })
+    expect(policy.convergence.minSettledAgents).toBe(3)
+    expect(tool.debatePolicyForPrompt('Evaluate this contested architecture.')).toMatchObject({
+      budget: { maxRounds: 3 },
+      roster: { length: 4 },
+    })
+  })
+
   it('lets an explicitly enabled Debate own the user turn without calling a primary model', async () => {
     const { ctx, agent, provider } = await setupAutomatic()
     provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })

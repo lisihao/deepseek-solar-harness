@@ -41,6 +41,7 @@ const MAX_LIST_ITEMS = 20
 const MAX_PREVIEW_CHARS = 600
 const MAX_REF_ITEMS = 20
 const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
+const CONCISE_DEBATE_HINT = /(?:简洁|简要|精简|三条|要点|concise|brief)/iu
 
 function isDebateMode(value: unknown): value is DebateExecutionMode {
   return typeof value === 'string' && MODE_OPTIONS.some(option => option === value)
@@ -168,6 +169,37 @@ export const DEFAULT_DEBATE_POLICY: DebatePolicyV1 = Object.freeze({
   }),
   preserveDissent: true,
 })
+
+/**
+ * Use one three-role round when the user explicitly asks for a concise result.
+ *
+ * @param prompt - The user request inspected for an explicit concise-output hint.
+ * @param mode - The selected debate policy mode to preserve in the derived policy.
+ * @returns The default policy or its bounded single-round concise variant.
+ */
+export function debatePolicyForPrompt(
+  prompt: string,
+  mode: DebatePolicyV1['mode'] = 'enabled',
+): DebatePolicyV1 {
+  if (!CONCISE_DEBATE_HINT.test(prompt)) return { ...DEFAULT_DEBATE_POLICY, mode }
+  const roster = DEFAULT_DEBATE_POLICY.roster.filter(role => role.role !== 'evidence-auditor')
+  return {
+    ...DEFAULT_DEBATE_POLICY,
+    mode,
+    roster,
+    budget: {
+      ...DEFAULT_DEBATE_POLICY.budget,
+      maxRounds: 1,
+      maxTurnsPerAgent: 1,
+      maxAgentsPerRound: roster.length,
+      maxInputTokens: 64_000,
+      maxOutputTokens: 16_000,
+      maxTotalTokens: 80_000,
+      maxCostUsd: 2,
+    },
+    convergence: { ...DEFAULT_DEBATE_POLICY.convergence, minSettledAgents: roster.length },
+  }
+}
 
 /** Model-visible guidance. Debate is an explicit/automatic strategy, not a second Scheduler. */
 export const debateGuidance = 'The debate tool runs a bounded, persistent multi-agent deliberation through the provider-neutral Debate service. Use action=start only when this Session has Debate enabled, or when Smart Auto has selected Debate for a genuinely contested, high-impact decision that benefits from independent proposals, falsification, evidence audit, and a final judge. Do not use Debate for greetings, simple retrieval, or one obvious implementation step. Debate preserves dissent, stops early on evidence-backed convergence, caps the roster at four native-subscription agents and the run at three rounds, and returns bounded status plus artifact references instead of large reports. Use list or inspect after a restart; use control only for an explicit user decision. Debate does not replace the DSH TaskGraph Scheduler and never calls a physical operator directly.'
@@ -382,7 +414,7 @@ class DebateHostAdapter extends LlmAdapter {
       commandId: dispatch.commandId,
       workspace,
       prompt,
-      policy: { ...DEFAULT_DEBATE_POLICY, mode: 'enabled' },
+      policy: debatePolicyForPrompt(prompt),
       execution: { version: 1, kind: 'standalone' },
       sourceSessionId: String(agent.id),
     })
@@ -537,7 +569,7 @@ export function apply(ctx: Context): void {
         workspace,
         prompt: args.prompt,
         ...(args.objective === undefined || args.objective.trim().length === 0 ? {} : { objective: args.objective }),
-        policy: { ...DEFAULT_DEBATE_POLICY, mode: preferences.mode },
+        policy: debatePolicyForPrompt(args.prompt, preferences.mode),
         execution: { version: 1, kind: 'standalone' },
         sourceSessionId: String(agent.id),
       }

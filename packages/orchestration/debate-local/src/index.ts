@@ -60,6 +60,7 @@ const STATE_VERSION = 1
 const DEFAULT_EVENT_LIMIT = 100
 const MAX_PREVIEW_LENGTH = 4_000
 const MAX_OUTPUT_REF_LENGTH = 2_000
+const MAX_FOLLOW_UP_JUDGE_CLAIMS = 4
 const DEBATE_ROLE_ORDER: readonly DebateRoleId[] = [
   'constructive-proposer',
   'skeptical-falsifier',
@@ -1010,7 +1011,7 @@ export class LocalDebateProvider extends DebateService {
       let result: NormalizedTurnResult
       try {
         result = normalizeTurnResult(rawResult, slot.role)
-        if (number > 1) this.assertFollowUpReferences(result, run.snapshot.claimLedger)
+        if (number > 1) this.assertFollowUpReferences(result, run.snapshot.claimLedger, slot.role)
       } catch (error) {
         const failedTurn: DebateAgentTurnV1 = {
           ...dispatched,
@@ -1180,11 +1181,22 @@ export class LocalDebateProvider extends DebateService {
     }
   }
 
-  private assertFollowUpReferences(result: NormalizedTurnResult, ledger: DebateClaimLedgerV1): void {
-    const knownClaimIds = new Set(ledger.claims.map(claim => claim.claimId))
-    for (const claim of result.claims) {
-      if (!knownClaimIds.has(claim.claimId)) invalid(`follow-up claim ${claim.claimId} is not present in the claim ledger`)
+  private assertFollowUpReferences(
+    result: NormalizedTurnResult,
+    ledger: DebateClaimLedgerV1,
+    role: DebateRoleId,
+  ): void {
+    const priorClaimIds = new Set(ledger.claims.map(claim => claim.claimId))
+    const newClaimIds = new Set(result.claims
+      .filter(claim => !priorClaimIds.has(claim.claimId))
+      .map(claim => claim.claimId))
+    if (role !== 'decision-judge' && newClaimIds.size > 0) {
+      invalid(`follow-up claim ${[...newClaimIds].sort()[0]} is not present in the claim ledger`)
     }
+    if (newClaimIds.size > MAX_FOLLOW_UP_JUDGE_CLAIMS) {
+      invalid(`follow-up decision judge may add at most ${String(MAX_FOLLOW_UP_JUDGE_CLAIMS)} reconciliation claims`)
+    }
+    const knownClaimIds = new Set([...priorClaimIds, ...newClaimIds])
     for (const dissent of result.dissent) {
       if (!knownClaimIds.has(dissent.claimId)) invalid(`follow-up dissent ${dissent.claimId} is not present in the claim ledger`)
     }
