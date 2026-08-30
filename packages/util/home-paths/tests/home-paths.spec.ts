@@ -44,7 +44,7 @@ describe('dsh path helpers', () => {
     expect(localIpcAddress(`${root}-other`, 'control', 'darwin')).not.toBe(first)
   })
 
-  it('uses the bounded POSIX temporary root when the configured temporary root is too long', () => {
+  it.skipIf(process.platform === 'win32')('uses the bounded POSIX temporary root when the configured temporary root is too long', () => {
     vi.stubEnv('TMPDIR', join('/tmp', 'temporary-root'.repeat(12)))
     const root = join('/private', 'dsh-product-server'.repeat(12), 'orchestration')
     const address = localIpcAddress(root, 'control', 'darwin')
