@@ -79,8 +79,14 @@ export class LocalRemoteOperatorHostService extends RemoteOperatorHostService {
   constructor(ctx: Context, private readonly options: LocalRemoteOperatorHostOptions) {
     super(ctx)
     this.orchestrationRoot = join(options.dshHome, 'orchestrations')
-    this.cacheRoot = join(this.orchestrationRoot, 'remote-workspaces', 'cache')
-    this.executionRoot = join(this.orchestrationRoot, 'remote-workspaces', 'executions')
+    // Git materialization creates object paths below the cache and checkout.
+    // Keep cluster configuration at its established location, but use a short
+    // Windows-only workspace root so those paths stay below MAX_PATH.
+    const remoteWorkspaceRoot = process.platform === 'win32'
+      ? join(options.dshHome, 'rw')
+      : join(this.orchestrationRoot, 'remote-workspaces')
+    this.cacheRoot = join(remoteWorkspaceRoot, 'cache')
+    this.executionRoot = join(remoteWorkspaceRoot, 'executions')
     this.residentArtifactRoot = join(options.dshHome, 'resident-operators', 'artifacts', 'sha256')
   }
 
