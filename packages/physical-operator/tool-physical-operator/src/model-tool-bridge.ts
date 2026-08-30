@@ -3,12 +3,11 @@
 import { createHash } from 'node:crypto'
 import { chmodSync, mkdirSync, rmSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { CallId, type ToolSchema } from '@deepseek-ai/dsh-llm'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { localIpcAddress, localIpcUsesFilesystem, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
@@ -52,14 +51,11 @@ function canonicalJson(value: unknown): string {
 let nextEndpointId = 0
 
 function socketPath(): { readonly path: string; readonly directory?: string } {
-  const root = resolveDshHome(process.env.DSH_HOME ?? join(homedir(), '.dsh'))
+  const root = resolveDshHome()
   const endpointId = `${String(process.pid)}-${String(nextEndpointId++)}`
-  if (process.platform === 'win32') {
-    const identity = createHash('sha256').update(root).digest('hex').slice(0, 24)
-    return { path: `\\\\.\\pipe\\dsh-model-tools-${identity}-${endpointId}` }
-  }
   const directory = join(root, 'physical-operator')
-  return { path: join(directory, `model-tools-${endpointId}.sock`), directory }
+  const path = localIpcAddress(directory, `model-tools-${endpointId}`)
+  return { path, ...localIpcUsesFilesystem() ? { directory: dirname(path) } : {} }
 }
 
 /** One bridge-owned stable endpoint. Bindings exist only while their Resident turn is attached. */

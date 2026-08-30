@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-`dsh-orchestratord` 是持久编排状态的唯一写者。它在 Harness home 下的单个 SQLite WAL 数据库中保存已认证逻辑图、节点状态、attempt、Evidence 引用、不可变编译 Artifact 和 append-only 事件。可释放的 `ctx.orchestrations` Provider 通过仅属主可访问的本地 IPC 连接（POSIX 使用 Unix socket，Windows 使用本地命名管道），因此 DSH 与 Desktop 重启不会停止已接纳 Run。
+`dsh-orchestratord` 是持久编排状态的唯一写者。它在 Harness home 下的单个 SQLite WAL 数据库中保存已认证逻辑图、节点状态、attempt、Evidence 引用、不可变编译 Artifact 和 append-only 事件。可释放的 `ctx.orchestrations` Provider 通过仅属主可访问的本地 IPC 连接（POSIX 使用 Unix socket，Windows 使用本地命名管道），因此 DSH 与 Desktop 重启不会停止已接纳 Run。POSIX 控制路径超过 macOS Unix socket 的字节限制时，会使用与 Resident 执行相同、确定性且仅属主可访问的临时地址约定；只有 socket 移动，编排状态仍保留在 Harness home 下。
 
 打包后的 Desktop 使用 `desktop-<SemVer>` 作为 daemon build identity。客户端以 `ORCHESTRATION_VERSION_MISMATCH` 拒绝协议、schema、方法集或 build 不一致；自动启动会先让不兼容 daemon 退出，再让已安装版本复用同一持久状态启动。开发 composition 在调用方未提供 `DSH_BUILD_COMMIT` 时继续使用显式的 `development` identity。
 

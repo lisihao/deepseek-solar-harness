@@ -30,6 +30,37 @@ describe('dsh path helpers', () => {
     expect(() => localIpcAddress(root, '   ', 'linux')).toThrow('local IPC channel must be non-blank')
   })
 
+  it('maps long POSIX socket paths into a deterministic owner-specific temporary directory', () => {
+    vi.stubEnv('TMPDIR', '/tmp')
+    const root = join(tmpdir(), 'dsh-product-server', 'nested-root'.repeat(12), 'resident-operators')
+    const first = localIpcAddress(root, 'control', 'darwin')
+    const second = localIpcAddress(root, 'control', 'linux')
+
+    expect(first).toBe(second)
+    expect(first).not.toBe(join(resolve(root), 'control.sock'))
+    expect(Buffer.byteLength(first)).toBeLessThanOrEqual(103)
+    expect(first).toMatch(/[/\\]dsh-ipc-[a-f0-9]{12}[/\\]control-[a-f0-9]{24}\.sock$/u)
+    expect(localIpcAddress(`${root}-other`, 'control', 'darwin')).not.toBe(first)
+  })
+
+  it('uses the bounded POSIX temporary root when the configured temporary root is too long', () => {
+    vi.stubEnv('TMPDIR', join('/tmp', 'temporary-root'.repeat(12)))
+    const root = join('/private', 'dsh-product-server'.repeat(12), 'orchestration')
+    const address = localIpcAddress(root, 'control', 'darwin')
+
+    expect(address).toMatch(/^\/tmp\/dsh-ipc-[a-f0-9]{12}\/control-[a-f0-9]{24}\.sock$/u)
+    expect(Buffer.byteLength(address)).toBeLessThanOrEqual(103)
+  })
+
+  it('measures POSIX socket limits in UTF-8 bytes', () => {
+    const root = join('/tmp', '长'.repeat(32))
+    const direct = join(resolve(root), 'control.sock')
+
+    expect(direct.length).toBeLessThanOrEqual(103)
+    expect(Buffer.byteLength(direct)).toBeGreaterThan(103)
+    expect(localIpcAddress(root, 'control', 'darwin')).not.toBe(direct)
+  })
+
   it('owns the shared default DSH home directory name', () => {
     expect(DSH_HOME_DIR_NAME).toBe('.dsh')
     expect(DEFAULT_DSH_HOME_DISPLAY).toBe('~/.dsh')
@@ -75,6 +106,7 @@ describe('dsh path helpers', () => {
     try {
       await mkdir(target)
       await symlink(target, alias, process.platform === 'win32' ? 'junction' : 'dir')
+      await expect(canonicalizeWatchPath(target)).resolves.toBe(await realpath(target))
       await expect(canonicalizeWatchPath(join(alias, 'later', 'config.yml'))).resolves.toBe(
         join(await realpath(target), 'later', 'config.yml'),
       )

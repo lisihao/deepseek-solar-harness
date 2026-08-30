@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import net from 'node:net'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 
 const execFileAsync = promisify(execFile)
 
@@ -77,11 +78,16 @@ export function assertOwnedDaemonCommand(command, root, executable = process.exe
 export async function stopOwnedDaemon(root, timeoutMs = 7_000, dependencies = {}) {
   const pid = await readPid(join(root, 'daemon.pid'))
   if (pid === undefined || !await processExists(pid)) return
-  try {
-    await (dependencies.requestShutdown ?? requestOwnerShutdown)(join(root, 'control.sock'), Math.min(timeoutMs, 2_000))
-    if (await waitForExit(pid, timeoutMs)) return
-  } catch {
-    // A crashed IPC owner may require the fenced process fallback below.
+  const requestShutdown = dependencies.requestShutdown ?? requestOwnerShutdown
+  const socketPaths = new Set([localIpcAddress(root, 'control'), join(root, 'control.sock')])
+  for (const socketPath of socketPaths) {
+    try {
+      await requestShutdown(socketPath, Math.min(timeoutMs, 2_000))
+      if (await waitForExit(pid, timeoutMs)) return
+      break
+    } catch {
+      // A daemon from the preceding socket layout may still own the legacy path.
+    }
   }
   if (!await processExists(pid)) return
   let command

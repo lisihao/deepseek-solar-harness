@@ -24,7 +24,9 @@ Shared filesystem path helpers for DeepSeek Harness user data.
 
 ## Local IPC
 
-`localIpcAddress(root, channel)` gives owner-local daemons one portable endpoint identity: a socket inside `root` on POSIX and a deterministic `\\.\pipe\...` named pipe on Windows. `localIpcUsesFilesystem()` tells lifecycle code whether stale-path cleanup and permission changes apply; Windows named pipes are never treated as files.
+`localIpcAddress(root, channel)` gives owner-local daemons one portable endpoint identity. POSIX uses a socket inside `root` while that path fits the macOS Unix-socket limit; longer paths map deterministically to an owner-specific directory under the operating-system temporary root, with `/tmp` as the bounded fallback when that temporary root is itself too long. Windows keeps the deterministic `\\.\pipe\...` named-pipe address. `localIpcUsesFilesystem()` tells lifecycle code whether stale-path cleanup and permission changes apply; Windows named pipes are never treated as files.
+
+The helper only derives the endpoint. A POSIX daemon that receives a temporary endpoint must create its parent directory with mode `0700`, create the socket with mode `0600`, and remove its own stale socket during startup and shutdown; the durable database and artifacts remain under `root`.
 
 This package is intentionally small and harness-dep-free so product packages can share user-data path conventions without depending on one another.
 

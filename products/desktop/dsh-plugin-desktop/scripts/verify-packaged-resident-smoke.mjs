@@ -62,9 +62,11 @@ const residentModule = pathToFileURL(join(
 )).href
 const { installNativeProductRuntime } = await import(runtimeModule)
 const { ResidentDaemonClient } = await import(residentModule)
-// macOS caps Unix-domain socket paths; keep the real control path below 104 bytes.
 const temporaryRoot = mkdtempSync('/tmp/dsh-r-')
-const stateRoot = join(temporaryRoot, 'resident-operators')
+const stateRoot = join(temporaryRoot, 'Library', 'Application Support', 'DSH Product Server Canary', 'state', 'dsh-home', 'resident-operators')
+if (Buffer.byteLength(join(stateRoot, 'control.sock')) <= 103) {
+  throw new Error('verify-packaged-resident-smoke: fixture does not exercise a long Unix socket path')
+}
 const installation = installNativeProductRuntime({
   platform: process.platform,
   homeDir: homedir(),

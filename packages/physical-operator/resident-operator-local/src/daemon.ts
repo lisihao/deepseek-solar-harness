@@ -1,9 +1,9 @@
 /** Local resident-operatord JSON-RPC server and lifecycle authority. @module @deepseek-ai/dsh-resident-operator-local/daemon */
 
-import { chmodSync, closeSync, existsSync, lstatSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
-import { isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
@@ -303,6 +303,11 @@ export class ResidentDaemon {
    */
   async start(): Promise<void> {
     this.acquireLock()
+    if (localIpcUsesFilesystem()) {
+      const socketDirectory = dirname(this.socketPath)
+      mkdirSync(socketDirectory, { recursive: true, mode: 0o700 })
+      chmodSync(socketDirectory, 0o700)
+    }
     this.removeStaleSocket()
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => { reject(error) }

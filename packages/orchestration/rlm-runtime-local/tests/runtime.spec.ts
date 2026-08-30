@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -1228,6 +1229,25 @@ describe('LocalRlmRuntime', () => {
     transport.close()
     socket.destroy()
     await ctx.root.fiber.dispose()
+  })
+
+  it('serves the RLM bridge when the configured temporary root exceeds Unix socket limits', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-long-bridge-'))
+    vi.stubEnv('TMPDIR', join('/tmp', 'dsh-long-temporary-root-'.repeat(8)))
+    const { ctx, service, sessionId } = await runtime(root, { dispatchChild: () => { throw new Error('not used') } })
+    let socketPath = ''
+    try {
+      const bridge = await service.modelToolBridge(sessionId)
+      socketPath = bridge.socketPath
+      expect(Buffer.byteLength(socketPath)).toBeLessThanOrEqual(103)
+      const socket = createConnection(socketPath)
+      await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
+      socket.destroy()
+    } finally {
+      await ctx.root.fiber.dispose()
+      if (socketPath.length > 0) expect(existsSync(socketPath)).toBe(false)
+      vi.unstubAllEnvs()
+    }
   })
 
   it('terminates a synchronous runaway cell and restores the last settled namespace', async () => {

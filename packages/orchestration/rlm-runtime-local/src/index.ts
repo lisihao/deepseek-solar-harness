@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { writeFileAtomicSync } from '@deepseek-ai/dsh-atomic-write'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
@@ -371,7 +371,14 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     this.recoverUncertainWork()
     const bridgeId = createHash('sha256').update(resolve(root)).digest('hex').slice(0, 20)
     this.bridgeSocketPath = localIpcAddress(tmpdir(), `rlm-${bridgeId}`)
-    if (localIpcUsesFilesystem() && existsSync(this.bridgeSocketPath)) unlinkSync(this.bridgeSocketPath)
+    if (localIpcUsesFilesystem()) {
+      const bridgeDirectory = dirname(this.bridgeSocketPath)
+      if (bridgeDirectory !== resolve(tmpdir())) {
+        mkdirSync(bridgeDirectory, { recursive: true, mode: 0o700 })
+        chmodSync(bridgeDirectory, 0o700)
+      }
+      if (existsSync(this.bridgeSocketPath)) unlinkSync(this.bridgeSocketPath)
+    }
     this.bridgeServer = createServer((socket) => { this.acceptBridgeSocket(socket) })
     this.bridgeReady = new Promise<void>((accept, reject) => {
       const onError = (error: Error): void => { reject(error) }
