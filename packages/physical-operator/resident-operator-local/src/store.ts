@@ -5,7 +5,10 @@ import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, re
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
+import type {
+  PhysicalOperatorModelToolBridgeV1,
+  PhysicalOperatorNativeToolPolicy,
+} from '@deepseek-ai/dsh-physical-operator'
 import {
   ResidentOperatorError,
   ResidentOperatorCommandId,
@@ -102,6 +105,7 @@ export type TurnInspection = ResidentTurnSnapshot
  * @param laneId - caller-owned native-context isolation lane.
  * @param modelToolBridge - optional sealed RLM model-tool bridge.
  * @param systemPrompt - optional DSH-owned system instructions.
+ * @param nativeToolPolicy - sealed native product tool authority.
  * @returns lowercase SHA-256 digest.
  */
 export function canonicalRequestHash(
@@ -113,6 +117,7 @@ export function canonicalRequestHash(
   laneId = 'legacy',
   modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
   systemPrompt?: string,
+  nativeToolPolicy: PhysicalOperatorNativeToolPolicy = 'inherit',
 ): string {
   return createHash('sha256')
     .update(JSON.stringify({
@@ -128,6 +133,7 @@ export function canonicalRequestHash(
         sessionId: modelToolBridge.sessionId,
         tools: modelToolBridge.tools,
       },
+      nativeToolPolicy,
     }))
     .digest('hex')
 }

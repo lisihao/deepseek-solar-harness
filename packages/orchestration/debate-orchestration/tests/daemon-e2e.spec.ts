@@ -16,6 +16,7 @@ interface ScriptedResidentRequest {
   readonly operatorId: string
   readonly profile?: { readonly model: string }
   readonly prompt?: readonly { readonly type: string; readonly text?: string }[]
+  readonly nativeToolPolicy?: 'inherit' | 'disabled'
 }
 
 type ScriptedResult = {
@@ -267,6 +268,7 @@ describe('Debate real TaskGraph binding', () => {
     const debateEvents = await debate.readEvents({ runId: completed.runId, limit: 100 })
     const orchestrationRuns = await client.list()
     expect(completed.state, JSON.stringify({ completed, debateEvents, orchestrationRuns, requests: resident.requests }, null, 2)).toBe('completed')
+    expect(resident.requests.every(request => request.nativeToolPolicy === 'disabled')).toBe(true)
     expect(completed.rounds).toHaveLength(1)
     expect(resident.peakParticipants).toBe(2)
     expect(resident.judgeStartedAfterParticipants).toBe(true)

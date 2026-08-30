@@ -97,7 +97,7 @@ export function frontendOwnerSurfaceScript(productVersion: string): string {
       button.addEventListener('click', () => { window.location.assign(target); });
       footer.appendChild(button);
     };
-    addButton('desktop-configure-deployment', 'Server / Git 同步', '配置远程 Server 与仅提交态的 GitHub/Tailscale Git 同步', ${JSON.stringify(CONFIGURE_DEPLOYMENT_URL)});
+    addButton('desktop-configure-deployment', '部署 / 同步', '切换本机 Server 或远程 Frontend，配置多个 Server、Git 与闭合 Session 同步', ${JSON.stringify(CONFIGURE_DEPLOYMENT_URL)});
     addButton('desktop-use-local-server', '切换到本地 Server', '停止使用远程 Frontend，并以本机完整 DSH Server 重启', ${JSON.stringify(USE_LOCAL_SERVER_URL)});
     document.body.dataset.dshDesktopProductFooter = 'true';
     document.body.appendChild(footer);
@@ -615,9 +615,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
         billingBridge = await startFrontendBillingBridge({
           origin: frontendBilling.origin,
           baseline: frontendBilling.baseline,
-          ...(frontendBilling.accessToken === undefined ? {} : {
-            accessToken: frontendBilling.accessToken,
-          }),
+          sources: frontendBilling.sources,
+          request: (input, init) => net.fetch(String(input), init),
         })
         window.webContents.session.webRequest.onBeforeRequest(
           billingFilter,

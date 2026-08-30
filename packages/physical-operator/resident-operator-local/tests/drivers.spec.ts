@@ -11,6 +11,7 @@ import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
   claudeEnvironment,
   claudeCompactPrompt,
+  claudeNativeToolOptions,
   claudeResultFailure,
   ClaudeCodeResidentDriver,
   codexExecutionFailure,
@@ -19,6 +20,7 @@ import {
   createClaudeRlmMcpServer,
   createCodexRlmToolHandler,
   isClaudeNativeSubscription,
+  nativeToolSystemPrompt,
   resolveProductExecutable,
 } from '../src/drivers.ts'
 
@@ -118,6 +120,14 @@ describe('Claude Code resident driver environment', () => {
   it('preserves an explicit caller CA policy and does not change other platforms', () => {
     expect(claudeEnvironment({ NODE_USE_SYSTEM_CA: '0' }, 'darwin')).toEqual({ NODE_USE_SYSTEM_CA: '0' })
     expect(claudeEnvironment({ PATH: '/usr/bin' }, 'linux')).toEqual({ PATH: '/usr/bin' })
+  })
+
+  it('removes the Claude native tool surface for a sealed no-tool execution', () => {
+    expect(claudeNativeToolOptions('disabled')).toEqual({ tools: [], allowedTools: [] })
+    expect(claudeNativeToolOptions('inherit')).toEqual({})
+    expect(nativeToolSystemPrompt('DSH authority', 'disabled')).toContain('grants no native tool authority')
+    expect(nativeToolSystemPrompt('DSH authority', 'disabled')).toContain('DSH authority')
+    expect(nativeToolSystemPrompt('DSH authority', 'inherit')).toBe('DSH authority')
   })
 
   it('pins SDK execution to the same first user-owned CLI selected for qualification', () => {

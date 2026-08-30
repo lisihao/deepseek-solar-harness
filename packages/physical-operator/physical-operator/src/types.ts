@@ -145,6 +145,9 @@ export interface PhysicalOperatorResidentCatalog {
   readonly quotaPools?: readonly PhysicalOperatorQuotaPool[]
 }
 
+/** Native product tool surface allowed for one sealed physical execution. */
+export type PhysicalOperatorNativeToolPolicy = 'inherit' | 'disabled'
+
 /** Caller-owned input for one operator execution. */
 export interface PhysicalOperatorStartRequest {
   /**
@@ -171,6 +174,8 @@ export interface PhysicalOperatorStartRequest {
   readonly residentLaneId?: string
   /** Optional genuine model-tool surface resolved before dispatch; never a prompt-encoded pseudo protocol. */
   readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
+  /** Native Claude/Codex tools remain available unless the caller explicitly seals a no-tool execution. */
+  readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
 }
 
 /** Provider-facing request after the service owns identity and mode normalization. */

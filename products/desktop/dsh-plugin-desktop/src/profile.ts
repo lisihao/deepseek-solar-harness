@@ -566,7 +566,7 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
     // permanently capturing an undefined optional service.
     patches.push({
       id: 'connection',
-      inject: ['webRuntime', 'webStartup', 'residentOperators', 'orchestrations'],
+      inject: ['webRuntime', 'webStartup', 'residentOperators', 'orchestrations', 'remoteOperatorHost'],
     })
   }
   if (!rows.has('webserver')) {

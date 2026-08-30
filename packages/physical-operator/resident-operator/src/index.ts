@@ -11,6 +11,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionPreference,
   PhysicalOperatorModelToolBridgeV1,
+  PhysicalOperatorNativeToolPolicy,
   PhysicalOperatorProgressPage,
   PhysicalOperatorReasoningEffort,
   PhysicalOperatorUsage,
@@ -20,7 +21,7 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 10
+export const RESIDENT_PROTOCOL_VERSION = 11
 /** Current forward-only daemon state schema version. */
 export const RESIDENT_STATE_SCHEMA_VERSION = 5
 
@@ -156,6 +157,8 @@ export interface ResidentDriverExecuteRequest {
   readonly signal: AbortSignal
   /** Genuine host-tool bridge sealed before native thread dispatch. */
   readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
+  /** Daemon-normalized native product tool policy; direct Driver callers inherit when omitted. */
+  readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
   readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
   /** Persist a bounded product-neutral progress phase for reconnecting observers. */
   readonly onProgress: (phase: ResidentProgressPhase) => void
@@ -266,6 +269,8 @@ export interface ResidentExecuteRequest {
   readonly profile?: PhysicalOperatorExecutionPreference
   /** Optional genuine model-tool bridge sealed before dispatch. */
   readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
+  /** Native product tool policy; absence preserves the existing native tool surface. */
+  readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
   readonly signal: AbortSignal
 }
 

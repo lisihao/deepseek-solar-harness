@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-`ctx.orchestrations` owns the provider-neutral API for compiling, starting, observing, approving, pausing, resuming, cancelling, explicitly resolving durable TaskGraph runs, and reading their immutable content-addressed artifacts. A sealed `NodeExecutionPlanV1` is immutable after its physical-operator receipt is accepted.
+`ctx.orchestrations` owns the provider-neutral API for compiling, starting, observing, approving, pausing, resuming, cancelling, explicitly resolving durable TaskGraph runs, and reading their immutable content-addressed artifacts. A sealed `NodeExecutionPlanV1` is immutable after its physical-operator receipt is accepted. Its native-tool policy is derived from the resolved scopes and effects: an attempt with no read, write, execute, or network authority is sealed as `disabled`, so inference-only Debate nodes cannot accidentally request Claude Code or Codex product tools.
 
 An RLM node may opt into Prime-compatible Autonomous Mode. The Graph or run admission selects `disabled | auto | enabled`; the resolved continuation, token, elapsed-time, and host quality-gate policy is content addressed and sealed into that attempt's `NodeExecutionPlanV1`. Autonomous Mode is a host continuation policy inside one node, not a Goal and not another Scheduler. It remains disabled by default.
 

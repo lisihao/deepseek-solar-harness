@@ -284,23 +284,41 @@ class OrchestrationResidentOperator implements PhysicalOperator {
     return { available: true as const }
   }
 
-  residentCatalog(): Promise<PhysicalOperatorResidentCatalog> {
-    return Promise.resolve({
+  async residentCatalog(): Promise<PhysicalOperatorResidentCatalog> {
+    const provider = (await this.resident.providers())
+      .find(value => value.operatorId === this.provider.operatorId)
+    if (provider === undefined) {
+      return {
+        operatorId: this.descriptor.id,
+        product: this.provider.product,
+        injectionBoundaries: this.provider.injectionBoundaries,
+        supportsModelToolBridge: true,
+        location: 'local',
+        supportsWorkspaceMutationReturn: true,
+        available: false,
+        unavailableReason: 'Resident provider is no longer registered',
+        authentication: 'unqualified',
+        productVersion: this.provider.productVersion,
+        protocolHash: this.provider.protocolHash,
+        models: [],
+      }
+    }
+    return {
       operatorId: this.descriptor.id,
-      product: this.provider.product,
-      injectionBoundaries: this.provider.injectionBoundaries,
+      product: provider.product,
+      injectionBoundaries: provider.injectionBoundaries,
       supportsModelToolBridge: true,
       location: 'local',
       supportsWorkspaceMutationReturn: true,
-      available: this.provider.available,
-      ...this.provider.unavailableReason === undefined ? {} : { unavailableReason: this.provider.unavailableReason },
-      ...this.provider.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: this.provider.quotaUnavailableReason },
-      authentication: this.provider.authentication,
-      productVersion: this.provider.productVersion,
-      protocolHash: this.provider.protocolHash,
-      models: this.provider.models,
-      ...this.provider.quotaPools === undefined ? {} : { quotaPools: this.provider.quotaPools },
-    })
+      available: provider.available,
+      ...provider.unavailableReason === undefined ? {} : { unavailableReason: provider.unavailableReason },
+      ...provider.quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason: provider.quotaUnavailableReason },
+      authentication: provider.authentication,
+      productVersion: provider.productVersion,
+      protocolHash: provider.protocolHash,
+      models: provider.models,
+      ...provider.quotaPools === undefined ? {} : { quotaPools: provider.quotaPools },
+    }
   }
 
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
@@ -319,6 +337,7 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
+      ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
       signal: request.signal,
     })
     /* jscpd:ignore-end */
@@ -589,6 +608,18 @@ function fakeParent(workspace: string, runId: string): Agent {
   } as unknown as Agent
 }
 
+function nativeToolPolicy(capabilities: CapabilityBindingPlanV1): 'inherit' | 'disabled' {
+  const effects = capabilities.effectiveEffects
+  return capabilities.effectiveReadScopes.length === 0
+    && capabilities.effectiveWriteScopes.length === 0
+    && effects.read.length === 0
+    && effects.write.length === 0
+    && effects.execute.length === 0
+    && effects.network.length === 0
+    ? 'disabled'
+    : 'inherit'
+}
+
 function promptFromPlan(
   node: OrchestrationNodeSpecV1,
   context: ContextPacketV1,
@@ -784,7 +815,7 @@ export class OrchestrationDaemon {
   private readonly rlmGoalUsageQueues = new Map<string, Promise<void>>()
   private lockDescriptor: number | undefined
   private ticker: ReturnType<typeof setInterval> | undefined
-  private ticking = false
+  private tickInFlight: Promise<void> | undefined
   private closing = false
   private readonly closedResolver = Promise.withResolvers<void>()
   /** Resolves after all local resources and the single-instance lock are released. */
@@ -875,9 +906,9 @@ export class OrchestrationDaemon {
     })
     await this.rebindRecoveredRlmHosts()
     await this.reconcile()
-    this.ticker = setInterval(() => { void this.tick() }, this.options.schedulerIntervalMs ?? 250)
+    this.ticker = setInterval(() => { this.triggerTick() }, this.options.schedulerIntervalMs ?? 250)
     this.ticker.unref()
-    void this.tick()
+    this.triggerTick()
   }
 
   /** Stop scheduling and release daemon-owned resources without stopping Resident sessions. */
@@ -886,6 +917,7 @@ export class OrchestrationDaemon {
     this.closing = true
     if (this.ticker !== undefined) clearInterval(this.ticker)
     this.ticker = undefined
+    if (this.tickInFlight !== undefined) await Promise.allSettled([this.tickInFlight])
     for (const controller of this.recoveredRlmControllers) controller.abort(new Error('orchestration daemon is closing'))
     for (const dispose of this.recoveredRlmDisposers.splice(0)) dispose()
     for (const registration of this.remoteOperatorRegistrations.values()) {
@@ -1084,7 +1116,7 @@ export class OrchestrationDaemon {
         admission: compilation.admission ?? null,
       }),
     ])
-    void this.tick()
+    this.triggerTick()
     return snapshot
   }
 
@@ -1108,7 +1140,7 @@ export class OrchestrationDaemon {
     const next = withRevision(record, { ...record.snapshot, state, nodes })
     this.store.saveRun(next, [event(request.runId, `run.${request.action}`, { reason: request.reason })])
     if (request.action === 'cancel') void this.interruptActive(String(request.runId))
-    void this.tick()
+    this.triggerTick()
     return next.snapshot
   }
 
@@ -1130,7 +1162,7 @@ export class OrchestrationDaemon {
         blockers: request.decision === 'approve' ? [] : [{ code: 'APPROVAL_REJECTED', message: request.reason }],
       })
       this.store.saveRun(next, [event(request.runId, `approval.${request.decision}`, { reason: request.reason })])
-      void this.tick()
+      this.triggerTick()
       return next.snapshot
     }
     const node = record.snapshot.nodes.find(value => value.id === request.nodeId)
@@ -1140,7 +1172,7 @@ export class OrchestrationDaemon {
       : value)
     const next = withRevision(record, { ...record.snapshot, state: 'running', nodes })
     this.store.saveRun(next, [event(request.runId, `node.approval.${request.decision}`, { reason: request.reason }, nodes.find(value => value.id === request.nodeId))])
-    void this.tick()
+    this.triggerTick()
     return next.snapshot
   }
 
@@ -1164,7 +1196,7 @@ export class OrchestrationDaemon {
       : value)
     const next = withRevision(record, { ...record.snapshot, state: 'running', nodes })
     this.store.saveRun(next, [event(request.runId, `node.indeterminate.${request.decision}`, { reason: request.reason }, nodes.find(value => value.id === request.nodeId))])
-    void this.tick()
+    this.triggerTick()
     return next.snapshot
   }
 
@@ -1317,7 +1349,7 @@ export class OrchestrationDaemon {
   private installClusterReplica(request: OrchestrationClusterInstallRequest): OrchestrationClusterInstallReceipt {
     const cluster = this.expectCluster()
     const status = cluster.status()
-    if (this.ticking || this.active.size > 0) {
+    if (this.tickInFlight !== undefined || this.active.size > 0) {
       throw new OrchestrationError('orchestration follower is busy and cannot install a cluster replica', 'ORCHESTRATION_UNAVAILABLE')
     }
     if (status.role !== 'follower' || status.term !== request.term
@@ -1371,7 +1403,7 @@ export class OrchestrationDaemon {
       const existing = this.remoteOperatorRegistrations.get(server.id)
       if (existing?.signature === signature) continue
       try {
-        const operators = await createRemotePhysicalOperators(server)
+        const operators = await createRemotePhysicalOperators(server, this.store)
         if (existing !== undefined) {
           await Promise.allSettled(existing.dispose.map(dispose => dispose()))
           this.remoteOperatorRegistrations.delete(server.id)
@@ -1387,24 +1419,42 @@ export class OrchestrationDaemon {
     this.remoteOperatorRefreshAt = Date.now() + 5_000
   }
 
-  private async tick(): Promise<void> {
-    if (this.ticking || this.closing) return
-    this.ticking = true
-    try {
-      await this.refreshClusterAuthority()
-      if (Date.now() >= this.remoteOperatorRefreshAt) await this.refreshRemoteOperators(false)
-      await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
-      await this.reconcile()
-      await this.ctx.rlmRuntime.pumpMessages()
-      await this.ctx.rlmRuntime.pumpHeartbeats()
-      if (this.cluster !== undefined && !this.cluster.canSchedule()) return
-      for (const record of this.store.listRuns()) {
-        if (record.snapshot.state !== 'running') continue
-        await this.advance(record)
-      }
-    } finally {
-      this.ticking = false
+  private tick(): Promise<void> {
+    if (this.closing) return Promise.resolve()
+    if (this.tickInFlight !== undefined) return this.tickInFlight
+    const run = this.runTick().finally(() => {
+      if (this.tickInFlight === run) this.tickInFlight = undefined
+    })
+    this.tickInFlight = run
+    return run
+  }
+
+  private async runTick(): Promise<void> {
+    await this.refreshClusterAuthority()
+    if (Date.now() >= this.remoteOperatorRefreshAt) await this.refreshRemoteOperators(false)
+    await Promise.all([...this.active.values()].map(active => this.syncActiveProgress(active)))
+    await this.reconcile()
+    await this.ctx.rlmRuntime.pumpMessages()
+    await this.ctx.rlmRuntime.pumpHeartbeats()
+    if (this.cluster !== undefined && !this.cluster.canSchedule()) return
+    for (const record of this.store.listRuns()) {
+      if (record.snapshot.state !== 'running') continue
+      await this.advance(record)
     }
+  }
+
+  private triggerTick(): void {
+    void this.tick().catch((error: unknown) => { this.recordSchedulerFatal(error) })
+  }
+
+  private recordSchedulerFatal(error: unknown): void {
+    const message = (error instanceof Error ? error.message : String(error)).slice(0, 4_096)
+    this.ctx.logger.error(`orchestration scheduler tick failed: ${message}`)
+    writeFileSync(join(this.options.root, 'scheduler-fatal.json'), `${JSON.stringify({
+      version: 1,
+      time: now(),
+      message,
+    })}\n`, { mode: 0o600 })
   }
 
   private async rebindRecoveredRlmHosts(): Promise<void> {
@@ -1839,6 +1889,7 @@ export class OrchestrationDaemon {
         operatorId,
         mode: selectedProvider === undefined ? 'model-worker' as const : 'resident' as const,
         ...allocation.profile === undefined ? {} : { profile: allocation.profile },
+        nativeToolPolicy: nativeToolPolicy(capabilityPlan),
         injectionBoundaries: selectedProvider?.injectionBoundaries ?? [],
       },
       effectiveReadScopes: capabilityPlan.effectiveReadScopes,
@@ -1922,6 +1973,7 @@ export class OrchestrationDaemon {
         parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
+        nativeToolPolicy: plan.operatorPlan.nativeToolPolicy,
       })
       const receipt = acceptedReceipt(run, String(plan.executionId))
       const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', turnId: receipt.turnId, updatedAt: now() }
@@ -1954,7 +2006,7 @@ export class OrchestrationDaemon {
           await this.syncActiveProgress(active)
           this.failAttempt(active, error)
         },
-      ).finally(() => { timeout.clearTimeout(); this.active.delete(key); void this.tick() })
+      ).finally(() => { timeout.clearTimeout(); this.active.delete(key); this.triggerTick() })
     } catch (error) {
       timeout.clearTimeout()
       this.failDispatch(acceptedAttempt, error)
@@ -3433,7 +3485,7 @@ export class OrchestrationDaemon {
     void active.run.result.then(
       async (value) => { if (!this.closing) await this.settleAttempt(active, value) },
       (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
-    ).finally(() => { this.active.delete(key); void this.tick() })
+    ).finally(() => { this.active.delete(key); this.triggerTick() })
   }
 
   private trackDelegatedAttempt(
@@ -3892,7 +3944,7 @@ export class OrchestrationDaemon {
             await this.syncActiveProgress(recovered)
             this.failAttempt(recovered, error)
           },
-        ).finally(() => { this.active.delete(key); void this.tick() })
+        ).finally(() => { this.active.delete(key); this.triggerTick() })
       } catch (error) {
         const code = error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE'
         if (code === 'COMMAND_INDETERMINATE') {

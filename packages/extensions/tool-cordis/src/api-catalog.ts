@@ -4880,6 +4880,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorModelToolV1 {\n    readonly name: string;\n    readonly description: string;\n    readonly inputSchema: Readonly<Record<string, unknown>>;\n}',
   },
   {
+    name: 'PhysicalOperatorNativeToolPolicy',
+    declaration: 'export type PhysicalOperatorNativeToolPolicy = \'inherit\' | \'disabled\';',
+  },
+  {
     name: 'PhysicalOperatorProgressEvent',
     declaration: 'export interface PhysicalOperatorProgressEvent {\n    readonly sequence: number;\n    readonly type: string;\n    readonly time: string;\n    readonly data: Readonly<Record<string, unknown>>;\n}',
   },
@@ -4925,7 +4929,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',
@@ -5109,7 +5113,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ResidentExecutionProfile',

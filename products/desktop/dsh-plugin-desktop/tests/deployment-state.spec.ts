@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   connectFrontendServer,
   DesktopDeploymentStateStore,
+  DesktopFrontendLeaderMonitor,
   type DesktopDeploymentRequest,
   type DesktopSecretStorage,
 } from '../src/deployment-state.ts'
@@ -251,6 +252,35 @@ describe('DesktopDeploymentStateStore', () => {
       state: { activeServerId: second.activeServerId },
       server: { label: 'Leader mini' },
     })
+  })
+
+  it('rebinds to a newly elected leader without requiring an application restart', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-server-leader-monitor-'))
+    const store = new DesktopDeploymentStateStore(root, secretStorage(), {
+      fetch: async () => { throw new Error('the injected connector owns this probe') },
+    })
+    const follower = await store.configureFrontend({
+      label: 'Follower mini', endpoint: 'http://127.0.0.1:13080', deviceName: 'MacBook',
+    })
+    const leader = await store.configureFrontend({
+      label: 'Leader mini', endpoint: 'http://127.0.0.1:23080', deviceName: 'MacBook',
+    })
+    const mounted: string[] = []
+    const monitor = new DesktopFrontendLeaderMonitor(
+      store,
+      async connection => { mounted.push(connection.server.id) },
+      {
+        intervalMs: 1_000,
+        connect: async (_store, state) => ({
+          state: { ...state, activeServerId: leader.activeServerId },
+          server: state.servers.find(server => server.id === leader.activeServerId)!,
+        }),
+      },
+    )
+    monitor.start(follower.activeServerId)
+    await monitor.pollNow()
+    await monitor.stop()
+    expect(mounted).toEqual([leader.activeServerId])
   })
 
   it('keeps the first reachable follower for read-only access when no leader is reachable', async () => {

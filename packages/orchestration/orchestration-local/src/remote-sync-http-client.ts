@@ -43,6 +43,8 @@ export class RemoteSyncHttpClient {
   declare readonly operatorExecute: RemoteResidentProtocolBindings['operatorExecute']
   /** Inspect one durable remote Resident turn. */
   declare readonly operatorInspect: RemoteResidentProtocolBindings['operatorInspect']
+  /** Read exact content-addressed bytes for one oversized Resident result. */
+  declare readonly operatorArtifact: RemoteResidentProtocolBindings['operatorArtifact']
   /** Read one bounded page of remote Resident progress events. */
   declare readonly operatorEvents: RemoteResidentProtocolBindings['operatorEvents']
   /** Interrupt one active remote Resident turn. */

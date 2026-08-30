@@ -20,6 +20,39 @@ describe('remote operator catalog', () => {
     ])
   })
 
+  it('derives remote capacity from cluster membership and rejects a second manual catalog', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-remote-operators-cluster-'))
+    await writeFile(join(root, 'cluster.json'), JSON.stringify({
+      version: 1,
+      nodeId: 'book',
+      members: [
+        {
+          id: 'book', label: 'MacBook', endpoint: 'http://127.0.0.1:13080',
+          remoteExecution: {
+            enabled: true,
+            repositories: [{ repository: 'github.com/lisihao/project', source: '/srv/git/project' }],
+          },
+        },
+        {
+          id: 'mini', label: 'Mac mini', endpoint: 'http://100.114.161.62:13080',
+          remoteExecution: {
+            enabled: true, pollIntervalMs: 300,
+            repositories: [{ repository: 'git@github.com:lisihao/project.git', source: '/srv/git/project' }],
+          },
+        },
+        {
+          id: 'observer', label: 'Observer', endpoint: 'http://observer.example',
+          remoteExecution: { enabled: false, repositories: [] },
+        },
+      ],
+    }))
+    expect(readRemoteOperatorCatalog(root)).toEqual([{
+      id: 'mini', label: 'Mac mini', endpoint: 'http://100.114.161.62:13080/', pollIntervalMs: 300,
+    }])
+    await writeFile(join(root, 'remote-operators.json'), JSON.stringify({ version: 1, servers: [] }))
+    expect(() => readRemoteOperatorCatalog(root)).toThrow('cannot both own capacity')
+  })
+
   it('fails loud for ambiguous or unsupported catalogs', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-remote-operators-invalid-'))
     await writeFile(join(root, 'remote-operators.json'), JSON.stringify({

@@ -8,7 +8,6 @@ import { interruptedTurnClosers, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence, SessionReplica, SessionReplicationResult } from '@deepseek-ai/dsh-session-persistence'
 import type {
   ResidentEventPage,
-  ResidentExecuteRequest,
   ResidentOperatorService,
   ResidentProviderStatus,
   ResidentTurnSnapshot,
@@ -36,7 +35,11 @@ import {
   type RemoteSessionReplicaApplyResult, type RemoteSessionReplicaDocument,
   type RemoteSessionReplicaSummary,
   type RemoteResidentAcceptedTurn,
+  type RemoteResidentExecuteRequest,
+  type RemoteResidentArtifactDocument,
+  type RemoteSyncProtocolVersion,
 } from './remote-sync.ts'
+import type { RemoteOperatorHostService } from './remote-operator-host.ts'
 import type { RemoteDeviceScope } from './remote-auth-wire.ts'
 
 type SourceStream = 'mux' | 'host'
@@ -195,6 +198,10 @@ export class RemoteSyncHub {
       OrchestrationService,
       'clusterStatus' | 'clusterRequestVote' | 'clusterHeartbeat' | 'clusterExportReplica' | 'clusterInstallReplica'
     > | undefined,
+    private readonly remoteOperatorHost?: () => Pick<
+      RemoteOperatorHostService,
+      'qualification' | 'materializeWorkspace' | 'renewWorkspace' | 'releaseWorkspace' | 'readResidentArtifact'
+    > | undefined,
   ) {
     this.journal = new RemoteSyncJournal(capacity)
     this.sourceLoop = this.runSources()
@@ -204,17 +211,26 @@ export class RemoteSyncHub {
    * Identify the authenticated Server generation before transferring its projections.
    * @param signal - request cancellation.
    * @param scope - authenticated device scope used to derive capabilities.
+   * @param protocol - negotiated same-major projection protocol.
    * @returns the stable Server description for the sampled generation.
    */
-  async describe(signal: AbortSignal, scope: RemoteDeviceScope): Promise<RemoteSyncDescription> {
+  async describe(
+    signal: AbortSignal,
+    scope: RemoteDeviceScope,
+    protocol: RemoteSyncProtocolVersion = REMOTE_SYNC_PROTOCOL,
+  ): Promise<RemoteSyncDescription> {
     while (!signal.aborted) {
       const cursor = this.journal.cursor()
       const host = await this.api.host.describe({ rpcId: RpcId(randomUUID()), payload: {} })
       if (!host.result.ok) throw new Error(`host.describe failed: ${host.result.error.message}`)
       const cluster = await this.orchestration?.()?.clusterStatus()
+      const remoteExecution = this.remoteOperatorHost?.()
+      const remoteExecutionAvailable = remoteExecution === undefined
+        ? false
+        : (await remoteExecution.qualification()).available
       if (this.journal.cursor().deploymentId !== cursor.deploymentId) continue
       return {
-        protocol: REMOTE_SYNC_PROTOCOL,
+        protocol,
         deploymentId: cursor.deploymentId,
         cursor,
         describedAt: new Date().toISOString(),
@@ -228,7 +244,17 @@ export class RemoteSyncHub {
               : ['session.replicate.read' as const, 'session.replicate.write' as const],
             ...this.resident === undefined
               ? []
-              : ['operator.read' as const, 'operator.execute' as const, 'operator.interrupt' as const],
+              : [
+                'operator.read' as const,
+                'operator.interrupt' as const,
+                ...!remoteExecutionAvailable || protocol.minor < REMOTE_SYNC_PROTOCOL.minor
+                  ? []
+                  : [
+                    'operator.execute' as const,
+                    'operator.workspace.materialize' as const,
+                    'operator.artifact.read' as const,
+                  ],
+              ],
             // A mounted orchestration Provider also serves standalone Servers;
             // only a concrete cluster status means cluster control exists.
             ...scope !== 'admin' || cluster === undefined
@@ -253,9 +279,13 @@ export class RemoteSyncHub {
   /**
    * Build a gap-free snapshot: the cursor is sampled before projection reads.
    * @param signal - request cancellation.
+   * @param protocol - negotiated same-major projection protocol.
    * @returns the Server-owned projection snapshot.
    */
-  async snapshot(signal: AbortSignal): Promise<RemoteSyncSnapshot> {
+  async snapshot(
+    signal: AbortSignal,
+    protocol: RemoteSyncProtocolVersion = REMOTE_SYNC_PROTOCOL,
+  ): Promise<RemoteSyncSnapshot> {
     while (!signal.aborted) {
       const cursor = this.journal.cursor()
       const [host, sessions, workspaces] = await Promise.all([
@@ -268,7 +298,7 @@ export class RemoteSyncHub {
       if (!workspaces.result.ok) throw new Error(`workspace.list failed: ${workspaces.result.error.message}`)
       if (this.journal.cursor().deploymentId !== cursor.deploymentId) continue
       return {
-        protocol: REMOTE_SYNC_PROTOCOL,
+        protocol,
         deploymentId: cursor.deploymentId,
         cursor,
         capturedAt: new Date().toISOString(),
@@ -340,10 +370,22 @@ export class RemoteSyncHub {
    * @returns the durable accepted command receipt.
    */
   async operatorExecute(
-    request: Omit<ResidentExecuteRequest, 'signal' | 'modelToolBridge'>,
+    request: RemoteResidentExecuteRequest,
   ): Promise<RemoteResidentAcceptedTurn> {
+    const host = this.expectRemoteOperatorHost()
+    const qualification = await host.qualification()
+    if (!qualification.available) throw new Error(qualification.reason ?? 'remote execution host is unavailable')
+    const materialized = await host.materializeWorkspace(request.workspaceIdentity, request.commandId)
     const turn = await this.expectResident().execute({
-      ...request,
+      commandId: request.commandId as never,
+      operatorId: request.operatorId,
+      workspace: materialized.path,
+      laneId: request.laneId,
+      ...request.taskLabel === undefined ? {} : { taskLabel: request.taskLabel },
+      prompt: request.prompt,
+      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
+      ...request.profile === undefined ? {} : { profile: request.profile },
+      ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
       signal: new AbortController().signal,
     })
     const accepted = {
@@ -356,12 +398,28 @@ export class RemoteSyncHub {
   }
 
   /**
+   * Read one immutable oversized Resident result through the host-local artifact Provider.
+   * @param ref - content-addressed result reference returned by turn inspection.
+   * @param signal - optional caller cancellation signal.
+   * @returns exact JSON bytes for sender-side digest verification and local CAS persistence.
+   */
+  operatorReadArtifact(ref: string, signal?: AbortSignal): Promise<RemoteResidentArtifactDocument> {
+    return this.expectRemoteOperatorHost().readResidentArtifact(ref, signal)
+  }
+
+  /**
    * Reattach to one durable remote receipt after any Frontend or network restart.
    * @param turnId - durable Resident turn identity.
    * @returns the current terminal or in-flight turn projection.
    */
-  operatorInspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
-    return this.expectResident().inspectTurn(turnId)
+  async operatorInspectTurn(turnId: string): Promise<ResidentTurnSnapshot> {
+    const turn = await this.expectResident().inspectTurn(turnId)
+    const host = this.remoteOperatorHost?.()
+    if (host !== undefined) {
+      if (turn.state === 'settled') await host.releaseWorkspace(String(turn.commandId))
+      else await host.renewWorkspace(String(turn.commandId))
+    }
+    return turn
   }
 
   /**
@@ -485,6 +543,15 @@ export class RemoteSyncHub {
   private expectResident(): Pick<ResidentOperatorService, 'providers' | 'execute' | 'inspectTurn' | 'readEvents' | 'interrupt'> {
     if (this.resident === undefined) throw new Error('remote Resident execution is unavailable')
     return this.resident
+  }
+
+  private expectRemoteOperatorHost(): Pick<
+    RemoteOperatorHostService,
+    'qualification' | 'materializeWorkspace' | 'renewWorkspace' | 'releaseWorkspace' | 'readResidentArtifact'
+  > {
+    const service = this.remoteOperatorHost?.()
+    if (service === undefined) throw new Error('remote operator workspace and artifact host is unavailable')
+    return service
   }
 
   private expectOrchestration(): Pick<

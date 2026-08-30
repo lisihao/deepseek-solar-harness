@@ -93,7 +93,7 @@ describe('desktop profile composition', () => {
     }))
     expect(rows.find(row => row.id === 'connection')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-client-connection',
-      inject: ['webRuntime', 'webStartup', 'residentOperators', 'orchestrations'],
+      inject: ['webRuntime', 'webStartup', 'residentOperators', 'orchestrations', 'remoteOperatorHost'],
     }))
     expect(rows.find(row => row.id === 'ui-remote-modules')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-client-ui-remote-modules',

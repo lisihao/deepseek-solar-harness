@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RemotePhysicalOperatorServer } from './remote-physical-operator.ts'
+import { readOrchestrationClusterConfig } from './cluster.ts'
 
 /** Current persisted remote execution member catalog schema version. */
 export const REMOTE_OPERATOR_CATALOG_VERSION = 1
@@ -26,6 +27,23 @@ function string(value: unknown, label: string): string {
  */
 export function readRemoteOperatorCatalog(root: string): RemotePhysicalOperatorServer[] {
   const path = join(root, 'remote-operators.json')
+  const cluster = readOrchestrationClusterConfig(root)
+  const clusterOwnsCapacity = cluster?.members.some(member => member.remoteExecution !== undefined) === true
+  if (clusterOwnsCapacity) {
+    if (existsSync(path)) {
+      throw new Error('cluster remoteExecution membership and remote-operators.json cannot both own capacity')
+    }
+    return cluster.members
+      .filter(member => member.id !== cluster.nodeId && member.remoteExecution?.enabled === true)
+      .map(member => ({
+        id: member.id,
+        label: member.label,
+        endpoint: member.endpoint,
+        ...member.remoteExecution?.pollIntervalMs === undefined
+          ? {}
+          : { pollIntervalMs: member.remoteExecution.pollIntervalMs },
+      }))
+  }
   if (!existsSync(path)) return []
   const payload: unknown = JSON.parse(readFileSync(path, 'utf8'))
   const catalog = record(payload, 'remote operator catalog')

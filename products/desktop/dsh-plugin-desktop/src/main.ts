@@ -23,8 +23,10 @@ import { packagedDependencyPath, unpackedAsarPath } from './packaged-runtime-pat
 import {
   connectFrontendServer,
   DesktopDeploymentStateStore,
+  DesktopFrontendLeaderMonitor,
   DesktopRemoteAccessSession,
   type DesktopDeploymentState,
+  type DesktopFrontendConnection,
 } from './deployment-state.ts'
 import { parseFrontendBillingBaseline, type FrontendBillingBaseline } from './frontend-billing.ts'
 import { FrontendSetupController } from './frontend-setup.ts'
@@ -99,6 +101,7 @@ async function start(): Promise<void> {
   let disposeNativeProductRuntime: (() => void) | undefined
   let disposeFrontend: (() => Promise<void>) | undefined
   let frontendAccess: DesktopRemoteAccessSession | undefined
+  let frontendLeaderMonitor: DesktopFrontendLeaderMonitor | undefined
   let frontendSetup: FrontendSetupController | undefined
   let gitSync: DesktopGitSyncController | undefined
   let sessionSync: DesktopSessionSyncController | undefined
@@ -143,6 +146,7 @@ async function start(): Promise<void> {
   shutdown = createDesktopShutdown(
     async () => {
       try {
+        await frontendLeaderMonitor?.stop()
         await disposeFrontend?.()
       } finally {
         try {
@@ -178,6 +182,7 @@ async function start(): Promise<void> {
   }
   installFailLoud(BIN_NAME, failLoudProcess, async () => {
     try {
+      await frontendLeaderMonitor?.stop()
       await disposeFrontend?.()
     } finally {
       try {
@@ -241,27 +246,51 @@ async function start(): Promise<void> {
       () => runtime.requestRestart(),
     )
     if (deploymentState.role === 'frontend') {
-      let state = deploymentState
-      let access: DesktopRemoteAccessSession | undefined
-      try {
-        const connected = await connectFrontendServer(deploymentStore, state, (candidate, cause) => {
-          process.stderr.write(
-            `${BIN_NAME}: Frontend Server ${candidate.label} unavailable: ${cause instanceof Error ? cause.message : String(cause)}\n`,
-          )
-        })
-        state = connected.state
-        deploymentState = connected.state
+      const billingBaseline = await readFrontendBillingBaseline()
+      const reportCandidateError = (candidate: { label: string }, cause: unknown): void => {
+        process.stderr.write(
+          `${BIN_NAME}: Frontend Server ${candidate.label} unavailable: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+      }
+      const mountFrontendConnection = async (connected: DesktopFrontendConnection): Promise<void> => {
+        const state = connected.state
         const server = connected.server
         const connectedAccess = connected.access
-        access = connectedAccess
-        frontendAccess = access
         const endpoint = new URL(server.endpoint)
         const renderer = new URL(endpoint)
         renderer.searchParams.set('dsh-deployment-role', 'frontend')
         renderer.searchParams.set('dsh-desktop-mode', state.presentation)
         renderer.searchParams.set('dsh-desktop-platform', process.platform)
         renderer.searchParams.set('dsh-desktop-version', runtime.updates.currentVersion)
-        const billingBaseline = await readFrontendBillingBaseline()
+        await disposeFrontend?.()
+        frontendAccess?.stop()
+        disposeFrontend = undefined
+        frontendAccess = undefined
+        const billingSources = state.servers.map(candidate => {
+          if (candidate.authMode !== 'paired') {
+            return { id: candidate.id, label: candidate.label, origin: candidate.endpoint }
+          }
+          if (candidate.id === server.id && connectedAccess !== undefined) {
+            return {
+              id: candidate.id,
+              label: candidate.label,
+              origin: candidate.endpoint,
+              accessToken: () => connectedAccess.accessToken(),
+            }
+          }
+          let cached: Awaited<ReturnType<DesktopDeploymentStateStore['exchange']>> | undefined
+          return {
+            id: candidate.id,
+            label: candidate.label,
+            origin: candidate.endpoint,
+            accessToken: async () => {
+              if (cached === undefined || Date.parse(cached.expiresAt) - Date.now() < 60_000) {
+                cached = await deploymentStore!.exchange(candidate)
+              }
+              return cached.accessToken
+            },
+          }
+        })
         const release = runtime.schedule({
           mode: state.presentation,
           width: 1280,
@@ -287,7 +316,7 @@ async function start(): Promise<void> {
             frontendBilling: {
               origin: endpoint.origin,
               baseline: billingBaseline,
-              ...(connectedAccess === undefined ? {} : { accessToken: () => connectedAccess.accessToken() }),
+              sources: billingSources,
             },
           },
           readThemeSource: () => 'system',
@@ -302,16 +331,45 @@ async function start(): Promise<void> {
           },
           requestConfigureDeployment: () => frontendSetup!.open(),
         })
-        disposeFrontend = release
-        await runtime.mountScheduled()
+        try {
+          disposeFrontend = release
+          frontendAccess = connectedAccess
+          deploymentState = connected.state
+          await runtime.mountScheduled()
+        } catch (cause) {
+          await release()
+          connectedAccess?.stop()
+          if (disposeFrontend === release) disposeFrontend = undefined
+          if (frontendAccess === connectedAccess) frontendAccess = undefined
+          throw cause
+        }
+      }
+      let connectedServerId: string | undefined
+      try {
+        const connected = await connectFrontendServer(deploymentStore, deploymentState, reportCandidateError)
+        await mountFrontendConnection(connected)
+        connectedServerId = connected.server.id
       } catch (cause) {
-        access?.stop()
         frontendAccess = undefined
         process.stderr.write(
           `${BIN_NAME}: unable to open remote Frontend: ${cause instanceof Error ? cause.message : String(cause)}\n`,
         )
         await frontendSetup.open()
       }
+      frontendLeaderMonitor = new DesktopFrontendLeaderMonitor(
+        deploymentStore,
+        mountFrontendConnection,
+        {
+          intervalMs: 10_000,
+          onCandidateError: reportCandidateError,
+          onMonitorError: cause => {
+            process.stderr.write(
+              `${BIN_NAME}: Frontend leader monitor failed: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+            )
+          },
+        },
+      )
+      frontendLeaderMonitor.start(connectedServerId)
       return
     }
     const electronVersion = process.versions.electron

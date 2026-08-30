@@ -29,7 +29,13 @@ import { ConnectionRpcHttpError, HostConnectionService } from './rpc-host.ts'
 import type { ConnectionRpcRequestContext } from './rpc.ts'
 import { REMOTE_AUTH_RPC_CHANNEL } from './remote-auth-wire.ts'
 import { RemoteSyncHub } from './remote-sync-host.ts'
-import { REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_RPC_CHANNEL } from './remote-sync.ts'
+import {
+  canonicalRemoteRepositoryIdentity,
+  REMOTE_SYNC_COMPATIBLE_MINOR, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
+  type RemoteResidentExecuteRequest,
+  type RemoteSyncProtocolVersion,
+  type RemoteWorkspaceIdentityV1,
+} from './remote-sync.ts'
 import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink.ts'
 
 export type {
@@ -43,6 +49,8 @@ export type {
 } from './rpc.ts'
 export { HostConnectionService } from './rpc-host.ts'
 export { REMOTE_AUTH_RPC_CHANNEL } from './remote-auth-wire.ts'
+export { RemoteOperatorHostService } from './remote-operator-host.ts'
+export type { RemoteMaterializedWorkspaceV1, RemoteOperatorHostQualification } from './remote-operator-host.ts'
 export type {
   RemoteAccessSession, RemoteDeviceCredential, RemoteDeviceScope,
   RemotePairingChallenge,
@@ -50,19 +58,20 @@ export type {
 
 export { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 export {
-  REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
-  bindRemoteResidentProtocol, RemoteResidentProtocolClient,
-  parseRemoteResidentAcceptedTurn, parseRemoteResidentEventPage, parseRemoteResidentProviders, parseRemoteResidentTurn,
+  REMOTE_SYNC_COMPATIBLE_MINOR, REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_PROTOCOL, REMOTE_SYNC_RPC_CHANNEL,
+  bindRemoteResidentProtocol, canonicalRemoteRepositoryIdentity, RemoteResidentProtocolClient,
+  parseRemoteResidentAcceptedTurn, parseRemoteResidentArtifact, parseRemoteResidentEventPage,
+  parseRemoteResidentProviders, parseRemoteResidentResult, parseRemoteResidentTurn,
   parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
   parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
 } from './remote-sync.ts'
 export type {
-  RemoteResidentAcceptedTurn, RemoteResidentEventPage, RemoteResidentExecuteRequest,
+  RemoteResidentAcceptedTurn, RemoteResidentArtifactDocument, RemoteResidentEventPage, RemoteResidentExecuteRequest,
   RemoteResidentModelOption, RemoteResidentProviderStatus, RemoteResidentQuotaPool,
   RemoteResidentProtocolBindings, RemoteResidentQuotaWindow, RemoteResidentReasoningEffort, RemoteResidentTurnSnapshot,
   RemoteSessionReplicaApplyResult, RemoteSessionReplicaDocument, RemoteSessionReplicaSummary,
   RemoteSyncCapability, RemoteSyncClusterProjection, RemoteSyncCursor, RemoteSyncDescription, RemoteSyncEvent, RemoteSyncFrame,
-  RemoteSyncResyncRequired, RemoteSyncSnapshot,
+  RemoteSyncProtocolVersion, RemoteSyncResyncRequired, RemoteSyncSnapshot, RemoteWorkspaceIdentityV1,
 } from './remote-sync.ts'
 
 /** Stable Cordis plugin name. */
@@ -382,6 +391,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         authCtx.get('sessionPersistence'),
         authCtx.get('residentOperators'),
         () => authCtx.get('orchestrations'),
+        () => authCtx.get('remoteOperatorHost'),
       )
       const removeAuthRpc = connection.rpc.handle(
         REMOTE_AUTH_RPC_CHANNEL,
@@ -401,8 +411,12 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
             requestContext,
             ['cockpit', 'pocket', 'admin'],
           )
-          if (endpoint === 'describe') return { ok: true, value: await hub.describe(signal, access.scope) }
-          if (endpoint === 'snapshot') return { ok: true, value: await hub.snapshot(signal) }
+          if (endpoint === 'describe') {
+            return { ok: true, value: await hub.describe(signal, access.scope, requestedRemoteSyncProtocol(payload)) }
+          }
+          if (endpoint === 'snapshot') {
+            return { ok: true, value: await hub.snapshot(signal, requestedRemoteSyncProtocol(payload)) }
+          }
           if (endpoint === 'replica.list') {
             if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
             return { ok: true, value: await hub.replicaList(signal) }
@@ -441,20 +455,24 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
           if (endpoint === 'operator.execute') {
             if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
             const body = recordPayload(payload)
+            requireCurrentRemoteSyncProtocol(body.protocol)
             if (!Array.isArray(body.prompt)) throw new ConnectionRpcHttpError(400, 'prompt must be an array')
             if (body.modelToolBridge !== undefined) {
               throw new ConnectionRpcHttpError(400, 'remote model-tool bridges are not supported')
             }
             const profile = body.profile === undefined ? undefined : residentProfile(body.profile)
-            const request: Omit<ResidentExecuteRequest, 'signal' | 'modelToolBridge'> = {
-              commandId: requiredString(body.commandId, 'commandId') as never,
+            const request: RemoteResidentExecuteRequest = {
+              commandId: requiredString(body.commandId, 'commandId'),
               operatorId: requiredString(body.operatorId, 'operatorId'),
-              workspace: requiredString(body.workspace, 'workspace'),
+              workspaceIdentity: remoteWorkspaceIdentity(body.workspaceIdentity),
               laneId: requiredString(body.laneId, 'laneId'),
               prompt: body.prompt as ContentBlock[],
               ...(typeof body.taskLabel === 'string' ? { taskLabel: body.taskLabel } : {}),
               ...(typeof body.systemPrompt === 'string' ? { systemPrompt: body.systemPrompt } : {}),
               ...profile === undefined ? {} : { profile },
+              ...body.nativeToolPolicy === undefined
+                ? {}
+                : { nativeToolPolicy: residentNativeToolPolicy(body.nativeToolPolicy) },
             }
             return { ok: true, value: await hub.operatorExecute(request) }
           }
@@ -475,6 +493,12 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
                 signal,
               ),
             }
+          }
+          if (endpoint === 'operator.artifact.read') {
+            if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
+            const body = recordPayload(payload)
+            requireCurrentRemoteSyncProtocol(body.protocol)
+            return { ok: true, value: await hub.operatorReadArtifact(requiredString(body.ref, 'ref'), signal) }
           }
           if (endpoint === 'operator.interrupt') {
             if (access.scope === 'pocket') throw new ConnectionRpcHttpError(403, 'forbidden')
@@ -735,6 +759,28 @@ function recordPayload(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
+function requestedRemoteSyncProtocol(value: unknown): RemoteSyncProtocolVersion {
+  const payload = recordPayload(value)
+  if (payload.protocol === undefined) {
+    return { major: REMOTE_SYNC_PROTOCOL.major, minor: REMOTE_SYNC_COMPATIBLE_MINOR }
+  }
+  const protocol = recordPayload(payload.protocol)
+  if (protocol.major !== REMOTE_SYNC_PROTOCOL.major
+    || (protocol.minor !== REMOTE_SYNC_COMPATIBLE_MINOR && protocol.minor !== REMOTE_SYNC_PROTOCOL.minor)) {
+    throw new ConnectionRpcHttpError(409, 'remote sync protocol mismatch')
+  }
+  return { major: REMOTE_SYNC_PROTOCOL.major, minor: protocol.minor }
+}
+
+function requireCurrentRemoteSyncProtocol(value: unknown): void {
+  const protocol = value === undefined
+    ? { major: REMOTE_SYNC_PROTOCOL.major, minor: REMOTE_SYNC_COMPATIBLE_MINOR }
+    : recordPayload(value)
+  if (protocol.major !== REMOTE_SYNC_PROTOCOL.major || protocol.minor !== REMOTE_SYNC_PROTOCOL.minor) {
+    throw new ConnectionRpcHttpError(409, 'remote operator execution requires remote sync protocol 1.4')
+  }
+}
+
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.length === 0) {
     throw new ConnectionRpcHttpError(400, `${field} must be a non-empty string`)
@@ -758,6 +804,38 @@ function residentProfile(value: unknown): NonNullable<ResidentExecuteRequest['pr
     throw new ConnectionRpcHttpError(400, 'profile.effort is invalid')
   }
   return { model, ...effort === undefined ? {} : { effort } }
+}
+
+function residentNativeToolPolicy(value: unknown): NonNullable<ResidentExecuteRequest['nativeToolPolicy']> {
+  if (value !== 'inherit' && value !== 'disabled') {
+    throw new ConnectionRpcHttpError(400, 'nativeToolPolicy must be inherit or disabled')
+  }
+  return value
+}
+
+function remoteWorkspaceIdentity(value: unknown): RemoteWorkspaceIdentityV1 {
+  const record = recordPayload(value)
+  if (record.version !== 1) throw new ConnectionRpcHttpError(400, 'workspaceIdentity.version must be 1')
+  const commit = requiredString(record.commit, 'workspaceIdentity.commit')
+  if (!/^[a-f0-9]{40}$/u.test(commit)) {
+    throw new ConnectionRpcHttpError(400, 'workspaceIdentity.commit must be a lowercase full Git SHA')
+  }
+  const subdir = record.subdir === undefined ? undefined : requiredString(record.subdir, 'workspaceIdentity.subdir')
+  if (subdir !== undefined && (subdir.startsWith('/') || subdir.split('/').some(segment => segment === '' || segment === '.' || segment === '..'))) {
+    throw new ConnectionRpcHttpError(400, 'workspaceIdentity.subdir must be a normalized repository-relative path')
+  }
+  let repository: string
+  try {
+    repository = canonicalRemoteRepositoryIdentity(requiredString(record.repository, 'workspaceIdentity.repository'))
+  } catch (cause) {
+    throw new ConnectionRpcHttpError(400, cause instanceof Error ? cause.message : String(cause))
+  }
+  return {
+    version: 1,
+    repository,
+    commit,
+    ...subdir === undefined ? {} : { subdir },
+  }
 }
 
 function remoteScope(value: unknown): RemoteDeviceScope {

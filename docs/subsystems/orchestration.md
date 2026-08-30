@@ -432,7 +432,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:632`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:634`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 

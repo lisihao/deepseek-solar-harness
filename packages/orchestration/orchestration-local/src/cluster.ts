@@ -1,7 +1,7 @@
 /** Majority-lease election primitives for the single-authority TaskGraph Scheduler. */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import type {
   OrchestrationClusterHeartbeatRequest,
   OrchestrationClusterHeartbeatResponse,
@@ -12,6 +12,7 @@ import type {
   OrchestrationClusterVoteRequest,
   OrchestrationClusterVoteResponse,
 } from '@deepseek-ai/dsh-orchestration'
+import { canonicalRemoteRepositoryIdentity } from '@deepseek-ai/dsh-client-connection'
 import { RemoteSyncHttpClient } from './remote-sync-http-client.ts'
 export type {
   OrchestrationClusterHeartbeatRequest,
@@ -32,6 +33,16 @@ export interface OrchestrationClusterMember {
   readonly id: string
   readonly label: string
   readonly endpoint: string
+  /** Optional remote execution capacity and Server-local Git source allowlist. */
+  readonly remoteExecution?: {
+    readonly enabled: boolean
+    readonly pollIntervalMs?: number
+    readonly repositories: readonly {
+      readonly repository: string
+      /** Server-local checkout path or credential-free Git URL; never sent over Remote Sync. */
+      readonly source: string
+    }[]
+  }
 }
 
 /** Identical membership installed on every Server in one cluster. */
@@ -136,10 +147,14 @@ export function readOrchestrationClusterConfig(root: string): OrchestrationClust
     if (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') {
       throw new Error(`orchestration cluster member ${String(index)}.endpoint must use http or https`)
     }
+    const remoteExecution = member.remoteExecution === undefined
+      ? undefined
+      : parseRemoteExecution(member.remoteExecution, `orchestration cluster member ${String(index)}.remoteExecution`)
     return {
       id,
       label: nonBlank(member.label, `orchestration cluster member ${String(index)}.label`),
       endpoint: endpoint.href,
+      ...remoteExecution === undefined ? {} : { remoteExecution },
     }
   })
   if (!ids.has(nodeId)) throw new Error(`orchestration cluster nodeId "${nodeId}" is absent from members`)
@@ -150,9 +165,61 @@ export function readOrchestrationClusterConfig(root: string): OrchestrationClust
   return { version: ORCHESTRATION_CLUSTER_CONFIG_VERSION, nodeId, members, leaseMs: Number(leaseMs) }
 }
 
+function parseRemoteExecution(
+  value: unknown,
+  label: string,
+): NonNullable<OrchestrationClusterMember['remoteExecution']> {
+  const config = object(value, label)
+  if (typeof config.enabled !== 'boolean') throw new Error(`${label}.enabled must be boolean`)
+  if (!Array.isArray(config.repositories)) throw new Error(`${label}.repositories must be an array`)
+  if (config.enabled && config.repositories.length === 0) {
+    throw new Error(`${label}.repositories must not be empty when remote execution is enabled`)
+  }
+  const identities = new Set<string>()
+  const repositories = config.repositories.map((entry, index) => {
+    const repository = object(entry, `${label}.repositories[${String(index)}]`)
+    const identity = canonicalRemoteRepositoryIdentity(nonBlank(
+      repository.repository,
+      `${label}.repositories[${String(index)}].repository`,
+    ))
+    if (identities.has(identity)) throw new Error(`${label} contains duplicate repository "${identity}"`)
+    identities.add(identity)
+    const source = nonBlank(repository.source, `${label}.repositories[${String(index)}].source`)
+    if (!isAbsolute(source)) {
+      if (!source.includes('://')) {
+        throw new Error(`${label}.repositories[${String(index)}].source must be an absolute local path or credential-free https/ssh URL`)
+      }
+      const url = new URL(source)
+      if (url.protocol !== 'https:' && url.protocol !== 'ssh:') {
+        throw new Error(`${label}.repositories[${String(index)}].source must use https or ssh`)
+      }
+      if (url.username.length > 0 || url.password.length > 0) {
+        throw new Error(`${label}.repositories[${String(index)}].source must not contain credentials`)
+      }
+      if (canonicalRemoteRepositoryIdentity(source) !== identity) {
+        throw new Error(`${label}.repositories[${String(index)}].source must identify repository "${identity}"`)
+      }
+    }
+    return { repository: identity, source }
+  })
+  const pollIntervalMs = config.pollIntervalMs
+  if (pollIntervalMs !== undefined && (!Number.isSafeInteger(pollIntervalMs) || Number(pollIntervalMs) < 10)) {
+    throw new Error(`${label}.pollIntervalMs must be at least 10`)
+  }
+  return {
+    enabled: config.enabled,
+    ...pollIntervalMs === undefined ? {} : { pollIntervalMs: Number(pollIntervalMs) },
+    repositories,
+  }
+}
+
 /** Majority election state machine. It never schedules or replicates Run state itself. */
 export class OrchestrationClusterElection {
   private state: OrchestrationClusterElectionState
+  private epoch = 0
+  private campaignInFlight: Promise<OrchestrationClusterStatus> | undefined
+  private renewalInFlight: Promise<OrchestrationClusterStatus> | undefined
+  private renewalTerm: number | undefined
   private readonly memberIds: ReadonlySet<string>
   private readonly peers: readonly OrchestrationClusterMember[]
 
@@ -242,11 +309,22 @@ export class OrchestrationClusterElection {
    * @returns cluster status after the election and initial lease attempt.
    */
   async campaign(): Promise<OrchestrationClusterStatus> {
+    if (this.campaignInFlight !== undefined) return this.campaignInFlight
+    const campaign = this.runCampaign().finally(() => {
+      if (this.campaignInFlight === campaign) this.campaignInFlight = undefined
+    })
+    this.campaignInFlight = campaign
+    return campaign
+  }
+
+  private async runCampaign(): Promise<OrchestrationClusterStatus> {
     if (this.state.leaseUntil > this.clock() && this.state.leaderId !== undefined) return this.status()
     const term = this.state.term + 1
     this.persist({ term, votedFor: this.config.nodeId, role: 'candidate', leaseUntil: 0 })
+    const epoch = this.epoch
     const request = { term, candidateId: this.config.nodeId, commitIndex: this.store.commitIndex() }
     const responses = await Promise.allSettled(this.peers.map(peer => this.transport.requestVote(peer, request)))
+    if (!this.matchesCampaign(epoch, term)) return this.status()
     let votes = 1
     for (const [index, result] of responses.entries()) {
       if (result.status !== 'fulfilled') continue
@@ -255,7 +333,7 @@ export class OrchestrationClusterElection {
       const response = result.value
       this.expectMember(response.voterId)
       if (response.voterId !== peer.id) continue
-      if (response.term > this.state.term) {
+      if (response.term > term) {
         this.persist({ term: response.term, role: 'follower', leaseUntil: 0 })
         return this.status()
       }
@@ -273,15 +351,35 @@ export class OrchestrationClusterElection {
    * @returns cluster status after replication and lease renewal.
    */
   async renew(): Promise<OrchestrationClusterStatus> {
+    if (this.renewalInFlight !== undefined) {
+      const pendingTerm = this.renewalTerm
+      const status = await this.renewalInFlight
+      return pendingTerm === this.state.term ? status : this.renew()
+    }
+    this.renewalTerm = this.state.term
+    const renewal = this.runRenewal().finally(() => {
+      if (this.renewalInFlight === renewal) {
+        this.renewalInFlight = undefined
+        this.renewalTerm = undefined
+      }
+    })
+    this.renewalInFlight = renewal
+    return renewal
+  }
+
+  private async runRenewal(): Promise<OrchestrationClusterStatus> {
     if (this.state.role !== 'leader' || this.state.leaderId !== this.config.nodeId) return this.status()
+    const term = this.state.term
+    const epoch = this.epoch
     const leaseUntil = this.clock() + this.config.leaseMs
     const request = {
-      term: this.state.term,
+      term,
       leaderId: this.config.nodeId,
       commitIndex: this.store.commitIndex(),
       leaseUntil,
     }
     const responses = await Promise.allSettled(this.peers.map(peer => this.transport.heartbeat(peer, request)))
+    if (!this.matchesLeadership(epoch, term)) return this.status()
     let acknowledgements = 1
     for (const [index, result] of responses.entries()) {
       if (result.status !== 'fulfilled') continue
@@ -290,13 +388,13 @@ export class OrchestrationClusterElection {
       const response = result.value
       this.expectMember(response.followerId)
       if (response.followerId !== peer.id) continue
-      if (response.term > this.state.term) {
+      if (response.term > term) {
         this.persist({ term: response.term, role: 'follower', leaseUntil: 0 })
         return this.status()
       }
-      if (response.term !== this.state.term || !response.accepted) continue
+      if (response.term !== term || !response.accepted) continue
       if (response.commitIndex > request.commitIndex) {
-        this.persist({ term: this.state.term, role: 'follower', leaseUntil: 0 })
+        this.persist({ term, role: 'follower', leaseUntil: 0 })
         return this.status()
       }
       if (response.commitIndex === request.commitIndex) {
@@ -304,11 +402,13 @@ export class OrchestrationClusterElection {
         continue
       }
       try {
+        if (!this.matchesLeadership(epoch, term)) return this.status()
         const installed = await this.transport.installReplica(peer, {
           term: request.term,
           leaderId: request.leaderId,
           replica: this.store.exportClusterReplica(),
         })
+        if (!this.matchesLeadership(epoch, term)) return this.status()
         if (installed.commitIndex >= request.commitIndex) acknowledgements += 1
       } catch {
         // A follower that cannot durably install the current state is not quorum evidence.
@@ -317,6 +417,7 @@ export class OrchestrationClusterElection {
     if (acknowledgements < this.quorum) {
       return this.loseQuorum()
     }
+    if (!this.matchesLeadership(epoch, term)) return this.status()
     this.persist({ ...this.state, leaseUntil })
     return this.status()
   }
@@ -330,6 +431,17 @@ export class OrchestrationClusterElection {
   private persist(state: OrchestrationClusterElectionState): void {
     this.store.saveElectionState(state)
     this.state = state
+    this.epoch += 1
+  }
+
+  private matchesCampaign(epoch: number, term: number): boolean {
+    return this.epoch === epoch && this.state.term === term
+      && this.state.role === 'candidate' && this.state.votedFor === this.config.nodeId
+  }
+
+  private matchesLeadership(epoch: number, term: number): boolean {
+    return this.epoch === epoch && this.state.term === term
+      && this.state.role === 'leader' && this.state.leaderId === this.config.nodeId
   }
 
   private voteResponse(granted: boolean): OrchestrationClusterVoteResponse {

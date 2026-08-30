@@ -69,8 +69,11 @@ describe('Frontend billing baseline', () => {
 
   it('serves the merged state through a private loopback redirect target', async () => {
     const request = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-      expect(String(input)).toBe('https://server.example/billing/state')
       expect(new Headers(init?.headers).get('authorization')).toBe('Bearer short-lived')
+      if (String(input).endsWith('/remote-sync/describe')) {
+        return Response.json({ result: { ok: true, value: { deploymentId: 'server-primary' } } })
+      }
+      expect(String(input)).toBe('https://server.example/billing/state')
       return Response.json({
         ok: true,
         totals: {
@@ -86,7 +89,10 @@ describe('Frontend billing baseline', () => {
     const bridge = await startFrontendBillingBridge({
       origin: 'https://server.example',
       baseline,
-      accessToken: () => 'short-lived',
+      sources: [{
+        id: 'primary', label: 'Primary', origin: 'https://server.example',
+        accessToken: () => 'short-lived',
+      }],
       request,
     })
     try {
@@ -100,5 +106,95 @@ describe('Frontend billing baseline', () => {
     } finally {
       await bridge.close()
     }
+  })
+
+  it('aggregates every configured Server and retains unavailable source provenance', async () => {
+    const request = async (input: string | URL | Request): Promise<Response> => {
+      const url = new URL(String(input))
+      const origin = url.origin
+      if (origin === 'https://offline.example') return new Response('offline', { status: 503 })
+      if (url.pathname === '/remote-sync/describe') {
+        return Response.json({ result: { ok: true, value: { deploymentId: origin } } })
+      }
+      const multiplier = origin === 'https://leader.example' ? 1 : 2
+      return Response.json({
+        ok: true,
+        totals: {
+          calls: multiplier,
+          cost: multiplier * 0.5,
+          costUsd: multiplier * 0.07,
+          inputTokens: multiplier * 10,
+          cacheReadTokens: multiplier * 20,
+          outputTokens: multiplier * 30,
+        },
+        today: {
+          calls: multiplier,
+          cost: multiplier * 0.5,
+          costUsd: multiplier * 0.07,
+          inputTokens: multiplier * 10,
+          cacheReadTokens: multiplier * 20,
+          outputTokens: multiplier * 30,
+        },
+        month: {
+          calls: multiplier,
+          cost: multiplier * 0.5,
+          costUsd: multiplier * 0.07,
+          inputTokens: multiplier * 10,
+          cacheReadTokens: multiplier * 20,
+          outputTokens: multiplier * 30,
+        },
+        byModel: {},
+      })
+    }
+    const bridge = await startFrontendBillingBridge({
+      origin: 'https://leader.example',
+      baseline,
+      sources: [
+        { id: 'leader', label: 'Leader', origin: 'https://leader.example' },
+        { id: 'worker', label: 'Worker', origin: 'https://worker.example' },
+        { id: 'offline', label: 'Offline', origin: 'https://offline.example' },
+      ],
+      request,
+    })
+    try {
+      const response = await fetch(bridge.url)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual(expect.objectContaining({
+        totals: expect.objectContaining({ calls: 418, cost: 13.1173779 }),
+        today: expect.objectContaining({ calls: 3, cost: 1.5 }),
+        desktopFrontend: expect.objectContaining({
+          serverTotals: expect.objectContaining({ calls: 3, cost: 1.5 }),
+          sources: [
+            expect.objectContaining({ id: 'leader', status: 'ready', totals: expect.objectContaining({ calls: 1 }) }),
+            expect.objectContaining({ id: 'worker', status: 'ready', totals: expect.objectContaining({ calls: 2 }) }),
+            expect.objectContaining({ id: 'offline', status: 'unavailable', error: 'HTTP 503' }),
+          ],
+        }),
+      }))
+    } finally {
+      await bridge.close()
+    }
+  })
+
+  it('deduplicates two ingress URLs for the same deployment ledger', async () => {
+    const request = async (input: string | URL | Request): Promise<Response> => {
+      const url = new URL(String(input))
+      if (url.pathname === '/remote-sync/describe') {
+        return Response.json({ result: { ok: true, value: { deploymentId: 'same-server' } } })
+      }
+      return Response.json({ ok: true, totals: { calls: 2, cost: 1, costUsd: 0.1, inputTokens: 10, cacheReadTokens: 20, outputTokens: 30 }, ledgerId: 'shared-ledger' })
+    }
+    const bridge = await startFrontendBillingBridge({
+      origin: 'https://one.example', baseline,
+      sources: [
+        { id: 'one', label: 'One', origin: 'https://one.example' },
+        { id: 'two', label: 'Two', origin: 'https://two.example' },
+      ], request,
+    })
+    try {
+      const value = await (await fetch(bridge.url)).json() as any
+      expect(value.totals.calls).toBe(baseline.calls + 2)
+      expect(value.desktopFrontend.sources[1]).toEqual(expect.objectContaining({ deduplicated: true, ledgerId: 'shared-ledger', deadlineMs: 3000, stale: false }))
+    } finally { await bridge.close() }
   })
 })

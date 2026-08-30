@@ -29,10 +29,10 @@ export function mountSolarBrandFooter(environment: DesktopClientEnvironment): ()
   configure.className = 'dshDesktopUseLocalServer'
   configure.dataset.testid = 'desktop-configure-deployment'
   configure.textContent = environment.deploymentRole === 'frontend'
-    ? 'Server / Git 同步'
+    ? '部署 / 同步'
     : '连接远程 Server'
   configure.title = environment.deploymentRole === 'frontend'
-    ? '配置远程 Server 与仅提交态的 GitHub/Tailscale Git 同步'
+    ? '切换本机 Server 或远程 Frontend，配置多个 Server、Git 与闭合 Session 同步'
     : '配置一个或多个远程 DSH Server，或保留本机 Server 模式'
   configure.addEventListener('click', () => { window.location.assign(CONFIGURE_DEPLOYMENT_URL) })
   footer.appendChild(configure)

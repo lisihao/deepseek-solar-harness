@@ -100,6 +100,7 @@ class LocalResidentOperatorService extends ResidentOperatorService {
       ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
+      ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
       signal: request.signal,
     })
     return {

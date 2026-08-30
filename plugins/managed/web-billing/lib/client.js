@@ -399,6 +399,21 @@ window.__ModuleLoader__.load({
 				formatCost(symbol, currency === "USD" ? localBaseline.costUsd : localBaseline.cost),
 				`${t("scope.currentServer")} ${formatCost(symbol, serverTotals === void 0 ? 0 : amountOf(serverTotals))}`
 			];
+			const sourceRows = desktopFrontend === void 0 ? [] : [
+				...(localBaseline === void 0 ? [] : [{
+					id: "desktop-local-history",
+					label: t("scope.frontendHistory"),
+					value: formatCost(symbol, currency === "USD" ? localBaseline.costUsd : localBaseline.cost)
+				}]),
+				...(Array.isArray(desktopFrontend.sources) ? desktopFrontend.sources.map((source) => ({
+					id: source.id,
+					label: source.label,
+					value: source.status === "ready" && source.totals !== void 0
+						? formatCost(symbol, amountOf(source.totals))
+						: t("scope.sourceUnavailable"),
+					detail: source.status === "ready" ? source.origin : `${source.origin} · ${source.error ?? ""}`
+				})) : [])
+			];
 			return react_jsx_runtime.jsxs(react_jsx_runtime.Fragment, {
 				children: [
 					react_jsx_runtime.jsx("div", {
@@ -541,6 +556,19 @@ window.__ModuleLoader__.load({
 												react_jsx_runtime.jsx("span", { className: css_default.cost, children: value })
 											]
 										}, model)),
+										sourceRows.length > 0 && react_jsx_runtime.jsx("div", { className: css_default.sep }),
+										sourceRows.length > 0 && react_jsx_runtime.jsx("div", {
+											className: css_default.section,
+											children: t("scope.sources")
+										}),
+										sourceRows.map((source) => react_jsx_runtime.jsxs("div", {
+											className: css_default.modelRow,
+											title: source.detail,
+											children: [
+												react_jsx_runtime.jsx("span", { className: css_default.name, children: source.label }),
+												react_jsx_runtime.jsx("span", { className: css_default.cost, children: source.value })
+											]
+										}, `source-${source.id}`)),
 										pricingRows.length > 0 && react_jsx_runtime.jsx("div", { className: css_default.sep }),
 										pricingRows.length > 0 && react_jsx_runtime.jsx("div", {
 											className: css_default.section,
@@ -622,6 +650,8 @@ window.__ModuleLoader__.load({
 			"scope.note": "DSH 本地统计（仅本插件捕获的已完成调用），不是 DeepSeek 官方账单",
 			"scope.frontendHistory": "MacBook 历史",
 			"scope.currentServer": "当前 Server",
+			"scope.sources": "费用来源",
+			"scope.sourceUnavailable": "不可用",
 			"tokens.short": "tok",
 			"sidebar.title": "费用"
 		};
@@ -668,6 +698,8 @@ window.__ModuleLoader__.load({
 			"scope.note": "Local DSH estimate (completed calls captured by this plugin), not the official DeepSeek invoice",
 			"scope.frontendHistory": "MacBook history",
 			"scope.currentServer": "Current Server",
+			"scope.sources": "Billing sources",
+			"scope.sourceUnavailable": "Unavailable",
 			"tokens.short": "tok",
 			"sidebar.title": "Usage"
 		};

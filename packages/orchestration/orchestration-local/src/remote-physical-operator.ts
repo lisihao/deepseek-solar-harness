@@ -1,5 +1,6 @@
 /** Remote Resident Provider over the authenticated DSH Server control plane. */
 
+import { createHash } from 'node:crypto'
 import {
   PhysicalOperatorError,
   PhysicalOperatorId,
@@ -10,7 +11,11 @@ import {
   type PhysicalOperatorResidentCatalog,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
-import type { RemoteResidentProviderStatus, RemoteResidentTurnSnapshot } from '@deepseek-ai/dsh-client-connection'
+import {
+  parseRemoteResidentResult,
+  type RemoteResidentProviderStatus,
+  type RemoteResidentTurnSnapshot,
+} from '@deepseek-ai/dsh-client-connection'
 import { residentProgressPage } from '@deepseek-ai/dsh-resident-operator'
 import {
   RemoteSyncHttpClient,
@@ -18,6 +23,17 @@ import {
   RemoteSyncTransportError,
 } from './remote-sync-http-client.ts'
 import { abortableDelay } from './abortable-delay.ts'
+import { identifyRemoteWorkspace } from './remote-execution-host.ts'
+
+const REMOTE_ARTIFACT_TRANSFER_TIMEOUT_MS = 15_000
+import type { OrchestrationStore } from './store.ts'
+
+const WORKSPACE_IDENTITY_TIMEOUT_MS = 10_000
+
+type RemoteResultStore = Pick<
+  OrchestrationStore,
+  'putArtifact' | 'readArtifact' | 'recordArtifact'
+>
 
 /** One independently addressable DSH Server execution member. */
 export interface RemotePhysicalOperatorServer {
@@ -47,6 +63,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
   constructor(
     readonly server: RemotePhysicalOperatorServer,
     provider: RemoteResidentProviderStatus,
+    private readonly resultStore: RemoteResultStore,
     request: typeof fetch = globalThis.fetch,
   ) {
     this.provider = provider
@@ -120,17 +137,28 @@ export class RemotePhysicalOperator implements PhysicalOperator {
     if (workspace === undefined) {
       throw new PhysicalOperatorError('remote physical operator requires a workspace', 'WORKSPACE_INVALID')
     }
+    let workspaceIdentity
+    try {
+      workspaceIdentity = await identifyRemoteWorkspace(workspace, WORKSPACE_IDENTITY_TIMEOUT_MS)
+    } catch (cause) {
+      throw new PhysicalOperatorError(
+        `remote physical operator cannot reproduce workspace: ${renderError(cause)}`,
+        'WORKSPACE_INVALID',
+        { cause },
+      )
+    }
     let accepted: PhysicalOperatorAcceptedReceipt
     try {
       accepted = await this.client.operatorExecute({
         commandId: String(request.executionId),
         operatorId: this.provider.operatorId,
-        workspace,
+        workspaceIdentity,
         laneId: request.residentLaneId ?? String(request.executionId),
         ...request.label === undefined ? {} : { taskLabel: request.label },
         prompt: request.prompt,
         ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
         ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
+        ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
       }, request.signal)
       this.unavailableReason = undefined
     } catch (error) {
@@ -224,9 +252,21 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         if (turn.result === undefined) {
           throw new PhysicalOperatorError('remote settled turn omitted its terminal result', 'INVALID_RESULT')
         }
+        const result = await this.materializeResult(turn, signal)
+        const localRef = this.resultStore.putArtifact({
+          version: 1,
+          kind: 'remote-physical-operator-result',
+          serverId: this.server.id,
+          turnId: turn.turnId,
+          remoteResultRef: turn.result.resultRef,
+          result,
+        })
+        this.resultStore.recordArtifact('compilation_artifacts', { ref: String(localRef) })
+        this.resultStore.readArtifact(localRef)
         return {
-          output: [...turn.result.output],
-          stopReason: turn.result.stopReason,
+          output: [...result.output],
+          stopReason: result.stopReason,
+          ...result.usage === undefined ? {} : { usage: result.usage },
           continuity: { sessionId: turn.sessionId, stateRevision: turn.stateRevision },
         }
       }
@@ -239,6 +279,45 @@ export class RemotePhysicalOperator implements PhysicalOperator {
       await abortableDelay(this.server.pollIntervalMs ?? 250, signal)
     }
   }
+
+  private async materializeResult(
+    turn: RemoteResidentTurnSnapshot,
+    signal: AbortSignal,
+  ): Promise<NonNullable<RemoteResidentTurnSnapshot['result']>> {
+    const bounded = turn.result
+    if (bounded === undefined) throw new PhysicalOperatorError('remote settled turn omitted its terminal result', 'INVALID_RESULT')
+    const ref = bounded.resultRef
+    if (ref === undefined) return bounded
+    let artifact
+    try {
+      artifact = await this.client.operatorArtifact(
+        ref,
+        AbortSignal.any([signal, AbortSignal.timeout(REMOTE_ARTIFACT_TRANSFER_TIMEOUT_MS)]),
+      )
+    } catch (cause) {
+      throw new PhysicalOperatorError(
+        `remote result artifact ${ref} could not be transferred: ${renderError(cause)}`,
+        'COMMAND_INDETERMINATE',
+        { cause },
+      )
+    }
+    if (artifact.ref !== ref) {
+      throw new PhysicalOperatorError(`remote result artifact reference mismatch: ${artifact.ref} != ${ref}`, 'INVALID_RESULT')
+    }
+    const digest = createHash('sha256').update(artifact.json).digest('hex')
+    if (`sha256:${digest}` !== ref) {
+      throw new PhysicalOperatorError(`remote result artifact digest mismatch: ${ref}`, 'INVALID_RESULT')
+    }
+    try {
+      return parseRemoteResidentResult(JSON.parse(artifact.json) as unknown)
+    } catch (cause) {
+      throw new PhysicalOperatorError(
+        `remote result artifact ${ref} is not a valid Resident result: ${renderError(cause)}`,
+        'INVALID_RESULT',
+        { cause },
+      )
+    }
+  }
 }
 
 function renderError(error: unknown): string {
@@ -248,13 +327,15 @@ function renderError(error: unknown): string {
 /**
  * Qualify one Server and construct its independently registered remote Providers.
  * @param server - remote DSH Server member to qualify.
+ * @param resultStore - local content-addressed artifact owner used for result import.
  * @param request - HTTP implementation used for authenticated control calls.
  * @returns independently registered Physical Operator projections.
  */
 export async function createRemotePhysicalOperators(
   server: RemotePhysicalOperatorServer,
+  resultStore: RemoteResultStore,
   request: typeof fetch = globalThis.fetch,
 ): Promise<RemotePhysicalOperator[]> {
   const client = new RemoteSyncHttpClient(server.endpoint, server.accessToken, request)
-  return (await client.operatorProviders()).map(provider => new RemotePhysicalOperator(server, provider, request))
+  return (await client.operatorProviders()).map(provider => new RemotePhysicalOperator(server, provider, resultStore, request))
 }

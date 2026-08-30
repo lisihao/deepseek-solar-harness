@@ -1,8 +1,31 @@
 /** Node-safe remote Resident client behavior. */
 
+import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createRemotePhysicalOperators } from '../src/remote-physical-operator.ts'
 import { RemoteSyncHttpClient } from '../src/remote-sync-http-client.ts'
+import { OrchestrationStore } from '../src/store.ts'
+
+function fixtureStore(): OrchestrationStore {
+  return new OrchestrationStore(mkdtempSync(join(tmpdir(), 'dsh-remote-result-store-')))
+}
+
+function fixtureWorkspace(): { readonly workspace: string; readonly store: OrchestrationStore } {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-remote-workspace-'))
+  mkdirSync(join(root, 'packages', 'core'), { recursive: true })
+  writeFileSync(join(root, 'packages', 'core', 'fixture.txt'), 'fixture\n')
+  execFileSync('git', ['init', '--initial-branch=main'], { cwd: root })
+  execFileSync('git', ['config', 'user.name', 'DSH Test'], { cwd: root })
+  execFileSync('git', ['config', 'user.email', 'dsh-test@example.invalid'], { cwd: root })
+  execFileSync('git', ['add', '.'], { cwd: root })
+  execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root })
+  execFileSync('git', ['remote', 'add', 'origin', 'git@github.com:lisihao/remote-fixture.git'], { cwd: root })
+  return { workspace: join(root, 'packages', 'core'), store: fixtureStore() }
+}
 
 describe('RemoteSyncHttpClient', () => {
   it('uses authenticated correlated requests for the durable operator lifecycle', async () => {
@@ -39,7 +62,10 @@ describe('RemoteSyncHttpClient', () => {
 
     await expect(client.operatorProviders()).resolves.toMatchObject([{ operatorId: 'codex' }])
     await expect(client.operatorExecute({
-      commandId: 'command-1', operatorId: 'codex', workspace: '/repo', laneId: 'lane-1', prompt: [],
+      commandId: 'command-1', operatorId: 'codex', laneId: 'lane-1', prompt: [],
+      workspaceIdentity: {
+        version: 1, repository: 'github.com/lisihao/remote-fixture', commit: 'a'.repeat(40),
+      },
     })).resolves.toMatchObject({ turnId: 'turn-1' })
     await expect(client.operatorInspect('turn-1')).resolves.toMatchObject({ state: 'settled' })
     await expect(client.operatorEvents('session-1', 0, 100)).resolves.toEqual({ events: [], nextSequence: 0 })
@@ -115,6 +141,7 @@ describe('RemoteSyncHttpClient', () => {
 
 describe('RemotePhysicalOperator', () => {
   it('projects a namespaced catalog and reconnectable remote run through the generic seam', async () => {
+    const fixture = fixtureWorkspace()
     let inspections = 0
     const methods: string[] = []
     const provider = {
@@ -162,7 +189,7 @@ describe('RemotePhysicalOperator', () => {
     })
     const [operator] = await createRemotePhysicalOperators({
       id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', accessToken: 'access', pollIntervalMs: 1,
-    }, request)
+    }, fixture.store, request)
     expect(operator?.descriptor.id).toBe('remote.mini.codex')
     await expect(operator?.residentCatalog()).resolves.toMatchObject({
       operatorId: 'remote.mini.codex', location: 'remote', supportsModelToolBridge: false,
@@ -172,7 +199,8 @@ describe('RemotePhysicalOperator', () => {
     const run = await operator!.start({
       executionId: 'command-1' as never,
       mode: 'resident', prompt: [], signal: controller.signal,
-      parent: { session: { header: { cwd: '/repo' } } } as never,
+      nativeToolPolicy: 'disabled',
+      parent: { session: { header: { cwd: fixture.workspace } } } as never,
     })
     expect(run.receipt).toEqual({ sessionId: 'session-1', turnId: 'turn-1', stateRevision: 2 })
     await expect(run.readEvents?.(0, 100)).resolves.toMatchObject({
@@ -186,9 +214,20 @@ describe('RemotePhysicalOperator', () => {
       'operator.providers', 'operator.providers', 'operator.execute', 'operator.inspect',
       'operator.events', 'operator.inspect',
     ])
+    const executeBody = JSON.parse(request.mock.calls.find(([, init]) => {
+      if (typeof init?.body !== 'string') return false
+      return (JSON.parse(init.body) as { method: string }).method === 'operator.execute'
+    })?.[1]?.body as string) as { payload: Record<string, unknown> }
+    expect(executeBody.payload).not.toHaveProperty('workspace')
+    expect(executeBody.payload.nativeToolPolicy).toBe('disabled')
+    expect(executeBody.payload.workspaceIdentity).toMatchObject({
+      version: 1, repository: 'github.com/lisihao/remote-fixture', subdir: 'packages/core',
+    })
+    fixture.store.close()
   })
 
   it('isolates an unavailable member catalog and restores it after qualification recovers', async () => {
+    const store = fixtureStore()
     let providerReads = 0
     const provider = {
       operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
@@ -210,7 +249,7 @@ describe('RemotePhysicalOperator', () => {
     })
     const [operator] = await createRemotePhysicalOperators({
       id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', pollIntervalMs: 1,
-    }, request)
+    }, store, request)
 
     const unavailableCatalog = await operator?.residentCatalog()
     expect(unavailableCatalog).toMatchObject({ operatorId: 'remote.mini.codex', available: false })
@@ -220,9 +259,11 @@ describe('RemotePhysicalOperator', () => {
       operatorId: 'remote.mini.codex', available: true,
     })
     expect(operator?.availability()).toEqual({ available: true })
+    store.close()
   })
 
   it('keeps an accepted remote turn attached across a transient transport outage', async () => {
+    const fixture = fixtureWorkspace()
     let inspections = 0
     const methods: string[] = []
     const provider = {
@@ -252,11 +293,11 @@ describe('RemotePhysicalOperator', () => {
     })
     const [operator] = await createRemotePhysicalOperators({
       id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', pollIntervalMs: 1,
-    }, request)
+    }, fixture.store, request)
     const run = await operator!.start({
       executionId: 'command-1' as never,
       mode: 'resident', prompt: [], signal: new AbortController().signal,
-      parent: { session: { header: { cwd: '/repo' } } } as never,
+      parent: { session: { header: { cwd: fixture.workspace } } } as never,
     })
 
     await expect(run.result).resolves.toMatchObject({
@@ -264,9 +305,73 @@ describe('RemotePhysicalOperator', () => {
     })
     expect(methods.filter(value => value === 'operator.execute')).toHaveLength(1)
     expect(methods.filter(value => value === 'operator.inspect')).toHaveLength(2)
+    fixture.store.close()
+  })
+
+  it('downloads, verifies, expands, and locally persists an oversized remote result artifact', async () => {
+    const fixture = fixtureWorkspace()
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
+      tags: ['code'], maxConcurrency: 1, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: '0.200.0', protocolHash: 'schema-1',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Fast worker', supportedEfforts: ['medium'],
+        defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true,
+      }],
+    }
+    const complete = {
+      output: [{ type: 'text', text: 'complete artifact output' }],
+      stopReason: 'completed',
+      usage: { inputTokens: 17, outputTokens: 9, cacheReadInputTokens: 3, costUsd: 0.02 },
+    }
+    const json = JSON.stringify(complete)
+    const remoteRef = `sha256:${createHash('sha256').update(json).digest('hex')}`
+    const methods: string[] = []
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      methods.push(call.method)
+      const value = call.method === 'operator.providers' ? [provider]
+        : call.method === 'operator.execute'
+          ? { sessionId: 'session-artifact', turnId: 'turn-artifact', stateRevision: 1 }
+          : call.method === 'operator.inspect'
+            ? {
+              commandId: 'command-artifact', sessionId: 'session-artifact', turnId: 'turn-artifact',
+              state: 'settled', stateRevision: 2, updatedAt: '2026-08-27T12:00:01.000Z',
+              resultRef: remoteRef,
+              result: {
+                output: [{ type: 'text', text: `Resident result stored at ${remoteRef}.` }],
+                stopReason: 'completed', resultRef: remoteRef,
+              },
+            }
+            : call.method === 'operator.artifact.read'
+              ? { ref: remoteRef, json }
+              : { interrupted: true }
+      return Response.json({ type: 'server-response', rpcId: call.rpcId, result: { ok: true, value } })
+    })
+    const [operator] = await createRemotePhysicalOperators({
+      id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', pollIntervalMs: 1,
+    }, fixture.store, request)
+    const run = await operator!.start({
+      executionId: 'command-artifact' as never,
+      mode: 'resident', prompt: [], signal: new AbortController().signal,
+      parent: { session: { header: { cwd: fixture.workspace } } } as never,
+    })
+    await expect(run.result).resolves.toMatchObject({
+      output: [{ type: 'text', text: 'complete artifact output' }],
+      usage: { inputTokens: 17, outputTokens: 9, cacheReadInputTokens: 3, costUsd: 0.02 },
+    })
+    expect(methods).toContain('operator.artifact.read')
+    const indexed = fixture.store.db.prepare('SELECT artifact_ref FROM compilation_artifacts').all() as { artifact_ref: string }[]
+    expect(indexed).toHaveLength(1)
+    expect(fixture.store.readArtifact(indexed[0]!.artifact_ref as never)).toMatchObject({
+      kind: 'remote-physical-operator-result', serverId: 'mini', remoteResultRef: remoteRef, result: complete,
+    })
+    fixture.store.close()
   })
 
   it('marks an uncorrelated admission loss indeterminate instead of replaying remotely', async () => {
+    const fixture = fixtureWorkspace()
     const provider = {
       operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
       tags: ['code'], maxConcurrency: 2, injectionBoundaries: ['pre-dispatch', 'next-turn'],
@@ -289,13 +394,14 @@ describe('RemotePhysicalOperator', () => {
     })
     const [operator] = await createRemotePhysicalOperators({
       id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', pollIntervalMs: 1,
-    }, request)
+    }, fixture.store, request)
 
     await expect(operator!.start({
       executionId: 'command-1' as never,
       mode: 'resident', prompt: [], signal: new AbortController().signal,
-      parent: { session: { header: { cwd: '/repo' } } } as never,
+      parent: { session: { header: { cwd: fixture.workspace } } } as never,
     })).rejects.toMatchObject({ code: 'COMMAND_INDETERMINATE' })
     expect(executeCalls).toBe(1)
+    fixture.store.close()
   })
 })

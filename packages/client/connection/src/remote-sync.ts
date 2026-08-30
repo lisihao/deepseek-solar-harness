@@ -18,7 +18,19 @@ export const REMOTE_SYNC_RPC_CHANNEL = '/remote-sync'
 export const REMOTE_SYNC_EVENTS_PATH = '/remote-sync/events'
 
 /** First independently versioned Server/Frontend projection protocol. */
-export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 3 })
+export const REMOTE_SYNC_PROTOCOL = Object.freeze({ major: 1, minor: 4 })
+
+/** Oldest projection-only minor accepted during a rolling 1.4 deployment. */
+export const REMOTE_SYNC_COMPATIBLE_MINOR = 3
+
+/** Negotiated same-major protocol carried by descriptions and snapshots. */
+export interface RemoteSyncProtocolVersion {
+  readonly major: typeof REMOTE_SYNC_PROTOCOL.major
+  readonly minor: typeof REMOTE_SYNC_PROTOCOL.minor | typeof REMOTE_SYNC_COMPATIBLE_MINOR
+}
+
+/** Maximum exact JSON artifact transferred by the remote operator wire. */
+export const REMOTE_RESIDENT_ARTIFACT_MAX_BYTES = 8 * 1024 * 1024
 
 /** Process-generation identity plus one global event watermark. */
 export interface RemoteSyncCursor {
@@ -28,7 +40,7 @@ export interface RemoteSyncCursor {
 
 /** Read-only state captured by the Server after the stream watermark is sampled. */
 export interface RemoteSyncSnapshot {
-  readonly protocol: typeof REMOTE_SYNC_PROTOCOL
+  readonly protocol: RemoteSyncProtocolVersion
   readonly deploymentId: string
   readonly cursor: RemoteSyncCursor
   readonly capturedAt: string
@@ -50,6 +62,8 @@ export type RemoteSyncCapability =
   | 'operator.read'
   | 'operator.execute'
   | 'operator.interrupt'
+  | 'operator.workspace.materialize'
+  | 'operator.artifact.read'
   | 'orchestration.cluster'
 
 /** Durable remote Resident turn identity returned before product execution settles. */
@@ -116,16 +130,62 @@ export interface RemoteResidentProviderStatus {
 }
 /* jscpd:ignore-end */
 
-/** Serializable remote execution request; product-local tool sockets never enter this DTO. */
+/** Git identity used to reproduce one sender workspace on another Server. */
+export interface RemoteWorkspaceIdentityV1 {
+  readonly version: 1
+  /** Canonical host/path identity, for example `github.com/owner/repository`. */
+  readonly repository: string
+  /** Exact clean source commit to materialize. */
+  readonly commit: string
+  /** Optional repository-relative directory used as the execution cwd. */
+  readonly subdir?: string
+}
+
+/**
+ * Normalize HTTPS and SSH Git origins to one credential-free host/path identity.
+ * @param value - configured identity or Git remote URL.
+ * @returns lowercase host plus case-preserving repository path without `.git`.
+ */
+export function canonicalRemoteRepositoryIdentity(value: string): string {
+  if (value.length === 0 || value.trim() !== value) throw new Error('remote repository identity must be non-blank and trimmed')
+  const scp = /^(?:[^@/\s]+@)?([^:/\s]+):(.+)$/u.exec(value)
+  if (scp !== null && !value.includes('://')) return canonicalRepositoryParts(scp[1] as string, scp[2] as string)
+  if (!value.includes('://')) {
+    const slash = value.indexOf('/')
+    if (slash <= 0) throw new Error('remote repository identity must contain a host and path')
+    return canonicalRepositoryParts(value.slice(0, slash), value.slice(slash + 1))
+  }
+  const url = new URL(value)
+  if (url.password.length > 0 || (url.protocol !== 'ssh:' && url.username.length > 0)) {
+    throw new Error('remote repository identity must not contain credentials')
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'ssh:') {
+    throw new Error('remote repository identity must use https or ssh')
+  }
+  return canonicalRepositoryParts(url.host, url.pathname)
+}
+
+function canonicalRepositoryParts(host: string, path: string): string {
+  const repositoryPath = path.replace(/^\/+|\/+$/gu, '').replace(/\.git$/u, '')
+  if (host.length === 0 || repositoryPath.length === 0
+    || repositoryPath.split('/').some(segment => segment === '' || segment === '.' || segment === '..')) {
+    throw new Error('remote repository identity must contain a valid host and repository path')
+  }
+  return `${host.toLowerCase()}/${repositoryPath}`
+}
+
+/** Serializable remote execution request; absolute sender paths and product-local sockets never enter this DTO. */
 export interface RemoteResidentExecuteRequest {
   readonly commandId: string
   readonly operatorId: string
-  readonly workspace: string
+  readonly workspaceIdentity: RemoteWorkspaceIdentityV1
   readonly laneId: string
   readonly taskLabel?: string
   readonly prompt: readonly ContentBlock[]
   readonly systemPrompt?: string
   readonly profile?: { readonly model?: string; readonly effort?: RemoteResidentReasoningEffort }
+  /** Sealed native product-tool authority. Protocol 1.4 only. */
+  readonly nativeToolPolicy?: 'inherit' | 'disabled'
 }
 
 /** Durable turn projection returned by the remote control plane. */
@@ -143,9 +203,22 @@ export interface RemoteResidentTurnSnapshot {
   readonly result?: {
     readonly output: readonly ContentBlock[]
     readonly stopReason: 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
+    readonly usage?: {
+      readonly inputTokens: number
+      readonly outputTokens: number
+      readonly cacheReadInputTokens?: number
+      readonly cacheWriteInputTokens?: number
+      readonly costUsd?: number
+    }
     readonly resultRef?: string
   }
   readonly error?: { readonly code: string; readonly message: string }
+}
+
+/** Exact immutable Resident result bytes returned for a content-addressed reference. */
+export interface RemoteResidentArtifactDocument {
+  readonly ref: string
+  readonly json: string
 }
 
 /** Ordered bounded page of structured Resident progress observations. */
@@ -182,7 +255,8 @@ export class RemoteResidentProtocolClient {
    * @returns the accepted durable turn identity.
    */
   execute(request: RemoteResidentExecuteRequest, signal?: AbortSignal): Promise<RemoteResidentAcceptedTurn> {
-    return this.call('operator.execute', request, signal).then(parseRemoteResidentAcceptedTurn)
+    return this.call('operator.execute', { ...request, protocol: REMOTE_SYNC_PROTOCOL }, signal)
+      .then(parseRemoteResidentAcceptedTurn)
   }
 
   /**
@@ -193,6 +267,17 @@ export class RemoteResidentProtocolClient {
    */
   inspect(turnId: string, signal?: AbortSignal): Promise<RemoteResidentTurnSnapshot> {
     return this.call('operator.inspect', { turnId }, signal).then(parseRemoteResidentTurn)
+  }
+
+  /**
+   * Read exact content-addressed Resident result bytes after terminal inspection.
+   * @param ref - `sha256:` reference returned by the settled remote turn.
+   * @param signal - optional transport cancellation signal.
+   * @returns exact UTF-8 JSON bytes and their claimed digest reference.
+   */
+  artifact(ref: string, signal?: AbortSignal): Promise<RemoteResidentArtifactDocument> {
+    return this.call('operator.artifact.read', { ref, protocol: REMOTE_SYNC_PROTOCOL }, signal)
+      .then(parseRemoteResidentArtifact)
   }
 
   /**
@@ -230,6 +315,7 @@ export interface RemoteResidentProtocolBindings {
   readonly operatorProviders: RemoteResidentProtocolClient['providers']
   readonly operatorExecute: RemoteResidentProtocolClient['execute']
   readonly operatorInspect: RemoteResidentProtocolClient['inspect']
+  readonly operatorArtifact: RemoteResidentProtocolClient['artifact']
   readonly operatorEvents: RemoteResidentProtocolClient['events']
   readonly operatorInterrupt: RemoteResidentProtocolClient['interrupt']
 }
@@ -247,6 +333,7 @@ export function bindRemoteResidentProtocol(
     operatorProviders: resident.providers.bind(resident),
     operatorExecute: resident.execute.bind(resident),
     operatorInspect: resident.inspect.bind(resident),
+    operatorArtifact: resident.artifact.bind(resident),
     operatorEvents: resident.events.bind(resident),
     operatorInterrupt: resident.interrupt.bind(resident),
   }
@@ -276,7 +363,7 @@ export interface RemoteSessionReplicaApplyResult {
 
 /** Authenticated Server identity and protocol capabilities discovered before snapshot. */
 export interface RemoteSyncDescription {
-  readonly protocol: typeof REMOTE_SYNC_PROTOCOL
+  readonly protocol: RemoteSyncProtocolVersion
   readonly deploymentId: string
   readonly cursor: RemoteSyncCursor
   readonly describedAt: string
@@ -574,8 +661,7 @@ export function parseRemoteResidentTurn(value: unknown): RemoteResidentTurnSnaps
     && stopReason !== 'error' && stopReason !== 'max-tokens' && stopReason !== 'refusal') {
     throw new Error('remote Resident turn stopReason is invalid')
   }
-  const result = record.result === undefined ? undefined : objectRecord(record.result, 'remote Resident turn result')
-  if (result !== undefined && !Array.isArray(result.output)) throw new Error('remote Resident turn result.output must be an array')
+  const result = record.result === undefined ? undefined : parseRemoteResidentResult(record.result)
   const error = record.error === undefined ? undefined : objectRecord(record.error, 'remote Resident turn error')
   return {
     commandId: nonEmptyString(record.commandId, 'commandId'),
@@ -589,11 +675,7 @@ export function parseRemoteResidentTurn(value: unknown): RemoteResidentTurnSnaps
     ...(typeof record.resultRef === 'string' ? { resultRef: record.resultRef } : {}),
     updatedAt: isoInstant(record.updatedAt, 'updatedAt'),
     ...(result === undefined ? {} : {
-      result: {
-        output: result.output as ContentBlock[],
-        stopReason: residentStopReason(result.stopReason, 'result.stopReason'),
-        ...(typeof result.resultRef === 'string' ? { resultRef: result.resultRef } : {}),
-      },
+      result,
     }),
     ...(error === undefined ? {} : {
       error: {
@@ -602,6 +684,46 @@ export function parseRemoteResidentTurn(value: unknown): RemoteResidentTurnSnaps
       },
     }),
   }
+}
+
+/**
+ * Validate one complete Resident result, including authoritative usage counters.
+ * @param value - untrusted wire or artifact payload.
+ * @returns a provider-neutral terminal result.
+ */
+export function parseRemoteResidentResult(
+  value: unknown,
+): NonNullable<RemoteResidentTurnSnapshot['result']> {
+  const result = objectRecord(value, 'remote Resident turn result')
+  if (!Array.isArray(result.output)) throw new Error('remote Resident turn result.output must be an array')
+  const usage = result.usage === undefined ? undefined : residentUsage(result.usage, 'result.usage')
+  return {
+    output: result.output as ContentBlock[],
+    stopReason: residentStopReason(result.stopReason, 'result.stopReason'),
+    ...usage === undefined ? {} : { usage },
+    ...(typeof result.resultRef === 'string' ? { resultRef: result.resultRef } : {}),
+  }
+}
+
+/**
+ * Validate one exact remote Resident artifact document before digest verification.
+ * @param value - untrusted wire payload.
+ * @returns validated reference and exact UTF-8 JSON bytes.
+ */
+export function parseRemoteResidentArtifact(value: unknown): RemoteResidentArtifactDocument {
+  const record = objectRecord(value, 'remote Resident artifact')
+  const ref = nonEmptyString(record.ref, 'remote Resident artifact.ref')
+  if (!/^sha256:[a-f0-9]{64}$/u.test(ref)) throw new Error('remote Resident artifact.ref is invalid')
+  const json = nonEmptyString(record.json, 'remote Resident artifact.json')
+  if (new TextEncoder().encode(json).byteLength > REMOTE_RESIDENT_ARTIFACT_MAX_BYTES) {
+    throw new Error(`remote Resident artifact.json exceeds ${String(REMOTE_RESIDENT_ARTIFACT_MAX_BYTES)} bytes`)
+  }
+  try {
+    JSON.parse(json)
+  } catch {
+    throw new Error('remote Resident artifact.json is invalid JSON')
+  }
+  return { ref, json }
 }
 
 /**
@@ -633,15 +755,17 @@ function parseCursor(value: unknown): RemoteSyncCursor {
   }
 }
 
-function parseProtocol(value: unknown): typeof REMOTE_SYNC_PROTOCOL {
+function parseProtocol(value: unknown): RemoteSyncProtocolVersion {
   const protocol = objectRecord(value, 'remote sync protocol')
-  if (protocol.major !== REMOTE_SYNC_PROTOCOL.major || protocol.minor !== REMOTE_SYNC_PROTOCOL.minor) {
+  if (protocol.major !== REMOTE_SYNC_PROTOCOL.major
+    || (protocol.minor !== REMOTE_SYNC_PROTOCOL.minor && protocol.minor !== REMOTE_SYNC_COMPATIBLE_MINOR)) {
     throw new Error(
-      `remote sync protocol mismatch: expected ${REMOTE_SYNC_PROTOCOL.major}.${REMOTE_SYNC_PROTOCOL.minor}, `
+      `remote sync protocol mismatch: expected ${REMOTE_SYNC_PROTOCOL.major}.${REMOTE_SYNC_COMPATIBLE_MINOR}`
+      + ` or ${REMOTE_SYNC_PROTOCOL.major}.${REMOTE_SYNC_PROTOCOL.minor}, `
       + `received ${String(protocol.major)}.${String(protocol.minor)}`,
     )
   }
-  return REMOTE_SYNC_PROTOCOL
+  return { major: REMOTE_SYNC_PROTOCOL.major, minor: protocol.minor }
 }
 
 function isoInstant(value: unknown, label: string): string {
@@ -660,6 +784,7 @@ function remoteCapability(value: unknown): RemoteSyncCapability {
     || value === 'session.command' || value === 'approval.respond'
     || value === 'session.replicate.read' || value === 'session.replicate.write'
     || value === 'operator.read' || value === 'operator.execute' || value === 'operator.interrupt'
+    || value === 'operator.workspace.materialize' || value === 'operator.artifact.read'
     || value === 'orchestration.cluster') return value
   throw new Error(`remote sync capability is invalid: ${String(value)}`)
 }
@@ -702,6 +827,32 @@ function reasoningEffort(value: unknown, label: string): 'low' | 'medium' | 'hig
 function residentStopReason(value: unknown, label: string): 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal' {
   if (value === 'completed' || value === 'aborted' || value === 'error' || value === 'max-tokens' || value === 'refusal') return value
   throw new Error(`${label} is invalid`)
+}
+
+function residentUsage(value: unknown, label: string): {
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens?: number
+  cacheWriteInputTokens?: number
+  costUsd?: number
+} {
+  const usage = objectRecord(value, label)
+  const optionalToken = (field: 'cacheReadInputTokens' | 'cacheWriteInputTokens'): number | undefined => (
+    usage[field] === undefined ? undefined : nonnegativeInteger(usage[field], `${label}.${field}`)
+  )
+  const costUsd = usage.costUsd
+  if (costUsd !== undefined && (typeof costUsd !== 'number' || !Number.isFinite(costUsd) || costUsd < 0)) {
+    throw new Error(`${label}.costUsd must be a non-negative finite number`)
+  }
+  const cacheReadInputTokens = optionalToken('cacheReadInputTokens')
+  const cacheWriteInputTokens = optionalToken('cacheWriteInputTokens')
+  return {
+    inputTokens: nonnegativeInteger(usage.inputTokens, `${label}.inputTokens`),
+    outputTokens: nonnegativeInteger(usage.outputTokens, `${label}.outputTokens`),
+    ...cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens },
+    ...cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens },
+    ...costUsd === undefined ? {} : { costUsd },
+  }
 }
 
 function quotaWindow(value: unknown, label: string): { usedPercent: number; resetsAt?: number; windowDurationMinutes?: number } {

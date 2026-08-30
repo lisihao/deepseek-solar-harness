@@ -5,10 +5,11 @@ import {
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import {
   REMOTE_SYNC_EVENTS_PATH, REMOTE_SYNC_RPC_CHANNEL,
+  REMOTE_SYNC_PROTOCOL,
   bindRemoteResidentProtocol,
   parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument, parseRemoteSessionReplicaList,
   parseRemoteSyncDescription, parseRemoteSyncFrame, parseRemoteSyncSnapshot,
-  type RemoteResidentAcceptedTurn, type RemoteResidentEventPage, type RemoteResidentExecuteRequest,
+  type RemoteResidentAcceptedTurn, type RemoteResidentArtifactDocument, type RemoteResidentEventPage, type RemoteResidentExecuteRequest,
   type RemoteResidentProviderStatus, type RemoteResidentTurnSnapshot,
   type RemoteSessionReplicaApplyResult, type RemoteSessionReplicaDocument, type RemoteSessionReplicaSummary,
   type RemoteSyncCursor, type RemoteSyncDescription, type RemoteSyncFrame, type RemoteSyncSnapshot,
@@ -33,6 +34,7 @@ export interface RemoteSyncClient {
     signal?: AbortSignal,
   ): Promise<RemoteResidentAcceptedTurn>
   operatorInspect(turnId: string, signal?: AbortSignal): Promise<RemoteResidentTurnSnapshot>
+  operatorArtifact(ref: string, signal?: AbortSignal): Promise<RemoteResidentArtifactDocument>
   operatorEvents(sessionId: string, afterSequence: number, limit: number, signal?: AbortSignal): Promise<RemoteResidentEventPage>
   operatorInterrupt(sessionId: string, turnId: string, signal?: AbortSignal): Promise<void>
   events(
@@ -48,6 +50,7 @@ export class WebRemoteSyncClient implements RemoteSyncClient {
   declare readonly operatorProviders: RemoteSyncClient['operatorProviders']
   declare readonly operatorExecute: RemoteSyncClient['operatorExecute']
   declare readonly operatorInspect: RemoteSyncClient['operatorInspect']
+  declare readonly operatorArtifact: RemoteSyncClient['operatorArtifact']
   declare readonly operatorEvents: RemoteSyncClient['operatorEvents']
   declare readonly operatorInterrupt: RemoteSyncClient['operatorInterrupt']
 
@@ -61,11 +64,11 @@ export class WebRemoteSyncClient implements RemoteSyncClient {
   }
 
   async describe(signal?: AbortSignal): Promise<RemoteSyncDescription> {
-    return parseRemoteSyncDescription(await this.call('describe', {}, signal))
+    return parseRemoteSyncDescription(await this.call('describe', { protocol: REMOTE_SYNC_PROTOCOL }, signal))
   }
 
   async snapshot(signal?: AbortSignal): Promise<RemoteSyncSnapshot> {
-    return parseRemoteSyncSnapshot(await this.call('snapshot', {}, signal))
+    return parseRemoteSyncSnapshot(await this.call('snapshot', { protocol: REMOTE_SYNC_PROTOCOL }, signal))
   }
 
   async replicaList(signal?: AbortSignal): Promise<RemoteSessionReplicaSummary[]> {

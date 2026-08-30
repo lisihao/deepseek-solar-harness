@@ -86,6 +86,13 @@ export interface DesktopFrontendConnection {
   readonly access?: DesktopRemoteAccessSession
 }
 
+export interface DesktopFrontendLeaderMonitorOptions {
+  readonly intervalMs: number
+  readonly connect?: typeof connectFrontendServer
+  onCandidateError?(server: DesktopFrontendServer, error: unknown): void
+  onMonitorError?(error: unknown): void
+}
+
 const DEFAULT_STATE: DesktopServerDeploymentState = {
   version: 4,
   role: 'server',
@@ -457,6 +464,82 @@ export async function connectFrontendServer(
     return { state: selected, server, ...access === undefined ? {} : { access } }
   }
   throw new AggregateError(failures, 'dsh-plugin-desktop: no configured Frontend Server is reachable')
+}
+
+/**
+ * Re-qualify the configured Server set while Desktop stays open. The monitor
+ * owns only access sessions created during a probe; ownership transfers to the
+ * caller after a successful leader change.
+ */
+export class DesktopFrontendLeaderMonitor {
+  private timer: ReturnType<typeof setTimeout> | undefined
+  private currentServerId: string | undefined
+  private stopped = true
+  private polling: Promise<void> | undefined
+
+  constructor(
+    private readonly store: DesktopDeploymentStateStore,
+    private readonly onConnection: (connection: DesktopFrontendConnection) => Promise<void>,
+    private readonly options: DesktopFrontendLeaderMonitorOptions,
+  ) {
+    if (!Number.isSafeInteger(options.intervalMs) || options.intervalMs < 1_000) {
+      throw new Error('dsh-plugin-desktop: Frontend leader probe interval must be at least 1000ms')
+    }
+  }
+
+  start(currentServerId?: string): void {
+    if (!this.stopped) throw new Error('dsh-plugin-desktop: Frontend leader monitor is already running')
+    this.stopped = false
+    this.currentServerId = currentServerId
+    this.schedule(currentServerId === undefined ? 0 : this.options.intervalMs)
+  }
+
+  async pollNow(): Promise<void> {
+    if (this.stopped) return
+    this.polling ??= this.poll().finally(() => { this.polling = undefined })
+    await this.polling
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true
+    if (this.timer !== undefined) clearTimeout(this.timer)
+    this.timer = undefined
+    await this.polling
+  }
+
+  private async poll(): Promise<void> {
+    let connection: DesktopFrontendConnection | undefined
+    try {
+      const state = await this.store.load()
+      if (state.role !== 'frontend') return
+      const connect = this.options.connect ?? connectFrontendServer
+      connection = await connect(
+        this.store,
+        state,
+        (server, error) => { this.options.onCandidateError?.(server, error) },
+      )
+      if (connection.server.id === this.currentServerId) {
+        connection.access?.stop()
+        return
+      }
+      await this.onConnection(connection)
+      this.currentServerId = connection.server.id
+      connection = undefined
+    } catch (error) {
+      connection?.access?.stop()
+      this.options.onMonitorError?.(error)
+    } finally {
+      if (!this.stopped) this.schedule(this.options.intervalMs)
+    }
+  }
+
+  private schedule(delay: number): void {
+    if (this.timer !== undefined) clearTimeout(this.timer)
+    this.timer = setTimeout(() => {
+      this.timer = undefined
+      void this.pollNow()
+    }, delay)
+  }
 }
 
 function parseEndpoint(input: string): URL {

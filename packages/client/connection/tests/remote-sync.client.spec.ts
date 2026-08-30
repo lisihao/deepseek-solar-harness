@@ -2,8 +2,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  parseRemoteResidentAcceptedTurn, parseRemoteResidentEventPage, parseRemoteResidentProviders,
-  parseRemoteResidentTurn, parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument,
+  parseRemoteResidentAcceptedTurn, parseRemoteResidentArtifact, parseRemoteResidentEventPage,
+  parseRemoteResidentProviders, parseRemoteResidentTurn, parseRemoteSessionReplicaApplyResult, parseRemoteSessionReplicaDocument,
   parseRemoteSessionReplicaList, parseRemoteSyncCursor, parseRemoteSyncDescription, parseRemoteSyncFrame,
   parseRemoteSyncSnapshot,
 } from '../src/remote-sync.ts'
@@ -11,7 +11,7 @@ import { setBrowserRemoteAccessToken } from '../src/client/browser-access-token.
 import { WebRemoteSyncClient } from '../src/client/remote-sync-client.ts'
 
 const snapshot = {
-  protocol: { major: 1, minor: 3 },
+  protocol: { major: 1, minor: 4 },
   deploymentId: 'deployment-1',
   cursor: { deploymentId: 'deployment-1', sequence: 7 },
   capturedAt: '2026-08-23T08:00:00.000Z',
@@ -76,7 +76,7 @@ afterEach(() => {
 describe('Remote Sync wire parsing', () => {
   it('accepts an authenticated Server description and rejects unknown capabilities', () => {
     const description = {
-      protocol: { major: 1, minor: 3 },
+      protocol: { major: 1, minor: 4 },
       deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 },
       describedAt: '2026-08-23T08:00:00.000Z',
@@ -98,9 +98,11 @@ describe('Remote Sync wire parsing', () => {
   it('describes the Server with a bearer header and never puts the token in its URL', async () => {
     let seenUrl = ''
     let seenAuthorization: string | null = null
+    let seenPayload: unknown
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
-      const request = JSON.parse(init.body) as { rpcId: string }
+      const request = JSON.parse(init.body) as { rpcId: string; payload: unknown }
+      seenPayload = request.payload
       seenUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       seenAuthorization = new Headers(init.headers).get('authorization')
       return new Response(JSON.stringify({
@@ -108,7 +110,7 @@ describe('Remote Sync wire parsing', () => {
         result: {
           ok: true,
           value: {
-            protocol: { major: 1, minor: 3 },
+            protocol: { major: 1, minor: 4 },
             deploymentId: 'deployment-1',
             cursor: { deploymentId: 'deployment-1', sequence: 7 },
             describedAt: '2026-08-23T08:00:00.000Z',
@@ -125,6 +127,7 @@ describe('Remote Sync wire parsing', () => {
     expect(seenUrl).toBe('https://server.example/remote-sync/describe')
     expect(seenUrl).not.toContain('short-lived')
     expect(seenAuthorization).toBe('Bearer short-lived')
+    expect(seenPayload).toEqual({ protocol: { major: 1, minor: 4 } })
   })
 
   it('lists, reads, and applies complete Session replicas over the same authenticated channel', async () => {
@@ -183,28 +186,45 @@ describe('Remote Sync wire parsing', () => {
       nextSequence: 1,
     }
     const methods: string[] = []
+    const payloads = new Map<string, unknown>()
     vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
-      const request = JSON.parse(init.body) as { rpcId: string; method: string }
+      const request = JSON.parse(init.body) as { rpcId: string; method: string; payload: unknown }
       methods.push(request.method)
+      payloads.set(request.method, request.payload)
       const value = request.method === 'operator.providers' ? [provider]
         : request.method === 'operator.execute' ? accepted
           : request.method === 'operator.inspect' ? turn
-            : request.method === 'operator.events' ? page
-              : { interrupted: true }
+            : request.method === 'operator.artifact.read'
+              ? { ref: 'sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', json: '{}' }
+              : request.method === 'operator.events' ? page
+                : { interrupted: true }
       return Response.json({ type: 'server-response', rpcId: request.rpcId, result: { ok: true, value } })
     }))
     const client = new WebRemoteSyncClient('https://server.example', 'access')
     await expect(client.operatorProviders()).resolves.toMatchObject([{ operatorId: 'codex', models: [{ model: 'gpt-5.6-luna' }] }])
     await expect(client.operatorExecute({
-      commandId: 'command-1', operatorId: 'codex', workspace: '/repo', laneId: 'lane-1', prompt: [],
+      commandId: 'command-1', operatorId: 'codex', laneId: 'lane-1', prompt: [],
+      nativeToolPolicy: 'disabled',
+      workspaceIdentity: {
+        version: 1, repository: 'github.com/lisihao/project', commit: 'a'.repeat(40), subdir: 'packages/core',
+      },
     })).resolves.toEqual(accepted)
     await expect(client.operatorInspect(accepted.turnId)).resolves.toMatchObject({ state: 'settled', result: { stopReason: 'completed' } })
+    await expect(client.operatorArtifact('sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a'))
+      .resolves.toEqual({
+        ref: 'sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', json: '{}',
+      })
     await expect(client.operatorEvents(accepted.sessionId, 0, 100)).resolves.toEqual(page)
     await expect(client.operatorInterrupt(accepted.sessionId, accepted.turnId)).resolves.toBeUndefined()
     expect(methods).toEqual([
-      'operator.providers', 'operator.execute', 'operator.inspect', 'operator.events', 'operator.interrupt',
+      'operator.providers', 'operator.execute', 'operator.inspect', 'operator.artifact.read',
+      'operator.events', 'operator.interrupt',
     ])
+    expect(payloads.get('operator.execute')).toMatchObject({
+      protocol: { major: 1, minor: 4 }, nativeToolPolicy: 'disabled',
+    })
+    expect(payloads.get('operator.artifact.read')).toMatchObject({ protocol: { major: 1, minor: 4 } })
   })
 
   it('validates every remote replication and Resident wire variant', () => {
@@ -337,6 +357,10 @@ describe('Remote Sync wire parsing', () => {
       ...baseTurn, result: { output: [], stopReason: 'unknown' },
     })).toThrow('result.stopReason is invalid')
     expect(() => parseRemoteResidentEventPage({ events: {}, nextSequence: 0 })).toThrow('must be an array')
+    expect(parseRemoteResidentArtifact({
+      ref: 'sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a', json: '{}',
+    })).toMatchObject({ json: '{}' })
+    expect(() => parseRemoteResidentArtifact({ ref: 'sha256:bad', json: '{}' })).toThrow('ref is invalid')
   })
 
   it('accepts a complete snapshot and rejects protocol or deployment mismatch', () => {
@@ -347,6 +371,8 @@ describe('Remote Sync wire parsing', () => {
     expect(() => parseRemoteSyncSnapshot({
       ...snapshot, protocol: { major: 2, minor: 0 },
     })).toThrow('protocol mismatch')
+    expect(parseRemoteSyncSnapshot({ ...snapshot, protocol: { major: 1, minor: 3 } }).protocol)
+      .toEqual({ major: 1, minor: 3 })
     expect(() => parseRemoteSyncSnapshot({
       ...snapshot, cursor: { deploymentId: 'deployment-2', sequence: 7 },
     })).toThrow('another deployment')
@@ -354,7 +380,7 @@ describe('Remote Sync wire parsing', () => {
 
   it('rejects malformed descriptions, cursors, snapshots, and scalar fields', () => {
     const description = {
-      protocol: { major: 1, minor: 3 }, deploymentId: 'deployment-1',
+      protocol: { major: 1, minor: 4 }, deploymentId: 'deployment-1',
       cursor: { deploymentId: 'deployment-1', sequence: 7 }, describedAt: snapshot.capturedAt,
       scope: 'cockpit', capabilities: ['session.read'], host: snapshot.host,
     }

@@ -28,12 +28,14 @@ import OrchestrationService, {
   type OrchestrationStartRequest,
 } from '@deepseek-ai/dsh-orchestration'
 import { OrchestrationDaemonClient } from './client.ts'
+import { LocalRemoteOperatorHostService } from './remote-execution-host.ts'
 
 export { OrchestrationDaemonClient, startDetachedOrchestrationDaemon } from './client.ts'
 export { OrchestrationDaemon, ORCHESTRATION_METHODS, ORCHESTRATION_PROTOCOL_VERSION } from './daemon.ts'
 export { graphCertificate, nodesConflict, scopeOverlap, validateGraph } from './graph.ts'
 export { BasicContextCompiler, DirectIntentCompiler, LocalCapabilityCapsuleService } from './providers.ts'
 export { ORCHESTRATION_STATE_SCHEMA_VERSION, OrchestrationStore } from './store.ts'
+export { LocalRemoteOperatorHostService } from './remote-execution-host.ts'
 export * from './auto-refine.ts'
 
 export const name = 'orchestration-local'
@@ -52,6 +54,14 @@ export interface Config {
   readonly residentDriverModules?: string[]
   /** Trusted plugins that register executable TypeScript Skills in the daemon. */
   readonly skillProviderModules?: string[]
+  /** Maximum time for one Server-side exact-commit Git materialization. */
+  readonly remoteMaterializationTimeoutMs?: number
+  /** Maximum time for one bounded Resident artifact read. */
+  readonly remoteArtifactReadTimeoutMs?: number
+  /** Maximum exact artifact bytes returned over Remote Sync. */
+  readonly remoteArtifactMaxBytes?: number
+  /** Lease retained for one command-isolated remote execution checkout. */
+  readonly remoteWorkspaceLeaseMs?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -60,6 +70,10 @@ export const Config: z<Config> = z.object({
   connectTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
   residentDriverModules: z.array(z.string()).default([]),
   skillProviderModules: z.array(z.string()).default([]),
+  remoteMaterializationTimeoutMs: z.number().step(1).min(1_000).max(15 * 60_000).default(120_000),
+  remoteArtifactReadTimeoutMs: z.number().step(1).min(100).max(60_000).default(15_000),
+  remoteArtifactMaxBytes: z.number().step(1).min(1_024).max(8 * 1024 * 1024).default(8 * 1024 * 1024),
+  remoteWorkspaceLeaseMs: z.number().step(1).min(60_000).max(7 * 24 * 60 * 60_000).default(24 * 60 * 60_000),
 })
 /* jscpd:ignore-end */
 
@@ -119,5 +133,14 @@ class LocalOrchestrationService extends OrchestrationService {
 }
 
 export function apply(ctx: Context, config: Config): void {
-  new LocalOrchestrationService(ctx, config as Required<Omit<Config, 'dshHome'>> & Pick<Config, 'dshHome'>)
+  const resolved = config as Required<Omit<Config, 'dshHome'>> & Pick<Config, 'dshHome'>
+  const dshHome = resolveDshHome(resolved.dshHome)
+  new LocalRemoteOperatorHostService(ctx, {
+    dshHome,
+    timeoutMs: resolved.remoteMaterializationTimeoutMs,
+    artifactReadTimeoutMs: resolved.remoteArtifactReadTimeoutMs,
+    artifactMaxBytes: resolved.remoteArtifactMaxBytes,
+    workspaceLeaseMs: resolved.remoteWorkspaceLeaseMs,
+  })
+  new LocalOrchestrationService(ctx, resolved)
 }

@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { FrontendBillingBaseline } from './frontend-billing.ts'
+import type { FrontendBillingBaseline, FrontendBillingSource } from './frontend-billing.ts'
 import type { UpdateCheckResult, UpdateRequest } from './update-checker.ts'
 
 /** Electron platforms supported by the DSH Desktop native adapter. */
@@ -147,7 +147,7 @@ export interface DesktopShellSpec extends DesktopWindowConfig {
   frontendBilling?: {
     readonly origin: string
     readonly baseline: FrontendBillingBaseline
-    accessToken?(): string
+    readonly sources: readonly FrontendBillingSource[]
   }
   /** Read the authoritative built-in theme preference after Host boot settles. */
   readThemeSource(): DesktopThemeSource
