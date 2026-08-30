@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import {
+  ResidentOperatorError,
   ResidentOperatorCommandId,
   ResidentOperatorSessionId,
   ResidentOperatorTurnId,
@@ -22,6 +23,45 @@ function responseRecorder(): {
 }
 
 describe('Resident Operator Desktop projection', () => {
+  it.each([
+    ['AUTH_REQUIRED', 'auth_required'],
+    ['NETWORK_UNAVAILABLE', 'network_unavailable'],
+    ['CALLBACK_LISTENER_MISSING', 'callback_listener_missing'],
+  ] as const)('returns structured %s login failures to the local UI', async (code, reason) => {
+    let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
+    const ctx = {
+      residentOperators: {
+        authenticate: vi.fn(async () => {
+          throw new ResidentOperatorError(`login failed with ${code}`, code)
+        }),
+      },
+      webServer: {
+        register: vi.fn((route: { handler: typeof handler }) => {
+          handler = route.handler
+          return () => {}
+        }),
+      },
+      get: () => undefined,
+      logger: { warn: vi.fn() },
+    } as unknown as Context
+    registerResidentDashboard(ctx)
+    if (handler === undefined) throw new Error('dashboard route was not registered')
+
+    const local = responseRecorder()
+    await handler({
+      method: 'POST',
+      url: '/api/resident-operators?operator_id=claude-code',
+      headers: { host: '127.0.0.1:13080', origin: 'http://127.0.0.1:13080' },
+      socket: { remoteAddress: '127.0.0.1' },
+    }, local.response)
+    expect(local.status()).toBe(503)
+    expect(local.json()).toEqual({
+      error: 'RESIDENT_AUTHENTICATION_FAILED',
+      reason,
+      message: `login failed with ${code}`,
+    })
+  })
+
   it('allows explicit login only from the owner-local browser route', async () => {
     let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
     const authenticate = vi.fn(async () => ({

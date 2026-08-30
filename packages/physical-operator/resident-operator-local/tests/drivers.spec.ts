@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
   claudeEnvironment,
+  claudeAuthenticationFailureCode,
   claudeCompactPrompt,
   claudeNativeToolOptions,
   claudeResultFailure,
@@ -36,6 +37,18 @@ const model = {
 } as const
 
 describe('Claude Code resident driver environment', () => {
+  it('classifies owner-actionable native login failures without starting a login', () => {
+    expect(claudeAuthenticationFailureCode(new Error(
+      'connect ECONNREFUSED 127.0.0.1:51000 while delivering OAuth callback',
+    ))).toBe('CALLBACK_LISTENER_MISSING')
+    expect(claudeAuthenticationFailureCode(new Error(
+      'fetch failed: getaddrinfo EAI_AGAIN api.anthropic.com',
+    ))).toBe('NETWORK_UNAVAILABLE')
+    expect(claudeAuthenticationFailureCode(new Error(
+      'Claude Code is not authenticated; run claude auth login',
+    ))).toBe('AUTH_REQUIRED')
+  })
+
   it.runIf(process.platform !== 'win32')('starts explicit login with the resolved CLI and a credential-scrubbed environment', async () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-claude-auth-'))
     const executable = join(root, 'claude')

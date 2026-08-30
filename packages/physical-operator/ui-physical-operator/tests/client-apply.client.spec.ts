@@ -14,7 +14,10 @@ import {
   physicalOperatorRoutingSummary,
   physicalOperatorStrategyPanelPosition,
 } from '../src/client/index.ts'
-import { authenticateResidentOperator } from '../src/client/ResidentOperatorsPanel.tsx'
+import {
+  authenticateResidentOperator,
+  ResidentAuthenticationError,
+} from '../src/client/ResidentOperatorsPanel.tsx'
 
 describe('physical operator client plugin', () => {
   it('starts authentication only through an explicit owner action', async () => {
@@ -38,6 +41,32 @@ describe('physical operator client plugin', () => {
       expect(request).toHaveBeenCalledOnce()
       expect(requestedUrl).toContain('operator_id=claude-code')
       expect(request.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', cache: 'no-store' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it.each([
+    'auth_required',
+    'network_unavailable',
+    'callback_listener_missing',
+  ] as const)('preserves the structured %s login reason for an explicit retry UI', async (reason) => {
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:13080' } })
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      error: 'RESIDENT_AUTHENTICATION_FAILED',
+      reason,
+      message: `login failed: ${reason}`,
+    }), { status: 503, headers: { 'content-type': 'application/json' } }))
+    try {
+      let failure: unknown
+      try {
+        await authenticateResidentOperator('claude-code', request)
+      } catch (cause: unknown) {
+        failure = cause
+      }
+      expect(failure).toBeInstanceOf(ResidentAuthenticationError)
+      expect(failure).toMatchObject({ reason, message: `login failed: ${reason}` })
+      expect(request).toHaveBeenCalledOnce()
     } finally {
       vi.unstubAllGlobals()
     }
