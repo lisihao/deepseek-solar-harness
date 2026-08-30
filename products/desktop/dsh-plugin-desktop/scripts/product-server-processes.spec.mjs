@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { assertOwnedDaemonCommand, stopProductServerDaemons } from './product-server-processes.mjs'
+import { assertOwnedDaemonCommand, stopOwnedDaemon, stopProductServerDaemons } from './product-server-processes.mjs'
 
 function exited(child) {
   return child.exitCode !== null || child.signalCode !== null
@@ -40,4 +40,31 @@ test('stops daemon pids retained below a Product Server smoke home', async () =>
 test('refuses a stale pid that does not prove executable and instance root', () => {
   assert.throws(() => assertOwnedDaemonCommand('/usr/bin/node daemon.js --root /tmp/other', '/tmp/expected'), /does not own root/)
   assert.throws(() => assertOwnedDaemonCommand('/tmp/not-node daemon.js --root /tmp/expected', '/tmp/expected'), /executable/)
+})
+
+test('accepts a daemon exit that races an unavailable owner socket', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-product-process-race-'))
+  const root = join(home, 'resident-operators')
+  await mkdir(root, { recursive: true })
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', root], { stdio: 'ignore' })
+  try {
+    assert.ok(child.pid)
+    await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)
+    let inspected = false
+    await stopOwnedDaemon(root, 1_000, {
+      requestShutdown: async () => {
+        child.kill('SIGTERM')
+        await new Promise(resolve => exited(child) ? resolve() : child.once('exit', resolve))
+        throw new Error('owner socket unavailable')
+      },
+      inspectProcess: async () => {
+        inspected = true
+        throw new Error('an exited daemon must not be inspected')
+      },
+    })
+    assert.equal(inspected, false)
+  } finally {
+    if (!exited(child)) child.kill('SIGKILL')
+    await rm(home, { recursive: true, force: true })
+  }
 })
