@@ -120,6 +120,11 @@
       "name": "Prefix-safe Session replicas and authenticated remote handoff",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "ce498eb4979688232e56204da191b0559b63ead3"
+    },
+    {
+      "name": "Claude Resident authentication failure classification",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "8e39720b4c115feb8f5f648e0feae41668c7ba67"
     }
   ],
   "sourcePackages": {
@@ -236,12 +241,12 @@
     "dsh-packages/deepseek-ai-dsh-model-worker-0.1.0-rc.5.tgz": "16373a366bfa033d543fd5c540a446ee05f0f9c6ea7a28dda0c8e559a1900217",
     "dsh-packages/deepseek-ai-dsh-model-worker-deepseek-0.1.0-rc.5.tgz": "d95a8e62b21491a58da5385cc90fa99f695dcc77791d3f586c91508231a4ce15",
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "11212b15d46492d08ff180eb10984b229ca502596505271e68ff7fe5d8aac38a",
-    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "ba665a965f7c55441cc781c9372d8a703244173c7c4a46b39d57477d2a5faf07",
+    "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "9015727b33ad041d0077a71157d9a2e6910515c20b7d5c9539bfcc863ef353bf",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "00455d9f3cf2a1bb4703c857009f2d278f48044a4c102841a6aeb6332b9698d8",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "d491821273c8a735853ae87e8f5eedd8cb185f527bc6d694fa9b14a9ce36617a",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "b348fb840fc866e14b04ac5055f068261894201cc8afda4c31881414b8f06fb8",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "5724755636621f37bc0328c6e8016e33697fd43b342e1249415ef42f05898b93",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "89e7b76a3762016370c7a87f477d997b3197e65b505219abbe24c1d4478bfe78",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "46f58a00480d1a5a1b8b19e25485d867d61c8a27ff15c2d1f675713ddc543ea1",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "09de0d3544b7b879d9c1fd959d94614d30833d3dd601d8de54af849dbae973d1",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "8f1b8a5f72121fd9f5950922a67d6790b6e19f21bc1cebb0c4870d7d443847d0",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "4ea84a9bbfa33facb052300180c243507a0f8048cdb7e4f43b9d00bfd2d584d6",
@@ -261,7 +266,7 @@
     "dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz": "000debc0221660c5498518e5c5de1e277e409b645b905ce063bcab033a93fd3a",
     "dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz": "d86ef872f6d493e706a0587692d8193b8bd624a98dcb38d9919261894e6288fd",
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "b79879a5662b7307f4da56b33b29e670bb382b31dfd351c4a14a2039f9e35ea6",
-    "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "f8fc17ad8b6d5873a5f1949a1dcbbb52555c0cafb8005936536e51d92dc3daa2",
+    "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "aaeaccc3a1b39ec2e55973666207b900ee98ad52f87e36d30c3e8eb511ce5c03",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "a99df0376e50f978b9549444b9ad1ac52ca5ad9bc4ef9037ca79ac32445c2c7e",
     "dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz": "7e68a1f1466bdda283026a63c4ef54e6a112c2d7bab5d56b227a36b1a25ae863",
     "dsh-packages/dsh-better-sidebar-0.15.0-solar.1.tgz": "e5ef31ca74a46a4d7e023fdc5f2dafd37aa458622f0db4824ad0393819e256fc",

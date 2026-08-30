@@ -226,7 +226,7 @@ class FailingAuthenticationDriver extends MemoryDriver {
     })
   }
 
-  override authenticate(): Promise<ResidentProviderStatus> {
+  authenticate(): Promise<ResidentProviderStatus> {
     this.authenticationCount += 1
     return Promise.reject(new ResidentOperatorError(
       'native callback listener is unavailable',
