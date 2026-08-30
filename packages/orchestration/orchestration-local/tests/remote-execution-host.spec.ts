@@ -25,6 +25,10 @@ async function sourceRepository(): Promise<{ readonly root: string; readonly com
   return { root, commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim() }
 }
 
+function normalizeCheckoutText(text: string): string {
+  return text.replace(/\r\n?/g, '\n')
+}
+
 async function serviceFixture() {
   const source = await sourceRepository()
   const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-host-'))
@@ -63,7 +67,8 @@ describe('LocalRemoteOperatorHostService', () => {
     const second = await service.materializeWorkspace(sender, 'execution-1')
     expect(second.path).toBe(first.path)
     expect(first.path).not.toContain(source.root)
-    expect(await readFile(join(first.path, 'fixture.txt'), 'utf8')).toBe('exact commit fixture\n')
+    expect(normalizeCheckoutText(await readFile(join(first.path, 'fixture.txt'), 'utf8')))
+      .toBe('exact commit fixture\n')
     const checkoutRoot = join(first.path, '..', '..')
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: checkoutRoot, encoding: 'utf8' }).trim())
       .toBe(source.commit)
@@ -88,7 +93,8 @@ describe('LocalRemoteOperatorHostService', () => {
     expect(first.path).not.toBe(second.path)
     await writeFile(join(first.path, 'packages', 'core', 'fixture.txt'), 'changed by A\n')
     await writeFile(join(first.path, 'untracked.txt'), 'A only\n')
-    expect(await readFile(join(second.path, 'packages', 'core', 'fixture.txt'), 'utf8')).toBe('exact commit fixture\n')
+    expect(normalizeCheckoutText(await readFile(join(second.path, 'packages', 'core', 'fixture.txt'), 'utf8')))
+      .toBe('exact commit fixture\n')
     await expect(access(join(second.path, 'untracked.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(execFileSync('git', ['status', '--porcelain=v1', '-uall'], { cwd: second.path, encoding: 'utf8' })).toBe('')
     await service.releaseWorkspace('execution-a')
