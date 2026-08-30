@@ -6,8 +6,12 @@
 
 import { createHash } from 'node:crypto'
 import { opendir, realpath } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, tmpdir, userInfo } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+
+const MACOS_UNIX_SOCKET_PATH_MAX_BYTES = 103
+const LOCAL_IPC_DIGEST_LENGTH = 24
+const LOCAL_IPC_CHANNEL_LABEL_LENGTH = 16
 
 /** Directory name for the default DeepSeek Harness home under the OS home. */
 export const DSH_HOME_DIR_NAME = '.dsh'
@@ -21,8 +25,9 @@ export const DSH_HOME_ENV = 'DSH_HOME'
 /**
  * Resolve one owner-local IPC endpoint without exposing filesystem-only socket
  * assumptions to callers. Windows named pipes are derived from the canonical
- * root and channel, while POSIX platforms keep the endpoint inside its owner
- * directory so normal filesystem permissions remain authoritative.
+ * root and channel. POSIX platforms keep short endpoints inside their owner
+ * directory and map longer endpoints into a deterministic owner-specific
+ * temporary directory that fits the macOS Unix-socket path limit.
  * @param root - owner-local state directory for the daemon or bridge.
  * @param channel - short diagnostic channel name such as `control` or `rlm`.
  * @param platform - platform override used by cross-platform contract tests.
@@ -35,8 +40,30 @@ export function localIpcAddress(
 ): string {
   const normalizedChannel = channel.trim().replace(/[^a-z0-9._-]+/giu, '-').replace(/^-+|-+$/gu, '')
   if (normalizedChannel.length === 0) throw new Error('local IPC channel must be non-blank')
-  if (platform !== 'win32') return join(resolve(root), `${normalizedChannel}.sock`)
-  const digest = createHash('sha256').update(`${resolve(root)}\0${normalizedChannel}`).digest('hex').slice(0, 24)
+  const resolvedRoot = resolve(root)
+  if (platform !== 'win32') {
+    const directAddress = join(resolvedRoot, `${normalizedChannel}.sock`)
+    if (Buffer.byteLength(directAddress) <= MACOS_UNIX_SOCKET_PATH_MAX_BYTES) return directAddress
+
+    const owner = userInfo()
+    const ownerIdentity = createHash('sha256')
+      .update(`${owner.uid}\0${owner.username}\0${owner.homedir}`)
+      .digest('hex')
+      .slice(0, 12)
+    const digest = createHash('sha256')
+      .update(`${resolvedRoot}\0${normalizedChannel}`)
+      .digest('hex')
+      .slice(0, LOCAL_IPC_DIGEST_LENGTH)
+    const filename = `${normalizedChannel.slice(0, LOCAL_IPC_CHANNEL_LABEL_LENGTH)}-${digest}.sock`
+    const ownerDirectory = `dsh-ipc-${ownerIdentity}`
+    const preferredAddress = join(tmpdir(), ownerDirectory, filename)
+    if (Buffer.byteLength(preferredAddress) <= MACOS_UNIX_SOCKET_PATH_MAX_BYTES) return preferredAddress
+    return join('/tmp', ownerDirectory, filename)
+  }
+  const digest = createHash('sha256')
+    .update(`${resolvedRoot}\0${normalizedChannel}`)
+    .digest('hex')
+    .slice(0, LOCAL_IPC_DIGEST_LENGTH)
   return `\\\\.\\pipe\\dsh-${normalizedChannel}-${digest}`
 }
 

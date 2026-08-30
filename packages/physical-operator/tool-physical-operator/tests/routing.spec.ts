@@ -1,6 +1,8 @@
 import { once } from 'node:events'
+import { existsSync } from 'node:fs'
 import { createConnection } from 'node:net'
-import { describe, expect, it } from 'vitest'
+import { join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -469,6 +471,32 @@ describe('host physical-operator routing', () => {
       await secondBridge.dispose()
       await first.ctx.root.fiber.dispose()
       await second.ctx.root.fiber.dispose()
+    }
+  })
+
+  it('serves model tools when DSH_HOME exceeds Unix socket limits', async () => {
+    vi.stubEnv('DSH_HOME', join('/tmp', 'dsh-model-tool-long-home-'.repeat(8)))
+    const { ctx, agent } = await setup({ mountTool: false })
+    const bridge = new PhysicalOperatorModelToolBridge(ctx)
+    let socketPath = ''
+    const bound = await bridge.bind('long-home', agent, [{
+      name: 'subscription_echo',
+      description: 'Echo through the real DSH tool runtime.',
+      parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] },
+    }], new AbortController().signal)
+    try {
+      expect(bound.descriptor).toBeDefined()
+      socketPath = bound.descriptor?.socketPath ?? ''
+      expect(Buffer.byteLength(socketPath)).toBeLessThanOrEqual(103)
+      const socket = createConnection(socketPath)
+      await once(socket, 'connect')
+      socket.destroy()
+    } finally {
+      bound.release()
+      await bridge.dispose()
+      await ctx.root.fiber.dispose()
+      if (socketPath.length > 0) expect(existsSync(socketPath)).toBe(false)
+      vi.unstubAllEnvs()
     }
   })
 

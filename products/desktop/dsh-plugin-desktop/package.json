@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.9.4",
+  "version": "3.9.5",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {

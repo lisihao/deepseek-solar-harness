@@ -10,7 +10,7 @@ The existing workflow engine executes foreground model-written scripts, the jobs
 
 ## Decision
 
-`dsh-orchestratord` is the sole writer for durable orchestration state. It persists certified logical graphs, node state, attempts, evidence references, immutable compilation artifacts, and append-only events in one SQLite WAL database under the Harness home. A disposable `ctx.orchestrations` Provider connects over owner-only local IPC (Unix socket on POSIX, local named pipe on Windows), so DSH and Desktop restarts do not stop accepted runs.
+`dsh-orchestratord` is the sole writer for durable orchestration state. It persists certified logical graphs, node state, attempts, evidence references, immutable compilation artifacts, and append-only events in one SQLite WAL database under the Harness home. A disposable `ctx.orchestrations` Provider connects over owner-only local IPC (Unix socket on POSIX, local named pipe on Windows), so DSH and Desktop restarts do not stop accepted runs. A POSIX control path that exceeds the macOS Unix-socket byte limit maps to the same deterministic owner-specific temporary-address contract as Resident execution; only the socket moves, while orchestration state remains under the Harness home.
 
 The packaged Desktop assigns `desktop-<SemVer>` as the daemon build identity. The client rejects a protocol, schema, method-set, or build mismatch with `ORCHESTRATION_VERSION_MISMATCH`; auto-start drains that incompatible daemon before starting the installed build against the same persistent state. Development composition keeps the explicit `development` identity unless the caller supplies `DSH_BUILD_COMMIT`.
 

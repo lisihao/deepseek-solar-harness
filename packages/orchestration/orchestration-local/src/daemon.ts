@@ -1,9 +1,9 @@
 /** Independent durable orchestration daemon and Scheduler authority. */
 import { randomUUID } from 'node:crypto'
-import { chmodSync, closeSync, existsSync, lstatSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -893,6 +893,11 @@ export class OrchestrationDaemon {
       this.ctx.physicalOperators.registerOperator(operator)
     }
     await this.refreshRemoteOperators(true)
+    if (localIpcUsesFilesystem()) {
+      const socketDirectory = dirname(this.socketPath)
+      mkdirSync(socketDirectory, { recursive: true, mode: 0o700 })
+      chmodSync(socketDirectory, 0o700)
+    }
     this.removeStaleSocket()
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error): void => { reject(error) }

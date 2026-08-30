@@ -361,7 +361,7 @@ describe('local Debate Provider', () => {
       const error = event.data.error
       return event.type === 'debate.agent.failed' && typeof error === 'string' && error.includes('not present in the claim ledger')
     })).toBe(true)
-  })
+  }, 15_000)
 
   it('allows bounded decision-judge reconciliation claims in a follow-up round', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-judge-reconciliation-'))

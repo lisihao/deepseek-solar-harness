@@ -24,7 +24,9 @@ DeepSeek Harness 用户数据的共享文件系统路径辅助工具。
 
 ## 本地 IPC
 
-`localIpcAddress(root, channel)` 为本机 daemon 提供跨平台端点身份：POSIX 使用 `root` 内的 socket，Windows 使用确定性的 `\\.\pipe\...` 命名管道。`localIpcUsesFilesystem()` 告诉生命周期代码是否需要清理陈旧路径和设置文件权限；Windows 命名管道绝不会被当成文件处理。
+`localIpcAddress(root, channel)` 为本机 daemon 提供跨平台端点身份。POSIX 在路径符合 macOS Unix socket 限制时使用 `root` 内的 socket；较长路径会确定性地映射到操作系统临时根目录下的当前用户专用目录，而当临时根目录自身过长时使用有界的 `/tmp` 后备路径。Windows 保持确定性的 `\\.\pipe\...` 命名管道地址。`localIpcUsesFilesystem()` 告诉生命周期代码是否需要清理陈旧路径和设置文件权限；Windows 命名管道绝不会被当成文件处理。
+
+该辅助函数只派生端点。POSIX daemon 收到临时端点后，必须以 `0700` 模式创建父目录、以 `0600` 模式创建 socket，并在启动和停止期间清理它自己的陈旧 socket；持久化数据库和产物仍保留在 `root` 下。
 
 该包刻意保持规模小且不依赖 harness，以便产品包共享用户数据路径约定，而不必彼此依赖。
 

@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -65,6 +65,20 @@ describe('Resident daemon lifecycle', () => {
     await daemon.close()
 
     expect(socket.destroyed).toBe(true)
+  })
+
+  it('starts and accepts clients when the durable root exceeds Unix socket limits', async () => {
+    const root = join(temporaryRoot(), 'resident-root-'.repeat(10))
+    const daemon = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    await daemon.start()
+    try {
+      expect(daemon.socketPath).not.toBe(join(root, 'control.sock'))
+      const client = new ResidentDaemonClient({ root, autoStart: false, connectTimeoutMs: 1_000, pollIntervalMs: 10 })
+      await expect(client.providers()).resolves.toHaveLength(1)
+    } finally {
+      await daemon.close()
+    }
+    expect(existsSync(daemon.socketPath)).toBe(false)
   })
 })
 

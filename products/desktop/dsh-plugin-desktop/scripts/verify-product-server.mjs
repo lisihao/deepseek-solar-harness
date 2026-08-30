@@ -133,11 +133,15 @@ async function stop(child) {
   throw new Error('product server did not stop within its bounded shutdown window')
 }
 
-// Keep the generated DSH_HOME short: macOS limits Unix-domain socket paths to
-// roughly 104 bytes, and the resident daemon's control socket is nested under
-// this directory.  The default tmpdir path can already consume most of that
-// budget before the test prefix is added.
-const home = mkdtempSync('/tmp/dsh-product-verify-')
+const homeContainer = mkdtempSync('/tmp/dsh-product-verify-')
+const home = join(homeContainer, 'Library', 'Application Support', 'DSH Product Server Canary', 'state', 'dsh-home')
+mkdirSync(home, { recursive: true, mode: 0o700 })
+for (const daemonRoot of ['resident-operators', 'orchestrations']) {
+  const directSocket = join(home, daemonRoot, 'control.sock')
+  if (Buffer.byteLength(directSocket) <= 103) {
+    throw new Error(`product server smoke root does not exercise long Unix socket paths: ${directSocket}`)
+  }
+}
 const port = await availablePort()
 const projectRoot = fileURLToPath(new URL('../../../..', import.meta.url))
 const repository = execFileSync('git', ['remote', 'get-url', 'origin'], {
@@ -224,7 +228,7 @@ try {
     try {
       await stopProductServerDaemons(home)
     } finally {
-      rmSync(home, { recursive: true, force: true })
+      rmSync(homeContainer, { recursive: true, force: true })
     }
   }
 }

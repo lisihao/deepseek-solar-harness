@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 import { assertOwnedDaemonCommand, stopOwnedDaemon, stopProductServerDaemons } from './product-server-processes.mjs'
 
 function exited(child) {
@@ -43,7 +44,7 @@ test('refuses a stale pid that does not prove executable and instance root', () 
 })
 
 test('accepts a daemon exit that races an unavailable owner socket', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'dsh-product-process-race-'))
+  const home = await mkdtemp('/tmp/dsh-product-process-race-')
   const root = join(home, 'resident-operators')
   await mkdir(root, { recursive: true })
   const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', root], { stdio: 'ignore' })
@@ -51,8 +52,10 @@ test('accepts a daemon exit that races an unavailable owner socket', async () =>
     assert.ok(child.pid)
     await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)
     let inspected = false
+    let shutdownAttempts = 0
     await stopOwnedDaemon(root, 1_000, {
       requestShutdown: async () => {
+        shutdownAttempts += 1
         child.kill('SIGTERM')
         await new Promise(resolve => exited(child) ? resolve() : child.once('exit', resolve))
         throw new Error('owner socket unavailable')
@@ -62,7 +65,55 @@ test('accepts a daemon exit that races an unavailable owner socket', async () =>
         throw new Error('an exited daemon must not be inspected')
       },
     })
+    assert.equal(shutdownAttempts, 1)
     assert.equal(inspected, false)
+  } finally {
+    if (!exited(child)) child.kill('SIGKILL')
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('uses the shared IPC address for a long Product Server root', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-product-process-long-'))
+  const root = join(home, 'resident-operators-with-a-root-long-enough-to-require-the-shared-ipc-address-contract')
+  await mkdir(root, { recursive: true })
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', root], { stdio: 'ignore' })
+  try {
+    assert.ok(child.pid)
+    await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)
+    let requestedSocket
+    await stopOwnedDaemon(root, 1_000, {
+      requestShutdown: async socketPath => {
+        requestedSocket = socketPath
+        child.kill('SIGTERM')
+        await new Promise(resolve => exited(child) ? resolve() : child.once('exit', resolve))
+      },
+    })
+    assert.equal(requestedSocket, localIpcAddress(root, 'control'))
+  } finally {
+    if (!exited(child)) child.kill('SIGKILL')
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
+test('falls back to the legacy control socket before signalling a long-root daemon', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'dsh-product-process-legacy-'))
+  const root = join(home, 'resident-operators-with-a-root-long-enough-to-require-the-shared-ipc-address-contract')
+  await mkdir(root, { recursive: true })
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', root], { stdio: 'ignore' })
+  try {
+    assert.ok(child.pid)
+    await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)
+    const attempts = []
+    await stopOwnedDaemon(root, 1_000, {
+      requestShutdown: async socketPath => {
+        attempts.push(socketPath)
+        if (attempts.length === 1) throw new Error('new owner socket is unavailable')
+        child.kill('SIGTERM')
+        await new Promise(resolve => exited(child) ? resolve() : child.once('exit', resolve))
+      },
+    })
+    assert.deepEqual(attempts, [localIpcAddress(root, 'control'), join(root, 'control.sock')])
   } finally {
     if (!exited(child)) child.kill('SIGKILL')
     await rm(home, { recursive: true, force: true })

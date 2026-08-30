@@ -1,5 +1,6 @@
 import { once } from 'node:events'
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -316,6 +317,22 @@ async function installInstructionCapsule(root: string): Promise<void> {
 }
 
 describe('orchestration daemon', () => {
+  it('starts and accepts clients when the durable root exceeds Unix socket limits', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'oc-long-root-'))
+    const root = join(home, 'orchestration-root-'.repeat(10))
+    const daemon = createDaemon(root, home, new FakeResidentClient())
+    await daemon.start()
+    try {
+      expect(daemon.socketPath).not.toBe(join(root, 'control.sock'))
+      const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+      await expect(client.clusterStatus()).resolves.toBeUndefined()
+    } finally {
+      await daemon.close()
+      await rm(home, { recursive: true, force: true })
+    }
+    expect(existsSync(daemon.socketPath)).toBe(false)
+  })
+
   it('waits for an in-flight election tick before closing daemon-owned state', async () => {
     const home = await mkdtemp(join(tmpdir(), 'oc-close-quiescence-'))
     const root = join(home, 'orchestrations')
