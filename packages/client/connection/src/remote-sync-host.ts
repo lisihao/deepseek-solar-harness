@@ -376,16 +376,17 @@ export class RemoteSyncHub {
     const qualification = await host.qualification()
     if (!qualification.available) throw new Error(qualification.reason ?? 'remote execution host is unavailable')
     const materialized = await host.materializeWorkspace(request.workspaceIdentity, request.commandId)
+    const { commandId, operatorId, laneId, taskLabel, prompt, systemPrompt, profile, nativeToolPolicy } = request
     const turn = await this.expectResident().execute({
-      commandId: request.commandId as never,
-      operatorId: request.operatorId,
+      commandId: commandId as never,
+      operatorId,
       workspace: materialized.path,
-      laneId: request.laneId,
-      ...request.taskLabel === undefined ? {} : { taskLabel: request.taskLabel },
-      prompt: request.prompt,
-      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
-      ...request.profile === undefined ? {} : { profile: request.profile },
-      ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
+      laneId,
+      ...taskLabel === undefined ? {} : { taskLabel },
+      prompt,
+      ...systemPrompt === undefined ? {} : { systemPrompt },
+      ...profile === undefined ? {} : { profile },
+      ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
       signal: new AbortController().signal,
     })
     const accepted = {
