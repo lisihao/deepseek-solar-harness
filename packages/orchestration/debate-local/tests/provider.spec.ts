@@ -363,6 +363,59 @@ describe('local Debate Provider', () => {
     })).toBe(true)
   })
 
+  it('allows bounded decision-judge reconciliation claims in a follow-up round', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-judge-reconciliation-'))
+    const service = await provider(root, async turn => resultFor(turn, {
+      newClaim: turn.round > 1 && turn.role === 'decision-judge',
+    }))
+    const pending = await service.start(request('enabled', {
+      commandId: 'start-judge-reconciliation',
+      policy: { ...policy('enabled'), convergence: { ...policy('enabled').convergence, scoreThreshold: 1 } },
+    }))
+    const completed = await service.control({
+      version: 1,
+      commandId: 'control-judge-reconciliation',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture bounded judge reconciliation',
+    })
+    expect(completed.state).toBe('max_rounds')
+    expect(completed.claimLedger.claims.some(claim => claim.claimId === 'claim:new:2:decision-judge')).toBe(true)
+    expect(completed.synthesis).toMatchObject({ state: 'settled' })
+  })
+
+  it('rejects an unbounded number of new decision-judge follow-up claims', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-judge-expansion-'))
+    const service = await provider(root, async (turn) => {
+      const result = resultFor(turn)
+      if (turn.round === 1 || turn.role !== 'decision-judge') return result
+      return {
+        ...result,
+        claims: Array.from({ length: 5 }, (_, index) => claim({
+          claimId: `claim:judge-new:${String(index)}`,
+          supportingSlotIds: [turn.slotId],
+        })),
+      }
+    })
+    const pending = await service.start(request('enabled', {
+      commandId: 'start-judge-expansion',
+      policy: { ...policy('enabled'), convergence: { ...policy('enabled').convergence, scoreThreshold: 1 } },
+    }))
+    const failed = await service.control({
+      version: 1,
+      commandId: 'control-judge-expansion',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture rejects unbounded judge expansion',
+    })
+    expect(failed.state).toBe('failed')
+    const events = (await service.readEvents({ runId: failed.runId, limit: 100 })).events
+    expect(events.some(event => event.type === 'debate.agent.failed'
+      && event.data.error === 'follow-up decision judge may add at most 4 reconciliation claims')).toBe(true)
+  })
+
   it('supports auto and disabled modes without requiring an external model or CLI', async () => {
     const autoRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-auto-'))
     let autoCalls = 0

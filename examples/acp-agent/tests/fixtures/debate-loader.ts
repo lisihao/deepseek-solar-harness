@@ -95,8 +95,28 @@ class FixtureDebateService extends DebateService {
   control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1> {
     const run = this.current
     if (run === undefined || run.runId !== request.runId) return Promise.reject(new Error(`unknown fixture Debate run: ${request.runId}`))
-    const state: DebateRunSnapshotV1['state'] = request.action === 'reject' || request.action === 'stop' ? 'stopped' : run.state
-    this.current = { ...run, state, revision: run.revision + 1, updatedAt: CREATED_AT }
+    if (request.expectedRevision !== run.revision) return Promise.reject(new Error(`stale fixture Debate revision: ${String(request.expectedRevision)}`))
+    const state: DebateRunSnapshotV1['state'] = request.action === 'approve'
+      ? 'completed'
+      : request.action === 'reject' || request.action === 'stop'
+        ? 'stopped'
+        : run.state
+    this.current = {
+      ...run,
+      state,
+      revision: run.revision + 1,
+      currentRound: request.action === 'approve' ? 1 : run.currentRound,
+      ...request.action !== 'approve' ? {} : {
+        synthesis: {
+          version: 1,
+          state: 'settled',
+          outputPreview: 'DEBATE_READY',
+          unresolvedClaimIds: [],
+          dissentCount: 0,
+        },
+      },
+      updatedAt: CREATED_AT,
+    }
     return Promise.resolve(this.current)
   }
 }

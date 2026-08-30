@@ -40,6 +40,8 @@ const DEFAULT_PREFERENCES: DebateExecutionPreferences = { mode: 'disabled' }
 const MAX_LIST_ITEMS = 20
 const MAX_PREVIEW_CHARS = 600
 const MAX_REF_ITEMS = 20
+const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
+const CONCISE_DEBATE_HINT = /(?:简洁|简要|精简|三条|要点|concise|brief)/iu
 
 function isDebateMode(value: unknown): value is DebateExecutionMode {
   return typeof value === 'string' && MODE_OPTIONS.some(option => option === value)
@@ -168,6 +170,37 @@ export const DEFAULT_DEBATE_POLICY: DebatePolicyV1 = Object.freeze({
   preserveDissent: true,
 })
 
+/**
+ * Use one three-role round when the user explicitly asks for a concise result.
+ *
+ * @param prompt - The user request inspected for an explicit concise-output hint.
+ * @param mode - The selected debate policy mode to preserve in the derived policy.
+ * @returns The default policy or its bounded single-round concise variant.
+ */
+export function debatePolicyForPrompt(
+  prompt: string,
+  mode: DebatePolicyV1['mode'] = 'enabled',
+): DebatePolicyV1 {
+  if (!CONCISE_DEBATE_HINT.test(prompt)) return { ...DEFAULT_DEBATE_POLICY, mode }
+  const roster = DEFAULT_DEBATE_POLICY.roster.filter(role => role.role !== 'evidence-auditor')
+  return {
+    ...DEFAULT_DEBATE_POLICY,
+    mode,
+    roster,
+    budget: {
+      ...DEFAULT_DEBATE_POLICY.budget,
+      maxRounds: 1,
+      maxTurnsPerAgent: 1,
+      maxAgentsPerRound: roster.length,
+      maxInputTokens: 64_000,
+      maxOutputTokens: 16_000,
+      maxTotalTokens: 80_000,
+      maxCostUsd: 2,
+    },
+    convergence: { ...DEFAULT_DEBATE_POLICY.convergence, minSettledAgents: roster.length },
+  }
+}
+
 /** Model-visible guidance. Debate is an explicit/automatic strategy, not a second Scheduler. */
 export const debateGuidance = 'The debate tool runs a bounded, persistent multi-agent deliberation through the provider-neutral Debate service. Use action=start only when this Session has Debate enabled, or when Smart Auto has selected Debate for a genuinely contested, high-impact decision that benefits from independent proposals, falsification, evidence audit, and a final judge. Do not use Debate for greetings, simple retrieval, or one obvious implementation step. Debate preserves dissent, stops early on evidence-backed convergence, caps the roster at four native-subscription agents and the run at three rounds, and returns bounded status plus artifact references instead of large reports. Use list or inspect after a restart; use control only for an explicit user decision. Debate does not replace the DSH TaskGraph Scheduler and never calls a physical operator directly.'
 
@@ -250,6 +283,27 @@ function preferenceProjection(value: DebateExecutionPreferences): DebateExecutio
 function commandId(sessionId: string | undefined, callId: string): string {
   const digest = createHash('sha256').update(`${sessionId ?? 'headless'}\0${callId}`).digest('hex').slice(0, 32)
   return `debate-tool-${digest}`
+}
+
+function approvalCommandId(startCommandId: string): string {
+  const digest = createHash('sha256').update(startCommandId).digest('hex').slice(0, 32)
+  return `debate-approval-${digest}`
+}
+
+async function approveExplicitDebate(
+  ctx: Context,
+  run: DebateRunSnapshotV1,
+  startCommandId: string,
+): Promise<DebateRunSnapshotV1> {
+  if (run.state !== 'awaiting_approval') return run
+  return ctx.debates.control({
+    version: 1,
+    commandId: approvalCommandId(startCommandId),
+    runId: run.runId,
+    expectedRevision: run.revision,
+    action: 'approve',
+    reason: EXPLICIT_DEBATE_APPROVAL_REASON,
+  })
 }
 
 function hostCommandId(sessionId: string, messageId: string): string {
@@ -360,26 +414,27 @@ class DebateHostAdapter extends LlmAdapter {
       commandId: dispatch.commandId,
       workspace,
       prompt,
-      policy: { ...DEFAULT_DEBATE_POLICY, mode: 'enabled' },
+      policy: debatePolicyForPrompt(prompt),
       execution: { version: 1, kind: 'standalone' },
       sourceSessionId: String(agent.id),
     })
-    if (!hasAdmission(agent.session.events, run.runId)) {
+    const admitted = await approveExplicitDebate(this.ctx, run, dispatch.commandId)
+    if (!hasAdmission(agent.session.events, admitted.runId)) {
       agent.session.append('debate/admission', {
-        runId: run.runId,
+        runId: admitted.runId,
         mode: 'enabled',
-        revision: run.revision,
-        state: run.state,
+        revision: admitted.revision,
+        state: admitted.state,
       }, { ignorable: true })
     }
-    if (run.state === 'failed' || run.state === 'indeterminate') {
-      throw new DebateError(`Debate run ${run.runId} ended as ${run.state}`, 'DEBATE_PROVIDER_UNAVAILABLE')
+    if (admitted.state === 'failed' || admitted.state === 'indeterminate') {
+      throw new DebateError(`Debate run ${admitted.runId} ended as ${admitted.state}`, 'DEBATE_PROVIDER_UNAVAILABLE')
     }
-    const text = runText(run)
+    const text = runText(admitted)
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text }
     yield { type: 'block-end', index: 0, block: { type: 'text', text } }
-    const usage = runUsage(run)
+    const usage = runUsage(admitted)
     if (usage !== undefined) yield { type: 'usage', usage }
     yield { type: 'finish', reason: { kind: 'stop' } }
   }
@@ -514,11 +569,14 @@ export function apply(ctx: Context): void {
         workspace,
         prompt: args.prompt,
         ...(args.objective === undefined || args.objective.trim().length === 0 ? {} : { objective: args.objective }),
-        policy: { ...DEFAULT_DEBATE_POLICY, mode: preferences.mode },
+        policy: debatePolicyForPrompt(args.prompt, preferences.mode),
         execution: { version: 1, kind: 'standalone' },
         sourceSessionId: String(agent.id),
       }
-      const run = await ctx.debates.start(request)
+      const started = await ctx.debates.start(request)
+      const run = preferences.mode === 'enabled'
+        ? await approveExplicitDebate(ctx, started, stableCommandId)
+        : started
       agent.session.append('debate/admission', {
         runId: run.runId,
         mode: preferences.mode,

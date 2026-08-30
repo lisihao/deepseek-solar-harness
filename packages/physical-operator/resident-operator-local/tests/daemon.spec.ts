@@ -10,6 +10,7 @@ import type {
   ResidentProductDriver,
   ResidentProviderStatus,
 } from '@deepseek-ai/dsh-resident-operator'
+import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
 import { ResidentDaemonClient } from '../src/client.ts'
 import { normalizeResidentDriverError, ResidentDaemon } from '../src/daemon.ts'
 import { residentDriverManifestSha256 } from '../src/driver-modules.ts'
@@ -204,6 +205,99 @@ class BlockingAuthenticationDriver extends MemoryDriver {
   }
 }
 
+class FailingAuthenticationDriver extends MemoryDriver {
+  authenticationCount = 0
+
+  override qualify(): Promise<ResidentProviderStatus> {
+    return Promise.resolve({
+      operatorId: this.operatorId,
+      product: 'codex',
+      displayName: 'Codex',
+      description: 'Test Resident Provider.',
+      tags: ['coding'],
+      maxConcurrency: 4,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: false,
+      unavailableReason: 'subscription login required',
+      authentication: 'unqualified',
+      productVersion: EXPECTED_CODEX_CLI_VERSION,
+      protocolHash: EXPECTED_CODEX_SCHEMA_SHA256,
+      models: [],
+    })
+  }
+
+  authenticate(): Promise<ResidentProviderStatus> {
+    this.authenticationCount += 1
+    return Promise.reject(new ResidentOperatorError(
+      'native callback listener is unavailable',
+      'CALLBACK_LISTENER_MISSING',
+    ))
+  }
+}
+
+class NetworkUnavailableClaudeDriver implements ResidentProductDriver {
+  readonly operatorId = 'claude-code'
+  authenticationCount = 0
+
+  qualify(): Promise<ResidentProviderStatus> {
+    return Promise.resolve({
+      operatorId: this.operatorId,
+      product: 'claude-code',
+      displayName: 'Claude Code',
+      description: 'Test Resident Provider.',
+      tags: ['subscription'],
+      maxConcurrency: 4,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: false,
+      unavailableReason: 'fetch failed: getaddrinfo EAI_AGAIN api.anthropic.com',
+      authentication: 'unqualified',
+      productVersion: 'unavailable',
+      protocolHash: 'unavailable',
+      models: [],
+    })
+  }
+
+  authenticate(): Promise<ResidentProviderStatus> {
+    this.authenticationCount += 1
+    return this.qualify()
+  }
+
+  execute(): Promise<never> {
+    return Promise.reject(new Error('not used'))
+  }
+}
+
+class AuthRequiredClaudeDriver extends NetworkUnavailableClaudeDriver {
+  private authenticated = false
+
+  override qualify(): Promise<ResidentProviderStatus> {
+    const available = this.authenticated
+    return Promise.resolve({
+      operatorId: this.operatorId,
+      product: 'claude-code',
+      displayName: 'Claude Code',
+      description: 'Test Resident Provider.',
+      tags: ['subscription'],
+      maxConcurrency: 4,
+      injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available,
+      ...available ? {} : {
+        unavailableReason: 'Claude Code is not authenticated with a claude.ai subscription',
+      },
+      authentication: available ? 'native-subscription' : 'unqualified',
+      productVersion: 'test',
+      protocolHash: 'test',
+      models: available ? MODELS : [],
+    })
+  }
+
+  override authenticate(): Promise<ResidentProviderStatus> {
+    this.authenticationCount += 1
+    this.authenticated = true
+    return this.qualify()
+  }
+}
+
 class BlockingDriver extends MemoryDriver {
   override async execute(request: ResidentDriverExecuteRequest) {
     const session = request.nativeSessionId ?? 'native-blocking'
@@ -295,6 +389,70 @@ function client(root: string): ResidentDaemonClient {
 }
 
 describe('ResidentDaemon', () => {
+  it('starts one Claude login only after read-only qualification proves auth is required', async () => {
+    const root = temporaryRoot()
+    const driver = new AuthRequiredClaudeDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    try {
+      await connected.ready()
+      expect(driver.authenticationCount).toBe(0)
+      await expect(connected.authenticate('claude-code')).resolves.toMatchObject({
+        available: true,
+        authentication: 'native-subscription',
+      })
+      expect(driver.authenticationCount).toBe(1)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('keeps qualification read-only when Claude is unavailable for a non-auth reason', async () => {
+    const root = temporaryRoot()
+    const driver = new NetworkUnavailableClaudeDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    try {
+      await connected.ready()
+      await expect(connected.authenticate('claude-code')).rejects.toMatchObject({
+        code: 'NETWORK_UNAVAILABLE',
+      })
+      expect(driver.authenticationCount).toBe(0)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('does not restart a failed login until the owner explicitly retries', async () => {
+    const root = temporaryRoot()
+    const driver = new FailingAuthenticationDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const connected = client(root)
+    try {
+      await connected.ready()
+      await expect(connected.authenticate('codex')).rejects.toMatchObject({
+        code: 'CALLBACK_LISTENER_MISSING',
+      })
+      expect(driver.authenticationCount).toBe(1)
+
+      await expect(connected.providers()).resolves.toEqual([
+        expect.objectContaining({ operatorId: 'codex', available: false }),
+      ])
+      await expect(connected.list()).resolves.toEqual([])
+      expect(driver.authenticationCount).toBe(1)
+
+      await expect(connected.authenticate('codex')).rejects.toMatchObject({
+        code: 'CALLBACK_LISTENER_MISSING',
+      })
+      expect(driver.authenticationCount).toBe(2)
+    } finally {
+      await daemon.close()
+    }
+  })
+
   it('coalesces concurrent explicit authentication for one native product', async () => {
     const root = temporaryRoot()
     const driver = new BlockingAuthenticationDriver()

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
   DesktopResidentDashboard,
+  DesktopResidentAuthenticationFailure,
+  DesktopResidentAuthenticationFailureReason,
   DesktopResidentAuthenticationResponse,
   DesktopResidentActivity,
   DesktopResidentEvent,
@@ -12,6 +14,18 @@ import { formatResidentTimestamp } from '../presentation.ts'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 
 export type BrowserRequest = ConnectionHandle['request']
+
+/** Typed failure from one explicit owner-local Resident authentication attempt. */
+export class ResidentAuthenticationError extends Error {
+  constructor(
+    message: string,
+    readonly reason: DesktopResidentAuthenticationFailureReason,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.name = 'ResidentAuthenticationError'
+  }
+}
 
 /** Load one same-origin daemon projection for the Desktop Resident panel. */
 export async function loadResidentDashboard(
@@ -41,8 +55,24 @@ export async function authenticateResidentOperator(
   url.searchParams.set('operator_id', operatorId)
   const response = await request(url, { method: 'POST', cache: 'no-store' })
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(`Resident Operator login failed (${String(response.status)}): ${message}`)
+    const body = await response.text()
+    let failure: DesktopResidentAuthenticationFailure | undefined
+    try {
+      const parsed = JSON.parse(body) as Partial<DesktopResidentAuthenticationFailure>
+      if (
+        parsed.error === 'RESIDENT_AUTHENTICATION_FAILED'
+        && (parsed.reason === 'auth_required'
+          || parsed.reason === 'network_unavailable'
+          || parsed.reason === 'callback_listener_missing')
+        && typeof parsed.message === 'string'
+      ) failure = parsed as DesktopResidentAuthenticationFailure
+    } catch {
+      // Non-JSON Host failures remain visible through the bounded response text.
+    }
+    if (failure !== undefined) {
+      throw new ResidentAuthenticationError(failure.message, failure.reason)
+    }
+    throw new Error(`Resident Operator login failed (${String(response.status)}): ${body}`)
   }
   return await response.json() as DesktopResidentAuthenticationResponse
 }
@@ -53,6 +83,10 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
   const [selectedSessionId, setSelectedSessionId] = useState<string>()
   const [dashboard, setDashboard] = useState<DesktopResidentDashboard>()
   const [error, setError] = useState<string>()
+  const [authenticationFailure, setAuthenticationFailure] = useState<{
+    operatorId: string
+    reason: DesktopResidentAuthenticationFailureReason
+  }>()
   const [authenticating, setAuthenticating] = useState<string>()
 
   useEffect(() => {
@@ -104,11 +138,15 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
 
   const authenticate = async (operatorId: string): Promise<void> => {
     setAuthenticating(operatorId)
+    setAuthenticationFailure(undefined)
     setError(undefined)
     try {
       await authenticateResidentOperator(operatorId, request)
       setDashboard(await loadResidentDashboard(selectedSessionId, undefined, request))
     } catch (cause) {
+      if (cause instanceof ResidentAuthenticationError) {
+        setAuthenticationFailure({ operatorId, reason: cause.reason })
+      }
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setAuthenticating(undefined)
@@ -162,6 +200,9 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
                         <strong>{provider.displayName}</strong>
                         <small>{provider.productVersion} · {String(provider.models.length)} 个模型</small>
                         {!provider.available && provider.unavailableReason !== undefined && <small>{provider.unavailableReason}</small>}
+                        {authenticationFailure?.operatorId === provider.operatorId && (
+                          <small role="status">{authenticationFailureMessage(authenticationFailure.reason)}</small>
+                        )}
                         {provider.quotaUnavailableReason !== undefined && <small>配额状态暂不可用，执行仍可继续</small>}
                         {!provider.available && provider.authentication === 'unqualified' && provider.supportsExplicitAuthentication && (
                           remoteFrontend
@@ -172,7 +213,11 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
                               disabled={authenticating !== undefined}
                               onClick={() => { void authenticate(provider.operatorId) }}
                             >
-                              {authenticating === provider.operatorId ? '正在打开登录…' : `登录 ${provider.displayName}`}
+                              {authenticating === provider.operatorId
+                                ? '正在打开登录…'
+                                : authenticationFailure?.operatorId === provider.operatorId
+                                  ? `重试登录 ${provider.displayName}`
+                                  : `登录 ${provider.displayName}`}
                             </button>
                         )}
                       </div>
@@ -221,6 +266,17 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
       )}
     </>
   )
+}
+
+function authenticationFailureMessage(reason: DesktopResidentAuthenticationFailureReason): string {
+  switch (reason) {
+    case 'auth_required':
+      return '订阅登录尚未完成。系统不会自动重开登录；请确认后手动重试。'
+    case 'network_unavailable':
+      return '当前网络无法完成订阅登录。系统不会自动重试；网络恢复后请手动重试。'
+    case 'callback_listener_missing':
+      return '登录回调监听器已经结束或不可达。系统不会自动重开；请手动重试并完成新窗口。'
+  }
 }
 
 function SessionRow(props: { session: DesktopResidentSession; selected: boolean; onSelect: () => void }) {

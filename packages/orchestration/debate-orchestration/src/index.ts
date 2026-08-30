@@ -104,6 +104,10 @@ function taskFor(turn: DebateTurnRequestV1): string {
       'All participant nodes in this round are dependencies of this judge node.',
       'Read every upstream Evidence body supplied by the TaskGraph Context Packet before judging.',
       'Synthesize the best supported result while preserving material dissent and unresolved gaps.',
+      ...(turn.round === 1 ? [] : [
+        'Keep the prior ledger as the topic boundary. You may add at most four new claim IDs only when they are strictly necessary to reconcile this round\'s participant evidence.',
+        'Any dissent or unresolved entry must reference either a prior claim ID or one reconciliation claim emitted in this same result.',
+      ]),
     ]
     : [
       turn.round === 1

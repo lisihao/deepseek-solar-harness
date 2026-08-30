@@ -83,7 +83,15 @@ export async function stopOwnedDaemon(root, timeoutMs = 7_000, dependencies = {}
   } catch {
     // A crashed IPC owner may require the fenced process fallback below.
   }
-  const command = await (dependencies.inspectProcess ?? processCommand)(pid)
+  if (!await processExists(pid)) return
+  let command
+  try {
+    command = await (dependencies.inspectProcess ?? processCommand)(pid)
+  } catch (cause) {
+    // The daemon may finish after the liveness probe but before ps reads it.
+    if (!await processExists(pid)) return
+    throw cause
+  }
   assertOwnedDaemonCommand(command, root, dependencies.executable ?? process.execPath)
   const signal = dependencies.signalProcess ?? process.kill
   signal(pid, 'SIGTERM')

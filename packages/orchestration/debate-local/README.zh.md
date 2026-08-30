@@ -18,7 +18,7 @@
 本实现通过 turn request 和事件流使以下边界可观察：
 
 1. 首轮是 `blind-independent`。每个固定 roster 槽位都会收到空的 prior ledger、dissent 和 unresolved。Provider 在调用 round executor 前写入全部派发事件，并按稳定 roster 顺序应用其 slot 结果。
-2. 后续回合使用 `claim-ledger`；若存在 high/critical 未解决缺口，则使用 `high-severity-unresolved`。每个 claim、dissent 和 unresolved 都必须引用上一轮 ledger 中已有的 `claim_id`；未知 ID 会使该 turn 失败，不能自由扩题。
+2. 后续回合使用 `claim-ledger`；若存在 high/critical 未解决缺口，则使用 `high-severity-unresolved`。参与者必须复用上一轮 ledger 的 claim ID。决策裁判最多可以新增四条为整合本轮参与者证据所必需的 reconciliation claim；dissent 和 unresolved 仍必须引用 prior claim，或引用该裁判结果同批新建的 reconciliation claim。未知或无界扩张的 follow-up ID 会使该 turn 失败。
 3. 每个 executor 结果都必须提交 `[0, 1]` 内的 calibrated turn-level `confidence`。Claim 和 dissent 也带 confidence 与证据引用；Provider 会把这些值保留在 ledger/event 投影中。
 4. 收敛要求 settled-agent 和策略阈值、没有新增 unresolved，并满足按 confidence 加权的一致性。Opposed claim 和 dissent 使用其报告的 confidence 计入 disagreement；分数是平均 claim confidence 乘以 `(1 - disagreement)`。否则继续推进，直到 `maxRounds`、token、turn 或 cost budget 结构化地产生 `max_rounds` 或 `budget_limited`。
 5. ledger 收敛后通过 decision-judge 投影进行 synthesis；dissent 仍可见。Consumer 应保留独立 majority vote/synthesis 基线并与 debate 对比。`auto` 是调用方选择，不代表辩论普遍提升质量。
