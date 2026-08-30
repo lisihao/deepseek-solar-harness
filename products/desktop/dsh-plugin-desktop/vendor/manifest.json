@@ -251,7 +251,7 @@
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "f02f46a6a622151a411533f886daf22462ccd251118bf54a18662f25bc729dc9",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "18e0f88aefe69709e3bf46971bcf99f1e5996e09d9639461b791182c8ed355af",
-    "dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz": "6702005de232b03631e1fcae90c232da98fc8a9771a1cccd2fdea2374210a0ed",
+    "dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz": "a0eda9e201cb6bcf1ce24c86c539f251223af53a1ba4bab8617d1987700b867f",
     "dsh-packages/deepseek-ai-dsh-tool-markdown-0.0.1.tgz": "79c85b9e8cf8349577d2ade3f33326f885fe7e1fc53dedcb914d694d5342ab07",
     "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "dcff839815bcd9fabf503647a80288146ee5a83f53e89360ac727755f3431252",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "76dc6b044a2f7c26aef9f0e57fc59e4f13453069d505568579178eef98b6bd06",

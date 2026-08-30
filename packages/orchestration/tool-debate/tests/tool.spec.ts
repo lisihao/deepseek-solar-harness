@@ -99,12 +99,14 @@ function snapshot(overrides: Partial<DebateRunSnapshotV1> = {}): DebateRunSnapsh
 
 class ScriptedDebates extends DebateService {
   readonly run = snapshot()
+  startResult: DebateRunSnapshotV1 = this.run
+  controlResult: DebateRunSnapshotV1 = this.run
   readonly starts: DebateStartRequestV1[] = []
   readonly controls: DebateControlRequestV1[] = []
 
   async start(request: DebateStartRequestV1): Promise<DebateRunSnapshotV1> {
     this.starts.push(request)
-    return this.run
+    return this.startResult
   }
 
   async list(): Promise<readonly DebateRunSummaryV1[]> {
@@ -128,7 +130,7 @@ class ScriptedDebates extends DebateService {
 
   async control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1> {
     this.controls.push(request)
-    return this.run
+    return this.controlResult
   }
 }
 
@@ -189,6 +191,8 @@ function resultValue(result: Awaited<ReturnType<typeof call>>): Record<string, u
 describe('debate model Consumer', () => {
   it('lets an explicitly enabled Debate own the user turn without calling a primary model', async () => {
     const { ctx, agent, provider } = await setupAutomatic()
+    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
+    provider.controlResult = snapshot({ revision: 3 })
     await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
 
     agent.followup(createUserMessage({
@@ -210,6 +214,14 @@ describe('debate model Consumer', () => {
     expect(provider.starts[0]?.commandId).toBe(
       `debate-host:session-debate-automatic:${dispatch.data.promptMessageId}`,
     )
+    expect(provider.controls).toHaveLength(1)
+    expect(provider.controls[0]).toMatchObject({
+      runId: 'debate-run-1',
+      expectedRevision: 2,
+      action: 'approve',
+      reason: 'The user explicitly selected Debate for this Session and submitted this request.',
+    })
+    expect(provider.controls[0]?.commandId).toMatch(/^debate-approval-[a-f0-9]{32}$/u)
     expect(dispatch.ignorable).toBe(true)
     expect(typeof dispatch.data.promptMessageId).toBe('string')
     expect(dispatch.data.turn).toBe(1)
@@ -273,6 +285,8 @@ describe('debate model Consumer', () => {
       && block.text.includes('Debate is disabled'))).toBe(true)
 
     await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
+    provider.controlResult = snapshot({ revision: 3 })
     const started = await call(ctx, agent, { action: 'start', prompt: 'Choose A or B.', objective: 'Choose safely.' }, 'same-call')
     expect(resultValue(started)).toMatchObject({ kind: 'start', run: { runId: 'debate-run-1', state: 'completed' } })
     expect(provider.starts).toHaveLength(1)
@@ -285,6 +299,11 @@ describe('debate model Consumer', () => {
       policy: { mode: 'enabled', preserveDissent: true, budget: { maxRounds: 3, maxAgentsPerRound: 4 } },
     })
     expect(provider.starts[0]?.commandId).toMatch(/^debate-tool-[a-f0-9]{32}$/u)
+    expect(provider.controls).toHaveLength(1)
+    expect(provider.controls[0]).toMatchObject({
+      runId: 'debate-run-1', expectedRevision: 2, action: 'approve',
+    })
+    expect(provider.controls[0]?.commandId).toMatch(/^debate-approval-[a-f0-9]{32}$/u)
     expect(agent.session.events.find(event => event.type === 'debate/admission')).toMatchObject({
       data: { runId: 'debate-run-1', mode: 'enabled' },
       ignorable: true,

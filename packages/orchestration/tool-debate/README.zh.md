@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这是 `ctx.debates` 面向模型的 Consumer。它注册一个有界 `debate` 工具，用于启动、列出、检查持久化 Debate Run，以及执行带 revision 栅栏的控制。独立的 `/debate-mode auto|enabled|disabled` 命令把当前会话的完整偏好记录为可忽略事件；旧会话默认 `disabled`。显式选择 `enabled` 也是宿主级执行选择：下一条直接用户消息会获得持久化 `debate/dispatch`，无需先调用主模型即可启动 Debate Provider，并把有界 synthesis 作为 assistant 回复返回。`auto` 仍是模型策略，不会无条件准入。
+这是 `ctx.debates` 面向模型的 Consumer。它注册一个有界 `debate` 工具，用于启动、列出、检查持久化 Debate Run，以及执行带 revision 栅栏的控制。独立的 `/debate-mode auto|enabled|disabled` 命令把当前会话的完整偏好记录为可忽略事件；旧会话默认 `disabled`。显式选择 `enabled` 同时构成宿主级执行选择和授权：下一条直接用户消息会获得持久化 `debate/dispatch`，无需先调用主模型即可启动 Debate Provider，并通过 revision 栅栏完成批准，再把有界 synthesis 作为 assistant 回复返回。`auto` 仍是模型策略，不会无条件准入，并保留 Provider 的常规审批状态。
 
 默认策略使用固定的四角色、订阅优先阵容：Codex Sol 建议者、Claude Fable 证伪者、Codex Sol 证据审计者，以及 Claude Opus 决策裁判。Run 在有证据的收敛或三轮上限时终止，保留重要异议，并只返回工件引用与有界投影，不内联大型报告。
 

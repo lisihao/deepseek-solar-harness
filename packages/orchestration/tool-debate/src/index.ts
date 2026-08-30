@@ -40,6 +40,7 @@ const DEFAULT_PREFERENCES: DebateExecutionPreferences = { mode: 'disabled' }
 const MAX_LIST_ITEMS = 20
 const MAX_PREVIEW_CHARS = 600
 const MAX_REF_ITEMS = 20
+const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
 
 function isDebateMode(value: unknown): value is DebateExecutionMode {
   return typeof value === 'string' && MODE_OPTIONS.some(option => option === value)
@@ -252,6 +253,27 @@ function commandId(sessionId: string | undefined, callId: string): string {
   return `debate-tool-${digest}`
 }
 
+function approvalCommandId(startCommandId: string): string {
+  const digest = createHash('sha256').update(startCommandId).digest('hex').slice(0, 32)
+  return `debate-approval-${digest}`
+}
+
+async function approveExplicitDebate(
+  ctx: Context,
+  run: DebateRunSnapshotV1,
+  startCommandId: string,
+): Promise<DebateRunSnapshotV1> {
+  if (run.state !== 'awaiting_approval') return run
+  return ctx.debates.control({
+    version: 1,
+    commandId: approvalCommandId(startCommandId),
+    runId: run.runId,
+    expectedRevision: run.revision,
+    action: 'approve',
+    reason: EXPLICIT_DEBATE_APPROVAL_REASON,
+  })
+}
+
 function hostCommandId(sessionId: string, messageId: string): string {
   return `debate-host:${sessionId}:${messageId}`
 }
@@ -364,22 +386,23 @@ class DebateHostAdapter extends LlmAdapter {
       execution: { version: 1, kind: 'standalone' },
       sourceSessionId: String(agent.id),
     })
-    if (!hasAdmission(agent.session.events, run.runId)) {
+    const admitted = await approveExplicitDebate(this.ctx, run, dispatch.commandId)
+    if (!hasAdmission(agent.session.events, admitted.runId)) {
       agent.session.append('debate/admission', {
-        runId: run.runId,
+        runId: admitted.runId,
         mode: 'enabled',
-        revision: run.revision,
-        state: run.state,
+        revision: admitted.revision,
+        state: admitted.state,
       }, { ignorable: true })
     }
-    if (run.state === 'failed' || run.state === 'indeterminate') {
-      throw new DebateError(`Debate run ${run.runId} ended as ${run.state}`, 'DEBATE_PROVIDER_UNAVAILABLE')
+    if (admitted.state === 'failed' || admitted.state === 'indeterminate') {
+      throw new DebateError(`Debate run ${admitted.runId} ended as ${admitted.state}`, 'DEBATE_PROVIDER_UNAVAILABLE')
     }
-    const text = runText(run)
+    const text = runText(admitted)
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text }
     yield { type: 'block-end', index: 0, block: { type: 'text', text } }
-    const usage = runUsage(run)
+    const usage = runUsage(admitted)
     if (usage !== undefined) yield { type: 'usage', usage }
     yield { type: 'finish', reason: { kind: 'stop' } }
   }
@@ -518,7 +541,10 @@ export function apply(ctx: Context): void {
         execution: { version: 1, kind: 'standalone' },
         sourceSessionId: String(agent.id),
       }
-      const run = await ctx.debates.start(request)
+      const started = await ctx.debates.start(request)
+      const run = preferences.mode === 'enabled'
+        ? await approveExplicitDebate(ctx, started, stableCommandId)
+        : started
       agent.session.append('debate/admission', {
         runId: run.runId,
         mode: preferences.mode,

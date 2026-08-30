@@ -128,7 +128,7 @@ A Mac mini installs Product Server from one immutable GitHub release rather than
 
 ```sh
 node scripts/install-product-server.mjs \
-  --ref DSH-desktop-v3.9.1 \
+  --ref DSH-desktop-v3.9.2 \
   --commit <exact-40-character-release-commit>
 ```
 
