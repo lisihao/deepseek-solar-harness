@@ -446,7 +446,12 @@ function textPrompt(prompt: readonly ContentBlock[], product: string): string[] 
   return texts
 }
 
-/** Append the sealed no-tool contract to the product-owned instruction channel. */
+/**
+ * Append the sealed no-tool contract to the product-owned instruction channel.
+ * @param systemPrompt - optional caller-owned instructions.
+ * @param policy - sealed native product-tool authority.
+ * @returns effective product system prompt, or undefined when no prompt is needed.
+ */
 export function nativeToolSystemPrompt(
   systemPrompt: string | undefined,
   policy?: PhysicalOperatorNativeToolPolicy,
@@ -460,7 +465,11 @@ export function nativeToolSystemPrompt(
   return systemPrompt === undefined ? noTools : `${systemPrompt}\n\n${noTools}`
 }
 
-/** Agent SDK options that remove Claude Code's built-in tool surface for a sealed no-tool turn. */
+/**
+ * Build Agent SDK options that remove Claude Code's built-in tool surface for a sealed no-tool turn.
+ * @param policy - sealed native product-tool authority.
+ * @returns SDK tool selection options for the requested policy.
+ */
 export function claudeNativeToolOptions(policy?: PhysicalOperatorNativeToolPolicy): {
   readonly tools?: []
   readonly allowedTools?: string[]

@@ -132,6 +132,8 @@ node scripts/install-product-server.mjs \
   --commit <正式发布的完整-40-位-commit>
 ```
 
+默认安装会创建单成员集群，并允许从发布仓物化精确 commit。使用 `--execution-repo <git-url>` 可选择另一单一 Git 权威；使用 `--cluster-config <path>` 可安装完整的多 Server 成员与仓库准入目录。
+
 ## 插件工作流
 
 使用普通 DSH 命令管理任意 profile：

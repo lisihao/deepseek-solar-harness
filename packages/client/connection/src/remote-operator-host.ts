@@ -50,15 +50,22 @@ export abstract class RemoteOperatorHostService extends Service {
     executionId: string,
   ): Promise<RemoteMaterializedWorkspaceV1>
 
-  /** Extend one in-flight execution workspace lease after a durable turn observation. */
+  /**
+   * Extend one in-flight execution workspace lease after a durable turn observation.
+   * @param executionId - physical execution identity owning the workspace.
+   */
   abstract renewWorkspace(executionId: string): Promise<void>
 
-  /** Release one proven-settled execution workspace without touching the immutable object cache. */
+  /**
+   * Release one proven-settled execution workspace without touching the immutable object cache.
+   * @param executionId - physical execution identity owning the workspace.
+   */
   abstract releaseWorkspace(executionId: string): Promise<void>
 
   /**
    * Read exact immutable bytes for a Resident result artifact.
    * @param ref - content-addressed result reference.
+   * @param signal - optional caller cancellation signal.
    * @returns exact JSON bytes whose SHA-256 is the supplied reference.
    */
   abstract readResidentArtifact(ref: string, signal?: AbortSignal): Promise<RemoteResidentArtifactDocument>

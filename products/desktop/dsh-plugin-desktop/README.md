@@ -132,6 +132,8 @@ node scripts/install-product-server.mjs \
   --commit <exact-40-character-release-commit>
 ```
 
+The default installation creates a one-member cluster and permits exact-commit execution from the release repository. Use `--execution-repo <git-url>` for another single Git authority, or `--cluster-config <path>` to install a complete multi-Server membership and repository allowlist.
+
 ## Plugin workflow
 
 Manage any profile with the ordinary DSH command:

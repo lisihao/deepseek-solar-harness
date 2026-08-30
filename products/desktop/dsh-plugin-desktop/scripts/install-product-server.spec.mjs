@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   parseInstallerArguments,
   renderProductServerLaunchAgent,
+  renderProductServerCluster,
   validateProductServerDescription,
 } from './install-product-server.mjs'
 
@@ -16,8 +17,19 @@ test('requires a stable Desktop tag pinned to one exact commit', () => {
   assert.equal(options.commit, commit)
   assert.equal(options.port, 13080)
   assert.equal(options.host, '127.0.0.1')
+  assert.equal(options.executionRepository, 'https://github.com/lisihao/deepseek-solar-harness.git')
   assert.throws(() => parseInstallerArguments(['--ref', 'main', '--commit', commit]), /stable/)
   assert.throws(() => parseInstallerArguments(['--ref', 'DSH-desktop-v3.9.0', '--commit', 'short']), /40-character/)
+})
+
+test('renders a standalone remote-execution cluster from the GitHub authority', () => {
+  const cluster = JSON.parse(renderProductServerCluster({
+    endpoint: 'http://127.0.0.1:13080/',
+    executionRepository: 'https://github.com/lisihao/deepseek-solar-harness.git',
+  }))
+  assert.equal(cluster.nodeId, 'product-server-local')
+  assert.equal(cluster.members[0].remoteExecution.repositories[0].repository, 'github.com/lisihao/deepseek-solar-harness')
+  assert.equal(cluster.members[0].remoteExecution.repositories[0].source, 'https://github.com/lisihao/deepseek-solar-harness.git')
 })
 
 test('renders an owner LaunchAgent without copying a MacBook artifact', () => {

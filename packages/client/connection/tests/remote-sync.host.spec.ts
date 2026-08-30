@@ -331,10 +331,10 @@ describe('RemoteSyncHub', () => {
       providers: async () => [], execute: vi.fn(), inspectTurn: vi.fn(), readEvents: vi.fn(), interrupt: vi.fn(),
     }
     const qualification = vi.fn(async () => ({ available: false, reason: 'no repository can be materialized' }))
-    const hub = new RemoteSyncHub(api(), 4, undefined, resident as never, undefined, () => ({
+    const hub = new RemoteSyncHub(api(), 4, undefined, resident, undefined, () => ({
       qualification,
       materializeWorkspace: vi.fn(), renewWorkspace: vi.fn(), releaseWorkspace: vi.fn(), readResidentArtifact: vi.fn(),
-    }) as never)
+    }))
     const description = await hub.describe(new AbortController().signal, 'admin')
     expect(description.capabilities).toContain('operator.read')
     expect(description.capabilities).not.toContain('operator.execute')

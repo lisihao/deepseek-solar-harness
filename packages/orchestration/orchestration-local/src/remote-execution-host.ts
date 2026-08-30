@@ -36,7 +36,12 @@ export interface LocalRemoteOperatorHostOptions {
   readonly workspaceLeaseMs: number
 }
 
-/** Derive the immutable Git identity represented by one clean sender workspace. */
+/**
+ * Derive the immutable Git identity represented by one clean sender workspace.
+ * @param workspace - sender workspace inside a Git repository.
+ * @param timeoutMs - upper bound for each Git inspection command.
+ * @returns exact repository, commit, and optional subdirectory identity.
+ */
 export async function identifyRemoteWorkspace(
   workspace: string,
   timeoutMs: number,

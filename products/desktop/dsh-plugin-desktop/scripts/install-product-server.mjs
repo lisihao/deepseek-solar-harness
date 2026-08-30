@@ -21,7 +21,7 @@ export function parseInstallerArguments(argv) {
     const key = argv[index]
     const value = argv[index + 1]
     if (typeof key !== 'string' || !key.startsWith('--') || value === undefined) {
-      throw new Error('usage: install-product-server --ref DSH-desktop-vX.Y.Z --commit <40-hex> [--repo URL] [--host HOST] [--port PORT] [--root PATH]')
+      throw new Error('usage: install-product-server --ref DSH-desktop-vX.Y.Z --commit <40-hex> [--repo URL] [--execution-repo URL] [--cluster-config PATH] [--host HOST] [--port PORT] [--root PATH]')
     }
     values.set(key, value)
   }
@@ -37,14 +37,64 @@ export function parseInstallerArguments(argv) {
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
     throw new Error('install-product-server: --port must be an integer from 1 to 65535')
   }
+  const repository = values.get('--repo') ?? DEFAULT_REPOSITORY
+  const executionRepository = values.get('--execution-repo') ?? repository
+  validateGitUrl(repository, '--repo')
+  validateGitUrl(executionRepository, '--execution-repo')
   return {
     ref,
     commit,
-    repository: values.get('--repo') ?? DEFAULT_REPOSITORY,
+    repository,
+    executionRepository,
+    clusterConfigPath: values.has('--cluster-config') ? resolve(values.get('--cluster-config')) : undefined,
     host: values.get('--host') ?? '127.0.0.1',
     port,
     root: resolve(values.get('--root') ?? join(homedir(), 'Library', 'Application Support', 'DSH Product Server')),
   }
+}
+
+function validateGitUrl(value, option) {
+  const url = new URL(value)
+  if (url.protocol !== 'https:' && url.protocol !== 'ssh:') {
+    throw new Error(`install-product-server: ${option} must use https or ssh`)
+  }
+  if (url.username.length > 0 || url.password.length > 0) {
+    throw new Error(`install-product-server: ${option} must not contain credentials`)
+  }
+}
+
+function canonicalGitRepository(value) {
+  const url = new URL(value)
+  const path = url.pathname.replace(/^\/+|\/+$/gu, '').replace(/\.git$/u, '')
+  if (path.length === 0 || path.split('/').some(segment => segment === '' || segment === '.' || segment === '..')) {
+    throw new Error('install-product-server: execution repository path is invalid')
+  }
+  return `${url.host.toLowerCase()}/${path}`
+}
+
+/**
+ * Render the standalone one-member cluster used unless an explicit cluster file is supplied.
+ * @param {{ endpoint: string, executionRepository: string }} options - local endpoint and Git execution authority.
+ * @returns {string} formatted cluster JSON with a trailing newline.
+ */
+export function renderProductServerCluster(options) {
+  return `${JSON.stringify({
+    version: 1,
+    nodeId: 'product-server-local',
+    leaseMs: 5_000,
+    members: [{
+      id: 'product-server-local',
+      label: 'DSH Product Server',
+      endpoint: options.endpoint,
+      remoteExecution: {
+        enabled: true,
+        repositories: [{
+          repository: canonicalGitRepository(options.executionRepository),
+          source: options.executionRepository,
+        }],
+      },
+    }],
+  }, null, 2)}\n`
 }
 
 function xml(value) {
@@ -157,12 +207,12 @@ async function atomicWrite(path, content) {
   await rename(temporary, path)
 }
 
-async function rpc(baseUrl, method) {
+async function rpc(baseUrl, method, payload = {}) {
   const rpcId = `installer-${method}`
   const response = await fetch(`${baseUrl}/remote-sync/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ type: 'client-request', rpcId, method, payload: {} }),
+    body: JSON.stringify({ type: 'client-request', rpcId, method, payload }),
   })
   if (!response.ok) throw new Error(`install-product-server: ${method} returned HTTP ${String(response.status)}`)
   const envelope = await response.json()
@@ -180,7 +230,7 @@ async function verifyRunning(baseUrl, expectedCommit) {
       const response = await fetch(`${baseUrl}/`)
       if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
       await response.arrayBuffer()
-      const description = await rpc(baseUrl, 'describe')
+      const description = await rpc(baseUrl, 'describe', { protocol: { major: 1, minor: 4 } })
       const providers = await rpc(baseUrl, 'operator.providers')
       validateProductServerDescription(description, providers)
       return { http: response.status, protocol: description.protocol, capabilities: description.capabilities, providers: providers.length }
@@ -252,13 +302,24 @@ export async function installProductServer(options) {
     })
   }
 
+  const dshHome = join(state, 'dsh-home')
+  const clusterPath = join(dshHome, 'orchestrations', 'cluster.json')
   const previousTarget = await readlink(current).catch(cause => cause?.code === 'ENOENT' ? undefined : Promise.reject(cause))
   const previousPlist = await readFile(plistPath, 'utf8').catch(cause => cause?.code === 'ENOENT' ? undefined : Promise.reject(cause))
+  const previousCluster = await readFile(clusterPath, 'utf8').catch(cause => cause?.code === 'ENOENT' ? undefined : Promise.reject(cause))
+  const endpointHost = options.host === '0.0.0.0' || options.host === '::' ? '127.0.0.1' : options.host
+  const cluster = options.clusterConfigPath === undefined
+    ? renderProductServerCluster({
+        endpoint: `http://${endpointHost}:${String(options.port)}/`,
+        executionRepository: options.executionRepository,
+      })
+    : await readFile(options.clusterConfigPath, 'utf8')
+  JSON.parse(cluster)
   const plist = renderProductServerLaunchAgent({
     label,
     nodePath: process.execPath,
     currentPath: current,
-    dshHome: join(state, 'dsh-home'),
+    dshHome,
     commit: options.commit,
     host: options.host,
     port: options.port,
@@ -267,8 +328,10 @@ export async function installProductServer(options) {
     stderrPath: join(logs, 'stderr.log'),
   })
   try {
+    await mkdir(dirname(clusterPath), { recursive: true, mode: 0o700 })
+    await atomicWrite(clusterPath, cluster.endsWith('\n') ? cluster : `${cluster}\n`)
     await bootout(domain, label)
-    await stopProductServerDaemons(join(state, 'dsh-home'))
+    await stopProductServerDaemons(dshHome)
     if (previousTarget !== undefined) await replaceSymlink(rollback, previousTarget)
     await replaceSymlink(current, release)
     await atomicWrite(plistPath, plist)
@@ -277,7 +340,9 @@ export async function installProductServer(options) {
     return { ...evidence, ref: options.ref, commit: options.commit, release, rollback: previousTarget ?? null }
   } catch (cause) {
     await bootout(domain, label)
-    await stopProductServerDaemons(join(state, 'dsh-home'))
+    await stopProductServerDaemons(dshHome)
+    if (previousCluster === undefined) await rm(clusterPath, { force: true })
+    else await atomicWrite(clusterPath, previousCluster)
     if (previousTarget !== undefined) await replaceSymlink(current, previousTarget)
     else await rm(current, { force: true })
     if (previousPlist !== undefined) {

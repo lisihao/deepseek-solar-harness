@@ -137,10 +137,10 @@ export function apply(ctx: Context, config: Config): void {
   const dshHome = resolveDshHome(resolved.dshHome)
   new LocalRemoteOperatorHostService(ctx, {
     dshHome,
-    timeoutMs: resolved.remoteMaterializationTimeoutMs ?? 120_000,
-    artifactReadTimeoutMs: resolved.remoteArtifactReadTimeoutMs ?? 15_000,
-    artifactMaxBytes: resolved.remoteArtifactMaxBytes ?? 8 * 1024 * 1024,
-    workspaceLeaseMs: resolved.remoteWorkspaceLeaseMs ?? 24 * 60 * 60_000,
+    timeoutMs: resolved.remoteMaterializationTimeoutMs,
+    artifactReadTimeoutMs: resolved.remoteArtifactReadTimeoutMs,
+    artifactMaxBytes: resolved.remoteArtifactMaxBytes,
+    workspaceLeaseMs: resolved.remoteWorkspaceLeaseMs,
   })
   new LocalOrchestrationService(ctx, resolved)
 }

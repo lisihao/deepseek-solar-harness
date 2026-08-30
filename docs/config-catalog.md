@@ -414,7 +414,7 @@ export interface ConnectionConfig {
 }
 ```
 
-Source: [`packages/client/connection/src/index.ts:92`](../packages/client/connection/src/index.ts)
+Source: [`packages/client/connection/src/index.ts:101`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -1553,10 +1553,18 @@ export interface Config {
   readonly residentDriverModules?: string[]
   /** Trusted plugins that register executable TypeScript Skills in the daemon. */
   readonly skillProviderModules?: string[]
+  /** Maximum time for one Server-side exact-commit Git materialization. */
+  readonly remoteMaterializationTimeoutMs?: number
+  /** Maximum time for one bounded Resident artifact read. */
+  readonly remoteArtifactReadTimeoutMs?: number
+  /** Maximum exact artifact bytes returned over Remote Sync. */
+  readonly remoteArtifactMaxBytes?: number
+  /** Lease retained for one command-isolated remote execution checkout. */
+  readonly remoteWorkspaceLeaseMs?: number
 }
 ```
 
-Source: [`packages/orchestration/orchestration-local/src/index.ts:44`](../packages/orchestration/orchestration-local/src/index.ts)
+Source: [`packages/orchestration/orchestration-local/src/index.ts:46`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 

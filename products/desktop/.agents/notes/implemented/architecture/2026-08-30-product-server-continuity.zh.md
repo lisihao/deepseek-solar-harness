@@ -14,7 +14,7 @@ Frontend 保持轻量：绝不启动本地 Host。Electron 自有 monitor 通过
 
 loopback billing bridge 会在明确的逐来源 deadline 内请求每个已配置 Server 的账本，把部分失败保留为显式来源记录，按 ledger 身份去重备用入口（缺失时退回 deployment 身份），聚合唯一 Server totals，并且只加一次未启动的 MacBook 历史基线。`dsh-web-billing` 只消费普通的 `desktopFrontend.sources` 投影，不依赖 Desktop runtime 代码。
 
-macOS Product Server 安装器接收稳定的 `DSH-desktop-vX.Y.Z` 标签与完整 40 位 commit。它在目标 Mac mini 上克隆 GitHub、本机构建并运行 release-shaped smoke，通过 owner IPC 排空 Host 与两个持久 daemon，再原子切换 `current`，将之前的目标保留为 `rollback`，激活 LaunchAgent，并验证 HTTP、Remote Sync 1.4、Resident provider 以及 read/execute/interrupt/materialize/artifact 能力。激活失败时会再次排空，再恢复并复验上一版本。PID signal 只是在 executable 与 instance root 都匹配后的 fenced 崩溃兜底。它不复制 MacBook 产物。
+macOS Product Server 安装器接收稳定的 `DSH-desktop-vX.Y.Z` 标签与完整 40 位 commit。它在目标 Mac mini 上克隆 GitHub、本机构建并运行 release-shaped smoke，通过 owner IPC 排空 Host 与两个持久 daemon，再原子切换 `current`，将之前的目标保留为 `rollback`，激活 LaunchAgent，并验证 HTTP、Remote Sync 1.4、Resident provider 以及 read/execute/interrupt/materialize/artifact 能力。默认安装会写入单成员 `cluster.json`，其执行准入目录包含 GitHub 发布仓；`--execution-repo` 可选择另一单仓，`--cluster-config` 则安装操作者提供的多 Server 成员与仓库目录。激活失败时会先恢复上一份集群配置，再恢复并复验上一版本。PID signal 只是在 executable 与 instance root 都匹配后的 fenced 崩溃兜底。它不复制 MacBook 产物。
 
 ## 验证
 

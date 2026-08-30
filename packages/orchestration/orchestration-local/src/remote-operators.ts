@@ -30,7 +30,6 @@ export function readRemoteOperatorCatalog(root: string): RemotePhysicalOperatorS
   const cluster = readOrchestrationClusterConfig(root)
   const clusterOwnsCapacity = cluster?.members.some(member => member.remoteExecution !== undefined) === true
   if (clusterOwnsCapacity) {
-    if (cluster === undefined) throw new Error('remote execution cluster membership is unavailable')
     if (existsSync(path)) {
       throw new Error('cluster remoteExecution membership and remote-operators.json cannot both own capacity')
     }

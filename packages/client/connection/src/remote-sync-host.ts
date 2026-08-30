@@ -211,6 +211,7 @@ export class RemoteSyncHub {
    * Identify the authenticated Server generation before transferring its projections.
    * @param signal - request cancellation.
    * @param scope - authenticated device scope used to derive capabilities.
+   * @param protocol - negotiated same-major projection protocol.
    * @returns the stable Server description for the sampled generation.
    */
   async describe(
@@ -278,6 +279,7 @@ export class RemoteSyncHub {
   /**
    * Build a gap-free snapshot: the cursor is sampled before projection reads.
    * @param signal - request cancellation.
+   * @param protocol - negotiated same-major projection protocol.
    * @returns the Server-owned projection snapshot.
    */
   async snapshot(
@@ -398,6 +400,7 @@ export class RemoteSyncHub {
   /**
    * Read one immutable oversized Resident result through the host-local artifact Provider.
    * @param ref - content-addressed result reference returned by turn inspection.
+   * @param signal - optional caller cancellation signal.
    * @returns exact JSON bytes for sender-side digest verification and local CAS persistence.
    */
   operatorReadArtifact(ref: string, signal?: AbortSignal): Promise<RemoteResidentArtifactDocument> {

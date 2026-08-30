@@ -327,6 +327,7 @@ function renderError(error: unknown): string {
 /**
  * Qualify one Server and construct its independently registered remote Providers.
  * @param server - remote DSH Server member to qualify.
+ * @param resultStore - local content-addressed artifact owner used for result import.
  * @param request - HTTP implementation used for authenticated control calls.
  * @returns independently registered Physical Operator projections.
  */

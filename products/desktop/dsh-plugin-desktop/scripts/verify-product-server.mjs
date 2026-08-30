@@ -1,8 +1,10 @@
 /** Release-shaped smoke for the headless DSH Product Server. */
 
-import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { stopProductServerDaemons } from './product-server-processes.mjs'
 
 const REQUIRED_CLIENT_IDS = [
@@ -84,7 +86,7 @@ async function waitForRemoteSync(baseUrl, child, output) {
           type: 'client-request',
           rpcId: 'product-server-describe',
           method: 'describe',
-          payload: {},
+          payload: { protocol: { major: 1, minor: 4 } },
         }),
       })
       lastStatus = String(response.status)
@@ -137,6 +139,26 @@ async function stop(child) {
 // budget before the test prefix is added.
 const home = mkdtempSync('/tmp/dsh-product-verify-')
 const port = await availablePort()
+const projectRoot = fileURLToPath(new URL('../../../..', import.meta.url))
+const repository = execFileSync('git', ['remote', 'get-url', 'origin'], {
+  cwd: projectRoot,
+  encoding: 'utf8',
+}).trim()
+mkdirSync(join(home, 'orchestrations'), { recursive: true, mode: 0o700 })
+writeFileSync(join(home, 'orchestrations', 'cluster.json'), `${JSON.stringify({
+  version: 1,
+  nodeId: 'product-server-smoke',
+  leaseMs: 5_000,
+  members: [{
+    id: 'product-server-smoke',
+    label: 'Product Server smoke',
+    endpoint: `http://127.0.0.1:${String(port)}/`,
+    remoteExecution: {
+      enabled: true,
+      repositories: [{ repository, source: projectRoot }],
+    },
+  }],
+}, null, 2)}\n`, { mode: 0o600 })
 let stdout = ''
 let stderr = ''
 const child = spawn(process.execPath, ['lib/product-server-bin.js', '--host', '127.0.0.1', '--port', String(port)], {
@@ -173,11 +195,11 @@ try {
   const description = await waitForRemoteSync(baseUrl, child, () => `${stdout}\n${stderr}`)
   for (const capability of ['operator.read', 'operator.execute', 'operator.interrupt']) {
     if (!description.capabilities?.includes(capability)) {
-      throw new Error(`product server Remote Sync is missing ${capability}`)
+      throw new Error(`product server Remote Sync is missing ${capability}: ${JSON.stringify(description)}\n${stdout}\n${stderr}`)
     }
   }
-  if (description.capabilities?.includes('orchestration.cluster')) {
-    throw new Error('standalone product server advertised an unconfigured orchestration cluster')
+  if (!description.capabilities?.includes('orchestration.cluster')) {
+    throw new Error('product server did not advertise its configured standalone cluster')
   }
   const providers = await remoteSyncCall(baseUrl, 'operator.providers')
   if (!Array.isArray(providers) || providers.length === 0) {
@@ -192,7 +214,7 @@ try {
     nativePicker: false,
     remoteResident: true,
     residentProviders: providers.length,
-    standaloneCluster: false,
+    standaloneCluster: true,
     rev: boot.rev,
   }
 } finally {
