@@ -99,6 +99,21 @@ describe('native product runtime', () => {
     installed.dispose()
   })
 
+  it('prefers the user-controlled npm installation over an app-managed standalone binary', () => {
+    const root = temporaryRoot()
+    const homeDir = join(root, 'home')
+    const npmCodex = join(homeDir, '.npm-global', 'bin', 'codex')
+    const standaloneCodex = join(homeDir, '.local', 'bin', 'codex')
+    product(npmCodex)
+    product(standaloneCodex)
+
+    expect(resolveNativeProductCommands({
+      platform: 'darwin',
+      homeDir,
+      environment: { PATH: '/usr/bin:/bin' },
+    }).codex).toBe(npmCodex)
+  })
+
   it('fails closed when the private runtime directory is a symlink', () => {
     const root = temporaryRoot()
     const target = join(root, 'target')

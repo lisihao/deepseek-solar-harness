@@ -436,6 +436,8 @@ describe('Electron compatibility runtime', () => {
 
   it('redirects the remote global billing snapshot through the local history bridge', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const frontendBilling = await import('../src/frontend-billing.ts')
+    const bridgeStart = vi.spyOn(frontendBilling, 'startFrontendBillingBridge')
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
     const runtime = new ElectronDesktopRuntime(async () => {})
     const release = runtime.schedule({
@@ -455,6 +457,9 @@ describe('Electron compatibility runtime', () => {
       },
     })
     await runtime.mountScheduled()
+    expect(bridgeStart).toHaveBeenCalledWith(expect.not.objectContaining({
+      request: expect.anything(),
+    }))
     const hook = electron.browserWindows[0]!.webContents.session.webRequest.onBeforeRequest
     expect(hook.mock.calls[0]?.[0]).toEqual({
       urls: ['http://127.0.0.1:43120/billing/state*'],

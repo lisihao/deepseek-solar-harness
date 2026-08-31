@@ -616,7 +616,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
           origin: frontendBilling.origin,
           baseline: frontendBilling.baseline,
           sources: frontendBilling.sources,
-          request: (input, init) => net.fetch(String(input), init),
         })
         window.webContents.session.webRequest.onBeforeRequest(
           billingFilter,
