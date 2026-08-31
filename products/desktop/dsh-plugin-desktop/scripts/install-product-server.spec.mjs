@@ -11,15 +11,15 @@ const commit = '1234567890abcdef1234567890abcdef12345678'
 
 test('requires a stable Desktop tag pinned to one exact commit', () => {
   const options = parseInstallerArguments([
-    '--ref', 'DSH-desktop-v3.9.7', '--commit', commit, '--port', '13080', '--host', '127.0.0.1',
+    '--ref', 'DSH-desktop-v3.9.8', '--commit', commit, '--port', '13080', '--host', '127.0.0.1',
   ])
-  assert.equal(options.ref, 'DSH-desktop-v3.9.7')
+  assert.equal(options.ref, 'DSH-desktop-v3.9.8')
   assert.equal(options.commit, commit)
   assert.equal(options.port, 13080)
   assert.equal(options.host, '127.0.0.1')
   assert.equal(options.executionRepository, 'https://github.com/lisihao/deepseek-solar-harness.git')
   assert.throws(() => parseInstallerArguments(['--ref', 'main', '--commit', commit]), /stable/)
-  assert.throws(() => parseInstallerArguments(['--ref', 'DSH-desktop-v3.9.7', '--commit', 'short']), /40-character/)
+  assert.throws(() => parseInstallerArguments(['--ref', 'DSH-desktop-v3.9.8', '--commit', 'short']), /40-character/)
 })
 
 test('renders a standalone remote-execution cluster from the GitHub authority', () => {
