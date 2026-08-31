@@ -28,6 +28,7 @@ import {
   formatImageReadOutput,
   imageMediaTypeForPath,
   imageRefFromValue,
+  sniffImageMediaType,
 } from '../src/read-image.ts'
 
 /** 1x1 red PNG (valid signature, IHDR, IDAT). */
@@ -164,6 +165,24 @@ describe('imageMediaTypeForPath', () => {
   })
 })
 
+describe('sniffImageMediaType', () => {
+  const ascii = (value: string): Uint8Array => new TextEncoder().encode(value)
+
+  it('identifies every supported image container by its complete signature', () => {
+    expect(sniffImageMediaType(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe('image/png')
+    expect(sniffImageMediaType(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg')
+    expect(sniffImageMediaType(ascii('GIF87a'))).toBe('image/gif')
+    expect(sniffImageMediaType(ascii('GIF89a'))).toBe('image/gif')
+    expect(sniffImageMediaType(ascii('RIFF\0\0\0\0WEBP'))).toBe('image/webp')
+  })
+
+  it('rejects incomplete, unknown, and non-WebP RIFF signatures', () => {
+    expect(sniffImageMediaType(Uint8Array.from([0x89, 0x50]))).toBeUndefined()
+    expect(sniffImageMediaType(ascii('plain text'))).toBeUndefined()
+    expect(sniffImageMediaType(ascii('RIFF\0\0\0\0WAVE'))).toBeUndefined()
+  })
+})
+
 describe('imageRefFromValue', () => {
   it('re-brands with and without the optional display name', () => {
     const base = { attachmentId: 'sha256:00', mediaType: 'image/png' as const, bytes: 1, width: 1, height: 1 }
@@ -210,6 +229,41 @@ describe('read_image happy path', () => {
     ctx.on('fs/observed', target => void observed.push(target.displayPath))
     await readImage(ctx, { file_path: 'red.png' }, agentOn('vision-model'))
     expect(observed).toEqual([join(dir, 'red.png')])
+  })
+
+  it('reads an extension-less image by its content signature', async () => {
+    await writeFile(join(dir, 'normalized-object'), PNG_1X1)
+    const ctx = await setup()
+    const result = await readImage(ctx, { file_path: 'normalized-object' }, agentOn('vision-model'))
+
+    expect(result.isError).toBe(false)
+    expect(result.content[1]).toMatchObject({
+      type: 'image',
+      attachment: { mediaType: 'image/png', width: 1, height: 1 },
+    })
+    expect(text(result)).toContain(`<path>${join(dir, 'normalized-object')}</path>`)
+  })
+
+  it('rejects extension-less non-image bytes after the bounded read', async () => {
+    await writeFile(join(dir, 'not-an-image'), 'plain text')
+    const ctx = await setup()
+    const result = await readImage(ctx, { file_path: 'not-an-image' }, agentOn('vision-model'))
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('file content is not a supported image format')
+  })
+
+  it('explains a corrupt extension-less file whose signature claims an image format', async () => {
+    await writeFile(join(dir, 'corrupt-image'), Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x63, 0x6f, 0x72, 0x72, 0x75, 0x70, 0x74,
+    ]))
+    const ctx = await setup()
+    const result = await readImage(ctx, { file_path: 'corrupt-image' }, agentOn('vision-model'))
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('the file signature claims image/png')
+    expect(text(result)).toContain('the bytes do not decode as a valid image/png image')
   })
 
   it('falls back to agent options when no request header exists yet', async () => {
@@ -306,7 +360,7 @@ describe('argument and service preconditions', () => {
 
     const nonImage = await readImage(ctx, { file_path: 'notes.txt' }, agentOn('vision-model'))
     expect(nonImage.isError).toBe(true)
-    expect(text(nonImage)).toContain('only accepts PNG/JPEG/WebP/GIF paths')
+    expect(text(nonImage)).toContain('does not declare a supported image format')
   })
 
   it('refuses when no attachment service is mounted', async () => {

@@ -128,7 +128,7 @@ Mac mini 必须从固定 GitHub Release 自行安装 Product Server，不复制 
 
 ```sh
 node scripts/install-product-server.mjs \
-  --ref DSH-desktop-v3.9.9 \
+  --ref DSH-desktop-v3.10.0 \
   --commit <正式发布的完整-40-位-commit>
 ```
 
