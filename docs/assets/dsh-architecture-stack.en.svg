@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1160" viewBox="0 0 1440 1160" role="img" aria-labelledby="title desc">
+  <title id="title">DSH 3.9.9 layered architecture</title>
+  <desc id="desc">A layered stack from interaction and plugin composition through the agent runtime, orchestration, execution allocation, and model providers, with cross-layer governance and durable state authorities.</desc>
+  <defs>
+    <style>
+      .canvas { fill: #f7f9fc; }
+      .frame { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; }
+      .title { fill: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 34px; font-weight: 700; }
+      .subtitle { fill: #475569; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 17px; font-weight: 500; }
+      .layer-label { fill: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 20px; font-weight: 700; }
+      .layer-index { fill: #dbeafe; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+      .layer-note { fill: #eef4ff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px; font-weight: 600; }
+      .card-title { fill: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 17px; font-weight: 700; }
+      .card-note { fill: #64748b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px; font-weight: 500; }
+      .rail-title { fill: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 21px; font-weight: 700; }
+      .rail-label { fill: #1e293b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 16px; font-weight: 700; }
+      .rail-note { fill: #64748b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px; font-weight: 500; }
+      .authority-title { fill: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 20px; font-weight: 700; }
+      .authority-subtitle { fill: #cbd5e1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 12px; font-weight: 600; }
+      .authority-label { fill: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 15px; font-weight: 700; }
+      .authority-note { fill: #64748b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 12px; font-weight: 500; }
+      .footer { fill: #64748b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px; font-weight: 500; }
+    </style>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect class="canvas" width="1440" height="1160"/>
+  <rect class="frame" x="28" y="28" width="1384" height="1104" rx="18" filter="url(#shadow)"/>
+
+  <text class="title" x="62" y="82">DSH 3.9.9 · Layered Agent Runtime</text>
+  <text class="subtitle" x="62" y="112">One control plane · Plugin capability seams · Replaceable model providers · Restart-safe durability</text>
+  <line x1="62" y1="135" x2="1378" y2="135" stroke="#d9e2ec" stroke-width="2"/>
+
+  <g transform="translate(62 160)">
+    <rect width="1030" height="108" rx="12" fill="#eef4ff" stroke="#9dbcf8" stroke-width="2"/>
+    <path d="M12 0 H224 V108 H12 Q0 108 0 96 V12 Q0 0 12 0Z" fill="#315b9d"/>
+    <text class="layer-index" x="26" y="33">LAYER 01</text>
+    <text class="layer-label" x="26" y="65">Interaction</text>
+    <text class="layer-note" x="26" y="88">People and automation</text>
+    <g transform="translate(244 18)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#bfd0ef"/><text class="card-title" x="18" y="31">DSH Desktop</text><text class="card-note" x="18" y="53">Local Server / Remote Frontend</text></g>
+    <g transform="translate(496 18)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#bfd0ef"/><text class="card-title" x="18" y="31">Web / CLI / SDK</text><text class="card-note" x="18" y="53">Browser, terminal, automation</text></g>
+    <g transform="translate(748 18)"><rect width="262" height="72" rx="8" fill="#ffffff" stroke="#bfd0ef"/><text class="card-title" x="18" y="31">Multi-Server Control</text><text class="card-note" x="18" y="53">Catalog, health, Leader follow</text></g>
+  </g>
+
+  <g transform="translate(62 282)">
+    <rect width="1030" height="108" rx="12" fill="#edfafa" stroke="#89cccc" stroke-width="2"/>
+    <path d="M12 0 H224 V108 H12 Q0 108 0 96 V12 Q0 0 12 0Z" fill="#217d7a"/>
+    <text class="layer-index" x="26" y="33" fill="#c8f3f0">LAYER 02</text>
+    <text class="layer-label" x="26" y="65">Plugin Composition</text>
+    <text class="layer-note" x="26" y="88">Compose; do not copy state</text>
+    <g transform="translate(244 18)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#add9d7"/><text class="card-title" x="18" y="31">Profile / Bundle</text><text class="card-note" x="18" y="53">Select product and Providers</text></g>
+    <g transform="translate(496 18)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#add9d7"/><text class="card-title" x="18" y="31">Cordis Plugin Runtime</text><text class="card-note" x="18" y="53">Service / Provider / Consumer</text></g>
+    <g transform="translate(748 18)"><rect width="262" height="72" rx="8" fill="#ffffff" stroke="#add9d7"/><text class="card-title" x="18" y="31">Managed / User Plugins</text><text class="card-note" x="18" y="53">Unloadable capability and UI</text></g>
+  </g>
+
+  <g transform="translate(62 404)">
+    <rect width="1030" height="108" rx="12" fill="#f2f0ff" stroke="#b9afea" stroke-width="2"/>
+    <path d="M12 0 H224 V108 H12 Q0 108 0 96 V12 Q0 0 12 0Z" fill="#6554a8"/>
+    <text class="layer-index" x="26" y="33" fill="#e6e0ff">LAYER 03</text>
+    <text class="layer-label" x="26" y="65">Agent Runtime</text>
+    <text class="layer-note" x="26" y="88">Turns and tool universe</text>
+    <g transform="translate(244 18)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#cbc3ef"/><text class="card-title" x="18" y="31">Session / Agent Loop</text><text class="card-note" x="18" y="53">Turn, step, steering, follow-up</text></g>
+    <g transform="translate(496 18)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#cbc3ef"/><text class="card-title" x="18" y="31">Prompt / Context / Preset</text><text class="card-note" x="18" y="53">Model-visible input and policy</text></g>
+    <g transform="translate(748 18)"><rect width="262" height="72" rx="8" fill="#ffffff" stroke="#cbc3ef"/><text class="card-title" x="18" y="31">Typed Tools / Approval / Trace</text><text class="card-note" x="18" y="53">FS, Shell, LSP, MCP, Workflow</text></g>
+  </g>
+
+  <g transform="translate(62 526)">
+    <rect width="1030" height="118" rx="12" fill="#fff7e8" stroke="#e9bd71" stroke-width="2"/>
+    <path d="M12 0 H224 V118 H12 Q0 118 0 106 V12 Q0 0 12 0Z" fill="#a96812"/>
+    <text class="layer-index" x="26" y="35" fill="#ffebbf">LAYER 04</text>
+    <text class="layer-label" x="26" y="68">Orchestration</text>
+    <text class="layer-note" x="26" y="93">Sole TaskGraph authority</text>
+    <g transform="translate(244 23)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#edce99"/><text class="card-title" x="18" y="31">Intent / Context / Capsule</text><text class="card-note" x="18" y="53">Versioned IR and late binding</text></g>
+    <g transform="translate(496 23)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#edce99"/><text class="card-title" x="18" y="31">Certified TaskGraph</text><text class="card-note" x="18" y="53">DAG, conflicts, approval, recovery</text></g>
+    <g transform="translate(748 23)"><rect width="262" height="72" rx="8" fill="#ffffff" stroke="#edce99"/><text class="card-title" x="18" y="31">RLM / Harness / Debate</text><text class="card-note" x="18" y="53">Optional strategies, same authority</text></g>
+  </g>
+
+  <g transform="translate(62 658)">
+    <rect width="1030" height="118" rx="12" fill="#eef8f0" stroke="#9bc8a4" stroke-width="2"/>
+    <path d="M12 0 H224 V118 H12 Q0 118 0 106 V12 Q0 0 12 0Z" fill="#39774a"/>
+    <text class="layer-index" x="26" y="35" fill="#d8f1de">LAYER 05</text>
+    <text class="layer-label" x="26" y="68">Execution Plane</text>
+    <text class="layer-note" x="26" y="93">Allocation, sealing, dispatch</text>
+    <g transform="translate(244 23)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#b9d7bf"/><text class="card-title" x="18" y="31">Model Allocator</text><text class="card-note" x="18" y="53">Plans, quota, cost, speed, quality</text></g>
+    <g transform="translate(496 23)"><rect width="236" height="72" rx="8" fill="#ffffff" stroke="#b9d7bf"/><text class="card-title" x="18" y="31">Resident Operator</text><text class="card-note" x="18" y="53">Session, receipt, lease, artifact</text></g>
+    <g transform="translate(748 23)"><rect width="262" height="72" rx="8" fill="#ffffff" stroke="#b9d7bf"/><text class="card-title" x="18" y="31">Remote Execution / Cluster</text><text class="card-note" x="18" y="53">Isolated workspace, peer, Leader</text></g>
+  </g>
+
+  <g transform="translate(62 790)">
+    <rect width="1030" height="108" rx="12" fill="#fff1ee" stroke="#e7a89c" stroke-width="2"/>
+    <path d="M12 0 H224 V108 H12 Q0 108 0 96 V12 Q0 0 12 0Z" fill="#a94f40"/>
+    <text class="layer-index" x="26" y="33" fill="#ffe0da">LAYER 06</text>
+    <text class="layer-label" x="26" y="65">Models &amp; Operators</text>
+    <text class="layer-note" x="26" y="88">Replaceable execution Providers</text>
+    <g transform="translate(244 18)"><rect width="180" height="72" rx="8" fill="#ffffff" stroke="#ecc2ba"/><text class="card-title" x="18" y="31">DeepSeek API</text><text class="card-note" x="18" y="53">Pro / Flash</text></g>
+    <g transform="translate(440 18)"><rect width="220" height="72" rx="8" fill="#ffffff" stroke="#ecc2ba"/><text class="card-title" x="18" y="31">Claude Code Plan</text><text class="card-note" x="18" y="53">Native login and durable session</text></g>
+    <g transform="translate(676 18)"><rect width="200" height="72" rx="8" fill="#ffffff" stroke="#ecc2ba"/><text class="card-title" x="18" y="31">Codex Plan</text><text class="card-note" x="18" y="53">Sol / Terra / Luna / Spark</text></g>
+    <g transform="translate(892 18)"><rect width="118" height="72" rx="8" fill="#ffffff" stroke="#ecc2ba"/><text class="card-title" x="18" y="31">Local Tools</text><text class="card-note" x="18" y="53">Shell / FS</text></g>
+  </g>
+
+  <g transform="translate(1110 160)">
+    <rect width="268" height="738" rx="12" fill="#eef2f6" stroke="#a8b4c3" stroke-width="2"/>
+    <path d="M12 0 H256 Q268 0 268 12 V82 H0 V12 Q0 0 12 0Z" fill="#27364a"/>
+    <text class="rail-title" x="24" y="36">Governance &amp; Release</text>
+    <text class="layer-note" x="24" y="61">Cross-layer controls</text>
+    <line x1="24" y1="109" x2="244" y2="109" stroke="#c4ced9"/>
+    <text class="rail-label" x="24" y="143">Code-as-Harness</text><text class="rail-note" x="24" y="166">Rules, plan, verify, attest</text>
+    <line x1="24" y1="195" x2="244" y2="195" stroke="#c4ced9"/>
+    <text class="rail-label" x="24" y="229">Plugin Provenance</text><text class="rail-note" x="24" y="252">Registry, commit, license</text>
+    <line x1="24" y1="281" x2="244" y2="281" stroke="#c4ced9"/>
+    <text class="rail-label" x="24" y="315">Trace &amp; Evidence</text><text class="rail-note" x="24" y="338">Session, run, operator proof</text>
+    <line x1="24" y1="367" x2="244" y2="367" stroke="#c4ced9"/>
+    <text class="rail-label" x="24" y="401">Permission &amp; Approval</text><text class="rail-note" x="24" y="424">Scope, effect, secret, risk</text>
+    <line x1="24" y1="453" x2="244" y2="453" stroke="#c4ced9"/>
+    <text class="rail-label" x="24" y="487">Billing &amp; Quota</text><text class="rail-note" x="24" y="510">Local ledger, balance, savings</text>
+    <line x1="24" y1="539" x2="244" y2="539" stroke="#c4ced9"/>
+    <text class="rail-label" x="24" y="573">Protected PR / CI</text><text class="rail-note" x="24" y="596">Merge gates and platform matrix</text>
+    <line x1="24" y1="625" x2="244" y2="625" stroke="#c4ced9"/>
+    <text class="rail-label" x="24" y="659">Product Identity</text><text class="rail-note" x="24" y="682">Source / Package / Runtime</text>
+  </g>
+
+  <g transform="translate(62 922)">
+    <rect width="1316" height="146" rx="12" fill="#1f2b3a"/>
+    <text class="authority-title" x="24" y="34">Durable State</text>
+    <text class="authority-title" x="24" y="57">Authorities</text>
+    <text class="authority-subtitle" x="24" y="82">One writer per state family</text>
+    <g transform="translate(224 22)"><rect width="252" height="100" rx="8" fill="#ffffff"/><text class="authority-label" x="18" y="31">Session Events</text><text class="authority-note" x="18" y="55">Model-visible history and views</text><text class="authority-note" x="18" y="77">Owner: Session Runtime</text></g>
+    <g transform="translate(492 22)"><rect width="252" height="100" rx="8" fill="#ffffff"/><text class="authority-label" x="18" y="31">Orchestration SQLite + CAS</text><text class="authority-note" x="18" y="55">Graph, attempts, evidence</text><text class="authority-note" x="18" y="77">Owner: dsh-orchestratord</text></g>
+    <g transform="translate(760 22)"><rect width="252" height="100" rx="8" fill="#ffffff"/><text class="authority-label" x="18" y="31">Receipt / Lease / Artifact</text><text class="authority-note" x="18" y="55">Native commands and recovery</text><text class="authority-note" x="18" y="77">Owner: resident-operatord</text></g>
+    <g transform="translate(1028 22)"><rect width="264" height="100" rx="8" fill="#ffffff"/><text class="authority-label" x="18" y="31">Native Product Sessions</text><text class="authority-note" x="18" y="55">Claude Code / Codex private history</text><text class="authority-note" x="18" y="77">Owner: each native product</text></g>
+  </g>
+
+  <text class="footer" x="62" y="1107">Read top-to-bottom by product layer; the right rail applies across layers; the bottom row names non-duplicated state authorities.</text>
+</svg>
