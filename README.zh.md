@@ -2,188 +2,243 @@
 
 [English](README.md) | 简体中文
 
-**一个具备治理闭环、插件化组合、持久 TaskGraph 编排能力的 Agent Runtime 与 macOS 工作台。**
+> **中文优先：** 本页是 DSH 3.9.9 的完整中文说明；英文文档见 [README.md](README.md)。
 
-**快照说明：** DeepSeek-Solar-Harness（`DSH`）是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的社区下游发行版，不是 DeepSeek AI 官方发行版。本分析固定在 2026-08-27 的 `solar@a3cd4397efc5294704e9d7384515ab285f81bd06`，对应 DSH Desktop `3.6.6`。当前已接受的产品合同只覆盖 macOS；在该快照之后，机器可读 manifest 仍是事实来源。
+**DSH 3.9.9 是一个插件化、可持久恢复、可在本机或多台 Server 上运行的 Agent Runtime 与 macOS 工作台。** 它既能直接使用 DeepSeek API，也能在没有 DeepSeek API Key 时，以用户自己的 Claude Code / Codex 订阅作为第一模型和持久物理算子。
 
-## 项目定位
-
-DSH 不只是终端 coding agent，也不只是 agent workflow 库。它把交互式 Agent 数据平面、持久编排控制平面以及产品与治理平面放进同一个源码仓库。
-
-交互平面保留 DeepSeek Harness 的 Cordis 模型：Agent、模型、工具、Session、UI、子进程、sandbox、subagent 和 workflow 都以具备生命周期的插件挂载。Solar 控制平面增加 intent 编译、受限 context packet、认证 TaskGraph、capability budget、冲突感知调度、receipt、artifact、审批、quota-aware 物理 Operator 路由和重启恢复。产品平面进一步把这些源码闭环成 macOS Desktop 发行版，并维护受管插件来源证明与 Code-as-Harness 验证。
-
-关键架构决策是：把 Codex 与 Claude Code 作为内层 coding loop 的**物理 Operator**，而由 DSH 掌握外层控制环。因此 DSH 优化的不是“一条 prompt 最快得到一次回答”，而是长任务能否持续可检查、可恢复、authority 有界且可复现。
-
-## 已实现能力盘点
-
-| 能力 | 本仓库代码证据 | 重要边界 |
+| 3.9.9 快照 | 状态 | 说明 |
 | --- | --- | --- |
-| Cordis 插件 runtime | Service、类型化 event、可逆 effect、scoped context、profile 组合 | 扩展由配置和生命周期驱动；加载顺序与 scope 仍会影响行为 |
-| 交互式 agent loop | [`ReactLoopAgent`](packages/core/agent-loop/src/agent.ts)、inbox 路由、turn/step 边界、streaming、steering、follow-up、cancellation | 默认 loop 可替换，但修改它会影响持久 event 语义 |
-| 类型化工具执行 | [`executeToolCalls`](packages/core/agent-loop/src/tool-calls.ts)、schema 校验、policy waterfall、有序结果提交、有界并行池 | 并行必须由每次调用的 safety classifier 显式声明；取消是 cooperative 的 |
-| Event-sourced Session | [`packages/core/session`](packages/core/session)、append-only event、surface projection、fork、compaction、crash repair | 当前 Session format 仍处于 prerelease；reader 会拒绝不支持的 required event |
-| Prompt 与 context 组装 | [`packages/core/system-prompt`](packages/core/system-prompt)、有序 section、变量、工具排序、runtime context | Prompt 或 schema 变化会破坏 KV-cache prefix，且模型可见内容必须能从 log 重建 |
-| LLM Provider seam | Direct DeepSeek 与多 Provider adapter、retry policy、token meter、routed request metadata | Provider default 与 replay metadata 绑定到精确的已解析模型路由 |
-| 执行能力族 | Filesystem、shell、持久 terminal、LSP、subprocess、sandbox、E2B、workflow、subagent、MCP-facing tool | Worker thread 与 `node:vm` 是隔离机制，不是安全边界 |
-| 持久编排 | 本地 `dsh-orchestratord`、Unix socket、SQLite WAL、immutable plan、event、审批、暂停/恢复/取消 | Daemon 是本地 single writer，不是分布式集群 scheduler |
-| Intent/context/capability 编译 | 带版本的 Service Definition 与确定性本地 Provider | Tool、MCP、secret 与 executable-guard capsule binding 在无 enforcement 时保持 fail closed |
-| Resident Operator 与 RLM | Quota-aware 分配、Resident Claude Code/Codex、有界递归 child、Continual Harness | Operator capability 更新在 dispatch 前或后续 turn generation 生效，不支持任意 in-turn hot swap |
-| Desktop 产品 | Thin Electron host、loopback Host/Web client、profile 切换、原生生命周期、package closure | 已接受的发行合同以 macOS 为先 |
-| 受管插件治理 | [`plugins/registry.yaml`](plugins/registry.yaml)、accepted revision、license evidence、native check、sealed-source 验证 | 未修改的可选插件仍属于外部 profile extension |
+| 正式产品 | `ok` | DSH Desktop `3.9.9`，当前接受平台为 macOS |
+| 源码身份 | `ok` | [`solar@009ec761`](https://github.com/lisihao/deepseek-solar-harness/commit/009ec761e4247dcc63ae1499a47dc4ed4b37e5e5) |
+| 产品形态 | `ok` | 本地 Desktop、Remote Frontend、Product Server、CLI / Web / SDK |
+| 项目关系 | `warn` | 社区下游发行版，并非 DeepSeek 官方产品 |
+
+## DSH 是什么
+
+DSH 不只是终端 coding agent，也不只是 workflow library。它把三个平面组合在同一个插件化产品中：
+
+1. **交互数据平面**——模型对话、类型化工具、文件、shell、terminal、LSP、sandbox、Session、Memory、Web UI 与 Desktop UI。
+2. **持久控制平面**——Intent、Context、Capability、TaskGraph、密封执行计划、Receipt、审批、Evidence、恢复、远程 Worker 与集群权威。
+3. **产品与治理平面**——密封的 Desktop/Product Server 组合、受管插件来源、计费、Trace、发行身份与 Code-as-Harness 门禁。
+
+核心架构决策是：外层控制环归 DSH 所有，DeepSeek、Claude Code 和 Codex 是可替换执行 Provider。一次简单请求可以直接完成；长任务则可以变成持久 DAG，其状态、Evidence、Authority 和算子 Receipt 可跨应用与 daemon 重启继续存在。
+
+DSH 基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 及其 Cordis 组合模型构建。它是社区下游发行版，并非 DeepSeek AI 官方产品。
+
+## 产品形态
+
+| 形态 | 用途 | 运行权威 |
+| --- | --- | --- |
+| DSH Desktop · Local Server | MacBook 完整 cockpit，包含本地 Host、插件、Session、算子、编排与原生集成 | 本地 Host 与本地 daemon |
+| DSH Desktop · Remote Frontend | 完整浏览器/Desktop 体验，从具名多 Server 目录连接一个选定 Product Server | 被选中的远端 Product Server；Frontend 只是投影与控制客户端 |
+| DSH Product Server | Plain-Node 长期运行的产品组合，包含 Resident、Orchestration、RLM、Debate、Memory、Billing、Remote Modules 与治理 | Server Host 及其 owner-local daemon |
+| CLI / Web / SDK | Headless、浏览器、自动化、配置、插件和开发者入口 | 被选中的 profile 与已挂载 Provider |
+
+Desktop 与 Product Server 从同一个密封组合生成，加载相同产品能力，只有 Host adapter 不同。上游兼容的普通 `dsh server` 命令仍是 bare Server profile，不是完整 DSH Product Server。
+
+## 功能全景
+
+| 能力 | 3.9.9 已提供 | 边界 |
+| --- | --- | --- |
+| Cordis 插件 runtime | Service Definition / Provider / Consumer 接缝、scoped context、类型化 event、可逆 effect、profile 与 bundle 组合 | 加载顺序与 scope 是可观察行为；Consumer 不得导入具体 Provider |
+| 交互式 Agent | Streaming turn/step loop、inbox、steering、follow-up、取消、模型可见日志、preset 切换 | 默认 loop 可替换，但必须保持持久 event 语义兼容 |
+| 模型与凭据 | DeepSeek 与多 Provider adapter、模型目录、effort/thinking 选择、retry 与 usage metadata | 凭据资格由各 Provider 所有；没有隐藏 API fallback |
+| 第一模型订阅 | Claude Code 与 Codex 可带着 DSH prompt、tool scope、审批、日志和插件驱动主 DSH turn | 使用用户的原生订阅登录；DSH 不导入产品私有 token |
+| 物理算子 | Provider-neutral 发现、准入、执行模式、生命周期、有界结果与插件接缝 | 未指定 mode 时仍默认 `ephemeral`；不支持的模式明确失败 |
+| Resident 算子 | 持久 Claude Code/Codex Session、Receipt、Lease、lane、interrupt、compact、reset、event、Artifact ref | Daemon 是唯一写者；indeterminate 命令绝不自动重放 |
+| Smart Collaboration | 自动或手动算子策略、实时模型/强度目录、主动委派、每个原生产品最多四个 lane | 它只是同一物理算子接缝上的策略，不是第二个 Scheduler |
+| AgentTeams | 具备有界 Worker 身份与所选 preset persona 的并行委派 Agent | Team 协作仍受 Session 与 Tool Authority 约束 |
+| TaskGraph 编排 | 持久 DAG、依赖、并行 readiness、scope/effect 冲突控制、retry、审批、暂停/恢复/取消与重启恢复 | `dsh-orchestratord` 是唯一编排写者 |
+| Compiler 流水线 | 版本化 Intent IR、Context Packet、Capability Binding Plan、Graph Certificate、per-attempt 密封 ExecutionPlan | Compiler Provider 不能执行节点或修改 Scheduler 状态 |
+| 模型分配 | 套餐优先 offer、quota pool、目标策略、Luna/Terra 自适应执行、高阶规划/验证、计费 fallback | Allocator 只消费归一化 offer，不预测私有订阅限流 |
+| RLM | 持久 TypeScript REPL、可编程 `context`、异步 `rlm()`、message、goal、compact、skill、有界递归、Agents View attach/input/detach | 当前是 **Compatible subset**，尚未宣称所有真实 Provider 都与 Prime 完全忠实对齐 |
+| Continuous Harness | Session、workspace、user-global 条目；版本化 prompt addenda、memory、skill、subagent definition、snapshot、refinement、rollback | 在密封 attempt/turn 边界生效；暂不支持 mid-turn mutation 与跨机器同步 |
+| Autonomous continuation | 同一密封 RLM lane 上可选的 end-condition loop，包含持久 budget 与 gate 计数 | 达到限制不等于成功；始终服从 TaskGraph 权威 |
+| Debate | 有界 proposer/falsifier/auditor/judge 阵容、盲首轮、Claim Ledger、收敛、异议、Artifact、审批与 UI | Debate 是可选模式；没有对照证据时不保证答案更好 |
+| Remote Frontend | 具名 Server 目录、增删改选、本地/远端切换、健康资格、Leader 跟随与恢复页 | Live state 留在权威 Server；Frontend 不成为第二写者 |
+| 远程执行 | 精确 commit 的仓库物化、per-command 隔离 workspace、持久 Resident 执行、Artifact 回传 | 仅允许 allowlist 仓库；凭据与发送端绝对路径不跨 wire |
+| 多 Server 集群 | 固定成员、majority-backed Leader Lease、term/vote fencing、逻辑状态复制、Frontend Leader 发现 | 首版使用有界完整 snapshot；成员变更与无界增量复制后置 |
+| Session handoff | Frontend/local Server/Product Server 间按 revision 传输完整且已闭合的事件日志 | 不复制 open turn、SQLite/WAL，也不做 continuous dual write |
+| Memory | Mnemon Memory Space、多 Provider adapter、Recall、Graph Projection、Runtime Memory、受监督写入与备份面 | Memory 是受管插件能力，不是编排事实源 |
+| Trace 与 Evidence | Session event、Collaboration Trace、Orchestration event、算子阶段、有界输出、不可变 Evidence/Artifact ref | 私有推理、原始 prompt、完整 terminal screen 与产品私有 transcript 不进入通用投影 |
+| Billing | 本地 usage ledger、DeepSeek 官方余额、分时价格、模型明细、本地节省、多 Server 聚合 | DSH 本地总额不是 Provider 官方账单；不可用来源会显式显示，不冒充零 |
+| Desktop 体验 | Thin Electron Host、官方 Web carrier、advanced/compatibility mode、profile、tray、terminal、update、theme 与 plugin | 当前稳定发行合同是 macOS；Windows/Linux 路径不是已接受的稳定 Desktop 发行版 |
+| 受管插件 | 密封 Better Sidebar、GenUI、diagnostics、code graph、Mnemon、Aegis skill、billing、remote module 与来源 registry | 可选第三方插件仍是 profile extension，除非进入密封产品 |
+| 治理 | Agent Note、双语文档、包约束、Code-as-Harness、source/package/runtime identity、受保护 PR 交付 | 需要真实安装产品验收时，治理通过不能替代它 |
 
 ## 系统架构
 
 ```mermaid
 flowchart TB
-  U[User / API] --> S[Desktop / Web / CLI / SDK]
-  S --> B[Profile Boot + Cordis Composition]
-  B --> A[Interactive Agent Runtime]
-  A --> P[Prompt + Context]
-  A --> L[LLM Providers]
-  A --> T[Typed Tool Runtime]
-  A --> E[Append-only Session Events]
-  T --> X[FS / Shell / Terminal / LSP / Sandbox / Workflow]
-  E --> SP[JSONL / SQLite Persistence + Projections]
-  A --> O[Orchestration Service]
-  O -->|Unix socket| D[dsh-orchestratord]
-  D --> C[Intent + Context + Capability Compilation]
-  C --> G[Certified TaskGraph + Sealed Plans]
-  D --> DB[(SQLite WAL + Receipts)]
-  D --> CAS[(Content-addressed Artifacts)]
-  D --> Q[Conflict-aware Scheduler]
-  Q --> M[Quota-aware Allocation]
-  M --> CC[Resident Claude Code]
-  M --> CX[Resident Codex]
-  M --> DS[DeepSeek API Fallback]
-  Q --> R[Bounded RLM + Continual Harness]
-  MP[Managed Plugins] --> B
-  GV[Code-as-Harness Governance] --> MP
-  GV --> REL[Protected PR + Release Evidence]
+  U[User] --> UI[Desktop / Web / CLI / SDK]
+  UI --> PB[Profile Boot + Cordis Composition]
+  PB --> AG[Interactive Agent Runtime]
+  AG --> PR[Prompt + Context + Preset]
+  AG --> LL[DeepSeek / Claude Code / Codex]
+  AG --> TL[Typed Tool Runtime]
+  AG --> SE[Append-only Session Events]
+  TL --> EX[FS / Shell / Terminal / LSP / Sandbox / MCP / Workflow]
+  SE --> SP[Session Persistence + Projections]
+
+  AG --> OR[ctx.orchestrations]
+  OR --> OD[dsh-orchestratord]
+  OD --> CP[Intent + Context + Capsule Compilers]
+  CP --> TG[Certified TaskGraph]
+  TG --> SC[Conflict-aware Scheduler]
+  SC --> MA[Quota-aware Model Allocation]
+  MA --> RO[dsh-resident-operatord]
+  MA --> DW[Optional DeepSeek API Worker]
+  RO --> CC[Claude Code Subscription]
+  RO --> CX[Codex Subscription]
+  SC --> RR[RLM / Continuous Harness / Debate]
+  OD --> DB[(SQLite WAL + Receipts)]
+  OD --> CAS[(Content-addressed Artifacts)]
+
+  RF[Remote Frontend] --> PS[Product Server Leader]
+  PS --> PE[Cluster Peers / Remote Operators]
+  PE --> RO
+  MP[Managed + User Plugins] --> PB
+  GV[Code-as-Harness Governance] --> REL[Protected PR + Product Release]
 ```
 
-这里刻意分离了交互 transcript 与 orchestration run。普通 DSH Session 记录什么内容进入模型可见 turn、模型生成什么以及调用了哪些工具。TaskGraph run 则记录任务为何这样分解、每个 node 密封了哪些 context 与 authority、哪个物理 attempt 被接受、哪些 effect 可以重叠、产生了什么证据，以及 UI 或 Harness 重启后如何恢复。
+### 权威边界
 
-## Runtime 执行路径
-
-1. [`apps/cli/src/bin.ts`](apps/cli/src/bin.ts) 解析 invocation mode，并动态加载 profile、plugin、resident、remote 或 configuration 路径。
-2. [`apps/cli/src/profile-boot.ts`](apps/cli/src/profile-boot.ts) 解析 bundle、profile patch、home patch、命令 overlay、telemetry policy、immutable launch environment 与 bounded shutdown。
-3. Cordis 挂载配置树；每次注册由 fiber 所有，并随插件 scope 一同 unwind，而不是变成未记录的 process-global state。
-4. `ReactLoopAgent` 打开持久 turn、领取 inbox 输入、组装 prompt section 与可见 tool schema、从 Session log 推导 message history，并解析精确 LLM call。
-5. Stream chunk 与 canonical assistant message 分开追加，使 replay 同时保留 Provider fidelity 和稳定的模型可见 message。
-6. Tool call 依次经过 pre-policy、monotonic guard、around-execute wrapper、post-policy、definition finalization、持久 call/result 关联和 next-step context 插入；exclusive call 构成 barrier，显式安全的 call 使用 bounded rolling pool。
-7. 持久编排把 request 编译成带版本 IR，校验并认证 graph，密封 per-attempt plan，分发物理 Operator，持久化 receipt/event/artifact，并在重启后 reconcile 已接受或结果不确定的 attempt。
-
-## 持久 TaskGraph 控制平面
-
-| 阶段 | 主要实现 | 合同 |
+| 所有者 | 权威内容 | 不得拥有 |
 | --- | --- | --- |
-| Intent IR | `ctx.intentCompiler` | 生成带版本、Provider-neutral 的需求表示 |
-| Context packet | `ctx.contextCompiler` | 绑定受限 instruction 与 source/resource reference，而不是传递不受约束的 conversation dump |
-| Capability capsule | `ctx.capabilityCapsules` | 解析已接受 capability、effect、secret 与 enforcement generation；不支持的 authority fail closed |
-| Graph validation | [`validateGraph`](packages/orchestration/orchestration-local/src/graph.ts) | 拒绝非法 ID、dependency、cycle、budget、timeout 与缺少 completion-critical verification coverage 的 graph |
-| Plan certification | Canonical JSON 加 SHA-256 | 在物理 dispatch 前使 graph 与 node order 可按内容验证 |
-| Scheduling | Conflict 与 dependency algorithm | 在 graph、worker、scope、effect 与实时 capacity 上限内运行独立 node，而不是使用 phase-wide barrier |
-| Persistence | [`OrchestrationStore`](packages/orchestration/orchestration-local/src/store.ts) | SQLite WAL single-writer state、command idempotency receipt、attempt reconciliation、append-only event、content-addressed artifact |
-| Physical execution | Resident Operator 组合 | 把 Claude Code、Codex 与 metered fallback worker 作为同一 sealed-plan authority 下的路由 Provider |
+| Session runtime | 模型可见 transcript、turn/step/tool event 顺序与用户投影 | TaskGraph 调度或原生产品 history |
+| Orchestration daemon | Graph/run/node/attempt 状态、Receipt、审批、generation、Evidence 与 CAS ref | 模型内自然语言解释或产品私有 Session state |
+| Resident daemon | 原生算子 Session 映射、Command Receipt、Lease、进展 event 与有界结果 | Global TaskGraph state 或 Desktop UI state |
+| Claude Code / Codex | 各自原生产品 Session 与执行行为 | DSH Global Scheduler、插件组合、Evidence graph 或发行权威 |
+| Product Server | 连接 Frontend 所使用的远程 Live Session 与 Service | Frontend 非活动本地状态或 GitHub 源码权威 |
+| Desktop Frontend | 展示、算子控制、Server 目录与显式同步请求 | 静默 failover 写入、复制 open turn 或第二份 canonical database |
 
-这个控制平面比 prompt 级 supervisor 更强，因为 scheduler state 与 evidence 不依赖任何单一模型对话；它也比普通 graph library 更重，因为 daemon、artifact lineage、receipt protocol、approval state、release identity 与 Desktop projection 共同形成的是产品 operating model，而不只是开发 API。
+## 执行模式
 
-## 与相关项目的对比
-
-| 项目族 | 相对 DSH 更强之处 | DSH 更强之处 |
+| 用户选择 | 执行行为 | 适合场景 |
 | --- | --- | --- |
-| [上游 DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | 上游差异更小、贡献路径更简单、社区基线更统一 | Solar Desktop、受管插件源码闭环、治理化发布、持久 TaskGraph daemon、Resident Operator 路由、Continual Harness |
-| [OpenAI Codex](https://github.com/openai/codex)、Claude Code、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[OpenCode](https://github.com/anomalyco/opencode) | 启动与运维复杂度更低；model-native coding loop 高度优化；其中多个项目提供更广平台打包 | 外置持久编排、显式 effect/read/write scope、Operator-independent receipt 与 artifact、Provider 路由、可复现产品组合 |
-| [LangGraph](https://github.com/langchain-ai/langgraph) | 任意 Python graph、checkpoint、interrupt、deployment integration 与应用嵌入的 library ergonomics 更成熟 | 集成 coding workbench、event-sourced model transcript、tool ABI、本地物理 Operator、Desktop、受管插件、源码到发布治理 |
-| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) 与 AutoGen 谱系 | 多语言企业 API、分布式/应用托管模式、广泛 Provider 生态和标准协作 pattern | 更具主张的本地 coding 控制平面、可执行 profile 组合、per-node capability sealing、本地 Resident Operator、产品源码闭环 |
-| AI4Research、GPT Researcher、Open Deep Research、OpenJiuwen DeepSearch、Octos 等深度研究流水线 | 领域化来源采集、证据综合、报告规划、引用与发布 workflow | 通用可执行 Agent runtime、coding tool、持久 Session、底层 capability seam、物理 Operator 编排、Desktop 生命周期 |
+| 标准 | 一个主模型遵循普通 Agent Loop 并使用标准 DSH 工具 | 对话、聚焦修改、可预测基线 |
+| 智能自动 | DSH 根据策略与实时能力选择直接执行、物理委派、TaskGraph、RLM 或其他已准入策略 | 系统可以综合优化质量、速度和成本时的通用默认 |
+| RLM | Root 模型获得持久 TypeScript REPL，把 context 与异步 child agent 当成可编程变量 | 大上下文分解、递归分析、受控综合 |
+| Debate | 多个有界高阶角色互相质询，Judge 保留异议并综合 | 有争议的架构、审查、风险与重证据决策 |
+| TaskGraph | Certified DAG 在 scope、effect、Receipt 与 acceptance 规则下并行派发独立节点 | 多步骤开发与必须跨重启继续的工作 |
 
-DSH 不应替换所有专业研究流水线。在 Solar 类系统中，它更适合作为研究 Operator 下方的执行底座：研究专用 Artifact schema、citation support、coverage evaluation、Report Planner、Chapter Writer 与发布仍应由领域 service 负责，而 DSH 提供有界执行、状态、恢复、Operator 路由、工具和治理。
+RLM 与 Debate 是执行策略，不是竞争控制平面。它们运行在既有 Session/TaskGraph Authority 内，并使用同一套物理算子。显式 RLM 使用面向 Prime 的 strict profile；Smart Auto 可以使用 DSH 的成本与 quota-aware 分配。两个模式都不被宣传为必然提升质量：发行判断应优先复用固定离线 fixture，只在受影响时执行一次获准的最小真实订阅盲测。
 
-## 优势
+## 没有 DeepSeek API Key 时使用原生订阅
 
-1. **Durability 同时覆盖模型与非模型状态。** Session event 重建模型可见 history；TaskGraph state、receipt 与 artifact 独立于 conversation 持久存在。
-2. **Authority 比 prompt-supervised 系统更显式。** Node 声明 dependency、read/write scope、effect budget、capability budget、secret、timeout、retry 与 verification criticality。
-3. **扩展点是真实 runtime contract。** Service、Provider、Consumer、scope、event、configuration 与 disposal 都在代码中表示，而不是隐藏在一个 supervisor prompt 内。
-4. **产品可复现。** Desktop package closure、受管插件源码、accepted revision、license evidence 与 release identity 一起被跟踪。
-5. **强 coding agent 仍是可替换资源。** Codex、Claude Code 与 metered worker 可由 policy 选择，但不会取得 global scheduler、evidence graph 或 release authority。
+只要至少一个 Claude Code 或 Codex 原生订阅 Provider 通过资格检查，DSH 就可以在没有 DeepSeek API Key 时运行。同一订阅可以承担两种角色：
 
-## 关键技术设计
+1. 作为**受委派物理算子**，接收当前 DSH Agent 发出的有界任务。
+2. 作为**第一模型 DSH Agent**，接收已组装 system prompt，以及到当前 DSH 工具全集的密封 bridge。
 
-### Cordis 插件 runtime
+两种路径中，插件组合、Tool Schema、审批策略、Event Logging、Collaboration Trace、Receipt 与有界结果仍由 DSH 掌握；原生产品保留自己的登录 token 和 Native Session。订阅 Provider 禁止 API fallback；登录资格不成立时明确失败，不会静默花费计费 API Key。
 
-Cordis 提供 service、可声明合并的类型化 event、waterfall/serial dispatch、child context 与可逆 effect。DSH package 通常把 capability 拆成 Service Definition、Service Provider 与 Consumer 三种角色。Consumer 依赖 definition 而不是某个本地 Provider，因此 filesystem、shell、sandbox、subagent、model 或 persistence 实现可以迁移，而不必 fork 所有调用方。
+## 持久编排流水线
 
-### Event-sourced Session
+```text
+Raw request
+  -> IntentIR
+  -> RequirementIR
+  -> Logical TaskGraph
+  -> validation + Plan Certificate
+  -> durable Run
 
-Session log 是模型 history 的事实来源。`turn/*`、`step/*`、`user/message`、`assistant/*` 与 `tool/*` 记录建立持久 enclosure 与 provenance；projection 推导模型 surface 和 UI state。所有模型可见输入必须能从 log 重建。Compaction 通过追加 replacement event 而不是删除历史来缩短 context；crash repair 会区分“工具从未被持久记录为已启动”和“attempt 已启动但外部结果未知”。
+Ready node
+  -> Capability resolution
+  -> Continuous Harness snapshot
+  -> Context compilation
+  -> Operator/model allocation
+  -> sealed NodeExecutionPlan
+  -> approval/admission
+  -> local or remote physical execution
+  -> Evidence + Artifact + receipt settlement
+```
 
-### 类型化工具与 Code Mode
+Scheduler 只有在 dependency、graph limit、read/write scope、effect、live capacity、quota 与 approval 都兼容时才准入节点。独立节点可以并行；冲突 scope 或 effect 只串行化受影响节点，不设置 phase-wide barrier。Settled 失败重试会生成新 attempt 与 execution identity；结果不确定的外部命令绝不自动重放。
 
-Tool registry 统一拥有参数校验、output schema、rendering、policy interception、timeout/retry wrapping、concurrency classification 与 tool-owned UI presentation。Native function calling 和 Code Mode 使用同一 registry。Code Mode 把可见 definition 收敛到生成的 `run_code` transport 与 TypeScript/Python SDK，从而降低直接 schema 压力，同时不绕过执行 policy。
+## 远程与多 Server 运行
 
-### Prompt 与 context 组装
+DSH 3.9.9 把 cockpit 与 compute 分离：
 
-Prompt 由插件拥有的有序 section、严格变量、动态 context 与可见工具全集组装。Scoped contribution 可以为单个 agent shadow global 内容。未知变量、非法 interpolation、多个 complete section、无效 tool order，或 runtime language 缺少 SDK renderer，都会在模型请求前明确失败。
+1. MacBook Desktop 可以运行自己的 Local Server，也可以不替换 App 就切换到已保存 Product Server。
+2. 一个 Frontend 可以维护多个具名 Server，并跟随当前可调度 Leader。
+3. Product Server 可以本地执行，也可以向集群提供已资格确认的远程 Resident capacity。
+4. 远程工作使用 clean Git repository identity 与精确 commit；接收端创建 Server-local 隔离 checkout。
+5. GitHub 仍是源码权威。可选 Tailscale/SSH 路径只用于加速传输和认证访问，不成为源码事实源。
 
-### 执行与 sandbox 边界
+集群调度必须持有未过期的 majority Lease。Follower 不能重放已接受命令，过期 term 的结果不能结算新 generation。首版集群协议有意使用固定成员和有界完整逻辑 snapshot；两节点集群失去一个成员后会因不再有多数派而停止调度。
 
-Filesystem、subprocess、shell、terminal、LSP、workflow、code runtime 与 sandbox 是独立 capability family，但必须描述同一个一致的 execution world。本地 sandbox Provider 实现平台相关 confinement；远程隔离通过替换完整 Provider 实现。Cooperative cancellation 会等待所拥有工作 quiesce。Worker thread 与动态 `node:vm` execution 都不能视为 hostile-code containment。
+## 插件架构
 
-### Desktop 与受管插件
+| 角色 | 职责 | 依赖规则 |
+| --- | --- | --- |
+| Service Definition | 拥有公共 type、event、error 与 capability contract | 不导入具体 Provider |
+| Provider | 实现一种 local、remote、native 或 test backend | 依赖 Definition，不依赖 Consumer |
+| Consumer | 暴露模型 tool、UI、command、API 或更高层组合 | 依赖 Definition 与注入 service |
+| Bundle/Profile | 为一个产品 surface 选择并配置实现 | 只负责组合，不重定义 contract |
 
-Desktop 是 thin Electron host：Host runtime 仍然基于 Cordis，通过 loopback HTTP/WebSocket 提供普通 Web UI，并只公开受限 Desktop service，而不是把原始 Electron API 暴露给页面。根目录保持 pnpm workspace，[`products/desktop`](products/desktop) 则是隔离 Yarn workspace。受管插件保留 source history、accepted SHA、license、native test 与 packaged-byte closure，使 clean clone 能解释默认应用的每一项输入。
+该规则覆盖 filesystem、subprocess、model、Resident Operator、orchestration、Intent/Context Compiler、Capsule、RLM、Continuous Harness、Debate、memory 与 remote service。移除可选 bundle 会同时移除其能力与 UI，而不会把它的状态机复制进 DSH Core。
+
+## 持久化、恢复与可观察性
+
+| 状态族 | 持久表示 | 恢复规则 |
+| --- | --- | --- |
+| Conversation | Append-only Session Event 加 JSONL/SQLite persistence 与 projection | 从 event 重建模型可见 history；遇到不支持的 required event 明确失败 |
+| Resident command | Owner DSH home 下的 Session、Receipt、Lease、Event 与 Artifact record | 相同 command/hash 复用 Receipt；原生结果不确定时进入 indeterminate |
+| Orchestration | SQLite WAL 加不可变 Compilation、Plan、Event、Evidence 与 CAS Artifact | 单 daemon 写入；新 dispatch 前先 reconcile 已 accepted attempt |
+| Remote cluster | Term、Vote、Leader Lease、Commit Index 与 digest-verified logical snapshot | 只有 majority-backed Leader 可以调度外部 effect |
+| Memory 与 Billing | 插件自有 Store，带显式 provenance 与 aggregation status | 可以投影进产品，但不能成为 Scheduler 或 Provider invoice 真相 |
+
+UI 提供有界运维视图：Physical Operators、Orchestrations、Debate、Memory、Billing、Plugin Diagnostics，以及 per-session Collaboration/Governance Trace。大型输出保存在 Artifact 中；原始 prompt、私有 chain-of-thought、完整 terminal screen、Native Credential 与产品私有 transcript 不会复制到通用投影。
 
 ## 代码地图
 
-| 区域 | 主要路径 | 关键作用 |
+| 区域 | 主要路径 | 职责 |
 | --- | --- | --- |
-| CLI 分发 | [`apps/cli/src/bin.ts`](apps/cli/src/bin.ts) | 在不预先耦合全部 surface 的前提下选择 runtime mode |
-| Profile boot | [`apps/cli/src/profile-boot.ts`](apps/cli/src/profile-boot.ts) | 管理有序组合、live patch reload、launch provenance 与 shutdown |
-| Agent state machine | [`packages/core/agent-loop/src/agent.ts`](packages/core/agent-loop/src/agent.ts) | 定义 turn/step admission、request construction、streaming、cancellation 与 continuation |
-| Tool scheduler | [`packages/core/agent-loop/src/tool-calls.ts`](packages/core/agent-loop/src/tool-calls.ts) | 只重叠显式安全的 dispatch body，同时保持模型顺序提交 |
-| Session model | [`packages/core/session`](packages/core/session) | 拥有持久 event vocabulary、surface replacement、fork 与 request reconstruction |
-| Tool ABI | [`packages/core/tools`](packages/core/tools) | 拥有 schema、policy、execution、result、Code Mode 与 presentation contract |
-| Prompt registry | [`packages/core/system-prompt`](packages/core/system-prompt) | 为每个 scoped request 组装精确 prompt/tool prefix |
-| Orchestration API | [`packages/orchestration/orchestration`](packages/orchestration/orchestration) | Provider-neutral TaskGraph、control、event、artifact 与 execution-plan type |
-| Graph algorithm | [`packages/orchestration/orchestration-local/src/graph.ts`](packages/orchestration/orchestration-local/src/graph.ts) | 校验 graph，并计算 dependency/effect conflict |
-| 持久 store | [`packages/orchestration/orchestration-local/src/store.ts`](packages/orchestration/orchestration-local/src/store.ts) | 实现 WAL state、migration、receipt、attempt、event 与 CAS artifact |
-| 本地 daemon | [`packages/orchestration/orchestration-local`](packages/orchestration/orchestration-local) | 唯一 orchestration writer 与物理 Operator coordinator |
-| Desktop 架构 | [`products/desktop/docs/architecture.en.md`](products/desktop/docs/architecture.en.md) | 说明 Electron、Host、Web client、profile、native runtime 与 packaging closure |
-| Plugin provenance | [`plugins/registry.yaml`](plugins/registry.yaml) | 记录 source、accepted revision、license evidence 与 native check |
-| 产品 identity | [`distribution/product.json`](distribution/product.json) | 定义 platform、Desktop version 与稳定 tag 合同 |
+| CLI 与 Profile Boot | [`apps/cli`](apps/cli) | 入口模式、profile/bundle 解析、launch provenance、shutdown |
+| Agent Loop | [`packages/core/agent-loop`](packages/core/agent-loop) | Turn/Step 状态机、模型调用、Streaming、Tool Dispatch |
+| Session model | [`packages/core/session`](packages/core/session) 与 [`packages/session`](packages/session) | Event Vocabulary、Persistence、Projection、Replay、Recovery |
+| Tool 与 Prompt | [`packages/core/tools`](packages/core/tools) 与 [`packages/core/system-prompt`](packages/core/system-prompt) | Tool ABI、Policy、Code Mode、Prompt/Context 组装 |
+| 物理算子 | [`packages/physical-operator`](packages/physical-operator) | Ephemeral/Resident capability seam 与本地 daemon Provider |
+| 编排 | [`packages/orchestration`](packages/orchestration) | TaskGraph、Compiler、Allocator、RLM、Harness、Debate、本地 daemon |
+| 远程连接 | [`packages/client/connection`](packages/client/connection) | 认证 Host Description、Event Stream、Sync、Remote Execution、Cluster Projection |
+| Desktop/Product Server | [`products/desktop/dsh-plugin-desktop`](products/desktop/dsh-plugin-desktop) | Electron Host、Product Server Adapter、产品组合、打包与验收 |
+| 受管插件 | [`plugins/managed`](plugins/managed) | 密封产品插件、Memory、Billing、Governance、UI 与来源证明 |
+| 产品 Identity | [`distribution/product.json`](distribution/product.json) | Platform、稳定 Desktop Version、Branch 与 Tag Contract |
 
-## 限制与风险
+## 诚实边界
 
-1. **上游分叉成本高。** Solar 必须持续验证 event vocabulary、persistence、package export、profile composition、Desktop 行为与受管插件。
-2. **系统包含多个 failure domain。** Cordis lifecycle、profile composition、Session persistence、orchestration daemon、物理 Operator、native helper 与 Desktop packaging 都需要独立诊断。
-3. **macOS 才是已接受产品面。** Cross-platform 代码路径或上游支持不等于 Solar 已支持 Windows/Linux Desktop release。
-4. **部分隔离机制不是安全边界。** Dynamic package、worker-authored workflow、本地 tool、MCP server 与第三方插件都需要 trusted-computing-base review。
-5. **没有分布式编排。** SQLite WAL 加 owner-local daemon 提供强本地恢复，不提供 horizontal availability 或 multi-region consensus。
-6. **Capsule enforcement 有意不完整。** 不支持的 tool/MCP/secret/guard binding 会拒绝而不是静默授权；这更安全，但限制可部署场景。
-7. **仓库与发布复杂度高。** Root pnpm、Desktop Yarn、Python/native build、sealed archive 与大量验证 gate 会提高变更延迟。
+1. **RLM 当前是 Compatible subset。** TypeScript Runtime 已实现核心可编程机制，但在固定 DeepSeek、Claude Code、Codex 与 Continuous Harness 端到端矩阵通过前，DSH 不宣称与 Prime 完全忠实。
+2. **质量提升不作保证。** RLM 与 Debate 提供方法和 Evidence surface；是否改善具体任务必须与标准模式对照测量。
+3. **Cluster v1 有意保持有界。** Membership 固定、复制是有大小上限的 Full Snapshot，两节点不具备容忍一个节点失败的可用性。
+4. **能力注入发生在边界。** 当前 Native Operator 支持 pre-dispatch 或 next-turn 变更，不支持任意 in-turn checkpoint/rebind。
+5. **已接受稳定 Desktop 是 macOS。** Windows/Linux 源码路径不代表 3.9.9 已接受稳定发行。
+6. **当前 Release Identity 不含 Developer ID Notarization。** 本地验收可以使用 ad-hoc signed App；正式公开分发需要 Apple 签名/公证凭据。
+7. **本地 Billing 是有范围的统计。** 它不能替代 Provider 对其他程序、API Key 或账号的完整官方账单。
+8. **仓库复杂度仍然显著。** pnpm monorepo、隔离 Desktop Yarn workspace、受管源码输入、Native Code、双语文档与 Release Gate 都会增加修改成本。
 
 ## 何时选择 DSH
 
 ### 适合场景
 
-- macOS 本地 AI 工作台需要同时组合 conversation、coding、tool、memory、Web/Desktop UI 与长任务。
-- 工作必须跨 UI/runtime 重启继续，并具备显式 receipt、artifact、approval、retry 与 indeterminate-outcome 处理。
-- Codex 或 Claude Code 可以执行受限 node，但不能拥有 global scheduler、evidence graph 或 release authority。
-- Plugin provenance、package closure 与 agent-generated code verification 是产品一级要求。
+- 你需要的是插件化本地 AI 工作台，而不是一个固定模型客户端。
+- Claude Code 或 Codex 订阅需要在没有 DeepSeek API Key 时作为持久第一模型 Agent 使用。
+- 长任务需要 DAG 并行、显式 Authority、Receipt、Evidence、Approval 与 Restart Recovery。
+- MacBook cockpit 需要使用一个或多个远程 Product Server 与远程算子容量。
+- 产品来源、受管插件、Traceability 与 Release Governance 是一级需求。
 
-### 优先其他基础的场景
+### 优先选择更小或不同基础的场景
 
-- 需求只是最小、model-native 的 terminal coding loop，几乎不需要外层编排。
-- 主要交付物是 cloud-native Python/.NET/Go workflow service，而不是本地 macOS workbench。
-- 必须立即具备多节点分布式调度、multi-region availability 或 enterprise hosted control plane。
-- 核心问题仅是领域化研究证据与报告生成，并不需要通用 coding/runtime 底座。
+- 你只需要最小、model-native 的终端 Coding Loop。
+- 主要产品是 Hosted Python/.NET/Go Workflow Library，而不是本地 Agent Workbench。
+- 你现在就需要弹性、无界、multi-region consensus。
+- 唯一问题是专业研究/报告流水线，不需要通用 Coding Runtime。
 
 <a id="run"></a><a id="run-from-source"></a>
 
-## 开发
+## 从源码运行
 
-前置条件是 macOS、Git、Corepack，以及 Node.js `22.19+` 或 `24+`。根目录与 Desktop dependency graph 有意分离。
+前置条件是 macOS、Git、Corepack，以及 Node.js `22.19+` 或 `24+`。Root pnpm graph 与 Desktop Yarn graph 有意隔离。
 
 ```sh
 git clone https://github.com/lisihao/deepseek-solar-harness.git
@@ -199,14 +254,14 @@ corepack yarn check
 corepack yarn dev
 ```
 
-根验证包含 typecheck、lint、unit/coverage test、snapshot、E2E suite、runtime-closure check、generated catalog、documentation check、package constraint 与 release verification。Desktop 使用独立的 headless `yarn check`，应用交付范围内还执行 D00–D08 acceptance。真实 Provider test 需要对应 credential；被跳过的测试不得报告为通过。
+Product Server 部署、Cluster 配置、远程仓库 Allowlist、Desktop Packaging 与 D00–D08 验收见 [`products/desktop/dsh-plugin-desktop/README.md`](products/desktop/dsh-plugin-desktop/README.md)。[`distribution/product.json`](distribution/product.json) 的机器可读 Product Identity 是稳定版本与支持平台的权威来源。
 
-## 验证与来源证明
+## 验证与贡献
 
-先阅读 [`AGENTS.md`](AGENTS.md) 获取长期仓库规则，再阅读 [`docs/architecture.md`](docs/architecture.md) 获取上游 runtime map。[`distribution/upstreams.yaml`](distribution/upstreams.yaml) 记录已接受 core/Desktop ancestry，[`plugins/registry.yaml`](plugins/registry.yaml) 记录受管插件 revision、license 与 native command。第三方 runtime disclosure 位于 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+修改仓库前先阅读 [`AGENTS.md`](AGENTS.md)，并通过 [`docs/architecture.md`](docs/architecture.md) 了解上游 Runtime Map。[`distribution/upstreams.yaml`](distribution/upstreams.yaml) 记录已接受 ancestry；[`plugins/registry.yaml`](plugins/registry.yaml) 记录受管插件源码、revision、license evidence 与 native check；[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 记录第三方 runtime disclosure。
 
-`solar` 是受保护分支。改动通过隔离 task branch 与 Pull Request 进入，并执行 change-aware Code-as-Harness audit、plan、verification、attestation、remote-SHA equality 以及适用的 runtime/release evidence。只有 PR 或 build artifact 不等于交付完成。
+`solar` 是受保护分支。改动通过隔离 branch 与 Pull Request 进入，并执行 change-aware Code-as-Harness 验证。Full Governance 与真实订阅验收只在受影响边界要求时运行；输入未改变时复用仍然有效的 Evidence。
 
-## 许可证
+## License
 
-核心仓库使用 [MIT](LICENSE) 许可证。导入组件保留自己的许可证证据与 notice。
+核心仓库使用 [MIT](LICENSE) 许可证。导入组件保留自己的许可证与 notice。
