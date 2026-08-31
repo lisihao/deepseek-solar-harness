@@ -2,188 +2,243 @@
 
 English | [简体中文](README.zh.md)
 
-**A governed, plugin-composed agent runtime and macOS workbench with durable TaskGraph orchestration.**
+> **中文优先：** GitHub 首页先给出中文产品总览；完整中文说明见 [README.zh.md](README.zh.md)。
 
-**Snapshot:** DeepSeek-Solar-Harness (`DSH`) is a community downstream distribution of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), not an official DeepSeek AI release. This analysis is pinned to `solar@a3cd4397efc5294704e9d7384515ab285f81bd06` on 2026-08-27 and DSH Desktop `3.6.6`. The accepted product contract currently covers macOS; machine-readable manifests remain authoritative after this snapshot.
+**DSH 3.9.9 是一个插件化、可持久恢复、可在本机或多台 Server 上运行的 Agent Runtime 与 macOS 工作台。** 它既能直接使用 DeepSeek API，也能在没有 DeepSeek API Key 时，以用户自己的 Claude Code / Codex 订阅作为第一模型和持久物理算子。
 
-## Positioning
-
-DSH is not only a terminal coding agent and not only an agent-workflow library. It combines an interactive agent data plane, a persistent orchestration control plane, and a product/governance plane in one source repository.
-
-The interactive plane retains DeepSeek Harness's Cordis model: agents, models, tools, sessions, UI surfaces, subprocesses, sandboxes, subagents, and workflows are mounted as lifecycle-managed plugins. The Solar control plane adds compiled intents, bounded context packets, certified TaskGraphs, capability budgets, conflict-aware scheduling, receipts, artifacts, approval, quota-aware physical-operator routing, and restart recovery. The product plane closes these sources into a macOS Desktop distribution with managed-plugin provenance and Code-as-Harness verification.
-
-The key architectural decision is to treat Codex and Claude Code as **physical operators** for an inner coding loop while DSH owns the outer control loop. DSH therefore optimizes for long-running work that must remain inspectable, resumable, authority-bounded, and reproducible rather than for the shortest path from one prompt to one answer.
-
-## Implemented capability inventory
-
-| Capability | Evidence in this repository | Important boundary |
+| 3.9.9 快照 | 状态 | 说明 |
 | --- | --- | --- |
-| Cordis plugin runtime | Services, typed events, reversible effects, scoped contexts, profile composition | Extension is configuration- and lifecycle-driven; load order and scope remain part of behavior |
-| Interactive agent loop | [`ReactLoopAgent`](packages/core/agent-loop/src/agent.ts), inbox routing, turn/step boundaries, streaming, steering, follow-ups, cancellation | The default loop is replaceable, but changing it affects durable event semantics |
-| Typed tool execution | [`executeToolCalls`](packages/core/agent-loop/src/tool-calls.ts), schema validation, policy waterfalls, ordered result commit, bounded parallel pools | Parallelism requires an explicit per-call safety classifier; cancellation is cooperative |
-| Event-sourced sessions | [`packages/core/session`](packages/core/session), append-only events, surface projection, forks, compaction, crash repair | Current session format remains pre-release and readers fail on unsupported required events |
-| Prompt and context assembly | [`packages/core/system-prompt`](packages/core/system-prompt), ordered sections, variables, tool ordering, runtime context | Prompt or schema changes can invalidate KV-cache prefixes and must remain reconstructable from the log |
-| LLM provider seam | Direct DeepSeek and multi-provider adapters, retry policy, token meter, routed request metadata | Provider defaults and replay metadata belong to the exact resolved model route |
-| Execution capabilities | Filesystem, shell, persistent terminal, LSP, subprocess, sandbox, E2B, workflow, subagent, MCP-facing tools | Worker threads and `node:vm` are isolation mechanisms, not security boundaries |
-| Durable orchestration | Local `dsh-orchestratord`, Unix socket, SQLite WAL, immutable plans, events, approvals, pause/resume/cancel | The daemon is a local single writer, not a distributed cluster scheduler |
-| Intent/context/capability compilation | Versioned service definitions and deterministic local providers | Tool, MCP, secret, and executable-guard capsule bindings remain fail-closed where enforcement is absent |
-| Resident operators and RLM | Quota-aware allocation, Resident Claude Code/Codex, bounded recursive children, Continual Harness | Operator capability updates apply before dispatch or at later turn generations, not arbitrary in-turn hot swap |
-| Desktop product | Thin Electron host, loopback Host/Web client, profile switching, native lifecycle, packaging closure | The accepted release contract is macOS-first |
-| Managed-plugin governance | [`plugins/registry.yaml`](plugins/registry.yaml), accepted revisions, license evidence, native checks, sealed-source verification | Unmodified optional plugins remain external profile extensions |
+| 正式产品 | `ok` | DSH Desktop `3.9.9`，当前接受平台为 macOS |
+| 源码身份 | `ok` | [`solar@009ec761`](https://github.com/lisihao/deepseek-solar-harness/commit/009ec761e4247dcc63ae1499a47dc4ed4b37e5e5) |
+| 产品形态 | `ok` | 本地 Desktop、Remote Frontend、Product Server、CLI / Web / SDK |
+| 项目关系 | `warn` | 社区下游发行版，并非 DeepSeek 官方产品 |
+
+## What DSH is
+
+DSH is not only a terminal coding agent or a workflow library. It combines three planes in one plugin-composed product:
+
+1. **Interactive data plane** — model conversations, typed tools, files, shells, terminals, LSP, sandboxes, sessions, memory, Web UI, and Desktop UI.
+2. **Durable control plane** — Intent, Context, Capability, TaskGraph, sealed execution plans, receipts, approvals, evidence, recovery, remote workers, and cluster authority.
+3. **Product and governance plane** — sealed Desktop/Product Server composition, managed-plugin provenance, billing, traceability, release identity, and Code-as-Harness gates.
+
+The central architectural decision is to keep the outer control loop in DSH while treating DeepSeek, Claude Code, and Codex as replaceable execution providers. One model turn can be simple and direct; a long task can instead become a persistent DAG whose state, evidence, authority, and operator receipts survive application and daemon restarts.
+
+DSH is based on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) and its Cordis composition model. It is a community downstream distribution, not an official DeepSeek AI release.
+
+## Product surfaces
+
+| Surface | Purpose | Runtime authority |
+| --- | --- | --- |
+| DSH Desktop · Local Server | Full MacBook cockpit with local Host, plugins, sessions, operators, orchestration, and native integration | The local Host and local daemons |
+| DSH Desktop · Remote Frontend | Full browser/Desktop experience connected to one selected Product Server from a named multi-Server catalog | The selected remote Product Server; the Frontend is a projection and control client |
+| DSH Product Server | Plain-Node, long-running product composition with Resident, Orchestration, RLM, Debate, Memory, Billing, Remote Modules, and governance | The Server Host and its owner-local daemons |
+| CLI / Web / SDK | Headless, browser, automation, configuration, plugin, and developer entry points | The selected profile and mounted Providers |
+
+Desktop and Product Server are generated from one sealed composition. They load the same product capabilities; only the Host adapter differs. The ordinary upstream-compatible `dsh server` command remains a bare Server profile and is not the full DSH Product Server.
+
+## Feature atlas
+
+| Capability | What 3.9.9 provides | Boundary |
+| --- | --- | --- |
+| Cordis plugin runtime | Service Definition / Provider / Consumer seams, scoped contexts, typed events, reversible effects, profile and bundle composition | Load order and scope are observable behavior; Consumers must not import concrete Providers |
+| Interactive agent | Streaming turn/step loop, inbox, steering, follow-ups, cancellation, model-visible logging, preset switching | The default loop is replaceable, but durable event semantics must remain compatible |
+| Models and credentials | DeepSeek and provider adapters, model catalogs, effort/thinking selection, retry and usage metadata | Credential qualification belongs to each Provider; no hidden API fallback |
+| First-class subscriptions | Claude Code and Codex may drive the main DSH turn with DSH prompt, tool scope, approvals, logs, and plugins | Uses the user's native subscription login; private product tokens are never imported into DSH |
+| Physical Operators | Provider-neutral discovery, admission, execution mode, lifecycle, bounded results, and plugin seam | Default omission remains `ephemeral`; unsupported modes fail explicitly |
+| Resident Operators | Durable Claude Code/Codex sessions, receipts, leases, lanes, interrupt, compact, reset, events, artifact refs | The daemon is the only writer; indeterminate commands are never auto-replayed |
+| Smart Collaboration | Automatic or manual operator policy, live model/effort catalog, proactive delegation, up to four lanes per native product | It is policy over the same physical-operator seam, not another Scheduler |
+| AgentTeams | Parallel delegated agents with bounded worker identity and the selected preset persona | Team coordination remains subordinate to session and tool authority |
+| TaskGraph orchestration | Persistent DAG, dependencies, parallel readiness, scope/effect conflict control, retry, approval, pause/resume/cancel, recovery | `dsh-orchestratord` is the sole orchestration writer |
+| Compiler pipeline | Versioned Intent IR, Context Packet, Capability Binding Plan, graph certificate, sealed per-attempt ExecutionPlan | Compiler Providers cannot execute nodes or mutate Scheduler state |
+| Model allocation | Native-subscription-first offers, quota pools, goal policies, adaptive Luna/Terra execution, high-tier planning/verification, metered fallback | The allocator consumes normalized offers; it does not predict private subscription throttling |
+| RLM | Persistent TypeScript REPL, programmable `context`, async `rlm()`, messages, goals, compact, skills, bounded recursion, Agents View attach/input/detach | **Compatible subset**, not yet claimed fully faithful to Prime across every real Provider |
+| Continuous Harness | Session, workspace, and user-global entries; versioned prompt addenda, memories, skills, subagent definitions, snapshots, refinement, rollback | Applies at sealed attempt/turn boundaries; no mid-turn mutation or cross-machine sync yet |
+| Autonomous continuation | Optional end-condition loop over the same sealed RLM lane with durable budget and gate accounting | A limit exit is not success; it remains subordinate to TaskGraph authority |
+| Debate | Bounded proposer/falsifier/auditor/judge roster, blind first drafts, claim ledger, convergence, dissent, artifacts, approval and UI | Debate is optional and does not guarantee better answers without comparative evidence |
+| Remote Frontend | Named Server catalog, add/edit/remove/select, local/remote switch, health qualification, Leader following, recovery page | Live state remains on its authoritative Server; the Frontend does not become a second writer |
+| Remote execution | Exact-commit repository materialization, isolated per-command workspaces, durable Resident execution, artifact return | Only allowlisted repositories; credentials and sender absolute paths never cross the wire |
+| Multi-Server cluster | Fixed membership, majority-backed Leader lease, term/vote fencing, logical state replication, Frontend Leader discovery | First release uses bounded full snapshots; membership changes and unbounded incremental replication are deferred |
+| Session handoff | Revision-aware transfer of complete balanced event logs between Frontend/local Server/Product Server | No open-turn replication, SQLite/WAL copying, or continuous dual writing |
+| Memory | Mnemon memory spaces, multi-provider adapters, recall, graph projection, runtime memory, supervised writes, backup surfaces | Memory is a managed plugin capability, not orchestration truth |
+| Trace and evidence | Session events, Collaboration Trace, orchestration events, operator phases, bounded output, immutable Evidence/Artifact refs | Private reasoning, raw prompts, terminal screens, and native product transcripts stay outside projections |
+| Billing | Local usage ledger, DeepSeek official balance, time-of-day pricing, model detail, local savings, multi-Server aggregation | Local DSH totals are not the provider's official invoice; unavailable sources are shown, not projected as zero |
+| Desktop experience | Thin Electron Host, official Web carrier, advanced/compatibility modes, profiles, tray, terminal, updates, themes, plugins | Current stable release contract is macOS; Windows/Linux paths are not accepted stable Desktop releases |
+| Managed plugins | Sealed Better Sidebar, GenUI, diagnostics, code graph, Mnemon, Aegis skills, billing, remote modules, provenance registry | Optional third-party plugins remain profile extensions unless admitted into the sealed product |
+| Governance | Agent Notes, bilingual docs, package constraints, Code-as-Harness, source/package/runtime identity, protected PR delivery | Passing governance does not replace real installed-product acceptance where required |
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-  U[User / API] --> S[Desktop / Web / CLI / SDK]
-  S --> B[Profile Boot + Cordis Composition]
-  B --> A[Interactive Agent Runtime]
-  A --> P[Prompt + Context]
-  A --> L[LLM Providers]
-  A --> T[Typed Tool Runtime]
-  A --> E[Append-only Session Events]
-  T --> X[FS / Shell / Terminal / LSP / Sandbox / Workflow]
-  E --> SP[JSONL / SQLite Persistence + Projections]
-  A --> O[Orchestration Service]
-  O -->|Unix socket| D[dsh-orchestratord]
-  D --> C[Intent + Context + Capability Compilation]
-  C --> G[Certified TaskGraph + Sealed Plans]
-  D --> DB[(SQLite WAL + Receipts)]
-  D --> CAS[(Content-addressed Artifacts)]
-  D --> Q[Conflict-aware Scheduler]
-  Q --> M[Quota-aware Allocation]
-  M --> CC[Resident Claude Code]
-  M --> CX[Resident Codex]
-  M --> DS[DeepSeek API Fallback]
-  Q --> R[Bounded RLM + Continual Harness]
-  MP[Managed Plugins] --> B
-  GV[Code-as-Harness Governance] --> MP
-  GV --> REL[Protected PR + Release Evidence]
+  U[User] --> UI[Desktop / Web / CLI / SDK]
+  UI --> PB[Profile Boot + Cordis Composition]
+  PB --> AG[Interactive Agent Runtime]
+  AG --> PR[Prompt + Context + Preset]
+  AG --> LL[DeepSeek / Claude Code / Codex]
+  AG --> TL[Typed Tool Runtime]
+  AG --> SE[Append-only Session Events]
+  TL --> EX[FS / Shell / Terminal / LSP / Sandbox / MCP / Workflow]
+  SE --> SP[Session Persistence + Projections]
+
+  AG --> OR[ctx.orchestrations]
+  OR --> OD[dsh-orchestratord]
+  OD --> CP[Intent + Context + Capsule Compilers]
+  CP --> TG[Certified TaskGraph]
+  TG --> SC[Conflict-aware Scheduler]
+  SC --> MA[Quota-aware Model Allocation]
+  MA --> RO[dsh-resident-operatord]
+  MA --> DW[Optional DeepSeek API Worker]
+  RO --> CC[Claude Code Subscription]
+  RO --> CX[Codex Subscription]
+  SC --> RR[RLM / Continuous Harness / Debate]
+  OD --> DB[(SQLite WAL + Receipts)]
+  OD --> CAS[(Content-addressed Artifacts)]
+
+  RF[Remote Frontend] --> PS[Product Server Leader]
+  PS --> PE[Cluster Peers / Remote Operators]
+  PE --> RO
+  MP[Managed + User Plugins] --> PB
+  GV[Code-as-Harness Governance] --> REL[Protected PR + Product Release]
 ```
 
-The deliberate separation is between the interactive transcript and the orchestration run. A DSH Session records what entered a model-visible turn, what the model produced, and which tools were called. A TaskGraph run records why work was decomposed, which context and authority were sealed for each node, which physical attempt was accepted, which effects may overlap, which evidence was produced, and how execution resumes after a UI or Harness restart.
+### Authority boundaries
 
-## Runtime execution path
-
-1. [`apps/cli/src/bin.ts`](apps/cli/src/bin.ts) parses the invocation mode and dynamically loads the profile, plugin, resident, remote, or configuration path.
-2. [`apps/cli/src/profile-boot.ts`](apps/cli/src/profile-boot.ts) resolves bundles, profile patches, home patches, command overlays, telemetry policy, immutable launch environment, and bounded shutdown.
-3. Cordis mounts the configured tree; every registration is owned by a fiber and unwinds with its plugin scope rather than becoming undocumented process-global state.
-4. `ReactLoopAgent` opens a durable turn, claims inbox input, assembles prompt sections and visible tool schemas, derives message history from the Session log, and resolves the exact LLM call.
-5. Stream chunks and the canonical assistant message are appended separately so replay keeps both provider fidelity and a stable model-visible message.
-6. Tool calls pass through pre-policy, monotonic guards, around-execute wrappers, post-policy, definition finalization, durable call/result linking, and next-step context insertion; exclusive calls form barriers and explicitly safe calls use a bounded rolling pool.
-7. Durable orchestration compiles a request into versioned IRs, validates and certifies a graph, seals per-attempt plans, dispatches physical operators, persists receipts/events/artifacts, and reconciles accepted or uncertain attempts after restart.
-
-## Durable TaskGraph control plane
-
-| Stage | Main implementation | Contract |
+| Owner | Authoritative for | Must not own |
 | --- | --- | --- |
-| Intent IR | `ctx.intentCompiler` | Produces a versioned, provider-neutral requirement representation |
-| Context packet | `ctx.contextCompiler` | Binds bounded instructions and source/resource references instead of forwarding an unrestricted conversation dump |
-| Capability capsule | `ctx.capabilityCapsules` | Resolves accepted capabilities, effects, secrets, and enforcement generations; unsupported authority fails closed |
-| Graph validation | [`validateGraph`](packages/orchestration/orchestration-local/src/graph.ts) | Rejects invalid IDs, dependencies, cycles, budgets, timeouts, and missing completion-critical verification coverage |
-| Plan certification | Canonical JSON plus SHA-256 | Makes the graph and node order content-verifiable before physical dispatch |
-| Scheduling | Conflict and dependency algorithms | Runs independent nodes up to graph, worker, scope, effect, and live-capacity bounds rather than using a phase-wide barrier |
-| Persistence | [`OrchestrationStore`](packages/orchestration/orchestration-local/src/store.ts) | SQLite WAL single-writer state, command idempotency receipts, attempt reconciliation, append-only events, content-addressed artifacts |
-| Physical execution | Resident operator composition | Treats Claude Code, Codex, and metered fallback workers as routed providers under the same sealed-plan authority |
+| Session runtime | Model-visible transcript, turn/step/tool event order, user-facing projections | TaskGraph scheduling or native product history |
+| Orchestration daemon | Graph/run/node/attempt state, receipts, approval, generations, Evidence and CAS refs | Natural-language interpretation inside a model or product-private session state |
+| Resident daemon | Native operator Session mapping, command receipts, leases, progress events, bounded results | Global TaskGraph state or Desktop UI state |
+| Claude Code / Codex | Their native product session and execution behavior | DSH global scheduler, plugin composition, Evidence graph, or release authority |
+| Product Server | Live remote sessions and services for connected Frontends | A Frontend's inactive local state or GitHub source authority |
+| Desktop Frontend | Presentation, operator controls, Server catalog, explicit sync requests | Silent failover writes, replicated open turns, or a second canonical database |
 
-The control plane is stronger than a prompt-level supervisor because scheduler state and evidence are outside any one model conversation. It is also heavier than a library graph: the daemon, artifact lineage, receipt protocol, approval states, release identity, and Desktop projections create a product operating model rather than only a developer API.
+## Execution modes
 
-## Comparison with related projects
-
-| Project family | Where it is stronger than DSH | Where DSH is stronger |
+| User choice | Execution behavior | Best fit |
 | --- | --- | --- |
-| [Upstream DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | Smaller upstream delta, simpler contribution path, broader community baseline | Solar Desktop, managed-plugin source closure, governed releases, persistent TaskGraph daemon, resident-operator routing, Continual Harness |
-| [OpenAI Codex](https://github.com/openai/codex), Claude Code, [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://github.com/anomalyco/opencode) | Lower startup and operational complexity; highly optimized model-native coding loops; broader platform packaging in several cases | External durable orchestration, explicit effect/read/write scopes, operator-independent receipts and artifacts, provider routing, reproducible product composition |
-| [LangGraph](https://github.com/langchain-ai/langgraph) | Mature library ergonomics for arbitrary Python graphs, checkpoints, interrupts, deployment integrations, and application embedding | Integrated coding workbench, event-sourced model transcript, tool ABI, local physical operators, Desktop, managed plugins, source-to-release governance |
-| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) and AutoGen lineage | Multi-language enterprise APIs, distributed/application hosting patterns, broad provider ecosystem, standard collaboration patterns | More opinionated local coding control plane, executable profile composition, per-node capability sealing, local Resident operators, product-source closure |
-| Deep-research pipelines such as AI4Research, GPT Researcher, Open Deep Research, OpenJiuwen DeepSearch, and Octos | Domain-specific source collection, evidence synthesis, report planning, citation and publishing workflows | General executable agent runtime, coding tools, durable sessions, low-level capability seams, physical-operator orchestration, Desktop lifecycle |
+| Standard | One primary model follows the ordinary agent loop and uses normal DSH tools | Conversation, focused edits, predictable baseline |
+| Smart Auto | DSH chooses direct execution, physical delegation, TaskGraph, RLM, or another admitted strategy from policy and live capability | General default when the system may optimize quality, speed, and cost |
+| RLM | A root model receives a persistent TypeScript REPL and treats context plus async child agents as programmable values | Large-context decomposition, recursive analysis, controlled synthesis |
+| Debate | Several bounded high-tier roles challenge claims and a judge synthesizes with dissent retained | Contested architecture, review, risk, and evidence-heavy decisions |
+| TaskGraph | A certified DAG dispatches independent nodes in parallel under scopes, effects, receipts, and acceptance rules | Multi-step development and work that must survive restarts |
 
-DSH should not replace every specialized research pipeline. Its best role for Solar-style systems is the execution substrate beneath research Operators: research-specific Artifact schemas, citation support, coverage evaluation, Report Planner, Chapter Writer, and publication remain domain services, while DSH supplies bounded execution, state, recovery, operator routing, tools, and governance.
+RLM and Debate are execution strategies, not competing control planes. They run inside the existing session/TaskGraph authority and use the same physical operators. Explicit RLM uses the Prime-oriented strict profile; Smart Auto may use DSH's cost- and quota-aware allocation. Neither mode is marketed as a universal quality improvement: release decisions should use fixed offline fixtures and one authorized minimal real-subscription blind comparison when affected.
 
-## Strengths
+## Native subscriptions without a DeepSeek API key
 
-1. **Durability spans model and non-model state.** Session events reconstruct model-visible history; TaskGraph state, receipts, and artifacts survive outside the conversation.
-2. **Authority is more explicit than in prompt-supervised systems.** Nodes declare dependencies, read/write scopes, effect budgets, capability budgets, secrets, timeout, retry, and verification criticality.
-3. **Extension points are real runtime contracts.** Services, providers, consumers, scopes, events, configuration, and disposal are represented in code rather than hidden in one supervisor prompt.
-4. **The product is reproducible.** Desktop package closure, managed-plugin sources, accepted revisions, license evidence, and release identity are tracked together.
-5. **Strong coding agents remain replaceable resources.** Codex, Claude Code, and metered workers can be selected by policy without surrendering outer-loop state authority to their private transcript.
+DSH can operate without a DeepSeek API key when at least one qualified Claude Code or Codex native subscription Provider is available. The same subscription may serve in two roles:
 
-## Key technical designs
+1. As a **delegated physical operator**, receiving a bounded task from the current DSH agent.
+2. As the **first-class DSH model**, receiving the assembled system prompt and a sealed bridge to the current DSH tool universe.
 
-### Cordis plugin runtime
+In both cases DSH keeps plugin composition, tool schemas, approval policy, event logging, collaboration trace, receipts, and bounded results. The native product keeps its own login token and native session. API fallback is forbidden for the subscription Providers; an unqualified login fails explicitly instead of silently spending a metered API key.
 
-Cordis supplies services, merge-extensible typed events, waterfall/serial dispatch, child contexts, and reversible effects. DSH packages normally split a capability into Service Definition, Service Provider, and Consumer roles. Consumers depend on the definition rather than a concrete local provider, allowing filesystem, shell, sandbox, subagent, model, or persistence implementations to move without forking every caller.
+## Durable orchestration pipeline
 
-### Event-sourced Session
+```text
+Raw request
+  -> IntentIR
+  -> RequirementIR
+  -> Logical TaskGraph
+  -> validation + Plan Certificate
+  -> durable Run
 
-The Session log is the source of model history. `turn/*`, `step/*`, `user/message`, `assistant/*`, and `tool/*` records establish durable enclosure and provenance; projections derive the model surface and UI state. Model-visible input must be reconstructable from the log. Compaction appends replacement events instead of deleting history, while crash repair distinguishes a tool never durably started from an attempt whose external outcome is unknown.
+Ready node
+  -> Capability resolution
+  -> Continuous Harness snapshot
+  -> Context compilation
+  -> Operator/model allocation
+  -> sealed NodeExecutionPlan
+  -> approval/admission
+  -> local or remote physical execution
+  -> Evidence + Artifact + receipt settlement
+```
 
-### Typed tools and Code Mode
+The Scheduler admits a node only after dependencies, graph limits, read/write scopes, effects, live capacity, quota, and approval are compatible. Independent nodes may run in parallel; conflicting scopes or effects serialize only the affected nodes rather than imposing a phase-wide barrier. A settled retry receives a new attempt and execution identity. An indeterminate external command is never automatically replayed.
 
-The tool registry owns argument validation, output schemas, rendering, policy interception, timeout/retry wrapping, concurrency classification, and tool-owned UI presentation. Native function calling and Code Mode share the same registry. Code Mode collapses visible definitions behind a generated `run_code` transport and TypeScript/Python SDK, reducing direct schema pressure without bypassing execution policy.
+## Remote and multi-Server operation
 
-### Prompt and context assembly
+DSH 3.9.9 separates cockpit from compute:
 
-Prompt text is assembled from ordered plugin-owned sections, strict variables, dynamic contexts, and the visible tool universe. Scoped contributions can shadow globals for one agent. Unknown variables, malformed interpolation, multiple complete sections, invalid tool ordering, or a runtime language without an SDK renderer fail loudly before a model request.
+1. A MacBook Desktop can run its own Local Server or switch to a saved Product Server without replacing the application.
+2. One Frontend can maintain several named Servers and follow the current schedulable Leader.
+3. A Product Server can execute locally or offer qualified remote Resident capacity to the cluster.
+4. Remote work names a clean Git repository identity and exact commit; the receiver creates a Server-local isolated checkout.
+5. GitHub remains source authority. Optional Tailscale/SSH paths accelerate transfer and authenticated access but do not become source truth.
 
-### Execution and sandbox boundaries
+Cluster scheduling requires a non-expired majority lease. A follower cannot replay an accepted command, and stale-term results cannot settle a newer generation. The first cluster protocol deliberately uses fixed membership and bounded full logical snapshots; a two-member cluster cannot continue after one member fails because it no longer has a majority.
 
-Filesystem, subprocess, shell, terminal, LSP, workflow, code runtime, and sandbox are separate capability families but must describe one coherent execution world. Local sandbox backends provide platform-specific confinement; remote isolation replaces complete providers. Cooperative cancellation waits for owned work to quiesce. Neither worker threads nor dynamic `node:vm` execution should be treated as hostile-code containment.
+## Plugin architecture
 
-### Desktop and managed plugins
+| Role | Responsibility | Dependency rule |
+| --- | --- | --- |
+| Service Definition | Owns public types, events, errors, and capability contract | Imports no concrete Provider |
+| Provider | Implements one local, remote, native, or test backend | Depends on the Definition, not a Consumer |
+| Consumer | Exposes a model tool, UI, command, API, or higher-level composition | Depends on the Definition and injected service |
+| Bundle/Profile | Selects and configures implementations for one product surface | Composition only; it does not redefine contracts |
 
-Desktop is a thin Electron host: the Host runtime remains Cordis-based, serves the normal Web UI over loopback HTTP/WebSocket, and exposes only bounded Desktop services rather than raw Electron APIs. The root remains a pnpm workspace while [`products/desktop`](products/desktop) is an isolated Yarn workspace. Managed plugins retain source history, accepted SHAs, licenses, native tests, and packaged-byte closure so a clean clone can explain the default application.
+This applies to filesystems, subprocesses, models, Resident Operators, orchestration, Intent/Context compilers, capsules, RLM, Continuous Harness, Debate, memory, and remote services. Removing an optional bundle removes its capability and UI without copying its state machine into DSH Core.
+
+## Persistence, recovery, and observability
+
+| State family | Durable representation | Recovery rule |
+| --- | --- | --- |
+| Conversation | Append-only Session events with JSONL/SQLite persistence and projections | Rebuild model-visible history from events; unsupported required events fail loudly |
+| Resident command | Session, Receipt, Lease, Event, and Artifact records under the owner DSH home | Same command/hash reuses the receipt; uncertain native outcome becomes indeterminate |
+| Orchestration | SQLite WAL plus immutable compilation, plan, event, Evidence, and CAS artifacts | One daemon writes; accepted attempts are reconciled before new dispatch |
+| Remote cluster | Term, vote, Leader lease, commit index, digest-verified logical snapshots | Only the majority-backed Leader schedules external effects |
+| Memory and billing | Plugin-owned stores with explicit provenance and aggregation status | They project into the product but do not become Scheduler or provider invoice truth |
+
+The UI exposes bounded operational views: Physical Operators, Orchestrations, Debate, Memory, billing, plugin diagnostics, and per-session Collaboration/Governance Trace. Large outputs remain artifacts; raw prompts, private chain-of-thought, complete terminal screens, native credentials, and product-private transcripts are not copied into general projections.
 
 ## Code map
 
-| Area | Primary path | Why it matters |
+| Area | Primary path | Responsibility |
 | --- | --- | --- |
-| CLI dispatch | [`apps/cli/src/bin.ts`](apps/cli/src/bin.ts) | Selects runtime mode without eagerly coupling every surface |
-| Profile boot | [`apps/cli/src/profile-boot.ts`](apps/cli/src/profile-boot.ts) | Owns ordered composition, live patch reload, launch provenance, and shutdown |
-| Agent state machine | [`packages/core/agent-loop/src/agent.ts`](packages/core/agent-loop/src/agent.ts) | Defines turn/step admission, request construction, streaming, cancellation, and continuation |
-| Tool scheduler | [`packages/core/agent-loop/src/tool-calls.ts`](packages/core/agent-loop/src/tool-calls.ts) | Preserves model order while overlapping only explicitly safe dispatch bodies |
-| Session model | [`packages/core/session`](packages/core/session) | Owns durable event vocabulary, surface replacement, forks, and request reconstruction |
-| Tool ABI | [`packages/core/tools`](packages/core/tools) | Owns schema, policy, execution, results, Code Mode, and presentation contracts |
-| Prompt registry | [`packages/core/system-prompt`](packages/core/system-prompt) | Assembles the exact prompt/tool prefix for each scoped request |
-| Orchestration API | [`packages/orchestration/orchestration`](packages/orchestration/orchestration) | Provider-neutral TaskGraph, control, event, artifact, and execution-plan types |
-| Graph algorithms | [`packages/orchestration/orchestration-local/src/graph.ts`](packages/orchestration/orchestration-local/src/graph.ts) | Validates graphs and computes dependency/effect conflicts |
-| Durable store | [`packages/orchestration/orchestration-local/src/store.ts`](packages/orchestration/orchestration-local/src/store.ts) | Implements WAL state, migrations, receipts, attempts, events, and CAS artifacts |
-| Local daemon | [`packages/orchestration/orchestration-local`](packages/orchestration/orchestration-local) | Sole orchestration writer and physical-operator coordinator |
-| Desktop architecture | [`products/desktop/docs/architecture.en.md`](products/desktop/docs/architecture.en.md) | Documents Electron, Host, Web client, profiles, native runtime, and packaging closure |
-| Plugin provenance | [`plugins/registry.yaml`](plugins/registry.yaml) | Records source, accepted revision, license evidence, and native checks |
-| Product identity | [`distribution/product.json`](distribution/product.json) | Defines platform, Desktop version, and stable tag contract |
+| CLI and profile boot | [`apps/cli`](apps/cli) | Entry modes, profile/bundle resolution, launch provenance, shutdown |
+| Agent loop | [`packages/core/agent-loop`](packages/core/agent-loop) | Turn/step state machine, model calls, streaming, tool dispatch |
+| Session model | [`packages/core/session`](packages/core/session) and [`packages/session`](packages/session) | Event vocabulary, persistence, projections, replay, recovery |
+| Tools and prompt | [`packages/core/tools`](packages/core/tools) and [`packages/core/system-prompt`](packages/core/system-prompt) | Tool ABI, policies, Code Mode, prompt/context assembly |
+| Physical Operators | [`packages/physical-operator`](packages/physical-operator) | Ephemeral and Resident capability seams plus local daemon Provider |
+| Orchestration | [`packages/orchestration`](packages/orchestration) | TaskGraph, compilers, allocator, RLM, Harness, Debate, local daemon |
+| Remote connection | [`packages/client/connection`](packages/client/connection) | Authenticated Host description, event streams, sync, remote execution, cluster projection |
+| Desktop/Product Server | [`products/desktop/dsh-plugin-desktop`](products/desktop/dsh-plugin-desktop) | Electron Host, Product Server adapter, product composition, packaging and acceptance |
+| Managed plugins | [`plugins/managed`](plugins/managed) | Sealed product plugins, memory, billing, governance, UI and provenance |
+| Product identity | [`distribution/product.json`](distribution/product.json) | Platform, stable Desktop version, branch and tag contract |
 
-## Constraints and risks
+## Honest boundaries
 
-1. **Upstream divergence is expensive.** Solar must continuously qualify changes across event vocabularies, persistence, package exports, profile composition, Desktop behavior, and managed plugins.
-2. **The system has several failure domains.** Cordis lifecycle, profile composition, Session persistence, orchestration daemon, physical operators, native helpers, and Desktop packaging each require independent diagnostics.
-3. **macOS is the accepted product surface.** Cross-platform code paths or upstream support do not imply a Solar-supported Windows/Linux Desktop release.
-4. **Some isolation mechanisms are not security boundaries.** Dynamic packages, worker-authored workflows, local tools, MCP servers, and third-party plugins require a trusted-computing-base review.
-5. **Distributed orchestration is absent.** SQLite WAL plus an owner-local daemon provides strong local recovery, not horizontal availability or multi-region consensus.
-6. **Capsule enforcement is intentionally incomplete.** Unsupported tool/MCP/secret/guard bindings reject rather than silently grant authority, which is safer but limits deployable scenarios.
-7. **Repository and release complexity is high.** Root pnpm, Desktop Yarn, Python/native builds, sealed archives, and many verification gates increase change latency.
+1. **RLM is currently a compatible subset.** The TypeScript runtime implements the core programmable mechanism, but DSH does not claim full Prime fidelity until the fixed DeepSeek, Claude Code, Codex, and Continuous Harness end-to-end matrix passes.
+2. **Quality uplift is not guaranteed.** RLM and Debate provide methods and evidence surfaces; whether they improve a task must be measured against Standard mode.
+3. **Cluster v1 is deliberately bounded.** Membership is fixed, replication is full-snapshot and size-bounded, and two members do not provide one-failure availability.
+4. **Hot capability injection is boundary-based.** Current native operators support pre-dispatch or next-turn changes, not arbitrary in-turn checkpoint/rebind.
+5. **The accepted stable Desktop is macOS.** Windows and Linux source paths do not constitute an accepted 3.9.9 stable release.
+6. **Developer ID notarization is not part of the current release identity.** Local acceptance can use an ad-hoc signed application; formal public distribution requires Apple signing/notarization credentials.
+7. **Local billing is scoped accounting.** It cannot replace a provider's complete official bill across other programs, API keys, or accounts.
+8. **Repository complexity remains material.** The pnpm monorepo, isolated Desktop Yarn workspace, managed source inputs, native code, bilingual docs, and release gates increase change cost.
 
 ## When to choose DSH
 
 ### Good fit
 
-- A macOS-local AI workbench must combine conversation, coding, tools, memory, Web/Desktop UI, and long-running tasks.
-- Work must continue across UI/runtime restarts with explicit receipts, artifacts, approval, retries, and indeterminate-outcome handling.
-- Codex or Claude Code should execute bounded nodes but must not own the global scheduler, evidence graph, or release authority.
-- Plugin provenance, package closure, and agent-generated code verification are first-class product requirements.
+- You want a plugin-composed local AI workbench rather than one fixed model client.
+- Claude Code or Codex subscriptions should work as durable first-class agents without requiring a DeepSeek API key.
+- Long tasks need DAG parallelism, explicit authority, receipts, evidence, approval, and restart recovery.
+- A MacBook cockpit should use one or more remote Product Servers and remote operator capacity.
+- Product provenance, managed plugins, traceability, and release governance are first-class requirements.
 
-### Prefer another base
+### Prefer a smaller or different base
 
-- The requirement is a minimal, model-native terminal coding loop with little outer orchestration.
-- The primary deliverable is a cloud-native Python/.NET/Go workflow service rather than a local macOS workbench.
-- Immediate multi-node distributed scheduling, multi-region availability, or enterprise hosted control planes are mandatory.
-- The core problem is domain-specific research evidence and report generation and no general coding/runtime substrate is needed.
+- You need only a minimal, model-native terminal coding loop.
+- Your primary product is a hosted Python/.NET/Go workflow library rather than a local agent workbench.
+- You require elastic, unbounded, multi-region consensus today.
+- Your only problem is a specialized research/report pipeline and you do not need a general coding runtime.
 
 <a id="run"></a><a id="run-from-source"></a>
 
-## Development
+## Run from source
 
-Prerequisites are macOS, Git, Corepack, and Node.js `22.19+` or `24+`. The root and Desktop dependency graphs are intentionally separate.
+Prerequisites are macOS, Git, Corepack, and Node.js `22.19+` or `24+`. The root pnpm graph and Desktop Yarn graph are intentionally separate.
 
 ```sh
 git clone https://github.com/lisihao/deepseek-solar-harness.git
@@ -199,14 +254,14 @@ corepack yarn check
 corepack yarn dev
 ```
 
-Root validation includes type checking, lint, unit/coverage tests, snapshots, E2E suites, runtime-closure checks, generated catalogs, documentation checks, package constraints, and release verification. Desktop uses its own headless `yarn check` plus D00–D08 acceptance where application delivery is in scope. Real-provider tests require the corresponding credentials and must not be reported as passed when skipped.
+Product Server deployment, cluster configuration, remote repository allowlists, Desktop packaging, and D00–D08 acceptance are documented in [`products/desktop/dsh-plugin-desktop/README.md`](products/desktop/dsh-plugin-desktop/README.md). The machine-readable product identity in [`distribution/product.json`](distribution/product.json) is authoritative for the stable version and supported platform.
 
-## Verification and provenance
+## Verification and contribution
 
-Start with [`AGENTS.md`](AGENTS.md) for standing repository rules and [`docs/architecture.md`](docs/architecture.md) for the upstream runtime map. [`distribution/upstreams.yaml`](distribution/upstreams.yaml) records accepted core/Desktop ancestry, while [`plugins/registry.yaml`](plugins/registry.yaml) records managed-plugin revisions, licenses, and native commands. Third-party runtime disclosures are in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Read [`AGENTS.md`](AGENTS.md) before changing the repository and [`docs/architecture.md`](docs/architecture.md) for the upstream runtime map. [`distribution/upstreams.yaml`](distribution/upstreams.yaml) records accepted ancestry; [`plugins/registry.yaml`](plugins/registry.yaml) records managed-plugin source, revision, license evidence, and native checks; [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) records third-party runtime disclosures.
 
-`solar` is protected. Changes use isolated task branches and Pull Requests, with change-aware Code-as-Harness audit, plan, verification, attestation, remote-SHA equality, and applicable runtime/release evidence. A PR or build artifact alone is not delivery.
+`solar` is protected. Changes enter through an isolated branch and Pull Request with change-aware Code-as-Harness verification. Full governance and real subscription acceptance are run only when the affected boundary requires them; still-valid evidence is reused when inputs are unchanged.
 
 ## License
 
-The core repository is licensed under [MIT](LICENSE). Imported components retain their own license evidence and notices.
+The core repository is licensed under [MIT](LICENSE). Imported components retain their own licenses and notices.
