@@ -10,10 +10,9 @@ export interface ConnectionConfig {
   backoffFactor?: number
   /** Upper bound for the backoff cap in ms. */
   backoffMaxMs?: number
-  /** Cap on waiting for both streams' onOpen before onConnected, in ms. The strict handshake
-   *  waits for mux+host stream establishment plus describe; a carrier that never
-   *  fires onOpen (misbehaving proxy) must not wedge the connection forever — on timeout the
-   *  generation proceeds as connected and the live-gap repair path covers stragglers. */
+  /** Warning threshold while waiting for both streams' onOpen before onConnected, in ms.
+   *  A slow backend remains in the connecting state; only actual stream loss or
+   *  cancellation ends the generation. */
   streamOpenTimeoutMs?: number
 }
 
@@ -136,14 +135,12 @@ export class ConnectionController {
         // Strict readiness handshake: describe proves unary reachability, onOpen
         // proves each physical stream is established before any frame —
         // only then may onConnected fire, so the resync it triggers cannot outrun the
-        // subscribed baseline. The timeout guards against a carrier that never fires onOpen
-        // (see ConnectionConfig.streamOpenTimeoutMs).
-        const timeout = new AbortController()
+        // subscribed baseline. The configured threshold reports a slow carrier
+        // without declaring it connected or tearing down a still-live generation.
         const [description] = await Promise.all([
           this.api.host.describe({}),
-          Promise.race([streamsOpen, sleep(this.config.streamOpenTimeoutMs, timeout.signal)]),
+          waitForReady(streamsOpen, this.config.streamOpenTimeoutMs, ac.signal),
         ])
-        timeout.abort()
         const descriptionResult = description.result
         if (!descriptionResult.ok) {
           throw new Error(`host.describe failed: ${descriptionResult.error.code}: ${descriptionResult.error.message}`)
@@ -202,4 +199,30 @@ export class ConnectionController {
       console.error('[web-runtime] connection sink threw:', error)
     }
   }
+}
+
+/** Await source readiness while reporting, but not cancelling, a slow Host. */
+function waitForReady<T>(ready: Promise<T>, timeoutMs: number, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const timeout = setTimeout(() => {
+      console.warn(`[web-runtime] connection streams are still not ready after ${String(timeoutMs)}ms`)
+    }, timeoutMs)
+    const aborted = (): void => {
+      finish({ error: new Error('connection generation aborted', { cause: signal.reason }) })
+    }
+    const finish = (outcome: { readonly value: T } | { readonly error: Error }): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', aborted)
+      if ('error' in outcome) reject(outcome.error)
+      else resolve(outcome.value)
+    }
+    signal.addEventListener('abort', aborted, { once: true })
+    void ready.then(
+      (value) => { finish({ value }) },
+      (error: unknown) => { finish({ error: error as Error }) },
+    )
+  })
 }
