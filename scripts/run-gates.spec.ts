@@ -78,6 +78,14 @@ describe('gate graph validation', () => {
     await expect(runGates(subject, subject.length, execute)).resolves.toHaveLength(subject.length)
   })
 
+  it('uses one top-level build gate instead of a separate web build in check-all', () => {
+    const gates = withPnpmEntrypoint(() => gatesForMode('check-all'))
+
+    expect(gates.filter(subject => subject.id === 'build')).toHaveLength(1)
+    expect(gates.find(subject => subject.id === 'build:web')).toBeUndefined()
+    expect(gates.find(subject => subject.id === 'build')?.displayCommand).toBe('pnpm run build')
+  })
+
   it('keeps the public repository link policy in the documentation gate', () => {
     const ids = withPnpmEntrypoint(() => gatesForMode('doc-sync').map(subject => subject.id))
 
