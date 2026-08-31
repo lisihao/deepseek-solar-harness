@@ -68,38 +68,7 @@ Desktop and Product Server are generated from one sealed composition. They load 
 
 ## Architecture
 
-```mermaid
-flowchart TB
-  U[User] --> UI[Desktop / Web / CLI / SDK]
-  UI --> PB[Profile Boot + Cordis Composition]
-  PB --> AG[Interactive Agent Runtime]
-  AG --> PR[Prompt + Context + Preset]
-  AG --> LL[DeepSeek / Claude Code / Codex]
-  AG --> TL[Typed Tool Runtime]
-  AG --> SE[Append-only Session Events]
-  TL --> EX[FS / Shell / Terminal / LSP / Sandbox / MCP / Workflow]
-  SE --> SP[Session Persistence + Projections]
-
-  AG --> OR[ctx.orchestrations]
-  OR --> OD[dsh-orchestratord]
-  OD --> CP[Intent + Context + Capsule Compilers]
-  CP --> TG[Certified TaskGraph]
-  TG --> SC[Conflict-aware Scheduler]
-  SC --> MA[Quota-aware Model Allocation]
-  MA --> RO[dsh-resident-operatord]
-  MA --> DW[Optional DeepSeek API Worker]
-  RO --> CC[Claude Code Subscription]
-  RO --> CX[Codex Subscription]
-  SC --> RR[RLM / Continuous Harness / Debate]
-  OD --> DB[(SQLite WAL + Receipts)]
-  OD --> CAS[(Content-addressed Artifacts)]
-
-  RF[Remote Frontend] --> PS[Product Server Leader]
-  PS --> PE[Cluster Peers / Remote Operators]
-  PE --> RO
-  MP[Managed + User Plugins] --> PB
-  GV[Code-as-Harness Governance] --> REL[Protected PR + Product Release]
-```
+![DSH 3.9.9 layered architecture: interaction, plugin composition, agent runtime, orchestration, execution allocation, model operators, governance, and durable state authorities](docs/assets/dsh-architecture-stack.en.svg)
 
 ### Authority boundaries
 

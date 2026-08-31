@@ -68,38 +68,7 @@ Desktop 与 Product Server 从同一个密封组合生成，加载相同产品�
 
 ## 系统架构
 
-```mermaid
-flowchart TB
-  U[User] --> UI[Desktop / Web / CLI / SDK]
-  UI --> PB[Profile Boot + Cordis Composition]
-  PB --> AG[Interactive Agent Runtime]
-  AG --> PR[Prompt + Context + Preset]
-  AG --> LL[DeepSeek / Claude Code / Codex]
-  AG --> TL[Typed Tool Runtime]
-  AG --> SE[Append-only Session Events]
-  TL --> EX[FS / Shell / Terminal / LSP / Sandbox / MCP / Workflow]
-  SE --> SP[Session Persistence + Projections]
-
-  AG --> OR[ctx.orchestrations]
-  OR --> OD[dsh-orchestratord]
-  OD --> CP[Intent + Context + Capsule Compilers]
-  CP --> TG[Certified TaskGraph]
-  TG --> SC[Conflict-aware Scheduler]
-  SC --> MA[Quota-aware Model Allocation]
-  MA --> RO[dsh-resident-operatord]
-  MA --> DW[Optional DeepSeek API Worker]
-  RO --> CC[Claude Code Subscription]
-  RO --> CX[Codex Subscription]
-  SC --> RR[RLM / Continuous Harness / Debate]
-  OD --> DB[(SQLite WAL + Receipts)]
-  OD --> CAS[(Content-addressed Artifacts)]
-
-  RF[Remote Frontend] --> PS[Product Server Leader]
-  PS --> PE[Cluster Peers / Remote Operators]
-  PE --> RO
-  MP[Managed + User Plugins] --> PB
-  GV[Code-as-Harness Governance] --> REL[Protected PR + Product Release]
-```
+![DSH 3.9.9 分层架构：交互入口、插件组合、Agent 运行时、编排控制、执行分配、模型算子、治理及持久状态权威](docs/assets/dsh-architecture-stack.zh.svg)
 
 ### 权威边界
 
