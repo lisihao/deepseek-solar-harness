@@ -89,8 +89,8 @@ export function resolveNativeProductCommands(
     // whether Desktop was opened from Finder or a shell. An inherited
     // /usr/local binary may be an older root-owned Claude Code release that
     // shares the same macOS Keychain item and predates OAuth refresh fixes.
-    join(options.homeDir, '.local', 'bin'),
     join(options.homeDir, '.npm-global', 'bin'),
+    join(options.homeDir, '.local', 'bin'),
     join(options.homeDir, '.bun', 'bin'),
     join(options.homeDir, '.volta', 'bin'),
     ...inheritedDirectories,
