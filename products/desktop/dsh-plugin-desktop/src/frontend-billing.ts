@@ -208,6 +208,7 @@ export function mergeFrontendBillingSources(
 function closeServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close((cause) => { cause === undefined ? resolve() : reject(cause) })
+    server.closeAllConnections()
   })
 }
 

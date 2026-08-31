@@ -108,6 +108,49 @@ describe('Frontend billing baseline', () => {
     }
   })
 
+  it('closes without waiting for an active renderer request', async () => {
+    let releaseSources!: () => void
+    const sourcesReleased = new Promise<void>((resolve) => { releaseSources = resolve })
+    let markSourcesStarted!: () => void
+    const sourcesStarted = new Promise<void>((resolve) => { markSourcesStarted = resolve })
+    let requestCount = 0
+    const request = async (input: string | URL | Request): Promise<Response> => {
+      requestCount += 1
+      if (requestCount === 2) markSourcesStarted()
+      await sourcesReleased
+      if (String(input).endsWith('/remote-sync/describe')) {
+        return Response.json({ result: { ok: true, value: { deploymentId: 'server-primary' } } })
+      }
+      return Response.json({
+        ok: true,
+        totals: {
+          calls: 0,
+          cost: 0,
+          costUsd: 0,
+          inputTokens: 0,
+          cacheReadTokens: 0,
+          outputTokens: 0,
+        },
+      })
+    }
+    const bridge = await startFrontendBillingBridge({
+      origin: 'https://server.example',
+      baseline,
+      sources: [{ id: 'primary', label: 'Primary', origin: 'https://server.example' }],
+      request,
+    })
+    const rendererRequest = fetch(bridge.url).catch(() => undefined)
+    await sourcesStarted
+    const closing = bridge.close()
+    const outcome = await Promise.race([
+      closing.then(() => 'closed' as const),
+      new Promise<'blocked'>((resolve) => { setTimeout(() => { resolve('blocked') }, 100) }),
+    ])
+    releaseSources()
+    await Promise.allSettled([closing, rendererRequest])
+    expect(outcome).toBe('closed')
+  })
+
   it('aggregates every configured Server and retains unavailable source provenance', async () => {
     const request = async (input: string | URL | Request): Promise<Response> => {
       const url = new URL(String(input))
