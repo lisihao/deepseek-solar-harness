@@ -43,16 +43,41 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # This runs with the runner's plain Node before pnpm is installed. Only
+      # an explicit release-ownership decision may skip this lane; empty,
+      # unknown, or unreadable scope is conservative and runs both lanes.
+      - name: Classify release impact
+        id: impact
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/pr-impact.mjs
+
+      - name: Report release impact
+        run: |
+          echo "classification=${{ steps.impact.outputs.classification }}"
+          echo "run_dsh=${{ steps.impact.outputs.run_dsh }}"
+          echo "run_vendor=${{ steps.impact.outputs.run_vendor }}"
+          echo "reason=${{ steps.impact.outputs.reason }}"
+
+      - name: Skip unaffected release pack
+        if: steps.impact.outputs.run_vendor == 'false'
+        run: |
+          echo 'Vendor package inputs are unchanged; release pack intentionally skipped.'
+
       - uses: pnpm/action-setup@v4
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         with:
           dest: ${{ runner.temp }}/setup-pnpm
 
       - uses: actions/setup-node@v6
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
       - name: Configure pnpm store path
         id: pnpm-store
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         run: |
           store_root="$HOME/.local/share/pnpm/store"
           echo "PNPM_CONFIG_STORE_DIR=$store_root" >> "$GITHUB_ENV"
@@ -60,6 +85,7 @@ jobs:
           echo "path=$store_path" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache/restore@v4
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -67,9 +93,11 @@ jobs:
             ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
 
       - name: Install (immutable)
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         run: pnpm install --frozen-lockfile
 
       - name: Verify release version
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         env:
           RELEASE_PUBLISH: ${{ inputs.publish }}
         run: pnpm run release:verify --family vendor
@@ -77,15 +105,19 @@ jobs:
       # The vendored packages publish their own sources and build outputs; the
       # host build produces what their manifests select.
       - name: Build
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         run: pnpm run build:lib:host
 
       - name: Pack release tarballs
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         run: pnpm run release:pack --family vendor --out dist/npm-vendor
 
       - name: Verify packed install
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         run: pnpm run release:verify-packed-install --family vendor --from dist/npm-vendor
 
       - uses: actions/upload-artifact@v4
+        if: always() && steps.impact.outputs.run_vendor != 'false'
         with:
           name: vendor-npm-tarballs
           path: dist/npm-vendor/*

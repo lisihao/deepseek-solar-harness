@@ -43,16 +43,41 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # This runs with the runner's plain Node before pnpm is installed. Only
+      # an explicit release-ownership decision may skip this lane; empty,
+      # unknown, or unreadable scope is conservative and runs both lanes.
+      - name: Classify release impact
+        id: impact
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/pr-impact.mjs
+
+      - name: Report release impact
+        run: |
+          echo "classification=${{ steps.impact.outputs.classification }}"
+          echo "run_dsh=${{ steps.impact.outputs.run_dsh }}"
+          echo "run_vendor=${{ steps.impact.outputs.run_vendor }}"
+          echo "reason=${{ steps.impact.outputs.reason }}"
+
+      - name: Skip unaffected release pack
+        if: steps.impact.outputs.run_dsh == 'false'
+        run: |
+          echo 'DSH package inputs are unchanged; release pack intentionally skipped.'
+
       - uses: pnpm/action-setup@v4
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         with:
           dest: ${{ runner.temp }}/setup-pnpm
 
       - uses: actions/setup-node@v6
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
       - name: Configure pnpm store path
         id: pnpm-store
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         run: |
           store_root="$HOME/.local/share/pnpm/store"
           echo "PNPM_CONFIG_STORE_DIR=$store_root" >> "$GITHUB_ENV"
@@ -60,6 +85,7 @@ jobs:
           echo "path=$store_path" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache/restore@v4
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -67,17 +93,21 @@ jobs:
             ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
 
       - name: Install (immutable)
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         run: pnpm install --frozen-lockfile
 
       - name: Verify release version
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         env:
           RELEASE_PUBLISH: ${{ inputs.publish }}
         run: pnpm run release:verify --family dsh
 
       - name: Build
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         run: pnpm run build
 
       - name: Pack release tarballs
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         run: pnpm run release:pack --family dsh --out dist/npm
 
       # The harness packages declare the vendored framework as a peer, and this
@@ -86,20 +116,24 @@ jobs:
       # publishes — so it installs that family's pack output too. Only dist/npm
       # is published.
       - name: Pack the vendored framework for verification
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         run: pnpm run release:pack --family vendor --out dist/npm-vendor
 
       # dsh-sandbox-local declares the Landlock entry as a runtime dependency, so
       # the verification needs its tarball. Its platform packages stay out: they
       # are optional, and building them needs a musl toolchain per architecture.
       - name: Pack the Landlock entry for verification
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         run: |
           pnpm --dir native/landlock-run run build:ts
           pnpm --dir native/landlock-run/packages/entry pack --pack-destination "$PWD/dist/npm-landlock"
 
       - name: Verify packed install
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         run: pnpm run release:verify-packed-install --family dsh --from dist/npm --from dist/npm-vendor --from dist/npm-landlock
 
       - uses: actions/upload-artifact@v4
+        if: always() && steps.impact.outputs.run_dsh != 'false'
         with:
           name: dsh-npm-tarballs
           path: dist/npm/*
