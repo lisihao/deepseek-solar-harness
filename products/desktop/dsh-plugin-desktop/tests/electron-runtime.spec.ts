@@ -472,6 +472,45 @@ describe('Electron compatibility runtime', () => {
     expect(hook.mock.calls.at(-1)?.[1]).toBeNull()
   })
 
+  it('destroys the remote renderer before closing its frontend billing bridge', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
+    const frontendBilling = await import('../src/frontend-billing.ts')
+    const cleanupOrder: string[] = []
+    const close = vi.fn(async () => {
+      cleanupOrder.push('billing')
+      expect(electron.browserWindows[0]?.destroy).toHaveBeenCalledOnce()
+    })
+    vi.spyOn(frontendBilling, 'startFrontendBillingBridge').mockResolvedValue({
+      url: 'http://127.0.0.1:43121/00000000-0000-4000-8000-000000000000',
+      close,
+    })
+    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
+    const runtime = new ElectronDesktopRuntime(async () => {})
+    const release = runtime.schedule({
+      ...spec,
+      url: 'http://127.0.0.1:43120/?dsh-deployment-role=frontend',
+      frontendBilling: {
+        origin: 'http://127.0.0.1:43120',
+        baseline: {
+          calls: 415,
+          cost: 11.6173779,
+          costUsd: 1.697263652,
+          inputTokens: 2_043_980,
+          cacheReadTokens: 23_318_912,
+          outputTokens: 200_035,
+        },
+        sources: [{ id: 'primary', label: 'Primary', origin: 'http://127.0.0.1:43120' }],
+      },
+    })
+    await runtime.mountScheduled()
+    electron.browserWindows[0]?.destroy.mockImplementation(() => { cleanupOrder.push('window') })
+
+    await release()
+
+    expect(close).toHaveBeenCalledOnce()
+    expect(cleanupOrder).toEqual(['window', 'billing'])
+  })
+
   it('keeps deployment role controls separate from presentation mode controls', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const configureFrontend = vi.fn(async () => {})

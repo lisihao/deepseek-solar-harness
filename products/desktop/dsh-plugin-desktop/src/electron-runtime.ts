@@ -781,8 +781,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       if (billingFilter !== undefined) {
         window.webContents.session.webRequest.onBeforeRequest(billingFilter, null)
       }
-      await billingBridge?.close()
       if (!window.isDestroyed()) window.destroy()
+      await billingBridge?.close()
       if (this.tray === mountedTray) this.tray = undefined
       if (this.window === window) this.window = undefined
     }
