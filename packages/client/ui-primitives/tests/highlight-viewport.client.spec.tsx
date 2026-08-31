@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
 
+import { useRef } from 'react'
 import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ReadBlock } from '../src/ReadBlock.tsx'
 import { CodeBlock } from '../src/markdown/CodeBlock.tsx'
+import { useViewportHighlighting } from '../src/markdown/useViewportHighlighting.ts'
+
+function MissingTarget(): React.JSX.Element {
+  const target = useRef<HTMLDivElement>(null)
+  const active = useViewportHighlighting(target, 'ts')
+  return <span data-active={String(active)} />
+}
 
 class IntersectionObserverStub {
   static instances: IntersectionObserverStub[] = []
@@ -76,6 +84,13 @@ describe('viewport-activated syntax highlighting', () => {
     pending.unmount()
     expect(observer.unobserved.has(block)).toBe(true)
     expect(observer.disconnected).toBe(true)
+    act(() => { observer.intersect(block, true) })
+  })
+
+  it('keeps a supported surface inactive until its ref resolves', () => {
+    const missing = render(<MissingTarget />)
+    expect(missing.container.querySelector('span')?.getAttribute('data-active')).toBe('false')
+    expect(IntersectionObserverStub.instances).toHaveLength(0)
   })
 
   it('highlights immediately without IntersectionObserver and gates read cards otherwise', async () => {

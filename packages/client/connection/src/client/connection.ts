@@ -203,26 +203,18 @@ export class ConnectionController {
 
 /** Await source readiness while reporting, but not cancelling, a slow Host. */
 function waitForReady<T>(ready: Promise<T>, timeoutMs: number, signal: AbortSignal): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false
-    const timeout = setTimeout(() => {
-      console.warn(`[web-runtime] connection streams are still not ready after ${String(timeoutMs)}ms`)
-    }, timeoutMs)
-    const aborted = (): void => {
-      finish({ error: new Error('connection generation aborted', { cause: signal.reason }) })
-    }
-    const finish = (outcome: { readonly value: T } | { readonly error: Error }): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      signal.removeEventListener('abort', aborted)
-      if ('error' in outcome) reject(outcome.error)
-      else resolve(outcome.value)
+  const timeout = setTimeout(() => {
+    console.warn(`[web-runtime] connection streams are still not ready after ${String(timeoutMs)}ms`)
+  }, timeoutMs)
+  let aborted!: () => void
+  const interrupted = new Promise<never>((_resolve, reject) => {
+    aborted = (): void => {
+      reject(new Error('connection generation aborted', { cause: signal.reason }))
     }
     signal.addEventListener('abort', aborted, { once: true })
-    void ready.then(
-      (value) => { finish({ value }) },
-      (error: unknown) => { finish({ error: error as Error }) },
-    )
+  })
+  return Promise.race([ready, interrupted]).finally(() => {
+    clearTimeout(timeout)
+    signal.removeEventListener('abort', aborted)
   })
 }

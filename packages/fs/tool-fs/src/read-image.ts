@@ -229,13 +229,13 @@ export function applyReadImageTool(ctx: Context): void {
       try {
         ref = await attachments.saveImage({ data, mediaType, name: basename(target.displayPath) })
       } catch (error: unknown) {
-        if (!(error instanceof AttachmentError) || error.code !== 'IMAGE_TYPE_MISMATCH') throw error
         if (declared === undefined) {
           throw new Error(
-            `cannot read "${target.displayPath}": the file signature claims ${mediaType}, but the bytes decode as a different image format; the file may be corrupt`,
+            `cannot read "${target.displayPath}": the file signature claims ${mediaType}, but the bytes do not decode as a valid ${mediaType} image; the file may be corrupt`,
             { cause: error },
           )
         }
+        if (!(error instanceof AttachmentError) || error.code !== 'IMAGE_TYPE_MISMATCH') throw error
         throw new Error(
           `cannot read "${target.displayPath}": the ${extension} extension declares ${mediaType}, but the bytes use a different image format; rename the file to match its actual format if it is PNG/JPEG/WebP/GIF, or convert it to one of those formats`,
           { cause: error },

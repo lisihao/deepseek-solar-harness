@@ -1304,7 +1304,7 @@ __metadata:
 
 "@deepseek-ai/dsh-client-connection@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-client-connection@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz::hash=a2ddd1&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-client-connection@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz::hash=57251d&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-attachment": "npm:^0.1.0-rc.5"
     "@deepseek-ai/dsh-commands": "npm:^0.1.0-rc.5"
@@ -1323,7 +1323,7 @@ __metadata:
     "@deepseek-ai/dsh-physical-operator": ^0.1.0-rc.5
     "@deepseek-ai/dsh-resident-operator": ^0.1.0-rc.5
     "@deepseek-ai/dsh-session-persistence": ^0.1.0-rc.5
-  checksum: 10c0/22e9a8a897980f51dea367340c1a1cdd21a805c1728bbeb7cdc3386cec3fd92ad8817ca990a4f36dfd83fea516a598aeaa4360d897be5ee471909613dad668a6
+  checksum: 10c0/de4a587960ef8d2b7ef7e2ec43a8494e08709fc537a870c52904a0f8f89db5a8fcb44cdef569ffe110e283ee4fc257185c1d4a95b243971d0d5a75a8f65abeb0
   languageName: node
   linkType: hard
 
@@ -4163,7 +4163,7 @@ __metadata:
 
 "@deepseek-ai/dsh-tool-fs@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-fs-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-tool-fs@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-fs-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-fs-0.1.0-rc.5.tgz::hash=dd6bb3&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-tool-fs@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-fs-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-fs-0.1.0-rc.5.tgz::hash=40e606&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
     diff: "npm:^9.0.0"
@@ -4179,7 +4179,7 @@ __metadata:
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
     "@deepseek-ai/dsh-user-approval": ^0.1.0-rc.5
-  checksum: 10c0/f6564936776cdbe5390324b7747445d8e139256b604f704ac46876c616d5d85980bf5f926a04704de2bf2cfa8a7c204859fba45fd97360bc9da16558d03b4be8
+  checksum: 10c0/32c7d46079d760088f963ddb4ca616243e584f3f7b8ee8dc21392cb2585ac61f5f5b182f36b59130267c5cc8816407d14bac1349437ac498dee58a20c9a61a62
   languageName: node
   linkType: hard
 

@@ -253,6 +253,19 @@ describe('read_image happy path', () => {
     expect(text(result)).toContain('file content is not a supported image format')
   })
 
+  it('explains a corrupt extension-less file whose signature claims an image format', async () => {
+    await writeFile(join(dir, 'corrupt-image'), Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x63, 0x6f, 0x72, 0x72, 0x75, 0x70, 0x74,
+    ]))
+    const ctx = await setup()
+    const result = await readImage(ctx, { file_path: 'corrupt-image' }, agentOn('vision-model'))
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('the file signature claims image/png')
+    expect(text(result)).toContain('the bytes do not decode as a valid image/png image')
+  })
+
   it('falls back to agent options when no request header exists yet', async () => {
     await writeFile(join(dir, 'red.png'), PNG_1X1)
     const ctx = await setup()
