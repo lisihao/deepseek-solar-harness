@@ -67,9 +67,14 @@ final report.
   the new installation passes D07, move every older backup and failed candidate
   to the macOS Trash so cleanup remains recoverable. Never recursively delete
   the prior application, and never accumulate one backup per delivery.
-- A local development artifact may be ad-hoc signed only after packaging; a
-  formal release must retain its Developer ID signature and notarization.
-  Codex MUST verify the installed signature after copying.
+- Package the macOS artifact first, then apply the repository-supported ad-hoc
+  signature and verify that installed signature after copying. The user has
+  permanently opted out of the paid Apple Developer Program: unless the user
+  explicitly reverses that decision, Codex MUST NOT request, test, configure,
+  or execute Developer ID signing, Apple notarization, stapling, App Store
+  Connect, or related certificate/profile workflows. Their absence is not a
+  `pending`, `warn`, `error`, or incomplete release item; GitHub distribution
+  may use the accepted ad-hoc-signed artifact.
 - Codex MUST relaunch the installed application and verify the real process,
   loopback listener, an HTTP 200 application response, and the displayed
   version. If replacement or startup verification fails, restore the backup
@@ -91,6 +96,11 @@ Every applicable Codex final report MUST include:
   probe result;
 - local commit, remote branch SHA, and GitHub PR or release URL;
 - any skipped step with `warn`, `error`, or `pending`, never `ok`.
+
+Apple Developer ID signing and notarization are intentionally outside this
+product's delivery scope and MUST be omitted from completion tables rather than
+reported as skipped or pending. This standing exclusion changes only when the
+user explicitly requests it in a future task.
 
 Codex MUST plan and execute applicable Desktop delivery work in this order:
 

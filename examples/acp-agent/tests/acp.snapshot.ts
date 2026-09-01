@@ -158,11 +158,11 @@ const SCENARIOS: Scenario[] = [
     systemPromptSource: 'product-subagent-codex',
     configPath: PRODUCT_SUBAGENT_BOTH_CONFIG,
   },
-  // Authored keyless Debate composition: the fixture seeds the session's
-  // Debate preference, then the real host adapter admits the prompt directly
-  // without a preliminary parent-model call. The fixture Provider records the
-  // approval-pending start, accepts the explicit-mode approval, and never starts
-  // an external operator.
+  // Authored keyless Debate composition: the Agent starts on the legacy
+  // internal Debate route with no pre-seeded preference or dispatch. The real
+  // host adapter must persist its own dispatch before admitting the prompt.
+  // The fixture Provider records the approval-pending start, accepts the
+  // explicit-route approval, and never starts an external operator.
   {
     name: 'debate-tool-turn',
     hasModelTurn: true,

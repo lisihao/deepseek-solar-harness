@@ -6,7 +6,7 @@
 
 默认策略使用固定的四角色、订阅优先阵容：Codex Sol 建议者、Claude Fable 证伪者、Codex Sol 证据审计者，以及 Claude Opus 决策裁判。决策裁判同时担任 Debate 主持人，在参与者轮次结算后负责最终总结。Run 在有证据的收敛或三轮上限时终止，保留重要异议，并只返回 Artifact 引用与有界投影，不内联大型报告。用户明确要求“简洁／简要”结果时，会确定性地选择紧凑策略：只运行建议者、证伪者和裁判一轮，并把总 token 上限设为 80,000、已报告成本上限设为 2 美元。
 
-本包只依赖 provider-neutral Debate Service Definition 与普通 Agent／LLM 扩展点，不导入本地 Provider、TaskGraph daemon 或物理算子运行时。物理算子宿主路由器会在持久化 Session 偏好明确启用 Debate 时独立让位，因此 Codex 与 Claude Code 仍是阵容内执行算子，不会取代 Debate Run。
+本包只依赖 provider-neutral Debate Service Definition 与普通 Agent／LLM 扩展点，不导入本地 Provider、TaskGraph daemon 或物理算子运行时。物理算子宿主路由器会在持久化 Session 偏好明确启用 Debate 时独立让位，因此 Codex 与 Claude Code 仍是阵容内执行算子，不会取代 Debate Run。内部 `dsh-debate-host/debate` 路由不再作为主聊天模型展示。已经选择该内部路由的旧 Session 会在请求发出前补写同一条持久化 `debate/dispatch` 并继续运行；新选择统一通过协作菜单的执行机制控件完成。
 
 ## Model Experience
 

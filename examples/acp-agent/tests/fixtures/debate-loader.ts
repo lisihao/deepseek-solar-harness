@@ -384,14 +384,5 @@ export const name = 'debate-loader-fixture'
 
 /** Mount only the provider-neutral Debate seam for the keyless snapshot. */
 export function apply(ctx: Context): void {
-  // ACP drives the Agent directly (rather than through the browser Session
-  // command adapter), so it cannot submit `/debate-mode enabled`. Seed the
-  // same durable preference at fixture-session creation; this keeps the
-  // snapshot focused on the real tool/Provider seam without spending a model
-  // turn on command plumbing.
-  ctx.on('agent/created', ({ agent }) => {
-    if (agent.session.events.some(event => event.type === 'debate/preferences')) return
-    agent.session.append('debate/preferences', { mode: 'enabled' }, { ignorable: true })
-  })
   new FixtureDebateService(ctx)
 }
