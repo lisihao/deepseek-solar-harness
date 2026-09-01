@@ -40,8 +40,16 @@ const DEFAULT_PREFERENCES: DebateExecutionPreferences = { mode: 'disabled' }
 const MAX_LIST_ITEMS = 20
 const MAX_PREVIEW_CHARS = 600
 const MAX_REF_ITEMS = 20
+const DEBATE_TRANSCRIPT_POLL_INTERVAL_MS = 100
 const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
 const CONCISE_DEBATE_HINT = /(?:简洁|简要|精简|三条|要点|concise|brief)/iu
+
+const TERMINAL_RUN_STATES: ReadonlySet<DebateRunSnapshotV1['state']> = new Set([
+  'completed',
+  'stopped',
+  'failed',
+  'indeterminate',
+])
 
 function isDebateMode(value: unknown): value is DebateExecutionMode {
   return typeof value === 'string' && MODE_OPTIONS.some(option => option === value)
@@ -233,6 +241,29 @@ function boundedRun(run: DebateRunSnapshotV1): Record<string, JsonValue> {
     mode: run.mode,
     currentRound: run.currentRound,
     revision: run.revision,
+    roster: run.roster.slice(0, MAX_REF_ITEMS).map(role => ({
+      role: role.role,
+      kind: role.kind,
+      title: preview(role.persona.title),
+      mandate: preview(role.persona.mandate),
+      operatorId: role.operatorId,
+      model: role.model,
+    })),
+    rounds: run.rounds.slice(0, MAX_REF_ITEMS).map(round => ({
+      round: round.round,
+      state: round.state,
+      turns: round.turns.slice(0, MAX_REF_ITEMS).map(turn => ({
+        round: turn.round,
+        slotId: turn.slotId,
+        role: turn.role,
+        operatorId: turn.operatorId,
+        model: turn.model,
+        state: turn.state,
+        ...turn.outputRef === undefined ? {} : { outputRef: preview(turn.outputRef) },
+        ...turn.outputPreview === undefined ? {} : { outputPreview: preview(turn.outputPreview) },
+      })),
+      ...round.convergence === undefined ? {} : { convergence: round.convergence },
+    })),
     convergence: run.rounds.at(-1)?.convergence,
     unresolved: run.unresolved.slice(0, MAX_REF_ITEMS).map(item => ({
       claimId: item.claimId,
@@ -366,7 +397,7 @@ function runText(run: DebateRunSnapshotV1): string {
   const summary = run.synthesis?.outputPreview
     ?? `Debate run is ${run.state}; inspect ${run.runId} for its current durable state.`
   return [
-    summary,
+    `Moderator summary (主持人总结): ${summary}`,
     '',
     `Debate Run: ${run.runId}`,
     `State: ${run.state}`,
@@ -375,6 +406,97 @@ function runText(run: DebateRunSnapshotV1): string {
     ...run.unresolved.length === 0 ? [] : [`Unresolved: ${String(run.unresolved.length)}`],
     ...run.dissent.length === 0 ? [] : [`Dissent: ${String(run.dissent.length)}`],
   ].join('\n')
+}
+
+interface TranscriptTracker {
+  rosterEmitted: boolean
+  readonly roundStates: Map<number, string>
+  readonly turnSignatures: Map<string, string>
+  readonly convergenceSignatures: Map<number, string>
+  synthesisSignature?: string
+  finalEmitted: boolean
+}
+
+function createTranscriptTracker(): TranscriptTracker {
+  return {
+    rosterEmitted: false,
+    roundStates: new Map(),
+    turnSignatures: new Map(),
+    convergenceSignatures: new Map(),
+    finalEmitted: false,
+  }
+}
+
+function transcriptLines(
+  run: DebateRunSnapshotV1,
+  tracker: TranscriptTracker,
+  final: boolean,
+): string[] {
+  const lines: string[] = []
+  if (!tracker.rosterEmitted) {
+    tracker.rosterEmitted = true
+    lines.push('Debate roster:')
+    for (const role of run.roster.slice(0, MAX_REF_ITEMS)) {
+      lines.push(`- ${role.role} (${preview(role.persona.title) ?? 'untitled'}) — ${role.operatorId}/${role.model}`)
+      lines.push(`  Mandate: ${preview(role.persona.mandate) ?? ''}`)
+    }
+  }
+
+  for (const round of run.rounds.slice(0, MAX_REF_ITEMS)) {
+    if (tracker.roundStates.get(round.round) !== round.state) {
+      tracker.roundStates.set(round.round, round.state)
+      lines.push(`Round ${String(round.round)} · ${round.state}`)
+    }
+    for (const turn of round.turns.slice(0, MAX_REF_ITEMS)) {
+      const key = `${String(round.round)}:${turn.slotId}`
+      const signature = [turn.state, turn.outputRef ?? '', turn.outputPreview ?? ''].join('\u0000')
+      if (tracker.turnSignatures.get(key) === signature) continue
+      tracker.turnSignatures.set(key, signature)
+      lines.push(`Agent ${turn.role} (${turn.slotId}) · ${turn.state}`)
+      if (turn.outputPreview !== undefined) lines.push(`  Explicit output summary: ${preview(turn.outputPreview) ?? ''}`)
+      if (turn.outputRef !== undefined) lines.push(`  Artifact: ${preview(turn.outputRef) ?? ''}`)
+    }
+    if (round.convergence !== undefined) {
+      const signature = JSON.stringify(round.convergence)
+      if (tracker.convergenceSignatures.get(round.round) !== signature) {
+        tracker.convergenceSignatures.set(round.round, signature)
+        lines.push(
+          `Convergence · round ${String(round.round)}: ${round.convergence.status}`
+          + ` (score ${round.convergence.score.toFixed(2)} / threshold ${round.convergence.threshold.toFixed(2)}; ${round.convergence.reason})`,
+        )
+      }
+    }
+  }
+
+  if (!final && run.synthesis !== undefined) {
+    const signature = [run.synthesis.state, run.synthesis.artifactRef ?? '', run.synthesis.outputPreview ?? ''].join('\u0000')
+    if (tracker.synthesisSignature !== signature) {
+      tracker.synthesisSignature = signature
+      lines.push(`Moderator synthesis · ${run.synthesis.state}`)
+    }
+  }
+  if (final && !tracker.finalEmitted) {
+    tracker.finalEmitted = true
+    lines.push(runText(run))
+  }
+  return lines
+}
+
+function waitForTranscriptPoll(signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted) signal.throwIfAborted()
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(new Error('Debate transcript polling was aborted'))
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, DEBATE_TRANSCRIPT_POLL_INTERVAL_MS)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
+  })
 }
 
 function runUsage(run: DebateRunSnapshotV1): TokenUsage | undefined {
@@ -409,7 +531,7 @@ class DebateHostAdapter extends LlmAdapter {
     if (workspace === undefined || workspace.length === 0) {
       throw new DebateError('Debate requires a Session workspace', 'DEBATE_INVALID')
     }
-    const run = await this.ctx.debates.start({
+    const started = await this.ctx.debates.start({
       version: 1,
       commandId: dispatch.commandId,
       workspace,
@@ -418,7 +540,47 @@ class DebateHostAdapter extends LlmAdapter {
       execution: { version: 1, kind: 'standalone' },
       sourceSessionId: String(agent.id),
     })
-    const admitted = await approveExplicitDebate(this.ctx, run, dispatch.commandId)
+    options.signal?.throwIfAborted()
+    const completionResult = approveExplicitDebate(this.ctx, started, dispatch.commandId).then(
+      value => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    )
+    const tracker = createTranscriptTracker()
+    let assembledText = ''
+    const startedIsTerminal = TERMINAL_RUN_STATES.has(started.state)
+
+    yield { type: 'block-start', index: 0, blockType: 'text' }
+    for (const line of transcriptLines(started, tracker, startedIsTerminal)) {
+      const delta = `${line}\n\n`
+      assembledText += delta
+      yield { type: 'text-delta', index: 0, text: delta }
+    }
+
+    let completion: Awaited<typeof completionResult> | undefined
+    while (completion === undefined && !TERMINAL_RUN_STATES.has(started.state)) {
+      options.signal?.throwIfAborted()
+      const observed = await this.ctx.debates.inspect(started.runId)
+      for (const line of transcriptLines(observed, tracker, false)) {
+        const delta = `${line}\n\n`
+        assembledText += delta
+        yield { type: 'text-delta', index: 0, text: delta }
+      }
+      if (TERMINAL_RUN_STATES.has(observed.state)) break
+      const next = await Promise.race([
+        completionResult,
+        waitForTranscriptPoll(options.signal),
+      ])
+      if (next !== undefined) completion = next
+    }
+
+    completion ??= await completionResult
+    if (!completion.ok) throw completion.error
+    const admitted = completion.value
+    for (const line of transcriptLines(admitted, tracker, true)) {
+      const delta = `${line}\n\n`
+      assembledText += delta
+      yield { type: 'text-delta', index: 0, text: delta }
+    }
     if (!hasAdmission(agent.session.events, admitted.runId)) {
       agent.session.append('debate/admission', {
         runId: admitted.runId,
@@ -430,11 +592,8 @@ class DebateHostAdapter extends LlmAdapter {
     if (admitted.state === 'failed' || admitted.state === 'indeterminate') {
       throw new DebateError(`Debate run ${admitted.runId} ended as ${admitted.state}`, 'DEBATE_PROVIDER_UNAVAILABLE')
     }
-    const text = runText(admitted)
-    yield { type: 'block-start', index: 0, blockType: 'text' }
-    yield { type: 'text-delta', index: 0, text }
-    yield { type: 'block-end', index: 0, block: { type: 'text', text } }
     const usage = runUsage(admitted)
+    yield { type: 'block-end', index: 0, block: { type: 'text', text: assembledText } }
     if (usage !== undefined) yield { type: 'usage', usage }
     yield { type: 'finish', reason: { kind: 'stop' } }
   }

@@ -2,7 +2,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import {
+  type DebateAgentTurnV1,
   type DebateEventV1,
+  type DebateEventType,
   type DebateJsonValue,
   type DebateRunSnapshotV1,
   type DebateRunSummaryV1,
@@ -18,6 +20,7 @@ import {
   type DesktopDebateControlRequest,
   type DesktopDebateDashboard,
   type DesktopDebateEvent,
+  type DesktopDebateRole,
   type DesktopDebateRun,
   type DesktopDebateRunSummary,
 } from './contracts.ts'
@@ -30,6 +33,7 @@ export const inject = ['debates', 'webServer']
 
 const MAX_CONTROL_BYTES = 64 * 1024
 const MAX_TEXT = 2_000
+const MAX_TURN_PREVIEW = 800
 const MAX_ITEMS = 100
 const CONTROL_ACTIONS = new Set<DesktopDebateControlAction>(['approve', 'reject', 'pause', 'resume', 'stop'])
 
@@ -98,7 +102,35 @@ function boundedText(value: string | undefined, max = MAX_TEXT): string | undefi
   return value.length <= max ? value : `${value.slice(0, max - 1)}…`
 }
 
-function jsonData(data: Readonly<Record<string, DebateJsonValue>>): Record<string, unknown> {
+const PUBLIC_EVENT_DATA_KEYS: Readonly<Record<DebateEventType, readonly string[]>> = {
+  'debate.planned': ['mode', 'rosterSize'],
+  'debate.roster.qualified': ['roles', 'maxRounds', 'maxAgentsPerRound'],
+  'debate.roster.rejected': ['roles', 'reason'],
+  'debate.admitted': ['action'],
+  'debate.round.started': ['round', 'phase', 'slotIds'],
+  'debate.agent.dispatched': ['round', 'role', 'model'],
+  'debate.agent.settled': ['round', 'role', 'claimCount', 'evidenceCount', 'confidence'],
+  'debate.agent.failed': ['round', 'errorCode', 'error'],
+  'debate.agent.indeterminate': ['round', 'errorCode', 'error'],
+  'debate.claims.compiled': ['round', 'claimCount', 'dissentCount', 'unresolvedCount'],
+  'debate.convergence.evaluated': [
+    'round', 'status', 'score', 'threshold', 'disagreement', 'coverage',
+    'unresolvedHighSeverity', 'settledAgents', 'reason',
+  ],
+  'debate.synthesis.started': ['round'],
+  'debate.synthesis.settled': ['round', 'unresolvedClaimIds', 'dissentCount'],
+  'debate.cost.accounted': ['usageStatus', 'costStatus', 'inputTokens', 'outputTokens', 'costUsd'],
+  'debate.stopped': ['action', 'reason'],
+  'debate.failed': ['errorCode', 'error', 'reason'],
+  'debate.indeterminate': ['errorCode', 'error', 'reason'],
+}
+
+function publicEventData(event: DebateEventV1): Record<string, unknown> {
+  const data: Record<string, DebateJsonValue> = {}
+  for (const key of PUBLIC_EVENT_DATA_KEYS[event.type]) {
+    const value = event.data[key]
+    if (value !== undefined) data[key] = value
+  }
   return JSON.parse(JSON.stringify(data)) as Record<string, unknown>
 }
 
@@ -113,6 +145,22 @@ function projectSummary(run: DebateRunSummaryV1): DesktopDebateRunSummary {
     unresolvedCount: run.unresolvedCount,
     cost: JSON.parse(JSON.stringify(run.cost)) as DesktopDebateRunSummary['cost'],
     updatedAt: run.updatedAt,
+  }
+}
+
+function projectTurnDetails(turn: DebateAgentTurnV1): NonNullable<DesktopDebateRole['latestTurn']> {
+  const outputPreview = boundedText(turn.outputPreview, MAX_TURN_PREVIEW)
+  return {
+    round: turn.round,
+    state: turn.state,
+    ...(turn.outputRef === undefined ? {} : { outputRef: turn.outputRef }),
+    ...(outputPreview === undefined ? {} : { outputPreview }),
+    claimIds: turn.claimIds.slice(0, MAX_ITEMS),
+    evidenceRefs: turn.evidenceRefs.slice(0, MAX_ITEMS).map(ref => ref.ref),
+    ...(turn.usage === undefined ? {} : { usage: { ...turn.usage } }),
+    ...(turn.startedAt === undefined ? {} : { startedAt: turn.startedAt }),
+    ...(turn.settledAt === undefined ? {} : { settledAt: turn.settledAt }),
+    ...(turn.errorCode === undefined ? {} : { errorCode: turn.errorCode }),
   }
 }
 
@@ -147,30 +195,17 @@ function projectRun(run: DebateRunSnapshotV1): DesktopDebateRun {
     ...(objective === undefined ? {} : { objective }),
     roles: run.roster.map((role) => {
       const turn = latestTurn(role.role)
-      const outputPreview = turn === undefined ? undefined : boundedText(turn.outputPreview, 800)
       return {
         role: role.role,
         kind: role.kind,
         title: role.persona.title,
+        mandate: boundedText(role.persona.mandate, MAX_TURN_PREVIEW) ?? '',
         operatorId: role.operatorId,
         model: role.model,
         tier: role.tier,
         source: role.source,
         required: role.required === true,
-        ...(turn === undefined ? {} : {
-          latestTurn: {
-            round: turn.round,
-            state: turn.state,
-            ...(turn.outputRef === undefined ? {} : { outputRef: turn.outputRef }),
-            ...(outputPreview === undefined ? {} : { outputPreview }),
-            claimIds: turn.claimIds.slice(0, MAX_ITEMS),
-            evidenceRefs: turn.evidenceRefs.slice(0, MAX_ITEMS).map(ref => ref.ref),
-            ...(turn.usage === undefined ? {} : { usage: { ...turn.usage } }),
-            ...(turn.startedAt === undefined ? {} : { startedAt: turn.startedAt }),
-            ...(turn.settledAt === undefined ? {} : { settledAt: turn.settledAt }),
-            ...(turn.errorCode === undefined ? {} : { errorCode: turn.errorCode }),
-          },
-        }),
+        ...(turn === undefined ? {} : { latestTurn: projectTurnDetails(turn) }),
       }
     }),
     rounds: run.rounds.map(round => ({
@@ -178,8 +213,10 @@ function projectRun(run: DebateRunSnapshotV1): DesktopDebateRun {
       state: round.state,
       turnStates: round.turns.map(turn => ({
         slotId: turn.slotId,
-        state: turn.state,
-        ...(turn.outputRef === undefined ? {} : { outputRef: turn.outputRef }),
+        role: turn.role,
+        operatorId: turn.operatorId,
+        model: turn.model,
+        ...projectTurnDetails(turn),
       })),
       ...(round.convergence === undefined ? {} : { convergence: { ...round.convergence } }),
     })),
@@ -237,7 +274,7 @@ function projectEvent(event: DebateEventV1): DesktopDebateEvent {
     ...(event.slotId === undefined ? {} : { slotId: event.slotId }),
     type: event.type,
     createdAt: event.createdAt,
-    data: jsonData(event.data),
+    data: publicEventData(event),
   }
 }
 

@@ -26,6 +26,19 @@ afterEach(async () => {
 function snapshot(overrides: Partial<DebateRunSnapshotV1> = {}): DebateRunSnapshotV1 {
   const evidence = { version: 1 as const, ref: 'artifact:evidence', kind: 'artifact' as const }
   const ledger = { version: 1 as const, claims: [], coverage: 1, digest: 'sha256:ledger' }
+  const turn = {
+    version: 1 as const,
+    round: 1,
+    slotId: 'slot-proposer',
+    role: 'constructive-proposer' as const,
+    operatorId: 'codex',
+    model: 'gpt-5.6-sol',
+    state: 'settled' as const,
+    outputRef: 'artifact:proposer-output',
+    outputPreview: 'Proposal output summary',
+    claimIds: [],
+    evidenceRefs: [],
+  }
   return {
     version: 1,
     runId: 'debate-run-1',
@@ -41,7 +54,7 @@ function snapshot(overrides: Partial<DebateRunSnapshotV1> = {}): DebateRunSnapsh
       version: 1,
       round: 1,
       state: 'completed',
-      turns: [],
+      turns: [turn],
       claimLedger: ledger,
       dissent: [],
       unresolved: [],
@@ -101,6 +114,9 @@ class ScriptedDebates extends DebateService {
   readonly run = snapshot()
   startResult: DebateRunSnapshotV1 = this.run
   controlResult: DebateRunSnapshotV1 = this.run
+  inspectFallback: DebateRunSnapshotV1 = this.run
+  readonly inspectSnapshots: DebateRunSnapshotV1[] = []
+  controlGate: Promise<DebateRunSnapshotV1> | undefined
   readonly starts: DebateStartRequestV1[] = []
   readonly controls: DebateControlRequestV1[] = []
 
@@ -123,14 +139,38 @@ class ScriptedDebates extends DebateService {
     }))
   }
 
-  async inspect(_runId: string): Promise<DebateRunSnapshotV1> { return this.run }
+  async inspect(_runId: string): Promise<DebateRunSnapshotV1> {
+    return this.inspectSnapshots.shift() ?? this.inspectFallback
+  }
   async readEvents(_request: DebateEventReadRequestV1): Promise<DebateEventPageV1> {
     return { events: [], nextSequence: 0 }
   }
 
   async control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1> {
     this.controls.push(request)
-    return this.controlResult
+    return this.controlGate ?? this.controlResult
+  }
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => undefined
+  const promise = new Promise<T>((next) => { resolve = next })
+  return { promise, resolve }
+}
+
+function textDeltas(agent: Agent): string[] {
+  return agent.session.events
+    .filter((event): event is Extract<typeof event, { type: 'assistant/chunk' }> => event.type === 'assistant/chunk')
+    .map(event => event.data.chunk)
+    .filter((chunk): chunk is Extract<typeof chunk, { type: 'text-delta' }> => chunk.type === 'text-delta')
+    .map(chunk => chunk.text)
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 2_000
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('timed out waiting for Debate stream progress')
+    await new Promise<void>(resolve => setTimeout(resolve, 10))
   }
 }
 
@@ -258,6 +298,103 @@ describe('debate model Consumer', () => {
     expect(response?.type === 'text' ? response.text : '').toContain('Decision summary')
   })
 
+  it('streams durable roster, agent output previews, convergence, and the final host summary', async () => {
+    const { ctx, agent, provider } = await setupAutomatic()
+    const template = snapshot()
+    const round = template.rounds[0]
+    if (round === undefined) throw new Error('missing Debate fixture round')
+    const turn = round.turns[0]
+    if (turn === undefined) throw new Error('missing Debate fixture turn')
+    const { convergence: _convergence, ...roundWithoutConvergence } = round
+    const secondTurn = {
+      ...turn,
+      round: 2,
+      slotId: 'slot-falsifier',
+      role: 'skeptical-falsifier' as const,
+      operatorId: 'claude-code',
+      model: 'claude-fable-5',
+      outputRef: 'artifact:falsifier-output',
+      outputPreview: 'Falsifier output summary',
+    }
+    const running = snapshot({
+      state: 'round_running',
+      revision: 5,
+      currentRound: 1,
+      rounds: [{ ...roundWithoutConvergence, state: 'running', turns: [turn] }],
+    })
+    const secondRound = snapshot({
+      state: 'round_running',
+      revision: 6,
+      currentRound: 2,
+      rounds: [
+        { ...round, state: 'completed', turns: [turn] },
+        { ...roundWithoutConvergence, round: 2, state: 'running', turns: [secondTurn] },
+      ],
+    })
+    const completed = snapshot({
+      revision: 7,
+      state: 'completed',
+      currentRound: 2,
+      rounds: [
+        { ...round, state: 'completed', turns: [turn] },
+        { ...round, round: 2, state: 'completed', turns: [secondTurn] },
+      ],
+      synthesis: {
+        ...template.synthesis!,
+        artifactRef: 'artifact:judge-output',
+        outputPreview: 'Final host decision summary',
+      },
+    })
+    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
+    const approval = deferred<DebateRunSnapshotV1>()
+    provider.controlGate = approval.promise
+    provider.inspectFallback = running
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Should DSH adopt this architecture?' }],
+      source: { kind: 'user' },
+    }))
+    const idle = agent.whenIdle()
+    await waitFor(() => textDeltas(agent).some(text => text.includes('Debate roster:')))
+    expect(agent.session.events.some(event => event.type === 'assistant/message')).toBe(false)
+
+    await waitFor(() => {
+      const text = textDeltas(agent).join('')
+      return text.includes('Explicit output summary: Proposal output summary')
+        && text.includes('Artifact: artifact:proposer-output')
+    })
+    provider.inspectFallback = secondRound
+    await waitFor(() => {
+      const text = textDeltas(agent).join('')
+      return text.includes('Round 2')
+        && text.includes('Explicit output summary: Falsifier output summary')
+        && text.includes('Artifact: artifact:falsifier-output')
+    })
+    provider.inspectFallback = completed
+    approval.resolve(completed)
+    await idle
+
+    const streamText = textDeltas(agent).join('')
+    expect(streamText).toContain('Mandate: Build the strongest practical answer to the user objective.')
+    expect(streamText.indexOf('Debate roster:')).toBeLessThan(streamText.indexOf('Round 1'))
+    expect(streamText.indexOf('Explicit output summary: Proposal output summary')).toBeLessThan(streamText.indexOf('Round 2'))
+    expect(streamText.indexOf('Round 2')).toBeLessThan(streamText.indexOf('Explicit output summary: Falsifier output summary'))
+    expect(streamText.indexOf('Convergence · round 1')).toBeLessThan(streamText.indexOf('Convergence · round 2'))
+    expect(streamText.indexOf('Convergence · round 2')).toBeLessThan(streamText.indexOf('Moderator summary (主持人总结): Final host decision summary'))
+    expect(streamText).toContain('Moderator summary (主持人总结): Final host decision summary')
+    expect(streamText).not.toContain('reasoning')
+
+    const chunks = agent.session.events
+      .filter((event): event is Extract<typeof event, { type: 'assistant/chunk' }> => event.type === 'assistant/chunk')
+      .map(event => event.data.chunk)
+    const blockEnd = chunks.find(chunk => chunk.type === 'block-end')
+    if (blockEnd?.type !== 'block-end' || blockEnd.block.type !== 'text') {
+      throw new Error('missing Debate text block-end')
+    }
+    expect(blockEnd.block.text).toBe(streamText)
+  })
+
   it('keeps legacy Sessions disabled and persists an ignorable whole-value mode', async () => {
     const { ctx, agent } = await setup()
     expect(tool.foldDebatePreferences([])).toEqual({ mode: 'disabled' })
@@ -344,9 +481,29 @@ describe('debate model Consumer', () => {
     const inspected = resultValue(await call(ctx, agent, { action: 'inspect', run_id: 'debate-run-1' }))
     expect(inspected).toMatchObject({
       kind: 'inspect',
-      run: { runId: 'debate-run-1', synthesis: { artifactRef: 'artifact:synthesis', outputPreview: 'Decision summary' } },
+      run: {
+        runId: 'debate-run-1',
+        rounds: [{
+          turns: [{
+            role: 'constructive-proposer',
+            slotId: 'slot-proposer',
+            outputRef: 'artifact:proposer-output',
+            outputPreview: 'Proposal output summary',
+          }],
+        }],
+        synthesis: { artifactRef: 'artifact:synthesis', outputPreview: 'Decision summary' },
+      },
     })
-    expect(JSON.stringify(inspected)).not.toContain('Constructive Proposer')
+    const inspectedRun = inspected.run as Record<string, unknown>
+    expect(inspectedRun.roster).toEqual(expect.arrayContaining([expect.objectContaining({
+      role: 'constructive-proposer',
+      title: 'Constructive Proposer',
+      mandate: 'Build the strongest practical answer to the user objective.',
+      operatorId: 'codex',
+      model: 'gpt-5.6-sol',
+    })]))
+    expect(JSON.stringify(inspected)).not.toContain('stance')
+    expect(JSON.stringify(inspected)).not.toContain('instructions')
 
     const controlled = resultValue(await call(ctx, agent, {
       action: 'control',

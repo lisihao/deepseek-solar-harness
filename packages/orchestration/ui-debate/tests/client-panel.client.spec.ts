@@ -1,10 +1,29 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { DesktopDebateRun } from '../src/contracts.ts'
+import type { DesktopDebateRound, DesktopDebateRun } from '../src/contracts.ts'
 import { controlDebate, EvidenceColumn, loadDebateDashboard, RunDetail } from '../src/client/DebatePanel.tsx'
 
 afterEach(() => { vi.unstubAllGlobals() })
+
+type DebateTurn = DesktopDebateRound['turnStates'][number]
+
+function turn(
+  round: number,
+  slotId: DebateTurn['slotId'],
+  role: DebateTurn['role'],
+  operatorId: string,
+  model: string,
+  outputRef: string,
+  outputPreview: string,
+  claimIds: string[],
+  evidenceRefs: string[],
+  usage: NonNullable<DebateTurn['usage']>,
+  startedAt: string,
+  settledAt: string,
+): DebateTurn {
+  return { round, slotId, role, operatorId, model, state: 'settled', outputRef, outputPreview, claimIds, evidenceRefs, usage, startedAt, settledAt }
+}
 
 function run(): DesktopDebateRun {
   return {
@@ -12,7 +31,7 @@ function run(): DesktopDebateRun {
     runId: 'debate-1',
     state: 'awaiting_approval',
     mode: 'enabled',
-    currentRound: 1,
+    currentRound: 2,
     revision: 7,
     unresolvedCount: 1,
     updatedAt: '2026-08-29T01:01:00.000Z',
@@ -20,10 +39,34 @@ function run(): DesktopDebateRun {
     objective: 'Choose A or B.',
     sourceSessionId: 'session-1',
     roles: [{
-      role: 'constructive-proposer', kind: 'participant', title: 'Proposer', operatorId: 'codex', model: 'gpt-5.6-sol', tier: 'high', source: 'native-subscription', required: true,
-      latestTurn: { round: 1, state: 'settled', outputRef: 'artifact:turn-1', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'], usage: { inputTokens: 1_000, outputTokens: 400 } },
+      role: 'constructive-proposer', kind: 'participant', title: 'Proposer', mandate: '提出可执行方案与成功标准。', operatorId: 'codex', model: 'gpt-5.6-sol', tier: 'high', source: 'native-subscription', required: true,
+      latestTurn: { round: 2, state: 'settled', outputRef: 'artifact:r2-proposer', outputPreview: 'Round two proposal: retain A with a gate.', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'], usage: { inputTokens: 1_100, outputTokens: 450 }, startedAt: '2026-08-29T01:01:01.000Z', settledAt: '2026-08-29T01:01:11.000Z' },
+    }, {
+      role: 'skeptical-falsifier', kind: 'participant', title: 'Falsifier', mandate: '寻找反例、风险和失败条件。', operatorId: 'claude-code', model: 'claude-fable-5', tier: 'medium', source: 'native-subscription', required: true,
+      latestTurn: { round: 2, state: 'settled', outputRef: 'artifact:r2-falsifier', outputPreview: 'Round two challenge: keep the cost dissent.', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'], usage: { inputTokens: 950, outputTokens: 380 }, startedAt: '2026-08-29T01:01:02.000Z', settledAt: '2026-08-29T01:01:12.000Z' },
+    }, {
+      role: 'decision-judge', kind: 'judge', title: 'Judge', mandate: '综合证据、裁定分歧并给出决策。', operatorId: 'claude-code', model: 'claude-opus-5', tier: 'high', source: 'native-subscription', required: true,
+      latestTurn: { round: 2, state: 'settled', outputRef: 'artifact:r2-judge', outputPreview: 'Round two ruling: choose A and record dissent.', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'], usage: { inputTokens: 850, outputTokens: 320 }, startedAt: '2026-08-29T01:01:03.000Z', settledAt: '2026-08-29T01:01:13.000Z' },
     }],
-    rounds: [{ round: 1, state: 'completed', turnStates: [{ slotId: 'constructive-proposer', state: 'settled', outputRef: 'artifact:turn-1' }], convergence: { status: 'converged', score: 0.9, threshold: 0.8, disagreement: 0.1, coverage: 0.8, unresolvedHighSeverity: 0, settledAgents: 3, reason: 'supported' } }],
+    rounds: [{
+      round: 1,
+      state: 'completed',
+      turnStates: [
+        turn(1, 'constructive-proposer', 'constructive-proposer', 'codex', 'gpt-5.6-sol', 'artifact:r1-proposer', 'Round one proposal: choose A.', ['claim-1'], ['artifact:evidence'], { inputTokens: 1_000, outputTokens: 400 }, '2026-08-29T01:00:01.000Z', '2026-08-29T01:00:11.000Z'),
+        turn(1, 'skeptical-falsifier', 'skeptical-falsifier', 'claude-code', 'claude-fable-5', 'artifact:r1-falsifier', 'Round one challenge: verify rollback.', ['claim-1'], ['artifact:evidence'], { inputTokens: 900, outputTokens: 350 }, '2026-08-29T01:00:02.000Z', '2026-08-29T01:00:12.000Z'),
+        turn(1, 'decision-judge', 'decision-judge', 'claude-code', 'claude-opus-5', 'artifact:r1-judge', 'Round one ruling: continue review.', ['claim-1'], ['artifact:evidence'], { inputTokens: 800, outputTokens: 300 }, '2026-08-29T01:00:03.000Z', '2026-08-29T01:00:13.000Z'),
+      ],
+      convergence: { status: 'continue', score: 0.6, threshold: 0.8, disagreement: 0.4, coverage: 0.6, unresolvedHighSeverity: 0, settledAgents: 3, reason: 'continue review' },
+    }, {
+      round: 2,
+      state: 'completed',
+      turnStates: [
+        turn(2, 'constructive-proposer', 'constructive-proposer', 'codex', 'gpt-5.6-sol', 'artifact:r2-proposer', 'Round two proposal: retain A with a gate.', ['claim-1'], ['artifact:evidence'], { inputTokens: 1_100, outputTokens: 450 }, '2026-08-29T01:01:01.000Z', '2026-08-29T01:01:11.000Z'),
+        turn(2, 'skeptical-falsifier', 'skeptical-falsifier', 'claude-code', 'claude-fable-5', 'artifact:r2-falsifier', 'Round two challenge: keep the cost dissent.', ['claim-1'], ['artifact:evidence'], { inputTokens: 950, outputTokens: 380 }, '2026-08-29T01:01:02.000Z', '2026-08-29T01:01:12.000Z'),
+        turn(2, 'decision-judge', 'decision-judge', 'claude-code', 'claude-opus-5', 'artifact:r2-judge', 'Round two ruling: choose A and record dissent.', ['claim-1'], ['artifact:evidence'], { inputTokens: 850, outputTokens: 320 }, '2026-08-29T01:01:03.000Z', '2026-08-29T01:01:13.000Z'),
+      ],
+      convergence: { status: 'converged', score: 0.9, threshold: 0.8, disagreement: 0.1, coverage: 0.8, unresolvedHighSeverity: 0, settledAgents: 3, reason: 'supported' },
+    }],
     claims: [{ claimId: 'claim-1', statement: 'Option A is safer.', status: 'supported', severity: 'high', confidence: 0.9, supportingSlotIds: ['constructive-proposer'], opposingSlotIds: [], evidenceRefs: ['artifact:evidence'], rationale: 'Rollback exists.' }],
     claimCoverage: 0.8,
     dissent: [{ slotId: 'skeptical-falsifier', claimId: 'claim-1', position: 'B may be safer.', reason: 'Benchmark missing.', confidence: 0.4, evidenceRefs: [] }],
@@ -63,13 +106,23 @@ describe('Debate Desktop panel transport', () => {
 
   it('renders roles, rounds, claims, dissent, unresolved, accounting, and synthesis ref', () => {
     const fixture = run()
+    const events = [
+      { version: 1 as const, sequence: 1, runId: fixture.runId, revision: 1, generation: 1, type: 'debate.planned', createdAt: '2026-08-29T01:00:00.000Z', data: { mode: 'enabled', rosterSize: 3 } },
+      { version: 1 as const, sequence: 2, runId: fixture.runId, revision: 2, generation: 2, round: 1, type: 'debate.round.started', createdAt: '2026-08-29T01:00:01.000Z', data: { phase: 'blind-independent', slotIds: ['constructive-proposer', 'skeptical-falsifier', 'decision-judge'] } },
+      { version: 1 as const, sequence: 3, runId: fixture.runId, revision: 3, generation: 3, round: 1, slotId: 'constructive-proposer', type: 'debate.agent.settled', createdAt: '2026-08-29T01:00:11.000Z', data: { role: 'constructive-proposer', claimCount: 1, evidenceCount: 1, confidence: 0.8 } },
+      { version: 1 as const, sequence: 4, runId: fixture.runId, revision: 4, generation: 4, round: 2, type: 'debate.synthesis.settled', createdAt: '2026-08-29T01:01:13.000Z', data: { unresolvedClaimIds: ['claim-2'], dissentCount: 1 } },
+    ]
     const markup = renderToStaticMarkup(createElement('div', null,
-      createElement(RunDetail, { run: fixture, pending: false, onControl: async () => {} }),
+      createElement(RunDetail, { run: fixture, events, pending: false, onControl: async () => {} }),
       createElement(EvidenceColumn, { run: fixture }),
     ))
     for (const expected of [
-      'Choose A or B.', 'Proposer', 'gpt-5.6-sol', '第 1 轮', 'Claim Ledger', 'Option A is safer.',
-      'Usage / Cost', '用量部分归集', '费用归集未知', 'artifact:synthesis',
+      'Choose A or B.', '参与 Agent 与角色职责', 'Proposer', '提出可执行方案与成功标准。', 'Falsifier', '寻找反例、风险和失败条件。',
+      'Judge', '综合证据、裁定分歧并给出决策。', 'gpt-5.6-sol', '第 1 轮', '第 2 轮',
+      'Round one proposal: choose A.', 'Round one challenge: verify rollback.', 'Round one ruling: continue review.',
+      'Round two proposal: retain A with a gate.', 'Round two challenge: keep the cost dissent.', 'Round two ruling: choose A and record dissent.',
+      'artifact:r1-proposer', 'artifact:r2-judge', 'Claim claim-1', 'Evidence artifact:evidence', 'Claim Ledger', 'Option A is safer.',
+      '事件时间线', 'Debate 已规划', '轮次已开始', 'Agent 输出已完成', '主持人总结 / 决策裁判', 'Usage / Cost', '用量部分归集', '费用归集未知', 'artifact:synthesis',
     ]) expect(markup).toContain(expected)
     expect(markup).toContain('费用 N/A')
     expect(markup).not.toContain('NaN')

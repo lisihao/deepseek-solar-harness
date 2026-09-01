@@ -272,6 +272,29 @@ describe('local Debate Provider', () => {
     expect(limited.synthesis).toMatchObject({ state: 'settled' })
   })
 
+  it('rejects a settled turn that has no public preview or artifact reference', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-missing-output-'))
+    const service = await provider(root, async (turn) => {
+      const { outputRef: _ref, outputPreview: _preview, ...result } = resultFor(turn)
+      return result
+    })
+    const pending = await service.start(request('enabled', { commandId: 'start-missing-output' }))
+    const failed = await service.control({
+      version: 1,
+      commandId: 'control-missing-output',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture requires a visible turn result',
+    })
+
+    expect(failed.state).toBe('failed')
+    expect(failed.rounds[0]?.turns.every(turn => turn.state === 'failed')).toBe(true)
+    const events = (await service.readEvents({ runId: failed.runId, limit: 100 })).events
+    expect(events.some(event => event.type === 'debate.agent.failed'
+      && event.data.error === 'turn result must include outputRef or outputPreview')).toBe(true)
+  })
+
   it('keeps repeated missing account cost unknown without synthesizing a zero subtotal', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-unknown-cost-'))
     const costUnboundedPolicy = policy('enabled')
