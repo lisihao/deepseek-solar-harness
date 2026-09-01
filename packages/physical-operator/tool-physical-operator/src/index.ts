@@ -32,7 +32,7 @@ import type {
   PhysicalOperatorStatus,
   PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
-import { PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
+import { PhysicalOperatorError, PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {
@@ -71,6 +71,7 @@ declare module '@deepseek-ai/dsh-session/types' {
     'physical-operator/dispatch': {
       commandId: string
       operatorId: string
+      fallbackOperatorId?: string
       promptMessageId: string
       requestedByMessageId: string
       turn: number
@@ -128,10 +129,12 @@ export const inject = ['tools', 'physicalOperators', 'systemPrompt', 'llm', 'age
 
 const ROUTER_PROVIDER = 'dsh-physical-operator'
 const RESUME_SOURCE = 'physical-operator-resume'
+const FALLBACK_REQUIRED_CODE = 'PHYSICAL_OPERATOR_FALLBACK_REQUIRED'
 
 interface PendingHostRoute {
   readonly commandId: string
   readonly operatorId: string
+  readonly fallbackOperatorId?: string
   readonly promptMessageId: string
   readonly requestedByMessageId: string
   readonly recovered: boolean
@@ -317,6 +320,26 @@ export function apply(ctx: Context): void {
     }
     const { reasoningEffort: _reasoningEffort, ...portable } = base
     return { ...portable, provider: ROUTER_PROVIDER, model: route.operatorId }
+  })
+
+  ctx.on('agent/request-error', async ({ agent, turn, step, provider, failure, signal }, next) => {
+    if (provider !== ROUTER_PROVIDER || failure.code !== FALLBACK_REQUIRED_CODE || signal.aborted) return next()
+    const failed = dispatchForPosition(agent.session.events, turn, step)
+    if (failed?.fallbackOperatorId === undefined) return next()
+    const fallback = fallbackHostRoute(agent, failed, failed.fallbackOperatorId)
+    agent.session.append('physical-operator/routing-decision', {
+      policy: 'auto',
+      route: 'resident',
+      requestedByMessageId: failed.requestedByMessageId,
+      reason: `${operatorDisplayName(failed.operatorId)} 订阅资格不可用，智能协作切换到 ${operatorDisplayName(fallback.operatorId)}`,
+      operatorId: fallback.operatorId,
+    }, { ignorable: true })
+    agent.session.append('physical-operator/dispatch', {
+      ...fallback,
+      turn,
+      step,
+    }, { ignorable: true })
+    return { kind: 'retry' }
   })
 
   ctx.on('agent/session-start', ({ agent, source }) => {
@@ -655,10 +678,18 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       if (observer !== undefined) await observer.stop()
       else if (run !== undefined) await projectResidentProgress(this.ctx, agent, run, dispatch.commandId)
       if (!signal.aborted) {
+        const code = errorCode(error)
         agent.session.append('physical-operator/dispatch-terminal', {
           commandId: dispatch.commandId,
-          code: errorCode(error),
+          code,
         }, { ignorable: true })
+        if (run === undefined && dispatch.fallbackOperatorId !== undefined && code === 'AUTH_MODE_MISMATCH') {
+          throw new PhysicalOperatorError(
+            `${operatorDisplayName(dispatch.operatorId)} subscription qualification failed; trying the Smart Auto fallback`,
+            FALLBACK_REQUIRED_CODE,
+            { cause: error },
+          )
+        }
       }
       throw error
     } finally {
@@ -702,7 +733,9 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
       promptMessageId: recoverable.promptMessageId,
       requestedByMessageId: resume.id,
       recovered: true,
+      ...recoverable.fallbackOperatorId === undefined ? {} : { fallbackOperatorId: recoverable.fallbackOperatorId },
       ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
+      ...recoverable.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(recoverable.fallbackConfig) },
     }
     return {
       policy,
@@ -735,7 +768,9 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
         promptMessageId: recoverable.promptMessageId,
         requestedByMessageId: current.id,
         recovered: true,
+        ...recoverable.fallbackOperatorId === undefined ? {} : { fallbackOperatorId: recoverable.fallbackOperatorId },
         ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
+        ...recoverable.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(recoverable.fallbackConfig) },
       }
     return {
       policy,
@@ -772,7 +807,14 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
   const automatic = automaticOperator(text)
   return automatic === undefined
     ? primaryDecision(current.id, policy, '未发现需要物理算子或 TaskGraph 的工作')
-    : residentDecision(agent, current.id, policy, automatic, '智能协作选择一个有界 Resident worker')
+    : residentDecision(
+      agent,
+      current.id,
+      policy,
+      automatic,
+      '智能协作选择一个有界 Resident worker',
+      automatic === 'claude-code' ? 'codex' : undefined,
+    )
 }
 
 function debateEnabled(events: readonly SessionEvent[]): boolean {
@@ -790,6 +832,7 @@ function residentDecision(
   policy: PhysicalOperatorRoutingPolicy,
   operatorId: PhysicalOperatorProfileOwner,
   reason: string,
+  fallbackOperatorId?: PhysicalOperatorProfileOwner,
 ): HostRoutingDecision {
   return {
     policy,
@@ -797,7 +840,7 @@ function residentDecision(
     requestedByMessageId: messageId,
     reason,
     operatorId,
-    hostRoute: newHostRoute(agent, messageId, operatorId),
+    hostRoute: newHostRoute(agent, messageId, operatorId, fallbackOperatorId),
   }
 }
 
@@ -814,17 +857,38 @@ function hasRoutingDecision(events: readonly SessionEvent[], requestedByMessageI
     && event.data.requestedByMessageId === requestedByMessageId)
 }
 
-function newHostRoute(agent: Agent, messageId: string, operatorId: string): PendingHostRoute {
+function newHostRoute(
+  agent: Agent,
+  messageId: string,
+  operatorId: string,
+  fallbackOperatorId?: string,
+): PendingHostRoute {
   const residentProfile = isPhysicalOperatorProfileOwner(operatorId)
     ? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
     : undefined
   return {
     commandId: `resident-${createHash('sha256').update(`${agent.id}\0${messageId}`).digest('hex').slice(0, 32)}`,
     operatorId,
+    ...fallbackOperatorId === undefined ? {} : { fallbackOperatorId },
     promptMessageId: messageId,
     requestedByMessageId: messageId,
     recovered: false,
     ...residentProfile === undefined ? {} : { residentProfile },
+  }
+}
+
+function fallbackHostRoute(agent: Agent, failed: PendingHostRoute, operatorId: string): PendingHostRoute {
+  const residentProfile = isPhysicalOperatorProfileOwner(operatorId)
+    ? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
+    : undefined
+  return {
+    commandId: `resident-${createHash('sha256').update(`${failed.commandId}\0fallback\0${operatorId}`).digest('hex').slice(0, 32)}`,
+    operatorId,
+    promptMessageId: failed.promptMessageId,
+    requestedByMessageId: failed.requestedByMessageId,
+    recovered: false,
+    ...residentProfile === undefined ? {} : { residentProfile },
+    ...failed.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(failed.fallbackConfig) },
   }
 }
 
@@ -897,11 +961,13 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
     && event.data.turn === turn && event.data.step === step)
   if (found?.type !== 'physical-operator/dispatch') return undefined
   const {
-    commandId, operatorId, promptMessageId, requestedByMessageId, recovered, residentProfile, fallbackConfig,
+    commandId, operatorId, fallbackOperatorId, promptMessageId, requestedByMessageId, recovered,
+    residentProfile, fallbackConfig,
   } = found.data
   return {
     commandId,
     operatorId,
+    ...fallbackOperatorId === undefined ? {} : { fallbackOperatorId },
     promptMessageId,
     requestedByMessageId,
     recovered,
@@ -1323,8 +1389,10 @@ function routingPolicyGuidance(policy: PhysicalOperatorRoutingPolicy): string {
   }
 }
 
-function operatorDisplayName(operatorId: PhysicalOperatorProfileOwner): string {
-  return operatorId === 'codex' ? 'Codex' : 'Claude Code'
+function operatorDisplayName(operatorId: string): string {
+  if (operatorId === 'codex') return 'Codex'
+  if (operatorId === 'claude-code') return 'Claude Code'
+  return operatorId
 }
 
 /** Reject run-only keys on list so accidental work requests are never ignored. */

@@ -20,6 +20,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import PhysicalOperatorRuntime, {
+  PhysicalOperatorError,
   PhysicalOperatorId,
   type PhysicalOperator,
   type PhysicalOperatorProgressEvent,
@@ -69,6 +70,7 @@ class DurableOperator implements PhysicalOperator {
     private readonly progressError?: string,
     private readonly observations: readonly Record<string, unknown>[] = [],
     private readonly observationsAfterSettle = false,
+    private readonly startErrorCode?: string,
   ) {
     this.descriptor = {
       id: PhysicalOperatorId(id),
@@ -86,6 +88,9 @@ class DurableOperator implements PhysicalOperator {
 
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
     this.requests.push(request)
+    if (this.startErrorCode !== undefined) {
+      throw new PhysicalOperatorError(`${this.id} qualification failed`, this.startErrorCode)
+    }
     const id = String(request.executionId)
     let receipt = this.receipts.get(id)
     let created = false
@@ -207,6 +212,7 @@ async function setup(options: {
   codexProgressError?: string
   codexObservations?: readonly Record<string, unknown>[]
   codexObservationsAfterSettle?: boolean
+  claudeStartErrorCode?: string
   primary?: 'deepseek' | 'codex' | 'claude-code'
   registerDeepSeek?: boolean
   mountTool?: boolean
@@ -248,7 +254,18 @@ async function setup(options: {
     options.codexObservations,
     options.codexObservationsAfterSettle,
   )
-  const claude = new DurableOperator('claude-code')
+  const claude = new DurableOperator(
+    'claude-code',
+    true,
+    undefined,
+    undefined,
+    [],
+    'completed',
+    undefined,
+    [],
+    false,
+    options.claudeStartErrorCode,
+  )
   ctx.physicalOperators.registerOperator(codex)
   ctx.physicalOperators.registerOperator(claude)
   const mounted = options.mountTool === false ? undefined : await ctx.plugin(tool)
@@ -639,6 +656,72 @@ describe('host physical-operator routing', () => {
     await automatic.agent.whenIdle()
     expect(automatic.codex.requests).toHaveLength(1)
     expect(automatic.deepseek.requests).toHaveLength(0)
+  })
+
+  it('falls back from an automatically selected unauthenticated Claude to Codex with a distinct durable trace', async () => {
+    const { agent, deepseek, codex, claude } = await setup({
+      claudeStartErrorCode: 'AUTH_MODE_MISMATCH',
+    })
+
+    send(agent, '你觉得 DSH 应该怎么优化架构更好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(1)
+    expect(claude.productStarts).toBe(0)
+    expect(codex.requests).toHaveLength(1)
+    expect(codex.productStarts).toBe(1)
+    expect(lastAssistantMessage(agent).source).toMatchObject({
+      provider: 'dsh-physical-operator',
+      model: 'codex',
+    })
+
+    const dispatches = agent.session.events.filter(event => event.type === 'physical-operator/dispatch')
+    expect(dispatches).toHaveLength(2)
+    expect(dispatches[0]).toMatchObject({
+      data: { operatorId: 'claude-code', fallbackOperatorId: 'codex' },
+    })
+    expect(dispatches[1]).toMatchObject({ data: { operatorId: 'codex' } })
+    if (dispatches[0]?.type !== 'physical-operator/dispatch'
+      || dispatches[1]?.type !== 'physical-operator/dispatch') throw new Error('expected two dispatches')
+    expect(dispatches[1].data.commandId).not.toBe(dispatches[0].data.commandId)
+    expect(agent.session.events).toContainEqual(expect.objectContaining({
+      type: 'physical-operator/dispatch-terminal',
+      data: { commandId: dispatches[0].data.commandId, code: 'AUTH_MODE_MISMATCH' },
+    }))
+    expect(agent.session.events.filter(event => event.type === 'physical-operator/routing-decision')).toHaveLength(2)
+  })
+
+  it('does not override an explicit Claude request when subscription qualification fails', async () => {
+    const { agent, deepseek, codex, claude } = await setup({
+      claudeStartErrorCode: 'AUTH_MODE_MISMATCH',
+    })
+
+    send(agent, '用 Claude 分析这个架构')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(1)
+    expect(codex.requests).toHaveLength(0)
+    expect(agent.session.events.filter(event => event.type === 'physical-operator/dispatch')).toHaveLength(1)
+    expect(agent.session.events.at(-1)).toMatchObject({
+      type: 'turn/end',
+      data: { reason: { kind: 'error', error: { code: 'AUTH_MODE_MISMATCH' } } },
+    })
+  })
+
+  it('does not override a manually selected Claude policy when subscription qualification fails', async () => {
+    const { ctx, agent, codex, claude } = await setup({
+      claudeStartErrorCode: 'AUTH_MODE_MISMATCH',
+    })
+    await ctx.commands.execute(agent, '/operator claude-code', new AbortController().signal)
+
+    send(agent, '请分析这个完整架构并给出改进方案')
+    await agent.whenIdle()
+
+    expect(claude.requests).toHaveLength(1)
+    expect(codex.requests).toHaveLength(0)
+    expect(agent.session.events.filter(event => event.type === 'physical-operator/dispatch')).toHaveLength(1)
   })
 
   it('yields Smart Auto host routing when the Session explicitly enables Debate', async () => {
