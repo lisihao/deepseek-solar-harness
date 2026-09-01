@@ -370,6 +370,9 @@ function normalizeTurnResult(value: DebateTurnResultV1, slotId: string): Normali
   const confidence = boundedConfidence(result.confidence, 'turn result.confidence')
   const outputRef = optionalText(result.outputRef, 'turn result.outputRef', MAX_OUTPUT_REF_LENGTH)
   const outputPreview = optionalText(result.outputPreview, 'turn result.outputPreview', MAX_PREVIEW_LENGTH)
+  if (outputRef === undefined && outputPreview === undefined) {
+    invalid('turn result must include outputRef or outputPreview')
+  }
   const claims: DebateClaimV1[] = []
   const claimValues = result.claims
   if (claimValues !== undefined) {

@@ -61,11 +61,22 @@ export interface DesktopDebateRunSummary {
   updatedAt: string
 }
 
+/** Public bounded usage accounting attached to one Debate turn. */
+export interface DesktopDebateTurnUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens?: number
+  cacheWriteInputTokens?: number
+  costUsd?: number
+}
+
 /** Public roster slot and its latest bounded turn projection. */
 export interface DesktopDebateRole {
   role: 'constructive-proposer' | 'skeptical-falsifier' | 'evidence-auditor' | 'decision-judge'
   kind: 'participant' | 'judge'
   title: string
+  /** Public role responsibility; private stance/instructions are never projected. */
+  mandate: string
   operatorId: string
   model: string
   tier: 'low' | 'medium' | 'high'
@@ -78,13 +89,7 @@ export interface DesktopDebateRole {
     outputPreview?: string
     claimIds: string[]
     evidenceRefs: string[]
-    usage?: {
-      inputTokens: number
-      outputTokens: number
-      cacheReadInputTokens?: number
-      cacheWriteInputTokens?: number
-      costUsd?: number
-    }
+    usage?: DesktopDebateTurnUsage
     startedAt?: string
     settledAt?: string
     errorCode?: string
@@ -128,7 +133,23 @@ export interface DesktopDebateUnresolved {
 export interface DesktopDebateRound {
   round: number
   state: 'planned' | 'running' | 'reviewing' | 'completed' | 'failed' | 'indeterminate'
-  turnStates: Array<{ slotId: string; state: string; outputRef?: string }>
+  /** Every public turn in this round, with only a bounded output preview. */
+  turnStates: Array<{
+    round: number
+    slotId: string
+    role: DesktopDebateRole['role']
+    operatorId: string
+    model: string
+    state: 'planned' | 'dispatched' | 'settled' | 'failed' | 'indeterminate'
+    outputRef?: string
+    outputPreview?: string
+    claimIds: string[]
+    evidenceRefs: string[]
+    usage?: DesktopDebateTurnUsage
+    startedAt?: string
+    settledAt?: string
+    errorCode?: string
+  }>
   convergence?: {
     status: 'converged' | 'continue' | 'budget_limited' | 'max_rounds'
     score: number

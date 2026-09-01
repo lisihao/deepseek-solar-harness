@@ -9,8 +9,10 @@ import type {
 import { describe, expect, it } from 'vitest'
 import { apply, remoteDebateControlAllowed } from '../src/index.ts'
 
+const longPreview = `Round two challenge: ${'x'.repeat(900)}`
+
 function policy(): DebatePolicyV1 {
-  const persona = (title: string) => ({ title, mandate: `private mandate ${title}`, stance: 'private stance', instructions: ['private instruction'] })
+  const persona = (title: string) => ({ title, mandate: `public responsibility ${title}`, stance: 'private stance', instructions: ['private instruction'] })
   return {
     version: 1,
     mode: 'enabled',
@@ -77,25 +79,53 @@ function run(): DebateRunSnapshotV1 {
     objective: 'Choose A or B.',
     policy: policy(),
     roster: policy().roster,
-    currentRound: 1,
+    currentRound: 2,
     rounds: [{
       version: 1,
       round: 1,
       state: 'completed',
-      turns: [{
-        version: 1,
-        round: 1,
-        slotId: 'constructive-proposer',
-        role: 'constructive-proposer',
-        operatorId: 'codex',
-        model: 'gpt-5.6-sol',
-        state: 'settled',
-        outputRef: 'artifact:turn-1',
-        outputPreview: 'Choose A.',
-        claimIds: ['claim-1'],
-        evidenceRefs: [evidence],
-        usage: { inputTokens: 1_000, outputTokens: 400 },
-      }],
+      turns: [
+        {
+          version: 1, round: 1, slotId: 'constructive-proposer', role: 'constructive-proposer', operatorId: 'codex', model: 'gpt-5.6-sol', state: 'settled',
+          outputRef: 'artifact:r1-proposer', outputPreview: 'Round one proposal: choose A.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 1_000, outputTokens: 400 }, startedAt: '2026-08-29T01:00:01.000Z', settledAt: '2026-08-29T01:00:11.000Z',
+        },
+        {
+          version: 1, round: 1, slotId: 'skeptical-falsifier', role: 'skeptical-falsifier', operatorId: 'claude-code', model: 'claude-fable-5', state: 'settled',
+          outputRef: 'artifact:r1-falsifier', outputPreview: 'Round one challenge: verify rollback.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 900, outputTokens: 350 }, startedAt: '2026-08-29T01:00:02.000Z', settledAt: '2026-08-29T01:00:12.000Z',
+        },
+        {
+          version: 1, round: 1, slotId: 'decision-judge', role: 'decision-judge', operatorId: 'claude-code', model: 'claude-opus-5', state: 'settled',
+          outputRef: 'artifact:r1-judge', outputPreview: 'Round one ruling: continue review.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 800, outputTokens: 300 }, startedAt: '2026-08-29T01:00:03.000Z', settledAt: '2026-08-29T01:00:13.000Z',
+        },
+      ],
+      claimLedger: ledger,
+      dissent: [],
+      unresolved: [],
+      convergence: { version: 1, status: 'continue', score: 0.6, threshold: 0.8, disagreement: 0.4, coverage: 0.6, unresolvedHighSeverity: 0, settledAgents: 3, reason: 'continue review' },
+    }, {
+      version: 1,
+      round: 2,
+      state: 'completed',
+      turns: [
+        {
+          version: 1, round: 2, slotId: 'constructive-proposer', role: 'constructive-proposer', operatorId: 'codex', model: 'gpt-5.6-sol', state: 'settled',
+          outputRef: 'artifact:r2-proposer', outputPreview: 'Round two proposal: retain A with a gate.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 1_100, outputTokens: 450 }, startedAt: '2026-08-29T01:01:01.000Z', settledAt: '2026-08-29T01:01:11.000Z',
+        },
+        {
+          version: 1, round: 2, slotId: 'skeptical-falsifier', role: 'skeptical-falsifier', operatorId: 'claude-code', model: 'claude-fable-5', state: 'settled',
+          outputRef: 'artifact:r2-falsifier', outputPreview: longPreview, claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 950, outputTokens: 380 }, startedAt: '2026-08-29T01:01:02.000Z', settledAt: '2026-08-29T01:01:12.000Z',
+        },
+        {
+          version: 1, round: 2, slotId: 'decision-judge', role: 'decision-judge', operatorId: 'claude-code', model: 'claude-opus-5', state: 'settled',
+          outputRef: 'artifact:r2-judge', outputPreview: 'Round two ruling: choose A and record dissent.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 850, outputTokens: 320 }, startedAt: '2026-08-29T01:01:03.000Z', settledAt: '2026-08-29T01:01:13.000Z',
+        },
+      ],
       claimLedger: ledger,
       dissent: [],
       unresolved: [],
@@ -176,7 +206,7 @@ describe('Debate Host projection', () => {
             events: [{
               version: 1, sequence: 1, runId: selected.runId, revision: 7, generation: 2, round: 1,
               slotId: 'constructive-proposer', type: 'debate.agent.settled', createdAt: selected.updatedAt,
-              data: { outputRef: 'artifact:turn-1' },
+              data: { outputRef: 'artifact:turn-1', role: 'constructive-proposer', privateInstructions: 'do not expose' },
             }],
             nextSequence: 2,
           }
@@ -206,11 +236,30 @@ describe('Debate Host projection', () => {
       nextSequence: 2,
     })
     expect((projected.selectedRun as { roles: unknown[] }).roles[0]).toMatchObject({
-      role: 'constructive-proposer', latestTurn: { outputRef: 'artifact:turn-1' },
+      role: 'constructive-proposer', mandate: 'public responsibility Proposer', latestTurn: { outputRef: 'artifact:r2-proposer' },
     })
+    const rounds = (projected.selectedRun as { rounds: Array<{ turnStates: unknown[] }> }).rounds
+    expect(rounds).toHaveLength(2)
+    expect(rounds[0]?.turnStates).toHaveLength(3)
+    expect(rounds[1]?.turnStates).toHaveLength(3)
+    expect(rounds[0]?.turnStates[0]).toMatchObject({
+      role: 'constructive-proposer', operatorId: 'codex', model: 'gpt-5.6-sol', outputPreview: 'Round one proposal: choose A.',
+      outputRef: 'artifact:r1-proposer', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'],
+      usage: { inputTokens: 1_000, outputTokens: 400 }, startedAt: '2026-08-29T01:00:01.000Z', settledAt: '2026-08-29T01:00:11.000Z',
+    })
+    expect(rounds[1]?.turnStates[2]).toMatchObject({
+      role: 'decision-judge', operatorId: 'claude-code', model: 'claude-opus-5', outputPreview: 'Round two ruling: choose A and record dissent.',
+      outputRef: 'artifact:r2-judge', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'],
+      usage: { inputTokens: 850, outputTokens: 320 }, startedAt: '2026-08-29T01:01:03.000Z', settledAt: '2026-08-29T01:01:13.000Z',
+    })
+    const bounded = rounds[1]?.turnStates[1] as { outputPreview?: string }
+    expect(bounded.outputPreview).toHaveLength(800)
+    expect(bounded.outputPreview?.endsWith('…')).toBe(true)
     expect((projected.selectedRun as { cost: Record<string, unknown> }).cost).not.toHaveProperty('costUsd')
     expect(inspected.body).not.toContain('private mandate')
+    expect(inspected.body).not.toContain('private stance')
     expect(inspected.body).not.toContain('private instruction')
+    expect(inspected.body).not.toContain('privateInstructions')
   })
 
   it('requires a control header and applies revision-fenced controls', async () => {
