@@ -21,6 +21,7 @@ export const EMPTY_TRAJECTORY_SNAPSHOT: TrajectorySnapshot = {
   callSchemas: new Map(),
   partial: null,
   runningCalls: EMPTY_LIST,
+  physicalOperatorExecutions: EMPTY_LIST,
 }
 
 function stepKey(turn: number, step: number): string {
@@ -190,6 +191,7 @@ export class TrajectorySnapshotBuilder implements ConversationViewBuilder<
     let previousTools: ReadonlyMap<string, ToolSchema> = new Map()
     let partial: TrajectorySnapshot['partial'] = null
     const runningCalls: TrajectorySnapshot['runningCalls'][number][] = []
+    const physicalOperatorExecutions: TrajectorySnapshot['physicalOperatorExecutions'][number][] = []
 
     for (const contribution of this.contributions) {
       const data = contribution.data
@@ -229,6 +231,10 @@ export class TrajectorySnapshotBuilder implements ConversationViewBuilder<
         requests.push(data.request)
         continue
       }
+      if (data.kind === 'physical-operator') {
+        physicalOperatorExecutions.push(data.execution)
+        continue
+      }
       if (data.kind === 'session-end') {
         boundaries.push({ seq: data.seq, time: data.time })
         continue
@@ -252,6 +258,7 @@ export class TrajectorySnapshotBuilder implements ConversationViewBuilder<
       callSchemas,
       partial,
       runningCalls,
+      physicalOperatorExecutions,
     }
   }
 

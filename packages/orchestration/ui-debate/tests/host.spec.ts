@@ -118,6 +118,12 @@ function run(): DebateRunSnapshotV1 {
         {
           version: 1, round: 2, slotId: 'skeptical-falsifier', role: 'skeptical-falsifier', operatorId: 'claude-code', model: 'claude-fable-5', state: 'settled',
           outputRef: 'artifact:r2-falsifier', outputPreview: longPreview, claimIds: ['claim-1'], evidenceRefs: [evidence],
+          attempt: 2,
+          routing: {
+            version: 1, requestedOperatorId: 'claude-code', requestedModel: 'claude-fable-5',
+            actualOperatorId: 'codex', actualModel: 'gpt-5.6-luna', fallbackReasonCode: 'AUTHENTICATION_UNQUALIFIED',
+            allocationPlanRef: 'artifact:allocation-plan',
+          },
           usage: { inputTokens: 950, outputTokens: 380 }, startedAt: '2026-08-29T01:01:02.000Z', settledAt: '2026-08-29T01:01:12.000Z',
         },
         {
@@ -251,6 +257,14 @@ describe('Debate Host projection', () => {
       role: 'decision-judge', operatorId: 'claude-code', model: 'claude-opus-5', outputPreview: 'Round two ruling: choose A and record dissent.',
       outputRef: 'artifact:r2-judge', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'],
       usage: { inputTokens: 850, outputTokens: 320 }, startedAt: '2026-08-29T01:01:03.000Z', settledAt: '2026-08-29T01:01:13.000Z',
+    })
+    expect(rounds[1]?.turnStates[1]).toMatchObject({
+      attempt: 2,
+      routing: {
+        requestedOperatorId: 'claude-code', requestedModel: 'claude-fable-5',
+        actualOperatorId: 'codex', actualModel: 'gpt-5.6-luna', fallbackReasonCode: 'AUTHENTICATION_UNQUALIFIED',
+        allocationPlanRef: 'artifact:allocation-plan',
+      },
     })
     const bounded = rounds[1]?.turnStates[1] as { outputPreview?: string }
     expect(bounded.outputPreview).toHaveLength(800)

@@ -128,7 +128,7 @@ function validatePersona(value: unknown, path: string): DebateRolePersonaV1 {
 
 function validateRole(value: unknown, path: string): DebateRoleSpecV1 {
   const role = record(value, path)
-  exactKeys(role, ['version', 'role', 'kind', 'operatorId', 'model', 'tier', 'source', 'persona', 'required'], path)
+  exactKeys(role, ['version', 'role', 'kind', 'operatorId', 'fallbackOperatorIds', 'model', 'tier', 'source', 'persona', 'required'], path)
   version(role, path)
   const roleId = enumValue(required(role, 'role', path), `${path}.role`, ROLE_IDS)
   const expectedKind: DebateRoleKind = roleId === 'decision-judge' ? 'judge' : 'participant'
@@ -139,11 +139,24 @@ function validateRole(value: unknown, path: string): DebateRoleSpecV1 {
     ? roleId === 'decision-judge'
     : booleanValue(requiredValue, `${path}.required`)
   if (roleId === 'decision-judge' && !isRequired) invalid(`${path}.required`, 'decision judge must be required')
+  const operatorId = stringValue(required(role, 'operatorId', path), `${path}.operatorId`, 1, 128)
+  const fallbackOperatorIdsValue = optional(role, 'fallbackOperatorIds')
+  const fallbackOperatorIds = fallbackOperatorIdsValue === undefined
+    ? undefined
+    : arrayValue(fallbackOperatorIdsValue, `${path}.fallbackOperatorIds`, 1, 8)
+      .map((value, index) => stringValue(value, `${path}.fallbackOperatorIds[${String(index)}]`, 1, 128))
+  if (fallbackOperatorIds?.includes(operatorId) === true) {
+    invalid(`${path}.fallbackOperatorIds`, 'must not repeat the primary operatorId')
+  }
+  if (fallbackOperatorIds !== undefined && new Set(fallbackOperatorIds).size !== fallbackOperatorIds.length) {
+    invalid(`${path}.fallbackOperatorIds`, 'must not contain duplicates')
+  }
   return {
     version: 1,
     role: roleId,
     kind,
-    operatorId: stringValue(required(role, 'operatorId', path), `${path}.operatorId`, 1, 128),
+    operatorId,
+    ...(fallbackOperatorIds === undefined ? {} : { fallbackOperatorIds }),
     model: stringValue(required(role, 'model', path), `${path}.model`, 1, 128),
     tier: enumValue(required(role, 'tier', path), `${path}.tier`, MODEL_TIERS),
     source: enumValue(required(role, 'source', path), `${path}.source`, MODEL_SOURCES),

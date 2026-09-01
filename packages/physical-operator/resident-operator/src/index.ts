@@ -74,6 +74,49 @@ export type ResidentProgressPhase =
   | 'tool_activity'
   | 'finalizing'
 
+/**
+ * A bounded, provider-neutral observation that is safe to project into a
+ * conversation trace. It intentionally has no thinking, prompt, stderr,
+ * environment, credential, or full-transcript variant.
+ */
+export type ResidentObservation =
+  | ResidentPublicOutputObservation
+  | ResidentToolStartedObservation
+  | ResidentToolCompletedObservation
+  | ResidentApprovalRequiredObservation
+  | ResidentUsageUpdatedObservation
+
+/** A public model-visible text fragment, truncated by the daemon before persistence. */
+export interface ResidentPublicOutputObservation {
+  readonly kind: 'public-output'
+  readonly preview: string
+}
+
+/** A product tool began; arguments and tool input are deliberately not retained. */
+export interface ResidentToolStartedObservation {
+  readonly kind: 'tool-started'
+  readonly toolName: string
+}
+
+/** A product tool ended; result body and tool output are deliberately not retained. */
+export interface ResidentToolCompletedObservation {
+  readonly kind: 'tool-completed'
+  readonly toolName: string
+}
+
+/** A product requested an interactive approval that a headless Resident cannot grant. */
+export interface ResidentApprovalRequiredObservation {
+  readonly kind: 'approval-required'
+  readonly approvalKind: string
+  readonly preview?: string
+}
+
+/** Authoritative product token/cost counters observed while a turn is running. */
+export interface ResidentUsageUpdatedObservation {
+  readonly kind: 'usage-updated'
+  readonly usage: PhysicalOperatorUsage
+}
+
 /** One native model advertised by a qualified subscription product. */
 export interface ResidentModelOption {
   readonly model: string
@@ -162,6 +205,8 @@ export interface ResidentDriverExecuteRequest {
   readonly onRunning: (nativeSessionId?: string, nativeTurnId?: string) => void
   /** Persist a bounded product-neutral progress phase for reconnecting observers. */
   readonly onProgress: (phase: ResidentProgressPhase) => void
+  /** Persist a bounded trace-safe product observation for reconnecting observers. */
+  readonly onObservation: (observation: ResidentObservation) => void
 }
 
 /** One native history-compaction request after daemon idle/revision admission. */

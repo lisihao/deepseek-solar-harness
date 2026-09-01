@@ -209,6 +209,33 @@ describe('TrajectorySnapshotBuilder', () => {
     ])
   })
 
+  it('preserves command-scoped physical executions without treating them as assistant transcript', () => {
+    const snapshot = new TrajectorySnapshotBuilder().replace({
+      nodes: [contribution('operator:command-1', 7, {
+        kind: 'physical-operator',
+        execution: {
+          commandId: 'command-1',
+          operatorId: 'codex',
+          turn: 2,
+          step: 1,
+          dispatchSeq: 7,
+          dispatchTime: 7,
+          entries: [{
+            seq: 8,
+            time: 8,
+            type: 'observation',
+            observation: { kind: 'public-output', preview: 'bounded public update' },
+          }],
+        },
+      })],
+    })
+
+    expect(snapshot.physicalOperatorExecutions).toMatchObject([{
+      commandId: 'command-1', operatorId: 'codex',
+    }])
+    expect(snapshot.eventNodes).toHaveLength(0)
+  })
+
   it('keeps cached contribution order across content updates and structural inserts', () => {
     const builder = new TrajectorySnapshotBuilder()
     const first = contribution('assistant:1', 1, {

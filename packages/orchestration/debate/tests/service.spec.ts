@@ -41,7 +41,7 @@ function policy(): DebatePolicyV1 {
         persona: persona('Proposer', 'Construct a viable answer.', 'Constructive'), required: false,
       },
       {
-        version: 1, role: 'skeptical-falsifier', kind: 'participant', operatorId: 'claude-code', model: 'sonnet', tier: 'medium', source: 'native-subscription',
+        version: 1, role: 'skeptical-falsifier', kind: 'participant', operatorId: 'claude-code', fallbackOperatorIds: ['codex'], model: 'sonnet', tier: 'medium', source: 'native-subscription',
         persona: persona('Falsifier', 'Find counterexamples and failure modes.', 'Skeptical'), required: false,
       },
       {
@@ -127,6 +127,7 @@ describe('Debate Service Definition', () => {
       'constructive-proposer', 'skeptical-falsifier', 'decision-judge',
     ])
     expect(validated.roster.find(role => role.role === 'decision-judge')?.required).toBe(true)
+    expect(validated.roster.find(role => role.role === 'skeptical-falsifier')?.fallbackOperatorIds).toEqual(['codex'])
     expect(JSON.parse(JSON.stringify(validated))).toEqual(validated)
   })
 
@@ -140,6 +141,14 @@ describe('Debate Service Definition', () => {
     expect(() => validateDebatePolicy({ ...policy(), roster: policy().roster.filter(role => role.role !== 'decision-judge') })).toThrow('decision-judge')
     expect(() => validateDebatePolicy({ ...policy(), budget: { ...policy().budget, maxTotalTokens: 100 } })).toThrow('maxTotalTokens')
     expect(() => validateDebatePolicy({ ...policy(), convergence: { ...policy().convergence, scoreThreshold: 2 } })).toThrow('scoreThreshold')
+    expect(() => validateDebatePolicy({
+      ...policy(),
+      roster: policy().roster.map((role, index) => index === 1 ? { ...role, fallbackOperatorIds: ['claude-code'] } : role),
+    })).toThrow('must not repeat the primary operatorId')
+    expect(() => validateDebatePolicy({
+      ...policy(),
+      roster: policy().roster.map((role, index) => index === 1 ? { ...role, fallbackOperatorIds: ['codex', 'codex'] } : role),
+    })).toThrow('must not contain duplicates')
   })
 
   it('validates start parent identity and rejects external unknown fields', () => {

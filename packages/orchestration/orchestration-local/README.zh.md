@@ -10,7 +10,7 @@ daemon 承载确定性的 direct Intent 提供方、basic Context 提供方、�
 
 Scheduler 会在 Graph 的 `maxParallel` 上限内启动彼此独立的节点，不设置阶段级 barrier。依赖、重叠的写入/effect scope 和 worker 上限只会串行化受影响节点；每个等待原因都会随 Run 持久化。每次 Attempt 都会获得内置 `context.clean-task` 指令 Capsule 和新的 Resident lane，因此复用的 Codex 或 Claude Code 宿主不会继承旧原生 thread，也不会 fork 父对话历史。
 
-分配器把产品报告的每个额度窗口都视为必须同时满足的约束，优先使用资格合格的原生订阅池，并且只在所选优化目标允许时使用按量 API 容量。实时容量建议会把 Scheduler 上限降到 `maxParallel` 以下；套餐暂时繁忙时等待，不会静默消耗付费 API。临近重置且仍可用的额度会被优先利用。
+分配器把产品报告的每个额度窗口都视为必须同时满足的约束，优先使用资格合格的原生订阅池，并且只在所选优化目标允许时使用按量 API 容量。实时容量建议会把 Scheduler 上限降到 `maxParallel` 以下；套餐暂时繁忙时等待，不会静默消耗付费 API。临近重置且仍可用的额度会被优先利用。节点声明的 fallback 算子只会在首选算子未通过可用性、认证、模型或配额资格检查后，从同一实时目录中解析；已封存的分配产物和事件会保留请求的算子／模型与原因码。
 
 可选的版本化 `cluster.json` 同时持有固定 Product Server 成员表与远程 Resident 容量。启用了 `remoteExecution` 的成员会以 `remote.<member>.<operator>` 投影到同一个物理算子能力 seam；它的仓库允许列表把不含凭据的 `host/path` 身份映射到 Server 本地 checkout 路径或 Git URL。某个成员资格检查失败时只会把该成员标为不可用，不会阻塞健康的本地或远程 Provider。只有当集群中没有成员定义 `remoteExecution` 时才继续读取旧 `remote-operators.json`；同时定义两个目录会被拒绝，避免容量目录与选举成员表漂移。
 

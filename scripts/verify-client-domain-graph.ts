@@ -18,14 +18,30 @@ import { globSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
-const CLIENT_DIR = join(root, 'packages/client')
+const BASELINE_PATH = join(root, 'scripts/fixtures/client-domain-graph-baseline.json')
+const BASELINE_SOURCE_COMMIT = '29c05e6297c24bd7dd8f7cdb9ad9db6c46002901'
 
 /** Directory names treated as the shared contract layer (importable by all). */
 const CONTRACT_DIRS = new Set(['contract'])
 /** Top-level client files allowed to import across domains (assembly layer). */
 const ASSEMBLY_FILES = new Set(['apply.ts', 'index.ts', 'index.tsx'])
 
-interface Violation { file: string; imported: string; reason: string }
+export interface Violation { file: string; imported: string; reason: string }
+
+export interface ClientDomainGraphBaseline {
+  readonly version: 1
+  readonly sourceCommit: string
+  readonly violations: readonly Violation[]
+}
+
+export interface ClientDomainGraphComparison {
+  readonly actual: readonly Violation[]
+  readonly baseline: readonly Violation[]
+  /** Actual entries that are not covered by the baseline, preserving multiplicity. */
+  readonly added: readonly Violation[]
+  /** Baseline entries absent from the actual result, preserving multiplicity. */
+  readonly removed: readonly Violation[]
+}
 
 /** Recursively list .ts/.tsx files under dir (relative paths). */
 function listSources(dir: string): string[] {
@@ -78,21 +94,133 @@ function checkPackage(pkgName: string, clientDir: string): Violation[] {
   return violations
 }
 
-const violations: Violation[] = []
-for (const pkg of readdirSync(CLIENT_DIR)) {
-  const clientDir = join(CLIENT_DIR, pkg, 'src/client')
-  try {
-    if (!statSync(clientDir).isDirectory()) continue
-  } catch {
-    // No client half in this package — nothing to layer-check.
-    continue
+/** Collect every client-domain layering violation, in deterministic order. */
+export function collectClientDomainViolations(scanRoot: string = root): Violation[] {
+  const clientDirRoot = join(scanRoot, 'packages/client')
+  const violations: Violation[] = []
+  for (const pkg of readdirSync(clientDirRoot).sort()) {
+    const clientDir = join(clientDirRoot, pkg, 'src/client')
+    try {
+      if (!statSync(clientDir).isDirectory()) continue
+    } catch {
+      // No client half in this package — nothing to layer-check.
+      continue
+    }
+    violations.push(...checkPackage(pkg, clientDir))
   }
-  violations.push(...checkPackage(pkg, clientDir))
+  return violations
 }
 
-if (violations.length > 0) {
-  console.error(`verify-client-domain-graph: ${violations.length} violation(s):`)
-  for (const v of violations) console.error(`  ${v.file} -> ${v.imported}\n    ${v.reason}`)
-  process.exit(1)
+function violationKey(violation: Violation): string {
+  return JSON.stringify([violation.file, violation.imported, violation.reason])
 }
-console.log('verify-client-domain-graph: client domain layering clean.')
+
+function compareViolations(left: Violation, right: Violation): number {
+  const leftKey = violationKey(left)
+  const rightKey = violationKey(right)
+  return leftKey === rightKey ? 0 : leftKey < rightKey ? -1 : 1
+}
+
+function subtractViolationMultiset(
+  left: readonly Violation[],
+  right: readonly Violation[],
+): Violation[] {
+  const remaining = new Map<string, number>()
+  for (const violation of right) {
+    const key = violationKey(violation)
+    remaining.set(key, (remaining.get(key) ?? 0) + 1)
+  }
+  const result: Violation[] = []
+  for (const violation of left) {
+    const key = violationKey(violation)
+    const count = remaining.get(key) ?? 0
+    if (count > 0) remaining.set(key, count - 1)
+    else result.push(violation)
+  }
+  return result
+}
+
+/**
+ * Compare sorted violation records as multisets. Keeping counts is important:
+ * two source imports with the same triple are two debts, not one.
+ */
+export function compareClientDomainViolations(
+  actual: readonly Violation[],
+  baseline: readonly Violation[],
+): ClientDomainGraphComparison {
+  const sort = (values: readonly Violation[]) => [...values].sort(compareViolations)
+  const sortedActual = sort(actual)
+  const sortedBaseline = sort(baseline)
+  return {
+    actual: sortedActual,
+    baseline: sortedBaseline,
+    added: subtractViolationMultiset(sortedActual, sortedBaseline),
+    removed: subtractViolationMultiset(sortedBaseline, sortedActual),
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseViolation(value: unknown, index: number): Violation {
+  if (!isRecord(value)
+    || typeof value.file !== 'string'
+    || typeof value.imported !== 'string'
+    || typeof value.reason !== 'string') {
+    throw new Error(`baseline violation ${String(index)} must contain string file, imported and reason`)
+  }
+  return { file: value.file, imported: value.imported, reason: value.reason }
+}
+
+export function readClientDomainBaseline(path: string = BASELINE_PATH): ClientDomainGraphBaseline {
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+  if (!isRecord(parsed)
+    || parsed.version !== 1
+    || typeof parsed.sourceCommit !== 'string'
+    || !Array.isArray(parsed.violations)) {
+    throw new Error('client-domain-graph baseline must have version 1, sourceCommit and violations[]')
+  }
+  return {
+    version: 1,
+    sourceCommit: parsed.sourceCommit,
+    violations: parsed.violations.map(parseViolation),
+  }
+}
+
+function printViolations(label: string, violations: readonly Violation[]): void {
+  console.error(`${label} (${String(violations.length)}):`)
+  for (const violation of violations) {
+    console.error(`  ${violation.file} -> ${violation.imported}\n    ${violation.reason}`)
+  }
+}
+
+function run(): void {
+  const actual = collectClientDomainViolations()
+  const baseline = readClientDomainBaseline()
+  if (baseline.sourceCommit !== BASELINE_SOURCE_COMMIT) {
+    throw new Error(`client-domain-graph baseline sourceCommit must be ${BASELINE_SOURCE_COMMIT}, got ${baseline.sourceCommit}`)
+  }
+  const comparison = compareClientDomainViolations(actual, baseline.violations)
+
+  if (comparison.added.length > 0 || comparison.removed.length > 0) {
+    console.error('verify-client-domain-graph: baseline mismatch.')
+    if (comparison.added.length > 0) printViolations('new client-domain violations', comparison.added)
+    if (comparison.removed.length > 0) {
+      printViolations('resolved violations still present in baseline; shrink the baseline explicitly', comparison.removed)
+    }
+    process.exitCode = 1
+    return
+  }
+
+  if (comparison.actual.length > 0) {
+    console.log(`verify-client-domain-graph: known baseline debt (${String(comparison.actual.length)} violation(s), source ${baseline.sourceCommit}).`)
+    for (const violation of comparison.actual) {
+      console.log(`  ${violation.file} -> ${violation.imported}\n    ${violation.reason}`)
+    }
+  } else {
+    console.log('verify-client-domain-graph: client domain layering clean.')
+  }
+}
+
+if (process.argv[1] && import.meta.filename === resolve(process.argv[1])) run()

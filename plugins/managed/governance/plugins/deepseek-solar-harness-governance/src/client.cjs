@@ -77,6 +77,7 @@ function orchestrationEventLabel(type) {
     'execution_plan.sealed': 'ExecutionPlan 已封印',
     'node.dispatched': 'Resident 算子已派发',
     'node.operator.progress': 'Resident 执行进度',
+    'node.operator.observation': 'Resident 公开观察',
     'node.evidence.accepted': 'Resident 结果与 Evidence',
     'node.failed': 'Resident 节点失败',
     'run.completed': 'TaskGraph 已完成',
@@ -106,6 +107,16 @@ function orchestrationEventDetail(event) {
   }
   if (event.type === 'node.operator.progress') {
     return `${String(event.data?.operatorId ?? 'N/A')} · ${operatorProgressLabel(event.data?.phase)}`
+  }
+  if (event.type === 'node.operator.observation') {
+    const observation = event.data?.observation ?? {}
+    const prefix = `${String(event.data?.operatorId ?? 'N/A')} · `
+    if (observation.kind === 'public-output') return `${prefix}${String(observation.preview ?? '')}`
+    if (observation.kind === 'tool-started') return `${prefix}开始使用工具 ${String(observation.toolName ?? 'N/A')}`
+    if (observation.kind === 'tool-completed') return `${prefix}完成工具 ${String(observation.toolName ?? 'N/A')}`
+    if (observation.kind === 'approval-required') return `${prefix}需要批准 ${String(observation.approvalKind ?? 'N/A')}${observation.preview === undefined ? '' : `\n${String(observation.preview)}`}`
+    if (observation.kind === 'usage-updated') return `${prefix}用量更新 ${JSON.stringify(observation.usage ?? {})}`
+    return `${prefix}公开观察`
   }
   if (event.type === 'node.evidence.accepted' || (event.type === 'node.failed' && typeof event.data?.outputPreview === 'string')) {
     const output = String(event.data?.outputPreview ?? '')
@@ -170,6 +181,8 @@ function SessionCollaborationEvent({ event }) {
     ? `${collaborationPolicyLabel(event.policy)} · ${String(event.route ?? 'N/A')} · ${String(event.reason ?? '')}`
     : event.type === 'physical-operator/dispatch'
       ? `${String(event.operatorId ?? 'N/A')} · command ${shortRef(event.commandId)}`
+      : event.type === 'physical-operator/tool-dispatch'
+        ? `${String(event.operatorId ?? 'N/A')} · 显式算子 · command ${shortRef(event.commandId)} · ${String(event.description ?? '')}`
       : event.type === 'physical-operator/dispatch-terminal'
         ? `${String(event.code ?? 'N/A')} · command ${shortRef(event.commandId)}`
         : event.type === 'orchestration/admission'
@@ -178,11 +191,15 @@ function SessionCollaborationEvent({ event }) {
             ? `${String(event.operatorId ?? 'Resident')} · ${String(event.tool ?? 'N/A')}\n${String(event.input ?? '')}`
             : event.type === 'physical-operator/tool-result' || event.type === 'subagent/output'
               ? `${String(event.operatorId ?? 'Resident')} · ${String(event.tool ?? 'N/A')}\n${String(event.output ?? event.outputPreview ?? '')}`
+              : event.type === 'physical-operator/observation'
+                ? `${String(event.operatorId ?? 'Resident')} · ${String(event.kind ?? 'progress')}${event.phase === undefined ? '' : ` ${String(event.phase)}`}${event.tool === undefined ? '' : ` ${String(event.tool)}`}${event.usage === undefined ? '' : `\n${JSON.stringify(event.usage)}`}${event.output === undefined ? '' : `\n${String(event.output)}`}`
+                : event.type === 'physical-operator/trace-degraded'
+                  ? `${String(event.operatorId ?? 'Resident')} · Trace 降级 ${String(event.code ?? 'N/A')}\n${String(event.message ?? '')}`
               : `${String(event.operatorId ?? 'N/A')}\n${String(event.output ?? event.outputPreview ?? '')}`
-  const failed = event.type === 'physical-operator/dispatch-terminal' || event.isError === true
+  const failed = event.type === 'physical-operator/dispatch-terminal' || event.type === 'physical-operator/trace-degraded' || event.isError === true
   const status = event.type.endsWith('/call') || event.type.endsWith('/tool-call')
     ? '调用'
-    : failed ? '失败' : event.type.includes('output') || event.type.endsWith('/tool-result') ? '输出' : '会话'
+    : failed ? '降级' : event.type.includes('output') || event.type.endsWith('/tool-result') || event.type === 'physical-operator/observation' ? '观察' : '会话'
   return h('li', { className: 'dsh-governance-event dsh-collaboration-event' },
     h('div', { className: 'dsh-governance-event-head' },
       h('span', { className: 'dsh-governance-sequence' }, `#${String(event.sequence)}`),

@@ -1114,6 +1114,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Select one qualified execution offer and recommend safe parallelism.',
         parameters: [{ name: 'request', description: 'Node phase, policy, quota, and currently qualified offers.' }],
         returns: 'The selected model plan and parallelism recommendation.',
+        throws: ['{ModelAllocationError} When no admitted lane qualifies, an explicit model is unavailable, or qualified capacity is busy.'],
       },
     ],
   },
@@ -3905,11 +3906,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DebateAgentTurnState',
-    declaration: 'export type DebateAgentTurnState = \'planned\' | \'dispatched\' | \'settled\' | \'failed\' | \'indeterminate\';',
+    declaration: 'export type DebateAgentTurnState = \'planned\' | \'dispatched\' | \'settled\' | \'blocked\' | \'failed\' | \'indeterminate\';',
   },
   {
     name: 'DebateAgentTurnV1',
-    declaration: 'export interface DebateAgentTurnV1 {\n    readonly version: 1;\n    readonly round: number;\n    readonly slotId: string;\n    readonly role: DebateRoleId;\n    readonly operatorId: string;\n    readonly model: string;\n    readonly state: DebateAgentTurnState;\n    readonly outputRef?: string;\n    readonly outputPreview?: string;\n    readonly claimIds: readonly string[];\n    readonly evidenceRefs: readonly DebateEvidenceRefV1[];\n    readonly usage?: DebateUsageV1;\n    readonly startedAt?: string;\n    readonly settledAt?: string;\n    readonly errorCode?: string;\n}',
+    declaration: 'export interface DebateAgentTurnV1 {\n    readonly version: 1;\n    readonly round: number;\n    readonly slotId: string;\n    readonly role: DebateRoleId;\n    readonly operatorId: string;\n    readonly model: string;\n    readonly state: DebateAgentTurnState;\n    readonly attempt?: number;\n    readonly routing?: DebateTurnRoutingV1;\n    readonly blockers?: readonly DebateTurnBlockerV1[];\n    readonly outputRef?: string;\n    readonly outputPreview?: string;\n    readonly claimIds: readonly string[];\n    readonly evidenceRefs: readonly DebateEvidenceRefV1[];\n    readonly usage?: DebateUsageV1;\n    readonly startedAt?: string;\n    readonly settledAt?: string;\n    readonly errorCode?: string;\n}',
   },
   {
     name: 'DebateBudgetV1',
@@ -3969,7 +3970,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DebateEventType',
-    declaration: 'export type DebateEventType = \'debate.planned\' | \'debate.roster.qualified\' | \'debate.roster.rejected\' | \'debate.admitted\' | \'debate.round.started\' | \'debate.agent.dispatched\' | \'debate.agent.settled\' | \'debate.agent.failed\' | \'debate.agent.indeterminate\' | \'debate.claims.compiled\' | \'debate.convergence.evaluated\' | \'debate.synthesis.started\' | \'debate.synthesis.settled\' | \'debate.cost.accounted\' | \'debate.stopped\' | \'debate.failed\' | \'debate.indeterminate\';',
+    declaration: 'export type DebateEventType = \'debate.planned\' | \'debate.roster.qualified\' | \'debate.roster.rejected\' | \'debate.admitted\' | \'debate.round.started\' | \'debate.agent.dispatched\' | \'debate.agent.settled\' | \'debate.agent.blocked\' | \'debate.agent.failed\' | \'debate.agent.indeterminate\' | \'debate.claims.compiled\' | \'debate.convergence.evaluated\' | \'debate.synthesis.started\' | \'debate.synthesis.settled\' | \'debate.cost.accounted\' | \'debate.stopped\' | \'debate.failed\' | \'debate.indeterminate\';',
   },
   {
     name: 'DebateEventV1',
@@ -4033,7 +4034,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DebateRoleSpecV1',
-    declaration: 'export interface DebateRoleSpecV1 {\n    readonly version: 1;\n    readonly role: DebateRoleId;\n    readonly kind: DebateRoleKind;\n    readonly operatorId: string;\n    readonly model: string;\n    readonly tier: DebateModelTier;\n    readonly source: DebateModelSource;\n    readonly persona: DebateRolePersonaV1;\n    readonly required?: boolean;\n}',
+    declaration: 'export interface DebateRoleSpecV1 {\n    readonly version: 1;\n    readonly role: DebateRoleId;\n    readonly kind: DebateRoleKind;\n    readonly operatorId: string;\n    readonly fallbackOperatorIds?: readonly string[];\n    readonly model: string;\n    readonly tier: DebateModelTier;\n    readonly source: DebateModelSource;\n    readonly persona: DebateRolePersonaV1;\n    readonly required?: boolean;\n}',
   },
   {
     name: 'DebateRoundSnapshotV1',
@@ -4074,6 +4075,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DebateSynthesisV1',
     declaration: 'export interface DebateSynthesisV1 {\n    readonly version: 1;\n    readonly state: DebateSynthesisState;\n    readonly artifactRef?: string;\n    readonly outputPreview?: string;\n    readonly unresolvedClaimIds: readonly string[];\n    readonly dissentCount: number;\n}',
+  },
+  {
+    name: 'DebateTurnBlockerV1',
+    declaration: 'export interface DebateTurnBlockerV1 {\n    readonly code: string;\n    readonly message: string;\n    readonly nodeId?: string;\n}',
+  },
+  {
+    name: 'DebateTurnRoutingV1',
+    declaration: 'export interface DebateTurnRoutingV1 {\n    readonly version: 1;\n    readonly requestedOperatorId: string;\n    readonly requestedModel: string;\n    readonly actualOperatorId?: string;\n    readonly actualModel?: string;\n    readonly fallbackReasonCode?: string;\n    readonly allocationPlanRef?: string;\n}',
   },
   {
     name: 'DebateUnresolvedV1',
@@ -4640,20 +4649,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface MessageSourceMap {\n    user: {\n        kind: \'user\';\n    };\n    plugin: {\n        kind: \'plugin\';\n        plugin: string;\n    } & ContextFormed;\n    model: ModelMessageSource;\n    tool: ToolMessageSource;\n}',
   },
   {
+    name: 'ModelAllocationFallbackProvenance',
+    declaration: 'export interface ModelAllocationFallbackProvenance {\n    readonly fromOperatorId: string;\n    readonly fromModel?: string;\n    readonly reasonCode: ModelAllocationFallbackReasonCode;\n}',
+  },
+  {
+    name: 'ModelAllocationFallbackReasonCode',
+    declaration: 'export type ModelAllocationFallbackReasonCode = \'OPERATOR_UNAVAILABLE\' | \'AUTHENTICATION_UNQUALIFIED\' | \'MODEL_UNAVAILABLE\' | \'QUOTA_UNQUALIFIED\';',
+  },
+  {
     name: 'ModelAllocationObjective',
     declaration: 'export type ModelAllocationObjective = \'balanced\' | \'quality\' | \'speed\' | \'economy\';',
   },
   {
     name: 'ModelAllocationPlan',
-    declaration: 'export interface ModelAllocationPlan {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly source: ModelExecutionOffer[\'source\'];\n    readonly tier: ModelExecutionOffer[\'tier\'];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly quotaPoolId?: string;\n    readonly suggestedParallelism: number;\n    readonly rationale: readonly string[];\n}',
+    declaration: 'export interface ModelAllocationPlan {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly source: ModelExecutionOffer[\'source\'];\n    readonly tier: ModelExecutionOffer[\'tier\'];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly quotaPoolId?: string;\n    readonly fallback?: ModelAllocationFallbackProvenance;\n    readonly suggestedParallelism: number;\n    readonly rationale: readonly string[];\n}',
   },
   {
     name: 'ModelAllocationRequest',
-    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
+    declaration: 'export interface ModelAllocationRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly phase: ModelTaskPhase;\n    readonly role: string;\n    readonly task: string;\n    readonly preferredOperatorIds: readonly string[];\n    readonly fallbackOperatorIds?: readonly string[];\n    readonly preferredModel?: string;\n    readonly objective: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n    readonly adaptiveExecutionPreference?: AdaptiveExecutionPreferenceV1;\n    readonly rlm: RlmExecutionMode;\n    readonly graphMaxParallel: number;\n    readonly offers: readonly ModelExecutionOffer[];\n    readonly now: string;\n}',
   },
   {
     name: 'ModelExecutionOffer',
-    declaration: 'export interface ModelExecutionOffer {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly displayName: string;\n    readonly source: \'native-subscription\' | \'metered-api\';\n    readonly tier: \'low\' | \'medium\' | \'high\';\n    readonly available: boolean;\n    readonly maxConcurrency: number;\n    readonly activeCount: number;\n    readonly tags: readonly string[];\n    readonly quotaPool?: ModelQuotaPool;\n    readonly quotaGuard?: ModelQuotaGuard;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n}',
+    declaration: 'export interface ModelExecutionOffer {\n    readonly offerId: string;\n    readonly operatorId: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly displayName: string;\n    readonly source: \'native-subscription\' | \'metered-api\';\n    readonly tier: \'low\' | \'medium\' | \'high\';\n    readonly available: boolean;\n    readonly maxConcurrency: number;\n    readonly activeCount: number;\n    readonly tags: readonly string[];\n    readonly unavailableReasonCode?: ModelAllocationFallbackReasonCode;\n    readonly quotaPool?: ModelQuotaPool;\n    readonly quotaGuard?: ModelQuotaGuard;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n}',
   },
   {
     name: 'ModelMessageSource',
@@ -4797,7 +4814,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OrchestrationNodeSpecV1',
-    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly autonomous?: RlmAutonomousConfigV1;\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
+    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly forbiddenScopes?: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly requiredArtifacts?: readonly string[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly timeoutMs?: number;\n    readonly phase?: ModelTaskPhase;\n    readonly rlm?: {\n        readonly mode: RlmExecutionMode;\n        readonly maxDepth: number;\n        readonly maxChildren: number;\n        readonly maxTurns: number;\n    };\n    readonly autonomous?: RlmAutonomousConfigV1;\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly fallbackIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
   },
   {
     name: 'OrchestrationNodeState',

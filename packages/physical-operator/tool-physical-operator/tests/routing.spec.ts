@@ -7,6 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LlmRuntime, {
+  CallId,
   createUserMessage,
   LlmAdapter,
   type GenerateOptions,
@@ -66,6 +67,8 @@ class DurableOperator implements PhysicalOperator {
     private readonly progressPhases: readonly string[] = [],
     private readonly stopReason: PhysicalOperatorResult['stopReason'] = 'completed',
     private readonly progressError?: string,
+    private readonly observations: readonly Record<string, unknown>[] = [],
+    private readonly observationsAfterSettle = false,
   ) {
     this.descriptor = {
       id: PhysicalOperatorId(id),
@@ -97,6 +100,8 @@ class DurableOperator implements PhysicalOperator {
       : await callBridgeTool(request, this.bridgeToolName, { value: 'hello' })
     if (created && this.immediate) receipt.result.resolve(this.resultValue(bridged))
     const activeReceipt = receipt
+    let settled = false
+    void activeReceipt.result.promise.then(() => { settled = true }, () => { settled = true })
     const callerResult = new Promise<PhysicalOperatorResult>((resolve, reject) => {
       const abort = (): void => {
         request.signal.removeEventListener('abort', abort)
@@ -112,32 +117,44 @@ class DurableOperator implements PhysicalOperator {
         },
       )
     })
-    const progressEvents: readonly PhysicalOperatorProgressEvent[] = [
+    const initialEvents: readonly PhysicalOperatorProgressEvent[] = [
       ...this.progressPhases.map((phase, index): PhysicalOperatorProgressEvent => ({
         sequence: index + 1,
         type: 'turn.progress',
         time: new Date(index + 1).toISOString(),
         data: { commandId: id, phase },
       })),
-      {
-        sequence: this.progressPhases.length + 1,
-        type: 'turn.settled',
-        time: new Date(this.progressPhases.length + 1).toISOString(),
-        data: {
-          commandId: id,
-          stopReason: this.stopReason,
-          ...this.usage === undefined ? {} : {
-            inputTokens: this.usage.inputTokens,
-            outputTokens: this.usage.outputTokens,
-            ...this.usage.cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens: this.usage.cacheReadInputTokens },
-            ...this.usage.cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens: this.usage.cacheWriteInputTokens },
-          },
+    ]
+    const observationEvents = this.observations.map((data, index): PhysicalOperatorProgressEvent => ({
+      sequence: initialEvents.length + index + 1,
+      type: 'turn.observation',
+      time: new Date(initialEvents.length + index + 1).toISOString(),
+      data: { commandId: id, ...data },
+    }))
+    const terminal: PhysicalOperatorProgressEvent = {
+      sequence: initialEvents.length + observationEvents.length + 1,
+      type: 'turn.settled',
+      time: new Date(initialEvents.length + observationEvents.length + 1).toISOString(),
+      data: {
+        commandId: id,
+        stopReason: this.stopReason,
+        ...this.usage === undefined ? {} : {
+          inputTokens: this.usage.inputTokens,
+          outputTokens: this.usage.outputTokens,
+          ...this.usage.cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens: this.usage.cacheReadInputTokens },
+          ...this.usage.cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens: this.usage.cacheWriteInputTokens },
         },
       },
-    ]
+    }
     return {
       readEvents: async (afterSequence, limit) => {
         if (this.progressError !== undefined) throw new Error(this.progressError)
+        const visibleObservations = this.observationsAfterSettle && !settled ? [] : observationEvents
+        const progressEvents = [
+          ...initialEvents,
+          ...visibleObservations,
+          ...(settled ? [terminal] : []),
+        ]
         return {
           events: progressEvents.filter(event => event.sequence > afterSequence).slice(0, limit),
           nextSequence: progressEvents.filter(event => event.sequence > afterSequence).at(-1)?.sequence ?? afterSequence,
@@ -188,6 +205,8 @@ async function setup(options: {
   codexProgressPhases?: readonly string[]
   codexStopReason?: PhysicalOperatorResult['stopReason']
   codexProgressError?: string
+  codexObservations?: readonly Record<string, unknown>[]
+  codexObservationsAfterSettle?: boolean
   primary?: 'deepseek' | 'codex' | 'claude-code'
   registerDeepSeek?: boolean
   mountTool?: boolean
@@ -226,6 +245,8 @@ async function setup(options: {
     options.codexProgressPhases,
     options.codexStopReason,
     options.codexProgressError,
+    options.codexObservations,
+    options.codexObservationsAfterSettle,
   )
   const claude = new DurableOperator('claude-code')
   ctx.physicalOperators.registerOperator(codex)
@@ -243,6 +264,16 @@ function send(agent: Agent, text: string): void {
     content: [{ type: 'text', text }],
     source: { kind: 'user' },
   }))
+}
+
+function callPhysicalOperator(ctx: Context, agent: Agent, args: Record<string, unknown>) {
+  return ctx.tools.execute({
+    signal: new AbortController().signal,
+    callId: CallId('physical-operator-explicit-run'),
+    name: 'physical_operator',
+    arguments: args,
+    agent,
+  })
 }
 
 function lastAssistantMessage(agent: Agent) {
@@ -363,6 +394,63 @@ describe('host physical-operator routing', () => {
     expect(terminal.data.type).toBe('turn.settled')
     expect(terminal.data.data).toMatchObject({ commandId: terminal.data.commandId, stopReason: 'completed' })
     expect(JSON.stringify(progress)).not.toContain('你好')
+  })
+
+  it('projects bounded Resident observations before settle and drains late observations without duplicates', async () => {
+    const { agent, codex } = await setup({
+      primary: 'codex',
+      registerDeepSeek: false,
+      codexImmediate: false,
+      codexProgressPhases: ['connecting'],
+      codexObservationsAfterSettle: true,
+      codexObservations: [
+        { kind: 'public-output', preview: 'public native update', prompt: 'must stay hidden' },
+        { kind: 'tool-started', toolName: 'Bash', arguments: { secret: 'must stay hidden' } },
+      ],
+    })
+    send(agent, '让 Codex 持续执行')
+    while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const beforeSettle = agent.session.events.filter(event => event.type === 'physical-operator/progress')
+    expect(beforeSettle.some(event => event.type === 'physical-operator/progress' && event.data.data.phase === 'connecting')).toBe(true)
+    expect(beforeSettle.some(event => event.type === 'physical-operator/progress' && event.data.type === 'turn.observation')).toBe(false)
+
+    const receipt = codex.receipts.values().next().value
+    if (receipt === undefined) throw new Error('expected durable receipt')
+    receipt.result.resolve({ output: [{ type: 'text', text: 'done' }], stopReason: 'completed' })
+    await agent.whenIdle()
+
+    const observations = agent.session.events.filter(event => (
+      event.type === 'physical-operator/progress' && event.data.type === 'turn.observation'
+    ))
+    expect(observations).toHaveLength(2)
+    expect(observations.map(event => event.type === 'physical-operator/progress' ? event.data.sequence : undefined)).toEqual([2, 3])
+    expect(observations.map(event => event.type === 'physical-operator/progress' ? event.data.data.kind : undefined))
+      .toEqual(['public-output', 'tool-started'])
+    expect(JSON.stringify(observations)).not.toContain('must stay hidden')
+  })
+
+  it('starts an explicit resident physical_operator trace and projects its public observation', async () => {
+    const { ctx, agent, codex } = await setup({
+      codexImmediate: false,
+      codexObservations: [{ kind: 'tool-completed', toolName: 'Read' }],
+    })
+    const pending = callPhysicalOperator(ctx, agent, {
+      action: 'run', operator_id: 'codex', description: 'inspect repository', prompt: 'read only', mode: 'resident',
+    })
+    while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(agent.session.events.find(event => event.type === 'physical-operator/tool-dispatch')).toMatchObject({
+      ignorable: true,
+      data: { operatorId: 'codex', mode: 'resident', description: 'inspect repository' },
+    })
+    expect(agent.session.events.find(event => (
+      event.type === 'physical-operator/progress' && event.data.type === 'turn.observation'
+    ))).toMatchObject({ data: { data: { kind: 'tool-completed', toolName: 'Read' } } })
+    const receipt = codex.receipts.values().next().value
+    if (receipt === undefined) throw new Error('expected durable receipt')
+    receipt.result.resolve({ output: [{ type: 'text', text: 'complete' }], stopReason: 'completed' })
+    await pending
   })
 
   it('keeps a settled answer while marking a failed Resident progress projection degraded', async () => {
@@ -705,6 +793,7 @@ describe('host physical-operator routing', () => {
     const { ctx, agent, deepseek, codex, mounted, echoCalls } = await setup({
       codexImmediate: false,
       codexBridgeTool: 'subscription_echo',
+      codexObservations: [{ kind: 'public-output', preview: 'resume-safe observation' }],
     })
     send(agent, '用 Codex 深度检查这个仓库并持续执行')
     while (codex.requests.length === 0 || echoCalls.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
@@ -741,5 +830,10 @@ describe('host physical-operator routing', () => {
     expect(lastAssistantMessage(agent).content).toEqual([
       { type: 'text', text: 'reconnected codex result' },
     ])
+    expect(agent.session.events.filter(event => (
+      event.type === 'physical-operator/progress'
+      && event.data.type === 'turn.observation'
+      && event.data.data.preview === 'resume-safe observation'
+    ))).toHaveLength(1)
   })
 })

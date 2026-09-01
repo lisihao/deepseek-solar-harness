@@ -243,6 +243,79 @@ describe('local Debate Provider', () => {
     )
   })
 
+  it('preserves settled work and structured blockers when a round TaskGraph fails partially', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-partial-'))
+    const ctx = new Context()
+    contexts.push(ctx)
+    const roundExecutor: DebateRoundExecutorPort = {
+      async executeRound(round) {
+        const proposer = round.turns.find(turn => turn.slotId === 'constructive-proposer')
+        if (proposer === undefined) throw new Error('fixture proposer missing')
+        return {
+          version: 1,
+          resultsBySlot: {
+            'constructive-proposer': {
+              ...resultFor(proposer),
+              attempt: 1,
+              routing: {
+                version: 1,
+                requestedOperatorId: proposer.operatorId,
+                requestedModel: proposer.model,
+                actualOperatorId: 'codex',
+                actualModel: 'gpt-5.6-sol',
+              },
+            },
+          },
+          failuresBySlot: {
+            'skeptical-falsifier': {
+              state: 'blocked',
+              attempt: 0,
+              errorCode: 'EXPLICIT_MODEL_UNAVAILABLE',
+              blockers: [{ code: 'EXPLICIT_MODEL_UNAVAILABLE', message: 'Claude subscription unavailable' }],
+              routing: {
+                version: 1,
+                requestedOperatorId: 'fixture-falsifier',
+                requestedModel: 'fixture-b',
+              },
+            },
+            'decision-judge': {
+              state: 'blocked',
+              attempt: 0,
+              errorCode: 'DEPENDENCY_FAILED',
+              blockers: [{ code: 'DEPENDENCY_FAILED', message: 'A required participant did not settle' }],
+              routing: {
+                version: 1,
+                requestedOperatorId: 'fixture-judge',
+                requestedModel: 'fixture-judge',
+              },
+            },
+          },
+        }
+      },
+    }
+    const service = new LocalDebateProvider(ctx, { root, executor: roundExecutor, idFactory: () => 'run-fixture' })
+
+    const failed = await service.start(request('auto', { commandId: 'start-partial' }))
+
+    expect(failed.state).toBe('failed')
+    expect(failed.rounds[0]?.state).toBe('failed')
+    expect(failed.rounds[0]?.turns).toMatchObject([
+      { slotId: 'constructive-proposer', state: 'settled', attempt: 1, operatorId: 'codex', model: 'gpt-5.6-sol' },
+      {
+        slotId: 'skeptical-falsifier', state: 'blocked', attempt: 0,
+        blockers: [{ code: 'EXPLICIT_MODEL_UNAVAILABLE', message: 'Claude subscription unavailable' }],
+      },
+      {
+        slotId: 'decision-judge', state: 'blocked', attempt: 0,
+        blockers: [{ code: 'DEPENDENCY_FAILED', message: 'A required participant did not settle' }],
+      },
+    ])
+    const events = (await service.readEvents({ runId: failed.runId, limit: 100 })).events
+    expect(events.filter(event => event.type === 'debate.agent.blocked')).toHaveLength(2)
+    expect(events.find(event => event.type === 'debate.agent.blocked')?.data.blockerCodes)
+      .toContain('EXPLICIT_MODEL_UNAVAILABLE')
+  })
+
   it('projects missing TaskGraph usage and account cost as unknown rather than zero', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-unknown-usage-'))
     const service = await provider(root, async (turn) => {

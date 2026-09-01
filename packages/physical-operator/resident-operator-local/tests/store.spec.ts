@@ -100,6 +100,33 @@ describe('ResidentStore', () => {
     store.close()
   })
 
+  it('orders bounded scrubbed observations across a Store restart and resumes by cursor', () => {
+    const path = root()
+    const first = new ResidentStore(path)
+    const accepted = first.accept('trace-command', 'trace-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
+    first.markRunning('trace-command', 'thread-1', 'turn-1')
+    first.observe('trace-command', { kind: 'public-output', preview: `visible API_KEY=secret ${'x'.repeat(2_000)}` })
+    first.observe('trace-command', { kind: 'tool-started', toolName: 'Bash\u0000unsafe' })
+    first.observe('trace-command', { kind: 'tool-completed', toolName: 'Bash' })
+    const beforeRestart = first.readEvents(accepted.sessionId)
+    const observations = beforeRestart.events.filter(event => event.type === 'turn.observation')
+    expect(observations).toHaveLength(3)
+    expect(observations.map(event => event.sequence)).toEqual([...observations.map(event => event.sequence)].sort((a, b) => a - b))
+    expect(observations[0]?.data).toMatchObject({ commandId: 'trace-command', turnId: accepted.turnId, kind: 'public-output' })
+    expect(observations[0]?.data.preview).toContain('API_KEY=[REDACTED]')
+    expect(String(observations[0]?.data.preview).length).toBeLessThanOrEqual(1_600)
+    expect(observations[1]?.data).toMatchObject({ kind: 'tool-started', toolName: 'Bashunsafe' })
+    const cursor = observations[0]!.sequence
+    first.close()
+
+    const restarted = new ResidentStore(path)
+    expect(restarted.readEvents(accepted.sessionId, cursor).events
+      .filter(event => event.type === 'turn.observation')
+      .map(event => event.data.kind))
+      .toEqual(['tool-started', 'tool-completed'])
+    restarted.close()
+  })
+
   it('admits independent lanes concurrently while keeping each lane single-flight', () => {
     const store = new ResidentStore(root())
     const first = store.accept('lane-one', 'hash-one', 'codex', '/workspace', PROFILE, PROFILE_SOURCE, undefined, undefined, 'run:A')

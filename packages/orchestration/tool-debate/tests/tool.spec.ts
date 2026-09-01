@@ -3,6 +3,7 @@ import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import DebateService, {
+  validateDebatePolicy,
   type DebateControlRequestV1,
   type DebateEventPageV1,
   type DebateEventReadRequestV1,
@@ -249,6 +250,11 @@ describe('debate model Consumer', () => {
       maxCostUsd: 2,
     })
     expect(policy.convergence.minSettledAgents).toBe(3)
+    expect(policy.roster.map(role => [role.role, role.fallbackOperatorIds])).toEqual([
+      ['constructive-proposer', undefined],
+      ['skeptical-falsifier', ['codex']],
+      ['decision-judge', ['codex']],
+    ])
     expect(tool.debatePolicyForPrompt('Evaluate this contested architecture.')).toMatchObject({
       budget: { maxRounds: 3 },
       roster: { length: 4 },
@@ -348,8 +354,18 @@ describe('debate model Consumer', () => {
       round: 2,
       slotId: 'slot-falsifier',
       role: 'skeptical-falsifier' as const,
-      operatorId: 'claude-code',
-      model: 'claude-fable-5',
+      operatorId: 'codex',
+      model: 'gpt-5.6-sol',
+      attempt: 1,
+      routing: {
+        version: 1 as const,
+        requestedOperatorId: 'claude-code',
+        requestedModel: 'claude-fable-5',
+        actualOperatorId: 'codex',
+        actualModel: 'gpt-5.6-sol',
+        fallbackReasonCode: 'provider-unavailable',
+        allocationPlanRef: 'artifact:allocation-falsifier',
+      },
       outputRef: 'artifact:falsifier-output',
       outputPreview: 'Falsifier output summary',
     }
@@ -419,6 +435,8 @@ describe('debate model Consumer', () => {
     expect(streamText.indexOf('Round 2')).toBeLessThan(streamText.indexOf('Explicit output summary: Falsifier output summary'))
     expect(streamText.indexOf('Convergence · round 1')).toBeLessThan(streamText.indexOf('Convergence · round 2'))
     expect(streamText.indexOf('Convergence · round 2')).toBeLessThan(streamText.indexOf('Moderator summary (主持人总结): Final host decision summary'))
+    expect(streamText).toContain('Agent skeptical-falsifier (slot-falsifier) · settled — codex/gpt-5.6-sol')
+    expect(streamText).toContain('Provider fallback: claude-code/claude-fable-5 → codex/gpt-5.6-sol (provider-unavailable)')
     expect(streamText).toContain('Moderator summary (主持人总结): Final host decision summary')
     expect(streamText).not.toContain('reasoning')
 
@@ -430,6 +448,56 @@ describe('debate model Consumer', () => {
       throw new Error('missing Debate text block-end')
     }
     expect(blockEnd.block.text).toBe(streamText)
+  })
+
+  it('streams the durable blocker when a roster slot was never dispatched', async () => {
+    const { ctx, agent, provider } = await setupAutomatic()
+    const template = snapshot()
+    const round = template.rounds[0]
+    if (round === undefined) throw new Error('missing Debate fixture round')
+    const { synthesis: _synthesis, ...withoutSynthesis } = template
+    const { convergence: _convergence, ...withoutConvergence } = round
+    provider.startResult = {
+      ...withoutSynthesis,
+      state: 'failed',
+      rounds: [{
+        ...withoutConvergence,
+        state: 'failed',
+        turns: [{
+          version: 1,
+          round: 1,
+          slotId: 'decision-judge',
+          role: 'decision-judge',
+          operatorId: 'claude-code',
+          model: 'claude-opus-5',
+          state: 'blocked',
+          attempt: 0,
+          routing: {
+            version: 1,
+            requestedOperatorId: 'claude-code',
+            requestedModel: 'claude-opus-5',
+          },
+          blockers: [{
+            code: 'DEPENDENCY_FAILED',
+            message: 'participant execution did not complete',
+            nodeId: 'debate-r1-decision-judge',
+          }],
+          claimIds: [],
+          evidenceRefs: [],
+        }],
+      }],
+    }
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Debate this blocked decision.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    const streamText = textDeltas(agent).join('')
+    expect(streamText).toContain('Agent decision-judge (decision-judge) · blocked — claude-code/claude-opus-5')
+    expect(streamText).toContain('Blocker: DEPENDENCY_FAILED — participant execution did not complete')
   })
 
   it('keeps legacy Sessions disabled and persists an ignorable whole-value mode', async () => {
@@ -467,6 +535,14 @@ describe('debate model Consumer', () => {
       ['evidence-auditor', 'codex', 'gpt-5.6-sol'],
       ['decision-judge', 'claude-code', 'claude-opus-5'],
     ])
+    expect(tool.DEFAULT_DEBATE_POLICY.roster.map(role => [role.role, role.fallbackOperatorIds])).toEqual([
+      ['constructive-proposer', undefined],
+      ['skeptical-falsifier', ['codex']],
+      ['evidence-auditor', undefined],
+      ['decision-judge', ['codex']],
+    ])
+    expect(tool.DEFAULT_DEBATE_POLICY.roster.every(role => role.source === 'native-subscription')).toBe(true)
+    expect(validateDebatePolicy(tool.DEFAULT_DEBATE_POLICY).roster).toEqual(tool.DEFAULT_DEBATE_POLICY.roster)
     expect(tool.DEFAULT_DEBATE_POLICY.budget).toMatchObject({ maxRounds: 3, maxAgentsPerRound: 4 })
     expect(tool.DEFAULT_DEBATE_POLICY.preserveDissent).toBe(true)
     expect(tool.debateGuidance).toContain('does not replace the DSH TaskGraph Scheduler')
@@ -553,5 +629,81 @@ describe('debate model Consumer', () => {
     expect(provider.controls[0]).toMatchObject({
       runId: 'debate-run-1', expectedRevision: 4, action: 'pause', reason: 'Review the evidence.',
     })
+  })
+
+  it('projects bounded requested and actual routing with blockers', async () => {
+    const { ctx, agent, provider } = await setup()
+    const template = snapshot()
+    const round = template.rounds[0]
+    if (round === undefined) throw new Error('missing Debate fixture round')
+    provider.inspectFallback = snapshot({
+      rounds: [{
+        ...round,
+        turns: [{
+          version: 1,
+          round: 1,
+          slotId: 'skeptical-falsifier',
+          role: 'skeptical-falsifier',
+          operatorId: 'codex',
+          model: 'gpt-5.6-sol',
+          state: 'blocked',
+          attempt: 2,
+          routing: {
+            version: 1,
+            requestedOperatorId: 'claude-code',
+            requestedModel: 'claude-fable-5',
+            actualOperatorId: 'codex',
+            actualModel: 'gpt-5.6-sol',
+            fallbackReasonCode: 'provider-unavailable',
+            allocationPlanRef: 'artifact:allocation-falsifier',
+          },
+          blockers: [{
+            code: 'DEPENDENCY_FAILED',
+            message: 'x'.repeat(800),
+            nodeId: 'debate-r1-skeptical-falsifier',
+          }],
+          claimIds: [],
+          evidenceRefs: [],
+        }],
+      }],
+    })
+
+    const inspected = resultValue(await call(ctx, agent, { action: 'inspect', run_id: 'debate-run-1' }))
+    expect(inspected).toMatchObject({
+      run: {
+        rounds: [{
+          turns: [{
+            role: 'skeptical-falsifier',
+            operatorId: 'codex',
+            model: 'gpt-5.6-sol',
+            state: 'blocked',
+            attempt: 2,
+            routing: {
+              requestedOperatorId: 'claude-code',
+              requestedModel: 'claude-fable-5',
+              actualOperatorId: 'codex',
+              actualModel: 'gpt-5.6-sol',
+              fallbackReasonCode: 'provider-unavailable',
+              allocationPlanRef: 'artifact:allocation-falsifier',
+            },
+            blockers: [{
+              code: 'DEPENDENCY_FAILED',
+              nodeId: 'debate-r1-skeptical-falsifier',
+            }],
+          }],
+        }],
+      },
+    })
+    const inspectedRun = inspected.run as {
+      roster: unknown[]
+      rounds: Array<{ turns: Array<{ blockers: Array<{ message: string }> }> }>
+    }
+    expect(inspectedRun.roster).toEqual(expect.arrayContaining([expect.objectContaining({
+      role: 'skeptical-falsifier',
+      fallbackOperatorIds: ['codex'],
+    })]))
+    const turn = inspectedRun.rounds[0]?.turns[0]
+    expect(turn?.blockers[0]?.message).toHaveLength(600)
+    expect(turn?.blockers[0]?.message.endsWith('…')).toBe(true)
   })
 })

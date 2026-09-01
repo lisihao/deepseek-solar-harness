@@ -8,6 +8,7 @@ import { registerTrajectoryAssistantDefinition } from '../src/client/trajectory-
 import { registerTrajectoryCompactionDefinitions } from '../src/client/trajectory-compaction-definition.ts'
 import type { TrajectorySnapshot } from '../src/client/trajectory-contract.ts'
 import { registerTrajectoryMessageDefinitions } from '../src/client/trajectory-message-definitions.ts'
+import { registerTrajectoryPhysicalOperatorDefinition } from '../src/client/trajectory-physical-operator-definition.ts'
 import { registerTrajectoryRequestHeaderDefinition } from '../src/client/trajectory-request-header-definition.ts'
 import { trajectoryViewDefinition } from '../src/client/trajectory-snapshot-builder.ts'
 import { registerTrajectoryToolDefinition } from '../src/client/trajectory-tool-definition.ts'
@@ -23,6 +24,7 @@ const registrationContext = {
 } as unknown as Context
 
 registerTrajectoryMessageDefinitions(registrationContext)
+registerTrajectoryPhysicalOperatorDefinition(registrationContext)
 registerTrajectoryRequestHeaderDefinition(registrationContext)
 registerTrajectoryAssistantDefinition(registrationContext)
 registerTrajectoryToolDefinition(registrationContext)
@@ -88,6 +90,85 @@ function assistantMessage(id: string, text: string) {
 }
 
 describe('Trajectory conversation Definitions', () => {
+  it('groups a Resident command by command id, dedupes reconnect sequence, and keeps only safe observations', () => {
+    const current = snapshot(assembler([
+      at(1, 'physical-operator/dispatch', {
+        commandId: 'command-1', operatorId: 'codex', promptMessageId: 'm', requestedByMessageId: 'm',
+        turn: 2, step: 1, recovered: false,
+      }),
+      at(2, 'physical-operator/progress', {
+        commandId: 'command-1', operatorId: 'codex', sequence: 4, type: 'turn.observation',
+        time: '2026-09-01T10:00:00.000Z',
+        data: { kind: 'public-output', preview: `Visible API_KEY=secret ${'x'.repeat(400)}` },
+      }, { ignorable: true }),
+      at(3, 'physical-operator/progress', {
+        commandId: 'command-1', operatorId: 'codex', sequence: 4, type: 'turn.observation',
+        time: '2026-09-01T10:00:00.000Z',
+        data: { kind: 'public-output', preview: 'reconnect duplicate' },
+      }, { ignorable: true }),
+      at(4, 'physical-operator/progress', {
+        commandId: 'command-1', operatorId: 'codex', sequence: 5, type: 'turn.observation',
+        time: '2026-09-01T10:00:01.000Z',
+        data: { kind: 'tool-started', toolName: 'Bash', arguments: { secret: 'never render' } },
+      }, { ignorable: true }),
+      at(5, 'physical-operator/dispatch-terminal', {
+        commandId: 'command-1', code: 'OPERATOR_ERROR',
+      }, { ignorable: true }),
+    ]))
+
+    expect(current.physicalOperatorExecutions).toHaveLength(1)
+    expect(current.physicalOperatorExecutions[0]).toMatchObject({
+      commandId: 'command-1', operatorId: 'codex', turn: 2, step: 1,
+    })
+    const entries = current.physicalOperatorExecutions[0]?.entries ?? []
+    expect(entries).toHaveLength(4)
+    expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
+      .toContain('[REDACTED]')
+    expect(entries.find(entry => entry.type === 'observation')?.observation?.preview?.length)
+      .toBeLessThanOrEqual(240)
+    expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
+      .not.toContain('reconnect duplicate')
+    expect(entries.find(entry => entry.type === 'observation' && entry.observation?.kind === 'tool-started')?.observation)
+      .toEqual({ kind: 'tool-started', toolName: 'Bash' })
+    expect(entries.some(entry => entry.type === 'terminal')).toBe(true)
+  })
+
+  it('projects a successful Resident turn.settled as a non-error terminal entry', () => {
+    const current = snapshot(assembler([
+      at(1, 'physical-operator/dispatch', {
+        commandId: 'command-success', operatorId: 'codex', promptMessageId: 'm', requestedByMessageId: 'm',
+        turn: 1, step: 1, recovered: false,
+      }),
+      at(2, 'physical-operator/progress', {
+        commandId: 'command-success', operatorId: 'codex', sequence: 1, type: 'turn.settled',
+        time: '2026-09-01T10:00:01.000Z',
+        data: { commandId: 'command-success', turnId: 'turn-1', stopReason: 'completed' },
+      }, { ignorable: true }),
+    ]))
+
+    expect(current.physicalOperatorExecutions[0]?.entries).toContainEqual(expect.objectContaining({
+      type: 'terminal', code: 'completed', outcome: 'success',
+    }))
+  })
+
+  it('uses the explicit tool-dispatch event as an equivalent command start without inventing an agent-loop location', () => {
+    const current = snapshot(assembler([
+      at(1, 'physical-operator/tool-dispatch', {
+        commandId: 'tool-command-1', operatorId: 'claude-code', toolCallId: 'tool-1', mode: 'resident',
+        description: 'bounded local summary',
+      }),
+      at(2, 'physical-operator/progress', {
+        commandId: 'tool-command-1', operatorId: 'claude-code', sequence: 1, type: 'turn.progress',
+        time: '2026-09-01T10:00:00.000Z', data: { phase: 'reasoning' },
+      }, { ignorable: true }),
+    ]))
+
+    expect(current.physicalOperatorExecutions).toMatchObject([{
+      commandId: 'tool-command-1', operatorId: 'claude-code', turn: 0, step: 0,
+    }])
+    expect(current.physicalOperatorExecutions[0]?.entries.map(entry => entry.type)).toEqual(['dispatch', 'progress'])
+  })
+
   it('assembles streaming usage, preserves retry facts, and materializes interruption', () => {
     const value = assembler([
       at(1, 'turn/start', { turn: 1 }),

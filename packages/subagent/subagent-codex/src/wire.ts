@@ -75,6 +75,17 @@ export interface CodexAppServerRateLimit {
   readonly secondary?: CodexAppServerRateLimitWindow
 }
 
+/** Trace-safe event surfaced by the Codex app-server wire to a Resident Driver. */
+export type CodexAppServerObservation =
+  | { readonly kind: 'public-output'; readonly preview: string }
+  | { readonly kind: 'tool-started'; readonly toolName: string }
+  | { readonly kind: 'tool-completed'; readonly toolName: string }
+  | { readonly kind: 'approval-required'; readonly approvalKind: string; readonly preview?: string }
+  | { readonly kind: 'usage-updated'; readonly usage: SubagentUsage }
+
+/** Optional one-way observer for trace-safe Codex app-server activity. */
+export type CodexAppServerObserver = (observation: CodexAppServerObservation) => void
+
 function object(value: unknown, label: string): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`subagent-codex: app-server returned invalid ${label}`)
@@ -173,6 +184,22 @@ function abortError(signal: AbortSignal): Error {
     : new Error(`subagent-codex: app-server request aborted: ${String(signal.reason)}`)
 }
 
+function productToolName(item: JsonObject): string | undefined {
+  const type = item.type
+  if (typeof type !== 'string') return undefined
+  switch (type) {
+    case 'commandExecution':
+    case 'fileChange':
+    case 'mcpToolCall':
+    case 'webSearch':
+    case 'functionCall':
+    case 'dynamicToolCall':
+      return type
+    default:
+      return undefined
+  }
+}
+
 async function raceAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) {
     void pending.catch(() => {})
@@ -217,6 +244,7 @@ export class CodexAppServerWire {
     private readonly approvalBehavior: 'decline' | 'require' = 'decline',
     private readonly dynamicTools: readonly CodexDynamicToolSpec[] = [],
     private readonly dynamicToolHandler?: (call: CodexDynamicToolCall) => Promise<CodexDynamicToolResult>,
+    private readonly observer?: CodexAppServerObserver,
   ) {
     this.transport = new JsonRpcLineTransport(input, output)
     // Fatal protocol state can arrive after the current guarded operation has
@@ -605,6 +633,7 @@ export class CodexAppServerWire {
   }
 
   private requireApproval(method: string): void {
+    this.observer?.({ kind: 'approval-required', approvalKind: method })
     if (this.approvalBehavior === 'require') {
       this.fail(new CodexApprovalRequiredError(method))
     }
@@ -634,6 +663,23 @@ export class CodexAppServerWire {
       if (id !== this.turnId) return
       const usage = object(params.tokenUsage, 'thread/tokenUsage/updated tokenUsage')
       this.lastUsage = tokenUsage(usage.last)
+      this.observer?.({ kind: 'usage-updated', usage: this.lastUsage })
+      return
+    }
+    if (method === 'item/started') {
+      const threadId = string(params.threadId, 'item/started thread id')
+      if (threadId !== this.threadId) return
+      const id = string(params.turnId, 'item/started turn id')
+      if (this.turnId === undefined) {
+        if (this.turnCompleted !== undefined) {
+          this.observePendingTurnId(id)
+          this.earlyTurnNotifications.push({ method, params })
+        }
+        return
+      }
+      if (id !== this.turnId) return
+      const toolName = productToolName(object(params.item, 'item/started item'))
+      if (toolName !== undefined) this.observer?.({ kind: 'tool-started', toolName })
       return
     }
     if (method === 'item/completed') {
@@ -649,7 +695,11 @@ export class CodexAppServerWire {
       }
       if (id !== this.turnId) return
       const item = object(params.item, 'item/completed item')
-      if (item.type !== 'agentMessage') return
+      if (item.type !== 'agentMessage') {
+        const toolName = productToolName(item)
+        if (toolName !== undefined) this.observer?.({ kind: 'tool-completed', toolName })
+        return
+      }
       const text = typeof item.text === 'string'
         ? item.text
         : (() => { throw new Error('subagent-codex: app-server returned an invalid agent message') })()
@@ -660,6 +710,7 @@ export class CodexAppServerWire {
       } else if (item.phase !== 'commentary') {
         throw new Error(`subagent-codex: app-server returned an unknown agent message phase ${JSON.stringify(item.phase)}`)
       }
+      this.observer?.({ kind: 'public-output', preview: text })
       return
     }
     if (method !== 'turn/completed') return
