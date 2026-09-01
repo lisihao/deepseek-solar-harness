@@ -18,6 +18,8 @@ Governance gates may declare `select_when` independently from `input_patterns`. 
 
 Pull-request CI uses the existing conservative path classifier before ordinary heavy jobs. Only the explicit documentation allowlist emits `run_ci=false`; empty input, an unknown path, classifier failure, repository automation, package input, source, or tooling remains full CI. The stable aggregate job always runs. It accepts intentionally skipped heavy jobs only after a successful docs-only classification and continues to reject failures, cancellations, or unexpected skips. Solar pull requests retain their required governance-owned `doc-sync`; documentation-only pull requests to another base run one targeted documentation job. Push and manual benchmark behavior is unchanged.
 
+The changed governance runtime is sealed as `@lisihao/dsh-code-harness-governance@0.3.14`. Because DSH Desktop consumes that immutable tarball, the compatible runtime-only change assigns Desktop patch version `3.10.3`; source, packaged artifact, and installed runtime must converge on that version through D00-D08 before delivery.
+
 ## Alternatives considered
 
 **Stop selecting `source-build` for documentation.** Rejected because current documentation contracts consume generated host output; removing the dependency would change correctness rather than remove duplicate work.

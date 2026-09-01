@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "3.10.2",
+  "version": "3.10.3",
   "private": true,
   "description": "DSH Desktop product workspace",
   "license": "MIT",
@@ -209,7 +209,7 @@
     "@deepseek-ai/dsh-tool-time": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-time-0.0.1.tgz",
     "@linxin666/dsh-client-ui-skin-blue-fantasy": "file:./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-client-ui-skin-blue-fantasy-0.1.17.tgz",
     "@linxin666/dsh-remote-web-ui": "file:./dsh-plugin-desktop/vendor/dsh-packages/linxin666-dsh-remote-web-ui-0.1.17.tgz",
-    "@lisihao/dsh-code-harness-governance": "file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.13.tgz",
+    "@lisihao/dsh-code-harness-governance": "file:./dsh-plugin-desktop/vendor/dsh-packages/lisihao-dsh-code-harness-governance-0.3.14.tgz",
     "@nanmicoder/dsh-agent-teams": "file:./dsh-plugin-desktop/vendor/dsh-packages/nanmicoder-dsh-agent-teams-0.1.5-solar.1.tgz",
     "@omdsh-dev/dsh-genui": "file:./dsh-plugin-desktop/vendor/dsh-packages/omdsh-dev-dsh-genui-0.9.1-solar.2.tgz",
     "@omdsh-dev/dsh-plugin-check": "file:./dsh-plugin-desktop/vendor/dsh-packages/omdsh-dev-dsh-plugin-check-0.1.0.tgz",

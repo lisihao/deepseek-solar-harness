@@ -18,6 +18,8 @@ Status: implemented
 
 拉取请求 CI 在普通重作业前复用现有的保守路径分类器。只有显式文档白名单会输出 `run_ci=false`；空输入、未知路径、分类失败、仓库自动化、包输入、源码或 tooling 仍运行完整 CI。稳定的 aggregate job 始终运行。只有成功分类为 docs-only 时，它才接受有意跳过的重作业；失败、取消或意外跳过仍会被拒绝。面向 solar 的 PR 继续由必需治理工作流执行 `doc-sync`；面向其他分支的纯文档 PR 则运行一个定向文档作业。push 与手工 benchmark 行为保持不变。
 
+变更后的治理运行时封装为 `@lisihao/dsh-code-harness-governance@0.3.14`。由于 DSH Desktop 会消费该不可变 tarball，本次兼容的纯运行时改动把 Desktop PATCH 版本定为 `3.10.3`；交付前必须通过 D00–D08，使源码版本、打包产物版本与已安装运行时版本收敛到该版本。
+
 ## 曾考虑的替代方案
 
 **文档变更不再选择 `source-build`。** 不采用，因为当前文档合同会消费生成态 host 输出；删除依赖是在改变正确性，而不是消除重复工作。
