@@ -1,7 +1,7 @@
 /** Model-facing Consumer and per-session policy for the provider-neutral Debate seam. */
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   type DebateControlAction,
   DebateError,
@@ -341,6 +341,22 @@ function hostCommandId(sessionId: string, messageId: string): string {
   return `debate-host:${sessionId}:${messageId}`
 }
 
+function persistHostDispatch(
+  agent: Agent,
+  current: HostMessage,
+  turn: number,
+  step: number,
+): DebateHostDispatch {
+  const dispatch = {
+    commandId: hostCommandId(String(agent.id), current.id),
+    promptMessageId: current.id,
+    turn,
+    step,
+  }
+  agent.session.append('debate/dispatch', dispatch, { ignorable: true })
+  return dispatch
+}
+
 function latestDirectUser(messages: readonly HostMessage[]): HostMessage | undefined {
   return [...messages].reverse().find(message => message.source.kind === 'user')
 }
@@ -514,10 +530,6 @@ function runUsage(run: DebateRunSnapshotV1): TokenUsage | undefined {
 class DebateHostAdapter extends LlmAdapter {
   constructor(private readonly ctx: Context) { super() }
 
-  override listModels(provider: string): Promise<readonly { provider: string; id: string; name: string }[]> {
-    return Promise.resolve([{ provider, id: DEBATE_HOST_MODEL, name: 'Debate' }])
-  }
-
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     if (!isAgentLoopRequest(options)) throw new Error('Debate host adapter only accepts an Agent Loop request')
     const agent = this.ctx.agents.requireInitiator()
@@ -616,18 +628,19 @@ export function apply(ctx: Context): void {
       if (decision.kind !== 'enter' || foldDebatePreferences(agent.session.events).mode !== 'enabled') return decision
       const current = latestDirectUser(decision.messages)
       if (current === undefined || dispatchForPosition(agent.session.events, turn, step) !== undefined) return decision
-      agent.session.append('debate/dispatch', {
-        commandId: hostCommandId(String(agent.id), current.id),
-        promptMessageId: current.id,
-        turn,
-        step,
-      }, { ignorable: true })
+      persistHostDispatch(agent, current, turn, step)
       return decision
     })
 
     hostCtx.on('agent/request', async ({ agent, turn, step }, next) => {
       const base = await next()
-      if (dispatchForPosition(agent.session.events, turn, step) === undefined) return base
+      let dispatch = dispatchForPosition(agent.session.events, turn, step)
+      if (dispatch === undefined && base.provider === DEBATE_HOST_PROVIDER && base.model === DEBATE_HOST_MODEL) {
+        const current = latestDirectUser(agent.session.deriveMessages())
+        if (current === undefined) throw new Error('Debate host route requires a current direct user message')
+        dispatch = persistHostDispatch(agent, current, turn, step)
+      }
+      if (dispatch === undefined) return base
       const { reasoningEffort: _reasoningEffort, ...portable } = base
       return { ...portable, provider: DEBATE_HOST_PROVIDER, model: DEBATE_HOST_MODEL }
     })

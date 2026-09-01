@@ -191,7 +191,12 @@ async function setup() {
   return { ctx, agent, provider: ctx.debates as ScriptedDebates }
 }
 
-async function setupAutomatic() {
+async function setupAutomatic(
+  route: { readonly provider: string; readonly model: string } = {
+    provider: 'unavailable-primary',
+    model: 'unavailable-primary',
+  },
+) {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(LlmRuntime)
@@ -206,7 +211,7 @@ async function setupAutomatic() {
   await ctx.plugin(tool)
   const agent = ctx.agentLoop.create(
     SessionId('session-debate-automatic'),
-    { provider: 'unavailable-primary', model: 'unavailable-primary' },
+    route,
     { cwd: '/workspace' },
   )
   return { ctx, agent, provider: ctx.debates as ScriptedDebates }
@@ -296,6 +301,38 @@ describe('debate model Consumer', () => {
     const response = assistant.data.message.content[0]
     expect(response?.type).toBe('text')
     expect(response?.type === 'text' ? response.text : '').toContain('Decision summary')
+  })
+
+  it('durably admits a turn when a legacy Session selected the internal Debate route as its primary model', async () => {
+    const { ctx, agent, provider } = await setupAutomatic({
+      provider: 'dsh-debate-host',
+      model: 'debate',
+    })
+
+    const message = createUserMessage({
+      content: [{ type: 'text', text: 'Debate this decision.' }],
+      source: { kind: 'user' },
+    })
+    agent.followup(message)
+    await agent.whenIdle()
+
+    expect(provider.starts).toHaveLength(1)
+    expect(provider.starts[0]?.commandId).toBe(
+      `debate-host:session-debate-automatic:${message.id}`,
+    )
+    expect(agent.session.events.find(event => event.type === 'debate/dispatch')).toMatchObject({
+      ignorable: true,
+      data: {
+        commandId: `debate-host:session-debate-automatic:${message.id}`,
+        promptMessageId: message.id,
+        turn: 1,
+        step: 1,
+      },
+    })
+    expect(agent.session.events.find(event => event.type === 'turn/end')).toMatchObject({
+      data: { reason: { kind: 'completed' } },
+    })
+    await expect(ctx.llm.listModels('dsh-debate-host')).resolves.toEqual([])
   })
 
   it('streams durable roster, agent output previews, convergence, and the final host summary', async () => {

@@ -5,6 +5,19 @@
   config:
     path: ./cordis.yml
     patches:
+      # Live authored acceptance mirrors the legacy direct-host route. The
+      # fixture Debate Provider remains keyless and starts no external model.
+      - id: acp-agent
+        name: '@deepseek-ai/dsh-acp-demo'
+        config:
+          provider: dsh-debate-host
+          model: debate
+          persistenceRoot: !!js process.env.DSH_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
+          persistenceCompression: !!js "process.env.DSH_SNAPSHOT === undefined ? 'zstd' : 'none'"
+          workspaceContext:
+            maxBytes: 65536
+          persona: |
+            You are a deterministic Debate host fixture. Your working directory is {{cwd}}.
       - insert:
           - id: debate-fixture
             name: './tests/fixtures/debate-loader.ts'
