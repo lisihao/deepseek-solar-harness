@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { releaseMac, type MacReleaseOptions } from '../scripts/release-mac.ts'
 
-const DEVELOPER_ID_OUTPUT = `
-  1) 0123456789ABCDEF "Developer ID Application: Mengxin Yang (TEAM123456)"
-     1 valid identities found
-`
-
 interface CommandCall {
   readonly command: string
   readonly args: readonly string[]
@@ -13,20 +8,17 @@ interface CommandCall {
   readonly env: NodeJS.ProcessEnv
 }
 
-function baseOptions(
-  env: NodeJS.ProcessEnv,
-  calls: CommandCall[],
-  identityEnvironments: NodeJS.ProcessEnv[] = [],
-  logs: string[] = [],
-): MacReleaseOptions {
+function baseOptions(calls: CommandCall[], logs: string[] = []): MacReleaseOptions {
   return {
-    env,
-    platform: 'darwin',
-    desktopRoot: '/repo/dsh-plugin-desktop',
-    listCodeSigningIdentities: identityEnv => {
-      identityEnvironments.push({ ...identityEnv })
-      return DEVELOPER_ID_OUTPUT
+    env: {
+      PATH: '/usr/bin',
+      SAFE_BUILD_VALUE: 'kept',
+      APPLE_ID: 'must-not-be-forwarded',
+      CSC_LINK: 'must-not-be-forwarded',
     },
+    platform: 'darwin',
+    arch: 'arm64',
+    desktopRoot: '/repo/dsh-plugin-desktop',
     run: (command, args, cwd, commandEnv) => {
       calls.push({ command, args: [...args], cwd, env: { ...commandEnv } })
     },
@@ -35,118 +27,48 @@ function baseOptions(
 }
 
 describe('macOS release command boundary', () => {
-  it('runs checks without credentials, then gives credentials only to the DMG builder', () => {
+  it('builds without Apple credentials and applies the ad-hoc signature', () => {
     const calls: CommandCall[] = []
-    const identityEnvironments: NodeJS.ProcessEnv[] = []
     const logs: string[] = []
-    const appPassword = 'notary-password-that-must-not-be-logged'
 
-    releaseMac(baseOptions({
-      PATH: '/usr/bin',
-      SAFE_BUILD_VALUE: 'kept',
-      APPLE_ID: 'developer@example.test',
-      APPLE_APP_SPECIFIC_PASSWORD: appPassword,
-      APPLE_TEAM_ID: 'TEAM123456',
-    }, calls, identityEnvironments, logs))
+    releaseMac(baseOptions(calls, logs))
 
-    expect(identityEnvironments).toEqual([{ PATH: '/usr/bin', SAFE_BUILD_VALUE: 'kept' }])
     expect(calls).toHaveLength(4)
     expect(calls[0]).toEqual({
       command: 'yarn',
-      args: ['run', 'check'],
-      cwd: '/repo',
+      args: [
+        'exec', 'electron-builder', '--mac', 'dir',
+        '--config.mac.identity=null', '--config.mac.notarize=false',
+      ],
+      cwd: '/repo/dsh-plugin-desktop',
       env: { PATH: '/usr/bin', SAFE_BUILD_VALUE: 'kept' },
     })
     expect(calls[1]).toEqual({
-      command: 'yarn',
+      command: 'codesign',
       args: [
-        'exec', 'electron-builder', '--mac', 'dmg',
-        '--config.forceCodeSigning=true', '--config.mac.notarize=true',
+        '--force', '--deep', '--sign', '-',
+        '/repo/dsh-plugin-desktop/dist/mac-arm64/DSH Desktop.app',
       ],
       cwd: '/repo/dsh-plugin-desktop',
-      env: {
-        PATH: '/usr/bin',
-        SAFE_BUILD_VALUE: 'kept',
-        APPLE_ID: 'developer@example.test',
-        APPLE_APP_SPECIFIC_PASSWORD: appPassword,
-        APPLE_TEAM_ID: 'TEAM123456',
-      },
-    })
-    expect(calls[2]).toEqual({
-      command: process.execPath,
-      args: ['scripts/verify-packaged-node-pty.ts'],
-      cwd: '/repo/dsh-plugin-desktop',
       env: { PATH: '/usr/bin', SAFE_BUILD_VALUE: 'kept' },
     })
-    expect(calls[3]).toEqual({
-      command: process.execPath,
-      args: ['scripts/verify-mac-release.ts'],
-      cwd: '/repo/dsh-plugin-desktop',
-      env: { PATH: '/usr/bin', SAFE_BUILD_VALUE: 'kept' },
-    })
-    expect(logs).toHaveLength(1)
-    expect(logs[0]).toContain('signing via keychain; notarization via apple-id')
-    expect(logs[0]).not.toContain(appPassword)
+    expect(calls[2]?.args).toEqual(['scripts/verify-packaged-node-pty.ts'])
+    expect(calls[3]?.args).toEqual(['scripts/verify-mac-release.ts'])
+    expect(calls.every(call => call.env.APPLE_ID === undefined && call.env.CSC_LINK === undefined)).toBe(true)
+    expect(logs).toEqual(['macOS release preflight passed: signing via ad-hoc'])
   })
 
-  it('adapts the existing P12 variables only for electron-builder', () => {
-    const calls: CommandCall[] = []
-    const p12Password = 'p12-password-that-must-not-be-logged'
-    const p12 = Buffer.from([0x30, 0x03, 0x02, 0x01, 0x00]).toString('base64')
-    const options: MacReleaseOptions = {
-      ...baseOptions({
-        PATH: '/usr/bin',
-        APPLE_API_KEY: '/private/AuthKey.p8',
-        APPLE_API_KEY_ID: 'KEY123',
-        APPLE_API_ISSUER: 'issuer-id',
-        CSC_KEY_PASSWORD: p12Password,
-        MAC_CERT_P12_BASE64: p12,
-        MACOS_SIGN_IDENTITY: 'Developer ID Application: Mengxin Yang (TEAM123456)',
-      }, calls),
-      listCodeSigningIdentities: () => {
-        throw new Error('P12 signing must not depend on a Keychain identity')
-      },
-    }
-
-    releaseMac(options)
-
-    expect(calls).toHaveLength(4)
-    expect(calls[0]?.env).toEqual({ PATH: '/usr/bin' })
-    expect(calls[1]?.env.CSC_LINK).toBe(`data:application/x-pkcs12;base64,${p12}`)
-    expect(calls[1]?.env.CSC_NAME).toBe('Mengxin Yang (TEAM123456)')
-    expect(calls[1]?.env.CSC_KEY_PASSWORD).toBe(p12Password)
-    expect(calls[1]?.env.MAC_CERT_P12_BASE64).toBeUndefined()
-    expect(calls[1]?.env.MACOS_SIGN_IDENTITY).toBeUndefined()
-    expect(calls[2]?.env).toEqual({ PATH: '/usr/bin' })
-    expect(calls[3]?.env).toEqual({ PATH: '/usr/bin' })
-  })
-
-  it('rejects development signing before running any command', () => {
-    const calls: CommandCall[] = []
-    const options = baseOptions({
-      APPLE_KEYCHAIN_PROFILE: 'dsh-notary',
-      CSC_NAME: 'Apple Development: Developer (TEAM123456)',
-    }, calls)
-
-    expect(() => releaseMac(options)).toThrow('Developer ID Application')
-    expect(calls).toEqual([])
-  })
-
-  it('does not invoke electron-builder after a failed credential-free check', () => {
+  it('does not sign or verify after packaging fails', () => {
     const calls: CommandCall[] = []
     const options: MacReleaseOptions = {
-      ...baseOptions({
-        APPLE_KEYCHAIN_PROFILE: 'dsh-notary',
-      }, calls),
+      ...baseOptions(calls),
       run: (command, args, cwd, commandEnv) => {
         calls.push({ command, args: [...args], cwd, env: { ...commandEnv } })
-        throw new Error('headless check failed')
+        throw new Error('packaging failed')
       },
     }
 
-    expect(() => releaseMac(options)).toThrow('headless check failed')
+    expect(() => releaseMac(options)).toThrow('packaging failed')
     expect(calls).toHaveLength(1)
-    expect(calls[0]?.args).toEqual(['run', 'check'])
-    expect(calls[0]?.cwd).toBe('/repo')
   })
 })
