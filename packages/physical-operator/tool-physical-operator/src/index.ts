@@ -1108,7 +1108,7 @@ function safeResidentProgressData(type: string, payload: unknown, commandId: str
       const usage = data.usage as Record<string, JsonValue>
       const numericUsage = Object.fromEntries(
         ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens', 'costUsd']
-          .flatMap(key => typeof usage[key] === 'number' && Number.isFinite(usage[key] as number) ? [[key, usage[key]]] : []),
+          .flatMap(key => typeof usage[key] === 'number' && Number.isFinite(usage[key]) ? [[key, usage[key]]] : []),
       ) as Record<string, JsonValue>
       return Object.keys(numericUsage).length === 0 ? undefined : { commandId, kind, usage: numericUsage }
     }
