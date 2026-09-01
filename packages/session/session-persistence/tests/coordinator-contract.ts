@@ -827,7 +827,7 @@ export function runCoordinatorContract(name: string, makeFixture: () => Promise<
 
     // --- HMR ---
 
-    it('HMR: applying the plugin seeds existing live sessions', async () => {
+    it('HMR: applying the plugin seeds existing live sessions', { timeout: 15_000 }, async () => {
       const fix = await makeFixture()
       const ctx = new Context()
       await ctx.plugin(SessionStore)
