@@ -2,6 +2,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import {
+  type DebateAgentTurnV1,
   type DebateEventV1,
   type DebateEventType,
   type DebateJsonValue,
@@ -19,6 +20,7 @@ import {
   type DesktopDebateControlRequest,
   type DesktopDebateDashboard,
   type DesktopDebateEvent,
+  type DesktopDebateRole,
   type DesktopDebateRun,
   type DesktopDebateRunSummary,
 } from './contracts.ts'
@@ -146,6 +148,22 @@ function projectSummary(run: DebateRunSummaryV1): DesktopDebateRunSummary {
   }
 }
 
+function projectTurnDetails(turn: DebateAgentTurnV1): NonNullable<DesktopDebateRole['latestTurn']> {
+  const outputPreview = boundedText(turn.outputPreview, MAX_TURN_PREVIEW)
+  return {
+    round: turn.round,
+    state: turn.state,
+    ...(turn.outputRef === undefined ? {} : { outputRef: turn.outputRef }),
+    ...(outputPreview === undefined ? {} : { outputPreview }),
+    claimIds: turn.claimIds.slice(0, MAX_ITEMS),
+    evidenceRefs: turn.evidenceRefs.slice(0, MAX_ITEMS).map(ref => ref.ref),
+    ...(turn.usage === undefined ? {} : { usage: { ...turn.usage } }),
+    ...(turn.startedAt === undefined ? {} : { startedAt: turn.startedAt }),
+    ...(turn.settledAt === undefined ? {} : { settledAt: turn.settledAt }),
+    ...(turn.errorCode === undefined ? {} : { errorCode: turn.errorCode }),
+  }
+}
+
 function projectRun(run: DebateRunSnapshotV1): DesktopDebateRun {
   const turns = run.rounds.flatMap(round => round.turns)
   const latestTurn = (role: string) => [...turns].reverse().find(turn => turn.role === role)
@@ -177,7 +195,6 @@ function projectRun(run: DebateRunSnapshotV1): DesktopDebateRun {
     ...(objective === undefined ? {} : { objective }),
     roles: run.roster.map((role) => {
       const turn = latestTurn(role.role)
-      const outputPreview = turn === undefined ? undefined : boundedText(turn.outputPreview, MAX_TURN_PREVIEW)
       return {
         role: role.role,
         kind: role.kind,
@@ -188,44 +205,19 @@ function projectRun(run: DebateRunSnapshotV1): DesktopDebateRun {
         tier: role.tier,
         source: role.source,
         required: role.required === true,
-        ...(turn === undefined ? {} : {
-          latestTurn: {
-            round: turn.round,
-            state: turn.state,
-            ...(turn.outputRef === undefined ? {} : { outputRef: turn.outputRef }),
-            ...(outputPreview === undefined ? {} : { outputPreview }),
-            claimIds: turn.claimIds.slice(0, MAX_ITEMS),
-            evidenceRefs: turn.evidenceRefs.slice(0, MAX_ITEMS).map(ref => ref.ref),
-            ...(turn.usage === undefined ? {} : { usage: { ...turn.usage } }),
-            ...(turn.startedAt === undefined ? {} : { startedAt: turn.startedAt }),
-            ...(turn.settledAt === undefined ? {} : { settledAt: turn.settledAt }),
-            ...(turn.errorCode === undefined ? {} : { errorCode: turn.errorCode }),
-          },
-        }),
+        ...(turn === undefined ? {} : { latestTurn: projectTurnDetails(turn) }),
       }
     }),
     rounds: run.rounds.map(round => ({
       round: round.round,
       state: round.state,
-      turnStates: round.turns.map((turn) => {
-        const outputPreview = boundedText(turn.outputPreview, MAX_TURN_PREVIEW)
-        return {
-          round: turn.round,
-          slotId: turn.slotId,
-          role: turn.role,
-          operatorId: turn.operatorId,
-          model: turn.model,
-          state: turn.state,
-          ...(turn.outputRef === undefined ? {} : { outputRef: turn.outputRef }),
-          ...(outputPreview === undefined ? {} : { outputPreview }),
-          claimIds: turn.claimIds.slice(0, MAX_ITEMS),
-          evidenceRefs: turn.evidenceRefs.slice(0, MAX_ITEMS).map(ref => ref.ref),
-          ...(turn.usage === undefined ? {} : { usage: { ...turn.usage } }),
-          ...(turn.startedAt === undefined ? {} : { startedAt: turn.startedAt }),
-          ...(turn.settledAt === undefined ? {} : { settledAt: turn.settledAt }),
-          ...(turn.errorCode === undefined ? {} : { errorCode: turn.errorCode }),
-        }
-      }),
+      turnStates: round.turns.map(turn => ({
+        slotId: turn.slotId,
+        role: turn.role,
+        operatorId: turn.operatorId,
+        model: turn.model,
+        ...projectTurnDetails(turn),
+      })),
       ...(round.convergence === undefined ? {} : { convergence: { ...round.convergence } }),
     })),
     claims: run.claimLedger.claims.slice(0, MAX_ITEMS).map((claim) => {
