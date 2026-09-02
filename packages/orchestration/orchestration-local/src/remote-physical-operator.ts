@@ -133,6 +133,12 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         'OPERATOR_MODE_UNSUPPORTED',
       )
     }
+    if (request.nativeToolPolicy === 'dsh-tools-authoritative') {
+      throw new PhysicalOperatorError(
+        'remote physical operators cannot use an owner-local DSH tool bridge as authority',
+        'OPERATOR_MODE_UNSUPPORTED',
+      )
+    }
     const workspace = request.parent.session.header.cwd
     if (workspace === undefined) {
       throw new PhysicalOperatorError('remote physical operator requires a workspace', 'WORKSPACE_INVALID')

@@ -230,7 +230,7 @@ function modelToolBridgeParam(params: Record<string, unknown>): PhysicalOperator
 
 function nativeToolPolicyParam(params: Record<string, unknown>): PhysicalOperatorNativeToolPolicy {
   const value = params.native_tool_policy ?? 'inherit'
-  if (value !== 'inherit' && value !== 'disabled') {
+  if (value !== 'inherit' && value !== 'dsh-tools-authoritative' && value !== 'disabled') {
     throw new ResidentOperatorError('resident protocol native_tool_policy is unsupported', 'INVALID_RESULT')
   }
   return value
@@ -522,6 +522,9 @@ export class ResidentDaemon {
     const nativeToolPolicy = nativeToolPolicyParam(params)
     if (nativeToolPolicy === 'disabled' && modelToolBridge !== undefined) {
       throw new ResidentOperatorError('a no-tool resident turn cannot expose a model tool bridge', 'INVALID_RESULT')
+    }
+    if (nativeToolPolicy === 'dsh-tools-authoritative' && modelToolBridge === undefined) {
+      throw new ResidentOperatorError('a DSH-tool-authoritative resident turn requires a model tool bridge', 'INVALID_RESULT')
     }
     const supersedesCommandId = params.supersedes_command_id === undefined
       ? undefined

@@ -146,7 +146,7 @@ export interface PhysicalOperatorResidentCatalog {
 }
 
 /** Native product tool surface allowed for one sealed physical execution. */
-export type PhysicalOperatorNativeToolPolicy = 'inherit' | 'disabled'
+export type PhysicalOperatorNativeToolPolicy = 'inherit' | 'dsh-tools-authoritative' | 'disabled'
 
 /** Caller-owned input for one operator execution. */
 export interface PhysicalOperatorStartRequest {
@@ -174,7 +174,7 @@ export interface PhysicalOperatorStartRequest {
   readonly residentLaneId?: string
   /** Optional genuine model-tool surface resolved before dispatch; never a prompt-encoded pseudo protocol. */
   readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1
-  /** Native Claude/Codex tools remain available unless the caller explicitly seals a no-tool execution. */
+  /** Native product defaults, a governed DSH writable-effect authority, or a completely disabled tool surface. */
   readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
 }
 

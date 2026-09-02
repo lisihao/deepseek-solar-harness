@@ -806,7 +806,7 @@ function residentProfile(value: unknown): NonNullable<ResidentExecuteRequest['pr
   return { model, ...effort === undefined ? {} : { effort } }
 }
 
-function residentNativeToolPolicy(value: unknown): NonNullable<ResidentExecuteRequest['nativeToolPolicy']> {
+function residentNativeToolPolicy(value: unknown): 'inherit' | 'disabled' {
   if (value !== 'inherit' && value !== 'disabled') {
     throw new ConnectionRpcHttpError(400, 'nativeToolPolicy must be inherit or disabled')
   }

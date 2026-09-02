@@ -8,7 +8,7 @@ Provider 是唯一状态写者。Resident Session 由稳定算子 ID、规范化
 
 ## 契约
 
-`execute()` 接收调用方生成的持久 command ID、算子 ID、工作区、lane ID、content blocks、可选的有界展示任务摘要、可选模型/强度偏好、可选的 DSH 组装系统提示、可选的密封模型工具桥、可选的密封原生工具策略与取消信号。任务摘要不是 prompt，只用于让重连后的用户界面在不持久化原始任务内容的前提下识别工作。系统提示与工具桥使通过资格审查的原生订阅产品可以成为当前 DSH Agent 的一等主模型，同时 DSH 仍拥有工具 scope、guard、approval、日志与插件组合。禁用的原生工具策略会进入 canonical Receipt hash，重放不能改变该策略；同时暴露模型工具桥属于无效请求。Provider 根据实时产品目录补全省略的 profile 字段，并把有效 profile 锁定到 Session。经显式授权的重试可以关联一条已 abandon 的 indeterminate command，但必须使用新 command ID。`authenticate()` 只在可信所有者显式操作后启动产品自有登录流程，绝不会让 DSH 读取产品 token。`list()`、`inspect()`、`inspectTurn()`、`readEvents()`、`interrupt()`、`compact()`、`reset()` 与 `resolveIndeterminate()` 只供可信插件和 CLI 管理消费者使用。
+`execute()` 接收调用方生成的持久 command ID、算子 ID、工作区、lane ID、content blocks、可选的有界展示任务摘要、可选模型/强度偏好、可选的 DSH 组装系统提示、可选的密封模型工具桥、可选的密封原生工具策略与取消信号。任务摘要不是 prompt，只用于让重连后的用户界面在不持久化原始任务内容的前提下识别工作。系统提示与工具桥使通过资格审查的原生订阅产品可以成为当前 DSH Agent 的一等主模型，同时 DSH 仍拥有工具 scope、guard、approval、日志与插件组合。原生工具策略会进入 canonical Receipt hash，重放不能改变该策略。`disabled` 禁止同时提供工具桥；`dsh-tools-authoritative` 则要求工具桥存在，并防止产品原生审批请求形成第二条权限通道。Provider 根据实时产品目录补全省略的 profile 字段，并把有效 profile 锁定到 Session。经显式授权的重试可以关联一条已 abandon 的 indeterminate command，但必须使用新 command ID。`authenticate()` 只在可信所有者显式操作后启动产品自有登录流程，绝不会让 DSH 读取产品 token。`list()`、`inspect()`、`inspectTurn()`、`readEvents()`、`interrupt()`、`compact()`、`reset()` 与 `resolveIndeterminate()` 只供可信插件和 CLI 管理消费者使用。
 
 生命周期、健康度、原因、Receipt、事件、模型目录、有效 profile 和 Artifact 引用均为 Provider 无关类型。Session 快照在最新持久 turn 摘要和结构化事件旁包含已锁定的模型/强度与选择来源；客户端重启后可通过 `inspectTurn()` 恢复当前或已结算 Receipt 的结果。`compact()` 使用独立持久 command receipt 与乐观 state revision，只能处理已有原生历史的 idle Session，并保持其原生身份不变；派发后终态无法证明时进入 `COMMAND_INDETERMINATE`，禁止自动重放。`reset` 清除原生 Session 关联与有效 profile；两者都不删除产品历史或 Artifact。
 
@@ -24,6 +24,6 @@ No direct invalidation; the physical-operator Consumer owns its request schema.
 
 ## Known Limitations and Deferred Work
 
-- 协议 v11 新增密封的原生工具策略，但仍不包含人工写接管与 control lease。
+- 协议 v12 新增 DSH 工具权威执行，但仍不包含人工写接管与 control lease。
 - Durable Jobs 投影与亲和调度器是独立的后续 Consumer。
-- v11 面向本地 Provider；远程传输和 Windows named pipe 后置。
+- v12 面向本地 Provider；远程传输和 Windows named pipe 后置。

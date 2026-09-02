@@ -35,6 +35,36 @@ export interface CodexAppServerExecutionProfile {
   readonly effort?: string
 }
 
+/** Logical app-server boundary that keeps native execution read-only while DSH owns writable effects. */
+export interface CodexAppServerExecutionBoundary {
+  readonly approval: 'never'
+  readonly nativeEffects: 'read-only'
+  readonly environmentAccess: 'disabled'
+}
+
+function threadStartBoundary(boundary?: CodexAppServerExecutionBoundary): JsonObject {
+  return boundary === undefined ? {} : {
+    approvalPolicy: boundary.approval,
+    sandbox: boundary.nativeEffects,
+    environments: [],
+  }
+}
+
+function threadResumeBoundary(boundary?: CodexAppServerExecutionBoundary): JsonObject {
+  return boundary === undefined ? {} : {
+    approvalPolicy: boundary.approval,
+    sandbox: boundary.nativeEffects,
+  }
+}
+
+function turnStartBoundary(boundary?: CodexAppServerExecutionBoundary): JsonObject {
+  return boundary === undefined ? {} : {
+    approvalPolicy: boundary.approval,
+    sandboxPolicy: { type: 'readOnly', networkAccess: false },
+    environments: [],
+  }
+}
+
 /** Experimental app-server function tool declared at persistent thread start. */
 export interface CodexDynamicToolSpec {
   readonly type: 'function'
@@ -350,6 +380,7 @@ export class CodexAppServerWire {
    * @param ephemeral - whether product history may discard the thread after this run.
    * @param profile - optional native model override for the new thread.
    * @param developerInstructions - optional DSH-owned system instructions for this thread.
+   * @param executionBoundary - optional sealed no-approval, read-only native execution boundary.
    */
   async startThread(
     cwd: string,
@@ -357,6 +388,7 @@ export class CodexAppServerWire {
     ephemeral = true,
     profile?: CodexAppServerExecutionProfile,
     developerInstructions?: string,
+    executionBoundary?: CodexAppServerExecutionBoundary,
   ): Promise<void> {
     const response = object(await this.guarded(this.transport.request('thread/start', {
       cwd,
@@ -364,6 +396,7 @@ export class CodexAppServerWire {
       ...profile === undefined ? {} : { model: profile.model },
       ...developerInstructions === undefined ? {} : { developerInstructions },
       ...this.dynamicTools.length === 0 ? {} : { dynamicTools: this.dynamicTools },
+      ...threadStartBoundary(executionBoundary),
     }, signal), signal), 'thread/start response')
     const thread = object(response.thread, 'thread/start thread')
     const id = string(thread.id, 'thread/start thread id')
@@ -382,6 +415,7 @@ export class CodexAppServerWire {
    * @param signal - unpublished-start cancellation.
    * @param profile - optional native model override for the resumed thread.
    * @param developerInstructions - optional DSH-owned system instructions for the resumed thread.
+   * @param executionBoundary - optional sealed no-approval, read-only native execution boundary.
    */
   async resumeThread(
     threadId: string,
@@ -389,12 +423,14 @@ export class CodexAppServerWire {
     signal: AbortSignal,
     profile?: CodexAppServerExecutionProfile,
     developerInstructions?: string,
+    executionBoundary?: CodexAppServerExecutionBoundary,
   ): Promise<void> {
     const response = object(await this.guarded(this.transport.request('thread/resume', {
       threadId,
       cwd,
       ...profile === undefined ? {} : { model: profile.model },
       ...developerInstructions === undefined ? {} : { developerInstructions },
+      ...threadResumeBoundary(executionBoundary),
     }, signal), signal), 'thread/resume response')
     const thread = object(response.thread, 'thread/resume thread')
     const id = string(thread.id, 'thread/resume thread id')
@@ -437,6 +473,7 @@ export class CodexAppServerWire {
    * @param signal - local cancellation for the published run.
    * @param onStarted - optional callback receiving the authoritative native turn identity.
    * @param profile - optional model and reasoning override for this turn.
+   * @param executionBoundary - optional sealed no-approval, read-only native execution boundary.
    * @returns the shared subagent result.
    */
   async runTurn(
@@ -444,6 +481,7 @@ export class CodexAppServerWire {
     signal: AbortSignal,
     onStarted?: (turnId: string) => void,
     profile?: CodexAppServerExecutionProfile,
+    executionBoundary?: CodexAppServerExecutionBoundary,
   ): Promise<SubagentResult> {
     const completion = Promise.withResolvers<JsonObject>()
     this.turnCompleted = completion
@@ -455,6 +493,7 @@ export class CodexAppServerWire {
         model: profile.model,
         ...profile.effort === undefined ? {} : { effort: profile.effort },
       },
+      ...turnStartBoundary(executionBoundary),
     }, signal), signal), 'turn/start response')
     const turn = object(response.turn, 'turn/start turn')
     const startedTurnId = string(turn.id, 'turn/start turn id')
