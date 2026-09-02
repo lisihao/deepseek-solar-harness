@@ -208,3 +208,15 @@ managed:
     tests:
       - corepack pnpm --ignore-workspace --config.auto-install-peers=false run build
       - corepack pnpm --ignore-workspace --config.auto-install-peers=false run test
+  - id: archify
+    path: plugins/managed/archify
+    package: '@deepseek-ai/dsh-archify@2.16.0-dsh.1'
+    source: https://github.com/tt-a1i/archify.git
+    upstream: https://github.com/tt-a1i/archify.git
+    source_branch: v2.16.0
+    accepted_sha: c826e6c3a7abad19c0f3cd1ca57207d54b1ad8de
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/archify/LICENSE
+    tests:
+      - npm run check

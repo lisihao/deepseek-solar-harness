@@ -11,6 +11,7 @@ export const DESKTOP_TAG_PATTERN = '^DSH-desktop-v[0-9]+\\.[0-9]+\\.[0-9]+$'
 export const MANAGED_IDS = [
   'aegis',
   'agent-teams',
+  'archify',
   'better-sidebar',
   'codegraph',
   'genui',

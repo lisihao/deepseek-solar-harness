@@ -140,12 +140,25 @@
       "name": "First-class DSH model tool authority",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
       "commit": "9cbbeb181d5d974ea60572fe8bcf0d05c96d924f"
+    },
+    {
+      "name": "Provider-neutral browser seam and Ego Lite v1.2.5 Provider",
+      "repository": "https://github.com/citrolabs/ego-lite",
+      "commit": "fd3aae7146cf6c9c52014a9752f411bf9978ae93"
+    },
+    {
+      "name": "Archify v2.16.0 architecture diagram capability",
+      "repository": "https://github.com/tt-a1i/archify",
+      "commit": "c826e6c3a7abad19c0f3cd1ca57207d54b1ad8de"
     }
   ],
   "sourcePackages": {
     "dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz": "apps/cli/package.json",
     "dsh-packages/deepseek-ai-dsh-app-boot-0.1.0-rc.5.tgz": "packages/boot/app-boot/package.json",
+    "dsh-packages/deepseek-ai-dsh-archify-2.16.0-dsh.1.tgz": "plugins/managed/archify/package.json",
     "dsh-packages/deepseek-ai-dsh-atomic-write-0.1.0-rc.5.tgz": "packages/util/atomic-write/package.json",
+    "dsh-packages/deepseek-ai-dsh-browser-0.1.0-rc.5.tgz": "packages/browser/browser/package.json",
+    "dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz": "packages/browser/browser-ego-lite/package.json",
     "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "packages/orchestration/capability-capsule/package.json",
     "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "packages/client/connection/package.json",
     "dsh-packages/deepseek-ai-dsh-client-hmr-0.1.0-rc.5.tgz": "packages/client/hmr/package.json",
@@ -164,6 +177,7 @@
     "dsh-packages/deepseek-ai-dsh-debate-0.1.0-rc.5.tgz": "packages/orchestration/debate/package.json",
     "dsh-packages/deepseek-ai-dsh-debate-local-0.1.0-rc.5.tgz": "packages/orchestration/debate-local/package.json",
     "dsh-packages/deepseek-ai-dsh-debate-orchestration-0.1.0-rc.5.tgz": "packages/orchestration/debate-orchestration/package.json",
+    "dsh-packages/deepseek-ai-dsh-ego-lite-browser-0.1.0-rc.5.tgz": "packages/bundle/ego-lite-browser/package.json",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "packages/host/apiproxy/package.json",
     "dsh-packages/deepseek-ai-dsh-host-frontend-static-0.1.0-rc.5.tgz": "packages/host/frontend-static/package.json",
     "dsh-packages/deepseek-ai-dsh-host-remote-auth-0.1.0-rc.5.tgz": "packages/host/remote-auth/package.json",
@@ -194,6 +208,7 @@
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "packages/core/system-prompt/package.json",
     "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "packages/orchestration/tool-orchestration/package.json",
     "dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz": "packages/orchestration/tool-debate/package.json",
+    "dsh-packages/deepseek-ai-dsh-tool-browser-0.1.0-rc.5.tgz": "packages/browser/tool-browser/package.json",
     "dsh-packages/deepseek-ai-dsh-tool-fs-0.1.0-rc.5.tgz": "packages/fs/tool-fs/package.json",
     "dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz": "packages/physical-operator/tool-physical-operator/package.json",
     "dsh-packages/deepseek-ai-dsh-tool-markdown-0.0.1.tgz": "plugins/managed/tool-markdown/package.json",
@@ -233,7 +248,10 @@
     "dsh-packages/aegis-2.8.5-solar.1.tgz": "09376c24ef76ccdc927286187d09bb314161636e3aceb64d02dade8e233fad73",
     "dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz": "91cd37ee7fdca21e6258e1575d7da282c9fea22cfb007b0bdba9c0c36e334378",
     "dsh-packages/deepseek-ai-dsh-app-boot-0.1.0-rc.5.tgz": "02c92558bd82719ddba1bfea84dcc4b5ac4e6b7fcb17ebe5e23be0a635355bd6",
+    "dsh-packages/deepseek-ai-dsh-archify-2.16.0-dsh.1.tgz": "2536dc2da3d7dc77b14cdc3ef0f5d9a4999e2f168a2ae96f2e7c2b0c2d79a08d",
     "dsh-packages/deepseek-ai-dsh-atomic-write-0.1.0-rc.5.tgz": "9a9897ec063d701d6151ed0adfe047f9db7c172d98eed651002ffed0c0c5b265",
+    "dsh-packages/deepseek-ai-dsh-browser-0.1.0-rc.5.tgz": "e6477650e089429b9018d7e59389e69ce6752ebce993db42edfd011ffe9fdc75",
+    "dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz": "f4725ce811b333c615f245929d787389695d78203cb45e876a5bc0a637677335",
     "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "e85b26a1c68a88b3821b455d3ee8f2a03b287b2bd6f978e3df85d7f3df9fe79b",
     "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "bbb1c82a6d05bb48a8994d1041ad9bcff0289d99c0512df1e737517fcb7a618a",
     "dsh-packages/deepseek-ai-dsh-client-hmr-0.1.0-rc.5.tgz": "fe79c5a407fdd27770d3ec0e6cd8659a977813077baec71072e8c81f7276f535",
@@ -252,6 +270,7 @@
     "dsh-packages/deepseek-ai-dsh-debate-0.1.0-rc.5.tgz": "37eb6839660e8cfd05af83d7d12d01d15ab1adf2e6bbabadd8a9fe73827d9102",
     "dsh-packages/deepseek-ai-dsh-debate-local-0.1.0-rc.5.tgz": "f91f1df632711a846facf875b1153f0364e1e713463f0dfc6911b911578dc8da",
     "dsh-packages/deepseek-ai-dsh-debate-orchestration-0.1.0-rc.5.tgz": "17a87be06d878fcbe7c2ceda5e22fea5f9794b37cd45313be9cd43d1f8b21af0",
+    "dsh-packages/deepseek-ai-dsh-ego-lite-browser-0.1.0-rc.5.tgz": "62fb4bd0d958b7425fe4a8951b25c7910bc1518f8ccf35c5076ae83d2cd6b552",
     "dsh-packages/deepseek-ai-dsh-home-paths-0.1.0-rc.5.tgz": "19c7efd115c5a43adf6ef532d5f38dc14bdcde75c9d840c900030fd653464aec",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "6d91ec4c14c709f905d0d58832ca463d4307dcd11b119eaeacbc122fe2c9aefe",
     "dsh-packages/deepseek-ai-dsh-host-frontend-static-0.1.0-rc.5.tgz": "5a4523b9934e6ed6fa37f99b49f3f0a0a7325a088a87970b43f2eb7cf48e8054",
@@ -281,6 +300,7 @@
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "eab5cb76cb7288781eab14638ffc0e56d1549e55d6d260d16f159fd78fe1e8ba",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "18e0f88aefe69709e3bf46971bcf99f1e5996e09d9639461b791182c8ed355af",
     "dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz": "2c079ceeb2b597765f3a44bac53699777d9665c8dc526177b7b6d7c562ec280f",
+    "dsh-packages/deepseek-ai-dsh-tool-browser-0.1.0-rc.5.tgz": "e6a75f77e3c955e5e5736501d2710c9263b67336230cc283964fb96c86b64ebc",
     "dsh-packages/deepseek-ai-dsh-tool-fs-0.1.0-rc.5.tgz": "e79de6bf417f08e60e93faa77ac83e915f06568d1b64eb42dc43f25040a64af6",
     "dsh-packages/deepseek-ai-dsh-tool-markdown-0.0.1.tgz": "79c85b9e8cf8349577d2ade3f33326f885fe7e1fc53dedcb914d694d5342ab07",
     "dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz": "dcff839815bcd9fabf503647a80288146ee5a83f53e89360ac727755f3431252",
