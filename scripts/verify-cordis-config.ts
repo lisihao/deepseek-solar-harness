@@ -14,6 +14,7 @@ import { globSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import ts from 'typescript'
+import { isSupportedDarwinPackagePath } from './darwin-package-scope.ts'
 import { cordisConfigFiles } from './cordis-config-files.ts'
 
 interface JsExpr {
@@ -369,6 +370,7 @@ function readManifest(path: string): PackageManifest {
 
 function localPackageDirectories(): Map<string, string> {
   const manifests = globSync(['packages/*/*/package.json', 'vendor/*/package.json'], { cwd: root })
+    .filter(isSupportedDarwinPackagePath)
   const packages = new Map<string, string>()
   for (const manifestPath of manifests) {
     const manifest = readManifest(manifestPath)

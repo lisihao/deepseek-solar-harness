@@ -14,6 +14,7 @@ import {
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
+import { isSupportedDarwinPackagePath } from './darwin-package-scope.mjs'
 
 const repositoryRoot = resolve(import.meta.dirname, '..')
 const { values: options } = parseArgs({
@@ -24,7 +25,9 @@ const packagesRoot = resolve(options['packages-root'] ?? repositoryRoot)
 const loaderUrl = options['loader-url']
   ?? pathToFileURL(resolve(repositoryRoot, 'vendor/loader/lib/index.js')).href
 const failures = []
-const manifests = globSync('packages/*/*/package.json', { cwd: packagesRoot }).sort()
+const manifests = globSync('packages/*/*/package.json', { cwd: packagesRoot })
+  .filter(isSupportedDarwinPackagePath)
+  .sort()
 const { default: Loader } = await import(loaderUrl)
 const loader = Object.create(Loader.prototype)
 

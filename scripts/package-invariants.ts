@@ -7,6 +7,7 @@
 import { existsSync, globSync, readFileSync } from 'node:fs'
 import { dirname, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
+import { isSupportedDarwinPackagePath } from './darwin-package-scope.ts'
 
 /** Required explanation marker for an intentionally empty installer. */
 const NO_RUNTIME_INVARIANT_MARKER = 'No runtime invariant:'
@@ -37,6 +38,7 @@ export interface PackageInvariantViolation {
 export function packageInvariantOwners(root: string): PackageInvariantOwner[] {
   return globSync('packages/*/*/package.json', { cwd: root })
     .map(path => path.split(sep).join('/'))
+    .filter(isSupportedDarwinPackagePath)
     .sort()
     .map((manifestPath) => {
       const manifest = readManifest(resolve(root, manifestPath))

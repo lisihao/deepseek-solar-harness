@@ -14,6 +14,8 @@ The supported DSH product and its default development pipeline are Darwin-only. 
 
 The compatibility implementation remains dormant source for upstream comparison and explicit diagnostics. It is not a workspace member, release member, supported tool schema, product dependency, or ordinary verification input. Re-enabling Windows support requires an explicit product decision and restoration of its dependency, build, test, CI, release, and packaging closure before support can be claimed.
 
+Package-wide hygiene discovery uses the same Darwin package boundary. A clean runner therefore never requires built publication or declaration artifacts from the dormant packages.
+
 ## Alternatives considered
 
 **Delete all compatibility source.** Rejected because keeping the isolated source helps future upstream comparison and does not cost the default pipeline once every active reference is removed.

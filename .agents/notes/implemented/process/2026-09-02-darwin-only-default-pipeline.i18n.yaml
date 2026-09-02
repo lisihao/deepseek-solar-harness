@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-02-darwin-only-default-pipeline.md
-2026-09-02-darwin-only-default-pipeline.md: 5ae0ba7bcc4f3b097689dd1e09f76f7556a6d3e1
-2026-09-02-darwin-only-default-pipeline.zh.md: 660f1fa50e5d6051a3e0c9a13164083a2985920e
+2026-09-02-darwin-only-default-pipeline.md: 7bffe83c81dd08a05d7bdb3acf513acbc52076ab
+2026-09-02-darwin-only-default-pipeline.zh.md: f66d7dce5b15fe482ccd92fe756bfc5bc77e3b88

@@ -7,6 +7,7 @@ import { globSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
+import { isSupportedDarwinPackagePath } from './darwin-package-scope.ts'
 
 interface PackageManifest {
   name?: string
@@ -74,6 +75,7 @@ console.log(`verify-runtime-closure: ${queue.length} workspace packages form a c
 
 async function loadWorkspacePackages(): Promise<Map<string, WorkspacePackage>> {
   const paths = globSync(['packages/*/*/package.json', 'vendor/*/package.json'], { cwd: root })
+    .filter(isSupportedDarwinPackagePath)
     .sort()
     .map(relative => resolve(root, relative))
   const result = new Map<string, WorkspacePackage>()

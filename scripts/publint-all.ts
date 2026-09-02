@@ -11,6 +11,7 @@ import { dirname, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 import { publint, type Message, type PackFile } from 'publint'
 import { formatMessage } from 'publint/utils'
+import { isSupportedDarwinPackagePath } from './darwin-package-scope.ts'
 
 const CONCURRENCY_ENV = 'DSH_PUBLINT_CONCURRENCY'
 const repositoryRoot = resolve(import.meta.dirname, '..')
@@ -37,6 +38,7 @@ type PublintResult =
 
 function workspacePackages(): PackageTarget[] {
   return globSync('packages/*/*/package.json', { cwd: packagesRoot })
+    .filter(isSupportedDarwinPackagePath)
     .sort()
     .map((manifestPath) => {
       const absoluteManifestPath = resolve(packagesRoot, manifestPath)

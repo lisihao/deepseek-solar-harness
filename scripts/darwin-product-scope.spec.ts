@@ -2,6 +2,10 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
+import {
+  isSupportedDarwinPackagePath,
+  unsupportedWindowsPackagePaths,
+} from './darwin-package-scope.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const read = (path: string): string => readFileSync(resolve(root, path), 'utf8')
@@ -34,6 +38,29 @@ describe('Darwin-only product scope', () => {
 
     const build = read('tsdown.config.ts')
     for (const path of unsupportedWorkspaces) expect(build).toContain(`'${path}/**'`)
+  })
+
+  it('keeps unsupported Windows packages outside package-wide hygiene scans', () => {
+    expect([...unsupportedWindowsPackagePaths]).toEqual(unsupportedWorkspaces)
+    const nodeScope = read('scripts/darwin-package-scope.mjs')
+    for (const path of unsupportedWorkspaces) {
+      expect(isSupportedDarwinPackagePath(`${path}/package.json`)).toBe(false)
+      expect(isSupportedDarwinPackagePath(`${path}/lib/index.js`)).toBe(false)
+      expect(nodeScope).toContain(`'${path}'`)
+    }
+    expect(isSupportedDarwinPackagePath('packages/shell/bash-local/package.json')).toBe(true)
+
+    for (const script of [
+      'scripts/publint-all.ts',
+      'scripts/package-invariants.ts',
+      'scripts/verify-built-package-invariants.mjs',
+      'scripts/verify-node-next-types.ts',
+      'scripts/verify-runtime-closure.ts',
+      'scripts/verify-cordis-config.ts',
+      'scripts/verify-dsh-package-licenses.ts',
+    ]) {
+      expect(read(script)).toContain('isSupportedDarwinPackagePath')
+    }
   })
 
   it('keeps dormant compatibility files outside default lint, typecheck, test, and hygiene', () => {
