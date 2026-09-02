@@ -590,9 +590,11 @@ describe('Ego Lite discovery and explicit partial mappings', () => {
   })
 
   it('fails unsupported current workspace, no-reuse open, and pages before spawning', async () => {
+    const open = plan.operations[0]
+    if (open?.kind !== 'open') throw new Error('fixture must begin with an open operation')
     const cases: BrowserRunPlanV1[] = [
       { ...plan, workspace: { kind: 'current' } },
-      { ...plan, operations: [{ ...plan.operations[0]!, reuse: 'never' }] },
+      { ...plan, operations: [{ ...open, reuse: 'never' }] },
       { ...plan, operations: [{ kind: 'pages', id: op('pages') }] },
     ]
     for (const unsupported of cases) {

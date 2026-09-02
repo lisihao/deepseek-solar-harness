@@ -20,8 +20,14 @@ function operationResult(operation: BrowserRunPlanV1['operations'][number]): Bro
       }
     case 'pages': return { kind: 'pages', id: operation.id, pages: [] }
     case 'snapshot': return { kind: 'snapshot', id: operation.id, content: 'fixture browser snapshot' }
+    case 'screenshot': return {
+      kind: 'screenshot', id: operation.id, mediaType: 'image/png', bytes: new Uint8Array(),
+    }
     case 'read': return { kind: 'read', id: operation.id, value: 'fixture browser value' }
     case 'count': return { kind: 'count', id: operation.id, count: 1 }
+    case 'handoff':
+    case 'takeover':
+      return { kind: 'control', id: operation.id, operation: operation.kind, control: operation.kind === 'handoff' ? 'user' : 'agent' }
     case 'wait':
     case 'click':
     case 'fill':
