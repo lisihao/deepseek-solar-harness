@@ -727,16 +727,7 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
   if (resume !== undefined) {
     const recoverable = recoverableDispatch(agent.session.events)
     if (recoverable === undefined) return undefined
-    const hostRoute: PendingHostRoute = {
-      commandId: recoverable.commandId,
-      operatorId: recoverable.operatorId,
-      promptMessageId: recoverable.promptMessageId,
-      requestedByMessageId: resume.id,
-      recovered: true,
-      ...recoverable.fallbackOperatorId === undefined ? {} : { fallbackOperatorId: recoverable.fallbackOperatorId },
-      ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
-      ...recoverable.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(recoverable.fallbackConfig) },
-    }
+    const hostRoute = recoveredHostRoute(recoverable, resume.id)
     return {
       policy,
       route: 'resident',
@@ -762,16 +753,7 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
     const recoverable = recoverableDispatch(agent.session.events)
     const hostRoute = recoverable === undefined
       ? newHostRoute(agent, current.id, previous.operatorId)
-      : {
-        commandId: recoverable.commandId,
-        operatorId: recoverable.operatorId,
-        promptMessageId: recoverable.promptMessageId,
-        requestedByMessageId: current.id,
-        recovered: true,
-        ...recoverable.fallbackOperatorId === undefined ? {} : { fallbackOperatorId: recoverable.fallbackOperatorId },
-        ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
-        ...recoverable.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(recoverable.fallbackConfig) },
-      }
+      : recoveredHostRoute(recoverable, current.id)
     return {
       policy,
       route: 'resident',
@@ -874,6 +856,19 @@ function newHostRoute(
     requestedByMessageId: messageId,
     recovered: false,
     ...residentProfile === undefined ? {} : { residentProfile },
+  }
+}
+
+function recoveredHostRoute(recoverable: DispatchRecord, requestedByMessageId: string): PendingHostRoute {
+  return {
+    commandId: recoverable.commandId,
+    operatorId: recoverable.operatorId,
+    promptMessageId: recoverable.promptMessageId,
+    requestedByMessageId,
+    recovered: true,
+    ...recoverable.fallbackOperatorId === undefined ? {} : { fallbackOperatorId: recoverable.fallbackOperatorId },
+    ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
+    ...recoverable.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(recoverable.fallbackConfig) },
   }
 }
 
