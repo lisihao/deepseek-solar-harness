@@ -30,7 +30,12 @@ import {
 } from '@deepseek-ai/dsh-orchestration'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { waitForDaemonSocketRelease } from '@deepseek-ai/dsh-resident-operator-local'
-import { ORCHESTRATION_METHODS, ORCHESTRATION_PROTOCOL_VERSION, skillProviderManifestSha256 } from './daemon.ts'
+import {
+  browserProviderManifestSha256,
+  ORCHESTRATION_METHODS,
+  ORCHESTRATION_PROTOCOL_VERSION,
+  skillProviderManifestSha256,
+} from './daemon.ts'
 import { unwrapWire } from './protocol.ts'
 import { ORCHESTRATION_STATE_SCHEMA_VERSION } from './store.ts'
 
@@ -44,6 +49,7 @@ export interface OrchestrationClientOptions {
   readonly connectTimeoutMs: number
   readonly residentDriverModules?: readonly string[]
   readonly skillProviderModules?: readonly string[]
+  readonly browserProviderModules?: readonly string[]
 }
 
 /** Stateless-per-request client for the durable local Scheduler. */
@@ -246,6 +252,7 @@ export class OrchestrationDaemonClient {
       this.options.dshHome,
       this.options.residentDriverModules ?? [],
       this.options.skillProviderModules ?? [],
+      this.options.browserProviderModules ?? [],
     )
     const deadline = Date.now() + this.options.connectTimeoutMs
     let lastError: unknown
@@ -293,10 +300,12 @@ export class OrchestrationDaemonClient {
       buildCommit: string
       methods: string[]
       skillProviderManifestSha256: string
+      browserProviderManifestSha256: string
     }>('system.handshake', {
       protocol_version: ORCHESTRATION_PROTOCOL_VERSION,
       state_schema_version: ORCHESTRATION_STATE_SCHEMA_VERSION,
       skill_provider_manifest_sha256: skillProviderManifestSha256(this.options.skillProviderModules ?? []),
+      browser_provider_manifest_sha256: browserProviderManifestSha256(this.options.browserProviderModules ?? []),
     })
     if (response.protocolVersion !== ORCHESTRATION_PROTOCOL_VERSION
       || response.stateSchemaVersion !== ORCHESTRATION_STATE_SCHEMA_VERSION) {
@@ -314,6 +323,9 @@ export class OrchestrationDaemonClient {
     }
     if (response.skillProviderManifestSha256 !== skillProviderManifestSha256(this.options.skillProviderModules ?? [])) {
       throw new OrchestrationError('orchestration daemon Skill Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
+    }
+    if (response.browserProviderManifestSha256 !== browserProviderManifestSha256(this.options.browserProviderModules ?? [])) {
+      throw new OrchestrationError('orchestration daemon Browser Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
   }
 
@@ -357,6 +369,7 @@ export class OrchestrationDaemonClient {
  * @param dshHome - DSH home shared with the Resident daemon.
  * @param residentDriverModules - absolute independent Resident Driver entries for the headless composition.
  * @param skillProviderModules - absolute trusted TypeScript Skill Provider plugin entries.
+ * @param browserProviderModules - absolute trusted Browser Provider plugin entries.
  * @returns detached child process identity.
  */
 export function startDetachedOrchestrationDaemon(
@@ -364,6 +377,7 @@ export function startDetachedOrchestrationDaemon(
   dshHome: string,
   residentDriverModules: readonly string[] = [],
   skillProviderModules: readonly string[] = [],
+  browserProviderModules: readonly string[] = [],
 ): number {
   const builtEntry = fileURLToPath(new URL('./startup.js', import.meta.url))
   const sourceEntry = fileURLToPath(new URL('./startup.ts', import.meta.url))
@@ -380,6 +394,7 @@ export function startDetachedOrchestrationDaemon(
     '--dsh-home', dshHome,
     ...residentDriverModules.flatMap(module => ['--resident-driver-module', module]),
     ...skillProviderModules.flatMap(module => ['--skill-provider-module', module]),
+    ...browserProviderModules.flatMap(module => ['--browser-provider-module', module]),
   ], {
     detached: true,
     stdio: 'ignore',

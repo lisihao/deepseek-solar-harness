@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ModelWorkerExecuteRequest, ModelWorkerProvider, ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
@@ -40,7 +41,35 @@ interface FakeResidentRequest {
   profile?: { model: string }
   prompt?: Array<{ type: string; text?: string }>
   modelToolBridge?: { version: 1; socketPath: string; sessionId: string; tools: readonly { name: string }[] }
+  nativeToolPolicy?: string
   workspace: string
+}
+
+async function callBrowserTool(
+  bridge: NonNullable<FakeResidentRequest['modelToolBridge']>,
+  commandId: string,
+): Promise<Record<string, unknown>> {
+  const socket = createConnection(bridge.socketPath)
+  await once(socket, 'connect')
+  const transport = new JsonRpcLineTransport(socket, socket)
+  transport.start()
+  try {
+    return await transport.request('tool.call', {
+      session_id: bridge.sessionId,
+      command_id: commandId,
+      tool: 'browser',
+      arguments: {
+        plan: {
+          version: 1,
+          workspace: { kind: 'current' },
+          operations: [{ kind: 'pages', id: 'list-pages' }],
+        },
+      },
+    }) as Record<string, unknown>
+  } finally {
+    transport.close()
+    socket.destroy()
+  }
 }
 
 async function callRlmTool(
@@ -313,6 +342,7 @@ function createDaemon(
   schedulerIntervalMs?: number,
   modelWorkerProviders?: readonly ModelWorkerProvider[],
   remoteOperatorServers?: readonly RemotePhysicalOperatorServer[],
+  browserProviderModules?: readonly string[],
 ): OrchestrationDaemon {
   return new OrchestrationDaemon({
     root,
@@ -320,6 +350,7 @@ function createDaemon(
     residentClient: residentClient as unknown as ResidentDaemonClient,
     modelWorkerProviders: modelWorkerProviders ?? [],
     ...remoteOperatorServers === undefined ? {} : { remoteOperatorServers },
+    ...browserProviderModules === undefined ? {} : { browserProviderModules },
     ...schedulerIntervalMs === undefined ? {} : { schedulerIntervalMs },
   })
 }
@@ -1235,6 +1266,8 @@ describe('orchestration daemon', () => {
       `codex:orch:${String(started.runId)}:code:1`,
       `claude-code:orch:${String(started.runId)}:review:1`,
     ])
+    expect(fake.requests.map(value => value.nativeToolPolicy)).toEqual(['inherit', 'inherit'])
+    expect(fake.requests.every(value => value.modelToolBridge === undefined)).toBe(true)
     expect(fake.requests[1]?.prompt?.map(block => block.text).join('\n')).toContain(
       `completed orch:${String(started.runId)}:code:1`,
     )
@@ -1281,6 +1314,67 @@ describe('orchestration daemon', () => {
       residentSequence: 5, observation: { kind: 'tool-completed', toolName: 'Read' },
     })
     expect(JSON.stringify(observations)).not.toContain('must not persist')
+  })
+
+  it('binds the browser capability to a Resident model tool bridge and seals DSH tool authority', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-browser-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    let browserResult: Record<string, unknown> | undefined
+    fake.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined) return
+      expect(request.modelToolBridge.tools.map(value => value.name)).toEqual(['browser'])
+      expect(request.nativeToolPolicy).toBe('dsh-tools-authoritative')
+      browserResult = await callBrowserTool(request.modelToolBridge, `browser-call:${request.commandId}`)
+    }
+    const browserProviderModule = fileURLToPath(new URL('./fixtures/browser-provider.ts', import.meta.url))
+    const daemon = createDaemon(root, home, fake, 10, [], undefined, [browserProviderModule])
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({
+      root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000,
+      browserProviderModules: [browserProviderModule],
+    })
+    const base = graph(home)
+    const browserGraph = {
+      ...base,
+      nodes: base.nodes.map(node => node.id === 'code'
+        ? { ...node, capabilityRequirements: [{ capability: 'browser', required: true }], capabilityBudget: ['browser'] }
+        : node),
+    }
+    const compilation = await client.compile({ intent: { request: 'Use the browser, then review.' }, graph: browserGraph })
+    const started = await startCompilation(client, compilation.compilationId)
+    const settled = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+    expect(settled.nodes.every(value => value.state === 'passed')).toBe(true)
+    expect(browserResult).toMatchObject({ isError: false })
+    const code = settled.nodes.find(value => value.id === 'code')
+    const executionPlan = await client.readArtifact(
+      OrchestrationArtifactRef(String(code?.executionPlanRef)),
+    ) as Record<string, unknown>
+    expect(executionPlan.operatorPlan).toMatchObject({ nativeToolPolicy: 'dsh-tools-authoritative' })
+  })
+
+  it('fails a browser-capable node loudly when no headless Browser Provider is configured', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-browser-unavailable-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const base = graph(home)
+    const browserGraph = {
+      ...base,
+      nodes: base.nodes.map(node => node.id === 'code'
+        ? { ...node, capabilityRequirements: [{ capability: 'browser', required: true }], capabilityBudget: ['browser'] }
+        : node),
+    }
+    const compilation = await client.compile({ intent: { request: 'Use the browser.' }, graph: browserGraph })
+    const started = await startCompilation(client, compilation.compilationId)
+    const failed = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'failed')
+    const codeBlockers = failed.nodes.find(value => value.id === 'code')?.blockers ?? []
+    expect(codeBlockers.some(blocker => blocker.message.includes('Browser Provider'))).toBe(true)
+    expect(fake.requests).toHaveLength(0)
   })
 
   it('runs mutating nodes in isolated worktrees and integrates their branches into the certified repository', async () => {

@@ -24,6 +24,7 @@ import IntentCompilerService, {
   type IntentIRV1,
 } from '@deepseek-ai/dsh-intent-compiler'
 import { canonicalSha256 } from './canonical.ts'
+import { BROWSER_CAPABILITY } from './browser-model-tool-bridge.ts'
 
 const EMPTY_EFFECTS: CapabilityEffectSet = Object.freeze({
   read: [], write: [], execute: [], network: [], cost: [], risk: [],
@@ -57,6 +58,39 @@ function cleanTaskContextCapsule(): CapabilityCapsuleManifestV1 {
       secretRefs: [], guardRefs: [],
     },
     verification: ['Context Packet contains the clean-context instruction before dispatch.'],
+    operatorCompatibility: ['codex', 'claude-code'],
+  }
+  return { ...manifest, digest: canonicalSha256(manifest) }
+}
+
+/** Built-in model tool Capsule for Resident browser-capable nodes. */
+function browserCapsule(): CapabilityCapsuleManifestV1 {
+  const manifest: CapabilityCapsuleManifestV1 = {
+    version: 1,
+    id: 'dsh.browser-automation',
+    capsuleVersion: '1.0.0',
+    kind: 'tool',
+    digest: '',
+    provenance: { publisher: 'DeepSeek-Solar-Harness', sourceRef: 'builtin:orchestration-local' },
+    applicability: ['durable TaskGraph nodes that explicitly require browser capability'],
+    capabilityTags: [BROWSER_CAPABILITY],
+    inputs: ['sealed browser plan'],
+    outputs: ['bounded BrowserRunResultV1'],
+    preconditions: ['A configured provider-neutral ctx.browser service is available.'],
+    postconditions: ['Browser operations complete in the submitted order.'],
+    invariants: ['Only the model-facing closed browser plan is exposed; provider-native control is not exposed.'],
+    consumes: [], produces: [], requires: [], compatible: ['codex', 'claude-code'], incompatible: [],
+    // Network authority remains an explicit graph concern. The browser seam
+    // itself does not invent a scope/effect budget for the caller.
+    effects: EMPTY_EFFECTS,
+    bindings: {
+      instructions: [
+        'Use the sealed browser tool for webpage interaction. Submit typed portable plans, prefer semantic locators, and verify resulting state before reporting success.',
+      ],
+      skills: [], toolsAllow: ['browser'], toolsDeny: [], mcpServers: [], resourceRefs: [], dataRefs: [],
+      secretRefs: [], guardRefs: [],
+    },
+    verification: ['Resident dispatch supplies a browser model-tool bridge and dsh-tools-authoritative native policy.'],
     operatorCompatibility: ['codex', 'claude-code'],
   }
   return { ...manifest, digest: canonicalSha256(manifest) }
@@ -368,6 +402,8 @@ export class LocalCapabilityCapsuleService extends CapabilityCapsuleService {
     const next = new Map<string, CapabilityCapsuleManifestV1>()
     const builtin = cleanTaskContextCapsule()
     next.set(`${builtin.id}@${builtin.capsuleVersion}#${builtin.digest}`, builtin)
+    const browser = browserCapsule()
+    next.set(`${browser.id}@${browser.capsuleVersion}#${browser.digest}`, browser)
     if (existsSync(this.root)) {
       for (const filename of readdirSync(this.root).filter(value => value.endsWith('.json')).sort()) {
         const manifest = validateManifest(JSON.parse(readFileSync(join(this.root, filename), 'utf8')), filename)

@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import BrowserRuntime from '@deepseek-ai/dsh-browser'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
@@ -90,6 +91,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorResidentModel,
   type PhysicalOperatorResult,
   type PhysicalOperatorModelToolBridgeV1,
+  type PhysicalOperatorNativeToolPolicy,
   type PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
@@ -97,6 +99,7 @@ import { residentProgressPage, type ResidentProviderStatus, type ResidentTurnSna
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { DurableAutoRefineCoordinator, PRIME_AUTO_REFINE_DEFAULTS, type AutoRefineReview } from './auto-refine.ts'
 import { abortableDelay } from './abortable-delay.ts'
 import {
@@ -108,6 +111,7 @@ import {
   resolveAutonomousPolicy,
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
+import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
 import {
   OrchestrationClusterElection,
   RemoteSyncClusterPeerTransport,
@@ -166,6 +170,11 @@ export const ORCHESTRATION_METHODS = Object.freeze([
  * @returns the canonical Provider-manifest SHA-256 digest.
  */
 export function skillProviderManifestSha256(modules: readonly string[]): string {
+  return canonicalSha256([...modules])
+}
+
+/** Fence detached daemons from clients configured with another Browser Provider set. */
+export function browserProviderManifestSha256(modules: readonly string[]): string {
   return canonicalSha256([...modules])
 }
 
@@ -453,6 +462,8 @@ export interface OrchestrationDaemonOptions {
   readonly residentDriverModules?: readonly string[]
   /** Trusted Cordis plugins that register TypeScript Skill modules in the headless daemon. */
   readonly skillProviderModules?: readonly string[]
+  /** Trusted complete Browser Provider plugins loaded by the headless daemon. */
+  readonly browserProviderModules?: readonly string[]
   readonly autoRefine?: Partial<typeof PRIME_AUTO_REFINE_DEFAULTS>
   /**
    * Explicit complete one-shot Provider set. Supplying it disables every
@@ -686,7 +697,8 @@ function fakeParent(workspace: string, runId: string): Agent {
   } as unknown as Agent
 }
 
-function nativeToolPolicy(capabilities: CapabilityBindingPlanV1): 'inherit' | 'disabled' {
+function nativeToolPolicy(capabilities: CapabilityBindingPlanV1): PhysicalOperatorNativeToolPolicy {
+  if (capabilities.resolvedCapabilities.includes(BROWSER_CAPABILITY)) return 'dsh-tools-authoritative'
   const effects = capabilities.effectiveEffects
   return capabilities.effectiveReadScopes.length === 0
     && capabilities.effectiveWriteScopes.length === 0
@@ -876,6 +888,8 @@ export class OrchestrationDaemon {
   private readonly transports = new Set<JsonRpcLineTransport>()
   private readonly sockets = new Set<Socket>()
   private readonly ctx = new Context()
+  /** Created only when the headless composition has a configured Browser Provider. */
+  private browserBridge: BrowserModelToolBridge | undefined
   private readonly active = new Map<string, ActiveAttempt>()
   private readonly reconcileRetryAfter = new Map<string, number>()
   private readonly capacityRetryAfter = new Map<string, number>()
@@ -951,6 +965,21 @@ export class OrchestrationDaemon {
     } else {
       for (const provider of this.options.modelWorkerProviders) this.ctx.modelWorkers.register(provider)
     }
+    if ((this.options.browserProviderModules ?? []).length > 0) {
+      // Browser Provider modules are complete trusted plugins. The generic
+      // local subprocess Provider is installed here only as their common
+      // process seam; no Ego-specific implementation is imported or assumed.
+      await this.ctx.plugin(LocalSubprocessRuntime)
+      await this.ctx.plugin(BrowserRuntime)
+      for (const modulePath of this.options.browserProviderModules ?? []) {
+        const loaded = await import(pathToFileURL(modulePath).href) as { readonly default?: unknown }
+        if (loaded.default === undefined || (typeof loaded.default !== 'function' && typeof loaded.default !== 'object')) {
+          throw new OrchestrationError(`invalid Browser Provider module: ${modulePath}`, 'ORCHESTRATION_UNAVAILABLE')
+        }
+        await this.ctx.plugin(loaded.default as Parameters<Context['plugin']>[0])
+      }
+      this.browserBridge = new BrowserModelToolBridge(this.ctx, thisRoot)
+    }
     await this.ctx.plugin(DirectIntentCompiler)
     await this.ctx.plugin(BasicContextCompiler)
     await this.ctx.plugin(SubscriptionFirstModelAllocation)
@@ -1017,6 +1046,8 @@ export class OrchestrationDaemon {
     for (const socket of this.sockets) socket.end()
     await Promise.allSettled([...this.active.values()].map(value => value.run.dispose()))
     this.rlmProgressSources.clear()
+    await this.browserBridge?.dispose()
+    this.browserBridge = undefined
     await this.ctx.root.fiber.dispose()
     await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
     this.store.close()
@@ -1095,12 +1126,18 @@ export class OrchestrationDaemon {
     if (skillProviderManifest !== activeSkillProviderManifest) {
       throw new OrchestrationError('orchestration Skill Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
+    const browserProviderManifest = requiredString(params, 'browser_provider_manifest_sha256')
+    const activeBrowserProviderManifest = browserProviderManifestSha256(this.options.browserProviderModules ?? [])
+    if (browserProviderManifest !== activeBrowserProviderManifest) {
+      throw new OrchestrationError('orchestration Browser Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
+    }
     return {
       protocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
       stateSchemaVersion: ORCHESTRATION_STATE_SCHEMA_VERSION,
       buildCommit: this.options.buildCommit ?? process.env.DSH_BUILD_COMMIT ?? 'development',
       methods: ORCHESTRATION_METHODS,
       skillProviderManifestSha256: activeSkillProviderManifest,
+      browserProviderManifestSha256: activeBrowserProviderManifest,
       injectionBoundaries: ['pre-dispatch', 'next-turn'],
     }
   }
@@ -1785,7 +1822,7 @@ export class OrchestrationDaemon {
       readScopes: spec.readScopes,
       writeScopes: spec.writeScopes,
       approvedSecretRefs: spec.approvedSecretRefs,
-      operatorInjectionKinds: ['instruction', 'resource', 'data'],
+      operatorInjectionKinds: ['instruction', 'resource', 'data', 'tool'],
     })
     const capabilityPlanRef = this.store.putArtifact(capabilityPlan)
     this.store.recordArtifact('capability_bindings', { ref: String(capabilityPlanRef), runId, nodeId, attempt, generation: node.capabilityGeneration })
@@ -1912,7 +1949,20 @@ export class OrchestrationDaemon {
       maxTokens: autonomousPolicy.maxTokens,
       timeoutMs: autonomousPolicy.timeoutMs,
     }, node)])
-    const selected = await this.selectOperator(record, spec, rlmPlan)
+    const requiresBrowser = capabilityPlan.resolvedCapabilities.includes(BROWSER_CAPABILITY)
+    if (requiresBrowser && this.browserBridge === undefined) {
+      throw new OrchestrationError(
+        'browser capability requires a configured headless Browser Provider module',
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
+    if (requiresBrowser && rlmPlan.enabled) {
+      throw new OrchestrationError(
+        'browser capability is currently available at the standard Resident turn boundary, not inside RLM',
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
+    const selected = await this.selectOperator(record, spec, rlmPlan, requiresBrowser)
     const rlmWorkerPlan = rlmPlan.enabled && rlmPlan.fidelity === 'dsh-optimized' && rlmPlan.maxTurns > 1
       ? await this.selectRlmWorker(record, spec, rlmPlan)
       : undefined
@@ -1980,7 +2030,10 @@ export class OrchestrationDaemon {
         operatorId,
         mode: selectedProvider === undefined ? 'model-worker' as const : 'resident' as const,
         ...allocation.profile === undefined ? {} : { profile: allocation.profile },
-        nativeToolPolicy: nativeToolPolicy(capabilityPlan),
+        // The orchestration contract in this checkout predates the full
+        // Physical Operator policy union. Keep the serialized value exact;
+        // the public orchestration type is widened by the owning integration.
+        nativeToolPolicy: nativeToolPolicy(capabilityPlan) as NodeExecutionPlanV1['operatorPlan']['nativeToolPolicy'],
         injectionBoundaries: selectedProvider?.injectionBoundaries ?? [],
       },
       effectiveReadScopes: capabilityPlan.effectiveReadScopes,
@@ -2054,8 +2107,19 @@ export class OrchestrationDaemon {
     const operator = this.ctx.physicalOperators.getOperator(plan.operatorPlan.operatorId)
     if (operator === undefined) throw new OrchestrationError(`physical operator is unavailable: ${plan.operatorPlan.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident')
+    const requiresBrowser = capabilityPlan.resolvedCapabilities.includes(BROWSER_CAPABILITY)
+    let browserBinding: Awaited<ReturnType<BrowserModelToolBridge['bind']>> | undefined
     try {
       await this.replicateClusterAuthority()
+      if (requiresBrowser) {
+        if (this.browserBridge === undefined) {
+          throw new OrchestrationError(
+            'browser capability requires a configured headless Browser Provider module',
+            'ORCHESTRATION_UNAVAILABLE',
+          )
+        }
+        browserBinding = await this.browserBridge.bind(String(plan.executionId), controller.signal)
+      }
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
@@ -2064,7 +2128,8 @@ export class OrchestrationDaemon {
         parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
-        nativeToolPolicy: plan.operatorPlan.nativeToolPolicy,
+        ...browserBinding === undefined ? {} : { modelToolBridge: browserBinding.descriptor },
+        nativeToolPolicy: requiresBrowser ? 'dsh-tools-authoritative' : plan.operatorPlan.nativeToolPolicy,
       })
       const receipt = acceptedReceipt(run, String(plan.executionId))
       const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', turnId: receipt.turnId, updatedAt: now() }
@@ -2101,8 +2166,14 @@ export class OrchestrationDaemon {
           await this.syncActiveProgress(active)
           this.failAttempt(active, error)
         },
-      ).finally(() => { timeout.clearTimeout(); this.active.delete(key); this.triggerTick() })
+      ).finally(() => {
+        browserBinding?.release()
+        timeout.clearTimeout()
+        this.active.delete(key)
+        this.triggerTick()
+      })
     } catch (error) {
+      browserBinding?.release()
       timeout.clearTimeout()
       this.failDispatch(acceptedAttempt, error)
     }
@@ -4101,10 +4172,12 @@ export class OrchestrationDaemon {
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     rlmPlan: RlmExecutionPlanV1,
+    requiresBrowser = false,
   ): Promise<{ readonly provider?: PhysicalOperatorResidentCatalog; readonly allocation: ModelAllocationPlan }> {
     const providers = await this.ctx.physicalOperators.residentCatalogs()
-    const residentOffers = this.residentOffers(record, spec, providers, true, rlmPlan.enabled)
-    const modelWorkerOffers = spec.writeScopes.length === 0
+    const residentOffers = this.residentOffers(record, spec, providers, true, rlmPlan.enabled || requiresBrowser)
+    const modelWorkerOffers = !requiresBrowser
+      && spec.writeScopes.length === 0
       && spec.effectBudget.write.length === 0
       && spec.effectBudget.execute.length === 0
       ? await this.ctx.modelWorkers.offers()

@@ -6122,6 +6122,9 @@ importers:
       '@deepseek-ai/dsh-agent':
         specifier: workspace:^
         version: link:../../core/agent
+      '@deepseek-ai/dsh-browser':
+        specifier: workspace:^
+        version: link:../../browser/browser
       '@deepseek-ai/dsh-capability-capsule':
         specifier: workspace:^
         version: link:../capability-capsule
@@ -6200,6 +6203,9 @@ importers:
       '@deepseek-ai/dsh-subprocess':
         specifier: workspace:^
         version: link:../../subprocess/subprocess
+      '@deepseek-ai/dsh-subprocess-local':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess-local
 
   packages/orchestration/rlm-runtime:
     devDependencies:
