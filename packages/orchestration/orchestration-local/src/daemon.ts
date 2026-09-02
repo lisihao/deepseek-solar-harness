@@ -2030,10 +2030,7 @@ export class OrchestrationDaemon {
         operatorId,
         mode: selectedProvider === undefined ? 'model-worker' as const : 'resident' as const,
         ...allocation.profile === undefined ? {} : { profile: allocation.profile },
-        // The orchestration contract in this checkout predates the full
-        // Physical Operator policy union. Keep the serialized value exact;
-        // the public orchestration type is widened by the owning integration.
-        nativeToolPolicy: nativeToolPolicy(capabilityPlan) as NodeExecutionPlanV1['operatorPlan']['nativeToolPolicy'],
+        nativeToolPolicy: nativeToolPolicy(capabilityPlan),
         injectionBoundaries: selectedProvider?.injectionBoundaries ?? [],
       },
       effectiveReadScopes: capabilityPlan.effectiveReadScopes,
