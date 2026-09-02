@@ -31,6 +31,15 @@ Upstream 尾部的 `[ego-browser:notice]` 更新提示会从结果通道移除�
 
 Provider 支持命名 task space 与稳定的 `ego-lite:<numeric-id>`；按完整 URL 打开/复用和选择页面；关闭、导航、刷新、页面元数据、snapshot、有界 screenshot bytes；语义/CSS locator 交互与读取；等待；显式 handoff/takeover；完成；以及 `browser-js-v1` 中的页面求值。
 
+| Upstream v1.2.5 契约 | DSH 实现 | 状态 |
+|---|---|---|
+| 一个 `ego-browser nodejs` heredoc 组合完整任务 | `browser-js-v1` 保留单进程及 JavaScript 变量、分支、循环、动作与验证 | faithful |
+| Agent 在复用用户浏览器状态的隔离 task space 中工作 | Portable named/existing workspace 映射为稳定 `ego-lite:<id>` 身份 | faithful |
+| Snapshot、语义 locator、动作、wait、capture 与求值 | 类型化 portable operation 覆盖模型安全子集；可信插件保留 capture、handoff/takeover 与求值 | faithful with split authority |
+| 用户控制与 inactive-space 错误是 hard stop | 首个原生 hard stop 被锁存并映射为稳定 `BrowserError`；不会隐式重试或 takeover | faithful |
+| Update notice 是带外 CLI 诊断 | Notice 进入 DSH 日志，绝不改变 framed result | adapted |
+| 原生 current-space 查询、保证全新 tab、原始 page 列表 | 公共 helper 无法保持 DSH 可移植身份契约，因此明确拒绝 | deliberate omission |
+
 `browser-js-v1` 保留 Ego 的核心单 heredoc 行为：可信插件代码可在一个进程中组合 JavaScript 变量、循环、分支、locator、动作、求值、验证和完成逻辑。Ego heredoc 在 Node.js 中执行，因此这一层是**可信插件可执行面，而不是面向模型的安全沙箱**。Provider 不使用 `vm`、静态黑名单或词法遮蔽伪装隔离。面向模型的 Consumer 必须只暴露类型化 `runPlan`，不得让模型把任意 `source` 传给 `runProgram`。
 
 Program 局部 page alias 仅在生成的 heredoc 内映射到原生 `targetId`。它们以及所有 DOM/原生 handle 都随进程结束而消失。返回值受声明的 `none`、按 grapheme 限制的 `text` 或按 UTF-8 bytes 限制的 JSON output contract 约束。
@@ -41,7 +50,7 @@ Program 局部 page alias 仅在生成的 heredoc 内映射到原生 `targetId`�
 
 #### 模型看到什么
 
-本包不会直接向模型呈现任何内容。未来的 browser Consumer 负责面向模型的 schema，并且只呈现类型化 `runPlan` 结果或可移植错误；不得向模型暴露 `browser-js-v1` source 执行。
+本 Provider 包不会直接向模型呈现任何内容。随产品交付的 `@deepseek-ai/dsh-tool-browser` Consumer 负责面向模型的 schema，并且只呈现类型化 `runPlan` 结果或可移植错误；不会向模型暴露 `browser-js-v1` source 执行。
 
 #### Token 影响
 

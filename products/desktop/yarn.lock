@@ -1311,7 +1311,7 @@ __metadata:
 
 "@deepseek-ai/dsh-browser-ego-lite@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-browser-ego-lite@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz::hash=ce36ba&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-browser-ego-lite@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz::hash=dbaeb0&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -1320,7 +1320,7 @@ __metadata:
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
     "@deepseek-ai/dsh-timeout": ^0.1.0-rc.5
-  checksum: 10c0/c26aead65a494da235321813f6d7fcbd3c7471448c162aca8003d598ef529964a5a09cd9aaba1d4c31f7b736c874775b6889c319799ebaf7596fcb04033a9a38
+  checksum: 10c0/be2cf24c8257b5b765f0fa3e592959c841449dee975b2fc48bd31347ab2f91612df0156f0f4e758997fd022e5e656102ddeb65cfc6cb10df343e18e9cca30c3f
   languageName: node
   linkType: hard
 

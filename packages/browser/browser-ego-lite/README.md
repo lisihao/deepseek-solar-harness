@@ -31,6 +31,15 @@ Native `EGO_TASK_SPACE_USER_IN_CONTROL` maps to `BROWSER_USER_CONTROL`; `EGO_TAS
 
 The Provider supports named and stable `ego-lite:<numeric-id>` task spaces; exact-URL open/reuse and selection; close, navigation, reload, page metadata, snapshot and bounded screenshot bytes; semantic/CSS locator interactions and reads; waits; explicit handoff/takeover; completion; and page evaluation inside `browser-js-v1`.
 
+| Upstream v1.2.5 contract | DSH realization | Status |
+|---|---|---|
+| One `ego-browser nodejs` heredoc composes a complete task | `browser-js-v1` preserves one process and JavaScript variables, branches, loops, actions, and verification | faithful |
+| Agent work is isolated in reusable task spaces with the user's browser state | Portable named/existing workspaces map to stable `ego-lite:<id>` identities | faithful |
+| Snapshot, semantic locators, actions, waits, capture, and evaluation | Typed portable operations cover the model-safe subset; trusted plugins retain capture, handoff/takeover, and evaluation | faithful with split authority |
+| User-control and inactive-space errors are hard stops | The first native hard stop is latched and mapped to a stable `BrowserError`; no implicit retry or takeover | faithful |
+| Update notices are out-of-band CLI diagnostics | Notices go to DSH logging and never alter the framed result | adapted |
+| Native current-space lookup, guaranteed fresh-tab creation, and raw page listing | Rejected as unsupported because the public helpers cannot preserve DSH's portable identity contract | deliberate omission |
+
 `browser-js-v1` preserves Ego's central single-heredoc behavior: trusted plugin code can keep JavaScript variables, loops, branches, locators, actions, evaluation, verification, and completion inside one process. Ego heredocs execute in Node.js, so this layer is a **trusted-plugin executable surface, not a model-facing security sandbox**. The Provider does not use `vm`, a static blacklist, or lexical shadowing to claim otherwise. A model-facing Consumer must expose only typed `runPlan`; it must never accept arbitrary model-authored `source` for `runProgram`.
 
 Program-local page aliases map to native `targetId` only inside the generated heredoc. They and every DOM/native handle die with the process. The returned value is limited by the declared `none`, grapheme-bounded `text`, or UTF-8-byte-bounded JSON output contract.
@@ -41,7 +50,7 @@ Program-local page aliases map to native `targetId` only inside the generated he
 
 #### What the model sees
 
-Nothing directly from this package. A future browser Consumer owns its model-facing schema and renders only typed `runPlan` results or portable errors; it must not expose `browser-js-v1` source execution to a model.
+Nothing directly from this Provider package. The shipped `@deepseek-ai/dsh-tool-browser` Consumer owns the model-facing schema and renders only typed `runPlan` results or portable errors; it does not expose `browser-js-v1` source execution to a model.
 
 #### Token effect
 
