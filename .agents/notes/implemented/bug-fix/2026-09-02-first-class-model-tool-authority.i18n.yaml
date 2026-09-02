@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-02-first-class-model-tool-authority.md
-2026-09-02-first-class-model-tool-authority.md: 5ccd5b3c4ea1f963bfb277e3ab228f1729ba1a71
-2026-09-02-first-class-model-tool-authority.zh.md: 5b4412384fb9e6577404f0420038b60c184dbd5c
+2026-09-02-first-class-model-tool-authority.md: 8ed4499f85fd321f11b46d5edd72940b53967a45
+2026-09-02-first-class-model-tool-authority.zh.md: fd508243225a07a5ba131cff4634cc580894f692

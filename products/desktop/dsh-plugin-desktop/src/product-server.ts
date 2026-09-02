@@ -1,7 +1,7 @@
 /** Headless Host adapter for the complete DSH product composition. */
 
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   boot,
@@ -32,6 +32,7 @@ export async function startProductServer(argv: readonly string[] = process.argv.
     platform: process.platform,
     homeDir: homedir(),
     stateDir: join(home, 'runtime-products'),
+    nodeBinDir: dirname(process.execPath),
     environment: process.env,
   })
   const prepared = prepareProductServerProfile(

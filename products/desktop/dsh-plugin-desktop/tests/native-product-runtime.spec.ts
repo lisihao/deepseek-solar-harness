@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
   lstatSync,
@@ -30,6 +31,12 @@ function product(filename: string): void {
   chmodSync(filename, 0o700)
 }
 
+function nodeProduct(filename: string): void {
+  mkdirSync(join(filename, '..'), { recursive: true })
+  writeFileSync(filename, '#!/usr/bin/env node\nconsole.log("native-node-product")\n', { mode: 0o700 })
+  chmodSync(filename, 0o700)
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
@@ -44,11 +51,13 @@ describe('native product runtime', () => {
     product(codex)
     const environment = { PATH: '/usr/bin:/bin' }
     const stateDir = join(root, 'state', 'products')
+    const nodeBinDir = join(root, 'private', 'node-bin')
 
     const installed = installNativeProductRuntime({
       platform: 'darwin',
       homeDir,
       stateDir,
+      nodeBinDir,
       environment,
     })
 
@@ -92,6 +101,7 @@ describe('native product runtime', () => {
       platform: 'win32',
       homeDir,
       stateDir: join(root, 'unused'),
+      nodeBinDir: join(root, 'private', 'node-bin'),
       environment,
     })
     expect(installed.commands).toEqual({})
@@ -114,6 +124,37 @@ describe('native product runtime', () => {
     }).codex).toBe(npmCodex)
   })
 
+  it('makes env-node product CLIs runnable without exposing the private Node directory to the host PATH', () => {
+    const root = temporaryRoot()
+    const homeDir = join(root, 'home')
+    const codex = join(homeDir, '.npm-global', 'bin', 'codex')
+    const nodeBinDir = join(root, 'private', 'node-bin')
+    const node = join(nodeBinDir, 'node')
+    const stateDir = join(root, 'state', 'products')
+    nodeProduct(codex)
+    mkdirSync(nodeBinDir, { recursive: true })
+    writeFileSync(node, '#!/bin/sh\nprintf "native-node-runtime\\n"\n', { mode: 0o700 })
+    chmodSync(node, 0o700)
+    const environment = { PATH: '/usr/bin:/bin' }
+
+    const installed = installNativeProductRuntime({
+      platform: 'darwin',
+      homeDir,
+      stateDir,
+      nodeBinDir,
+      environment,
+    })
+
+    const result = spawnSync(join(stateDir, 'codex'), [], { encoding: 'utf8', env: environment })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe('native-node-runtime\n')
+    expect(readFileSync(join(stateDir, 'codex'), 'utf8')).toContain(`PATH='${nodeBinDir}':"\${PATH:-}" exec '${codex}' "$@"`)
+    expect(environment.PATH).toBe(`${stateDir}${delimiter}/usr/bin:/bin`)
+    expect(environment.PATH).not.toContain(nodeBinDir)
+
+    installed.dispose()
+  })
+
   it('fails closed when the private runtime directory is a symlink', () => {
     const root = temporaryRoot()
     const target = join(root, 'target')
@@ -125,6 +166,7 @@ describe('native product runtime', () => {
       platform: 'darwin',
       homeDir: join(root, 'home'),
       stateDir,
+      nodeBinDir: join(root, 'private', 'node-bin'),
       environment: { PATH: '/usr/bin' },
     })).toThrow('not a private directory')
   })

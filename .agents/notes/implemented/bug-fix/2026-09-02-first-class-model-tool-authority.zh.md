@@ -10,6 +10,8 @@ Smart Auto 选择 Claude Code 后，如果订阅资格在准入前失败，DSH �
 
 现有 `disabled` 原生工具策略不能解决该问题：该策略刻意禁止全部工具，Resident daemon 会拒绝它与模型工具桥同时出现。
 
+打包 Resident 冒烟检查还把产品组合与账户状态混为一谈，要求 Claude Code 与 Codex 同时登录。这违反了一等路由契约：一个通过资格审查的原生订阅就足够，而且包完整性必须可以在没有凭据时验证。此外，Finder 的最小 `PATH` 不包含 `node`；因此使用 `#!/usr/bin/env node` 的 npm 版 Codex 即使在终端登录正常，也会在 Desktop 资格审查中失败。
+
 ## 决策
 
 Resident 协议 v13 包含 `dsh-tools-authoritative`。它要求非空模型工具桥，并进入 canonical command Receipt hash。作为一等主模型的 Claude Code 与 Codex 适配器使用该策略；显式 `physical_operator` 工具、TaskGraph 计划、Debate 无工具角色及远程算子保持既有契约。
@@ -24,6 +26,10 @@ Claude Code 接收 `tools: []`，并只允许严格配置的 DSH MCP 工具桥�
 
 Desktop 会优先于 profile-local 模块链接解析已打包的 DSH 依赖闭包。因此产品持有的包及其 subpath 来自已安装应用，第三方 profile 插件仍保留自身的解析与文件。
 
+Desktop 现在向原生产品 wrapper 提供明确的应用私有 Node 目录。wrapper 只在 Claude/Codex 子进程中前置该目录，因此 npm 安装的产品 CLI 可以从 Finder 启动，同时私有 Node shim 不会暴露到 Host 的公共 `PATH`。Plain-Node Product Server 则提供自身可执行文件所在目录。
+
+打包验收按目的拆分。默认 Resident 包体冒烟检查会解析两个命令、验证两个 Provider 状态记录、协议 v13、状态 schema v5、daemon 权威和完整清理，但不要求任一账户已登录。`--require-provider codex` 与 `--require-provider claude-code` 是显式环境门禁。`--execute` 只执行通过资格审查的原生订阅 Provider，若没有可用 Provider 则失败，因此真实回合门禁不能以零执行通过，也不能回退到 API key。
+
 ## 备选方案
 
 - 不采纳复用 `disabled`：它会同时移除原生工具和 DSH 工具。
@@ -35,5 +41,7 @@ Desktop 会优先于 profile-local 模块链接解析已打包的 DSH 依赖闭�
 Smart Auto 可以在 Claude 订阅不合格时回退到 Codex，而不会把工具执行迁移到无人拥有的审批路径。DSH 工具调用继续通过普通的 scope、guard、approval、event 与插件组合表面。Receipt 重放不能改变工具权威，不受支持的远程使用会明确失败。
 
 应用升级不会通过共享控制 socket 继续使用旧版 Resident 解析器，也不会把已打包核心包与过期源码链接混用。daemon 握手保持低成本，因为原生产品资格检查仍由 `operator.list` 承担，不进入逐请求兼容性交换。
+
+Finder 启动与终端启动现在通过应用持有的 Node runtime 解析同一个 npm 版 Codex CLI。发布自动化可以区分无效包体和账户不可用，而被显式要求的 Provider 仍会明确失败。这样既保留单一订阅运行，也不会削弱认证检查。
 
 Codex 的限制被明确记录：当前 app-server 协议可以移除原生 environment、强制只读 sandbox、拒绝带副作用的原生审批并指示模型使用 DSH 工具，但无法从产品展示面移除每个内置只读 utility。未来上游提供 allowlist 后，可以在不改变 DSH 策略名称或 Receipt 语义的前提下加强执行约束。

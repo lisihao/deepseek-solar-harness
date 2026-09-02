@@ -391,6 +391,7 @@ async function start(): Promise<void> {
       platform: process.platform,
       homeDir: app.getPath('home'),
       stateDir: join(app.getPath('userData'), 'runtime-products'),
+      nodeBinDir: pnpmRuntime.nodeBinDir,
       environment: process.env,
     })
     const releaseNativeProductRuntime = (): void => { nativeProductRuntime.dispose() }

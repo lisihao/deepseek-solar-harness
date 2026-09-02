@@ -10,6 +10,8 @@ When Smart Auto selected Claude Code and subscription qualification failed befor
 
 Using the existing `disabled` native-tool policy was not valid: that policy deliberately forbids every tool and the Resident daemon rejects it when a model-tool bridge is present.
 
+The packaged Resident smoke also conflated product composition with account state by requiring both Claude Code and Codex to be logged in. This contradicted the first-class routing contract: one qualified native subscription is sufficient, and package integrity must remain testable without credentials. In addition, Finder's minimal `PATH` did not contain `node`; an npm-installed Codex entry using `#!/usr/bin/env node` therefore failed qualification even while the same account worked in a terminal.
+
 ## Decision
 
 Resident protocol v13 includes `dsh-tools-authoritative`. It requires a non-empty model-tool bridge and is sealed into the canonical command Receipt hash. First-class Claude Code and Codex model adapters use this policy; the explicit `physical_operator` tool, TaskGraph plans, Debate no-tool roles, and remote operators keep their existing contracts.
@@ -24,6 +26,10 @@ Every Resident business request completes the compatible handshake on the same l
 
 Desktop resolves its packaged DSH dependency closure ahead of profile-local module links. Product-owned packages and subpaths therefore come from the installed application, while third-party profile plugins retain their own resolution and files.
 
+Desktop now gives the native-product wrapper an explicit app-private Node directory. The wrapper prepends it only to the Claude/Codex child process, so npm-installed product CLIs work from Finder without exposing the private Node shim through the Host's public `PATH`. The plain-Node Product Server supplies the directory of its own executable.
+
+Packaged verification is split by intent. The default Resident package smoke resolves both commands, validates both Provider status records, protocol v13, state schema v5, daemon ownership, and complete cleanup without requiring either account to be logged in. `--require-provider codex` and `--require-provider claude-code` are explicit environment gates. `--execute` runs only qualified native-subscription Providers and fails when none is available, so a real-turn gate cannot pass with zero executions or fall back to an API key.
+
 ## Alternatives considered
 
 - Reusing `disabled` was rejected because it intentionally removes both native and DSH tools.
@@ -35,5 +41,7 @@ Desktop resolves its packaged DSH dependency closure ahead of profile-local modu
 Smart Auto can fall back from an unqualified Claude subscription to Codex without moving tool execution onto an unowned approval path. DSH tool calls continue through the ordinary scope, guard, approval, event, and plugin composition surfaces. Receipt replay cannot change tool authority, and unsupported remote use fails loud.
 
 An application upgrade cannot keep using an older Resident parser through the shared control socket or mix packaged core packages with stale source links. The daemon handshake stays inexpensive because native product qualification remains on `operator.list`, outside the per-request compatibility exchange.
+
+Finder launch and terminal launch now resolve the same npm-installed Codex CLI through an app-owned Node runtime. Release automation can distinguish an invalid package from an unavailable account, while an explicitly required Provider still fails loudly. This preserves single-subscription operation without weakening authentication checks.
 
 The Codex limitation is explicit: the current app-server protocol can remove native environments, enforce a read-only sandbox, decline side-effectful native approvals, and instruct the model to use DSH tools, but cannot remove every built-in read-only utility from the advertised product surface. A future upstream allowlist can strengthen enforcement without changing the DSH policy name or Receipt semantics.

@@ -27,6 +27,8 @@ export interface NativeProductRuntimeOptions {
   readonly homeDir: string
   /** Private app-owned directory that receives command wrappers. */
   readonly stateDir: string
+  /** Trusted directory containing the Node executable used by npm-installed CLIs. */
+  readonly nodeBinDir: string
   /** Host environment whose PATH is projected and restored. */
   readonly environment?: NodeJS.ProcessEnv
 }
@@ -153,6 +155,9 @@ export function installNativeProductRuntime(
   const environment = options.environment ?? process.env
   const commands = resolveNativeProductCommands(options)
   if (options.platform !== 'darwin') return { commands, dispose: () => {} }
+  if (!isAbsolute(options.nodeBinDir) || options.nodeBinDir.length === 0 || /[\0\r\n]/u.test(options.nodeBinDir)) {
+    throw new Error('dsh-plugin-desktop: native product Node command directory must be an absolute path without NUL')
+  }
 
   mkdirSync(options.stateDir, { recursive: true, mode: DIRECTORY_MODE })
   const state = lstatSync(options.stateDir)
@@ -170,7 +175,7 @@ export function installNativeProductRuntime(
     }
     replacePrivateExecutable(wrapper, [
       '#!/bin/sh',
-      `exec ${quoteShell(target)} "$@"`,
+      `PATH=${quoteShell(options.nodeBinDir)}:"\${PATH:-}" exec ${quoteShell(target)} "$@"`,
       '',
     ].join('\n'))
   }
