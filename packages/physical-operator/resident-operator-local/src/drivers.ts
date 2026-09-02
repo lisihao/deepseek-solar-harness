@@ -436,6 +436,15 @@ async function claudeModels(claudeExecutable: string): Promise<ResidentModelOpti
       env: claudeEnvironment(),
       pathToClaudeCodeExecutable: claudeExecutable,
       persistSession: false,
+      // Qualification is a DSH-owned read-only probe. Loading the owner's
+      // Claude settings here would start every user MCP server on each status
+      // poll and can orphan those subprocesses when the short-lived probe
+      // closes. Product turns may still opt into their explicit tool surface.
+      settingSources: [],
+      mcpServers: {},
+      strictMcpConfig: true,
+      tools: [],
+      allowedTools: [],
       disallowedTools: ['AskUserQuestion'],
     },
   })
@@ -677,6 +686,17 @@ export function codexExecutionFailure(error: unknown): ResidentOperatorError {
 /** Claude Code Agent SDK Driver using persisted native subscription Sessions. */
 export class ClaudeCodeResidentDriver implements ResidentProductDriver {
   readonly operatorId = 'claude-code' as const
+  private modelCatalog: { readonly executable: string; readonly promise: Promise<ResidentModelOption[]> } | undefined
+
+  private models(executable: string): Promise<ResidentModelOption[]> {
+    if (this.modelCatalog?.executable === executable) return this.modelCatalog.promise
+    const catalog = { executable, promise: claudeModels(executable) }
+    this.modelCatalog = catalog
+    void catalog.promise.catch(() => {
+      if (this.modelCatalog === catalog) this.modelCatalog = undefined
+    })
+    return catalog.promise
+  }
 
   async authenticate(): Promise<ResidentProviderStatus> {
     const executable = resolveProductExecutable('claude')
@@ -705,7 +725,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
       const parsed = JSON.parse(auth) as Record<string, unknown>
       const subscription = isClaudeNativeSubscription(parsed)
       const exactVersion = version.trim() === EXPECTED_CLAUDE_CLI_VERSION
-      const models = subscription && exactVersion ? await claudeModels(executable) : []
+      const models = subscription && exactVersion ? await this.models(executable) : []
       const catalogReady = models.length > 0
       return {
         operatorId: this.operatorId,
