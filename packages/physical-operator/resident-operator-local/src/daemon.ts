@@ -1,9 +1,11 @@
 /** Local resident-operatord JSON-RPC server and lifecycle authority. @module @deepseek-ai/dsh-resident-operator-local/daemon */
 
-import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
 import { dirname, isAbsolute, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
@@ -34,7 +36,7 @@ import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v11 method set advertised by daemon handshake. */
+/** Public protocol-v13 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
   'system.shutdown',
@@ -272,13 +274,14 @@ export class ResidentDaemon {
   private readonly server: Server
   private readonly drivers = new Map<string, ResidentProductDriver>()
   private readonly driverManifestHash: string
+  private readonly instanceId = randomUUID()
   private readonly transports = new Set<JsonRpcLineTransport>()
   private readonly sockets = new Set<Socket>()
   private readonly active = new Map<string, ActiveTurn>()
   private readonly activeCompactions = new Map<string, ActiveCompaction>()
   private readonly qualifications = new Map<string, Promise<ResidentProviderStatus>>()
   private readonly authentications = new Map<string, Promise<ResidentProviderStatus>>()
-  private lockDescriptor: number | undefined
+  private authorityOwned = false
   private closing = false
   private readonly closedResolver = Promise.withResolvers<void>()
   /** Settles after socket, store, pid, and lock cleanup complete. */
@@ -286,7 +289,10 @@ export class ResidentDaemon {
 
   constructor(private readonly options: ResidentDaemonOptions) {
     this.socketPath = localIpcAddress(options.root, 'control')
-    this.store = new ResidentStore(options.root)
+    // Open and migrate the Store without recovering other daemon work. A
+    // losing concurrent process must not mark the current owner's receipts
+    // indeterminate before it has acquired the authority transaction.
+    this.store = new ResidentStore(options.root, { recoverInterrupted: false })
     for (const driver of options.drivers ?? [new ClaudeCodeResidentDriver(), new CodexResidentDriver()]) {
       if (this.drivers.has(driver.operatorId)) {
         throw new Error(`duplicate resident driver ${driver.operatorId}`)
@@ -303,22 +309,30 @@ export class ResidentDaemon {
    */
   async start(): Promise<void> {
     this.acquireLock()
-    if (localIpcUsesFilesystem()) {
-      const socketDirectory = dirname(this.socketPath)
-      mkdirSync(socketDirectory, { recursive: true, mode: 0o700 })
-      chmodSync(socketDirectory, 0o700)
-    }
-    this.removeStaleSocket()
-    await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error): void => { reject(error) }
-      this.server.once('error', onError)
-      this.server.listen(this.socketPath, () => {
-        this.server.off('error', onError)
-        if (localIpcUsesFilesystem()) chmodSync(this.socketPath, 0o600)
-        writeFileSync(join(this.options.root, 'daemon.pid'), `${process.pid}\n`, { mode: 0o600 })
-        resolve()
+    try {
+      // Recovery is an authority-owned mutation. Keep it after the
+      // transactional claim and before publishing the control socket.
+      this.store.recoverInterrupted()
+      if (localIpcUsesFilesystem()) {
+        const socketDirectory = dirname(this.socketPath)
+        mkdirSync(socketDirectory, { recursive: true, mode: 0o700 })
+        chmodSync(socketDirectory, 0o700)
+      }
+      this.removeStaleSocket()
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error): void => { reject(error) }
+        this.server.once('error', onError)
+        this.server.listen(this.socketPath, () => {
+          this.server.off('error', onError)
+          if (localIpcUsesFilesystem()) chmodSync(this.socketPath, 0o600)
+          writeFileSync(join(this.options.root, 'daemon.pid'), `${process.pid}\n`, { mode: 0o600 })
+          resolve()
+        })
       })
-    })
+    } catch (error) {
+      this.releaseLock()
+      throw error
+    }
   }
 
   /**
@@ -338,20 +352,37 @@ export class ResidentDaemon {
     for (const socket of this.sockets) socket.end()
     await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
     this.store.close()
-    if (localIpcUsesFilesystem()) this.safeUnlink(this.socketPath)
-    this.safeUnlink(join(this.options.root, 'daemon.pid'))
-    this.releaseLock()
+    // A daemon that never acquired (or already released) authority may still
+    // close its private Store, but must never remove the live owner's markers.
+    if (this.authorityOwned) {
+      if (localIpcUsesFilesystem()) this.safeUnlink(this.socketPath)
+      this.safeUnlink(join(this.options.root, 'daemon.pid'))
+      this.releaseLock()
+    }
     this.closedResolver.resolve()
   }
 
   private acceptSocket(socket: Socket): void {
     socket.setEncoding('utf8')
     const transport = new JsonRpcLineTransport(socket, socket)
+    let qualified = false
     this.transports.add(transport)
     this.sockets.add(socket)
     transport.onRequest(async (method, params) => {
       try {
-        return wireSuccess(await this.dispatch(method, params))
+        if (method === 'system.handshake') {
+          qualified = false
+          const response = await this.dispatch(method, params, false)
+          qualified = true
+          return wireSuccess(response)
+        }
+        if (method !== 'system.shutdown' && !qualified) {
+          throw new ResidentOperatorError(
+            'resident client must complete a compatible handshake on this connection before invoking business methods',
+            'PROTOCOL_MISMATCH',
+          )
+        }
+        return wireSuccess(await this.dispatch(method, params, qualified))
       } catch (error) {
         return wireFailure(error)
       }
@@ -366,7 +397,11 @@ export class ResidentDaemon {
     transport.start()
   }
 
-  private async dispatch(method: string, params: Record<string, unknown>): Promise<unknown> {
+  private async dispatch(
+    method: string,
+    params: Record<string, unknown>,
+    connectionQualified = false,
+  ): Promise<unknown> {
     switch (method) {
       case 'system.handshake':
         return this.handshake(params)
@@ -416,15 +451,34 @@ export class ResidentDaemon {
           params.after_sequence === undefined ? 0 : integerParam(params, 'after_sequence'),
           params.limit === undefined ? 100 : integerParam(params, 'limit'),
         )
-      case 'system.shutdown':
+      case 'system.shutdown': {
+        const expectedInstanceId = params.expected_daemon_instance_id
+        const expectedPid = params.expected_daemon_pid
+        if (!connectionQualified && (expectedInstanceId === undefined || expectedPid === undefined)) {
+          throw new ResidentOperatorError(
+            'unqualified resident shutdown requires daemon pid and instance identity',
+            'PROTOCOL_MISMATCH',
+          )
+        }
+        if (expectedInstanceId !== undefined && (typeof expectedInstanceId !== 'string' || expectedInstanceId.length === 0)) {
+          throw new ResidentOperatorError('resident protocol expected_daemon_instance_id must be a non-empty string', 'INVALID_RESULT')
+        }
+        if (expectedPid !== undefined && (!Number.isSafeInteger(expectedPid) || Number(expectedPid) <= 0)) {
+          throw new ResidentOperatorError('resident protocol expected_daemon_pid must be a positive integer', 'INVALID_RESULT')
+        }
+        if ((expectedInstanceId !== undefined && expectedInstanceId !== this.instanceId)
+          || (expectedPid !== undefined && expectedPid !== process.pid)) {
+          return { draining: false, replaced: true, daemonInstanceId: this.instanceId }
+        }
         setTimeout(() => { void this.close() }, 10)
-        return { draining: true }
+        return { draining: true, daemonInstanceId: this.instanceId }
+      }
       default:
         throw new ResidentOperatorError(`resident protocol method not found: ${method}`, 'PROTOCOL_MISMATCH')
     }
   }
 
-  private async handshake(params: Record<string, unknown>): Promise<unknown> {
+  private handshake(params: Record<string, unknown>): unknown {
     const requestedProtocol = integerParam(params, 'protocol_version')
     const requestedSchema = integerParam(params, 'state_schema_version')
     const requestedDriverManifest = stringParam(params, 'driver_manifest_sha256')
@@ -443,10 +497,10 @@ export class ResidentDaemon {
     return {
       protocolVersion: RESIDENT_PROTOCOL_VERSION,
       stateSchemaVersion: RESIDENT_STATE_SCHEMA_VERSION,
+      daemonInstanceId: this.instanceId,
       buildCommit: this.options.buildCommit ?? process.env.DSH_BUILD_COMMIT ?? 'development',
       driverManifestSha256: this.driverManifestHash,
       methods: RESIDENT_METHODS,
-      providers: await this.providerStatuses(),
     }
   }
 
@@ -733,31 +787,92 @@ export class ResidentDaemon {
   }
 
   private acquireLock(): void {
+    mkdirSync(this.options.root, { recursive: true, mode: 0o700 })
+    chmodSync(this.options.root, 0o700)
+    const authorityPath = join(this.options.root, 'daemon-authority.sqlite')
     const lockPath = join(this.options.root, 'daemon.lock')
+    const authority = new DatabaseSync(authorityPath)
     try {
-      this.lockDescriptor = openSync(lockPath, 'wx', 0o600)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      const pidPath = join(this.options.root, 'daemon.pid')
-      const pid = existsSync(pidPath) ? Number(readFileSync(pidPath, 'utf8').trim()) : Number.NaN
-      if (Number.isSafeInteger(pid) && pid > 0) {
+      authority.exec(`
+        PRAGMA busy_timeout = 5000;
+        CREATE TABLE IF NOT EXISTS daemon_authority (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          pid INTEGER NOT NULL,
+          instance_id TEXT NOT NULL
+        ) STRICT;
+        BEGIN IMMEDIATE;
+      `)
+      const owner = authority.prepare(
+        'SELECT pid, instance_id FROM daemon_authority WHERE singleton = 1',
+      ).get() as { pid: number; instance_id: string } | undefined
+      if (owner !== undefined) {
+        if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0 || owner.instance_id.length === 0) {
+          throw new ResidentOperatorError(
+            'resident daemon authority contains an invalid owner; refusing unsafe takeover',
+            'RUNTIME_UNAVAILABLE',
+          )
+        }
         try {
-          process.kill(pid, 0)
-          throw new ResidentOperatorError(`resident daemon already runs as pid ${pid}`, 'RUNTIME_UNAVAILABLE')
+          process.kill(owner.pid, 0)
+          throw new ResidentOperatorError(
+            `resident daemon already runs as pid ${owner.pid}`,
+            'RUNTIME_UNAVAILABLE',
+          )
         } catch (probe) {
           if (probe instanceof ResidentOperatorError) throw probe
           if ((probe as NodeJS.ErrnoException).code !== 'ESRCH') throw probe
         }
+      } else {
+        const legacyPidPath = join(this.options.root, 'daemon.pid')
+        const legacyPid = existsSync(legacyPidPath)
+          ? Number(readFileSync(legacyPidPath, 'utf8').trim())
+          : Number.NaN
+        if (Number.isSafeInteger(legacyPid) && legacyPid > 0) {
+          try {
+            process.kill(legacyPid, 0)
+            throw new ResidentOperatorError(
+              `legacy resident daemon still runs as pid ${legacyPid}`,
+              'RUNTIME_UNAVAILABLE',
+            )
+          } catch (probe) {
+            if (probe instanceof ResidentOperatorError) throw probe
+            if ((probe as NodeJS.ErrnoException).code !== 'ESRCH') throw probe
+          }
+        }
       }
-      this.safeUnlink(lockPath)
-      this.lockDescriptor = openSync(lockPath, 'wx', 0o600)
+      authority.prepare(`
+        INSERT INTO daemon_authority (singleton, pid, instance_id) VALUES (1, ?, ?)
+        ON CONFLICT(singleton) DO UPDATE SET pid = excluded.pid, instance_id = excluded.instance_id
+      `).run(process.pid, this.instanceId)
+      writeFileSync(lockPath, `${process.pid}\n`, { mode: 0o600 })
+      authority.exec('COMMIT;')
+      chmodSync(authorityPath, 0o600)
+      this.authorityOwned = true
+    } catch (error) {
+      try { authority.exec('ROLLBACK;') } catch { /* no transaction remained */ }
+      throw error
+    } finally {
+      authority.close()
     }
   }
 
   private releaseLock(): void {
-    if (this.lockDescriptor !== undefined) closeSync(this.lockDescriptor)
-    this.lockDescriptor = undefined
-    this.safeUnlink(join(this.options.root, 'daemon.lock'))
+    if (!this.authorityOwned) return
+    const authority = new DatabaseSync(join(this.options.root, 'daemon-authority.sqlite'))
+    try {
+      authority.exec('PRAGMA busy_timeout = 5000; BEGIN IMMEDIATE;')
+      const released = authority.prepare(
+        'DELETE FROM daemon_authority WHERE singleton = 1 AND pid = ? AND instance_id = ?',
+      ).run(process.pid, this.instanceId)
+      if (Number(released.changes) === 1) this.safeUnlink(join(this.options.root, 'daemon.lock'))
+      authority.exec('COMMIT;')
+      this.authorityOwned = false
+    } catch (error) {
+      try { authority.exec('ROLLBACK;') } catch { /* no transaction remained */ }
+      throw error
+    } finally {
+      authority.close()
+    }
   }
 
   private removeStaleSocket(): void {

@@ -199,12 +199,18 @@ export function canonicalCompactRequestHash(
     .digest('hex')
 }
 
+/** Startup controls for authority-owned Resident crash recovery. */
+export interface ResidentStoreOptions {
+  /** Skip crash recovery until the owning daemon has acquired authority. */
+  readonly recoverInterrupted?: boolean
+}
+
 /** Single-writer SQLite state, receipt, lease, event, and artifact authority. */
 export class ResidentStore {
   private readonly db: DatabaseSync
   private readonly artifactRoot: string
 
-  constructor(readonly root: string) {
+  constructor(readonly root: string, options: ResidentStoreOptions = {}) {
     mkdirSync(root, { recursive: true, mode: 0o700 })
     chmodSync(root, 0o700)
     this.artifactRoot = join(root, 'artifacts', 'sha256')
@@ -218,7 +224,7 @@ export class ResidentStore {
     }
     this.db = new DatabaseSync(path)
     this.configure()
-    this.recoverInterrupted()
+    if (options.recoverInterrupted !== false) this.recoverInterrupted()
     for (const file of [path, `${path}-wal`, `${path}-shm`]) {
       if (existsSync(file)) chmodSync(file, 0o600)
     }
@@ -426,7 +432,8 @@ export class ResidentStore {
   }
 
   /** Any pre-crash accepted/running command is unsafe to replay automatically. */
-  private recoverInterrupted(): void {
+  /** Recover pre-crash work after the owning daemon has acquired authority. */
+  recoverInterrupted(): void {
     const now = new Date().toISOString()
     this.transaction(() => {
       const interrupted = this.db.prepare(

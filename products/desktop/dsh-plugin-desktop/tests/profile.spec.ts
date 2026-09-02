@@ -1,6 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { composeEntries, initProfile, PROFILE_TEMPLATES } from '@deepseek-ai/dsh-app-boot'
@@ -15,6 +25,7 @@ import {
   prepareProductServerProfile,
   readDesktopShellMode,
 } from '../src/profile.ts'
+import { packagedRuntimePackageDirectory } from '../src/module-resolution.ts'
 import { PRODUCT_BUNDLE_ROW_IDS } from '../src/product-bundles.ts'
 
 const homes: string[] = []
@@ -364,6 +375,49 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'ui-remote-modules')?.config).toEqual(expect.objectContaining({
       instances: [expect.objectContaining({ id: 'private-workspace', relayPort: 29001 })],
     }))
+  })
+
+  it('shadows a profile-local core link in the product runtime seat without changing the profile link', () => {
+    const home = temporaryHome()
+    const profileDir = ensureDesktopProfile(home)
+    const sourceDir = join(home, 'source-dsh-terminal')
+    mkdirSync(sourceDir)
+    const profileLink = join(profileDir, 'node_modules', '@deepseek-ai', 'dsh-terminal')
+    mkdirSync(join(profileDir, 'node_modules', '@deepseek-ai'), { recursive: true })
+    symlinkSync(sourceDir, profileLink, 'junction')
+
+    const prepared = prepareDesktopProfile(undefined, home, 'darwin')
+    const runtimeRoot = join(dirname(fileURLToPath(prepared.bareModuleBaseUrl)))
+    const runtimeLink = join(runtimeRoot, 'node_modules', '@deepseek-ai', 'dsh-terminal')
+
+    expect(lstatSync(profileLink).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(profileLink)).toBe(sourceDir)
+    expect(readlinkSync(runtimeLink)).toBe(packagedRuntimePackageDirectory('@deepseek-ai/dsh-terminal'))
+
+    const staleSourceDir = join(home, 'stale-source')
+    mkdirSync(staleSourceDir)
+    const staleRuntimeLink = join(runtimeRoot, 'node_modules', '@deepseek-ai', 'stale-package')
+    symlinkSync(staleSourceDir, staleRuntimeLink, 'junction')
+    prepareDesktopProfile(undefined, home, 'darwin')
+    expect(existsSync(staleRuntimeLink)).toBe(false)
+    expect(readlinkSync(profileLink)).toBe(sourceDir)
+  })
+
+  it('keeps an unrelated third-party profile link outside the product runtime seat', () => {
+    const home = temporaryHome()
+    const profileDir = ensureDesktopProfile(home)
+    const sourceDir = join(home, 'third-party-source')
+    mkdirSync(sourceDir)
+    const profileLink = join(profileDir, 'node_modules', 'third-party-profile-plugin')
+    mkdirSync(join(profileDir, 'node_modules'), { recursive: true })
+    symlinkSync(sourceDir, profileLink, 'junction')
+
+    const prepared = prepareDesktopProfile(undefined, home, 'darwin')
+    const runtimeRoot = join(dirname(fileURLToPath(prepared.bareModuleBaseUrl)))
+
+    expect(readlinkSync(profileLink)).toBe(sourceDir)
+    expect(existsSync(join(runtimeRoot, 'node_modules', 'third-party-profile-plugin'))).toBe(false)
+    expect(existsSync(join(home, 'profiles', 'node_modules'))).toBe(false)
   })
 
   it('boots a selected Web profile without overriding its compatibility UI rows', () => {

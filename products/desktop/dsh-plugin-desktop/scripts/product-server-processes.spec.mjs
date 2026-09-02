@@ -41,6 +41,10 @@ test('stops daemon pids retained below a Product Server smoke home', async () =>
 test('refuses a stale pid that does not prove executable and instance root', () => {
   assert.throws(() => assertOwnedDaemonCommand('/usr/bin/node daemon.js --root /tmp/other', '/tmp/expected'), /does not own root/)
   assert.throws(() => assertOwnedDaemonCommand('/tmp/not-node daemon.js --root /tmp/expected', '/tmp/expected'), /executable/)
+  assert.doesNotThrow(() => assertOwnedDaemonCommand(
+    `${process.execPath} daemon.js --root /tmp/expected root --driver-module /tmp/driver.js`,
+    '/tmp/expected root',
+  ))
 })
 
 test('accepts a daemon exit that races an unavailable owner socket', async () => {

@@ -1,19 +1,26 @@
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import type {
   ResidentDriverExecuteRequest,
   ResidentDriverCompactRequest,
   ResidentProductDriver,
   ResidentProviderStatus,
 } from '@deepseek-ai/dsh-resident-operator'
-import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
+import {
+  ResidentOperatorError,
+  RESIDENT_PROTOCOL_VERSION,
+  RESIDENT_STATE_SCHEMA_VERSION,
+} from '@deepseek-ai/dsh-resident-operator'
 import { ResidentDaemonClient } from '../src/client.ts'
 import { normalizeResidentDriverError, ResidentDaemon } from '../src/daemon.ts'
 import { residentDriverManifestSha256 } from '../src/driver-modules.ts'
+import { unwrapWire } from '../src/protocol.ts'
+import { ResidentStore } from '../src/store.ts'
 import {
   EXPECTED_CODEX_CLI_VERSION,
   EXPECTED_CODEX_SCHEMA_SHA256,
@@ -33,6 +40,28 @@ const temporaryRoot = (): string => {
   const value = mkdtempSync(join(tmpdir(), 'dsh-resident-daemon-'))
   roots.push(value)
   return value
+}
+
+async function qualifiedRawRequest<T>(
+  socketPath: string,
+  method: string,
+  params: object,
+): Promise<T> {
+  const socket = createConnection(socketPath)
+  await once(socket, 'connect')
+  const transport = new JsonRpcLineTransport(socket, socket)
+  transport.start()
+  try {
+    unwrapWire(await transport.request('system.handshake', {
+      protocol_version: RESIDENT_PROTOCOL_VERSION,
+      state_schema_version: RESIDENT_STATE_SCHEMA_VERSION,
+      driver_manifest_sha256: residentDriverManifestSha256([]),
+    }))
+    return unwrapWire(await transport.request(method, params)) as T
+  } finally {
+    transport.close()
+    socket.end()
+  }
 }
 
 afterEach(() => {
@@ -55,6 +84,129 @@ describe('Resident daemon Driver error boundary', () => {
 })
 
 describe('Resident daemon lifecycle', () => {
+  it('publishes its process identity in the single-instance lock before listening', async () => {
+    const root = temporaryRoot()
+    const daemon = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    await daemon.start()
+    try {
+      expect(readFileSync(join(root, 'daemon.lock'), 'utf8')).toBe(`${process.pid}\n`)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('refuses to shut down when the caller observed a different daemon identity', async () => {
+    const root = temporaryRoot()
+    const daemon = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    await daemon.start()
+    const connected = client(root)
+    const raw = connected as unknown as {
+      rawRequest<T>(method: string, params: object, signal?: AbortSignal): Promise<T>
+    }
+    try {
+      await expect(raw.rawRequest('system.shutdown', {
+        expected_daemon_pid: process.pid + 1,
+        expected_daemon_instance_id: 'different-daemon-instance',
+      })).resolves.toMatchObject({ draining: false, replaced: true })
+      await expect(connected.providers()).resolves.toHaveLength(1)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('rejects an unqualified shutdown without a fully observed daemon identity', async () => {
+    const root = temporaryRoot()
+    const daemon = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    await daemon.start()
+    const connected = client(root)
+    const raw = connected as unknown as {
+      rawRequest<T>(method: string, params: object, signal?: AbortSignal): Promise<T>
+    }
+    try {
+      await expect(raw.rawRequest('system.shutdown', {})).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+      await expect(connected.providers()).resolves.toHaveLength(1)
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('serializes concurrent authority claims and permits the loser after owner release', async () => {
+    const root = temporaryRoot()
+    const first = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    const second = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    const results = await Promise.allSettled([first.start(), second.start()])
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
+
+    const winner = results[0]?.status === 'fulfilled' ? first : second
+    const loser = winner === first ? second : first
+    await winner.close()
+    await expect(loser.start()).resolves.toBeUndefined()
+    await loser.close()
+  })
+
+  it('defers recovery for a losing daemon and fences its shared-marker cleanup', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const owner = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    let loser: ResidentDaemon | undefined
+    await owner.start()
+    try {
+      const accepted = owner.store.accept(
+        'owner-command',
+        'owner-request-hash',
+        'codex',
+        workspace,
+        { model: 'gpt-test', effort: 'medium' },
+        'manual',
+      )
+      owner.store.markRunning('owner-command', 'native-owner', 'turn-owner')
+      expect(owner.store.inspectTurn(accepted.turnId)).toMatchObject({ state: 'running' })
+
+      // Construct after the owner's running receipt exists: a losing
+      // constructor must not recover the owner's work before it has authority.
+      loser = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+      expect(loser.store.inspectTurn(accepted.turnId)).toMatchObject({ state: 'running' })
+      await expect(loser.start()).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+
+      // Closing the loser must not remove the owner's socket or PID marker.
+      await loser.close()
+      expect(existsSync(owner.socketPath)).toBe(true)
+      expect(readFileSync(join(root, 'daemon.pid'), 'utf8')).toBe(`${process.pid}\n`)
+      expect(owner.store.inspectTurn(accepted.turnId)).toMatchObject({ state: 'running' })
+    } finally {
+      if (loser !== undefined) await loser.close()
+      await owner.close()
+    }
+  })
+
+  it('runs interrupted-receipt recovery only after the daemon claims authority', async () => {
+    const root = temporaryRoot()
+    const bootstrap = new ResidentStore(root, { recoverInterrupted: false })
+    const accepted = bootstrap.accept(
+      'interrupted-command',
+      'interrupted-request-hash',
+      'codex',
+      '/workspace',
+      { model: 'gpt-test', effort: 'medium' },
+      'manual',
+    )
+    bootstrap.markRunning('interrupted-command', 'native-interrupted', 'turn-interrupted')
+    bootstrap.close()
+
+    const daemon = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
+    await daemon.start()
+    try {
+      expect(daemon.store.inspectTurn(accepted.turnId)).toMatchObject({
+        state: 'indeterminate',
+        error: { code: 'COMMAND_INDETERMINATE' },
+      })
+    } finally {
+      await daemon.close()
+    }
+  })
+
   it('closes accepted control sockets before shutdown settles', async () => {
     const root = temporaryRoot()
     const daemon = new ResidentDaemon({ root, drivers: [new MemoryDriver()] })
@@ -508,9 +660,9 @@ describe('ResidentDaemon', () => {
     const connected = client(root)
     try {
       await connected.ready()
-      expect(driver.qualificationCount).toBe(1)
+      expect(driver.qualificationCount).toBe(0)
       expect(await connected.list()).toEqual([])
-      expect(driver.qualificationCount).toBe(1)
+      expect(driver.qualificationCount).toBe(0)
     } finally {
       await daemon.close()
     }
@@ -529,7 +681,7 @@ describe('ResidentDaemon', () => {
     try {
       await driver.blockingQualificationEntered
       await new Promise<void>(resolve => setTimeout(resolve, 25))
-      expect(driver.qualificationCount).toBe(2)
+      expect(driver.qualificationCount).toBe(1)
       expect(driver.maximumActiveQualifications).toBe(1)
     } finally {
       driver.releaseQualification()
@@ -925,8 +1077,14 @@ describe('ResidentDaemon', () => {
       operator_id: 'codex',
       workspace,
       prompt: [{ type: 'text', text: 42 }],
+    })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
+    await expect(qualifiedRawRequest(daemon.socketPath, 'turn.execute', {
+      command_id: 'invalid-prompt-qualified',
+      operator_id: 'codex',
+      workspace,
+      prompt: [{ type: 'text', text: 42 }],
     })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
-    await expect(raw.rawRequest('turn.execute', {
+    await expect(qualifiedRawRequest(daemon.socketPath, 'turn.execute', {
       command_id: 'invalid-label',
       operator_id: 'codex',
       workspace,

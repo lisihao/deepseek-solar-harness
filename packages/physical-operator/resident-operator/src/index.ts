@@ -21,7 +21,7 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 12
+export const RESIDENT_PROTOCOL_VERSION = 13
 /** Current forward-only daemon state schema version. */
 export const RESIDENT_STATE_SCHEMA_VERSION = 5
 

@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import net from 'node:net'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
+import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
 
 const execFileAsync = promisify(execFile)
 
@@ -64,11 +65,13 @@ async function processCommand(pid) {
 }
 
 export function assertOwnedDaemonCommand(command, root, executable = process.execPath) {
-  const words = command.split(/\s+/u)
-  const rootIndex = words.indexOf('--root')
-  if (rootIndex < 0 || resolve(words[rootIndex + 1] ?? '') !== resolve(root)) {
+  const rootArgument = ` --root ${root}`
+  const rootIndex = command.indexOf(rootArgument)
+  const suffix = rootIndex < 0 ? '' : command.slice(rootIndex + rootArgument.length)
+  if (rootIndex < 0 || (suffix.length > 0 && !suffix.startsWith(' --'))) {
     throw new Error(`refusing to signal daemon: command does not own root ${resolve(root)}`)
   }
+  const words = command.split(/\s+/u)
   if (resolve(words[0] ?? '') !== resolve(executable)) {
     throw new Error(`refusing to signal daemon: executable does not match ${resolve(executable)}`)
   }
@@ -87,6 +90,20 @@ export async function stopOwnedDaemon(root, timeoutMs = 7_000, dependencies = {}
       break
     } catch {
       // A daemon from the preceding socket layout may still own the legacy path.
+    }
+  }
+  if (basename(root) === 'resident-operators') {
+    try {
+      const resident = new ResidentDaemonClient({
+        root,
+        autoStart: false,
+        connectTimeoutMs: Math.min(timeoutMs, 2_000),
+        pollIntervalMs: 50,
+      })
+      await (dependencies.requestQualifiedShutdown ?? (() => resident.shutdown()))()
+      if (await waitForExit(pid, timeoutMs)) return
+    } catch {
+      // A legacy or differently configured daemon is handled by the proven process fallback below.
     }
   }
   if (!await processExists(pid)) return
