@@ -5,14 +5,12 @@
   ],
   "ignoreBinaries": [
     "bwrap",
-    "icacls",
     "musl-gcc",
     "python3",
     "sandbox-exec",
     "tar",
     "taskkill",
-    "tmux",
-    "where.exe"
+    "tmux"
   ],
   "ignoreWorkspaces": [
     "vendor/*",
@@ -127,11 +125,28 @@
     "packages/host/directory-picker-native": {
       "entry": [
         "tests/**/*.spec.{ts,tsx}",
-        "tests/**/*.e2e.ts"
+        "!tests/win32-dialog*.spec.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx}",
-        "tests/**/*.{ts,tsx}"
+        "tests/**/*.{ts,tsx}",
+        "!src/win32-dialog*.ts",
+        "!tests/built-worker.e2e.ts",
+        "!tests/win32-dialog*.spec.ts"
+      ],
+      "ignoreDependencies": [
+        "koffi"
+      ]
+    },
+    "packages/fs/fs-local": {
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts",
+        "!src/win32.ts",
+        "!tests/win32.spec.ts"
+      ],
+      "ignoreDependencies": [
+        "koffi"
       ]
     },
     "packages/client/web-ui": {
@@ -381,11 +396,24 @@
     "packages/sandbox/sandbox-local": {
       "entry": [
         "tests/**/*.spec.ts",
-        "tests/**/*.e2e.ts"
+        "tests/**/*.e2e.ts",
+        "!tests/acl-grants.spec.ts"
       ],
       "project": [
         "src/**/*.ts",
-        "tests/**/*.ts"
+        "tests/**/*.ts",
+        "!tests/acl-grants.spec.ts"
+      ]
+    },
+    "packages/session/session-persistence-jsonl": {
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts",
+        "!src/win32.ts",
+        "!tests/win32.spec.ts"
+      ],
+      "ignoreDependencies": [
+        "koffi"
       ]
     },
     "packages/session/session-telemetry-otel": {
@@ -401,6 +429,13 @@
     "packages/util/brand": {
       "project": [
         "src/**/*.ts"
+      ]
+    },
+    "packages/util/atomic-write": {
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts",
+        "!tests/windows-contention.spec.ts"
       ]
     },
     "packages/attachment/attachment": {

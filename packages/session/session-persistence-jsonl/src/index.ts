@@ -30,7 +30,6 @@ import {
 import {
   compressZstdFrame, createZstdFrameDecoder, decompressZstdFrame, decompressZstdPrefix, scanZstdFrames,
 } from './zstd.ts'
-import { ensureDurableDirectoryWin32, publishNewFileWin32 } from './win32.ts'
 
 export type { JsonlCompression } from './format.ts'
 
@@ -517,15 +516,9 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     const finalPath = logPath(this.root, meta.cwd, meta.id, this.compression)
     await this.rejectOppositeArtifact(meta.cwd, meta.id)
     const content = await this.encodeMaterialization(meta, events)
-    /* v8 ignore next -- native Windows coverage exercises this platform dispatch; Linux covers the POSIX peer */
-    if (process.platform === 'win32') {
-      await this.materializeWin32(project, dir, finalPath, meta.id, content)
-    } else {
-      await this.materializePosix(project, dir, finalPath, meta.id, content)
-    }
+    await this.materializePosix(project, dir, finalPath, meta.id, content)
   }
 
-  /* v8 ignore start -- Windows uses the Win32 durable-publish path; POSIX coverage exercises this peer. */
   private async materializePosix(
     project: string,
     dir: string,
@@ -567,30 +560,6 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
       /* v8 ignore next -- redundant temp link; publish already durable, rm failure is an unreachable IO edge */
     }
   }
-  /* v8 ignore stop */
-
-  /* v8 ignore start -- native Windows coverage exercises this integration path */
-  private async materializeWin32(
-    project: string,
-    dir: string,
-    finalPath: string,
-    id: SessionId,
-    content: Buffer | string,
-  ): Promise<void> {
-    await ensureDurableDirectoryWin32(this.root)
-    await ensureDurableDirectoryWin32(project)
-    await ensureDurableDirectoryWin32(dir)
-    await this.rejectExistingLog(finalPath, id)
-    const tmp = await this.writeSyncedTempFile(finalPath, content)
-    try {
-      await publishNewFileWin32(tmp, finalPath)
-    } catch (error) {
-      await rm(tmp, { force: true })
-      throw error
-    }
-  }
-  /* v8 ignore stop */
-
   private async rejectExistingLog(finalPath: string, id: SessionId): Promise<void> {
     // Never publish over an existing committed log: materialize is the first
     // write of a session the backend believes is new. A file here means a

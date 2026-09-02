@@ -1,6 +1,12 @@
 packages:
   - vendor/*
   - packages/*/*
+  # Dormant Windows compatibility source is intentionally outside the active
+  # workspace so ordinary install/build/test/verification never resolves it.
+  - '!packages/sandbox/sandbox-windows-acl'
+  - '!packages/shell/pwsh-local'
+  - '!packages/shell/pwsh-sandbox'
+  - '!packages/shell/tool-pwsh'
   # The Landlock launcher is developed with its harness consumers but keeps
   # its native build and publication scripts under native/landlock-run.
   - native/landlock-run
@@ -42,14 +48,14 @@ allowBuilds:
   lefthook: true
   # Cross-platform boundary for the persistent PTY backend, including ConPTY on Windows.
   node-pty: true
+  # Old worktrees may retain Koffi from the retired Windows closure; never run its build script.
+  koffi: false
   # Pulled in by @earendil-works/pi-ai (optional LLM API backend). pnpm lists
   # them only because they ship lifecycle scripts, but those are no-ops we don't
   # need, so we deny them — install still succeeds.
   '@google/genai': false
   protobufjs: false
   node-addon-require-builtin: false
-  # JSONL durability calls MoveFileExW with write-through publication on Windows.
-  koffi: true
   # The Python runtime deploy includes the reviewed workspace postinstall that
   # restores the executable bit on node-pty's macOS spawn helper.
   '@deepseek-ai/dsh-subprocess-local@file:packages/subprocess/subprocess-local': true

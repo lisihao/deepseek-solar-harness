@@ -66,7 +66,7 @@ Non-zero exits are reported as `[exit code: N]` markers; investigate failures be
 
 #### 模型看到的内容
 
-模型看到生成的 [`pwsh` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-pwsh)。按 agent 作用域的工具限制可以移除该 agent 的定义。
+这份休眠兼容源码在本地定义其 [`pwsh` schema](src/index.ts)。DSH 不再构建或发布 Windows/PowerShell 工具面，因此生成目录与受支持产品中均不含此 schema；若显式诊断组合加载该源码，按 agent 作用域的工具限制仍然适用。
 
 #### Token 影响
 

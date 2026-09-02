@@ -66,7 +66,7 @@ Prefix-stable while the registration scope and prompt text are unchanged. Plugin
 
 #### What the model sees
 
-The model sees the generated [`pwsh` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-pwsh). Agent-scoped tool restrictions can remove the definition for that agent.
+This dormant compatibility source defines its [`pwsh` schema](src/index.ts) locally. The schema is absent from the generated catalog and supported product because DSH no longer builds or ships a Windows/PowerShell tool surface. Agent-scoped restrictions still apply if an explicit diagnostic composition loads the source.
 
 #### Token effect
 

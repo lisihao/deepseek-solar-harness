@@ -261,9 +261,6 @@
     "esbuild": {
       "built": true
     },
-    "koffi": {
-      "built": true
-    },
     "node-pty": {
       "built": true
     },
