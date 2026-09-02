@@ -36,9 +36,6 @@ export const VARIANT_TITLES: Record<ToolRowVariant, string> = {
  */
 const TOOL_VARIANTS: Record<string, ToolRowVariant> = {
   bash: 'bash',
-  // The PowerShell twin is a shell tool: the bash row family (icon, colors)
-  // with its own title from TOOL_TITLES, not the generic `others` row.
-  pwsh: 'bash',
   read: 'read',
   web_fetch: 'read',
   web_search: 'search',
@@ -65,7 +62,6 @@ const TOOL_TITLES: Record<string, string> = {
   cordis_run: 'Run Cordis Plugin',
   cordis_stop: 'Stop Cordis Plugin',
   cordis_undefine: 'Remove Cordis Plugin',
-  pwsh: 'Pwsh',
 }
 
 /**

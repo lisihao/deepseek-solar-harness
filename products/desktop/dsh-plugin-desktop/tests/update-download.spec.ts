@@ -25,14 +25,6 @@ function dmgArtifact(): Uint8Array {
   return artifact
 }
 
-function windowsArtifact(): Uint8Array {
-  const artifact = Buffer.alloc(512, 0)
-  artifact.write('MZ', 0, 'ascii')
-  artifact.writeUInt32LE(0x80, 0x3c)
-  artifact.set([0x50, 0x45, 0x00, 0x00], 0x80)
-  return artifact
-}
-
 function chunkedResponse(chunks: readonly Uint8Array[], headers: HeadersInit = {}): Response {
   let index = 0
   return new Response(new ReadableStream<Uint8Array>({
@@ -93,24 +85,6 @@ describe('desktop update installer download', () => {
     await expectNoPartialFiles(userDataPath, '2.1.0')
   })
 
-  it('accepts a Windows executable only when it has both MZ and PE signatures', async () => {
-    const userDataPath = await temporaryUserData()
-    const artifact = windowsArtifact()
-    const result = await downloadDesktopUpdate({
-      platform: 'win32',
-      version: '2.2.0',
-      userDataPath,
-      request: async (url) => {
-        expect(url).toBe(DESKTOP_DOWNLOAD_URLS.win32)
-        return chunkedResponse([artifact])
-      },
-    })
-
-    expect(result).toBe(join(userDataPath, 'updates', '2.2.0', 'DSH-Desktop-2.2.0-windows.exe'))
-    expect(await readFile(result)).toEqual(Buffer.from(artifact))
-    await expectNoPartialFiles(userDataPath, '2.2.0')
-  })
-
   it('accepts canonical stable SemVer build metadata in the private artifact path', async () => {
     const userDataPath = await temporaryUserData()
     const result = await downloadDesktopUpdate({
@@ -130,8 +104,6 @@ describe('desktop update installer download', () => {
 
   it.each([
     ['darwin', new Uint8Array(1024)],
-    ['win32', Object.assign(windowsArtifact(), { 0: 0 })],
-    ['win32', Object.assign(windowsArtifact(), { 0x80: 0 })],
   ] as const)('rejects and removes an invalid %s artifact', async (platform, artifact) => {
     const userDataPath = await temporaryUserData()
     await expectFailure(downloadDesktopUpdate({
@@ -219,8 +191,6 @@ describe('desktop update installer download', () => {
   it.each([
     ['linux', '2.8.0'],
     ['darwin', '../2.8.0'],
-    ['win32', 'v2.8.0'],
-    ['win32', '2.8.0-rc.1'],
   ])('rejects platform %s and version %s before requesting', async (platform, version) => {
     const userDataPath = await temporaryUserData()
     let requested = false

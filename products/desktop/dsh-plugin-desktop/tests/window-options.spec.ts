@@ -6,7 +6,6 @@ import {
   compatibilityWindowOptions,
   desktopWindowOptions,
 } from '../src/window-options.ts'
-import { WINDOWS_TITLEBAR_HEIGHT } from '../src/window-chrome.ts'
 
 const spec: DesktopShellSpec = {
   mode: 'compatibility',
@@ -63,13 +62,6 @@ describe('compatibility BrowserWindow options', () => {
     }
   })
 
-  it('uses the native Windows caption while hiding the application menu', () => {
-    const options = compatibilityWindowOptions(spec, {} as NativeImage, 'win32')
-
-    expect(options.title).toBe('DeepSeek Harness Desktop')
-    expect(options.autoHideMenuBar).toBe(true)
-  })
-
   it('rejects an advanced spec before BrowserWindow construction', () => {
     expect(() => compatibilityWindowOptions(
       { ...spec, mode: 'advanced' },
@@ -91,27 +83,6 @@ describe('compatibility BrowserWindow options', () => {
       visualEffectState: 'followWindow',
     }))
     expect(desktopWindowOptions(advanced, {} as NativeImage, 'darwin')).toEqual(options)
-  })
-
-  it('uses native Windows controls, Mica, shadow, and rounded corners in advanced mode', () => {
-    const options = advancedWindowOptions(
-      { ...spec, mode: 'advanced' },
-      {} as NativeImage,
-      'win32',
-    )
-
-    expect(options).toEqual(expect.objectContaining({
-      titleBarStyle: 'hidden',
-      titleBarOverlay: {
-        color: '#00000000',
-        symbolColor: '#7f858f',
-        height: WINDOWS_TITLEBAR_HEIGHT,
-      },
-      backgroundMaterial: 'mica',
-      hasShadow: true,
-      roundedCorners: true,
-      thickFrame: true,
-    }))
   })
 
   it('rejects advanced mode on Linux', () => {

@@ -9,7 +9,6 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
-import { evaluate } from '@deepseek-ai/cordis-plugin-loader'
 
 describe('dsh-base bundle', () => {
   it('declares a parseable patch list through the dsh.bundle.patch manifest field', () => {
@@ -41,8 +40,11 @@ describe('dsh-base bundle', () => {
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-claude-code')
   })
 
-  it('gates each shell stack by platform with a symmetric disabled expression', () => {
+  it('keeps the default profile on the supported POSIX shell stack', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
+    const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+    }
     const parsed = yaml.load(
       readFileSync(resolve(root, 'cordis.patch.yml'), 'utf8'),
       { schema: entryListSchema },
@@ -53,25 +55,15 @@ describe('dsh-base bundle', () => {
         ? (patch as { insert?: Record<string, unknown>[] }).insert ?? []
         : [],
     )
-    // Symmetric gating: each stack's executor and tool rows carry the same
-    // platform fact, inverted between the bash and pwsh twins, so exactly one
-    // shell stack mounts per host. Evaluate with a platform-scoped context
-    // (the `with` scope shadows the global `process`) so both outcomes pin on
-    // every host.
-    for (const [id, win32, linux] of [
-      ['bash-sandbox', true, false],
-      ['tool-bash', true, false],
-      ['pwsh-sandbox', false, true],
-      ['tool-pwsh', false, true],
-    ] as const) {
+    for (const id of ['bash-sandbox', 'tool-bash'] as const) {
       const row = rows.find(candidate => candidate.id === id)
       if (row === undefined) throw new Error(`base patch must mount ${id}`)
-      const expression = (row.disabled as { __jsExpr?: string } | undefined)?.__jsExpr
-      if (expression === undefined) throw new Error(`${id} must gate on a !!js disabled expression`)
-      expect(Boolean(evaluate({ process: { platform: 'win32' } }, expression)), `${id} on win32`).toBe(win32)
-      expect(Boolean(evaluate({ process: { platform: 'linux' } }, expression)), `${id} on linux`).toBe(linux)
+      expect(row.name).toMatch(/^@deepseek-ai\/dsh-(bash-sandbox|tool-bash)$/)
     }
-    // The platform layer folded into these rows: no separate patch file ships.
+    expect(rows.filter(row => row.id === 'pwsh-sandbox' || row.id === 'tool-pwsh')).toHaveLength(0)
+    expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-pwsh-sandbox')
+    expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-tool-pwsh')
+    // The platform-specific compatibility layer is not a separate patch file.
     expect(existsSync(resolve(root, 'windows.cordis.patch.yml'))).toBe(false)
   })
 })

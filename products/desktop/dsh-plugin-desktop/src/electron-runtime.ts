@@ -145,7 +145,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   readonly platform: DesktopPlatform
   readonly updates: DesktopUpdateAdapter = {
     get isPackaged() { return app.isPackaged },
-    get canDownload() { return app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32') },
+    get canDownload() { return app.isPackaged && process.platform === 'darwin' },
     get currentVersion() { return PRODUCT_VERSION },
     get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
     request: (url, init) => net.fetch(url, init),
@@ -168,7 +168,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     private readonly restart: () => Promise<void>,
     private readonly deployment?: DesktopDeploymentAdapter,
   ) {
-    if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
+    if (process.platform !== 'darwin' && process.platform !== 'linux') {
       throw new Error(`dsh-plugin-desktop: unsupported Electron platform ${process.platform}`)
     }
     this.platform = process.platform
@@ -431,7 +431,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
 
   /** Download a confirmed installer and hand it to the native installation flow. */
   private async downloadAndOpenUpdate(version: string, signal: AbortSignal): Promise<void> {
-    if (this.platform !== 'darwin' && this.platform !== 'win32') {
+    if (this.platform !== 'darwin') {
       throw new Error(`dsh-plugin-desktop: updates are unavailable on ${this.platform}`)
     }
     const artifactPath = await downloadDesktopUpdate({
@@ -443,67 +443,17 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     })
     signal.throwIfAborted()
 
-    if (this.platform === 'darwin') {
-      const openError = await shell.openPath(artifactPath)
-      if (openError !== '') throw new Error(`dsh-plugin-desktop: failed to open update disk image: ${openError}`)
-      signal.throwIfAborted()
-      await dialog.showMessageBox({
-        type: 'info',
-        title: 'DSH Desktop Update Downloaded',
-        message: `DSH Desktop ${version} is ready to install.`,
-        detail: 'The disk image has opened. Replace DSH Desktop in Applications, then reopen it.',
-        buttons: ['OK'],
-        defaultId: 0,
-        noLink: true,
-      })
-      return
-    }
-
-    const result = await dialog.showMessageBox({
+    const openError = await shell.openPath(artifactPath)
+    if (openError !== '') throw new Error(`dsh-plugin-desktop: failed to open update disk image: ${openError}`)
+    signal.throwIfAborted()
+    await dialog.showMessageBox({
       type: 'info',
       title: 'DSH Desktop Update Downloaded',
       message: `DSH Desktop ${version} is ready to install.`,
-      detail: 'Restart DSH Desktop and run the installer now?',
-      buttons: ['Restart and Install', 'Later'],
-      defaultId: 1,
-      cancelId: 1,
+      detail: 'The disk image has opened. Replace DSH Desktop in Applications, then reopen it.',
+      buttons: ['OK'],
+      defaultId: 0,
       noLink: true,
-    })
-    if (result.response !== 0) return
-
-    const spec = this.scheduled
-    if (spec === undefined) throw new Error('dsh-plugin-desktop: no active shell can exit for update installation')
-    signal.throwIfAborted()
-    await this.launchWindowsUpdateInstaller(artifactPath)
-    this.quitting = true
-    spec.requestQuit(0)
-  }
-
-  /** Start the downloaded NSIS installer before releasing the current process. */
-  private async launchWindowsUpdateInstaller(installerPath: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      let child: ReturnType<typeof spawn>
-      try {
-        child = spawn(installerPath, ['--updated', '--force-run'], {
-          detached: true,
-          stdio: 'ignore',
-          shell: false,
-          windowsHide: false,
-        })
-      } catch (cause) {
-        reject(cause)
-        return
-      }
-      const fail = (cause: Error): void => { reject(cause) }
-      child.once('error', fail)
-      child.once('spawn', () => {
-        child.off('error', fail)
-        child.once('error', cause => {
-          process.stderr.write(`dsh-plugin-desktop: update installer failed after launch: ${cause.message}\n`)
-        })
-        child.unref()
-        resolve()
-      })
     })
   }
 
@@ -581,7 +531,6 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     const windowTitle = `${spec.productName} v${PRODUCT_VERSION} · ${spec.windowTitle}`
     const window = new BrowserWindow(desktopWindowOptions({ ...spec, windowTitle }, icon, this.platform))
     window.accessibleTitle = windowTitle
-    if (this.platform === 'win32') window.removeMenu()
     const previousApplicationMenu = this.platform === 'darwin' ? Menu.getApplicationMenu() : undefined
     this.installApplicationMenu()
     this.window = window

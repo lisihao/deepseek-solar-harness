@@ -1,7 +1,5 @@
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import tsconfigPaths from 'vite-tsconfig-paths'
-import { resolvePwshPath } from './packages/shell/pwsh-local/src/resolve.ts'
 import { defineConfig } from 'vitest/config'
 import { standardDecoratorPlugin, vitestExecArgv } from './vitest.shared.ts'
 import { COVERAGE_EXEMPT_ENV, coverageExemptHeavySuites } from './scripts/coverage-exempt.ts'
@@ -18,75 +16,32 @@ const uncoveredLocationsReporter = fileURLToPath(new URL('./scripts/coverage-unc
 // lib/ never loads a second module-singleton copy.
 const pathsPlugin = (): ReturnType<typeof tsconfigPaths> => tsconfigPaths({ projects: ['./tsconfig.base.json'] })
 
-const windowsUnsupportedPackages = process.platform === 'win32'
-  ? [
-      // Bash-requiring suites (a real POSIX shell is unavailable on Windows).
-      // The pwsh-requiring suites (pwsh-local, tool-pwsh) deliberately stay
-      // INCLUDED: PowerShell ships with Windows, so they run natively here.
-      // This explicit list (not a 'packages/shell/*' glob) keeps
-      // packages/shell/shell — the Service Definition package — running on Windows.
-      'packages/shell/bash-local',
-      'packages/shell/bash-sandbox',
-      'packages/shell/tool-bash',
-      'packages/hooks/*',
-      'packages/terminal/terminal-bash',
-      'packages/sandbox/sandbox-local',
-    ]
-  : []
+// Windows compatibility packages and their host-specific acceptance suites
+// remain in the repository as dormant source, but the supported default
+// build/test/coverage path is macOS/Linux and must not select them.
+const unsupportedWindowsTests = [
+  'packages/fs/fs-local/tests/win32.spec.ts',
+  'packages/host/directory-picker-native/tests/built-worker.e2e.ts',
+  'packages/host/directory-picker-native/tests/win32-dialog.spec.ts',
+  'packages/host/directory-picker-native/tests/win32-dialog-*.spec.ts',
+  'packages/session/session-persistence-jsonl/tests/win32.spec.ts',
+  'packages/sandbox/sandbox-windows-acl/tests/**/*.spec.ts',
+  'packages/sandbox/sandbox-local/tests/acl-grants.spec.ts',
+  'packages/shell/pwsh-local/tests/**/*.spec.ts',
+  'packages/shell/pwsh-sandbox/tests/**/*.spec.ts',
+  'packages/shell/tool-pwsh/tests/**/*.spec.ts',
+  'packages/util/atomic-write/tests/windows-contention.spec.ts',
+]
 
-const windowsUnsupportedTests = process.platform === 'win32'
-  ? [
-      ...windowsUnsupportedPackages.map(path => `${path}/tests/**/*.spec.ts`),
-      'packages/subprocess/subprocess/tests/**/*.spec.ts',
-      'packages/subprocess/subprocess-local/tests/local.spec.ts',
-      'packages/subprocess/subprocess-local/tests/process-inspector.spec.ts',
-      'packages/subprocess/subprocess-local/tests/spawn.spec.ts',
-      'packages/subprocess/subprocess-local/tests/terminal.spec.ts',
-      // These local authorities intentionally expose Unix-domain sockets.
-      // Windows product support does not provide a named-pipe transport yet,
-      // so the native lane must not treat a filesystem path as a pipe name.
-      'packages/orchestration/orchestration-local/tests/daemon.spec.ts',
-      'packages/physical-operator/resident-operator-local/tests/daemon.spec.ts',
-      'packages/physical-operator/resident-operator-local/tests/codex-transport.spec.ts',
-    ]
-  : []
-
-const windowsUnsupportedCoveragePackages = process.platform === 'win32'
-  ? [...windowsUnsupportedPackages, 'packages/subprocess/*']
-  : []
-
-// Windows-only packages: their sources execute exclusively on win32 (koffi
-// loads Win32 libraries), so the Linux coverage lane can never cover them.
-// The Windows dev/CI lane exercises them through the probe/runner suites; the
-// per-file 100% gate must not fail on their Linux-uncovered paths.
-const windowsOnlyCoverageExclusions = process.platform !== 'win32'
-  ? [
-      'packages/sandbox/sandbox-windows-acl/src/**/*.ts',
-    ]
-  : []
-
-// The confinement runner entry executes exclusively as a spawned child
-// process (the sandbox seam's argv-prefix wrapper): its module-level main()
-// would run the confinement in-process if imported, and vitest's v8 coverage
-// never measures child processes. Its behavior is pinned end-to-end by
-// tests/runner.spec.ts, which spawns the real entry through tsx.
-const windowsRunnerCoverageExclusions = process.platform === 'win32'
-  ? ['packages/sandbox/sandbox-windows-acl/src/runner.ts']
-  : []
-
-// pwsh-local's run/start/lifecycle suites self-skip without a real pwsh
-// (executor.spec.ts hasPwsh), leaving this file
-// far below per-file 100% on pwsh-less hosts; the exemption keeps those hosts
-// green while CI runners ship pwsh and still enforce the full bar. The probe
-// runs the suites' own resolution (the dependency-free resolve.ts module),
-// so the exemption is active exactly when the suites skip — a mismatched
-// narrower probe could exempt the file on hosts whose suites actually run.
-const pwshCoverageExclusions = spawnSync(resolvePwshPath(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$true'], { encoding: 'utf8' }).status === 0
-  ? []
-  : [
-      'packages/shell/pwsh-local/src/index.ts',
-      'packages/shell/pwsh-sandbox/src/**/*.ts',
-    ]
+const unsupportedWindowsCoverageSources = [
+  'packages/fs/fs-local/src/win32.ts',
+  'packages/host/directory-picker-native/src/win32-*.ts',
+  'packages/session/session-persistence-jsonl/src/win32.ts',
+  'packages/sandbox/sandbox-windows-acl/src/**/*.ts',
+  'packages/shell/pwsh-local/src/**/*.ts',
+  'packages/shell/pwsh-sandbox/src/**/*.ts',
+  'packages/shell/tool-pwsh/src/**/*.ts',
+]
 
 const testIncludes = [
   'packages/*/*/tests/**/*.spec.{ts,tsx}',
@@ -132,7 +87,7 @@ export default defineConfig({
     setupFiles: ['./scripts/test-invariants.ts'],
     // .tsx: client component specs (jsdom via per-file @vitest-environment pragma).
     include: testIncludes,
-    exclude: windowsUnsupportedTests,
+    exclude: unsupportedWindowsTests,
     // One coverage invocation aggregates both projects. Every suite forks for
     // Node stability; process-bound suites stay separate for inventory control.
     projects: [
@@ -151,7 +106,7 @@ export default defineConfig({
           setupFiles: ['./scripts/test-invariants.ts'],
           include: testIncludes,
           exclude: [
-            ...windowsUnsupportedTests,
+            ...unsupportedWindowsTests,
             ...processBoundTests,
             ...coverageExemptExcludes,
           ],
@@ -167,7 +122,7 @@ export default defineConfig({
           setupFiles: ['./scripts/test-invariants.ts'],
           include: processBoundTests,
           exclude: [
-            ...windowsUnsupportedTests,
+            ...unsupportedWindowsTests,
             ...coverageExemptExcludes,
           ],
         },
@@ -296,10 +251,7 @@ export default defineConfig({
         'packages/bundle/orchestrations/src/**/*.{ts,tsx}',
         'packages/bundle/resident-operators/src/**/*.{ts,tsx}',
         'packages/subagent/subagent-codex/src/wire.ts',
-        ...windowsUnsupportedCoveragePackages.map(path => `${path}/src/**/*.ts`),
-        ...windowsOnlyCoverageExclusions,
-        ...windowsRunnerCoverageExclusions,
-        ...pwshCoverageExclusions,
+        ...unsupportedWindowsCoverageSources,
       ],
       // 100% or it doesn't merge (docs/testing.md: excessive tests are welcome).
       // Per-file so a well-covered big file can't subsidize a bare one.

@@ -228,12 +228,6 @@ importers:
       '@deepseek-ai/dsh-plan-mode':
         specifier: workspace:^
         version: link:../../packages/plan/plan-mode
-      '@deepseek-ai/dsh-pwsh-local':
-        specifier: workspace:^
-        version: link:../../packages/shell/pwsh-local
-      '@deepseek-ai/dsh-pwsh-sandbox':
-        specifier: workspace:^
-        version: link:../../packages/shell/pwsh-sandbox
       '@deepseek-ai/dsh-resident-operator-local':
         specifier: workspace:^
         version: link:../../packages/physical-operator/resident-operator-local
@@ -294,9 +288,6 @@ importers:
       '@deepseek-ai/dsh-tool-jobs':
         specifier: workspace:^
         version: link:../../packages/jobs/tool-jobs
-      '@deepseek-ai/dsh-tool-pwsh':
-        specifier: workspace:^
-        version: link:../../packages/shell/tool-pwsh
       '@deepseek-ai/dsh-tool-ralph':
         specifier: workspace:^
         version: link:../../packages/workflow/tool-ralph
@@ -413,9 +404,6 @@ importers:
       '@deepseek-ai/dsh-cmdline':
         specifier: workspace:^
         version: link:../../packages/boot/cmdline
-      '@deepseek-ai/dsh-pwsh-local':
-        specifier: workspace:^
-        version: link:../../packages/shell/pwsh-local
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.0
@@ -581,9 +569,6 @@ importers:
       '@deepseek-ai/dsh-plan-mode':
         specifier: workspace:*
         version: link:../packages/plan/plan-mode
-      '@deepseek-ai/dsh-pwsh-local':
-        specifier: workspace:*
-        version: link:../packages/shell/pwsh-local
       '@deepseek-ai/dsh-repeat-tool-reminder':
         specifier: workspace:*
         version: link:../packages/guard/repeat-tool-reminder
@@ -737,9 +722,6 @@ importers:
       '@deepseek-ai/dsh-tool-physical-operator':
         specifier: workspace:*
         version: link:../packages/physical-operator/tool-physical-operator
-      '@deepseek-ai/dsh-tool-pwsh':
-        specifier: workspace:*
-        version: link:../packages/shell/tool-pwsh
       '@deepseek-ai/dsh-tool-ralph':
         specifier: workspace:*
         version: link:../packages/workflow/tool-ralph
@@ -1115,9 +1097,6 @@ importers:
       '@deepseek-ai/dsh-plan-mode':
         specifier: workspace:^
         version: link:../../plan/plan-mode
-      '@deepseek-ai/dsh-pwsh-sandbox':
-        specifier: workspace:^
-        version: link:../../shell/pwsh-sandbox
       '@deepseek-ai/dsh-repeat-tool-reminder':
         specifier: workspace:^
         version: link:../../guard/repeat-tool-reminder
@@ -1208,9 +1187,6 @@ importers:
       '@deepseek-ai/dsh-tool-jobs':
         specifier: workspace:^
         version: link:../../jobs/tool-jobs
-      '@deepseek-ai/dsh-tool-pwsh':
-        specifier: workspace:^
-        version: link:../../shell/tool-pwsh
       '@deepseek-ai/dsh-tool-ralph':
         specifier: workspace:^
         version: link:../../workflow/tool-ralph
@@ -5129,9 +5105,6 @@ importers:
       '@deepseek-ai/dsh-native-command':
         specifier: workspace:^
         version: link:../../util/native-command
-      koffi:
-        specifier: ^3.1.0
-        version: 3.1.1
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -6739,9 +6712,6 @@ importers:
 
   packages/sandbox/sandbox-local:
     dependencies:
-      '@deepseek-ai/dsh-sandbox-windows-acl':
-        specifier: workspace:^
-        version: link:../sandbox-windows-acl
       '@deepseek-ai/node-addon-landlock-run':
         specifier: workspace:^
         version: link:../../../native/landlock-run/packages/entry

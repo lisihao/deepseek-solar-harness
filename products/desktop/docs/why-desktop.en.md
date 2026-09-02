@@ -27,12 +27,12 @@ The plugin boundary also tells us what not to expose. Third-party plugins can us
 
 The current Desktop product provides:
 
-- Native windows, a tray, and single-instance lifecycle on macOS and Windows.
+- Native windows, a tray, and single-instance lifecycle on macOS.
 - Compatibility and advanced presentation modes. Compatibility preserves the upstream client; advanced adds Desktop-owned layout, native materials, and drag regions.
 - Multiple profile selection. Desktop exposes the active profile identity for the current generation, and switching takes effect through an orderly restart.
 - A bundled terminal and pinned pnpm environment. They apply only to processes created by Desktop and do not modify the user's global PATH.
 - Public `desktopProfiles` and `desktopPnpm` Host services for plugins.
-- Version discovery and confirmation-gated installer downloads, handing off to a macOS DMG or Windows NSIS installer.
+- Version discovery and confirmation-gated macOS DMG downloads.
 
 ## What we deliberately do not do
 

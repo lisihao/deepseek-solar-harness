@@ -42,78 +42,35 @@ describe('CI workflow', () => {
     }
   })
 
-  it('keeps a required Wine Windows job, a non-blocking native Windows job with failover, and a master-only standby', () => {
+  it('keeps the required CI DAG Linux/Python-only', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     if (!isRecord(workflow.jobs)
-      || !isRecord(workflow.jobs.windows)
-      || !isRecord(workflow.jobs['windows-native'])
-      || !isRecord(workflow.jobs['wine-apt-cache'])
-      || !isRecord(workflow.jobs['serial-windows'])
       || !isRecord(workflow.jobs['node-24'])
       || !isRecord(workflow.jobs['node-24-coverage'])
       || !isRecord(workflow.jobs['node-24-consumers'])
       || !isRecord(workflow.jobs['all-checks-passed'])) {
-      throw new TypeError('CI workflow must define windows, windows-native, wine-apt-cache, serial-windows, node-24, node-24-coverage, node-24-consumers, and all-checks-passed jobs')
+      throw new TypeError('CI workflow must define node-24, node-24-coverage, node-24-consumers, and all-checks-passed jobs')
     }
 
-    const windows = workflow.jobs.windows
-    const windowsNative = workflow.jobs['windows-native']
-    const wineAptCache = workflow.jobs['wine-apt-cache']
-    const serialWindows = workflow.jobs['serial-windows']
     const node24 = workflow.jobs['node-24']
     const node24Coverage = workflow.jobs['node-24-coverage']
     const node24Consumers = workflow.jobs['node-24-consumers']
     const aggregate = workflow.jobs['all-checks-passed']
-    if (!Array.isArray(windows.steps) || !Array.isArray(aggregate.needs)) {
-      throw new TypeError('Windows job must define steps and the aggregate must define needs')
+    if (!Array.isArray(aggregate.needs)) {
+      throw new TypeError('CI aggregate must define needs')
     }
-    const commandSteps = windows.steps.filter((step): step is Record<string, unknown> & { run: string } => (
-      isRecord(step) && typeof step.run === 'string'
-    ))
 
-    // Required PR job: Wine on ubuntu-latest, runs wine-windows-gates.sh.
-    expect(windows['runs-on']).toBe('ubuntu-latest')
-    expect(windows.name).toBe('windows node 24 / wine blocking')
-    expect(windows.if).toBe(pullRequestImpactIf)
-    expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
+    for (const jobName of ['windows', 'windows-native', 'wine-apt-cache', 'serial-windows']) {
+      expect(workflow.jobs).not.toHaveProperty(jobName)
+    }
+    expect(JSON.stringify(workflow.jobs)).not.toMatch(/windows|wine|pwsh/iu)
+    expect(aggregate.needs).not.toEqual(expect.arrayContaining(['windows', 'windows-native', 'wine-apt-cache', 'serial-windows']))
 
-    // windows-native: non-blocking native job with failover, runs windows-complete.
-    // Its pool is resolved by the Windows-specific switch.
-    expect(typeof windowsNative['runs-on']).toBe('string')
-    expect(windowsNative['runs-on']).toContain('DSH_CI_FAILOVER_WINDOWS')
-    expect(windowsNative['runs-on']).not.toContain('DSH_CI_FAILOVER_LINUX')
-    expect(windowsNative['runs-on']).toContain('self-hosted')
-    expect(windowsNative['runs-on']).toContain('dsh-win-ci')
-    expect(windowsNative['runs-on']).toContain('windows-2025')
-    expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
-    expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toBe(pullRequestImpactIf)
-    const nativeCommandSteps = (windowsNative.steps as unknown[]).filter((step): step is Record<string, unknown> & { run: string } => (
-      isRecord(step) && typeof step.run === 'string'
-    ))
-    expect(nativeCommandSteps.map(step => step.run)).toContain('pnpm run check:ci:windows-complete')
-
-    // wine-apt-cache: master-only, seeds the Wine apt cache.
-    expect(wineAptCache.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
-    expect(wineAptCache['runs-on']).toBe('ubuntu-latest')
-
-    // serial-windows: master-only standby, self-hosted, non-blocking.
-    expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'")
-    expect(serialWindows['runs-on']).toEqual(['self-hosted', 'dsh-win-ci', 'windows'])
-    expect(serialWindows.name).toBe('serial / windows (self-hosted standby)')
-
-    // Aggregate: Wine `windows` required, native `windows-native` excluded.
-    expect(aggregate.needs).toContain('windows')
-    expect(aggregate.needs).not.toContain('windows-native')
-    expect(aggregate.needs).not.toContain('serial-windows')
-
-    // Linux failover is a separate switch: the three required Linux workers
-    // and the verdict job resolve their pool through DSH_CI_FAILOVER_LINUX,
-    // never the Windows switch.
+    // The three required Linux workers and the verdict job resolve their pool
+    // through DSH_CI_FAILOVER_LINUX.
     for (const [jobName, job] of [['node-24', node24], ['node-24-coverage', node24Coverage], ['node-24-consumers', node24Consumers]] as const) {
       expect(typeof job['runs-on']).toBe('string')
       expect(job['runs-on'], `${jobName} runs-on must use the Linux failover switch`).toContain('DSH_CI_FAILOVER_LINUX')
-      expect(job['runs-on'], `${jobName} runs-on must not use the Windows failover switch`).not.toContain('DSH_CI_FAILOVER_WINDOWS')
       expect(job['runs-on']).toContain('vm-backup')
       expect(job['runs-on']).toContain('ubuntu-24.04')
       expect(job['runs-on']).not.toContain('dsh-ubuntu-24-04-16core')
@@ -123,7 +80,6 @@ describe('CI workflow', () => {
     expect(node24Coverage.env.DSH_OXLINT_THREADS).toBe('1')
     expect(node24Coverage.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain("|| '2'")
     expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
-    expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
     expect(aggregate['runs-on']).toContain('vm-backup')
   })
 
@@ -146,13 +102,13 @@ describe('CI workflow', () => {
 
     // Neither drill may carry a job-level group: it would not exempt the job
     // from run-scoped cancellation.
-    for (const name of ['serial-linux-selfhosted', 'serial-windows']) {
+    for (const name of ['serial-linux-selfhosted']) {
       const job = workflow.jobs[name]
       if (!isRecord(job)) throw new TypeError(`${name} must be defined`)
       expect(job.concurrency).toBeUndefined()
       // Both stay master-push-only and only allocate when their pool is configured.
       expect(job.if).toContain("github.event_name == 'push' && github.ref == 'refs/heads/master'")
-      expect(job.if).toContain(name === 'serial-linux-selfhosted' ? 'DSH_CI_FAILOVER_LINUX' : 'DSH_CI_FAILOVER_WINDOWS')
+      expect(job.if).toContain('DSH_CI_FAILOVER_LINUX')
     }
 
     // What bounds the cost of exempting push: a master push may only carry the
@@ -181,7 +137,7 @@ describe('CI workflow', () => {
       })
       .map(([name]) => name)
       .sort()
-    expect(pushReachable).toEqual(['serial-linux-selfhosted', 'serial-windows', 'wine-apt-cache'])
+    expect(pushReachable).toEqual(['serial-linux-selfhosted'])
 
     // Why workflow_dispatch must keep cancelling: each benchmark fans out to a
     // dozen larger runners at once, in this same group on master. If it stopped
@@ -195,14 +151,6 @@ describe('CI workflow', () => {
       expect(job.strategy['max-parallel']).toBe(12)
       expect(job['timeout-minutes']).toBe(15)
     }
-  })
-
-  it('keeps supported LSP source under native Windows coverage', () => {
-    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
-
-    expect(config).not.toContain('packages/lsp/lsp-stdio/src/connection.ts')
-    expect(config).not.toContain('packages/lsp/lsp-stdio/src/index.ts')
-    expect(config).not.toContain('packages/lsp/lsp-stdio/src/instance.ts')
   })
 
   it('requires one release-shaped Python runtime target on every pull request', () => {
@@ -252,7 +200,7 @@ describe('CI workflow', () => {
     expect(JSON.stringify(docsOnly.steps)).toContain('pnpm run doc-sync')
     expect(aggregate.needs).toContain('docs-only')
 
-    for (const jobName of ['node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-runtime', 'windows', 'windows-native']) {
+    for (const jobName of ['node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-runtime']) {
       const job = workflowJob(workflow, jobName)
       expect(job.needs, `${jobName} must depend on impact classification`).toEqual(['pr-impact'])
       expect(job.if, `${jobName} must fail open only after a classified full PR`).toBe(pullRequestImpactIf)
@@ -265,19 +213,10 @@ describe('CI workflow', () => {
     expect(aggregateText).toContain("needs['node-24'].result != 'success'")
   })
 
-  it('keeps every Vitest project process-isolated on native Windows', () => {
+  it('keeps every Vitest project process-isolated', () => {
     const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
 
-    expect(config).not.toContain("pool: process.platform === 'win32' ? 'threads' : 'forks'")
     expect(config.match(/pool: 'forks'/g)).toHaveLength(2)
-  })
-
-  it('keeps Unix-socket authorities outside the native Windows inventory', () => {
-    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
-
-    expect(config).toContain("'packages/orchestration/orchestration-local/tests/daemon.spec.ts'")
-    expect(config).toContain("'packages/physical-operator/resident-operator-local/tests/daemon.spec.ts'")
-    expect(config).toContain("'packages/physical-operator/resident-operator-local/tests/codex-transport.spec.ts'")
   })
 
   it('keeps native HMR watcher suites in the process-bound project', () => {
@@ -301,12 +240,10 @@ describe('fork branch CI workflow', () => {
     const compat = workflowJob(workflow, 'node-compat')
     const pythonSdk = workflowJob(workflow, 'python-sdk')
     const pythonRuntime = workflowJob(workflow, 'python-runtime')
-    const windows = workflowJob(workflow, 'windows')
     const aggregate = workflowJob(workflow, 'all-checks-passed')
     if (!Array.isArray(linux.steps)
       || !Array.isArray(compat.steps)
       || !Array.isArray(pythonSdk.steps)
-      || !Array.isArray(windows.steps)
       || !Array.isArray(aggregate.needs)) {
       throw new TypeError('fork CI jobs must define executable steps and aggregate dependencies')
     }
@@ -322,8 +259,8 @@ describe('fork branch CI workflow', () => {
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: { targets: 'node24-linux-x64', ci: true },
     })
-    expect(windows['runs-on']).toBe('windows-latest')
-    expect(JSON.stringify(windows.steps)).toContain('pnpm run check:ci:windows-blocking')
+    expect(workflow.jobs).not.toHaveProperty('windows')
+    expect(JSON.stringify(workflow.jobs)).not.toMatch(/windows|wine|pwsh/iu)
     expect(aggregate).toMatchObject({
       name: 'all checks passed',
       if: 'always()',
@@ -333,7 +270,6 @@ describe('fork branch CI workflow', () => {
       'node-compat',
       'python-sdk',
       'python-runtime',
-      'windows',
     ])
   })
 })

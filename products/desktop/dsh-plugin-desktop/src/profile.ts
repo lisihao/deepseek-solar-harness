@@ -13,7 +13,7 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { evaluate, isJsExpr, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
+import { type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import {
   composeEntries,
@@ -76,10 +76,6 @@ const BROWSE_PICKER_BACKEND = '@deepseek-ai/dsh-host-directory-picker-browse'
 const BROWSE_PICKER_SURFACE = '@deepseek-ai/dsh-client-ui-directory-picker-browse'
 const SERVER_BROWSE_PICKER_HOST_ROW_ID = 'product-server-directory-picker-browse-host'
 const SERVER_BROWSE_PICKER_SURFACE_ROW_ID = 'product-server-directory-picker-browse-surface'
-const PWSH_SANDBOX_ROW_ID = 'pwsh-sandbox'
-const UPSTREAM_PWSH_SANDBOX_PACKAGE = '@deepseek-ai/dsh-pwsh-sandbox'
-const DESKTOP_WINDOWS_PWSH_SANDBOX_ROW_ID = 'desktop-windows-pwsh-sandbox'
-const DESKTOP_WINDOWS_PWSH_SANDBOX_PACKAGE = 'dsh-plugin-desktop/windows-pwsh-sandbox'
 const DEFAULT_DESKTOP_SHELL_MODE: DesktopShellMode = 'compatibility'
 const PRODUCT_MODULE_BASE_DIR = '.dsh-product-runtime'
 const SETTINGS_FILE_PACKAGE = '@deepseek-ai/dsh-settings-file'
@@ -359,19 +355,6 @@ function rowConfig(row: EntryOptions | undefined): Record<string, unknown> {
     : {}
 }
 
-/** Resolve a Loader row's platform gate without mutating the host process. */
-function rowDisabledOnPlatform(row: EntryOptions, platform: NodeJS.Platform): boolean {
-  if (!isJsExpr(row.disabled)) return row.disabled === true
-  const scopedProcess = new Proxy(process, {
-    get(target, property) {
-      if (property === 'platform') return platform
-      const value = Reflect.get(target, property, target)
-      return typeof value === 'function' ? value.bind(target) : value
-    },
-  })
-  return Boolean(evaluate({ process: scopedProcess }, row.disabled.__jsExpr))
-}
-
 type ProductHostAdapter = 'desktop' | 'server'
 
 interface ProductProfileOptions {
@@ -390,12 +373,11 @@ const DESKTOP_ADAPTER_ROW_IDS = [
   'desktop-updates',
   'desktop-directory-picker-browse-host',
   'desktop-directory-picker-browse-surface',
-  DESKTOP_WINDOWS_PWSH_SANDBOX_ROW_ID,
 ] as const
 
 /** Build the shared product composition, then add exactly one Host adapter. */
 function prepareProductProfile(options: ProductProfileOptions): PreparedProductProfile {
-  const { telemetryDisabled, home, platform, profileName, adapter } = options
+  const { telemetryDisabled, home, profileName, adapter } = options
   if (profileName === DESKTOP_PROFILE_NAME) ensureDesktopProfile(home)
   else if (profileName === PRODUCT_SERVER_PROFILE_NAME) ensureProductServerProfile(home)
   else resolveProfileDir(profileName, home)
@@ -572,51 +554,6 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
   if (!rows.has('webserver')) {
     throw new Error(`${BIN_NAME}: desktop profile has no webserver row`)
   }
-  if (adapter === 'desktop' && platform === 'win32') {
-    if (!rows.has(DIRECTORY_PICKER_ROW_ID)) {
-      throw new Error(`${BIN_NAME}: desktop profile has no directory-picker row`)
-    }
-    patches.push(
-      {
-        id: DIRECTORY_PICKER_ROW_ID,
-        name: AUTO_PICKER_PACKAGE,
-        disabled: true,
-      },
-      {
-        insert: [
-          {
-            id: 'desktop-directory-picker-browse-host',
-            name: BROWSE_PICKER_BACKEND,
-          },
-          {
-            id: 'desktop-directory-picker-browse-surface',
-            name: BROWSE_PICKER_SURFACE,
-          },
-        ],
-      },
-    )
-    const pwshSandbox = rows.get(PWSH_SANDBOX_ROW_ID)
-    if (pwshSandbox?.name === UPSTREAM_PWSH_SANDBOX_PACKAGE
-      && !rowDisabledOnPlatform(pwshSandbox, platform)) {
-      patches.push(
-        {
-          id: PWSH_SANDBOX_ROW_ID,
-          name: UPSTREAM_PWSH_SANDBOX_PACKAGE,
-          disabled: true,
-        },
-        {
-          insert: [
-            {
-              id: DESKTOP_WINDOWS_PWSH_SANDBOX_ROW_ID,
-              name: DESKTOP_WINDOWS_PWSH_SANDBOX_PACKAGE,
-              ...(pwshSandbox.disabled === undefined ? {} : { disabled: pwshSandbox.disabled }),
-              config: rowConfig(pwshSandbox),
-            },
-          ],
-        },
-      )
-    }
-  }
   if (adapter === 'desktop') {
     // Loopback-only binding is a launcher security invariant, not user config.
     patches.push({
@@ -683,7 +620,7 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
  * Load and compose one desktop profile generation.
  * @param telemetryDisabled - inherited DSH telemetry opt-out value.
  * @param home - Harness home containing profiles and the machine-wide patch.
- * @param platform - native platform selecting launcher-owned safety overlays.
+ * @param platform - native platform marker retained for the profile API.
  * @param profileName - existing or lazily available Web profile to compose.
  * @returns root config, profile metadata, and ordered patches.
  */

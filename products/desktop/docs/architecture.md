@@ -49,7 +49,7 @@ Launcher 私有的 `desktopRuntime`、`desktopPnpmBootstrap`、Electron executab
 
 ## 打包与运行时闭包
 
-发布包使用 Electron Builder 和 `app.asar`，但需要物理 unpack 的依赖（例如 pnpm、node-pty、Windows ACL/native 文件）会放在 `app.asar.unpacked`。Packaged runtime gate 会检查 ASAR 入口和物理运行时入口，profile fallback 不能把符号链接指向无法被 Node 解析的虚拟 ASAR 路径。
+发布包使用 Electron Builder 和 `app.asar`，但需要物理 unpack 的依赖（例如 pnpm 与 node-pty native 文件）会放在 `app.asar.unpacked`。Packaged runtime gate 会检查 ASAR 入口和物理运行时入口，profile fallback 不能把符号链接指向无法被 Node 解析的虚拟 ASAR 路径。
 
 Desktop workspace 使用 Yarn；Solar Harness monorepo 根目录保留 pnpm workspace。桌面代码、测试、打包配置和发布脚本属于 `products/desktop/dsh-plugin-desktop/`；核心改动属于 monorepo 根目录，并执行根治理合同。
 

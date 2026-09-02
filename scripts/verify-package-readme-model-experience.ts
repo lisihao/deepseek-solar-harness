@@ -45,9 +45,8 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/attachment/attachment': { kind: 'indirect', reason: 'The storage seam delegates model request rendering to provider adapters.' },
   'packages/attachment/attachment-local': { kind: 'indirect', reason: 'The local backend delegates model request rendering to provider adapters.' },
   'packages/shell/shell': { kind: 'indirect', reason: 'The service interface delegates all model rendering to dsh-tool-bash.' },
-  'packages/shell/shell-env': { kind: 'indirect', reason: 'The env service exposes managed DSH_* facts through the shell tools (dsh-tool-bash/dsh-tool-pwsh); it registers no prompt or schema of its own.' },
+  'packages/shell/shell-env': { kind: 'indirect', reason: 'The env service exposes managed DSH_* facts through dsh-tool-bash; it registers no prompt or schema of its own.' },
   'packages/shell/bash-local': { kind: 'indirect', reason: 'The executor backend delegates model rendering to dsh-tool-bash.' },
-  'packages/shell/pwsh-local': { kind: 'indirect', reason: 'The executor backend delegates model rendering to dsh-tool-pwsh.' },
   'packages/physical-operator/physical-operator': { kind: 'indirect', reason: 'The service definition delegates model rendering to dsh-tool-physical-operator.' },
   'packages/physical-operator/physical-operator-resident': { kind: 'indirect', reason: 'The dual-mode provider delegates model rendering to dsh-tool-physical-operator.' },
   'packages/physical-operator/physical-operator-subagent': { kind: 'indirect', reason: 'The provider adapter delegates model rendering to dsh-tool-physical-operator.' },
@@ -144,7 +143,6 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/e2b/subprocess-e2b': { kind: 'indirect', reason: 'The remote spawn backend delegates model rendering to consumer seams such as the bash executor family.' },
   'packages/subprocess/subprocess-local': { kind: 'indirect', reason: 'The spawn backend delegates model rendering to consumer seams such as the bash executor family.' },
   'packages/sandbox/sandbox-local': { kind: 'indirect', reason: 'The provider backend delegates model rendering to dsh-bash-sandbox and dsh-tool-bash.' },
-  'packages/sandbox/sandbox-windows-acl': { kind: 'indirect', reason: 'The provider backend delegates model rendering to the shell/pwsh sandbox executors and their tools.' },
   'packages/sdk/client': { kind: 'none', reason: 'Client-process library; model-facing behavior lives in the spawned runtime\'s composed plugins.' },
   'packages/sdk/protocol': { kind: 'none', reason: 'Client-facing wire library; the runtime plugins behind the serving entry own model-facing behavior.' },
   'packages/session/session-projection': { kind: 'none', reason: 'The projection registry serves client-facing read models of already-logged session state and registers nothing model-facing.' },
@@ -272,7 +270,16 @@ for (const line of readFileSync(resolve(root, 'docs/tool-catalog.md'), 'utf8').s
 }
 
 const failures: Failure[] = []
-const packageJsons = globSync('packages/*/*/package.json', { cwd: root }).map(path => path.split(sep).join('/')).sort()
+const unsupportedWindowsPackages = new Set([
+  'packages/sandbox/sandbox-windows-acl',
+  'packages/shell/pwsh-local',
+  'packages/shell/pwsh-sandbox',
+  'packages/shell/tool-pwsh',
+])
+const packageJsons = globSync('packages/*/*/package.json', { cwd: root })
+  .map(path => path.split(sep).join('/'))
+  .filter(path => !unsupportedWindowsPackages.has(path.slice(0, -'/package.json'.length)))
+  .sort()
 const scannedPackages = new Set(packageJsons.map(path => path.slice(0, -'/package.json'.length)))
 let structuredCount = 0
 let modelContextEntryCount = 0

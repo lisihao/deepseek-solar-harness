@@ -10,6 +10,9 @@
   "include": [
     "src"
   ],
+  "exclude": [
+    "src/win32-dialog*.ts"
+  ],
   "references": [
     {
       "path": "../directory-picker"

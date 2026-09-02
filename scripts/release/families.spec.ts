@@ -1,5 +1,6 @@
 /** Release family discovery, publish order, tag naming, and the bump judgements. */
 
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { releaseFamily, type ReleaseMember } from './families.ts'
 import { compareVersions, nextVendorVersion, reachesPayload } from './bump.ts'
@@ -93,6 +94,18 @@ describe('release families', () => {
 
   it('rejects an unknown family identifier', () => {
     expect(() => { releaseFamily('native') }).toThrow(/unknown release family/)
+  })
+
+  it('keeps Windows compatibility packages out of the dsh release family', () => {
+    const root = fileURLToPath(new URL('../..', import.meta.url))
+    const names = new Set(releaseFamily('dsh').members(root).map(entry => entry.name))
+
+    expect(names).not.toEqual(expect.arrayContaining([
+      '@deepseek-ai/dsh-pwsh-local',
+      '@deepseek-ai/dsh-pwsh-sandbox',
+      '@deepseek-ai/dsh-sandbox-windows-acl',
+      '@deepseek-ai/dsh-tool-pwsh',
+    ]))
   })
 })
 

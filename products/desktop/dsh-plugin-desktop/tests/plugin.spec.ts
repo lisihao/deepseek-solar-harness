@@ -180,7 +180,7 @@ describe('desktop Host plugin', () => {
     expect(harness.update).toHaveBeenCalledWith({ mode: 'advanced' })
   })
 
-  it.each(['win32', 'linux'] as const)(
+  it.each(['linux'] as const)(
     'keeps the full-size application icon on %s',
     (platform) => {
       const harness = createHarness(platform)

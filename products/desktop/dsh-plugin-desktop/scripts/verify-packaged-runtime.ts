@@ -37,7 +37,6 @@ export const REQUIRED_PACKAGED_RUNTIME_ENTRIES = [
   'lib/update-checker.js',
   'lib/update-download.js',
   'lib/updates.js',
-  'lib/windows-acl-runner.js',
   'node_modules/@deepseek-ai/dsh/lib/bin.js',
   'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html',
   'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js',
@@ -88,7 +87,6 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'lib/terminal.js',
   'lib/update-download.js',
   'lib/updates.js',
-  'lib/windows-pwsh-sandbox.js',
   'node_modules/@deepseek-ai/dsh/package.json',
   'node_modules/@deepseek-ai/dsh/lib/bin.js',
   'node_modules/@deepseek-ai/dsh-app-boot/lib/index.js',
@@ -123,13 +121,12 @@ export const REQUIRED_UNPACKED_RUNTIME_ENTRIES = [
   'vendor/agent-presets/anchored-standard/tool-bootstrap.mjs',
 ] as const
 
-/** Prebuilt Node-API modules required when the Windows package skips native source rebuilds. */
-export const REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES = [
-  'node_modules/node-pty/prebuilds/win32-x64/conpty.node',
-  'node_modules/node-pty/prebuilds/win32-x64/conpty_console_list.node',
-  'node_modules/node-pty/prebuilds/win32-x64/pty.node',
-  'node_modules/node-pty/prebuilds/win32-x64/winpty-agent.exe',
-  'node_modules/node-pty/prebuilds/win32-x64/winpty.dll',
+/** Windows-only packages that must not be physically sealed into a supported Desktop runtime. */
+export const FORBIDDEN_PACKAGED_WINDOWS_PACKAGES = [
+  '@deepseek-ai/dsh-pwsh-local',
+  '@deepseek-ai/dsh-pwsh-sandbox',
+  '@deepseek-ai/dsh-tool-pwsh',
+  '@deepseek-ai/dsh-sandbox-windows-acl',
 ] as const
 
 /** Package exports that profile fallback links must resolve from the physical application tree. */
@@ -142,7 +139,6 @@ export const REQUIRED_UNPACKED_PACKAGE_SPECIFIERS = [
   'dsh-plugin-desktop/profile-service',
   'dsh-plugin-desktop/profiles',
   'dsh-plugin-desktop/updates',
-  'dsh-plugin-desktop/windows-pwsh-sandbox',
   'dsh-plugin-desktop/package.json',
   '@deepseek-ai/dsh-base/package.json',
   '@deepseek-ai/dsh-resident-operator-local/startup',
@@ -234,7 +230,7 @@ export function resolvePackagedAsarPath(context: PackagedRuntimeContext): string
       'app.asar',
     )
   }
-  if (context.electronPlatformName === 'win32' || context.electronPlatformName === 'linux') {
+  if (context.electronPlatformName === 'linux') {
     return join(context.appOutDir, 'resources', 'app.asar')
   }
   throw new Error(
@@ -254,6 +250,28 @@ export function resolvePackagedUnpackedRoot(context: PackagedRuntimeContext): st
 /** Normalize the host-specific separators emitted by the ASAR reader. */
 function normalizeArchiveEntry(entry: string): string {
   return entry.replaceAll('\\', '/').replace(/^\/+/, '').replace(/\/+$/, '')
+}
+
+function forbiddenArchivePackageNames(entries: readonly string[]): readonly string[] {
+  return FORBIDDEN_PACKAGED_WINDOWS_PACKAGES.filter(packageName => {
+    const packageRoot = `node_modules/${packageName}`
+    return entries.some(entry => entry === packageRoot || entry.startsWith(`${packageRoot}/`))
+  })
+}
+
+/** Reject disabled Windows packages from the physical app.asar.unpacked package tree. */
+export function verifyUnpackedWindowsPackageClosure(
+  unpackedRoot: string,
+  exists: FileProbe = existsSync,
+): void {
+  const physicalPackages = FORBIDDEN_PACKAGED_WINDOWS_PACKAGES.filter(packageName =>
+    exists(join(unpackedRoot, 'node_modules', packageName)),
+  )
+  if (physicalPackages.length > 0) {
+    throw new Error(
+      `dsh-plugin-desktop: packaged runtime at ${unpackedRoot} contains forbidden Windows packages in app.asar.unpacked/node_modules: ${physicalPackages.join(', ')}`,
+    )
+  }
 }
 
 /**
@@ -281,6 +299,13 @@ export function verifyPackagedAsar(
   if (missing.length > 0) {
     throw new Error(
       `dsh-plugin-desktop: packaged runtime at ${archivePath} is missing required ASAR entries: ${missing.join(', ')}`,
+    )
+  }
+
+  const forbidden = forbiddenArchivePackageNames([...present])
+  if (forbidden.length > 0) {
+    throw new Error(
+      `dsh-plugin-desktop: packaged runtime at ${archivePath} contains forbidden Windows packages in ASAR: ${forbidden.join(', ')}`,
     )
   }
 }
@@ -377,15 +402,14 @@ export function verifyPackagedRuntime(
 ): void {
   verifyPackagedAsar(resolvePackagedAsarPath(context), list)
   const unpackedRoot = resolvePackagedUnpackedRoot(context)
-  const requiredPhysicalEntries = context.electronPlatformName === 'win32'
-    ? [...REQUIRED_UNPACKED_RUNTIME_ENTRIES, ...REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES]
-    : REQUIRED_UNPACKED_RUNTIME_ENTRIES
+  const requiredPhysicalEntries = REQUIRED_UNPACKED_RUNTIME_ENTRIES
   const missing = requiredPhysicalEntries.filter(entry => !exists(join(unpackedRoot, entry)))
   if (missing.length > 0) {
     throw new Error(
       `dsh-plugin-desktop: packaged runtime at ${unpackedRoot} is missing required physical entries: ${missing.join(', ')}`,
     )
   }
+  verifyUnpackedWindowsPackageClosure(unpackedRoot, exists)
   verifyPackagedClientBranding(unpackedRoot, readText)
   verifyUnpackedPackageResolution(unpackedRoot, resolvePackage)
   verifyPackagedPersistentBashPrompt(unpackedRoot, readText)

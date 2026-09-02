@@ -28,9 +28,12 @@ final report.
 - Use PATCH for compatible fixes, MINOR for compatible user-visible features,
   and MAJOR for incompatible product or state-contract changes. Record the
   reason for the selected increment.
-- The root `package.json`, `dsh-plugin-desktop/package.json`, lockfile workspace
-  metadata, Electron artifact metadata, and runtime-reported product version
-  MUST resolve to the exact same value. A mismatch fails closed.
+- The Desktop workspace root `package.json` at `products/desktop/package.json`
+  and `dsh-plugin-desktop/package.json` MUST declare the exact same version.
+  The product manifest, Electron artifact metadata, and runtime-reported product
+  version MUST resolve to that value. Yarn may record local workspaces as
+  `0.0.0-use.local`; lockfile acceptance is dependency-closure consistency, not
+  a duplicated Desktop SemVer string. A mismatch fails closed.
 - The assigned version MUST be committed with the implementation. Codex must
   not invent a display-only version, append an untracked suffix, or change the
   version after the accepted artifact has been built.
