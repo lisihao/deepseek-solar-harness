@@ -200,6 +200,15 @@ interface ActiveAttempt {
   readonly progressSources?: readonly PhysicalProgressSource[]
 }
 
+/** Durable identity needed to recreate the owner-local browser model-tool bridge. */
+interface BrowserBindingArtifactV1 {
+  readonly version: 1
+  readonly kind: 'browser-model-tool-binding'
+  readonly executionId: string
+  readonly sessionId: string
+  readonly socketPath: string
+}
+
 interface PhysicalProgressSource {
   readonly run: Pick<PhysicalOperatorRun, 'readEvents'>
   readonly commandId: string
@@ -496,6 +505,10 @@ function now(): string {
   return new Date().toISOString()
 }
 
+function renderError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 function clearWaitReason(node: OrchestrationNodeSnapshot): OrchestrationNodeSnapshot {
   const { waitReason: _discarded, ...rest } = node
   return rest
@@ -517,6 +530,29 @@ function event(
     type,
     time: now(),
     data,
+  }
+}
+
+function browserBindingArtifact(value: unknown): BrowserBindingArtifactV1 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new OrchestrationError('browser binding artifact is not an object', 'ORCHESTRATION_UNAVAILABLE')
+  }
+  const raw = value as Record<string, unknown>
+  if (raw.version !== 1 || raw.kind !== 'browser-model-tool-binding') {
+    throw new OrchestrationError('browser binding artifact has an unsupported version', 'ORCHESTRATION_UNAVAILABLE')
+  }
+  const fields = ['executionId', 'sessionId', 'socketPath'] as const
+  for (const field of fields) {
+    if (typeof raw[field] !== 'string' || raw[field].length === 0) {
+      throw new OrchestrationError(`browser binding artifact field ${field} is invalid`, 'ORCHESTRATION_UNAVAILABLE')
+    }
+  }
+  return {
+    version: 1,
+    kind: 'browser-model-tool-binding',
+    executionId: raw.executionId as string,
+    sessionId: raw.sessionId as string,
+    socketPath: raw.socketPath as string,
   }
 }
 
@@ -2116,6 +2152,25 @@ export class OrchestrationDaemon {
           )
         }
         browserBinding = await this.browserBridge.bind(String(plan.executionId), controller.signal)
+        const binding = browserBinding.descriptor
+        const bindingArtifact = {
+          version: 1 as const,
+          kind: 'browser-model-tool-binding' as const,
+          executionId: String(plan.executionId),
+          sessionId: binding.sessionId,
+          socketPath: binding.socketPath,
+        } satisfies BrowserBindingArtifactV1
+        const bindingRef = this.store.putArtifact(bindingArtifact)
+        const acceptedRecord = this.store.getRun(String(record.snapshot.runId))
+        const acceptedNode = acceptedRecord.snapshot.nodes.find(value => value.id === spec.id)
+        this.store.recordArtifact('compilation_artifacts', {
+          ref: String(bindingRef), runId: String(record.snapshot.runId), nodeId: spec.id,
+          attempt: plan.attempt, generation: plan.capabilityGeneration,
+        })
+        this.store.appendEvents([event(record.snapshot.runId, 'browser.binding.created', {
+          executionId: String(plan.executionId), bindingRef: String(bindingRef),
+          sessionId: binding.sessionId, socketPath: binding.socketPath,
+        }, acceptedNode)])
       }
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
@@ -4045,6 +4100,76 @@ export class OrchestrationDaemon {
     this.store.saveRun(next, [event(next.snapshot.runId, 'node.indeterminate', { executionId: attempt.executionId }, nodes.find(value => value.id === attempt.nodeId))])
   }
 
+  /**
+   * Recover the exact browser binding recorded before a Resident command was
+   * admitted.  The native Resident daemon retains the original descriptor;
+   * this owner daemon must recreate the same session on its stable endpoint
+   * before observing the turn again.  Missing or corrupt evidence is a hard
+   * indeterminate outcome, never a reason to retry the product call.
+   */
+  private recoveredBrowserBinding(
+    attempt: AttemptRecord,
+    record: RuntimeRunRecord,
+  ): { readonly required: false } | {
+    readonly required: true
+    readonly artifact?: BrowserBindingArtifactV1
+    readonly error?: string
+  } {
+    const graphNode = record.graph.nodes.find(value => value.id === attempt.nodeId)
+    const declared = graphNode?.capabilityRequirements.some(value => value.capability === BROWSER_CAPABILITY) === true
+    let plan: NodeExecutionPlanV1
+    try {
+      plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+    } catch (error) {
+      return declared
+        ? { required: true, error: `browser execution plan cannot be read: ${renderError(error)}` }
+        : { required: false }
+    }
+    let capabilityPlan: CapabilityBindingPlanV1
+    try {
+      capabilityPlan = this.store.readArtifact(OrchestrationArtifactRef(String(plan.capabilityPlanRef))) as CapabilityBindingPlanV1
+    } catch (error) {
+      return declared
+        ? { required: true, error: `browser capability plan cannot be read: ${renderError(error)}` }
+        : { required: false }
+    }
+    if (!Array.isArray(capabilityPlan.resolvedCapabilities)) {
+      return declared
+        ? { required: true, error: 'browser capability plan has no valid resolved capability list' }
+        : { required: false }
+    }
+    if (!capabilityPlan.resolvedCapabilities.includes(BROWSER_CAPABILITY)) return { required: false }
+
+    let afterSequence = 0
+    let bindingRef: string | undefined
+    while (bindingRef === undefined) {
+      const page = this.store.readEvents(attempt.runId, afterSequence, 500)
+      const match = page.events.find(value => (
+        value.type === 'browser.binding.created'
+        && value.nodeId === attempt.nodeId
+        && value.attempt === attempt.attempt
+        && value.generation === attempt.generation
+        && value.data.executionId === attempt.executionId
+        && typeof value.data.bindingRef === 'string'
+      ))
+      if (match !== undefined) bindingRef = String(match.data.bindingRef)
+      if (page.events.length < 500) break
+      afterSequence = page.nextSequence
+    }
+    if (bindingRef === undefined) {
+      return { required: true, error: 'browser binding receipt is missing for the recovered Resident execution' }
+    }
+    try {
+      const artifact = browserBindingArtifact(this.store.readArtifact(OrchestrationArtifactRef(bindingRef)))
+      if (artifact.executionId !== attempt.executionId) {
+        return { required: true, error: 'browser binding receipt belongs to a different execution' }
+      }
+      return { required: true, artifact }
+    } catch (error) {
+      return { required: true, error: `browser binding receipt is invalid: ${renderError(error)}` }
+    }
+  }
+
   private blockNode(runId: string, nodeId: string, blockers: readonly OrchestrationBlocker[]): void {
     const record = this.store.getRun(runId)
     const nodes = record.snapshot.nodes.map(value => value.id === nodeId ? { ...value, state: 'blocked' as const, blockers, updatedAt: now() } : value)
@@ -4239,7 +4364,30 @@ export class OrchestrationDaemon {
         continue
       }
       const record = this.store.getRun(attempt.runId)
-      const operatorId = record.snapshot.nodes.find(value => value.id === attempt.nodeId)?.operatorId
+      const node = record.snapshot.nodes.find(value => value.id === attempt.nodeId)
+      const browserBridge = this.browserBridge
+      const browserRecovery = this.recoveredBrowserBinding(attempt, record)
+      if (browserRecovery.required && browserRecovery.error !== undefined) {
+        this.applyIndeterminate({
+          ...attempt,
+          state: 'indeterminate',
+          errorCode: 'BROWSER_BINDING_UNRECOVERABLE',
+          errorMessage: browserRecovery.error,
+          updatedAt: now(),
+        })
+        continue
+      }
+      if (browserRecovery.required && browserBridge === undefined) {
+        this.applyIndeterminate({
+          ...attempt,
+          state: 'indeterminate',
+          errorCode: 'BROWSER_BINDING_UNRECOVERABLE',
+          errorMessage: 'recovered browser execution has no configured Browser model-tool bridge',
+          updatedAt: now(),
+        })
+        continue
+      }
+      const operatorId = node?.operatorId
       if (operatorId === undefined) {
         this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: 'recovered attempt has no sealed physical operator identity', updatedAt: now() })
         continue
@@ -4253,7 +4401,33 @@ export class OrchestrationDaemon {
         this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: `physical operator ${operatorId} cannot reattach its durable turn`, updatedAt: now() })
         continue
       }
+      let browserBinding: Awaited<ReturnType<BrowserModelToolBridge['bind']>> | undefined
+      let browserSignal: AbortController | undefined
       try {
+        if (browserRecovery.required && browserRecovery.artifact !== undefined) {
+          if (browserBridge === undefined) {
+            throw new OrchestrationError(
+              'recovered browser execution has no configured Browser model-tool bridge',
+              'COMMAND_INDETERMINATE',
+            )
+          }
+          browserSignal = new AbortController()
+          browserBinding = await browserBridge.bind(attempt.executionId, browserSignal.signal)
+          if (
+            browserBinding.descriptor.sessionId !== browserRecovery.artifact.sessionId
+            || browserBinding.descriptor.socketPath !== browserRecovery.artifact.socketPath
+          ) {
+            throw new OrchestrationError(
+              'recovered browser binding does not match its durable descriptor',
+              'COMMAND_INDETERMINATE',
+            )
+          }
+          this.store.appendEvents([event(record.snapshot.runId, 'browser.binding.rebound', {
+            executionId: attempt.executionId,
+            sessionId: browserBinding.descriptor.sessionId,
+            socketPath: browserBinding.descriptor.socketPath,
+          }, node)])
+        }
         const run = await operator.reattach(attempt.turnId)
         const receipt = run.receipt
         if (receipt === undefined) throw new OrchestrationError('reattached Provider omitted its durable receipt', 'ORCHESTRATION_UNAVAILABLE')
@@ -4281,11 +4455,24 @@ export class OrchestrationDaemon {
             await this.syncActiveProgress(recovered)
             this.failAttempt(recovered, error)
           },
-        ).finally(() => { this.active.delete(key); this.triggerTick() })
+        ).finally(() => {
+          browserSignal?.abort(new Error('recovered browser binding detached'))
+          browserBinding?.release()
+          this.active.delete(key)
+          this.triggerTick()
+        })
       } catch (error) {
+        browserSignal?.abort(error)
+        browserBinding?.release()
         const code = error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE'
-        if (code === 'COMMAND_INDETERMINATE') {
-          this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: code, errorMessage: error instanceof Error ? error.message : String(error), updatedAt: now() })
+        if (code === 'COMMAND_INDETERMINATE' || browserRecovery.required) {
+          this.applyIndeterminate({
+            ...attempt,
+            state: 'indeterminate',
+            errorCode: code === 'COMMAND_INDETERMINATE' ? code : 'BROWSER_BINDING_UNRECOVERABLE',
+            errorMessage: error instanceof Error ? error.message : String(error),
+            updatedAt: now(),
+          })
         } else {
           this.reconcileRetryAfter.set(key, Date.now() + 2_000)
         }

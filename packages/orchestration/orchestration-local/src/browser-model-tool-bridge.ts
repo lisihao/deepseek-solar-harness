@@ -272,8 +272,6 @@ function errorResult(error: unknown): Record<string, unknown> {
   return { isError: true, content: [{ type: 'text', text: message }], error: { code, message } }
 }
 
-let nextEndpointId = 0
-
 /** One daemon-owned endpoint; bindings are scoped to a single Resident command. */
 export class BrowserModelToolBridge {
   private readonly endpoint: { readonly path: string; readonly directory?: string }
@@ -283,8 +281,14 @@ export class BrowserModelToolBridge {
 
   constructor(private readonly ctx: Context, root: string) {
     const directory = join(root, 'model-tools')
-    const id = `${String(process.pid)}-${String(nextEndpointId++)}`
-    const path = localIpcAddress(directory, `browser-${id}`)
+    // The descriptor is persisted by the orchestration daemon's execution
+    // record and consumed by the independently durable Resident daemon.  It
+    // therefore must survive an orchestration process restart; a PID-scoped
+    // endpoint would leave the native turn pointing at a dead socket.  The
+    // daemon lock serializes owners of this root, so one stable endpoint is
+    // safe and lets a recovered daemon recreate the binding under the same
+    // path and session identity.
+    const path = localIpcAddress(directory, 'browser')
     this.endpoint = { path, ...localIpcUsesFilesystem() ? { directory: dirname(path) } : {} }
     this.server = createServer((socket) => { this.accept(socket) })
   }
