@@ -54,6 +54,18 @@ describe('web e2e: workspace management (create / rename / flat view / hover aff
     await dialog.getByRole('button', { name: 'Edit path' }).click()
     await dialog.getByLabel('Edit path').fill(path)
     await dialog.getByLabel('Edit path').press('Enter')
+    // The dialog resets its selection on open, but that reset and the
+    // submitted navigation land in separate React commits. Do not let a
+    // previous folder selection become the create/adopt target while the
+    // requested path is still landing.
+    const targetName = path.split(/[\\/]/).filter(Boolean).at(-1)
+    if (targetName !== undefined) {
+      await expect.poll(async () => {
+        const crumbs = dialog.getByRole('navigation').getByRole('button')
+        const count = await crumbs.count()
+        return count === 0 ? null : await crumbs.nth(count - 1).textContent()
+      }, { timeout: 10_000 }).toBe(targetName)
+    }
     return dialog
   }
 
@@ -66,7 +78,16 @@ describe('web e2e: workspace management (create / rename / flat view / hover aff
     await dialog.getByRole('button', { name: 'New folder' }).click()
     await page.getByLabel('Folder name').fill(name)
     await page.getByRole('button', { name: 'Create', exact: true }).click()
-    // Creating selects the new folder in the listing; Open adopts it.
+    // Creating selects the new folder in the listing. Wait for that selection
+    // to be committed before Open: under a loaded CI runner the parent relist
+    // and child preview can settle in separate React commits, and Open's
+    // fallback target would otherwise still be the parent-level selection.
+    const created = dialog.getByRole('listitem').filter({ hasText: name })
+      .getByRole('button', { name, exact: true })
+    await created.waitFor({ timeout: 10_000 })
+    await expect.poll(() => created.getAttribute('aria-current'), { timeout: 10_000 }).toBe('true')
+    // Open adopts the selected directory, not the displayed breadcrumb.
+    await expect.poll(() => dialog.getByRole('button', { name: 'Open', exact: true }).isEnabled(), { timeout: 10_000 }).toBe(true)
     await dialog.getByRole('button', { name: 'Open', exact: true }).click()
     await dialog.waitFor({ state: 'hidden', timeout: 10_000 })
     await expect.poll(
