@@ -23,6 +23,7 @@ import { HarnessError, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionId,
   PhysicalOperatorExecutionPreference,
+  PhysicalOperatorNativeToolPolicy,
   PhysicalOperatorStopReason,
   PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
@@ -356,7 +357,7 @@ export interface PhysicalOperatorPlanV1 {
   readonly mode: 'resident' | 'model-worker'
   readonly profile?: PhysicalOperatorExecutionPreference
   /** Native product tool authority sealed from the graph scopes/effects. */
-  readonly nativeToolPolicy: 'inherit' | 'disabled'
+  readonly nativeToolPolicy: PhysicalOperatorNativeToolPolicy
   readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
 }
 
