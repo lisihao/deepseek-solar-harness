@@ -11,7 +11,9 @@ export const unsupportedWindowsPackagePaths = new Set([
 /** Whether a repository path belongs to the supported Darwin product package set. */
 export function isSupportedDarwinPackagePath(path: string): boolean {
   const normalized = path.split(sep).join('/')
+  const packageRoot = normalized.indexOf('packages/')
+  const scopedPath = packageRoot === -1 ? normalized : normalized.slice(packageRoot)
   return ![...unsupportedWindowsPackagePaths].some(packagePath => (
-    normalized === packagePath || normalized.startsWith(`${packagePath}/`)
+    scopedPath === packagePath || scopedPath.startsWith(`${packagePath}/`)
   ))
 }

@@ -46,6 +46,7 @@ describe('Darwin-only product scope', () => {
     for (const path of unsupportedWorkspaces) {
       expect(isSupportedDarwinPackagePath(`${path}/package.json`)).toBe(false)
       expect(isSupportedDarwinPackagePath(`${path}/lib/index.js`)).toBe(false)
+      expect(isSupportedDarwinPackagePath(`../${path}/src/invariant.ts`)).toBe(false)
       expect(nodeScope).toContain(`'${path}'`)
     }
     expect(isSupportedDarwinPackagePath('packages/shell/bash-local/package.json')).toBe(true)
@@ -58,6 +59,7 @@ describe('Darwin-only product scope', () => {
       'scripts/verify-runtime-closure.ts',
       'scripts/verify-cordis-config.ts',
       'scripts/verify-dsh-package-licenses.ts',
+      'scripts/test-invariants.ts',
     ]) {
       expect(read(script)).toContain('isSupportedDarwinPackagePath')
     }
