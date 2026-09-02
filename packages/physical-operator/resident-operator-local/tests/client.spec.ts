@@ -43,7 +43,7 @@ async function listenMockDaemon(
   const methods: string[][] = []
   const server = createServer((socket) => {
     const connectionMethods: string[] = []
-    methods.push(connectionMethods)
+    let recordedConnection = false
     let buffer = ''
     socket.setEncoding('utf8')
     socket.on('data', (chunk: string) => {
@@ -55,6 +55,10 @@ async function listenMockDaemon(
         buffer = buffer.slice(newline + 1)
         if (line.length === 0) continue
         const frame = JSON.parse(line) as { readonly id: string | number; readonly method: string }
+        if (!recordedConnection) {
+          methods.push(connectionMethods)
+          recordedConnection = true
+        }
         connectionMethods.push(frame.method)
         const value = frame.method === 'system.handshake'
           ? handshake()
