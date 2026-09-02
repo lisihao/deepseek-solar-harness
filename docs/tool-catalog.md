@@ -16,6 +16,7 @@ This table connects model-visible tool names to the plugin package and service s
 | Tool package | Model-visible names | Requires | Writes / affects | Shipped aliases | Deployment note |
 | --- | --- | --- | --- | --- | --- |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
+| `@deepseek-ai/dsh-tool-browser` | `browser` | `ctx.tools`, `ctx.browser`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `browser provider state through ctx.browser` | - | The model-facing `browser` tool accepts only the bounded portable-plan vocabulary. Provider selection, Ego Lite discovery, and browser lifecycle remain behind `ctx.browser`; browser-js-v1 is trusted-plugin-only and is not exposed to the model. |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: code` / `mode: both` (see the Code Mode Agent Note). Under `code` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
 | `@deepseek-ai/dsh-tool-physical-operator` | `physical_operator` | `ctx.tools`, `ctx.physicalOperators`, `a calling Agent for action=run` | `tool/call`, `tool/result`, `physical-operator lifecycle through the selected provider` | - | The schema exposes stable physical-operator ids rather than provider transports. Deployments register operators separately; the catalog intentionally harvests the empty-registry schema. |
@@ -116,6 +117,32 @@ Ask the user a concise question when you need confirmation, a choice, or missing
 Source: [`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)
 
 ask_user_question pauses the tool call until the active UI provider returns a human answer.
+
+<a id="deepseek-aidsh-tool-browser"></a>
+
+## `@deepseek-ai/dsh-tool-browser`
+
+### `browser`
+
+Run an ordered, typed browser plan through the configured browser provider. Uses persistent browser workspaces and existing login state when supported.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "plan": {
+      "description": "BrowserRunPlanV1: {version:1, workspace, requiredCapabilities, operations}. Operations are bounded to 64 and execute in order."
+    }
+  },
+  "required": [
+    "plan"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+The model-facing `browser` tool accepts only the bounded portable-plan vocabulary. Provider selection, Ego Lite discovery, and browser lifecycle remain behind `ctx.browser`; browser-js-v1 is trusted-plugin-only and is not exposed to the model.
 
 <a id="deepseek-aidsh-tools"></a>
 
