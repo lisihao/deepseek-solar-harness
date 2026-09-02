@@ -6,7 +6,7 @@ import { executeArchify, type ArchifyConfig } from './runner.ts'
 import { ARCHIFY_ACTIONS, ARCHIFY_DIAGRAM_TYPES, type ArchifyToolArgs } from './types.ts'
 
 export const name = '@deepseek-ai/dsh-archify'
-export const inject = ['tools', 'systemPrompt']
+export const inject = ['tools', 'systemPrompt', 'subprocess']
 
 export interface Config extends ArchifyConfig {
   readonly promptSectionOrder?: number
