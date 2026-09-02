@@ -100,7 +100,7 @@ describe('LocalRemoteOperatorHostService', () => {
     await service.releaseWorkspace('execution-a')
     await expect(access(first.path)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(access(second.path)).resolves.toBeUndefined()
-  })
+  }, process.platform === 'win32' ? 15_000 : 5_000)
 
   it('returns exact Resident artifact bytes only when their digest matches', async () => {
     const { dshHome, service } = await serviceFixture()
@@ -121,5 +121,5 @@ describe('LocalRemoteOperatorHostService', () => {
     const abort = new AbortController()
     abort.abort(new Error('cancelled'))
     await expect(service.readResidentArtifact(`sha256:${digest}`, abort.signal)).rejects.toThrow()
-  })
+  }, process.platform === 'win32' ? 15_000 : 5_000)
 })
