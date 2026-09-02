@@ -992,6 +992,16 @@ describe('runScenario', () => {
       },
       { agent: AGENT, mode: 'replay', fixtureFile: early.fixtureFile },
     )).rejects.toThrow(/did not persist user\/message after turn\/end within 20ms/)
+
+    const waitFor = vi.spyOn(vi, 'waitFor').mockRejectedValueOnce(new Error('Timed out in waitFor!'))
+    try {
+      await expect(runScenario(
+        { steps: [...boot, { op: 'waitForEventAfterTurnEnd', type: 'user/message', timeoutMs: 20 }] },
+        { agent: AGENT, mode: 'replay', fixtureFile: early.fixtureFile },
+      )).rejects.toThrow(/did not persist user\/message after turn\/end within 20ms/)
+    } finally {
+      waitFor.mockRestore()
+    }
   })
 
   it('promptExpectError swallows a model-error response as the expected outcome', { timeout: 20_000 }, async () => {
