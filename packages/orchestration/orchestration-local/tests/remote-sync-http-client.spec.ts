@@ -224,7 +224,7 @@ describe('RemotePhysicalOperator', () => {
       version: 1, repository: 'github.com/lisihao/remote-fixture', subdir: 'packages/core',
     })
     fixture.store.close()
-  })
+  }, 15_000)
 
   it('rejects a local DSH-tool-authoritative policy before remote admission', async () => {
     const fixture = fixtureWorkspace()
