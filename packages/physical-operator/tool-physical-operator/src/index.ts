@@ -169,6 +169,8 @@ type ToolRequest = {
   readonly description?: string
   readonly prompt?: string
   readonly mode?: 'ephemeral' | 'resident'
+  /** Capabilities the delegated operator must receive through the DSH surface. */
+  readonly required_capabilities?: readonly string[]
 }
 
 type OperatorListValue = {
@@ -468,6 +470,11 @@ export function apply(ctx: Context): void {
         enum: ['ephemeral', 'resident'],
         description: 'Execution lifetime. Omit for backward-compatible ephemeral execution.',
       },
+      required_capabilities: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Capabilities required by the delegated task, for example browser. Browser requires resident mode so the full DSH tool bridge remains authoritative.',
+      },
     },
     output: {
       schema: {
@@ -561,6 +568,7 @@ export function apply(ctx: Context): void {
       const operatorId = requireTrimmed(request.operator_id, 'operator_id')
       const description = requireTrimmed(request.description, 'description')
       const prompt = requireTrimmed(request.prompt, 'prompt')
+      rejectUnsupportedCapabilityMode(request)
       const executionId = PhysicalOperatorExecutionId(
         `tool-${createHash('sha256').update(`${String(parent.id)}\0${String(exec.callId)}`).digest('hex').slice(0, 32)}`,
       )
@@ -587,6 +595,7 @@ export function apply(ctx: Context): void {
           ...request.mode === 'resident' ? { residentLaneId: `explicit-tool:${String(parent.id)}` } : {},
           ...resident?.systemPrompt === undefined ? {} : { systemPrompt: resident.systemPrompt },
           ...resident?.descriptor === undefined ? {} : { modelToolBridge: resident.descriptor },
+          ...resident?.descriptor === undefined ? {} : { nativeToolPolicy: 'dsh-tools-authoritative' as const },
         })
         if (request.mode === 'resident') observer = observeResidentProgress(ctx, parent, run, String(executionId))
         const result = await settleForeground(run, () => observer?.stop())
@@ -1396,10 +1405,17 @@ function operatorDisplayName(operatorId: string): string {
 
 /** Reject run-only keys on list so accidental work requests are never ignored. */
 function rejectRunFieldsOnList(request: ToolRequest): void {
-  for (const field of ['operator_id', 'description', 'prompt', 'mode'] as const) {
+  for (const field of ['operator_id', 'description', 'prompt', 'mode', 'required_capabilities'] as const) {
     if (request[field] !== undefined) {
       throw new Error(`physical_operator action=list does not accept ${field}`)
     }
+  }
+}
+
+/** Browser-backed work must use the Resident bridge so native tools cannot bypass DSH authority. */
+function rejectUnsupportedCapabilityMode(request: ToolRequest): void {
+  if (request.required_capabilities?.includes('browser') === true && request.mode !== 'resident') {
+    throw new Error('physical_operator capability "browser" requires mode="resident"; retry with mode="resident"')
   }
 }
 

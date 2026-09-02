@@ -99,7 +99,7 @@ describe('physical_operator tool', () => {
     const schema = ctx.tools.schemas().find(candidate => candidate.name === 'physical_operator')
     expect(schema).toBeDefined()
     const properties = schema!.parameters.properties as Record<string, unknown>
-    expect(Object.keys(properties).sort()).toEqual(['action', 'description', 'mode', 'operator_id', 'prompt'])
+    expect(Object.keys(properties).sort()).toEqual(['action', 'description', 'mode', 'operator_id', 'prompt', 'required_capabilities'])
     expect(schema!.description).not.toMatch(/codex|claude|subagent/i)
     expect(schema!.description).toContain('backing provider')
     const section = (await ctx.systemPrompt.assemble()).sections
@@ -207,6 +207,7 @@ describe('physical_operator tool', () => {
       { action: 'run', operator_id: 'physics-solver', prompt: 'work' },
       { action: 'run', operator_id: 'physics-solver', description: 'do work' },
       { action: 'list', prompt: 'must not be ignored' },
+      { action: 'list', required_capabilities: ['browser'] },
     ]) {
       const result = await call(ctx, args)
       expect(result.isError).toBe(true)
