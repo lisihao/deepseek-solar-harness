@@ -27,6 +27,7 @@ import {
 export {
   CodexAppServerWire,
   CodexApprovalRequiredError,
+  type CodexAppServerExecutionBoundary,
   type CodexAppServerExecutionProfile,
   type CodexAppServerModel,
   type CodexAppServerRateLimit,

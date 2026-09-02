@@ -1040,6 +1040,22 @@ describe('ResidentDaemon', () => {
       },
       signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+    await expect(connected.execute({
+      commandId: 'missing-bridge', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'use DSH tools' }], nativeToolPolicy: 'dsh-tools-authoritative',
+      signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+    const authoritative = await connected.execute({
+      commandId: 'dsh-tools', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'use DSH tools' }], nativeToolPolicy: 'dsh-tools-authoritative',
+      modelToolBridge: {
+        version: 1, socketPath: join(root, 'bridge.sock'), sessionId: 'bridge-session',
+        tools: [{ name: 'echo', description: 'Echo.', inputSchema: { type: 'object' } }],
+      },
+      signal: new AbortController().signal,
+    })
+    await authoritative.result
+    expect(driver.nativeToolPolicies).toEqual(['disabled', 'dsh-tools-authoritative'])
     await daemon.close()
   })
 })

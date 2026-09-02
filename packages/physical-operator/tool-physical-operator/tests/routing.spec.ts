@@ -316,7 +316,10 @@ describe('host physical-operator routing', () => {
     expect(deepseek.requests).toHaveLength(0)
     expect(codex.requests).toHaveLength(1)
     expect(claude.requests).toHaveLength(0)
-    expect(codex.requests[0]).toMatchObject({ mode: 'resident' })
+    expect(codex.requests[0]).toMatchObject({
+      mode: 'resident',
+      nativeToolPolicy: 'dsh-tools-authoritative',
+    })
     expect(lastAssistantMessage(agent).source).toMatchObject({
       provider: 'dsh-physical-operator',
       model: 'codex',
@@ -335,6 +338,8 @@ describe('host physical-operator routing', () => {
 
     expect(deepseek.requests).toHaveLength(0)
     expect(codex.requests).toHaveLength(1)
+    expect(codex.requests[0]?.nativeToolPolicy).toBe('dsh-tools-authoritative')
+    expect(codex.requests[0]?.residentLaneId).toBeUndefined()
     expect(codex.requests[0]?.systemPrompt).toContain('physical')
     expect(codex.requests[0]?.modelToolBridge?.tools.map(value => value.name)).toContain('subscription_echo')
     const answer = lastAssistantMessage(agent).content[0]
@@ -428,6 +433,7 @@ describe('host physical-operator routing', () => {
     send(agent, '让 Codex 持续执行')
     while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
     await new Promise(resolve => setTimeout(resolve, 10))
+    expect(codex.requests[0]?.nativeToolPolicy).toBe('dsh-tools-authoritative')
     const beforeSettle = agent.session.events.filter(event => event.type === 'physical-operator/progress')
     expect(beforeSettle.some(event => event.type === 'physical-operator/progress' && event.data.data.phase === 'connecting')).toBe(true)
     expect(beforeSettle.some(event => event.type === 'physical-operator/progress' && event.data.type === 'turn.observation')).toBe(false)
@@ -457,6 +463,8 @@ describe('host physical-operator routing', () => {
     })
     while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
     await new Promise(resolve => setTimeout(resolve, 10))
+    expect(codex.requests[0]?.nativeToolPolicy).toBeUndefined()
+    expect(codex.requests[0]?.residentLaneId).toBe(`explicit-tool:${String(agent.id)}`)
     expect(agent.session.events.find(event => event.type === 'physical-operator/tool-dispatch')).toMatchObject({
       ignorable: true,
       data: { operatorId: 'codex', mode: 'resident', description: 'inspect repository' },
@@ -616,7 +624,10 @@ describe('host physical-operator routing', () => {
 
     expect(deepseek.requests).toHaveLength(0)
     expect(claude.requests).toHaveLength(1)
-    expect(claude.requests[0]).toMatchObject({ mode: 'resident' })
+    expect(claude.requests[0]).toMatchObject({
+      mode: 'resident',
+      nativeToolPolicy: 'dsh-tools-authoritative',
+    })
     expect(lastAssistantMessage(agent).source).toMatchObject({
       provider: 'dsh-physical-operator',
       model: 'claude-code',

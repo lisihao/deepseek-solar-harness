@@ -39,6 +39,7 @@ import {
   type CodexDynamicToolCall,
   type CodexDynamicToolResult,
   type CodexDynamicToolSpec,
+  type CodexAppServerExecutionBoundary,
   type CodexAppServerModel,
   type CodexAppServerRateLimit,
 } from '@deepseek-ai/dsh-subagent-codex'
@@ -378,6 +379,14 @@ function claudeQualifiedToolNames(bridge: NonNullable<ResidentDriverExecuteReque
   return bridge.tools.map(tool => `${prefix}${tool.name}`)
 }
 
+/** Map bare DSH tool names used by shared Skills onto the qualified Claude MCP surface. */
+export function claudeToolAliases(
+  bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
+): Record<string, string> {
+  const qualified = claudeQualifiedToolNames(bridge)
+  return Object.fromEntries(bridge.tools.map((tool, index) => [tool.name, qualified[index] as string]))
+}
+
 function claudeModelOption(model: ModelInfo, index: number): ResidentModelOption {
   const efforts: PhysicalOperatorReasoningEffort[] = [...(model.supportedEffortLevels ?? [])]
   return {
@@ -537,13 +546,19 @@ export function nativeToolSystemPrompt(
   systemPrompt: string | undefined,
   policy?: PhysicalOperatorNativeToolPolicy,
 ): string | undefined {
-  if (policy !== 'disabled') return systemPrompt
-  const noTools = [
-    'This execution plan grants no native tool authority.',
-    'Do not invoke shell, filesystem, network, browser, search, MCP, or other product tools.',
-    'Reason only from the supplied prompt and return the requested text answer directly.',
-  ].join(' ')
-  return systemPrompt === undefined ? noTools : `${systemPrompt}\n\n${noTools}`
+  if (policy === 'inherit' || policy === undefined) return systemPrompt
+  const authority = policy === 'disabled'
+    ? [
+      'This execution plan grants no native tool authority.',
+      'Do not invoke shell, filesystem, network, browser, search, MCP, or other product tools.',
+      'Reason only from the supplied prompt and return the requested text answer directly.',
+    ].join(' ')
+    : [
+      'This execution plan grants tool authority only through the DSH model-tool bridge.',
+      'Do not invoke product-native shell, filesystem, network, browser, search, other tools, or any MCP server except the DSH model-tool bridge.',
+      'Use the DSH tools exposed for this turn; any product-native approval request will be declined.',
+    ].join(' ')
+  return systemPrompt === undefined ? authority : `${systemPrompt}\n\n${authority}`
 }
 
 /**
@@ -555,7 +570,25 @@ export function claudeNativeToolOptions(policy?: PhysicalOperatorNativeToolPolic
   readonly tools?: []
   readonly allowedTools?: string[]
 } {
-  return policy === 'disabled' ? { tools: [], allowedTools: [] } : {}
+  return policy === 'disabled' || policy === 'dsh-tools-authoritative'
+    ? { tools: [], allowedTools: [] }
+    : {}
+}
+
+/** Resolve how native Codex approval requests behave for the sealed tool authority. */
+export function codexApprovalBehavior(
+  policy?: PhysicalOperatorNativeToolPolicy,
+): 'decline' | 'require' {
+  return policy === 'dsh-tools-authoritative' ? 'decline' : 'require'
+}
+
+/** Seal a read-only, no-approval native Codex environment while DSH tools remain dynamic functions. */
+export function codexExecutionBoundary(
+  policy?: PhysicalOperatorNativeToolPolicy,
+): CodexAppServerExecutionBoundary | undefined {
+  return policy === 'dsh-tools-authoritative'
+    ? { approval: 'never', nativeEffects: 'read-only', environmentAccess: 'disabled' }
+    : undefined
 }
 
 async function command(command: string, args: string[]): Promise<{ stdout: string; stderr: string; executable: string }> {
@@ -749,6 +782,8 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
           ...isRlmOnlyBridge(modelToolBridge) ? { tools: [] as const } : {},
           allowedTools: [...modelToolNames],
           mcpServers: { [claudeBridgeName(modelToolBridge)]: rlmServer },
+          strictMcpConfig: true,
+          toolAliases: claudeToolAliases(modelToolBridge),
         },
         canUseTool,
       },
@@ -940,10 +975,11 @@ export class CodexResidentDriver implements ResidentProductDriver {
     const stream = await this.openStream(request.signal)
     const modelToolBridge = ensureModelToolBridge(request)
     const dynamicTools = codexDynamicTools(request)
+    const executionBoundary = codexExecutionBoundary(request.nativeToolPolicy)
     const wire = new CodexAppServerWire(
       stream,
       stream,
-      'require',
+      codexApprovalBehavior(request.nativeToolPolicy),
       dynamicTools,
       modelToolBridge === undefined
         ? undefined
@@ -963,6 +999,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
           false,
           request.profile,
           nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy),
+          executionBoundary,
         )
       } else {
         await wire.resumeThread(
@@ -971,6 +1008,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
           request.signal,
           request.profile,
           nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy),
+          executionBoundary,
         )
       }
       const threadId = wire.currentThreadId
@@ -982,7 +1020,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
       request.onProgress('reasoning')
       const result = await wire.runTurn(texts, request.signal, (turnId) => {
         request.onRunning(threadId, turnId)
-      }, request.profile)
+      }, request.profile, executionBoundary)
       request.onProgress('finalizing')
       return { ...result, nativeSessionId: threadId }
     } catch (error) {

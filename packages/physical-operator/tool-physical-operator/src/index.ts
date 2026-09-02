@@ -584,6 +584,7 @@ export function apply(ctx: Context): void {
           parent,
           signal: exec.signal,
           ...request.mode === undefined ? {} : { mode: request.mode },
+          ...request.mode === 'resident' ? { residentLaneId: `explicit-tool:${String(parent.id)}` } : {},
           ...resident?.systemPrompt === undefined ? {} : { systemPrompt: resident.systemPrompt },
           ...resident?.descriptor === undefined ? {} : { modelToolBridge: resident.descriptor },
         })
@@ -660,6 +661,9 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         parent: agent,
         signal,
         mode: 'resident',
+        // A first-class DSH model uses the same governed tool surface as every
+        // other primary model; product-native approvals are not a second lane.
+        nativeToolPolicy: 'dsh-tools-authoritative',
         ...options.system === undefined ? {} : { systemPrompt: options.system },
         ...bound.descriptor === undefined ? {} : { modelToolBridge: bound.descriptor },
         ...dispatch.residentProfile === undefined ? {} : { residentProfile: dispatch.residentProfile },
