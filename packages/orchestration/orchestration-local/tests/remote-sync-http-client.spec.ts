@@ -226,6 +226,38 @@ describe('RemotePhysicalOperator', () => {
     fixture.store.close()
   })
 
+  it('rejects a local DSH-tool-authoritative policy before remote admission', async () => {
+    const fixture = fixtureWorkspace()
+    const provider = {
+      operatorId: 'codex', product: 'codex', displayName: 'Codex', description: 'Code operator',
+      tags: ['code'], maxConcurrency: 1, injectionBoundaries: ['pre-dispatch', 'next-turn'],
+      available: true, authentication: 'native-subscription', productVersion: '0.200.0', protocolHash: 'schema-1',
+      models: [{
+        model: 'gpt-5.6-luna', displayName: 'Luna', description: 'Fast worker',
+        supportedEfforts: ['medium'], defaultEffort: 'medium', isDefault: true,
+        supportsAdaptiveThinking: true,
+      }],
+    }
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('expected JSON request body')
+      const call = JSON.parse(init.body) as { rpcId: string }
+      return Response.json({
+        type: 'server-response', rpcId: call.rpcId, result: { ok: true, value: [provider] },
+      })
+    })
+    const [operator] = await createRemotePhysicalOperators({
+      id: 'mini', label: 'Mac mini', endpoint: 'https://mini.example', pollIntervalMs: 1,
+    }, fixture.store, request)
+    await expect(operator!.start({
+      executionId: 'command-authority' as never,
+      mode: 'resident', prompt: [], signal: new AbortController().signal,
+      nativeToolPolicy: 'dsh-tools-authoritative',
+      parent: { session: { header: { cwd: fixture.workspace } } } as never,
+    })).rejects.toMatchObject({ code: 'OPERATOR_MODE_UNSUPPORTED' })
+    expect(request).toHaveBeenCalledTimes(1)
+    fixture.store.close()
+  })
+
   it('isolates an unavailable member catalog and restores it after qualification recovers', async () => {
     const store = fixtureStore()
     let providerReads = 0

@@ -4898,7 +4898,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorNativeToolPolicy',
-    declaration: 'export type PhysicalOperatorNativeToolPolicy = \'inherit\' | \'disabled\';',
+    declaration: 'export type PhysicalOperatorNativeToolPolicy = \'inherit\' | \'dsh-tools-authoritative\' | \'disabled\';',
   },
   {
     name: 'PhysicalOperatorProgressEvent',

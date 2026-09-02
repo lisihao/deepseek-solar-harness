@@ -620,10 +620,12 @@ describe('CodexAppServerWire', () => {
 
     const resuming = wire.resumeThread(
       'thread-persistent', '/workspace', new AbortController().signal, undefined, 'DSH resumed system',
+      { approval: 'never', nativeEffects: 'read-only', environmentAccess: 'disabled' },
     )
     const threadResume = await child.peer.nextMethod('thread/resume')
     expect(threadResume.params).toEqual({
       threadId: 'thread-persistent', cwd: '/workspace', developerInstructions: 'DSH resumed system',
+      approvalPolicy: 'never', sandbox: 'read-only',
     })
     child.peer.respond(threadResume, { thread: { id: 'thread-persistent', ephemeral: false } })
     await resuming
@@ -633,6 +635,56 @@ describe('CodexAppServerWire', () => {
     child.peer.respond(compact, {})
     await compacting
     expect(wire.currentThreadId).toBe('thread-persistent')
+    wire.close()
+  })
+
+  it('seals the DSH tool execution boundary at thread and turn start', async () => {
+    const child = fakeChild()
+    const tools = [{
+      type: 'function' as const,
+      name: 'Bash',
+      description: 'Run through DSH.',
+      inputSchema: { type: 'object' },
+    }]
+    const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!, 'decline', tools)
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    child.peer.respond(initialize, { userAgent: 'codex-cli 0.151.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+
+    const boundary = {
+      approval: 'never' as const,
+      nativeEffects: 'read-only' as const,
+      environmentAccess: 'disabled' as const,
+    }
+    const starting = wire.startThread(
+      '/workspace', new AbortController().signal, false, undefined, 'DSH authority', boundary,
+    )
+    const threadStart = await child.peer.nextMethod('thread/start')
+    expect(threadStart.params).toEqual({
+      cwd: '/workspace', ephemeral: false, developerInstructions: 'DSH authority', dynamicTools: tools,
+      approvalPolicy: 'never', sandbox: 'read-only', environments: [],
+    })
+    child.peer.respond(threadStart, { thread: { id: 'thread-dsh-tools', ephemeral: false } })
+    await starting
+
+    const result = wire.runTurn(['task'], new AbortController().signal, undefined, undefined, boundary)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    expect(turnStart.params).toMatchObject({
+      threadId: 'thread-dsh-tools',
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'readOnly', networkAccess: false },
+      environments: [],
+    })
+    expect(turnStart.params).not.toHaveProperty('sandbox')
+    child.peer.respond(turnStart, { turn: { id: 'turn-dsh-tools' } })
+    child.peer.send(
+      agentMessage('done', 'final_answer', 'turn-dsh-tools', 'thread-dsh-tools'),
+      turnCompleted('completed', 'turn-dsh-tools', 'thread-dsh-tools'),
+    )
+    await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
     wire.close()
   })
 

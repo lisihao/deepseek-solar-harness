@@ -13,9 +13,12 @@ import {
   claudeAuthenticationFailureCode,
   claudeCompactPrompt,
   claudeNativeToolOptions,
+  claudeToolAliases,
   claudeResultFailure,
   ClaudeCodeResidentDriver,
+  codexApprovalBehavior,
   codexExecutionFailure,
+  codexExecutionBoundary,
   collectCodexModelsAndQuota,
   CodexResidentDriver,
   createClaudeRlmMcpServer,
@@ -138,10 +141,27 @@ describe('Claude Code resident driver environment', () => {
 
   it('removes the Claude native tool surface for a sealed no-tool execution', () => {
     expect(claudeNativeToolOptions('disabled')).toEqual({ tools: [], allowedTools: [] })
+    expect(claudeNativeToolOptions('dsh-tools-authoritative')).toEqual({ tools: [], allowedTools: [] })
     expect(claudeNativeToolOptions('inherit')).toEqual({})
     expect(nativeToolSystemPrompt('DSH authority', 'disabled')).toContain('grants no native tool authority')
+    expect(nativeToolSystemPrompt('DSH authority', 'dsh-tools-authoritative')).toContain('only through the DSH model-tool bridge')
     expect(nativeToolSystemPrompt('DSH authority', 'disabled')).toContain('DSH authority')
     expect(nativeToolSystemPrompt('DSH authority', 'inherit')).toBe('DSH authority')
+    expect(codexApprovalBehavior('dsh-tools-authoritative')).toBe('decline')
+    expect(codexApprovalBehavior('inherit')).toBe('require')
+    expect(codexExecutionBoundary('dsh-tools-authoritative')).toEqual({
+      approval: 'never', nativeEffects: 'read-only', environmentAccess: 'disabled',
+    })
+    expect(codexExecutionBoundary('inherit')).toBeUndefined()
+    expect(claudeToolAliases({
+      version: 1,
+      socketPath: '/tmp/dsh-tools.sock',
+      sessionId: 'dsh-session',
+      tools: [
+        { name: 'Bash', description: 'Run a command.', inputSchema: { type: 'object' } },
+        { name: 'Read', description: 'Read a file.', inputSchema: { type: 'object' } },
+      ],
+    })).toEqual({ Bash: 'mcp__dsh_tools__Bash', Read: 'mcp__dsh_tools__Read' })
   })
 
   it('pins SDK execution to the same first user-owned CLI selected for qualification', () => {
