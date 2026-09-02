@@ -139,7 +139,7 @@
     {
       "name": "First-class DSH model tool authority",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "3d8e1671556f605ccbb5fb2649604749a1eeb760"
+      "commit": "9cbbeb181d5d974ea60572fe8bcf0d05c96d924f"
     }
   ],
   "sourcePackages": {
@@ -270,7 +270,7 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "5aa5625abe5c801f7db2b618fb00bf070461a90ca331e519bab5b68f54bd3e21",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "b348fb840fc866e14b04ac5055f068261894201cc8afda4c31881414b8f06fb8",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "544eeff6512b77693c45c368aad2bf554d34fb9028774093d5344175db0cfcb4",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "1fb932c663f941c17ef762ad77e31dd55d003ba2e32aa1346ccc84fed5185129",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "5c36c98c8d8431bf7f2cbaf25abc1e60e03eb0efe36010bcc6772c77678abd3c",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "09de0d3544b7b879d9c1fd959d94614d30833d3dd601d8de54af849dbae973d1",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "8f1b8a5f72121fd9f5950922a67d6790b6e19f21bc1cebb0c4870d7d443847d0",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "19ac2c8f0d667c40bebf0d83737d534725b13812bcb6335d156e785159b7d480",
