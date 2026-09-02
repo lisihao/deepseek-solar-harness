@@ -46,7 +46,9 @@
 
 契约刻意排除了 Provider 原生 tab id、snapshot ref、原生 workspace 命令、扩展消息、profile 目录、调试协议命令和传输细节。Provider 负责在可移植计划与原生协议之间转换。
 
-`browser-js-v1` 是独立的显式 opt-in 层，用于需要在一次执行中使用变量、循环、分支、locator 和页面求值的工作负载。`BrowserRunProgramV1.source` 是异步函数的 body；它唯一被注入的 host object 是 `BrowserProgramApiV1`：`browser.run(operation)` 执行一个可移植操作，`browser.evaluate(page, functionExpression, argument?)` 在页面内执行函数表达式。该语言不包含 Node.js、文件系统、网络、模块加载或 Provider 原生 global。
+`browser-js-v1` 是独立的显式 opt-in 层，用于需要在一次执行中使用变量、循环、分支、locator 和页面求值的工作负载。`BrowserRunProgramV1.source` 是异步函数的 body，并接收 `BrowserProgramApiV1`：`browser.run(operation)` 执行一个可移植操作，`browser.evaluate(page, functionExpression, argument?)` 在页面内执行函数表达式。
+
+这一层是可信插件可执行面，而不是面向恶意代码或模型的安全沙箱。Provider runtime 即使只把 `BrowserProgramApiV1` 作为可移植 API，也可能暴露 ambient Node.js、文件系统、网络、模块加载或 Provider global；这些能力都不属于可移植契约。面向模型的 Consumer 必须只暴露类型化 `runPlan` 输入，绝不能让模型把任意 `source` 传给 `runProgram`。
 
 program 声明 `requiredCapabilities`，Service 会在执行前检查。返回值必须满足显式的 `none`、有界 `text` 或有界 JSON output contract。program 局部变量、locator、page object、DOM object 和 Provider 原生 handle 会随本次执行结束，不能返回给后续调用。
 
@@ -62,6 +64,7 @@ program 声明 `requiredCapabilities`，Service 会在执行前检查。返回�
 
 - Service 信任同进程的类型化计划；Consumer 在构造计划前验证模型或用户 JSON。
 - Provider 在自己的不可信边界验证并限制每条扩展、进程或网络消息。
+- `browser-js-v1` 信任其 source。Service 会限制声明的结果，但不会隔离 ambient runtime 访问。
 - `handoff` 和 `takeover` 是显式操作。当用户拥有控制权时，Provider 必须返回 `BROWSER_USER_CONTROL`，不得继续执行动作。
 - 页面求值仅存在于显式 opt-in 的 `browser-js-v1` 层，并要求声明 `page-evaluate` capability。调试协议仍不属于公共接缝。
 
@@ -84,7 +87,7 @@ program 声明 `requiredCapabilities`，Service 会在执行前检查。返回�
 ## 已知限制与延期工作
 
 - 本包不附带 Provider 或 Consumer，因此在注册 Provider 前执行会失败；仅安装本包也不会提供面向模型的浏览器工具。
-- 端到端 Ego Lite 忠实度当前为 **partial**：本包保留了可移植 plan 和可编程组合，但这里尚未实现 Ego Provider、扩展生命周期或 Consumer 集成。
+- 端到端 Ego Lite 忠实度当前为 **partial**：独立的 `@deepseek-ai/dsh-browser-ego-lite` Provider 保留可移植 plan 与可信的可编程组合，但 extension 生命周期、Bundle 和 Consumer 集成仍不属于本 Service 包。
 - v1 契约刻意没有下载、文件上传、PDF 提取或调试协议操作。页面求值仅存在于 program 层。
 - availability 没有事件流；调用方通过 `capabilities(layer)` 或执行时的可移植错误观察它。
 - Service 不持久化 workspace 元数据或截图。Provider 负责原生状态，Consumer 负责 harness attachment 或持久记录。
