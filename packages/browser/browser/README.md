@@ -46,7 +46,9 @@ The closed operation union covers page selection and lifecycle, navigation, page
 
 The plan contract intentionally excludes Provider-native tab ids, snapshot refs, native workspace commands, extension messages, profile directories, arbitrary source, debugging-protocol commands, and transport details. Providers translate between the portable plan and their native protocol.
 
-`browser-js-v1` is a separate explicit opt-in layer for workloads that need single-execution variables, loops, branches, locators, and page evaluation. `BrowserRunProgramV1.source` is the body of an async function whose sole injected host object is `BrowserProgramApiV1`: `browser.run(operation)` executes one portable operation and `browser.evaluate(page, functionExpression, argument?)` executes a function expression in the page. No Node.js, filesystem, network, module-loading, or Provider-native global is part of this language.
+`browser-js-v1` is a separate explicit opt-in layer for workloads that need single-execution variables, loops, branches, locators, and page evaluation. `BrowserRunProgramV1.source` is the body of an async function that receives `BrowserProgramApiV1`: `browser.run(operation)` executes one portable operation and `browser.evaluate(page, functionExpression, argument?)` executes a function expression in the page.
+
+This layer is a trusted-plugin executable surface, not a hostile-code or model-facing security sandbox. A Provider runtime may expose ambient Node.js, filesystem, network, module-loading, or Provider globals even though none of those capabilities is portable or part of `BrowserProgramApiV1`. A model-facing Consumer must expose only typed `runPlan` input and must never accept arbitrary model-authored `source` for `runProgram`.
 
 The program declares `requiredCapabilities`; the Service checks them before execution. Its return value must satisfy an explicit `none`, bounded `text`, or bounded JSON output contract. Program-local variables, locators, page objects, DOM objects, and Provider-native handles die with that one execution and cannot be returned for a later call.
 
@@ -62,6 +64,7 @@ Layer and capability mismatches fail before source execution. The Service enforc
 
 - The Service trusts typed same-process plans; the Consumer validates model or user JSON before constructing them.
 - A Provider validates and bounds every extension, process, or network message at its own untrusted boundary.
+- `browser-js-v1` trusts its source. The Service bounds its declared result but does not confine ambient runtime access.
 - `handoff` and `takeover` are explicit operations. A Provider must return `BROWSER_USER_CONTROL` rather than acting while the user owns control.
 - Page evaluation exists only in the opt-in `browser-js-v1` layer and requires the declared `page-evaluate` capability. Debugging protocols remain outside the public seam.
 
@@ -84,7 +87,7 @@ No direct invalidation; this Service registers no prompt, tool schema, or Sessio
 ## Known Limitations and Deferred Work
 
 - No Provider or Consumer is bundled, so execution fails until a Provider is registered and no model-facing browser tool exists from this package alone.
-- End-to-end Ego Lite fidelity is currently **partial**: this package preserves both portable plans and programmable composition, but no Ego Provider, extension lifecycle, or Consumer integration is implemented here.
+- End-to-end Ego Lite fidelity is currently **partial**: the separate `@deepseek-ai/dsh-browser-ego-lite` Provider preserves portable plans and trusted programmable composition, but extension lifecycle, Bundle, and Consumer integration remain outside this Service package.
 - The v1 contract deliberately has no downloads, file upload, PDF extraction, or debugging-protocol operation. Page evaluation is program-only.
 - Availability has no event stream; callers observe it through `capabilities(layer)` or execution-time portable errors.
 - The Service does not persist workspace metadata or screenshots. Providers own native state and Consumers own harness attachments or durable records.

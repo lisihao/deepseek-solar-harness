@@ -180,10 +180,12 @@ export type BrowserProgramOutputContractV1 =
 /**
  * Explicit opt-in programmable browser request.
  *
- * `source` is the body of an async `browser-js-v1` function whose sole injected
- * host object is the normative {@link BrowserProgramApiV1}. JavaScript variables,
- * loops, and branches stay inside this single execution. The returned value must
- * satisfy `output`; Provider-native objects and handles may not cross the result.
+ * `source` is the body of an async `browser-js-v1` function that receives the
+ * normative {@link BrowserProgramApiV1}. JavaScript variables, loops, and branches
+ * stay inside this single execution. This contract does not sandbox ambient runtime
+ * capabilities, so only trusted plugin code may use it; model-facing Consumers must
+ * expose typed plans instead. The returned value must satisfy `output`; Provider-
+ * native objects and handles may not cross the result.
  */
 export interface BrowserRunProgramV1 {
   readonly version: 1
@@ -195,7 +197,7 @@ export interface BrowserRunProgramV1 {
   readonly output: BrowserProgramOutputContractV1
 }
 
-/** Normative host object exposed to a `browser-js-v1` source body. */
+/** Normative portable browser object passed to a `browser-js-v1` source body. */
 export interface BrowserProgramApiV1 {
   /** Execute one portable operation and return its portable result. */
   run(operation: BrowserOperationV1): Promise<BrowserOperationResultV1>
