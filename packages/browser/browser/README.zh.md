@@ -87,7 +87,7 @@ program 声明 `requiredCapabilities`，Service 会在执行前检查。返回�
 ## 已知限制与延期工作
 
 - 本包不附带 Provider 或 Consumer，因此在注册 Provider 前执行会失败；仅安装本包也不会提供面向模型的浏览器工具。
-- 端到端 Ego Lite 忠实度当前为 **partial**：独立的 `@deepseek-ai/dsh-browser-ego-lite` Provider 保留可移植 plan 与可信的可编程组合，但 extension 生命周期、Bundle 和 Consumer 集成仍不属于本 Service 包。
+- Service 包保持 Provider 中立。独立的 `@deepseek-ai/dsh-browser-ego-lite` Provider、`@deepseek-ai/dsh-tool-browser` Consumer 与 `@deepseek-ai/dsh-ego-lite-browser` Bundle 共同构成随产品交付的 Ego Lite 集成；外部浏览器的安装与 onboarding 生命周期仍不属于本 Service。
 - v1 契约刻意没有下载、文件上传、PDF 提取或调试协议操作。页面求值仅存在于 program 层。
 - availability 没有事件流；调用方通过 `capabilities(layer)` 或执行时的可移植错误观察它。
 - Service 不持久化 workspace 元数据或截图。Provider 负责原生状态，Consumer 负责 harness attachment 或持久记录。

@@ -53,7 +53,7 @@ No direct invalidation. This Provider registers no prompt, tool schema, or Sessi
 
 ## Known Limitations and Deferred Work
 
-- **Integration fidelity remains partial** — this package contains no Ego Lite binary, extension lifecycle manager, model-facing Consumer, Bundle row, or real installed-browser acceptance. Its fixture exercises the frozen CLI protocol without claiming real browser evidence.
+- **The binary remains an external prerequisite** — this package does not redistribute Ego Lite or manage its extension/onboarding lifecycle. `@deepseek-ai/dsh-tool-browser` supplies the model Consumer, `@deepseek-ai/dsh-ego-lite-browser` supplies the Bundle, and DSH Desktop composes both by default. Real installed-browser acceptance remains pending until Ego Lite onboarding is complete; fixture coverage is not presented as that evidence.
 - **`current` workspace is unsupported** — upstream v1.2.5 public helpers do not expose a lossless selected-task-space identity, so the Provider fails with `BROWSER_UNSUPPORTED_OPERATION` before launch.
 - **`open` with `reuse: "never"` is unsupported** — the public `browser` facade exposes `openOrReuseTab` but not `newTab`, so the Provider does not pretend it can guarantee a fresh page.
 - **`pages` is unsupported** — upstream returns native `targetId` values while the portable result requires Consumer-minted page keys; the Provider fails instead of exporting or persisting native identifiers.

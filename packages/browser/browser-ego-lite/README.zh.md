@@ -53,7 +53,7 @@ Program 局部 page alias 仅在生成的 heredoc 内映射到原生 `targetId`�
 
 ## 已知限制与延期工作
 
-- **集成忠实度仍为 partial** — 本包不包含 Ego Lite binary、extension 生命周期管理器、面向模型的 Consumer、Bundle 配置或真实已安装浏览器验收。fixture 只验证冻结 CLI 协议，不冒充真实浏览器证据。
+- **Binary 仍是外部前置条件** — 本包不再分发 Ego Lite，也不管理其 extension/onboarding 生命周期。`@deepseek-ai/dsh-tool-browser` 提供面向模型的 Consumer，`@deepseek-ai/dsh-ego-lite-browser` 提供 Bundle，DSH Desktop 默认组合二者。真实已安装浏览器验收仍须等待 Ego Lite 完成 onboarding；fixture 覆盖不会冒充该证据。
 - **不支持 `current` workspace** — upstream v1.2.5 公共 helper 无法无损给出当前选中的 task-space identity，因此 Provider 会在启动前返回 `BROWSER_UNSUPPORTED_OPERATION`。
 - **不支持 `reuse: "never"` 的 `open`** — 公共 `browser` facade 暴露 `openOrReuseTab`，但不暴露 `newTab`；Provider 不会伪装成可保证新页面。
 - **不支持 `pages`** — upstream 返回原生 `targetId`，而 portable result 要求 Consumer 创建 page key；Provider 会失败，而不是导出或持久化原生标识符。

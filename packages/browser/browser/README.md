@@ -87,7 +87,7 @@ No direct invalidation; this Service registers no prompt, tool schema, or Sessio
 ## Known Limitations and Deferred Work
 
 - No Provider or Consumer is bundled, so execution fails until a Provider is registered and no model-facing browser tool exists from this package alone.
-- End-to-end Ego Lite fidelity is currently **partial**: the separate `@deepseek-ai/dsh-browser-ego-lite` Provider preserves portable plans and trusted programmable composition, but extension lifecycle, Bundle, and Consumer integration remain outside this Service package.
+- The Service package remains Provider-neutral. The separate `@deepseek-ai/dsh-browser-ego-lite` Provider, `@deepseek-ai/dsh-tool-browser` Consumer, and `@deepseek-ai/dsh-ego-lite-browser` Bundle form the shipped Ego Lite integration; the external browser's installation and onboarding lifecycle remain outside this Service.
 - The v1 contract deliberately has no downloads, file upload, PDF extraction, or debugging-protocol operation. Page evaluation is program-only.
 - Availability has no event stream; callers observe it through `capabilities(layer)` or execution-time portable errors.
 - The Service does not persist workspace metadata or screenshots. Providers own native state and Consumers own harness attachments or durable records.
