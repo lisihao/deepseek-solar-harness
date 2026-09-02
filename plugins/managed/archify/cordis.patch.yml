@@ -1,0 +1,4 @@
+# DSH bundle patch: add the isolated Archify model tool and usage guidance.
+- insert:
+    - id: archify
+      name: '@deepseek-ai/dsh-archify'

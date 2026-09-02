@@ -1,0 +1,75 @@
+{
+  "name": "@deepseek-ai/dsh-archify",
+  "version": "2.16.0-dsh.1",
+  "description": "Archify v2.16.0 as an isolated DSH model tool for typed architecture, workflow, sequence, dataflow, and lifecycle diagrams.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run tests",
+    "check": "npm run typecheck && npm test && npm run build",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1 <5.0.0",
+    "@deepseek-ai/dsh-session": ">=0.1.0-rc.5 <0.2.0",
+    "@deepseek-ai/dsh-system-prompt": ">=0.1.0-rc.5 <0.2.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.5 <0.2.0",
+    "@deepseek-ai/dsh-subprocess": ">=0.1.0-rc.5 <0.2.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./SKILL.md": "./SKILL.md",
+    "./SOURCE-LOCK.json": "./SOURCE-LOCK.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "vendor/archify",
+    "cordis.patch.yml",
+    "SKILL.md",
+    "README.md",
+    "README.en.md",
+    "ARCHIFY-FIDELITY.md",
+    "ARCHIFY-FIDELITY.en.md",
+    "SOURCE-LOCK.json",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "dependencies": {
+    "ajv": "8.17.1",
+    "parse5": "7.3.0",
+    "saxes": "6.0.0",
+    "simple-icons": "16.28.0"
+  },
+  "overrides": {
+    "fast-uri": "3.1.5"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.5",
+    "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.5",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.5",
+    "@deepseek-ai/dsh-subprocess": "0.1.0-rc.5",
+    "@deepseek-ai/dsh-subprocess-local": "0.1.0-rc.5",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
