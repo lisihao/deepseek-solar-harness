@@ -20,6 +20,12 @@ Claude Code 接收 `tools: []`，并只允许严格配置的 DSH MCP 工具桥�
 
 远程执行会在准入前拒绝该新策略，因为属主本地的模型工具 socket 不能跨越该 transport。`disabled` 仍是唯一无工具策略，并继续禁止与工具桥同时使用。
 
+## 备选方案
+
+- 不采纳复用 `disabled`：它会同时移除原生工具和 DSH 工具。
+- 不采纳继续透传 Codex 产品原生审批：拥有该回合的 DSH Session 无法结算第二条审批通道。
+- 不采纳让全部 resident 调用统一使用新策略：显式 `physical_operator` 必须保留其已记录的原生产品行为。
+
 ## 后果
 
 Smart Auto 可以在 Claude 订阅不合格时回退到 Codex，而不会把工具执行迁移到无人拥有的审批路径。DSH 工具调用继续通过普通的 scope、guard、approval、event 与插件组合表面。Receipt 重放不能改变工具权威，不受支持的远程使用会明确失败。

@@ -20,6 +20,12 @@ Claude Code receives `tools: []` plus only the strict DSH MCP bridge allowlist, 
 
 Remote execution rejects the new policy before admission because an owner-local model-tool socket cannot cross that transport. `disabled` remains the only no-tool policy and still cannot be combined with a bridge.
 
+## Alternatives considered
+
+- Reusing `disabled` was rejected because it intentionally removes both native and DSH tools.
+- Letting Codex product-native approvals flow through was rejected because the owning DSH Session cannot settle that second approval channel.
+- Giving every resident call the new policy was rejected because explicit `physical_operator` use must retain its documented native product behavior.
+
 ## Consequences
 
 Smart Auto can fall back from an unqualified Claude subscription to Codex without moving tool execution onto an unowned approval path. DSH tool calls continue through the ordinary scope, guard, approval, event, and plugin composition surfaces. Receipt replay cannot change tool authority, and unsupported remote use fails loud.

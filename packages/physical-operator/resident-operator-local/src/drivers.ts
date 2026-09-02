@@ -379,7 +379,12 @@ function claudeQualifiedToolNames(bridge: NonNullable<ResidentDriverExecuteReque
   return bridge.tools.map(tool => `${prefix}${tool.name}`)
 }
 
-/** Map bare DSH tool names used by shared Skills onto the qualified Claude MCP surface. */
+/**
+ * Map bare DSH tool names used by shared Skills onto the qualified Claude MCP surface.
+ *
+ * @param bridge DSH model-tool bridge whose tools are exposed through Claude MCP.
+ * @returns Bare tool names mapped to their qualified Claude MCP names.
+ */
 export function claudeToolAliases(
   bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
 ): Record<string, string> {
@@ -575,14 +580,24 @@ export function claudeNativeToolOptions(policy?: PhysicalOperatorNativeToolPolic
     : {}
 }
 
-/** Resolve how native Codex approval requests behave for the sealed tool authority. */
+/**
+ * Resolve how native Codex approval requests behave for the sealed tool authority.
+ *
+ * @param policy Sealed native product-tool authority for the turn.
+ * @returns Whether native approval requests are declined or surfaced for settlement.
+ */
 export function codexApprovalBehavior(
   policy?: PhysicalOperatorNativeToolPolicy,
 ): 'decline' | 'require' {
   return policy === 'dsh-tools-authoritative' ? 'decline' : 'require'
 }
 
-/** Seal a read-only, no-approval native Codex environment while DSH tools remain dynamic functions. */
+/**
+ * Seal a read-only, no-approval native Codex environment while DSH tools remain dynamic functions.
+ *
+ * @param policy Sealed native product-tool authority for the turn.
+ * @returns Codex execution boundary for DSH-authoritative turns, otherwise undefined.
+ */
 export function codexExecutionBoundary(
   policy?: PhysicalOperatorNativeToolPolicy,
 ): CodexAppServerExecutionBoundary | undefined {
