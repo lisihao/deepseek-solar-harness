@@ -100,7 +100,10 @@ describe('desktop profile composition', () => {
     }))
     expect(rows.find(row => row.id === 'orchestration-local')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-orchestration-local',
-      config: expect.objectContaining({ autoStart: true }),
+      config: expect.objectContaining({
+        autoStart: true,
+        browserProviderModules: ['@deepseek-ai/dsh-browser-ego-lite'],
+      }),
     }))
     expect(rows.find(row => row.id === 'browser')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-browser',
@@ -312,7 +315,10 @@ describe('desktop profile composition', () => {
     }))
     expect(rows.find(row => row.id === 'orchestration-local')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-orchestration-local',
-      config: expect.objectContaining({ autoStart: true }),
+      config: expect.objectContaining({
+        autoStart: true,
+        browserProviderModules: ['@deepseek-ai/dsh-browser-ego-lite'],
+      }),
     }))
     expect(rows.find(row => row.id === 'tool-orchestration')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-tool-orchestration',

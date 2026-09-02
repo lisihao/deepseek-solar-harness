@@ -45,6 +45,7 @@ import {
 import {
   AGENT_TEAMS_PACKAGE,
   AGENT_TEAMS_ROW_ID,
+  EGO_LITE_BROWSER_PROVIDER_PACKAGE,
   PRODUCT_BUNDLE_PACKAGES,
   PRODUCT_BUNDLE_ROW_IDS,
   PLUGIN_CONSOLE_PACKAGE,
@@ -489,6 +490,17 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
     config: {
       ...rowConfig(residentOperators),
       connectTimeoutMs: RESIDENT_OPERATOR_STARTUP_TIMEOUT_MS,
+    },
+  })
+  const orchestration = rows.get('orchestration-local')
+  if (orchestration?.name !== '@deepseek-ai/dsh-orchestration-local') {
+    throw new Error(`${BIN_NAME}: product profile must provide the local orchestration row`)
+  }
+  patches.push({
+    id: 'orchestration-local',
+    config: {
+      ...rowConfig(orchestration),
+      browserProviderModules: [EGO_LITE_BROWSER_PROVIDER_PACKAGE],
     },
   })
   const settingsConfig = FileSettingsProvider.Config({
