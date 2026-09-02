@@ -3,7 +3,6 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import {
   chmodSync,
-  existsSync,
   lstatSync,
   mkdirSync,
   renameSync,
@@ -11,45 +10,17 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
-import { basename, dirname, join, win32 } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { assertDesktopProfileName } from './profile-manager.ts'
 
 const RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 const DEFAULT_PROFILE = 'DSH_DESKTOP_DEFAULT_PROFILE'
 const DSH_HOME = 'DSH_HOME'
 const PATH = 'PATH'
-const WINDOWS_APP_EXECUTABLE = 'DSH_DESKTOP_APP_EXECUTABLE'
-const WINDOWS_DSH_BOOTSTRAP = 'DSH_DESKTOP_DSH_BOOTSTRAP'
-const WINDOWS_ELECTRON_VERSION = 'DSH_DESKTOP_ELECTRON_VERSION'
-const WINDOWS_PNPM_ENTRY = 'DSH_DESKTOP_PNPM_ENTRY'
-const WINDOWS_PROFILE_DIRECTORY = 'DSH_DESKTOP_PROFILE_DIRECTORY'
-const WINDOWS_PRODUCT_VERSION = 'DSH_DESKTOP_PRODUCT_VERSION'
-const WINDOWS_SHIM_DIRECTORY = 'DSH_DESKTOP_SHIM_DIRECTORY'
-const WINDOWS_POWERSHELL_WELCOME = 'DSH_DESKTOP_POWERSHELL_WELCOME'
-const WINDOWS_CMD_WELCOME = 'DSH_DESKTOP_CMD_WELCOME'
-const WINDOWS_SHELL_EXECUTABLE = 'DSH_DESKTOP_SHELL_EXECUTABLE'
-const WINDOWS_GENERATED_ENVIRONMENT_KEYS = new Set([
-  DEFAULT_PROFILE,
-  WINDOWS_APP_EXECUTABLE,
-  WINDOWS_DSH_BOOTSTRAP,
-  WINDOWS_ELECTRON_VERSION,
-  WINDOWS_PNPM_ENTRY,
-  WINDOWS_PROFILE_DIRECTORY,
-  WINDOWS_PRODUCT_VERSION,
-  WINDOWS_SHIM_DIRECTORY,
-  WINDOWS_POWERSHELL_WELCOME,
-  WINDOWS_CMD_WELCOME,
-  WINDOWS_SHELL_EXECUTABLE,
-])
 const STATE_DIRECTORY_MODE = 0o700
 const EXECUTABLE_FILE_MODE = 0o700
 const PRIVATE_FILE_MODE = 0o600
-const WINDOWS_SHELL_COMMANDS = ['pwsh.exe', 'powershell.exe', 'cmd.exe'] as const
-const WINDOWS_TERMINAL_COMMAND = 'wt.exe'
 const ELECTRON_HEADERS_URL = 'https://electronjs.org/headers'
-
-/** Platforms with a native terminal launch contract owned by DSH Desktop. */
-export type DesktopTerminalPlatform = 'darwin' | 'win32'
 
 /** Process launcher injected by the Electron adapter. */
 export type DesktopTerminalSpawn = (
@@ -57,24 +28,6 @@ export type DesktopTerminalSpawn = (
   args: readonly string[],
   options: SpawnOptions,
 ) => ChildProcess
-
-/** Filesystem probe used while resolving a Windows terminal shell. */
-export type DesktopTerminalExecutableExists = (filename: string) => boolean
-
-/** Resolver used to locate one Windows terminal shell without a command interpreter. */
-export type DesktopTerminalExecutableResolver = (
-  command: string,
-  environment: Readonly<NodeJS.ProcessEnv>,
-  exists: DesktopTerminalExecutableExists,
-) => string | undefined
-
-/** Optional Windows terminal accepting a selected shell command after its argument prefix. */
-export interface WindowsTerminalLauncher {
-  /** Terminal executable, for example `wt.exe`. */
-  executable: string
-  /** Arguments placed before the selected shell child command. */
-  arguments?: readonly string[]
-}
 
 /** Inputs for one isolated desktop terminal launch. */
 export interface DesktopTerminalOptions {
@@ -102,12 +55,6 @@ export interface DesktopTerminalOptions {
   spawn: DesktopTerminalSpawn
   /** Environment copied into the terminal child; defaults to `process.env`. */
   environment?: NodeJS.ProcessEnv
-  /** Optional Windows terminal wrapper. Windows Terminal is discovered when omitted. */
-  windowsTerminal?: WindowsTerminalLauncher
-  /** Windows executable existence probe; defaults to `existsSync`. */
-  windowsExecutableExists?: DesktopTerminalExecutableExists
-  /** Windows executable resolver; defaults to a trusted PATH/SystemRoot lookup. */
-  windowsExecutableResolver?: DesktopTerminalExecutableResolver
   /** Reporter attached before the platform launcher can emit an asynchronous failure. */
   onLaunchError?: (cause: Error) => void
 }
@@ -124,8 +71,6 @@ export interface DesktopTerminalLaunch {
   nodeShimPath: string
   /** Generated script that configures and welcomes the interactive shell. */
   welcomePath: string
-  /** Windows command broker that creates the visible console, when applicable. */
-  windowsLauncherPath?: string
   /** Short-lived platform launcher; callers may observe its asynchronous failure. */
   child: ChildProcess
 }
@@ -149,7 +94,6 @@ interface DesktopTerminalFiles {
   pnpmShimPath: string
   nodeShimPath: string
   welcomePath: string
-  windowsCmdWelcomePath?: string
 }
 
 /** Reject values that cannot be represented safely in generated command files. */
@@ -163,22 +107,6 @@ function assertScriptValue(label: string, value: string): void {
 /** Quote one arbitrary value as a POSIX shell word. */
 function quoteSh(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`
-}
-
-/** Escape printable text following an `echo(` batch builtin. */
-function escapeBatchText(value: string): string {
-  if (/\r|\n/.test(value)) {
-    throw new Error('dsh-plugin-desktop: terminal Windows welcome text must not contain newlines')
-  }
-  return value
-    .replaceAll('^', '^^')
-    .replaceAll('%', '%%')
-    .replaceAll('&', '^&')
-    .replaceAll('|', '^|')
-    .replaceAll('<', '^<')
-    .replaceAll('>', '^>')
-    .replaceAll('(', '^(')
-    .replaceAll(')', '^)')
 }
 
 /** Remove a temporary file while preserving every error except absence. */
@@ -222,18 +150,6 @@ function macShim(appExecutable: string, binPath?: string): string {
   ].join('\n')
 }
 
-/** Build a command shim that enables Electron's Node mode only for its child. */
-function windowsShim(): string {
-  return [
-    '@echo off',
-    'setlocal DisableDelayedExpansion',
-    `set "${RUN_AS_NODE}=1"`,
-    `"%${WINDOWS_APP_EXECUTABLE}%" %*`,
-    'exit /b %errorlevel%',
-    '',
-  ].join('\r\n')
-}
-
 /** Build the DSH shim with Loader internals and one process-local default profile. */
 function macDshShim(options: DesktopTerminalOptions): string {
   return [
@@ -245,18 +161,6 @@ function macDshShim(options: DesktopTerminalOptions): string {
     ].join(' '),
     '',
   ].join('\n')
-}
-
-/** Build the Windows DSH shim with Loader internals and one local default profile. */
-function windowsDshShim(): string {
-  return [
-    '@echo off',
-    'setlocal DisableDelayedExpansion',
-    `set "${RUN_AS_NODE}=1"`,
-    `"%${WINDOWS_APP_EXECUTABLE}%" --expose-internals "%${WINDOWS_DSH_BOOTSTRAP}%" %*`,
-    'exit /b %errorlevel%',
-    '',
-  ].join('\r\n')
 }
 
 /** Build a pnpm shim with Electron native-module settings scoped to its process tree. */
@@ -272,21 +176,6 @@ function macPnpmShim(options: DesktopTerminalOptions): string {
     ].join(' '),
     '',
   ].join('\n')
-}
-
-/** Build a pnpm batch shim with Electron settings local to its `setlocal` child tree. */
-function windowsPnpmShim(): string {
-  return [
-    '@echo off',
-    'setlocal DisableDelayedExpansion',
-    `set "${RUN_AS_NODE}=1"`,
-    'set "npm_config_runtime=electron"',
-    `set "npm_config_target=%${WINDOWS_ELECTRON_VERSION}%"`,
-    `set "npm_config_disturl=${ELECTRON_HEADERS_URL}"`,
-    `"%${WINDOWS_APP_EXECUTABLE}%" "%${WINDOWS_PNPM_ENTRY}%" %*`,
-    'exit /b %errorlevel%',
-    '',
-  ].join('\r\n')
 }
 
 /** Build a zsh startup file that preserves the user's rc and then restores desktop variables. */
@@ -371,63 +260,9 @@ function macWelcome(
   ].join('\n')
 }
 
-/** Build the PowerShell script that remains active in the new console. */
-function windowsWelcome(): string {
-  const commandHelp = 'dsh --dump-config'
-  const pluginAdd = 'dsh plugin add <third-party-plugin>'
-  const pluginRemove = 'dsh plugin remove <third-party-plugin>'
-  const pluginUpdate = 'dsh plugin update'
-  return [
-    `Remove-Item Env:${RUN_AS_NODE} -ErrorAction SilentlyContinue`,
-    `$dshDesktopShimDir = $env:${WINDOWS_SHIM_DIRECTORY}`,
-    `$dshDesktopPath = @($env:${PATH} -split ';' | Where-Object { -not [string]::Equals($_, $dshDesktopShimDir, [StringComparison]::OrdinalIgnoreCase) })`,
-    `$env:${PATH} = (@($dshDesktopShimDir) + $dshDesktopPath) -join ';'`,
-    `Set-Location -LiteralPath $env:${WINDOWS_PROFILE_DIRECTORY}`,
-    `Write-Host ("DSH Desktop {0} terminal" -f $env:${WINDOWS_PRODUCT_VERSION})`,
-    `Write-Host ("Profile: {0}" -f $env:${DEFAULT_PROFILE})`,
-    `Write-Host ("Profile directory: {0}" -f $env:${WINDOWS_PROFILE_DIRECTORY})`,
-    `Write-Host ("Harness home: {0}" -f $env:${DSH_HOME})`,
-    `Write-Host ("Plugin commands without --profile modify the {0} profile." -f $env:${DEFAULT_PROFILE})`,
-    `Write-Host 'Commands:'`,
-    `Write-Host '  ${commandHelp}'`,
-    `Write-Host '  ${pluginAdd}'`,
-    `Write-Host '  ${pluginRemove}'`,
-    `Write-Host '  ${pluginUpdate}'`,
-    `Write-Host 'Restart DSH Desktop after plugin changes.'`,
-    '',
-  ].join('\r\n')
-}
-
-/** Build the fallback batch welcome script used when PowerShell is unavailable. */
-function windowsCmdWelcome(): string {
-  const commandHelp = 'dsh --dump-config'
-  const pluginAdd = 'dsh plugin add <third-party-plugin>'
-  const pluginRemove = 'dsh plugin remove <third-party-plugin>'
-  const pluginUpdate = 'dsh plugin update'
-  return [
-    '@echo off',
-    'setlocal EnableDelayedExpansion',
-    `set "${RUN_AS_NODE}="`,
-    `cd /d "!${WINDOWS_PROFILE_DIRECTORY}!"`,
-    `echo(DSH Desktop !${WINDOWS_PRODUCT_VERSION}! terminal`,
-    `echo(Profile: !${DEFAULT_PROFILE}!`,
-    `echo(Profile directory: !${WINDOWS_PROFILE_DIRECTORY}!`,
-    `echo(Harness home: !${DSH_HOME}!`,
-    `echo(Plugin commands without --profile modify the !${DEFAULT_PROFILE}! profile.`,
-    'echo(Commands:',
-    `echo(  ${escapeBatchText(commandHelp)}`,
-    `echo(  ${escapeBatchText(pluginAdd)}`,
-    `echo(  ${escapeBatchText(pluginRemove)}`,
-    `echo(  ${escapeBatchText(pluginUpdate)}`,
-    `echo(${escapeBatchText('Restart DSH Desktop after plugin changes.')}`,
-    'endlocal & set "ELECTRON_RUN_AS_NODE="',
-    '',
-  ].join('\r\n')
-}
-
 /** Create command shims and the interactive welcome script. */
 function prepareDesktopTerminalFiles(options: DesktopTerminalOptions): DesktopTerminalFiles {
-  if (options.platform !== 'darwin' && options.platform !== 'win32') {
+  if (options.platform !== 'darwin') {
     throw new Error(`dsh-plugin-desktop: terminal is unsupported on ${options.platform}`)
   }
   assertDesktopProfileName(options.profileName)
@@ -445,41 +280,21 @@ function prepareDesktopTerminalFiles(options: DesktopTerminalOptions): DesktopTe
   prepareStateDirectory(options.stateDir)
   const shimDir = join(options.stateDir, 'bin')
   prepareStateDirectory(shimDir)
-  if (options.platform === 'darwin') {
-    const files: DesktopTerminalFiles = {
-      shimDir,
-      dshShimPath: join(shimDir, 'dsh'),
-      pnpmShimPath: join(shimDir, 'pnpm'),
-      nodeShimPath: join(shimDir, 'node'),
-      welcomePath: join(options.stateDir, 'welcome.command'),
-    }
-    const bashRcPath = join(options.stateDir, 'bashrc')
-    replacePrivateFile(files.dshShimPath, macDshShim(options), EXECUTABLE_FILE_MODE)
-    replacePrivateFile(files.pnpmShimPath, macPnpmShim(options), EXECUTABLE_FILE_MODE)
-    replacePrivateFile(files.nodeShimPath, macShim(options.appExecutable), EXECUTABLE_FILE_MODE)
-    replacePrivateFile(join(options.stateDir, '.zshrc'), macZshRc(options, shimDir), PRIVATE_FILE_MODE)
-    replacePrivateFile(bashRcPath, macBashRc(options, shimDir), PRIVATE_FILE_MODE)
-    replacePrivateFile(files.welcomePath, macWelcome(options, shimDir, bashRcPath), EXECUTABLE_FILE_MODE)
-    return files
+  const files: DesktopTerminalFiles = {
+    shimDir,
+    dshShimPath: join(shimDir, 'dsh'),
+    pnpmShimPath: join(shimDir, 'pnpm'),
+    nodeShimPath: join(shimDir, 'node'),
+    welcomePath: join(options.stateDir, 'welcome.command'),
   }
-  if (options.platform === 'win32') {
-    const windowsCmdWelcomePath = join(options.stateDir, 'welcome.cmd')
-    const files: DesktopTerminalFiles = {
-      shimDir,
-      dshShimPath: join(shimDir, 'dsh.cmd'),
-      pnpmShimPath: join(shimDir, 'pnpm.cmd'),
-      nodeShimPath: join(shimDir, 'node.cmd'),
-      welcomePath: join(options.stateDir, 'welcome.ps1'),
-      windowsCmdWelcomePath,
-    }
-    replacePrivateFile(files.dshShimPath, windowsDshShim(), PRIVATE_FILE_MODE)
-    replacePrivateFile(files.pnpmShimPath, windowsPnpmShim(), PRIVATE_FILE_MODE)
-    replacePrivateFile(files.nodeShimPath, windowsShim(), PRIVATE_FILE_MODE)
-    replacePrivateFile(files.welcomePath, windowsWelcome(), PRIVATE_FILE_MODE)
-    replacePrivateFile(windowsCmdWelcomePath, windowsCmdWelcome(), PRIVATE_FILE_MODE)
-    return files
-  }
-  throw new Error(`dsh-plugin-desktop: terminal is unsupported on ${options.platform}`)
+  const bashRcPath = join(options.stateDir, 'bashrc')
+  replacePrivateFile(files.dshShimPath, macDshShim(options), EXECUTABLE_FILE_MODE)
+  replacePrivateFile(files.pnpmShimPath, macPnpmShim(options), EXECUTABLE_FILE_MODE)
+  replacePrivateFile(files.nodeShimPath, macShim(options.appExecutable), EXECUTABLE_FILE_MODE)
+  replacePrivateFile(join(options.stateDir, '.zshrc'), macZshRc(options, shimDir), PRIVATE_FILE_MODE)
+  replacePrivateFile(bashRcPath, macBashRc(options, shimDir), PRIVATE_FILE_MODE)
+  replacePrivateFile(files.welcomePath, macWelcome(options, shimDir, bashRcPath), EXECUTABLE_FILE_MODE)
+  return files
 }
 
 /** Copy the Host environment and scope desktop command discovery to one terminal child. */
@@ -490,176 +305,17 @@ function terminalEnvironment(options: DesktopTerminalOptions, files: DesktopTerm
   for (const [key, value] of Object.entries(source)) {
     const normalized = key.toUpperCase()
     if (normalized === RUN_AS_NODE || normalized === DSH_HOME) continue
-    if (options.platform === 'win32' && WINDOWS_GENERATED_ENVIRONMENT_KEYS.has(normalized)) continue
     if (normalized === PATH) {
       inheritedPath ??= value
       continue
     }
     env[key] = value
   }
-  const delimiter = options.platform === 'win32' ? ';' : ':'
   env[PATH] = inheritedPath === undefined || inheritedPath.length === 0
     ? files.shimDir
-    : `${files.shimDir}${delimiter}${inheritedPath}`
+    : `${files.shimDir}:${inheritedPath}`
   env[DSH_HOME] = options.homeDir
-  if (options.platform === 'win32') {
-    env[DEFAULT_PROFILE] = options.profileName
-    env[WINDOWS_APP_EXECUTABLE] = options.appExecutable
-    env[WINDOWS_DSH_BOOTSTRAP] = options.dshBootstrapPath
-    env[WINDOWS_ELECTRON_VERSION] = options.electronVersion
-    env[WINDOWS_PNPM_ENTRY] = options.pnpmBinPath
-    env[WINDOWS_PROFILE_DIRECTORY] = options.profileDir
-    env[WINDOWS_PRODUCT_VERSION] = options.productVersion
-    env[WINDOWS_SHIM_DIRECTORY] = files.shimDir
-    env[WINDOWS_POWERSHELL_WELCOME] = files.welcomePath
-    if (files.windowsCmdWelcomePath !== undefined) env[WINDOWS_CMD_WELCOME] = files.windowsCmdWelcomePath
-  }
   return env
-}
-
-/** Read one Windows environment value without trusting its key casing. */
-function windowsEnvironmentValue(environment: Readonly<NodeJS.ProcessEnv>, name: string): string | undefined {
-  const normalized = name.toUpperCase()
-  for (const [key, value] of Object.entries(environment)) {
-    if (key.toUpperCase() === normalized) return value
-  }
-  return undefined
-}
-
-/** Resolve known Windows shells from explicit system paths and then the inherited PATH. */
-function defaultWindowsExecutableResolver(
-  command: string,
-  environment: Readonly<NodeJS.ProcessEnv>,
-  exists: DesktopTerminalExecutableExists,
-): string | undefined {
-  const candidates: string[] = []
-  const systemRoot = windowsEnvironmentValue(environment, 'SystemRoot')
-  if (command.toLowerCase() === 'powershell.exe' && systemRoot !== undefined) {
-    candidates.push(win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'))
-  }
-  if (command.toLowerCase() === 'cmd.exe') {
-    const comSpec = windowsEnvironmentValue(environment, 'ComSpec')
-    if (comSpec !== undefined) candidates.push(comSpec)
-    if (systemRoot !== undefined) candidates.push(win32.join(systemRoot, 'System32', 'cmd.exe'))
-  }
-  if (command.toLowerCase() === WINDOWS_TERMINAL_COMMAND) {
-    const localAppData = windowsEnvironmentValue(environment, 'LocalAppData')
-    if (localAppData !== undefined) {
-      candidates.push(win32.join(localAppData, 'Microsoft', 'WindowsApps', WINDOWS_TERMINAL_COMMAND))
-    }
-  }
-  const inheritedPath = windowsEnvironmentValue(environment, PATH)
-  if (inheritedPath !== undefined) {
-    for (const rawDir of inheritedPath.split(';')) {
-      const dir = rawDir.startsWith('"') && rawDir.endsWith('"') ? rawDir.slice(1, -1) : rawDir
-      if (dir.length > 0) candidates.push(win32.join(dir, command))
-    }
-  }
-  return candidates.find(candidate => exists(candidate))
-}
-
-interface ResolvedWindowsShell {
-  kind: 'powershell' | 'cmd'
-  executable: string
-}
-
-/** Resolve the preferred Windows Terminal host, preserving an explicit adapter. */
-function resolveWindowsTerminal(
-  options: DesktopTerminalOptions,
-  environment: Readonly<NodeJS.ProcessEnv>,
-): WindowsTerminalLauncher | undefined {
-  if (options.windowsTerminal !== undefined) return options.windowsTerminal
-  const exists = options.windowsExecutableExists ?? existsSync
-  const resolveExecutable = options.windowsExecutableResolver ?? defaultWindowsExecutableResolver
-  const executable = resolveExecutable(WINDOWS_TERMINAL_COMMAND, environment, exists)
-  if (executable === undefined) return undefined
-  assertScriptValue('wt.exe executable', executable)
-  return {
-    executable,
-    arguments: [
-      '--window',
-      'new',
-      'new-tab',
-      '--title',
-      'DSH Desktop',
-      '--startingDirectory',
-      options.profileDir,
-    ],
-  }
-}
-
-/** Select PowerShell 7, Windows PowerShell, or the built-in command prompt. */
-function resolveWindowsShell(
-  options: DesktopTerminalOptions,
-  environment: Readonly<NodeJS.ProcessEnv>,
-): ResolvedWindowsShell {
-  const exists = options.windowsExecutableExists ?? existsSync
-  const resolveExecutable = options.windowsExecutableResolver ?? defaultWindowsExecutableResolver
-  for (const command of WINDOWS_SHELL_COMMANDS) {
-    const executable = resolveExecutable(command, environment, exists)
-    if (executable === undefined) continue
-    assertScriptValue(`${command} executable`, executable)
-    return {
-      kind: command === 'cmd.exe' ? 'cmd' : 'powershell',
-      executable,
-    }
-  }
-  throw new Error('dsh-plugin-desktop: terminal requires pwsh.exe, powershell.exe, or cmd.exe on Windows')
-}
-
-/** Convert one selected Windows shell into an argv-only launch. */
-function windowsShellArgv(
-  shell: ResolvedWindowsShell,
-  files: DesktopTerminalFiles,
-): string[] {
-  if (shell.kind === 'cmd') {
-    const welcome = files.windowsCmdWelcomePath
-    if (welcome === undefined) {
-      throw new Error('dsh-plugin-desktop: terminal did not generate the Windows command prompt welcome script')
-    }
-    return ['/D', '/K', 'call', welcome]
-  }
-  return [
-    '-NoLogo',
-    '-NoExit',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    files.welcomePath,
-  ]
-}
-
-/** Resolve the trusted command processor used only to invoke the `start` broker. */
-function resolveWindowsCommandProcessor(
-  options: DesktopTerminalOptions,
-  environment: Readonly<NodeJS.ProcessEnv>,
-  shell: ResolvedWindowsShell,
-): string {
-  if (shell.kind === 'cmd') return shell.executable
-  const exists = options.windowsExecutableExists ?? existsSync
-  const resolveExecutable = options.windowsExecutableResolver ?? defaultWindowsExecutableResolver
-  const executable = resolveExecutable('cmd.exe', environment, exists)
-  if (executable === undefined) {
-    throw new Error('dsh-plugin-desktop: terminal requires cmd.exe to create a visible Windows console')
-  }
-  assertScriptValue('cmd.exe executable', executable)
-  return executable
-}
-
-/** Build the trusted batch broker whose `start` command owns the visible console. */
-function windowsLaunchBroker(
-  shell: ResolvedWindowsShell,
-): string {
-  const target = shell.kind === 'cmd'
-    ? `"!${WINDOWS_SHELL_EXECUTABLE}!" /D /K call "!${WINDOWS_CMD_WELCOME}!"`
-    : `"!${WINDOWS_SHELL_EXECUTABLE}!" -NoLogo -NoExit -ExecutionPolicy Bypass -File "!${WINDOWS_POWERSHELL_WELCOME}!"`
-  return [
-    '@echo off',
-    'setlocal EnableDelayedExpansion',
-    `start "DSH Desktop" /D "!${WINDOWS_PROFILE_DIRECTORY}!" ${target}`,
-    'exit /b %errorlevel%',
-    '',
-  ].join('\r\n')
 }
 
 /** Report a launcher error without leaving an unhandled EventEmitter error. */
@@ -685,44 +341,14 @@ function reportLaunchError(options: DesktopTerminalOptions, cause: Error): void 
 export function openDesktopTerminal(options: DesktopTerminalOptions): DesktopTerminalLaunch {
   const files = prepareDesktopTerminalFiles(options)
   const env = terminalEnvironment(options, files)
-  let command: string
-  let args: string[]
-  let detached = true
-  let windowsHide = false
-  let launcherCwd = options.profileDir
-  let windowsLauncherPath: string | undefined
-  if (options.platform === 'darwin') {
-    command = '/usr/bin/open'
-    args = ['-a', 'Terminal', files.welcomePath]
-  } else {
-    const shell = resolveWindowsShell(options, env)
-    const shellArgs = windowsShellArgv(shell, files)
-    const windowsTerminal = resolveWindowsTerminal(options, env)
-    if (windowsTerminal !== undefined) {
-      command = windowsTerminal.executable
-      args = [...(windowsTerminal.arguments ?? []), shell.executable, ...shellArgs]
-    } else {
-      command = resolveWindowsCommandProcessor(options, env, shell)
-      env[WINDOWS_SHELL_EXECUTABLE] = shell.executable
-      windowsLauncherPath = join(options.stateDir, 'launch.cmd')
-      replacePrivateFile(
-        windowsLauncherPath,
-        windowsLaunchBroker(shell),
-        PRIVATE_FILE_MODE,
-      )
-      args = ['/D', '/S', '/C', basename(windowsLauncherPath)]
-      detached = false
-      windowsHide = true
-      launcherCwd = options.stateDir
-    }
-  }
+  const command = '/usr/bin/open'
+  const args = ['-a', 'Terminal', files.welcomePath]
   const spawnOptions: SpawnOptions = {
-    cwd: launcherCwd,
-    detached,
+    cwd: options.profileDir,
+    detached: true,
     env,
     shell: false,
     stdio: 'ignore',
-    windowsHide,
   }
   const child = options.spawn(command, args, spawnOptions)
   let launchFailureReported = false
@@ -746,7 +372,6 @@ export function openDesktopTerminal(options: DesktopTerminalOptions): DesktopTer
     pnpmShimPath: files.pnpmShimPath,
     nodeShimPath: files.nodeShimPath,
     welcomePath: files.welcomePath,
-    ...(windowsLauncherPath === undefined ? {} : { windowsLauncherPath }),
     child,
   }
 }

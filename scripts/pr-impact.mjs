@@ -1,4 +1,4 @@
-/** Classify pull-request paths into the two credential-free release pack lanes. */
+/** Classify pull-request paths for the credential-free release and CI lanes. */
 
 import { appendFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
@@ -45,7 +45,8 @@ export function normalizePaths(paths) {
 
 /**
  * Classify one complete committed path set. Empty and unknown input is full by
- * design: release lanes are skipped only for the explicit docs-only allowlist.
+ * design: release and ordinary CI lanes are skipped only for the explicit
+ * docs-only allowlist.
  * @param {readonly unknown[]} paths - changed repository-relative paths.
  * @returns {ImpactDecision} the deterministic release decision.
  */
@@ -226,6 +227,7 @@ export function emitOutputs(result, outputPath = process.env.GITHUB_OUTPUT) {
     format_version: String(result.formatVersion),
     classifier_version: String(result.classifierVersion),
     classification: result.classification,
+    run_ci: String(result.classification !== 'docs-only'),
     run_dsh: String(result.runDsh),
     run_vendor: String(result.runVendor),
     path_count: String(result.paths.length),

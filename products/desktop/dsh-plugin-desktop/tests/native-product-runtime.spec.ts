@@ -87,16 +87,6 @@ describe('native product runtime', () => {
       environment: { PATH: `${inherited}:relative:` },
     }).codex).toBe(inheritedCodex)
 
-    const environment = { PATH: '/windows/path' }
-    const installed = installNativeProductRuntime({
-      platform: 'win32',
-      homeDir,
-      stateDir: join(root, 'unused'),
-      environment,
-    })
-    expect(installed.commands).toEqual({})
-    expect(environment.PATH).toBe('/windows/path')
-    installed.dispose()
   })
 
   it('prefers the user-controlled npm installation over an app-managed standalone binary', () => {

@@ -16,7 +16,17 @@ function isBuildFaceClient(value: unknown): boolean {
 export default defineConfig(({ env }) => {
   const client = isBuildFaceClient(env?.DSH_BUILD_FACE)
   return {
-    workspace: ['vendor/*', 'packages/*/*', 'apps/cli'],
+    workspace: {
+      include: ['vendor/*', 'packages/*/*', 'apps/cli'],
+      // Windows compatibility packages stay in the source tree for dormant
+      // consumers, but are not part of the supported macOS/Linux build.
+      exclude: [
+        'packages/sandbox/sandbox-windows-acl/**',
+        'packages/shell/pwsh-local/**',
+        'packages/shell/pwsh-sandbox/**',
+        'packages/shell/tool-pwsh/**',
+      ],
+    },
     entry: client ? '' : ['lib/types/{index,invariant,startup}.js'],
     outDir: 'lib',
     format: ['esm'],

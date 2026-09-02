@@ -2,11 +2,11 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   FORBIDDEN_PACKAGED_CLIENT_BRANDING_MARKERS,
+  FORBIDDEN_PACKAGED_WINDOWS_PACKAGES,
   REQUIRED_PACKAGED_RUNTIME_ENTRIES,
   REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS,
   REQUIRED_UNPACKED_PACKAGE_SPECIFIERS,
   REQUIRED_UNPACKED_RUNTIME_ENTRIES,
-  REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES,
   resolvePackagedAsarPath,
   resolvePackagedUnpackedRoot,
   verifyPackagedClientBranding,
@@ -35,6 +35,12 @@ function completePackageResolver(unpackedRoot: string): PackageResolver {
   return specifier => join(unpackedRoot, 'resolved', `${specifier.replaceAll('/', '-')}.js`)
 }
 
+function validPhysicalFileProbe(unpackedRoot: string, missingPath?: string): FileProbe {
+  return filename => filename !== missingPath && !FORBIDDEN_PACKAGED_WINDOWS_PACKAGES.some(
+    packageName => filename === join(unpackedRoot, 'node_modules', packageName),
+  )
+}
+
 function validClientBundle(): string {
   return REQUIRED_PACKAGED_CLIENT_BRANDING_MARKERS.join('\n')
 }
@@ -61,14 +67,14 @@ describe('packaged desktop runtime verification', () => {
       join('/build', 'DSH Desktop.app', 'Contents', 'Resources', 'app.asar'),
     ],
     [
-      'win32',
+      'linux',
       join('/build', 'resources', 'app.asar'),
     ],
   ])('inspects the %s app.asar path', (platform, expectedPath) => {
-    const list = vi.fn<ArchiveLister>(() => completeArchiveEntries(platform === 'win32' ? '\\' : '/'))
+    const list = vi.fn<ArchiveLister>(() => completeArchiveEntries())
 
-    const exists = vi.fn<FileProbe>(() => true)
     const unpackedRoot = `${expectedPath}.unpacked`
+    const exists = vi.fn<FileProbe>(validPhysicalFileProbe(unpackedRoot))
     const resolvePackage = vi.fn<PackageResolver>(completePackageResolver(unpackedRoot))
 
     verifyPackagedRuntime(context('/build', platform), list, exists, resolvePackage, readValidRuntime)
@@ -78,8 +84,7 @@ describe('packaged desktop runtime verification', () => {
     expect(list).toHaveBeenCalledWith(expectedPath, { isPack: false })
     expect(resolvePackagedUnpackedRoot(context('/build', platform))).toBe(unpackedRoot)
     expect(exists).toHaveBeenCalledTimes(
-      REQUIRED_UNPACKED_RUNTIME_ENTRIES.length
-        + (platform === 'win32' ? REQUIRED_WINDOWS_X64_NODE_PTY_ENTRIES.length : 0),
+      REQUIRED_UNPACKED_RUNTIME_ENTRIES.length + FORBIDDEN_PACKAGED_WINDOWS_PACKAGES.length,
     )
     expect(resolvePackage.mock.calls.map(([specifier]) => specifier))
       .toEqual(REQUIRED_UNPACKED_PACKAGE_SPECIFIERS)
@@ -100,9 +105,64 @@ describe('packaged desktop runtime verification', () => {
   ])('fails loud when required runtime entry %s is absent', (missing) => {
     const entries = completeArchiveEntries().filter(entry => entry !== `/${missing}`)
 
-    expect(() => verifyPackagedRuntime(context('/build', 'win32'), () => entries, () => true))
+    const unpackedRoot = resolvePackagedUnpackedRoot(context('/build', 'darwin'))
+    expect(() => verifyPackagedRuntime(
+      context('/build', 'darwin'),
+      () => entries,
+      validPhysicalFileProbe(unpackedRoot),
+    ))
       .toThrow(`missing required ASAR entries: ${missing}`)
   })
+
+  it.each(FORBIDDEN_PACKAGED_WINDOWS_PACKAGES)(
+    'rejects the disabled package %s from app.asar',
+    (packageName) => {
+      const runtimeContext = context('/build', 'darwin')
+      const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
+      const packageEntry = `/node_modules/${packageName}/package.json`
+
+      expect(() => verifyPackagedRuntime(
+        runtimeContext,
+        () => [...completeArchiveEntries(), packageEntry],
+        validPhysicalFileProbe(unpackedRoot),
+      )).toThrow(`contains forbidden Windows packages in ASAR: ${packageName}`)
+    },
+  )
+
+  it('does not reject an unrelated archive entry whose name mentions a disabled package', () => {
+    const runtimeContext = context('/build', 'darwin')
+    const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
+
+    expect(() => verifyPackagedRuntime(
+      runtimeContext,
+      () => [
+        ...completeArchiveEntries(),
+        'vendor/agent-presets/anchored-standard/dsh-pwsh-local-reference.txt',
+      ],
+      validPhysicalFileProbe(unpackedRoot),
+      completePackageResolver(unpackedRoot),
+      readValidRuntime,
+    )).not.toThrow()
+  })
+
+  it.each(FORBIDDEN_PACKAGED_WINDOWS_PACKAGES)(
+    'rejects the disabled package %s from app.asar.unpacked/node_modules',
+    (packageName) => {
+      const runtimeContext = context('/build', 'darwin')
+      const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
+      const packagePath = join(unpackedRoot, 'node_modules', packageName)
+      const exists: FileProbe = filename =>
+        filename === packagePath || validPhysicalFileProbe(unpackedRoot)(filename)
+
+      expect(() => verifyPackagedRuntime(
+        runtimeContext,
+        () => completeArchiveEntries(),
+        exists,
+      )).toThrow(
+        `contains forbidden Windows packages in app.asar.unpacked/node_modules: ${packageName}`,
+      )
+    },
+  )
 
   it.each([
     'package.json',
@@ -114,23 +174,22 @@ describe('packaged desktop runtime verification', () => {
     'node_modules/@deepseek-ai/dsh-resident-operator-local/lib/startup.js',
     'node_modules/@nanmicoder/dsh-agent-teams/lib/index.js',
     'node_modules/pnpm/bin/pnpm.mjs',
-    'node_modules/node-pty/prebuilds/win32-x64/conpty.node',
   ])('fails loud when physical runtime entry %s is absent from app.asar.unpacked', (missing) => {
-    const runtimeContext = context('/build', 'win32')
+    const runtimeContext = context('/build', 'darwin')
     const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
     const missingPath = join(unpackedRoot, missing)
 
     expect(() => verifyPackagedRuntime(
       runtimeContext,
       () => completeArchiveEntries(),
-      filename => filename !== missingPath,
+      validPhysicalFileProbe(unpackedRoot, missingPath),
       completePackageResolver(unpackedRoot),
       readValidRuntime,
     )).toThrow(`missing required physical entries: ${missing}`)
   })
 
   it('fails loud when a required package export cannot resolve from app.asar.unpacked', () => {
-    const runtimeContext = context('/build', 'win32')
+    const runtimeContext = context('/build', 'darwin')
     const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
     const resolvePackage = vi.fn<PackageResolver>((specifier) => {
       if (specifier === 'dsh-plugin-desktop/profiles') {
@@ -142,7 +201,7 @@ describe('packaged desktop runtime verification', () => {
     expect(() => verifyPackagedRuntime(
       runtimeContext,
       () => completeArchiveEntries(),
-      () => true,
+      validPhysicalFileProbe(unpackedRoot),
       resolvePackage,
       readValidRuntime,
     )).toThrow(
@@ -151,7 +210,7 @@ describe('packaged desktop runtime verification', () => {
   })
 
   it('fails loud when a required package export escapes app.asar.unpacked', () => {
-    const runtimeContext = context('/build', 'win32')
+    const runtimeContext = context('/build', 'darwin')
     const unpackedRoot = resolvePackagedUnpackedRoot(runtimeContext)
     const escapedPath = join('/workspace', 'node_modules', '@deepseek-ai', 'dsh-base', 'lib', 'index.js')
     const resolvePackage = vi.fn<PackageResolver>((specifier) => {
@@ -162,7 +221,7 @@ describe('packaged desktop runtime verification', () => {
     expect(() => verifyPackagedRuntime(
       runtimeContext,
       () => completeArchiveEntries(),
-      () => true,
+      validPhysicalFileProbe(unpackedRoot),
       resolvePackage,
       readValidRuntime,
     )).toThrow(

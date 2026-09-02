@@ -43,7 +43,7 @@ describe('platform tray icons', () => {
     expect(electron.template.setTemplateImage).toHaveBeenCalledWith(true)
   })
 
-  it.each(['win32', 'linux'] satisfies DesktopPlatform[])('%s uses the fixed brand-blue image', (platform) => {
+  it.each(['linux'] satisfies DesktopPlatform[])('%s uses the fixed brand-blue image', (platform) => {
     expect(prepareTrayIcon(assets, platform)).toBe(electron.blue)
     expect(electron.createFromPath).toHaveBeenCalledOnce()
     expect(electron.createFromPath).toHaveBeenCalledWith(assets.bluePath)
@@ -52,7 +52,6 @@ describe('platform tray icons', () => {
 
   it.each([
     ['darwin', 'templatePath', electron.template],
-    ['win32', 'bluePath', electron.blue],
   ] as const)('rejects an empty %s tray image', (platform, pathKey, image) => {
     image.isEmpty.mockReturnValueOnce(true)
 

@@ -50,6 +50,14 @@ const publishedRepositoryUrl = 'git+https://github.com/deepseek-ai/deepseek-harn
 /** Directories whose packages this repository publishes: one release member each. */
 const releaseMemberDirectory = /^(?:packages\/[^/]+\/[^/]+|apps\/[^/]+|vendor\/[^/]+)$/
 
+/** Windows compatibility packages remain in the source tree but are outside supported validation. */
+const unsupportedWindowsPackageNames = new Set([
+  '@deepseek-ai/dsh-pwsh-local',
+  '@deepseek-ai/dsh-pwsh-sandbox',
+  '@deepseek-ai/dsh-sandbox-windows-acl',
+  '@deepseek-ai/dsh-tool-pwsh',
+])
+
 const localArtifactDirs = new Set(['node_modules'])
 const appPackageFiles: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh': ['lib/*.js', 'config'],
@@ -123,7 +131,8 @@ function workspaceManifests(): WorkspaceManifest[] {
 
   for (const { dir: base, depth } of workspaceGlobs) {
     for (const dir of packageDirs(base, depth)) {
-      manifests.push({ dir, manifest: readJson(join(root, dir, 'package.json')) })
+      const manifest = readJson(join(root, dir, 'package.json'))
+      if (!unsupportedWindowsPackageNames.has(manifest.name ?? '')) manifests.push({ dir, manifest })
     }
   }
 
@@ -142,10 +151,6 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // The Python runtime uses a distinct closed-resolution bin; the public CLI
   // keeps config-owned bare-package resolution through lib/bin.js.
   '@deepseek-ai/dsh-sdk-jsonrpc-demo': ['lib/packaged-bin.js'],
-  // The argv-prefix runner entry ships beside the lib as its own bundle;
-  // sandbox-local resolves it through the package's ./runner export. tsdown
-  // also shares its generated FFI code through a hashed runtime chunk.
-  '@deepseek-ai/dsh-sandbox-windows-acl': ['lib/runner.js', 'lib/types-*.js'],
   // The Resident package's index and standalone daemon share one product,
   // receipt, and SQLite implementation emitted as a content-hashed chunk.
   '@deepseek-ai/dsh-resident-operator-local': ['lib/daemon-*.js'],

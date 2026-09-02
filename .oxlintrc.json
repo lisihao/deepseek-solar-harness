@@ -26,6 +26,19 @@
     "native/**", // The imported landlock-run subtree has its own gates; see native/README.md.
     "products/desktop/**", // Independent Yarn product; products/desktop/AGENTS.md owns its check contract.
     "plugins/managed/**", // Imported Solar components retain their native package-manager and lint/test gates.
+    "packages/fs/fs-local/src/win32.ts", // Dormant Windows compatibility source is outside the Darwin product.
+    "packages/fs/fs-local/tests/win32.spec.ts",
+    "packages/host/directory-picker-native/src/win32-dialog*.ts",
+    "packages/host/directory-picker-native/tests/built-worker.e2e.ts",
+    "packages/host/directory-picker-native/tests/win32-dialog*.spec.ts",
+    "packages/session/session-persistence-jsonl/src/win32.ts",
+    "packages/session/session-persistence-jsonl/tests/win32.spec.ts",
+    "packages/sandbox/sandbox-windows-acl/**",
+    "packages/sandbox/sandbox-local/tests/acl-grants.spec.ts",
+    "packages/shell/pwsh-local/**",
+    "packages/shell/pwsh-sandbox/**",
+    "packages/shell/tool-pwsh/**",
+    "packages/util/atomic-write/tests/windows-contention.spec.ts",
     "**/*.js",
     "**/*.mjs",
     "**/*.config.ts", // Tool and app configs are outside the repository TypeScript programs.

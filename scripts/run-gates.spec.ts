@@ -64,9 +64,6 @@ describe('gate graph validation', () => {
     'ci-snapshot',
     'ci-artifacts',
     'ci-consumers',
-    'ci-windows-blocking',
-    'ci-windows-complete',
-    'ci-windows-observational',
     'node-compat',
     'check-all',
     'doc-sync',
@@ -114,14 +111,27 @@ describe('gate graph validation', () => {
     },
   )
 
-  it('keeps native Windows coverage blocking while portability inventory remains observational', () => {
-    const gates = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
-    const byId = new Map(gates.map(subject => [subject.id, subject]))
+  it('does not select a Windows-specific gate in any supported aggregate', () => {
+    const modes = [
+      'ci-primary',
+      'ci-linux-primary',
+      'ci-static',
+      'ci-lint-contracts-ready',
+      'ci-coverage',
+      'ci-snapshot',
+      'ci-artifacts',
+      'ci-consumers',
+      'node-compat',
+      'check-all',
+      'doc-sync',
+      'doc-sync:contracts-ready',
+    ] as const
 
-    expect(byId.get('coverage')?.allowFailure).not.toBe(true)
-    expect(byId.get('coverage-exempt-heavy')?.allowFailure).not.toBe(true)
-    expect(byId.get('coverage-exempt-tail')?.allowFailure).not.toBe(true)
-    expect(byId.get('duplication')?.allowFailure).toBe(true)
+    for (const mode of modes) {
+      const gates = withPnpmEntrypoint(() => gatesForMode(mode))
+      expect(gates.map(subject => `${subject.id} ${subject.displayCommand}`).join('\n'))
+        .not.toMatch(/windows|wine|pwsh/iu)
+    }
   })
 
   it.each([
@@ -357,7 +367,7 @@ describe('Linux primary graph', () => {
 })
 
 describe('gate process outcomes', () => {
-  it.skipIf(process.platform === 'win32')('reports signal termination independently from exit status', async () => {
+  it('reports signal termination independently from exit status', async () => {
     const result = await runGate(gate('terminated', {
       args: ['-e', "process.kill(process.pid, 'SIGTERM')"],
     }))

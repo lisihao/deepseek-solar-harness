@@ -7,16 +7,16 @@ import {
 import { packagedDependencyPath, unpackedAsarPath } from '../src/packaged-runtime-path.ts'
 
 describe('packaged dsh bootstrap', () => {
-  it('removes every Windows casing of Electron Node mode', () => {
+  it('removes every casing of Electron Node mode', () => {
     const environment = {
       ELECTRON_RUN_AS_NODE: '1',
       electron_run_as_node: 'inherited',
-      Path: 'C:\\Windows',
+      PATH: '/usr/local/bin',
     }
 
     clearElectronRunAsNode(environment)
 
-    expect(environment).toEqual({ Path: 'C:\\Windows' })
+    expect(environment).toEqual({ PATH: '/usr/local/bin' })
   })
 
   it('clears Node mode before loading the fixed packaged CLI entry', async () => {

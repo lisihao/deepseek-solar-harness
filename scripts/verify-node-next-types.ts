@@ -9,6 +9,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { isSupportedDarwinPackagePath } from './darwin-package-scope.ts'
 
 const root = resolve(import.meta.dirname, '..')
 
@@ -39,6 +40,7 @@ function workspacePackages(): WorkspacePackage[] {
     ...globSync('vendor/*/package.json', { cwd: root }),
     ...globSync('packages/*/*/package.json', { cwd: root }),
   ]
+    .filter(isSupportedDarwinPackagePath)
     .map(path => readPackage(resolve(root, path)))
     .filter(pkg => pkg !== null)
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -52,7 +54,7 @@ function relativeSpecifiersMissingExtensions(): string[] {
   const files = [
     ...globSync('vendor/*/lib/types/**/*.d.ts', { cwd: root }),
     ...globSync('packages/*/*/lib/types/**/*.d.ts', { cwd: root }),
-  ].sort()
+  ].filter(isSupportedDarwinPackagePath).sort()
 
   for (const file of files) {
     const text = readFileSync(resolve(root, file), 'utf8')

@@ -10,16 +10,12 @@ import {
   MACOS_DRAG_REGION_HEIGHT,
   MACOS_TITLEBAR_HEIGHT,
   MACOS_TRAFFIC_LIGHT_SAFE_WIDTH,
-  WINDOWS_CAPTION_CONTROLS_WIDTH,
-  WINDOWS_TITLEBAR_HEIGHT,
 } from '../src/window-chrome.ts'
 
 describe('desktop client environment', () => {
   it('accepts the Electron-owned kebab query markers', () => {
     expect(parseDesktopClientEnvironment('?dsh-deployment-role=server&dsh-desktop-mode=advanced&dsh-desktop-platform=darwin&dsh-desktop-version=2.0.1'))
       .toEqual({ deploymentRole: 'server', mode: 'advanced', platform: 'darwin', productVersion: '2.0.1' })
-    expect(parseDesktopClientEnvironment('?dsh-deployment-role=frontend&dsh-desktop-platform=win32&dsh-desktop-mode=compatibility&dsh-desktop-version=2.0.1'))
-      .toEqual({ deploymentRole: 'frontend', mode: 'compatibility', platform: 'win32', productVersion: '2.0.1' })
   })
 
   it.each([
@@ -67,7 +63,6 @@ describe('advanced desktop layout', () => {
     expect(MACOS_TITLEBAR_HEIGHT).toBe(20)
     expect(MACOS_DRAG_REGION_HEIGHT).toBe(32)
     expect(MACOS_DRAG_REGION_HEIGHT).toBeGreaterThan(MACOS_TITLEBAR_HEIGHT)
-    expect(WINDOWS_TITLEBAR_HEIGHT).toBe(32)
     let css = ''
     const remove = vi.fn()
     const style = {
@@ -107,12 +102,6 @@ describe('advanced desktop layout', () => {
       expect(css).not.toMatch(/data-desktop-platform="darwin"\] \.dshDesktopSidebarSurface \{[^}]*-webkit-app-region:\s*drag;/)
       expect(css).not.toContain('[data-phase')
       expect(css).toMatch(/html:has\(\[aria-modal="true"\]\) \.dshDesktopMacCaptionRow::before,[\s\S]*html:has\(\[aria-modal="true"\]\) \.dshDesktopSidebarSurface::before \{ -webkit-app-region: no-drag !important; \}/)
-      expect(css).toContain(`grid-template-rows: ${WINDOWS_TITLEBAR_HEIGHT}px minmax(0, 1fr)`)
-      expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-platform="win32"\] \.dshDesktopSidebarSurface \{ grid-row: 1 \/ -1; \}/)
-      expect(css).toMatch(/\.dshDesktopFrame\[data-desktop-platform="win32"\] \.dshDesktopConversationSurface,\s*\.dshDesktopFrame\[data-desktop-platform="win32"\] \.dshDesktopDetailsSurface \{ grid-row: 2; \}/)
-      expect(css).toMatch(/\.dshDesktopWindowsCaptionRow \{[^}]*grid-column: 2 \/ -1;[^}]*grid-row: 1;/)
-      expect(css).toMatch(new RegExp(`\\.dshDesktopWindowsCaptionRow::before \\{[^}]*inset: 0 ${WINDOWS_CAPTION_CONTROLS_WIDTH}px 0 0;[^}]*-webkit-app-region: drag;`))
-      expect(css).not.toMatch(/data-desktop-platform="win32"[^{}]*header[^{}]*\{[^}]*padding-right/)
       expect(appendChild).toHaveBeenCalledWith(style)
       dispose()
       expect(remove).toHaveBeenCalledOnce()
@@ -140,7 +129,7 @@ describe('advanced desktop layout', () => {
     expect(disposed).toBe(true)
   })
 
-  it('uses the compatibility rail on Windows and the wider desktop rail on macOS', () => {
+  it('uses the compatibility rail and the wider macOS desktop rail', () => {
     expect(computeDesktopColumns(1440, 0, 0)).toEqual({ sidebar: SIDEBAR_COLLAPSED, center: 1384, details: 0 })
     expect(computeDesktopColumns(1440, 0, 0, MACOS_SIDEBAR_COLLAPSED))
       .toEqual({ sidebar: MACOS_SIDEBAR_COLLAPSED, center: 1350, details: 0 })

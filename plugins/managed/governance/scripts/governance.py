@@ -113,11 +113,42 @@ def validate_profile(profile: dict[str, Any], source: Path) -> None:
             for key, value in environment.items()
         ):
             raise GovernanceError(f"gate '{gate_id}' env must be a string-to-string object")
-        if not gate.get("scopes") or not gate.get("levels"):
-            raise GovernanceError(f"gate '{gate_id}' must declare scopes and levels")
-        unknown_scopes = set(gate["scopes"]) - declared_scopes - {"always"}
+        select_when = gate.get("select_when", gate.get("scopes"))
+        if not isinstance(select_when, list) or not select_when or not all(
+            isinstance(scope, str) and scope for scope in select_when
+        ):
+            raise GovernanceError(
+                f"gate '{gate_id}' must declare a non-empty select_when or scopes array"
+            )
+        if (
+            "select_when" in gate
+            and "scopes" in gate
+            and gate["select_when"] != gate["scopes"]
+        ):
+            raise GovernanceError(
+                f"gate '{gate_id}' select_when must match legacy scopes when both are declared"
+            )
+        if not gate.get("levels"):
+            raise GovernanceError(f"gate '{gate_id}' must declare levels")
+        unknown_scopes = set(select_when) - declared_scopes - {"always"}
         if unknown_scopes:
             raise GovernanceError(f"gate '{gate_id}' uses unknown scopes: {sorted(unknown_scopes)}")
+        input_patterns = gate.get("input_patterns")
+        if input_patterns is not None and (
+            not isinstance(input_patterns, list)
+            or not input_patterns
+            or not all(isinstance(pattern, str) and pattern for pattern in input_patterns)
+        ):
+            raise GovernanceError(
+                f"gate '{gate_id}' input_patterns must be a non-empty string array"
+            )
+        if input_patterns is not None:
+            for pattern in input_patterns:
+                path_pattern = Path(pattern)
+                if path_pattern.is_absolute() or ".." in path_pattern.parts:
+                    raise GovernanceError(
+                        f"gate '{gate_id}' input_patterns must remain inside the project"
+                    )
         unknown_levels = set(gate["levels"]) - {"quick", "full"}
         if unknown_levels:
             raise GovernanceError(f"gate '{gate_id}' uses unknown levels: {sorted(unknown_levels)}")
@@ -414,11 +445,22 @@ def executable_identity(program: str) -> dict[str, Any]:
     }
 
 
+def gate_select_when(gate: dict[str, Any]) -> list[str]:
+    """Return the trigger scopes, accepting ``scopes`` from older profiles."""
+    select_when = gate.get("select_when")
+    if select_when is not None:
+        return select_when
+    return gate["scopes"]
+
+
 def gate_input_files(
     profile: dict[str, Any], gate: dict[str, Any], files: list[str]
 ) -> list[str]:
-    """Select outgoing-diff files whose scopes can affect a gate."""
-    gate_scopes = set(gate["scopes"])
+    """Select changed files that belong to a gate's declared evidence inputs."""
+    input_patterns = gate.get("input_patterns")
+    if input_patterns is not None:
+        return [path for path in files if matches(path, input_patterns)]
+    gate_scopes = set(gate_select_when(gate))
     if "always" in gate_scopes:
         return list(files)
     return [
@@ -428,12 +470,23 @@ def gate_input_files(
     ]
 
 
+def gate_input_selector(profile: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
+    """Return the profile fields that determine a gate's evidence input closure."""
+    input_patterns = gate.get("input_patterns")
+    if input_patterns is not None:
+        return {"input_patterns": input_patterns}
+    return {
+        "legacy_scopes": gate_select_when(gate),
+        "scope_rules": profile["scope_rules"],
+    }
+
+
 def gate_execution_contract(gate: dict[str, Any]) -> dict[str, Any]:
-    """Return fields that define the full gate, excluding evidence-only optimization."""
+    """Return execution fields without selection-only or incremental metadata."""
     return {
         key: value
         for key, value in gate.items()
-        if key not in {"incremental_command"}
+        if key not in {"incremental_command", "scopes", "select_when"}
     }
 
 
@@ -470,8 +523,8 @@ def gate_input_fingerprints(
             if dependency in gates_by_id
         }
         payload = {
-            "contract": gate,
-            "scope_rules": profile["scope_rules"],
+            "contract": gate_execution_contract(gate),
+            "input_selector": gate_input_selector(profile, gate),
             "baseline": baseline,
             "inputs": inputs,
             "dependencies": dependencies,
@@ -564,7 +617,6 @@ def load_reusable_evidence(
         for gate in (old_profile or {}).get("gates", [])
         if isinstance(gate, dict)
     }
-    scope_rules_stable = (old_profile or {}).get("scope_rules") == profile.get("scope_rules")
     delta_files = changed_files(project, evidence_head)
 
     impact_cache: dict[str, bool] = {}
@@ -589,10 +641,10 @@ def load_reusable_evidence(
         current_gate = current_by_id[gate_id]
         exact = previous.get("input_sha256") == fingerprints[gate_id]
         old_gate = old_gates.get(gate_id)
-        contract_stable = (
-            scope_rules_stable
-            and isinstance(old_gate, dict)
-            and gate_execution_contract(old_gate) == gate_execution_contract(current_gate)
+        contract_stable = isinstance(old_gate, dict) and (
+            gate_execution_contract(old_gate) == gate_execution_contract(current_gate)
+            and gate_input_selector(old_profile or {}, old_gate)
+            == gate_input_selector(profile, current_gate)
         )
         unaffected = not gate_or_dependency_changed(gate_id)
         if exact or (contract_stable and unaffected):
@@ -662,7 +714,7 @@ def select_gates(
     for gate in profile["gates"]:
         if level not in gate["levels"]:
             continue
-        if active.intersection(gate["scopes"]):
+        if active.intersection(gate_select_when(gate)):
             selected_ids.add(gate["id"])
     gates_by_id = {gate["id"]: gate for gate in profile["gates"]}
     pending = list(selected_ids)

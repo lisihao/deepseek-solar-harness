@@ -25,9 +25,6 @@ export type Mode =
   | 'ci-snapshot'
   | 'ci-artifacts'
   | 'ci-consumers'
-  | 'ci-windows-blocking'
-  | 'ci-windows-complete'
-  | 'ci-windows-observational'
   | 'node-compat'
   | 'check-all'
   | 'doc-sync'
@@ -111,9 +108,6 @@ function parseMode(raw: string | undefined): Mode {
     case 'ci-snapshot':
     case 'ci-artifacts':
     case 'ci-consumers':
-    case 'ci-windows-blocking':
-    case 'ci-windows-complete':
-    case 'ci-windows-observational':
     case 'node-compat':
     case 'check-all':
     case 'doc-sync':
@@ -121,7 +115,7 @@ function parseMode(raw: string | undefined): Mode {
       return raw
     default:
       throw new Error(
-        `run-gates: expected mode ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-observational | node-compat | check-all | doc-sync | doc-sync:contracts-ready, got ${JSON.stringify(raw)}.`,
+        `run-gates: expected mode ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-snapshot | ci-artifacts | ci-consumers | node-compat | check-all | doc-sync | doc-sync:contracts-ready, got ${JSON.stringify(raw)}.`,
       )
   }
 }
@@ -186,7 +180,7 @@ function pnpmInvocation(args: string[]): Pick<Gate, 'command' | 'args'> {
   if (entrypoint === undefined || entrypoint === '') {
     throw new Error('run-gates: npm_execpath is unavailable; invoke the runner through a pnpm package script.')
   }
-  // Windows cannot spawn the pnpm.cmd shim directly; the JavaScript entrypoint keeps every host shell-free.
+  // The JavaScript entrypoint keeps nested pnpm invocations independent of the host shell.
   return { command: process.execPath, args: [entrypoint, ...args] }
 }
 
@@ -216,12 +210,6 @@ export function gatesForMode(selected: Mode): Gate[] {
       return ciArtifactGates()
     case 'ci-consumers':
       return ciConsumerGates()
-    case 'ci-windows-blocking':
-      return ciWindowsBlockingGates()
-    case 'ci-windows-complete':
-      return ciWindowsCompleteGates()
-    case 'ci-windows-observational':
-      return ciWindowsObservationalGates()
     case 'node-compat':
       return nodeCompatGates()
     case 'check-all':
@@ -438,42 +426,6 @@ function desktopVendorBuildGate(): Gate {
   })
 }
 
-function ciWindowsBlockingGates(): Gate[] {
-  return [
-    pnpmScript('windows-build', 'build', { label: 'build' }),
-    pnpmScript('windows-site', 'docs:build', { label: 'production site' }),
-  ]
-}
-
-function ciWindowsCompleteGates(): Gate[] {
-  const observational = ciWindowsObservationalGates()
-    // The required production site replaces the observational MPA build; both
-    // VitePress modes write the same output directory and cannot overlap.
-    .filter(gate => gate.id !== 'build' && gate.id !== 'docs-site-build')
-    .map(gate => ({ ...gate, allowFailure: true }))
-  return [
-    pnpmScript('build', 'build'),
-    pnpmScript('windows-site', 'docs:build', { label: 'production site' }),
-    ...coverageGates(),
-    ...observational,
-  ]
-}
-
-function ciWindowsObservationalGates(): Gate[] {
-  return [
-    ...ciStaticGates({ ownsBuild: true }),
-    // Linux owns required lint and snapshots; Windows omits those duplicates.
-    pnpmScript('duplication', 'duplication'),
-    pnpmScript('publint', 'publint', { needs: ['build'] }),
-    pnpmScript('node-next-types', 'verify-node-next-types', {
-      label: 'node-next types',
-      needs: ['build'],
-    }),
-    builtPackageInvariantsGate(['build']),
-    builtBinSmokeGate(),
-  ]
-}
-
 function typertContractsGate(): Gate {
   return pnpmScript('typert-contracts', 'build:lib:host', { label: 'Typert contracts' })
 }
@@ -654,7 +606,6 @@ function builtBinSmokeGate(needs: string[] = ['build']): Gate {
     'examples/headless-agent/tests/keyless-smoke.e2e.ts',
     'apps/cli/tests/built-bin.e2e.ts',
     'packages/examples/acp-demo/tests/built-bin.e2e.ts',
-    'packages/host/directory-picker-native/tests/built-worker.e2e.ts',
     'packages/sdk/server/tests/built-scope-carrier.e2e.ts',
     'packages/subagent/subagent-codex/tests/loader-composition.e2e.ts',
     'packages/subagent/subagent-claude-code/tests/loader-composition.e2e.ts',

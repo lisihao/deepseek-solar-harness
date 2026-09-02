@@ -16,6 +16,7 @@ import type {
   StoredImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import { isSupportedDarwinPackagePath } from './darwin-package-scope.ts'
 
 declare global {
   interface ImportMeta {
@@ -42,8 +43,11 @@ export const TEST_INVARIANT_READY_SERVICE = 'testInvariantReady'
  * registration while per-file setup stops importing 168 companions and their
  * transitive package sources.
  */
-export const testInvariantCompanions: Readonly<Record<string, () => Promise<TestInvariantCompanion>>> =
+const discoveredInvariantCompanions =
   import.meta.glob<TestInvariantCompanion>('../packages/*/*/src/invariant.ts')
+export const testInvariantCompanions: Readonly<Record<string, () => Promise<TestInvariantCompanion>>> =
+  Object.fromEntries(Object.entries(discoveredInvariantCompanions)
+    .filter(([path]) => isSupportedDarwinPackagePath(path)))
 
 /** Manual-topology suites whose names cannot follow the focused invariant convention. */
 const MANUAL_INVARIANT_TEST_EXCEPTIONS = [

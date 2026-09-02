@@ -45,6 +45,59 @@ jobs:
   # TODO(hosted-serial-ci): Re-enable the three hosted serial reference jobs before release.
   # The self-hosted standby remains active on every master push.
 
+  # Classify pull-request paths before any ordinary CI runner provisions
+  # dependencies. The classifier is intentionally PR-only; master pushes and
+  # manual benchmark runs retain their existing authoritative jobs below.
+  pr-impact:
+    if: github.event_name == 'pull_request'
+    name: pull request / impact
+    runs-on: ubuntu-latest
+    outputs:
+      classification: ${{ steps.impact.outputs.classification }}
+      run_ci: ${{ steps.impact.outputs.run_ci }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify pull-request impact
+        id: impact
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/pr-impact.mjs
+
+  # Solar pull requests already run the complete documentation contract in the
+  # required Solar Code-as-Harness workflow. Other targets need one lightweight
+  # documentation owner so skipping ordinary CI cannot merge a broken docs or
+  # website projection.
+  docs-only:
+    needs: [pr-impact]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs['pr-impact'].outputs.run_ci == 'false'
+      && github.base_ref != 'solar'
+    name: pull request / documentation
+    runs-on: ubuntu-latest
+    env:
+      DSH_GATE_CONCURRENCY: '2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify documentation contract
+        run: pnpm run doc-sync
+
   # Three standard-hosted jobs isolate coverage, static analysis, and the
   # build-backed consumer tail. The consumer job owns the only Linux build so
   # all three jobs enter runner allocation independently.
@@ -54,14 +107,15 @@ jobs:
   # pick portable GitHub-hosted runners below. Setting the variable to
   # 'selfhosted' (repo Settings → Actions → Variables; writer-manageable
   # repository state — not PR-editable, no merge required) retargets all
-  # three onto the in-house
-  # vm-backup pool and re-running the failed jobs is the entire switch —
-  # see .agents/notes/implemented/process/2026-07-26-ci-failover-runbook.md. The
-  # in-house pool's readiness is re-proven on every master push by the
-  # serial-linux-selfhosted standby lane below. The Windows failover switch is
-  # the separate DSH_CI_FAILOVER_WINDOWS variable on the windows-native job below.
+  # three onto the in-house vm-backup pool and re-running the failed jobs is the
+  # entire switch — see .agents/notes/implemented/process/2026-07-26-ci-failover-runbook.md.
+  # The in-house pool's readiness is re-proven on every master push by the
+  # serial-linux-selfhosted standby lane below.
   node-24:
-    if: github.event_name == 'pull_request'
+    needs: [pr-impact]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs['pr-impact'].outputs.run_ci != 'false'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -113,7 +167,10 @@ jobs:
         run: pnpm run check:ci:static
 
   node-24-coverage:
-    if: github.event_name == 'pull_request'
+    needs: [pr-impact]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs['pr-impact'].outputs.run_ci != 'false'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -203,7 +260,10 @@ jobs:
         run: pnpm run check:ci:snapshot
 
   node-24-consumers:
-    if: github.event_name == 'pull_request'
+    needs: [pr-impact]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs['pr-impact'].outputs.run_ci != 'false'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -283,7 +343,10 @@ jobs:
 
 
   node-compat:
-    if: github.event_name == 'pull_request'
+    needs: [pr-impact]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs['pr-impact'].outputs.run_ci != 'false'
     # Each compatibility contract receives an independent standard hosted job.
     runs-on: ${{ matrix.runner }}
     name: ${{ matrix.name }}
@@ -321,7 +384,10 @@ jobs:
         run: pnpm run check:node-compat
 
   python-sdk:
-    if: github.event_name == 'pull_request'
+    needs: [pr-impact]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs['pr-impact'].outputs.run_ci != 'false'
     runs-on: ubuntu-latest
     name: python 3.10 / keyless SDK
     steps:
@@ -343,182 +409,15 @@ jobs:
   # The reusable builder owns the executable, snapshot, wheel, clean-install,
   # GLIBC, and manylinux checks; release validation retains all native targets.
   python-runtime:
-    if: github.event_name == 'pull_request'
+    needs: [pr-impact]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs['pr-impact'].outputs.run_ci != 'false'
     name: python runtime / release-shaped Linux x64
     uses: ./.github/workflows/build-exe-for-python-sdk.yml
     with:
       targets: node24-linux-x64
       ci: true
-
-  # The required pull-request Windows signal: the two blocking win32 surfaces
-  # (workspace build, production site) execute with real, checksum-verified
-  # Windows Node under Wine on standard hosted Linux. The independent
-  # windows-native job below keeps the complete native-kernel inventory —
-  # including the observational portability gates this lane does not run —
-  # on real Windows. This job only provisions runner state (caches,
-  # apt); scripts/wine-windows-gates.sh owns the gate logic and is the same
-  # script the optional local gate `pnpm run check:windows-wine` runs.
-  # Current topology and fidelity limits live in
-  # .agents/notes/implemented/process/2026-08-08-native-windows-pull-request-ci.md
-  windows:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    name: windows node 24 / wine blocking
-    # A cold hosted runner can spend more than 13 minutes downloading and
-    # installing Wine before the actual gates start. Keep enough headroom for
-    # that first run; warm-cache runs still finish much sooner.
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - uses: pnpm/action-setup@v4
-        with:
-          dest: ${{ runner.temp }}/setup-pnpm
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.PRIMARY_NODE_VERSION }}
-
-      - name: Configure pnpm store path
-        id: pnpm-store
-        run: |
-          store_root="$HOME/.local/share/pnpm/store"
-          echo "PNPM_CONFIG_STORE_DIR=$store_root" >> "$GITHUB_ENV"
-          store_path=$(PNPM_CONFIG_STORE_DIR="$store_root" pnpm store path --silent)
-          echo "path=$store_path" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
-
-      # Master's wine-apt-cache job seeds the default-branch scope every pull
-      # request can read; a save from this job only reaches reruns of the
-      # same merge ref.
-      - name: Compose Wine apt cache key
-        id: wine-cache-key
-        run: echo "key=wine-debs-${ImageOS:-linux}-${ImageVersion:-v0}" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/wine-debs
-          key: ${{ steps.wine-cache-key.outputs.key }}
-
-      # Runner provisioning only — a developer machine installs Wine through
-      # its own package manager; the gate script assumes a wine binary and
-      # fails loud without one. Wine from the apt cache when present; else
-      # download the full dependency closure once and keep it for the next
-      # run. The `wine` dispatcher package (not bare `wine64`) is what puts a
-      # binary on PATH.
-      - name: Install Wine
-        run: |
-          if compgen -G "$HOME/wine-debs/*.deb" > /dev/null; then
-            sudo apt-get install -y --no-install-recommends "$HOME"/wine-debs/*.deb
-          else
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends --download-only wine
-            mkdir -p "$HOME/wine-debs"
-            cp /var/cache/apt/archives/*.deb "$HOME/wine-debs/" 2>/dev/null || true
-            sudo apt-get install -y --no-install-recommends wine
-          fi
-
-      - name: Run the Wine Windows gates
-        run: bash scripts/wine-windows-gates.sh
-
-      - name: Shut down wineserver
-        if: always()
-        run: wineserver -k 2>/dev/null || true
-
-  # Master seeds the Wine apt-archive cache in the default-branch scope,
-  # which every pull request's windows job can restore; saves from
-  # pull-request runs are scoped to their own merge ref and help nobody
-  # else. Runs in seconds when the image version already has a cache.
-  wine-apt-cache:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    name: wine apt cache
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Compose Wine apt cache key
-        id: wine-cache-key
-        run: echo "key=wine-debs-${ImageOS:-linux}-${ImageVersion:-v0}" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache@v4
-        id: wine-cache
-        with:
-          path: ~/wine-debs
-          key: ${{ steps.wine-cache-key.outputs.key }}
-
-      - name: Download the Wine dependency closure
-        if: steps.wine-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends --download-only wine
-          mkdir -p "$HOME/wine-debs"
-          cp /var/cache/apt/archives/*.deb "$HOME/wine-debs/"
-          du -sh "$HOME/wine-debs"
-
-  # Every pull request also gets a real Windows-kernel signal. This job keeps
-  # its own unmasked conclusion but is deliberately absent from
-  # all-checks-passed.needs, so it never delays or changes that required
-  # verdict. Under normal operation it runs on standard hosted Windows; under
-  # Windows failover (DSH_CI_FAILOVER_WINDOWS=selfhosted) it retargets onto the
-  # in-house self-hosted Windows pool. Dependabot PRs are excluded from the
-  # self-hosted pool and stay queued for the hosted runner — see the failover
-  # runbook. This Windows switch is independent of the Linux
-  # DSH_CI_FAILOVER_LINUX variable that retargets the three required Linux jobs
-  # and the all-checks-passed verdict above.
-  windows-native:
-    if: github.event_name == 'pull_request'
-    runs-on: >-
-      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
-          && github.event.pull_request.user.login != 'dependabot[bot]'
-          && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
-          || 'windows-2025' }}
-    name: windows node 24 / native complete
-    timeout-minutes: 60
-    env:
-      DSH_COVERAGE_MAX_WORKERS: '2'
-      # Coverage and its exempt aggregate each own a Vitest worker. Running
-      # both gates together on the hosted Windows runner makes otherwise-fast
-      # 5s contracts contend with V8 instrumentation and fail nondeterministically.
-      # Keep the complete inventory, but serialize its top-level gates.
-      DSH_GATE_CONCURRENCY: '1'
-      DSH_PUBLINT_CONCURRENCY: '4'
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Enable Developer Mode (symlink support)
-        shell: pwsh
-        run: >-
-          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
-          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
-
-      - uses: pnpm/action-setup@v4
-        with:
-          dest: ${{ runner.temp }}/setup-pnpm
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.PRIMARY_NODE_VERSION }}
-
-      # Extracting the many-file pnpm store cache is slower than a clean
-      # install on hosted Windows runners, and saving it adds latency after
-      # the gates. The self-hosted VM's persistent store makes caching
-      # redundant.
-      - name: Install (immutable)
-        shell: pwsh
-        run: pnpm install --frozen-lockfile
-
-      - name: Run complete native Windows gate inventory
-        shell: pwsh
-        run: pnpm run check:ci:windows-complete
 
   # The hosted reference jobs below are temporarily disabled; the self-hosted
   # standby remains active. Each enabled host executes the complete, unsharded
@@ -677,59 +576,7 @@ jobs:
           DSH_SNAPSHOT_MAX_CONCURRENCY: '1'
         run: pnpm run check:ci
 
-  # Hot-standby drill for an explicitly configured self-hosted Windows pool:
-  # while the Windows failover switch is enabled, every master
-  # move re-runs the complete unsharded Windows gate inventory on the persistent
-  # VM, continuously proving that environment can take over the required
-  # `windows` lane if the hosted pool degrades (the switch is setting the
-  # writer-manageable DSH_CI_FAILOVER_WINDOWS variable — see the failover
-  # runbook, no merge required). Push-triggered, so this lane always executes
-  # the base branch's own workflow definition. Non-blocking for pull requests;
-  # absent from all-checks-passed.needs by design — the required `windows` job
-  # owns the PR verdict. No cache steps because the VM's persistent pnpm store
-  # and tool caches make them redundant (and saving here would poison the
-  # hosted cache namespace with self-hosted paths).
-  serial-windows:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
-    name: serial / windows (self-hosted standby)
-    runs-on: [self-hosted, dsh-win-ci, windows]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Enable Developer Mode (symlink support)
-        shell: pwsh
-        run: >-
-          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
-          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
-
-      - uses: pnpm/action-setup@v4
-        with:
-          dest: ${{ runner.temp }}/setup-pnpm
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.PRIMARY_NODE_VERSION }}
-
-      - name: Configure persistent pnpm store
-        shell: pwsh
-        run: |
-          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
-          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
-
-      - name: Install (immutable)
-        shell: pwsh
-        run: pnpm install --frozen-lockfile
-
-      - name: Run complete unsharded Windows gate inventory serially
-        shell: pwsh
-        env:
-          DSH_COVERAGE_MAX_WORKERS: '1'
-          DSH_GATE_CONCURRENCY: '1'
-          DSH_PUBLINT_CONCURRENCY: '1'
-        run: pnpm run check:ci:windows-complete
-
-  # Manual, bounded comparison of the actual critical Linux and Windows lanes.
+  # Manual, bounded comparison of the actual critical Linux lanes.
   # The named pools are restricted at the organization level to this repository.
   larger-runner-benchmark:
     if: github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'
@@ -764,30 +611,6 @@ jobs:
             cores: '96'
             runner: dsh-ubuntu-24-04-96core
             workload: typecheck
-          - platform: windows
-            cores: '4'
-            runner: dsh-windows-2025-4core
-            workload: production-site
-          - platform: windows
-            cores: '8'
-            runner: dsh-windows-2025-8core
-            workload: production-site
-          - platform: windows
-            cores: '16'
-            runner: dsh-windows-2025-16core
-            workload: production-site
-          - platform: windows
-            cores: '32'
-            runner: dsh-windows-2025-32core
-            workload: production-site
-          - platform: windows
-            cores: '64'
-            runner: dsh-windows-2025-64core
-            workload: production-site
-          - platform: windows
-            cores: '96'
-            runner: dsh-windows-2025-96core
-            workload: production-site
     steps:
       - uses: actions/checkout@v6
 
@@ -795,8 +618,6 @@ jobs:
         with:
           dest: ${{ runner.temp }}/setup-pnpm
 
-      # The benchmark's Windows lanes deliberately skip the store cache like
-      # the independent native Windows job; an empty input disables caching.
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
@@ -815,13 +636,8 @@ jobs:
         if: matrix.platform == 'linux'
         run: pnpm run typecheck
 
-      - name: Run critical Windows production-site lane
-        if: matrix.platform == 'windows'
-        run: pnpm run docs:build
-
-  # Manual comparison of the intended low-fanout topology. Linux runs the
-  # complete unsharded primary aggregate with bounded in-runner parallelism;
-  # Windows runs both blocking build targets concurrently through run-gates.
+      # Manual comparison of the intended low-fanout topology. Linux runs the
+      # complete unsharded primary aggregate with bounded in-runner parallelism.
   consolidated-runner-benchmark:
     if: github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'
     runs-on: ${{ matrix.runner }}
@@ -855,30 +671,6 @@ jobs:
             cores: '96'
             runner: dsh-ubuntu-24-04-96core
             workers: '32'
-          - platform: windows
-            cores: '4'
-            runner: dsh-windows-2025-4core
-            workers: '2'
-          - platform: windows
-            cores: '8'
-            runner: dsh-windows-2025-8core
-            workers: '2'
-          - platform: windows
-            cores: '16'
-            runner: dsh-windows-2025-16core
-            workers: '2'
-          - platform: windows
-            cores: '32'
-            runner: dsh-windows-2025-32core
-            workers: '2'
-          - platform: windows
-            cores: '64'
-            runner: dsh-windows-2025-64core
-            workers: '2'
-          - platform: windows
-            cores: '96'
-            runner: dsh-windows-2025-96core
-            workers: '2'
     steps:
       - uses: actions/checkout@v6
 
@@ -886,8 +678,6 @@ jobs:
         with:
           dest: ${{ runner.temp }}/setup-pnpm
 
-      # Unlike the larger-runner suite, both platforms cache the store here:
-      # the consolidated topology measures cache mechanics as workload.
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
@@ -913,11 +703,6 @@ jobs:
           if (( install_status != 0 )); then exit "$install_status"; fi
           exit "$sandbox_status"
 
-      - name: Install (immutable)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: pnpm install --frozen-lockfile
-
       - name: Run complete unsharded primary Node CI concurrently
         if: matrix.platform == 'linux'
         env:
@@ -928,20 +713,14 @@ jobs:
           DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ matrix.workers }}
         run: pnpm run check:ci
 
-      - name: Run blocking Windows builds concurrently
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        env:
-          DSH_GATE_CONCURRENCY: ${{ matrix.workers }}
-        run: pnpm run check:ci:windows-blocking
-
   # Single stable required check for branch protection: require "all checks
   # passed" instead of enumerating matrix legs whose names change as lanes and
-  # node versions evolve. Every blocking job in THIS workflow must be listed in
-  # `needs`. The required Wine job is listed as `windows`; `windows-native` is
-  # deliberately absent so its independent result never delays or changes this
-  # verdict. (`needs` cannot reach across workflow files; e2e.yml stays its own
-  # check.)
+  # node versions evolve. The impact classifier and every blocking job in THIS
+  # workflow are listed in `needs`. A docs-only PR intentionally skips the
+  # heavy jobs and records its explicit success below; a complete PR treats any
+  # skipped blocking job as a failure. All required Linux, Node, and Python
+  # jobs are listed in `needs`. (`needs` cannot reach across workflow files;
+  # e2e.yml stays its own check.)
   # `if: always()` is load-bearing: without it a failed dependency
   # would SKIP this job, and GitHub counts a skipped required check as passing
   # — so this job always runs and fails on any non-success result, including
@@ -952,20 +731,45 @@ jobs:
     # provisioning — and under Linux failover it follows the same selector as
     # the worker jobs it aggregates, so a standard-hosted outage cannot strand
     # the branch-protection verdict either. It retargets with the Linux switch
-    # (DSH_CI_FAILOVER_LINUX), not the Windows one, because it aggregates the
-    # required Linux workers and runs on the vm-backup pool.
+    # (DSH_CI_FAILOVER_LINUX) because it aggregates the required Linux workers
+    # and runs on the vm-backup pool.
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
-    needs: [node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows]
+    needs: [pr-impact, docs-only, node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime]
     if: always() && github.event_name == 'pull_request'
     steps:
-      - name: Fail if any needed job did not succeed
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+      - name: Fail if impact classification or a needed job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
         run: |
           echo "::error::Needed job results: ${{ join(needs.*.result, ', ') }}"
           exit 1
-      - name: All checks passed
+      - name: Fail if a complete PR unexpectedly skipped a blocking CI job
+        if: >-
+          needs['pr-impact'].outputs.run_ci != 'false'
+          && (needs['node-24'].result != 'success'
+            || needs['node-24-coverage'].result != 'success'
+            || needs['node-24-consumers'].result != 'success'
+            || needs['node-compat'].result != 'success'
+            || needs['python-sdk'].result != 'success'
+            || needs['python-runtime'].result != 'success')
+        run: |
+          echo "::error::Complete PR unexpectedly skipped a needed job: ${{ join(needs.*.result, ', ') }}"
+          exit 1
+      - name: Fail if a non-Solar docs-only PR missed its documentation owner
+        if: >-
+          needs['pr-impact'].outputs.run_ci == 'false'
+          && github.base_ref != 'solar'
+          && needs['docs-only'].result != 'success'
+        run: |
+          echo "::error::Docs-only PR did not complete its documentation contract."
+          exit 1
+      - name: Record docs-only success
+        if: needs['pr-impact'].outputs.run_ci == 'false'
+        run: |
+          echo "Docs-only PR: ordinary CI heavy jobs intentionally skipped (${{ needs['pr-impact'].outputs.classification }}); documentation is owned by this workflow or the required Solar governance workflow."
+      - name: Record all checks passed
+        if: needs['pr-impact'].outputs.run_ci != 'false'
         run: echo "All needed jobs succeeded (${{ join(needs.*.result, ', ') }})"

@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/Desktop-App-47848F?style=flat" alt="Desktop application">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
   <a href="https://discord.gg/TJeGqKRNM"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&amp;logo=discord&amp;logoColor=white" alt="Join Discord"></a>
-  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows-4493F8?style=flat-square" alt="Supported platforms: macOS and Windows">
+  <img src="https://img.shields.io/badge/macOS-4493F8?style=flat-square" alt="Supported platform: macOS">
 </p>
 
 <p align="center"><sub><a href="README.md">中文</a> · English</sub></p>
@@ -80,7 +80,7 @@ The official project provides the core agent capabilities, plugin system, and We
 - Desktop application packaging
 - Starting, stopping, and recovering the local service
 - Desktop window and system tray integration
-- macOS and Windows installer builds and releases
+- macOS installer builds and releases
 - An interface designed for desktop use
 
 If you prefer to run Harness from the command line or contribute to its core functionality, refer to the official repository first.

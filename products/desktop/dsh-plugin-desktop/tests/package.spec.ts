@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import sharp from 'sharp'
@@ -23,8 +23,6 @@ const manifest = JSON.parse(readFileSync(new URL('package.json', packageRoot), '
     electronFuses?: unknown
     files?: unknown
     mac?: { hardenedRuntime?: unknown; icon?: unknown; notarize?: unknown; target?: unknown }
-    win?: { icon?: unknown; target?: unknown }
-    nsis?: Record<string, unknown>
     linux?: { icon?: unknown }
   }
   dependencies?: Record<string, unknown>
@@ -54,10 +52,7 @@ describe('published package surface', () => {
       types: './lib/types/product-server.d.ts',
       default: './lib/product-server.js',
     })
-    expect(manifest.exports).toHaveProperty('./windows-pwsh-sandbox', {
-      types: './lib/types/windows-pwsh-sandbox.d.ts',
-      default: './lib/windows-pwsh-sandbox.js',
-    })
+    expect(manifest.exports).not.toHaveProperty('./windows-pwsh-sandbox')
     expect(manifest.exports).toHaveProperty('./terminal', {
       types: './lib/types/terminal.d.ts',
       default: './lib/terminal.js',
@@ -169,8 +164,8 @@ describe('published package surface', () => {
     const config = readFileSync(new URL('tsdown.config.ts', packageRoot), 'utf8')
     const frontendSetup = readFileSync(new URL('src/frontend-setup.ts', packageRoot), 'utf8')
 
-    expect(config).toContain("'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts'")
-    expect(config).toContain("'windows-acl-runner': 'src/windows-acl-runner.ts'")
+    expect(config).not.toContain('windows-pwsh-sandbox')
+    expect(config).not.toContain('windows-acl-runner')
     expect(config).toContain("'desktop-cli': 'src/desktop-cli.ts'")
     expect(config).toContain("name: `${PACKAGE_NAME}/frontend-setup-preload`")
     expect(config).toContain("entry: { 'frontend-setup-preload': 'src/frontend-setup-preload.ts' }")
@@ -248,21 +243,8 @@ describe('published package surface', () => {
       'vendor/agent-presets/**',
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon-mac.png')
-    expect(manifest.build?.win?.icon).toBe('build/app-icon.png')
-    expect(manifest.build?.win?.target).toEqual([{
-      target: 'nsis',
-      arch: ['x64'],
-    }])
-    expect(manifest.build?.nsis).toEqual({
-      oneClick: false,
-      perMachine: false,
-      allowElevation: true,
-      allowToChangeInstallationDirectory: true,
-      createDesktopShortcut: true,
-      createStartMenuShortcut: true,
-      shortcutName: 'DSH Desktop',
-      artifactName: 'DSH-Desktop-${version}-${arch}-Setup.${ext}',
-    })
+    expect(manifest.build).not.toHaveProperty('win')
+    expect(manifest.build).not.toHaveProperty('nsis')
     expect(manifest.build?.linux?.icon).toBe('build/app-icon.png')
   })
 
@@ -274,18 +256,12 @@ describe('published package surface', () => {
     expect(packageDir).toContain("CSC_IDENTITY_AUTO_DISCOVERY: 'false'")
     expect(packageDir).toContain('verify-packaged-node-pty.ts')
     expect(manifest.scripts?.['dist:mac']).toBe('node scripts/release-mac.ts')
-    expect(manifest.scripts?.['dist:win']).toBe('node scripts/package-win.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('yarn run build')
-    expect(manifest.scripts?.['check:win-package']).toContain('yarn run typecheck')
-    expect(manifest.scripts?.['check:win-package']).toContain('tests/package-win.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('tests/update-checker.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('tests/update-download.spec.ts')
-    expect(manifest.scripts?.['check:win-package']).toContain('yarn run verify:closure')
+    expect(manifest.scripts).not.toHaveProperty('dist:win')
+    expect(manifest.scripts).not.toHaveProperty('check:win-package')
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
     expect(manifest.scripts?.check).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac']).toBe('yarn workspace dsh-plugin-desktop dist:mac')
-    expect(workspaceManifest.scripts?.['dist:win'])
-      .toBe('yarn workspace dsh-plugin-desktop dist:win')
+    expect(workspaceManifest.scripts).not.toHaveProperty('dist:win')
     expect(manifest.build?.afterPack).toBe('./scripts/verify-packaged-runtime.ts')
     expect(manifest.build?.mac).toEqual(expect.objectContaining({
       hardenedRuntime: true,
@@ -374,32 +350,23 @@ describe('published package surface', () => {
     expect(installedCodeSign).toContain('"-k", keychainPassword, keychainFile')
   })
 
-  it('starts restricted Windows shells with a hidden console show state', () => {
-    const patchResolution = 'patch:@deepseek-ai/dsh-sandbox-windows-acl@npm%3A0.1.0-rc.6#./patches/dsh-sandbox-windows-acl@0.1.0-rc.6.patch'
-    const lockfile = readFileSync(new URL('yarn.lock', workspaceRoot), 'utf8')
-    const patch = readFileSync(new URL('patches/dsh-sandbox-windows-acl@0.1.0-rc.6.patch', workspaceRoot), 'utf8')
-    const workspaceRequire = createRequire(new URL('package.json', packageRoot))
-    const sandboxManifest = workspaceRequire.resolve('@deepseek-ai/dsh-sandbox-windows-acl/package.json')
-    const sandboxLocalManifest = workspaceRequire.resolve('@deepseek-ai/dsh-sandbox-local/package.json')
-    const sandboxLocalRequire = createRequire(sandboxLocalManifest)
-    const sandboxLib = join(dirname(sandboxManifest), 'lib')
-    const runtimeChunks = readdirSync(sandboxLib).filter(name => /^types-.*\.js$/u.test(name))
-
-    expect(workspaceManifest.resolutions).toMatchObject({
-      '@deepseek-ai/dsh-sandbox-windows-acl@npm:0.1.0-rc.6': patchResolution,
-      '@deepseek-ai/dsh-sandbox-windows-acl@npm:^0.1.0-rc.6': patchResolution,
-    })
-    expect(sandboxLocalRequire.resolve('@deepseek-ai/dsh-sandbox-windows-acl/package.json'))
-      .toBe(sandboxManifest)
-    expect(lockfile).toContain('@deepseek-ai/dsh-sandbox-windows-acl@patch:@deepseek-ai/dsh-sandbox-windows-acl@npm%3A0.1.0-rc.6#./patches/dsh-sandbox-windows-acl@0.1.0-rc.6.patch')
-    expect(patch.match(/^\+\s*dwFlags: 257,\r?$/gmu)).toHaveLength(2)
-    expect(patch.match(/^\+\s*wShowWindow: 0,\r?$/gmu)).toHaveLength(2)
-    expect(runtimeChunks).toHaveLength(1)
-    const installedRuntime = readFileSync(join(sandboxLib, runtimeChunks[0] as string), 'utf8')
-    expect(installedRuntime.match(/dwFlags: 257,/gu)).toHaveLength(2)
-    expect(installedRuntime.match(/wShowWindow: 0,/gu)).toHaveLength(2)
-    expect(installedRuntime).toContain('api.createProcessAsUserW(token, null, commandLine, null, null, 1, 0, null')
-    expect(installedRuntime).toContain('api.createProcessAsUserW(token, null, commandLine, null, null, 1, 4, null')
-    expect(installedRuntime).not.toContain('134217728')
+  it('keeps unsupported Windows runtime packages out of the Desktop surface', () => {
+    for (const packageName of [
+      '@deepseek-ai/dsh-pwsh-local',
+      '@deepseek-ai/dsh-pwsh-sandbox',
+      '@deepseek-ai/dsh-sandbox-windows-acl',
+      '@deepseek-ai/dsh-tool-pwsh',
+    ]) {
+      expect(manifest.dependencies).not.toHaveProperty(packageName)
+      expect(manifest.optionalDependencies ?? {}).not.toHaveProperty(packageName)
+      expect(manifest.devDependencies ?? {}).not.toHaveProperty(packageName)
+      expect(manifest.peerDependencies ?? {}).not.toHaveProperty(packageName)
+    }
+    expect(workspaceManifest.resolutions ?? {}).not.toHaveProperty(
+      '@deepseek-ai/dsh-sandbox-windows-acl@npm:0.1.0-rc.6',
+    )
+    expect(workspaceManifest.resolutions ?? {}).not.toHaveProperty(
+      '@deepseek-ai/dsh-sandbox-windows-acl@npm:^0.1.0-rc.6',
+    )
   })
 })

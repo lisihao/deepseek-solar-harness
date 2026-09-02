@@ -19,6 +19,7 @@ import { DesktopProfileService } from '../lib/profile-service.js'
 const BIN_NAME = 'dsh-plugin-desktop-profile-smoke'
 const HOST_SERVICE_PLUGIN_NAME = 'dsh-desktop-host-services-smoke-plugin'
 const HOST_SERVICE_PROBE_KEY = 'desktopHostServiceProbe'
+const supportedPlatform = process.platform
 const home = mkdtempSync(join(tmpdir(), 'dsh-desktop-profile-'))
 let ctx
 let releasePackageResolver
@@ -29,7 +30,7 @@ const trayItems = []
 
 try {
   writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: advanced\n')
-  const prepared = prepareDesktopProfile('1', home, 'win32')
+  const prepared = prepareDesktopProfile('1', home, supportedPlatform)
   const hostServicePluginDir = join(
     prepared.profile.dir,
     'node_modules',
@@ -80,7 +81,7 @@ try {
   })
   releasePackageResolver = installProfilePackageResolver(prepared.bareModuleBaseUrl)
   const runtime = {
-    platform: 'win32',
+    platform: supportedPlatform,
     updates: {
       isPackaged: false,
       canDownload: true,
@@ -179,15 +180,19 @@ try {
   }
 
   const picker = ctx.directoryPicker.capability()
-  if (picker.kind !== 'browse') {
-    throw new Error(`assembled Windows profile selected ${picker.kind} directory picker`)
+  if (picker.kind !== 'native' && picker.kind !== 'browse') {
+    throw new Error(`assembled supported profile selected ${picker.kind} directory picker`)
   }
-  const listing = await picker.list(home)
-  if (listing.path !== home) {
-    throw new Error(`assembled Windows browse picker listed ${listing.path} instead of ${home}`)
+  if (picker.kind === 'browse') {
+    const listing = await picker.list(home)
+    if (listing.path !== home) {
+      throw new Error(`assembled directory picker listed ${listing.path} instead of ${home}`)
+    }
+  } else if (typeof picker.pick !== 'function') {
+    throw new Error('assembled native directory picker is missing its pick capability')
   }
 
-  const expectedUrl = `http://127.0.0.1:${String(ctx.webServer.port)}/?dsh-deployment-role=server&dsh-desktop-mode=advanced&dsh-desktop-platform=win32&dsh-desktop-version=${desktopVersion}`
+  const expectedUrl = `http://127.0.0.1:${String(ctx.webServer.port)}/?dsh-deployment-role=server&dsh-desktop-mode=advanced&dsh-desktop-platform=${supportedPlatform}&dsh-desktop-version=${desktopVersion}`
   if (mountedSpec?.url !== expectedUrl) {
     throw new Error(`desktop plugin produced an unexpected renderer URL: ${String(mountedSpec?.url)}`)
   }
@@ -249,13 +254,15 @@ try {
     'dsh-plugin-desktop',
     '@deepseek-ai/dsh-client-ui-conversation',
     '@deepseek-ai/dsh-client-ui-sidebar',
-    '@deepseek-ai/dsh-client-ui-directory-picker-browse',
+    '@deepseek-ai/dsh-client-ui-directory-picker-native',
   ]) {
-    if (!ids.has(id)) throw new Error(`assembled advanced Web graph is missing ${id}`)
+    if (!ids.has(id)) {
+      throw new Error(`assembled advanced Web graph is missing ${id}; received ${[...ids].sort().join(', ')}`)
+    }
   }
   for (const id of [
     '@deepseek-ai/dsh-client-ui-layout',
-    '@deepseek-ai/dsh-client-ui-directory-picker-native',
+    '@deepseek-ai/dsh-client-ui-directory-picker-browse',
   ]) {
     if (ids.has(id)) throw new Error(`assembled advanced Web graph unexpectedly includes ${id}`)
   }

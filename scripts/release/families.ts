@@ -77,6 +77,15 @@ export abstract class ReleaseFamily {
   abstract readonly tagPrefix: string
 
   /**
+   * Whether a discovered manifest belongs to this family's supported release
+   * surface. Compatibility-only packages may stay in the workspace while the
+   * release family deliberately leaves them dormant.
+   */
+  protected isSupportedMember(_name: string, _directory: string): boolean {
+    return true
+  }
+
+  /**
    * Discover this family's members.
    * @param root - repository root.
    * @returns Members sorted by directory, with names validated and deduplicated.
@@ -92,6 +101,7 @@ export abstract class ReleaseFamily {
       const manifest = readManifest(resolve(root, manifestPath))
       const name = requireString(manifest, 'name', normalized)
       const version = requireString(manifest, 'version', normalized)
+      if (!this.isSupportedMember(name, normalized.slice(0, normalized.length - '/package.json'.length))) continue
       if (name === WORKSPACE_ROOT_PACKAGE) throw new Error(`${normalized} selected the workspace root`)
       if (!name.startsWith('@deepseek-ai/')) throw new Error(`${normalized} must name an @deepseek-ai package`)
       if (seen.has(name)) throw new Error(`${name} appears twice in release family ${this.id}`)
@@ -193,11 +203,23 @@ export abstract class ReleaseFamily {
   abstract readonly installedEntry: InstalledEntry | undefined
 }
 
+const UNSUPPORTED_WINDOWS_DSH_PACKAGES = new Set([
+  '@deepseek-ai/dsh-pwsh-local',
+  '@deepseek-ai/dsh-pwsh-sandbox',
+  '@deepseek-ai/dsh-sandbox-windows-acl',
+  '@deepseek-ai/dsh-tool-pwsh',
+])
+
 /** `packages/*` and `apps/*`: one shared version across the whole family. */
 class DshFamily extends ReleaseFamily {
   readonly id = 'dsh'
   readonly patterns = ['packages/*/*/package.json', 'apps/*/package.json'] as const
   readonly tagPrefix = 'dsh-v'
+
+  /** Windows compatibility packages remain source-only and are not released. */
+  protected override isSupportedMember(name: string): boolean {
+    return !UNSUPPORTED_WINDOWS_DSH_PACKAGES.has(name)
+  }
 
   /**
    * Require one version across the family, the way a single tag can name it.

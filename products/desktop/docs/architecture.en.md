@@ -49,7 +49,7 @@ The launcher-private `desktopRuntime`, `desktopPnpmBootstrap`, Electron executab
 
 ## Packaging and runtime closure
 
-Release artifacts use Electron Builder and `app.asar`, while dependencies that must be physical (for example pnpm, node-pty, and Windows ACL/native files) live under `app.asar.unpacked`. The packaged-runtime gate checks both archive entries and physical runtime entries; profile fallback links must not target virtual ASAR paths that Node cannot resolve.
+Release artifacts use Electron Builder and `app.asar`, while dependencies that must be physical (for example pnpm and node-pty native files) live under `app.asar.unpacked`. The packaged-runtime gate checks both archive entries and physical runtime entries; profile fallback links must not target virtual ASAR paths that Node cannot resolve.
 
 The Desktop workspace uses Yarn. The Solar Harness monorepo root keeps its pnpm workspace. Desktop source, tests, packaging, and release scripts belong to `products/desktop/dsh-plugin-desktop/`; core changes belong to the monorepo root and pass the root governance contract.
 

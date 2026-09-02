@@ -1,7 +1,6 @@
 /**
- * Native picker tier selection and the execFile adapter: the Win32 dialog
- * primary (failures surface as-is, no fallback tier), the abort rule, and
- * the POSIX command tiers (osascript, Zenity → KDialog).
+ * Native picker tier selection and the execFile adapter: the macOS chooser,
+ * the abort rule, and the POSIX command tiers (osascript, Zenity → KDialog).
  */
 
 type ExecFileCallback = (
@@ -29,9 +28,6 @@ function failure(code: string | number, stderr = ''): Error {
 
 const signal = () => new AbortController().signal
 
-/** A Win32 dialog that always fails — the no-fallback case. */
-const noDialog = async (): Promise<string | null> => { throw new Error('dialog unavailable') }
-
 describe('native directory picker', () => {
   it('uses the macOS folder chooser and maps user cancellation to null', async () => {
     const run = vi.fn<DirectoryPickerRunner>(async () => ({ stdout: '/Users/test/project/\n', stderr: '' }))
@@ -53,41 +49,6 @@ describe('native directory picker', () => {
   ])('does not mistake %s for macOS cancellation', async (_label, reason) => {
     const run = vi.fn<DirectoryPickerRunner>(async () => { throw reason })
     await expect(pickNativeDirectory(signal(), { platform: 'darwin', run })).rejects.toBe(reason)
-  })
-
-  it('uses the Win32 dialog and never spawns a command when it answers', async () => {
-    const run = vi.fn<DirectoryPickerRunner>()
-    const pickWin32Dialog = vi.fn(async (): Promise<string | null> => 'C:\\work\\selected')
-    await expect(pickNativeDirectory(signal(), { platform: 'win32', run, pickWin32Dialog })).resolves.toBe('C:\\work\\selected')
-    pickWin32Dialog.mockResolvedValueOnce(null)
-    await expect(pickNativeDirectory(signal(), { platform: 'win32', run, pickWin32Dialog })).resolves.toBeNull()
-    expect(run).not.toHaveBeenCalled()
-  })
-
-  it('surfaces the Win32 dialog failure with no fallback', async () => {
-    const run = vi.fn<DirectoryPickerRunner>()
-    await expect(pickNativeDirectory(signal(), { platform: 'win32', run, pickWin32Dialog: noDialog }))
-      .rejects.toThrow('dialog unavailable')
-    expect(run).not.toHaveBeenCalled()
-  })
-
-  it('wires the real Win32 dialog as the default tier', async () => {
-    // A pre-aborted signal makes the DEFAULT dialog deterministic on every
-    // host: pickWin32Directory throws before spawning any worker or window.
-    const abort = new AbortController()
-    abort.abort()
-    const run = vi.fn<DirectoryPickerRunner>()
-    await expect(pickNativeDirectory(abort.signal, { platform: 'win32', run }))
-      .rejects.toThrow('native directory picker aborted')
-    expect(run).not.toHaveBeenCalled()
-  })
-
-  it('does not fall back when the caller aborted the dialog', async () => {
-    const abort = new AbortController()
-    abort.abort(new Error('closed'))
-    const run = vi.fn<DirectoryPickerRunner>()
-    await expect(pickNativeDirectory(abort.signal, { platform: 'win32', run, pickWin32Dialog: noDialog })).rejects.toThrow('dialog unavailable')
-    expect(run).not.toHaveBeenCalled()
   })
 
   it('runs the default command adapter without a shell and preserves command failures', async () => {
@@ -114,15 +75,6 @@ describe('native directory picker', () => {
       stdout: 'partial output', stderr: 'failure details',
     })
     expect((surfaced as { cause?: unknown }).cause).toBeInstanceOf(Error)
-  })
-
-  it('uses the current process platform when no platform override is supplied', async () => {
-    // Deterministic on every host: the win32 tier answers from the dialog,
-    // the POSIX tiers from the command runner.
-    const run = vi.fn<DirectoryPickerRunner>(async () => ({ stdout: '/default/platform\n', stderr: '' }))
-    const pickWin32Dialog = async (): Promise<string | null> => 'C:\\default\\platform'
-    const expected = process.platform === 'win32' ? 'C:\\default\\platform' : '/default/platform'
-    await expect(pickNativeDirectory(signal(), { run, pickWin32Dialog })).resolves.toBe(expected)
   })
 
   it('maps empty command output to cancellation', async () => {

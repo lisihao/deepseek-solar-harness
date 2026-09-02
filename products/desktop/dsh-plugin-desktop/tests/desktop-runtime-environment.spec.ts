@@ -170,45 +170,6 @@ describe('desktop Host pnpm runtime', () => {
     installation.dispose()
   })
 
-  it('creates Windows batch shims without publishing the private Node directory', () => {
-    const stateDir = join(temporaryDirectory(), 'runtime-state')
-    const environment: NodeJS.ProcessEnv = {
-      Path: 'C:\\Windows\\System32;C:\\Windows',
-      KEEP: 'value',
-    }
-    const original = { ...environment }
-
-    const installation = installDesktopPnpmRuntime(options(stateDir, 'win32', environment))
-
-    expect(readdirSync(installation.pathDir)).toEqual(['pnpm.cmd'])
-    expect(readdirSync(installation.nodeBinDir)).toEqual(['node.cmd'])
-    const clearEnvironmentUrl = pathToFileURL(installation.clearEnvironmentPath).href
-    const escapedClearEnvironmentUrl = clearEnvironmentUrl.replaceAll('%', '%%')
-    const pnpm = readFileSync(installation.pnpmShimPath, 'utf8')
-    expect(pnpm).toContain(`set "PATH=${installation.nodeBinDir};%PATH%"`)
-    expect(pnpm).toContain(`set "NODE=${installation.nodeShimPath}"`)
-    expect(pnpm).toContain('set "ELECTRON_RUN_AS_NODE=1"')
-    expect(pnpm).toContain('set "npm_config_runtime=electron"')
-    expect(pnpm).toContain('set "npm_config_target=43.4.0"')
-    expect(pnpm).toContain(`--import "${escapedClearEnvironmentUrl}"`)
-    expect(pnpm.indexOf(`--import "${escapedClearEnvironmentUrl}"`)).toBeLessThan(pnpm.indexOf('pnpm\\bin\\pnpm.mjs'))
-    const node = readFileSync(installation.nodeShimPath, 'utf8')
-    expect(node).toContain('set "ELECTRON_RUN_AS_NODE=1"')
-    expect(node).toContain(`--import "${escapedClearEnvironmentUrl}" %*`)
-    expect(node).not.toContain('npm_config_')
-
-    expect(environment).toEqual({
-      Path: `${installation.pathDir};C:\\Windows\\System32;C:\\Windows`,
-      KEEP: 'value',
-    })
-    expect(environment).not.toHaveProperty('ELECTRON_RUN_AS_NODE')
-    expect(environment).not.toHaveProperty('npm_config_runtime')
-
-    installation.dispose()
-    installation.dispose()
-    expect(environment).toEqual(original)
-  })
-
   it('removes only its own PATH component when another owner changes PATH later', () => {
     const stateDir = join(temporaryDirectory(), 'runtime')
     const environment: NodeJS.ProcessEnv = { PATH: '/usr/bin' }

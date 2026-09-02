@@ -10,7 +10,7 @@ describe('macOS ad-hoc release preflight', () => {
   })
 
   it('rejects release execution away from macOS', () => {
-    expect(() => assertMacReleaseReady('win32')).toThrow('must be built on macOS')
+    expect(() => assertMacReleaseReady('linux')).toThrow('must be built on macOS')
   })
 
   it('removes every Apple release variable from build subprocesses', () => {

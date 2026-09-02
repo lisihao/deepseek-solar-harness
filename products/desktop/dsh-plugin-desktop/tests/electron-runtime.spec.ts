@@ -8,31 +8,6 @@ const productVersion = (JSON.parse(
 
 const terminal = vi.hoisted(() => ({ open: vi.fn() }))
 const updater = vi.hoisted(() => ({ download: vi.fn() }))
-const childProcess = vi.hoisted(() => {
-  type Listener = (...args: unknown[]) => void
-  const listeners = new Map<string, Listener[]>()
-  const child = {
-    once: vi.fn((event: string, listener: Listener) => {
-      listeners.set(event, [...(listeners.get(event) ?? []), listener])
-      return child
-    }),
-    off: vi.fn((event: string, listener: Listener) => {
-      listeners.set(event, (listeners.get(event) ?? []).filter(candidate => candidate !== listener))
-      return child
-    }),
-    unref: vi.fn(),
-  }
-  return {
-    child,
-    emit(event: string, ...args: unknown[]) {
-      const current = [...(listeners.get(event) ?? [])]
-      listeners.delete(event)
-      for (const listener of current) listener(...args)
-    },
-    reset() { listeners.clear() },
-    spawn: vi.fn(() => child),
-  }
-})
 
 vi.mock('../src/desktop-terminal.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('../src/desktop-terminal.ts')>(),
@@ -42,8 +17,6 @@ vi.mock('../src/desktop-terminal.ts', async (importOriginal) => ({
 vi.mock('../src/update-download.ts', () => ({
   downloadDesktopUpdate: updater.download,
 }))
-
-vi.mock('node:child_process', () => ({ spawn: childProcess.spawn }))
 
 const electron = vi.hoisted(() => {
   const browserWindowOptions: unknown[] = []
@@ -106,7 +79,6 @@ const electron = vi.hoisted(() => {
     readonly once = vi.fn()
     readonly destroy = vi.fn()
     readonly loadURL = loadURL
-    readonly removeMenu = vi.fn()
   }
 
   class Tray {
@@ -228,7 +200,6 @@ describe('Electron compatibility runtime', () => {
     electron.menuTemplates.length = 0
     electron.applicationMenus.length = 0
     electron.notifications.length = 0
-    childProcess.reset()
     vi.clearAllMocks()
     electron.loadURL.mockReset()
     electron.loadURL.mockResolvedValue(undefined)
@@ -288,7 +259,6 @@ describe('Electron compatibility runtime', () => {
     )
     expect(spec.readThemeSource).not.toHaveBeenCalled()
     expect(electron.nativeTheme.themeSource).toBe('system')
-    expect(electron.browserWindows[0]?.removeMenu).not.toHaveBeenCalled()
     expect(electron.app.dock.setIcon).toHaveBeenCalledWith(electron.appIcon)
     expect(electron.browserWindows[0]?.show).toHaveBeenCalledOnce()
     expect(electron.browserWindows[0]?.focus).toHaveBeenCalledOnce()
@@ -622,30 +592,6 @@ describe('Electron compatibility runtime', () => {
     }
   })
 
-  it('uses the Windows caption, hidden menu bar, removed menu, and fixed blue tray image', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
-    const release = runtime.schedule(spec)
-
-    await runtime.mountScheduled()
-
-    expect(electron.browserWindowOptions[0]).toEqual(expect.objectContaining({
-      title: `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
-      autoHideMenuBar: true,
-    }))
-    expect(electron.browserWindows[0]?.accessibleTitle).toBe(
-      `DSH Desktop v${productVersion} · DeepSeek Harness Desktop`,
-    )
-    expect(electron.browserWindows[0]?.removeMenu).toHaveBeenCalledOnce()
-    expect(electron.app.dock.setIcon).not.toHaveBeenCalled()
-    expect(electron.trays[0]?.image).toBe(electron.blueIcon)
-    expect(electron.templateIcon.setTemplateImage).not.toHaveBeenCalled()
-
-    await release()
-    expect(electron.trays[0]?.off).toHaveBeenCalledWith('click', expect.any(Function))
-  })
-
   it('does not mount a registration disposed before Host boot settles', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
@@ -836,43 +782,6 @@ describe('Electron compatibility runtime', () => {
     }
   })
 
-  it('shows native errors for synchronous and asynchronous terminal launch failures', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-    Object.defineProperty(process.versions, 'electron', {
-      configurable: true,
-      value: '43.4.0',
-    })
-    try {
-      const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-      const runtime = new ElectronDesktopRuntime(async () => {})
-      runtime.configureTerminal({
-        profileName: 'desktop',
-        profileDir: 'C:\\Users\\Example\\.dsh\\profiles\\desktop',
-        homeDir: 'C:\\Users\\Example\\.dsh',
-      })
-      terminal.open.mockImplementationOnce(() => { throw new Error('cannot create launcher') })
-
-      expect(() => { runtime.openTerminal() }).not.toThrow()
-      expect(electron.dialog.showErrorBox).toHaveBeenCalledWith(
-        'Unable to Open DSH Terminal',
-        'cannot create launcher',
-      )
-
-      terminal.open.mockImplementationOnce((options: { onLaunchError: (cause: Error) => void }) => {
-        options.onLaunchError(new Error('launcher exited with code 1'))
-      })
-      runtime.openTerminal()
-      expect(electron.dialog.showErrorBox).toHaveBeenLastCalledWith(
-        'Unable to Open DSH Terminal',
-        'launcher exited with code 1',
-      )
-      expect(stderr).toHaveBeenCalledWith(expect.stringContaining('failed to open terminal'))
-    } finally {
-      delete (process.versions as { electron?: string }).electron
-    }
-  })
-
   it('uses Electron networking and confirmation-gated macOS update handoff', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
     const response = Response.json({ version: '2.1.0' })
@@ -941,63 +850,6 @@ describe('Electron compatibility runtime', () => {
     })
     expect(notification?.show).toHaveBeenCalledOnce()
     expect(notification?.once).not.toHaveBeenCalled()
-  })
-
-  it('starts the downloaded Windows installer before requesting orderly exit', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-    updater.download.mockResolvedValueOnce('C:\\Updates\\DSH-Desktop-2.1.0-windows.exe')
-    const requestQuit = vi.fn()
-    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
-    runtime.schedule({ ...spec, requestQuit })
-
-    const pending = runtime.updates.downloadAndOpen('2.1.0', new AbortController().signal)
-    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
-    expect(childProcess.spawn).toHaveBeenCalledWith(
-      'C:\\Updates\\DSH-Desktop-2.1.0-windows.exe',
-      ['--updated', '--force-run'],
-      {
-        detached: true,
-        stdio: 'ignore',
-        shell: false,
-        windowsHide: false,
-      },
-    )
-    expect(requestQuit).not.toHaveBeenCalled()
-    childProcess.emit('spawn')
-    await pending
-
-    expect(childProcess.child.unref).toHaveBeenCalledOnce()
-    expect(requestQuit).toHaveBeenCalledWith(0)
-  })
-
-  it('does not exit when the downloaded Windows installer fails to spawn', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-    updater.download.mockResolvedValueOnce('C:\\Updates\\DSH-Desktop-2.1.0-windows.exe')
-    const requestQuit = vi.fn()
-    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
-    runtime.schedule({ ...spec, requestQuit })
-
-    const pending = runtime.updates.downloadAndOpen('2.1.0', new AbortController().signal)
-    await vi.waitFor(() => { expect(childProcess.spawn).toHaveBeenCalledOnce() })
-    childProcess.emit('error', new Error('blocked'))
-
-    await expect(pending).rejects.toThrow('blocked')
-    expect(childProcess.child.unref).not.toHaveBeenCalled()
-    expect(requestQuit).not.toHaveBeenCalled()
-  })
-
-  it('keeps a downloaded Windows installer idle when installation is deferred', async () => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-    updater.download.mockResolvedValueOnce('C:\\Updates\\DSH-Desktop-2.1.0-windows.exe')
-    electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
-    const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
-
-    await runtime.updates.downloadAndOpen('2.1.0', new AbortController().signal)
-
-    expect(childProcess.spawn).not.toHaveBeenCalled()
   })
 
   it('rejects a macOS handoff when the operating system cannot open the DMG', async () => {

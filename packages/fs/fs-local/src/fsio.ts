@@ -12,7 +12,6 @@ import type { BigIntStats, Dirent, Stats } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
-import { copyFileDaclWin32, replaceFileWin32 } from './win32.ts'
 
 const BINARY_SAMPLE_BYTES = 8192
 // Bound one non-abortable FileHandle.read so cancellation is observed between chunks.
@@ -80,16 +79,10 @@ function versionOf(info: BigIntStats): FsVersion {
  * a name race), override native boundaries, and observe the staged temp file before publication.
  */
 export interface FsIoInternals {
-  /** Override the host platform for native-publication unit coverage. */
-  platform?: NodeJS.Platform
   /** Override the generated private staging-dir name (relative to the target dir). */
   tempDirName?: (writePath: string) => string
   /** Override the generated temp-file name (relative to the private staging dir). */
   tempName?: (writePath: string) => string
-  /** Override the Win32 DACL copy boundary. */
-  copyFileDacl?: (source: string, destination: string) => Promise<void>
-  /** Override the Win32 security-preserving replacement boundary. */
-  replaceFile?: (replaced: string, replacement: string) => Promise<void>
   /** Override the hard-link no-replace publication boundary. */
   linkFile?: (existingPath: string, newPath: string) => Promise<void>
   /** Override target inspection after guarded publication fails. */
@@ -517,13 +510,11 @@ async function throwGuardedCreateFailure(
 
 /**
  * Atomically replace a file through a private, synced staging file in the same directory.
- * POSIX protects the staging directory and file with `0o700` and `0o600`. A new Windows file
- * inherits the destination directory's DACL; a replacement copies the existing target's DACL
- * onto the empty temp before writing and preserves the target descriptor at publication.
+ * The supported Darwin/POSIX product protects the staging directory and file with `0o700`
+ * and `0o600`, then publishes the synchronized file through the host rename primitive.
  * @param absolutePath - destination; missing parent directories are created.
  * @param content - the full UTF-8 text to write.
- * @param mode - existing destination's POSIX mode to preserve, or `undefined` for a new file;
- * inert as a mode on Windows but identifies replacement security semantics.
+ * @param mode - existing destination's POSIX mode to preserve, or `undefined` for a new file.
  * @param signal - cancellation checked before final publication.
  * @param internals - Test hook for pinning temp names and observing the staged file.
  * @param createIfAbsent - when provided, publish with a hard-link no-replace
@@ -547,9 +538,6 @@ export async function writeFileAtomic(
   const stagingDir = join(directory, stagingDirName)
   const tempName = internals.tempName?.(absolutePath) ?? `${basename(absolutePath)}.tmp`
   const tempPath = join(stagingDir, tempName)
-  const platform = internals.platform ?? process.platform
-  const copyFileDacl = internals.copyFileDacl ?? copyFileDaclWin32
-  const replaceFile = internals.replaceFile ?? replaceFileWin32
   const linkFile = internals.linkFile ?? link
   const inspectPublicationTarget = internals.inspectPublicationTarget
     ?? (path => lstat(path, { bigint: true }))
@@ -564,9 +552,6 @@ export async function writeFileAtomic(
 
     handle = await open(tempPath, 'wx', 0o600)
     await handle.chmod(0o600)
-    if (platform === 'win32' && mode !== undefined) {
-      await copyFileDacl(absolutePath, tempPath)
-    }
     await handle.writeFile(content, { encoding: 'utf8', ...signal ? { signal } : {} })
     await handle.sync()
     await internals.inspectTemp?.({ stagingDir, tempPath })
@@ -580,15 +565,6 @@ export async function writeFileAtomic(
         await linkFile(tempPath, absolutePath)
       } catch (error: unknown) {
         await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget)
-      }
-    } else if (platform === 'win32' && mode !== undefined) {
-      try {
-        await replaceFile(absolutePath, tempPath)
-      } catch (error: unknown) {
-        // If the observed target disappears during staging, the protected DACL
-        // already copied to the temp remains authoritative for recreation.
-        if (!isENOENT(error)) throw error
-        await rename(tempPath, absolutePath)
       }
     } else {
       await rename(tempPath, absolutePath)

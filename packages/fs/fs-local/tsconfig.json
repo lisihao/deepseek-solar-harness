@@ -5,6 +5,7 @@
     "outDir": "lib/types"
   },
   "include": ["src"],
+  "exclude": ["src/win32.ts"],
   "references": [
     {
       "path": "../../../vendor/cosmokit"

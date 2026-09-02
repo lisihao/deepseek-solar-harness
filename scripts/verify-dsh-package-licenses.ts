@@ -5,6 +5,7 @@
 
 import { globSync, readFileSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
+import { isSupportedDarwinPackagePath } from './darwin-package-scope.ts'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const DSH_PACKAGE_NAME = /^@deepseek-ai\/dsh(?:-|$)/
@@ -42,7 +43,7 @@ function workspaceManifestPaths(root: string): string[] {
       files.add(file)
     }
   }
-  return [...files].sort()
+  return [...files].filter(isSupportedDarwinPackagePath).sort()
 }
 
 function printable(value: unknown): string {
