@@ -1,0 +1,14 @@
+# Opt-in provider-neutral browser automation using the separately installed
+# Ego Lite macOS application. Other plugins consume only ctx.browser.
+
+- insert:
+    - id: browser
+      name: '@deepseek-ai/dsh-browser'
+      config:
+        provider: ego-lite
+
+    - id: browser-ego-lite
+      name: '@deepseek-ai/dsh-browser-ego-lite'
+
+    - id: tool-browser
+      name: '@deepseek-ai/dsh-tool-browser'
