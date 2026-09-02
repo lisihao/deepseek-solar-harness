@@ -148,6 +148,78 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).not.toContain('$0.0000')
   })
 
+  it('keeps settled roles visible when another role is blocked and shows route provenance', () => {
+    const fixture = run()
+    const blockedRouting = {
+      version: 1 as const,
+      requestedOperatorId: 'claude-code',
+      requestedModel: 'claude-fable-5',
+      actualOperatorId: 'codex',
+      actualModel: 'gpt-5.6-luna',
+      fallbackReasonCode: 'AUTHENTICATION_UNQUALIFIED',
+      allocationPlanRef: 'artifact:allocation-plan',
+    }
+    const { outputRef: _outputRef, outputPreview: _outputPreview, ...turnWithoutOutput } = fixture.rounds[1]!.turnStates[1]!
+    const blockedTurn = {
+      ...turnWithoutOutput,
+      state: 'blocked' as const,
+      attempt: 1,
+      routing: blockedRouting,
+      claimIds: [],
+      evidenceRefs: [],
+      errorCode: 'EXPLICIT_MODEL_UNAVAILABLE',
+      blockers: [{ code: 'EXPLICIT_MODEL_UNAVAILABLE', message: 'Claude Code unavailable because the VPN is blocked.', nodeId: 'debate-r1-skeptical-falsifier' }],
+    }
+    fixture.rounds = fixture.rounds.map((round, index) => index === 1
+      ? { ...round, state: 'failed' as const, turnStates: round.turnStates.map((turn, turnIndex) => turnIndex === 1 ? blockedTurn : turn) }
+      : round)
+    fixture.roles = fixture.roles.map(role => role.role === 'skeptical-falsifier'
+      ? { ...role, latestTurn: blockedTurn }
+      : role)
+    const markup = renderToStaticMarkup(createElement('div', null,
+      createElement(RunDetail, { run: fixture, events: [], pending: false, onControl: async () => {} }),
+    ))
+    expect(markup).toContain('data-state="settled"')
+    expect(markup).toContain('data-state="blocked"')
+    expect(markup).toContain('请求：<span>claude-code · claude-fable-5</span>')
+    expect(markup).toContain('实际：<span>codex · gpt-5.6-luna</span>')
+    expect(markup).toContain('回退：AUTHENTICATION_UNQUALIFIED')
+    expect(markup).toContain('EXPLICIT_MODEL_UNAVAILABLE')
+    expect(markup).toContain('Claude Code unavailable because the VPN is blocked.')
+    expect(markup).toContain('节点 debate-r1-skeptical-falsifier')
+    expect(markup).not.toContain('Agent 输出失败')
+  })
+
+  it('truncates long route values visually while preserving complete values in titles', () => {
+    const fixture = run()
+    const longModel = `claude-model-${'x'.repeat(72)}`
+    const longNodeId = `debate-node-${'y'.repeat(72)}`
+    const route = {
+      version: 1 as const,
+      requestedOperatorId: 'claude-code',
+      requestedModel: longModel,
+      actualOperatorId: 'codex',
+      actualModel: 'gpt-5.6-luna',
+      fallbackReasonCode: 'MODEL_UNAVAILABLE',
+    }
+    const { outputRef: _outputRef, outputPreview: _outputPreview, ...turnWithoutOutput } = fixture.rounds[1]!.turnStates[1]!
+    const blockedTurn = {
+      ...turnWithoutOutput,
+      state: 'blocked' as const,
+      routing: route,
+      blockers: [{ code: 'MODEL_UNAVAILABLE', message: 'The requested model is unavailable.', nodeId: longNodeId }],
+      claimIds: [],
+      evidenceRefs: [],
+    }
+    fixture.rounds = fixture.rounds.map((round, index) => index === 1
+      ? { ...round, turnStates: round.turnStates.map((turn, turnIndex) => turnIndex === 1 ? blockedTurn : turn) }
+      : round)
+    const markup = renderToStaticMarkup(createElement(RunDetail, { run: fixture, events: [], pending: false, onControl: async () => {} }))
+    expect(markup).toContain(`title="claude-code · ${longModel}"`)
+    expect(markup).toContain(`title="${longNodeId}"`)
+    expect(markup).toMatch(/请求：<span>claude-code · claude-model-x+…x+<\/span>/)
+  })
+
   it('offers resume only when the durable stop event proves a pause', () => {
     const stopped = { ...run(), state: 'stopped' as const }
     const withoutPause = renderToStaticMarkup(createElement(RunDetail, {

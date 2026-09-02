@@ -5,6 +5,8 @@ import ModelAllocationService, {
   ModelAllocationError,
   validateAdaptiveExecutionPreference,
   type AdaptiveExecutionPreferenceV1,
+  type ModelAllocationFallbackProvenance,
+  type ModelAllocationFallbackReasonCode,
   type ModelAllocationPlan,
   type ModelAllocationRequest,
   type ModelExecutionOffer,
@@ -32,6 +34,16 @@ function quotaAdmitted(offer: ModelExecutionOffer): boolean {
   const guard = offer.quotaGuard
   if (observed === undefined) return guard?.unknownQuota !== 'block'
   return observed > (guard?.stopAdmissionAtRemainingPercent ?? 0)
+}
+
+/**
+ * A requested model is an exact pin at the allocation boundary.  Provider
+ * aliases should already have been normalized into `offer.model` before they
+ * reach this Provider; silently matching a sibling model here would turn an
+ * explicit Opus/Sonnet (or Sol/Luna) selection into an accidental downgrade.
+ */
+function matchesRequestedModel(offer: ModelExecutionOffer, requestedModel: string | undefined): boolean {
+  return requestedModel === undefined || offer.model === requestedModel
 }
 
 function resetUrgency(window: ModelQuotaWindow | undefined, nowSeconds: number): number {
@@ -169,6 +181,44 @@ function suggestedParallelism(request: ModelAllocationRequest, qualified: readon
   return Math.max(1, Math.min(request.graphMaxParallel, usable))
 }
 
+function fallbackProvenance(
+  request: ModelAllocationRequest,
+  preferredOffers: readonly ModelExecutionOffer[],
+  primaryOperatorId: string,
+): ModelAllocationFallbackProvenance {
+  const primaryOffers = preferredOffers.filter(offer => offer.operatorId === primaryOperatorId)
+  const modelOffers = request.preferredModel === undefined
+    ? primaryOffers
+    : primaryOffers.filter(offer => offer.model === request.preferredModel)
+  const reasonOrder: readonly ModelAllocationFallbackReasonCode[] = [
+    'AUTHENTICATION_UNQUALIFIED',
+    'OPERATOR_UNAVAILABLE',
+    'QUOTA_UNQUALIFIED',
+    'MODEL_UNAVAILABLE',
+  ]
+  const quotaRejected = primaryOffers.some(offer => offer.available && !quotaAdmitted(offer))
+  const reportedReasons = new Set(primaryOffers.flatMap(offer => (
+    offer.unavailableReasonCode === undefined ? [] : [offer.unavailableReasonCode]
+  )))
+  // Preserve an explicit provider/auth/quota failure before diagnosing a
+  // missing model.  A provider may expose a canonical model name different
+  // from the caller's display alias while it is unavailable for another
+  // reason; that must not be mislabeled as MODEL_UNAVAILABLE.
+  const reportedReason = reasonOrder.find(reason => reportedReasons.has(reason))
+  const reasonCode = quotaRejected
+    ? 'QUOTA_UNQUALIFIED'
+    : reportedReason !== undefined && reportedReason !== 'MODEL_UNAVAILABLE'
+      ? reportedReason
+      : request.preferredModel !== undefined && primaryOffers.length > 0 && modelOffers.length === 0
+        ? 'MODEL_UNAVAILABLE'
+        : reportedReason ?? 'OPERATOR_UNAVAILABLE'
+  return {
+    fromOperatorId: primaryOperatorId,
+    ...request.preferredModel === undefined ? {} : { fromModel: request.preferredModel },
+    reasonCode,
+  }
+}
+
 /** Public deterministic Provider, separately mountable from the Scheduler. */
 export class SubscriptionFirstModelAllocation extends ModelAllocationService {
   allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan> {
@@ -176,12 +226,31 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
       ? undefined
       : validateAdaptiveExecutionPreference(request.adaptiveExecutionPreference)
     const qualified = request.offers.filter(offer => offer.available && quotaAdmitted(offer))
+    const preferredOffers = request.offers.filter(offer => request.preferredOperatorIds.includes(offer.operatorId))
+    const preferredQualified = qualified.filter(offer => request.preferredOperatorIds.includes(offer.operatorId)
+      && matchesRequestedModel(offer, request.preferredModel))
+    const fallbackOperatorIds = request.fallbackOperatorIds ?? []
+    const primaryOperatorId = request.preferredOperatorIds[0]
+    const fallback = primaryOperatorId !== undefined
+      && preferredQualified.length === 0
+      && fallbackOperatorIds.length > 0
+      ? fallbackProvenance(request, preferredOffers, primaryOperatorId)
+      : undefined
     const explicitQualified = request.preferredOperatorIds.length === 0
-      ? qualified
-      : qualified.filter(offer => request.preferredOperatorIds.includes(offer.operatorId))
-    if (request.preferredOperatorIds.length > 0 && explicitQualified.length === 0) {
+      ? qualified.filter(offer => matchesRequestedModel(offer, request.preferredModel))
+      : preferredQualified.length > 0
+        ? preferredQualified
+        : qualified.filter(offer => fallbackOperatorIds.includes(offer.operatorId))
+    if ((request.preferredOperatorIds.length > 0 || request.preferredModel !== undefined)
+      && explicitQualified.length === 0) {
       throw new ModelAllocationError(
-        `none of the explicitly preferred operators has capacity: ${request.preferredOperatorIds.join(', ')}`,
+        fallback === undefined
+          ? request.preferredOperatorIds.length > 0
+            ? `none of the explicitly preferred operators has the requested model or capacity: ${request.preferredOperatorIds.join(', ')}`
+            : `the requested model is unavailable or has no capacity: ${request.preferredModel}`
+          : `neither the explicitly preferred nor fallback operators have capacity: ${[
+            ...request.preferredOperatorIds, ...fallbackOperatorIds,
+          ].join(', ')}`,
         'EXPLICIT_MODEL_UNAVAILABLE',
       )
     }
@@ -229,6 +298,7 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
       tier: selected.tier,
       ...selected.profile === undefined ? {} : { profile: selected.profile },
       ...selected.quotaPool === undefined ? {} : { quotaPoolId: selected.quotaPool.poolId },
+      ...fallback === undefined ? {} : { fallback },
       suggestedParallelism: suggestedParallelism(request, explicitQualified),
       rationale: [
         selected.source === 'native-subscription' ? 'native-subscription-first' : 'metered-api-last-resort',

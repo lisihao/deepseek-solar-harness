@@ -12,6 +12,8 @@ The provider is the only state writer. A resident session is keyed by stable ope
 
 The lifecycle, health, reason, receipt, event, model catalog, effective profile, and artifact-reference types are provider-neutral. Session snapshots include the locked model/effort and selection source beside the latest durable turn summary and structured event, while `inspectTurn()` recovers the current or settled receipt result after a client restart. `compact()` uses an independent durable command receipt plus optimistic state revision, requires an idle Session with native history, and preserves its native identity. An uncertain post-dispatch outcome becomes `COMMAND_INDETERMINATE` and cannot be replayed automatically. `reset` clears the native-session association and effective profile. Neither operation deletes product history or artifacts.
 
+Drivers may additionally emit `ResidentObservation` through the execution callback. The only persistable variants are public output, tool start/completion, approval required, and usage updates; phase remains a separate coarse progress signal. The contract deliberately has no thinking, raw prompt, system prompt, tool input/output, stderr, environment, credential, or full-transcript variant.
+
 ## Model Experience
 
 Indirectly, through the physical-operator Consumer. Resident results expose only a session id and state revision in addition to the ordinary bounded result.

@@ -210,6 +210,8 @@ export interface OrchestrationNodeSpecV1 {
   readonly autonomous?: RlmAutonomousConfigV1
   readonly operator?: {
     readonly preferredIds?: readonly string[]
+    /** Operator ids admitted only when every preferred operator is unqualified. */
+    readonly fallbackIds?: readonly string[]
     readonly profile?: PhysicalOperatorExecutionPreference
   }
 }

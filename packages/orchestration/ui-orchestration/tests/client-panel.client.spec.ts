@@ -239,6 +239,51 @@ describe('orchestration Desktop panel transport', () => {
       data: { operatorId: 'claude-code', phase: 'tool_activity' },
     })).toBe('claude-code · 正在使用工具')
     expect(eventDetail({
+      sequence: 81,
+      runId: 'run-1',
+      type: 'node.operator.observation',
+      time: '2026-08-20T00:00:03.100Z',
+      data: {
+        operatorId: 'claude-code',
+        observation: { kind: 'public-output', preview: 'bounded progress API_KEY=hidden' },
+        prompt: 'must not render',
+        thinking: 'must not render',
+        toolArgs: { password: 'must not render' },
+        toolResult: 'must not render',
+      },
+    })).toBe('claude-code · 公开输出 · bounded progress API_KEY=[REDACTED]')
+    expect(eventDetail({
+      sequence: 82,
+      runId: 'run-1',
+      type: 'node.operator.observation',
+      time: '2026-08-20T00:00:03.200Z',
+      data: { operatorId: 'codex', observation: { kind: 'tool-started', toolName: 'Bash' } },
+    })).toBe('codex · 工具开始 · Bash')
+    expect(eventDetail({
+      sequence: 83,
+      runId: 'run-1',
+      type: 'node.operator.observation',
+      time: '2026-08-20T00:00:03.300Z',
+      data: { operatorId: 'codex', observation: { kind: 'tool-completed', toolName: 'Bash' } },
+    })).toBe('codex · 工具完成 · Bash')
+    expect(eventDetail({
+      sequence: 84,
+      runId: 'run-1',
+      type: 'node.operator.observation',
+      time: '2026-08-20T00:00:03.400Z',
+      data: { operatorId: 'codex', observation: { kind: 'approval-required', approvalKind: 'Bash', preview: 'allow command?' } },
+    })).toBe('codex · 需要批准 · Bash · allow command?')
+    expect(eventDetail({
+      sequence: 85,
+      runId: 'run-1',
+      type: 'node.operator.observation',
+      time: '2026-08-20T00:00:03.500Z',
+      data: {
+        operatorId: 'codex',
+        observation: { kind: 'usage-updated', usage: { inputTokens: 10, outputTokens: 4, cacheReadInputTokens: 8, cacheWriteInputTokens: 2, costUsd: 0.01 } },
+      },
+    })).toBe('codex · 用量更新 · 输入 10 · 输出 4 · 缓存读 8 · 缓存写 2 · 成本 $0.01')
+    expect(eventDetail({
       sequence: 9,
       runId: 'run-1',
       type: 'node.evidence.accepted',

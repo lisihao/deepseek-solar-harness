@@ -522,6 +522,9 @@ export function eventDetail(event: DesktopOrchestrationEvent): string {
   if (event.type === 'node.operator.progress') {
     return `${eventValue(event, 'operatorId')} · ${operatorProgressLabel(eventValue(event, 'phase', 'unknown'))}`
   }
+  if (event.type === 'node.operator.observation') {
+    return operatorObservationDetail(event)
+  }
   if (event.type === 'node.evidence.accepted' || (event.type === 'node.failed' && typeof event.data.outputPreview === 'string')) {
     const output = eventValue(event, 'outputPreview', '')
     const truncated = event.data.outputTruncated === true ? '\n…输出已截断，完整结果保留在 Evidence 产物中。' : ''
@@ -578,6 +581,59 @@ function operatorProgressLabel(phase: string): string {
     tool_activity: '正在使用工具',
     finalizing: '正在整理结果',
   } as Record<string, string>)[phase] ?? '正在执行'
+}
+
+/** Render only the public, bounded observation shapes admitted by the Host. */
+function operatorObservationDetail(event: DesktopOrchestrationEvent): string {
+  const operatorId = eventValue(event, 'operatorId')
+  const raw = event.data.observation
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return `${operatorId} · 公开观察不可用`
+  }
+  const observation = raw as Record<string, unknown>
+  const kind = typeof observation.kind === 'string' ? observation.kind : undefined
+  if (kind === 'public-output') {
+    const preview = boundedObservationText(observation.preview)
+    return `${operatorId} · 公开输出${preview === undefined ? '' : ` · ${preview}`}`
+  }
+  if (kind === 'tool-started' || kind === 'tool-completed') {
+    const toolName = boundedObservationText(observation.toolName) ?? '原生工具'
+    return `${operatorId} · ${kind === 'tool-started' ? '工具开始' : '工具完成'} · ${toolName}`
+  }
+  if (kind === 'approval-required') {
+    const approvalKind = boundedObservationText(observation.approvalKind) ?? '原生权限'
+    const preview = boundedObservationText(observation.preview)
+    return `${operatorId} · 需要批准 · ${approvalKind}${preview === undefined ? '' : ` · ${preview}`}`
+  }
+  if (kind === 'usage-updated') {
+    const usage = observation.usage
+    if (typeof usage !== 'object' || usage === null || Array.isArray(usage)) {
+      return `${operatorId} · 用量更新`
+    }
+    const record = usage as Record<string, unknown>
+    const parts = [
+      usageNumber(record.inputTokens) === undefined ? undefined : `输入 ${String(usageNumber(record.inputTokens))}`,
+      usageNumber(record.outputTokens) === undefined ? undefined : `输出 ${String(usageNumber(record.outputTokens))}`,
+      usageNumber(record.cacheReadInputTokens) === undefined ? undefined : `缓存读 ${String(usageNumber(record.cacheReadInputTokens))}`,
+      usageNumber(record.cacheWriteInputTokens) === undefined ? undefined : `缓存写 ${String(usageNumber(record.cacheWriteInputTokens))}`,
+      usageNumber(record.costUsd) === undefined ? undefined : `成本 $${String(usageNumber(record.costUsd))}`,
+    ].filter((value): value is string => value !== undefined)
+    return `${operatorId} · 用量更新${parts.length === 0 ? '' : ` · ${parts.join(' · ')}`}`
+  }
+  return `${operatorId} · 公开观察不可用`
+}
+
+function boundedObservationText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const text = value.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim()
+    .replace(/\b((?:api[_-]?key|token|secret|password)\s*[=:]\s*)\S+/giu, '$1[REDACTED]')
+    .replace(/\b(Bearer\s+)\S+/giu, '$1[REDACTED]')
+  if (text === '') return undefined
+  return text.length > 240 ? `${text.slice(0, 239)}…` : text
+}
+
+function usageNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 function control(
@@ -647,6 +703,7 @@ function eventLabel(type: string): string {
     'worktree.integration_failed': '隔离分支集成失败',
     'model.allocated': '模型与配额已分配', 'context.compiled': 'Context 已编译', 'execution_plan.sealed': 'ExecutionPlan 已封存',
     'node.dispatched': '执行已派发', 'node.operator.progress': 'Resident 执行进度',
+    'node.operator.observation': 'Resident 公开观察',
     'node.evidence.accepted': 'Evidence 已验收',
     'node.failed': '节点失败', 'node.retry_scheduled': '已安排重试', 'run.completed': '任务已完成',
     'capability_update.proposed': '能力更新已提出', 'capability_update.applied': '能力更新已应用',

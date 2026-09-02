@@ -466,6 +466,51 @@ describe('CodexAppServerWire', () => {
     wire.close()
   })
 
+  it('normalizes only public text, tool lifecycle, approval, and usage for Resident trace observers', async () => {
+    const child = fakeChild()
+    const observations: unknown[] = []
+    const wire = new CodexAppServerWire(
+      child.handle.stdout!, child.handle.stdin!, 'decline', [], undefined,
+      (observation) => { observations.push(observation) },
+    )
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    child.peer.respond(await child.peer.nextMethod('initialize'), { userAgent: 'codex-cli 0.151.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+    const starting = wire.startThread('/workspace', new AbortController().signal, false)
+    child.peer.respond(await child.peer.nextMethod('thread/start'), { thread: { id: 'thread-1', ephemeral: false } })
+    await starting
+    const result = wire.runTurn(['trace task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(
+      { method: 'item/started', params: { threadId: 'thread-1', turnId: 'turn-1', item: { type: 'commandExecution', command: 'cat .env' } } },
+      { method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: { type: 'commandExecution', aggregatedOutput: 'DATABASE_PASSWORD=never-persist-this' } } },
+      agentMessage('Visible implementation update.', 'commentary'),
+      { method: 'thread/tokenUsage/updated', params: {
+        threadId: 'thread-1', turnId: 'turn-1', tokenUsage: { last: { inputTokens: 8, cachedInputTokens: 3, outputTokens: 2 } },
+      } },
+      { id: 'approval', method: 'item/fileChange/requestApproval', params: {
+        threadId: 'thread-1', turnId: 'turn-1', availableDecisions: ['decline'],
+      } },
+    )
+    await child.peer.nextResponse('approval')
+    child.peer.send(agentMessage('Final answer.', 'final_answer'), turnCompleted('completed'))
+    await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    expect(observations).toEqual([
+      { kind: 'tool-started', toolName: 'commandExecution' },
+      { kind: 'tool-completed', toolName: 'commandExecution' },
+      { kind: 'public-output', preview: 'Visible implementation update.' },
+      { kind: 'usage-updated', usage: { inputTokens: 5, outputTokens: 2, cacheReadInputTokens: 3, cacheWriteInputTokens: 0 } },
+      { kind: 'approval-required', approvalKind: 'item/fileChange/requestApproval' },
+      { kind: 'public-output', preview: 'Final answer.' },
+    ])
+    expect(JSON.stringify(observations)).not.toContain('DATABASE_PASSWORD')
+    wire.close()
+  })
+
   it('registers experimental dynamic tools and returns host tool results to the active turn', async () => {
     const child = fakeChild()
     const tools = [{

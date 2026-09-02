@@ -19,6 +19,7 @@ import {
   type ResidentCompactResult,
   type ResidentExecutionProfile,
   type ResidentExecutionProfileSource,
+  type ResidentObservation,
   type ResidentProgressPhase,
   type ResidentReceiptState,
   type ResidentSessionSnapshot,
@@ -29,6 +30,49 @@ import {
 } from '@deepseek-ai/dsh-resident-operator'
 
 const MAX_INLINE_RESULT_BYTES = 64 * 1024
+const MAX_OBSERVATION_PREVIEW_CHARS = 1_600
+const MAX_OBSERVATION_NAME_CHARS = 160
+
+/**
+ * Bound trace text and remove the small set of credential-shaped values that
+ * native products can echo in an otherwise public response. This store never
+ * receives prompts, stderr, environment values, or complete tool results.
+ */
+function scrubObservationPreview(value: string): string {
+  return value
+    .replace(/\b((?:api[_-]?key|authorization|password|token|secret))\s*[:=]\s*[^\s,;]+/giu, '$1=[REDACTED]')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '')
+    .slice(0, MAX_OBSERVATION_PREVIEW_CHARS)
+}
+
+function boundedObservationName(value: string): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f]/gu, '')
+    .slice(0, MAX_OBSERVATION_NAME_CHARS)
+}
+
+/**
+ * Normalize the public Resident observation union before durable persistence.
+ * @param observation - public, already validated observation emitted by a native Resident driver.
+ * @returns bounded and credential-scrubbed observation safe for durable persistence.
+ */
+export function normalizeResidentObservation(observation: ResidentObservation): ResidentObservation {
+  switch (observation.kind) {
+    case 'public-output':
+      return { kind: observation.kind, preview: scrubObservationPreview(observation.preview) }
+    case 'tool-started':
+    case 'tool-completed':
+      return { kind: observation.kind, toolName: boundedObservationName(observation.toolName) }
+    case 'approval-required':
+      return {
+        kind: observation.kind,
+        approvalKind: boundedObservationName(observation.approvalKind),
+        ...observation.preview === undefined ? {} : { preview: scrubObservationPreview(observation.preview) },
+      }
+    case 'usage-updated':
+      return observation
+  }
+}
 
 interface SessionRow {
   id: string
@@ -671,6 +715,26 @@ export class ResidentStore {
       }, now)
       return this.inspectTurn(receipt.turn_id)
     })
+  }
+
+  /**
+   * Append one trace-safe native product observation to the existing durable
+   * event stream. Sequence and time are assigned by this single writer so a
+   * reconnecting client can resume with its existing event cursor.
+   * @param commandId - admitted durable command identity.
+   * @param observation - provider-neutral, bounded observation payload.
+   */
+  observe(commandId: string, observation: ResidentObservation): void {
+    const receipt = this.requireReceipt(commandId)
+    if (receipt.state !== 'accepted' && receipt.state !== 'running') return
+    const now = new Date().toISOString()
+    const normalized = normalizeResidentObservation(observation)
+    this.db.prepare('UPDATE session_leases SET heartbeat_at = ? WHERE session_id = ?').run(now, receipt.session_id)
+    this.appendEvent(receipt.session_id, 'turn.observation', {
+      commandId,
+      turnId: receipt.turn_id,
+      ...normalized,
+    }, now)
   }
 
   /**

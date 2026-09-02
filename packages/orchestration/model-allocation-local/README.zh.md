@@ -6,6 +6,8 @@
 
 Provider 只接收规范化 Offer，不导入 Codex、Claude、DeepSeek、Resident daemon 或 Scheduler 实现。
 
+显式算子 fallback 采用 fail-closed 的延迟绑定。提供方先评估首选 Offer；首选 lane 只是繁忙时继续等待。只有可用性、认证、请求模型或配额资格失败才会打开调用方提供的 fallback 列表，生成的计划会记录请求的算子／模型和稳定原因码。没有 fallback 列表时，显式选择维持原有失败行为。
+
 当编程执行请求带有 `adaptiveExecutionPreference: { version: 1, ... }` 时，本 Provider 对低风险首次尝试优先选择 Codex Luna；对中/高风险、跨域工作或任何此前失败优先选择 Codex Terra。目标模型族缺席时回到既有确定性评分。显式 planning/verification 偏好可以把候选约束为 Codex Sol 或 Claude Opus/Fable；显式 Claude 执行偏好会约束为 Sonnet，并对该请求停用 Codex 自适应目标。既有配额准入、订阅优先和 API 最后兜底行为不变。
 
 ## 模型体验

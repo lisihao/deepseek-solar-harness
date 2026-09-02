@@ -8,6 +8,8 @@ import {
   type DebateJsonValue,
   type DebateRunSnapshotV1,
   type DebateRunSummaryV1,
+  type DebateTurnBlockerV1,
+  type DebateTurnRoutingV1,
 } from '@deepseek-ai/dsh-debate'
 import {
   authorizeRemoteRequest,
@@ -23,6 +25,8 @@ import {
   type DesktopDebateRole,
   type DesktopDebateRun,
   type DesktopDebateRunSummary,
+  type DesktopDebateTurnBlocker,
+  type DesktopDebateTurnRouting,
 } from './contracts.ts'
 
 export { DEBATE_DASHBOARD_PATH } from './contracts.ts'
@@ -108,10 +112,11 @@ const PUBLIC_EVENT_DATA_KEYS: Readonly<Record<DebateEventType, readonly string[]
   'debate.roster.rejected': ['roles', 'reason'],
   'debate.admitted': ['action'],
   'debate.round.started': ['round', 'phase', 'slotIds'],
-  'debate.agent.dispatched': ['round', 'role', 'model'],
-  'debate.agent.settled': ['round', 'role', 'claimCount', 'evidenceCount', 'confidence'],
-  'debate.agent.failed': ['round', 'errorCode', 'error'],
-  'debate.agent.indeterminate': ['round', 'errorCode', 'error'],
+  'debate.agent.dispatched': ['round', 'role', 'model', 'operatorId', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
+  'debate.agent.settled': ['round', 'role', 'claimCount', 'evidenceCount', 'confidence', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
+  'debate.agent.blocked': ['round', 'role', 'errorCode', 'error', 'blockers', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
+  'debate.agent.failed': ['round', 'role', 'errorCode', 'error', 'blockers', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
+  'debate.agent.indeterminate': ['round', 'role', 'errorCode', 'error', 'blockers', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
   'debate.claims.compiled': ['round', 'claimCount', 'dissentCount', 'unresolvedCount'],
   'debate.convergence.evaluated': [
     'round', 'status', 'score', 'threshold', 'disagreement', 'coverage',
@@ -148,11 +153,38 @@ function projectSummary(run: DebateRunSummaryV1): DesktopDebateRunSummary {
   }
 }
 
+function projectRouting(routing: DebateTurnRoutingV1 | undefined): DesktopDebateTurnRouting | undefined {
+  if (routing === undefined) return undefined
+  return {
+    version: 1,
+    requestedOperatorId: routing.requestedOperatorId,
+    requestedModel: routing.requestedModel,
+    ...(routing.actualOperatorId === undefined ? {} : { actualOperatorId: routing.actualOperatorId }),
+    ...(routing.actualModel === undefined ? {} : { actualModel: routing.actualModel }),
+    ...(routing.fallbackReasonCode === undefined ? {} : { fallbackReasonCode: routing.fallbackReasonCode }),
+    ...(routing.allocationPlanRef === undefined ? {} : { allocationPlanRef: routing.allocationPlanRef }),
+  }
+}
+
+function projectBlockers(blockers: readonly DebateTurnBlockerV1[] | undefined): DesktopDebateTurnBlocker[] | undefined {
+  if (blockers === undefined || blockers.length === 0) return undefined
+  return blockers.slice(0, 8).map(blocker => ({
+    code: boundedText(blocker.code, 256) ?? 'UNKNOWN',
+    message: boundedText(blocker.message, MAX_TEXT) ?? '',
+    ...(blocker.nodeId === undefined ? {} : { nodeId: boundedText(blocker.nodeId, 256) ?? '' }),
+  }))
+}
+
 function projectTurnDetails(turn: DebateAgentTurnV1): NonNullable<DesktopDebateRole['latestTurn']> {
   const outputPreview = boundedText(turn.outputPreview, MAX_TURN_PREVIEW)
+  const routing = projectRouting(turn.routing)
+  const blockers = projectBlockers(turn.blockers)
   return {
     round: turn.round,
     state: turn.state,
+    ...(turn.attempt === undefined ? {} : { attempt: turn.attempt }),
+    ...(routing === undefined ? {} : { routing }),
+    ...(blockers === undefined ? {} : { blockers }),
     ...(turn.outputRef === undefined ? {} : { outputRef: turn.outputRef }),
     ...(outputPreview === undefined ? {} : { outputPreview }),
     claimIds: turn.claimIds.slice(0, MAX_ITEMS),

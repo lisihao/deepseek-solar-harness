@@ -139,6 +139,16 @@ class MemoryDriver implements ResidentProductDriver {
   }
 }
 
+class TraceDriver extends MemoryDriver {
+  override async execute(request: ResidentDriverExecuteRequest) {
+    request.onObservation({ kind: 'public-output', preview: 'Visible native progress.' })
+    request.onObservation({ kind: 'tool-started', toolName: 'Bash' })
+    request.onObservation({ kind: 'tool-completed', toolName: 'Bash' })
+    request.onObservation({ kind: 'usage-updated', usage: { inputTokens: 7, outputTokens: 3 } })
+    return super.execute(request)
+  }
+}
+
 class BlockingQualificationDriver extends MemoryDriver {
   qualificationCount = 0
   activeQualifications = 0
@@ -613,6 +623,37 @@ describe('ResidentDaemon', () => {
     expect(isolated.sessionId).not.toBe(first.sessionId)
     expect(await isolated.result).toMatchObject({ output: [{ text: 'session=native-2;count=1' }] })
     await daemon.close()
+  })
+
+  it('persists Driver observations through daemon restart without changing the final result', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const daemon = new ResidentDaemon({ root, drivers: [new TraceDriver()] })
+    await daemon.start()
+    const connected = client(root)
+    const turn = await connected.execute({
+      commandId: 'trace-through-daemon', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'ordinary task' }], signal: new AbortController().signal,
+    })
+    await expect(turn.result).resolves.toMatchObject({ output: [{ text: 'session=native-1;count=1' }] })
+    const events = await connected.readEvents(turn.sessionId)
+    expect(events.events.filter(event => event.type === 'turn.observation').map(event => event.data.kind)).toEqual([
+      'public-output', 'tool-started', 'tool-completed', 'usage-updated',
+    ])
+    expect(events.events.find(event => event.type === 'turn.observation')?.data).toMatchObject({
+      commandId: 'trace-through-daemon', turnId: turn.turnId,
+    })
+    await daemon.close()
+
+    const restarted = new ResidentDaemon({ root, drivers: [new TraceDriver()] })
+    await restarted.start()
+    try {
+      const afterRestart = await client(root).readEvents(turn.sessionId, events.events[0]!.sequence)
+      expect(afterRestart.events.some(event => event.type === 'turn.observation')).toBe(true)
+    } finally {
+      await restarted.close()
+    }
   })
 
   it('compacts an idle native Session once and replays the durable receipt without replacing history', async () => {

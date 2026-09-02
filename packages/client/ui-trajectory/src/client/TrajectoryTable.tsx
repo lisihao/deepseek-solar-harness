@@ -43,6 +43,7 @@ const KIND_LABEL: Record<TrajectoryCellKind, string> = {
   message: 'ASSISTANT',
   tool: 'TOOL',
   subtool: 'SUBTOOL',
+  operator: 'OPERATOR',
 }
 
 function ToolWrenchIcon(): ReactNode {
@@ -114,6 +115,7 @@ const KIND_ICON: Record<TrajectoryCellKind, ReactNode> = {
   message: <IconSparkle16 size={13} />,
   tool: <ToolWrenchIcon />,
   subtool: <ToolWrenchIcon />,
+  operator: <IconSparkle16 size={13} />,
 }
 
 interface TableRecord {

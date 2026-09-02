@@ -12,6 +12,8 @@ export type TrajectoryCellKind =
   | 'message'
   | 'tool'
   | 'subtool'
+  /** Safe progress emitted by a Resident physical operator. */
+  | 'operator'
 
 /** Recorded inputs needed to derive assistant TTFT and decode throughput. */
 export interface AssistantMetricDetail {

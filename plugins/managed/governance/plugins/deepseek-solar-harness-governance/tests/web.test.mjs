@@ -75,6 +75,19 @@ test('trace HTTP projection includes exact safe main-model and subscription-suba
   }, {
     type: 'orchestration/admission', seq: 10, time: Date.parse('2026-08-21T01:00:03.000Z'),
     data: { policy: 'auto', route: 'taskgraph', runId: 'run-1', maxParallel: 2 },
+  }, {
+    type: 'physical-operator/progress', seq: 11, time: Date.parse('2026-08-21T01:00:03.100Z'),
+    data: { commandId: 'resident-1', operatorId: 'codex', data: {
+      commandId: 'resident-1', kind: 'public-output', preview: 'safe native progress', prompt: 'must not project',
+    } },
+  }, {
+    type: 'physical-operator/progress', seq: 12, time: Date.parse('2026-08-21T01:00:03.200Z'),
+    data: { commandId: 'resident-1', operatorId: 'codex', data: {
+      commandId: 'resident-1', kind: 'tool-started', toolName: 'Bash', arguments: { secret: 'must not project' },
+    } },
+  }, {
+    type: 'physical-operator/trace-degraded', seq: 13, time: Date.parse('2026-08-21T01:00:03.300Z'),
+    data: { commandId: 'resident-1', operatorId: 'codex', code: 'PROGRESS_UNAVAILABLE', message: 'stream detached' },
   }] }
   const ctx = context(session)
   const handler = createGovernanceTraceHandler(ctx, new GovernanceService(ctx, {}))
@@ -83,7 +96,7 @@ test('trace HTTP projection includes exact safe main-model and subscription-suba
   assert.equal(res.status, 200)
   const body = JSON.parse(res.body)
   assert.equal(body.sessionId, session.id)
-  assert.equal(body.collaboration.totalEvents, 8)
+  assert.equal(body.collaboration.totalEvents, 11)
   assert.equal(body.collaboration.events[2].type, 'physical-operator/output')
   assert.equal(body.collaboration.events[2].output, 'bounded final result')
   assert.equal(body.collaboration.events[2].outputPreview, 'bounded final result')
@@ -93,6 +106,16 @@ test('trace HTTP projection includes exact safe main-model and subscription-suba
   assert.equal(body.collaboration.events[6].output, 'exact Claude child output')
   assert.doesNotMatch(JSON.stringify(body.collaboration), /private reasoning/u)
   assert.equal(body.collaboration.events[7].runId, 'run-1')
+  assert.deepEqual(body.collaboration.events[8], {
+    sequence: 11, type: 'physical-operator/observation', timestamp: '2026-08-21T01:00:03.100Z',
+    commandId: 'resident-1', operatorId: 'codex', kind: 'public-output', output: 'safe native progress', outputPreview: 'safe native progress', outputTruncated: false,
+  })
+  assert.deepEqual(body.collaboration.events[9], {
+    sequence: 12, type: 'physical-operator/observation', timestamp: '2026-08-21T01:00:03.200Z',
+    commandId: 'resident-1', operatorId: 'codex', kind: 'tool-started', tool: 'Bash',
+  })
+  assert.equal(body.collaboration.events[10].type, 'physical-operator/trace-degraded')
+  assert.doesNotMatch(JSON.stringify(body.collaboration), /must not project/u)
 })
 
 test('trace HTTP projection rejects missing and unknown sessions', async () => {

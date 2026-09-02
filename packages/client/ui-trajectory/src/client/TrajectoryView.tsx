@@ -151,6 +151,7 @@ export function TrajectoryView({
   const runningCalls = inspection.runningCalls
   const requests = inspection.requests
   const callSchemas = inspection.callSchemas
+  const physicalOperatorExecutions = inspection.physicalOperatorExecutions
   const requestNumbers = useMemo<readonly TrajectoryRequestNumber[]>(() => {
     const assistantsByStep = new Map<string, AssistantMessageNode>()
     for (const node of nodes) {
@@ -262,11 +263,12 @@ export function TrajectoryView({
       runningCalls,
       requests,
       callSchemas,
+      physicalOperatorExecutions,
     })
     return { turns, lastIndex: lastCellIndex(turns) }
   }, [
     nodes, eventLocations, partialTurn, partialStep,
-    runningCalls, requests, callSchemas,
+    runningCalls, requests, callSchemas, physicalOperatorExecutions,
   ])
   const timelinePartialSignature = partialStructureSignature(partial)
   const timelinePartial = useMemo<ConversationSnapshot['partial']>(() => partial === null

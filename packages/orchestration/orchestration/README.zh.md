@@ -4,6 +4,8 @@
 
 `ctx.orchestrations` 持有提供方无关 API，用于编译、启动、观察、审批、暂停、恢复、取消、显式处置持久化 TaskGraph Run 的不确定状态，以及读取其不可变内容寻址 Artifact。物理算子 Receipt accepted 后，已封存的 `NodeExecutionPlanV1` 不可修改。原生工具策略由解析后的 scope 与 effect 推导：没有 read、write、execute 或 network 权限的 Attempt 会密封为 `disabled`，因此仅推理的 Debate 节点不会意外请求 Claude Code 或 Codex 产品工具。
 
+节点可以把硬锁定的 `operator.preferredIds` 与显式准入的 `operator.fallbackIds` 配对。Scheduler 保持节点 task、role、authority 和 acceptance 不变；只有首选算子资格失败才允许改变已封存的算子／模型，并且分配计划会保留结构化 fallback 来源。首选算子繁忙时等待，不会 fallback。
+
 RLM 节点可以选择启用与 Prime 兼容的 Autonomous Mode。Graph 或 Run 准入选择 `disabled | auto | enabled`；解析后的 continuation、token、耗时与宿主质量门禁策略经过内容寻址，并封存进该 Attempt 的 `NodeExecutionPlanV1`。Autonomous Mode 是单个节点内部的宿主续接策略，不是 Goal，也不是另一套 Scheduler。它默认保持禁用。
 
 ## Model Experience

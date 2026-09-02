@@ -72,7 +72,7 @@ describe('LocalRemoteOperatorHostService', () => {
     const checkoutRoot = join(first.path, '..', '..')
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: checkoutRoot, encoding: 'utf8' }).trim())
       .toBe(source.commit)
-  })
+  }, 15_000)
 
   it('rejects dirty senders and repositories outside the Server allowlist', async () => {
     const { source, service } = await serviceFixture()

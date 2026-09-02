@@ -4,12 +4,45 @@ const DIRECT_OPERATOR_PROVIDER = 'dsh-physical-operator'
 const COLLABORATION_EVENT_TYPES = new Set([
   'physical-operator/routing-decision',
   'physical-operator/dispatch',
+  'physical-operator/tool-dispatch',
   'physical-operator/dispatch-terminal',
+  'physical-operator/progress',
+  'physical-operator/trace-degraded',
   'physical-operator/tool-call',
   'physical-operator/tool-result',
   'orchestration/admission',
 ])
 const MAX_OUTPUT_PREVIEW = 4_000
+
+function boundedText(value, limit = MAX_OUTPUT_PREVIEW) {
+  return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, limit) : undefined
+}
+
+function directOperatorObservation(data) {
+  const nested = data?.data
+  if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) return undefined
+  const kind = boundedText(nested.kind, 160)
+  if (kind === 'public-output') {
+    const output = boundedText(nested.preview)
+    return output === undefined ? undefined : { kind, output, outputPreview: output, outputTruncated: false }
+  }
+  if (kind === 'tool-started' || kind === 'tool-completed') {
+    const tool = boundedText(nested.toolName, 160)
+    return tool === undefined ? undefined : { kind, tool }
+  }
+  if (kind === 'approval-required') {
+    const approvalKind = boundedText(nested.approvalKind, 160)
+    const preview = boundedText(nested.preview)
+    return approvalKind === undefined ? undefined : { kind, approvalKind, ...preview === undefined ? {} : { output: preview, outputPreview: preview, outputTruncated: false } }
+  }
+  if (kind === 'usage-updated' && nested.usage !== null && typeof nested.usage === 'object' && !Array.isArray(nested.usage)) {
+    const usage = Object.fromEntries(['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens', 'costUsd']
+      .flatMap(key => typeof nested.usage[key] === 'number' && Number.isFinite(nested.usage[key]) ? [[key, nested.usage[key]]] : []))
+    return Object.keys(usage).length === 0 ? undefined : { kind, usage }
+  }
+  if (typeof nested.phase === 'string') return { kind: 'progress', phase: boundedText(nested.phase, 160) }
+  return undefined
+}
 
 function isLegacyGovernanceRefusal(error) {
   return error instanceof Error
@@ -120,6 +153,30 @@ function projectCollaborationEvent(event, index, subagentCalls) {
     }
   }
   if (!COLLABORATION_EVENT_TYPES.has(event.type) && output === undefined) return undefined
+  if (event.type === 'physical-operator/progress') {
+    const observation = directOperatorObservation(data)
+    if (observation === undefined) return undefined
+    return {
+      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
+      type: 'physical-operator/observation',
+      timestamp: eventTimestamp(event),
+      ...typeof data.commandId === 'string' ? { commandId: data.commandId } : {},
+      ...typeof data.operatorId === 'string' ? { operatorId: data.operatorId } : {},
+      ...observation,
+    }
+  }
+  if (event.type === 'physical-operator/trace-degraded') {
+    const message = boundedText(data.message, 400)
+    return {
+      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
+      type: event.type,
+      timestamp: eventTimestamp(event),
+      ...typeof data.commandId === 'string' ? { commandId: data.commandId } : {},
+      ...typeof data.operatorId === 'string' ? { operatorId: data.operatorId } : {},
+      ...typeof data.code === 'string' ? { code: data.code } : {},
+      ...message === undefined ? {} : { message },
+    }
+  }
   if (event.type === 'physical-operator/tool-call') {
     return {
       sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
@@ -153,6 +210,8 @@ function projectCollaborationEvent(event, index, subagentCalls) {
     ...typeof data.reason === 'string' ? { reason: data.reason } : {},
     ...typeof data.operatorId === 'string' ? { operatorId: data.operatorId } : {},
     ...typeof data.commandId === 'string' ? { commandId: data.commandId } : {},
+    ...typeof data.toolCallId === 'string' ? { toolCallId: data.toolCallId } : {},
+    ...typeof data.description === 'string' ? { description: boundedText(data.description, 160) } : {},
     ...typeof data.code === 'string' ? { code: data.code } : {},
     ...typeof data.runId === 'string' ? { runId: data.runId } : {},
     ...Number.isSafeInteger(data.maxParallel) ? { maxParallel: data.maxParallel } : {},

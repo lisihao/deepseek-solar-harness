@@ -6,6 +6,8 @@ Service Definition for quota-aware TaskGraph model allocation. It owns only immu
 
 This package has no model-visible surface. The orchestration Consumer records the selected plan as a sealed execution artifact and bounded event.
 
+An explicit `preferredOperatorIds` selection remains pinned. A caller may separately admit `fallbackOperatorIds`; the Provider considers them only when every preferred lane is unavailable, unauthenticated, missing the requested model, or rejected by quota admission. Temporary saturation returns `MODEL_CAPACITY_BUSY` and never changes operators. A selected fallback adds structured `fromOperatorId`, optional `fromModel`, and `reasonCode` provenance to the sealed plan. Omitting fallback ids preserves the prior hard-pin behavior.
+
 ## Adaptive execution preference
 
 `ModelAllocationRequest` may carry an `adaptiveExecutionPreference` with `version: 1`, an `executionRisk` (`low`, `medium`, or `high`), a non-negative `priorFailures` count, and an optional `crossDomain` flag. Its presence opts one coding execution request into a small, deterministic policy:

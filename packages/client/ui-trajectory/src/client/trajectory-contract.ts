@@ -13,6 +13,45 @@ export interface TrajectoryRequestHeaderState {
   readonly location: ConversationLocation
 }
 
+/** One safe, command-scoped physical-operator execution trace. */
+export interface TrajectoryPhysicalOperatorExecution {
+  readonly commandId: string
+  readonly operatorId: string
+  readonly turn: number
+  readonly step: number
+  readonly dispatchSeq: number
+  readonly dispatchTime: number
+  readonly entries: readonly TrajectoryPhysicalOperatorTraceEntry[]
+}
+
+/** One bounded trace fact emitted by the physical-operator Session projection. */
+export interface TrajectoryPhysicalOperatorTraceEntry {
+  readonly seq: number
+  readonly time: number
+  readonly type:
+    | 'dispatch'
+    | 'progress'
+    | 'observation'
+    | 'terminal'
+    | 'degraded'
+  readonly phase?: string
+  readonly observation?: {
+    readonly kind: 'public-output' | 'tool-started' | 'tool-completed' | 'approval-required' | 'usage-updated'
+    readonly preview?: string
+    readonly toolName?: string
+    readonly approvalKind?: string
+    readonly usage?: {
+      readonly inputTokens?: number
+      readonly outputTokens?: number
+      readonly cacheReadInputTokens?: number
+      readonly cacheWriteInputTokens?: number
+    }
+  }
+  /** Terminal outcome from the Resident product. Successful settlement is not an error. */
+  readonly outcome?: 'success' | 'error'
+  readonly code?: string
+}
+
 /** One independently assembled contribution to the legacy Trajectory ledger. */
 export type TrajectoryContribution =
   | {
@@ -36,6 +75,10 @@ export type TrajectoryContribution =
   | {
     readonly kind: 'compaction'
     readonly request: Extract<RequestView, { purpose: 'compaction' }>
+  }
+  | {
+    readonly kind: 'physical-operator'
+    readonly execution: TrajectoryPhysicalOperatorExecution
   }
   | {
     readonly kind: 'session-end'
@@ -65,6 +108,8 @@ export interface TrajectorySnapshot {
   readonly callSchemas: ReadonlyMap<string, ConversationPromptSnapshot['tools'][number]>
   readonly partial: PartialAssistant | null
   readonly runningCalls: readonly RunningToolCall[]
+  /** Safe execution facts for Resident physical-operator commands. */
+  readonly physicalOperatorExecutions: readonly TrajectoryPhysicalOperatorExecution[]
 }
 
 declare module '@deepseek-ai/dsh-client-runtime/client' {

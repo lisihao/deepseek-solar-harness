@@ -22,6 +22,7 @@ import {
   createCodexRlmToolHandler,
   isClaudeNativeSubscription,
   nativeToolSystemPrompt,
+  residentClaudeObservations,
   resolveProductExecutable,
 } from '../src/drivers.ts'
 
@@ -344,6 +345,30 @@ describe('Claude Code resident terminal failures', () => {
       type: 'result', subtype: 'success', is_error: true,
       result: 'Usage limit reached. Try again after the subscription window resets.',
     } as SDKResultMessage)).toMatchObject({ code: 'QUOTA_EXHAUSTED' })
+  })
+})
+
+describe('Claude Code resident trace normalization', () => {
+  it('keeps public text and tool lifecycle while excluding thinking and raw tool result content', () => {
+    const toolNames = new Map<string, string>()
+    expect(residentClaudeObservations({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'thinking', thinking: 'private reasoning must never persist' },
+          { type: 'text', text: 'I will inspect the package boundary.' },
+          { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'cat .env' } },
+        ],
+      },
+    }, toolNames)).toEqual([
+      { kind: 'public-output', preview: 'I will inspect the package boundary.' },
+      { kind: 'tool-started', toolName: 'Bash' },
+    ])
+    expect(residentClaudeObservations({
+      type: 'user',
+      parent_tool_use_id: 'tool-1',
+      message: { content: [{ type: 'tool_result', content: 'DATABASE_PASSWORD=never-persist-this' }] },
+    }, toolNames)).toEqual([{ kind: 'tool-completed', toolName: 'Bash' }])
   })
 })
 

@@ -202,6 +202,58 @@ describe('subscription-first model allocation', () => {
     await ctx.root.fiber.dispose()
   })
 
+  it('honors the requested model on an explicitly preferred operator', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const result = await service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
+      preferredOperatorIds: ['codex'], preferredModel: 'gpt-5.6-sol', objective: 'quality',
+      rlm: 'disabled', graphMaxParallel: 2,
+      offers: [
+        offer({ offerId: 'codex:sonnet', model: 'gpt-5.6-sonnet', tier: 'high' }),
+        offer({ offerId: 'codex:sol', model: 'gpt-5.6-sol', tier: 'high' }),
+      ],
+      now: '2026-08-29T00:00:00.000Z',
+    })
+    expect(result).toMatchObject({ operatorId: 'codex', model: 'gpt-5.6-sol' })
+    await ctx.root.fiber.dispose()
+  })
+
+  it('fails loudly instead of selecting a sibling model when an explicit model is unavailable', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    expect(() => service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
+      preferredOperatorIds: ['codex'], preferredModel: 'gpt-5.6-sol', objective: 'quality',
+      rlm: 'disabled', graphMaxParallel: 2,
+      offers: [offer({ offerId: 'codex:sonnet', model: 'gpt-5.6-sonnet', tier: 'high' })],
+      now: '2026-08-29T00:00:00.000Z',
+    })).toThrow(expect.objectContaining({ code: 'EXPLICIT_MODEL_UNAVAILABLE' }))
+    await ctx.root.fiber.dispose()
+  })
+
+  it('does not apply the preferred model pin to an admitted fallback operator', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const result = await service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
+      preferredOperatorIds: ['claude-code'], fallbackOperatorIds: ['codex'], preferredModel: 'opus',
+      objective: 'quality', rlm: 'disabled', graphMaxParallel: 2,
+      offers: [
+        offer({
+          offerId: 'claude:opus', operatorId: 'claude-code', provider: 'claude-code', model: 'opus',
+          available: false, unavailableReasonCode: 'AUTHENTICATION_UNQUALIFIED', tier: 'high',
+        }),
+        offer({ offerId: 'codex:sonnet', model: 'sonnet', tier: 'high' }),
+        offer({ offerId: 'codex:opus', model: 'opus', tier: 'low' }),
+      ],
+      now: '2026-08-29T00:00:00.000Z',
+    })
+    expect(result).toMatchObject({ operatorId: 'codex', model: 'sonnet' })
+    expect(result.fallback).toMatchObject({ fromOperatorId: 'claude-code', fromModel: 'opus' })
+    await ctx.root.fiber.dispose()
+  })
+
   it('keeps product affinity when a remote Server namespaces the operator id', async () => {
     const ctx = new Context()
     const service = new SubscriptionFirstModelAllocation(ctx)
@@ -319,6 +371,89 @@ describe('subscription-first model allocation', () => {
     expect(result).toMatchObject({ offerId: 'claude:opus' })
     expect(result.rationale).toContain('protected-reserve:20%')
     expect(result.rationale).not.toContain('accelerate-before-quota-reset')
+    await ctx.root.fiber.dispose()
+  })
+
+  it.each([
+    {
+      name: 'operator outage',
+      reasonCode: 'OPERATOR_UNAVAILABLE' as const,
+      primary: offer({
+        offerId: 'claude:opus', operatorId: 'claude-code', provider: 'claude-code', model: 'opus',
+        available: false, unavailableReasonCode: 'OPERATOR_UNAVAILABLE',
+      }),
+    },
+    {
+      name: 'authentication failure',
+      reasonCode: 'AUTHENTICATION_UNQUALIFIED' as const,
+      primary: offer({
+        offerId: 'claude:opus', operatorId: 'claude-code', provider: 'claude-code', model: 'opus',
+        available: false, unavailableReasonCode: 'AUTHENTICATION_UNQUALIFIED',
+      }),
+    },
+    {
+      name: 'model mismatch',
+      reasonCode: 'MODEL_UNAVAILABLE' as const,
+      primary: offer({
+        offerId: 'claude:sonnet', operatorId: 'claude-code', provider: 'claude-code', model: 'sonnet',
+        available: false, unavailableReasonCode: 'MODEL_UNAVAILABLE',
+      }),
+    },
+    {
+      name: 'quota rejection',
+      reasonCode: 'QUOTA_UNQUALIFIED' as const,
+      primary: offer({
+        offerId: 'claude:opus', operatorId: 'claude-code', provider: 'claude-code', model: 'opus',
+        quotaGuard: {
+          unknownQuota: 'block', protectedRemainingPercent: 20,
+          stopAdmissionAtRemainingPercent: 25, accelerateBeforeReset: false,
+        },
+        quotaPool: {
+          poolId: 'claude-five-hour', displayName: 'Claude five-hour', models: ['opus'],
+          meter: 'native-subscription', primary: { usedPercent: 80 }, observedAt: '2026-08-23T00:00:00.000Z',
+        },
+      }),
+    },
+  ])('uses an admitted fallback for $name and records structured provenance', async ({ primary, reasonCode }) => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    const result = await service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
+      preferredOperatorIds: ['claude-code'], fallbackOperatorIds: ['codex'], preferredModel: 'claude-opus-5',
+      objective: 'quality', rlm: 'disabled', graphMaxParallel: 2,
+      offers: [
+        primary,
+        offer({ offerId: 'codex:sol', model: 'gpt-5.6-sol', tier: 'high' }),
+      ],
+      now: '2026-08-23T00:00:00.000Z',
+    })
+    expect(result).toMatchObject({
+      operatorId: 'codex', model: 'gpt-5.6-sol',
+      fallback: {
+        fromOperatorId: 'claude-code',
+        fromModel: 'claude-opus-5',
+        reasonCode,
+      },
+    })
+    await ctx.root.fiber.dispose()
+  })
+
+  it('keeps a qualified but busy preferred operator pinned instead of using a fallback', async () => {
+    const ctx = new Context()
+    const service = new SubscriptionFirstModelAllocation(ctx)
+    expect(() => service.allocate({
+      runId: 'r', nodeId: 'n', phase: 'planning', role: 'judge', task: 'judge the debate',
+      preferredOperatorIds: ['claude-code'], fallbackOperatorIds: ['codex'], preferredModel: 'opus',
+      objective: 'quality', rlm: 'disabled', graphMaxParallel: 2,
+      offers: [
+        offer({
+          offerId: 'claude:opus', operatorId: 'claude-code', provider: 'claude-code', model: 'opus',
+          tier: 'high', maxConcurrency: 1, activeCount: 1,
+        }),
+        offer({ offerId: 'codex:sol', model: 'gpt-5.6-sol', tier: 'high' }),
+      ],
+      now: '2026-08-23T00:00:00.000Z',
+    })).toThrow(expect.objectContaining({ code: 'MODEL_CAPACITY_BUSY' }))
     await ctx.root.fiber.dispose()
   })
 

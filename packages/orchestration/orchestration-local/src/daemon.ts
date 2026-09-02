@@ -183,6 +183,22 @@ interface ActiveAttempt {
   progressSync?: Promise<void>
   readonly run: Pick<PhysicalOperatorRun, 'result' | 'dispose'>
     & Partial<Pick<PhysicalOperatorRun, 'readEvents'>>
+  /**
+   * Independent Resident sources owned by a composite RLM attempt.  The
+   * wrapper Promise intentionally has no native event stream, so each child
+   * turn keeps its own cursor and identity for projection and fencing.
+   */
+  readonly progressSources?: readonly PhysicalProgressSource[]
+}
+
+interface PhysicalProgressSource {
+  readonly run: Pick<PhysicalOperatorRun, 'readEvents'>
+  readonly commandId: string
+  readonly operatorId: string
+  readonly sessionId: string
+  readonly turnId: string
+  /** Last native event sequence consumed for this command/session pair. */
+  progressCursor: number
 }
 
 interface ResidentReceiptIdentity {
@@ -495,6 +511,68 @@ function event(
 
 const MAX_OPERATOR_OUTPUT_PREVIEW = 8_000
 const MAX_UPSTREAM_CONTEXT_PREVIEW = 4_000
+const MAX_OPERATOR_OBSERVATION_PREVIEW = 1_600
+const MAX_OPERATOR_OBSERVATION_NAME = 160
+
+type NodeOperatorObservationV1 =
+  | { readonly kind: 'public-output'; readonly preview: string }
+  | { readonly kind: 'tool-started' | 'tool-completed'; readonly toolName: string }
+  | { readonly kind: 'approval-required'; readonly approvalKind: string; readonly preview?: string }
+  | {
+    readonly kind: 'usage-updated'
+    readonly usage: Readonly<{
+      readonly inputTokens?: number
+      readonly outputTokens?: number
+      readonly cacheReadInputTokens?: number
+      readonly cacheWriteInputTokens?: number
+      readonly costUsd?: number
+    }>
+  }
+
+function boundedOperatorObservationText(value: unknown, limit: number): string | undefined {
+  if (typeof value !== 'string') return undefined
+  return value.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, limit)
+}
+
+/** Revalidate the Provider event boundary before durable TaskGraph projection. */
+function nodeOperatorObservation(value: Readonly<Record<string, unknown>>): NodeOperatorObservationV1 | undefined {
+  const kind = boundedOperatorObservationText(value.kind, MAX_OPERATOR_OBSERVATION_NAME)
+  switch (kind) {
+    case 'public-output': {
+      const preview = boundedOperatorObservationText(value.preview, MAX_OPERATOR_OBSERVATION_PREVIEW)
+      return preview === undefined ? undefined : { kind, preview }
+    }
+    case 'tool-started':
+    case 'tool-completed': {
+      const toolName = boundedOperatorObservationText(value.toolName, MAX_OPERATOR_OBSERVATION_NAME)
+      return toolName === undefined ? undefined : { kind, toolName }
+    }
+    case 'approval-required': {
+      const approvalKind = boundedOperatorObservationText(value.approvalKind, MAX_OPERATOR_OBSERVATION_NAME)
+      const preview = boundedOperatorObservationText(value.preview, MAX_OPERATOR_OBSERVATION_PREVIEW)
+      return approvalKind === undefined ? undefined : {
+        kind, approvalKind,
+        ...preview === undefined ? {} : { preview },
+      }
+    }
+    case 'usage-updated': {
+      if (value.usage === null || typeof value.usage !== 'object' || Array.isArray(value.usage)) return undefined
+      const rawUsage = value.usage as Record<string, unknown>
+      const usage: {
+        inputTokens?: number
+        outputTokens?: number
+        cacheReadInputTokens?: number
+        cacheWriteInputTokens?: number
+        costUsd?: number
+      } = {}
+      for (const key of ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens', 'costUsd'] as const) {
+        if (typeof rawUsage[key] === 'number' && Number.isFinite(rawUsage[key])) usage[key] = rawUsage[key]
+      }
+      return Object.keys(usage).length === 0 ? undefined : { kind, usage }
+    }
+    default: return undefined
+  }
+}
 
 /** Project the operator's user-facing result without copying unbounded output into the event index. */
 function operatorOutputPreview(output: readonly ContentBlock[]): { outputPreview: string; outputTruncated: boolean } {
@@ -806,6 +884,12 @@ export class OrchestrationDaemon {
   private readonly cluster: OrchestrationClusterElection | undefined
   private readonly recoveredRlmControllers: AbortController[] = []
   private readonly recoveredRlmDisposers: Array<() => void> = []
+  /**
+   * Live physical sources registered while a composite RLM Attempt is being
+   * assembled.  Auto-refine and continuation turns use the same lookup, so
+   * they cannot accidentally bypass the parent Attempt's trace projection.
+   */
+  private readonly rlmProgressSources = new Map<string, PhysicalProgressSource[]>()
   private readonly remoteOperatorRegistrations = new Map<string, {
     readonly signature: string
     readonly dispose: readonly (() => Promise<void>)[]
@@ -932,6 +1016,7 @@ export class OrchestrationDaemon {
     for (const transport of this.transports) transport.close()
     for (const socket of this.sockets) socket.end()
     await Promise.allSettled([...this.active.values()].map(value => value.run.dispose()))
+    this.rlmProgressSources.clear()
     await this.ctx.root.fiber.dispose()
     await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
     this.store.close()
@@ -1846,6 +1931,7 @@ export class OrchestrationDaemon {
     this.store.saveRun(record, [event(record.snapshot.runId, 'model.allocated', {
       ref: String(allocationPlanRef), operatorId, model: allocation.model, tier: allocation.tier, source: allocation.source,
       quotaPoolId: allocation.quotaPoolId ?? null,
+      fallback: allocation.fallback ?? null,
       suggestedParallelism: allocation.suggestedParallelism,
       rationale: allocation.rationale,
     }, node)])
@@ -1997,7 +2083,11 @@ export class OrchestrationDaemon {
         runId: String(record.snapshot.runId), nodeId: spec.id, attempt: plan.attempt,
         generation: plan.capabilityGeneration, executionId: String(plan.executionId),
         sessionId: receipt.sessionId, turnId: receipt.turnId,
-        operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
+        operatorId: plan.operatorPlan.operatorId,
+        progressCursor: this.residentProgressCursor(
+          String(record.snapshot.runId), spec.id, plan.attempt, plan.capabilityGeneration, String(plan.executionId),
+        ),
+        run,
       }
       this.active.set(key, active)
       void run.result.then(
@@ -2033,6 +2123,44 @@ export class OrchestrationDaemon {
     ))
   }
 
+  /** Stable owner key for all native turns inside one sealed composite Attempt. */
+  private rlmProgressKey(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+  ): string {
+    return [
+      String(record.snapshot.runId),
+      spec.id,
+      String(plan.attempt),
+      String(plan.capabilityGeneration),
+    ].join('\0')
+  }
+
+  /** Register one native Resident turn for composite-attempt trace projection. */
+  private registerRlmPhysicalRun(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    executionId: PhysicalOperatorExecutionId,
+    started: StartedResidentTurn,
+    physicalRuns?: PhysicalOperatorRun[],
+  ): void {
+    physicalRuns?.push(started.run)
+    const sources = this.rlmProgressSources.get(this.rlmProgressKey(record, spec, plan))
+    if (sources === undefined) return
+    sources.push({
+      run: started.run,
+      commandId: String(executionId),
+      operatorId: String(started.run.operatorId),
+      sessionId: started.receipt.sessionId,
+      turnId: started.receipt.turnId,
+      progressCursor: this.residentProgressCursor(
+        String(record.snapshot.runId), spec.id, plan.attempt, plan.capabilityGeneration, String(executionId),
+      ),
+    })
+  }
+
   private async dispatchRlmAttempt(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
@@ -2043,6 +2171,7 @@ export class OrchestrationDaemon {
     const timeout = attemptAbort(spec.timeoutMs)
     const { controller } = timeout
     const physicalRuns: PhysicalOperatorRun[] = []
+    const progressSources: PhysicalProgressSource[] = []
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident-rlm')
     try {
       await this.replicateClusterAuthority()
@@ -2051,20 +2180,27 @@ export class OrchestrationDaemon {
       this.failDispatch(acceptedAttempt, error)
       return
     }
+    const progressKey = this.rlmProgressKey(record, spec, plan)
+    this.rlmProgressSources.set(progressKey, progressSources)
     const result = execute(controller, physicalRuns)
     this.markAttemptRunning(record, spec, acceptedAttempt, {
       executionId: String(plan.executionId), operatorId: plan.operatorPlan.operatorId,
       model: plan.allocationPlan.model, contextIsolation, executor: 'resident-rlm',
     })
     const run = {
-      result: result.finally(timeout.clearTimeout),
+      result: result.finally(() => {
+        timeout.clearTimeout()
+        if (this.rlmProgressSources.get(progressKey) === progressSources) {
+          this.rlmProgressSources.delete(progressKey)
+        }
+      }),
       dispose: async (): Promise<void> => {
         timeout.clearTimeout()
         controller.abort()
         await Promise.allSettled(physicalRuns.map(value => value.dispose()))
       },
     }
-    this.trackDelegatedAttempt('resident-rlm', record, spec, plan, run)
+    this.trackDelegatedAttempt('resident-rlm', record, spec, plan, run, progressSources)
   }
 
   private async prepareRlmExecution(
@@ -2184,7 +2320,7 @@ export class OrchestrationDaemon {
         record, spec, plan.executionWorkspace.path, rootExecutionId, plan.allocationPlan,
         rootPrompt, controller.signal, 'Prime RLM root', bridge, String(rootSessionId),
       )
-      physicalRuns.push(root.run)
+      this.registerRlmPhysicalRun(record, spec, plan, rootExecutionId, root, physicalRuns)
       await this.ctx.rlmRuntime.trackExecution(rootSessionId, {
         nativeSessionId: root.receipt.sessionId,
         nativeTurnId: root.receipt.turnId,
@@ -2553,6 +2689,7 @@ export class OrchestrationDaemon {
         [{ type: 'text', text: prompt }], timeout.controller.signal,
         `Continuous Harness auto-refine ${stage}`, undefined, `auto-refine:${String(sessionId)}`,
       )
+      this.registerRlmPhysicalRun(record, spec, plan, executionId, started)
       run = started.run
       const result = await run.result
       if (result.stopReason !== 'completed') {
@@ -2695,7 +2832,7 @@ export class OrchestrationDaemon {
             bridge,
             String(request.childSessionId),
           )
-          physicalRuns.push(started.run)
+          this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
           this.store.appendEvents([event(record.snapshot.runId, 'rlm.child.dispatched', {
             executionId: String(executionId), childId: String(request.childId),
             childSessionId: String(request.childSessionId), parentSessionId: String(request.parentSessionId),
@@ -2987,7 +3124,7 @@ export class OrchestrationDaemon {
         record, spec, plan.executionWorkspace.path, executionId, request.model,
         prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId),
       )
-      physicalRuns.push(started.run)
+      this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
       return this.residentRlmExecution(started, settle, failed)
     }
     const result = this.ctx.modelWorkers.execute({
@@ -3488,8 +3625,16 @@ export class OrchestrationDaemon {
     const key = `${active.runId}\0${active.nodeId}`
     this.active.set(key, active)
     void active.run.result.then(
-      async (value) => { if (!this.closing) await this.settleAttempt(active, value) },
-      (error: unknown) => { if (!this.closing) this.failAttempt(active, error) },
+      async (value) => {
+        if (this.closing) return
+        await this.syncActiveProgress(active)
+        await this.settleAttempt(active, value)
+      },
+      async (error: unknown) => {
+        if (this.closing) return
+        await this.syncActiveProgress(active)
+        this.failAttempt(active, error)
+      },
     ).finally(() => { this.active.delete(key); this.triggerTick() })
   }
 
@@ -3499,13 +3644,37 @@ export class OrchestrationDaemon {
     spec: OrchestrationNodeSpecV1,
     plan: NodeExecutionPlanV1,
     run: ActiveAttempt['run'],
+    progressSources: readonly PhysicalProgressSource[] = [],
   ): void {
     this.trackActiveAttempt({
       kind, runId: String(record.snapshot.runId), nodeId: spec.id,
       attempt: plan.attempt, generation: plan.capabilityGeneration,
       executionId: String(plan.executionId), sessionId: '', turnId: '',
       operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
+      progressSources,
     })
+  }
+
+  /** Resume the native cursor from this exact durable attempt after a daemon reconnect. */
+  private residentProgressCursor(
+    runId: string,
+    nodeId: string,
+    attempt: number,
+    generation: number,
+    executionId: string,
+  ): number {
+    let afterSequence = 0
+    let cursor = 0
+    while (true) {
+      const page = this.store.readEvents(runId, afterSequence, 500)
+      for (const event of page.events) {
+        if (event.nodeId !== nodeId || event.attempt !== attempt || event.generation !== generation) continue
+        if (event.data.commandId !== executionId || !Number.isSafeInteger(event.data.residentSequence)) continue
+        cursor = Math.max(cursor, Number(event.data.residentSequence))
+      }
+      if (page.events.length < 500) return cursor
+      afterSequence = page.nextSequence
+    }
   }
 
   private failDispatch(acceptedAttempt: AttemptRecord, error: unknown): void {
@@ -3521,7 +3690,7 @@ export class OrchestrationDaemon {
   }
 
   private async syncActiveProgress(active: ActiveAttempt): Promise<void> {
-    if (active.kind !== 'resident') return
+    if (active.kind !== 'resident' && active.progressSources === undefined) return
     if (active.progressSync !== undefined) return active.progressSync
     const operation = this.syncActiveProgressUnchecked(active).finally(() => {
       if (active.progressSync === operation) delete active.progressSync
@@ -3531,28 +3700,87 @@ export class OrchestrationDaemon {
   }
 
   private async syncActiveProgressUnchecked(active: ActiveAttempt): Promise<void> {
-    if (active.run.readEvents === undefined) return
+    if (active.kind === 'resident') {
+      const source: PhysicalProgressSource = {
+        run: active.run,
+        commandId: active.executionId,
+        operatorId: active.operatorId,
+        sessionId: active.sessionId,
+        turnId: active.turnId,
+        progressCursor: active.progressCursor,
+      }
+      await this.syncPhysicalProgressSource(active, source)
+      active.progressCursor = source.progressCursor
+      return
+    }
+    // A child/continuation may be registered while another source is being
+    // drained.  Index iteration observes those late additions before the
+    // composite result is settled, avoiding a lost final trace slice.
+    const sources = active.progressSources ?? []
+    for (let index = 0; index < sources.length; index += 1) {
+      const source = sources[index]
+      if (source !== undefined) await this.syncPhysicalProgressSource(active, source)
+    }
+  }
+
+  /** Drain one native event cursor without allowing one child to hide siblings. */
+  private async syncPhysicalProgressSource(
+    active: ActiveAttempt,
+    source: PhysicalProgressSource,
+  ): Promise<void> {
+    const readEvents = source.run.readEvents
+    if (readEvents === undefined) return
     try {
-      const page = await active.run.readEvents(active.progressCursor, 200)
-      const progress = page.events.filter(value => (
-        value.type === 'turn.progress'
-        && value.data.turnId === active.turnId
-        && typeof value.data.phase === 'string'
-      ))
-      if (progress.length > 0) {
-        const record = this.store.getRun(active.runId)
-        const node = record.snapshot.nodes.find(value => value.id === active.nodeId)
-        this.store.appendEvents(progress.map(value => event(record.snapshot.runId, 'node.operator.progress', {
-          operatorId: active.operatorId,
-          turnId: active.turnId,
-          phase: value.data.phase,
+      const page = await readEvents(source.progressCursor, 200)
+      if (!Number.isSafeInteger(page.nextSequence) || page.nextSequence < source.progressCursor) {
+        throw new Error(`invalid progress cursor for physical operator command ${source.commandId}`)
+      }
+      const projected: Array<{ readonly type: string; readonly data: Readonly<Record<string, unknown>> }> = []
+      let lastSequence = source.progressCursor
+      for (const value of page.events) {
+        if (!Number.isSafeInteger(value.sequence) || value.sequence <= lastSequence) {
+          throw new Error(`invalid progress sequence for physical operator command ${source.commandId}`)
+        }
+        lastSequence = value.sequence
+        if (value.data.turnId !== source.turnId) continue
+        if (value.type === 'turn.progress' && typeof value.data.phase === 'string') {
+          projected.push({ type: 'node.operator.progress', data: {
+            commandId: source.commandId,
+            operatorId: source.operatorId,
+            nativeSessionId: source.sessionId,
+            turnId: source.turnId,
+            phase: value.data.phase,
+            residentSequence: value.sequence,
+            residentTime: value.time,
+          } })
+          continue
+        }
+        if (value.type !== 'turn.observation') continue
+        const observation = nodeOperatorObservation(value.data)
+        if (observation === undefined) continue
+        projected.push({ type: 'node.operator.observation', data: {
+          commandId: source.commandId,
+          operatorId: source.operatorId,
+          nativeSessionId: source.sessionId,
+          turnId: source.turnId,
           residentSequence: value.sequence,
           residentTime: value.time,
-        }, node)))
+          observation,
+        } })
       }
-      active.progressCursor = page.nextSequence
+      if (projected.length > 0) {
+        const record = this.store.getRun(active.runId)
+        const node = record.snapshot.nodes.find(value => value.id === active.nodeId)
+        this.store.appendEvents(projected.map(value => event(record.snapshot.runId, value.type, value.data, node)))
+      }
+      if (page.nextSequence < lastSequence) {
+        throw new Error(`progress cursor does not cover events for physical operator command ${source.commandId}`)
+      }
+      source.progressCursor = page.nextSequence
     } catch (error) {
-      this.ctx.logger.warn(`orchestration progress projection failed: ${error instanceof Error ? error.message : String(error)}`)
+      this.ctx.logger.warn(
+        `orchestration progress projection failed for ${source.commandId}: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
 
@@ -3790,15 +4018,27 @@ export class OrchestrationDaemon {
       .filter(provider => !mutatesWorkspace || provider.supportsWorkspaceMutationReturn)
       .flatMap((provider) => {
         const status = this.ctx.physicalOperators.status(String(provider.operatorId))
-        const available = provider.available && provider.authentication === 'native-subscription'
+        const preferred = spec.operator?.preferredIds?.includes(provider.operatorId) === true
+        const fallbackOnly = spec.operator?.fallbackIds?.includes(provider.operatorId) === true && !preferred
+        const requestedModel = honorProfile && !fallbackOnly ? spec.operator?.profile?.model : undefined
         return provider.models
-          .filter(model => !honorProfile
-            || spec.operator?.profile?.model === undefined
-            || model.model === spec.operator.profile.model
-            || model.resolvedModel === spec.operator.profile.model)
           .map((model): ModelExecutionOffer => {
             const quotaPool = quotaForModel(provider.quotaPools, model)
             const offerId = `${provider.operatorId}:${model.model}`
+            const modelQualified = requestedModel === undefined
+              || model.model === requestedModel
+              || model.resolvedModel === requestedModel
+            const quotaExhausted = exhaustedOfferIds.has(offerId)
+              || (quotaPool !== undefined && exhaustedQuotaPoolIds.has(quotaPool.poolId))
+            const unavailableReasonCode = provider.authentication !== 'native-subscription'
+              ? 'AUTHENTICATION_UNQUALIFIED' as const
+              : !provider.available
+                ? 'OPERATOR_UNAVAILABLE' as const
+                : !modelQualified
+                  ? 'MODEL_UNAVAILABLE' as const
+                  : quotaExhausted
+                    ? 'QUOTA_UNQUALIFIED' as const
+                    : undefined
             return {
               offerId,
               operatorId: provider.operatorId,
@@ -3807,19 +4047,18 @@ export class OrchestrationDaemon {
               displayName: `${status.displayName} · ${model.displayName}`,
               source: 'native-subscription',
               tier: modelTier(model),
-              available: available
-              && !exhaustedOfferIds.has(offerId)
-              && (quotaPool === undefined || !exhaustedQuotaPoolIds.has(quotaPool.poolId)),
+              available: unavailableReasonCode === undefined,
               maxConcurrency: status.maxConcurrency,
               activeCount: activeByOperator.get(provider.operatorId) ?? 0,
               tags: status.tags,
+              ...unavailableReasonCode === undefined ? {} : { unavailableReasonCode },
               ...quotaPool === undefined ? {} : { quotaPool },
-              quotaGuard: spec.operator?.preferredIds?.includes(provider.operatorId) === true
+              quotaGuard: preferred
                 ? { ...quotaGuard(provider), unknownQuota: 'allow' }
                 : quotaGuard(provider),
               profile: {
                 model: model.model,
-                ...honorProfile && spec.operator?.profile?.effort !== undefined
+                ...honorProfile && !fallbackOnly && spec.operator?.profile?.effort !== undefined
                   ? { effort: spec.operator.profile.effort }
                   : model.defaultEffort === undefined ? {} : { effort: model.defaultEffort },
               },
@@ -3872,6 +4111,18 @@ export class OrchestrationDaemon {
       : []
     const phase = nodePhase(spec)
     const priorFailures = record.snapshot.nodes.find(value => value.id === spec.id)?.attempt ?? 0
+    const requestedModel = spec.operator?.profile?.model
+    // Resident catalogs may expose a user-facing resolved model alongside the
+    // exact native CLI model token.  Normalize that alias before crossing the
+    // public allocator seam, whose preferredModel contract is deliberately an
+    // exact match against ModelExecutionOffer.model.
+    const canonicalPreferredModel = requestedModel === undefined
+      ? undefined
+      : providers
+        .filter(provider => spec.operator?.preferredIds?.includes(provider.operatorId) === true)
+        .flatMap(provider => provider.models)
+        .find(model => model.model === requestedModel || model.resolvedModel === requestedModel)
+        ?.model ?? requestedModel
     const allocation = await this.ctx.modelAllocation.allocate({
       runId: String(record.snapshot.runId),
       nodeId: spec.id,
@@ -3879,6 +4130,8 @@ export class OrchestrationDaemon {
       role: spec.role,
       task: spec.task,
       preferredOperatorIds: spec.operator?.preferredIds ?? [],
+      fallbackOperatorIds: spec.operator?.fallbackIds ?? [],
+      ...canonicalPreferredModel === undefined ? {} : { preferredModel: canonicalPreferredModel },
       objective: record.snapshot.admission?.optimization ?? 'balanced',
       plannerVerifierPreference: record.snapshot.admission?.plannerVerifierPreference ?? 'codex-sol',
       executionPreference: record.snapshot.admission?.executionPreference ?? 'luna-first',
@@ -3894,11 +4147,17 @@ export class OrchestrationDaemon {
       offers: [...residentOffers, ...modelWorkerOffers],
       now: now(),
     })
-    const provider = providers.find(value => value.operatorId === allocation.operatorId)
-    if (allocation.source === 'native-subscription' && provider === undefined) {
-      throw new OrchestrationError(`allocated provider disappeared: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
+    // The allocator receives the canonical native token, while persisted
+    // fallback provenance must retain the exact model spelling requested by
+    // the Graph so the UI and audit trail explain the user's selection.
+    const surfacedAllocation = allocation.fallback === undefined || requestedModel === undefined
+      ? allocation
+      : { ...allocation, fallback: { ...allocation.fallback, fromModel: requestedModel } }
+    const provider = providers.find(value => value.operatorId === surfacedAllocation.operatorId)
+    if (surfacedAllocation.source === 'native-subscription' && provider === undefined) {
+      throw new OrchestrationError(`allocated provider disappeared: ${surfacedAllocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     }
-    return provider === undefined ? { allocation } : { provider, allocation }
+    return provider === undefined ? { allocation: surfacedAllocation } : { provider, allocation: surfacedAllocation }
   }
 
   private async reconcile(): Promise<void> {
@@ -3933,7 +4192,10 @@ export class OrchestrationDaemon {
           runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
           generation: attempt.generation, executionId: attempt.executionId,
           sessionId: receipt.sessionId, turnId: receipt.turnId,
-          run, operatorId, progressCursor: 0,
+          run, operatorId,
+          progressCursor: this.residentProgressCursor(
+            attempt.runId, attempt.nodeId, attempt.attempt, attempt.generation, attempt.executionId,
+          ),
         }
         this.reconcileRetryAfter.delete(key)
         this.active.set(key, recovered)

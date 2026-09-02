@@ -680,6 +680,8 @@ export interface DebateRoundExecutionResultV1 {
   readonly version: 1
   /** Completed turn result indexed by its roster slot identity. */
   readonly resultsBySlot: Readonly<Record<string, DebateTurnResultV1>>
+  /** Slot-specific failures retained instead of collapsing the whole round. */
+  readonly failuresBySlot?: Readonly<Record<string, DebateTurnFailureV1>>
 }
 
 /** Input sent to one roster slot by the local Provider. */
@@ -700,6 +702,8 @@ export interface DebateTurnRequestV1 {
   readonly persona: DebateRolePersonaV1
   /** Deployment-owned physical operator identity. */
   readonly operatorId: string
+  /** Explicit alternatives resolved at Scheduler attempt admission. */
+  readonly fallbackOperatorIds?: readonly string[]
   /** Model identifier selected for the slot. */
   readonly model: string
   /** Qualified model tier retained from the fixed roster. */
@@ -730,6 +734,8 @@ export interface DebateTurnRequestV1 {
 
 /** Result returned by one injected executor turn; no model or CLI is assumed. */
 export interface DebateTurnResultV1 {
+  /** Scheduler attempt that produced this settled result. */
+  readonly attempt?: number
   /** Calibrated confidence for this complete turn, required even when no claim is emitted. */
   readonly confidence: number
   /** Optional durable reference to the complete turn output. */
@@ -748,15 +754,31 @@ export interface DebateTurnResultV1 {
   readonly evidenceRefs?: readonly DebateEvidenceRefV1[]
   /** Provider-reported token and cost accounting. */
   readonly usage?: DebateUsageV1
+  /** Scheduler-owned requested/actual routing for this settled logical role. */
+  readonly routing?: DebateTurnRoutingV1
+}
+
+/** One authoritative per-slot Scheduler outcome when no settled result exists. */
+export interface DebateTurnFailureV1 {
+  /** Terminal outcome for the slot when no settled turn result exists. */
+  readonly state: 'blocked' | 'failed' | 'indeterminate'
+  /** Scheduler attempt number that produced this outcome. */
+  readonly attempt: number
+  /** Stable error code explaining why the slot did not settle. */
+  readonly errorCode: string
+  /** Structured blockers that prevent the slot from settling. */
+  readonly blockers: readonly DebateTurnBlockerV1[]
+  /** Scheduler-owned requested and actual routing for this failed slot. */
+  readonly routing?: DebateTurnRoutingV1
 }
 
 /** Round phase supplied to the injected executor. */
 export type DebateTurnPhase = 'blind-independent' | 'claim-ledger' | 'high-severity-unresolved'
 ```
 
-依赖：[`DebateClaimLedgerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimV1`](../packages/orchestration/debate/src/index.ts) · [`DebateDissentV1`](../packages/orchestration/debate/src/index.ts) · [`DebateEvidenceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateExecutionRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateModelSource`](../packages/orchestration/debate/src/index.ts) · [`DebateModelTier`](../packages/orchestration/debate/src/index.ts) · [`DebateRoleId`](../packages/orchestration/debate/src/index.ts) · [`DebateRolePersonaV1`](../packages/orchestration/debate/src/index.ts) · [`DebateSourceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUnresolvedV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUsageV1`](../packages/orchestration/debate/src/index.ts)
+依赖：[`DebateClaimLedgerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimV1`](../packages/orchestration/debate/src/index.ts) · [`DebateDissentV1`](../packages/orchestration/debate/src/index.ts) · [`DebateEvidenceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateExecutionRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateModelSource`](../packages/orchestration/debate/src/index.ts) · [`DebateModelTier`](../packages/orchestration/debate/src/index.ts) · [`DebateRoleId`](../packages/orchestration/debate/src/index.ts) · [`DebateRolePersonaV1`](../packages/orchestration/debate/src/index.ts) · [`DebateSourceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnBlockerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnRoutingV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUnresolvedV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUsageV1`](../packages/orchestration/debate/src/index.ts)
 
-来源：[`packages/orchestration/debate-local/src/types.ts:147`](../packages/orchestration/debate-local/src/types.ts)
+来源：[`packages/orchestration/debate-local/src/types.ts:171`](../packages/orchestration/debate-local/src/types.ts)
 
 <a id="deepseek-aidsh-debate-orchestration"></a>
 
@@ -786,7 +808,7 @@ export interface DebateTaskGraphAdapterOptions {
 }
 ```
 
-来源：[`packages/orchestration/debate-orchestration/src/index.ts:42`](../packages/orchestration/debate-orchestration/src/index.ts)
+来源：[`packages/orchestration/debate-orchestration/src/index.ts:45`](../packages/orchestration/debate-orchestration/src/index.ts)
 
 <a id="deepseek-aidsh-e2b"></a>
 

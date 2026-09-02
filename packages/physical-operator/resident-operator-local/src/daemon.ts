@@ -709,6 +709,9 @@ export class ResidentDaemon {
         onProgress: (phase) => {
           this.store.progress(commandId, phase)
         },
+        onObservation: (observation) => {
+          this.store.observe(commandId, observation)
+        },
       })
       this.store.markRunning(commandId, result.nativeSessionId)
       this.store.settle(commandId, result)

@@ -49,6 +49,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'physical-operator/progress',
   'physical-operator/routing-decision',
   'physical-operator/tool-call',
+  'physical-operator/tool-dispatch',
   'physical-operator/tool-result',
   'physical-operator/trace-degraded',
   'plan/mode',

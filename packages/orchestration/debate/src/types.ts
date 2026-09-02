@@ -57,6 +57,8 @@ export interface DebateRoleSpecV1 {
   readonly role: DebateRoleId
   readonly kind: DebateRoleKind
   readonly operatorId: string
+  /** Explicit deployment-owned alternatives resolved only by the Scheduler. */
+  readonly fallbackOperatorIds?: readonly string[]
   readonly model: string
   readonly tier: DebateModelTier
   readonly source: DebateModelSource
@@ -261,7 +263,25 @@ export interface DebateProvenanceV1 {
 }
 
 /** Durable lifecycle of one roster slot turn. */
-export type DebateAgentTurnState = 'planned' | 'dispatched' | 'settled' | 'failed' | 'indeterminate'
+export type DebateAgentTurnState = 'planned' | 'dispatched' | 'settled' | 'blocked' | 'failed' | 'indeterminate'
+
+/** Scheduler-owned reason why a roster slot did not produce a settled result. */
+export interface DebateTurnBlockerV1 {
+  readonly code: string
+  readonly message: string
+  readonly nodeId?: string
+}
+
+/** Requested and actual physical routing retained without changing the logical role. */
+export interface DebateTurnRoutingV1 {
+  readonly version: 1
+  readonly requestedOperatorId: string
+  readonly requestedModel: string
+  readonly actualOperatorId?: string
+  readonly actualModel?: string
+  readonly fallbackReasonCode?: string
+  readonly allocationPlanRef?: string
+}
 
 /** One provider-reported attempt of one fixed roster slot. */
 export interface DebateAgentTurnV1 {
@@ -272,6 +292,9 @@ export interface DebateAgentTurnV1 {
   readonly operatorId: string
   readonly model: string
   readonly state: DebateAgentTurnState
+  readonly attempt?: number
+  readonly routing?: DebateTurnRoutingV1
+  readonly blockers?: readonly DebateTurnBlockerV1[]
   readonly outputRef?: string
   readonly outputPreview?: string
   readonly claimIds: readonly string[]
@@ -372,6 +395,7 @@ export type DebateEventType =
   | 'debate.round.started'
   | 'debate.agent.dispatched'
   | 'debate.agent.settled'
+  | 'debate.agent.blocked'
   | 'debate.agent.failed'
   | 'debate.agent.indeterminate'
   | 'debate.claims.compiled'
