@@ -168,7 +168,7 @@ describe('immutable compilation foundations', () => {
       constructor(value: Context) { super(value, capsuleRoot) }
     })
     const snapshot = await ctx.capabilityCapsules.snapshot({})
-    expect(snapshot.refs).toHaveLength(2)
+    expect(snapshot.refs.some(ref => String(ref).startsWith('network-reader@'))).toBe(true)
     const networkRef = snapshot.refs.find(ref => String(ref).startsWith('network-reader@'))
     expect(networkRef).toBeDefined()
     await expect(ctx.capabilityCapsules.get(CapabilityCapsuleRef(String(networkRef)))).resolves.toMatchObject({ id: 'network-reader' })

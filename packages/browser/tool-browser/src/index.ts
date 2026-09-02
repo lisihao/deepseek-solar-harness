@@ -251,7 +251,11 @@ const planSchema = zod.object({
 
 type PortablePlanInput = zod.infer<typeof planSchema>
 
-/** Validate the model boundary and brand only already-validated plan-local ids. */
+/**
+ * Validate the model boundary and brand only already-validated plan-local ids.
+ * @param input - untrusted model tool value to validate.
+ * @returns the branded portable plan accepted by `ctx.browser`.
+ */
 export function parseBrowserPlan(input: unknown): BrowserRunPlanV1 {
   const parsed = planSchema.parse(input)
   const workspace: BrowserWorkspaceSelectorV1 = parsed.workspace.kind === 'existing'
@@ -306,7 +310,11 @@ function operationValue(operation: BrowserOperationResultV1): JsonValue {
   return JSON.parse(JSON.stringify(operation)) as JsonValue
 }
 
-/** Convert branded seam values to the tool's JSON-only durable value. */
+/**
+ * Convert branded seam values to the tool's JSON-only durable value.
+ * @param result - browser run result with branded identifiers.
+ * @returns a JSON-only value safe for tool persistence and rendering.
+ */
 export function resultValue(result: BrowserRunResultV1): Record<string, JsonValue> {
   return {
     version: result.version,
@@ -315,6 +323,7 @@ export function resultValue(result: BrowserRunResultV1): Record<string, JsonValu
   }
 }
 
+/** Stable model policy paired with the portable browser tool schema. */
 export const browserGuidance = 'Use the browser tool when a task requires interacting with a real webpage, especially one that benefits from the user\'s existing browser login. Submit one ordered portable plan with the fewest necessary operations. Use a named workspace (createIfMissing true when needed) or an existing workspace id; the default Ego Lite browser cannot identify a current workspace. For open, use reuse:"exact-url"; reuse:"never" is not available. Do not request pages, because provider-native tab ids are not portable; use select-page with a URL match, then page-info or snapshot. Prefer semantic snapshots and role/label/text locators over CSS. Reuse a named workspace only when continuity matters. Never assume a click or form submission succeeded: read the resulting state in the same plan. If the browser reports user control or an inactive workspace, stop and report it; do not retry, take control, or recreate the task automatically.'
 
 /** Register the portable model Consumer; Provider selection remains in ctx.browser. */

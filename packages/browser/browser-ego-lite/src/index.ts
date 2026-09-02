@@ -192,6 +192,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.browser.registerProvider(new EgoLiteBrowserProvider(ctx, resolved, executable))
 }
 
+/** Complete Cordis plugin export used by headless orchestration compositions. */
+export default { name, inject, Config, apply }
+
 function resolveConfig(config: Config): ResolvedConfigValues {
   const resolved = config as ResolvedConfigValues
   if (!isAbsolute(resolved.cwd)) throw new Error('browser-ego-lite: cwd must be an absolute path')

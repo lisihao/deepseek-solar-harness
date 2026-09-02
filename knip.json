@@ -826,6 +826,13 @@
         "@deepseek-ai/.+"
       ]
     },
+    "packages/bundle/ego-lite-browser": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-browser",
+        "@deepseek-ai/dsh-browser-ego-lite",
+        "@deepseek-ai/dsh-tool-browser"
+      ]
+    },
     "packages/orchestration/capability-capsule": {
       "project": [
         "src/**/*.ts"

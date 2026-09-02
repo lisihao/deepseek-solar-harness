@@ -317,6 +317,15 @@ async function executeFixtureSource(source: string, state: FixtureState = { snap
 }
 
 describe('EgoLiteBrowserProvider process protocol', () => {
+  it('exports a complete default Cordis plugin for headless dynamic loading', () => {
+    expect(EgoLite.default).toMatchObject({
+      name: 'browser-ego-lite',
+      inject: ['browser', 'subprocess'],
+      Config: EgoLite.Config,
+      apply: EgoLite.apply,
+    })
+  })
+
   it('spawns exactly [executable, nodejs] without a shell and sends one complete stdin program', async () => {
     const { ctx, subprocess } = await setup()
 

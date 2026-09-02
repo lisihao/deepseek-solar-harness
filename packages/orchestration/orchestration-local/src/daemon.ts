@@ -173,7 +173,11 @@ export function skillProviderManifestSha256(modules: readonly string[]): string 
   return canonicalSha256([...modules])
 }
 
-/** Fence detached daemons from clients configured with another Browser Provider set. */
+/**
+ * Fence detached daemons from clients configured with another Browser Provider set.
+ * @param modules - configured Browser Provider module identifiers.
+ * @returns the canonical Provider-manifest SHA-256 digest.
+ */
 export function browserProviderManifestSha256(modules: readonly string[]): string {
   return canonicalSha256([...modules])
 }

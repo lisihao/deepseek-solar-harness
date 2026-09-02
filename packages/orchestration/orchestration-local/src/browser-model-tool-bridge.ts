@@ -216,7 +216,11 @@ function operation(value: unknown): BrowserOperationV1 {
   throw new Error(`unsupported browser operation kind: ${kind}`)
 }
 
-/** Validate and brand the model's closed browser plan before it crosses the bridge. */
+/**
+ * Validate and brand the model's closed browser plan before it crosses the bridge.
+ * @param input - untrusted Resident model-tool plan.
+ * @returns the validated portable plan with branded local identifiers.
+ */
 export function parseBrowserModelPlan(input: unknown): BrowserRunPlanV1 {
   const raw = object(input, 'browser plan')
   if (raw.version !== 1) throw new Error('browser plan version must be 1')
@@ -293,7 +297,12 @@ export class BrowserModelToolBridge {
     this.server = createServer((socket) => { this.accept(socket) })
   }
 
-  /** Bind the browser tool to one Resident execution and return its bridge descriptor. */
+  /**
+   * Bind the browser tool to one Resident execution and return its bridge descriptor.
+   * @param commandId - Resident command identifier that scopes the bridge session.
+   * @param signal - cancellation signal for browser calls in this binding.
+   * @returns the Resident bridge descriptor and an idempotent release operation.
+   */
   async bind(commandId: string, signal: AbortSignal): Promise<{
     readonly descriptor: PhysicalOperatorModelToolBridgeV1
     release(): void

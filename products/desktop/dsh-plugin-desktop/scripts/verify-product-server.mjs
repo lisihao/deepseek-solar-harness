@@ -189,7 +189,15 @@ try {
   }
   for (const entry of entries) {
     if (typeof entry.url !== 'string') throw new Error(`client ${String(entry.id)} has no URL`)
-    const response = await fetch(new URL(entry.url, baseUrl))
+    let response
+    try {
+      response = await fetch(new URL(entry.url, baseUrl))
+    } catch (error) {
+      throw new Error(
+        `client ${String(entry.id)} fetch failed: ${error instanceof Error ? error.message : String(error)}\n${stdout}\n${stderr}`,
+        { cause: error },
+      )
+    }
     if (!response.ok) throw new Error(`client ${String(entry.id)} returned HTTP ${String(response.status)}`)
   }
   // WebServer becomes reachable before optional resident/orchestration

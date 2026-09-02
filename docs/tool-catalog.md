@@ -124,14 +124,428 @@ ask_user_question pauses the tool call until the active UI provider returns a hu
 
 ### `browser`
 
-Run an ordered, typed browser plan through the configured browser provider. Uses persistent browser workspaces and existing login state when supported.
+Run an ordered, typed browser plan through the configured browser provider. The model-facing plan uses only named/existing workspaces, exact-URL tab reuse, and portable page operations supported by the default Ego Lite v1.2.5 Provider; current workspace, reuse:"never", and pages are unavailable.
 
 ```json
 {
   "type": "object",
   "properties": {
     "plan": {
-      "description": "BrowserRunPlanV1: {version:1, workspace, requiredCapabilities, operations}. Operations are bounded to 64 and execute in order."
+      "type": "object",
+      "description": "Closed BrowserRunPlanV1 model schema. Use workspace kind existing or named; open.reuse must be exact-url; pages is not a model operation. Operations are bounded to 64 and execute in order.",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "workspace": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "existing"
+                },
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "named"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "createIfMissing": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "kind",
+                "name",
+                "createIfMissing"
+              ]
+            }
+          ]
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "authenticated-profile-reuse",
+              "named-workspace",
+              "page-evaluate",
+              "semantic-snapshot"
+            ]
+          }
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "timeoutMs": {
+                "type": "integer"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "open",
+                  "select-page",
+                  "close-page",
+                  "navigate",
+                  "reload",
+                  "page-info",
+                  "snapshot",
+                  "click",
+                  "fill",
+                  "clear",
+                  "press",
+                  "check",
+                  "select",
+                  "read",
+                  "count",
+                  "wait",
+                  "complete"
+                ]
+              },
+              "page": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "reuse": {
+                "type": "string",
+                "const": "exact-url"
+              },
+              "waitUntil": {
+                "type": "string",
+                "enum": [
+                  "dom-content-loaded",
+                  "load",
+                  "network-idle"
+                ]
+              },
+              "match": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "exact-url"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "url"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "url-prefix"
+                      },
+                      "prefix": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "prefix"
+                    ]
+                  }
+                ]
+              },
+              "locator": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "css",
+                      "role",
+                      "text",
+                      "label",
+                      "placeholder",
+                      "test-id"
+                    ]
+                  },
+                  "selector": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "placeholder": {
+                    "type": "string"
+                  },
+                  "testId": {
+                    "type": "string"
+                  },
+                  "exact": {
+                    "type": "boolean"
+                  },
+                  "index": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "value": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "checked": {
+                "type": "boolean"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "text"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "value"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "html"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "attribute"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "name"
+                    ]
+                  }
+                ]
+              },
+              "condition": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "load",
+                      "url",
+                      "locator",
+                      "control"
+                    ]
+                  },
+                  "page": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "dom-content-loaded",
+                      "load",
+                      "network-idle",
+                      "attached",
+                      "detached",
+                      "visible",
+                      "hidden"
+                    ]
+                  },
+                  "match": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "exact-url"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "url-prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "css",
+                          "role",
+                          "text",
+                          "label",
+                          "placeholder",
+                          "test-id"
+                        ]
+                      },
+                      "selector": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "placeholder": {
+                        "type": "string"
+                      },
+                      "testId": {
+                        "type": "string"
+                      },
+                      "exact": {
+                        "type": "boolean"
+                      },
+                      "index": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  "control": {
+                    "type": "string",
+                    "enum": [
+                      "agent",
+                      "user"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "keep": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind"
+            ]
+          }
+        }
+      },
+      "required": [
+        "version",
+        "workspace",
+        "operations"
+      ]
     }
   },
   "required": [
@@ -242,6 +656,13 @@ Discover and run deployment-defined physical operators. Use action=list to inspe
         "ephemeral",
         "resident"
       ]
+    },
+    "required_capabilities": {
+      "type": "array",
+      "description": "Capabilities required by the delegated task, for example browser. Browser requires resident mode so the full DSH tool bridge remains authoritative.",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

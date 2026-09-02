@@ -1615,6 +1615,8 @@ export interface Config {
   readonly residentDriverModules?: string[]
   /** Trusted plugins that register executable TypeScript Skills in the daemon. */
   readonly skillProviderModules?: string[]
+  /** Trusted complete Browser Provider plugins loaded by the headless daemon. */
+  readonly browserProviderModules?: string[]
   /** Maximum time for one Server-side exact-commit Git materialization. */
   readonly remoteMaterializationTimeoutMs?: number
   /** Maximum time for one bounded Resident artifact read. */
@@ -1626,7 +1628,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/orchestration/orchestration-local/src/index.ts:46`](../packages/orchestration/orchestration-local/src/index.ts)
+Source: [`packages/orchestration/orchestration-local/src/index.ts:53`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
