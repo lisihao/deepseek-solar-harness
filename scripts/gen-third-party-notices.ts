@@ -13,6 +13,7 @@ import { resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import { parse as parseToml, type TomlTableWithoutBigInt, type TomlValueWithoutBigInt } from 'smol-toml'
 import parseSpdx from 'spdx-expression-parse'
+import { isSupportedDarwinPackagePath } from './darwin-package-scope.ts'
 
 const root = resolve(import.meta.dirname, '..')
 const OUT = 'THIRD_PARTY_NOTICES.md'
@@ -165,6 +166,7 @@ function loadWorkspaceManifests(): { manifests: Map<string, Manifest>; names: Se
   for (const pattern of patterns) {
     for (const path of globSync(pattern, { cwd: root })) {
       const normalized = path.replaceAll('\\', '/')
+      if (!isSupportedDarwinPackagePath(normalized)) continue
       const manifest = readManifest(normalized)
       manifests.set(normalized, manifest)
       if (manifest.name !== undefined) names.add(manifest.name)
