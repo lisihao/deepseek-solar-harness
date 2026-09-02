@@ -9,7 +9,7 @@ import { apply, inject, name } from '../src/index.ts'
 describe('Archify plugin registration contract', () => {
   it('exports an isolated Cordis plugin contract', () => {
     expect(name).toBe('@deepseek-ai/dsh-archify')
-    expect(inject).toEqual(['tools', 'systemPrompt'])
+    expect(inject).toEqual(['tools', 'systemPrompt', 'subprocess'])
     expect(typeof apply).toBe('function')
   })
 
