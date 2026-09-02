@@ -18,6 +18,22 @@ Graph 是执行权限天花板，不是 prompt 模板。Capsule 解析可以实�
 
 RLM 节点还可以把与 Prime 兼容的 Autonomous Mode 选择为 `disabled | auto | enabled`；它默认禁用。daemon 会为每个 Attempt 封存一份不可变宿主策略，持久化 token、turn、continuation 和门禁状态，先运行声明的宿主质量门禁，再检查限制，并且只在预算仍有余量时续接同一条 RLM lane。门禁通过可以完成节点；限制耗尽绝不会变成成功。该策略既不是 Goal，也不是另一套 Scheduler；其 shell 命令需要 Graph 显式声明 `autonomous-gate` execute effect。
 
+## Debate 算子回退与来源记录
+
+Debate 将逻辑 roster 与物理执行 offer 分开。角色的 `operatorId`、模型、角色类型和 persona 是不可变的 roster 事实；Graph 与 Scheduler 只能为某个节点 Attempt 晚绑定物理算子和模型。
+
+Graph 节点上的 `operator.preferredIds` 在分配请求中规范化为 `preferredOperatorIds`，继续保持硬锁定语义。没有 fallback 列表时，首选算子不可用就显式失败，分配不会静默扩大候选集合。调用方可以通过 `operator.fallbackIds` 或 Debate 角色的 `fallbackOperatorIds` 明确准入部署拥有的替代算子；这些字段不是“尝试任意 Provider”的开关。
+
+只有当所有首选 lane 因 `OPERATOR_UNAVAILABLE`、`AUTHENTICATION_UNQUALIFIED`、`MODEL_UNAVAILABLE` 或 `QUOTA_UNQUALIFIED` 而不合格时，Scheduler 才会考虑显式 fallback。`MODEL_CAPACITY_BUSY` 表示首选 lane 已通过资格审查但暂时满载，因此节点保持 busy 或 waiting，不会切换算子。
+
+Fallback 选择仍然受当前策略已经准入的 offer、认证、配额、来源和 effect 检查约束。显式 fallback 列表不会授权计量 API、绕过原生订阅资格审查或授予新权限；Debate 的订阅 fallback 策略必须明确列出允许的物理算子。
+
+已封存的分配计划会以 `fromOperatorId`、可选的 `fromModel` 和 `reasonCode` 记录结构化 fallback 来源。Debate turn 投影还会分别保留请求的算子／模型、实际算子／模型、fallback 原因、分配计划引用、Attempt 以及结构化 blocker。因此，一个物理 Provider 可以执行多个逻辑角色，例如 proposer、falsifier 和 judge，而不会改变它们的角色或 persona；角色多样性不要求 Provider 多样性。
+
+Round 投影按角色独立，而不是全有或全无。已结算的 proposer 与被阻断的 falsifier 会连同各自实际路由和 blocker 独立可见；因依赖失败而阻断的 judge 不会被改写成算子故障。因此，Run 可以以 failed 或 awaiting recovery 结束，同时为 UI、Trace 和显式恢复决策保留每个成功角色的结果及每个角色的失败。
+
+本契约细化了 [原生使用 TaskGraph 的智能协作](../../.agents/notes/implemented/feature/2026-08-20-taskgraph-smart-collaboration.md) 中的 model-allocation fallback 说明：其中与 Provider 无关的偏好和硬锁定行为保持不变，而 fallback 现在必须显式准入并持久化来源。权威契约位于 [`model-allocation`](../../packages/orchestration/model-allocation/src/index.ts)、[`orchestration`](../../packages/orchestration/orchestration/src/index.ts) 和 [`debate`](../../packages/orchestration/debate/src/types.ts)。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -249,7 +265,7 @@ abstract readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV
 abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>
 ```
 
-Source: [`packages/orchestration/debate/src/index.ts:341`](../../packages/orchestration/debate/src/index.ts)
+Source: [`packages/orchestration/debate/src/index.ts:354`](../../packages/orchestration/debate/src/index.ts)
 
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 
@@ -279,11 +295,13 @@ Scheduler-facing Service Definition; implementations remain replaceable plugins.
  * Select one qualified execution offer and recommend safe parallelism.
  * @param request Node phase, policy, quota, and currently qualified offers.
  * @returns The selected model plan and parallelism recommendation.
+ * @throws {ModelAllocationError} When no admitted lane qualifies, an explicit
+ * model is unavailable, or qualified capacity is busy.
  */
 abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
 ```
 
-Source: [`packages/orchestration/model-allocation/src/index.ts:156`](../../packages/orchestration/model-allocation/src/index.ts)
+Source: [`packages/orchestration/model-allocation/src/index.ts:177`](../../packages/orchestration/model-allocation/src/index.ts)
 
 <a id="ctxmodelworkers--modelworkerruntime"></a>
 
@@ -432,7 +450,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:634`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:636`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 

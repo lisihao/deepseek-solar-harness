@@ -17,6 +17,7 @@ import type {
   TrajectoryCellProps,
   TrajectorySourceBlock,
 } from './trajectory-record.ts'
+import type { TrajectoryPhysicalOperatorExecution } from './trajectory-contract.ts'
 import { formatElapsedSeconds } from './trajectory-record.ts'
 
 /** One Message or Step group inside a turn. */
@@ -40,6 +41,7 @@ export interface TrajectoryLayoutInput {
   runningCalls: ConversationSnapshot['runningCalls']
   requests?: readonly RequestView[]
   callSchemas?: RequestInspectionSnapshot['callSchemas']
+  physicalOperatorExecutions?: readonly TrajectoryPhysicalOperatorExecution[]
 }
 
 interface UsageLike {
@@ -138,6 +140,7 @@ function inputCellDetail(node: InputNode): Pick<
 export function deriveTrajectoryLayout(input: TrajectoryLayoutInput): readonly TrajectoryTurnModel[] {
   const {
     nodes, eventLocations, partial, runningCalls, requests = [], callSchemas,
+    physicalOperatorExecutions = [],
   } = input
   const resultByCall = indexResults(nodes)
   const callById = new Map<string, ToolCallBlock>(resultByCall)
@@ -153,6 +156,7 @@ export function deriveTrajectoryLayout(input: TrajectoryLayoutInput): readonly T
     const startedAt = finiteTime(call.time)
     if (startedAt !== null) callStartById.set(call.callId, startedAt)
   }
+
   const turns = new Map<number, TurnBucket>()
   const standaloneCompactions: TurnBucket[] = []
   let index = 0
@@ -500,6 +504,19 @@ export function deriveTrajectoryLayout(input: TrajectoryLayoutInput): readonly T
     else for (const laid of laidList) pushMessage(call.turn, laid)
   }
 
+  for (const current of [...physicalOperatorExecutions]
+    .sort((left, right) => left.dispatchSeq - right.dispatchSeq)) {
+    const operatorGroup: LaidGroup = {
+      title: `Operator · ${physicalOperatorLabel(current.operatorId)} · ${shortCommandId(current.commandId)}`,
+      laid: current.entries.map(entry => ({
+        absTime: finiteTime(entry.time),
+        cell: physicalOperatorCell(current, entry, ++index),
+      })),
+    }
+    if (operatorGroup.laid.length === 0) continue
+    bucket(current.turn).groups.push(operatorGroup)
+  }
+
   // Orphan turn-0 cells (orphaned tools) fold into Turn 1.
   const prologue = turns.get(0)
   if (prologue !== undefined) {
@@ -510,16 +527,174 @@ export function deriveTrajectoryLayout(input: TrajectoryLayoutInput): readonly T
     turns.set(1, first)
   }
 
+  // Physical commands are session events, not a trailing appendix. Sort all
+  // groups by their first source sequence (then wall time) so a command that
+  // started between a user message and its assistant/tool records stays in
+  // that position. Cell indexes are reassigned after this ordering step.
+  for (const turn of turns.values()) {
+    turn.groups.sort(compareLaidGroups)
+  }
+
   for (const entry of [...turns.values(), ...standaloneCompactions]) {
     for (const group of entry.groups) {
       for (const laid of group.laid) attachToolSchema(laid, callSchemas)
     }
   }
 
-  return [
+  const ordered = [
     ...[...turns.entries()].map(([turn, entry]) => toTurnModel(turn, entry)),
     ...standaloneCompactions.map(entry => toTurnModel(null, entry)),
-  ].sort((left, right) => firstCellIndex(left) - firstCellIndex(right))
+  ].sort(compareTurnModels)
+  let nextIndex = 0
+  return ordered.map(turn => ({
+    ...turn,
+    groups: turn.groups.map(group => ({
+      ...group,
+      cells: group.cells.map(cell => ({ ...cell, index: ++nextIndex })),
+    })),
+  }))
+}
+
+function compareLaidGroups(left: LaidGroup, right: LaidGroup): number {
+  const leftKey = laidGroupOrder(left)
+  const rightKey = laidGroupOrder(right)
+  return compareOrderPair(leftKey, rightKey)
+}
+
+function laidGroupOrder(group: LaidGroup): { sequence: number; time: number } {
+  const sequence = Math.min(
+    ...group.laid.flatMap(value => typeof value.cell.sourceSeq === 'number' && Number.isFinite(value.cell.sourceSeq)
+      ? [value.cell.sourceSeq]
+      : []),
+    Number.POSITIVE_INFINITY,
+  )
+  const time = Math.min(
+    ...group.laid.flatMap(value => value.absTime !== null && Number.isFinite(value.absTime)
+      ? [value.absTime]
+      : []),
+    Number.POSITIVE_INFINITY,
+  )
+  return { sequence, time }
+}
+
+function compareTurnModels(left: TrajectoryTurnModel, right: TrajectoryTurnModel): number {
+  const leftKey = turnModelOrder(left)
+  const rightKey = turnModelOrder(right)
+  const order = compareOrderPair(leftKey, rightKey)
+  return order !== 0 ? order : firstCellIndex(left) - firstCellIndex(right)
+}
+
+function compareOrderPair(
+  left: { sequence: number; time: number },
+  right: { sequence: number; time: number },
+): number {
+  if (left.sequence !== right.sequence) return left.sequence < right.sequence ? -1 : 1
+  if (left.time !== right.time) return left.time < right.time ? -1 : 1
+  // Modern JS sorting is stable; returning zero preserves the source order
+  // when both source coordinates are identical or unavailable.
+  return 0
+}
+
+function turnModelOrder(turn: TrajectoryTurnModel): { sequence: number; time: number } {
+  const cells = turn.groups.flatMap(group => group.cells)
+  return {
+    sequence: Math.min(
+      ...cells.flatMap(cell => typeof cell.sourceSeq === 'number' && Number.isFinite(cell.sourceSeq)
+        ? [cell.sourceSeq]
+        : []),
+      Number.POSITIVE_INFINITY,
+    ),
+    time: Math.min(
+      ...cells.flatMap(cell => cell.startedAt !== null && cell.startedAt !== undefined && Number.isFinite(cell.startedAt)
+        ? [cell.startedAt]
+        : []),
+      Number.POSITIVE_INFINITY,
+    ),
+  }
+}
+
+function physicalOperatorLabel(operatorId: string): string {
+  return operatorId === 'claude-code' ? 'Claude Code' : operatorId === 'codex' ? 'Codex' : operatorId
+}
+
+function shortCommandId(commandId: string): string {
+  return commandId.length <= 12 ? commandId : `${commandId.slice(0, 11)}…`
+}
+
+function physicalOperatorCell(
+  execution: TrajectoryPhysicalOperatorExecution,
+  entry: TrajectoryPhysicalOperatorExecution['entries'][number],
+  index: number,
+): TrajectoryCellProps {
+  const base = {
+    index,
+    recordId: `physical-operator\u0000${execution.commandId}\u0000${entry.seq}`,
+    kind: 'operator' as const,
+    sourceSeq: entry.seq,
+    timeSeconds: 0,
+    startedAt: finiteTime(entry.time),
+  }
+  if (entry.type === 'dispatch') return { ...base, text: `${physicalOperatorLabel(execution.operatorId)} 已派发` }
+  if (entry.type === 'progress') return {
+    ...base,
+    text: `阶段 · ${physicalOperatorPhaseLabel(entry.phase)}`,
+  }
+  if (entry.type === 'terminal') return {
+    ...base,
+    text: entry.outcome === 'success' || entry.code === 'completed'
+      ? `执行完成 · ${entry.code ?? 'completed'}`
+      : `执行终止 · ${entry.code ?? '未知原因'}`,
+    ...(entry.outcome === 'success' || entry.code === 'completed' ? {} : { isError: true }),
+  }
+  if (entry.type === 'degraded') return {
+    ...base,
+    text: `轨迹降级 · ${entry.code ?? 'PROGRESS_UNAVAILABLE'}`,
+    isError: true,
+  }
+  const observation = entry.observation
+  if (observation === undefined) return { ...base, text: '已收到原生状态更新' }
+  if (observation.kind === 'public-output') return {
+    ...base,
+    // This is a bounded progress summary, never the final assistant transcript.
+    text: observation.preview === undefined ? '公开输出已更新' : `公开输出 · ${observation.preview}`,
+  }
+  if (observation.kind === 'tool-started') return {
+    ...base,
+    text: `工具开始 · ${observation.toolName ?? '原生工具'}`,
+  }
+  if (observation.kind === 'tool-completed') return {
+    ...base,
+    text: `工具完成 · ${observation.toolName ?? '原生工具'}`,
+  }
+  if (observation.kind === 'approval-required') return {
+    ...base,
+    text: `需要批准 · ${observation.approvalKind ?? '原生权限'}`,
+    ...(observation.preview === undefined ? {} : { previewMarkdown: observation.preview }),
+    isError: true,
+  }
+  const usage = observation.usage
+  const fragments = [
+    usage?.inputTokens === undefined ? undefined : `输入 ${String(usage.inputTokens)}`,
+    usage?.outputTokens === undefined ? undefined : `输出 ${String(usage.outputTokens)}`,
+  ].filter((value): value is string => value !== undefined)
+  return {
+    ...base,
+    text: fragments.length === 0 ? '用量已更新' : `用量更新 · ${fragments.join(' · ')}`,
+    ...(usage?.inputTokens === undefined ? {} : { input: usage.inputTokens }),
+    ...(usage?.outputTokens === undefined ? {} : { output: usage.outputTokens }),
+    ...(usage?.cacheReadInputTokens === undefined ? {} : { cacheRead: usage.cacheReadInputTokens }),
+    ...(usage?.cacheWriteInputTokens === undefined ? {} : { cacheWrite: usage.cacheWriteInputTokens }),
+  }
+}
+
+function physicalOperatorPhaseLabel(phase: string | undefined): string {
+  return ({
+    connecting: '连接原生产品',
+    session_ready: '原生会话已接通',
+    reasoning: '推理与执行',
+    tool_activity: '使用工具',
+    finalizing: '整理结果',
+  } as Record<string, string>)[phase ?? ''] ?? '正在执行'
 }
 
 /**

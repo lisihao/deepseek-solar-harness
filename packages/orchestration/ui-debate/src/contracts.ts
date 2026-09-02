@@ -70,6 +70,27 @@ export interface DesktopDebateTurnUsage {
   costUsd?: number
 }
 
+/** Public routing provenance for one logical role turn. */
+export interface DesktopDebateTurnRouting {
+  version: 1
+  requestedOperatorId: string
+  requestedModel: string
+  actualOperatorId?: string
+  actualModel?: string
+  fallbackReasonCode?: string
+  allocationPlanRef?: string
+}
+
+/** Public scheduler blocker; messages are bounded by the Host projection. */
+export interface DesktopDebateTurnBlocker {
+  code: string
+  message: string
+  nodeId?: string
+}
+
+/** Public lifecycle state of one role turn. */
+export type DesktopDebateTurnState = 'planned' | 'dispatched' | 'settled' | 'blocked' | 'failed' | 'indeterminate'
+
 /** Public roster slot and its latest bounded turn projection. */
 export interface DesktopDebateRole {
   role: 'constructive-proposer' | 'skeptical-falsifier' | 'evidence-auditor' | 'decision-judge'
@@ -84,7 +105,10 @@ export interface DesktopDebateRole {
   required: boolean
   latestTurn?: {
     round: number
-    state: 'planned' | 'dispatched' | 'settled' | 'failed' | 'indeterminate'
+    state: DesktopDebateTurnState
+    attempt?: number
+    routing?: DesktopDebateTurnRouting
+    blockers?: DesktopDebateTurnBlocker[]
     outputRef?: string
     outputPreview?: string
     claimIds: string[]
@@ -140,7 +164,10 @@ export interface DesktopDebateRound {
     role: DesktopDebateRole['role']
     operatorId: string
     model: string
-    state: 'planned' | 'dispatched' | 'settled' | 'failed' | 'indeterminate'
+    state: DesktopDebateTurnState
+    attempt?: number
+    routing?: DesktopDebateTurnRouting
+    blockers?: DesktopDebateTurnBlocker[]
     outputRef?: string
     outputPreview?: string
     claimIds: string[]

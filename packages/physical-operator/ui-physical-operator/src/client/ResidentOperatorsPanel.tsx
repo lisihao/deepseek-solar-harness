@@ -81,6 +81,7 @@ export async function authenticateResidentOperator(
 export function ResidentOperatorsPanel({ request }: { request: BrowserRequest }) {
   const [open, setOpen] = useState(false)
   const [selectedSessionId, setSelectedSessionId] = useState<string>()
+  const [selectedCommandId, setSelectedCommandId] = useState<string>()
   const [dashboard, setDashboard] = useState<DesktopResidentDashboard>()
   const [error, setError] = useState<string>()
   const [authenticationFailure, setAuthenticationFailure] = useState<{
@@ -115,6 +116,12 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
     const selectionExists = dashboard.sessions.some(session => session.sessionId === selectedSessionId)
     if (!selectionExists) setSelectedSessionId(dashboard.sessions[0]?.sessionId)
   }, [dashboard, open, selectedSessionId])
+
+  useEffect(() => {
+    if (!open || dashboard === undefined) return
+    const selectedExists = dashboard.activities.some(activity => activity.commandId === selectedCommandId)
+    if (!selectedExists) setSelectedCommandId(dashboard.activities[0]?.commandId)
+  }, [dashboard, open, selectedCommandId])
 
   useEffect(() => {
     if (!open) return
@@ -253,11 +260,21 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
                 <h3>任务记录</h3>
                 {selectedSessionId === undefined
                   ? <p className="dshDesktopResidentEmpty">选择一个持久任务查看记录。</p>
-                  : <ActivityTimeline
-                    activities={dashboard?.activities ?? []}
-                    generatedAt={dashboard?.generatedAt ?? new Date().toISOString()}
-                    timeZone={timeZone}
-                  />}
+                  : <>
+                    <ActivityTimeline
+                      activities={dashboard?.activities ?? []}
+                      generatedAt={dashboard?.generatedAt ?? new Date().toISOString()}
+                      timeZone={timeZone}
+                      selectedCommandId={selectedCommandId}
+                      onSelect={setSelectedCommandId}
+                    />
+                    <ResidentEventDetails
+                      events={dashboard?.events ?? []}
+                      commandId={selectedCommandId}
+                      generatedAt={dashboard?.generatedAt ?? new Date().toISOString()}
+                      timeZone={timeZone}
+                    />
+                  </>}
               </div>
             </div>
           </section>
@@ -318,19 +335,110 @@ function profileLabel(session: DesktopResidentSession): string {
   return `${profile.model} · ${profile.effort ?? '默认强度'} · ${source}`
 }
 
-function ActivityTimeline(props: { activities: DesktopResidentActivity[]; generatedAt: string; timeZone: string }) {
+function ActivityTimeline(props: {
+  activities: DesktopResidentActivity[]
+  generatedAt: string
+  timeZone: string
+  selectedCommandId: string | undefined
+  onSelect: (commandId: string) => void
+}) {
   if (props.activities.length === 0) return <p className="dshDesktopResidentEmpty">还没有任务记录。</p>
   return (
     <ol>
       {props.activities.slice(0, 20).map((activity) => {
         const time = formatResidentTimestamp(activity.updatedAt, props.generatedAt, props.timeZone)
         return <li key={activity.turnId}>
-          <time title={time.absolute}>{time.relative}</time>
-          <strong>{activity.taskLabel}</strong>
-          <span>{activityLabel(activity)}</span>
+          <button
+            type="button"
+            data-selected={activity.commandId === props.selectedCommandId || undefined}
+            onClick={() => { props.onSelect(activity.commandId) }}
+          >
+            <time title={time.absolute}>{time.relative}</time>
+            <strong>{activity.taskLabel}</strong>
+            <span>{activityLabel(activity)}</span>
+          </button>
         </li>
       })}
     </ol>
+  )
+}
+
+const MAX_EVENT_TEXT = 240
+
+function safeEventText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/\b((?:api[_-]?key|token|secret|password)\s*=\s*)\S+/giu, '$1[REDACTED]')
+    .replace(/\b(Bearer\s+)\S+/giu, '$1[REDACTED]')
+  if (normalized === '') return undefined
+  return normalized.length > MAX_EVENT_TEXT
+    ? `${normalized.slice(0, MAX_EVENT_TEXT - 1)}…`
+    : normalized
+}
+
+function eventCommandId(event: DesktopResidentEvent): string | undefined {
+  return typeof event.data.commandId === 'string' ? event.data.commandId : undefined
+}
+
+function residentEventDetails(event: DesktopResidentEvent): { readonly title: string; readonly detail?: string; readonly state?: 'warn' | 'error' } {
+  if (event.type === 'turn.observation') {
+    switch (event.data.kind) {
+      case 'public-output': {
+        const detail = safeEventText(event.data.preview)
+        return { title: '公开输出', ...(detail === undefined ? {} : { detail }) }
+      }
+      case 'tool-started': return { title: `工具开始 · ${safeEventText(event.data.toolName) ?? '原生工具'}` }
+      case 'tool-completed': return { title: `工具完成 · ${safeEventText(event.data.toolName) ?? '原生工具'}` }
+      case 'approval-required': {
+        const detail = safeEventText(event.data.preview)
+        return {
+          title: `需要批准 · ${safeEventText(event.data.approvalKind) ?? '原生权限'}`,
+          ...(detail === undefined ? {} : { detail }),
+          state: 'warn',
+        }
+      }
+      case 'usage-updated': {
+        const usage = typeof event.data.usage === 'object' && event.data.usage !== null
+          ? event.data.usage as Record<string, unknown>
+          : undefined
+        const values = [
+          typeof usage?.inputTokens === 'number' ? `输入 ${String(usage.inputTokens)}` : undefined,
+          typeof usage?.outputTokens === 'number' ? `输出 ${String(usage.outputTokens)}` : undefined,
+        ].filter((value): value is string => value !== undefined)
+        return { title: values.length === 0 ? '用量更新' : `用量更新 · ${values.join(' · ')}` }
+      }
+      default: return { title: '原生状态更新' }
+    }
+  }
+  if (event.type === 'turn.progress') return { title: `阶段 · ${progressPhaseLabel(safeEventText(event.data.phase) ?? '')}` }
+  if (event.type === 'turn.failed' || event.type === 'turn.indeterminate') return { title: event.type === 'turn.failed' ? '任务失败' : '状态待确认', state: 'error' }
+  return { title: progressLabel(event) }
+}
+
+function ResidentEventDetails(props: {
+  events: DesktopResidentEvent[]
+  commandId: string | undefined
+  generatedAt: string
+  timeZone: string
+}) {
+  const visible = props.commandId === undefined
+    ? props.events.slice(-20)
+    : props.events.filter(event => eventCommandId(event) === props.commandId)
+  if (visible.length === 0) return <p className="dshDesktopResidentEmpty">选择一条任务以展开安全的结构化进度。</p>
+  return (
+    <details className="dshDesktopResidentTrace" open>
+      <summary>结构化执行轨迹 · {String(visible.length)} 条</summary>
+      <ol>
+        {visible.map((event) => {
+          const time = formatResidentTimestamp(event.time, props.generatedAt, props.timeZone)
+          const view = residentEventDetails(event)
+          return <li key={event.sequence} data-state={view.state}>
+            <time title={time.absolute}>{time.relative}</time>
+            <div><strong>{view.title}</strong>{view.detail !== undefined && <p>{view.detail}</p>}</div>
+          </li>
+        })}
+      </ol>
+    </details>
   )
 }
 

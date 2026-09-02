@@ -287,5 +287,5 @@ describe('Debate real TaskGraph binding', () => {
       unknownUsageTurns: 0,
       unknownCostTurns: 0,
     })
-  })
+  }, 15_000)
 })

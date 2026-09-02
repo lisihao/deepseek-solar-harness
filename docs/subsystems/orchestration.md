@@ -18,6 +18,22 @@ The orchestration daemon survives Desktop and DSH client shutdown. It calls the 
 
 An RLM node can additionally select Prime-compatible Autonomous Mode as `disabled | auto | enabled`; it is disabled by default. The daemon seals one immutable host policy per Attempt, persists token/turn/continuation and gate state, runs declared host quality gates before evaluating limits, and resumes the same RLM lane only while budget remains. Gate success can complete the node; exhausted limits never become success. This policy is neither a Goal nor another Scheduler, and its shell commands require the Graph's explicit `autonomous-gate` execute effect.
 
+## Debate operator fallback and provenance
+
+Debate keeps its logical roster separate from physical execution offers. A role's `operatorId`, model, role kind, and persona are immutable roster facts; the Graph and Scheduler may late-bind only the physical operator and model for one node Attempt.
+
+`operator.preferredIds` on a Graph node, normalized as `preferredOperatorIds` in an allocation request, retains hard-pin semantics. If no fallback list is present, an unavailable preferred operator fails explicitly and allocation never silently broadens the candidate set. A caller opts into deployment-owned alternatives with `operator.fallbackIds` or a Debate role's `fallbackOperatorIds`; these fields are not a generic try-any-provider switch.
+
+The Scheduler considers an explicit fallback only after every preferred lane is disqualified for `OPERATOR_UNAVAILABLE`, `AUTHENTICATION_UNQUALIFIED`, `MODEL_UNAVAILABLE`, or `QUOTA_UNQUALIFIED`. `MODEL_CAPACITY_BUSY` means that a preferred lane is qualified but temporarily full, so the node remains busy or waiting and does not switch operators.
+
+Fallback selection remains inside the offers admitted by the active policy and its authentication, quota, source, and effect checks. An explicit fallback list does not authorize a metered API, bypass native-subscription qualification, or grant new permissions; Debate's subscription fallback policy must name the eligible physical operators.
+
+The sealed allocation plan records structured fallback provenance as `fromOperatorId`, optional `fromModel`, and `reasonCode`. The Debate turn projection separately retains the requested operator/model, actual operator/model, fallback reason, allocation-plan reference, attempt, and any structured blocker. Consequently, a physical provider can execute several logical roles—such as proposer, falsifier, and judge—without changing their role or persona, and provider diversity is not required for role diversity.
+
+Round projection is per role rather than all-or-nothing. A settled proposer and a blocked falsifier remain independently visible with their actual routing and blocker; a dependency-blocked judge is not rewritten as an operator failure. The run may therefore finish as failed or awaiting recovery while preserving every successful role result and every role-specific failure for the UI, Trace, and explicit recovery decision.
+
+This contract refines the model-allocation fallback paragraph in [TaskGraph-native Smart Collaboration](../../.agents/notes/implemented/feature/2026-08-20-taskgraph-smart-collaboration.md): its provider-neutral preference and hard-pin behavior remain, while fallback now requires explicit admission and durable provenance. The owning contracts are [`model-allocation`](../../packages/orchestration/model-allocation/src/index.ts), [`orchestration`](../../packages/orchestration/orchestration/src/index.ts), and [`debate`](../../packages/orchestration/debate/src/types.ts).
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -249,7 +265,7 @@ abstract readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV
 abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>
 ```
 
-Source: [`packages/orchestration/debate/src/index.ts:341`](../../packages/orchestration/debate/src/index.ts)
+Source: [`packages/orchestration/debate/src/index.ts:354`](../../packages/orchestration/debate/src/index.ts)
 
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 
@@ -279,11 +295,13 @@ Scheduler-facing Service Definition; implementations remain replaceable plugins.
  * Select one qualified execution offer and recommend safe parallelism.
  * @param request Node phase, policy, quota, and currently qualified offers.
  * @returns The selected model plan and parallelism recommendation.
+ * @throws {ModelAllocationError} When no admitted lane qualifies, an explicit
+ * model is unavailable, or qualified capacity is busy.
  */
 abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
 ```
 
-Source: [`packages/orchestration/model-allocation/src/index.ts:156`](../../packages/orchestration/model-allocation/src/index.ts)
+Source: [`packages/orchestration/model-allocation/src/index.ts:177`](../../packages/orchestration/model-allocation/src/index.ts)
 
 <a id="ctxmodelworkers--modelworkerruntime"></a>
 
@@ -432,7 +450,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:634`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:636`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 

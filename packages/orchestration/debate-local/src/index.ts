@@ -997,6 +997,37 @@ export class LocalDebateProvider extends DebateService {
         if (failedState === 'indeterminate' || terminalState === undefined) terminalState = failedState
         continue
       }
+      const failure = batch.value.failuresBySlot?.[slot.role]
+      if (failure !== undefined) {
+        const failedTurn: DebateAgentTurnV1 = {
+          ...dispatched,
+          state: failure.state,
+          attempt: failure.attempt,
+          ...(failure.routing === undefined ? {} : {
+            routing: failure.routing,
+            operatorId: failure.routing.actualOperatorId ?? dispatched.operatorId,
+            model: failure.routing.actualModel ?? dispatched.model,
+          }),
+          blockers: failure.blockers,
+          settledAt: this.now(),
+          errorCode: failure.errorCode,
+        }
+        const eventType = failure.state === 'indeterminate'
+          ? 'debate.agent.indeterminate' as const
+          : failure.state === 'blocked'
+            ? 'debate.agent.blocked' as const
+            : 'debate.agent.failed' as const
+        this.replaceTurn(run, number, failedTurn, eventType, {
+          round: number,
+          errorCode: failure.errorCode,
+          blockerCodes: failure.blockers.map(blocker => blocker.code).join(', '),
+          blockerMessages: failure.blockers.map(blocker => blocker.message).join('\n'),
+        })
+        if (failure.state === 'indeterminate' || terminalState === undefined) {
+          terminalState = failure.state === 'indeterminate' ? 'indeterminate' : 'failed'
+        }
+        continue
+      }
       const rawResult = batch.value.resultsBySlot[slot.role]
       if (rawResult === undefined) {
         const failedTurn: DebateAgentTurnV1 = {
@@ -1031,6 +1062,12 @@ export class LocalDebateProvider extends DebateService {
       const settledTurn: DebateAgentTurnV1 = {
         ...dispatched,
         state: 'settled',
+        ...(rawResult.attempt === undefined ? {} : { attempt: rawResult.attempt }),
+        ...(rawResult.routing === undefined ? {} : {
+          routing: rawResult.routing,
+          operatorId: rawResult.routing.actualOperatorId ?? dispatched.operatorId,
+          model: rawResult.routing.actualModel ?? dispatched.model,
+        }),
         claimIds: sortedUnique(result.claims.map(claim => claim.claimId)),
         evidenceRefs: result.evidenceRefs,
         settledAt: this.now(),
@@ -1058,12 +1095,16 @@ export class LocalDebateProvider extends DebateService {
     }
 
     if (terminalState !== undefined) {
-      this.appendEvent(
+      const failedRound: DebateRoundSnapshotV1 = {
+        ...this.round(run, number),
+        state: terminalState,
+      }
+      this.replaceRoundProjection(
         run,
+        failedRound,
         terminalState === 'indeterminate' ? 'debate.indeterminate' : 'debate.failed',
         { round: number, errorCode: terminalState === 'indeterminate' ? 'DEBATE_INDETERMINATE' : 'DEBATE_TURN_FAILED' },
         { state: terminalState },
-        { round: number },
       )
       return 'terminal'
     }
@@ -1250,6 +1291,7 @@ export class LocalDebateProvider extends DebateService {
       role: slot.role,
       persona: clone(slot.persona),
       operatorId: slot.operatorId,
+      ...(slot.fallbackOperatorIds === undefined ? {} : { fallbackOperatorIds: clone(slot.fallbackOperatorIds) }),
       model: slot.model,
       tier: slot.tier,
       source: slot.source,
@@ -1274,10 +1316,12 @@ export class LocalDebateProvider extends DebateService {
       signal,
     })
     const expected = new Set(slots.map(slot => slot.role))
-    const actual = Object.keys(result.resultsBySlot)
+    const actual = [...Object.keys(result.resultsBySlot), ...Object.keys(result.failuresBySlot ?? {})]
     if (actual.some(slotId => !expected.has(slotId as DebateRoleId))) {
       invalid('round executor returned an unsupported slot result')
     }
+    if (new Set(actual).size !== actual.length) invalid('round executor returned both result and failure for one slot')
+    if (actual.length !== expected.size) invalid('round executor omitted a slot outcome')
     return result
   }
 

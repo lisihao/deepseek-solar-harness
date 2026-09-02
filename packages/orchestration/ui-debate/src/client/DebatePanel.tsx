@@ -12,6 +12,8 @@ import {
   type DesktopDebateRound,
   type DesktopDebateRun,
   type DesktopDebateRunSummary,
+  type DesktopDebateTurnBlocker,
+  type DesktopDebateTurnRouting,
   type DesktopDebateTurnUsage,
 } from '../contracts.ts'
 
@@ -253,33 +255,52 @@ export function RunDetail(props: {
 
 function RoleCard({ role }: { role: DesktopDebateRole }) {
   const turn = role.latestTurn
+  const route = turnRoute(role, turn)
   return <article data-state={turn?.state ?? 'planned'}>
     <div>
       <span className="dshDesktopDebateDot" />
       <strong>{role.title}</strong>
       <em>{turnStateLabel(turn?.state ?? 'planned')}</em>
     </div>
-    <small>{role.operatorId} · {role.model} · {role.source === 'native-subscription' ? '订阅套餐' : role.source}</small>
+    <div className="dshDesktopDebateRoute" aria-label="算子路由">
+      <small title={`${route.requestedOperatorId} · ${route.requestedModel}`}>请求：<span>{displayRouteValue(route.requestedOperatorId)} · {displayRouteValue(route.requestedModel)}</span></small>
+      {route.actualOperatorId === undefined || route.actualModel === undefined
+        ? <small>实际：尚未执行</small>
+        : <small title={`${route.actualOperatorId} · ${route.actualModel}`}>实际：<span>{displayRouteValue(route.actualOperatorId)} · {displayRouteValue(route.actualModel)}</span></small>}
+      <small>{role.source === 'native-subscription' ? '订阅套餐' : role.source}</small>
+    </div>
     <p className="dshDesktopDebateRoleMandate">职责：{role.mandate}</p>
     {turn !== undefined && <p>
-      第 {String(turn.round)} 轮 · Claim {String(turn.claimIds.length)}
+      第 {String(turn.round)} 轮 · Attempt {String(turn.attempt ?? 1)} · Claim {String(turn.claimIds.length)}
       {' · '}Evidence {String(turn.evidenceRefs.length)}
     </p>}
+    {turn?.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">
+      回退：{turn.routing.fallbackReasonCode}
+    </p>}
+    {turn?.blockers !== undefined && <BlockerList blockers={turn.blockers} />}
   </article>
 }
 
 function DebateTurnCard({ run, turn }: { run: DesktopDebateRun; turn: DesktopDebateRound['turnStates'][number] }) {
   const role = run.roles.find(entry => entry.role === turn.role || entry.role === turn.slotId)
   const title = role?.title ?? roleLabel(turn.role)
+  const route = turnRoute(role, turn)
   const claimText = turn.claimIds.length > 0 ? turn.claimIds.join('、') : 'N/A'
   const evidenceText = turn.evidenceRefs.length > 0 ? turn.evidenceRefs.join('、') : 'N/A'
+  const blockerSummary = turn.blockers?.[0]?.message
   return <article className="dshDesktopDebateTurn" data-state={turn.state}>
     <div className="dshDesktopDebateTurnHeader">
       <strong>{title}</strong>
       <em>{turnStateLabel(turn.state)}</em>
     </div>
-    <small>{roleLabel(turn.role)} · {turn.operatorId} · {turn.model}</small>
-    <p className="dshDesktopDebateTurnSummary"><strong>讨论摘要：</strong>{turn.outputPreview ?? '尚未返回讨论摘要。'}</p>
+    <div className="dshDesktopDebateRoute" aria-label="本轮算子路由">
+      <small title={`${route.requestedOperatorId} · ${route.requestedModel}`}>请求：<span>{displayRouteValue(route.requestedOperatorId)} · {displayRouteValue(route.requestedModel)}</span></small>
+      {route.actualOperatorId === undefined || route.actualModel === undefined
+        ? <small>实际：尚未执行</small>
+        : <small title={`${route.actualOperatorId} · ${route.actualModel}`}>实际：<span>{displayRouteValue(route.actualOperatorId)} · {displayRouteValue(route.actualModel)}</span></small>}
+      {turn.attempt !== undefined && <small>Attempt {String(turn.attempt)}</small>}
+    </div>
+    <p className="dshDesktopDebateTurnSummary"><strong>讨论摘要：</strong>{turn.outputPreview ?? (blockerSummary === undefined ? '尚未返回讨论摘要。' : `未产生输出：${blockerSummary}`)}</p>
     {turn.outputRef !== undefined && <code title={turn.outputRef}>Artifact · {turn.outputRef}</code>}
     <small>Claim {claimText} · Evidence {evidenceText}</small>
     {turn.usage !== undefined && <small>{turnUsageLabel(turn.usage)}</small>}
@@ -288,7 +309,43 @@ function DebateTurnCard({ run, turn }: { run: DesktopDebateRun; turn: DesktopDeb
       {turn.settledAt !== undefined && <time dateTime={turn.settledAt} title={turn.settledAt}>完成 {formatTime(turn.settledAt)}</time>}
     </div>}
     {turn.errorCode !== undefined && <p className="dshDesktopDebateTurnError">错误：{turn.errorCode}</p>}
+    {turn.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">回退：{turn.routing.fallbackReasonCode}</p>}
+    {turn.blockers !== undefined && <BlockerList blockers={turn.blockers} />}
   </article>
+}
+
+function BlockerList({ blockers }: { blockers: DesktopDebateTurnBlocker[] }) {
+  return <div className="dshDesktopDebateBlockers" aria-label="阻断原因">
+    {blockers.map((blocker, index) => <article key={`${blocker.code}-${String(index)}`}>
+      <strong>{blocker.code}</strong>
+      <p title={blocker.message}>{blocker.message}</p>
+      {blocker.nodeId !== undefined && <small title={blocker.nodeId}>节点 {displayRouteValue(blocker.nodeId)}</small>}
+    </article>)}
+  </div>
+}
+
+function turnRoute(
+  role: DesktopDebateRole | undefined,
+  turn: { operatorId?: string; model?: string; routing?: DesktopDebateTurnRouting } | undefined,
+): {
+  requestedOperatorId: string
+  requestedModel: string
+  actualOperatorId?: string
+  actualModel?: string
+} {
+  const routing = turn?.routing
+  const actualOperatorId = routing?.actualOperatorId ?? turn?.operatorId
+  const actualModel = routing?.actualModel ?? turn?.model
+  return {
+    requestedOperatorId: routing?.requestedOperatorId ?? role?.operatorId ?? turn?.operatorId ?? 'N/A',
+    requestedModel: routing?.requestedModel ?? role?.model ?? turn?.model ?? 'N/A',
+    ...(actualOperatorId === undefined ? {} : { actualOperatorId }),
+    ...(actualModel === undefined ? {} : { actualModel }),
+  }
+}
+
+function displayRouteValue(value: string): string {
+  return value.length <= 42 ? value : `${value.slice(0, 18)}…${value.slice(-20)}`
 }
 
 function EventTimeline({ run, events }: { run: DesktopDebateRun; events: DesktopDebateEvent[] }) {
@@ -414,6 +471,7 @@ function debateEventDetail(event: DesktopDebateEvent): string {
   if (event.type === 'debate.round.started') return `阶段 ${eventValue(event, 'phase')} · ${eventList(event, 'slotIds')}`
   if (event.type === 'debate.agent.dispatched') return `${eventValue(event, 'role', event.slotId ?? 'Agent')} · ${eventValue(event, 'model')}`
   if (event.type === 'debate.agent.settled') return `Claim ${eventValue(event, 'claimCount', '0')} · Evidence ${eventValue(event, 'evidenceCount', '0')} · 置信度 ${eventValue(event, 'confidence')}`
+  if (event.type === 'debate.agent.blocked') return `阻断 ${eventValue(event, 'errorCode')} · ${eventValue(event, 'blockerMessages', '等待资源')}${eventRoutingDetail(event)}`
   if (event.type === 'debate.agent.failed' || event.type === 'debate.agent.indeterminate') return `错误 ${eventValue(event, 'errorCode')}`
   if (event.type === 'debate.claims.compiled') return `Claim ${eventValue(event, 'claimCount', '0')} · 异议 ${eventValue(event, 'dissentCount', '0')} · 未决 ${eventValue(event, 'unresolvedCount', '0')}`
   if (event.type === 'debate.convergence.evaluated') return `${eventValue(event, 'status')} · 分数 ${eventValue(event, 'score')} · ${eventValue(event, 'reason')}`
@@ -434,6 +492,7 @@ function debateEventLabel(type: string): string {
     'debate.round.started': '轮次已开始',
     'debate.agent.dispatched': 'Agent 已派发',
     'debate.agent.settled': 'Agent 输出已完成',
+    'debate.agent.blocked': 'Agent 等待资源',
     'debate.agent.failed': 'Agent 输出失败',
     'debate.agent.indeterminate': 'Agent 输出待确认',
     'debate.claims.compiled': 'Claim Ledger 已编译',
@@ -462,6 +521,13 @@ function eventList(event: DesktopDebateEvent, key: string, fallback = 'N/A'): st
   return strings.length > 0 ? strings.join('、') : fallback
 }
 
+function eventRoutingDetail(event: DesktopDebateEvent): string {
+  const fallback = eventValue(event, 'fallbackReasonCode', '')
+  if (fallback.length === 0) return ''
+  const actual = [eventValue(event, 'actualOperatorId', ''), eventValue(event, 'actualModel', '')].filter(Boolean).join('/')
+  return actual.length === 0 ? ` · 回退 ${fallback}` : ` · 回退 ${fallback} → ${actual}`
+}
+
 function eventNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined
 }
@@ -481,7 +547,7 @@ function roleLabel(role: string): string {
 }
 
 function turnStateLabel(state: string): string {
-  return ({ planned: '待执行', dispatched: '运行中', settled: '已完成', failed: '失败', indeterminate: '不确定' } as Record<string, string>)[state] ?? state
+  return ({ planned: '待执行', dispatched: '运行中', settled: '已完成', blocked: '已阻断', failed: '失败', indeterminate: '不确定' } as Record<string, string>)[state] ?? state
 }
 
 function roundStateLabel(state: string): string {

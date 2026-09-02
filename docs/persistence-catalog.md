@@ -609,6 +609,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 'physical-operator/dispatch': {
   commandId: string
   operatorId: string
+  fallbackOperatorId?: string
   promptMessageId: string
   requestedByMessageId: string
   turn: number
@@ -633,7 +634,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:71`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:83`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:92`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -679,7 +680,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:58`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:88`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:97`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -711,7 +712,24 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:63`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:104`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:113`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortool-dispatch--log-only"></a>
+
+#### `physical-operator/tool-dispatch` — log-only
+
+```ts persistence-catalog
+/** Explicit physical_operator tool admission, distinct from a routed main-model turn. */
+'physical-operator/tool-dispatch': {
+  commandId: string
+  operatorId: string
+  toolCallId: string
+  mode: 'ephemeral' | 'resident'
+  description: string
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:84`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -726,7 +744,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:104`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:110`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:119`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -742,7 +760,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:110`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:97`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:106`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

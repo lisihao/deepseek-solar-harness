@@ -151,7 +151,8 @@ describe('HMR exact config paths', () => {
         active -= 1
       })
       await started.promise
-      writeFileSync(filename, 'two')
+      // Grow the file so polling does not depend on filesystem timestamp precision.
+      writeFileSync(filename, 'two\n')
       // Do not guess how long a polling scan takes under CI load. Wait until
       // the watcher has actually marked a second refresh dirty while the first
       // callback is blocked, then verify disposal drains both in order.
@@ -172,7 +173,7 @@ describe('HMR exact config paths', () => {
       release.resolve(undefined)
       await disposal
       expect(maxActive).toBe(1)
-      expect(observed).toEqual(['one', 'two'])
+      expect(observed).toEqual(['one', 'two\n'])
     } finally {
       release.resolve(undefined)
       await ctx.fiber.dispose()

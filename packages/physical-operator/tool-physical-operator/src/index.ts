@@ -32,7 +32,7 @@ import type {
   PhysicalOperatorStatus,
   PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
-import { PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
+import { PhysicalOperatorError, PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {
@@ -71,6 +71,7 @@ declare module '@deepseek-ai/dsh-session/types' {
     'physical-operator/dispatch': {
       commandId: string
       operatorId: string
+      fallbackOperatorId?: string
       promptMessageId: string
       requestedByMessageId: string
       turn: number
@@ -78,6 +79,14 @@ declare module '@deepseek-ai/dsh-session/types' {
       recovered: boolean
       residentProfile?: PhysicalOperatorExecutionPreference
       fallbackConfig?: LlmCallConfig
+    }
+    /** Explicit physical_operator tool admission, distinct from a routed main-model turn. */
+    'physical-operator/tool-dispatch': {
+      commandId: string
+      operatorId: string
+      toolCallId: string
+      mode: 'ephemeral' | 'resident'
+      description: string
     }
     /** Non-cancellation terminal failure; prevents an endless cold-resume loop. */
     'physical-operator/dispatch-terminal': {
@@ -120,10 +129,12 @@ export const inject = ['tools', 'physicalOperators', 'systemPrompt', 'llm', 'age
 
 const ROUTER_PROVIDER = 'dsh-physical-operator'
 const RESUME_SOURCE = 'physical-operator-resume'
+const FALLBACK_REQUIRED_CODE = 'PHYSICAL_OPERATOR_FALLBACK_REQUIRED'
 
 interface PendingHostRoute {
   readonly commandId: string
   readonly operatorId: string
+  readonly fallbackOperatorId?: string
   readonly promptMessageId: string
   readonly requestedByMessageId: string
   readonly recovered: boolean
@@ -309,6 +320,26 @@ export function apply(ctx: Context): void {
     }
     const { reasoningEffort: _reasoningEffort, ...portable } = base
     return { ...portable, provider: ROUTER_PROVIDER, model: route.operatorId }
+  })
+
+  ctx.on('agent/request-error', async ({ agent, turn, step, provider, failure, signal }, next) => {
+    if (provider !== ROUTER_PROVIDER || failure.code !== FALLBACK_REQUIRED_CODE || signal.aborted) return next()
+    const failed = dispatchForPosition(agent.session.events, turn, step)
+    if (failed?.fallbackOperatorId === undefined) return next()
+    const fallback = fallbackHostRoute(agent, failed, failed.fallbackOperatorId)
+    agent.session.append('physical-operator/routing-decision', {
+      policy: 'auto',
+      route: 'resident',
+      requestedByMessageId: failed.requestedByMessageId,
+      reason: `${operatorDisplayName(failed.operatorId)} 订阅资格不可用，智能协作切换到 ${operatorDisplayName(fallback.operatorId)}`,
+      operatorId: fallback.operatorId,
+    }, { ignorable: true })
+    agent.session.append('physical-operator/dispatch', {
+      ...fallback,
+      turn,
+      step,
+    }, { ignorable: true })
+    return { kind: 'retry' }
   })
 
   ctx.on('agent/session-start', ({ agent, source }) => {
@@ -537,7 +568,15 @@ export function apply(ctx: Context): void {
         ? await prepareResidentSurface(ctx, modelTools, executionId, parent, exec.signal)
         : undefined
       let run: PhysicalOperatorRun | undefined
+      let observer: ReturnType<typeof observeResidentProgress> | undefined
       try {
+        parent.session.append('physical-operator/tool-dispatch', {
+          commandId: String(executionId),
+          operatorId,
+          toolCallId: String(exec.callId),
+          mode: request.mode ?? 'ephemeral',
+          description: description.slice(0, 160),
+        }, { ignorable: true })
         run = await ctx.physicalOperators.start(operatorId, {
           executionId,
           label: description,
@@ -548,7 +587,8 @@ export function apply(ctx: Context): void {
           ...resident?.systemPrompt === undefined ? {} : { systemPrompt: resident.systemPrompt },
           ...resident?.descriptor === undefined ? {} : { modelToolBridge: resident.descriptor },
         })
-        const result = await settleForeground(run)
+        if (request.mode === 'resident') observer = observeResidentProgress(ctx, parent, run, String(executionId))
+        const result = await settleForeground(run, () => observer?.stop())
         return {
           kind: 'run',
           operatorId: String(run.operatorId),
@@ -557,6 +597,7 @@ export function apply(ctx: Context): void {
           ...result.continuity === undefined ? {} : { continuity: result.continuity },
         }
       } finally {
+        await observer?.stop()
         resident?.release()
       }
     },
@@ -602,6 +643,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     }
     const signal = options.signal ?? new AbortController().signal
     let run: PhysicalOperatorRun | undefined
+    let observer: ReturnType<typeof observeResidentProgress> | undefined
     let releaseModelTools: (() => void) | undefined
     try {
       const bound = await this.modelTools.bind(
@@ -622,8 +664,9 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         ...bound.descriptor === undefined ? {} : { modelToolBridge: bound.descriptor },
         ...dispatch.residentProfile === undefined ? {} : { residentProfile: dispatch.residentProfile },
       })
+      observer = observeResidentProgress(this.ctx, agent, run, dispatch.commandId)
       const result = await run.result
-      await projectResidentProgress(this.ctx, agent, run, dispatch.commandId)
+      await observer.stop()
       if (result.stopReason === 'error' || result.stopReason === 'refusal') {
         agent.session.append('physical-operator/dispatch-terminal', {
           commandId: dispatch.commandId,
@@ -632,15 +675,25 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       }
       yield* resultChunks(result)
     } catch (error) {
-      if (run !== undefined) await projectResidentProgress(this.ctx, agent, run, dispatch.commandId)
+      if (observer !== undefined) await observer.stop()
+      else if (run !== undefined) await projectResidentProgress(this.ctx, agent, run, dispatch.commandId)
       if (!signal.aborted) {
+        const code = errorCode(error)
         agent.session.append('physical-operator/dispatch-terminal', {
           commandId: dispatch.commandId,
-          code: errorCode(error),
+          code,
         }, { ignorable: true })
+        if (run === undefined && dispatch.fallbackOperatorId !== undefined && code === 'AUTH_MODE_MISMATCH') {
+          throw new PhysicalOperatorError(
+            `${operatorDisplayName(dispatch.operatorId)} subscription qualification failed; trying the Smart Auto fallback`,
+            FALLBACK_REQUIRED_CODE,
+            { cause: error },
+          )
+        }
       }
       throw error
     } finally {
+      await observer?.stop()
       releaseModelTools?.()
       await run?.dispose()
     }
@@ -674,14 +727,7 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
   if (resume !== undefined) {
     const recoverable = recoverableDispatch(agent.session.events)
     if (recoverable === undefined) return undefined
-    const hostRoute: PendingHostRoute = {
-      commandId: recoverable.commandId,
-      operatorId: recoverable.operatorId,
-      promptMessageId: recoverable.promptMessageId,
-      requestedByMessageId: resume.id,
-      recovered: true,
-      ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
-    }
+    const hostRoute = recoveredHostRoute(recoverable, resume.id)
     return {
       policy,
       route: 'resident',
@@ -707,14 +753,7 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
     const recoverable = recoverableDispatch(agent.session.events)
     const hostRoute = recoverable === undefined
       ? newHostRoute(agent, current.id, previous.operatorId)
-      : {
-        commandId: recoverable.commandId,
-        operatorId: recoverable.operatorId,
-        promptMessageId: recoverable.promptMessageId,
-        requestedByMessageId: current.id,
-        recovered: true,
-        ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
-      }
+      : recoveredHostRoute(recoverable, current.id)
     return {
       policy,
       route: 'resident',
@@ -750,7 +789,14 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
   const automatic = automaticOperator(text)
   return automatic === undefined
     ? primaryDecision(current.id, policy, '未发现需要物理算子或 TaskGraph 的工作')
-    : residentDecision(agent, current.id, policy, automatic, '智能协作选择一个有界 Resident worker')
+    : residentDecision(
+      agent,
+      current.id,
+      policy,
+      automatic,
+      '智能协作选择一个有界 Resident worker',
+      automatic === 'claude-code' ? 'codex' : undefined,
+    )
 }
 
 function debateEnabled(events: readonly SessionEvent[]): boolean {
@@ -768,6 +814,7 @@ function residentDecision(
   policy: PhysicalOperatorRoutingPolicy,
   operatorId: PhysicalOperatorProfileOwner,
   reason: string,
+  fallbackOperatorId?: PhysicalOperatorProfileOwner,
 ): HostRoutingDecision {
   return {
     policy,
@@ -775,7 +822,7 @@ function residentDecision(
     requestedByMessageId: messageId,
     reason,
     operatorId,
-    hostRoute: newHostRoute(agent, messageId, operatorId),
+    hostRoute: newHostRoute(agent, messageId, operatorId, fallbackOperatorId),
   }
 }
 
@@ -792,17 +839,51 @@ function hasRoutingDecision(events: readonly SessionEvent[], requestedByMessageI
     && event.data.requestedByMessageId === requestedByMessageId)
 }
 
-function newHostRoute(agent: Agent, messageId: string, operatorId: string): PendingHostRoute {
+function newHostRoute(
+  agent: Agent,
+  messageId: string,
+  operatorId: string,
+  fallbackOperatorId?: string,
+): PendingHostRoute {
   const residentProfile = isPhysicalOperatorProfileOwner(operatorId)
     ? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
     : undefined
   return {
     commandId: `resident-${createHash('sha256').update(`${agent.id}\0${messageId}`).digest('hex').slice(0, 32)}`,
     operatorId,
+    ...fallbackOperatorId === undefined ? {} : { fallbackOperatorId },
     promptMessageId: messageId,
     requestedByMessageId: messageId,
     recovered: false,
     ...residentProfile === undefined ? {} : { residentProfile },
+  }
+}
+
+function recoveredHostRoute(recoverable: DispatchRecord, requestedByMessageId: string): PendingHostRoute {
+  return {
+    commandId: recoverable.commandId,
+    operatorId: recoverable.operatorId,
+    promptMessageId: recoverable.promptMessageId,
+    requestedByMessageId,
+    recovered: true,
+    ...recoverable.fallbackOperatorId === undefined ? {} : { fallbackOperatorId: recoverable.fallbackOperatorId },
+    ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
+    ...recoverable.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(recoverable.fallbackConfig) },
+  }
+}
+
+function fallbackHostRoute(agent: Agent, failed: PendingHostRoute, operatorId: string): PendingHostRoute {
+  const residentProfile = isPhysicalOperatorProfileOwner(operatorId)
+    ? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
+    : undefined
+  return {
+    commandId: `resident-${createHash('sha256').update(`${failed.commandId}\0fallback\0${operatorId}`).digest('hex').slice(0, 32)}`,
+    operatorId,
+    promptMessageId: failed.promptMessageId,
+    requestedByMessageId: failed.requestedByMessageId,
+    recovered: false,
+    ...residentProfile === undefined ? {} : { residentProfile },
+    ...failed.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(failed.fallbackConfig) },
   }
 }
 
@@ -875,11 +956,13 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
     && event.data.turn === turn && event.data.step === step)
   if (found?.type !== 'physical-operator/dispatch') return undefined
   const {
-    commandId, operatorId, promptMessageId, requestedByMessageId, recovered, residentProfile, fallbackConfig,
+    commandId, operatorId, fallbackOperatorId, promptMessageId, requestedByMessageId, recovered,
+    residentProfile, fallbackConfig,
   } = found.data
   return {
     commandId,
     operatorId,
+    ...fallbackOperatorId === undefined ? {} : { fallbackOperatorId },
     promptMessageId,
     requestedByMessageId,
     recovered,
@@ -987,6 +1070,112 @@ function terminalCodeFor(stopReason: 'error' | 'refusal'): string {
 }
 
 const PHYSICAL_OPERATOR_PROGRESS_PAGE_LIMIT = 100
+const PHYSICAL_OPERATOR_PROGRESS_POLL_MS = 750
+const MAX_RESIDENT_OBSERVATION_PREVIEW = 1_600
+const MAX_RESIDENT_OBSERVATION_NAME = 160
+
+interface ResidentProgressProjectionState {
+  afterSequence: number
+  readonly projected: Set<number>
+}
+
+/** Start a bounded best-effort observer while a Resident turn is still running. */
+function observeResidentProgress(
+  ctx: Context,
+  agent: Agent,
+  run: PhysicalOperatorRun,
+  commandId: string,
+): { drain(): Promise<void>; stop(): Promise<void> } {
+  const state = progressProjectionState(agent, commandId)
+  let active = true
+  let pending: Promise<void> | undefined
+  const drain = async (): Promise<void> => {
+    if (pending !== undefined) return pending
+    const operation = projectResidentProgress(ctx, agent, run, commandId, state).finally(() => {
+      if (pending === operation) pending = undefined
+    })
+    pending = operation
+    return operation
+  }
+  const timer = setInterval(() => {
+    if (active) void drain()
+  }, PHYSICAL_OPERATOR_PROGRESS_POLL_MS)
+  void drain()
+  return {
+    drain,
+    async stop(): Promise<void> {
+      active = false
+      clearInterval(timer)
+      await drain()
+    },
+  }
+}
+
+function progressProjectionState(agent: Agent, commandId: string): ResidentProgressProjectionState {
+  const projected = new Set<number>()
+  let afterSequence = 0
+  for (const event of agent.session.events) {
+    if (event.type !== 'physical-operator/progress' || event.data.commandId !== commandId) continue
+    projected.add(event.data.sequence)
+    afterSequence = Math.max(afterSequence, event.data.sequence)
+  }
+  return { afterSequence, projected }
+}
+
+function boundedResidentText(value: unknown, limit: number): string | undefined {
+  if (typeof value !== 'string') return undefined
+  return value.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, limit)
+}
+
+/**
+ * Re-check the daemon boundary before copying it into Session. The Resident
+ * daemon already sanitizes observations, but remote providers are still an
+ * untrusted boundary: only the documented bounded public shapes survive.
+ */
+function safeResidentProgressData(type: string, payload: unknown, commandId: string): Record<string, JsonValue> | undefined {
+  if (!isJsonValue(payload) || payload === null || Array.isArray(payload)) return undefined
+  const data = payload as Record<string, JsonValue>
+  if (data.commandId !== commandId) return undefined
+  if (type === 'turn.progress') {
+    const phase = boundedResidentText(data.phase, MAX_RESIDENT_OBSERVATION_NAME)
+    return phase === undefined ? undefined : { commandId, phase }
+  }
+  if (type === 'turn.settled') {
+    const stopReason = boundedResidentText(data.stopReason, MAX_RESIDENT_OBSERVATION_NAME)
+    return stopReason === undefined ? undefined : { commandId, stopReason }
+  }
+  if (type !== 'turn.observation') return undefined
+  const kind = boundedResidentText(data.kind, MAX_RESIDENT_OBSERVATION_NAME)
+  switch (kind) {
+    case 'public-output': {
+      const preview = boundedResidentText(data.preview, MAX_RESIDENT_OBSERVATION_PREVIEW)
+      return preview === undefined ? undefined : { commandId, kind, preview }
+    }
+    case 'tool-started':
+    case 'tool-completed': {
+      const toolName = boundedResidentText(data.toolName, MAX_RESIDENT_OBSERVATION_NAME)
+      return toolName === undefined ? undefined : { commandId, kind, toolName }
+    }
+    case 'approval-required': {
+      const approvalKind = boundedResidentText(data.approvalKind, MAX_RESIDENT_OBSERVATION_NAME)
+      const preview = boundedResidentText(data.preview, MAX_RESIDENT_OBSERVATION_PREVIEW)
+      return approvalKind === undefined ? undefined : {
+        commandId, kind, approvalKind,
+        ...preview === undefined ? {} : { preview },
+      }
+    }
+    case 'usage-updated': {
+      if (!isJsonValue(data.usage) || data.usage === null || Array.isArray(data.usage)) return undefined
+      const usage = data.usage as Record<string, JsonValue>
+      const numericUsage = Object.fromEntries(
+        ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens', 'costUsd']
+          .flatMap(key => typeof usage[key] === 'number' && Number.isFinite(usage[key]) ? [[key, usage[key]]] : []),
+      ) as Record<string, JsonValue>
+      return Object.keys(numericUsage).length === 0 ? undefined : { commandId, kind, usage: numericUsage }
+    }
+    default: return undefined
+  }
+}
 
 /**
  * Copy the settled Resident event page into the owning DSH Session. The
@@ -1000,32 +1189,24 @@ async function projectResidentProgress(
   agent: Agent,
   run: PhysicalOperatorRun,
   commandId: string,
+  state = progressProjectionState(agent, commandId),
 ): Promise<void> {
   if (run.readEvents === undefined) return
-  const projected = new Set<number>()
-  for (const event of agent.session.events) {
-    if (event.type === 'physical-operator/progress' && event.data.commandId === commandId) {
-      projected.add(event.data.sequence)
-    }
-  }
-  let afterSequence = 0
   try {
     while (true) {
-      const page = await run.readEvents(afterSequence, PHYSICAL_OPERATOR_PROGRESS_PAGE_LIMIT)
+      const page = await run.readEvents(state.afterSequence, PHYSICAL_OPERATOR_PROGRESS_PAGE_LIMIT)
       if (page.events.length === 0) return
-      let lastSequence = afterSequence
+      let lastSequence = state.afterSequence
       for (const event of page.events) {
         if (!Number.isSafeInteger(event.sequence) || event.sequence <= lastSequence) {
           throw new Error(`invalid progress sequence for physical operator command ${commandId}`)
         }
-        const payload: unknown = event.data
-        if (typeof event.type !== 'string' || typeof event.time !== 'string'
-          || !isJsonValue(payload) || payload === null || Array.isArray(payload)) {
+        if (typeof event.type !== 'string' || typeof event.time !== 'string') {
           throw new Error(`invalid progress payload for physical operator command ${commandId}`)
         }
         lastSequence = event.sequence
-        const data = payload as Record<string, JsonValue>
-        if (data.commandId !== commandId || projected.has(event.sequence)) continue
+        const data = safeResidentProgressData(event.type, event.data, commandId)
+        if (data === undefined || state.projected.has(event.sequence)) continue
         agent.session.append('physical-operator/progress', {
           commandId,
           operatorId: String(run.operatorId),
@@ -1034,9 +1215,9 @@ async function projectResidentProgress(
           time: event.time,
           data,
         }, { ignorable: true })
-        projected.add(event.sequence)
+        state.projected.add(event.sequence)
       }
-      afterSequence = lastSequence
+      state.afterSequence = lastSequence
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -1203,8 +1384,10 @@ function routingPolicyGuidance(policy: PhysicalOperatorRoutingPolicy): string {
   }
 }
 
-function operatorDisplayName(operatorId: PhysicalOperatorProfileOwner): string {
-  return operatorId === 'codex' ? 'Codex' : 'Claude Code'
+function operatorDisplayName(operatorId: string): string {
+  if (operatorId === 'codex') return 'Codex'
+  if (operatorId === 'claude-code') return 'Claude Code'
+  return operatorId
 }
 
 /** Reject run-only keys on list so accidental work requests are never ignored. */
@@ -1242,12 +1425,16 @@ function statusValue(status: PhysicalOperatorStatus): OperatorListValue {
 // Foreground physical-operator and subagent tools share the same result/disposal ownership rule.
 /* jscpd:ignore-start */
 /** Await one foreground result and dispose independently without hiding either failure. */
-async function settleForeground(run: PhysicalOperatorRun): Promise<PhysicalOperatorResult> {
+async function settleForeground(
+  run: PhysicalOperatorRun,
+  beforeDispose?: () => void | Promise<void>,
+): Promise<PhysicalOperatorResult> {
   const [execution] = await Promise.allSettled([run.result.then((result) => {
     const error = stopReasonError(result)
     if (error !== undefined) throw new Error(withPartialText(error, result.output))
     return result
   })])
+  await beforeDispose?.()
   const [disposal] = await Promise.allSettled([Promise.resolve().then(() => run.dispose())])
   if (execution.status === 'rejected') {
     if (disposal.status === 'rejected') {

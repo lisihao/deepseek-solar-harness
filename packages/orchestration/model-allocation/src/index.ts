@@ -102,6 +102,8 @@ export interface ModelExecutionOffer {
   readonly maxConcurrency: number
   readonly activeCount: number
   readonly tags: readonly string[]
+  /** Why a known lane cannot currently qualify for explicit operator selection. */
+  readonly unavailableReasonCode?: ModelAllocationFallbackReasonCode
   readonly quotaPool?: ModelQuotaPool
   readonly quotaGuard?: ModelQuotaGuard
   readonly profile?: PhysicalOperatorExecutionPreference
@@ -115,6 +117,10 @@ export interface ModelAllocationRequest {
   readonly role: string
   readonly task: string
   readonly preferredOperatorIds: readonly string[]
+  /** Operator ids admitted only when every preferred operator is unqualified. */
+  readonly fallbackOperatorIds?: readonly string[]
+  /** Explicit model requested from the preferred operator, when one was pinned. */
+  readonly preferredModel?: string
   readonly objective: ModelAllocationObjective
   readonly plannerVerifierPreference?: PlannerVerifierPreference
   readonly executionPreference?: ExecutionModelPreference
@@ -124,6 +130,20 @@ export interface ModelAllocationRequest {
   readonly graphMaxParallel: number
   readonly offers: readonly ModelExecutionOffer[]
   readonly now: string
+}
+
+/** Stable reason why an explicit preferred operator was replaced. */
+export type ModelAllocationFallbackReasonCode =
+  | 'OPERATOR_UNAVAILABLE'
+  | 'AUTHENTICATION_UNQUALIFIED'
+  | 'MODEL_UNAVAILABLE'
+  | 'QUOTA_UNQUALIFIED'
+
+/** Structured provenance retained when an explicitly admitted fallback is selected. */
+export interface ModelAllocationFallbackProvenance {
+  readonly fromOperatorId: string
+  readonly fromModel?: string
+  readonly reasonCode: ModelAllocationFallbackReasonCode
 }
 
 /** Sealed model choice and graph-wide concurrency advice. */
@@ -136,6 +156,7 @@ export interface ModelAllocationPlan {
   readonly tier: ModelExecutionOffer['tier']
   readonly profile?: PhysicalOperatorExecutionPreference
   readonly quotaPoolId?: string
+  readonly fallback?: ModelAllocationFallbackProvenance
   readonly suggestedParallelism: number
   readonly rationale: readonly string[]
 }
@@ -163,6 +184,8 @@ export abstract class ModelAllocationService extends Service {
    * Select one qualified execution offer and recommend safe parallelism.
    * @param request Node phase, policy, quota, and currently qualified offers.
    * @returns The selected model plan and parallelism recommendation.
+   * @throws {ModelAllocationError} When no admitted lane qualifies, an explicit
+   * model is unavailable, or qualified capacity is busy.
    */
   abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
 }

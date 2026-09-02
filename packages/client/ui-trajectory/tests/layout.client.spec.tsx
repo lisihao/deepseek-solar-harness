@@ -109,6 +109,85 @@ describe('deriveTrajectoryLayout', () => {
     })
   })
 
+  it('adds one bounded physical-operator group without exposing a full final transcript', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-123456789', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [
+          { seq: 10, time: 10_000, type: 'dispatch' },
+          { seq: 11, time: 10_100, type: 'progress', phase: 'reasoning' },
+          {
+            seq: 12, time: 10_200, type: 'observation',
+            observation: { kind: 'public-output', preview: 'A bounded native progress summary.' },
+          },
+          {
+            seq: 13, time: 10_300, type: 'observation',
+            observation: { kind: 'tool-started', toolName: 'Bash' },
+          },
+        ],
+      }],
+    })
+    const group = turns[0]?.groups.find(value => value.title.startsWith('Operator · Codex'))
+    expect(group?.cells).toMatchObject([
+      { kind: 'operator', text: 'Codex 已派发' },
+      { kind: 'operator', text: '阶段 · 推理与执行' },
+      { kind: 'operator', text: '公开输出 · A bounded native progress summary.' },
+      { kind: 'operator', text: '工具开始 · Bash' },
+    ])
+    expect(group?.cells[2]?.outputDetail).toBeUndefined()
+  })
+
+  it('orders a physical command by source sequence and keeps a settled success out of error state', () => {
+    const nodes = [
+      { kind: 'user', seq: 1, time: 1_000, content: [{ type: 'text', text: 'start' }], source: null },
+      {
+        kind: 'assistant', seq: 5, time: 5_000, turn: 1, step: 1,
+        blocks: [{ kind: 'text', text: 'done' }],
+      },
+    ] as unknown as ConversationSnapshot['nodes']
+    const turns = deriveTrajectoryLayout({
+      nodes,
+      partial: null,
+      runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-2', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 3, dispatchTime: 3_000,
+        entries: [
+          { seq: 3, time: 3_000, type: 'dispatch' },
+          { seq: 4, time: 4_000, type: 'terminal', code: 'completed', outcome: 'success' },
+        ],
+      }],
+    })
+    const groups = turns[0]?.groups ?? []
+    expect(groups.map(group => group.title)).toEqual([
+      'Message', 'Operator · Codex · command-2', 'Step 1',
+    ])
+    const terminal = groups[1]?.cells[1]
+    expect(terminal?.text).toBe('执行完成 · completed')
+    expect(terminal?.isError).toBeUndefined()
+    expect(groups.flatMap(group => group.cells).map(cell => cell.index)).toEqual([1, 2, 3, 4])
+  })
+
+  it('folds an explicit tool-dispatch without an agent-loop location into the first visible turn', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [], partial: null, runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'tool-command', operatorId: 'claude-code', turn: 0, step: 0,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [{ seq: 10, time: 10_000, type: 'dispatch' }],
+      }],
+    })
+
+    expect(turns).toMatchObject([{
+      turn: 1,
+      groups: [{ title: 'Operator · Claude Code · tool-command' }],
+    }])
+  })
+
   it('appends a streaming partial without rebuilding unaffected finalized turns', () => {
     const nodes = [{
       kind: 'assistant', seq: 2, time: 2_000, turn: 1, step: 1,

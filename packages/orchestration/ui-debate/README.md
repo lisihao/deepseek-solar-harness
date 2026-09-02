@@ -6,6 +6,8 @@ This dual-face plugin exposes the provider-neutral Debate projection at the auth
 
 GET without `run_id` lists bounded persistent runs. GET with `run_id` adds the selected run, public roster responsibilities, every round's bounded per-agent output summaries and Artifact references, claim ledger, preserved dissent, unresolved items, usage/cost accounting status, moderator synthesis, and a bounded cursor event page. POST accepts revision-fenced `approve`, `reject`, `pause`, `resume`, or `stop` controls only with the dedicated control header and an authorized loopback or paired remote-device identity.
 
+Each role turn retains the requested operator/model separately from the actual late-bound route. When the Scheduler uses an explicit fallback, the browser shows the fallback reason, attempt, and bounded blocker code/message. A blocked role remains distinct from a failed role, and a settled role remains visible when another role blocks the round; long route identifiers are visually truncated with their complete value available through the accessible title.
+
 The browser panel uses the shared theme tokens but owns its styles and transport. This package depends only on the provider-neutral `ctx.debates` Service Definition and Host/client platform seams; it does not import the local Debate Provider, orchestration daemon, or physical-operator runtime.
 
 ## Model Experience

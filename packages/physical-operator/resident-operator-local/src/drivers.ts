@@ -24,6 +24,7 @@ import type {
   ResidentDriverExecuteRequest,
   ResidentDriverCompactRequest,
   ResidentModelOption,
+  ResidentObservation,
   ResidentProductDriver,
   ResidentProviderStatus,
   ResidentQuotaPool,
@@ -185,6 +186,56 @@ function reasoningEffort(value: string | undefined): PhysicalOperatorReasoningEf
   return value !== undefined && EFFORTS.has(value as PhysicalOperatorReasoningEffort)
     ? value as PhysicalOperatorReasoningEffort
     : undefined
+}
+
+function observationRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+/**
+ * Normalize only Claude Agent SDK public text and tool lifecycle messages.
+ * Thinking blocks, user prompt text, tool inputs, tool outputs, stderr, and
+ * all unrecognized SDK envelopes intentionally produce no observation.
+ *
+ * @param message - one SDK stream message.
+ * @param toolNames - turn-local tool-use identity to display-name mapping.
+ * @returns safe, provider-neutral trace observations.
+ */
+export function residentClaudeObservations(
+  message: unknown,
+  toolNames: Map<string, string>,
+): readonly ResidentObservation[] {
+  const record = observationRecord(message)
+  if (record?.type === 'assistant') {
+    const assistant = observationRecord(record.message)
+    const content = assistant?.content
+    if (!Array.isArray(content)) return []
+    const observations: ResidentObservation[] = []
+    for (const block of content) {
+      const value = observationRecord(block)
+      if (value?.type === 'text' && typeof value.text === 'string') {
+        observations.push({ kind: 'public-output', preview: value.text })
+      }
+      if (value?.type === 'tool_use' && typeof value.id === 'string' && typeof value.name === 'string') {
+        toolNames.set(value.id, value.name)
+        observations.push({ kind: 'tool-started', toolName: value.name })
+      }
+    }
+    return observations
+  }
+  if (record?.type === 'user' && typeof record.parent_tool_use_id === 'string') {
+    const user = observationRecord(record.message)
+    const content = user?.content
+    if (!Array.isArray(content) || !content.some(block => observationRecord(block)?.type === 'tool_result')) return []
+    const toolName = toolNames.get(record.parent_tool_use_id)
+    return toolName === undefined ? [] : [{ kind: 'tool-completed', toolName }]
+  }
+  if (record?.type === 'system' && record.subtype === 'permission_denied' && typeof record.tool_name === 'string') {
+    return [{ kind: 'approval-required', approvalKind: record.tool_name }]
+  }
+  return []
 }
 
 function ensureModelToolBridge(request: ResidentDriverExecuteRequest): NonNullable<ResidentDriverExecuteRequest['modelToolBridge']> | undefined {
@@ -656,12 +707,14 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     let final: SDKResultMessage | undefined
     let approvalRequired: string | undefined
     const running = new Set<string>()
+    const observedToolNames = new Map<string, string>()
     const modelToolBridge = ensureModelToolBridge(request)
     const effectiveSystemPrompt = nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy)
     const modelToolNames = new Set(modelToolBridge === undefined ? [] : claudeQualifiedToolNames(modelToolBridge))
     const canUseTool: CanUseTool = (toolName, _input, options) => {
       if (modelToolNames.has(toolName)) return Promise.resolve({ behavior: 'allow' })
       approvalRequired = options.title ?? options.displayName ?? toolName
+      request.onObservation({ kind: 'approval-required', approvalKind: toolName, preview: approvalRequired })
       return Promise.resolve({
         behavior: 'deny',
         message: `Resident execution requires out-of-band approval for ${toolName}`,
@@ -702,6 +755,9 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     })
     try {
       for await (const message of query) {
+        for (const observation of residentClaudeObservations(message, observedToolNames)) {
+          request.onObservation(observation)
+        }
         const session = message.session_id
         if (typeof session === 'string' && session.length > 0) {
           nativeSessionId = session
@@ -748,17 +804,19 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     const output = final.subtype === 'success' && final.result.trim().length > 0
       ? [{ type: 'text' as const, text: final.result }]
       : []
+    const usage = {
+      inputTokens: final.usage.input_tokens,
+      outputTokens: final.usage.output_tokens,
+      cacheReadInputTokens: final.usage.cache_read_input_tokens,
+      cacheWriteInputTokens: final.usage.cache_creation_input_tokens,
+      costUsd: final.total_cost_usd,
+    }
+    request.onObservation({ kind: 'usage-updated', usage })
     return {
       output,
       stopReason,
       nativeSessionId,
-      usage: {
-        inputTokens: final.usage.input_tokens,
-        outputTokens: final.usage.output_tokens,
-        cacheReadInputTokens: final.usage.cache_read_input_tokens,
-        cacheWriteInputTokens: final.usage.cache_creation_input_tokens,
-        costUsd: final.total_cost_usd,
-      },
+      usage,
     }
   }
 
@@ -890,6 +948,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
       modelToolBridge === undefined
         ? undefined
         : createCodexRlmToolHandler(String(request.commandId), modelToolBridge, request.signal),
+      (observation) => { request.onObservation(observation) },
     )
     const abort = (): void => { wire.interrupt() }
     if (request.signal.aborted) abort()

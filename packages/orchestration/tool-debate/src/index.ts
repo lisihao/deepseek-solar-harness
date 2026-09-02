@@ -126,6 +126,7 @@ export const DEFAULT_DEBATE_POLICY: DebatePolicyV1 = Object.freeze({
     Object.freeze({
       version: 1, role: 'skeptical-falsifier', kind: 'participant', operatorId: 'claude-code',
       model: 'claude-fable-5', tier: 'medium', source: 'native-subscription', required: true,
+      fallbackOperatorIds: Object.freeze(['codex']),
       persona: Object.freeze({
         title: 'Skeptical Falsifier',
         mandate: 'Find decisive counterexamples, hidden assumptions, and failure modes.',
@@ -152,6 +153,7 @@ export const DEFAULT_DEBATE_POLICY: DebatePolicyV1 = Object.freeze({
     Object.freeze({
       version: 1, role: 'decision-judge', kind: 'judge', operatorId: 'claude-code',
       model: 'claude-opus-5', tier: 'high', source: 'native-subscription', required: true,
+      fallbackOperatorIds: Object.freeze(['codex']),
       persona: Object.freeze({
         title: 'Decision Judge',
         mandate: 'Reconcile the strongest supported claims and preserve material dissent.',
@@ -248,6 +250,7 @@ function boundedRun(run: DebateRunSnapshotV1): Record<string, JsonValue> {
       mandate: preview(role.persona.mandate),
       operatorId: role.operatorId,
       model: role.model,
+      ...role.fallbackOperatorIds === undefined ? {} : { fallbackOperatorIds: role.fallbackOperatorIds },
     })),
     rounds: run.rounds.slice(0, MAX_REF_ITEMS).map(round => ({
       round: round.round,
@@ -259,6 +262,24 @@ function boundedRun(run: DebateRunSnapshotV1): Record<string, JsonValue> {
         operatorId: turn.operatorId,
         model: turn.model,
         state: turn.state,
+        ...turn.attempt === undefined ? {} : { attempt: turn.attempt },
+        ...turn.routing === undefined ? {} : {
+          routing: {
+            requestedOperatorId: turn.routing.requestedOperatorId,
+            requestedModel: turn.routing.requestedModel,
+            ...turn.routing.actualOperatorId === undefined ? {} : { actualOperatorId: turn.routing.actualOperatorId },
+            ...turn.routing.actualModel === undefined ? {} : { actualModel: turn.routing.actualModel },
+            ...turn.routing.fallbackReasonCode === undefined ? {} : { fallbackReasonCode: turn.routing.fallbackReasonCode },
+            ...turn.routing.allocationPlanRef === undefined ? {} : { allocationPlanRef: preview(turn.routing.allocationPlanRef) },
+          },
+        },
+        ...turn.blockers === undefined ? {} : {
+          blockers: turn.blockers.slice(0, MAX_REF_ITEMS).map(blocker => ({
+            code: blocker.code,
+            message: preview(blocker.message),
+            ...blocker.nodeId === undefined ? {} : { nodeId: blocker.nodeId },
+          })),
+        },
         ...turn.outputRef === undefined ? {} : { outputRef: preview(turn.outputRef) },
         ...turn.outputPreview === undefined ? {} : { outputPreview: preview(turn.outputPreview) },
       })),
@@ -465,10 +486,30 @@ function transcriptLines(
     }
     for (const turn of round.turns.slice(0, MAX_REF_ITEMS)) {
       const key = `${String(round.round)}:${turn.slotId}`
-      const signature = [turn.state, turn.outputRef ?? '', turn.outputPreview ?? ''].join('\u0000')
+      const signature = JSON.stringify([
+        turn.state,
+        turn.operatorId,
+        turn.model,
+        turn.attempt,
+        turn.routing,
+        turn.blockers,
+        turn.outputRef,
+        turn.outputPreview,
+      ])
       if (tracker.turnSignatures.get(key) === signature) continue
       tracker.turnSignatures.set(key, signature)
-      lines.push(`Agent ${turn.role} (${turn.slotId}) · ${turn.state}`)
+      const actualOperatorId = turn.routing?.actualOperatorId ?? turn.operatorId
+      const actualModel = turn.routing?.actualModel ?? turn.model
+      lines.push(`Agent ${turn.role} (${turn.slotId}) · ${turn.state} — ${actualOperatorId}/${actualModel}`)
+      if (turn.routing?.fallbackReasonCode !== undefined) {
+        lines.push(
+          `  Provider fallback: ${turn.routing.requestedOperatorId}/${turn.routing.requestedModel}`
+          + ` → ${actualOperatorId}/${actualModel} (${turn.routing.fallbackReasonCode})`,
+        )
+      }
+      for (const blocker of turn.blockers?.slice(0, MAX_REF_ITEMS) ?? []) {
+        lines.push(`  Blocker: ${blocker.code} — ${preview(blocker.message) ?? ''}`)
+      }
       if (turn.outputPreview !== undefined) lines.push(`  Explicit output summary: ${preview(turn.outputPreview) ?? ''}`)
       if (turn.outputRef !== undefined) lines.push(`  Artifact: ${preview(turn.outputRef) ?? ''}`)
     }

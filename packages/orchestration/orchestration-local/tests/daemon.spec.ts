@@ -73,10 +73,14 @@ class FakeResidentClient {
   available = true
   maxConcurrency = 4
   unavailableOperators = new Set<string>()
+  unauthenticatedOperators = new Set<string>()
   defer = false
   failNext = 0
   failNextCode = 'RUNTIME_UNAVAILABLE'
   claudeQuotaKnown = true
+  claudeQuotaUsedPercent = 50
+  /** Let composite trace tests model one independent native lane per turn. */
+  uniqueSessionPerCommand = false
   onExecute?: (request: FakeResidentRequest) => Promise<void>
   private readonly deferredResolvers: Array<() => void> = []
   turns = new Map<string, { state: 'running' | 'settled'; result?: TestResult }>()
@@ -98,7 +102,7 @@ class FakeResidentClient {
       maxConcurrency: this.maxConcurrency,
       injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
       available: this.available && !this.unavailableOperators.has(operatorId),
-      authentication: 'native-subscription',
+      authentication: this.unauthenticatedOperators.has(operatorId) ? 'unqualified' as const : 'native-subscription' as const,
       productVersion: 'test',
       protocolHash: 'test',
       models: operatorId === 'codex'
@@ -123,7 +127,7 @@ class FakeResidentClient {
         quotaPools: [{
           poolId: 'claude-test', displayName: 'Claude test quota',
           models: ['claude-sonnet-4-6', 'claude-opus-4-6'], meter: 'native-subscription' as const,
-          primary: { usedPercent: 50 }, observedAt: '2026-08-21T00:00:00.000Z',
+          primary: { usedPercent: this.claudeQuotaUsedPercent }, observedAt: '2026-08-21T00:00:00.000Z',
         }],
       },
     }))
@@ -134,14 +138,33 @@ class FakeResidentClient {
     this.requests.push(request)
     this.starts.push(`${request.operatorId}:${request.commandId}`)
     const turnId = `turn:${request.commandId}`
-    const sessionId = `session:${request.operatorId}`
-    this.residentEvents.set(sessionId, ['reasoning', 'tool_activity', 'finalizing'].map((phase, index) => ({
+    const sessionId = this.uniqueSessionPerCommand
+      ? `session:${request.operatorId}:${request.commandId}`
+      : `session:${request.operatorId}`
+    const progress = ['reasoning', 'tool_activity', 'finalizing'].map((phase, index) => ({
       sequence: index + 1,
       sessionId,
       type: 'turn.progress',
       time: `2026-08-21T00:00:0${String(index)}.000Z`,
       data: { turnId, phase },
-    })))
+    }))
+    this.residentEvents.set(sessionId, [
+      ...progress,
+      {
+        sequence: progress.length + 1,
+        sessionId,
+        type: 'turn.observation',
+        time: '2026-08-21T00:00:03.000Z',
+        data: { turnId, commandId: request.commandId, kind: 'public-output', preview: 'safe native progress', prompt: 'must not persist' },
+      },
+      {
+        sequence: progress.length + 2,
+        sessionId,
+        type: 'turn.observation',
+        time: '2026-08-21T00:00:04.000Z',
+        data: { turnId, commandId: request.commandId, kind: 'tool-completed', toolName: 'Read', result: 'must not persist' },
+      },
+    ])
     const result = {
       output: [{ type: 'text' as const, text: `completed ${request.commandId}` }],
       stopReason: 'completed' as const,
@@ -614,6 +637,7 @@ describe('orchestration daemon', () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-home-'))
     const root = join(home, 'orchestrations')
     const fake = new FakeResidentClient()
+    fake.uniqueSessionPerCommand = true
     fake.onExecute = async (request) => {
       if (request.modelToolBridge === undefined) return
       if (request.commandId.endsWith(':rlm:root')) {
@@ -691,6 +715,26 @@ describe('orchestration daemon', () => {
     expect(events.events.find(value => value.type === 'rlm.execution.settled')?.data).toMatchObject({
       childCount: 1,
     })
+    const nativeProgress = events.events.filter(value => value.type === 'node.operator.progress')
+    const nativeObservations = events.events.filter(value => value.type === 'node.operator.observation')
+    const nativeCommands = new Set(nativeProgress.map(value => value.data.commandId))
+    expect(nativeCommands.size).toBe(3)
+    const firstNativeProgress = nativeProgress[0]
+    expect(firstNativeProgress?.nodeId).toBe('code')
+    expect(firstNativeProgress?.attempt).toBe(1)
+    expect(typeof firstNativeProgress?.generation).toBe('number')
+    expect(firstNativeProgress?.data.operatorId).toBe('claude-code')
+    expect(typeof firstNativeProgress?.data.nativeSessionId).toBe('string')
+    expect(typeof firstNativeProgress?.data.turnId).toBe('string')
+    expect(typeof firstNativeProgress?.data.residentSequence).toBe('number')
+    expect(nativeObservations.length).toBeGreaterThanOrEqual(6)
+    expect(nativeObservations.every(value => (
+      value.data.operatorId === 'claude-code'
+      && typeof value.data.nativeSessionId === 'string'
+      && typeof value.data.turnId === 'string'
+      && Number.isSafeInteger(value.data.residentSequence)
+    ))).toBe(true)
+    expect(JSON.stringify([...nativeProgress, ...nativeObservations])).not.toContain('must not persist')
   })
 
   it('does not let one RLM allocation serialize an independent TaskGraph node', async () => {
@@ -1198,6 +1242,7 @@ describe('orchestration daemon', () => {
     expect(events.events.map(value => value.type)).toEqual(expect.arrayContaining([
       'intent.compiled', 'graph.compiled', 'capsule.resolved', 'context.compiled',
       'execution_plan.sealed', 'node.dispatched', 'node.operator.progress',
+      'node.operator.observation',
       'node.evidence.accepted', 'run.completed',
     ]))
     const codexEvidence = events.events.find(value => value.type === 'node.evidence.accepted' && value.nodeId === 'code')
@@ -1222,6 +1267,20 @@ describe('orchestration daemon', () => {
     })
     expect(events.events.filter(value => value.type === 'node.operator.progress').map(value => value.data.phase))
       .toEqual(expect.arrayContaining(['reasoning', 'tool_activity', 'finalizing']))
+    const observations = events.events.filter(value => value.type === 'node.operator.observation')
+    const outputObservation = observations.find(value => value.data.residentSequence === 4)
+    expect(outputObservation?.nodeId).toBe('code')
+    expect(outputObservation?.attempt).toBe(1)
+    expect(typeof outputObservation?.generation).toBe('number')
+    expect(outputObservation?.data).toMatchObject({
+      commandId: `orch:${String(started.runId)}:code:1`, operatorId: 'codex', residentSequence: 4,
+      observation: { kind: 'public-output', preview: 'safe native progress' },
+    })
+    const completedObservation = observations.find(value => value.data.residentSequence === 5)
+    expect(completedObservation?.data).toMatchObject({
+      residentSequence: 5, observation: { kind: 'tool-completed', toolName: 'Read' },
+    })
+    expect(JSON.stringify(observations)).not.toContain('must not persist')
   })
 
   it('runs mutating nodes in isolated worktrees and integrates their branches into the certified repository', async () => {
@@ -1583,6 +1642,78 @@ describe('orchestration daemon', () => {
     await eventually(() => client.inspect(String(run.runId)), () => fake.starts.length === 2)
     fake.resolveDeferred()
     await eventually(() => client.inspect(String(run.runId)), value => value.state === 'completed')
+  })
+
+  it.each([
+    {
+      name: 'operator outage',
+      preferredModel: 'claude-opus-5',
+      reasonCode: 'OPERATOR_UNAVAILABLE',
+      configure: (fake: FakeResidentClient) => { fake.unavailableOperators.add('claude-code') },
+    },
+    {
+      name: 'authentication failure',
+      preferredModel: 'claude-opus-5',
+      reasonCode: 'AUTHENTICATION_UNQUALIFIED',
+      configure: (fake: FakeResidentClient) => { fake.unauthenticatedOperators.add('claude-code') },
+    },
+    {
+      name: 'model mismatch',
+      preferredModel: 'claude-missing-model',
+      reasonCode: 'MODEL_UNAVAILABLE',
+      configure: (_fake: FakeResidentClient) => {},
+    },
+    {
+      name: 'quota rejection',
+      preferredModel: 'claude-opus-4-6',
+      reasonCode: 'QUOTA_UNQUALIFIED',
+      configure: (fake: FakeResidentClient) => { fake.claudeQuotaUsedPercent = 80 },
+    },
+  ])('late-binds an admitted fallback after $name', async ({ configure, preferredModel, reasonCode }) => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-fallback-'))
+    const root = join(home, 'o')
+    const fake = new FakeResidentClient()
+    configure(fake)
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const base = graph(home)
+    const node = {
+      ...base.nodes[0]!,
+      readScopes: [],
+      writeScopes: [],
+      title: 'Debate judge',
+      role: 'decision judge',
+      task: 'Judge the debate without changing the role.',
+      phase: 'planning' as const,
+      operator: {
+        preferredIds: ['claude-code'],
+        fallbackIds: ['codex'],
+        profile: { model: preferredModel },
+      },
+    }
+    const compilation = await client.compile({
+      intent: { request: 'Late-bound Debate fallback fixture.' },
+      graph: { ...base, maxParallel: 1, nodes: [node] },
+    })
+    const started = await startCompilation(client, compilation.compilationId)
+    const completed = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ state: 'passed', operatorId: 'codex', model: 'gpt-5.6-sol' })
+    expect(fake.requests).toHaveLength(1)
+    expect(fake.requests[0]).toMatchObject({ operatorId: 'codex', profile: { model: 'gpt-5.6-sol' } })
+    const events = await client.readEvents({ runId: started.runId, limit: 100 })
+    const allocated = events.events.find(value => value.type === 'model.allocated')
+    expect(allocated?.data.fallback).toEqual({
+      fromOperatorId: 'claude-code',
+      fromModel: preferredModel,
+      reasonCode,
+    })
+    const plan = await client.readArtifact(OrchestrationArtifactRef(String(allocated?.data.ref)))
+    expect(plan).toMatchObject({
+      operatorId: 'codex',
+      fallback: { fromOperatorId: 'claude-code', fromModel: preferredModel, reasonCode },
+    })
   })
 
   it('does not replace an unavailable explicitly preferred operator', async () => {

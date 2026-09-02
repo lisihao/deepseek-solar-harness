@@ -3,13 +3,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
-import { DebateError } from '@deepseek-ai/dsh-debate'
+import { DebateError, type DebateTurnRoutingV1 } from '@deepseek-ai/dsh-debate'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import LocalDebateProvider from '@deepseek-ai/dsh-debate-local'
 import type {
   DebateRoundExecutionRequestV1,
   DebateRoundExecutionResultV1,
   DebateRoundExecutorPort,
+  DebateTurnFailureV1,
   DebateTurnRequestV1,
   DebateTurnResultV1,
 } from '@deepseek-ai/dsh-debate-local'
@@ -19,6 +20,8 @@ import {
 } from '@deepseek-ai/dsh-orchestration'
 import type {
   LogicalTaskGraphV1,
+  NodeExecutionPlanV1,
+  OrchestrationNodeSnapshot,
   OrchestrationNodeSpecV1,
   OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
@@ -166,7 +169,11 @@ function graphNode(turn: DebateTurnRequestV1, participantIds: readonly string[])
     phase: judge ? 'synthesis' : 'execution',
     rlm: { mode: 'disabled', maxDepth: 1, maxChildren: 1, maxTurns: 1 },
     autonomous: { mode: 'disabled' },
-    operator: { preferredIds: [turn.operatorId], profile: { model: turn.model } },
+    operator: {
+      preferredIds: [turn.operatorId],
+      ...(turn.fallbackOperatorIds === undefined ? {} : { fallbackIds: turn.fallbackOperatorIds }),
+      profile: { model: turn.model },
+    },
   }
 }
 
@@ -233,6 +240,34 @@ function terminal(state: OrchestrationRunSnapshot['state']): boolean {
   return state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'indeterminate'
 }
 
+function failureCode(error: unknown): string {
+  if (error instanceof DebateError) return error.code
+  if (error instanceof Error) {
+    const code = (error as Error & { readonly code?: unknown }).code
+    if (typeof code === 'string' && code.length > 0) return code
+  }
+  return 'DEBATE_INVALID'
+}
+
+function failureMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function participantFailure(
+  node: OrchestrationNodeSnapshot,
+  routing: DebateTurnRoutingV1,
+  error: unknown,
+): DebateTurnFailureV1 {
+  const code = failureCode(error)
+  return {
+    state: 'failed',
+    attempt: node.attempt,
+    errorCode: code,
+    blockers: [{ code, message: failureMessage(error), nodeId: node.id }],
+    routing,
+  }
+}
+
 /** One-round adapter that compiles and starts only the existing TaskGraph service. */
 export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
   private readonly maxParallel: number
@@ -293,6 +328,32 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
         runId: request.runId,
         round: request.round,
       })),
+    }
+  }
+
+  private async routing(
+    turn: DebateTurnRequestV1,
+    node: OrchestrationNodeSnapshot,
+  ): Promise<DebateTurnRoutingV1> {
+    let fallbackReasonCode: string | undefined
+    let allocationPlanRef: string | undefined
+    if (node.executionPlanRef !== undefined) {
+      const rawPlan = await this.orchestrations.readArtifact(node.executionPlanRef)
+      if (typeof rawPlan !== 'object' || rawPlan === null || !('allocationPlanRef' in rawPlan) || !('allocationPlan' in rawPlan)) {
+        throw new DebateError(`Debate node ${node.id} has an invalid execution plan artifact`, 'DEBATE_INVALID')
+      }
+      const plan = rawPlan as NodeExecutionPlanV1
+      allocationPlanRef = String(plan.allocationPlanRef)
+      fallbackReasonCode = plan.allocationPlan.fallback?.reasonCode
+    }
+    return {
+      version: 1,
+      requestedOperatorId: turn.operatorId,
+      requestedModel: turn.model,
+      ...(node.operatorId === undefined ? {} : { actualOperatorId: node.operatorId }),
+      ...(node.model === undefined ? {} : { actualModel: node.model }),
+      ...(fallbackReasonCode === undefined ? {} : { fallbackReasonCode }),
+      ...(allocationPlanRef === undefined ? {} : { allocationPlanRef }),
     }
   }
 
@@ -357,25 +418,81 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
       await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs))
       run = await this.orchestrations.inspect(OrchestrationRunId(String(run.runId)))
     }
-    if (run.state === 'indeterminate') {
-      throw new DebateError(`Debate TaskGraph ${String(run.runId)} is indeterminate`, 'DEBATE_INDETERMINATE')
-    }
-    if (run.state !== 'completed') {
-      throw new DebateError(`Debate TaskGraph ${String(run.runId)} ended as ${run.state}`, 'DEBATE_PROVIDER_UNAVAILABLE')
-    }
     const resultsBySlot: Record<string, DebateTurnResultV1> = {}
+    const failuresBySlot: Record<string, DebateTurnFailureV1> = {}
+    let hasNonPassedNodeFailure = false
     for (const identity of plan.identities) {
       const node = run.nodes.find(candidate => candidate.id === identity.nodeId)
-      const evidenceRef = node?.evidenceRefs.at(-1)
-      if (node?.state !== 'passed' || evidenceRef === undefined) {
-        throw new DebateError(`Debate node ${identity.nodeId} omitted settled Evidence`, 'DEBATE_PROVIDER_UNAVAILABLE')
+      const turn = request.turns.find(candidate => candidate.slotId === identity.slotId)
+      if (node === undefined || turn === undefined) {
+        throw new DebateError(`Debate TaskGraph omitted planned node ${identity.nodeId}`, 'DEBATE_INVALID')
       }
+      const routing = await this.routing(turn, node)
+      if (node.state !== 'passed') {
+        hasNonPassedNodeFailure = true
+        if (!['blocked', 'failed', 'indeterminate', 'cancelled'].includes(node.state)) {
+          throw new DebateError(
+            `Debate TaskGraph ended as ${run.state} with non-terminal node ${identity.nodeId}=${node.state}`,
+            'DEBATE_INVALID',
+          )
+        }
+        const state = node.state === 'blocked'
+          ? 'blocked' as const
+          : node.state === 'indeterminate'
+            ? 'indeterminate' as const
+            : 'failed' as const
+        const defaultCode = node.state === 'indeterminate'
+          ? 'DEBATE_INDETERMINATE'
+          : node.state === 'cancelled'
+            ? 'DEBATE_INTERRUPTED'
+            : 'DEBATE_PROVIDER_UNAVAILABLE'
+        failuresBySlot[identity.slotId] = {
+          state,
+          attempt: node.attempt,
+          errorCode: node.blockers[0]?.code ?? defaultCode,
+          blockers: node.blockers.map(blocker => ({ ...blocker })),
+          routing,
+        }
+        continue
+      }
+      const evidenceRef = node.evidenceRefs.at(-1)
+      if (evidenceRef === undefined) {
+        failuresBySlot[identity.slotId] = participantFailure(
+          node,
+          routing,
+          new DebateError(`Debate node ${identity.nodeId} omitted settled Evidence`, 'DEBATE_PROVIDER_UNAVAILABLE'),
+        )
+        continue
+      }
+      // Keep the durable artifact read outside the participant parser catches:
+      // an unavailable/corrupt orchestration store is a run-level failure, not
+      // a partial Debate result that can be safely presented as settled.
       const evidence = await this.orchestrations.readArtifact(OrchestrationArtifactRef(String(evidenceRef)))
-      const output = textOutput(evidence, `Debate node ${identity.nodeId}`)
-      const parsed = parseJsonOutput(output, `Debate node ${identity.nodeId}`)
-      const usage = evidenceUsage(evidence)
+      let output: string
+      try {
+        output = textOutput(evidence, `Debate node ${identity.nodeId}`)
+      } catch (error) {
+        failuresBySlot[identity.slotId] = participantFailure(node, routing, error)
+        continue
+      }
+      let parsed: Record<string, unknown>
+      try {
+        parsed = parseJsonOutput(output, `Debate node ${identity.nodeId}`)
+      } catch (error) {
+        failuresBySlot[identity.slotId] = participantFailure(node, routing, error)
+        continue
+      }
+      let usage: DebateTurnResultV1['usage']
+      try {
+        usage = evidenceUsage(evidence)
+      } catch (error) {
+        failuresBySlot[identity.slotId] = participantFailure(node, routing, error)
+        continue
+      }
       resultsBySlot[identity.slotId] = {
         ...parsed as unknown as DebateTurnResultV1,
+        attempt: node.attempt,
+        routing,
         outputRef: String(evidenceRef),
         outputPreview: typeof parsed.outputPreview === 'string'
           ? parsed.outputPreview.slice(0, MAX_RESULT_PREVIEW)
@@ -383,7 +500,17 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
         ...(usage === undefined ? {} : { usage }),
       }
     }
-    return { version: 1, resultsBySlot }
+    if (run.state === 'completed' && hasNonPassedNodeFailure) {
+      throw new DebateError(`Completed Debate TaskGraph ${String(run.runId)} contains failed nodes`, 'DEBATE_INVALID')
+    }
+    if (run.state !== 'completed' && !hasNonPassedNodeFailure) {
+      throw new DebateError(`Debate TaskGraph ${String(run.runId)} ended as ${run.state} without a node failure`, 'DEBATE_PROVIDER_UNAVAILABLE')
+    }
+    return {
+      version: 1,
+      resultsBySlot,
+      ...(Object.keys(failuresBySlot).length === 0 ? {} : { failuresBySlot }),
+    }
   }
 }
 
