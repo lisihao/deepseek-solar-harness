@@ -557,13 +557,11 @@ function transcriptLines(
     }
     for (const turn of round.turns.slice(0, MAX_REF_ITEMS)) {
       const key = `${String(round.round)}:${turn.slotId}`
-      if (turn.role !== 'decision-judge' && !tracker.turnFloors.has(key)) {
-        tracker.turnFloors.set(key, tracker.nextFloor++)
-      }
-      if (!roundIsTerminal(round.state) || !turnIsTerminal(turn.state)) continue
+      if ((!roundIsTerminal(round.state) && run.state !== 'stopped') || !turnIsTerminal(turn.state)) continue
       if (tracker.emittedTurnKeys.has(key)) continue
       tracker.emittedTurnKeys.add(key)
       if (turn.role === 'decision-judge') continue
+      if (!tracker.turnFloors.has(key)) tracker.turnFloors.set(key, tracker.nextFloor++)
       const floor = tracker.turnFloors.get(key)
       if (floor !== undefined) lines.push(...transcriptTurnLines(run, round.round, floor, turn))
     }

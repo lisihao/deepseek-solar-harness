@@ -549,6 +549,71 @@ describe('debate model Consumer', () => {
     expect(streamText.match(/participant execution did not complete/g)).toHaveLength(1)
   })
 
+  it('renders terminal participant turns from a stopped active round with contiguous floors', async () => {
+    const { ctx, agent, provider } = await setupAutomatic()
+    const template = snapshot()
+    const round = template.rounds[0]
+    const proposer = round?.turns[0]
+    if (round === undefined || proposer === undefined) throw new Error('missing Debate fixture turn')
+    const { synthesis: _synthesis, ...withoutSynthesis } = template
+    const { convergence: _convergence, ...withoutConvergence } = round
+    const proposerBlocker = { code: 'DEBATE_INTERRUPTED', message: 'active stop', nodeId: 'node-stop' }
+    const proposerTurn = {
+      ...proposer,
+      state: 'failed' as const,
+      attempt: 1,
+      outputRef: undefined,
+      outputPreview: undefined,
+      errorCode: 'DEBATE_INTERRUPTED',
+      blockers: [proposerBlocker, proposerBlocker, { ...proposerBlocker, message: 'second active failure', nodeId: 'node-second' }],
+    }
+    const falsifierTurn = {
+      ...proposer,
+      slotId: 'slot-falsifier',
+      role: 'skeptical-falsifier' as const,
+      model: 'claude-fable-5',
+      state: 'settled' as const,
+      outputRef: 'artifact:falsifier-stop',
+      outputPreview: 'Falsifier output after stop.',
+    }
+    const judgeTurn = {
+      ...proposer,
+      slotId: 'slot-judge',
+      role: 'decision-judge' as const,
+      state: 'failed' as const,
+      outputRef: undefined,
+      outputPreview: undefined,
+      errorCode: 'DEBATE_INTERRUPTED',
+      blockers: [{ code: 'DEBATE_INTERRUPTED', message: 'judge interrupted', nodeId: 'node-judge' }],
+    }
+    provider.startResult = {
+      ...withoutSynthesis,
+      state: 'stopped',
+      currentRound: 1,
+      rounds: [{
+        ...withoutConvergence,
+        state: 'running',
+        turns: [proposerTurn, falsifierTurn, judgeTurn],
+      }],
+    }
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Stop this active Debate.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    const streamText = textDeltas(agent).join('')
+    expect(streamText).toContain('### 1 楼 · 建设性提案者')
+    expect(streamText).toContain('### 2 楼 · 怀疑式证伪者')
+    expect(streamText).not.toContain('### 3 楼')
+    expect(streamText).not.toContain('楼 · 决策裁判（主持人）')
+    expect(streamText.match(/未完成：active stop/g)).toHaveLength(1)
+    expect(streamText.match(/未完成：second active failure/g)).toHaveLength(1)
+    expect(streamText).not.toContain('未完成：DEBATE_INTERRUPTED')
+    expect(streamText).toContain('主持人状态')
+  })
+
   it('uses configured personas and renders each terminal lifecycle deterministically without a judge floor', async () => {
     const states = ['completed', 'budget_limited', 'max_rounds', 'stopped', 'failed', 'indeterminate'] as const
     for (const state of states) {

@@ -234,6 +234,50 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).not.toContain('公开发言：尚未记录公开输出。')
   })
 
+  it('keeps stopped active terminal turns visible and assigns contiguous floors after filtering', () => {
+    const fixture = run()
+    const firstRound = fixture.rounds[0]
+    if (firstRound === undefined) throw new Error('missing Debate fixture round')
+    const proposer = firstRound.turnStates[0]
+    const falsifier = firstRound.turnStates[1]
+    const judge = firstRound.turnStates[2]
+    if (proposer === undefined || falsifier === undefined || judge === undefined) throw new Error('missing Debate fixture turns')
+    const plannedProposer = { ...proposer, state: 'planned' as const, outputRef: undefined, outputPreview: undefined, claimIds: [], evidenceRefs: [] }
+    const settledFalsifier = { ...falsifier, state: 'settled' as const }
+    const failedJudge = {
+      ...judge,
+      state: 'failed' as const,
+      outputRef: undefined,
+      outputPreview: undefined,
+      claimIds: [],
+      evidenceRefs: [],
+      errorCode: 'DEBATE_INTERRUPTED',
+      blockers: [{ code: 'DEBATE_INTERRUPTED', message: 'judge interrupted', nodeId: 'node-judge' }],
+    }
+    fixture.state = 'stopped'
+    fixture.currentRound = 1
+    fixture.synthesis = undefined
+    fixture.rounds = [{ ...firstRound, state: 'running', turnStates: [plannedProposer, settledFalsifier, failedJudge] }]
+    fixture.roles = fixture.roles.map(role => role.role === 'constructive-proposer'
+      ? { ...role, latestTurn: plannedProposer }
+      : role.role === 'skeptical-falsifier'
+        ? { ...role, latestTurn: settledFalsifier }
+        : role.role === 'decision-judge'
+          ? { ...role, latestTurn: failedJudge }
+          : role)
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup.match(/<span class="dshDesktopDebateFloor">[0-9]+ 楼<\/span>/g)).toEqual([
+      '<span class="dshDesktopDebateFloor">1 楼</span>',
+    ])
+    expect(markup).toContain('Round one challenge: verify rollback.')
+    expect(markup).not.toContain('Round one proposal: choose A.')
+  })
+
   it('keeps settled roles visible when another role is blocked and shows route provenance', () => {
     const fixture = run()
     const blockedRouting = {
@@ -274,6 +318,42 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).toContain('Claude Code unavailable because the VPN is blocked.')
     expect(markup).toContain('节点 debate-r1-skeptical-falsifier')
     expect(markup).not.toContain('Agent 输出失败')
+  })
+
+  it('deduplicates exact blockers within one turn while preserving distinct messages', () => {
+    const fixture = run()
+    const secondRound = fixture.rounds[1]
+    if (secondRound === undefined) throw new Error('missing Debate fixture round')
+    const sourceTurn = secondRound.turnStates[1]
+    if (sourceTurn === undefined) throw new Error('missing Debate fixture turn')
+    const firstBlocker = { code: 'DUPLICATE_ERROR', message: 'First blocker.', nodeId: 'node-first' }
+    const blockedTurn = {
+      ...sourceTurn,
+      state: 'blocked' as const,
+      outputRef: undefined,
+      outputPreview: undefined,
+      claimIds: [],
+      evidenceRefs: [],
+      attempt: 1,
+      errorCode: 'DUPLICATE_ERROR',
+      blockers: [firstBlocker, firstBlocker, { code: 'DUPLICATE_ERROR', message: 'Second blocker.', nodeId: 'node-second' }],
+    }
+    fixture.rounds = fixture.rounds.map((round, index) => index === 1
+      ? { ...round, turnStates: round.turnStates.map((turn, turnIndex) => turnIndex === 1 ? blockedTurn : turn) }
+      : round)
+    fixture.roles = fixture.roles.map(role => role.role === 'skeptical-falsifier'
+      ? { ...role, latestTurn: blockedTurn }
+      : role)
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup.match(/节点 node-first/g)).toHaveLength(1)
+    expect(markup.match(/节点 node-second/g)).toHaveLength(1)
+    expect(markup).toContain('First blocker.')
+    expect(markup).toContain('Second blocker.')
   })
 
   it('truncates long route values visually while preserving complete values in titles', () => {

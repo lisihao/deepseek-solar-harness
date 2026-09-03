@@ -210,7 +210,9 @@ export function RunDetail(props: {
   let nextFloor = 1
   for (const round of run.rounds) {
     for (const turn of round.turnStates) {
-      if (turn.role !== 'decision-judge') floors.set(`${String(round.round)}-${turn.slotId}`, nextFloor++)
+      if (turn.role === 'decision-judge' || !terminalTurnState(turn.state)) continue
+      const key = `${String(round.round)}-${turn.slotId}`
+      if (!floors.has(key)) floors.set(key, nextFloor++)
     }
   }
   return <main className="dshDesktopDebateColumn dshDesktopDebateDetail">
@@ -304,7 +306,6 @@ function RoleCard({ role }: { role: DesktopDebateRole }) {
       {turn?.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">
         回退：{turn.routing.fallbackReasonCode}
       </p>}
-      {turn?.blockers !== undefined && <BlockerList blockers={turn.blockers} />}
     </details>
   </article>
 }
@@ -346,19 +347,33 @@ function DebateTurnCard({ run, turn, floor }: { run: DesktopDebateRun; turn: Des
         {turn.settledAt !== undefined && <time dateTime={turn.settledAt} title={turn.settledAt}>完成 {formatTime(turn.settledAt)}</time>}
       </div>}
       {turn.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">回退：{turn.routing.fallbackReasonCode}</p>}
-      {turn.blockers !== undefined && <BlockerList blockers={turn.blockers} />}
+      {turn.blockers !== undefined && <BlockerList attempt={turn.attempt} blockers={turn.blockers} />}
     </details>
   </article>
 }
 
-function BlockerList({ blockers }: { blockers: DesktopDebateTurnBlocker[] }) {
+function BlockerList({ blockers, attempt }: { blockers: readonly DesktopDebateTurnBlocker[]; attempt?: number | undefined }) {
+  const uniqueBlockers = dedupeTurnBlockers(blockers, attempt)
   return <div className="dshDesktopDebateBlockers" aria-label="阻断原因">
-    {blockers.map((blocker, index) => <article key={`${blocker.code}-${String(index)}`}>
+    {uniqueBlockers.map((blocker, index) => <article key={`${blocker.code}-${String(index)}`}>
       <strong>{blocker.code}</strong>
       <p title={blocker.message}>{blocker.message}</p>
       {blocker.nodeId !== undefined && <small title={blocker.nodeId}>节点 {displayRouteValue(blocker.nodeId)}</small>}
     </article>)}
   </div>
+}
+
+function dedupeTurnBlockers(
+  blockers: readonly DesktopDebateTurnBlocker[],
+  attempt: number | undefined,
+): DesktopDebateTurnBlocker[] {
+  const seen = new Set<string>()
+  return blockers.filter((blocker) => {
+    const key = JSON.stringify([attempt ?? null, blocker.nodeId ?? '', blocker.code, blocker.message])
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function turnRoute(
@@ -446,7 +461,7 @@ export function EvidenceColumn({ run }: { run?: DesktopDebateRun | undefined }) 
         ? <>
           <p className="dshDesktopDebateEmpty">尚未生成综合结果。</p>
           {moderatorTurn !== undefined && <p>主持人状态：{turnStateLabel(moderatorTurn.state)}</p>}
-          {moderatorTurn?.blockers !== undefined && <BlockerList blockers={moderatorTurn.blockers} />}
+          {moderatorTurn?.blockers !== undefined && <BlockerList attempt={moderatorTurn.attempt} blockers={moderatorTurn.blockers} />}
         </>
         : <>
           <p><strong>{synthesisLabel(run.synthesis.state)}</strong> · 保留异议 {String(run.synthesis.dissentCount)}</p>
