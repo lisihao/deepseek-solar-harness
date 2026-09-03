@@ -405,7 +405,7 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:63`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:80`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -427,7 +427,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:63`](../packages/orche
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:76`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:93`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -438,7 +438,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:76`](../packages/orche
 'debate/preferences': DebateExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:61`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:78`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 

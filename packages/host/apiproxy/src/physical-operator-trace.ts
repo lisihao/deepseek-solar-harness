@@ -6,6 +6,7 @@ import type {
   PhysicalOperatorTraceView, PhysicalOperatorValueShape,
 } from './api/events.ts'
 
+/** Public, sanitized projection of an authority Session event. */
 export interface PublicSessionEventProjection {
   readonly event: SessionEvent
   readonly physicalOperatorTrace?: PhysicalOperatorTraceView
@@ -192,6 +193,9 @@ function traceFor(event: PhysicalEventEnvelope): PhysicalOperatorTraceView | und
  * Build the event delivered over public Host transports. Physical Operator
  * authority payload is always removed, including for unknown future events in
  * the namespace; recognized events additionally receive a fixed safe trace.
+ *
+ * @param event - Authority Session event to project.
+ * @returns Public event with the raw Physical Operator payload removed and an optional safe trace.
  */
 export function projectPublicSessionEvent(event: SessionEvent): PublicSessionEventProjection {
   const physicalEvent = event as PhysicalEventEnvelope

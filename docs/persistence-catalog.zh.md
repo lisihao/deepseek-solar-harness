@@ -407,7 +407,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:63`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:80`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -429,7 +429,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:76`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:93`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -440,7 +440,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'debate/preferences': DebateExecutionPreferences
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:61`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:78`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 

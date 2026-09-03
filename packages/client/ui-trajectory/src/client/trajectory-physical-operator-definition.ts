@@ -212,7 +212,11 @@ const trajectoryPhysicalOperatorDefinition: ConversationNodeDefinition<PhysicalO
     }),
 }
 
-/** Register the Host-projected Physical Operator trace Definition. */
+/**
+ * Register the Host-projected Physical Operator trace Definition.
+ *
+ * @param ctx - Client Context that owns the conversation event registry.
+ */
 export function registerTrajectoryPhysicalOperatorDefinition(ctx: Context): void {
   ctx.conversationEvents.register(trajectoryPhysicalOperatorDefinition)
 }
