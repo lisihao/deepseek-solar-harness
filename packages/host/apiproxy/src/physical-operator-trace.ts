@@ -130,7 +130,6 @@ function toolTrace(
       status: 'indeterminate',
     }
   }
-  if (event.type !== 'physical-operator/tool-result') return undefined
   const result = record(data.result)
   const isError = result?.isError === true || result?.error !== undefined
   const resultValue = result === undefined
