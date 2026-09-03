@@ -1681,7 +1681,7 @@ export class LocalDebateProvider extends DebateService {
       generation: this.document.generation,
       type,
       createdAt,
-      data: data as DebateEventV1['data'],
+      data,
       ...(context.round === undefined ? {} : { round: context.round }),
       ...(context.slotId === undefined ? {} : { slotId: context.slotId }),
     }

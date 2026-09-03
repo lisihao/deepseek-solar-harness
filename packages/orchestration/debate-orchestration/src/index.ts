@@ -263,7 +263,7 @@ function publicProgressUsage(value: unknown): DebateAgentProgressUsageV1 | undef
     })
   return entries.length === 0
     ? undefined
-    : Object.fromEntries(entries) as DebateAgentProgressUsageV1
+    : Object.fromEntries(entries)
 }
 
 function publicProgress(

@@ -139,15 +139,23 @@ function publicProgress(value: unknown): TrajectoryDebateProgress | undefined {
   const approvalKind = string(input.approvalKind)
   const approvalPreview = string(input.approvalPreview)
   const usage = publicUsage(input.usage)
-  return Object.assign(
-    { kind, sourceTime },
-    phase === undefined ? {} : { phase },
-    publicOutputPreview === undefined ? {} : { publicOutputPreview },
-    toolName === undefined ? {} : { toolName },
-    approvalKind === undefined ? {} : { approvalKind },
-    approvalPreview === undefined ? {} : { approvalPreview },
-    usage === undefined ? {} : { usage },
-  )
+  const progress: {
+    kind: TrajectoryDebateProgress['kind']
+    sourceTime: string
+    phase?: string
+    publicOutputPreview?: string
+    toolName?: string
+    approvalKind?: string
+    approvalPreview?: string
+    usage?: NonNullable<TrajectoryDebateProgress['usage']>
+  } = { kind, sourceTime }
+  if (phase !== undefined) progress.phase = phase
+  if (publicOutputPreview !== undefined) progress.publicOutputPreview = publicOutputPreview
+  if (toolName !== undefined) progress.toolName = toolName
+  if (approvalKind !== undefined) progress.approvalKind = approvalKind
+  if (approvalPreview !== undefined) progress.approvalPreview = approvalPreview
+  if (usage !== undefined) progress.usage = usage
+  return progress
 }
 
 function publicConvergence(value: unknown): TrajectoryDebateTraceEntry['convergence'] | undefined {
