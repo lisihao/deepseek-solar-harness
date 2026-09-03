@@ -117,17 +117,49 @@ describe('Debate Desktop panel transport', () => {
       createElement(EvidenceColumn, { run: fixture }),
     ))
     for (const expected of [
-      'Choose A or B.', '参与 Agent 与角色职责', 'Proposer', '提出可执行方案与成功标准。', 'Falsifier', '寻找反例、风险和失败条件。',
-      'Judge', '综合证据、裁定分歧并给出决策。', 'gpt-5.6-sol', '第 1 轮', '第 2 轮',
+      'Choose A or B.', '参与 Agent 与角色职责', '建设性提案者', '提出最可执行的方案，明确关键主张、假设和验收标准。', '怀疑式证伪者', '寻找决定性反例、隐藏假设和失败条件，并按影响排序。',
+      '决策裁判（主持人）', '综合已支持的主张，裁定分歧，并保留重要少数意见。', 'gpt-5.6-sol', '第 1 轮', '第 2 轮',
       'Round one proposal: choose A.', 'Round one challenge: verify rollback.', 'Round one ruling: continue review.',
       'Round two proposal: retain A with a gate.', 'Round two challenge: keep the cost dissent.', 'Round two ruling: choose A and record dissent.',
-      'artifact:r1-proposer', 'artifact:r2-judge', 'Claim claim-1', 'Evidence artifact:evidence', 'Claim Ledger', 'Option A is safer.',
-      '事件时间线', 'Debate 已规划', '轮次已开始', 'Agent 输出已完成', '主持人总结 / 决策裁判', 'Usage / Cost', '用量部分归集', '费用归集未知', 'artifact:synthesis',
+      'artifact:r1-proposer', 'artifact:r2-judge', 'Claim refs：claim-1', 'Evidence refs：artifact:evidence', 'Claim Ledger', 'Option A is safer.',
+      '讨论动态', 'Debate 已规划', '轮次已开始', 'Agent 输出已完成', '主持人总结 / 决策裁判', 'Usage / Cost', '用量部分归集', '费用归集未知', 'artifact:synthesis',
     ]) expect(markup).toContain(expected)
     expect(markup).toContain('费用 N/A')
     expect(markup).not.toContain('NaN')
     expect(markup).toContain('批准')
     expect(markup).toContain('终止')
+  })
+
+  it('renders a readable BBS thread and de-duplicates repeated agent errors', () => {
+    const fixture = run()
+    const duplicateError = {
+      version: 1 as const,
+      sequence: 1,
+      runId: fixture.runId,
+      revision: 8,
+      generation: 1,
+      round: 2,
+      slotId: 'skeptical-falsifier',
+      type: 'debate.agent.failed',
+      createdAt: '2026-08-29T01:01:14.000Z',
+      data: { role: 'skeptical-falsifier', errorCode: 'DUPLICATE_ERROR' },
+    }
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [duplicateError, { ...duplicateError, sequence: 2, revision: 9 }],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup).toContain('dshDesktopDebateTopic')
+    expect(markup).toContain('dshDesktopDebateRoster')
+    expect(markup).toContain('参与者名册')
+    expect(markup).toContain('1 楼')
+    expect(markup).toContain('4 楼')
+    expect(markup).toContain('回应主张：“Option A is safer.”')
+    expect(markup).toContain('公开发言：')
+    expect(markup).toContain('技术详情')
+    expect(markup.match(/错误码：DUPLICATE_ERROR/g)?.length).toBe(1)
+    expect(markup).not.toContain('open=""')
   })
 
   it('renders fully unknown optional accounting totals as N/A instead of zero or NaN', () => {

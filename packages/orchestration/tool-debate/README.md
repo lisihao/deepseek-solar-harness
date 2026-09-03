@@ -8,6 +8,17 @@ The default policy uses a fixed four-role, native-subscription-first roster: a C
 
 This package depends only on the provider-neutral Debate Service Definition and ordinary Agent/LLM extension points. It does not import the local Provider, TaskGraph daemon, or physical-operator runtime. The physical-operator host router independently yields when the durable Session preference says Debate is enabled, so Codex and Claude Code remain roster executors instead of replacing the Debate run. The internal `dsh-debate-host/debate` route is not advertised as a primary chat model. A legacy Session that already selected that internal route is admitted by writing the same durable `debate/dispatch` before its request, so it remains usable while new selections go through the collaboration execution-mechanism control.
 
+## BBS-style transcript
+
+The host response is presented as a readable forum thread rather than a diagnostic dump:
+
+- A topic post opens the thread with the public objective and lifecycle state.
+- The participant roster is grouped once, with Chinese role names and responsibilities; operator, model, and tier remain in a collapsed technical-details block.
+- Every round gets its own heading and every agent turn receives a stable global floor number. First-round posts are independent; later posts cite the recorded claim statements instead of repeating opaque claim IDs.
+- Only durable `outputPreview` values are quoted as public speech. A blocked, failed, or indeterminate turn explicitly says that no public output was produced; the Consumer never invents a missing response.
+- Convergence, unresolved claims, preserved dissent, and the moderator's final synthesis remain visible. The final synthesis is rendered as a pinned moderator post, while run IDs, hashes, provider versions, routing, artifacts, and usage stay behind collapsible technical details.
+- Repeated copies of the same role/round/error are emitted once in the streamed transcript, so reconnect polling does not flood the conversation.
+
 ## Model Experience
 
 ### Bounded `debate` tool

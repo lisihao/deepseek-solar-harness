@@ -44,6 +44,25 @@ const DEBATE_TRANSCRIPT_POLL_INTERVAL_MS = 100
 const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
 const CONCISE_DEBATE_HINT = /(?:简洁|简要|精简|三条|要点|concise|brief)/iu
 
+const ROLE_COPY: Readonly<Record<string, { readonly title: string; readonly mandate: string }>> = {
+  'constructive-proposer': {
+    title: '建设性提案者',
+    mandate: '提出最可执行的方案，明确关键主张、假设和验收标准。',
+  },
+  'skeptical-falsifier': {
+    title: '怀疑式证伪者',
+    mandate: '寻找决定性反例、隐藏假设和失败条件，并按影响排序。',
+  },
+  'evidence-auditor': {
+    title: '证据审计员',
+    mandate: '核验重要主张是否有可追溯、直接且与决策相关的证据支持。',
+  },
+  'decision-judge': {
+    title: '决策裁判（主持人）',
+    mandate: '综合已支持的主张，裁定分歧，并保留重要少数意见。',
+  },
+}
+
 const TERMINAL_RUN_STATES: ReadonlySet<DebateRunSnapshotV1['state']> = new Set([
   'completed',
   'stopped',
@@ -431,36 +450,56 @@ function hasAdmission(events: readonly { readonly type: string; readonly data: u
 }
 
 function runText(run: DebateRunSnapshotV1): string {
-  const summary = run.synthesis?.outputPreview
-    ?? `Debate run is ${run.state}; inspect ${run.runId} for its current durable state.`
-  return [
-    `Moderator summary (主持人总结): ${summary}`,
-    '',
-    `Debate Run: ${run.runId}`,
-    `State: ${run.state}`,
-    `Rounds: ${String(run.currentRound)}`,
-    ...run.synthesis?.artifactRef === undefined ? [] : [`Artifact: ${run.synthesis.artifactRef}`],
-    ...run.unresolved.length === 0 ? [] : [`Unresolved: ${String(run.unresolved.length)}`],
-    ...run.dissent.length === 0 ? [] : [`Dissent: ${String(run.dissent.length)}`],
-  ].join('\n')
+  const lines = [
+    '## 置顶 · 主持人总结',
+    run.synthesis?.outputPreview ?? '主持人尚未提交最终总结。',
+  ]
+  if (run.unresolved.length > 0) {
+    lines.push('', '### 未决问题', ...run.unresolved.slice(0, MAX_REF_ITEMS).map(item =>
+      `- ${item.blocking ? '阻断：' : ''}${item.description}${item.reason.length > 0 ? `（${item.reason}）` : ''}`))
+  }
+  if (run.dissent.length > 0) {
+    lines.push('', '### 保留异议', ...run.dissent.slice(0, MAX_REF_ITEMS).map(item =>
+      `- ${roleTitle(item.slotId)}：${item.position}${item.reason.length > 0 ? `（${item.reason}）` : ''}`))
+  }
+  lines.push('', '<details>', '<summary>技术详情</summary>', '',
+    `- Run ID：${run.runId}`,
+    `- 状态：${lifecycleLabel(run.state)}`,
+    `- 已完成轮次：${String(run.currentRound)}`,
+    `- Prompt hash：${run.promptSha256}`,
+    `- Provider：${run.provenance.providerId} ${run.provenance.providerVersion}`,
+    `- 请求 hash：${run.provenance.requestSha256}`,
+    ...run.provenance.outputSha256 === undefined ? [] : [`- 输出 hash：${run.provenance.outputSha256}`],
+    ...run.synthesis?.artifactRef === undefined ? [] : [`- 总结 Artifact：${run.synthesis.artifactRef}`],
+    '</details>')
+  return lines.join('\n')
 }
 
 interface TranscriptTracker {
+  topicEmitted: boolean
+  topicState?: DebateRunSnapshotV1['state']
   rosterEmitted: boolean
   readonly roundStates: Map<number, string>
   readonly turnSignatures: Map<string, string>
+  readonly turnFloors: Map<string, number>
   readonly convergenceSignatures: Map<number, string>
+  readonly errorSignatures: Set<string>
   synthesisSignature?: string
   finalEmitted: boolean
+  nextFloor: number
 }
 
 function createTranscriptTracker(): TranscriptTracker {
   return {
+    topicEmitted: false,
     rosterEmitted: false,
     roundStates: new Map(),
     turnSignatures: new Map(),
+    turnFloors: new Map(),
     convergenceSignatures: new Map(),
+    errorSignatures: new Set(),
     finalEmitted: false,
+    nextFloor: 1,
   }
 }
 
@@ -470,19 +509,33 @@ function transcriptLines(
   final: boolean,
 ): string[] {
   const lines: string[] = []
+  if (!tracker.topicEmitted) {
+    tracker.topicEmitted = true
+    tracker.topicState = run.state
+    lines.push(
+      '# 主题帖 · Debate',
+      `状态：${lifecycleLabel(run.state)}`,
+      ...run.objective === undefined ? [] : [`议题：${run.objective}`],
+      '',
+    )
+  } else if (tracker.topicState !== run.state) {
+    tracker.topicState = run.state
+    lines.push(`**主题帖状态更新**：${lifecycleLabel(run.state)}`)
+  }
   if (!tracker.rosterEmitted) {
     tracker.rosterEmitted = true
-    lines.push('Debate roster:')
+    lines.push('## 参与者名册')
     for (const role of run.roster.slice(0, MAX_REF_ITEMS)) {
-      lines.push(`- ${role.role} (${preview(role.persona.title) ?? 'untitled'}) — ${role.operatorId}/${role.model}`)
-      lines.push(`  Mandate: ${preview(role.persona.mandate) ?? ''}`)
+      lines.push(`- **${roleTitle(role.role)}**：${roleMandate(role.role, role.persona.mandate)}`)
+      lines.push(...roleTechnicalDetails(role))
     }
+    lines.push('')
   }
 
   for (const round of run.rounds.slice(0, MAX_REF_ITEMS)) {
     if (tracker.roundStates.get(round.round) !== round.state) {
       tracker.roundStates.set(round.round, round.state)
-      lines.push(`Round ${String(round.round)} · ${round.state}`)
+      lines.push(`## 第 ${String(round.round)} 轮 · ${roundStateLabel(round.state)}`)
     }
     for (const turn of round.turns.slice(0, MAX_REF_ITEMS)) {
       const key = `${String(round.round)}:${turn.slotId}`
@@ -498,28 +551,17 @@ function transcriptLines(
       ])
       if (tracker.turnSignatures.get(key) === signature) continue
       tracker.turnSignatures.set(key, signature)
-      const actualOperatorId = turn.routing?.actualOperatorId ?? turn.operatorId
-      const actualModel = turn.routing?.actualModel ?? turn.model
-      lines.push(`Agent ${turn.role} (${turn.slotId}) · ${turn.state} — ${actualOperatorId}/${actualModel}`)
-      if (turn.routing?.fallbackReasonCode !== undefined) {
-        lines.push(
-          `  Provider fallback: ${turn.routing.requestedOperatorId}/${turn.routing.requestedModel}`
-          + ` → ${actualOperatorId}/${actualModel} (${turn.routing.fallbackReasonCode})`,
-        )
-      }
-      for (const blocker of turn.blockers?.slice(0, MAX_REF_ITEMS) ?? []) {
-        lines.push(`  Blocker: ${blocker.code} — ${preview(blocker.message) ?? ''}`)
-      }
-      if (turn.outputPreview !== undefined) lines.push(`  Explicit output summary: ${preview(turn.outputPreview) ?? ''}`)
-      if (turn.outputRef !== undefined) lines.push(`  Artifact: ${preview(turn.outputRef) ?? ''}`)
+      const floor = tracker.turnFloors.get(key) ?? tracker.nextFloor++
+      tracker.turnFloors.set(key, floor)
+      lines.push(...transcriptTurnLines(run, round.round, floor, turn, tracker))
     }
     if (round.convergence !== undefined) {
       const signature = JSON.stringify(round.convergence)
       if (tracker.convergenceSignatures.get(round.round) !== signature) {
         tracker.convergenceSignatures.set(round.round, signature)
         lines.push(
-          `Convergence · round ${String(round.round)}: ${round.convergence.status}`
-          + ` (score ${round.convergence.score.toFixed(2)} / threshold ${round.convergence.threshold.toFixed(2)}; ${round.convergence.reason})`,
+          `**本轮收敛判断**：${convergenceLabel(round.convergence.status)}`
+          + `（得分 ${round.convergence.score.toFixed(2)} / 阈值 ${round.convergence.threshold.toFixed(2)}，${round.convergence.reason}）`,
         )
       }
     }
@@ -529,7 +571,7 @@ function transcriptLines(
     const signature = [run.synthesis.state, run.synthesis.artifactRef ?? '', run.synthesis.outputPreview ?? ''].join('\u0000')
     if (tracker.synthesisSignature !== signature) {
       tracker.synthesisSignature = signature
-      lines.push(`Moderator synthesis · ${run.synthesis.state}`)
+      lines.push(`**主持人状态**：${synthesisLabel(run.synthesis.state)}`)
     }
   }
   if (final && !tracker.finalEmitted) {
@@ -537,6 +579,111 @@ function transcriptLines(
     lines.push(runText(run))
   }
   return lines
+}
+
+function roleTitle(role: string): string {
+  return ROLE_COPY[role]?.title ?? role
+}
+
+function roleMandate(role: string, configured: string): string {
+  return ROLE_COPY[role]?.mandate ?? preview(configured) ?? '职责未提供。'
+}
+
+function roleTechnicalDetails(role: DebatePolicyV1['roster'][number]): string[] {
+  return [
+    '<details>',
+    '<summary>角色技术详情</summary>',
+    '',
+    `- 角色 ID：${role.role}`,
+    `- 算子：${role.operatorId}`,
+    `- 模型：${role.model}`,
+    `- 层级：${role.tier}`,
+    '</details>',
+  ]
+}
+
+function transcriptTurnLines(
+  run: DebateRunSnapshotV1,
+  round: number,
+  floor: number,
+  turn: DebateRunSnapshotV1['rounds'][number]['turns'][number],
+  tracker: TranscriptTracker,
+): string[] {
+  const lines = [
+    `### ${String(floor)} 楼 · ${roleTitle(turn.role)}`,
+    `**状态：** ${turnStateLabel(turn.state)}`,
+  ]
+  if (round === 1) lines.push('**发言类型：** 首轮独立发言')
+  else if (turn.claimIds.length > 0) lines.push(`**回应主张：** ${claimReferences(run, turn.claimIds)}`)
+  if (turn.outputPreview !== undefined) {
+    lines.push('', '**公开发言：**', quoteText(preview(turn.outputPreview) ?? ''))
+  } else if (turn.state === 'blocked' || turn.state === 'failed' || turn.state === 'indeterminate') {
+    lines.push('', '**公开发言：**', '> 未产生公开输出。')
+  } else {
+    lines.push('', '**公开发言：**', '> 尚未记录公开输出。')
+  }
+  if (turn.claimIds.length > 0 && round === 1) lines.push(`**提出主张：** ${claimReferences(run, turn.claimIds)}`)
+  if (turn.evidenceRefs.length > 0) lines.push(`**证据：** 已关联 ${String(turn.evidenceRefs.length)} 项`)
+  for (const blocker of turn.blockers?.slice(0, MAX_REF_ITEMS) ?? []) {
+    const signature = `${turn.role}\u0000${turn.round}\u0000${blocker.code}`
+    if (tracker.errorSignatures.has(signature)) continue
+    tracker.errorSignatures.add(signature)
+    lines.push(`> ⚠️ 未完成：${blocker.message}`)
+  }
+  if (turn.errorCode !== undefined) {
+    const signature = `${turn.role}\u0000${turn.round}\u0000${turn.errorCode}`
+    if (!tracker.errorSignatures.has(signature)) {
+      tracker.errorSignatures.add(signature)
+      lines.push(`> ⚠️ 未完成：${turn.errorCode}`)
+    }
+  }
+  lines.push('', '<details>', '<summary>技术详情</summary>', '',
+    `- Slot：${turn.slotId}`,
+    `- 请求算子/模型：${turn.routing?.requestedOperatorId ?? turn.operatorId}/${turn.routing?.requestedModel ?? turn.model}`,
+    `- 实际算子/模型：${turn.routing?.actualOperatorId ?? turn.operatorId}/${turn.routing?.actualModel ?? turn.model}`,
+    ...turn.routing?.fallbackReasonCode === undefined ? [] : [
+      `- 回退原因：${turn.routing.fallbackReasonCode}`,
+      `- 回退路由：${turn.routing.requestedOperatorId}/${turn.routing.requestedModel}`
+        + ` → ${turn.routing.actualOperatorId ?? turn.operatorId}/${turn.routing.actualModel ?? turn.model}`,
+    ],
+    ...turn.attempt === undefined ? [] : [`- Attempt：${String(turn.attempt)}`],
+    ...turn.outputRef === undefined ? [] : [`- 输出 Artifact：${turn.outputRef}`],
+    ...turn.evidenceRefs.length === 0 ? [] : [`- Evidence refs：${turn.evidenceRefs.map(ref => ref.ref).join('、')}`],
+    ...turn.usage === undefined ? [] : [`- Usage：输入 ${String(turn.usage.inputTokens)} · 输出 ${String(turn.usage.outputTokens)}`],
+    '</details>',
+    '')
+  return lines
+}
+
+function claimReferences(run: DebateRunSnapshotV1, ids: readonly string[]): string {
+  return ids.slice(0, MAX_REF_ITEMS).map((id) => {
+    const claim = run.claimLedger.claims.find(item => item.claimId === id)
+    return claim === undefined ? `编号 ${id}` : `“${preview(claim.statement) ?? id}”`
+  }).join('、')
+}
+
+function quoteText(value: string): string {
+  return value.split('\n').map(line => `> ${line}`).join('\n')
+}
+
+function turnStateLabel(state: string): string {
+  return ({ planned: '待执行', dispatched: '运行中', settled: '已完成', blocked: '已阻断', failed: '失败', indeterminate: '不确定' } as Record<string, string>)[state] ?? state
+}
+
+function roundStateLabel(state: string): string {
+  return ({ planned: '待开始', running: '进行中', reviewing: '审查中', completed: '已完成', failed: '失败', indeterminate: '不确定' } as Record<string, string>)[state] ?? state
+}
+
+function convergenceLabel(state: string): string {
+  return ({ converged: '已收敛', continue: '继续辩论', budget_limited: '预算停止', max_rounds: '轮次上限' } as Record<string, string>)[state] ?? state
+}
+
+function synthesisLabel(state: string): string {
+  return ({ pending: '等待综合', running: '综合中', settled: '综合完成', failed: '综合失败' } as Record<string, string>)[state] ?? state
+}
+
+function lifecycleLabel(state: string): string {
+  return ({ planned: '已规划', awaiting_approval: '等待批准', admitting: '准入中', round_running: '辩论中', reviewing: '审查中', converged: '已收敛', next_round: '准备下一轮', budget_limited: '预算停止', max_rounds: '达到轮次上限', synthesizing: '综合中', completed: '已完成', stopped: '已暂停/停止', failed: '失败', indeterminate: '状态不确定' } as Record<string, string>)[state] ?? state
 }
 
 function waitForTranscriptPoll(signal: AbortSignal | undefined): Promise<void> {

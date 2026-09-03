@@ -409,35 +409,37 @@ describe('debate model Consumer', () => {
       source: { kind: 'user' },
     }))
     const idle = agent.whenIdle()
-    await waitFor(() => textDeltas(agent).some(text => text.includes('Debate roster:')))
+    await waitFor(() => textDeltas(agent).some(text => text.includes('# 主题帖 · Debate')))
     expect(agent.session.events.some(event => event.type === 'assistant/message')).toBe(false)
 
     await waitFor(() => {
       const text = textDeltas(agent).join('')
-      return text.includes('Explicit output summary: Proposal output summary')
-        && text.includes('Artifact: artifact:proposer-output')
+      return text.includes('公开发言')
+        && text.includes('Proposal output summary')
     })
     provider.inspectFallback = secondRound
     await waitFor(() => {
       const text = textDeltas(agent).join('')
-      return text.includes('Round 2')
-        && text.includes('Explicit output summary: Falsifier output summary')
-        && text.includes('Artifact: artifact:falsifier-output')
+      return text.includes('第 2 轮')
+        && text.includes('Falsifier output summary')
     })
     provider.inspectFallback = completed
     approval.resolve(completed)
     await idle
 
     const streamText = textDeltas(agent).join('')
-    expect(streamText).toContain('Mandate: Build the strongest practical answer to the user objective.')
-    expect(streamText.indexOf('Debate roster:')).toBeLessThan(streamText.indexOf('Round 1'))
-    expect(streamText.indexOf('Explicit output summary: Proposal output summary')).toBeLessThan(streamText.indexOf('Round 2'))
-    expect(streamText.indexOf('Round 2')).toBeLessThan(streamText.indexOf('Explicit output summary: Falsifier output summary'))
-    expect(streamText.indexOf('Convergence · round 1')).toBeLessThan(streamText.indexOf('Convergence · round 2'))
-    expect(streamText.indexOf('Convergence · round 2')).toBeLessThan(streamText.indexOf('Moderator summary (主持人总结): Final host decision summary'))
-    expect(streamText).toContain('Agent skeptical-falsifier (slot-falsifier) · settled — codex/gpt-5.6-sol')
-    expect(streamText).toContain('Provider fallback: claude-code/claude-fable-5 → codex/gpt-5.6-sol (provider-unavailable)')
-    expect(streamText).toContain('Moderator summary (主持人总结): Final host decision summary')
+    expect(streamText).toContain('建设性提案者')
+    expect(streamText).toContain('主题帖状态更新')
+    expect(streamText.indexOf('# 主题帖 · Debate')).toBeLessThan(streamText.indexOf('第 1 轮'))
+    expect(streamText.indexOf('Proposal output summary')).toBeLessThan(streamText.indexOf('第 2 轮'))
+    expect(streamText.indexOf('第 2 轮')).toBeLessThan(streamText.indexOf('Falsifier output summary'))
+    expect(streamText.indexOf('本轮收敛判断')).toBeLessThan(streamText.lastIndexOf('本轮收敛判断'))
+    expect(streamText.indexOf('本轮收敛判断')).toBeLessThan(streamText.indexOf('Final host decision summary'))
+    expect(streamText).toContain('### 2 楼 · 怀疑式证伪者')
+    expect(streamText).toContain('请求算子/模型：claude-code/claude-fable-5')
+    expect(streamText).toContain('→ codex/gpt-5.6-sol')
+    expect(streamText).toContain('## 置顶 · 主持人总结')
+    expect(streamText).toContain('Final host decision summary')
     expect(streamText).not.toContain('reasoning')
 
     const chunks = agent.session.events
@@ -496,8 +498,8 @@ describe('debate model Consumer', () => {
     await agent.whenIdle()
 
     const streamText = textDeltas(agent).join('')
-    expect(streamText).toContain('Agent decision-judge (decision-judge) · blocked — claude-code/claude-opus-5')
-    expect(streamText).toContain('Blocker: DEPENDENCY_FAILED — participant execution did not complete')
+    expect(streamText).toContain('### 1 楼 · 决策裁判（主持人）')
+    expect(streamText).toContain('未完成：participant execution did not complete')
   })
 
   it('keeps legacy Sessions disabled and persists an ignorable whole-value mode', async () => {
