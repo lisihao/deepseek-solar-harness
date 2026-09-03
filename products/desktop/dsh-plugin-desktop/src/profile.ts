@@ -89,6 +89,7 @@ const DEFAULT_DESKTOP_SHELL_MODE: DesktopShellMode = 'compatibility'
 const PRODUCT_MODULE_BASE_DIR = '.dsh-product-runtime'
 const SETTINGS_FILE_PACKAGE = '@deepseek-ai/dsh-settings-file'
 const AGENT_DEFAULT_MODEL_PACKAGE = '@deepseek-ai/dsh-agent-default-model'
+const OUTPUT_STYLE_PACKAGE = '@deepseek-ai/dsh-output-style'
 const PRODUCT_DEFAULT_AGENT_MODEL = Object.freeze({
   provider: 'dsh-physical-operator',
   model: 'codex',
@@ -438,6 +439,9 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
   const adapterPatches = adapter === 'desktop'
     ? loadOverlayPatches(BIN_NAME, DESKTOP_PATCH_PATH)
     : []
+  const sharedProductPatches: PatchOptions[] = [{
+    insert: [{ id: 'output-style', name: OUTPUT_STYLE_PACKAGE }],
+  }]
   const homePatches = loadOptionalPatches(BIN_NAME, join(home, PROFILE_PATCH_FILENAME)) ?? []
   const selectedProfilePatches = bindPluginConsolePatches([
     ...profile.layers.flatMap(layer => layer.patches),
@@ -457,6 +461,7 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
   for (const layer of profile.layers) {
     bundlePatches.push(...layer.patches)
     if (layer.packageName !== '@deepseek-ai/dsh-web-app') continue
+    bundlePatches.push(...sharedProductPatches)
     bundlePatches.push(...adapterPatches)
     bundlePatches.push(...productPatches)
     productLayerInserted = true

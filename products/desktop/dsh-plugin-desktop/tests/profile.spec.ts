@@ -164,6 +164,20 @@ describe('desktop profile composition', () => {
     }
   })
 
+  it('mounts the shared output style policy on Desktop and Product Server', () => {
+    const home = temporaryHome()
+    const desktopRows = composeEntries([prepareDesktopProfile(undefined, home, 'darwin').patches])
+    const serverRows = composeEntries([prepareProductServerProfile(undefined, home, 'darwin').patches])
+
+    for (const rows of [desktopRows, serverRows]) {
+      const outputStyle = rows.find(row => row.id === 'output-style')
+      expect(outputStyle).toEqual(expect.objectContaining({
+        name: '@deepseek-ai/dsh-output-style',
+      }))
+      expect(outputStyle?.disabled).not.toBe(true)
+    }
+  })
+
   it('keeps the Product Server compatibility layout when Desktop settings request advanced', () => {
     const home = temporaryHome()
     writeFileSync(join(home, 'settings.yaml'), 'dsh-desktop:\n  mode: advanced\n')
