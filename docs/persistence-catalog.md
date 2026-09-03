@@ -405,7 +405,7 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:101`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:104`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -427,7 +427,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:101`](../packages/orch
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:114`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:117`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -438,7 +438,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:114`](../packages/orch
 'debate/preferences': DebateExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:99`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:102`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatetrace--log-only"></a>
 
@@ -453,7 +453,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:99`](../packages/orche
 'debate/trace': DebateTraceSessionEventV1
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:125`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:128`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 

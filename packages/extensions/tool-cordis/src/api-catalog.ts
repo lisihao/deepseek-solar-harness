@@ -4101,7 +4101,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DebateEventType',
-    declaration: 'export type DebateEventType = \'debate.planned\' | \'debate.roster.qualified\' | \'debate.roster.rejected\' | \'debate.admitted\' | \'debate.round.started\' | \'debate.agent.dispatched\' | \'debate.agent.settled\' | \'debate.agent.blocked\' | \'debate.agent.failed\' | \'debate.agent.indeterminate\' | \'debate.claims.compiled\' | \'debate.convergence.evaluated\' | \'debate.synthesis.started\' | \'debate.synthesis.settled\' | \'debate.cost.accounted\' | \'debate.stopped\' | \'debate.failed\' | \'debate.indeterminate\';',
+    declaration: 'export type DebateEventType = \'debate.planned\' | \'debate.roster.qualified\' | \'debate.roster.rejected\' | \'debate.admitted\' | \'debate.round.started\' | \'debate.agent.dispatched\' | \'debate.agent.progress\' | \'debate.agent.settled\' | \'debate.agent.blocked\' | \'debate.agent.failed\' | \'debate.agent.indeterminate\' | \'debate.claims.compiled\' | \'debate.convergence.evaluated\' | \'debate.synthesis.started\' | \'debate.synthesis.settled\' | \'debate.cost.accounted\' | \'debate.stopped\' | \'debate.failed\' | \'debate.indeterminate\';',
   },
   {
     name: 'DebateEventV1',

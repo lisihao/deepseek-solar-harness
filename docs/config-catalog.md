@@ -708,6 +708,12 @@ export interface DebateRoundExecutionRequestV1 {
   readonly turns: readonly DebateTurnRequestV1[]
   /** Certified maximum parallel participant count for this round. */
   readonly maxParallel: number
+  /**
+   * Optional durable-progress sink. The executor awaits it in source event
+   * order; an unavailable sink must fail the round rather than lose a claimed
+   * public trace.
+   */
+  readonly onProgress?: (progress: DebateRoundAgentProgressV1) => Promise<void>
   /** Cancellation signal for the complete TaskGraph round. */
   readonly signal?: AbortSignal
 }
@@ -770,6 +776,22 @@ export interface DebateTurnRequestV1 {
   readonly signal?: AbortSignal
 }
 
+/** One safe progress fact emitted while a TaskGraph-backed roster slot is running. */
+export interface DebateRoundAgentProgressV1 {
+  /** Progress schema version. */
+  readonly version: 1
+  /** Stable Debate run identity. */
+  readonly runId: string
+  /** One-based Debate round identity. */
+  readonly round: number
+  /** Fixed roster slot identity. */
+  readonly slotId: string
+  /** Fixed role retained even when its physical route falls back. */
+  readonly role: DebateRoleId
+  /** Whitelisted physical-operator projection and its original event position. */
+  readonly progress: DebateAgentProgressV1
+}
+
 /** Result returned by one injected executor turn; no model or CLI is assumed. */
 export interface DebateTurnResultV1 {
   /** Scheduler attempt that produced this settled result. */
@@ -814,9 +836,9 @@ export interface DebateTurnFailureV1 {
 export type DebateTurnPhase = 'blind-independent' | 'claim-ledger' | 'high-severity-unresolved'
 ```
 
-Depends on: [`DebateClaimLedgerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimV1`](../packages/orchestration/debate/src/index.ts) · [`DebateDissentV1`](../packages/orchestration/debate/src/index.ts) · [`DebateEvidenceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateExecutionRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateModelSource`](../packages/orchestration/debate/src/index.ts) · [`DebateModelTier`](../packages/orchestration/debate/src/index.ts) · [`DebateRoleId`](../packages/orchestration/debate/src/index.ts) · [`DebateRolePersonaV1`](../packages/orchestration/debate/src/index.ts) · [`DebateSourceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnBlockerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnRoutingV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUnresolvedV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUsageV1`](../packages/orchestration/debate/src/index.ts)
+Depends on: [`DebateAgentProgressV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimLedgerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimV1`](../packages/orchestration/debate/src/index.ts) · [`DebateDissentV1`](../packages/orchestration/debate/src/index.ts) · [`DebateEvidenceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateExecutionRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateModelSource`](../packages/orchestration/debate/src/index.ts) · [`DebateModelTier`](../packages/orchestration/debate/src/index.ts) · [`DebateRoleId`](../packages/orchestration/debate/src/index.ts) · [`DebateRolePersonaV1`](../packages/orchestration/debate/src/index.ts) · [`DebateSourceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnBlockerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnRoutingV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUnresolvedV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUsageV1`](../packages/orchestration/debate/src/index.ts)
 
-Source: [`packages/orchestration/debate-local/src/types.ts:171`](../packages/orchestration/debate-local/src/types.ts)
+Source: [`packages/orchestration/debate-local/src/types.ts:194`](../packages/orchestration/debate-local/src/types.ts)
 
 <a id="deepseek-aidsh-debate-orchestration"></a>
 
@@ -846,7 +868,7 @@ export interface DebateTaskGraphAdapterOptions {
 }
 ```
 
-Source: [`packages/orchestration/debate-orchestration/src/index.ts:45`](../packages/orchestration/debate-orchestration/src/index.ts)
+Source: [`packages/orchestration/debate-orchestration/src/index.ts:54`](../packages/orchestration/debate-orchestration/src/index.ts)
 
 <a id="deepseek-aidsh-e2b"></a>
 
