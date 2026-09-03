@@ -162,6 +162,11 @@
       "commit": "5b55020865074c7fcb5f941cfd685210247307b4"
     },
     {
+      "name": "Installed Ego Lite 0.4.7.4 flat-helper compatibility",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "c6a66f86bbb4657089bd81a62c5c1df54f1c9b5b"
+    },
+    {
       "name": "Archify v2.16.0 architecture diagram capability",
       "repository": "https://github.com/tt-a1i/archify",
       "commit": "c826e6c3a7abad19c0f3cd1ca57207d54b1ad8de"
@@ -269,7 +274,7 @@
     "dsh-packages/deepseek-ai-dsh-archify-2.16.0-dsh.1.tgz": "2536dc2da3d7dc77b14cdc3ef0f5d9a4999e2f168a2ae96f2e7c2b0c2d79a08d",
     "dsh-packages/deepseek-ai-dsh-atomic-write-0.1.0-rc.5.tgz": "9a9897ec063d701d6151ed0adfe047f9db7c172d98eed651002ffed0c0c5b265",
     "dsh-packages/deepseek-ai-dsh-browser-0.1.0-rc.5.tgz": "7f90631fae848e45cf0a6c24358f75a3472400efd771aa34d8dd5b2ebf117e48",
-    "dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz": "8ac024c7f5c3f9b4251ee663f47326bde3950b60268a454c32b96f10552af50c",
+    "dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz": "3e33d9cc5ff3d1c52e6ba9502e61cc7e4944452b02a850d734a6adbf4c1e3d3a",
     "dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz": "e85b26a1c68a88b3821b455d3ee8f2a03b287b2bd6f978e3df85d7f3df9fe79b",
     "dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz": "59761918b73abe652fe06990b737094cef75edae8bb99a1ea81f16e349c0855a",
     "dsh-packages/deepseek-ai-dsh-client-hmr-0.1.0-rc.5.tgz": "fe79c5a407fdd27770d3ec0e6cd8659a977813077baec71072e8c81f7276f535",
