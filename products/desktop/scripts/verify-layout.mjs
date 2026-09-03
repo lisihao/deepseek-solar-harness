@@ -74,6 +74,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-rlm-runtime-local',
   '@deepseek-ai/dsh-rlm-strategy',
   '@deepseek-ai/dsh-rlm-strategy-local',
+  '@deepseek-ai/dsh-sdk-protocol',
   '@deepseek-ai/dsh-orchestration',
   '@deepseek-ai/dsh-orchestration-local',
   '@deepseek-ai/dsh-tool-orchestration',

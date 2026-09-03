@@ -105,7 +105,7 @@
     "@deepseek-ai/dsh-sandbox-policy": "0.1.0-rc.6",
     "@deepseek-ai/dsh-schedule": "0.1.0-rc.6",
     "@deepseek-ai/dsh-scope": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-sdk-protocol": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-sdk-protocol": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-sdk-protocol-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-session-log-export": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session-persistence": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-session-persistence-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-session-projection": "0.1.0-rc.6",
