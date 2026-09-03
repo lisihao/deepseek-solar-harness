@@ -13,11 +13,11 @@ This package depends only on the provider-neutral Debate Service Definition and 
 The host response is presented as a readable forum thread rather than a diagnostic dump:
 
 - A topic post opens the thread with the public objective and lifecycle state.
-- The participant roster is grouped once, with Chinese role names and responsibilities; operator, model, and tier remain in a collapsed technical-details block.
-- Every round gets its own heading and every agent turn receives a stable global floor number. First-round posts are independent; later posts cite the recorded claim statements instead of repeating opaque claim IDs.
+- The participant roster is grouped once, with a localized role category plus the configured public persona title and mandate; operator, model, and tier remain in a collapsed technical-details block.
+- Every round gets one heading and every terminal participant turn receives a stable global floor number. First-round posts are independent; later posts identify the claim-ledger phase, while claim text is labelled only as a claim submitted by that turn because the v1 protocol does not record reply targets.
 - Only durable `outputPreview` values are quoted as public speech. A blocked, failed, or indeterminate turn explicitly says that no public output was produced; the Consumer never invents a missing response.
-- Convergence, unresolved claims, preserved dissent, and the moderator's final synthesis remain visible. The final synthesis is rendered as a pinned moderator post, while run IDs, hashes, provider versions, routing, artifacts, and usage stay behind collapsible technical details.
-- Repeated copies of the same role/round/error are emitted once in the streamed transcript, so reconnect polling does not flood the conversation.
+- Convergence, unresolved claims, preserved dissent, and the moderator's final synthesis remain visible. The decision judge is represented by this single pinned moderator post instead of a duplicated ordinary floor; a judge failure remains an explicit moderator status. Run IDs, hashes, provider versions, routing, artifacts, and usage stay behind collapsible technical details.
+- Planned and dispatched lifecycle snapshots never create duplicate floors. Exact blocker copies use attempt, node, code, and message identity; different failures with the same code remain visible.
 
 ## Model Experience
 

@@ -209,7 +209,9 @@ export function RunDetail(props: {
   const floors = new Map<string, number>()
   let nextFloor = 1
   for (const round of run.rounds) {
-    for (const turn of round.turnStates) floors.set(`${String(round.round)}-${turn.slotId}`, nextFloor++)
+    for (const turn of round.turnStates) {
+      if (turn.role !== 'decision-judge') floors.set(`${String(round.round)}-${turn.slotId}`, nextFloor++)
+    }
   }
   return <main className="dshDesktopDebateColumn dshDesktopDebateDetail">
     <section className="dshDesktopDebateTopic" aria-label="Debate 主题帖">
@@ -242,9 +244,11 @@ export function RunDetail(props: {
       {run.rounds.map(round => <article key={round.round} data-state={round.state}>
         <div className="dshDesktopDebateRoundHeading"><strong>第 {String(round.round)} 轮</strong><em>{roundStateLabel(round.state)}</em></div>
         <div className="dshDesktopDebateTurnList">
-          {round.turnStates.length === 0
-            ? <p className="dshDesktopDebateEmpty">尚未派发 Agent。</p>
-            : round.turnStates.map(turn => <DebateTurnCard key={`${String(round.round)}-${turn.slotId}`} run={run} turn={turn} floor={floors.get(`${String(round.round)}-${turn.slotId}`) ?? 1} />)}
+          {round.turnStates.filter(turn => turn.role !== 'decision-judge' && terminalTurnState(turn.state)).length === 0
+            ? <p className="dshDesktopDebateEmpty">参与者尚未提交公开发言。</p>
+            : round.turnStates
+              .filter(turn => turn.role !== 'decision-judge' && terminalTurnState(turn.state))
+              .map(turn => <DebateTurnCard key={`${String(round.round)}-${turn.slotId}`} run={run} turn={turn} floor={floors.get(`${String(round.round)}-${turn.slotId}`) ?? 1} />)}
         </div>
         {round.convergence !== undefined && <p>
           {convergenceLabel(round.convergence.status)}
@@ -283,7 +287,7 @@ function RoleCard({ role }: { role: DesktopDebateRole }) {
       <strong>{roleLabel(role.role)}</strong>
       <em>{turnStateLabel(turn?.state ?? 'planned')}</em>
     </div>
-    <p className="dshDesktopDebateRoleMandate">职责：{roleMandate(role.role, role.mandate)}</p>
+    <p className="dshDesktopDebateRoleMandate">角色：{role.title}<br />职责：{role.mandate}</p>
     {turn !== undefined && <p>
       第 {String(turn.round)} 轮 · Attempt {String(turn.attempt ?? 1)} · Claim {String(turn.claimIds.length)}
       {' · '}Evidence {String(turn.evidenceRefs.length)}
@@ -319,11 +323,9 @@ function DebateTurnCard({ run, turn, floor }: { run: DesktopDebateRun; turn: Des
     </div>
     {turn.round === 1
       ? <p className="dshDesktopDebateReplyRef">首轮独立发言</p>
-      : claimText === 'N/A'
-        ? <p className="dshDesktopDebateReplyRef">本轮未记录可引用的主张</p>
-        : <p className="dshDesktopDebateReplyRef">回应主张：{claimText}</p>}
+      : <p className="dshDesktopDebateReplyRef">Claim Ledger 后续发言</p>}
     <p className="dshDesktopDebateTurnSummary"><strong>公开发言：</strong>{turn.outputPreview ?? (blockerSummary === undefined ? '尚未记录公开输出。' : `未产生公开输出：${blockerSummary}`)}</p>
-    {turn.claimIds.length > 0 && turn.round === 1 && <p className="dshDesktopDebateReplyRef">提出主张：{claimText}</p>}
+    {turn.claimIds.length > 0 && <p className="dshDesktopDebateReplyRef">本楼提交主张：{claimText}</p>}
     {turn.evidenceRefs.length > 0 && <p className="dshDesktopDebateReplyRef">已关联证据：{evidenceText}</p>}
     {turn.errorCode !== undefined && <p className="dshDesktopDebateTurnError">未完成：{turn.errorCode}</p>}
     <details className="dshDesktopDebateTechDetails">
@@ -389,7 +391,7 @@ function EventTimeline({ events }: { events: DesktopDebateEvent[] }) {
     <h3>讨论动态</h3>
     {visibleEvents.length === 0
       ? <p className="dshDesktopDebateEmpty">还没有讨论动态。</p>
-      : <ol>{visibleEvents.map(event => <li key={event.sequence}>
+      : <ol>{visibleEvents.map(event => <li key={debateEventIdentity(event)}>
         <time dateTime={event.createdAt} title={event.createdAt}>{formatTime(event.createdAt)}</time>
         <strong>{debateEventLabel(event.type)}</strong>
         <span>{debateEventContext(event)}</span>
@@ -403,13 +405,27 @@ function dedupeDebateEvents(events: readonly DesktopDebateEvent[]): DesktopDebat
   const seen = new Set<string>()
   return events.filter((event) => {
     if (!isDebateErrorEvent(event.type)) return true
-    const errorCode = typeof event.data.errorCode === 'string' ? event.data.errorCode : 'UNKNOWN'
-    const role = typeof event.data.role === 'string' ? event.data.role : event.slotId ?? ''
-    const key = [event.type, event.round ?? '', role, errorCode].join('\u0000')
+    const key = debateEventIdentity(event)
     if (seen.has(key)) return false
     seen.add(key)
     return true
   })
+}
+
+function debateEventIdentity(event: DesktopDebateEvent): string {
+  const attempt = eventValue(event, 'attempt', '')
+  const blockers = Array.isArray(event.data.blockers) ? event.data.blockers : []
+  const nodeIds = blockers.map((blocker) => {
+    if (blocker === null || typeof blocker !== 'object') return ''
+    const nodeId = (blocker as { readonly nodeId?: unknown }).nodeId
+    return typeof nodeId === 'string' ? nodeId : ''
+  }).join('\u0001')
+  const messages = blockers.map((blocker) => {
+    if (blocker === null || typeof blocker !== 'object') return ''
+    const message = (blocker as { readonly message?: unknown }).message
+    return typeof message === 'string' ? message : ''
+  }).join('\u0001') || eventValue(event, 'error', eventValue(event, 'reason', ''))
+  return [event.runId, event.sequence, attempt, nodeIds, messages].join('\u0000')
 }
 
 function isDebateErrorEvent(type: string): boolean {
@@ -419,11 +435,19 @@ function isDebateErrorEvent(type: string): boolean {
 
 export function EvidenceColumn({ run }: { run?: DesktopDebateRun | undefined }) {
   if (run === undefined) return <aside className="dshDesktopDebateColumn" />
+  const moderatorTurn = [...run.rounds]
+    .reverse()
+    .flatMap(round => [...round.turnStates].reverse())
+    .find(turn => turn.role === 'decision-judge')
   return <aside className="dshDesktopDebateColumn dshDesktopDebateEvidence">
     <CostCard run={run} />
     <section className="dshDesktopDebatePinned" aria-label="置顶 · 主持人总结 / 决策裁判"><h3><span className="dshDesktopDebatePinnedLabel">置顶</span> 主持人总结 / 决策裁判</h3>
       {run.synthesis === undefined
-        ? <p className="dshDesktopDebateEmpty">尚未生成综合结果。</p>
+        ? <>
+          <p className="dshDesktopDebateEmpty">尚未生成综合结果。</p>
+          {moderatorTurn !== undefined && <p>主持人状态：{turnStateLabel(moderatorTurn.state)}</p>}
+          {moderatorTurn?.blockers !== undefined && <BlockerList blockers={moderatorTurn.blockers} />}
+        </>
         : <>
           <p><strong>{synthesisLabel(run.synthesis.state)}</strong> · 保留异议 {String(run.synthesis.dissentCount)}</p>
           {run.synthesis.outputPreview !== undefined && <p>{run.synthesis.outputPreview}</p>}
@@ -625,15 +649,6 @@ function roleLabel(role: string): string {
   } as Record<string, string>)[role] ?? role
 }
 
-function roleMandate(role: string, configured: string): string {
-  return ({
-    'constructive-proposer': '提出最可执行的方案，明确关键主张、假设和验收标准。',
-    'skeptical-falsifier': '寻找决定性反例、隐藏假设和失败条件，并按影响排序。',
-    'evidence-auditor': '核验重要主张是否有可追溯、直接且与决策相关的证据支持。',
-    'decision-judge': '综合已支持的主张，裁定分歧，并保留重要少数意见。',
-  } as Record<string, string>)[role] ?? configured
-}
-
 function claimReferences(run: DesktopDebateRun, ids: readonly string[]): string {
   return ids.slice(0, 8).map((id) => {
     const claim = run.claims.find(item => item.claimId === id)
@@ -643,6 +658,10 @@ function claimReferences(run: DesktopDebateRun, ids: readonly string[]): string 
 
 function turnStateLabel(state: string): string {
   return ({ planned: '待执行', dispatched: '运行中', settled: '已完成', blocked: '已阻断', failed: '失败', indeterminate: '不确定' } as Record<string, string>)[state] ?? state
+}
+
+function terminalTurnState(state: string): boolean {
+  return state === 'settled' || state === 'blocked' || state === 'failed' || state === 'indeterminate'
 }
 
 function roundStateLabel(state: string): string {

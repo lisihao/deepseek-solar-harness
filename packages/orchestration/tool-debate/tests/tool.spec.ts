@@ -209,13 +209,14 @@ async function setupAutomatic(
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(ScriptedDebates)
-  await ctx.plugin(tool)
+  const toolFiber = ctx.plugin(tool)
+  await toolFiber.await()
   const agent = ctx.agentLoop.create(
     SessionId('session-debate-automatic'),
     route,
     { cwd: '/workspace' },
   )
-  return { ctx, agent, provider: ctx.debates as ScriptedDebates }
+  return { ctx, agent, provider: ctx.debates as ScriptedDebates, toolFiber }
 }
 
 let calls = 0
@@ -276,6 +277,7 @@ describe('debate model Consumer', () => {
     expect(provider.starts, JSON.stringify(agent.session.events, null, 2)).toHaveLength(1)
     expect(provider.starts[0]).toMatchObject({
       prompt: 'Should DSH adopt this architecture?',
+      objective: 'Should DSH adopt this architecture?',
       workspace: '/workspace',
       sourceSessionId: 'session-debate-automatic',
       execution: { version: 1, kind: 'standalone' },
@@ -373,19 +375,49 @@ describe('debate model Consumer', () => {
       state: 'round_running',
       revision: 5,
       currentRound: 1,
-      rounds: [{ ...roundWithoutConvergence, state: 'running', turns: [turn] }],
+      rounds: [{
+        ...roundWithoutConvergence,
+        state: 'running',
+        turns: [{
+          ...turn,
+          state: 'planned',
+          outputRef: undefined,
+          outputPreview: undefined,
+        }],
+      }],
     })
-    const secondRound = snapshot({
+    const dispatched = snapshot({
       state: 'round_running',
       revision: 6,
+      currentRound: 1,
+      rounds: [{
+        ...roundWithoutConvergence,
+        state: 'running',
+        turns: [{
+          ...turn,
+          state: 'dispatched',
+          outputRef: undefined,
+          outputPreview: undefined,
+        }],
+      }],
+    })
+    const firstCompleted = snapshot({
+      state: 'reviewing',
+      revision: 7,
+      currentRound: 1,
+      rounds: [{ ...round, state: 'completed', turns: [turn] }],
+    })
+    const secondRound = snapshot({
+      state: 'reviewing',
+      revision: 8,
       currentRound: 2,
       rounds: [
         { ...round, state: 'completed', turns: [turn] },
-        { ...roundWithoutConvergence, round: 2, state: 'running', turns: [secondTurn] },
+        { ...roundWithoutConvergence, round: 2, state: 'completed', turns: [secondTurn] },
       ],
     })
     const completed = snapshot({
-      revision: 7,
+      revision: 10,
       state: 'completed',
       currentRound: 2,
       rounds: [
@@ -401,7 +433,8 @@ describe('debate model Consumer', () => {
     provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
     const approval = deferred<DebateRunSnapshotV1>()
     provider.controlGate = approval.promise
-    provider.inspectFallback = running
+    provider.inspectFallback = firstCompleted
+    provider.inspectSnapshots.push(running, dispatched, firstCompleted)
     await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
 
     agent.followup(createUserMessage({
@@ -436,6 +469,9 @@ describe('debate model Consumer', () => {
     expect(streamText.indexOf('本轮收敛判断')).toBeLessThan(streamText.lastIndexOf('本轮收敛判断'))
     expect(streamText.indexOf('本轮收敛判断')).toBeLessThan(streamText.indexOf('Final host decision summary'))
     expect(streamText).toContain('### 2 楼 · 怀疑式证伪者')
+    expect(streamText.match(/### 1 楼/g)).toHaveLength(1)
+    expect(streamText.match(/Proposal output summary/g)).toHaveLength(1)
+    expect(streamText.match(/Final host decision summary/g)).toHaveLength(1)
     expect(streamText).toContain('请求算子/模型：claude-code/claude-fable-5')
     expect(streamText).toContain('→ codex/gpt-5.6-sol')
     expect(streamText).toContain('## 置顶 · 主持人总结')
@@ -483,6 +519,14 @@ describe('debate model Consumer', () => {
             code: 'DEPENDENCY_FAILED',
             message: 'participant execution did not complete',
             nodeId: 'debate-r1-decision-judge',
+          }, {
+            code: 'DEPENDENCY_FAILED',
+            message: 'evidence audit execution did not complete',
+            nodeId: 'debate-r1-evidence-auditor',
+          }, {
+            code: 'DEPENDENCY_FAILED',
+            message: 'participant execution did not complete',
+            nodeId: 'debate-r1-decision-judge',
           }],
           claimIds: [],
           evidenceRefs: [],
@@ -498,8 +542,80 @@ describe('debate model Consumer', () => {
     await agent.whenIdle()
 
     const streamText = textDeltas(agent).join('')
-    expect(streamText).toContain('### 1 楼 · 决策裁判（主持人）')
-    expect(streamText).toContain('未完成：participant execution did not complete')
+    expect(streamText).not.toContain('楼 · 决策裁判（主持人）')
+    expect(streamText).toContain('主持人状态')
+    expect(streamText).toContain('已阻断：participant execution did not complete')
+    expect(streamText).toContain('evidence audit execution did not complete')
+    expect(streamText.match(/participant execution did not complete/g)).toHaveLength(1)
+  })
+
+  it('uses configured personas and renders each terminal lifecycle deterministically without a judge floor', async () => {
+    const states = ['completed', 'budget_limited', 'max_rounds', 'stopped', 'failed', 'indeterminate'] as const
+    for (const state of states) {
+      const execute = async (): Promise<string> => {
+        const { ctx, agent, provider } = await setupAutomatic()
+        const template = snapshot()
+        provider.startResult = {
+          ...template,
+          state,
+          roster: template.roster.map(role => role.role === 'constructive-proposer'
+            ? { ...role, persona: { ...role.persona, title: 'Fixture Architect', mandate: 'Audit exactly the configured fixture boundary.' } }
+            : role),
+        }
+        await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+        agent.followup(createUserMessage({
+          content: [{ type: 'text', text: `Replay ${state} Debate state.` }],
+          source: { kind: 'user' },
+        }))
+        await agent.whenIdle()
+        return textDeltas(agent).join('')
+      }
+      const first = await execute()
+      const replay = await execute()
+      expect(first).toBe(replay)
+      expect(first).toContain('Fixture Architect')
+      expect(first).toContain('Audit exactly the configured fixture boundary.')
+      expect(first).not.toContain('楼 · 决策裁判（主持人）')
+      expect(first.match(/置顶 · 主持人总结/g)).toHaveLength(1)
+    }
+  })
+
+  it('re-registers after HMR without duplicating durable dispatch, floors, or moderator output', async () => {
+    const { ctx, agent, provider, toolFiber } = await setupAutomatic()
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Debate before HMR.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+    expect(provider.starts).toHaveLength(1)
+
+    await toolFiber.dispose()
+    const reloadedToolFiber = ctx.plugin(tool)
+    await reloadedToolFiber.await()
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Debate after HMR.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    expect(provider.starts).toHaveLength(2)
+    expect(provider.starts[1]).toMatchObject({
+      prompt: 'Debate after HMR.',
+      objective: 'Debate after HMR.',
+    })
+    expect(new Set(provider.starts.map(start => start.commandId))).toHaveLength(2)
+    const latestAssistant = [...agent.session.events].reverse()
+      .find(event => event.type === 'assistant/message')
+    if (latestAssistant?.type !== 'assistant/message') throw new Error('missing assistant response after HMR')
+    const content = latestAssistant.data.message.content[0]
+    if (content?.type !== 'text') throw new Error('missing Debate text response after HMR')
+    expect(content.text.match(/### 1 楼/g)).toHaveLength(1)
+    expect(content.text.match(/Proposal output summary/g)).toHaveLength(1)
+    expect(content.text.match(/置顶 · 主持人总结/g)).toHaveLength(1)
+    expect(content.text.match(/Decision summary/g)).toHaveLength(1)
   })
 
   it('keeps legacy Sessions disabled and persists an ignorable whole-value mode', async () => {

@@ -14,11 +14,11 @@ The browser panel uses the shared theme tokens but owns its styles and transport
 
 The selected Run is rendered as a forum thread:
 
-- The topic post is shown first, followed by a collapsible participant roster with Chinese role names and public responsibilities.
-- Each round is a separate section and each agent turn is an independent, globally numbered floor. Later-round turns display the real claim statements they answer, not bare claim IDs.
+- The topic post is shown first, followed by a full-width collapsible roster with localized role categories and the configured public persona title and mandate.
+- Each round is a separate section and each terminal participant turn is an independent, globally numbered floor; planned and dispatched turns remain roster status rather than empty posts. Later-round turns identify the claim-ledger phase; submitted claims display their real statements, but the UI does not claim a reply relationship that the v1 protocol does not record.
 - The visible card contains only the durable public output preview, status, and evidence count. Provider/model routing, fallback, attempt, artifact, usage, timestamps, and identifiers are available under collapsed technical details.
-- The moderator synthesis is pinned as the top decision post. Unresolved claims, preserved dissent, and convergence metrics remain separate sections so disagreement is not hidden by the final answer.
-- Repeated error events with the same type, round, role, and code are collapsed to one timeline entry. Missing output stays explicitly missing; the panel does not manufacture text for a role that never produced it.
+- The decision judge appears once as the pinned moderator synthesis rather than again as a discussion floor. Unresolved claims, preserved dissent, and convergence metrics remain separate sections so disagreement is not hidden by the final answer.
+- Replayed copies of the same durable error event are collapsed by sequence, attempt, node, and message. Distinct attempts or messages remain separate even when the error code matches. Missing output stays explicitly missing; the panel does not manufacture text for a role that never produced it.
 
 ## Model Experience
 

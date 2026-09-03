@@ -44,27 +44,25 @@ const DEBATE_TRANSCRIPT_POLL_INTERVAL_MS = 100
 const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
 const CONCISE_DEBATE_HINT = /(?:简洁|简要|精简|三条|要点|concise|brief)/iu
 
-const ROLE_COPY: Readonly<Record<string, { readonly title: string; readonly mandate: string }>> = {
+const ROLE_COPY: Readonly<Record<string, { readonly title: string }>> = {
   'constructive-proposer': {
     title: '建设性提案者',
-    mandate: '提出最可执行的方案，明确关键主张、假设和验收标准。',
   },
   'skeptical-falsifier': {
     title: '怀疑式证伪者',
-    mandate: '寻找决定性反例、隐藏假设和失败条件，并按影响排序。',
   },
   'evidence-auditor': {
     title: '证据审计员',
-    mandate: '核验重要主张是否有可追溯、直接且与决策相关的证据支持。',
   },
   'decision-judge': {
     title: '决策裁判（主持人）',
-    mandate: '综合已支持的主张，裁定分歧，并保留重要少数意见。',
   },
 }
 
 const TERMINAL_RUN_STATES: ReadonlySet<DebateRunSnapshotV1['state']> = new Set([
   'completed',
+  'budget_limited',
+  'max_rounds',
   'stopped',
   'failed',
   'indeterminate',
@@ -454,6 +452,24 @@ function runText(run: DebateRunSnapshotV1): string {
     '## 置顶 · 主持人总结',
     run.synthesis?.outputPreview ?? '主持人尚未提交最终总结。',
   ]
+  const moderatorFailure = [...run.rounds]
+    .reverse()
+    .flatMap(round => [...round.turns].reverse())
+    .find(turn => turn.role === 'decision-judge' && turn.state !== 'settled')
+  if (run.synthesis === undefined && moderatorFailure !== undefined) {
+    const seen = new Set<string>()
+    const messages = moderatorFailure.blockers?.filter((blocker) => {
+      const key = [moderatorFailure.attempt ?? '', blocker.nodeId ?? '', blocker.code, blocker.message].join('\u0000')
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    }).map(blocker => blocker.message) ?? []
+    lines.push(
+      '',
+      '### 主持人状态',
+      `- ${turnStateLabel(moderatorFailure.state)}${messages.length === 0 ? '' : `：${messages.join('；')}`}`,
+    )
+  }
   if (run.unresolved.length > 0) {
     lines.push('', '### 未决问题', ...run.unresolved.slice(0, MAX_REF_ITEMS).map(item =>
       `- ${item.blocking ? '阻断：' : ''}${item.description}${item.reason.length > 0 ? `（${item.reason}）` : ''}`))
@@ -480,10 +496,9 @@ interface TranscriptTracker {
   topicState?: DebateRunSnapshotV1['state']
   rosterEmitted: boolean
   readonly roundStates: Map<number, string>
-  readonly turnSignatures: Map<string, string>
+  readonly emittedTurnKeys: Set<string>
   readonly turnFloors: Map<string, number>
   readonly convergenceSignatures: Map<number, string>
-  readonly errorSignatures: Set<string>
   synthesisSignature?: string
   finalEmitted: boolean
   nextFloor: number
@@ -494,10 +509,9 @@ function createTranscriptTracker(): TranscriptTracker {
     topicEmitted: false,
     rosterEmitted: false,
     roundStates: new Map(),
-    turnSignatures: new Map(),
+    emittedTurnKeys: new Set(),
     turnFloors: new Map(),
     convergenceSignatures: new Map(),
-    errorSignatures: new Set(),
     finalEmitted: false,
     nextFloor: 1,
   }
@@ -515,7 +529,7 @@ function transcriptLines(
     lines.push(
       '# 主题帖 · Debate',
       `状态：${lifecycleLabel(run.state)}`,
-      ...run.objective === undefined ? [] : [`议题：${run.objective}`],
+      ...run.objective === undefined ? [] : [`议题：${preview(run.objective) ?? ''}`],
       '',
     )
   } else if (tracker.topicState !== run.state) {
@@ -526,34 +540,32 @@ function transcriptLines(
     tracker.rosterEmitted = true
     lines.push('## 参与者名册')
     for (const role of run.roster.slice(0, MAX_REF_ITEMS)) {
-      lines.push(`- **${roleTitle(role.role)}**：${roleMandate(role.role, role.persona.mandate)}`)
+      lines.push(`- **${rosterRoleTitle(role.role, role.persona.title)}**：${roleMandate(role.persona.mandate)}`)
       lines.push(...roleTechnicalDetails(role))
     }
     lines.push('')
   }
 
   for (const round of run.rounds.slice(0, MAX_REF_ITEMS)) {
-    if (tracker.roundStates.get(round.round) !== round.state) {
+    const previousRoundState = tracker.roundStates.get(round.round)
+    if (previousRoundState === undefined) {
       tracker.roundStates.set(round.round, round.state)
       lines.push(`## 第 ${String(round.round)} 轮 · ${roundStateLabel(round.state)}`)
+    } else if (previousRoundState !== round.state) {
+      tracker.roundStates.set(round.round, round.state)
+      lines.push(`**第 ${String(round.round)} 轮状态更新**：${roundStateLabel(round.state)}`)
     }
     for (const turn of round.turns.slice(0, MAX_REF_ITEMS)) {
       const key = `${String(round.round)}:${turn.slotId}`
-      const signature = JSON.stringify([
-        turn.state,
-        turn.operatorId,
-        turn.model,
-        turn.attempt,
-        turn.routing,
-        turn.blockers,
-        turn.outputRef,
-        turn.outputPreview,
-      ])
-      if (tracker.turnSignatures.get(key) === signature) continue
-      tracker.turnSignatures.set(key, signature)
-      const floor = tracker.turnFloors.get(key) ?? tracker.nextFloor++
-      tracker.turnFloors.set(key, floor)
-      lines.push(...transcriptTurnLines(run, round.round, floor, turn, tracker))
+      if (turn.role !== 'decision-judge' && !tracker.turnFloors.has(key)) {
+        tracker.turnFloors.set(key, tracker.nextFloor++)
+      }
+      if (!roundIsTerminal(round.state) || !turnIsTerminal(turn.state)) continue
+      if (tracker.emittedTurnKeys.has(key)) continue
+      tracker.emittedTurnKeys.add(key)
+      if (turn.role === 'decision-judge') continue
+      const floor = tracker.turnFloors.get(key)
+      if (floor !== undefined) lines.push(...transcriptTurnLines(run, round.round, floor, turn))
     }
     if (round.convergence !== undefined) {
       const signature = JSON.stringify(round.convergence)
@@ -585,8 +597,14 @@ function roleTitle(role: string): string {
   return ROLE_COPY[role]?.title ?? role
 }
 
-function roleMandate(role: string, configured: string): string {
-  return ROLE_COPY[role]?.mandate ?? preview(configured) ?? '职责未提供。'
+function rosterRoleTitle(role: string, configured: string): string {
+  const localized = roleTitle(role)
+  const title = preview(configured)
+  return title === undefined || title === localized ? localized : `${localized} · ${title}`
+}
+
+function roleMandate(configured: string): string {
+  return preview(configured) ?? '职责未提供。'
 }
 
 function roleTechnicalDetails(role: DebatePolicyV1['roster'][number]): string[] {
@@ -607,33 +625,32 @@ function transcriptTurnLines(
   round: number,
   floor: number,
   turn: DebateRunSnapshotV1['rounds'][number]['turns'][number],
-  tracker: TranscriptTracker,
 ): string[] {
   const lines = [
     `### ${String(floor)} 楼 · ${roleTitle(turn.role)}`,
     `**状态：** ${turnStateLabel(turn.state)}`,
   ]
   if (round === 1) lines.push('**发言类型：** 首轮独立发言')
-  else if (turn.claimIds.length > 0) lines.push(`**回应主张：** ${claimReferences(run, turn.claimIds)}`)
+  else lines.push('**发言类型：** Claim Ledger 后续发言')
   if (turn.outputPreview !== undefined) {
     lines.push('', '**公开发言：**', quoteText(preview(turn.outputPreview) ?? ''))
   } else if (turn.state === 'blocked' || turn.state === 'failed' || turn.state === 'indeterminate') {
     lines.push('', '**公开发言：**', '> 未产生公开输出。')
   } else {
-    lines.push('', '**公开发言：**', '> 尚未记录公开输出。')
+    lines.push('', '**公开发言：**', '> 未提供公开摘要。')
   }
-  if (turn.claimIds.length > 0 && round === 1) lines.push(`**提出主张：** ${claimReferences(run, turn.claimIds)}`)
+  if (turn.claimIds.length > 0) lines.push(`**本楼提交主张：** ${claimReferences(run, turn.claimIds)}`)
   if (turn.evidenceRefs.length > 0) lines.push(`**证据：** 已关联 ${String(turn.evidenceRefs.length)} 项`)
+  const errorSignatures = new Set<string>()
   for (const blocker of turn.blockers?.slice(0, MAX_REF_ITEMS) ?? []) {
-    const signature = `${turn.role}\u0000${turn.round}\u0000${blocker.code}`
-    if (tracker.errorSignatures.has(signature)) continue
-    tracker.errorSignatures.add(signature)
+    const signature = [turn.attempt ?? '', blocker.nodeId ?? '', blocker.code, blocker.message].join('\u0000')
+    if (errorSignatures.has(signature)) continue
+    errorSignatures.add(signature)
     lines.push(`> ⚠️ 未完成：${blocker.message}`)
   }
   if (turn.errorCode !== undefined) {
-    const signature = `${turn.role}\u0000${turn.round}\u0000${turn.errorCode}`
-    if (!tracker.errorSignatures.has(signature)) {
-      tracker.errorSignatures.add(signature)
+    const alreadyExplained = turn.blockers?.some(blocker => blocker.code === turn.errorCode) ?? false
+    if (!alreadyExplained) {
       lines.push(`> ⚠️ 未完成：${turn.errorCode}`)
     }
   }
@@ -653,6 +670,14 @@ function transcriptTurnLines(
     '</details>',
     '')
   return lines
+}
+
+function roundIsTerminal(state: string): boolean {
+  return state === 'completed' || state === 'failed' || state === 'indeterminate'
+}
+
+function turnIsTerminal(state: string): boolean {
+  return state === 'settled' || state === 'blocked' || state === 'failed' || state === 'indeterminate'
 }
 
 function claimReferences(run: DebateRunSnapshotV1, ids: readonly string[]): string {
@@ -736,6 +761,7 @@ class DebateHostAdapter extends LlmAdapter {
       commandId: dispatch.commandId,
       workspace,
       prompt,
+      objective: prompt,
       policy: debatePolicyForPrompt(prompt),
       execution: { version: 1, kind: 'standalone' },
       sourceSessionId: String(agent.id),
