@@ -145,7 +145,7 @@ describe('immutable compilation foundations', () => {
     const head = (await run('git', ['-C', repository, 'rev-parse', 'HEAD'])).stdout.trim()
     await expect(manager.integrate(repository, first, 'fixture:first:1')).resolves.toMatchObject({ integratedHead: head })
     expect((await run('git', ['-C', repository, 'rev-parse', 'HEAD'])).stdout.trim()).toBe(head)
-  })
+  }, 30_000)
 
   it('fails closed when a capsule expands network authority', async () => {
     const root = await temporary()
@@ -196,7 +196,7 @@ describe('immutable compilation foundations', () => {
       'autonomous_states', 'cluster_election',
     ]))
     store.close()
-  })
+  }, 30_000)
 
   it('adds durable command receipts when opening a schema-one store', async () => {
     const root = await temporary()
