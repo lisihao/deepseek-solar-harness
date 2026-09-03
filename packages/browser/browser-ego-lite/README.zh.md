@@ -10,7 +10,7 @@
 
 | 字段 | 默认值 | 含义 |
 |---|---:|---|
-| `executable` | 自动发现 | `ego-browser` 绝对路径。省略时先探测 `~/.local/bin/ego-browser`，再探测 `/Applications/ego lite.app/Contents/Frameworks/ego Framework.framework/Versions/Current/Helpers/ego-browser` 内置 helper；不使用 shell 或 PATH 搜索。 |
+| `executable` | 自动发现 | `ego-browser` 绝对路径。省略时先探测 `/Applications/ego lite.app/Contents/Frameworks/ego Framework.framework/Versions/Current/Helpers/ego-browser` 内置 helper，再回退到 `~/.local/bin/ego-browser`；不使用 shell 或 PATH 搜索。 |
 | `cwd` | DSH 进程 cwd | 每次隔离命令使用的绝对工作目录。 |
 | `graceMs` | `2000` | 托管进程树的终止宽限期。 |
 | `stdoutMaxBytes` | `8388608` | 完整 framed stdout 上限；溢出返回 `BROWSER_OUTPUT_LIMIT`。 |

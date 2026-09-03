@@ -563,7 +563,7 @@ describe('Ego Lite discovery and explicit partial mappings', () => {
     await expect(ctx.plugin(EgoLite, { executable: 'ego-browser' })).rejects.toThrow('must be an absolute path')
   })
 
-  it('probes ~/.local/bin before the installed app helper and never guesses through PATH', async () => {
+  it('probes the installed app helper before ~/.local/bin and never guesses through PATH', async () => {
     const ctx = new Context()
     await ctx.plugin(BrowserRuntime)
     await ctx.plugin(FakeSubprocess)
@@ -571,30 +571,45 @@ describe('Ego Lite discovery and explicit partial mappings', () => {
     subprocess.resolve = () => Promise.reject(new Error('missing'))
     await ctx.plugin(EgoLite, {})
 
-    expect(subprocess.resolutions.at(-1)).toBe(EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE)
     expect(subprocess.resolutions).not.toContain('ego-browser')
-    if (process.env.HOME !== undefined) {
-      expect(subprocess.resolutions[0]).toBe(join(process.env.HOME, '.local', 'bin', 'ego-browser'))
-    }
+    expect(subprocess.resolutions).toEqual(process.env.HOME === undefined
+      ? [EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE]
+      : [EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE, join(process.env.HOME, '.local', 'bin', 'ego-browser')])
     await expect(ctx.browser.runPlan(plan)).rejects.toMatchObject({ code: 'BROWSER_UNAVAILABLE' })
     expect(subprocess.spawns).toHaveLength(0)
   })
 
-  it('selects the installed app helper when the user-local executable is absent', async () => {
+  it('selects the installed app helper before the user-local executable when both exist', async () => {
     const ctx = new Context()
     await ctx.plugin(FakeSubprocess)
     const subprocess = ctx.subprocess as FakeSubprocess
-    subprocess.resolve = command => command === EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE
-      ? Promise.resolve(command)
-      : Promise.reject(new Error('missing'))
+    subprocess.resolve = command => Promise.resolve(command)
 
     await expect(EgoLite.resolveEgoLiteExecutable(subprocess, undefined, '/Users/fixture')).resolves.toEqual({
       path: EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE,
       source: 'application',
     })
     expect(subprocess.resolutions).toEqual([
-      join('/Users/fixture', '.local', 'bin', 'ego-browser'),
       EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE,
+    ])
+  })
+
+  it('falls back to the user-local executable when the app helper is absent', async () => {
+    const ctx = new Context()
+    await ctx.plugin(FakeSubprocess)
+    const subprocess = ctx.subprocess as FakeSubprocess
+    const homeExecutable = join('/Users/fixture', '.local', 'bin', 'ego-browser')
+    subprocess.resolve = command => command === homeExecutable
+      ? Promise.resolve(command)
+      : Promise.reject(new Error('missing'))
+
+    await expect(EgoLite.resolveEgoLiteExecutable(subprocess, undefined, '/Users/fixture')).resolves.toEqual({
+      path: homeExecutable,
+      source: 'home',
+    })
+    expect(subprocess.resolutions).toEqual([
+      EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE,
+      homeExecutable,
     ])
   })
 

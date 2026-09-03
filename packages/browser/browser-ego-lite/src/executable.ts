@@ -13,8 +13,9 @@ export interface ResolvedEgoLiteExecutable {
 }
 
 /**
- * Resolve an explicitly configured absolute executable, then the Finder-safe
- * `~/.local/bin/ego-browser` location, then the signed macOS app helper.
+ * Resolve an explicitly configured absolute executable, then the current
+ * helper bundled by the signed macOS app, then the Finder-safe
+ * `~/.local/bin/ego-browser` fallback.
  * @param subprocess - executable resolver for the Provider's execution world.
  * @param configured - optional deployment-owned absolute executable path.
  * @param home - home directory used for the Finder-safe candidate.
@@ -36,10 +37,10 @@ export async function resolveEgoLiteExecutable(
   }
 
   const candidates: readonly (readonly [string, ResolvedEgoLiteExecutable['source']])[] = [
+    [DEFAULT_EGO_LITE_APP_EXECUTABLE, 'application'],
     ...(home === undefined
       ? []
       : [[join(home, '.local', 'bin', 'ego-browser'), 'home'] as const]),
-    [DEFAULT_EGO_LITE_APP_EXECUTABLE, 'application'],
   ]
   for (const [candidate, source] of candidates) {
     try {
