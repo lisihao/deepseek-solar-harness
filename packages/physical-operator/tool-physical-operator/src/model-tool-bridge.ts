@@ -1,15 +1,13 @@
 /** Owner-local bridge exposing one Agent's real DSH tool surface to a Resident product. */
 
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdirSync, rmSync } from 'node:fs'
-import { createServer, type Server, type Socket } from 'node:net'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { CallId, type ToolSchema } from '@deepseek-ai/dsh-llm'
 import { localIpcAddress, localIpcUsesFilesystem, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
-import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { LocalJsonRpcRequestServer } from '@deepseek-ai/dsh-sdk-protocol'
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
 
 interface Binding {
@@ -62,11 +60,13 @@ function socketPath(): { readonly path: string; readonly directory?: string } {
 export class PhysicalOperatorModelToolBridge {
   private readonly endpoint = socketPath()
   private readonly bindings = new Map<string, Binding>()
-  private readonly server: Server
-  private ready: Promise<void> | undefined
+  private readonly server: LocalJsonRpcRequestServer
 
   constructor(private readonly ctx: Context) {
-    this.server = createServer((socket) => { this.accept(socket) })
+    this.server = new LocalJsonRpcRequestServer(this.endpoint, (method, params) => {
+      if (method !== 'tool.call') throw new Error(`unsupported model tool bridge method: ${method}`)
+      return this.call(params)
+    })
   }
 
   /**
@@ -84,7 +84,7 @@ export class PhysicalOperatorModelToolBridge {
     signal: AbortSignal,
   ): Promise<{ readonly descriptor?: PhysicalOperatorModelToolBridgeV1; release(): void }> {
     if (schemas.length === 0) return { release: () => {} }
-    await this.start()
+    await this.server.start()
     const sessionId = `${String(agent.id)}:${commandId}`
     const tools = schemas.map(schema => ({
       name: schema.name,
@@ -114,37 +114,7 @@ export class PhysicalOperatorModelToolBridge {
   /** Close the endpoint and remove only this bridge's socket file. */
   async dispose(): Promise<void> {
     this.bindings.clear()
-    if (this.ready === undefined) return
-    await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
-    if (process.platform !== 'win32') rmSync(this.endpoint.path, { force: true })
-  }
-
-  private start(): Promise<void> {
-    this.ready ??= new Promise<void>((resolve, reject) => {
-      if (this.endpoint.directory !== undefined) {
-        mkdirSync(this.endpoint.directory, { recursive: true, mode: 0o700 })
-        chmodSync(this.endpoint.directory, 0o700)
-      }
-      if (process.platform !== 'win32') rmSync(this.endpoint.path, { force: true })
-      const onError = (error: Error): void => { reject(error) }
-      this.server.once('error', onError)
-      this.server.listen(this.endpoint.path, () => {
-        this.server.off('error', onError)
-        if (process.platform !== 'win32') chmodSync(this.endpoint.path, 0o600)
-        resolve()
-      })
-    })
-    return this.ready
-  }
-
-  private accept(socket: Socket): void {
-    const transport = new JsonRpcLineTransport(socket, socket)
-    transport.onRequest((method, params) => {
-      if (method !== 'tool.call') throw new Error(`unsupported model tool bridge method: ${method}`)
-      return this.call(params)
-    })
-    socket.on('close', () => { transport.close() })
-    transport.start()
+    await this.server.dispose()
   }
 
   private call(params: unknown): Promise<unknown> {

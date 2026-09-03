@@ -1,7 +1,5 @@
 /** Owner-local model tool bridge for the provider-neutral `ctx.browser` seam. */
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdirSync, rmSync } from 'node:fs'
-import { createServer, type Server, type Socket } from 'node:net'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import {
@@ -20,7 +18,7 @@ import {
 } from '@deepseek-ai/dsh-browser'
 import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
-import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { LocalJsonRpcRequestServer } from '@deepseek-ai/dsh-sdk-protocol'
 
 /** Graph capability tag resolved by the built-in browser Capsule. */
 export const BROWSER_CAPABILITY = 'browser'
@@ -280,8 +278,7 @@ function errorResult(error: unknown): Record<string, unknown> {
 export class BrowserModelToolBridge {
   private readonly endpoint: { readonly path: string; readonly directory?: string }
   private readonly bindings = new Map<string, Binding>()
-  private readonly server: Server
-  private ready: Promise<void> | undefined
+  private readonly server: LocalJsonRpcRequestServer
 
   constructor(private readonly ctx: Context, root: string) {
     const directory = join(root, 'model-tools')
@@ -294,7 +291,10 @@ export class BrowserModelToolBridge {
     // path and session identity.
     const path = localIpcAddress(directory, 'browser')
     this.endpoint = { path, ...localIpcUsesFilesystem() ? { directory: dirname(path) } : {} }
-    this.server = createServer((socket) => { this.accept(socket) })
+    this.server = new LocalJsonRpcRequestServer(this.endpoint, (method, params) => {
+      if (method !== 'tool.call') throw new Error(`unsupported browser model tool method: ${method}`)
+      return this.call(params)
+    })
   }
 
   /**
@@ -307,57 +307,30 @@ export class BrowserModelToolBridge {
     readonly descriptor: PhysicalOperatorModelToolBridgeV1
     release(): void
   }> {
-    await this.start()
+    await this.server.start()
     const sessionId = `browser:${commandId}`
     const binding: Binding = { signal, receipts: new Map() }
-    if (this.bindings.has(sessionId)) throw new Error(`browser model tool session is already attached: ${sessionId}`)
-    this.bindings.set(sessionId, binding)
-    let attached = true
     return {
       descriptor: { version: 1, socketPath: this.endpoint.path, sessionId, tools: [BROWSER_MODEL_TOOL_SCHEMA] },
-      release: () => {
-        if (!attached) return
-        attached = false
-        if (this.bindings.get(sessionId) === binding) this.bindings.delete(sessionId)
-      },
+      release: this.attach(sessionId, binding),
     }
   }
 
   /** Close this endpoint and remove only the bridge-owned socket. */
   async dispose(): Promise<void> {
     this.bindings.clear()
-    if (this.ready === undefined) return
-    await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
-    if (process.platform !== 'win32') rmSync(this.endpoint.path, { force: true })
-    this.ready = undefined
+    await this.server.dispose()
   }
 
-  private start(): Promise<void> {
-    this.ready ??= new Promise<void>((resolve, reject) => {
-      if (this.endpoint.directory !== undefined) {
-        mkdirSync(this.endpoint.directory, { recursive: true, mode: 0o700 })
-        chmodSync(this.endpoint.directory, 0o700)
-      }
-      if (process.platform !== 'win32') rmSync(this.endpoint.path, { force: true })
-      const onError = (error: Error): void => { reject(error) }
-      this.server.once('error', onError)
-      this.server.listen(this.endpoint.path, () => {
-        this.server.off('error', onError)
-        if (process.platform !== 'win32') chmodSync(this.endpoint.path, 0o600)
-        resolve()
-      })
-    })
-    return this.ready
-  }
-
-  private accept(socket: Socket): void {
-    const transport = new JsonRpcLineTransport(socket, socket)
-    transport.onRequest((method, params) => {
-      if (method !== 'tool.call') throw new Error(`unsupported browser model tool method: ${method}`)
-      return this.call(params)
-    })
-    socket.on('close', () => { transport.close() })
-    transport.start()
+  private attach(sessionId: string, binding: Binding): () => void {
+    if (this.bindings.has(sessionId)) throw new Error(`browser model tool session is already attached: ${sessionId}`)
+    this.bindings.set(sessionId, binding)
+    let attached = true
+    return () => {
+      if (!attached) return
+      attached = false
+      if (this.bindings.get(sessionId) === binding) this.bindings.delete(sessionId)
+    }
   }
 
   private call(params: unknown): Promise<unknown> {
