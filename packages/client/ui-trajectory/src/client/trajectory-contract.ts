@@ -60,6 +60,108 @@ export interface TrajectoryPhysicalOperatorTraceEntry {
   readonly code?: string
 }
 
+/** One public role route rendered in the durable Debate trajectory. */
+export interface TrajectoryDebateRole {
+  readonly title: string
+  readonly kind: 'participant' | 'judge' | 'moderator'
+  readonly requestedOperatorId: string
+  readonly requestedModel: string
+  readonly actualOperatorId?: string
+  readonly actualModel?: string
+  readonly fallbackReasonCode?: string
+}
+
+/** One short, user-readable claim from a Debate provider's public trace. */
+export interface TrajectoryDebateClaim {
+  readonly statement: string
+  readonly status: string
+  readonly severity: string
+}
+
+/** Safe public progress kinds copied from a native Debate operator. */
+export type TrajectoryDebateProgressKind =
+  | 'phase'
+  | 'public-output'
+  | 'tool-started'
+  | 'tool-completed'
+  | 'approval-required'
+  | 'usage-updated'
+
+/**
+ * One Host-safe native progress fact attached to a Debate trace event.
+ *
+ * `sourceTime` is retained as an origin coordinate for ordering and display;
+ * it is not a product/session identifier. The Host owns redaction, and the
+ * client has no fields for prompts, arguments/results, stderr, credentials,
+ * hidden reasoning, or native product identifiers.
+ */
+export interface TrajectoryDebateProgress {
+  readonly kind: TrajectoryDebateProgressKind
+  readonly sourceTime: string
+  readonly phase?: string
+  readonly publicOutputPreview?: string
+  readonly toolName?: string
+  readonly approvalKind?: string
+  readonly approvalPreview?: string
+  readonly usage?: {
+    readonly inputTokens?: number
+    readonly outputTokens?: number
+    readonly cacheReadInputTokens?: number
+    readonly cacheWriteInputTokens?: number
+    readonly costUsd?: number
+  }
+}
+
+/** One safe, replayable public Debate trace entry emitted by the Host. */
+export interface TrajectoryDebateTraceEntry {
+  /** Session-log sequence that carries this trace projection. */
+  readonly seq: number
+  readonly time: number
+  /** Source Debate-event sequence used to deduplicate reconnect replay. */
+  readonly sourceSequence: number
+  readonly state: string
+  readonly round?: number
+  readonly role?: TrajectoryDebateRole
+  readonly publicOutputPreview?: string
+  readonly publicOutputRef?: string
+  readonly claims: readonly TrajectoryDebateClaim[]
+  readonly evidenceRefs: readonly string[]
+  readonly usage?: {
+    readonly inputTokens?: number
+    readonly outputTokens?: number
+    readonly cacheReadInputTokens?: number
+    readonly cacheWriteInputTokens?: number
+    readonly costUsd?: number
+  }
+  readonly convergence?: {
+    readonly status: string
+    readonly score: number
+    readonly threshold: number
+    readonly reason: string
+  }
+  readonly synthesis?: {
+    readonly state: string
+    readonly outputPreview?: string
+    readonly artifactRef?: string
+    readonly unresolvedCount: number
+    readonly dissentCount: number
+  }
+  /** Optional native execution fact. Older traces simply omit this field. */
+  readonly progress?: TrajectoryDebateProgress
+}
+
+/** Public multi-round Debate execution reconstructed from `debate/trace` records. */
+export interface TrajectoryDebateExecution {
+  readonly runId: string
+  readonly topic?: string
+  /** Session turn that initiated the Debate, when the producer recorded it. */
+  readonly turn: number
+  readonly step: number
+  readonly dispatchSeq: number
+  readonly dispatchTime: number
+  readonly entries: readonly TrajectoryDebateTraceEntry[]
+}
+
 /** Text-free structural shape supplied by the Host public trace. */
 export type TrajectoryPhysicalOperatorValueShape =
   | { readonly kind: 'object'; readonly fields: number }
@@ -96,6 +198,10 @@ export type TrajectoryContribution =
     readonly execution: TrajectoryPhysicalOperatorExecution
   }
   | {
+    readonly kind: 'debate'
+    readonly execution: TrajectoryDebateExecution
+  }
+  | {
     readonly kind: 'session-end'
     readonly seq: number
     readonly time: number
@@ -125,6 +231,8 @@ export interface TrajectorySnapshot {
   readonly runningCalls: readonly RunningToolCall[]
   /** Safe execution facts for Resident physical-operator commands. */
   readonly physicalOperatorExecutions: readonly TrajectoryPhysicalOperatorExecution[]
+  /** Safe, bounded public records for durable multi-round Debate runs. */
+  readonly debateExecutions: readonly TrajectoryDebateExecution[]
 }
 
 declare module '@deepseek-ai/dsh-client-runtime/client' {

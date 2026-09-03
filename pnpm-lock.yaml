@@ -1174,6 +1174,9 @@ importers:
       '@deepseek-ai/dsh-llm-retry':
         specifier: workspace:^
         version: link:../../llm/llm-retry
+      '@deepseek-ai/dsh-output-style':
+        specifier: workspace:^
+        version: link:../../core/output-style
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:^
         version: link:../../interaction/permission-presets
@@ -3912,6 +3915,21 @@ importers:
         specifier: workspace:^
         version: link:../tools
 
+  packages/core/output-style:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-scope':
+        specifier: workspace:^
+        version: link:../scope
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../system-prompt
+
   packages/core/scope:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -6350,6 +6368,10 @@ importers:
         version: 4.4.3
 
   packages/orchestration/ui-debate:
+    dependencies:
+      '@deepseek-ai/dsh-client-ui-primitives':
+        specifier: workspace:^
+        version: link:../../client/ui-primitives
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^

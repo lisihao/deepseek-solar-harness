@@ -11,7 +11,7 @@ afterEach(() => {
 })
 
 describe('Debate panel layout styles', () => {
-  it('installs bounded route and blocker styles that prevent narrow-column overflow', () => {
+  it('installs bounded table, Markdown, and status styles that preserve readable Debate structure', () => {
     dispose = installDebateStyles()
     const style = document.head.querySelector('style[data-plugin="@deepseek-ai/dsh-ui-debate"]')
     expect(style).not.toBeNull()
@@ -22,6 +22,10 @@ describe('Debate panel layout styles', () => {
     expect(css).toContain('.dshDesktopDebateTopic')
     expect(css).toContain('.dshDesktopDebateRoster')
     expect(css).toContain('.dshDesktopDebateRoster{grid-column:1/-1;width:100%')
+    expect(css).toContain('.dshDesktopDebateRosterScroller{overflow:auto}')
+    expect(css).toContain('.dshDesktopDebateRoster table{width:100%;min-width:560px')
+    expect(css).toContain('.dshDesktopDebateStatusStrip')
+    expect(css).toContain('.dshDesktopDebateTurnClaims')
     expect(css).toContain('.dshDesktopDebateTechDetails')
     expect(css).toContain('.dshDesktopDebatePinned')
     expect(css).toContain('var(--dsw-alias-brand-primary)')

@@ -65,6 +65,36 @@ const FOLD_PROPS = {
 }
 
 describe('TrajectoryTable', () => {
+  it('renders a public Debate record with its structured claims in the inspector', () => {
+    const turns: readonly TrajectoryTurnModel[] = [{
+      turn: 1,
+      groups: [{
+        title: 'Debate · 当前用户议题',
+        cells: [{
+          index: 1,
+          kind: 'debate',
+          text: '第 1 轮 · 建设性提案者 · 已提交观点',
+          previewMarkdown: '先建立恢复基线。',
+          outputDetail: [
+            '**模型路由**：Codex / gpt-5.6-sol',
+            '### 公开观点\n\n先建立恢复基线。',
+            '### 本楼主张\n\n- 先补齐恢复基线。（supported · high）',
+          ].join('\n\n'),
+          timeSeconds: 0,
+        }],
+      }],
+    }]
+
+    render(<TrajectoryTable turns={turns} {...FOLD_PROPS} />)
+    const row = screen.getByRole('row', { name: /DEBATE/ })
+    expect(row.textContent).toContain('先建立恢复基线。')
+    fireEvent.click(row)
+
+    expect(screen.getByText('公开观点')).toBeTruthy()
+    expect(screen.getByText('本楼主张')).toBeTruthy()
+    expect(screen.getByText('先补齐恢复基线。（supported · high）')).toBeTruthy()
+  })
+
   it('shows a muted placeholder for an assistant response containing only tool calls', () => {
     const turns: readonly TrajectoryTurnModel[] = [{
       turn: 1,

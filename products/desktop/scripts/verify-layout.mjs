@@ -82,6 +82,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-ui-orchestration',
   '@deepseek-ai/dsh-ui-physical-operator',
   '@deepseek-ai/dsh-orchestrations',
+  '@deepseek-ai/dsh-output-style',
 ])
 
 if (workspace.packageManager !== 'yarn@4.18.0') {

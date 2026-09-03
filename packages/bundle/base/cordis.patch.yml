@@ -431,6 +431,13 @@
       config:
         persona: ''
 
+    # Global presentation defaults are model guidance, not an output rewriter.
+    # An explicit user-requested format still wins; complete preset personas
+    # carry the same contract themselves because they intentionally replace all
+    # additive prompt sections.
+    - id: output-style
+      name: '@deepseek-ai/dsh-output-style'
+
     # Agents created at startup. The base stays empty; raw overlays may create
     # agents, while Web creates sessions on client request.
     - id: agent-loop

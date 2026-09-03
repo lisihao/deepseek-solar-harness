@@ -10,6 +10,7 @@ English | [中文](README.zh.md)
 - The round protocol is fixed as blind independent first drafts, claim-ledger follow-up, and high-severity-unresolved escalation. Providers enforce the bounded `DebateBudgetV1` before dispatch.
 - Claims, evidence refs, dissent, unresolved gaps, convergence reasons, usage/cost, and provider provenance are durable JSON-compatible records. `usageStatus` and `costStatus` distinguish known, partial, and unknown accounting; missing counters are never projected as zero. Dissent is retained; convergence never means forced unanimity.
 - `start`, `list`, `inspect`, `readEvents`, and `control` are the complete seam. `control` carries an expected revision for optimistic concurrency and explicit approval, pause, resume, stop, or reject decisions.
+- Providers may append `debate.agent.progress` while an admitted slot is running. Its v1 payload is deliberately limited to source sequence/time, phase, bounded public output preview, tool start/completion name, approval requirement, usage, and requested/actual routing. Prompt text, hidden reasoning, credentials, and native session or command identifiers are outside this event contract.
 
 ## Provider boundary
 

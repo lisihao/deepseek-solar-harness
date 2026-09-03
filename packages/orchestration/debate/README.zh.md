@@ -10,6 +10,7 @@
 - 回合协议固定为盲独立首轮、Claim Ledger 聚焦追问和高严重度未解决问题升级。Provider 必须在派发前执行有界的 `DebateBudgetV1`。
 - Claim、证据引用、异议、未解决缺口、收敛原因、用量/费用和提供方溯源都是可持久化的 JSON 兼容记录。`usageStatus` 与 `costStatus` 区分 known、partial 和 unknown；缺失计数绝不投影成零。异议会被保留；收敛不等于强行一致。
 - `start`、`list`、`inspect`、`readEvents` 和 `control` 是完整接缝。`control` 带有 expected revision，用于乐观并发控制，并支持显式批准、暂停、恢复、停止或拒绝。
+- Provider 可以在已准入槽位运行期间追加 `debate.agent.progress`。其 v1 payload 被严格限制为来源 sequence/time、phase、有界公开输出预览、工具开始/完成名称、审批要求、usage 以及请求/实际路由；提示词、私有推理、凭据，以及原生 session 或 command 标识不属于该事件契约。
 
 ## Provider boundary
 

@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.12.1",
+  "version": "3.12.3",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -207,6 +207,7 @@
     "@deepseek-ai/dsh-orchestration-local": "file:vendor/dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-orchestrations": "file:vendor/dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-output-retention": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-output-style": "file:vendor/dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-permission-presets": "0.1.0-rc.6",
     "@deepseek-ai/dsh-physical-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-physical-operator-resident": "file:vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz",

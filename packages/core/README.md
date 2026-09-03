@@ -9,6 +9,7 @@ The session log, system-prompt assembly, tool registry, agent vocabulary, deploy
 | [`scope/`](scope/README.md) | Scoped-context registration primitive | library — no ctx key |
 | [`session/`](session/README.md) | Event-sourced session log and in-memory store | `ctx.sessions` |
 | [`system-prompt/`](system-prompt/README.md) | Prompt and tool-schema assembly registry | `ctx.systemPrompt` |
+| [`output-style/`](output-style/README.md) | Unloadable response-presentation guidance | contributes to `ctx.systemPrompt` |
 | [`tools/`](tools/README.md) | Scoped tool registry and execution pipeline | `ctx.tools` |
 | [`agent/`](agent/README.md) | Agent interface, registry, and event vocabulary | `ctx.agents` |
 | [`agent-default-model/`](agent-default-model/README.md) | Default model selection shared by Agent entry points | `ctx.agentDefaultModel` |

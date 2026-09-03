@@ -10,7 +10,12 @@ import type {
   DebatePolicyV1,
   DebateStartRequestV1,
 } from '@deepseek-ai/dsh-debate'
-import type { DebateRoundExecutorPort, DebateTurnRequestV1, DebateTurnResultV1 } from '../src/types.ts'
+import type {
+  DebateRoundAgentProgressV1,
+  DebateRoundExecutorPort,
+  DebateTurnRequestV1,
+  DebateTurnResultV1,
+} from '../src/types.ts'
 
 const contexts: Context[] = []
 
@@ -134,6 +139,36 @@ async function provider(
   return new LocalDebateProvider(ctx, { root, executor: roundExecutor, idFactory: () => 'run-fixture' })
 }
 
+async function expectTerminalConvergenceOrder(
+  service: LocalDebateProvider,
+  runId: string,
+  status: 'converged' | 'budget_limited' | 'max_rounds',
+  finalState: 'completed' | 'budget_limited' | 'max_rounds',
+): Promise<void> {
+  const events = (await service.readEvents({ runId, limit: 100 })).events
+  const convergenceIndex = events.findIndex(event => event.type === 'debate.convergence.evaluated'
+    && event.data.status === status)
+  const synthesisStartIndex = events.findIndex((event, index) => index > convergenceIndex
+    && event.type === 'debate.synthesis.started')
+  const synthesisSettledIndex = events.findIndex((event, index) => index > synthesisStartIndex
+    && event.type === 'debate.synthesis.settled')
+  expect(convergenceIndex).toBeGreaterThanOrEqual(0)
+  expect(synthesisStartIndex).toBeGreaterThan(convergenceIndex)
+  expect(synthesisSettledIndex).toBeGreaterThan(synthesisStartIndex)
+  expect(events[convergenceIndex]?.data.lifecycleState).toBe('synthesizing')
+  expect(events[synthesisStartIndex]?.data.lifecycleState).toBe('synthesizing')
+  expect(events[synthesisSettledIndex]?.data.lifecycleState).toBe(finalState)
+  expect(events.slice(convergenceIndex, synthesisSettledIndex + 1).map(event => event.type)).toEqual([
+    'debate.convergence.evaluated',
+    'debate.cost.accounted',
+    'debate.synthesis.started',
+    'debate.synthesis.settled',
+  ])
+  const settledSequence = events[synthesisSettledIndex]?.sequence
+  expect(events.filter(event => event.type === 'debate.agent.dispatched'
+    && (settledSequence === undefined || event.sequence > settledSequence))).toHaveLength(0)
+}
+
 describe('local Debate Provider', () => {
   it('keeps start approval-pending, persists control/event projections, and supports reject', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-control-'))
@@ -143,7 +178,13 @@ describe('local Debate Provider', () => {
       return resultFor({} as DebateTurnRequestV1)
     })
     const pending = await service.start(request('enabled'))
-    expect(pending).toMatchObject({ runId: 'run-fixture', state: 'awaiting_approval', currentRound: 0, revision: 2 })
+    expect(pending).toMatchObject({
+      runId: 'run-fixture',
+      state: 'awaiting_approval',
+      currentRound: 0,
+      revision: 2,
+      topic: { version: 1, title: 'Choose the most supportable candidate.', source: 'objective' },
+    })
     expect(calls).toBe(0)
     const rejected = await service.control({
       version: 1, commandId: 'control-reject', runId: pending.runId, expectedRevision: pending.revision,
@@ -157,6 +198,23 @@ describe('local Debate Provider', () => {
     const nextPage = await service.readEvents({ runId: pending.runId, afterSequence: page.nextSequence, limit: 2 })
     expect(nextPage.events[0]?.sequence).toBe(3)
     await expect(service.inspect('missing')).rejects.toMatchObject({ code: 'DEBATE_NOT_FOUND' })
+  })
+
+  it('persists the request prompt as the public topic when no objective is supplied', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-topic-prompt-'))
+    const service = await provider(root, async turn => resultFor(turn))
+    const { objective: _objective, ...promptOnlyRequest } = request('enabled', {
+      commandId: 'start-topic-prompt',
+      prompt: '用户给出的多轮 Debate 议题正文',
+    })
+    const pending = await service.start(promptOnlyRequest)
+
+    expect(pending).toMatchObject({
+      topic: { version: 1, title: '用户给出的多轮 Debate 议题正文', source: 'user' },
+    })
+    await expect(service.inspect(pending.runId)).resolves.toMatchObject({
+      topic: { title: '用户给出的多轮 Debate 议题正文', source: 'user' },
+    })
   })
 
   it('allows a pending run to pause and resume through the same revision-fenced seam', async () => {
@@ -205,6 +263,7 @@ describe('local Debate Provider', () => {
       .filter(event => event.type === 'debate.agent.settled')
     expect(settledEvents).toHaveLength(3)
     expect(settledEvents.every(event => event.data.confidence === 0.9)).toBe(true)
+    await expectTerminalConvergenceOrder(service, completed.runId, 'converged', 'completed')
 
     const recovered = await provider(root, async () => {
       throw new Error('recovery inspection must not execute a turn')
@@ -241,6 +300,87 @@ describe('local Debate Provider', () => {
     expect(Math.max(...dispatches.map(event => event.sequence))).toBeLessThan(
       Math.min(...settlements.map(event => event.sequence)),
     )
+  })
+
+  it('immediately persists one safe, source-deduplicated TaskGraph operator progress fact before round settlement', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-progress-'))
+    const ctx = new Context()
+    contexts.push(ctx)
+    let persistedBeforeSettlement = false
+    const executor: DebateRoundExecutorPort = {
+      async executeRound(round) {
+        const turn = round.turns[0]
+        if (turn === undefined || round.onProgress === undefined) throw new Error('fixture requires an admitted progress callback')
+        const unsafeProgress = {
+          version: 1,
+          runId: round.runId,
+          round: round.round,
+          slotId: turn.slotId,
+          role: turn.role,
+          progress: {
+            version: 1,
+            kind: 'public-output',
+            source: {
+              orchestrationRunId: 'taskgraph-progress-fixture',
+              sequence: 42,
+              time: '2026-09-03T10:00:00.000Z',
+            },
+            publicOutputPreview: 'Safe public operator update.',
+            routing: {
+              version: 1,
+              requestedOperatorId: turn.operatorId,
+              requestedModel: turn.model,
+              actualOperatorId: 'codex',
+              actualModel: 'gpt-5.6-luna',
+            },
+            prompt: 'must-not-copy',
+            nativeSessionId: 'must-not-copy',
+            commandId: 'must-not-copy',
+          },
+        } as DebateRoundAgentProgressV1
+        await round.onProgress(unsafeProgress)
+        await round.onProgress(unsafeProgress)
+        const events = (await service.readEvents({ runId: round.runId, limit: 100 })).events
+        persistedBeforeSettlement = events.some(event => event.type === 'debate.agent.progress')
+        return {
+          version: 1,
+          resultsBySlot: Object.fromEntries(round.turns.map(entry => [entry.slotId, resultFor(entry)])),
+        }
+      },
+    }
+    const service = new LocalDebateProvider(ctx, { root, executor, idFactory: () => 'run-progress' })
+    const pending = await service.start(request('enabled', { commandId: 'start-progress' }))
+    const completed = await service.control({
+      version: 1,
+      commandId: 'approve-progress',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture approval',
+    })
+
+    const events = (await service.readEvents({ runId: completed.runId, limit: 100 })).events
+    const progress = events.filter(event => event.type === 'debate.agent.progress')
+    const settled = events.filter(event => event.type === 'debate.agent.settled')
+    expect(persistedBeforeSettlement).toBe(true)
+    expect(progress).toHaveLength(1)
+    expect(progress[0]).toMatchObject({
+      round: 1,
+      slotId: 'constructive-proposer',
+      data: {
+        orchestrationRunId: 'taskgraph-progress-fixture',
+        orchestrationSequence: 42,
+        kind: 'public-output',
+        publicOutputPreview: 'Safe public operator update.',
+        routing: {
+          requestedOperatorId: 'fixture-proposer',
+          actualOperatorId: 'codex',
+          actualModel: 'gpt-5.6-luna',
+        },
+      },
+    })
+    expect(progress[0]?.sequence).toBeLessThan(Math.min(...settled.map(event => event.sequence)))
+    expect(JSON.stringify(progress)).not.toContain('must-not-copy')
   })
 
   it('preserves settled work and structured blockers when a round TaskGraph fails partially', async () => {
@@ -343,6 +483,7 @@ describe('local Debate Provider', () => {
     expect(limited.cost.outputTokens).toBeUndefined()
     expect(limited.cost.costUsd).toBeUndefined()
     expect(limited.synthesis).toMatchObject({ state: 'settled' })
+    await expectTerminalConvergenceOrder(service, limited.runId, 'budget_limited', 'budget_limited')
   })
 
   it('rejects a settled turn that has no public preview or artifact reference', async () => {
@@ -437,6 +578,7 @@ describe('local Debate Provider', () => {
     expect(maxed.state).toBe('max_rounds')
     expect(maxed.rounds).toHaveLength(2)
     expect(maxed.synthesis).toMatchObject({ state: 'settled' })
+    await expectTerminalConvergenceOrder(maxService, maxed.runId, 'max_rounds', 'max_rounds')
   })
 
   it('rejects a new follow-up claim instead of expanding outside the ledger', async () => {
@@ -569,6 +711,48 @@ describe('local Debate Provider', () => {
 
     release()
     await expect(running).resolves.toMatchObject({ state: 'completed' })
+  })
+
+  it('recovers a pending receipt as settled only when the terminal outcome is proven', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-proven-receipt-'))
+    const source = await provider(sourceRoot, async turn => resultFor(turn))
+    const startRequest = request('auto', { commandId: 'start-proven-terminal' })
+    const completed = await source.start(startRequest)
+    expect(completed.state).toBe('completed')
+
+    type PersistedState = {
+      commands: Array<{ commandId: string; runId: string; state: string; response?: unknown }>
+      runs: Array<{ events: Array<{ type: string }> }>
+      [key: string]: unknown
+    }
+    const persisted = JSON.parse(await readFile(join(sourceRoot, 'state.json'), 'utf8')) as PersistedState
+    const command = persisted.commands.find(entry => entry.commandId === startRequest.commandId)
+    if (command === undefined) throw new Error('fixture command receipt is missing')
+    command.state = 'running'
+    delete command.response
+
+    const recoveryRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-proven-recovered-'))
+    await writeFile(join(recoveryRoot, 'state.json'), `${JSON.stringify(persisted)}\n`, { mode: 0o600 })
+    const recovered = await provider(recoveryRoot, async () => {
+      throw new Error('proven recovery must not execute another turn')
+    })
+    await expect(recovered.start(startRequest)).resolves.toEqual(completed)
+    const settledState = JSON.parse(await readFile(join(recoveryRoot, 'state.json'), 'utf8')) as PersistedState
+    expect(settledState.commands.find(entry => entry.commandId === startRequest.commandId)).toMatchObject({
+      state: 'settled',
+      response: completed,
+    })
+
+    const unproven = JSON.parse(JSON.stringify(persisted)) as PersistedState
+    const run = unproven.runs[0]
+    if (run === undefined) throw new Error('fixture Debate run is missing')
+    run.events = run.events.filter(event => event.type !== 'debate.synthesis.settled')
+    const unprovenRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-unproven-terminal-'))
+    await writeFile(join(unprovenRoot, 'state.json'), `${JSON.stringify(unproven)}\n`, { mode: 0o600 })
+    const uncertain = await provider(unprovenRoot, async () => {
+      throw new Error('unproven recovery must not execute another turn')
+    })
+    await expect(uncertain.start(startRequest)).rejects.toMatchObject({ code: 'DEBATE_INDETERMINATE' })
   })
 
   it('pauses an active run at the round boundary and resumes without replaying the settled round', async () => {

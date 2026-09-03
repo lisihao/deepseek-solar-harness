@@ -127,6 +127,17 @@ export interface DebateSourceRefV1 {
   readonly digest?: string
 }
 
+/**
+ * The public topic of a Debate run. New writers record the user-selected
+ * title explicitly so consumer projections never infer it from an unrelated
+ * Session message. Older persisted runs may omit this field.
+ */
+export interface DebateTopicV1 {
+  readonly version: 1
+  readonly title: string
+  readonly source: 'user' | 'objective' | 'legacy-missing'
+}
+
 /** Provider input. `commandId` is the adapter's idempotency identity. */
 export interface DebateStartRequestV1 {
   readonly version: 1
@@ -205,6 +216,143 @@ export interface DebateUsageV1 {
   readonly cacheReadInputTokens?: number
   readonly cacheWriteInputTokens?: number
   readonly costUsd?: number
+}
+
+/** One public claim summary carried in the Session trace without private slot identities. */
+export interface DebateTraceClaimV1 {
+  readonly statement: string
+  readonly status: DebateClaimStatus
+  readonly severity: DebateClaimSeverity
+}
+
+/** Requested and actual product route shown for one public Debate role. */
+export interface DebateTraceRoleV1 {
+  readonly title: string
+  readonly kind: 'participant' | 'judge' | 'moderator'
+  readonly requested: {
+    readonly operatorId: string
+    readonly model: string
+  }
+  readonly actual?: {
+    readonly operatorId: string
+    readonly model: string
+  }
+  readonly fallbackReasonCode?: string
+}
+
+/** Safe usage counters reported while one physical Debate turn is still running. */
+export interface DebateAgentProgressUsageV1 {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly cacheReadInputTokens?: number
+  readonly cacheWriteInputTokens?: number
+  readonly costUsd?: number
+}
+
+/** One whitelisted public detail received from a physical operator. */
+export type DebateAgentProgressKindV1 =
+  | 'phase'
+  | 'public-output'
+  | 'tool-started'
+  | 'tool-completed'
+  | 'approval-required'
+  | 'usage-updated'
+
+/**
+ * Durable, source-addressable operator progress for one Debate roster slot.
+ * It intentionally carries only a whitelisted public projection; prompt text,
+ * hidden reasoning, credentials, and native product identifiers are absent.
+ */
+export interface DebateAgentProgressV1 {
+  readonly version: 1
+  readonly kind: DebateAgentProgressKindV1
+  readonly source: {
+    readonly orchestrationRunId: string
+    readonly sequence: number
+    readonly time: string
+  }
+  readonly phase?: string
+  readonly publicOutputPreview?: string
+  readonly toolName?: string
+  readonly approvalKind?: string
+  readonly approvalPreview?: string
+  readonly usage?: DebateAgentProgressUsageV1
+  /** Requested/actual public route known when the progress was observed. */
+  readonly routing?: DebateTurnRoutingV1
+}
+
+/** Public subset of one durable physical-operator progress fact in a Session trace. */
+export interface DebateTraceProgressV1 {
+  readonly kind: DebateAgentProgressKindV1
+  readonly sourceTime: string
+  readonly phase?: string
+  readonly publicOutputPreview?: string
+  readonly toolName?: string
+  readonly approvalKind?: string
+  readonly approvalPreview?: string
+  readonly usage?: DebateAgentProgressUsageV1
+}
+
+/** Bounded public synthesis data retained in a Debate Session trace. */
+export interface DebateTraceSynthesisV1 {
+  readonly state: DebateSynthesisState
+  /** Bounded public user-facing summary; never hidden reasoning or private analysis. */
+  readonly outputPreview?: string
+  readonly artifactRef?: string
+  readonly unresolvedCount: number
+  readonly dissentCount: number
+}
+
+/** Public lifecycle fact projected from a Debate provider into a Session log. */
+export type DebateTraceStateV1 =
+  | 'planned'
+  | 'dispatched'
+  | 'running'
+  | 'progress'
+  | 'settled'
+  | 'blocked'
+  | 'failed'
+  | 'indeterminate'
+  | 'round-completed'
+  | 'synthesis-running'
+  | 'synthesis-settled'
+  | 'run-completed'
+  | 'budget-limited'
+  | 'max-rounds'
+  | 'stopped'
+
+/**
+ * Ignorable, replayable public Debate trace record appended as
+ * `debate/trace` to a DSH Session. The producer owns redaction: this payload
+ * may contain only public result text, never raw prompts, hidden reasoning,
+ * credentials, or native-product transcripts.
+ *
+ * `sourceSequence` is the source Debate event's durable sequence rather than
+ * the enclosing Session sequence. Consumers therefore deduplicate reconnect
+ * replays by `(runId, sourceSequence)` and preserve source ordering.
+ */
+export interface DebateTraceSessionEventV1 {
+  readonly version: 1
+  readonly runId: string
+  readonly sourceSequence: number
+  readonly state: DebateTraceStateV1
+  /** Public topic copied from the run snapshot; never inferred by a renderer. */
+  readonly topic?: DebateTopicV1
+  readonly sessionTurn?: number
+  readonly sessionStep?: number
+  readonly round?: number
+  readonly role?: DebateTraceRoleV1
+  readonly publicOutput?: {
+    readonly preview?: string
+    readonly ref?: string
+  }
+  readonly claims?: readonly DebateTraceClaimV1[]
+  readonly evidenceRefs?: readonly DebateEvidenceRefV1[]
+  readonly usage?: DebateUsageV1
+  /** Safe, incrementally projected operator detail for a running Debate turn. */
+  readonly progress?: DebateTraceProgressV1
+  readonly convergence?: DebateConvergenceV1
+  readonly synthesis?: DebateTraceSynthesisV1
 }
 
 /** Usage and account-sourced cost attributed to one roster slot. */
@@ -296,6 +444,7 @@ export interface DebateAgentTurnV1 {
   readonly routing?: DebateTurnRoutingV1
   readonly blockers?: readonly DebateTurnBlockerV1[]
   readonly outputRef?: string
+  /** Bounded public user-facing summary; never hidden reasoning or private analysis. */
   readonly outputPreview?: string
   readonly claimIds: readonly string[]
   readonly evidenceRefs: readonly DebateEvidenceRefV1[]
@@ -344,6 +493,7 @@ export interface DebateSynthesisV1 {
   readonly version: 1
   readonly state: DebateSynthesisState
   readonly artifactRef?: string
+  /** Bounded public moderator summary; never hidden reasoning or private analysis. */
   readonly outputPreview?: string
   readonly unresolvedClaimIds: readonly string[]
   readonly dissentCount: number
@@ -357,6 +507,8 @@ export interface DebateRunSnapshotV1 {
   readonly state: DebateLifecycle
   readonly mode: DebateMode
   readonly promptSha256: string
+  /** Present on newly written runs; absent only on pre-topic persisted data. */
+  readonly topic?: DebateTopicV1
   readonly objective?: string
   readonly policy: DebatePolicyV1
   readonly roster: readonly DebateRoleSpecV1[]
@@ -394,6 +546,7 @@ export type DebateEventType =
   | 'debate.admitted'
   | 'debate.round.started'
   | 'debate.agent.dispatched'
+  | 'debate.agent.progress'
   | 'debate.agent.settled'
   | 'debate.agent.blocked'
   | 'debate.agent.failed'

@@ -14,6 +14,8 @@ import DebateService, {
   validateDebateStartRequest,
 } from '@deepseek-ai/dsh-debate'
 import type {
+  DebateAgentProgressKindV1,
+  DebateAgentProgressUsageV1,
   DebateAgentTurnV1,
   DebateClaimLedgerV1,
   DebateClaimSeverity,
@@ -26,6 +28,7 @@ import type {
   DebateEventType,
   DebateEventV1,
   DebateEvidenceRefV1,
+  DebateJsonValue,
   DebateLifecycle,
   DebateRoleId,
   DebateRoleSpecV1,
@@ -33,6 +36,8 @@ import type {
   DebateRunSnapshotV1,
   DebateRunSummaryV1,
   DebateStartRequestV1,
+  DebateTopicV1,
+  DebateTurnRoutingV1,
   DebateUnresolvedV1,
   DebateUsageV1,
 } from '@deepseek-ai/dsh-debate'
@@ -41,6 +46,7 @@ import type {
   Config as ProviderConfig,
   DebateRoundExecutor,
   DebateRoundExecutionResultV1,
+  DebateRoundAgentProgressV1,
   DebateTurnPhase,
   DebateTurnRequestV1,
   DebateTurnResultV1,
@@ -61,6 +67,9 @@ const DEFAULT_EVENT_LIMIT = 100
 const MAX_PREVIEW_LENGTH = 4_000
 const MAX_OUTPUT_REF_LENGTH = 2_000
 const MAX_FOLLOW_UP_JUDGE_CLAIMS = 4
+const MAX_PROGRESS_SOURCE_ID_LENGTH = 512
+const MAX_PROGRESS_TEXT_LENGTH = 1_600
+const MAX_PROGRESS_NAME_LENGTH = 160
 const DEBATE_ROLE_ORDER: readonly DebateRoleId[] = [
   'constructive-proposer',
   'skeptical-falsifier',
@@ -71,6 +80,14 @@ const ROLE_INDEX = new Map<string, number>(DEBATE_ROLE_ORDER.map((role, index) =
 const CLAIM_STATUSES = new Set<DebateClaimStatus>(['open', 'supported', 'refuted', 'settled', 'unresolved'])
 const CLAIM_SEVERITIES = new Set<DebateClaimSeverity>(['low', 'medium', 'high', 'critical'])
 const EVIDENCE_KINDS = new Set<DebateEvidenceRefV1['kind']>(['source', 'artifact', 'observation', 'quote'])
+const PROGRESS_KINDS = new Set<DebateAgentProgressKindV1>([
+  'phase',
+  'public-output',
+  'tool-started',
+  'tool-completed',
+  'approval-required',
+  'usage-updated',
+])
 
 /** Runtime record kept beside the inspect projection so a resumed run can re-enter the executor. */
 interface StoredRun {
@@ -365,6 +382,142 @@ function normalizeUsage(value: unknown, path: string): DebateUsageV1 {
   }
 }
 
+function normalizeProgressText(value: unknown, path: string, max: number): string {
+  const normalized = text(value, path, max).replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, max)
+  if (normalized.trim().length === 0) invalid(`${path} must contain visible text`)
+  return normalized
+}
+
+function normalizeProgressUsage(value: unknown, path: string): DebateAgentProgressUsageV1 {
+  const raw = record(value, path)
+  const usage: {
+    inputTokens?: number
+    outputTokens?: number
+    cacheReadInputTokens?: number
+    cacheWriteInputTokens?: number
+    costUsd?: number
+  } = {}
+  for (const field of ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens'] as const) {
+    if (raw[field] !== undefined) usage[field] = nonNegativeInteger(raw[field], `${path}.${field}`)
+  }
+  if (raw.costUsd !== undefined) usage.costUsd = nonNegativeNumber(raw.costUsd, `${path}.costUsd`)
+  if (Object.keys(usage).length === 0) invalid(`${path} must include at least one counter`)
+  return usage
+}
+
+function normalizeProgressRouting(value: unknown, path: string): DebateTurnRoutingV1 {
+  const routing = record(value, path)
+  if (routing.version !== 1) invalid(`${path}.version must be 1`)
+  const requestedOperatorId = normalizeProgressText(routing.requestedOperatorId, `${path}.requestedOperatorId`, MAX_PROGRESS_NAME_LENGTH)
+  const requestedModel = normalizeProgressText(routing.requestedModel, `${path}.requestedModel`, MAX_PROGRESS_NAME_LENGTH)
+  const actualOperatorId = routing.actualOperatorId === undefined
+    ? undefined
+    : normalizeProgressText(routing.actualOperatorId, `${path}.actualOperatorId`, MAX_PROGRESS_NAME_LENGTH)
+  const actualModel = routing.actualModel === undefined
+    ? undefined
+    : normalizeProgressText(routing.actualModel, `${path}.actualModel`, MAX_PROGRESS_NAME_LENGTH)
+  const fallbackReasonCode = routing.fallbackReasonCode === undefined
+    ? undefined
+    : normalizeProgressText(routing.fallbackReasonCode, `${path}.fallbackReasonCode`, MAX_PROGRESS_NAME_LENGTH)
+  return {
+    version: 1,
+    requestedOperatorId,
+    requestedModel,
+    ...(actualOperatorId === undefined ? {} : { actualOperatorId }),
+    ...(actualModel === undefined ? {} : { actualModel }),
+    ...(fallbackReasonCode === undefined ? {} : { fallbackReasonCode }),
+  }
+}
+
+function progressUsageData(usage: DebateAgentProgressUsageV1): Readonly<Record<string, DebateJsonValue>> {
+  return {
+    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
+    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
+    ...(usage.cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens: usage.cacheReadInputTokens }),
+    ...(usage.cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
+    ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
+  }
+}
+
+function progressRoutingData(routing: DebateTurnRoutingV1): Readonly<Record<string, DebateJsonValue>> {
+  const result: Record<string, DebateJsonValue> = {
+    version: 1,
+    requestedOperatorId: routing.requestedOperatorId,
+    requestedModel: routing.requestedModel,
+  }
+  if (routing.actualOperatorId !== undefined) result.actualOperatorId = routing.actualOperatorId
+  if (routing.actualModel !== undefined) result.actualModel = routing.actualModel
+  if (routing.fallbackReasonCode !== undefined) result.fallbackReasonCode = routing.fallbackReasonCode
+  return result
+}
+
+function normalizeRoundAgentProgress(
+  value: DebateRoundAgentProgressV1,
+  expected: { readonly runId: string; readonly round: number; readonly slotId: string; readonly role: DebateRoleId },
+): DebateRoundAgentProgressV1 {
+  const candidate = record(value, 'round progress')
+  if (candidate.version !== 1) invalid('round progress.version must be 1')
+  if (candidate.runId !== expected.runId || candidate.round !== expected.round
+    || candidate.slotId !== expected.slotId || candidate.role !== expected.role) {
+    invalid('round progress does not belong to the admitted Debate slot')
+  }
+  const progress = record(candidate.progress, 'round progress.progress')
+  if (progress.version !== 1) invalid('round progress.progress.version must be 1')
+  const kind = enumValue(progress.kind, 'round progress.progress.kind', PROGRESS_KINDS)
+  const source = record(progress.source, 'round progress.progress.source')
+  const orchestrationRunId = normalizeProgressText(
+    source.orchestrationRunId,
+    'round progress.progress.source.orchestrationRunId',
+    MAX_PROGRESS_SOURCE_ID_LENGTH,
+  )
+  const sequence = nonNegativeInteger(source.sequence, 'round progress.progress.source.sequence')
+  if (sequence < 1) invalid('round progress.progress.source.sequence must be positive')
+  const time = normalizeProgressText(source.time, 'round progress.progress.source.time', MAX_PROGRESS_NAME_LENGTH)
+  if (!Number.isFinite(Date.parse(time))) invalid('round progress.progress.source.time must be an ISO timestamp')
+  const phase = progress.phase === undefined ? undefined : normalizeProgressText(progress.phase, 'round progress.progress.phase', MAX_PROGRESS_NAME_LENGTH)
+  const publicOutputPreview = progress.publicOutputPreview === undefined
+    ? undefined
+    : normalizeProgressText(progress.publicOutputPreview, 'round progress.progress.publicOutputPreview', MAX_PROGRESS_TEXT_LENGTH)
+  const toolName = progress.toolName === undefined
+    ? undefined
+    : normalizeProgressText(progress.toolName, 'round progress.progress.toolName', MAX_PROGRESS_NAME_LENGTH)
+  const approvalKind = progress.approvalKind === undefined
+    ? undefined
+    : normalizeProgressText(progress.approvalKind, 'round progress.progress.approvalKind', MAX_PROGRESS_NAME_LENGTH)
+  const approvalPreview = progress.approvalPreview === undefined
+    ? undefined
+    : normalizeProgressText(progress.approvalPreview, 'round progress.progress.approvalPreview', MAX_PROGRESS_TEXT_LENGTH)
+  const usage = progress.usage === undefined ? undefined : normalizeProgressUsage(progress.usage, 'round progress.progress.usage')
+  const routing = progress.routing === undefined ? undefined : normalizeProgressRouting(progress.routing, 'round progress.progress.routing')
+  switch (kind) {
+    case 'phase': if (phase === undefined) invalid('phase progress must include phase'); break
+    case 'public-output': if (publicOutputPreview === undefined) invalid('public-output progress must include publicOutputPreview'); break
+    case 'tool-started':
+    case 'tool-completed': if (toolName === undefined) invalid('tool progress must include toolName'); break
+    case 'approval-required': if (approvalKind === undefined) invalid('approval progress must include approvalKind'); break
+    case 'usage-updated': if (usage === undefined) invalid('usage progress must include usage'); break
+  }
+  return {
+    version: 1,
+    runId: expected.runId,
+    round: expected.round,
+    slotId: expected.slotId,
+    role: expected.role,
+    progress: {
+      version: 1,
+      kind,
+      source: { orchestrationRunId, sequence, time: new Date(time).toISOString() },
+      ...(phase === undefined ? {} : { phase }),
+      ...(publicOutputPreview === undefined ? {} : { publicOutputPreview }),
+      ...(toolName === undefined ? {} : { toolName }),
+      ...(approvalKind === undefined ? {} : { approvalKind }),
+      ...(approvalPreview === undefined ? {} : { approvalPreview }),
+      ...(usage === undefined ? {} : { usage }),
+      ...(routing === undefined ? {} : { routing }),
+    },
+  }
+}
+
 function normalizeTurnResult(value: DebateTurnResultV1, slotId: string): NormalizedTurnResult {
   const result = record(value, 'turn result')
   const confidence = boundedConfidence(result.confidence, 'turn result.confidence')
@@ -623,6 +776,37 @@ function lifecycleTerminal(state: DebateLifecycle): boolean {
     || state === 'indeterminate' || state === 'budget_limited' || state === 'max_rounds'
 }
 
+/** Final lifecycle states cannot be reopened; a paused `stopped` run may resume. */
+function lifecycleFinal(state: DebateLifecycle): boolean {
+  return state === 'completed' || state === 'failed' || state === 'indeterminate'
+    || state === 'budget_limited' || state === 'max_rounds'
+}
+
+/**
+ * Return whether a persisted terminal run proves the outcome of a pending
+ * command receipt. A terminal snapshot without its committing event is not
+ * sufficient: recovery must preserve the indeterminate state in that case.
+ */
+function hasProvenTerminalOutcome(run: StoredRun): boolean {
+  switch (run.snapshot.state) {
+    case 'completed':
+    case 'budget_limited':
+    case 'max_rounds':
+      return run.events.some((event) => {
+        if (event.type !== 'debate.synthesis.settled') return false
+        const lifecycleState = (event.data as { readonly lifecycleState?: unknown }).lifecycleState
+        return lifecycleState === undefined || lifecycleState === run.snapshot.state
+      })
+    case 'failed':
+      return run.events.some(event => event.type === 'debate.failed')
+    case 'stopped':
+      return run.events.some(event => event.type === 'debate.stopped')
+    case 'indeterminate':
+    default:
+      return false
+  }
+}
+
 /** Persistent local implementation of {@link DebateService}. */
 export class LocalDebateProvider extends DebateService {
   static Config: z<Config> = z.object({
@@ -684,7 +868,7 @@ export class LocalDebateProvider extends DebateService {
       const policy = validateDebatePolicy(normalized.policy)
       const roster = orderedRoster(policy.roster)
       const sourceRefs = normalized.sourceRefs ?? []
-      const baseSnapshot: DebateRunSnapshotV1 = {
+      const baseSnapshot: DebateRunSnapshotV1 & { readonly topic: DebateTopicV1 } = {
         version: 1,
         runId,
         revision: 0,
@@ -692,6 +876,11 @@ export class LocalDebateProvider extends DebateService {
         mode: policy.mode,
         promptSha256: `sha256:${sha256(normalized.prompt)}`,
         ...(normalized.objective === undefined ? {} : { objective: normalized.objective }),
+        topic: {
+          version: 1,
+          title: normalized.objective ?? normalized.prompt,
+          source: normalized.objective === undefined ? 'user' : 'objective',
+        },
         policy,
         roster,
         currentRound: 0,
@@ -896,12 +1085,44 @@ export class LocalDebateProvider extends DebateService {
   }
 
   private async runRound(run: StoredRun, signal: AbortSignal): Promise<'continue' | 'converged' | 'terminal'> {
+    // A settled run is immutable from the scheduler's point of view. This
+    // guard keeps a late recovery/control path from dispatching another round
+    // after a terminal lifecycle event has committed.
+    if (lifecycleFinal(run.snapshot.state)) return 'terminal'
     const number = run.snapshot.currentRound + 1
     const { policy } = run.snapshot
     if (number > policy.budget.maxRounds) {
-      this.appendEvent(run, 'debate.convergence.evaluated', {
-        status: 'max_rounds', round: number - 1, reason: 'maximum rounds already exhausted',
-      }, { state: 'max_rounds' })
+      const lastRound = run.snapshot.rounds.at(-1)
+      if (lastRound === undefined) {
+        // This is only reachable after an externally edited/legacy state. Do
+        // not leave the run in a non-terminal state after reporting the
+        // exhausted budget; settle an empty synthesis explicitly instead.
+        this.appendEvent(run, 'debate.convergence.evaluated', {
+          status: 'max_rounds', round: number - 1, reason: 'maximum rounds already exhausted',
+          lifecycleState: 'synthesizing',
+        }, { state: 'synthesizing' })
+        const synthesis = {
+          version: 1 as const,
+          state: 'settled' as const,
+          unresolvedClaimIds: run.snapshot.unresolved.map(entry => entry.claimId),
+          dissentCount: run.snapshot.dissent.length,
+        }
+        this.appendEvent(run, 'debate.synthesis.started', {
+          round: number - 1,
+          lifecycleState: 'synthesizing',
+        }, {
+          state: 'synthesizing',
+          synthesis: { ...synthesis, state: 'running' as const },
+        })
+        this.appendEvent(run, 'debate.synthesis.settled', {
+          round: number - 1,
+          unresolvedClaimIds: synthesis.unresolvedClaimIds,
+          dissentCount: synthesis.dissentCount,
+          lifecycleState: 'max_rounds',
+        }, { state: 'max_rounds', synthesis })
+      } else {
+        this.synthesize(run, lastRound, 'max_rounds')
+      }
       return 'terminal'
     }
     const slots = this.roundSlots(run.snapshot.roster, policy.budget.maxAgentsPerRound)
@@ -1136,12 +1357,13 @@ export class LocalDebateProvider extends DebateService {
       unresolvedHighSeverity: convergence.unresolvedHighSeverity,
       settledAgents: convergence.settledAgents,
       reason: convergence.reason,
+      lifecycleState: convergence.status === 'continue' ? 'next_round' : 'synthesizing',
     }, {
       state: convergence.status === 'converged'
-        ? 'converged'
+        ? 'synthesizing'
         : convergence.status === 'continue'
           ? 'next_round'
-          : convergence.status,
+          : 'synthesizing',
       claimLedger: ledger,
       dissent,
       unresolved,
@@ -1261,7 +1483,10 @@ export class LocalDebateProvider extends DebateService {
       unresolvedClaimIds: run.snapshot.unresolved.map(entry => entry.claimId),
       dissentCount: run.snapshot.dissent.length,
     }
-    this.appendEvent(run, 'debate.synthesis.started', { round: round.round }, { state: 'synthesizing', synthesis: running }, { round: round.round })
+    this.appendEvent(run, 'debate.synthesis.started', {
+      round: round.round,
+      lifecycleState: 'synthesizing',
+    }, { state: 'synthesizing', synthesis: running }, { round: round.round })
     const settled = {
       version: 1 as const,
       state: 'settled' as const,
@@ -1271,7 +1496,10 @@ export class LocalDebateProvider extends DebateService {
       ...(judge?.outputPreview === undefined ? {} : { outputPreview: judge.outputPreview }),
     }
     this.appendEvent(run, 'debate.synthesis.settled', {
-      round: round.round, unresolvedClaimIds: settled.unresolvedClaimIds, dissentCount: settled.dissentCount,
+      round: round.round,
+      unresolvedClaimIds: settled.unresolvedClaimIds,
+      dissentCount: settled.dissentCount,
+      lifecycleState: finalState,
     }, { state: finalState, synthesis: settled }, { round: round.round })
   }
 
@@ -1313,6 +1541,7 @@ export class LocalDebateProvider extends DebateService {
       round,
       turns,
       maxParallel: Math.max(1, slots.filter(slot => slot.kind === 'participant').length),
+      onProgress: async progress => this.appendRoundAgentProgress(run.runId, progress),
       signal,
     })
     const expected = new Set(slots.map(slot => slot.role))
@@ -1323,6 +1552,50 @@ export class LocalDebateProvider extends DebateService {
     if (new Set(actual).size !== actual.length) invalid('round executor returned both result and failure for one slot')
     if (actual.length !== expected.size) invalid('round executor omitted a slot outcome')
     return result
+  }
+
+  /** Persist one whitelisted TaskGraph operator detail before the round settles. */
+  private async appendRoundAgentProgress(
+    runId: string,
+    candidate: DebateRoundAgentProgressV1,
+  ): Promise<void> {
+    await this.mutate(() => {
+      const run = this.requireRun(runId)
+      if (lifecycleTerminal(run.snapshot.state)) return
+      const round = this.round(run, candidate.round)
+      const turn = round.turns.find(value => value.slotId === candidate.slotId)
+      if (turn === undefined) invalid(`round progress slot is not admitted: ${candidate.slotId}`)
+      const progress = normalizeRoundAgentProgress(candidate, {
+        runId,
+        round: round.round,
+        slotId: turn.slotId,
+        role: turn.role,
+      })
+      if (turn.state !== 'dispatched') return
+      const source = progress.progress.source
+      const duplicate = run.events.some(event => (
+        event.type === 'debate.agent.progress'
+        && event.round === progress.round
+        && event.slotId === progress.slotId
+        && event.data.orchestrationRunId === source.orchestrationRunId
+        && event.data.orchestrationSequence === source.sequence
+      ))
+      if (duplicate) return
+      this.appendEvent(run, 'debate.agent.progress', {
+        role: progress.role,
+        orchestrationRunId: source.orchestrationRunId,
+        orchestrationSequence: source.sequence,
+        orchestrationTime: source.time,
+        kind: progress.progress.kind,
+        ...(progress.progress.phase === undefined ? {} : { phase: progress.progress.phase }),
+        ...(progress.progress.publicOutputPreview === undefined ? {} : { publicOutputPreview: progress.progress.publicOutputPreview }),
+        ...(progress.progress.toolName === undefined ? {} : { toolName: progress.progress.toolName }),
+        ...(progress.progress.approvalKind === undefined ? {} : { approvalKind: progress.progress.approvalKind }),
+        ...(progress.progress.approvalPreview === undefined ? {} : { approvalPreview: progress.progress.approvalPreview }),
+        ...(progress.progress.usage === undefined ? {} : { usage: progressUsageData(progress.progress.usage) }),
+        ...(progress.progress.routing === undefined ? {} : { routing: progressRoutingData(progress.progress.routing) }),
+      }, {}, { round: progress.round, slotId: progress.slotId })
+    })
   }
 
   private roundSlots(roster: readonly DebateRoleSpecV1[], maxAgents: number): DebateRoleSpecV1[] {
@@ -1385,10 +1658,17 @@ export class LocalDebateProvider extends DebateService {
   private appendEvent(
     run: StoredRun,
     type: DebateEventType,
-    data: Readonly<Record<string, string | number | boolean | readonly string[] | readonly DebateEvidenceRefV1[]>>,
+    data: Readonly<Record<string, DebateJsonValue>>,
     patch: Partial<Pick<DebateRunSnapshotV1, 'state' | 'currentRound' | 'rounds' | 'claimLedger' | 'dissent' | 'unresolved' | 'evidence' | 'cost' | 'provenance' | 'synthesis'>> = {},
     context: { readonly round?: number; readonly slotId?: string } = {},
   ): void {
+    const nextState = patch.state ?? run.snapshot.state
+    if (lifecycleFinal(run.snapshot.state) && nextState !== run.snapshot.state) {
+      throw new DebateError(
+        `terminal Debate ${run.runId} cannot transition from ${run.snapshot.state} to ${nextState}`,
+        'DEBATE_STATE_CONFLICT',
+      )
+    }
     const createdAt = this.now()
     const revision = run.snapshot.revision + 1
     run.snapshot = { ...run.snapshot, ...patch, revision, updatedAt: createdAt }
@@ -1401,7 +1681,7 @@ export class LocalDebateProvider extends DebateService {
       generation: this.document.generation,
       type,
       createdAt,
-      data: data as DebateEventV1['data'],
+      data,
       ...(context.round === undefined ? {} : { round: context.round }),
       ...(context.slotId === undefined ? {} : { slotId: context.slotId }),
     }
@@ -1601,8 +1881,13 @@ export class LocalDebateProvider extends DebateService {
     }
     for (const command of this.document.commands) {
       if (command.state !== 'accepted' && command.state !== 'running') continue
-      command.state = 'indeterminate'
       const run = this.document.runs.find(entry => entry.runId === command.runId)
+      if (run !== undefined && hasProvenTerminalOutcome(run)) {
+        command.state = 'settled'
+        command.response = clone(run.snapshot)
+        continue
+      }
+      command.state = 'indeterminate'
       if (run !== undefined) command.response = clone(run.snapshot)
     }
     this.persist()

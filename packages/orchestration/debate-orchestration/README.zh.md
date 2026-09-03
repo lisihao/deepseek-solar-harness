@@ -10,7 +10,7 @@
 
 首版适配器只接受 native-subscription roster slot，因为当前 TaskGraph 服务只能对原生 Resident 模型 profile 强制精确匹配。metered/local slot 会显式失败，直到其 Scheduler offer 路径提供相同的精确模型保证。
 
-每轮只生成一个 TaskGraph。适配器读取 `ctx.orchestrations` 保存的不可变执行 Evidence 后，按 slot 返回结果映射。缺失的 usage 保持缺失；Debate Provider 将其投影为 unknown，而不是零。
+每轮只生成一个 TaskGraph。运行期间，适配器会 cursor-read `ctx.orchestrations.readEvents`，并只把按来源 sequence 排序的白名单 `node.operator.progress` / `node.operator.observation` 事实转发给本地 Provider：phase、有界公开输出、工具名称、审批要求和 usage。回调按来源 sequence 逐条 await，绝不转发提示词、私有推理、凭据或原生标识。适配器随后读取不可变执行 Evidence，并按 slot 返回结果映射。缺失的 usage 保持缺失；Debate Provider 将其投影为 unknown，而不是零。
 
 Debate Command Receipt 会在调用本适配器前持久化，TaskGraph 的 start command 确定性固定为 `debate:<run>:round:<n>`。stop 信号会调用现有 Orchestration `cancel` control，并等待已确认的 cancelled 投影。revision 冲突或其他无法证明的取消结果会返回 `DEBATE_INDETERMINATE`；Provider 不会重放该轮。
 

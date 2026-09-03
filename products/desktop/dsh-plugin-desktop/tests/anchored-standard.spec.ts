@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 // @ts-expect-error The accepted preset is executable vendored JavaScript.
 import { apply } from '../vendor/agent-presets/anchored-standard/tool-bootstrap.mjs'
 
@@ -42,5 +45,18 @@ describe('Anchored Standard tool reachability', () => {
     expect(promoted.tools.map((tool: { name: string }) => tool.name)).toEqual([
       'bash', 'str_replace_editor', 'dev_tool_search', 'skill_search', 'skill_load',
     ])
+  })
+
+  it('wires its complete persona to the shared output-style package', () => {
+    const preset = fileURLToPath(new URL('../vendor/agent-presets/anchored-standard/', import.meta.url))
+    const config = readFileSync(resolve(preset, 'agent.cordis.yml'), 'utf8')
+    const persona = readFileSync(resolve(preset, 'output-style-persona.mjs'), 'utf8')
+
+    expect(config).toMatch(/- id: persona\n  name: \.\/output-style-persona\.mjs/)
+    expect(persona).toContain("from '@deepseek-ai/dsh-output-style'")
+    expect(persona).toContain('ANCHORED_STANDARD_PERSONA')
+    expect(persona).toContain('PERSONA_SECTION')
+    expect(persona).toContain('complete: true')
+    expect(persona).toContain('suppressRuntimeContext()')
   })
 })

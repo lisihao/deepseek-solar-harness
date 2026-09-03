@@ -30,6 +30,10 @@ Fallback 选择仍然受当前策略已经准入的 offer、认证、配额、�
 
 已封存的分配计划会以 `fromOperatorId`、可选的 `fromModel` 和 `reasonCode` 记录结构化 fallback 来源。Debate turn 投影还会分别保留请求的算子／模型、实际算子／模型、fallback 原因、分配计划引用、Attempt 以及结构化 blocker。因此，一个物理 Provider 可以执行多个逻辑角色，例如 proposer、falsifier 和 judge，而不会改变它们的角色或 persona；角色多样性不要求 Provider 多样性。
 
+每个 Debate 快照拥有版本化的公开 `topic`；新 Run 根据显式 objective 或当前请求 prompt 生成它，旧版快照可以缺少该字段。宿主把 durable Debate 事件投影为可忽略的 `debate/trace` Session 记录，并以 `(runId, sourceSequence)` 为键。这些记录只携带有界的公开检查事实——轮次、角色标题、请求和实际路由、公开输出及 Artifact 引用、Claim、Evidence、usage、收敛与综合——因此轨迹可以回放讨论，而不会创建额外 assistant 消息，也不会暴露私有提示词和推理。
+
+主持人综合结算前，收敛处置不会成为 Run 的终态生命周期。`converged`、`budget_limited` 与 `max_rounds` 会先让 Run 进入 `synthesizing`；结算后再提交对应终态，此后不能派发新轮次。
+
 Round 投影按角色独立，而不是全有或全无。已结算的 proposer 与被阻断的 falsifier 会连同各自实际路由和 blocker 独立可见；因依赖失败而阻断的 judge 不会被改写成算子故障。因此，Run 可以以 failed 或 awaiting recovery 结束，同时为 UI、Trace 和显式恢复决策保留每个成功角色的结果及每个角色的失败。
 
 本契约细化了 [原生使用 TaskGraph 的智能协作](../../.agents/notes/implemented/feature/2026-08-20-taskgraph-smart-collaboration.md) 中的 model-allocation fallback 说明：其中与 Provider 无关的偏好和硬锁定行为保持不变，而 fallback 现在必须显式准入并持久化来源。权威契约位于 [`model-allocation`](../../packages/orchestration/model-allocation/src/index.ts)、[`orchestration`](../../packages/orchestration/orchestration/src/index.ts) 和 [`debate`](../../packages/orchestration/debate/src/types.ts)。

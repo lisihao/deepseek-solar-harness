@@ -69,16 +69,12 @@
 
 # ── identity ────────────────────────────────────────────────────────────────
 
-# Keep this text byte-identical to the Minimal preset. `complete` prevents the
-# Harness identity and per-tool guidance from changing the system prompt, while
-# runtime-context suppression leaves task and repository rules to user messages
-# and explicit file reads. Tool schemas and their runtime enforcement remain.
+# A complete persona intentionally prevents additive prompt sections. This
+# local row carries the shared output-style policy in its one explicit persona,
+# while preserving runtime-context suppression and the original identity line.
+# Tool schemas and their runtime enforcement remain unchanged.
 - id: persona
-  name: '@deepseek-ai/dsh-persona'
-  config:
-    text: You are a helpful software engineer assistant.
-    complete: true
-    includeRuntimeContext: false
+  name: ./output-style-persona.mjs
 
 # Instruction FILES are NOT injected (replaces dsh-agent-instructions, local
 # addition): the full AGENTS.md/CLAUDE.md digest is a large injected block

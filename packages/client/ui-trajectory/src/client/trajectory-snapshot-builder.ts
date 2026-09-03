@@ -22,6 +22,7 @@ export const EMPTY_TRAJECTORY_SNAPSHOT: TrajectorySnapshot = {
   partial: null,
   runningCalls: EMPTY_LIST,
   physicalOperatorExecutions: EMPTY_LIST,
+  debateExecutions: EMPTY_LIST,
 }
 
 function stepKey(turn: number, step: number): string {
@@ -192,6 +193,7 @@ export class TrajectorySnapshotBuilder implements ConversationViewBuilder<
     let partial: TrajectorySnapshot['partial'] = null
     const runningCalls: TrajectorySnapshot['runningCalls'][number][] = []
     const physicalOperatorExecutions: TrajectorySnapshot['physicalOperatorExecutions'][number][] = []
+    const debateExecutions: TrajectorySnapshot['debateExecutions'][number][] = []
 
     for (const contribution of this.contributions) {
       const data = contribution.data
@@ -235,6 +237,10 @@ export class TrajectorySnapshotBuilder implements ConversationViewBuilder<
         physicalOperatorExecutions.push(data.execution)
         continue
       }
+      if (data.kind === 'debate') {
+        debateExecutions.push(data.execution)
+        continue
+      }
       if (data.kind === 'session-end') {
         boundaries.push({ seq: data.seq, time: data.time })
         continue
@@ -259,6 +265,7 @@ export class TrajectorySnapshotBuilder implements ConversationViewBuilder<
       partial,
       runningCalls,
       physicalOperatorExecutions,
+      debateExecutions,
     }
   }
 

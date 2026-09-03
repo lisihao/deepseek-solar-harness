@@ -1,5 +1,6 @@
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
-import { useCallback, useEffect, useState } from 'react'
+import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   DEBATE_DASHBOARD_PATH,
@@ -67,9 +68,12 @@ export function DebatePanel({ request: browserRequest }: { request: BrowserReque
   const [dashboard, setDashboard] = useState<DesktopDebateDashboard>()
   const [error, setError] = useState<string>()
   const [controlPending, setControlPending] = useState(false)
+  const requestGeneration = useRef(0)
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
+    const generation = ++requestGeneration.current
     const next = await loadDebateDashboard(open ? selectedRunId : undefined, signal, browserRequest)
+    if (generation !== requestGeneration.current) return
     setDashboard(next)
     setError(undefined)
   }, [browserRequest, open, selectedRunId])
@@ -111,9 +115,27 @@ export function DebatePanel({ request: browserRequest }: { request: BrowserReque
   const active = dashboard?.runs.filter(run => isActive(run.state)).length ?? 0
   const attention = dashboard?.runs.filter(run => needsAttention(run.state)).length ?? 0
   const status = error !== undefined ? 'error' : attention > 0 ? 'warn' : active > 0 ? 'running' : 'idle'
+  const selectedRun = selectedDashboardRun(dashboard, selectedRunId)
+
+  const openPanel = useCallback(() => {
+    requestGeneration.current += 1
+    setSelectedRunId(undefined)
+    setDashboard(undefined)
+    setError(undefined)
+    setOpen(true)
+  }, [])
+
+  const closePanel = useCallback(() => {
+    requestGeneration.current += 1
+    setOpen(false)
+  }, [])
+
+  const selectRun = useCallback((runId: string) => {
+    setSelectedRunId(runId)
+  }, [])
 
   const submit = useCallback(async (action: DesktopDebateControlAction) => {
-    const run = dashboard?.selectedRun
+    const run = selectedRun
     if (run === undefined) return
     setControlPending(true)
     try {
@@ -131,7 +153,7 @@ export function DebatePanel({ request: browserRequest }: { request: BrowserReque
     } finally {
       setControlPending(false)
     }
-  }, [browserRequest, dashboard?.selectedRun, refresh])
+  }, [browserRequest, refresh, selectedRun])
 
   const label = `Debate：${String(active)} 个运行中${attention > 0 ? `，${String(attention)} 个需处理` : ''}`
   return <>
@@ -141,13 +163,13 @@ export function DebatePanel({ request: browserRequest }: { request: BrowserReque
       data-status={status}
       aria-label={label}
       title={label}
-      onClick={() => { setOpen(true) }}
+      onClick={openPanel}
     >
       <span className="dshDesktopDebateDot" aria-hidden="true" />
       <span>Debate</span>
     </button>
     {open && createPortal(
-      <div className="dshDesktopDebateBackdrop" role="presentation" onMouseDown={() => { setOpen(false) }}>
+      <div className="dshDesktopDebateBackdrop" role="presentation" onMouseDown={closePanel}>
         <section
           className="dshDesktopDebatePanel"
           role="dialog"
@@ -157,19 +179,33 @@ export function DebatePanel({ request: browserRequest }: { request: BrowserReque
         >
           <header>
             <div><h2>多 Agent Debate</h2><p>独立主张 → 证伪 → 证据审计 → 决策裁判</p></div>
-            <button type="button" aria-label="关闭 Debate 面板" onClick={() => { setOpen(false) }}>×</button>
+            <button type="button" aria-label="关闭 Debate 面板" onClick={closePanel}>×</button>
           </header>
           {error !== undefined && <div className="dshDesktopDebateError" role="alert">{error}</div>}
           <div className="dshDesktopDebateGrid">
-            <RunList runs={dashboard?.runs ?? []} selectedRunId={selectedRunId} onSelect={setSelectedRunId} />
-            <RunDetail run={dashboard?.selectedRun} events={dashboard?.events ?? []} pending={controlPending} onControl={submit} />
-            <EvidenceColumn run={dashboard?.selectedRun} />
+            <RunList runs={dashboard?.runs ?? []} selectedRunId={selectedRunId} onSelect={selectRun} />
+            <RunDetail
+              run={selectedRun}
+              events={selectedRun === undefined ? [] : dashboard?.events ?? []}
+              pending={controlPending}
+              onControl={submit}
+            />
+            <EvidenceColumn run={selectedRun} />
           </div>
         </section>
       </div>,
       document.body,
     )}
   </>
+}
+
+/** Return only the inspected Run matching the user's current selection. */
+export function selectedDashboardRun(
+  dashboard: DesktopDebateDashboard | undefined,
+  selectedRunId: string | undefined,
+): DesktopDebateRun | undefined {
+  const run = dashboard?.selectedRun
+  return selectedRunId !== undefined && run?.runId === selectedRunId ? run : undefined
 }
 
 function RunList(props: {
@@ -210,7 +246,7 @@ export function RunDetail(props: {
   let nextFloor = 1
   for (const round of run.rounds) {
     for (const turn of round.turnStates) {
-      if (turn.role === 'decision-judge' || !terminalTurnState(turn.state)) continue
+      if (!terminalTurnState(turn.state)) continue
       const key = `${String(round.round)}-${turn.slotId}`
       if (!floors.has(key)) floors.set(key, nextFloor++)
     }
@@ -219,46 +255,33 @@ export function RunDetail(props: {
     <section className="dshDesktopDebateTopic" aria-label="Debate 主题帖">
       <div className="dshDesktopDebateTopicHeading">
         <span className="dshDesktopDebatePinnedLabel">主题帖</span>
-        <strong>{run.objective ?? '未提供公开议题'}</strong>
+        <strong>{topicTitle(run)}</strong>
         <em>{lifecycleLabel(run.state)}</em>
       </div>
-      <small>第 {String(run.currentRound)} 轮 · {run.unresolved.length > 0 ? `未决 ${String(run.unresolved.length)} 项` : '暂无未决问题'}</small>
-      <details className="dshDesktopDebateTechDetails">
-        <summary>技术详情</summary>
-        <small>Run ID：{run.runId} · revision：{String(run.revision)} · Session：{run.sourceSessionId ?? 'N/A'}</small>
-      </details>
+      <RunStatusStrip run={run} />
     </section>
     <div className="dshDesktopDebateRunHeader">
       <div><h3>讨论楼层</h3><small>按轮次排列，每位 Agent 独立发言；引用只来自已记录的主张。</small></div>
       <RunControls run={run} resumable={resumable} pending={props.pending} onControl={props.onControl} />
     </div>
     <section className="dshDesktopDebateRoles" aria-label="参与 Agent 与角色职责">
-      <details className="dshDesktopDebateRoster">
-        <summary><strong>参与者名册</strong><span>{String(run.roles.length)} 位 Agent · 点击展开角色职责</span></summary>
-        <div className="dshDesktopDebateRosterGrid">
-          {run.roles.map(role => <RoleCard key={role.role} role={role} />)}
-        </div>
-      </details>
+      <RosterTable roles={run.roles} />
     </section>
     <section className="dshDesktopDebateRounds">
       <h3>逐轮讨论</h3>
       <p className="dshDesktopDebateSectionHint">每张卡片对应一个论坛楼层；只展示 Agent 明确提交的公开摘要，不展示私有指令或隐藏推理。</p>
-      {run.rounds.map(round => <article key={round.round} data-state={round.state}>
-        <div className="dshDesktopDebateRoundHeading"><strong>第 {String(round.round)} 轮</strong><em>{roundStateLabel(round.state)}</em></div>
-        <div className="dshDesktopDebateTurnList">
-          {round.turnStates.filter(turn => turn.role !== 'decision-judge' && terminalTurnState(turn.state)).length === 0
-            ? <p className="dshDesktopDebateEmpty">参与者尚未提交公开发言。</p>
-            : round.turnStates
-              .filter(turn => turn.role !== 'decision-judge' && terminalTurnState(turn.state))
-              .map(turn => <DebateTurnCard key={`${String(round.round)}-${turn.slotId}`} run={run} turn={turn} floor={floors.get(`${String(round.round)}-${turn.slotId}`) ?? 1} />)}
-        </div>
-        {round.convergence !== undefined && <p>
-          {convergenceLabel(round.convergence.status)}
-          {' · '}分数 {percent(round.convergence.score)} / 阈值 {percent(round.convergence.threshold)}
-          {' · '}覆盖 {percent(round.convergence.coverage)}
-          {' · '}高严重度未决 {String(round.convergence.unresolvedHighSeverity)}
-        </p>}
-      </article>)}
+      {run.rounds.map((round) => {
+        const turns = publicRoundTurns(round)
+        return <article key={round.round} data-state={round.state}>
+          <div className="dshDesktopDebateRoundHeading"><strong>第 {String(round.round)} 轮</strong><em>{roundStateLabel(round.state)}</em></div>
+          <div className="dshDesktopDebateTurnList">
+            {turns.length === 0
+              ? <p className="dshDesktopDebateEmpty">参与者尚未提交公开发言。</p>
+              : turns.map(turn => <DebateTurnCard key={`${String(round.round)}-${turn.slotId}`} run={run} turn={turn} floor={floors.get(`${String(round.round)}-${turn.slotId}`) ?? 1} />)}
+          </div>
+          {round.convergence !== undefined && <ConvergenceSummary convergence={round.convergence} />}
+        </article>
+      })}
     </section>
     <EventTimeline events={props.events ?? []} />
     <section className="dshDesktopDebateClaims">
@@ -280,73 +303,99 @@ export function RunDetail(props: {
   </main>
 }
 
-function RoleCard({ role }: { role: DesktopDebateRole }) {
+function topicTitle(run: DesktopDebateRun): string {
+  const topic = run.topic?.title.trim()
+  if (topic !== undefined && topic.length > 0) return topic
+  const objective = run.objective?.trim()
+  if (objective !== undefined && objective.length > 0) return objective
+  return '历史记录缺少公开议题'
+}
+
+function RunStatusStrip({ run }: { run: DesktopDebateRun }) {
+  const round = run.rounds.find(item => item.round === run.currentRound) ?? run.rounds.at(-1)
+  return <dl className="dshDesktopDebateStatusStrip">
+    <div><dt>运行状态</dt><dd data-state={run.state}>{lifecycleLabel(run.state)}</dd></div>
+    <div><dt>当前轮次</dt><dd>{round === undefined ? `第 ${String(run.currentRound)} 轮` : `第 ${String(round.round)} 轮 · ${roundStateLabel(round.state)}`}</dd></div>
+    <div><dt>未决问题</dt><dd>{run.unresolved.length === 0 ? '无' : `${String(run.unresolved.length)} 项`}</dd></div>
+    {round?.convergence !== undefined && <div><dt>收敛检查</dt><dd>{convergenceLabel(round.convergence.status)}</dd></div>}
+  </dl>
+}
+
+function ConvergenceSummary({ convergence }: { convergence: NonNullable<DesktopDebateRound['convergence']> }) {
+  return <dl className="dshDesktopDebateConvergence">
+    <div><dt>本轮结论</dt><dd>{convergenceLabel(convergence.status)}</dd></div>
+    <div><dt>收敛分数</dt><dd>{percent(convergence.score)} / 阈值 {percent(convergence.threshold)}</dd></div>
+    <div><dt>证据覆盖</dt><dd>{percent(convergence.coverage)}</dd></div>
+    <div><dt>高严重度未决</dt><dd>{String(convergence.unresolvedHighSeverity)} 项</dd></div>
+  </dl>
+}
+
+function RosterTable({ roles }: { roles: readonly DesktopDebateRole[] }) {
+  return <section className="dshDesktopDebateRoster">
+    <div className="dshDesktopDebateRosterHeading"><h3>参与者名册</h3><small>{String(roles.length)} 位 Agent · 名称、职责与执行状态</small></div>
+    <div className="dshDesktopDebateRosterScroller">
+      <table>
+        <thead><tr><th scope="col">角色</th><th scope="col">职责</th><th scope="col">算子</th><th scope="col">模型</th><th scope="col">状态</th></tr></thead>
+        <tbody>{roles.map(role => <RosterRow key={role.role} role={role} />)}</tbody>
+      </table>
+    </div>
+  </section>
+}
+
+function RosterRow({ role }: { role: DesktopDebateRole }) {
   const turn = role.latestTurn
   const route = turnRoute(role, turn)
-  return <article data-state={turn?.state ?? 'planned'}>
-    <div>
-      <span className="dshDesktopDebateDot" />
-      <strong>{roleLabel(role.role)}</strong>
-      <em>{turnStateLabel(turn?.state ?? 'planned')}</em>
-    </div>
-    <p className="dshDesktopDebateRoleMandate">角色：{role.title}<br />职责：{role.mandate}</p>
-    {turn !== undefined && <p>
-      第 {String(turn.round)} 轮 · Attempt {String(turn.attempt ?? 1)} · Claim {String(turn.claimIds.length)}
-      {' · '}Evidence {String(turn.evidenceRefs.length)}
-    </p>}
-    <details className="dshDesktopDebateTechDetails">
-      <summary>角色技术详情</summary>
-      <div className="dshDesktopDebateRoute" aria-label="算子路由">
-        <small title={`${route.requestedOperatorId} · ${route.requestedModel}`}>请求：<span>{displayRouteValue(route.requestedOperatorId)} · {displayRouteValue(route.requestedModel)}</span></small>
-        {route.actualOperatorId === undefined || route.actualModel === undefined
-          ? <small>实际：尚未执行</small>
-          : <small title={`${route.actualOperatorId} · ${route.actualModel}`}>实际：<span>{displayRouteValue(route.actualOperatorId)} · {displayRouteValue(route.actualModel)}</span></small>}
-        <small>{role.source === 'native-subscription' ? '订阅套餐' : role.source}</small>
-      </div>
-      {turn?.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">
-        回退：{turn.routing.fallbackReasonCode}
-      </p>}
-    </details>
-  </article>
+  const display = displayRoute(route)
+  return <tr data-state={turn?.state ?? 'planned'}>
+    <th scope="row"><strong>{roleLabel(role.role)}</strong><small>{role.title}</small></th>
+    <td>{role.mandate}</td>
+    <td>{display.operator}</td>
+    <td>{display.model}</td>
+    <td><span className="dshDesktopDebateStateBadge" data-state={turn?.state ?? 'planned'}>{turnStateLabel(turn?.state ?? 'planned')}</span>{display.fallback && <small>已回退</small>}</td>
+  </tr>
 }
 
 function DebateTurnCard({ run, turn, floor }: { run: DesktopDebateRun; turn: DesktopDebateRound['turnStates'][number]; floor: number }) {
   const role = run.roles.find(entry => entry.role === turn.role || entry.role === turn.slotId)
   const title = roleLabel(role?.role ?? turn.role)
   const route = turnRoute(role, turn)
-  const claimText = claimReferences(run, turn.claimIds)
+  const display = displayRoute(route)
+  const claims = claimStatements(run, turn.claimIds)
   const evidenceText = turn.evidenceRefs.length > 0 ? `${String(turn.evidenceRefs.length)} 项` : 'N/A'
   const blockerSummary = turn.blockers?.[0]?.message
+  const output = turn.outputPreview === undefined ? undefined : publicMarkdown(turn.outputPreview)
   return <article className="dshDesktopDebateTurn" data-state={turn.state}>
     <div className="dshDesktopDebateTurnHeader">
       <strong><span className="dshDesktopDebateFloor">{String(floor)} 楼</span>{title}</strong>
       <em>{turnStateLabel(turn.state)}</em>
     </div>
+    <small className="dshDesktopDebateTurnRoute">执行：{display.operator} · {display.model}{display.fallback ? ' · 已回退' : ''}</small>
     {turn.round === 1
       ? <p className="dshDesktopDebateReplyRef">首轮独立发言</p>
       : <p className="dshDesktopDebateReplyRef">Claim Ledger 后续发言</p>}
-    <p className="dshDesktopDebateTurnSummary"><strong>公开发言：</strong>{turn.outputPreview ?? (blockerSummary === undefined ? '尚未记录公开输出。' : `未产生公开输出：${blockerSummary}`)}</p>
-    {turn.claimIds.length > 0 && <p className="dshDesktopDebateReplyRef">本楼提交主张：{claimText}</p>}
+    {output === undefined || output.length === 0
+      ? <p className="dshDesktopDebateTurnSummary">{blockerSummary === undefined ? '尚未记录公开输出。' : `未产生公开输出：${blockerSummary}`}</p>
+      : <div className="dshDesktopDebateTurnSummary"><MarkdownText text={output} /></div>}
+    {claims.length > 0 && <section className="dshDesktopDebateTurnClaims"><strong>本楼提交主张</strong><ol>{claims.map((claim, index) => <li key={`${String(index)}-${claim}`}>{claim}</li>)}</ol></section>}
     {turn.evidenceRefs.length > 0 && <p className="dshDesktopDebateReplyRef">已关联证据：{evidenceText}</p>}
     {turn.errorCode !== undefined && <p className="dshDesktopDebateTurnError">未完成：{turn.errorCode}</p>}
     <details className="dshDesktopDebateTechDetails">
       <summary>技术详情</summary>
       <div className="dshDesktopDebateRoute" aria-label="本轮算子路由">
-        <small title={`${route.requestedOperatorId} · ${route.requestedModel}`}>请求：<span>{displayRouteValue(route.requestedOperatorId)} · {displayRouteValue(route.requestedModel)}</span></small>
+        <small>请求：<span>{friendlyOperator(route.requestedOperatorId)} · {friendlyModel(route.requestedModel)}</span></small>
         {route.actualOperatorId === undefined || route.actualModel === undefined
           ? <small>实际：尚未执行</small>
-          : <small title={`${route.actualOperatorId} · ${route.actualModel}`}>实际：<span>{displayRouteValue(route.actualOperatorId)} · {displayRouteValue(route.actualModel)}</span></small>}
-        {turn.attempt !== undefined && <small>Attempt {String(turn.attempt)}</small>}
+          : <small>实际：<span>{friendlyOperator(route.actualOperatorId)} · {friendlyModel(route.actualModel)}</span></small>}
+        {turn.attempt !== undefined && <small>执行尝试：{String(turn.attempt)}</small>}
       </div>
       {turn.outputRef !== undefined && <code title={turn.outputRef}>输出 Artifact · {turn.outputRef}</code>}
-      {turn.claimIds.length > 0 && <small>Claim refs：{turn.claimIds.join('、')}</small>}
       {turn.evidenceRefs.length > 0 && <small>Evidence refs：{turn.evidenceRefs.join('、')}</small>}
       {turn.usage !== undefined && <small>{turnUsageLabel(turn.usage)}</small>}
       {(turn.startedAt !== undefined || turn.settledAt !== undefined) && <div className="dshDesktopDebateTurnTimes">
         {turn.startedAt !== undefined && <time dateTime={turn.startedAt} title={turn.startedAt}>开始 {formatTime(turn.startedAt)}</time>}
         {turn.settledAt !== undefined && <time dateTime={turn.settledAt} title={turn.settledAt}>完成 {formatTime(turn.settledAt)}</time>}
       </div>}
-      {turn.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">回退：{turn.routing.fallbackReasonCode}</p>}
+      {turn.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">回退：{fallbackReasonLabel(turn.routing.fallbackReasonCode)}</p>}
       {turn.blockers !== undefined && <BlockerList attempt={turn.attempt} blockers={turn.blockers} />}
     </details>
   </article>
@@ -356,9 +405,8 @@ function BlockerList({ blockers, attempt }: { blockers: readonly DesktopDebateTu
   const uniqueBlockers = dedupeTurnBlockers(blockers, attempt)
   return <div className="dshDesktopDebateBlockers" aria-label="阻断原因">
     {uniqueBlockers.map((blocker, index) => <article key={`${blocker.code}-${String(index)}`}>
-      <strong>{blocker.code}</strong>
+      <strong>{blockerLabel(blocker.code)}</strong>
       <p title={blocker.message}>{blocker.message}</p>
-      {blocker.nodeId !== undefined && <small title={blocker.nodeId}>节点 {displayRouteValue(blocker.nodeId)}</small>}
     </article>)}
   </div>
 }
@@ -396,8 +444,64 @@ function turnRoute(
   }
 }
 
-function displayRouteValue(value: string): string {
-  return value.length <= 42 ? value : `${value.slice(0, 18)}…${value.slice(-20)}`
+function displayRoute(route: ReturnType<typeof turnRoute>): { operator: string; model: string; fallback: boolean } {
+  const operatorId = route.actualOperatorId ?? route.requestedOperatorId
+  const model = route.actualModel ?? route.requestedModel
+  return {
+    operator: friendlyOperator(operatorId),
+    model: friendlyModel(model),
+    fallback: route.actualOperatorId !== undefined && route.actualModel !== undefined
+      && (route.actualOperatorId !== route.requestedOperatorId || route.actualModel !== route.requestedModel),
+  }
+}
+
+function friendlyOperator(value: string): string {
+  return ({ codex: 'Codex', 'claude-code': 'Claude Code', deepseek: 'DeepSeek' } as Record<string, string>)[value] ?? value
+}
+
+function friendlyModel(value: string): string {
+  return ({
+    'gpt-5.6-sol': 'GPT-5.6 Sol',
+    'gpt-5.6-terra': 'GPT-5.6 Terra',
+    'gpt-5.6-luna': 'GPT-5.6 Luna',
+    'claude-opus-5': 'Claude Opus 5',
+    'claude-fable-5': 'Claude Fable 5',
+    'claude-sonnet-5': 'Claude Sonnet 5',
+  } as Record<string, string>)[value] ?? value
+}
+
+function fallbackReasonLabel(value: string): string {
+  return ({
+    MODEL_UNAVAILABLE: '请求模型当前不可用，已改用可用模型。',
+    AUTHENTICATION_UNQUALIFIED: '请求模型尚未通过可用性确认，已改用可用模型。',
+  } as Record<string, string>)[value] ?? '请求模型不可用，已改用可用模型。'
+}
+
+function blockerLabel(value: string): string {
+  return ({
+    MODEL_UNAVAILABLE: '模型不可用',
+    AUTHENTICATION_UNQUALIFIED: '模型资格未确认',
+    EXPLICIT_MODEL_UNAVAILABLE: '指定模型不可用',
+    DEBATE_INTERRUPTED: '讨论已中断',
+  } as Record<string, string>)[value] ?? '执行受阻'
+}
+
+function publicRoundTurns(round: DesktopDebateRound): DesktopDebateRound['turnStates'] {
+  return round.turnStates.filter(turn => terminalTurnState(turn.state))
+}
+
+/** Render durable public output as safe Markdown without legacy raw-HTML wrappers. */
+function publicMarkdown(value: string): string {
+  return value
+    .replace(/<details\b[^>]*>[\s\S]*?<\/details>/gi, '')
+    .replace(/<\/?[A-Za-z][^>]*>/g, '')
+    .replace(/(^|[\s，。；;])([Pp][0-3])\s*[：:]\s*/g, (_match, prefix: string, priority: string) => `${prefix}\n\n### ${priority.toUpperCase()}\n\n`)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function claimStatements(run: DesktopDebateRun, ids: readonly string[]): string[] {
+  return ids.map(id => run.claims.find(item => item.claimId === id)?.statement ?? '一项已记录主张')
 }
 
 function EventTimeline({ events }: { events: DesktopDebateEvent[] }) {
@@ -411,7 +515,6 @@ function EventTimeline({ events }: { events: DesktopDebateEvent[] }) {
         <strong>{debateEventLabel(event.type)}</strong>
         <span>{debateEventContext(event)}</span>
         <small>{debateEventSummary(event)}</small>
-        {debateEventTechnicalDetail(event) !== undefined && <details className="dshDesktopDebateTechDetails"><summary>技术详情</summary><small>{debateEventTechnicalDetail(event)}</small></details>}
       </li>)}</ol>}
   </section>
 }
@@ -465,7 +568,7 @@ export function EvidenceColumn({ run }: { run?: DesktopDebateRun | undefined }) 
         </>
         : <>
           <p><strong>{synthesisLabel(run.synthesis.state)}</strong> · 保留异议 {String(run.synthesis.dissentCount)}</p>
-          {run.synthesis.outputPreview !== undefined && <p>{run.synthesis.outputPreview}</p>}
+          {run.synthesis.outputPreview !== undefined && <div className="dshDesktopDebateSynthesis"><MarkdownText text={publicMarkdown(run.synthesis.outputPreview)} /></div>}
           {run.synthesis.artifactRef !== undefined && <details className="dshDesktopDebateTechDetails"><summary>总结技术详情</summary><code title={run.synthesis.artifactRef}>{run.synthesis.artifactRef}</code></details>}
         </>}
     </section>
@@ -551,7 +654,6 @@ function debateEventContext(event: DesktopDebateEvent): string {
   return [
     round === undefined ? 'Run' : `第 ${String(round)} 轮`,
     roleId === undefined ? undefined : roleLabel(roleId),
-    `#${String(event.sequence)}`,
   ].filter((value): value is string => value !== undefined).join(' · ')
 }
 
@@ -575,37 +677,6 @@ function debateEventSummary(event: DesktopDebateEvent): string {
   if (event.type === 'debate.failed') return '讨论失败，未能完成全部流程。'
   if (event.type === 'debate.indeterminate') return '讨论状态不确定，需要人工确认。'
   return '状态已记录。'
-}
-
-function debateEventTechnicalDetail(event: DesktopDebateEvent): string | undefined {
-  const details: string[] = []
-  if (event.type === 'debate.agent.dispatched' || event.type === 'debate.agent.settled'
-    || event.type === 'debate.agent.blocked' || event.type === 'debate.agent.failed'
-    || event.type === 'debate.agent.indeterminate') {
-    details.push(`角色 ID：${eventValue(event, 'role', event.slotId ?? 'N/A')}`)
-    details.push(`请求算子/模型：${eventValue(event, 'requestedOperatorId', eventValue(event, 'operatorId'))}/${eventValue(event, 'requestedModel', eventValue(event, 'model'))}`)
-    const actual = [eventValue(event, 'actualOperatorId', ''), eventValue(event, 'actualModel', '')].filter(Boolean).join('/')
-    if (actual.length > 0) details.push(`实际算子/模型：${actual}`)
-    const fallback = eventValue(event, 'fallbackReasonCode', '')
-    if (fallback.length > 0) details.push(`回退原因：${fallback}`)
-    const attempt = eventValue(event, 'attempt', '')
-    if (attempt.length > 0) details.push(`Attempt：${attempt}`)
-    const errorCode = eventValue(event, 'errorCode', '')
-    if (errorCode.length > 0) details.push(`错误码：${errorCode}`)
-  }
-  if (event.type === 'debate.planned') details.push(`模式：${eventValue(event, 'mode')} · 阵容数量：${eventValue(event, 'rosterSize')}`)
-  if (event.type === 'debate.roster.qualified') details.push(`角色：${eventList(event, 'roles')} · 每轮上限：${eventValue(event, 'maxAgentsPerRound')}`)
-  if (event.type === 'debate.roster.rejected') details.push(`角色：${eventList(event, 'roles')} · 原因：${eventValue(event, 'reason', 'N/A')}`)
-  if (event.type === 'debate.round.started') details.push(`阶段：${eventValue(event, 'phase')} · 槽位：${eventList(event, 'slotIds')}`)
-  if (event.type === 'debate.agent.settled') details.push(`Claim 数：${eventValue(event, 'claimCount', '0')} · Evidence 数：${eventValue(event, 'evidenceCount', '0')} · 置信度：${eventValue(event, 'confidence')}`)
-  if (event.type === 'debate.agent.blocked') details.push(`阻断信息：${eventValue(event, 'blockerMessages', eventValue(event, 'error', 'N/A'))}`)
-  if (event.type === 'debate.claims.compiled') details.push(`Claim：${eventValue(event, 'claimCount', '0')} · 异议：${eventValue(event, 'dissentCount', '0')} · 未决：${eventValue(event, 'unresolvedCount', '0')}`)
-  if (event.type === 'debate.convergence.evaluated') details.push(`分数：${eventValue(event, 'score')} · 阈值：${eventValue(event, 'threshold')} · 原因：${eventValue(event, 'reason')}`)
-  if (event.type === 'debate.synthesis.settled') details.push(`未决 Claim：${eventList(event, 'unresolvedClaimIds')} · 异议：${eventValue(event, 'dissentCount', '0')}`)
-  if (event.type === 'debate.cost.accounted') details.push(`用量：${eventValue(event, 'usageStatus')} · 费用：${eventValue(event, 'costStatus')} · 输入：${eventValue(event, 'inputTokens')} · 输出：${eventValue(event, 'outputTokens')}`)
-  if (event.type === 'debate.stopped') details.push(`动作：${eventValue(event, 'action')} · 原因：${eventValue(event, 'reason')}`)
-  if (event.type === 'debate.failed' || event.type === 'debate.indeterminate') details.push(`错误码：${eventValue(event, 'errorCode')} · 原因：${eventValue(event, 'reason', eventValue(event, 'error'))}`)
-  return details.length === 0 ? undefined : details.join(' · ')
 }
 
 function debateEventLabel(type: string): string {
@@ -639,13 +710,6 @@ function eventValue(event: DesktopDebateEvent, key: string, fallback = 'N/A'): s
   return fallback
 }
 
-function eventList(event: DesktopDebateEvent, key: string, fallback = 'N/A'): string {
-  const value = event.data[key]
-  if (!Array.isArray(value)) return fallback
-  const strings = value.filter((entry): entry is string => typeof entry === 'string')
-  return strings.length > 0 ? strings.join('、') : fallback
-}
-
 function eventNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined
 }
@@ -653,7 +717,7 @@ function eventNumber(value: unknown): number | undefined {
 function lifecycleLabel(state: DesktopDebateLifecycle): string {
   return ({
     planned: '已规划', awaiting_approval: '等待批准', admitting: '准入中', round_running: '辩论中', reviewing: '审查中',
-    converged: '已收敛', next_round: '准备下一轮', budget_limited: '预算停止', max_rounds: '达到轮次上限', synthesizing: '综合中',
+    converged: '已收敛', next_round: '准备下一轮', budget_limited: '达到预算上限', max_rounds: '达到轮次上限', synthesizing: '综合中',
     completed: '已完成', stopped: '已暂停/停止', failed: '失败', indeterminate: '状态不确定',
   } as const)[state]
 }
@@ -662,13 +726,6 @@ function roleLabel(role: string): string {
   return ({
     'constructive-proposer': '建设性提案者', 'skeptical-falsifier': '怀疑式证伪者', 'evidence-auditor': '证据审计员', 'decision-judge': '决策裁判（主持人）',
   } as Record<string, string>)[role] ?? role
-}
-
-function claimReferences(run: DesktopDebateRun, ids: readonly string[]): string {
-  return ids.slice(0, 8).map((id) => {
-    const claim = run.claims.find(item => item.claimId === id)
-    return claim === undefined ? `编号 ${id}` : `“${claim.statement}”`
-  }).join('、') || 'N/A'
 }
 
 function turnStateLabel(state: string): string {
@@ -684,7 +741,7 @@ function roundStateLabel(state: string): string {
 }
 
 function convergenceLabel(state: string): string {
-  return ({ converged: '已收敛', continue: '继续辩论', budget_limited: '预算停止', max_rounds: '轮次上限' } as Record<string, string>)[state] ?? state
+  return ({ converged: '已收敛', continue: '继续辩论', budget_limited: '本轮达到预算上限', max_rounds: '达到轮次上限' } as Record<string, string>)[state] ?? state
 }
 
 function claimStatusLabel(state: string): string {

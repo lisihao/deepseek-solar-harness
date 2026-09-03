@@ -213,6 +213,11 @@
   opacity: 1;
 }
 
+.span[data-timeline-span='debate'] {
+  background: var(--dsw-alias-state-business-primary);
+  opacity: 1;
+}
+
 .span[data-error='true'] {
   background: var(--dsw-alias-state-error-primary);
 }

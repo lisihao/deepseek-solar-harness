@@ -25,6 +25,7 @@ import {
   type DesktopDebateRole,
   type DesktopDebateRun,
   type DesktopDebateRunSummary,
+  type DesktopDebateTopic,
   type DesktopDebateTurnBlocker,
   type DesktopDebateTurnRouting,
 } from './contracts.ts'
@@ -113,6 +114,7 @@ const PUBLIC_EVENT_DATA_KEYS: Readonly<Record<DebateEventType, readonly string[]
   'debate.admitted': ['action'],
   'debate.round.started': ['round', 'phase', 'slotIds'],
   'debate.agent.dispatched': ['round', 'role', 'model', 'operatorId', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
+  'debate.agent.progress': ['role', 'kind', 'phase', 'publicOutputPreview', 'toolName', 'approvalKind', 'approvalPreview', 'usage', 'routing'],
   'debate.agent.settled': ['round', 'role', 'claimCount', 'evidenceCount', 'confidence', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
   'debate.agent.blocked': ['round', 'role', 'errorCode', 'error', 'blockers', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
   'debate.agent.failed': ['round', 'role', 'errorCode', 'error', 'blockers', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
@@ -200,6 +202,16 @@ function projectRun(run: DebateRunSnapshotV1): DesktopDebateRun {
   const turns = run.rounds.flatMap(round => round.turns)
   const latestTurn = (role: string) => [...turns].reverse().find(turn => turn.role === role)
   const objective = boundedText(run.objective)
+  const topic = run.topic === undefined
+    ? undefined
+    : (() => {
+      const title = boundedText(run.topic.title)
+      return title === undefined ? undefined : {
+        version: 1,
+        title,
+        source: run.topic.source,
+      } satisfies DesktopDebateTopic
+    })()
   const synthesis = run.synthesis === undefined
     ? undefined
     : (() => {
@@ -224,6 +236,7 @@ function projectRun(run: DebateRunSnapshotV1): DesktopDebateRun {
       cost: run.cost,
       updatedAt: run.updatedAt,
     }),
+    ...(topic === undefined ? {} : { topic }),
     ...(objective === undefined ? {} : { objective }),
     roles: run.roster.map((role) => {
       const turn = latestTurn(role.role)

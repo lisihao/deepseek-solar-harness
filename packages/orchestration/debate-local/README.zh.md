@@ -10,7 +10,9 @@
 
 - `enabled` 创建 `awaiting_approval` 运行；通过 `control({ action: "approve" })` 才 admit。`auto` 在 `start` 时 admit，`disabled` 则记录结构化 stopped 运行且不执行 turn。
 - 每次 mutation 都有 revision fence、command-id 幂等、写锁和原子替换。持久 Command Receipt 会在任何 TaskGraph 调用前进入 `accepted`，再从 `running` 进入 `settled` 或 `indeterminate`。重放已 settled 的命令会返回已记录响应；无法证明结果的命令绝不会自动再执行。事件只追加，`readEvents` 会把最后一条已消费 sequence 作为续读 cursor 返回。
+- TaskGraph 适配的 executor 可以在槽位仍为 `dispatched` 时调用每轮的 `onProgress` sink。Provider 会校验并立即把白名单公开投影追加为 `debate.agent.progress`，并按 `(round, slot, orchestration run, source sequence)` 去重；不会持久化原始提示词、私有推理、凭据或原生 session/command ID。
 - snapshot 保留固定 roster、回合投影、Claim Ledger、异议、未解决缺口、证据引用、provenance 以及逐槽位 token/cost ledger。缺失 usage 或 cost 会在公共投影中标记为 `unknown` 或 `partial`；无法证明未超出已配置预算时进入 `budget_limited` 终态，不会伪装成成功。
+- 收敛判断达到 `converged`、`budget_limited` 或 `max_rounds` 后，运行会保持 `synthesizing`，直到 `debate.synthesis.settled` 提交最终的 `completed`、`budget_limited` 或 `max_rounds` 状态。最终状态不能重新打开或再次派发回合。新接收的运行会优先从 `objective` 持久化公开议题；没有 objective 时使用 `prompt`；旧记录缺少议题正文时保持缺失，不会借用其他议题。
 - `control` 支持 approve、pause、resume、stop、reject。运行中的 pause 会持久化为回合边界意图，stop 则中断注入的 round executor；若无法证明下游 TaskGraph 的中断结果，就进入 `indeterminate`。暂停运行只能以当前 revision 和匹配的 `resume` command 恢复。
 
 ## 确定性回合协议

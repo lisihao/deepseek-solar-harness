@@ -141,6 +141,154 @@ describe('deriveTrajectoryLayout', () => {
     expect(group?.cells[2]?.outputDetail).toBeUndefined()
   })
 
+  it('lays out public Debate rounds, fallback routing, convergence, and synthesis as readable records', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      debateExecutions: [{
+        runId: 'debate-run-123456789', topic: '当前用户议题', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [
+          { seq: 10, time: 10_000, sourceSequence: 1, state: 'planned', claims: [], evidenceRefs: [] },
+          {
+            seq: 11, time: 10_100, sourceSequence: 2, state: 'settled', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            publicOutputPreview: '先建立恢复基线。', publicOutputRef: 'artifact:proposer-r1',
+            claims: [{ statement: '先补齐恢复基线。', status: 'supported', severity: 'high' }],
+            evidenceRefs: ['artifact:baseline'], usage: { inputTokens: 120, outputTokens: 48 },
+          },
+          {
+            seq: 12, time: 10_200, sourceSequence: 3, state: 'failed', round: 1,
+            role: {
+              title: '怀疑式证伪者', kind: 'participant', requestedOperatorId: 'claude-code', requestedModel: 'claude-fable-5',
+              actualOperatorId: 'codex', actualModel: 'gpt-5.6-sol', fallbackReasonCode: 'MODEL_UNAVAILABLE',
+            },
+            claims: [], evidenceRefs: [],
+          },
+          {
+            seq: 13, time: 10_300, sourceSequence: 4, state: 'budget-limited', round: 2,
+            claims: [], evidenceRefs: [],
+            convergence: { status: 'budget_limited', score: 0.44, threshold: 0.82, reason: '输入预算已用完。' },
+          },
+          {
+            seq: 14, time: 10_400, sourceSequence: 5, state: 'synthesis-settled', claims: [], evidenceRefs: [],
+            synthesis: {
+              state: 'settled', outputPreview: '主持人结论：先测量再重构。', artifactRef: 'artifact:synthesis',
+              unresolvedCount: 1, dissentCount: 1,
+            },
+          },
+        ],
+      }],
+    })
+
+    const group = turns[0]?.groups.find(value => value.title === 'Debate · 当前用户议题')
+    expect(group?.cells).toMatchObject([
+      { kind: 'debate', text: '已创建' },
+      { kind: 'debate', text: '第 1 轮 · 建设性提案者 · 已提交观点', previewMarkdown: '先建立恢复基线。', input: 120, output: 48 },
+      { kind: 'debate', text: '第 1 轮 · 怀疑式证伪者 · 执行失败', isError: true },
+      { kind: 'debate', text: '第 2 轮 · 预算已到上限' },
+      { kind: 'debate', text: '主持人总结完成', previewMarkdown: '主持人结论：先测量再重构。' },
+    ])
+    const settled = group?.cells[1]
+    expect(settled?.outputDetail).toContain('### 本楼主张')
+    expect(settled?.outputDetail).toContain('- 先补齐恢复基线。（supported · high）')
+    expect(settled?.outputDetail).toContain('**模型路由**：Codex / gpt-5.6-sol')
+    expect(group?.cells[2]?.outputDetail).toContain('Claude Code / claude-fable-5 → Codex / gpt-5.6-sol')
+    expect(group?.cells[3]?.outputDetail).toContain('### 收敛判断')
+    expect(group?.cells[4]?.outputDetail).toContain('### 主持人总结')
+    expect(group?.cells[1]?.recordId).toBe(['debate', 'debate-run-123456789', '2'].join('\u0000'))
+  })
+
+  it('expands each native Debate progress fact into one readable record with origin timing', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      debateExecutions: [{
+        runId: 'debate-progress-123456789', topic: '进度议题', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [
+          { seq: 10, time: 10_000, sourceSequence: 1, state: 'planned', claims: [], evidenceRefs: [] },
+          {
+            seq: 11, time: 10_100, sourceSequence: 2, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+              actualOperatorId: 'codex', actualModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'phase', sourceTime: '2026-09-03T09:00:00.000Z', phase: 'reasoning' },
+          },
+          {
+            seq: 12, time: 10_200, sourceSequence: 3, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'public-output', sourceTime: '2026-09-03T09:00:01.000Z', publicOutputPreview: '已完成基线。' },
+          },
+          {
+            seq: 13, time: 10_300, sourceSequence: 4, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'tool-started', sourceTime: '2026-09-03T09:00:02.000Z', toolName: 'Bash' },
+          },
+          {
+            seq: 14, time: 10_400, sourceSequence: 5, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'tool-completed', sourceTime: '2026-09-03T09:00:03.000Z', toolName: 'Bash' },
+          },
+          {
+            seq: 15, time: 10_500, sourceSequence: 6, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'approval-required', sourceTime: '2026-09-03T09:00:04.000Z', approvalKind: 'workspace-write', approvalPreview: '需要批准工作区写入。' },
+          },
+          {
+            seq: 16, time: 10_600, sourceSequence: 7, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'usage-updated', sourceTime: '2026-09-03T09:00:05.000Z', usage: { inputTokens: 120, outputTokens: 48 } },
+          },
+        ],
+      }],
+    })
+
+    const group = turns[0]?.groups.find(value => value.title === 'Debate · 进度议题')
+    // A native progress event replaces the generic lifecycle row rather than
+    // producing a duplicate “状态已更新” row.
+    expect(group?.cells).toHaveLength(7)
+    expect(group?.cells.map(cell => cell.text)).toEqual([
+      '已创建',
+      '第 1 轮 · 建设性提案者 · 阶段 · 推理与执行',
+      '第 1 轮 · 建设性提案者 · 公开输出更新',
+      '第 1 轮 · 建设性提案者 · 工具开始 · Bash',
+      '第 1 轮 · 建设性提案者 · 工具完成 · Bash',
+      '第 1 轮 · 建设性提案者 · 需要批准 · workspace-write',
+      '第 1 轮 · 建设性提案者 · 用量更新 · 输入 120 · 输出 48',
+    ])
+    expect(group?.cells[1]?.startedAt).toBe(Date.parse('2026-09-03T09:00:00.000Z'))
+    expect(group?.cells[2]?.previewMarkdown).toBe('已完成基线。')
+    expect(group?.cells[2]?.outputDetail).toContain('### 公开输出')
+    expect(group?.cells[3]?.outputDetail).toContain('- Bash')
+    expect(group?.cells[5]).toMatchObject({ isError: true, previewMarkdown: '需要批准工作区写入。' })
+    expect(group?.cells[5]?.outputDetail).toContain('### 权限请求')
+    expect(group?.cells[6]).toMatchObject({ input: 120, output: 48 })
+    expect(group?.cells[6]?.outputDetail).toContain('### 用量')
+    expect(group?.cells[6]?.recordId).toBe(['debate', 'debate-progress-123456789', '7', 'progress'].join('\u0000'))
+  })
+
   it('renders a paired physical tool call with bounded input/result details and stable identity', () => {
     const turns = deriveTrajectoryLayout({
       nodes: [],

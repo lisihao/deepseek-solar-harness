@@ -405,7 +405,7 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:80`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:104`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -427,7 +427,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:80`](../packages/orche
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:93`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:117`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -438,7 +438,22 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:93`](../packages/orche
 'debate/preferences': DebateExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:78`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:102`](../packages/orchestration/tool-debate/src/index.ts)
+
+<a id="debatetrace--log-only"></a>
+
+#### `debate/trace` — log-only
+
+```ts persistence-catalog
+/**
+ * One bounded public fact from a durable Debate run, keyed by its source event sequence.
+ * @param runId Persistent Debate run identity.
+ * @param sourceSequence Durable sequence from the Debate Provider.
+ */
+'debate/trace': DebateTraceSessionEventV1
+```
+
+Source: [`packages/orchestration/tool-debate/src/index.ts:128`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 

@@ -44,6 +44,7 @@ const KIND_LABEL: Record<TrajectoryCellKind, string> = {
   tool: 'TOOL',
   subtool: 'SUBTOOL',
   operator: 'OPERATOR',
+  debate: 'DEBATE',
 }
 
 function ToolWrenchIcon(): ReactNode {
@@ -116,6 +117,7 @@ const KIND_ICON: Record<TrajectoryCellKind, ReactNode> = {
   tool: <ToolWrenchIcon />,
   subtool: <ToolWrenchIcon />,
   operator: <IconSparkle16 size={13} />,
+  debate: <IconSparkle16 size={13} />,
 }
 
 interface TableRecord {
@@ -847,6 +849,7 @@ function isMarkdownRecord(record: TableRecord): boolean {
   return record.cell.kind === 'user'
     || record.cell.kind === 'context'
     || record.cell.kind === 'message'
+    || record.cell.kind === 'debate'
 }
 
 function parentRecords(
@@ -887,7 +890,7 @@ function markdownSource(record: TableRecord): string | undefined {
   if (record.cell.kind === 'user' || record.cell.kind === 'context') {
     return record.cell.inputDetail
   }
-  if (record.cell.kind === 'message' || record.cell.kind === 'compacted') {
+  if (record.cell.kind === 'message' || record.cell.kind === 'compacted' || record.cell.kind === 'debate') {
     return record.cell.outputDetail
   }
   return undefined
@@ -934,7 +937,7 @@ function recordDisplayText(cell: TrajectoryCellProps): string {
   if (cell.text !== '') return cell.text
   const markdown = cell.kind === 'user' || cell.kind === 'context'
     ? cell.inputDetail
-    : cell.kind === 'message'
+    : cell.kind === 'message' || cell.kind === 'debate'
       ? cell.outputDetail ?? cell.thinkingDetail
       : undefined
   return markdown === undefined ? '' : trajectoryPreviewText(markdown)

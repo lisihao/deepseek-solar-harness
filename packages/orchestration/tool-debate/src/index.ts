@@ -4,11 +4,17 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   type DebateControlAction,
+  type DebateAgentProgressUsageV1,
   DebateError,
+  type DebateEventV1,
   type DebatePolicyV1,
   type DebateRunSnapshotV1,
   type DebateRunSummaryV1,
   type DebateStartRequestV1,
+  type DebateTraceSessionEventV1,
+  type DebateTraceProgressV1,
+  type DebateTraceStateV1,
+  type DebateTurnRoutingV1,
 } from '@deepseek-ai/dsh-debate'
 import {
   isAgentLoopRequest,
@@ -44,19 +50,37 @@ const DEBATE_TRANSCRIPT_POLL_INTERVAL_MS = 100
 const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
 const CONCISE_DEBATE_HINT = /(?:简洁|简要|精简|三条|要点|concise|brief)/iu
 
-const ROLE_COPY: Readonly<Record<string, { readonly title: string }>> = {
+const ROLE_COPY: Readonly<Record<string, { readonly title: string; readonly mandate: string }>> = {
   'constructive-proposer': {
     title: '建设性提案者',
+    mandate: '提出可执行的正向方案，并明确前提。',
   },
   'skeptical-falsifier': {
     title: '怀疑式证伪者',
+    mandate: '寻找决定性的反例、隐藏前提和失败风险。',
   },
   'evidence-auditor': {
     title: '证据审计员',
+    mandate: '核对关键主张是否有直接、可追溯且与决策相关的证据。',
   },
   'decision-judge': {
     title: '决策裁判（主持人）',
+    mandate: '综合最有力的主张，保留实质异议并给出明确结论。',
   },
+}
+
+const OPERATOR_LABELS: Readonly<Record<string, string>> = {
+  codex: 'Codex',
+  'claude-code': 'Claude Code',
+}
+
+const MODEL_LABELS: Readonly<Record<string, string>> = {
+  'gpt-5.6-sol': 'GPT-5.6 Sol',
+  'gpt-5.6-terra': 'GPT-5.6 Terra',
+  'gpt-5.6-luna': 'GPT-5.6 Luna',
+  'claude-opus-5': 'Claude Opus 5',
+  'claude-fable-5': 'Claude Fable 5',
+  'claude-sonnet-4': 'Claude Sonnet 4',
 }
 
 const TERMINAL_RUN_STATES: ReadonlySet<DebateRunSnapshotV1['state']> = new Set([
@@ -96,6 +120,12 @@ declare module '@deepseek-ai/dsh-session/types' {
       readonly turn: number
       readonly step: number
     }
+    /**
+     * One bounded public fact from a durable Debate run, keyed by its source event sequence.
+     * @param runId Persistent Debate run identity.
+     * @param sourceSequence Durable sequence from the Debate Provider.
+     */
+    'debate/trace': DebateTraceSessionEventV1
   }
 }
 
@@ -110,6 +140,18 @@ interface DebateHostDispatch {
   readonly promptMessageId: string
   readonly turn: number
   readonly step: number
+}
+
+/**
+ * Session-local placement for a Debate trace projection.
+ *
+ * Host-routed Debate has an explicit message dispatch. A model-invoked
+ * `debate` tool instead owns a normal `tool/call`; it can still recover its
+ * turn/step from that durable call without inventing a user-message id.
+ */
+interface DebateTraceDispatch {
+  readonly turn?: number
+  readonly step?: number
 }
 
 type ToolArgs = {
@@ -395,6 +437,14 @@ function persistHostDispatch(
   return dispatch
 }
 
+function toolTraceDispatch(agent: Agent, callId: string): DebateTraceDispatch {
+  const call = agent.session.events.findLast(event => event.type === 'tool/call'
+    && String(event.data.callId) === callId
+    && event.data.name === 'debate')
+  if (call?.type !== 'tool/call') return {}
+  return { turn: call.data.turn, step: call.data.step }
+}
+
 function latestDirectUser(messages: readonly HostMessage[]): HostMessage | undefined {
   return [...messages].reverse().find(message => message.source.kind === 'user')
 }
@@ -450,7 +500,7 @@ function hasAdmission(events: readonly { readonly type: string; readonly data: u
 function runText(run: DebateRunSnapshotV1): string {
   const lines = [
     '## 置顶 · 主持人总结',
-    run.synthesis?.outputPreview ?? '主持人尚未提交最终总结。',
+    formatPublicSpeech(run.synthesis?.outputPreview ?? '主持人尚未提交最终总结。'),
   ]
   const moderatorFailure = [...run.rounds]
     .reverse()
@@ -476,18 +526,14 @@ function runText(run: DebateRunSnapshotV1): string {
   }
   if (run.dissent.length > 0) {
     lines.push('', '### 保留异议', ...run.dissent.slice(0, MAX_REF_ITEMS).map(item =>
-      `- ${roleTitle(item.slotId)}：${item.position}${item.reason.length > 0 ? `（${item.reason}）` : ''}`))
+      `- ${roleTitleForSlot(run, item.slotId)}：${item.position}${item.reason.length > 0 ? `（${item.reason}）` : ''}`))
   }
-  lines.push('', '<details>', '<summary>技术详情</summary>', '',
-    `- Run ID：${run.runId}`,
-    `- 状态：${lifecycleLabel(run.state)}`,
+  lines.push(
+    '',
+    '### 本场结果',
+    `- 状态：${finalLifecycleLabel(run.state)}`,
     `- 已完成轮次：${String(run.currentRound)}`,
-    `- Prompt hash：${run.promptSha256}`,
-    `- Provider：${run.provenance.providerId} ${run.provenance.providerVersion}`,
-    `- 请求 hash：${run.provenance.requestSha256}`,
-    ...run.provenance.outputSha256 === undefined ? [] : [`- 输出 hash：${run.provenance.outputSha256}`],
-    ...run.synthesis?.artifactRef === undefined ? [] : [`- 总结 Artifact：${run.synthesis.artifactRef}`],
-    '</details>')
+  )
   return lines.join('\n')
 }
 
@@ -521,27 +567,40 @@ function transcriptLines(
   run: DebateRunSnapshotV1,
   tracker: TranscriptTracker,
   final: boolean,
+  requestTopic?: string,
 ): string[] {
   const lines: string[] = []
   if (!tracker.topicEmitted) {
     tracker.topicEmitted = true
     tracker.topicState = run.state
     lines.push(
-      '# 主题帖 · Debate',
-      `状态：${lifecycleLabel(run.state)}`,
-      ...run.objective === undefined ? [] : [`议题：${preview(run.objective) ?? ''}`],
+      '# 主题帖',
+      `## ${topicTitle(run, requestTopic)}`,
+      `**当前状态：** ${transcriptLifecycleLabel(run, final)}`,
       '',
     )
   } else if (tracker.topicState !== run.state) {
     tracker.topicState = run.state
-    lines.push(`**主题帖状态更新**：${lifecycleLabel(run.state)}`)
+    lines.push(`**主题帖状态更新：** ${transcriptLifecycleLabel(run, final)}`)
   }
   if (!tracker.rosterEmitted) {
     tracker.rosterEmitted = true
-    lines.push('## 参与者名册')
+    lines.push(
+      '## 参与者名册',
+      '| 角色 | 职责 | 执行算子 | 模型 | 当前状态 |',
+      '| --- | --- | --- | --- | --- |',
+    )
     for (const role of run.roster.slice(0, MAX_REF_ITEMS)) {
-      lines.push(`- **${rosterRoleTitle(role.role, role.persona.title)}**：${roleMandate(role.persona.mandate)}`)
-      lines.push(...roleTechnicalDetails(role))
+      const turn = latestRoleTurn(run, role.role)
+      const route = turn === undefined ? configuredRoute(role) : actualRoute(turn)
+      const cells = [
+        rosterRoleTitle(role),
+        roleMandate(role),
+        route.operator,
+        route.model,
+        turn === undefined ? '等待分派' : turnStateLabel(turn.state),
+      ].map(tableCell)
+      lines.push(`| ${cells.join(' | ')} |`)
     }
     lines.push('')
   }
@@ -570,7 +629,7 @@ function transcriptLines(
       if (tracker.convergenceSignatures.get(round.round) !== signature) {
         tracker.convergenceSignatures.set(round.round, signature)
         lines.push(
-          `**本轮收敛判断**：${convergenceLabel(round.convergence.status)}`
+          `**本轮收敛判断：** ${transcriptConvergenceLabel(round.convergence.status, final)}`
           + `（得分 ${round.convergence.score.toFixed(2)} / 阈值 ${round.convergence.threshold.toFixed(2)}，${round.convergence.reason}）`,
         )
       }
@@ -591,31 +650,35 @@ function transcriptLines(
   return lines
 }
 
-function roleTitle(role: string): string {
-  return ROLE_COPY[role]?.title ?? role
+function roleTitle(role: string, roster?: DebateRunSnapshotV1['roster']): string {
+  const localized = ROLE_COPY[role]?.title
+  if (localized !== undefined) return localized
+  const configured = roster?.find(candidate => candidate.role === role)?.persona.title
+  return configured === undefined || configured.trim().length === 0 ? '参与者' : configured
 }
 
-function rosterRoleTitle(role: string, configured: string): string {
-  const localized = roleTitle(role)
-  const title = preview(configured)
-  return title === undefined || title === localized ? localized : `${localized} · ${title}`
+function roleTitleForSlot(run: DebateRunSnapshotV1, slotId: string): string {
+  const turn = run.rounds.flatMap(round => round.turns).find(candidate => candidate.slotId === slotId)
+  return turn === undefined ? '一位参与者' : roleTitle(turn.role, run.roster)
 }
 
-function roleMandate(configured: string): string {
-  return preview(configured) ?? '职责未提供。'
+function rosterRoleTitle(role: DebateRunSnapshotV1['roster'][number]): string {
+  const localized = roleTitle(role.role, [role])
+  const configured = preview(role.persona.title)
+  return isDefaultRolePersona(role) || configured === undefined || configured === localized
+    ? localized
+    : `${localized}（${configured}）`
 }
 
-function roleTechnicalDetails(role: DebatePolicyV1['roster'][number]): string[] {
-  return [
-    '<details>',
-    '<summary>角色技术详情</summary>',
-    '',
-    `- 角色 ID：${role.role}`,
-    `- 算子：${role.operatorId}`,
-    `- 模型：${role.model}`,
-    `- 层级：${role.tier}`,
-    '</details>',
-  ]
+function roleMandate(role: DebateRunSnapshotV1['roster'][number]): string {
+  return isDefaultRolePersona(role)
+    ? ROLE_COPY[role.role]?.mandate ?? '职责未提供。'
+    : preview(role.persona.mandate) ?? '职责未提供。'
+}
+
+function isDefaultRolePersona(role: DebateRunSnapshotV1['roster'][number]): boolean {
+  const defaultRole = DEFAULT_DEBATE_POLICY.roster.find(candidate => candidate.role === role.role)
+  return defaultRole?.persona.title === role.persona.title && defaultRole.persona.mandate === role.persona.mandate
 }
 
 function transcriptTurnLines(
@@ -625,19 +688,22 @@ function transcriptTurnLines(
   turn: DebateRunSnapshotV1['rounds'][number]['turns'][number],
 ): string[] {
   const lines = [
-    `### ${String(floor)} 楼 · ${roleTitle(turn.role)}`,
+    `### ${String(floor)} 楼 · ${roleTitle(turn.role, run.roster)}`,
     `**状态：** ${turnStateLabel(turn.state)}`,
+    `**执行者：** ${routeDescription(actualRoute(turn))}`,
   ]
   if (round === 1) lines.push('**发言类型：** 首轮独立发言')
   else lines.push('**发言类型：** Claim Ledger 后续发言')
   if (turn.outputPreview !== undefined) {
-    lines.push('', '**公开发言：**', quoteText(preview(turn.outputPreview) ?? ''))
+    lines.push('', '**公开发言：**', formatPublicSpeech(turn.outputPreview))
   } else if (turn.state === 'blocked' || turn.state === 'failed' || turn.state === 'indeterminate') {
     lines.push('', '**公开发言：**', '> 未产生公开输出。')
   } else {
     lines.push('', '**公开发言：**', '> 未提供公开摘要。')
   }
-  if (turn.claimIds.length > 0) lines.push(`**本楼提交主张：** ${claimReferences(run, turn.claimIds)}`)
+  if (turn.claimIds.length > 0) {
+    lines.push('', '**本楼主张：**', ...claimReferences(run, turn.claimIds).map((claim, index) => `${String(index + 1)}. ${claim}`))
+  }
   if (turn.evidenceRefs.length > 0) lines.push(`**证据：** 已关联 ${String(turn.evidenceRefs.length)} 项`)
   const errorSignatures = new Set<string>()
   for (const blocker of turn.blockers?.slice(0, MAX_REF_ITEMS) ?? []) {
@@ -652,21 +718,7 @@ function transcriptTurnLines(
       lines.push(`> ⚠️ 未完成：${turn.errorCode}`)
     }
   }
-  lines.push('', '<details>', '<summary>技术详情</summary>', '',
-    `- Slot：${turn.slotId}`,
-    `- 请求算子/模型：${turn.routing?.requestedOperatorId ?? turn.operatorId}/${turn.routing?.requestedModel ?? turn.model}`,
-    `- 实际算子/模型：${turn.routing?.actualOperatorId ?? turn.operatorId}/${turn.routing?.actualModel ?? turn.model}`,
-    ...turn.routing?.fallbackReasonCode === undefined ? [] : [
-      `- 回退原因：${turn.routing.fallbackReasonCode}`,
-      `- 回退路由：${turn.routing.requestedOperatorId}/${turn.routing.requestedModel}`
-        + ` → ${turn.routing.actualOperatorId ?? turn.operatorId}/${turn.routing.actualModel ?? turn.model}`,
-    ],
-    ...turn.attempt === undefined ? [] : [`- Attempt：${String(turn.attempt)}`],
-    ...turn.outputRef === undefined ? [] : [`- 输出 Artifact：${turn.outputRef}`],
-    ...turn.evidenceRefs.length === 0 ? [] : [`- Evidence refs：${turn.evidenceRefs.map(ref => ref.ref).join('、')}`],
-    ...turn.usage === undefined ? [] : [`- Usage：输入 ${String(turn.usage.inputTokens)} · 输出 ${String(turn.usage.outputTokens)}`],
-    '</details>',
-    '')
+  lines.push('')
   return lines
 }
 
@@ -678,15 +730,424 @@ function turnIsTerminal(state: string): boolean {
   return state === 'settled' || state === 'blocked' || state === 'failed' || state === 'indeterminate'
 }
 
-function claimReferences(run: DebateRunSnapshotV1, ids: readonly string[]): string {
+function claimReferences(run: DebateRunSnapshotV1, ids: readonly string[]): string[] {
   return ids.slice(0, MAX_REF_ITEMS).map((id) => {
     const claim = run.claimLedger.claims.find(item => item.claimId === id)
-    return claim === undefined ? `编号 ${id}` : `“${preview(claim.statement) ?? id}”`
-  }).join('、')
+    return claim === undefined ? '一项未能读取正文的主张' : formatInlineText(preview(claim.statement) ?? '')
+  })
 }
 
-function quoteText(value: string): string {
-  return value.split('\n').map(line => `> ${line}`).join('\n')
+function formatInlineText(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim().replace(/\|/gu, '\\|')
+}
+
+function formatPublicSpeech(value: string): string {
+  const bounded = preview(value) ?? ''
+  const normalized = bounded.replace(/\r\n?/gu, '\n').trim().replace(/\n{3,}/gu, '\n\n')
+  return normalized
+    .replace(/(^|[^\n])\s+(P[0-9]+)\s*[：:]\s*/gu, (_match, before: string, priority: string) => `${before}\n\n**${priority}**：`)
+    .replace(/^(P[0-9]+)\s*[：:]\s*/gmu, (_match, priority: string) => `**${priority}**：`)
+    .replace(/^(立场|结论|建议|验收标准|主要风险|最高影响不确定性)\s*[：:]\s*/gmu, (_match, heading: string) => `**${heading}**：`)
+}
+
+function tableCell(value: string): string {
+  return formatInlineText(value).replace(/\n/gu, ' ')
+}
+
+interface DisplayRoute {
+  readonly operator: string
+  readonly model: string
+  readonly requested?: { readonly operator: string; readonly model: string }
+}
+
+function configuredRoute(role: DebateRunSnapshotV1['roster'][number]): DisplayRoute {
+  return {
+    operator: operatorLabel(role.operatorId),
+    model: modelLabel(role.model),
+  }
+}
+
+function actualRoute(turn: DebateRunSnapshotV1['rounds'][number]['turns'][number]): DisplayRoute {
+  const requestedOperator = turn.routing?.requestedOperatorId ?? turn.operatorId
+  const requestedModel = turn.routing?.requestedModel ?? turn.model
+  const actualOperator = turn.routing?.actualOperatorId ?? turn.operatorId
+  const actualModel = turn.routing?.actualModel ?? turn.model
+  const requested = requestedOperator === actualOperator && requestedModel === actualModel
+    ? undefined
+    : { operator: operatorLabel(requestedOperator), model: modelLabel(requestedModel) }
+  return { operator: operatorLabel(actualOperator), model: modelLabel(actualModel), ...(requested === undefined ? {} : { requested }) }
+}
+
+function routeDescription(route: DisplayRoute): string {
+  const actual = `${route.operator} · ${route.model}`
+  return route.requested === undefined
+    ? actual
+    : `${actual}（已从 ${route.requested.operator} · ${route.requested.model} 自动回退）`
+}
+
+function operatorLabel(value: string): string {
+  return OPERATOR_LABELS[value] ?? value
+}
+
+function modelLabel(value: string): string {
+  return MODEL_LABELS[value] ?? value
+}
+
+function latestRoleTurn(
+  run: DebateRunSnapshotV1,
+  role: string,
+): DebateRunSnapshotV1['rounds'][number]['turns'][number] | undefined {
+  for (let roundIndex = run.rounds.length - 1; roundIndex >= 0; roundIndex -= 1) {
+    const round = run.rounds[roundIndex]
+    if (round === undefined) continue
+    for (let turnIndex = round.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+      const turn = round.turns[turnIndex]
+      if (turn?.role === role) return turn
+    }
+  }
+  return undefined
+}
+
+function topicTitle(run: DebateRunSnapshotV1, requestTopic?: string): string {
+  const title = run.topic?.title ?? run.objective ?? requestTopic
+  return title === undefined || title.trim().length === 0
+    ? '历史记录缺少议题正文'
+    : formatInlineText(preview(title) ?? '')
+}
+
+function transcriptLifecycleLabel(run: DebateRunSnapshotV1, final: boolean): string {
+  if (final) return finalLifecycleLabel(run.state)
+  if (run.state === 'budget_limited') return '预算已达上限，正在整理主持人总结'
+  if (run.state === 'max_rounds') return '已达轮次上限，正在整理主持人总结'
+  return lifecycleLabel(run.state)
+}
+
+function finalLifecycleLabel(state: DebateRunSnapshotV1['state']): string {
+  if (state === 'budget_limited') return '预算已达上限，主持人总结已完成'
+  if (state === 'max_rounds') return '已达轮次上限，主持人总结已完成'
+  return lifecycleLabel(state)
+}
+
+function transcriptConvergenceLabel(state: string, final: boolean): string {
+  if (state === 'budget_limited') return final
+    ? '本轮预算已达上限，主持人总结已完成'
+    : '本轮预算已达上限，进入主持人综合'
+  if (state === 'max_rounds') return final
+    ? '已达轮次上限，主持人总结已完成'
+    : '已达轮次上限，进入主持人综合'
+  return convergenceLabel(state)
+}
+
+function traceTopic(run: DebateRunSnapshotV1): NonNullable<DebateTraceSessionEventV1['topic']> {
+  if (run.topic !== undefined) return run.topic
+  if (run.objective !== undefined && run.objective.trim().length > 0) {
+    return { version: 1, title: preview(run.objective) ?? '', source: 'objective' }
+  }
+  return { version: 1, title: '历史记录缺少议题正文', source: 'legacy-missing' }
+}
+
+function traceState(event: DebateEventV1): DebateTraceStateV1 | undefined {
+  switch (event.type) {
+    case 'debate.planned': return 'planned'
+    case 'debate.roster.qualified':
+    case 'debate.admitted':
+    case 'debate.round.started': return 'running'
+    case 'debate.agent.dispatched': return 'dispatched'
+    case 'debate.agent.progress': return 'progress'
+    case 'debate.agent.settled': return 'settled'
+    case 'debate.agent.blocked': return 'blocked'
+    case 'debate.agent.failed': return 'failed'
+    case 'debate.agent.indeterminate': return 'indeterminate'
+    case 'debate.claims.compiled': return 'round-completed'
+    case 'debate.convergence.evaluated': {
+      const status = event.data.status
+      if (status === 'budget_limited') return 'budget-limited'
+      if (status === 'max_rounds') return 'max-rounds'
+      return 'round-completed'
+    }
+    case 'debate.synthesis.started': return 'synthesis-running'
+    case 'debate.synthesis.settled': return 'synthesis-settled'
+    case 'debate.stopped': return 'stopped'
+    case 'debate.roster.rejected':
+    case 'debate.failed': return 'failed'
+    case 'debate.indeterminate': return 'indeterminate'
+    case 'debate.cost.accounted': return undefined
+    default: return undefined
+  }
+}
+
+function turnForTraceEvent(
+  run: DebateRunSnapshotV1,
+  event: DebateEventV1,
+): DebateRunSnapshotV1['rounds'][number]['turns'][number] | undefined {
+  if (event.round === undefined || event.slotId === undefined) return undefined
+  return run.rounds.find(round => round.round === event.round)?.turns
+    .find(turn => turn.slotId === event.slotId)
+}
+
+function traceRole(
+  run: DebateRunSnapshotV1,
+  turn: DebateRunSnapshotV1['rounds'][number]['turns'][number],
+  includeActualRoute: boolean,
+  routingOverride?: DebateTurnRoutingV1,
+): NonNullable<DebateTraceSessionEventV1['role']> {
+  const routing = routingOverride ?? turn.routing
+  const requestedOperatorId = routing?.requestedOperatorId ?? turn.operatorId
+  const requestedModel = routing?.requestedModel ?? turn.model
+  const actualOperatorId = routing?.actualOperatorId
+  const actualModel = routing?.actualModel
+  return {
+    title: roleTitle(turn.role, run.roster),
+    kind: turn.role === 'decision-judge' ? 'judge' : 'participant',
+    requested: { operatorId: requestedOperatorId, model: requestedModel },
+    ...(!includeActualRoute || actualOperatorId === undefined || actualModel === undefined
+      ? {}
+      : { actual: { operatorId: actualOperatorId, model: actualModel } }),
+    ...(!includeActualRoute || routing?.fallbackReasonCode === undefined
+      ? {}
+      : { fallbackReasonCode: routing.fallbackReasonCode }),
+  }
+}
+
+function traceProgressText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  return preview(value.replace(/[\u0000-\u001f\u007f]/gu, ''))
+}
+
+function traceProgressUsage(value: unknown): DebateAgentProgressUsageV1 | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const usage: {
+    inputTokens?: number
+    outputTokens?: number
+    cacheReadInputTokens?: number
+    cacheWriteInputTokens?: number
+    costUsd?: number
+  } = {}
+  for (const field of ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens', 'costUsd'] as const) {
+    const counter = source[field]
+    if (typeof counter === 'number' && Number.isFinite(counter) && counter >= 0) usage[field] = counter
+  }
+  return Object.keys(usage).length === 0 ? undefined : usage
+}
+
+function traceProgressRouting(value: unknown): DebateTurnRoutingV1 | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const routing = value as Record<string, unknown>
+  if (routing.version !== 1 || typeof routing.requestedOperatorId !== 'string' || typeof routing.requestedModel !== 'string') {
+    return undefined
+  }
+  const requestedOperatorId = traceProgressText(routing.requestedOperatorId)
+  const requestedModel = traceProgressText(routing.requestedModel)
+  if (requestedOperatorId === undefined || requestedModel === undefined) return undefined
+  const actualOperatorId = traceProgressText(routing.actualOperatorId)
+  const actualModel = traceProgressText(routing.actualModel)
+  const fallbackReasonCode = traceProgressText(routing.fallbackReasonCode)
+  return {
+    version: 1,
+    requestedOperatorId,
+    requestedModel,
+    ...(actualOperatorId === undefined ? {} : { actualOperatorId }),
+    ...(actualModel === undefined ? {} : { actualModel }),
+    ...(fallbackReasonCode === undefined ? {} : { fallbackReasonCode }),
+  }
+}
+
+function traceProgress(event: DebateEventV1): {
+  readonly progress: DebateTraceProgressV1
+  readonly routing?: DebateTurnRoutingV1
+} | undefined {
+  if (event.type !== 'debate.agent.progress') return undefined
+  const sourceTime = traceProgressText(event.data.orchestrationTime)
+  const kind = event.data.kind
+  if (sourceTime === undefined || !Number.isFinite(Date.parse(sourceTime)) || typeof kind !== 'string') return undefined
+  const routing = traceProgressRouting(event.data.routing)
+  const base = { sourceTime: new Date(sourceTime).toISOString() }
+  switch (kind) {
+    case 'phase': {
+      const phase = traceProgressText(event.data.phase)
+      return phase === undefined ? undefined : { progress: { kind, ...base, phase }, ...(routing === undefined ? {} : { routing }) }
+    }
+    case 'public-output': {
+      const publicOutputPreview = traceProgressText(event.data.publicOutputPreview)
+      return publicOutputPreview === undefined
+        ? undefined
+        : { progress: { kind, ...base, publicOutputPreview }, ...(routing === undefined ? {} : { routing }) }
+    }
+    case 'tool-started':
+    case 'tool-completed': {
+      const toolName = traceProgressText(event.data.toolName)
+      return toolName === undefined ? undefined : { progress: { kind, ...base, toolName }, ...(routing === undefined ? {} : { routing }) }
+    }
+    case 'approval-required': {
+      const approvalKind = traceProgressText(event.data.approvalKind)
+      const approvalPreview = traceProgressText(event.data.approvalPreview)
+      return approvalKind === undefined
+        ? undefined
+        : {
+          progress: {
+            kind,
+            ...base,
+            approvalKind,
+            ...(approvalPreview === undefined ? {} : { approvalPreview }),
+          },
+          ...(routing === undefined ? {} : { routing }),
+        }
+    }
+    case 'usage-updated': {
+      const usage = traceProgressUsage(event.data.usage)
+      return usage === undefined ? undefined : { progress: { kind, ...base, usage }, ...(routing === undefined ? {} : { routing }) }
+    }
+    default: return undefined
+  }
+}
+
+function traceClaims(
+  run: DebateRunSnapshotV1,
+  turn: DebateRunSnapshotV1['rounds'][number]['turns'][number],
+): readonly NonNullable<DebateTraceSessionEventV1['claims']>[number][] {
+  return turn.claimIds.slice(0, MAX_REF_ITEMS).flatMap((id) => {
+    const claim = run.claimLedger.claims.find(candidate => candidate.claimId === id)
+    return claim === undefined ? [] : [{
+      statement: preview(claim.statement) ?? '',
+      status: claim.status,
+      severity: claim.severity,
+    }]
+  })
+}
+
+function traceSynthesis(run: DebateRunSnapshotV1): DebateTraceSessionEventV1['synthesis'] | undefined {
+  const synthesis = run.synthesis
+  if (synthesis === undefined) return undefined
+  const outputPreview = preview(synthesis.outputPreview)
+  return {
+    state: synthesis.state,
+    ...(outputPreview === undefined ? {} : { outputPreview }),
+    ...(synthesis.artifactRef === undefined ? {} : { artifactRef: synthesis.artifactRef }),
+    unresolvedCount: synthesis.unresolvedClaimIds.length,
+    dissentCount: synthesis.dissentCount,
+  }
+}
+
+/**
+ * Project the synthesis-start event without borrowing settled output from a
+ * later run snapshot. The source event carries no final text, so this trace
+ * deliberately exposes only the running state and bounded counters.
+ */
+function traceSynthesisStarted(run: DebateRunSnapshotV1): DebateTraceSessionEventV1['synthesis'] | undefined {
+  const synthesis = run.synthesis
+  if (synthesis === undefined) return undefined
+  return {
+    state: 'running',
+    unresolvedCount: synthesis.unresolvedClaimIds.length,
+    dissentCount: synthesis.dissentCount,
+  }
+}
+
+function tracePublicOutput(
+  turn: DebateRunSnapshotV1['rounds'][number]['turns'][number],
+): DebateTraceSessionEventV1['publicOutput'] | undefined {
+  const outputPreview = preview(turn.outputPreview)
+  const outputRef = turn.outputRef
+  if (outputPreview === undefined && outputRef === undefined) return undefined
+  return {
+    ...(outputPreview === undefined ? {} : { preview: outputPreview }),
+    ...(outputRef === undefined ? {} : { ref: outputRef }),
+  }
+}
+
+function settledTraceDetails(
+  run: DebateRunSnapshotV1,
+  turn: DebateRunSnapshotV1['rounds'][number]['turns'][number],
+): Pick<DebateTraceSessionEventV1, 'publicOutput' | 'claims' | 'evidenceRefs' | 'usage'> {
+  const publicOutput = tracePublicOutput(turn)
+  return {
+    ...(publicOutput === undefined ? {} : { publicOutput }),
+    ...(turn.claimIds.length === 0 ? {} : { claims: traceClaims(run, turn) }),
+    ...(turn.evidenceRefs.length === 0 ? {} : { evidenceRefs: turn.evidenceRefs.slice(0, MAX_REF_ITEMS) }),
+    ...(turn.usage === undefined ? {} : { usage: turn.usage }),
+  }
+}
+
+function traceForEvent(
+  run: DebateRunSnapshotV1,
+  event: DebateEventV1,
+  dispatch: DebateTraceDispatch,
+): DebateTraceSessionEventV1 | undefined {
+  const state = traceState(event)
+  if (state === undefined) return undefined
+  const turn = turnForTraceEvent(run, event)
+  const agentEvent = event.type.startsWith('debate.agent.')
+  if (agentEvent && turn === undefined) return undefined
+  const progress = traceProgress(event)
+  if (event.type === 'debate.agent.progress' && progress === undefined) return undefined
+  const convergence = event.type === 'debate.convergence.evaluated'
+    ? run.rounds.find(round => round.round === event.round)?.convergence
+    : undefined
+  if (event.type === 'debate.convergence.evaluated' && convergence === undefined) return undefined
+  const synthesis = event.type === 'debate.synthesis.started'
+    ? traceSynthesisStarted(run)
+    : event.type === 'debate.synthesis.settled'
+      ? traceSynthesis(run)
+      : undefined
+  const settledDetails = event.type === 'debate.agent.settled' && turn !== undefined
+    ? settledTraceDetails(run, turn)
+    : {}
+  if ((event.type === 'debate.synthesis.started' || event.type === 'debate.synthesis.settled') && synthesis === undefined) return undefined
+  return {
+    version: 1,
+    runId: run.runId,
+    sourceSequence: event.sequence,
+    state,
+    ...(event.type === 'debate.planned' ? { topic: traceTopic(run) } : {}),
+    ...(dispatch.turn === undefined ? {} : { sessionTurn: dispatch.turn }),
+    ...(dispatch.step === undefined ? {} : { sessionStep: dispatch.step }),
+    ...(event.round === undefined ? {} : { round: event.round }),
+    ...(turn === undefined ? {} : {
+      role: traceRole(
+        run,
+        turn,
+        event.type !== 'debate.agent.dispatched',
+        progress?.routing,
+      ),
+    }),
+    ...settledDetails,
+    ...(progress === undefined ? {} : { progress: progress.progress }),
+    ...(convergence === undefined ? {} : { convergence }),
+    ...(synthesis === undefined ? {} : { synthesis }),
+  }
+}
+
+function hasProjectedTrace(
+  events: readonly { readonly type: string; readonly data: unknown }[],
+  runId: string,
+  sourceSequence: number,
+): boolean {
+  return events.some((event) => {
+    if (event.type !== 'debate/trace') return false
+    const data = event.data as Partial<DebateTraceSessionEventV1>
+    return data.runId === runId && data.sourceSequence === sourceSequence
+  })
+}
+
+async function projectDebateTrace(
+  ctx: Context,
+  agent: Agent,
+  run: DebateRunSnapshotV1,
+  dispatch: DebateTraceDispatch,
+): Promise<void> {
+  let afterSequence = 0
+  while (true) {
+    const page = await ctx.debates.readEvents({ runId: run.runId, afterSequence, limit: MAX_REF_ITEMS })
+    if (page.events.length === 0) return
+    for (const event of page.events) {
+      if (hasProjectedTrace(agent.session.events, run.runId, event.sequence)) continue
+      const trace = traceForEvent(run, event, dispatch)
+      if (trace !== undefined) agent.session.append('debate/trace', trace, { ignorable: true })
+    }
+    if (page.nextSequence <= afterSequence) return
+    afterSequence = page.nextSequence
+  }
 }
 
 function turnStateLabel(state: string): string {
@@ -774,7 +1235,8 @@ class DebateHostAdapter extends LlmAdapter {
     const startedIsTerminal = TERMINAL_RUN_STATES.has(started.state)
 
     yield { type: 'block-start', index: 0, blockType: 'text' }
-    for (const line of transcriptLines(started, tracker, startedIsTerminal)) {
+    await projectDebateTrace(this.ctx, agent, started, dispatch)
+    for (const line of transcriptLines(started, tracker, startedIsTerminal, prompt)) {
       const delta = `${line}\n\n`
       assembledText += delta
       yield { type: 'text-delta', index: 0, text: delta }
@@ -784,7 +1246,8 @@ class DebateHostAdapter extends LlmAdapter {
     while (completion === undefined && !TERMINAL_RUN_STATES.has(started.state)) {
       options.signal?.throwIfAborted()
       const observed = await this.ctx.debates.inspect(started.runId)
-      for (const line of transcriptLines(observed, tracker, false)) {
+      await projectDebateTrace(this.ctx, agent, observed, dispatch)
+      for (const line of transcriptLines(observed, tracker, false, prompt)) {
         const delta = `${line}\n\n`
         assembledText += delta
         yield { type: 'text-delta', index: 0, text: delta }
@@ -800,7 +1263,8 @@ class DebateHostAdapter extends LlmAdapter {
     completion ??= await completionResult
     if (!completion.ok) throw completion.error
     const admitted = completion.value
-    for (const line of transcriptLines(admitted, tracker, true)) {
+    await projectDebateTrace(this.ctx, agent, admitted, dispatch)
+    for (const line of transcriptLines(admitted, tracker, true, prompt)) {
       const delta = `${line}\n\n`
       assembledText += delta
       yield { type: 'text-delta', index: 0, text: delta }
@@ -910,16 +1374,22 @@ export function apply(ctx: Context): void {
       render: (_args, value) => [{ type: 'text' as const, text: JSON.stringify(value) }],
     },
     async execute(args: ToolArgs, exec) {
+      const agent = exec.agent
+      const projectToolTrace = async (run: DebateRunSnapshotV1): Promise<void> => {
+        if (agent === undefined) return
+        await projectDebateTrace(ctx, agent, run, toolTraceDispatch(agent, String(exec.callId)))
+      }
       if (args.action === 'list') {
         const runs = await ctx.debates.list()
         return jsonObject({ kind: 'list', runs: runs.slice(0, MAX_LIST_ITEMS).map(boundedSummary), truncated: runs.length > MAX_LIST_ITEMS })
       }
 
       if (args.action === 'inspect') {
-        return jsonObject({ kind: 'inspect', run: boundedRun(await ctx.debates.inspect(requiredRunId(args))) })
+        const run = await ctx.debates.inspect(requiredRunId(args))
+        await projectToolTrace(run)
+        return jsonObject({ kind: 'inspect', run: boundedRun(run) })
       }
 
-      const agent = exec.agent
       const stableCommandId = commandId(agent === undefined ? undefined : String(agent.id), String(exec.callId))
       if (args.action === 'control') {
         if (args.expected_revision === undefined || !Number.isInteger(args.expected_revision) || args.expected_revision < 0) {
@@ -935,6 +1405,7 @@ export function apply(ctx: Context): void {
           action: args.control_action,
           reason: args.reason,
         })
+        await projectToolTrace(run)
         return jsonObject({ kind: 'control', run: boundedRun(run) })
       }
 
@@ -958,9 +1429,11 @@ export function apply(ctx: Context): void {
         sourceSessionId: String(agent.id),
       }
       const started = await ctx.debates.start(request)
+      await projectToolTrace(started)
       const run = preferences.mode === 'enabled'
         ? await approveExplicitDebate(ctx, started, stableCommandId)
         : started
+      await projectToolTrace(run)
       agent.session.append('debate/admission', {
         runId: run.runId,
         mode: preferences.mode,
