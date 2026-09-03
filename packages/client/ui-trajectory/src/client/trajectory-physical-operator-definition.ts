@@ -12,20 +12,32 @@ const MAX_PREVIEW_LINES = 12
 const MAX_SUMMARY_DEPTH = 4
 const MAX_SUMMARY_ITEMS = 24
 
-const SENSITIVE_KEY = new RegExp([
+const SENSITIVE_LABEL = [
   'api[_-]?key', 'authorization', 'password', 'access[_-]?token', 'refresh[_-]?token',
   'token', 'secret', 'credential', 'stderr', 'prompt', 'system[_-]?prompt',
   'hidden[_-]?reasoning', 'reasoning', 'transcript', 'environment', 'env',
   'chain[_-]?of[_-]?thought', 'internal',
-].join('|'), 'iu')
+].join('|')
+const SENSITIVE_KEY = new RegExp(SENSITIVE_LABEL, 'iu')
 const SENSITIVE_TEXT = new RegExp(
-  String.raw`\b((?:${[
-    'api[_-]?key', 'authorization', 'password', 'access[_-]?token', 'refresh[_-]?token',
-    'token', 'secret', 'credential', 'prompt', 'system[_-]?prompt',
-  ].join('|')})\s*[:=]\s*)` + String.raw`["']?[^\s,;}"']+`,
+  String.raw`\b(["']?(?:${SENSITIVE_LABEL})["']?\s*[:=]\s*)`
+    + String.raw`(?:"[^"\n]*"|'[^'\n]*'|[^\n,;}]+)`,
   'giu',
 )
 const BEARER_TEXT = /\b(Bearer\s+)[^\s,;}"']+/giu
+const COMMON_CREDENTIAL_TEXT = new RegExp([
+  String.raw`\bsk-[A-Za-z0-9_-]{8,}\b`,
+  String.raw`\bgh[pousr]_[A-Za-z0-9_]{8,}\b`,
+  String.raw`\bxox[baprs]-[A-Za-z0-9-]{8,}\b`,
+  String.raw`\bAKIA[0-9A-Z]{16}\b`,
+].join('|'), 'gu')
+const PRIVATE_KEY_TEXT = /-----BEGIN [^-\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\n]*PRIVATE KEY-----/gu
+const PUBLIC_SCALAR_KEYS = new Set([
+  'action', 'bytes', 'code', 'column', 'count', 'durationMs', 'end', 'exitCode',
+  'isError', 'kind', 'limit', 'line', 'method', 'offset', 'operation', 'start',
+  'state', 'status', 'success', 'total', 'type',
+])
+const PUBLIC_SCALAR_TEXT = /^[A-Za-z0-9_.:/-]{1,160}$/u
 
 interface PhysicalOperatorState {
   readonly commandId: string
@@ -61,13 +73,15 @@ function nonEmptyString(value: unknown): string | undefined {
 
 function scrubText(value: string): string {
   return value
+    .replace(PRIVATE_KEY_TEXT, '[PRIVATE KEY REDACTED]')
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, ' ')
     .replace(SENSITIVE_TEXT, '$1[REDACTED]')
     .replace(BEARER_TEXT, '$1[REDACTED]')
+    .replace(COMMON_CREDENTIAL_TEXT, '[CREDENTIAL REDACTED]')
 }
 
 function boundedMultiline(value: string, limit = MAX_PREVIEW_CHARACTERS): string | undefined {
-  const lines = value.replace(/\r\n?/gu, '\n').split('\n').map(scrubText)
+  const lines = scrubText(value.replace(/\r\n?/gu, '\n')).split('\n')
   const hasMoreLines = lines.length > MAX_PREVIEW_LINES
   let bounded = lines.slice(0, MAX_PREVIEW_LINES).join('\n').trim()
   if (hasMoreLines) bounded = `${bounded}\n…`
@@ -80,23 +94,40 @@ function safePreview(value: unknown): string | undefined {
   return boundedMultiline(value)
 }
 
-function safeSummaryValue(value: unknown, depth = 0): unknown {
+function structuralDescriptor(value: unknown): string {
+  if (typeof value === 'string') return `[string:${String(value.length)}]`
+  if (typeof value === 'number') return '[number]'
+  if (typeof value === 'boolean') return '[boolean]'
+  if (value === null) return '[null]'
+  if (Array.isArray(value)) return `[array:${String(value.length)}]`
+  if (typeof value === 'object') return `[object:${String(Object.keys(value).length)}]`
+  return '[unavailable]'
+}
+
+function safePublicScalar(key: string, value: unknown): unknown {
+  if (!PUBLIC_SCALAR_KEYS.has(key)) return structuralDescriptor(value)
+  if (typeof value === 'boolean' || typeof value === 'number' || value === null) return value
+  if (typeof value === 'string' && PUBLIC_SCALAR_TEXT.test(value) && scrubText(value) === value) return value
+  return structuralDescriptor(value)
+}
+
+/**
+ * Describe an arbitrary tool payload without copying arbitrary values. Only a
+ * closed set of status/count metadata may expose scalar values; every other
+ * value is represented by its JSON shape.
+ */
+function safeSummaryValue(value: unknown, depth = 0, key = ''): unknown {
   if (depth > MAX_SUMMARY_DEPTH) return '[TRUNCATED]'
-  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value
-  if (typeof value === 'string') return scrubText(value)
-  if (Array.isArray(value)) {
-    return [
-      ...value.slice(0, MAX_SUMMARY_ITEMS).map(item => safeSummaryValue(item, depth + 1)),
-      ...(value.length > MAX_SUMMARY_ITEMS ? ['[TRUNCATED]'] : []),
-    ]
-  }
-  if (typeof value !== 'object') return '[UNAVAILABLE]'
+  if (value === null || typeof value !== 'object') return safePublicScalar(key, value)
+  if (Array.isArray(value)) return structuralDescriptor(value)
   const source = value as Record<string, unknown>
   const entries = Object.entries(source).sort(([left], [right]) => left.localeCompare(right))
   const result: Record<string, unknown> = {}
   for (const [key, item] of entries.slice(0, MAX_SUMMARY_ITEMS)) {
     if (SENSITIVE_KEY.test(key)) continue
-    result[key] = safeSummaryValue(item, depth + 1)
+    result[key] = item !== null && typeof item === 'object' && !Array.isArray(item)
+      ? safeSummaryValue(item, depth + 1, key)
+      : safePublicScalar(key, item)
   }
   if (entries.length > MAX_SUMMARY_ITEMS) result['…'] = '[TRUNCATED]'
   return result
@@ -109,6 +140,14 @@ function safeJsonSummary(value: unknown): string | undefined {
   } catch {
     return undefined
   }
+}
+
+function safeErrorSummary(value: unknown): string {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const code = (value as Record<string, unknown>).code
+    if (typeof code === 'string' && PUBLIC_SCALAR_TEXT.test(code)) return `错误码 ${code}`
+  }
+  return '错误详情未公开'
 }
 
 function usage(value: unknown): PhysicalObservation['usage'] | undefined {
@@ -194,15 +233,30 @@ function toolTraceEntry(event: PhysicalSessionEvent): {
       },
     }
   }
+  if (event.type === 'physical-operator/tool-indeterminate') {
+    return {
+      key: `tool:${toolCallId}`,
+      entry: {
+        seq: event.seq,
+        time: event.time,
+        type: 'tool',
+        tool: {
+          toolCallId,
+          name,
+          status: 'indeterminate',
+          error: 'COMMAND_INDETERMINATE',
+          resultSeq: event.seq,
+        },
+      },
+    }
+  }
   if (event.type !== 'physical-operator/tool-result') return undefined
   const result = event.data.result
   const resultRecord = typeof result === 'object' && result !== null && !Array.isArray(result)
     ? result as Record<string, unknown>
     : undefined
   const isError = resultRecord?.isError === true || resultRecord?.error !== undefined
-  const error = resultRecord?.error === undefined ? undefined : safePreview(
-    typeof resultRecord.error === 'string' ? resultRecord.error : safeJsonSummary(resultRecord.error),
-  )
+  const error = resultRecord?.error === undefined ? undefined : safeErrorSummary(resultRecord.error)
   const resultValue = resultRecord === undefined
     ? result
     : resultRecord.value === undefined ? resultRecord.content : resultRecord.value
@@ -234,7 +288,9 @@ function mergeToolTraceEntries(
   }
   // The first settled result wins. This keeps reconnect/replay events from
   // replacing a durable receipt with a later duplicate.
-  if (previous.tool.status !== 'running') return previous
+  if (previous.tool.status === 'completed' || previous.tool.status === 'error') return previous
+  if (next.tool.status === 'running') return previous
+  if (previous.tool.status === 'indeterminate' && next.tool.status === 'indeterminate') return previous
   const callSeq = previous.tool.callSeq ?? next.tool.callSeq
   return {
     ...previous,
@@ -248,7 +304,9 @@ function mergeToolTraceEntries(
 
 function traceEntry(match: ConversationMatch): { readonly key: string; readonly entry: TrajectoryPhysicalOperatorTraceEntry } | undefined {
   const event = physicalEvent(match)
-  if (event.type === 'physical-operator/tool-call' || event.type === 'physical-operator/tool-result') {
+  if (event.type === 'physical-operator/tool-call'
+    || event.type === 'physical-operator/tool-result'
+    || event.type === 'physical-operator/tool-indeterminate') {
     return toolTraceEntry(event)
   }
   if (event.type === 'physical-operator/dispatch-terminal') {
@@ -318,7 +376,9 @@ const trajectoryPhysicalOperatorDefinition: ConversationNodeDefinition<PhysicalO
     if (event.type === 'physical-operator/progress'
       || event.type === 'physical-operator/dispatch-terminal'
       || event.type === 'physical-operator/trace-degraded') return { id: String(event.data.commandId), role: 'update' }
-    if (event.type === 'physical-operator/tool-call' || event.type === 'physical-operator/tool-result') {
+    if (event.type === 'physical-operator/tool-call'
+      || event.type === 'physical-operator/tool-result'
+      || event.type === 'physical-operator/tool-indeterminate') {
       const id = executionTraceId(event.data)
       if (id === undefined) return null
       // New events carry the parent execution id. Legacy events without it

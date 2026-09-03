@@ -99,7 +99,21 @@ describe('Trajectory conversation Definitions', () => {
       at(2, 'physical-operator/progress', {
         commandId: 'command-1', operatorId: 'codex', sequence: 4, type: 'turn.observation',
         time: '2026-09-01T10:00:00.000Z',
-        data: { kind: 'public-output', preview: `Visible API_KEY=secret\nsecond line\n${'x'.repeat(400)}` },
+        data: {
+          kind: 'public-output',
+          preview: [
+            'Visible API_KEY=secret',
+            "password='correct horse battery staple'",
+            "curl -H 'Authorization: Bearer sk-live-secret'",
+            'echo ghp_abcdefghijklmnopqrstuvwxyz',
+            'reasoning: private chain of thought',
+            '-----BEGIN OPENSSH PRIVATE KEY-----',
+            'private-key-body',
+            '-----END OPENSSH PRIVATE KEY-----',
+            'second line',
+            'x'.repeat(400),
+          ].join('\n'),
+        },
       }, { ignorable: true }),
       at(3, 'physical-operator/progress', {
         commandId: 'command-1', operatorId: 'codex', sequence: 4, type: 'turn.observation',
@@ -126,6 +140,9 @@ describe('Trajectory conversation Definitions', () => {
       .toContain('[REDACTED]')
     expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
       .toContain('\nsecond line')
+    const publicPreview = entries.find(entry => entry.type === 'observation')?.observation?.preview ?? ''
+    expect(publicPreview).not.toMatch(/secret|correct horse|sk-live|ghp_|chain of thought|private-key-body/iu)
+    expect(publicPreview).toContain('[PRIVATE KEY REDACTED]')
     expect(entries.find(entry => entry.type === 'observation')?.observation?.preview?.length)
       .toBeLessThanOrEqual(1_600)
     expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
@@ -171,7 +188,7 @@ describe('Trajectory conversation Definitions', () => {
     expect(current.physicalOperatorExecutions[0]?.entries.map(entry => entry.type)).toEqual(['dispatch', 'progress'])
   })
 
-  it('pairs durable physical tool events, preserves multiline output, and scrubs sensitive values after replay', () => {
+  it('pairs durable physical tool events and exposes only structural whitelist summaries after replay', () => {
     const current = snapshot(assembler([
       at(1, 'physical-operator/dispatch', {
         commandId: 'command-tools', operatorId: 'codex', promptMessageId: 'm', requestedByMessageId: 'm',
@@ -180,14 +197,24 @@ describe('Trajectory conversation Definitions', () => {
       at(2, 'physical-operator/tool-call', {
         commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
         tool: 'Bash', arguments: {
-          command: 'printf hello', token: 'do-not-render', prompt: 'do-not-render',
+          command: "curl -H 'Authorization: Bearer sk-live-secret'",
+          input: 'complete original request must not render',
+          password: 'correct horse battery staple',
+          privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nprivate-key-body\n-----END OPENSSH PRIVATE KEY-----',
+          prompt: 'hidden prompt must not render',
+          reasoning: 'hidden chain of thought must not render',
+          token: 'ghp_abcdefghijklmnopqrstuvwxyz',
+          limit: 5,
         },
       }, { ignorable: true }),
       at(3, 'physical-operator/tool-result', {
         commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
         tool: 'Bash', result: {
           isError: false,
-          value: { text: 'line one\nline two', api_key: 'do-not-render' },
+          value: {
+            text: 'line one\nline two', api_key: 'do-not-render',
+            transcript: 'full transcript must not render', code: 'sk-live-secret', count: 2,
+          },
         },
       }, { ignorable: true }),
       // A reconnect/reload can expose the same durable tool call and result at
@@ -212,12 +239,49 @@ describe('Trajectory conversation Definitions', () => {
       },
     })
     if (tool?.type !== 'tool' || tool.tool === undefined) throw new Error('expected paired physical tool trace')
-    expect(tool.tool.argumentsSummary).toContain('printf hello')
-    expect(tool.tool.argumentsSummary).not.toContain('do-not-render')
-    expect(tool.tool.resultSummary).toContain('line one')
-    expect(tool.tool.resultSummary).toContain('line two')
-    expect(tool.tool.resultSummary).not.toContain('do-not-render')
+    expect(tool.tool.argumentsSummary).toContain('"command": "[string:')
+    expect(tool.tool.argumentsSummary).toContain('"limit": 5')
+    expect(tool.tool.resultSummary).toContain('"count": 2')
+    const exposed = `${tool.tool.argumentsSummary ?? ''}\n${tool.tool.resultSummary ?? ''}`
+    for (const secret of [
+      'Authorization', 'sk-live', 'original request', 'correct horse', 'private-key-body',
+      'hidden prompt', 'chain of thought', 'ghp_', 'line one', 'line two', 'full transcript',
+      'do-not-render',
+    ]) expect(exposed).not.toContain(secret)
     expect(tool.tool.resultSummary).not.toContain('api_key')
+  })
+
+  it('projects a recovered call without a result as indeterminate and accepts later proof of settlement', () => {
+    const value = assembler([
+      at(1, 'physical-operator/dispatch', {
+        commandId: 'command-indeterminate', operatorId: 'codex', promptMessageId: 'm', requestedByMessageId: 'm',
+        turn: 1, step: 1, recovered: false,
+      }),
+      at(2, 'physical-operator/tool-call', {
+        commandId: 'command-indeterminate:codex-tool:1', toolCallId: 'tool-call-indeterminate',
+        executionCommandId: 'command-indeterminate', tool: 'Bash', arguments: { command: 'side effect' },
+      }, { ignorable: true }),
+      at(3, 'physical-operator/tool-indeterminate', {
+        commandId: 'command-indeterminate:codex-tool:1', toolCallId: 'tool-call-indeterminate',
+        executionCommandId: 'command-indeterminate', tool: 'Bash', code: 'COMMAND_INDETERMINATE',
+      }, { ignorable: true }),
+    ])
+    const indeterminateEntry = snapshot(value).physicalOperatorExecutions[0]?.entries
+      .find(entry => entry.type === 'tool')
+    expect(indeterminateEntry?.type).toBe('tool')
+    expect(indeterminateEntry?.tool).toMatchObject({
+      toolCallId: 'tool-call-indeterminate', status: 'indeterminate', error: 'COMMAND_INDETERMINATE',
+    })
+
+    value.append(at(4, 'physical-operator/tool-result', {
+      commandId: 'command-indeterminate:codex-tool:1', toolCallId: 'tool-call-indeterminate',
+      executionCommandId: 'command-indeterminate', tool: 'Bash', result: { isError: false, value: { count: 1 } },
+    }, { ignorable: true }))
+    value.flush()
+    const settledEntry = snapshot(value).physicalOperatorExecutions[0]?.entries
+      .find(entry => entry.type === 'tool')
+    expect(settledEntry?.type).toBe('tool')
+    expect(settledEntry?.tool).toMatchObject({ status: 'completed', resultSeq: 4 })
   })
 
   it('keeps legacy tool events visible when no parent execution id was persisted', () => {

@@ -12,6 +12,7 @@ import LlmRuntime, {
   LlmAdapter,
   type GenerateOptions,
   type StreamChunk,
+  type ToolSchema,
 } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -356,6 +357,60 @@ describe('host physical-operator routing', () => {
     expect(toolResult.data.toolCallId).toBe(toolResult.data.commandId)
     expect(toolCall.data.executionCommandId).toBe(toolResult.data.executionCommandId)
     expect(toolCall.data.executionCommandId).not.toBe(toolCall.data.commandId)
+  })
+
+  it('persists one indeterminate trace across bridge restart when a recovered receipt has no result', async () => {
+    const { ctx, agent } = await setup({ mountTool: false })
+    const executionCommandId = 'resident-recovered-command'
+    const commandId = `${executionCommandId}:codex-tool:1`
+    agent.session.append('physical-operator/tool-call', {
+      commandId,
+      toolCallId: commandId,
+      executionCommandId,
+      tool: 'subscription_echo',
+      arguments: { value: 'side effect may have happened' },
+    }, { ignorable: true })
+    const bridge = new PhysicalOperatorModelToolBridge(ctx)
+    const schema: ToolSchema = {
+      name: 'subscription_echo',
+      description: 'test',
+      parameters: { type: 'object' },
+    }
+    const bound = await bridge.bind(
+      executionCommandId,
+      agent,
+      [schema],
+      new AbortController().signal,
+    )
+    try {
+      expect(agent.session.events.filter(event => event.type === 'physical-operator/tool-indeterminate')).toMatchObject([{
+        ignorable: true,
+        data: {
+          commandId,
+          toolCallId: commandId,
+          executionCommandId,
+          tool: 'subscription_echo',
+          code: 'COMMAND_INDETERMINATE',
+        },
+      }])
+    } finally {
+      bound.release()
+      await bridge.dispose()
+    }
+
+    const restartedBridge = new PhysicalOperatorModelToolBridge(ctx)
+    const restarted = await restartedBridge.bind(
+      executionCommandId,
+      agent,
+      [schema],
+      new AbortController().signal,
+    )
+    try {
+      expect(agent.session.events.filter(event => event.type === 'physical-operator/tool-indeterminate')).toHaveLength(1)
+    } finally {
+      restarted.release()
+      await restartedBridge.dispose()
+    }
   })
 
   it('carries Resident product usage into the durable assistant message for billing', async () => {

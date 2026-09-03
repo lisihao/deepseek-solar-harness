@@ -41,7 +41,7 @@ export interface TrajectoryPhysicalOperatorTraceEntry {
     /** Stable bridge receipt identity used to pair call and result events. */
     readonly toolCallId: string
     readonly name: string
-    readonly status: 'running' | 'completed' | 'error'
+    readonly status: 'running' | 'completed' | 'error' | 'indeterminate'
     readonly argumentsSummary?: string
     readonly resultSummary?: string
     readonly error?: string

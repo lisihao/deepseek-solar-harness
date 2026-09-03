@@ -656,7 +656,11 @@ function physicalOperatorCell(
   if (entry.type === 'tool') {
     const tool = entry.tool
     if (tool === undefined) return { ...base, text: '工具状态已更新' }
-    const status = tool.status === 'running' ? '运行中' : tool.status === 'error' ? '失败' : '完成'
+    const status = tool.status === 'running'
+      ? '运行中'
+      : tool.status === 'indeterminate'
+        ? '状态不确定'
+        : tool.status === 'error' ? '失败' : '完成'
     const outputDetail = [
       tool.resultSummary === undefined ? undefined : `结果\n${tool.resultSummary}`,
       tool.error === undefined ? undefined : `错误\n${tool.error}`,
@@ -671,7 +675,7 @@ function physicalOperatorCell(
       }),
       ...(tool.resultSummary === undefined ? {} : { resultPreviewMarkdown: tool.resultSummary }),
       ...(outputDetail === '' ? {} : { outputDetail }),
-      ...(tool.status === 'error' ? { isError: true } : {}),
+      ...(tool.status === 'error' || tool.status === 'indeterminate' ? { isError: true } : {}),
     }
   }
   const observation = entry.observation

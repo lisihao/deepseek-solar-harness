@@ -171,6 +171,27 @@ describe('deriveTrajectoryLayout', () => {
     expect(cell?.recordId).toBe(['physical-operator', 'command-tools', 'tool', 'tool-call-1'].join('\u0000'))
   })
 
+  it('renders an indeterminate recovered physical tool as a terminal error state', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [], partial: null, runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-indeterminate', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [{
+          seq: 11, time: 10_100, type: 'tool',
+          tool: {
+            toolCallId: 'tool-call-1', name: 'Bash', status: 'indeterminate',
+            error: 'COMMAND_INDETERMINATE', callSeq: 10, resultSeq: 11,
+          },
+        }],
+      }],
+    })
+    expect(turns[0]?.groups[0]?.cells[0]).toMatchObject({
+      kind: 'operator', text: '工具状态不确定 · Bash', isError: true,
+      outputDetail: '错误\nCOMMAND_INDETERMINATE',
+    })
+  })
+
   it('orders a physical command by source sequence and keeps a settled success out of error state', () => {
     const nodes = [
       { kind: 'user', seq: 1, time: 1_000, content: [{ type: 'text', text: 'start' }], source: null },

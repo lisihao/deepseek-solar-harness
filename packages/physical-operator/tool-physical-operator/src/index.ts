@@ -129,6 +129,14 @@ declare module '@deepseek-ai/dsh-session/types' {
       tool: string
       result: JsonValue
     }
+    /** A recovered bridge Receipt has a call but no provable settled result. */
+    'physical-operator/tool-indeterminate': {
+      commandId: string
+      toolCallId: string
+      executionCommandId: string
+      tool: string
+      code: 'COMMAND_INDETERMINATE'
+    }
   }
 }
 

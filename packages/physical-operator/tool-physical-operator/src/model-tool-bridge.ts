@@ -19,6 +19,18 @@ interface Binding {
   readonly receipts: Map<string, { readonly hash: string; readonly result?: Promise<unknown> }>
 }
 
+interface RecoveredIndeterminateReceipt {
+  readonly commandId: string
+  readonly toolCallId: string
+  readonly executionCommandId?: string
+  readonly tool: string
+}
+
+interface RecoveredBridgeState {
+  readonly receipts: Binding['receipts']
+  readonly indeterminate: readonly RecoveredIndeterminateReceipt[]
+}
+
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${label} must be an object`)
@@ -88,20 +100,31 @@ export class PhysicalOperatorModelToolBridge {
     if (schemas.length === 0) return { release: () => {} }
     await this.server.start()
     const sessionId = `${String(agent.id)}:${commandId}`
+    const current = this.bindings.get(sessionId)
+    if (current !== undefined) throw new Error(`model tool bridge session is already attached: ${sessionId}`)
     const tools = schemas.map(schema => ({
       name: schema.name,
       description: schema.description,
       inputSchema: schema.parameters,
     }))
+    const recovered = recoverReceipts(agent.session.events)
+    for (const receipt of recovered.indeterminate) {
+      if (receipt.executionCommandId !== commandId) continue
+      agent.session.append('physical-operator/tool-indeterminate', {
+        commandId: receipt.commandId,
+        toolCallId: receipt.toolCallId,
+        executionCommandId: commandId,
+        tool: receipt.tool,
+        code: 'COMMAND_INDETERMINATE',
+      }, { ignorable: true })
+    }
     const binding: Binding = {
       agent,
       signal,
       executionCommandId: commandId,
       tools: new Set(tools.map(tool => tool.name)),
-      receipts: recoverReceipts(agent.session.events),
+      receipts: recovered.receipts,
     }
-    const current = this.bindings.get(sessionId)
-    if (current !== undefined) throw new Error(`model tool bridge session is already attached: ${sessionId}`)
     this.bindings.set(sessionId, binding)
     let attached = true
     return {
@@ -180,26 +203,54 @@ export class PhysicalOperatorModelToolBridge {
   }
 }
 
-function recoverReceipts(events: readonly SessionEvent[]): Binding['receipts'] {
-  const calls = new Map<string, { readonly hash: string; readonly tool: string }>()
+function recoverReceipts(events: readonly SessionEvent[]): RecoveredBridgeState {
+  const calls = new Map<string, {
+    readonly hash: string
+    readonly tool: string
+    readonly toolCallId: string
+    readonly executionCommandId?: string
+  }>()
   const receipts: Binding['receipts'] = new Map()
+  const settled = new Set<string>()
+  const markedIndeterminate = new Set<string>()
   for (const event of events) {
     if (event.type === 'physical-operator/tool-call') {
       const call = {
         hash: requestHash(event.data.tool, event.data.arguments),
         tool: event.data.tool,
+        toolCallId: event.data.toolCallId ?? event.data.commandId,
+        ...event.data.executionCommandId === undefined
+          ? {}
+          : { executionCommandId: event.data.executionCommandId },
       }
       calls.set(event.data.commandId, call)
-      receipts.set(event.data.commandId, { hash: call.hash })
+      if (!settled.has(event.data.commandId)) receipts.set(event.data.commandId, { hash: call.hash })
+      continue
+    }
+    if (event.type === 'physical-operator/tool-indeterminate') {
+      markedIndeterminate.add(event.data.commandId)
       continue
     }
     if (event.type !== 'physical-operator/tool-result') continue
     const call = calls.get(event.data.commandId)
     if (call === undefined || call.tool !== event.data.tool) continue
+    settled.add(event.data.commandId)
     receipts.set(event.data.commandId, {
       hash: call.hash,
       result: Promise.resolve(event.data.result),
     })
   }
-  return receipts
+  return {
+    receipts,
+    indeterminate: [...calls.entries()].flatMap(([commandId, call]) => (
+      settled.has(commandId) || markedIndeterminate.has(commandId)
+        ? []
+        : [{
+          commandId,
+          toolCallId: call.toolCallId,
+          ...call.executionCommandId === undefined ? {} : { executionCommandId: call.executionCommandId },
+          tool: call.tool,
+        }]
+    )),
+  }
 }
