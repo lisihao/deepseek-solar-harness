@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
+import { name } from '../src/index.js'
 
 describe('Ego Lite browser bundle', () => {
   it('ships one self-contained Service/Provider/Consumer composition', () => {
+    expect(name).toBe('ego-lite-browser-bundle')
     const root = fileURLToPath(new URL('..', import.meta.url))
     const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
       dependencies: Record<string, string>

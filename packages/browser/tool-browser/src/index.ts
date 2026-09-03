@@ -302,7 +302,9 @@ function brandOperation(operation: PortablePlanInput['operations'][number]): Bro
     case 'complete':
       return withId as BrowserOperationV1
   }
+  /* v8 ignore next -- Zod rejects unknown operation kinds before this closed-union exhaustiveness backstop. */
   const exhaustive: never = operation
+  /* v8 ignore next -- the same validated closed union makes this return unreachable. */
   return exhaustive
 }
 

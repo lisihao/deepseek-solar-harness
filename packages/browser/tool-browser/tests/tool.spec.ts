@@ -44,8 +44,11 @@ describe('tool-browser boundary', () => {
       workspace: { kind: 'named', name: 'research', createIfMissing: true },
       requiredCapabilities: ['named-workspace', 'semantic-snapshot'],
       operations: [
-        { id: 'open', kind: 'open', page: 'main', url: 'https://example.com', reuse: 'exact-url', waitUntil: 'load' },
+        { id: 'open', kind: 'open', page: 'main', url: 'https://example.com', reuse: 'exact-url', waitUntil: 'load', timeoutMs: 5_000 },
+        { id: 'select', kind: 'select-page', page: 'main', match: { kind: 'url-prefix', prefix: 'https://example.com' } },
         { id: 'snapshot', kind: 'snapshot', page: 'main' },
+        { id: 'wait-control', kind: 'wait', condition: { kind: 'control', control: 'agent' } },
+        { id: 'wait-locator', kind: 'wait', condition: { kind: 'locator', page: 'main', locator: { kind: 'role', role: 'button' }, state: 'visible' } },
         { id: 'done', kind: 'complete', keep: true },
       ],
     })).toEqual({
@@ -53,10 +56,27 @@ describe('tool-browser boundary', () => {
       workspace: { kind: 'named', name: 'research', createIfMissing: true },
       requiredCapabilities: ['named-workspace', 'semantic-snapshot'],
       operations: [
-        { id: BrowserOperationId('open'), kind: 'open', page: BrowserPageKey('main'), url: 'https://example.com', reuse: 'exact-url', waitUntil: 'load' },
+        { id: BrowserOperationId('open'), kind: 'open', page: BrowserPageKey('main'), url: 'https://example.com', reuse: 'exact-url', waitUntil: 'load', timeoutMs: 5_000 },
+        { id: BrowserOperationId('select'), kind: 'select-page', page: BrowserPageKey('main'), match: { kind: 'url-prefix', prefix: 'https://example.com' } },
         { id: BrowserOperationId('snapshot'), kind: 'snapshot', page: BrowserPageKey('main') },
+        { id: BrowserOperationId('wait-control'), kind: 'wait', condition: { kind: 'control', control: 'agent' } },
+        { id: BrowserOperationId('wait-locator'), kind: 'wait', condition: { kind: 'locator', page: BrowserPageKey('main'), locator: { kind: 'role', role: 'button' }, state: 'visible' } },
         { id: BrowserOperationId('done'), kind: 'complete', keep: true },
       ],
+    })
+  })
+
+  it('brands an existing workspace without changing its durable id', () => {
+    expect(parseBrowserPlan({
+      version: 1,
+      workspace: { kind: 'existing', id: 'workspace-1' },
+      requiredCapabilities: [],
+      operations: [{ id: 'done', kind: 'complete', keep: false }],
+    })).toEqual({
+      version: 1,
+      workspace: { kind: 'existing', id: BrowserWorkspaceId('workspace-1') },
+      requiredCapabilities: [],
+      operations: [{ id: BrowserOperationId('done'), kind: 'complete', keep: false }],
     })
   })
 
@@ -119,6 +139,18 @@ describe('tool-browser boundary', () => {
     expect(schema.properties.plan.properties.workspace.oneOf.map(branch => branch.properties.kind.const)).toEqual(['existing', 'named'])
     expect(schema.properties.plan.properties.operations.items.properties.kind.enum).not.toContain('pages')
     expect(schema.properties.plan.properties.operations.items.properties.reuse.const).toBe('exact-url')
+  })
+
+  it('provides a generic pending presentation for a validated browser plan', async () => {
+    const { ctx } = await setupBrowserFixture()
+    await ctx.plugin(ToolBrowser)
+    const plan = validPlan()
+    expect(ctx.tools.get('browser')?.presentCall?.({ plan })).toEqual({
+      card: 'generic',
+      title: 'Browser plan',
+      kind: 'other',
+      rawInput: JSON.stringify(plan),
+    })
   })
 
   it('projects portable results to JSON without changing stable ids', () => {

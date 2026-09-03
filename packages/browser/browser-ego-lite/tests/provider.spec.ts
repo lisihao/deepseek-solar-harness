@@ -598,6 +598,21 @@ describe('Ego Lite discovery and explicit partial mappings', () => {
     ])
   })
 
+  it('selects the app helper directly when no home directory is available', async () => {
+    const ctx = new Context()
+    await ctx.plugin(FakeSubprocess)
+    const subprocess = ctx.subprocess as FakeSubprocess
+    subprocess.resolve = command => command === EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE
+      ? Promise.resolve(command)
+      : Promise.reject(new Error('missing'))
+
+    await expect(EgoLite.resolveEgoLiteExecutable(subprocess, undefined, undefined)).resolves.toEqual({
+      path: EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE,
+      source: 'application',
+    })
+    expect(subprocess.resolutions).toEqual([EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE])
+  })
+
   it('fails unsupported current workspace, no-reuse open, and pages before spawning', async () => {
     const open = plan.operations[0]
     if (open?.kind !== 'open') throw new Error('fixture must begin with an open operation')
@@ -715,7 +730,9 @@ describe('Ego Lite subprocess validation', () => {
   it('rejects signalled, empty-success, multiple, and malformed error frames', async () => {
     const cases: readonly [ScriptedRun, string][] = [
       [{ outcome: { exitCode: null, signal: 'SIGKILL' } }, 'BROWSER_PROVIDER_FAILED'],
+      [{ outcome: { exitCode: null, signal: null } }, 'BROWSER_PROVIDER_FAILED'],
       [{ outcome: { exitCode: 0, signal: null } }, 'BROWSER_PROTOCOL'],
+      [{ outcome: { exitCode: 1, signal: null } }, 'BROWSER_PROVIDER_FAILED'],
       [{
         outcome: { exitCode: 0, signal: null },
         stdout: `${successFrame(planResult).stdout}${successFrame(planResult).stdout}`,
@@ -773,6 +790,7 @@ describe('Ego Lite subprocess validation', () => {
       ['EGO_CDP_SEND_FAILED', 'BROWSER_PROVIDER_FAILED'],
       ['EGO_OPERATION_FAILED', 'BROWSER_PROVIDER_FAILED'],
       ['EGO_SNAPSHOT_FAILED', 'BROWSER_PROVIDER_FAILED'],
+      ['EGO_UNKNOWN', 'BROWSER_PROVIDER_FAILED'],
     ] as const
     for (const [native, portable] of mappings) {
       const { ctx, subprocess } = await processHarness()
@@ -828,5 +846,81 @@ describe('Ego Lite subprocess validation', () => {
       output: { kind: 'json', value: undefined },
     }, json)).toThrow(BrowserError)
     expect(() => EgoLite.decodeProgramResult({ version: 2, output: {}, workspace: {} }, program)).toThrow(BrowserError)
+
+    const decodePlan = (operation: BrowserRunPlanV1['operations'][number], result: unknown) => {
+      const oneOperationPlan: BrowserRunPlanV1 = { ...plan, operations: [operation] }
+      return () => EgoLite.decodePlanResult({
+        version: 1,
+        workspace: planResult.workspace,
+        operations: [result],
+      }, oneOperationPlan)
+    }
+    expect(decodePlan(
+      { kind: 'click', id: op('bad-done'), page: pageKey('main'), locator: { kind: 'css', selector: 'button' } },
+      { kind: 'wrong', id: op('bad-done') },
+    )).toThrow(BrowserError)
+    expect(decodePlan(
+      { kind: 'navigate', id: op('bad-page'), page: pageKey('main'), url: 'https://example.com', waitUntil: 'load' },
+      { kind: 'wrong', id: op('bad-page') },
+    )).toThrow(BrowserError)
+    expect(decodePlan(
+      { kind: 'pages', id: op('pages') },
+      { kind: 'pages', id: op('pages'), pages: [] },
+    )).toThrow(BrowserError)
+    expect(decodePlan(
+      { kind: 'snapshot', id: op('bad-snapshot'), page: pageKey('main') },
+      { kind: 'snapshot', id: op('bad-snapshot'), content: 42 },
+    )).toThrow(BrowserError)
+    expect(decodePlan(
+      { kind: 'screenshot', id: op('bad-shot'), page: pageKey('main'), fullPage: false },
+      { kind: 'screenshot', id: op('bad-shot'), mediaType: 'image/png', base64: 42 },
+    )).toThrow(BrowserError)
+    expect(decodePlan(
+      { kind: 'read', id: op('bad-read'), page: pageKey('main'), locator: { kind: 'css', selector: 'input' }, target: { kind: 'text' } },
+      { kind: 'read', id: op('bad-read'), value: 42 },
+    )).toThrow(BrowserError)
+    expect(decodePlan(
+      { kind: 'count', id: op('bad-count'), page: pageKey('main'), locator: { kind: 'css', selector: 'article' } },
+      { kind: 'count', id: op('bad-count'), count: -1 },
+    )).toThrow(BrowserError)
+    expect(decodePlan(
+      { kind: 'handoff', id: op('bad-control') },
+      { kind: 'control', id: op('bad-control'), operation: 'handoff', control: 'agent' },
+    )).toThrow(BrowserError)
+    expect(() => EgoLite.decodePlanResult({
+      version: 1,
+      workspace: planResult.workspace,
+      operations: [{}],
+    }, { ...plan, operations: [undefined] as unknown as BrowserRunPlanV1['operations'] })).toThrow(BrowserError)
+    expect(() => EgoLite.decodePlanResult({
+      version: 1,
+      workspace: { ...planResult.workspace, lifecycle: 'stopped' },
+      operations: [planResult.operations[0]],
+    }, plan)).toThrow(BrowserError)
+    expect(decodePlan(
+      { kind: 'open', id: op('bad-page-data'), page: pageKey('main'), url: 'https://example.com', reuse: 'exact-url', waitUntil: 'load' },
+      { kind: 'page', id: op('bad-page-data'), operation: 'open', page: { page: 'main', url: 42 } },
+    )).toThrow(BrowserError)
+    expect(() => EgoLite.decodePlanResult({
+      version: 1,
+      workspace: planResult.workspace,
+      operations: [{ kind: 'screenshot', id: op('bad-base64'), mediaType: 'image/png', base64: '!' }],
+    }, { ...plan, operations: [{ kind: 'screenshot', id: op('bad-base64'), page: pageKey('main'), fullPage: false }] })).toThrow(BrowserError)
+
+    expect(EgoLite.decodePlanResult({
+      version: 1,
+      workspace: { id: 'ego-lite:unnamed', lifecycle: 'active', control: 'agent' },
+      operations: [{ kind: 'page', id: op('open-main'), operation: 'open', page: { page: 'main', url: 'https://example.com' } }],
+    }, plan)).toMatchObject({ workspace: { id: BrowserWorkspaceId('ego-lite:unnamed') } })
+    expect(EgoLite.decodeProgramResult({
+      version: 1,
+      workspace: { id: 'ego-lite:unnamed', lifecycle: 'active', control: 'agent' },
+      output: { kind: 'text', value: 'ok', truncated: false },
+    }, program)).toMatchObject({ output: { kind: 'text', value: 'ok' } })
+    expect(() => EgoLite.decodeProgramResult({
+      version: 1,
+      workspace: planResult.workspace,
+      output: { kind: 'text', value: 42, truncated: false },
+    }, program)).toThrow(BrowserError)
   })
 })
