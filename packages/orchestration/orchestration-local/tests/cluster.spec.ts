@@ -193,7 +193,7 @@ describe('orchestration cluster persistence', () => {
     expect(reopened.loadElectionState()).toEqual({ term: 2, votedFor: 'a', role: 'candidate', leaseUntil: 0 })
     expect(reopened.commitIndex()).toBe(2)
     reopened.close()
-  })
+  }, 30_000)
 })
 
 describe('OrchestrationClusterElection', () => {

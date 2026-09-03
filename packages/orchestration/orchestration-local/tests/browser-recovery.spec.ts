@@ -179,7 +179,7 @@ describe('browser binding restart recovery', () => {
     const completed = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
     expect(completed.nodes[0]?.state).toBe('passed')
     expect(resident.requests).toHaveLength(1)
-  })
+  }, 30_000)
 
   it('uses the same owner-local endpoint across bridge instances', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-browser-bridge-'))

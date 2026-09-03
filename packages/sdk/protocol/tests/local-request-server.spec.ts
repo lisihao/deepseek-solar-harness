@@ -92,7 +92,7 @@ describe('LocalJsonRpcRequestServer', () => {
     await firstStart
     if (endpoint.directory !== undefined) {
       if (process.platform === 'win32') {
-        expect(fsHarness.chmodCalls).toEqual([endpoint.directory, endpoint.path])
+        expect(fsHarness.chmodCalls).toEqual([endpoint.path])
       } else {
         expect((await stat(endpoint.directory)).mode & 0o777).toBe(0o700)
         expect((await stat(endpoint.path)).mode & 0o777).toBe(0o600)

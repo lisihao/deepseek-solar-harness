@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { PhysicalOperatorValueShape } from '../src/api/events.ts'
 
 import { projectPublicSessionEvent } from '../src/physical-operator-trace.ts'
 
@@ -183,7 +184,7 @@ describe('projectPublicSessionEvent', () => {
       cacheReadInputTokens: 30,
       cacheWriteInputTokens: 40,
     })
-    expect(project('progress', {
+    const partialUsage = project('progress', {
       commandId: 'observation-usage-partial',
       sequence: 6,
       type: 'turn.observation',
@@ -196,7 +197,12 @@ describe('projectPublicSessionEvent', () => {
           cacheWriteInputTokens: '40',
         },
       },
-    })).toMatchObject({ kind: 'usage', inputTokens: 1 })
+    })
+    expect(partialUsage).toMatchObject({ version: 1, kind: 'usage', sourceSequence: 6, inputTokens: 1 })
+    expect(partialUsage?.commandId).toMatch(/^trace-[0-9a-f]{24}$/)
+    expect(partialUsage).not.toHaveProperty('outputTokens')
+    expect(partialUsage).not.toHaveProperty('cacheReadInputTokens')
+    expect(partialUsage).not.toHaveProperty('cacheWriteInputTokens')
     expect(project('progress', {
       commandId: 'observation-usage-output-only',
       sequence: 6,
@@ -241,18 +247,17 @@ describe('projectPublicSessionEvent', () => {
   })
 
   it('projects tool calls, including standalone calls and all value shapes', () => {
-    const values: unknown[] = [
-      null,
-      'text',
-      1,
-      true,
-      ['item'],
-      { field: 'value' },
-      undefined,
-      Symbol('unavailable'),
+    const values: readonly [unknown, PhysicalOperatorValueShape][] = [
+      [null, { kind: 'null' }],
+      ['text', { kind: 'string', characters: 4 }],
+      [1, { kind: 'number' }],
+      [true, { kind: 'boolean' }],
+      [['item'], { kind: 'array', items: 1 }],
+      [{ field: 'value' }, { kind: 'object', fields: 1 }],
+      [undefined, { kind: 'unavailable' }],
     ]
 
-    for (const [index, argumentsValue] of values.entries()) {
+    for (const [index, [argumentsValue, argumentsShape]] of values.entries()) {
       expect(project('tool-call', {
         commandId: `tool-command-${index}`,
         toolCallId: `tool-call-${index}`,
@@ -261,6 +266,7 @@ describe('projectPublicSessionEvent', () => {
         kind: 'tool',
         standalone: true,
         status: 'running',
+        argumentsShape,
       })
     }
 
@@ -275,12 +281,12 @@ describe('projectPublicSessionEvent', () => {
       commandId: 'null-execution-fallback',
       toolCallId: 'null-execution-tool',
       arguments: {},
-    })).toMatchObject({ kind: 'tool', standalone: false })
+    })).toMatchObject({ kind: 'tool', standalone: true })
     expect(project('tool-call', {
       executionCommandId: '',
       commandId: 'unused-command',
       toolCallId: 'empty-execution-tool',
-    })).toBeUndefined()
+    })).toMatchObject({ kind: 'tool', standalone: true })
     expect(project('tool-call', {
       commandId: 'invalid-tool-id-command',
       toolCallId: 123,
@@ -289,7 +295,7 @@ describe('projectPublicSessionEvent', () => {
       executionCommandId: 123,
       commandId: 'valid-fallback-not-used',
       toolCallId: 'tool-id',
-    })).toBeUndefined()
+    })).toMatchObject({ kind: 'tool', standalone: true })
 
     expect(project('tool-indeterminate', {
       commandId: 'indeterminate-command',

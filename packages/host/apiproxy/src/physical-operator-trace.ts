@@ -106,7 +106,8 @@ function toolTrace(
   event: PhysicalEventEnvelope,
   data: Record<string, unknown>,
 ): PhysicalOperatorTraceView | undefined {
-  const commandId = publicIdentity(data.executionCommandId ?? data.commandId)
+  const executionCommandId = publicIdentity(data.executionCommandId)
+  const commandId = executionCommandId ?? publicIdentity(data.commandId)
   const toolCallId = publicIdentity(data.toolCallId ?? data.commandId)
   if (commandId === undefined || toolCallId === undefined) return undefined
   if (event.type === 'physical-operator/tool-call') {
@@ -115,7 +116,7 @@ function toolTrace(
       kind: 'tool',
       commandId,
       toolCallId,
-      standalone: data.executionCommandId === undefined,
+      standalone: executionCommandId === undefined,
       status: 'running',
       argumentsShape: valueShape(data.arguments),
     }
@@ -126,7 +127,7 @@ function toolTrace(
       kind: 'tool',
       commandId,
       toolCallId,
-      standalone: data.executionCommandId === undefined,
+      standalone: executionCommandId === undefined,
       status: 'indeterminate',
     }
   }
@@ -140,7 +141,7 @@ function toolTrace(
     kind: 'tool',
     commandId,
     toolCallId,
-    standalone: data.executionCommandId === undefined,
+    standalone: executionCommandId === undefined,
     status: isError ? 'error' : 'completed',
     resultShape: valueShape(resultValue),
   }
