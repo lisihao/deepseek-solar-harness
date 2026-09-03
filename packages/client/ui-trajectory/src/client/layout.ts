@@ -56,6 +56,25 @@ interface UsageLike {
   reasoningTokens?: number
 }
 
+interface DetailedUsageLike {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly cacheReadInputTokens?: number
+  readonly cacheWriteInputTokens?: number
+}
+
+function detailedUsageProps(usage: DetailedUsageLike | undefined): Pick<
+  TrajectoryCellProps,
+  'input' | 'output' | 'cacheRead' | 'cacheWrite'
+> {
+  return {
+    ...(usage?.inputTokens === undefined ? {} : { input: usage.inputTokens }),
+    ...(usage?.outputTokens === undefined ? {} : { output: usage.outputTokens }),
+    ...(usage?.cacheReadInputTokens === undefined ? {} : { cacheRead: usage.cacheReadInputTokens }),
+    ...(usage?.cacheWriteInputTokens === undefined ? {} : { cacheWrite: usage.cacheWriteInputTokens }),
+  }
+}
+
 /** Cell plus absolute ms for group wall-span descriptions. */
 interface LaidCell {
   cell: TrajectoryCellProps
@@ -725,10 +744,7 @@ function physicalOperatorCell(
   return {
     ...base,
     text: fragments.length === 0 ? '用量已更新' : `用量更新 · ${fragments.join(' · ')}`,
-    ...(usage?.inputTokens === undefined ? {} : { input: usage.inputTokens }),
-    ...(usage?.outputTokens === undefined ? {} : { output: usage.outputTokens }),
-    ...(usage?.cacheReadInputTokens === undefined ? {} : { cacheRead: usage.cacheReadInputTokens }),
-    ...(usage?.cacheWriteInputTokens === undefined ? {} : { cacheWrite: usage.cacheWriteInputTokens }),
+    ...detailedUsageProps(usage),
   }
 }
 
@@ -764,10 +780,7 @@ function debateCell(
     ...base,
     ...(output === undefined ? {} : { previewMarkdown: output }),
     ...(details === undefined ? {} : { outputDetail: details }),
-    ...(usage?.inputTokens === undefined ? {} : { input: usage.inputTokens }),
-    ...(usage?.outputTokens === undefined ? {} : { output: usage.outputTokens }),
-    ...(usage?.cacheReadInputTokens === undefined ? {} : { cacheRead: usage.cacheReadInputTokens }),
-    ...(usage?.cacheWriteInputTokens === undefined ? {} : { cacheWrite: usage.cacheWriteInputTokens }),
+    ...detailedUsageProps(usage),
   }
 }
 
