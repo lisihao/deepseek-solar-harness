@@ -3,12 +3,41 @@ import { access, chmod, mkdtemp, rm, stat } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const fsHarness = vi.hoisted(() => ({
+  chmodCalls: [] as string[],
+  rmCalls: [] as string[],
+}))
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...actual,
+    chmodSync(path: Parameters<typeof actual.chmodSync>[0], mode: Parameters<typeof actual.chmodSync>[1]): void {
+      if (process.platform === 'win32' && typeof path === 'string' && path.startsWith('\\\\.\\pipe\\')) {
+        fsHarness.chmodCalls.push(path)
+        return
+      }
+      actual.chmodSync(path, mode)
+    },
+    rmSync(path: Parameters<typeof actual.rmSync>[0], options: Parameters<typeof actual.rmSync>[1]): void {
+      if (process.platform === 'win32' && typeof path === 'string' && path.startsWith('\\\\.\\pipe\\')) {
+        fsHarness.rmCalls.push(path)
+        return
+      }
+      actual.rmSync(path, options)
+    },
+  }
+})
+
 import { JsonRpcLineTransport, LocalJsonRpcRequestServer } from '../src/index.ts'
 
 const roots: string[] = []
 
 afterEach(async () => {
+  fsHarness.chmodCalls.length = 0
+  fsHarness.rmCalls.length = 0
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -23,7 +52,11 @@ async function temporaryEndpoint(
   ownsDirectory: boolean,
 ): Promise<{ path: string; directory?: string }> {
   if (process.platform === 'win32') {
-    return { path: `\\\\.\\pipe\\dsh-local-jsonrpc-${process.pid}-${label}-${randomUUID()}` }
+    const directory = ownsDirectory ? await temporaryRoot() : undefined
+    return {
+      path: `\\\\.\\pipe\\dsh-local-jsonrpc-${process.pid}-${label}-${randomUUID()}`,
+      ...(directory === undefined ? {} : { directory }),
+    }
   }
   const root = await temporaryRoot()
   const directory = ownsDirectory ? join(root, 'nested') : root
@@ -58,14 +91,22 @@ describe('LocalJsonRpcRequestServer', () => {
     expect(server.start()).toBe(firstStart)
     await firstStart
     if (endpoint.directory !== undefined) {
-      expect((await stat(endpoint.directory)).mode & 0o777).toBe(0o700)
-      expect((await stat(endpoint.path)).mode & 0o777).toBe(0o600)
+      if (process.platform === 'win32') {
+        expect(fsHarness.chmodCalls).toEqual([endpoint.directory, endpoint.path])
+      } else {
+        expect((await stat(endpoint.directory)).mode & 0o777).toBe(0o700)
+        expect((await stat(endpoint.path)).mode & 0o777).toBe(0o600)
+      }
     }
     await expect(request(endpoint.path)).resolves.toEqual({ method: 'echo', params: { value: 'hello' } })
 
     await server.dispose()
     if (endpoint.directory !== undefined) {
-      await expect(access(endpoint.path)).rejects.toMatchObject({ code: 'ENOENT' })
+      if (process.platform === 'win32') {
+        expect(fsHarness.rmCalls).toContain(endpoint.path)
+      } else {
+        await expect(access(endpoint.path)).rejects.toMatchObject({ code: 'ENOENT' })
+      }
     }
     await server.dispose()
 

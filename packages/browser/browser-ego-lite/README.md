@@ -10,7 +10,7 @@ The adapter is frozen against upstream [`v1.2.5`](https://github.com/citrolabs/e
 
 | Field | Default | Meaning |
 |---|---:|---|
-| `executable` | discovery | Absolute `ego-browser` path. Omission probes `~/.local/bin/ego-browser`, then the helper bundled at `/Applications/ego lite.app/Contents/Frameworks/ego Framework.framework/Versions/Current/Helpers/ego-browser`. No shell or PATH lookup is used. |
+| `executable` | discovery | Absolute `ego-browser` path. Omission probes the helper bundled at `/Applications/ego lite.app/Contents/Frameworks/ego Framework.framework/Versions/Current/Helpers/ego-browser`, then falls back to `~/.local/bin/ego-browser`. No shell or PATH lookup is used. |
 | `cwd` | DSH process cwd | Absolute working directory for each isolated command. |
 | `graceMs` | `2000` | Managed process-tree termination grace. |
 | `stdoutMaxBytes` | `8388608` | Complete framed stdout bound. Overflow fails with `BROWSER_OUTPUT_LIMIT`. |

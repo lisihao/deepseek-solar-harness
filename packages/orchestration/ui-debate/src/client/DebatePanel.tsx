@@ -206,24 +206,51 @@ export function RunDetail(props: {
   if (run === undefined) return <main className="dshDesktopDebateColumn"><p className="dshDesktopDebateEmpty">选择一个 Run 查看辩论。</p></main>
   const lastStopped = [...(props.events ?? [])].reverse().find(event => event.type === 'debate.stopped')
   const resumable = lastStopped?.data.action === 'pause'
+  const floors = new Map<string, number>()
+  let nextFloor = 1
+  for (const round of run.rounds) {
+    for (const turn of round.turnStates) {
+      if (turn.role === 'decision-judge' || !terminalTurnState(turn.state)) continue
+      const key = `${String(round.round)}-${turn.slotId}`
+      if (!floors.has(key)) floors.set(key, nextFloor++)
+    }
+  }
   return <main className="dshDesktopDebateColumn dshDesktopDebateDetail">
+    <section className="dshDesktopDebateTopic" aria-label="Debate 主题帖">
+      <div className="dshDesktopDebateTopicHeading">
+        <span className="dshDesktopDebatePinnedLabel">主题帖</span>
+        <strong>{run.objective ?? '未提供公开议题'}</strong>
+        <em>{lifecycleLabel(run.state)}</em>
+      </div>
+      <small>第 {String(run.currentRound)} 轮 · {run.unresolved.length > 0 ? `未决 ${String(run.unresolved.length)} 项` : '暂无未决问题'}</small>
+      <details className="dshDesktopDebateTechDetails">
+        <summary>技术详情</summary>
+        <small>Run ID：{run.runId} · revision：{String(run.revision)} · Session：{run.sourceSessionId ?? 'N/A'}</small>
+      </details>
+    </section>
     <div className="dshDesktopDebateRunHeader">
-      <div><h3>{run.objective ?? `Debate ${shortRef(run.runId)}`}</h3><small>rev {String(run.revision)} · 第 {String(run.currentRound)} 轮 · {lifecycleLabel(run.state)}</small></div>
+      <div><h3>讨论楼层</h3><small>按轮次排列，每位 Agent 独立发言；引用只来自已记录的主张。</small></div>
       <RunControls run={run} resumable={resumable} pending={props.pending} onControl={props.onControl} />
     </div>
     <section className="dshDesktopDebateRoles" aria-label="参与 Agent 与角色职责">
-      <h3>参与 Agent 与角色职责</h3>
-      {run.roles.map(role => <RoleCard key={role.role} role={role} />)}
+      <details className="dshDesktopDebateRoster">
+        <summary><strong>参与者名册</strong><span>{String(run.roles.length)} 位 Agent · 点击展开角色职责</span></summary>
+        <div className="dshDesktopDebateRosterGrid">
+          {run.roles.map(role => <RoleCard key={role.role} role={role} />)}
+        </div>
+      </details>
     </section>
     <section className="dshDesktopDebateRounds">
-      <h3>逐轮讨论摘要与收敛</h3>
-      <p className="dshDesktopDebateSectionHint">仅展示有界讨论摘要；完整结果保留在 Artifact，不展示私有指令或完整推理过程。</p>
+      <h3>逐轮讨论</h3>
+      <p className="dshDesktopDebateSectionHint">每张卡片对应一个论坛楼层；只展示 Agent 明确提交的公开摘要，不展示私有指令或隐藏推理。</p>
       {run.rounds.map(round => <article key={round.round} data-state={round.state}>
-        <div><strong>第 {String(round.round)} 轮</strong><em>{roundStateLabel(round.state)}</em></div>
+        <div className="dshDesktopDebateRoundHeading"><strong>第 {String(round.round)} 轮</strong><em>{roundStateLabel(round.state)}</em></div>
         <div className="dshDesktopDebateTurnList">
-          {round.turnStates.length === 0
-            ? <p className="dshDesktopDebateEmpty">尚未派发 Agent。</p>
-            : round.turnStates.map(turn => <DebateTurnCard key={`${String(round.round)}-${turn.slotId}`} run={run} turn={turn} />)}
+          {round.turnStates.filter(turn => turn.role !== 'decision-judge' && terminalTurnState(turn.state)).length === 0
+            ? <p className="dshDesktopDebateEmpty">参与者尚未提交公开发言。</p>
+            : round.turnStates
+              .filter(turn => turn.role !== 'decision-judge' && terminalTurnState(turn.state))
+              .map(turn => <DebateTurnCard key={`${String(round.round)}-${turn.slotId}`} run={run} turn={turn} floor={floors.get(`${String(round.round)}-${turn.slotId}`) ?? 1} />)}
         </div>
         {round.convergence !== undefined && <p>
           {convergenceLabel(round.convergence.status)}
@@ -233,7 +260,7 @@ export function RunDetail(props: {
         </p>}
       </article>)}
     </section>
-    <EventTimeline run={run} events={props.events ?? []} />
+    <EventTimeline events={props.events ?? []} />
     <section className="dshDesktopDebateClaims">
       <h3>Claim Ledger · 覆盖 {percent(run.claimCoverage)}</h3>
       {run.claims.length === 0 && <p className="dshDesktopDebateEmpty">Claim Ledger 尚未生成。</p>}
@@ -259,69 +286,94 @@ function RoleCard({ role }: { role: DesktopDebateRole }) {
   return <article data-state={turn?.state ?? 'planned'}>
     <div>
       <span className="dshDesktopDebateDot" />
-      <strong>{role.title}</strong>
+      <strong>{roleLabel(role.role)}</strong>
       <em>{turnStateLabel(turn?.state ?? 'planned')}</em>
     </div>
-    <div className="dshDesktopDebateRoute" aria-label="算子路由">
-      <small title={`${route.requestedOperatorId} · ${route.requestedModel}`}>请求：<span>{displayRouteValue(route.requestedOperatorId)} · {displayRouteValue(route.requestedModel)}</span></small>
-      {route.actualOperatorId === undefined || route.actualModel === undefined
-        ? <small>实际：尚未执行</small>
-        : <small title={`${route.actualOperatorId} · ${route.actualModel}`}>实际：<span>{displayRouteValue(route.actualOperatorId)} · {displayRouteValue(route.actualModel)}</span></small>}
-      <small>{role.source === 'native-subscription' ? '订阅套餐' : role.source}</small>
-    </div>
-    <p className="dshDesktopDebateRoleMandate">职责：{role.mandate}</p>
+    <p className="dshDesktopDebateRoleMandate">角色：{role.title}<br />职责：{role.mandate}</p>
     {turn !== undefined && <p>
       第 {String(turn.round)} 轮 · Attempt {String(turn.attempt ?? 1)} · Claim {String(turn.claimIds.length)}
       {' · '}Evidence {String(turn.evidenceRefs.length)}
     </p>}
-    {turn?.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">
-      回退：{turn.routing.fallbackReasonCode}
-    </p>}
-    {turn?.blockers !== undefined && <BlockerList blockers={turn.blockers} />}
+    <details className="dshDesktopDebateTechDetails">
+      <summary>角色技术详情</summary>
+      <div className="dshDesktopDebateRoute" aria-label="算子路由">
+        <small title={`${route.requestedOperatorId} · ${route.requestedModel}`}>请求：<span>{displayRouteValue(route.requestedOperatorId)} · {displayRouteValue(route.requestedModel)}</span></small>
+        {route.actualOperatorId === undefined || route.actualModel === undefined
+          ? <small>实际：尚未执行</small>
+          : <small title={`${route.actualOperatorId} · ${route.actualModel}`}>实际：<span>{displayRouteValue(route.actualOperatorId)} · {displayRouteValue(route.actualModel)}</span></small>}
+        <small>{role.source === 'native-subscription' ? '订阅套餐' : role.source}</small>
+      </div>
+      {turn?.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">
+        回退：{turn.routing.fallbackReasonCode}
+      </p>}
+    </details>
   </article>
 }
 
-function DebateTurnCard({ run, turn }: { run: DesktopDebateRun; turn: DesktopDebateRound['turnStates'][number] }) {
+function DebateTurnCard({ run, turn, floor }: { run: DesktopDebateRun; turn: DesktopDebateRound['turnStates'][number]; floor: number }) {
   const role = run.roles.find(entry => entry.role === turn.role || entry.role === turn.slotId)
-  const title = role?.title ?? roleLabel(turn.role)
+  const title = roleLabel(role?.role ?? turn.role)
   const route = turnRoute(role, turn)
-  const claimText = turn.claimIds.length > 0 ? turn.claimIds.join('、') : 'N/A'
-  const evidenceText = turn.evidenceRefs.length > 0 ? turn.evidenceRefs.join('、') : 'N/A'
+  const claimText = claimReferences(run, turn.claimIds)
+  const evidenceText = turn.evidenceRefs.length > 0 ? `${String(turn.evidenceRefs.length)} 项` : 'N/A'
   const blockerSummary = turn.blockers?.[0]?.message
   return <article className="dshDesktopDebateTurn" data-state={turn.state}>
     <div className="dshDesktopDebateTurnHeader">
-      <strong>{title}</strong>
+      <strong><span className="dshDesktopDebateFloor">{String(floor)} 楼</span>{title}</strong>
       <em>{turnStateLabel(turn.state)}</em>
     </div>
-    <div className="dshDesktopDebateRoute" aria-label="本轮算子路由">
-      <small title={`${route.requestedOperatorId} · ${route.requestedModel}`}>请求：<span>{displayRouteValue(route.requestedOperatorId)} · {displayRouteValue(route.requestedModel)}</span></small>
-      {route.actualOperatorId === undefined || route.actualModel === undefined
-        ? <small>实际：尚未执行</small>
-        : <small title={`${route.actualOperatorId} · ${route.actualModel}`}>实际：<span>{displayRouteValue(route.actualOperatorId)} · {displayRouteValue(route.actualModel)}</span></small>}
-      {turn.attempt !== undefined && <small>Attempt {String(turn.attempt)}</small>}
-    </div>
-    <p className="dshDesktopDebateTurnSummary"><strong>讨论摘要：</strong>{turn.outputPreview ?? (blockerSummary === undefined ? '尚未返回讨论摘要。' : `未产生输出：${blockerSummary}`)}</p>
-    {turn.outputRef !== undefined && <code title={turn.outputRef}>Artifact · {turn.outputRef}</code>}
-    <small>Claim {claimText} · Evidence {evidenceText}</small>
-    {turn.usage !== undefined && <small>{turnUsageLabel(turn.usage)}</small>}
-    {(turn.startedAt !== undefined || turn.settledAt !== undefined) && <div className="dshDesktopDebateTurnTimes">
-      {turn.startedAt !== undefined && <time dateTime={turn.startedAt} title={turn.startedAt}>开始 {formatTime(turn.startedAt)}</time>}
-      {turn.settledAt !== undefined && <time dateTime={turn.settledAt} title={turn.settledAt}>完成 {formatTime(turn.settledAt)}</time>}
-    </div>}
-    {turn.errorCode !== undefined && <p className="dshDesktopDebateTurnError">错误：{turn.errorCode}</p>}
-    {turn.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">回退：{turn.routing.fallbackReasonCode}</p>}
-    {turn.blockers !== undefined && <BlockerList blockers={turn.blockers} />}
+    {turn.round === 1
+      ? <p className="dshDesktopDebateReplyRef">首轮独立发言</p>
+      : <p className="dshDesktopDebateReplyRef">Claim Ledger 后续发言</p>}
+    <p className="dshDesktopDebateTurnSummary"><strong>公开发言：</strong>{turn.outputPreview ?? (blockerSummary === undefined ? '尚未记录公开输出。' : `未产生公开输出：${blockerSummary}`)}</p>
+    {turn.claimIds.length > 0 && <p className="dshDesktopDebateReplyRef">本楼提交主张：{claimText}</p>}
+    {turn.evidenceRefs.length > 0 && <p className="dshDesktopDebateReplyRef">已关联证据：{evidenceText}</p>}
+    {turn.errorCode !== undefined && <p className="dshDesktopDebateTurnError">未完成：{turn.errorCode}</p>}
+    <details className="dshDesktopDebateTechDetails">
+      <summary>技术详情</summary>
+      <div className="dshDesktopDebateRoute" aria-label="本轮算子路由">
+        <small title={`${route.requestedOperatorId} · ${route.requestedModel}`}>请求：<span>{displayRouteValue(route.requestedOperatorId)} · {displayRouteValue(route.requestedModel)}</span></small>
+        {route.actualOperatorId === undefined || route.actualModel === undefined
+          ? <small>实际：尚未执行</small>
+          : <small title={`${route.actualOperatorId} · ${route.actualModel}`}>实际：<span>{displayRouteValue(route.actualOperatorId)} · {displayRouteValue(route.actualModel)}</span></small>}
+        {turn.attempt !== undefined && <small>Attempt {String(turn.attempt)}</small>}
+      </div>
+      {turn.outputRef !== undefined && <code title={turn.outputRef}>输出 Artifact · {turn.outputRef}</code>}
+      {turn.claimIds.length > 0 && <small>Claim refs：{turn.claimIds.join('、')}</small>}
+      {turn.evidenceRefs.length > 0 && <small>Evidence refs：{turn.evidenceRefs.join('、')}</small>}
+      {turn.usage !== undefined && <small>{turnUsageLabel(turn.usage)}</small>}
+      {(turn.startedAt !== undefined || turn.settledAt !== undefined) && <div className="dshDesktopDebateTurnTimes">
+        {turn.startedAt !== undefined && <time dateTime={turn.startedAt} title={turn.startedAt}>开始 {formatTime(turn.startedAt)}</time>}
+        {turn.settledAt !== undefined && <time dateTime={turn.settledAt} title={turn.settledAt}>完成 {formatTime(turn.settledAt)}</time>}
+      </div>}
+      {turn.routing?.fallbackReasonCode !== undefined && <p className="dshDesktopDebateFallback">回退：{turn.routing.fallbackReasonCode}</p>}
+      {turn.blockers !== undefined && <BlockerList attempt={turn.attempt} blockers={turn.blockers} />}
+    </details>
   </article>
 }
 
-function BlockerList({ blockers }: { blockers: DesktopDebateTurnBlocker[] }) {
+function BlockerList({ blockers, attempt }: { blockers: readonly DesktopDebateTurnBlocker[]; attempt?: number | undefined }) {
+  const uniqueBlockers = dedupeTurnBlockers(blockers, attempt)
   return <div className="dshDesktopDebateBlockers" aria-label="阻断原因">
-    {blockers.map((blocker, index) => <article key={`${blocker.code}-${String(index)}`}>
+    {uniqueBlockers.map((blocker, index) => <article key={`${blocker.code}-${String(index)}`}>
       <strong>{blocker.code}</strong>
       <p title={blocker.message}>{blocker.message}</p>
       {blocker.nodeId !== undefined && <small title={blocker.nodeId}>节点 {displayRouteValue(blocker.nodeId)}</small>}
     </article>)}
   </div>
+}
+
+function dedupeTurnBlockers(
+  blockers: readonly DesktopDebateTurnBlocker[],
+  attempt: number | undefined,
+): DesktopDebateTurnBlocker[] {
+  const seen = new Set<string>()
+  return blockers.filter((blocker) => {
+    const key = JSON.stringify([attempt ?? null, blocker.nodeId ?? '', blocker.code, blocker.message])
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function turnRoute(
@@ -348,32 +400,73 @@ function displayRouteValue(value: string): string {
   return value.length <= 42 ? value : `${value.slice(0, 18)}…${value.slice(-20)}`
 }
 
-function EventTimeline({ run, events }: { run: DesktopDebateRun; events: DesktopDebateEvent[] }) {
-  const visibleEvents = events.slice(-40)
-  return <section className="dshDesktopDebateEvents" aria-label="Debate 事件时间线">
-    <h3>事件时间线</h3>
+function EventTimeline({ events }: { events: DesktopDebateEvent[] }) {
+  const visibleEvents = dedupeDebateEvents(events).slice(-40)
+  return <section className="dshDesktopDebateEvents" aria-label="Debate 讨论动态">
+    <h3>讨论动态</h3>
     {visibleEvents.length === 0
-      ? <p className="dshDesktopDebateEmpty">还没有 Debate 事件。</p>
-      : <ol>{visibleEvents.map(event => <li key={event.sequence}>
+      ? <p className="dshDesktopDebateEmpty">还没有讨论动态。</p>
+      : <ol>{visibleEvents.map(event => <li key={debateEventIdentity(event)}>
         <time dateTime={event.createdAt} title={event.createdAt}>{formatTime(event.createdAt)}</time>
         <strong>{debateEventLabel(event.type)}</strong>
-        <span>{debateEventContext(run, event)}</span>
-        <small>{debateEventDetail(event)}</small>
+        <span>{debateEventContext(event)}</span>
+        <small>{debateEventSummary(event)}</small>
+        {debateEventTechnicalDetail(event) !== undefined && <details className="dshDesktopDebateTechDetails"><summary>技术详情</summary><small>{debateEventTechnicalDetail(event)}</small></details>}
       </li>)}</ol>}
   </section>
 }
 
+function dedupeDebateEvents(events: readonly DesktopDebateEvent[]): DesktopDebateEvent[] {
+  const seen = new Set<string>()
+  return events.filter((event) => {
+    if (!isDebateErrorEvent(event.type)) return true
+    const key = debateEventIdentity(event)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function debateEventIdentity(event: DesktopDebateEvent): string {
+  const attempt = eventValue(event, 'attempt', '')
+  const blockers = Array.isArray(event.data.blockers) ? event.data.blockers : []
+  const nodeIds = blockers.map((blocker) => {
+    if (blocker === null || typeof blocker !== 'object') return ''
+    const nodeId = (blocker as { readonly nodeId?: unknown }).nodeId
+    return typeof nodeId === 'string' ? nodeId : ''
+  }).join('\u0001')
+  const messages = blockers.map((blocker) => {
+    if (blocker === null || typeof blocker !== 'object') return ''
+    const message = (blocker as { readonly message?: unknown }).message
+    return typeof message === 'string' ? message : ''
+  }).join('\u0001') || eventValue(event, 'error', eventValue(event, 'reason', ''))
+  return [event.runId, event.sequence, attempt, nodeIds, messages].join('\u0000')
+}
+
+function isDebateErrorEvent(type: string): boolean {
+  return type === 'debate.agent.blocked' || type === 'debate.agent.failed' || type === 'debate.agent.indeterminate'
+    || type === 'debate.failed' || type === 'debate.indeterminate'
+}
+
 export function EvidenceColumn({ run }: { run?: DesktopDebateRun | undefined }) {
   if (run === undefined) return <aside className="dshDesktopDebateColumn" />
+  const moderatorTurn = [...run.rounds]
+    .reverse()
+    .flatMap(round => [...round.turnStates].reverse())
+    .find(turn => turn.role === 'decision-judge')
   return <aside className="dshDesktopDebateColumn dshDesktopDebateEvidence">
     <CostCard run={run} />
-    <section aria-label="主持人总结 / 决策裁判"><h3>主持人总结 / 决策裁判</h3>
+    <section className="dshDesktopDebatePinned" aria-label="置顶 · 主持人总结 / 决策裁判"><h3><span className="dshDesktopDebatePinnedLabel">置顶</span> 主持人总结 / 决策裁判</h3>
       {run.synthesis === undefined
-        ? <p className="dshDesktopDebateEmpty">尚未生成综合结果。</p>
+        ? <>
+          <p className="dshDesktopDebateEmpty">尚未生成综合结果。</p>
+          {moderatorTurn !== undefined && <p>主持人状态：{turnStateLabel(moderatorTurn.state)}</p>}
+          {moderatorTurn?.blockers !== undefined && <BlockerList attempt={moderatorTurn.attempt} blockers={moderatorTurn.blockers} />}
+        </>
         : <>
           <p><strong>{synthesisLabel(run.synthesis.state)}</strong> · 保留异议 {String(run.synthesis.dissentCount)}</p>
           {run.synthesis.outputPreview !== undefined && <p>{run.synthesis.outputPreview}</p>}
-          {run.synthesis.artifactRef !== undefined && <code title={run.synthesis.artifactRef}>{run.synthesis.artifactRef}</code>}
+          {run.synthesis.artifactRef !== undefined && <details className="dshDesktopDebateTechDetails"><summary>总结技术详情</summary><code title={run.synthesis.artifactRef}>{run.synthesis.artifactRef}</code></details>}
         </>}
     </section>
     <section><h3>未决问题</h3>
@@ -452,35 +545,67 @@ function turnUsageLabel(usage: DesktopDebateTurnUsage): string {
   return `Usage 输入 ${formatOptionalNumber(usage.inputTokens)} · 输出 ${formatOptionalNumber(usage.outputTokens)} · 缓存命中 ${formatOptionalNumber(usage.cacheReadInputTokens)} · 费用 ${formatOptionalCost(usage.costUsd)}`
 }
 
-function debateEventContext(run: DesktopDebateRun, event: DesktopDebateEvent): string {
+function debateEventContext(event: DesktopDebateEvent): string {
   const roleId = typeof event.data.role === 'string' ? event.data.role : event.slotId
-  const role = roleId === undefined ? undefined : run.roles.find(entry => entry.role === roleId || entry.role === event.slotId)
   const round = event.round ?? eventNumber(event.data.round)
   return [
     round === undefined ? 'Run' : `第 ${String(round)} 轮`,
-    role?.title ?? (roleId === undefined ? undefined : roleLabel(roleId)),
+    roleId === undefined ? undefined : roleLabel(roleId),
     `#${String(event.sequence)}`,
   ].filter((value): value is string => value !== undefined).join(' · ')
 }
 
-function debateEventDetail(event: DesktopDebateEvent): string {
-  if (event.type === 'debate.planned') return `模式 ${eventValue(event, 'mode')} · Agent ${eventValue(event, 'rosterSize')}`
-  if (event.type === 'debate.roster.qualified') return `角色 ${eventList(event, 'roles')} · 每轮最多 ${eventValue(event, 'maxAgentsPerRound')}`
-  if (event.type === 'debate.roster.rejected') return `角色 ${eventList(event, 'roles')} · ${eventValue(event, 'reason', '准入未通过')}`
-  if (event.type === 'debate.admitted') return `准入动作：${eventValue(event, 'action')}`
-  if (event.type === 'debate.round.started') return `阶段 ${eventValue(event, 'phase')} · ${eventList(event, 'slotIds')}`
-  if (event.type === 'debate.agent.dispatched') return `${eventValue(event, 'role', event.slotId ?? 'Agent')} · ${eventValue(event, 'model')}`
-  if (event.type === 'debate.agent.settled') return `Claim ${eventValue(event, 'claimCount', '0')} · Evidence ${eventValue(event, 'evidenceCount', '0')} · 置信度 ${eventValue(event, 'confidence')}`
-  if (event.type === 'debate.agent.blocked') return `阻断 ${eventValue(event, 'errorCode')} · ${eventValue(event, 'blockerMessages', '等待资源')}${eventRoutingDetail(event)}`
-  if (event.type === 'debate.agent.failed' || event.type === 'debate.agent.indeterminate') return `错误 ${eventValue(event, 'errorCode')}`
-  if (event.type === 'debate.claims.compiled') return `Claim ${eventValue(event, 'claimCount', '0')} · 异议 ${eventValue(event, 'dissentCount', '0')} · 未决 ${eventValue(event, 'unresolvedCount', '0')}`
-  if (event.type === 'debate.convergence.evaluated') return `${eventValue(event, 'status')} · 分数 ${eventValue(event, 'score')} · ${eventValue(event, 'reason')}`
-  if (event.type === 'debate.synthesis.started') return '主持人综合已启动'
-  if (event.type === 'debate.synthesis.settled') return `未决 ${eventList(event, 'unresolvedClaimIds')} · 异议 ${eventValue(event, 'dissentCount', '0')}`
-  if (event.type === 'debate.cost.accounted') return `用量 ${eventValue(event, 'usageStatus')} · 费用 ${eventValue(event, 'costStatus')}`
-  if (event.type === 'debate.stopped') return `${eventValue(event, 'action')} · ${eventValue(event, 'reason')}`
-  if (event.type === 'debate.failed' || event.type === 'debate.indeterminate') return `错误 ${eventValue(event, 'errorCode')}`
-  return eventValue(event, 'reason', '状态已记录')
+function debateEventSummary(event: DesktopDebateEvent): string {
+  if (event.type === 'debate.planned') return '讨论主题已建立，等待参与者进入。'
+  if (event.type === 'debate.roster.qualified') return '参与者已通过准入检查。'
+  if (event.type === 'debate.roster.rejected') return '部分参与者未通过准入，讨论无法按原计划进行。'
+  if (event.type === 'debate.admitted') return '讨论已获得执行准入。'
+  if (event.type === 'debate.round.started') return `第 ${eventValue(event, 'round', event.round === undefined ? 'N/A' : String(event.round))} 轮已开始。`
+  if (event.type === 'debate.agent.dispatched') return `${roleLabel(eventValue(event, 'role', event.slotId ?? 'Agent'))} 已开始发言。`
+  if (event.type === 'debate.agent.settled') return `${roleLabel(eventValue(event, 'role', event.slotId ?? 'Agent'))} 已提交公开发言。`
+  if (event.type === 'debate.agent.blocked') return `${roleLabel(eventValue(event, 'role', event.slotId ?? 'Agent'))} 暂未完成，正在等待资源。`
+  if (event.type === 'debate.agent.failed') return `${roleLabel(eventValue(event, 'role', event.slotId ?? 'Agent'))} 未完成本轮发言。`
+  if (event.type === 'debate.agent.indeterminate') return `${roleLabel(eventValue(event, 'role', event.slotId ?? 'Agent'))} 的结果需要确认。`
+  if (event.type === 'debate.claims.compiled') return '本轮主张、异议和未决问题已整理。'
+  if (event.type === 'debate.convergence.evaluated') return `本轮判断：${convergenceLabel(eventValue(event, 'status'))}。`
+  if (event.type === 'debate.synthesis.started') return '主持人正在综合各楼层发言。'
+  if (event.type === 'debate.synthesis.settled') return '主持人已提交最终综合结果。'
+  if (event.type === 'debate.cost.accounted') return '本轮用量与费用已更新。'
+  if (event.type === 'debate.stopped') return `讨论已${eventValue(event, 'action') === 'pause' ? '暂停' : '停止'}。`
+  if (event.type === 'debate.failed') return '讨论失败，未能完成全部流程。'
+  if (event.type === 'debate.indeterminate') return '讨论状态不确定，需要人工确认。'
+  return '状态已记录。'
+}
+
+function debateEventTechnicalDetail(event: DesktopDebateEvent): string | undefined {
+  const details: string[] = []
+  if (event.type === 'debate.agent.dispatched' || event.type === 'debate.agent.settled'
+    || event.type === 'debate.agent.blocked' || event.type === 'debate.agent.failed'
+    || event.type === 'debate.agent.indeterminate') {
+    details.push(`角色 ID：${eventValue(event, 'role', event.slotId ?? 'N/A')}`)
+    details.push(`请求算子/模型：${eventValue(event, 'requestedOperatorId', eventValue(event, 'operatorId'))}/${eventValue(event, 'requestedModel', eventValue(event, 'model'))}`)
+    const actual = [eventValue(event, 'actualOperatorId', ''), eventValue(event, 'actualModel', '')].filter(Boolean).join('/')
+    if (actual.length > 0) details.push(`实际算子/模型：${actual}`)
+    const fallback = eventValue(event, 'fallbackReasonCode', '')
+    if (fallback.length > 0) details.push(`回退原因：${fallback}`)
+    const attempt = eventValue(event, 'attempt', '')
+    if (attempt.length > 0) details.push(`Attempt：${attempt}`)
+    const errorCode = eventValue(event, 'errorCode', '')
+    if (errorCode.length > 0) details.push(`错误码：${errorCode}`)
+  }
+  if (event.type === 'debate.planned') details.push(`模式：${eventValue(event, 'mode')} · 阵容数量：${eventValue(event, 'rosterSize')}`)
+  if (event.type === 'debate.roster.qualified') details.push(`角色：${eventList(event, 'roles')} · 每轮上限：${eventValue(event, 'maxAgentsPerRound')}`)
+  if (event.type === 'debate.roster.rejected') details.push(`角色：${eventList(event, 'roles')} · 原因：${eventValue(event, 'reason', 'N/A')}`)
+  if (event.type === 'debate.round.started') details.push(`阶段：${eventValue(event, 'phase')} · 槽位：${eventList(event, 'slotIds')}`)
+  if (event.type === 'debate.agent.settled') details.push(`Claim 数：${eventValue(event, 'claimCount', '0')} · Evidence 数：${eventValue(event, 'evidenceCount', '0')} · 置信度：${eventValue(event, 'confidence')}`)
+  if (event.type === 'debate.agent.blocked') details.push(`阻断信息：${eventValue(event, 'blockerMessages', eventValue(event, 'error', 'N/A'))}`)
+  if (event.type === 'debate.claims.compiled') details.push(`Claim：${eventValue(event, 'claimCount', '0')} · 异议：${eventValue(event, 'dissentCount', '0')} · 未决：${eventValue(event, 'unresolvedCount', '0')}`)
+  if (event.type === 'debate.convergence.evaluated') details.push(`分数：${eventValue(event, 'score')} · 阈值：${eventValue(event, 'threshold')} · 原因：${eventValue(event, 'reason')}`)
+  if (event.type === 'debate.synthesis.settled') details.push(`未决 Claim：${eventList(event, 'unresolvedClaimIds')} · 异议：${eventValue(event, 'dissentCount', '0')}`)
+  if (event.type === 'debate.cost.accounted') details.push(`用量：${eventValue(event, 'usageStatus')} · 费用：${eventValue(event, 'costStatus')} · 输入：${eventValue(event, 'inputTokens')} · 输出：${eventValue(event, 'outputTokens')}`)
+  if (event.type === 'debate.stopped') details.push(`动作：${eventValue(event, 'action')} · 原因：${eventValue(event, 'reason')}`)
+  if (event.type === 'debate.failed' || event.type === 'debate.indeterminate') details.push(`错误码：${eventValue(event, 'errorCode')} · 原因：${eventValue(event, 'reason', eventValue(event, 'error'))}`)
+  return details.length === 0 ? undefined : details.join(' · ')
 }
 
 function debateEventLabel(type: string): string {
@@ -521,13 +646,6 @@ function eventList(event: DesktopDebateEvent, key: string, fallback = 'N/A'): st
   return strings.length > 0 ? strings.join('、') : fallback
 }
 
-function eventRoutingDetail(event: DesktopDebateEvent): string {
-  const fallback = eventValue(event, 'fallbackReasonCode', '')
-  if (fallback.length === 0) return ''
-  const actual = [eventValue(event, 'actualOperatorId', ''), eventValue(event, 'actualModel', '')].filter(Boolean).join('/')
-  return actual.length === 0 ? ` · 回退 ${fallback}` : ` · 回退 ${fallback} → ${actual}`
-}
-
 function eventNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined
 }
@@ -542,12 +660,23 @@ function lifecycleLabel(state: DesktopDebateLifecycle): string {
 
 function roleLabel(role: string): string {
   return ({
-    'constructive-proposer': '建议者', 'skeptical-falsifier': '证伪者', 'evidence-auditor': '证据审计者', 'decision-judge': '决策裁判',
+    'constructive-proposer': '建设性提案者', 'skeptical-falsifier': '怀疑式证伪者', 'evidence-auditor': '证据审计员', 'decision-judge': '决策裁判（主持人）',
   } as Record<string, string>)[role] ?? role
+}
+
+function claimReferences(run: DesktopDebateRun, ids: readonly string[]): string {
+  return ids.slice(0, 8).map((id) => {
+    const claim = run.claims.find(item => item.claimId === id)
+    return claim === undefined ? `编号 ${id}` : `“${claim.statement}”`
+  }).join('、') || 'N/A'
 }
 
 function turnStateLabel(state: string): string {
   return ({ planned: '待执行', dispatched: '运行中', settled: '已完成', blocked: '已阻断', failed: '失败', indeterminate: '不确定' } as Record<string, string>)[state] ?? state
+}
+
+function terminalTurnState(state: string): boolean {
+  return state === 'settled' || state === 'blocked' || state === 'failed' || state === 'indeterminate'
 }
 
 function roundStateLabel(state: string): string {

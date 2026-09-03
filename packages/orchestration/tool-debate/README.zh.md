@@ -8,6 +8,17 @@
 
 本包只依赖 provider-neutral Debate Service Definition 与普通 Agent／LLM 扩展点，不导入本地 Provider、TaskGraph daemon 或物理算子运行时。物理算子宿主路由器会在持久化 Session 偏好明确启用 Debate 时独立让位，因此 Codex 与 Claude Code 仍是阵容内执行算子，不会取代 Debate Run。内部 `dsh-debate-host/debate` 路由不再作为主聊天模型展示。已经选择该内部路由的旧 Session 会在请求发出前补写同一条持久化 `debate/dispatch` 并继续运行；新选择统一通过协作菜单的执行机制控件完成。
 
+## BBS 式讨论记录
+
+宿主回复按易读的论坛主题组织，而不是直接倾倒诊断字符串：
+
+- 以主题帖开头，展示公开议题和当前生命周期状态。
+- 参与者名册只展示一次，使用本地化角色类别，并展示配置中真实的公开 persona 标题和职责；算子、模型和层级收纳在可折叠的技术详情中。
+- 每轮只有一个标题，每个进入终态的参与者发言都有稳定的全局楼层号。首轮是相互独立的发言；后续楼层标明 Claim Ledger 阶段，而主张文案只会说明“本楼提交”，因为 v1 协议没有记录回复目标。
+- 只有持久化的 `outputPreview` 才会作为公开发言引用。被阻断、失败或状态不确定的轮次会明确说明“没有产生公开输出”；Consumer 不伪造缺失内容。
+- 收敛判断、未决主张、保留异议和主持人最终综合结果都会显示。决策裁判只以这条置顶主持人总结展示，不再复制为普通楼层；裁判失败时仍会明确展示主持人状态。Run ID、hash、Provider 版本、路由、Artifact 和 usage 收纳在可折叠技术详情中。
+- planned 和 dispatched 生命周期快照不会创建重复楼层。完全相同的 blocker 按 attempt、节点、代码和消息身份去重；错误码相同但内容不同的失败仍会显示。
+
 ## Model Experience
 
 ### 有界的 `debate` 工具

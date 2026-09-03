@@ -117,17 +117,74 @@ describe('Debate Desktop panel transport', () => {
       createElement(EvidenceColumn, { run: fixture }),
     ))
     for (const expected of [
-      'Choose A or B.', '参与 Agent 与角色职责', 'Proposer', '提出可执行方案与成功标准。', 'Falsifier', '寻找反例、风险和失败条件。',
-      'Judge', '综合证据、裁定分歧并给出决策。', 'gpt-5.6-sol', '第 1 轮', '第 2 轮',
-      'Round one proposal: choose A.', 'Round one challenge: verify rollback.', 'Round one ruling: continue review.',
-      'Round two proposal: retain A with a gate.', 'Round two challenge: keep the cost dissent.', 'Round two ruling: choose A and record dissent.',
-      'artifact:r1-proposer', 'artifact:r2-judge', 'Claim claim-1', 'Evidence artifact:evidence', 'Claim Ledger', 'Option A is safer.',
-      '事件时间线', 'Debate 已规划', '轮次已开始', 'Agent 输出已完成', '主持人总结 / 决策裁判', 'Usage / Cost', '用量部分归集', '费用归集未知', 'artifact:synthesis',
+      'Choose A or B.', '参与 Agent 与角色职责', '建设性提案者', '怀疑式证伪者', '决策裁判（主持人）',
+      '角色：Proposer', '职责：提出可执行方案与成功标准。', 'gpt-5.6-sol', '第 1 轮', '第 2 轮',
+      'Round one proposal: choose A.', 'Round one challenge: verify rollback.',
+      'Round two proposal: retain A with a gate.', 'Round two challenge: keep the cost dissent.',
+      'artifact:r1-proposer', 'Claim refs：claim-1', 'Evidence refs：artifact:evidence', 'Claim Ledger', 'Option A is safer.',
+      '讨论动态', 'Debate 已规划', '轮次已开始', 'Agent 输出已完成', '主持人总结 / 决策裁判', 'Usage / Cost', '用量部分归集', '费用归集未知', 'artifact:synthesis',
     ]) expect(markup).toContain(expected)
+    expect(markup).toContain('角色：Proposer')
+    expect(markup).toContain('职责：提出可执行方案与成功标准。')
+    expect(markup).not.toContain('提出最可执行的方案，明确关键主张、假设和验收标准。')
+    expect(markup).not.toContain('Round one ruling: continue review.')
+    expect(markup).not.toContain('Round two ruling: choose A and record dissent.')
+    expect(markup).not.toContain('artifact:r2-judge')
     expect(markup).toContain('费用 N/A')
     expect(markup).not.toContain('NaN')
     expect(markup).toContain('批准')
     expect(markup).toContain('终止')
+  })
+
+  it('renders a readable BBS thread and de-duplicates only the same durable error event', () => {
+    const fixture = run()
+    const duplicateError = {
+      version: 1 as const,
+      sequence: 1,
+      runId: fixture.runId,
+      revision: 8,
+      generation: 1,
+      round: 2,
+      slotId: 'skeptical-falsifier',
+      type: 'debate.agent.failed',
+      createdAt: '2026-08-29T01:01:14.000Z',
+      data: {
+        role: 'skeptical-falsifier',
+        attempt: 1,
+        errorCode: 'DUPLICATE_ERROR',
+        blockers: [{ code: 'DUPLICATE_ERROR', message: 'First failure.', nodeId: 'node-first' }],
+      },
+    }
+    const secondAttempt = {
+      ...duplicateError,
+      sequence: 2,
+      revision: 9,
+      generation: 2,
+      data: {
+        ...duplicateError.data,
+        attempt: 2,
+        blockers: [{ code: 'DUPLICATE_ERROR', message: 'Second failure.', nodeId: 'node-second' }],
+      },
+    }
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [duplicateError, { ...duplicateError }, secondAttempt],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup).toContain('dshDesktopDebateTopic')
+    expect(markup).toContain('dshDesktopDebateRoster')
+    expect(markup).toContain('参与者名册')
+    expect(markup).toContain('1 楼')
+    expect(markup).toContain('4 楼')
+    expect(markup).toContain('本楼提交主张：“Option A is safer.”')
+    expect(markup).toContain('Claim Ledger 后续发言')
+    expect(markup).toContain('公开发言：')
+    expect(markup).toContain('技术详情')
+    expect(markup.match(/错误码：DUPLICATE_ERROR/g)?.length).toBe(2)
+    expect(markup).toContain('Attempt：1')
+    expect(markup).toContain('Attempt：2')
+    expect(markup).not.toContain('open=""')
   })
 
   it('renders fully unknown optional accounting totals as N/A instead of zero or NaN', () => {
@@ -146,6 +203,88 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).toContain('费用 N/A')
     expect(markup).not.toContain('NaN')
     expect(markup).not.toContain('$0.0000')
+  })
+
+  it('keeps planned and dispatched lifecycle states in the roster without manufacturing discussion floors', () => {
+    const fixture = run()
+    fixture.rounds = [{
+      ...fixture.rounds[0]!,
+      state: 'running',
+      turnStates: fixture.rounds[0]!.turnStates.map((entry, index) => {
+        const { outputRef: _outputRef, outputPreview: _outputPreview, ...withoutOutput } = entry
+        return index === 0
+          ? { ...withoutOutput, state: 'planned' as const, claimIds: [], evidenceRefs: [] }
+          : index === 1
+            ? { ...withoutOutput, state: 'dispatched' as const, claimIds: [], evidenceRefs: [] }
+            : entry
+      }),
+    }]
+    fixture.roles = fixture.roles.map((role, index) => {
+      if (index === 0) {
+        const { outputRef: _outputRef, outputPreview: _outputPreview, ...withoutOutput } = role.latestTurn!
+        return { ...role, latestTurn: { ...withoutOutput, state: 'planned' as const, claimIds: [], evidenceRefs: [] } }
+      }
+      if (index === 1) {
+        const { outputRef: _outputRef, outputPreview: _outputPreview, ...withoutOutput } = role.latestTurn!
+        return { ...role, latestTurn: { ...withoutOutput, state: 'dispatched' as const, claimIds: [], evidenceRefs: [] } }
+      }
+      return role
+    })
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup).toContain('待执行')
+    expect(markup).toContain('运行中')
+    expect(markup).toContain('参与者尚未提交公开发言。')
+    expect(markup).not.toContain('Round one proposal: choose A.')
+    expect(markup).not.toContain('公开发言：尚未记录公开输出。')
+  })
+
+  it('keeps stopped active terminal turns visible and assigns contiguous floors after filtering', () => {
+    const fixture = run()
+    const firstRound = fixture.rounds[0]
+    if (firstRound === undefined) throw new Error('missing Debate fixture round')
+    const proposer = firstRound.turnStates[0]
+    const falsifier = firstRound.turnStates[1]
+    const judge = firstRound.turnStates[2]
+    if (proposer === undefined || falsifier === undefined || judge === undefined) throw new Error('missing Debate fixture turns')
+    const { outputRef: _proposerOutputRef, outputPreview: _proposerOutputPreview, ...proposerWithoutOutput } = proposer
+    const plannedProposer = { ...proposerWithoutOutput, state: 'planned' as const, claimIds: [], evidenceRefs: [] }
+    const settledFalsifier = { ...falsifier, state: 'settled' as const }
+    const { outputRef: _judgeOutputRef, outputPreview: _judgeOutputPreview, ...judgeWithoutOutput } = judge
+    const failedJudge = {
+      ...judgeWithoutOutput,
+      state: 'failed' as const,
+      claimIds: [],
+      evidenceRefs: [],
+      errorCode: 'DEBATE_INTERRUPTED',
+      blockers: [{ code: 'DEBATE_INTERRUPTED', message: 'judge interrupted', nodeId: 'node-judge' }],
+    }
+    fixture.state = 'stopped'
+    fixture.currentRound = 1
+    delete fixture.synthesis
+    fixture.rounds = [{ ...firstRound, state: 'running', turnStates: [plannedProposer, settledFalsifier, failedJudge] }]
+    fixture.roles = fixture.roles.map(role => role.role === 'constructive-proposer'
+      ? { ...role, latestTurn: plannedProposer }
+      : role.role === 'skeptical-falsifier'
+        ? { ...role, latestTurn: settledFalsifier }
+        : role.role === 'decision-judge'
+          ? { ...role, latestTurn: failedJudge }
+          : role)
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup.match(/<span class="dshDesktopDebateFloor">[0-9]+ 楼<\/span>/g)).toEqual([
+      '<span class="dshDesktopDebateFloor">1 楼</span>',
+    ])
+    expect(markup).toContain('Round one challenge: verify rollback.')
+    expect(markup).not.toContain('Round one proposal: choose A.')
   })
 
   it('keeps settled roles visible when another role is blocked and shows route provenance', () => {
@@ -188,6 +327,41 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).toContain('Claude Code unavailable because the VPN is blocked.')
     expect(markup).toContain('节点 debate-r1-skeptical-falsifier')
     expect(markup).not.toContain('Agent 输出失败')
+  })
+
+  it('deduplicates exact blockers within one turn while preserving distinct messages', () => {
+    const fixture = run()
+    const secondRound = fixture.rounds[1]
+    if (secondRound === undefined) throw new Error('missing Debate fixture round')
+    const sourceTurn = secondRound.turnStates[1]
+    if (sourceTurn === undefined) throw new Error('missing Debate fixture turn')
+    const firstBlocker = { code: 'DUPLICATE_ERROR', message: 'First blocker.', nodeId: 'node-first' }
+    const { outputRef: _outputRef, outputPreview: _outputPreview, ...turnWithoutOutput } = sourceTurn
+    const blockedTurn = {
+      ...turnWithoutOutput,
+      state: 'blocked' as const,
+      claimIds: [],
+      evidenceRefs: [],
+      attempt: 1,
+      errorCode: 'DUPLICATE_ERROR',
+      blockers: [firstBlocker, firstBlocker, { code: 'DUPLICATE_ERROR', message: 'Second blocker.', nodeId: 'node-second' }],
+    }
+    fixture.rounds = fixture.rounds.map((round, index) => index === 1
+      ? { ...round, turnStates: round.turnStates.map((turn, turnIndex) => turnIndex === 1 ? blockedTurn : turn) }
+      : round)
+    fixture.roles = fixture.roles.map(role => role.role === 'skeptical-falsifier'
+      ? { ...role, latestTurn: blockedTurn }
+      : role)
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup.match(/节点 node-first/g)).toHaveLength(1)
+    expect(markup.match(/节点 node-second/g)).toHaveLength(1)
+    expect(markup).toContain('First blocker.')
+    expect(markup).toContain('Second blocker.')
   })
 
   it('truncates long route values visually while preserving complete values in titles', () => {

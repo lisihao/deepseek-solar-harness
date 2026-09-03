@@ -12,6 +12,7 @@ import LlmRuntime, {
   LlmAdapter,
   type GenerateOptions,
   type StreamChunk,
+  type ToolSchema,
 } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -347,6 +348,69 @@ describe('host physical-operator routing', () => {
     expect(answer?.type === 'text' ? answer.text : '').toContain('subscription:hello')
     expect(agent.session.events.some(event => event.type === 'physical-operator/tool-call')).toBe(true)
     expect(agent.session.events.some(event => event.type === 'physical-operator/tool-result')).toBe(true)
+    const toolCall = agent.session.events.find(event => event.type === 'physical-operator/tool-call')
+    const toolResult = agent.session.events.find(event => event.type === 'physical-operator/tool-result')
+    if (toolCall?.type !== 'physical-operator/tool-call' || toolResult?.type !== 'physical-operator/tool-result') {
+      throw new Error('expected durable physical tool call/result events')
+    }
+    expect(toolCall.data.toolCallId).toBe(toolCall.data.commandId)
+    expect(toolResult.data.toolCallId).toBe(toolResult.data.commandId)
+    expect(toolCall.data.executionCommandId).toBe(toolResult.data.executionCommandId)
+    expect(toolCall.data.executionCommandId).not.toBe(toolCall.data.commandId)
+  })
+
+  it('persists one indeterminate trace across bridge restart when a recovered receipt has no result', async () => {
+    const { ctx, agent } = await setup({ mountTool: false })
+    const executionCommandId = 'resident-recovered-command'
+    const commandId = `${executionCommandId}:codex-tool:1`
+    agent.session.append('physical-operator/tool-call', {
+      commandId,
+      toolCallId: commandId,
+      executionCommandId,
+      tool: 'subscription_echo',
+      arguments: { value: 'side effect may have happened' },
+    }, { ignorable: true })
+    const bridge = new PhysicalOperatorModelToolBridge(ctx)
+    const schema: ToolSchema = {
+      name: 'subscription_echo',
+      description: 'test',
+      parameters: { type: 'object' },
+    }
+    const bound = await bridge.bind(
+      executionCommandId,
+      agent,
+      [schema],
+      new AbortController().signal,
+    )
+    try {
+      expect(agent.session.events.filter(event => event.type === 'physical-operator/tool-indeterminate')).toMatchObject([{
+        ignorable: true,
+        data: {
+          commandId,
+          toolCallId: commandId,
+          executionCommandId,
+          tool: 'subscription_echo',
+          code: 'COMMAND_INDETERMINATE',
+        },
+      }])
+    } finally {
+      bound.release()
+      await bridge.dispose()
+    }
+
+    const restartedBridge = new PhysicalOperatorModelToolBridge(ctx)
+    const restarted = await restartedBridge.bind(
+      executionCommandId,
+      agent,
+      [schema],
+      new AbortController().signal,
+    )
+    try {
+      expect(agent.session.events.filter(event => event.type === 'physical-operator/tool-indeterminate')).toHaveLength(1)
+    } finally {
+      restarted.release()
+      await restartedBridge.dispose()
+    }
   })
 
   it('carries Resident product usage into the durable assistant message for billing', async () => {
@@ -568,6 +632,62 @@ describe('host physical-operator routing', () => {
         arguments: { value: 'hello', nested: { a: 1, b: 2 } },
       })).rejects.toThrow(/indeterminate and will not be replayed/u)
       expect(echoCalls).toEqual([])
+    } finally {
+      transport.close()
+      socket.destroy()
+      bound.release()
+      await bridge.dispose()
+      await ctx.root.fiber.dispose()
+    }
+  })
+
+  it('settles an active indeterminate binding from a later durable result without re-executing', async () => {
+    const { ctx, agent, echoCalls } = await setup({ mountTool: false })
+    const bridge = new PhysicalOperatorModelToolBridge(ctx)
+    const executionCommandId = 'outer-late-settlement'
+    const commandId = 'native-tool-late-settlement'
+    const requestArguments = { nested: { b: 2, a: 1 }, value: 'hello' }
+    agent.session.append('physical-operator/tool-call', {
+      commandId,
+      toolCallId: commandId,
+      executionCommandId,
+      tool: 'subscription_echo',
+      arguments: requestArguments,
+    }, { ignorable: true })
+    const bound = await bridge.bind(executionCommandId, agent, [{
+      name: 'subscription_echo',
+      description: 'Echo through the real DSH tool runtime.',
+      parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] },
+    }], new AbortController().signal)
+    if (bound.descriptor === undefined) throw new Error('expected a model tool descriptor')
+    const persistedResult = {
+      isError: false,
+      content: [{ type: 'text', text: 'settled elsewhere' }],
+      value: { echoed: 'settled elsewhere' },
+    }
+    agent.session.append('physical-operator/tool-result', {
+      commandId,
+      toolCallId: commandId,
+      executionCommandId,
+      tool: 'subscription_echo',
+      result: persistedResult,
+    }, { ignorable: true })
+    const socket = createConnection(bound.descriptor.socketPath)
+    await once(socket, 'connect')
+    const transport = new JsonRpcLineTransport(socket, socket)
+    transport.start()
+    const request = {
+      session_id: bound.descriptor.sessionId,
+      command_id: commandId,
+      tool: 'subscription_echo',
+      arguments: { value: 'hello', nested: { a: 1, b: 2 } },
+    }
+    try {
+      await expect(transport.request('tool.call', request)).resolves.toEqual(persistedResult)
+      await expect(transport.request('tool.call', request)).resolves.toEqual(persistedResult)
+      expect(echoCalls).toEqual([])
+      expect(agent.session.events.filter(event => event.type === 'physical-operator/tool-call')).toHaveLength(1)
+      expect(agent.session.events.filter(event => event.type === 'physical-operator/tool-result')).toHaveLength(1)
     } finally {
       transport.close()
       socket.destroy()

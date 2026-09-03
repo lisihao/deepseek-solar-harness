@@ -410,7 +410,7 @@ Requires: `browser` · `subprocess`
 ```ts config-catalog
 /** Ego Lite process and translation settings owned by deployment composition. */
 export interface Config {
-  /** Absolute CLI path; omission probes the user install, then signed macOS app. */
+  /** Absolute CLI path; omission probes the signed macOS app, then the user install. */
   executable?: string
   /** Absolute working directory for each isolated CLI invocation. */
   cwd?: string

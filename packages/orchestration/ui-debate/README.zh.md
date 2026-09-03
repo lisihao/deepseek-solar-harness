@@ -10,6 +10,16 @@
 
 浏览器面板使用共享主题变量，但自行持有样式和传输。本包只依赖 provider-neutral `ctx.debates` Service Definition 与 Host/Client 平台接缝，不导入本地 Debate Provider、编排 daemon 或物理算子运行时。
 
+## BBS 式面板
+
+选中的 Run 会按论坛主题展示：
+
+- 首先展示主题帖，然后是占满容器宽度的可折叠名册，使用本地化角色类别，并展示配置中真实的公开 persona 标题和职责。
+- 每轮单独成段，每个进入终态的参与者发言拥有稳定的全局楼层号；planned 和 dispatched turn 只作为名册状态，不生成空楼层。后续轮次会标明 Claim Ledger 阶段；已提交主张会展示原文，但 UI 不会声称 v1 协议未记录的回复关系。
+- 可见卡片只展示持久化的公开输出摘要、状态和证据数量。Provider／模型路由、回退、attempt、Artifact、usage、时间戳和标识符收纳在折叠的技术详情中。
+- 决策裁判只作为置顶主持人综合结果出现一次，不再重复为讨论楼层。未决主张、保留异议和收敛指标分开显示，不让最终答案掩盖分歧。
+- 同一持久化错误事件的重放副本按 sequence、attempt、节点和消息去重。不同 attempt 或消息会分开显示，即使错误码相同。缺失输出会明确保持缺失；角色没有产生内容时，面板不会伪造文字。
+
 ## Model Experience
 
 ### 仅浏览器端的 `/api/debates` 投影

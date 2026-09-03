@@ -122,11 +122,11 @@ describe('deriveTrajectoryLayout', () => {
           { seq: 11, time: 10_100, type: 'progress', phase: 'reasoning' },
           {
             seq: 12, time: 10_200, type: 'observation',
-            observation: { kind: 'public-output', preview: 'A bounded native progress summary.' },
+            observation: { kind: 'public-output' },
           },
           {
             seq: 13, time: 10_300, type: 'observation',
-            observation: { kind: 'tool-started', toolName: 'Bash' },
+            observation: { kind: 'tool-started' },
           },
         ],
       }],
@@ -135,10 +135,60 @@ describe('deriveTrajectoryLayout', () => {
     expect(group?.cells).toMatchObject([
       { kind: 'operator', text: 'Codex 已派发' },
       { kind: 'operator', text: '阶段 · 推理与执行' },
-      { kind: 'operator', text: '公开输出 · A bounded native progress summary.' },
-      { kind: 'operator', text: '工具开始 · Bash' },
+      { kind: 'operator', text: '公开输出已更新' },
+      { kind: 'operator', text: '原生工具开始' },
     ])
     expect(group?.cells[2]?.outputDetail).toBeUndefined()
+  })
+
+  it('renders a paired physical tool call with bounded input/result details and stable identity', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-tools', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [{
+          seq: 11, time: 10_100, type: 'tool',
+          tool: {
+            toolCallId: 'tool-call-1', status: 'error',
+            argumentsShape: { kind: 'object', fields: 1 },
+            resultShape: { kind: 'object', fields: 1 },
+            callSeq: 11, resultSeq: 12,
+          },
+        }],
+      }],
+    })
+    const cell = turns[0]?.groups[0]?.cells[0]
+    expect(cell).toMatchObject({
+      kind: 'operator', text: 'DSH 工具失败', callId: 'tool-call-1', isError: true,
+      inputDetail: '对象 · 1 个字段',
+      outputDetail: '结果结构\n对象 · 1 个字段\n\n工具报告失败',
+      previewMarkdown: '对象 · 1 个字段',
+      resultPreviewMarkdown: '对象 · 1 个字段',
+    })
+    expect(cell?.recordId).toBe(['physical-operator', 'command-tools', 'tool', 'tool-call-1'].join('\u0000'))
+  })
+
+  it('renders an indeterminate recovered physical tool as a terminal error state', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [], partial: null, runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-indeterminate', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [{
+          seq: 11, time: 10_100, type: 'tool',
+          tool: {
+            toolCallId: 'tool-call-1', status: 'indeterminate', callSeq: 10, resultSeq: 11,
+          },
+        }],
+      }],
+    })
+    expect(turns[0]?.groups[0]?.cells[0]).toMatchObject({
+      kind: 'operator', text: 'DSH 工具状态不确定', isError: true,
+      outputDetail: '工具结果尚无法证明',
+    })
   })
 
   it('orders a physical command by source sequence and keeps a settled success out of error state', () => {

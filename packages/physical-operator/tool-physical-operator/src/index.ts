@@ -112,14 +112,30 @@ declare module '@deepseek-ai/dsh-session/types' {
     /** One Resident-native model call into the current Agent's real DSH tool surface. */
     'physical-operator/tool-call': {
       commandId: string
+      /** Stable receipt identity; legacy events use commandId when absent. */
+      toolCallId?: string
+      /** Parent physical execution command that owns this model-tool call. */
+      executionCommandId?: string
       tool: string
       arguments: Record<string, JsonValue>
     }
     /** Settled result of one bridged DSH tool call. */
     'physical-operator/tool-result': {
       commandId: string
+      /** Stable receipt identity; legacy events use commandId when absent. */
+      toolCallId?: string
+      /** Parent physical execution command that owns this model-tool call. */
+      executionCommandId?: string
       tool: string
       result: JsonValue
+    }
+    /** A recovered bridge Receipt has a call but no provable settled result. */
+    'physical-operator/tool-indeterminate': {
+      commandId: string
+      toolCallId: string
+      executionCommandId: string
+      tool: string
+      code: 'COMMAND_INDETERMINATE'
     }
   }
 }
@@ -1135,9 +1151,10 @@ function progressProjectionState(agent: Agent, commandId: string): ResidentProgr
   return { afterSequence, projected }
 }
 
-function boundedResidentText(value: unknown, limit: number): string | undefined {
+function boundedResidentText(value: unknown, limit: number, multiline = false): string | undefined {
   if (typeof value !== 'string') return undefined
-  return value.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, limit)
+  const controls = multiline ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu : /[\u0000-\u001f\u007f]/gu
+  return value.replace(controls, '').slice(0, limit)
 }
 
 /**
@@ -1161,7 +1178,7 @@ function safeResidentProgressData(type: string, payload: unknown, commandId: str
   const kind = boundedResidentText(data.kind, MAX_RESIDENT_OBSERVATION_NAME)
   switch (kind) {
     case 'public-output': {
-      const preview = boundedResidentText(data.preview, MAX_RESIDENT_OBSERVATION_PREVIEW)
+      const preview = boundedResidentText(data.preview, MAX_RESIDENT_OBSERVATION_PREVIEW, true)
       return preview === undefined ? undefined : { commandId, kind, preview }
     }
     case 'tool-started':

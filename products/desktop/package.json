@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-desktop",
-  "version": "3.11.0",
+  "version": "3.12.0",
   "private": true,
   "description": "DSH Desktop product workspace",
   "license": "MIT",
@@ -20,7 +20,7 @@
     "@deepseek-ai/dsh-agent-tool-presentation": "0.1.0-rc.6",
     "@deepseek-ai/dsh-anonymous-user-id": "0.1.0-rc.6",
     "@deepseek-ai/dsh-api-gateway": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-api-remotes": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-api-remotes": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-api-remotes-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-atomic-write": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-atomic-write-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-archify": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-archify-2.16.0-dsh.1.tgz",
     "@deepseek-ai/dsh-browser": "file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-0.1.0-rc.5.tgz",

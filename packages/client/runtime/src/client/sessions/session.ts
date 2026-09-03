@@ -5,7 +5,7 @@ import type { AttachmentIdType, ImageAttachmentRef } from '@deepseek-ai/dsh-atta
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import type {
   HistoryEntry, IApiClient, MessageId, MuxFrame, PromptContentPart, QueueAction, RpcError,
-  RpcId, RpcResponse, RpcResult, SessionId, SubagentAddress, ToolEventView,
+  PhysicalOperatorTraceView, RpcId, RpcResponse, RpcResult, SessionId, SubagentAddress, ToolEventView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 // Value import from the inline-safe wire layer (not the connection plugin):
 // plugin-to-plugin value imports are a bundle purity error.
@@ -102,7 +102,11 @@ export class Session implements SessionFace {
   private promptError: PromptError | null = null
   private lastAgentError: string | null = null
   /** Live events buffered during open/resync and stitched by sequence once history lands. */
-  private liveBuffer: { event: SessionEvent; view: ToolEventView | undefined }[] = []
+  private liveBuffer: {
+    event: SessionEvent
+    view: ToolEventView | undefined
+    physicalOperatorTrace: PhysicalOperatorTraceView | undefined
+  }[] = []
   /** Gap repair in flight; live events detour to the buffer until the tail page lands. */
   private stitching = false
   /** subscribed.lastSeq baseline (gap detection; null when no subscribed frame arrived — degrade to the liveBuffer dedup path). */
@@ -467,7 +471,7 @@ export class Session implements SessionFace {
   handleMuxEnvelope(rpcId: RpcId, frame: MuxFrame): void {
     switch (frame.type) {
       case 'session/event': {
-        this.acceptLiveEvent(frame.event, frame.view)
+        this.acceptLiveEvent(frame.event, frame.view, frame.physicalOperatorTrace)
         return
       }
       case 'session/queue': {
@@ -660,19 +664,27 @@ export class Session implements SessionFace {
     if (projections !== undefined) this.projections.seed(projections)
     const buffered = this.liveBuffer
     this.liveBuffer = []
-    for (const item of buffered) this.appendLive(item.event, item.view)
+    for (const item of buffered) this.appendLive(item.event, item.view, item.physicalOperatorTrace)
     this.notifier.markDirty()
   }
 
   /** Seq-guarded append shared by stitching and the open-state live path. */
-  private appendLive(event: SessionEvent, view?: ToolEventView): ConversationPublication {
+  private appendLive(
+    event: SessionEvent,
+    view?: ToolEventView,
+    physicalOperatorTrace?: PhysicalOperatorTraceView,
+  ): ConversationPublication {
     const tailSeq = this.windowTailSeq()
     if (tailSeq !== null && event.seq <= tailSeq) return 'none' // replay overlap, drop
     this.events.push(event)
     this.views.push(view)
     if (event.type === 'turn/start') this.firstPromptPendingTurn = false
     const queueChanged = this.queueMirror.acceptDurable(event)
-    const publication = this.conversation.append({ event, view })
+    const publication = this.conversation.append({
+      event,
+      view,
+      ...(physicalOperatorTrace === undefined ? {} : { physicalOperatorTrace }),
+    })
     return queueChanged ? 'immediate' : publication
   }
 
@@ -681,19 +693,23 @@ export class Session implements SessionFace {
    *  expected reconnect-window artifact, repaired by refetch). The window stays one contiguous
    *  raw range, which lets Conversation Definitions correlate every recorded event between its
    *  ends and lets a compaction checkpoint resolve its cited summary event. */
-  private acceptLiveEvent(event: SessionEvent, view?: ToolEventView): void {
+  private acceptLiveEvent(
+    event: SessionEvent,
+    view?: ToolEventView,
+    physicalOperatorTrace?: PhysicalOperatorTraceView,
+  ): void {
     if (this.openState === 'loading' || this.stitching) {
-      this.liveBuffer.push({ event, view })
+      this.liveBuffer.push({ event, view, physicalOperatorTrace })
       return
     }
     if (this.openState !== 'open') return // cold/error: no window upkeep (history fully backfills on open)
     const tailSeq = this.windowTailSeq()
     if (tailSeq !== null && event.seq > tailSeq + 1) {
-      this.liveBuffer.push({ event, view })
+      this.liveBuffer.push({ event, view, physicalOperatorTrace })
       void this.repairGap()
       return
     }
-    this.scheduleConversation(this.appendLive(event, view))
+    this.scheduleConversation(this.appendLive(event, view, physicalOperatorTrace))
   }
 
   /** Route assembler cadence into the Session's existing microtask/RAF notifier. */
@@ -781,7 +797,13 @@ export class Session implements SessionFace {
 
 /** Convert one wire history row into the assembler's transport-neutral input. */
 function conversationInput(entry: HistoryEntry): ConversationEventInput {
-  return { event: entry.event, view: entry.view }
+  return {
+    event: entry.event,
+    view: entry.view,
+    ...(entry.physicalOperatorTrace === undefined ? {} : {
+      physicalOperatorTrace: entry.physicalOperatorTrace,
+    }),
+  }
 }
 
 /** A generic command row alone remains control-plane content; every other visible Chat Node activates the conversation. */

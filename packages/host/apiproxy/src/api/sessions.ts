@@ -12,7 +12,7 @@ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session/types'
 // cordis Context merge (via dsh-agent) must not enter client aggregates.
 import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import type { RpcId, RpcRequest, RpcResponse } from './rpc.ts'
-import type { ToolEventView } from './events.ts'
+import type { PhysicalOperatorTraceView, ToolEventView } from './events.ts'
 import type { WorkspaceId } from './workspace.ts'
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
@@ -57,13 +57,14 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 /**
- * One history page entry: the raw event plus the optional host-computed render
- * intent (same semantics as the mux frame's `view` slot — a pagination-time
- * derivation, never persisted).
+ * One history page entry: a public event plus optional Host-computed views.
+ * Physical Operator authority events have empty public data and carry only the
+ * fixed, text-free `physicalOperatorTrace` projection.
  */
 export interface HistoryEntry {
   event: SessionEvent
   view?: ToolEventView
+  physicalOperatorTrace?: PhysicalOperatorTraceView
 }
 
 /**
@@ -268,9 +269,10 @@ export interface SessionsApi {
    * `maxMessages`, so a compaction's `compaction/summary` record stays on the page of its replacement. The tail
    * page (beforeSeq absent) additionally carries the in-flight
    * partial — chunk events already emitted for the last unfinalized message.
-   * Each entry pairs the raw SessionEvent with the host-computed view (tool events whose
+   * Each entry pairs the public SessionEvent with the host-computed view (tool events whose
    * presenter produced one, evaluated against the registry at pagination time); the client
-   * rebuilds the surface from the events with the shared fold.
+   * rebuilds the surface from the events with the shared fold. Physical Operator
+   * events expose only their fixed `physicalOperatorTrace`, never authority payloads.
    * The tail page — and only the tail page — additionally carries `projections`
    * when the deployment mounts the session-projection registry: every moment
    * the client needs a fresh baseline already pulls the tail page, and

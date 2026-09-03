@@ -10,6 +10,16 @@ Each role turn retains the requested operator/model separately from the actual l
 
 The browser panel uses the shared theme tokens but owns its styles and transport. This package depends only on the provider-neutral `ctx.debates` Service Definition and Host/client platform seams; it does not import the local Debate Provider, orchestration daemon, or physical-operator runtime.
 
+## BBS-style panel
+
+The selected Run is rendered as a forum thread:
+
+- The topic post is shown first, followed by a full-width collapsible roster with localized role categories and the configured public persona title and mandate.
+- Each round is a separate section and each terminal participant turn is an independent, globally numbered floor; planned and dispatched turns remain roster status rather than empty posts. Later-round turns identify the claim-ledger phase; submitted claims display their real statements, but the UI does not claim a reply relationship that the v1 protocol does not record.
+- The visible card contains only the durable public output preview, status, and evidence count. Provider/model routing, fallback, attempt, artifact, usage, timestamps, and identifiers are available under collapsed technical details.
+- The decision judge appears once as the pinned moderator synthesis rather than again as a discussion floor. Unresolved claims, preserved dissent, and convergence metrics remain separate sections so disagreement is not hidden by the final answer.
+- Replayed copies of the same durable error event are collapsed by sequence, attempt, node, and message. Distinct attempts or messages remain separate even when the error code matches. Missing output stays explicitly missing; the panel does not manufacture text for a role that never produced it.
+
 ## Model Experience
 
 ### Browser-only `/api/debates` projection
