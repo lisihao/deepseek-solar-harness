@@ -628,7 +628,9 @@ function physicalOperatorCell(
 ): TrajectoryCellProps {
   const base = {
     index,
-    recordId: `physical-operator\u0000${execution.commandId}\u0000${entry.seq}`,
+    recordId: entry.type === 'tool' && entry.tool !== undefined
+      ? `physical-operator\u0000${execution.commandId}\u0000tool\u0000${entry.tool.toolCallId}`
+      : `physical-operator\u0000${execution.commandId}\u0000${entry.seq}`,
     kind: 'operator' as const,
     sourceSeq: entry.seq,
     timeSeconds: 0,
@@ -651,12 +653,34 @@ function physicalOperatorCell(
     text: `轨迹降级 · ${entry.code ?? 'PROGRESS_UNAVAILABLE'}`,
     isError: true,
   }
+  if (entry.type === 'tool') {
+    const tool = entry.tool
+    if (tool === undefined) return { ...base, text: '工具状态已更新' }
+    const status = tool.status === 'running' ? '运行中' : tool.status === 'error' ? '失败' : '完成'
+    const outputDetail = [
+      tool.resultSummary === undefined ? undefined : `结果\n${tool.resultSummary}`,
+      tool.error === undefined ? undefined : `错误\n${tool.error}`,
+    ].filter((value): value is string => value !== undefined).join('\n\n')
+    return {
+      ...base,
+      text: `工具${status} · ${tool.name}`,
+      callId: tool.toolCallId,
+      ...(tool.argumentsSummary === undefined ? {} : {
+        inputDetail: tool.argumentsSummary,
+        previewMarkdown: tool.argumentsSummary,
+      }),
+      ...(tool.resultSummary === undefined ? {} : { resultPreviewMarkdown: tool.resultSummary }),
+      ...(outputDetail === '' ? {} : { outputDetail }),
+      ...(tool.status === 'error' ? { isError: true } : {}),
+    }
+  }
   const observation = entry.observation
   if (observation === undefined) return { ...base, text: '已收到原生状态更新' }
   if (observation.kind === 'public-output') return {
     ...base,
     // This is a bounded progress summary, never the final assistant transcript.
     text: observation.preview === undefined ? '公开输出已更新' : `公开输出 · ${observation.preview}`,
+    ...(observation.preview === undefined ? {} : { outputDetail: observation.preview }),
   }
   if (observation.kind === 'tool-started') return {
     ...base,

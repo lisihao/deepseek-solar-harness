@@ -138,7 +138,37 @@ describe('deriveTrajectoryLayout', () => {
       { kind: 'operator', text: '公开输出 · A bounded native progress summary.' },
       { kind: 'operator', text: '工具开始 · Bash' },
     ])
-    expect(group?.cells[2]?.outputDetail).toBeUndefined()
+    expect(group?.cells[2]?.outputDetail).toBe('A bounded native progress summary.')
+  })
+
+  it('renders a paired physical tool call with bounded input/result details and stable identity', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-tools', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [{
+          seq: 11, time: 10_100, type: 'tool',
+          tool: {
+            toolCallId: 'tool-call-1', name: 'Bash', status: 'error',
+            argumentsSummary: '{\n  "command": "printf hello"\n}',
+            resultSummary: '{\n  "message": "failed"\n}',
+            error: 'permission denied', callSeq: 11, resultSeq: 12,
+          },
+        }],
+      }],
+    })
+    const cell = turns[0]?.groups[0]?.cells[0]
+    expect(cell).toMatchObject({
+      kind: 'operator', text: '工具失败 · Bash', callId: 'tool-call-1', isError: true,
+      inputDetail: '{\n  "command": "printf hello"\n}',
+      outputDetail: '结果\n{\n  "message": "failed"\n}\n\n错误\npermission denied',
+      previewMarkdown: '{\n  "command": "printf hello"\n}',
+      resultPreviewMarkdown: '{\n  "message": "failed"\n}',
+    })
+    expect(cell?.recordId).toBe(['physical-operator', 'command-tools', 'tool', 'tool-call-1'].join('\u0000'))
   })
 
   it('orders a physical command by source sequence and keeps a settled success out of error state', () => {

@@ -32,9 +32,22 @@ export interface TrajectoryPhysicalOperatorTraceEntry {
     | 'dispatch'
     | 'progress'
     | 'observation'
+    | 'tool'
     | 'terminal'
     | 'degraded'
   readonly phase?: string
+  /** One paired model-tool call/result from a physical operator bridge. */
+  readonly tool?: {
+    /** Stable bridge receipt identity used to pair call and result events. */
+    readonly toolCallId: string
+    readonly name: string
+    readonly status: 'running' | 'completed' | 'error'
+    readonly argumentsSummary?: string
+    readonly resultSummary?: string
+    readonly error?: string
+    readonly callSeq?: number
+    readonly resultSeq?: number
+  }
   readonly observation?: {
     readonly kind: 'public-output' | 'tool-started' | 'tool-completed' | 'approval-required' | 'usage-updated'
     readonly preview?: string

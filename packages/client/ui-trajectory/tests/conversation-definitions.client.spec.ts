@@ -99,7 +99,7 @@ describe('Trajectory conversation Definitions', () => {
       at(2, 'physical-operator/progress', {
         commandId: 'command-1', operatorId: 'codex', sequence: 4, type: 'turn.observation',
         time: '2026-09-01T10:00:00.000Z',
-        data: { kind: 'public-output', preview: `Visible API_KEY=secret ${'x'.repeat(400)}` },
+        data: { kind: 'public-output', preview: `Visible API_KEY=secret\nsecond line\n${'x'.repeat(400)}` },
       }, { ignorable: true }),
       at(3, 'physical-operator/progress', {
         commandId: 'command-1', operatorId: 'codex', sequence: 4, type: 'turn.observation',
@@ -124,8 +124,10 @@ describe('Trajectory conversation Definitions', () => {
     expect(entries).toHaveLength(4)
     expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
       .toContain('[REDACTED]')
+    expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
+      .toContain('\nsecond line')
     expect(entries.find(entry => entry.type === 'observation')?.observation?.preview?.length)
-      .toBeLessThanOrEqual(240)
+      .toBeLessThanOrEqual(1_600)
     expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
       .not.toContain('reconnect duplicate')
     expect(entries.find(entry => entry.type === 'observation' && entry.observation?.kind === 'tool-started')?.observation)
@@ -167,6 +169,70 @@ describe('Trajectory conversation Definitions', () => {
       commandId: 'tool-command-1', operatorId: 'claude-code', turn: 0, step: 0,
     }])
     expect(current.physicalOperatorExecutions[0]?.entries.map(entry => entry.type)).toEqual(['dispatch', 'progress'])
+  })
+
+  it('pairs durable physical tool events, preserves multiline output, and scrubs sensitive values after replay', () => {
+    const current = snapshot(assembler([
+      at(1, 'physical-operator/dispatch', {
+        commandId: 'command-tools', operatorId: 'codex', promptMessageId: 'm', requestedByMessageId: 'm',
+        turn: 1, step: 1, recovered: false,
+      }),
+      at(2, 'physical-operator/tool-call', {
+        commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
+        tool: 'Bash', arguments: {
+          command: 'printf hello', token: 'do-not-render', prompt: 'do-not-render',
+        },
+      }, { ignorable: true }),
+      at(3, 'physical-operator/tool-result', {
+        commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
+        tool: 'Bash', result: {
+          isError: false,
+          value: { text: 'line one\nline two', api_key: 'do-not-render' },
+        },
+      }, { ignorable: true }),
+      // A reconnect/reload can expose the same durable tool call and result at
+      // new session sequence positions. The stable toolCallId keeps one row.
+      at(4, 'physical-operator/tool-call', {
+        commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
+        tool: 'Bash', arguments: { command: 'duplicate' },
+      }, { ignorable: true }),
+      at(5, 'physical-operator/tool-result', {
+        commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
+        tool: 'Bash', result: { isError: false, value: { text: 'duplicate' } },
+      }, { ignorable: true }),
+    ]))
+    const execution = current.physicalOperatorExecutions[0]
+    const tool = execution?.entries.find(entry => entry.type === 'tool')
+    expect(execution?.commandId).toBe('command-tools')
+    expect(execution?.entries.filter(entry => entry.type === 'tool')).toHaveLength(1)
+    expect(tool).toMatchObject({
+      type: 'tool', seq: 2,
+      tool: {
+        toolCallId: 'tool-call-1', name: 'Bash', status: 'completed', callSeq: 2, resultSeq: 3,
+      },
+    })
+    if (tool?.type !== 'tool' || tool.tool === undefined) throw new Error('expected paired physical tool trace')
+    expect(tool.tool.argumentsSummary).toContain('printf hello')
+    expect(tool.tool.argumentsSummary).not.toContain('do-not-render')
+    expect(tool.tool.resultSummary).toContain('line one')
+    expect(tool.tool.resultSummary).toContain('line two')
+    expect(tool.tool.resultSummary).not.toContain('do-not-render')
+    expect(tool.tool.resultSummary).not.toContain('api_key')
+  })
+
+  it('keeps legacy tool events visible when no parent execution id was persisted', () => {
+    const current = snapshot(assembler([
+      at(1, 'physical-operator/tool-call', {
+        commandId: 'legacy-tool-1', tool: 'Read', arguments: { path: '/tmp/a' },
+      }, { ignorable: true }),
+      at(2, 'physical-operator/tool-result', {
+        commandId: 'legacy-tool-1', tool: 'Read', result: { isError: true, error: 'permission denied' },
+      }, { ignorable: true }),
+    ]))
+    expect(current.physicalOperatorExecutions).toMatchObject([{
+      commandId: 'legacy-tool-1', operatorId: 'physical-operator',
+      entries: [{ type: 'dispatch' }, { type: 'tool', tool: { status: 'error', toolCallId: 'legacy-tool-1' } }],
+    }])
   })
 
   it('assembles streaming usage, preserves retry facts, and materializes interruption', () => {

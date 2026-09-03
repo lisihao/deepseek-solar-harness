@@ -347,6 +347,15 @@ describe('host physical-operator routing', () => {
     expect(answer?.type === 'text' ? answer.text : '').toContain('subscription:hello')
     expect(agent.session.events.some(event => event.type === 'physical-operator/tool-call')).toBe(true)
     expect(agent.session.events.some(event => event.type === 'physical-operator/tool-result')).toBe(true)
+    const toolCall = agent.session.events.find(event => event.type === 'physical-operator/tool-call')
+    const toolResult = agent.session.events.find(event => event.type === 'physical-operator/tool-result')
+    if (toolCall?.type !== 'physical-operator/tool-call' || toolResult?.type !== 'physical-operator/tool-result') {
+      throw new Error('expected durable physical tool call/result events')
+    }
+    expect(toolCall.data.toolCallId).toBe(toolCall.data.commandId)
+    expect(toolResult.data.toolCallId).toBe(toolResult.data.commandId)
+    expect(toolCall.data.executionCommandId).toBe(toolResult.data.executionCommandId)
+    expect(toolCall.data.executionCommandId).not.toBe(toolCall.data.commandId)
   })
 
   it('carries Resident product usage into the durable assistant message for billing', async () => {

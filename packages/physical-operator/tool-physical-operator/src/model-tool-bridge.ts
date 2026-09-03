@@ -13,6 +13,8 @@ import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
 interface Binding {
   readonly agent: Agent
   readonly signal: AbortSignal
+  /** Parent physical execution that owns every model-visible tool call in this binding. */
+  readonly executionCommandId: string
   readonly tools: ReadonlySet<string>
   readonly receipts: Map<string, { readonly hash: string; readonly result?: Promise<unknown> }>
 }
@@ -94,6 +96,7 @@ export class PhysicalOperatorModelToolBridge {
     const binding: Binding = {
       agent,
       signal,
+      executionCommandId: commandId,
       tools: new Set(tools.map(tool => tool.name)),
       receipts: recoverReceipts(agent.session.events),
     }
@@ -147,6 +150,8 @@ export class PhysicalOperatorModelToolBridge {
     const { agent } = binding
     agent.session.append('physical-operator/tool-call', {
       commandId,
+      toolCallId: commandId,
+      executionCommandId: binding.executionCommandId,
       tool,
       arguments: args as Record<string, import('@deepseek-ai/dsh-session').JsonValue>,
     }, { ignorable: true })
@@ -166,6 +171,8 @@ export class PhysicalOperatorModelToolBridge {
     }
     agent.session.append('physical-operator/tool-result', {
       commandId,
+      toolCallId: commandId,
+      executionCommandId: binding.executionCommandId,
       tool,
       result: envelope as unknown as JsonValue,
     }, { ignorable: true })
