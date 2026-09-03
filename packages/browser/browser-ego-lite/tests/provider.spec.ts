@@ -737,6 +737,27 @@ describe('Ego Lite subprocess validation', () => {
     }
   })
 
+  it('maps the exact Ego Lite onboarding output to an actionable unavailable error', async () => {
+    const onboarding = await processHarness()
+    onboarding.subprocess.run = () => Promise.resolve({
+      outcome: { exitCode: 0, signal: null },
+      stdout: 'Please complete the onboarding process first. A setup window has opened; follow the on-screen instructions to continue. After completing onboarding, open a new terminal window for the command to take effect.\n',
+    })
+
+    await expect(EgoLite.runEgoLiteProcess(onboarding.ctx, processConfig, 'code')).rejects.toMatchObject({
+      code: 'BROWSER_UNAVAILABLE',
+      message: 'Ego Lite onboarding is incomplete; complete setup in the Ego Lite app, then retry',
+    })
+
+    const nearMiss = await processHarness()
+    nearMiss.subprocess.run = () => Promise.resolve({
+      outcome: { exitCode: 0, signal: null },
+      stdout: 'Please complete the onboarding process first. A setup window has opened; follow the on-screen instructions to continue. After completing onboarding, open a new terminal window for the command to take effect. extra\n',
+    })
+    await expect(EgoLite.runEgoLiteProcess(nearMiss.ctx, processConfig, 'code'))
+      .rejects.toMatchObject({ code: 'BROWSER_PROTOCOL' })
+  })
+
   it('maps every published Ego failure family and emitted portable error family', async () => {
     const mappings = [
       ['EGO_TASK_SPACE_NOT_FOUND', 'BROWSER_WORKSPACE_INACTIVE'],

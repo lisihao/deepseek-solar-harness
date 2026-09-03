@@ -36,6 +36,9 @@ interface WireError {
   readonly operationId?: string
 }
 
+const EGO_LITE_ONBOARDING_MESSAGE = 'Please complete the onboarding process first. A setup window has opened; follow the on-screen instructions to continue. After completing onboarding, open a new terminal window for the command to take effect.'
+const EGO_LITE_ONBOARDING_ERROR = 'Ego Lite onboarding is incomplete; complete setup in the Ego Lite app, then retry'
+
 type WireFrame =
   | { readonly ok: true; readonly result: unknown }
   | { readonly ok: false; readonly error: WireError }
@@ -149,6 +152,9 @@ function parseProcessStreams(stdout: string, stderr: string): ParsedStreams {
   for (const [channel, text] of [['stdout', stdout], ['stderr', stderr]] as const) {
     for (const line of text.split(/\r?\n/u)) {
       if (line.length === 0) continue
+      if (line === EGO_LITE_ONBOARDING_MESSAGE) {
+        throw new BrowserError(EGO_LITE_ONBOARDING_ERROR, 'BROWSER_UNAVAILABLE')
+      }
       if (line.startsWith(EGO_LITE_NOTICE_PREFIX)) {
         notices.push(line)
         continue
