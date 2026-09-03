@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/browser/browser-ego-lite/README.md
-README.md: 3b9ad24243a6e65a843115a8cf2c4adcf34772be
-README.zh.md: cb40175e7291586f40c7b9580de14ca2db386c6d
+README.md: 4f577b5cedfb87400da0aeef6a1c90351c43e1e3
+README.zh.md: db94c8eb6cc7cd5ae56fb7dd4179bca2f817cac3

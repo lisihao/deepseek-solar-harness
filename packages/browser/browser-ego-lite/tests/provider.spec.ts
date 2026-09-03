@@ -180,10 +180,46 @@ interface FixtureState {
   takeoverCalls: number
 }
 
-async function executeFixtureSource(source: string, state: FixtureState = { snapshotCalls: 0, takeoverCalls: 0 }): Promise<ScriptedRun> {
+type FixtureSurface = 'object' | 'global-helpers'
+
+async function executeFixtureSource(
+  source: string,
+  state: FixtureState = { snapshotCalls: 0, takeoverCalls: 0 },
+  surface: FixtureSurface = 'object',
+): Promise<ScriptedRun> {
   const target = globalThis as Record<string, unknown>
   const previous = new Map<string, unknown>()
-  const names = ['browser', 'page', 'taskSpaces'] as const
+  const objectNames = ['browser', 'page', 'taskSpaces'] as const
+  const helperNames = [
+    'listTaskSpaces',
+    'useOrCreateTaskSpace',
+    'claimTaskSpace',
+    'handOffTaskSpace',
+    'takeOverTaskSpace',
+    'waitForAgentControl',
+    'completeTaskSpace',
+    'listTabs',
+    'openOrReuseTab',
+    'closeTab',
+    'gotoAndWait',
+    'currentTab',
+    'switchTab',
+    'gotoUrl',
+    'pageInfo',
+    'ensureRealTab',
+    'snapshotText',
+    'captureScreenshot',
+    'waitForLoad',
+    'waitForNetworkIdle',
+    'waitForElement',
+    'click',
+    'fillInput',
+    'pressKey',
+    'cdp',
+    'js',
+    'wait',
+  ] as const
+  const names = [...objectNames, ...helperNames]
   for (const name of names) previous.set(name, target[name])
   const originalConsole = globalThis.console
   const stdout: string[] = []
@@ -292,6 +328,48 @@ async function executeFixtureSource(source: string, state: FixtureState = { snap
     waitForAgentControl: () => Promise.resolve(),
     complete: () => Promise.resolve({ done: true }),
   }
+  if (surface === 'global-helpers') {
+    const nativeBrowser = target.browser
+    const nativePage = target.page
+    const nativeTaskSpaces = target.taskSpaces
+    const call = (owner: unknown, method: string, ...args: unknown[]): unknown => {
+      const fn = (owner as Record<string, (...values: unknown[]) => unknown>)[method]
+      if (typeof fn !== 'function') throw new Error(`fixture helper is missing: ${method}`)
+      return fn(...args)
+    }
+    for (const name of objectNames) Reflect.deleteProperty(target, name)
+    Object.assign(target, {
+      listTaskSpaces: () => call(nativeTaskSpaces, 'list'),
+      useOrCreateTaskSpace: (nameOrId: string | number) => call(nativeTaskSpaces, 'useOrCreate', nameOrId),
+      claimTaskSpace: (nameOrId: string | number) => call(nativeTaskSpaces, 'useOrCreate', nameOrId),
+      handOffTaskSpace: (id?: number) => call(nativeTaskSpaces, 'handOff', id),
+      takeOverTaskSpace: (id?: number) => call(nativeTaskSpaces, 'takeOver', id),
+      waitForAgentControl: (id?: number, options?: unknown) => call(nativeTaskSpaces, 'waitForAgentControl', id, options),
+      completeTaskSpace: (id?: number, options?: unknown) => call(nativeTaskSpaces, 'complete', id, options),
+      listTabs: (options?: unknown) => call(nativeBrowser, 'listTabs', options),
+      openOrReuseTab: (url: string, options?: unknown) => call(nativeBrowser, 'openOrReuseTab', url, options),
+      closeTab: (targetId?: string) => call(nativeBrowser, 'closeTab', targetId),
+      gotoAndWait: (url: string, options?: unknown) => call(nativePage, 'goto', url, options),
+      currentTab: () => active,
+      switchTab: (targetId: string) => call(nativeBrowser, 'switchTab', targetId),
+      gotoUrl: (url: string, options?: unknown) => call(nativePage, 'goto', url, options),
+      pageInfo: () => call(nativePage, 'info'),
+      ensureRealTab: () => active,
+      snapshotText: () => call(nativePage, 'snapshot'),
+      captureScreenshot: (options?: unknown) => call(nativePage, 'screenshot', options),
+      waitForLoad: (options?: unknown) => call(nativePage, 'waitForLoadState', 'load', options),
+      waitForNetworkIdle: (options?: unknown) => call(nativePage, 'waitForLoadState', 'networkidle', options),
+      waitForElement: () => Promise.resolve(true),
+      click: () => Promise.resolve(true),
+      fillInput: () => Promise.resolve(true),
+      pressKey: () => Promise.resolve(true),
+      cdp: (method: string) => method === 'Page.reload'
+        ? call(nativePage, 'reload')
+        : Promise.reject(new Error(`unsupported fixture CDP method: ${method}`)),
+      js: (expression: string) => call(nativePage, 'evaluate', expression),
+      wait: () => Promise.resolve(),
+    })
+  }
   globalThis.console = {
     ...originalConsole,
     log: (...args: unknown[]) => { stdout.push(args.map(String).join(' ')) },
@@ -339,6 +417,32 @@ describe('EgoLiteBrowserProvider process protocol', () => {
     expect(typeof stdin).toBe('object')
     expect(typeof stdin === 'object' && 'data' in stdin ? stdin.data : '').toContain('await __dshEntrypoint')
     expect(spawn?.signal).toBeUndefined()
+  })
+
+  it('uses Ego Lite 0.4.7.4 global helpers when object facades are absent', async () => {
+    const { ctx, subprocess } = await setup()
+    subprocess.run = spec => executeFixtureSource(
+      (spec.stdio.stdin as { data: string }).data,
+      undefined,
+      'global-helpers',
+    )
+
+    const globalPlan: BrowserRunPlanV1 = {
+      ...plan,
+      operations: [
+        plan.operations[0]!,
+        { kind: 'reload', id: op('reload-main'), page: pageKey('main'), waitUntil: 'load' },
+      ],
+    }
+    await expect(ctx.browser.runPlan(globalPlan)).resolves.toMatchObject({
+      version: 1,
+      workspace: { id: 'ego-lite:7', name: 'workspace' },
+      operations: [
+        { kind: 'page', page: { page: 'main', url: 'https://example.com' } },
+        { kind: 'page', operation: 'reload', page: { page: 'main', url: 'https://example.com' } },
+      ],
+    })
+    expect(subprocess.spawns).toHaveLength(1)
   })
 
   it('uses JSON string embedding so quotes, backticks, interpolation text, and newlines stay data', async () => {
