@@ -45,6 +45,23 @@
 - `AbortSignal` 会取消浏览器程序并得到 aborted 终态。dispose 不会关闭用户浏览器或已认证工作区。
 - 进度流只保存生命周期阶段和结果大小元数据；它刻意不包含 prompt 或网页回复正文。
 
+## 旧 Solar 保真矩阵
+
+迁移基线为 Solar 提交 `cf7df54d0`。该提交的 `core/chatgpt-web/client.ts` 实现了一次同步 Puppeteer/CDP 请求。下表明确区分忠实行为与 Ego Lite 平台适配；不会把后来的包装或未实现能力归到旧算子名下。
+
+| Solar 行为 | 本 Provider | 保真状态 |
+|---|---|---|
+| 使用用户已登录的 ChatGPT 网页订阅 | 使用经过认证的命名 browser workspace；不读取 API key | faithful |
+| 连接端口 9222 上单独启动的 Chrome Profile | 使用公共 `ctx.browser` seam 和 Ego Lite 的 authenticated-profile reuse | 平台适配；移除脆弱的调试端口和 Profile 所有权 |
+| 打开或复用 `https://chatgpt.com/` | 在 `dsh-chatgpt-web` 中打开或复用完全一致的 URL | faithful |
+| 提交前检测可见登录控件 | 返回 `CHATGPT_WEB_AUTH_REQUIRED` | faithful，并提供类型化失败 |
+| 合并 `systemPrompt + "\n\n---\n\n" + task` | 保留完全相同的文本边界 | faithful |
+| 填写输入框、按 Enter、等待并提取最新 Markdown 回复 | 在一个可信 browser program 中按相同顺序执行 | faithful |
+| 可选模型选择失败时静默保留当前模型 | 显式请求的模型必须被选择并验证，否则调用失败 | 有意的可靠性改进 |
+| 断开但不关闭用户浏览器 | dispose 只取消当前调用并保留命名 workspace | faithful |
+| 不存在 durable receipt、`submit/poll/collect`、原生 resume 或 Deep Research 模式 | 首版 Provider 不宣称支持这些能力 | faithful 的范围边界 |
+| 顺序执行的人格比较脚本 | 交由 Debate/Orchestration，而不在 Provider 中重复实现 | 有意放在正确的 capability seam |
+
 ## 模型体验
 
 ### 由 Consumer 持有的物理算子结果

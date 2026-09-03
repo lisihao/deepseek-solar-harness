@@ -172,6 +172,26 @@ describe('ChatGPT Web physical operator', () => {
     expect(program.source).not.toContain("kind: 'close-page'")
   })
 
+  it('emits browser evaluator functions as executable JavaScript rather than TypeScript source', () => {
+    const program = adapter.buildChatGptWebProgram({
+      url: 'https://chatgpt.com/',
+      workspaceName: 'fixture-chatgpt-web',
+      prompt: 'question',
+      model: 'GPT-5',
+      generationTimeoutMs: 1_000,
+      pollIntervalMs: 1,
+      outputMaxBytes: 2_048,
+    })
+    const encodedEvaluators = [
+      ...program.source.matchAll(/browser\.evaluate\(page, ("(?:\\.|[^"\\])*")/g),
+    ].map(match => match[1])
+    expect(encodedEvaluators).toHaveLength(4)
+    for (const encoded of encodedEvaluators) {
+      const evaluator = JSON.parse(encoded!) as string
+      expect(() => Function(`return (${evaluator})`)()).not.toThrow()
+    }
+  })
+
   it('fails loud instead of silently falling back when an explicit model cannot be verified', async () => {
     const provider = new StubBrowserProvider(async () => resultFor({ status: 'model-selection-unavailable' }))
     const { ctx, plugin } = await setup(provider)

@@ -45,6 +45,23 @@ The configured browser Provider must declare `browser-js-v1` plus `authenticated
 - `AbortSignal` cancels the browser program and yields an aborted result. Dispose never closes the user's browser or authenticated workspace.
 - Progress is bounded to lifecycle phases and result size metadata; it deliberately excludes the prompt and webpage output.
 
+## Legacy Solar fidelity
+
+The migration baseline is Solar commit `cf7df54d0`, where `core/chatgpt-web/client.ts` implemented one synchronous Puppeteer/CDP request. The table distinguishes faithful behavior from deliberate Ego Lite platform adaptations; it does not attribute later or unimplemented behavior to the legacy operator.
+
+| Solar behavior | This Provider | Fidelity |
+|---|---|---|
+| Use the user's authenticated ChatGPT website subscription | Uses an authenticated named browser workspace; no API key is read | faithful |
+| Connect to a separately launched Chrome profile on port 9222 | Uses the public `ctx.browser` seam and Ego Lite authenticated-profile reuse | platform adaptation; removes the fragile debugging-port/profile ownership |
+| Open or reuse `https://chatgpt.com/` | Opens or reuses the exact URL in `dsh-chatgpt-web` | faithful |
+| Detect a visible login control before submission | Returns `CHATGPT_WEB_AUTH_REQUIRED` | faithful, with a typed failure |
+| Merge `systemPrompt + "\n\n---\n\n" + task` | Preserves the same text boundary | faithful |
+| Fill the composer, press Enter, wait, and extract the newest Markdown reply | Performs the same ordered interaction in one trusted browser program | faithful |
+| Optional model selector could fail and silently keep the current model | A requested model must be selected and verified or the call fails | deliberate reliability improvement |
+| Disconnect without closing the user's browser | Dispose cancels only this call and keeps the named workspace | faithful |
+| No durable receipt, `submit/poll/collect`, native resume, or Deep Research mode | This first Provider does not claim those capabilities | faithful scope boundary |
+| Sequential personality comparison script | Left to Debate/Orchestration rather than duplicated in the Provider | deliberate capability-seam placement |
+
 ## Model Experience
 
 ### Consumer-owned physical-operator result

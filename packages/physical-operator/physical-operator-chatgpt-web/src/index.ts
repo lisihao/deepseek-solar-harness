@@ -129,14 +129,14 @@ type ProgramOutcome = CompletedProgramOutcome
   | { readonly status: 'generation-timeout' }
   | { readonly status: 'protocol-error' }
 
-const INSPECT_PAGE = String.raw`(): unknown => {
-  const visible = (element: Element) => {
+const INSPECT_PAGE = String.raw`() => {
+  const visible = (element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
   };
-  const normalize = (value: unknown) => String(value ?? '').replace(/\s+/g, ' ').trim();
-  const label = (element: Element) => normalize(
+  const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const label = (element) => normalize(
     element.getAttribute('aria-label') ?? element.getAttribute('title') ?? element.textContent,
   );
   const loginRequired = [...document.querySelectorAll('button,a')]
@@ -161,18 +161,18 @@ const INSPECT_PAGE = String.raw`(): unknown => {
   };
 }`
 
-const SELECT_MODEL = String.raw`async (input: unknown): Promise<unknown> => {
+const SELECT_MODEL = String.raw`async (input) => {
   if (input === null || typeof input !== 'object') return { selected: false };
-  const record = input as { model?: unknown; waitMs?: unknown };
+  const record = input;
   if (typeof record.model !== 'string' || typeof record.waitMs !== 'number') return { selected: false };
-  const normalize = (value: unknown) => String(value ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+  const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
   const target = normalize(record.model);
-  const visible = (element: Element) => {
+  const visible = (element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
   };
-  const label = (element: Element) => normalize(
+  const label = (element) => normalize(
     element.getAttribute('aria-label') ?? element.getAttribute('title') ?? element.textContent,
   );
   const controls = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
@@ -180,17 +180,17 @@ const SELECT_MODEL = String.raw`async (input: unknown): Promise<unknown> => {
   if (selectors.length !== 1) return { selected: false };
   const selector = selectors[0];
   selector.click();
-  await new Promise<void>((resolve) => setTimeout(resolve, record.waitMs));
+  await new Promise((resolve) => setTimeout(resolve, record.waitMs));
   const options = [...document.querySelectorAll('button,[role="menuitem"],[role="option"]')]
     .filter(visible)
     .filter((element) => label(element) === target);
   if (options.length !== 1) return { selected: false };
   options[0].click();
-  await new Promise<void>((resolve) => setTimeout(resolve, record.waitMs));
+  await new Promise((resolve) => setTimeout(resolve, record.waitMs));
   return { selected: label(selector) === target };
 }`
 
-const RESPONSE_STATE = String.raw`(): unknown => {
+const RESPONSE_STATE = String.raw`() => {
   const replies = [...document.querySelectorAll('[data-message-author-role="assistant"]')]
     .map((element) => element.querySelector('.markdown') ?? element)
     .map((element) => element.textContent ?? '')
