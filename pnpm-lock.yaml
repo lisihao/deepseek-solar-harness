@@ -1338,6 +1338,25 @@ importers:
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
 
+  packages/bundle/chatgpt-web-operator:
+    dependencies:
+      '@deepseek-ai/dsh-physical-operator-chatgpt-web':
+        specifier: workspace:^
+        version: link:../../physical-operator/physical-operator-chatgpt-web
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: workspace:^
+        version: link:../../../vendor/include
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      js-yaml:
+        specifier: ^4.2.0
+        version: 4.2.0
+
   packages/bundle/ego-lite-browser:
     dependencies:
       '@deepseek-ai/dsh-browser':
@@ -6475,6 +6494,37 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+
+  packages/physical-operator/physical-operator-chatgpt-web:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:^
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-app-boot':
+        specifier: workspace:^
+        version: link:../../boot/app-boot
+      '@deepseek-ai/dsh-browser':
+        specifier: workspace:^
+        version: link:../../browser/browser
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-loader-smoke':
+        specifier: workspace:^
+        version: link:../../test-support/loader-smoke
+      '@deepseek-ai/dsh-physical-operator':
+        specifier: workspace:^
+        version: link:../physical-operator
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session

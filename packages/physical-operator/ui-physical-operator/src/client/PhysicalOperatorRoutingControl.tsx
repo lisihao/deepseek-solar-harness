@@ -54,6 +54,7 @@ const LABELS: Record<PhysicalOperatorRoutingPolicy, string> = {
   direct: '仅主模型',
   codex: '优先 Codex',
   'claude-code': '优先 Claude Code',
+  'chatgpt-web': 'ChatGPT 网页订阅',
 }
 
 const RLM_EXECUTION_LABELS: Record<RlmExecutionMode, string> = {
@@ -175,6 +176,7 @@ export function physicalOperatorRoutingSummary(policy: PhysicalOperatorRoutingPo
     direct: '仅主模型',
     codex: 'Codex',
     'claude-code': 'Claude Code',
+    'chatgpt-web': 'ChatGPT 网页版',
   } as const)[policy]
 }
 
@@ -380,7 +382,7 @@ export function PhysicalOperatorRoutingControl({
         aria-haspopup="dialog"
         aria-expanded={open}
         disabled={locked}
-        title={error ?? '设置主模型、订阅态 Codex/Claude Code 与 TaskGraph 执行机制'}
+        title={error ?? '设置主模型、订阅态 Codex/Claude Code/ChatGPT 网页版与 TaskGraph 执行机制'}
         onClick={() => {
           setOpen((value) => {
             if (!value) setPage('basic')
@@ -624,6 +626,7 @@ export function physicalOperatorRoutingDescription(policy: PhysicalOperatorRouti
     direct: '始终由当前主聊天模型回答，不调用执行助手。',
     codex: '代码、调试和测试任务优先交给 Codex；短问答仍由主模型处理。',
     'claude-code': '分析、架构和长上下文任务优先交给 Claude Code；短问答仍由主模型处理。',
+    'chatgpt-web': '仅在你明确选择时通过已登录的 ChatGPT 网页订阅执行；不进入智能自动，模型与强度由网页端管理。',
   } as const)[policy]
 }
 

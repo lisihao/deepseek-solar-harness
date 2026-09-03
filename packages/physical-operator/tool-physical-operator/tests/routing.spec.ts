@@ -62,7 +62,7 @@ class DurableOperator implements PhysicalOperator {
   productStarts = 0
 
   constructor(
-    readonly id: 'codex' | 'claude-code',
+    readonly id: 'codex' | 'claude-code' | 'chatgpt-web',
     private readonly immediate = true,
     private readonly bridgeToolName?: string,
     private readonly usage?: PhysicalOperatorResult['usage'],
@@ -72,14 +72,15 @@ class DurableOperator implements PhysicalOperator {
     private readonly observations: readonly Record<string, unknown>[] = [],
     private readonly observationsAfterSettle = false,
     private readonly startErrorCode?: string,
+    private readonly executionModes: readonly ('ephemeral' | 'resident')[] = ['ephemeral', 'resident'],
   ) {
     this.descriptor = {
       id: PhysicalOperatorId(id),
-      displayName: id === 'codex' ? 'Codex' : 'Claude Code',
-      description: `Resident ${id} fixture.`,
-      tags: id === 'codex' ? ['coding'] : ['analysis'],
+      displayName: id === 'codex' ? 'Codex' : id === 'claude-code' ? 'Claude Code' : 'ChatGPT Web',
+      description: `${id} fixture.`,
+      tags: id === 'codex' ? ['coding'] : id === 'claude-code' ? ['analysis'] : ['browser', 'subscription'],
       maxConcurrency: 1,
-      executionModes: ['ephemeral', 'resident'] as const,
+      executionModes: this.executionModes,
     }
   }
 
@@ -214,7 +215,7 @@ async function setup(options: {
   codexObservations?: readonly Record<string, unknown>[]
   codexObservationsAfterSettle?: boolean
   claudeStartErrorCode?: string
-  primary?: 'deepseek' | 'codex' | 'claude-code'
+  primary?: 'deepseek' | 'codex' | 'claude-code' | 'chatgpt-web'
   registerDeepSeek?: boolean
   mountTool?: boolean
 } = {}) {
@@ -267,14 +268,28 @@ async function setup(options: {
     false,
     options.claudeStartErrorCode,
   )
+  const chatgpt = new DurableOperator(
+    'chatgpt-web',
+    true,
+    undefined,
+    undefined,
+    [],
+    'completed',
+    undefined,
+    [],
+    false,
+    undefined,
+    ['ephemeral'],
+  )
   ctx.physicalOperators.registerOperator(codex)
   ctx.physicalOperators.registerOperator(claude)
+  ctx.physicalOperators.registerOperator(chatgpt)
   const mounted = options.mountTool === false ? undefined : await ctx.plugin(tool)
   const primary = options.primary ?? 'deepseek'
   const agent = ctx.agentLoop.create(SessionId('router-session'), primary === 'deepseek'
     ? { provider: 'deepseek', model: 'deepseek' }
     : { provider: 'dsh-physical-operator', model: primary })
-  return { ctx, deepseek, codex, claude, mounted, agent, echoCalls }
+  return { ctx, deepseek, codex, claude, chatgpt, mounted, agent, echoCalls }
 }
 
 function send(agent: Agent, text: string): void {
@@ -302,9 +317,9 @@ function lastAssistantMessage(agent: Agent) {
 }
 
 describe('host physical-operator routing', () => {
-  it('keeps the physical product directory limited to Codex and Claude Code', async () => {
+  it('keeps the physical product directory as generic operator discovery', async () => {
     const { ctx } = await setup()
-    expect(ctx.physicalOperators.list().map(value => String(value.id))).toEqual(['codex', 'claude-code'])
+    expect(ctx.physicalOperators.list().map(value => String(value.id))).toEqual(['codex', 'claude-code', 'chatgpt-web'])
   })
 
   it('lets an explicit current-message Codex request override a Claude preference without calling DeepSeek', async () => {
@@ -357,6 +372,82 @@ describe('host physical-operator routing', () => {
     expect(toolResult.data.toolCallId).toBe(toolResult.data.commandId)
     expect(toolCall.data.executionCommandId).toBe(toolResult.data.executionCommandId)
     expect(toolCall.data.executionCommandId).not.toBe(toolCall.data.commandId)
+  })
+
+  it('runs ChatGPT Web as a first-class ephemeral main-model route without DeepSeek or a Resident bridge', async () => {
+    const { agent, deepseek, chatgpt } = await setup({
+      primary: 'chatgpt-web',
+      registerDeepSeek: false,
+    })
+
+    send(agent, '你好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(chatgpt.requests).toHaveLength(1)
+    expect(chatgpt.requests[0]).toMatchObject({ mode: 'ephemeral' })
+    expect(chatgpt.requests[0]?.nativeToolPolicy).toBeUndefined()
+    expect(chatgpt.requests[0]?.modelToolBridge).toBeUndefined()
+    expect(chatgpt.requests[0]?.residentProfile).toBeUndefined()
+    expect(lastAssistantMessage(agent).source).toMatchObject({
+      provider: 'dsh-physical-operator',
+      model: 'chatgpt-web',
+    })
+    expect(agent.session.events.find(event => event.type === 'physical-operator/dispatch')).toMatchObject({
+      data: { operatorId: 'chatgpt-web', executionMode: 'ephemeral' },
+    })
+    expect(agent.session.events.filter(event => event.type === 'physical-operator/progress')).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          operatorId: 'chatgpt-web',
+          type: 'turn.settled',
+          data: expect.objectContaining({ stopReason: 'completed' }),
+        }),
+      }),
+    ])
+  })
+
+  it('recognizes an explicitly named ChatGPT Web request without changing Smart Auto', async () => {
+    const { agent, deepseek, chatgpt } = await setup()
+
+    send(agent, '请用 ChatGPT 网页版回答：你好。')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(chatgpt.requests).toHaveLength(1)
+    expect(chatgpt.requests[0]).toMatchObject({ mode: 'ephemeral' })
+  })
+
+  it('accepts ChatGPT Web only as an explicit policy and keeps it out of Smart Auto', async () => {
+    const selected = await setup()
+    await expect(selected.ctx.commands.execute(
+      selected.agent,
+      '/operator chatgpt-web',
+      new AbortController().signal,
+    )).resolves.toMatchObject({ result: { kind: 'success', text: 'routing chatgpt-web' } })
+    await expect(selected.ctx.commands.execute(
+      selected.agent,
+      '/operator-profile chatgpt-web auto auto',
+      new AbortController().signal,
+    )).resolves.toMatchObject({ result: { kind: 'error' } })
+
+    send(selected.agent, '请分析这个架构设计，并列出三个可执行建议。')
+    await selected.agent.whenIdle()
+
+    expect(selected.deepseek.requests).toHaveLength(0)
+    expect(selected.codex.requests).toHaveLength(0)
+    expect(selected.claude.requests).toHaveLength(0)
+    expect(selected.chatgpt.requests).toHaveLength(1)
+    expect(selected.chatgpt.requests[0]).toMatchObject({ mode: 'ephemeral' })
+    expect(selected.agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+      data: { policy: 'chatgpt-web', route: 'ephemeral', operatorId: 'chatgpt-web' },
+    })
+
+    const automatic = await setup()
+    send(automatic.agent, '请分析这个架构设计，并列出三个可执行建议。')
+    await automatic.agent.whenIdle()
+    expect(automatic.chatgpt.requests).toHaveLength(0)
+    expect(automatic.claude.requests).toHaveLength(1)
   })
 
   it('persists one indeterminate trace across bridge restart when a recovered receipt has no result', async () => {
@@ -917,6 +1008,24 @@ describe('host physical-operator routing', () => {
         policy: 'codex',
         route: 'taskgraph-candidate',
         operatorId: 'codex',
+      },
+    })
+  })
+
+  it('keeps an explicit ChatGPT Web policy on its bounded ephemeral route for parallel-looking prompts', async () => {
+    const { ctx, agent, deepseek, chatgpt } = await setup()
+    await ctx.commands.execute(agent, '/operator chatgpt-web', new AbortController().signal)
+    send(agent, '请并行研究三个独立方案，再综合输出最终建议。')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(chatgpt.requests).toHaveLength(1)
+    expect(chatgpt.requests[0]).toMatchObject({ mode: 'ephemeral' })
+    expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+      data: {
+        policy: 'chatgpt-web',
+        route: 'ephemeral',
+        operatorId: 'chatgpt-web',
       },
     })
   })

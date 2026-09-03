@@ -5,6 +5,8 @@ export const ORCHESTRATION_BUNDLE_PACKAGE = '@deepseek-ai/dsh-orchestrations'
 export const EGO_LITE_BROWSER_BUNDLE_PACKAGE = '@deepseek-ai/dsh-ego-lite-browser'
 export const EGO_LITE_BROWSER_ROW_ID = 'browser'
 export const EGO_LITE_BROWSER_PROVIDER_PACKAGE = '@deepseek-ai/dsh-browser-ego-lite'
+export const CHATGPT_WEB_BUNDLE_PACKAGE = '@deepseek-ai/dsh-chatgpt-web-operator'
+export const CHATGPT_WEB_ROW_ID = 'physical-operator-chatgpt-web'
 export const ARCHIFY_PACKAGE = '@deepseek-ai/dsh-archify'
 export const ARCHIFY_ROW_ID = 'archify'
 export const AGENT_TEAMS_PACKAGE = '@nanmicoder/dsh-agent-teams'
@@ -36,6 +38,7 @@ export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
   [ORCHESTRATION_BUNDLE_PACKAGE, 'orchestration-local'],
   [EGO_LITE_BROWSER_BUNDLE_PACKAGE, EGO_LITE_BROWSER_ROW_ID],
+  [CHATGPT_WEB_BUNDLE_PACKAGE, CHATGPT_WEB_ROW_ID],
   [ARCHIFY_PACKAGE, ARCHIFY_ROW_ID],
   [AGENT_TEAMS_PACKAGE, AGENT_TEAMS_ROW_ID],
   [REMOTE_WEB_UI_PACKAGE, 'remote-web-ui'],
@@ -61,6 +64,7 @@ export const PRODUCT_BUNDLE_PACKAGES = [
   RESIDENT_BUNDLE_PACKAGE,
   ORCHESTRATION_BUNDLE_PACKAGE,
   EGO_LITE_BROWSER_BUNDLE_PACKAGE,
+  CHATGPT_WEB_BUNDLE_PACKAGE,
   ARCHIFY_PACKAGE,
   AGENT_TEAMS_PACKAGE,
   REMOTE_WEB_UI_PACKAGE,

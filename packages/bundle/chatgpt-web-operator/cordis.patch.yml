@@ -1,0 +1,10 @@
+# Opt-in provider-only ChatGPT Web physical-operator bundle.
+#
+# The host profile owns the public `ctx.physicalOperators` and `ctx.browser`
+# seams plus their Consumer/browser Provider. Keeping this patch to one unique
+# Provider row lets it compose directly with resident-operators and
+# ego-lite-browser without duplicate Loader IDs or duplicate Service writers.
+
+- insert:
+    - id: physical-operator-chatgpt-web
+      name: '@deepseek-ai/dsh-physical-operator-chatgpt-web'

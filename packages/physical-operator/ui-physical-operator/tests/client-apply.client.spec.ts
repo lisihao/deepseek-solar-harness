@@ -99,7 +99,7 @@ describe('physical operator client plugin', () => {
     expect(resident?.options.inject?.('session-1')).toEqual({ request })
     expect(routing?.options.name).toBe('conversation.input.right')
     const injected = routing?.options.inject?.('session-1') as {
-      select: (policy: 'codex') => Promise<string | null>
+      select: (policy: 'codex' | 'chatgpt-web') => Promise<string | null>
       selectProfile: (operatorId: 'codex', model?: string, effort?: 'high') => Promise<string | null>
       selectOrchestrationStrategy: (
         rlm: 'enabled', autonomous: 'enabled', harness: 'off', optimization: 'balanced',
@@ -108,19 +108,21 @@ describe('physical operator client plugin', () => {
       selectDebateMode: (mode: 'enabled') => Promise<string | null>
     }
     await expect(injected.select('codex')).resolves.toBeNull()
+    await expect(injected.select('chatgpt-web')).resolves.toBeNull()
     await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBeNull()
     await expect(injected.selectOrchestrationStrategy(
       'enabled', 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
     )).resolves.toBeNull()
     await expect(injected.selectDebateMode('enabled')).resolves.toBeNull()
     expect(execute).toHaveBeenNthCalledWith(1, 'session-1', '/operator codex')
-    expect(execute).toHaveBeenNthCalledWith(2, 'session-1', '/operator-profile codex gpt-5.6-sol high')
+    expect(execute).toHaveBeenNthCalledWith(2, 'session-1', '/operator chatgpt-web')
+    expect(execute).toHaveBeenNthCalledWith(3, 'session-1', '/operator-profile codex gpt-5.6-sol high')
     expect(execute).toHaveBeenNthCalledWith(
-      3,
+      4,
       'session-1',
       '/orchestration-strategy enabled enabled off balanced codex-sol luna-first',
     )
-    expect(execute).toHaveBeenNthCalledWith(4, 'session-1', '/debate-mode enabled')
+    expect(execute).toHaveBeenNthCalledWith(5, 'session-1', '/debate-mode enabled')
   })
 
   it('maps RLM and Debate preferences into one mutually exclusive execution selector', () => {
@@ -212,6 +214,9 @@ describe('physical operator client plugin', () => {
     expect(physicalOperatorRoutingLabel('auto')).toBe('智能协作')
     expect(physicalOperatorRoutingLabel('codex')).toBe('优先 Codex')
     expect(physicalOperatorRoutingSummary('claude-code')).toBe('Claude Code')
+    expect(physicalOperatorRoutingSummary('chatgpt-web')).toBe('ChatGPT 网页版')
+    expect(physicalOperatorRoutingLabel('chatgpt-web')).toBe('ChatGPT 网页订阅')
+    expect(physicalOperatorRoutingDescription('chatgpt-web')).toContain('不进入智能自动')
     expect(physicalOperatorRoutingDescription('codex')).toContain('短问答仍由主模型处理')
     expect(physicalOperatorEffortLabel('high')).toBe('高 · 复杂任务的深度推理')
     expect(physicalOperatorEffortLabel('high', 'claude-code')).toBe('高 · Claude 深入思考')

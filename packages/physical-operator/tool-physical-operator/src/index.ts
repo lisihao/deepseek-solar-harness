@@ -25,6 +25,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { z as zod } from 'zod'
 import type {
+  PhysicalOperatorExecutionMode,
   PhysicalOperatorExecutionPreference,
   PhysicalOperatorReasoningEffort,
   PhysicalOperatorResult,
@@ -39,6 +40,7 @@ import type {
   PhysicalOperatorRoutingOption,
   PhysicalOperatorRoutingPolicy,
   PhysicalOperatorRoutingSelect,
+  PhysicalOperatorRoutingTarget,
   PhysicalOperatorProfileOwner,
   PhysicalOperatorProfilePreferences,
   PhysicalOperatorProfilePreferencesSelect,
@@ -62,12 +64,12 @@ declare module '@deepseek-ai/dsh-session/types' {
     /** Durable collaboration admission decision for one user request. */
     'physical-operator/routing-decision': {
       policy: PhysicalOperatorRoutingPolicy
-      route: 'primary-model' | 'resident' | 'taskgraph-candidate'
+      route: 'primary-model' | 'ephemeral' | 'resident' | 'taskgraph-candidate'
       requestedByMessageId: string
       reason: string
       operatorId?: string
     }
-    /** Durable host decision that binds one DSH message to one Resident command. */
+    /** Durable host decision that binds one DSH message to one physical-operator command. */
     'physical-operator/dispatch': {
       commandId: string
       operatorId: string
@@ -77,6 +79,8 @@ declare module '@deepseek-ai/dsh-session/types' {
       turn: number
       step: number
       recovered: boolean
+      /** Omitted by pre-ChatGPT-Web logs; those legacy host routes were Resident. */
+      executionMode?: PhysicalOperatorExecutionMode
       residentProfile?: PhysicalOperatorExecutionPreference
       fallbackConfig?: LlmCallConfig
     }
@@ -154,6 +158,8 @@ interface PendingHostRoute {
   readonly promptMessageId: string
   readonly requestedByMessageId: string
   readonly recovered: boolean
+  /** Capability-selected lifetime frozen with the host dispatch. */
+  readonly executionMode: PhysicalOperatorExecutionMode
   readonly residentProfile?: PhysicalOperatorExecutionPreference
   readonly fallbackConfig?: LlmCallConfig
 }
@@ -172,7 +178,7 @@ interface HostRouteMessage {
 
 interface HostRoutingDecision {
   readonly policy: PhysicalOperatorRoutingPolicy
-  readonly route: 'primary-model' | 'resident' | 'taskgraph-candidate'
+  readonly route: 'primary-model' | 'ephemeral' | 'resident' | 'taskgraph-candidate'
   readonly requestedByMessageId: string
   readonly reason: string
   readonly operatorId?: string
@@ -213,7 +219,7 @@ type ToolValue =
 
 /** Routing values accepted by the durable command and projected to clients. */
 export const PHYSICAL_OPERATOR_ROUTING_POLICIES = [
-  'auto', 'direct', 'codex', 'claude-code',
+  'auto', 'direct', 'codex', 'claude-code', 'chatgpt-web',
 ] as const satisfies readonly PhysicalOperatorRoutingPolicy[]
 
 const ROUTING_OPTIONS: readonly PhysicalOperatorRoutingOption[] = [
@@ -236,6 +242,11 @@ const ROUTING_OPTIONS: readonly PhysicalOperatorRoutingOption[] = [
     value: 'claude-code',
     name: 'Claude Code',
     description: 'Prefer Claude Code automatically for delegable analysis, architecture, review, and long-context work.',
+  },
+  {
+    value: 'chatgpt-web',
+    name: 'ChatGPT Web',
+    description: 'Use the authenticated ChatGPT website only when explicitly selected; Smart Auto never chooses this browser subscription route.',
   },
 ]
 
@@ -271,7 +282,7 @@ export function apply(ctx: Context): void {
   ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx, modelTools))
 
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
-    const decision = decideHostRoute(agent, messages)
+    const decision = decideHostRoute(ctx, agent, messages)
     const route = decision?.hostRoute
     if (decision !== undefined && !hasRoutingDecision(agent.session.events, decision.requestedByMessageId)) {
       agent.session.append('physical-operator/routing-decision', {
@@ -313,7 +324,7 @@ export function apply(ctx: Context): void {
       if (!ctx.physicalOperators.list().some(operator => String(operator.id) === base.model)) {
         throw new Error(`physical-operator primary model is not registered: ${base.model}`)
       }
-      route = newHostRoute(agent, promptMessage.id, base.model)
+      route = newHostRoute(ctx, agent, promptMessage.id, base.model)
     }
     if (route === undefined) {
       fallbackConfigs.set(agent, cloneCallConfig(base))
@@ -344,10 +355,10 @@ export function apply(ctx: Context): void {
     if (provider !== ROUTER_PROVIDER || failure.code !== FALLBACK_REQUIRED_CODE || signal.aborted) return next()
     const failed = dispatchForPosition(agent.session.events, turn, step)
     if (failed?.fallbackOperatorId === undefined) return next()
-    const fallback = fallbackHostRoute(agent, failed, failed.fallbackOperatorId)
+    const fallback = fallbackHostRoute(ctx, agent, failed, failed.fallbackOperatorId)
     agent.session.append('physical-operator/routing-decision', {
       policy: 'auto',
-      route: 'resident',
+      route: routeKind(fallback.executionMode),
       requestedByMessageId: failed.requestedByMessageId,
       reason: `${operatorDisplayName(failed.operatorId)} 订阅资格不可用，智能协作切换到 ${operatorDisplayName(fallback.operatorId)}`,
       operatorId: fallback.operatorId,
@@ -361,7 +372,7 @@ export function apply(ctx: Context): void {
   })
 
   ctx.on('agent/session-start', ({ agent, source }) => {
-    if (source !== 'resume' || recoverableDispatch(agent.session.events) === undefined) return
+    if (source !== 'resume' || resumableResidentDispatch(agent.session.events) === undefined) return
     queueMicrotask(() => {
       if (agent.status !== 'idle') return
       agent.followup(createUserMessage({
@@ -411,7 +422,7 @@ export function apply(ctx: Context): void {
     commandCtx.commands.register({
       name: 'operator',
       description: 'Select automatic physical-operator routing or a preferred native worker',
-      input: { hint: '<auto|direct|codex|claude-code>' },
+      input: { hint: '<auto|direct|codex|claude-code|chatgpt-web>' },
       handler: ({ agent, rawInput }) => {
         const value = rawInput.trim()
         if (value === '') {
@@ -592,7 +603,7 @@ export function apply(ctx: Context): void {
         ? await prepareResidentSurface(ctx, modelTools, executionId, parent, exec.signal)
         : undefined
       let run: PhysicalOperatorRun | undefined
-      let observer: ReturnType<typeof observeResidentProgress> | undefined
+      let observer: ReturnType<typeof observePhysicalOperatorProgress> | undefined
       try {
         parent.session.append('physical-operator/tool-dispatch', {
           commandId: String(executionId),
@@ -613,7 +624,7 @@ export function apply(ctx: Context): void {
           ...resident?.descriptor === undefined ? {} : { modelToolBridge: resident.descriptor },
           ...resident?.descriptor === undefined ? {} : { nativeToolPolicy: 'dsh-tools-authoritative' as const },
         })
-        if (request.mode === 'resident') observer = observeResidentProgress(ctx, parent, run, String(executionId))
+        observer = observePhysicalOperatorProgress(ctx, parent, run, String(executionId))
         const result = await settleForeground(run, () => observer?.stop())
         return {
           kind: 'run',
@@ -633,8 +644,8 @@ export function apply(ctx: Context): void {
 /**
  * Host-level model adapter that makes an accepted routing decision executable.
  * DeepSeek is never called on this path: its request is replaced before
- * adapter resolution and the native Resident result becomes the assistant
- * message directly.
+ * adapter resolution and the selected physical-operator result becomes the
+ * assistant message directly.
  */
 class PhysicalOperatorLlmAdapter extends LlmAdapter {
   constructor(
@@ -661,7 +672,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     const agent = this.ctx.agents.requireInitiator()
     const dispatch = recoverableDispatch(agent.session.events)
     if (dispatch === undefined || dispatch.operatorId !== options.model) {
-      throw new Error(`physical-operator router has no pending durable dispatch for ${options.model}`)
+      throw new Error(`physical-operator router has no pending dispatch for ${options.model}`)
     }
     const prompt = promptForMessage(agent.session.events, dispatch.promptMessageId)
     if (prompt === undefined) {
@@ -669,33 +680,40 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     }
     const signal = options.signal ?? new AbortController().signal
     let run: PhysicalOperatorRun | undefined
-    let observer: ReturnType<typeof observeResidentProgress> | undefined
+    let observer: ReturnType<typeof observePhysicalOperatorProgress> | undefined
     let releaseModelTools: (() => void) | undefined
     try {
-      const bound = await this.modelTools.bind(
-        dispatch.commandId,
-        agent,
-        options.tools ?? [],
-        signal,
-      )
-      releaseModelTools = () => { bound.release() }
+      const bound = dispatch.executionMode === 'resident'
+        ? await this.modelTools.bind(
+          dispatch.commandId,
+          agent,
+          options.tools ?? [],
+          signal,
+        )
+        : undefined
+      releaseModelTools = bound === undefined ? undefined : () => { bound.release() }
       run = await this.ctx.physicalOperators.start(dispatch.operatorId, {
         executionId: PhysicalOperatorExecutionId(dispatch.commandId),
         label: labelFor(prompt),
         prompt,
         parent: agent,
         signal,
-        mode: 'resident',
-        // A first-class DSH model uses the same governed tool surface as every
-        // other primary model; product-native approvals are not a second lane.
-        nativeToolPolicy: 'dsh-tools-authoritative',
+        mode: dispatch.executionMode,
+        // Only Resident products can attach to the owner-local typed DSH tool
+        // bridge. Browser-backed ephemeral products receive the same system
+        // instruction but never a synthetic tool surface.
+        ...(dispatch.executionMode === 'resident'
+          ? { nativeToolPolicy: 'dsh-tools-authoritative' as const }
+          : {}),
         ...options.system === undefined ? {} : { systemPrompt: options.system },
-        ...bound.descriptor === undefined ? {} : { modelToolBridge: bound.descriptor },
-        ...dispatch.residentProfile === undefined ? {} : { residentProfile: dispatch.residentProfile },
+        ...(bound?.descriptor === undefined ? {} : { modelToolBridge: bound.descriptor }),
+        ...(dispatch.executionMode === 'resident' && dispatch.residentProfile !== undefined
+          ? { residentProfile: dispatch.residentProfile }
+          : {}),
       })
-      observer = observeResidentProgress(this.ctx, agent, run, dispatch.commandId)
+      observer = observePhysicalOperatorProgress(this.ctx, agent, run, dispatch.commandId)
       const result = await run.result
-      await observer.stop()
+      await observer?.stop()
       if (result.stopReason === 'error' || result.stopReason === 'refusal') {
         agent.session.append('physical-operator/dispatch-terminal', {
           commandId: dispatch.commandId,
@@ -705,7 +723,9 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       yield* resultChunks(result)
     } catch (error) {
       if (observer !== undefined) await observer.stop()
-      else if (run !== undefined) await projectResidentProgress(this.ctx, agent, run, dispatch.commandId)
+      else if (run !== undefined) {
+        await projectPhysicalOperatorProgress(this.ctx, agent, run, dispatch.commandId)
+      }
       if (!signal.aborted) {
         const code = errorCode(error)
         agent.session.append('physical-operator/dispatch-terminal', {
@@ -746,7 +766,7 @@ async function prepareResidentSurface(
 }
 
 /** Resolve explicit, continuation, preferred, and smart-auto routing in strict priority order. */
-function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): HostRoutingDecision | undefined {
+function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRouteMessage[]): HostRoutingDecision | undefined {
   const current = [...messages].reverse().find(message => message.source.kind === 'user')
   const resume = [...messages].reverse().find(message => (
     message.source.kind === 'plugin' && message.source.plugin === RESUME_SOURCE
@@ -777,15 +797,15 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
   }
   const text = textContent(current.content)
   const explicit = explicitOperator(text)
-  if (explicit !== undefined) return residentDecision(agent, current.id, policy, explicit, '当前请求显式指定物理算子')
+  if (explicit !== undefined) return operatorDecision(ctx, agent, current.id, policy, explicit, '当前请求显式指定物理算子')
   if (isContinuation(text) && previous !== undefined) {
     const recoverable = recoverableDispatch(agent.session.events)
     const hostRoute = recoverable === undefined
-      ? newHostRoute(agent, current.id, previous.operatorId)
+      ? newHostRoute(ctx, agent, current.id, previous.operatorId)
       : recoveredHostRoute(recoverable, current.id)
     return {
       policy,
-      route: 'resident',
+      route: routeKind(hostRoute.executionMode),
       operatorId: previous.operatorId,
       requestedByMessageId: current.id,
       reason: '继续上一条物理算子任务',
@@ -793,6 +813,11 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
     }
   }
   if (policy === 'direct') return primaryDecision(current.id, policy, '用户选择仅主模型')
+  if (policy === 'chatgpt-web') {
+    return isDelegable(text)
+      ? operatorDecision(ctx, agent, current.id, policy, policy, '用户策略为 ChatGPT 网页订阅')
+      : primaryDecision(current.id, policy, '请求过小，不值得启动 ChatGPT 网页算子')
+  }
   if (policy === 'codex' || policy === 'claude-code') {
     if (isParallelCandidate(text)) {
       return {
@@ -804,7 +829,7 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
       }
     }
     return isDelegable(text)
-      ? residentDecision(agent, current.id, policy, policy, `用户策略为优先 ${operatorDisplayName(policy)}`)
+      ? operatorDecision(ctx, agent, current.id, policy, policy, `用户策略为优先 ${operatorDisplayName(policy)}`)
       : primaryDecision(current.id, policy, '请求过小，不值得启动物理算子')
   }
   if (isParallelCandidate(text)) {
@@ -818,12 +843,13 @@ function decideHostRoute(agent: Agent, messages: readonly HostRouteMessage[]): H
   const automatic = automaticOperator(text)
   return automatic === undefined
     ? primaryDecision(current.id, policy, '未发现需要物理算子或 TaskGraph 的工作')
-    : residentDecision(
+    : operatorDecision(
+      ctx,
       agent,
       current.id,
       policy,
       automatic,
-      '智能协作选择一个有界 Resident worker',
+      '智能协作选择一个有界物理算子',
       automatic === 'claude-code' ? 'codex' : undefined,
     )
 }
@@ -837,21 +863,23 @@ function debateEnabled(events: readonly SessionEvent[]): boolean {
   return false
 }
 
-function residentDecision(
+function operatorDecision(
+  ctx: Context,
   agent: Agent,
   messageId: string,
   policy: PhysicalOperatorRoutingPolicy,
-  operatorId: PhysicalOperatorProfileOwner,
+  operatorId: PhysicalOperatorRoutingTarget,
   reason: string,
-  fallbackOperatorId?: PhysicalOperatorProfileOwner,
+  fallbackOperatorId?: PhysicalOperatorRoutingTarget,
 ): HostRoutingDecision {
+  const hostRoute = newHostRoute(ctx, agent, messageId, operatorId, fallbackOperatorId)
   return {
     policy,
-    route: 'resident',
+    route: routeKind(hostRoute.executionMode),
     requestedByMessageId: messageId,
     reason,
     operatorId,
-    hostRoute: newHostRoute(agent, messageId, operatorId, fallbackOperatorId),
+    hostRoute,
   }
 }
 
@@ -869,12 +897,14 @@ function hasRoutingDecision(events: readonly SessionEvent[], requestedByMessageI
 }
 
 function newHostRoute(
+  ctx: Context,
   agent: Agent,
   messageId: string,
   operatorId: string,
   fallbackOperatorId?: string,
 ): PendingHostRoute {
-  const residentProfile = isPhysicalOperatorProfileOwner(operatorId)
+  const executionMode = executionModeFor(ctx, operatorId)
+  const residentProfile = executionMode === 'resident' && isPhysicalOperatorProfileOwner(operatorId)
     ? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
     : undefined
   return {
@@ -884,6 +914,7 @@ function newHostRoute(
     promptMessageId: messageId,
     requestedByMessageId: messageId,
     recovered: false,
+    executionMode,
     ...residentProfile === undefined ? {} : { residentProfile },
   }
 }
@@ -895,14 +926,16 @@ function recoveredHostRoute(recoverable: DispatchRecord, requestedByMessageId: s
     promptMessageId: recoverable.promptMessageId,
     requestedByMessageId,
     recovered: true,
+    executionMode: recoverable.executionMode,
     ...recoverable.fallbackOperatorId === undefined ? {} : { fallbackOperatorId: recoverable.fallbackOperatorId },
     ...recoverable.residentProfile === undefined ? {} : { residentProfile: recoverable.residentProfile },
     ...recoverable.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(recoverable.fallbackConfig) },
   }
 }
 
-function fallbackHostRoute(agent: Agent, failed: PendingHostRoute, operatorId: string): PendingHostRoute {
-  const residentProfile = isPhysicalOperatorProfileOwner(operatorId)
+function fallbackHostRoute(ctx: Context, agent: Agent, failed: PendingHostRoute, operatorId: string): PendingHostRoute {
+  const executionMode = executionModeFor(ctx, operatorId)
+  const residentProfile = executionMode === 'resident' && isPhysicalOperatorProfileOwner(operatorId)
     ? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
     : undefined
   return {
@@ -911,18 +944,21 @@ function fallbackHostRoute(agent: Agent, failed: PendingHostRoute, operatorId: s
     promptMessageId: failed.promptMessageId,
     requestedByMessageId: failed.requestedByMessageId,
     recovered: false,
+    executionMode,
     ...residentProfile === undefined ? {} : { residentProfile },
     ...failed.fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(failed.fallbackConfig) },
   }
 }
 
-function explicitOperator(text: string): PhysicalOperatorProfileOwner | undefined {
+function explicitOperator(text: string): PhysicalOperatorRoutingTarget | undefined {
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*codex\b|\bcodex\s*(?:来|去|帮我|执行|处理|分析|研究|实现|修复)/iu.test(text)) return 'codex'
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*gpt[-\s]?5(?:\.\d+)?(?:[-\s]?(?:codex|sol|terra))?\b/iu.test(text)) return 'codex'
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*claude(?:\s+code)?\b|\bclaude(?:\s+code)?\s*(?:来|去|帮我|执行|处理|分析|研究|实现|修复)/iu.test(text)) return 'claude-code'
   if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*(?:sonnet|opus|haiku|fable)\b/iu.test(text)) return 'claude-code'
+  if (/(?:用|使用|调用|让|请|交给)\s*(?:一下|下)?\s*(?:chatgpt(?:\s*(?:web|网页(?:版)?))?|openai\s+chatgpt)/iu.test(text)) return 'chatgpt-web'
   if (/\b(?:use|ask|have|let)\s+(?:the\s+)?codex\b/iu.test(text)) return 'codex'
   if (/\b(?:use|ask|have|let)\s+(?:the\s+)?claude(?:\s+code)?\b/iu.test(text)) return 'claude-code'
+  if (/\b(?:use|ask|have|let)\s+(?:the\s+)?chatgpt(?:\s+web)?\b/iu.test(text)) return 'chatgpt-web'
   return undefined
 }
 
@@ -955,14 +991,34 @@ function isContinuation(text: string): boolean {
   return /^(?:继续|继续啊|接着|接着做|继续执行|continue|go on|resume)[\s!！。,.，]*$/iu.test(text.trim())
 }
 
+/** Select the strongest supported lifetime without coupling to any Provider implementation. */
+function executionModeFor(ctx: Context, operatorId: string): PhysicalOperatorExecutionMode {
+  const status = ctx.physicalOperators.list().find(candidate => String(candidate.id) === operatorId)
+  if (status?.executionModes.includes('resident') === true) return 'resident'
+  if (status?.executionModes.includes('ephemeral') === true) return 'ephemeral'
+  // Keep legacy error behavior for a route whose provider is not composed:
+  // `ctx.physicalOperators.start()` remains the single diagnostic authority.
+  return 'resident'
+}
+
+function routeKind(executionMode: PhysicalOperatorExecutionMode): 'ephemeral' | 'resident' {
+  return executionMode
+}
+
 function latestDispatch(events: readonly SessionEvent[]): DispatchRecord | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (event === undefined) continue
     if (event.type !== 'physical-operator/dispatch') continue
-    return { ...event.data, seq: event.seq }
+    return { ...event.data, executionMode: event.data.executionMode ?? 'resident', seq: event.seq }
   }
   return undefined
+}
+
+/** Only Resident routes are safe to request again after a cold DSH Session resume. */
+function resumableResidentDispatch(events: readonly SessionEvent[]): DispatchRecord | undefined {
+  const dispatch = recoverableDispatch(events)
+  return dispatch?.executionMode === 'resident' ? dispatch : undefined
 }
 
 function recoverableDispatch(events: readonly SessionEvent[]): DispatchRecord | undefined {
@@ -986,7 +1042,7 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
   if (found?.type !== 'physical-operator/dispatch') return undefined
   const {
     commandId, operatorId, fallbackOperatorId, promptMessageId, requestedByMessageId, recovered,
-    residentProfile, fallbackConfig,
+    executionMode, residentProfile, fallbackConfig,
   } = found.data
   return {
     commandId,
@@ -995,6 +1051,7 @@ function dispatchForPosition(events: readonly SessionEvent[], turn: number, step
     promptMessageId,
     requestedByMessageId,
     recovered,
+    executionMode: executionMode ?? 'resident',
     ...residentProfile === undefined ? {} : { residentProfile },
     ...fallbackConfig === undefined ? {} : { fallbackConfig: cloneCallConfig(fallbackConfig) },
   }
@@ -1103,13 +1160,13 @@ const PHYSICAL_OPERATOR_PROGRESS_POLL_MS = 750
 const MAX_RESIDENT_OBSERVATION_PREVIEW = 1_600
 const MAX_RESIDENT_OBSERVATION_NAME = 160
 
-interface ResidentProgressProjectionState {
+interface PhysicalOperatorProgressProjectionState {
   afterSequence: number
   readonly projected: Set<number>
 }
 
-/** Start a bounded best-effort observer while a Resident turn is still running. */
-function observeResidentProgress(
+/** Start a bounded best-effort observer while any physical-operator turn is running. */
+function observePhysicalOperatorProgress(
   ctx: Context,
   agent: Agent,
   run: PhysicalOperatorRun,
@@ -1120,7 +1177,7 @@ function observeResidentProgress(
   let pending: Promise<void> | undefined
   const drain = async (): Promise<void> => {
     if (pending !== undefined) return pending
-    const operation = projectResidentProgress(ctx, agent, run, commandId, state).finally(() => {
+    const operation = projectPhysicalOperatorProgress(ctx, agent, run, commandId, state).finally(() => {
       if (pending === operation) pending = undefined
     })
     pending = operation
@@ -1140,7 +1197,7 @@ function observeResidentProgress(
   }
 }
 
-function progressProjectionState(agent: Agent, commandId: string): ResidentProgressProjectionState {
+function progressProjectionState(agent: Agent, commandId: string): PhysicalOperatorProgressProjectionState {
   const projected = new Set<number>()
   let afterSequence = 0
   for (const event of agent.session.events) {
@@ -1173,6 +1230,24 @@ function safeResidentProgressData(type: string, payload: unknown, commandId: str
   if (type === 'turn.settled') {
     const stopReason = boundedResidentText(data.stopReason, MAX_RESIDENT_OBSERVATION_NAME)
     return stopReason === undefined ? undefined : { commandId, stopReason }
+  }
+  if (type.startsWith('chatgpt-web.')) {
+    const phase = boundedResidentText(data.phase, MAX_RESIDENT_OBSERVATION_NAME)
+    if (phase === undefined) return undefined
+    const projected: Record<string, JsonValue> = { commandId, phase }
+    if (typeof data.requestedModel === 'string') {
+      const requestedModel = boundedResidentText(data.requestedModel, MAX_RESIDENT_OBSERVATION_NAME)
+      if (requestedModel !== undefined) projected.requestedModel = requestedModel
+    }
+    if (typeof data.outputBytes === 'number' && Number.isSafeInteger(data.outputBytes) && data.outputBytes >= 0) {
+      projected.outputBytes = data.outputBytes
+    }
+    if (typeof data.truncated === 'boolean') projected.truncated = data.truncated
+    if (typeof data.code === 'string') {
+      const code = boundedResidentText(data.code, MAX_RESIDENT_OBSERVATION_NAME)
+      if (code !== undefined) projected.code = code
+    }
+    return projected
   }
   if (type !== 'turn.observation') return undefined
   const kind = boundedResidentText(data.kind, MAX_RESIDENT_OBSERVATION_NAME)
@@ -1214,7 +1289,7 @@ function safeResidentProgressData(type: string, payload: unknown, commandId: str
  * their native sequence. A read failure remains observable in the host log
  * without replacing the model result that already settled.
  */
-async function projectResidentProgress(
+async function projectPhysicalOperatorProgress(
   ctx: Context,
   agent: Agent,
   run: PhysicalOperatorRun,
@@ -1392,8 +1467,8 @@ function selectionGuidance(
   if (available.length === 0) return ''
   return [
     routingPolicyGuidance(policy),
-    'Physical operators are separate native Claude Code or Codex workers using the user subscription, never an API fallback.',
-    'Choose resident mode for repository implementation, multi-turn work, work that must remain inspectable across a DSH restart, or work that should continue in the same native product session. Keep ephemeral mode for one bounded independent check.',
+    'Physical operators use their own native subscription surface, including configured browser subscriptions; they are never an API fallback.',
+    'Choose resident mode for repository implementation, multi-turn work, work that must remain inspectable across a DSH restart, or work that should continue in the same native product session. Keep ephemeral mode for one bounded independent check; a browser-only provider may intentionally support ephemeral mode only.',
     'When routing automatically, prefer implementation/debugging/testing tags for code changes and analysis/architecture/review/long-context tags for broad reasoning. RLM and Continuous Harness are TaskGraph strategies, never operator ids. Call action=list if the suitable stable id is not already evident from the catalog below.',
     'Send one complete standalone prompt. Do not delegate trivial questions, translation, or a tiny direct edit whose coordination cost exceeds the work.',
     ...available.map(operator => `- ${operator}`),
@@ -1411,12 +1486,15 @@ function routingPolicyGuidance(policy: PhysicalOperatorRoutingPolicy): string {
       return 'Physical-operator routing policy: CODEX PREFERRED. Use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["codex"] on each delegable node. Invoke one codex Resident directly for bounded single-worker work without waiting for the user to repeat the preference.'
     case 'claude-code':
       return 'Physical-operator routing policy: CLAUDE CODE PREFERRED. Use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["claude-code"] on each delegable node. Invoke one Claude Code Resident directly for bounded single-worker work without waiting for the user to repeat the preference.'
+    case 'chatgpt-web':
+      return 'Physical-operator routing policy: CHATGPT WEB EXPLICIT. Use the authenticated ChatGPT website for bounded non-trivial work through the configured browser subscription. This is an ephemeral route, does not expose a DSH model or effort setting, and is never selected by Smart Auto.'
   }
 }
 
 function operatorDisplayName(operatorId: string): string {
   if (operatorId === 'codex') return 'Codex'
   if (operatorId === 'claude-code') return 'Claude Code'
+  if (operatorId === 'chatgpt-web') return 'ChatGPT Web'
   return operatorId
 }
 
@@ -1429,10 +1507,10 @@ function rejectRunFieldsOnList(request: ToolRequest): void {
   }
 }
 
-/** Browser-backed work must use the Resident bridge so native tools cannot bypass DSH authority. */
+/** DSH-owned browser tool capabilities require the Resident bridge. */
 function rejectUnsupportedCapabilityMode(request: ToolRequest): void {
   if (request.required_capabilities?.includes('browser') === true && request.mode !== 'resident') {
-    throw new Error('physical_operator capability "browser" requires mode="resident"; retry with mode="resident"')
+    throw new Error('physical_operator capability "browser" through the DSH tool surface requires mode="resident"; retry with mode="resident"')
   }
 }
 
