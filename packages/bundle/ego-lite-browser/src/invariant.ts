@@ -7,6 +7,7 @@ import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 const PACKAGE_NAME = '@deepseek-ai/dsh-ego-lite-browser'
 export const name = 'ego-lite-browser-bundle-invariant'
 export const inject = ['invariants']
+/** No runtime invariant: this composition-only bundle owns no mutable state beyond its mounted child plugins. */
 const install: InvariantInstaller = () => {}
 export const apply = (ctx: Context): Promise<() => void> =>
   Promise.resolve(ctx.invariants.register(PACKAGE_NAME, install))

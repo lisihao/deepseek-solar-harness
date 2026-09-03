@@ -7,6 +7,7 @@ import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 const PACKAGE_NAME = '@deepseek-ai/dsh-tool-browser'
 export const name = 'tool-browser-invariant'
 export const inject = ['invariants']
+/** No runtime invariant: this stateless Consumer delegates provider lifecycle and request validation to ctx.browser. */
 const install: InvariantInstaller = () => {}
 
 export const apply = (ctx: Context): Promise<() => void> =>
