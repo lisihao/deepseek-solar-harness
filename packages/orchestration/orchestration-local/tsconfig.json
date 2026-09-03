@@ -7,6 +7,7 @@
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../util/home-paths" },
+    { "path": "../../browser/browser" },
     { "path": "../../host/apiproxy" },
     { "path": "../../credentials/credentials-local" },
     { "path": "../../llm/llm" },
@@ -31,6 +32,7 @@
     { "path": "../../client/connection/tsconfig.host.json" },
     { "path": "../../physical-operator/physical-operator" },
     { "path": "../../physical-operator/resident-operator-local" },
+    { "path": "../../subprocess/subprocess-local" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

@@ -26,6 +26,7 @@ if (root === undefined || dshHome === undefined) {
     dshHome: resolve(dshHome),
     residentDriverModules: argumentsFor('--resident-driver-module').map(value => resolve(value)),
     skillProviderModules: argumentsFor('--skill-provider-module').map(value => resolve(value)),
+    browserProviderModules: argumentsFor('--browser-provider-module').map(value => resolve(value)),
   })
   const close = (): void => { void daemon.close() }
   process.once('SIGINT', close)

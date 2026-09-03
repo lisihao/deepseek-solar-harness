@@ -22,6 +22,9 @@ const notePaths = [`${noteDirectory}/${noteName}.md`, `${noteDirectory}/${noteNa
 const noteRecordPath = `${noteDirectory}/${noteName}.i18n.yaml`
 const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-atomic-write',
+  '@deepseek-ai/dsh-archify',
+  '@deepseek-ai/dsh-browser',
+  '@deepseek-ai/dsh-browser-ego-lite',
   '@deepseek-ai/dsh-client-connection',
   '@deepseek-ai/dsh-client-hmr',
   '@deepseek-ai/dsh-client-modules',
@@ -59,7 +62,9 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-debate',
   '@deepseek-ai/dsh-debate-local',
   '@deepseek-ai/dsh-debate-orchestration',
+  '@deepseek-ai/dsh-ego-lite-browser',
   '@deepseek-ai/dsh-tool-debate',
+  '@deepseek-ai/dsh-tool-browser',
   '@deepseek-ai/dsh-ui-debate',
   '@deepseek-ai/dsh-model-allocation',
   '@deepseek-ai/dsh-model-allocation-local',
@@ -69,6 +74,7 @@ const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-rlm-runtime-local',
   '@deepseek-ai/dsh-rlm-strategy',
   '@deepseek-ai/dsh-rlm-strategy-local',
+  '@deepseek-ai/dsh-sdk-protocol',
   '@deepseek-ai/dsh-orchestration',
   '@deepseek-ai/dsh-orchestration-local',
   '@deepseek-ai/dsh-tool-orchestration',

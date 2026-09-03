@@ -2,6 +2,11 @@
 
 export const RESIDENT_BUNDLE_PACKAGE = '@deepseek-ai/dsh-resident-operators'
 export const ORCHESTRATION_BUNDLE_PACKAGE = '@deepseek-ai/dsh-orchestrations'
+export const EGO_LITE_BROWSER_BUNDLE_PACKAGE = '@deepseek-ai/dsh-ego-lite-browser'
+export const EGO_LITE_BROWSER_ROW_ID = 'browser'
+export const EGO_LITE_BROWSER_PROVIDER_PACKAGE = '@deepseek-ai/dsh-browser-ego-lite'
+export const ARCHIFY_PACKAGE = '@deepseek-ai/dsh-archify'
+export const ARCHIFY_ROW_ID = 'archify'
 export const AGENT_TEAMS_PACKAGE = '@nanmicoder/dsh-agent-teams'
 export const AGENT_TEAMS_ROW_ID = 'agent-teams'
 export const REMOTE_WEB_UI_PACKAGE = '@linxin666/dsh-remote-web-ui'
@@ -30,6 +35,8 @@ export const BETTER_SIDEBAR_PACKAGE = 'dsh-better-sidebar'
 export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [RESIDENT_BUNDLE_PACKAGE, 'resident-operators'],
   [ORCHESTRATION_BUNDLE_PACKAGE, 'orchestration-local'],
+  [EGO_LITE_BROWSER_BUNDLE_PACKAGE, EGO_LITE_BROWSER_ROW_ID],
+  [ARCHIFY_PACKAGE, ARCHIFY_ROW_ID],
   [AGENT_TEAMS_PACKAGE, AGENT_TEAMS_ROW_ID],
   [REMOTE_WEB_UI_PACKAGE, 'remote-web-ui'],
   [LIANGSHEN_PACKAGE, LIANGSHEN_ROW_ID],
@@ -53,6 +60,8 @@ export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
 export const PRODUCT_BUNDLE_PACKAGES = [
   RESIDENT_BUNDLE_PACKAGE,
   ORCHESTRATION_BUNDLE_PACKAGE,
+  EGO_LITE_BROWSER_BUNDLE_PACKAGE,
+  ARCHIFY_PACKAGE,
   AGENT_TEAMS_PACKAGE,
   REMOTE_WEB_UI_PACKAGE,
   LIANGSHEN_PACKAGE,

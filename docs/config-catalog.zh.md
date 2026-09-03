@@ -389,6 +389,46 @@ export type Config = LocalConfig
 
 来源：[`packages/shell/bash-sandbox/src/index.ts:35`](../packages/shell/bash-sandbox/src/index.ts)
 
+<a id="deepseek-aidsh-browser"></a>
+
+## `@deepseek-ai/dsh-browser`
+
+```ts config-catalog
+/** Browser Provider selection config. */
+export interface BrowserRuntimeConfig {
+  /** Explicit provider id. Omitted = auto-select when exactly one is usable. */
+  readonly provider?: string
+}
+```
+
+来源：[`packages/browser/browser/src/index.ts:60`](../packages/browser/browser/src/index.ts)
+
+<a id="deepseek-aidsh-browser-ego-lite"></a>
+
+## `@deepseek-ai/dsh-browser-ego-lite`
+
+需要：`browser` · `subprocess`
+
+```ts config-catalog
+/** Ego Lite process and translation settings owned by deployment composition. */
+export interface Config {
+  /** Absolute CLI path; omission probes the user install, then signed macOS app. */
+  executable?: string
+  /** Absolute working directory for each isolated CLI invocation. */
+  cwd?: string
+  /** Process-tree termination grace in milliseconds. */
+  graceMs?: number
+  /** Maximum complete stdout retained for one framed result. */
+  stdoutMaxBytes?: number
+  /** Maximum stderr diagnostic tail retained for one invocation. */
+  stderrMaxBytes?: number
+  /** Default operation timeout when a portable operation omits `timeoutMs`. */
+  operationTimeoutMs?: number
+}
+```
+
+来源：[`packages/browser/browser-ego-lite/src/index.ts:69`](../packages/browser/browser-ego-lite/src/index.ts)
+
 <a id="deepseek-aidsh-client-connection"></a>
 
 ## `@deepseek-ai/dsh-client-connection`
@@ -1577,6 +1617,8 @@ export interface Config {
   readonly residentDriverModules?: string[]
   /** Trusted plugins that register executable TypeScript Skills in the daemon. */
   readonly skillProviderModules?: string[]
+  /** Trusted complete Browser Provider plugins loaded by the headless daemon. */
+  readonly browserProviderModules?: string[]
   /** Maximum time for one Server-side exact-commit Git materialization. */
   readonly remoteMaterializationTimeoutMs?: number
   /** Maximum time for one bounded Resident artifact read. */
@@ -1588,7 +1630,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/orchestration/orchestration-local/src/index.ts:46`](../packages/orchestration/orchestration-local/src/index.ts)
+来源：[`packages/orchestration/orchestration-local/src/index.ts:53`](../packages/orchestration/orchestration-local/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -3487,6 +3529,7 @@ export interface Config {
 - `@deepseek-ai/dsh-subprocess-local`（[`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts)）
 - `@deepseek-ai/dsh-terminal`（[`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts)）
 - `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userInteraction`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
+- `@deepseek-ai/dsh-tool-browser` — 需要 `browser` · `tools` · `systemPrompt`（[`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)）
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
 - `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect`（[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
 - `@deepseek-ai/dsh-tool-debate` — 需要 `debates` · `tools` · `systemPrompt`（[`packages/orchestration/tool-debate/src/index.ts`](../packages/orchestration/tool-debate/src/index.ts)）
@@ -3547,6 +3590,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-web`（[`packages/client/web/src/index.ts`](../packages/client/web/src/index.ts)）
 - `@deepseek-ai/dsh-client-web-react`（[`packages/client/web-react/src/index.ts`](../packages/client/web-react/src/index.ts)）
 - `@deepseek-ai/dsh-cmdline`（[`packages/boot/cmdline/src/index.ts`](../packages/boot/cmdline/src/index.ts)）
+- `@deepseek-ai/dsh-ego-lite-browser`（[`packages/bundle/ego-lite-browser/src/index.ts`](../packages/bundle/ego-lite-browser/src/index.ts)）
 - `@deepseek-ai/dsh-home-paths`（[`packages/util/home-paths/src/index.ts`](../packages/util/home-paths/src/index.ts)）
 - `@deepseek-ai/dsh-hook-protocol`（[`packages/hooks/hook-protocol/src/index.ts`](../packages/hooks/hook-protocol/src/index.ts)）
 - `@deepseek-ai/dsh-launch-environment`（[`packages/util/launch-environment/src/index.ts`](../packages/util/launch-environment/src/index.ts)）

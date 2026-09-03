@@ -83,6 +83,10 @@ try {
   const orchestrationRows = rowsWithId('orchestration-local')
   const orchestrationToolRows = rowsWithId('tool-orchestration')
   const orchestrationUiRows = rowsWithId('ui-orchestration')
+  const browserRows = rowsWithId('browser')
+  const browserProviderRows = rowsWithId('browser-ego-lite')
+  const browserToolRows = rowsWithId('tool-browser')
+  const archifyRows = rowsWithId('archify')
   const teamRows = rowsWithId('agent-teams')
   const remoteRows = rowsWithId('remote-web-ui')
   const billingRows = rowsWithId('web-billing')
@@ -118,6 +122,20 @@ try {
   if (orchestrationUiRows.length !== 1
     || orchestrationUiRows[0].name !== '@deepseek-ai/dsh-ui-orchestration') {
     throw new Error('verify-packaged-composition-smoke: orchestration Web Consumer is not composed exactly once')
+  }
+  if (browserRows.length !== 1
+    || browserRows[0].name !== '@deepseek-ai/dsh-browser'
+    || browserRows[0].config?.provider !== 'ego-lite') {
+    throw new Error('verify-packaged-composition-smoke: provider-neutral browser seam is not composed exactly once')
+  }
+  if (browserProviderRows.length !== 1 || browserProviderRows[0].name !== '@deepseek-ai/dsh-browser-ego-lite') {
+    throw new Error('verify-packaged-composition-smoke: Ego Lite browser Provider is not composed exactly once')
+  }
+  if (browserToolRows.length !== 1 || browserToolRows[0].name !== '@deepseek-ai/dsh-tool-browser') {
+    throw new Error('verify-packaged-composition-smoke: browser tool Consumer is not composed exactly once')
+  }
+  if (archifyRows.length !== 1 || archifyRows[0].name !== '@deepseek-ai/dsh-archify') {
+    throw new Error('verify-packaged-composition-smoke: Archify bundle is not composed exactly once')
   }
   if (teamRows.length !== 1 || teamRows[0].name !== '@nanmicoder/dsh-agent-teams') {
     throw new Error('verify-packaged-composition-smoke: AgentTeams bundle is not composed exactly once')
@@ -201,6 +219,10 @@ try {
       orchestrationProvider: orchestrationRows[0].name,
       orchestrationTool: orchestrationToolRows[0].name,
       orchestrationUi: orchestrationUiRows[0].name,
+      browser: browserRows[0].name,
+      browserProvider: browserProviderRows[0].name,
+      browserTool: browserToolRows[0].name,
+      archify: archifyRows[0].name,
       agentTeams: teamRows[0].name,
       memberPersonaPlacement: teamRows[0].config.memberPersonaPlacement,
       remoteWebUi: remoteRows[0].name,

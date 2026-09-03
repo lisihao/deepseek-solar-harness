@@ -379,6 +379,37 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'browser',
+    summary: 'Registry and execution authority for the browser capability seam.',
+    description: 'Registry and execution authority for the browser capability seam.\n\nProvider resolution happens for every call. Explicit selection fails closed when missing or unavailable; implicit selection succeeds only when exactly one provider is locally usable, so registration and HMR order never decide.',
+    methods: [
+      {
+        signature: 'registerProvider(provider: BrowserProvider): () => void',
+        description: 'Register one backend. Duplicate stable ids fail instead of replacing a live Provider. The returned disposer is also tied to the contributing Cordis fiber.',
+        parameters: [{ name: 'provider', description: 'browser backend and its stable descriptor.' }],
+        returns: 'a disposer that unregisters this Provider.',
+      },
+      {
+        signature: 'capabilities(layer: BrowserExecutionLayerV1): readonly BrowserCapabilityV1[]',
+        description: 'Portable capabilities of the Provider that would execute one layer now.',
+        parameters: [{ name: 'layer', description: 'explicit execution layer to resolve.' }],
+        returns: 'the selected Provider\'s portable capability names.',
+      },
+      {
+        signature: 'async runPlan(plan: BrowserRunPlanV1, signal?: AbortSignal): Promise<BrowserRunResultV1>',
+        description: 'Execute one ordered v1 plan. The Provider receives the exact plan and abort signal. Portable Provider errors survive; arbitrary failures are normalized.',
+        parameters: [{ name: 'plan', description: 'closed, ordered portable operation plan.' }, { name: 'signal', description: 'optional cancellation forwarded to the Provider.' }],
+        returns: 'the Provider\'s normalized ordered result.',
+      },
+      {
+        signature: 'async runProgram( program: BrowserRunProgramV1, signal?: AbortSignal, ): Promise<BrowserRunProgramResultV1>',
+        description: 'Execute one explicitly opted-in `browser-js-v1` program. This method never converts a plan into source and never retries or takes control implicitly.',
+        parameters: [{ name: 'program', description: 'source, workspace, required capabilities, and output bound.' }, { name: 'signal', description: 'optional cancellation forwarded to the Provider.' }],
+        returns: 'the bounded provider-neutral program result.',
+      },
+    ],
+  },
+  {
     key: 'capabilityCapsules',
     summary: 'Provider-neutral Capsule registry and late-binding resolver.',
     description: 'Provider-neutral Capsule registry and late-binding resolver.',
@@ -3555,6 +3586,106 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'Branded',
     declaration: 'export type Branded<B extends string> = string & {\n    readonly [BRAND]: B;\n};',
+  },
+  {
+    name: 'BrowserCapabilityV1',
+    declaration: 'export type BrowserCapabilityV1 = \'authenticated-profile-reuse\' | \'named-workspace\' | \'page-evaluate\' | \'screenshot\' | \'semantic-snapshot\' | \'user-control\';',
+  },
+  {
+    name: 'BrowserDoneOperationV1',
+    declaration: 'export type BrowserDoneOperationV1 = \'close-page\' | \'click\' | \'fill\' | \'clear\' | \'press\' | \'check\' | \'select\' | \'wait\' | \'complete\';',
+  },
+  {
+    name: 'BrowserExecutionLayerV1',
+    declaration: 'export type BrowserExecutionLayerV1 = \'portable-plan-v1\' | \'browser-js-v1\';',
+  },
+  {
+    name: 'BrowserJsonValue',
+    declaration: 'export type BrowserJsonValue = null | boolean | number | string | readonly BrowserJsonValue[] | {\n    readonly [key: string]: BrowserJsonValue;\n};',
+  },
+  {
+    name: 'BrowserLoadStateV1',
+    declaration: 'export type BrowserLoadStateV1 = \'dom-content-loaded\' | \'load\' | \'network-idle\';',
+  },
+  {
+    name: 'BrowserLocatorV1',
+    declaration: 'export type BrowserLocatorV1 = {\n    readonly kind: \'css\';\n    readonly selector: string;\n    readonly index?: number;\n} | {\n    readonly kind: \'role\';\n    readonly role: string;\n    readonly name?: string;\n    readonly exact?: boolean;\n    readonly index?: number;\n} | {\n    readonly kind: \'text\';\n    readonly text: string;\n    readonly exact?: boolean;\n    readonly index?: number;\n} | {\n    readonly kind: \'label\';\n    readonly label: string;\n    readonly exact?: boolean;\n    readonly index?: number;\n} | {\n    readonly kind: \'placeholder\';\n    readonly placeholder: string;\n    readonly exact?: boolean;\n    readonly index?: number;\n} | {\n    readonly kind: \'test-id\';\n    readonly testId: string;\n    readonly index?: number;\n};',
+  },
+  {
+    name: 'BrowserOperationEnvelopeV1',
+    declaration: 'export interface BrowserOperationEnvelopeV1 {\n    readonly id: BrowserOperationId;\n    readonly timeoutMs?: number;\n}',
+  },
+  {
+    name: 'BrowserOperationId',
+    declaration: 'export type BrowserOperationId = Branded<\'BrowserOperationId\'>;',
+  },
+  {
+    name: 'BrowserOperationResultV1',
+    declaration: 'export type BrowserOperationResultV1 = {\n    readonly kind: \'done\';\n    readonly id: BrowserOperationId;\n    readonly operation: BrowserDoneOperationV1;\n} | {\n    readonly kind: \'page\';\n    readonly id: BrowserOperationId;\n    readonly operation: \'open\' | \'select-page\' | \'navigate\' | \'reload\' | \'page-info\';\n    readonly page: BrowserPageV1;\n} | {\n    readonly kind: \'pages\';\n    readonly id: BrowserOperationId;\n    readonly pages: readonly BrowserPageV1[];\n} | {\n    readonly kind: \'snapshot\';\n    readonly id: BrowserOperationId;\n    readonly content: string;\n} | {\n    readonly kind: \'screenshot\';\n    readonly id: BrowserOperationId;\n    readonly mediaType: \'image/png\' | \'image/jpeg\';\n    readonly bytes: Uint8Array;\n} | {\n    readonly kind: \'read\';\n    readonly id: BrowserOperationId;\n    readonly value: string | null;\n} | {\n    readonly kind: \'count\';\n    readonly id: BrowserOperationId;\n    readonly count: number;\n} | {\n    readonly kind: \'control\';\n    readonly id: BrowserOperationId;\n    readonly operation: \'handoff\' | \'takeover\';\n    readonly control: \'agent\' | \'user\';\n};',
+  },
+  {
+    name: 'BrowserOperationV1',
+    declaration: 'export type BrowserOperationV1 = BrowserOperationEnvelopeV1 & ({\n    readonly kind: \'open\';\n    readonly page: BrowserPageKey;\n    readonly url: string;\n    readonly reuse: \'never\' | \'exact-url\';\n    readonly waitUntil: BrowserLoadStateV1;\n} | {\n    readonly kind: \'select-page\';\n    readonly page: BrowserPageKey;\n    readonly match: BrowserPageMatchV1;\n} | {\n    readonly kind: \'close-page\';\n    readonly page: BrowserPageKey;\n} | {\n    readonly kind: \'navigate\';\n    readonly page: BrowserPageKey;\n    readonly url: string;\n    readonly waitUntil: BrowserLoadStateV1;\n} | {\n    readonly kind: \'reload\';\n    readonly page: BrowserPageKey;\n    readonly waitUntil: BrowserLoadStateV1;\n} | {\n    readonly kind: \'pages\';\n} | {\n    readonly kind: \'page-info\';\n    readonly page: BrowserPageKey;\n} | {\n    readonly kind: \'snapshot\';\n    readonly page: BrowserPageKey;\n} | {\n    readonly kind: \'screenshot\';\n    readonly page: BrowserPageKey;\n    readonly fullPage: boolean;\n} | {\n    readonly kind: \'click\';\n    readonly page: BrowserPageKey;\n    readonly locator: BrowserLocatorV1;\n} | {\n    readonly kind: \'fill\';\n    readonly page: BrowserPageKey;\n    readonly locator: BrowserLocatorV1;\n    readonly value: string;\n} | {\n    readonly kind: \'clear\';\n    readonly page: BrowserPageKey;\n    readonly locator: BrowserLocatorV1;\n} | {\n    readonly kind: \'press\';\n    readonly page: BrowserPageKey;\n    readonly locator: BrowserLocatorV1;\n    readonly key: string;\n} | {\n    readonly kind: \'check\';\n    rea /* …truncated — full shape in source */',
+  },
+  {
+    name: 'BrowserPageKey',
+    declaration: 'export type BrowserPageKey = Branded<\'BrowserPageKey\'>;',
+  },
+  {
+    name: 'BrowserPageMatchV1',
+    declaration: 'export type BrowserPageMatchV1 = {\n    readonly kind: \'exact-url\';\n    readonly url: string;\n} | {\n    readonly kind: \'url-prefix\';\n    readonly prefix: string;\n};',
+  },
+  {
+    name: 'BrowserPageV1',
+    declaration: 'export interface BrowserPageV1 {\n    readonly page: BrowserPageKey;\n    readonly url: string;\n    readonly title?: string;\n}',
+  },
+  {
+    name: 'BrowserProgramOutputContractV1',
+    declaration: 'export type BrowserProgramOutputContractV1 = {\n    readonly kind: \'none\';\n} | {\n    readonly kind: \'text\';\n    readonly maxCharacters: number;\n} | {\n    readonly kind: \'json\';\n    readonly maxBytes: number;\n};',
+  },
+  {
+    name: 'BrowserProgramOutputV1',
+    declaration: 'export type BrowserProgramOutputV1 = {\n    readonly kind: \'none\';\n} | {\n    readonly kind: \'text\';\n    readonly value: string;\n    readonly truncated: boolean;\n} | {\n    readonly kind: \'json\';\n    readonly value: BrowserJsonValue;\n};',
+  },
+  {
+    name: 'BrowserProvider',
+    declaration: 'export interface BrowserProvider {\n    readonly descriptor: BrowserProviderDescriptorV1;\n    available(): boolean;\n    runPlan?(plan: BrowserRunPlanV1, signal?: AbortSignal): Promise<BrowserRunResultV1>;\n    runProgram?(program: BrowserRunProgramV1, signal?: AbortSignal): Promise<BrowserRunProgramResultV1>;\n}',
+  },
+  {
+    name: 'BrowserProviderDescriptorV1',
+    declaration: 'export interface BrowserProviderDescriptorV1 {\n    readonly id: BrowserProviderId;\n    readonly layers: readonly BrowserExecutionLayerV1[];\n    readonly capabilities: readonly BrowserCapabilityV1[];\n}',
+  },
+  {
+    name: 'BrowserProviderId',
+    declaration: 'export type BrowserProviderId = Branded<\'BrowserProviderId\'>;',
+  },
+  {
+    name: 'BrowserRunPlanV1',
+    declaration: 'export interface BrowserRunPlanV1 {\n    readonly version: 1;\n    readonly workspace: BrowserWorkspaceSelectorV1;\n    readonly requiredCapabilities: readonly BrowserCapabilityV1[];\n    readonly operations: readonly BrowserOperationV1[];\n}',
+  },
+  {
+    name: 'BrowserRunProgramResultV1',
+    declaration: 'export interface BrowserRunProgramResultV1 {\n    readonly version: 1;\n    readonly workspace: BrowserWorkspaceStateV1;\n    readonly output: BrowserProgramOutputV1;\n}',
+  },
+  {
+    name: 'BrowserRunProgramV1',
+    declaration: 'export interface BrowserRunProgramV1 {\n    readonly version: 1;\n    readonly language: \'browser-js-v1\';\n    readonly workspace: BrowserWorkspaceSelectorV1;\n    readonly source: string;\n    readonly requiredCapabilities: readonly BrowserCapabilityV1[];\n    readonly output: BrowserProgramOutputContractV1;\n}',
+  },
+  {
+    name: 'BrowserRunResultV1',
+    declaration: 'export interface BrowserRunResultV1 {\n    readonly version: 1;\n    readonly workspace: BrowserWorkspaceStateV1;\n    readonly operations: readonly BrowserOperationResultV1[];\n}',
+  },
+  {
+    name: 'BrowserWorkspaceId',
+    declaration: 'export type BrowserWorkspaceId = Branded<\'BrowserWorkspaceId\'>;',
+  },
+  {
+    name: 'BrowserWorkspaceSelectorV1',
+    declaration: 'export type BrowserWorkspaceSelectorV1 = {\n    readonly kind: \'current\';\n} | {\n    readonly kind: \'existing\';\n    readonly id: BrowserWorkspaceId;\n} | {\n    readonly kind: \'named\';\n    readonly name: string;\n    readonly createIfMissing: boolean;\n};',
+  },
+  {
+    name: 'BrowserWorkspaceStateV1',
+    declaration: 'export interface BrowserWorkspaceStateV1 {\n    readonly id: BrowserWorkspaceId;\n    readonly name?: string;\n    readonly lifecycle: \'active\' | \'completed\';\n    readonly control: \'agent\' | \'user\';\n}',
   },
   {
     name: 'CancelOptions',

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/tt-a1i/archify",
+  "tag": "v2.16.0",
+  "commit": "c826e6c3a7abad19c0f3cd1ca57207d54b1ad8de",
+  "version": "2.16.0",
+  "license": "MIT",
+  "license_files": [
+    "vendor/archify/LICENSE"
+  ],
+  "vendor_path": "vendor/archify",
+  "content_manifest": {
+    "file_count": 190,
+    "tree_sha256": "57ef6e5699d759e78fa0e790bd5807c8d960140ca4638670b76e7edf217eb1f6"
+  },
+  "source_note": "Pinned from the annotated v2.16.0 tag. The 2.14 archify-dsh snapshot is not an acceptable substitute."
+}

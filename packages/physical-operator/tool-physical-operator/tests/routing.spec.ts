@@ -456,14 +456,17 @@ describe('host physical-operator routing', () => {
   it('starts an explicit resident physical_operator trace and projects its public observation', async () => {
     const { ctx, agent, codex } = await setup({
       codexImmediate: false,
+      codexBridgeTool: 'subscription_echo',
       codexObservations: [{ kind: 'tool-completed', toolName: 'Read' }],
     })
     const pending = callPhysicalOperator(ctx, agent, {
       action: 'run', operator_id: 'codex', description: 'inspect repository', prompt: 'read only', mode: 'resident',
+      required_capabilities: ['browser'],
     })
     while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
     await new Promise(resolve => setTimeout(resolve, 10))
-    expect(codex.requests[0]?.nativeToolPolicy).toBeUndefined()
+    expect(codex.requests[0]?.nativeToolPolicy).toBe('dsh-tools-authoritative')
+    expect(codex.requests[0]?.modelToolBridge?.tools.map(value => value.name)).toContain('subscription_echo')
     expect(codex.requests[0]?.residentLaneId).toBe(`explicit-tool:${String(agent.id)}`)
     expect(agent.session.events.find(event => event.type === 'physical-operator/tool-dispatch')).toMatchObject({
       ignorable: true,
@@ -476,6 +479,18 @@ describe('host physical-operator routing', () => {
     if (receipt === undefined) throw new Error('expected durable receipt')
     receipt.result.resolve({ output: [{ type: 'text', text: 'complete' }], stopReason: 'completed' })
     await pending
+  })
+
+  it('rejects browser capability requests that omit Resident mode instead of silently using ephemeral', async () => {
+    const { ctx, agent, codex } = await setup()
+    const result = await callPhysicalOperator(ctx, agent, {
+      action: 'run', operator_id: 'codex', description: 'browse repository', prompt: 'inspect the browser',
+      required_capabilities: ['browser'],
+    })
+
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result)).toMatch(/requires mode=.*resident/u)
+    expect(codex.requests).toHaveLength(0)
   })
 
   it('keeps a settled answer while marking a failed Resident progress projection degraded', async () => {

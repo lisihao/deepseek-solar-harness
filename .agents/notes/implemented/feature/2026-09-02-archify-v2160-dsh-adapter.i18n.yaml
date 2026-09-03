@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record the sidecar with the
+# repository's translation-pairing command.
+2026-09-02-archify-v2160-dsh-adapter.md: 722d32dee7f279c6082d59c0d1c42a0c034ad299
+2026-09-02-archify-v2160-dsh-adapter.zh.md: 55bba2bb54359dc05a14deecb136874dbb7b1e80

@@ -611,6 +611,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Search and fetch providers register into one ctx.web seam; tool-web owns the stable model-facing names.',
   },
   {
+    key: 'browser',
+    pkg: 'browser',
+    title: 'Provider-neutral interactive browser seam',
+    mode: 'seam',
+    implementations: ['browser-ego-lite'],
+    consumers: ['tool-browser', 'orchestration-local'],
+    note: 'Providers own browser transport, profile, and lifecycle; model and orchestration Consumers use the typed ctx.browser seam and never depend on Ego Lite internals.',
+  },
+  {
     key: 'spillStore',
     pkg: 'spill',
     title: 'Spill storage seam',

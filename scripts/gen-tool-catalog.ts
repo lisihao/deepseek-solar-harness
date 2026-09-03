@@ -43,6 +43,8 @@ import SkillRegistry from '@deepseek-ai/dsh-skill'
 import * as SkillFileSystem from '@deepseek-ai/dsh-skill-filesystem'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import * as ToolAskUser from '@deepseek-ai/dsh-tool-ask-user'
+import BrowserRuntime from '@deepseek-ai/dsh-browser'
+import * as ToolBrowser from '@deepseek-ai/dsh-tool-browser'
 import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
 import * as ToolPwsh from '@deepseek-ai/dsh-tool-pwsh'
 import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
@@ -229,6 +231,23 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'ask_user_question pauses the tool call until the active UI provider returns a human answer.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-browser',
+    dir: 'tool-browser',
+    source: 'packages/browser/tool-browser/src/index.ts',
+    requires: ['ctx.tools', 'ctx.browser', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'tool/result', 'browser provider state through ctx.browser'],
+    async mount(ctx) {
+      // The Consumer registers against the provider-neutral seam. A Provider
+      // is intentionally not mounted during schema harvest: discovery and
+      // installed-browser qualification belong to deployment composition, not
+      // to the generated model-facing catalog.
+      await ctx.plugin(BrowserRuntime)
+      await ctx.plugin(ToolBrowser)
+    },
+    note:
+      'The model-facing `browser` tool accepts only the bounded portable-plan vocabulary. Provider selection, Ego Lite discovery, and browser lifecycle remain behind `ctx.browser`; browser-js-v1 is trusted-plugin-only and is not exposed to the model.',
   },
   {
     pkg: '@deepseek-ai/dsh-tools',

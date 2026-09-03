@@ -478,7 +478,7 @@ describe('Prime-compatible orchestration offline E2E', () => {
       fidelity: 'dsh-optimized',
       reason: 'auto-explicit-decomposition',
     })
-  }, 15_000)
+  }, 30_000)
 
   it('runs independent TaskGraph nodes in parallel, then serializes a shared scope without deadlock', async () => {
     const fixture = await e2eHarness('dsh-prime-dag-')

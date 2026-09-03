@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import BrowserRuntime from '@deepseek-ai/dsh-browser'
 import LocalCredentialProvider from '@deepseek-ai/dsh-credentials-local'
 import type { CapabilityBindingPlanV1 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextSourceRef } from '@deepseek-ai/dsh-context-compiler'
@@ -90,6 +91,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorResidentModel,
   type PhysicalOperatorResult,
   type PhysicalOperatorModelToolBridgeV1,
+  type PhysicalOperatorNativeToolPolicy,
   type PhysicalOperatorUsage,
 } from '@deepseek-ai/dsh-physical-operator'
 import { ResidentDaemonClient } from '@deepseek-ai/dsh-resident-operator-local'
@@ -97,6 +99,7 @@ import { residentProgressPage, type ResidentProviderStatus, type ResidentTurnSna
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { DurableAutoRefineCoordinator, PRIME_AUTO_REFINE_DEFAULTS, type AutoRefineReview } from './auto-refine.ts'
 import { abortableDelay } from './abortable-delay.ts'
 import {
@@ -108,6 +111,7 @@ import {
   resolveAutonomousPolicy,
 } from './autonomous.ts'
 import { canonicalSha256 } from './canonical.ts'
+import { BROWSER_CAPABILITY, BrowserModelToolBridge } from './browser-model-tool-bridge.ts'
 import {
   OrchestrationClusterElection,
   RemoteSyncClusterPeerTransport,
@@ -169,6 +173,15 @@ export function skillProviderManifestSha256(modules: readonly string[]): string 
   return canonicalSha256([...modules])
 }
 
+/**
+ * Fence detached daemons from clients configured with another Browser Provider set.
+ * @param modules - configured Browser Provider module identifiers.
+ * @returns the canonical Provider-manifest SHA-256 digest.
+ */
+export function browserProviderManifestSha256(modules: readonly string[]): string {
+  return canonicalSha256([...modules])
+}
+
 interface ActiveAttempt {
   readonly kind: 'resident' | 'resident-rlm' | 'model-worker'
   readonly runId: string
@@ -189,6 +202,15 @@ interface ActiveAttempt {
    * turn keeps its own cursor and identity for projection and fencing.
    */
   readonly progressSources?: readonly PhysicalProgressSource[]
+}
+
+/** Durable identity needed to recreate the owner-local browser model-tool bridge. */
+interface BrowserBindingArtifactV1 {
+  readonly version: 1
+  readonly kind: 'browser-model-tool-binding'
+  readonly executionId: string
+  readonly sessionId: string
+  readonly socketPath: string
 }
 
 interface PhysicalProgressSource {
@@ -453,6 +475,8 @@ export interface OrchestrationDaemonOptions {
   readonly residentDriverModules?: readonly string[]
   /** Trusted Cordis plugins that register TypeScript Skill modules in the headless daemon. */
   readonly skillProviderModules?: readonly string[]
+  /** Trusted complete Browser Provider plugins loaded by the headless daemon. */
+  readonly browserProviderModules?: readonly string[]
   readonly autoRefine?: Partial<typeof PRIME_AUTO_REFINE_DEFAULTS>
   /**
    * Explicit complete one-shot Provider set. Supplying it disables every
@@ -485,6 +509,10 @@ function now(): string {
   return new Date().toISOString()
 }
 
+function renderError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 function clearWaitReason(node: OrchestrationNodeSnapshot): OrchestrationNodeSnapshot {
   const { waitReason: _discarded, ...rest } = node
   return rest
@@ -506,6 +534,29 @@ function event(
     type,
     time: now(),
     data,
+  }
+}
+
+function browserBindingArtifact(value: unknown): BrowserBindingArtifactV1 {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new OrchestrationError('browser binding artifact is not an object', 'ORCHESTRATION_UNAVAILABLE')
+  }
+  const raw = value as Record<string, unknown>
+  if (raw.version !== 1 || raw.kind !== 'browser-model-tool-binding') {
+    throw new OrchestrationError('browser binding artifact has an unsupported version', 'ORCHESTRATION_UNAVAILABLE')
+  }
+  const fields = ['executionId', 'sessionId', 'socketPath'] as const
+  for (const field of fields) {
+    if (typeof raw[field] !== 'string' || raw[field].length === 0) {
+      throw new OrchestrationError(`browser binding artifact field ${field} is invalid`, 'ORCHESTRATION_UNAVAILABLE')
+    }
+  }
+  return {
+    version: 1,
+    kind: 'browser-model-tool-binding',
+    executionId: raw.executionId as string,
+    sessionId: raw.sessionId as string,
+    socketPath: raw.socketPath as string,
   }
 }
 
@@ -686,7 +737,8 @@ function fakeParent(workspace: string, runId: string): Agent {
   } as unknown as Agent
 }
 
-function nativeToolPolicy(capabilities: CapabilityBindingPlanV1): 'inherit' | 'disabled' {
+function nativeToolPolicy(capabilities: CapabilityBindingPlanV1): PhysicalOperatorNativeToolPolicy {
+  if (capabilities.resolvedCapabilities.includes(BROWSER_CAPABILITY)) return 'dsh-tools-authoritative'
   const effects = capabilities.effectiveEffects
   return capabilities.effectiveReadScopes.length === 0
     && capabilities.effectiveWriteScopes.length === 0
@@ -876,6 +928,8 @@ export class OrchestrationDaemon {
   private readonly transports = new Set<JsonRpcLineTransport>()
   private readonly sockets = new Set<Socket>()
   private readonly ctx = new Context()
+  /** Created only when the headless composition has a configured Browser Provider. */
+  private browserBridge: BrowserModelToolBridge | undefined
   private readonly active = new Map<string, ActiveAttempt>()
   private readonly reconcileRetryAfter = new Map<string, number>()
   private readonly capacityRetryAfter = new Map<string, number>()
@@ -951,6 +1005,21 @@ export class OrchestrationDaemon {
     } else {
       for (const provider of this.options.modelWorkerProviders) this.ctx.modelWorkers.register(provider)
     }
+    if ((this.options.browserProviderModules ?? []).length > 0) {
+      // Browser Provider modules are complete trusted plugins. The generic
+      // local subprocess Provider is installed here only as their common
+      // process seam; no Ego-specific implementation is imported or assumed.
+      await this.ctx.plugin(LocalSubprocessRuntime)
+      await this.ctx.plugin(BrowserRuntime)
+      for (const modulePath of this.options.browserProviderModules ?? []) {
+        const loaded = await import(pathToFileURL(modulePath).href) as { readonly default?: unknown }
+        if (loaded.default === undefined || (typeof loaded.default !== 'function' && typeof loaded.default !== 'object')) {
+          throw new OrchestrationError(`invalid Browser Provider module: ${modulePath}`, 'ORCHESTRATION_UNAVAILABLE')
+        }
+        await this.ctx.plugin(loaded.default as Parameters<Context['plugin']>[0])
+      }
+      this.browserBridge = new BrowserModelToolBridge(this.ctx, thisRoot)
+    }
     await this.ctx.plugin(DirectIntentCompiler)
     await this.ctx.plugin(BasicContextCompiler)
     await this.ctx.plugin(SubscriptionFirstModelAllocation)
@@ -1017,6 +1086,8 @@ export class OrchestrationDaemon {
     for (const socket of this.sockets) socket.end()
     await Promise.allSettled([...this.active.values()].map(value => value.run.dispose()))
     this.rlmProgressSources.clear()
+    await this.browserBridge?.dispose()
+    this.browserBridge = undefined
     await this.ctx.root.fiber.dispose()
     await new Promise<void>((resolve) => { this.server.close(() => { resolve() }) })
     this.store.close()
@@ -1095,12 +1166,18 @@ export class OrchestrationDaemon {
     if (skillProviderManifest !== activeSkillProviderManifest) {
       throw new OrchestrationError('orchestration Skill Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
     }
+    const browserProviderManifest = requiredString(params, 'browser_provider_manifest_sha256')
+    const activeBrowserProviderManifest = browserProviderManifestSha256(this.options.browserProviderModules ?? [])
+    if (browserProviderManifest !== activeBrowserProviderManifest) {
+      throw new OrchestrationError('orchestration Browser Provider manifest mismatch', 'ORCHESTRATION_VERSION_MISMATCH')
+    }
     return {
       protocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
       stateSchemaVersion: ORCHESTRATION_STATE_SCHEMA_VERSION,
       buildCommit: this.options.buildCommit ?? process.env.DSH_BUILD_COMMIT ?? 'development',
       methods: ORCHESTRATION_METHODS,
       skillProviderManifestSha256: activeSkillProviderManifest,
+      browserProviderManifestSha256: activeBrowserProviderManifest,
       injectionBoundaries: ['pre-dispatch', 'next-turn'],
     }
   }
@@ -1785,7 +1862,7 @@ export class OrchestrationDaemon {
       readScopes: spec.readScopes,
       writeScopes: spec.writeScopes,
       approvedSecretRefs: spec.approvedSecretRefs,
-      operatorInjectionKinds: ['instruction', 'resource', 'data'],
+      operatorInjectionKinds: ['instruction', 'resource', 'data', 'tool'],
     })
     const capabilityPlanRef = this.store.putArtifact(capabilityPlan)
     this.store.recordArtifact('capability_bindings', { ref: String(capabilityPlanRef), runId, nodeId, attempt, generation: node.capabilityGeneration })
@@ -1912,7 +1989,20 @@ export class OrchestrationDaemon {
       maxTokens: autonomousPolicy.maxTokens,
       timeoutMs: autonomousPolicy.timeoutMs,
     }, node)])
-    const selected = await this.selectOperator(record, spec, rlmPlan)
+    const requiresBrowser = capabilityPlan.resolvedCapabilities.includes(BROWSER_CAPABILITY)
+    if (requiresBrowser && this.browserBridge === undefined) {
+      throw new OrchestrationError(
+        'browser capability requires a configured headless Browser Provider module',
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
+    if (requiresBrowser && rlmPlan.enabled) {
+      throw new OrchestrationError(
+        'browser capability is currently available at the standard Resident turn boundary, not inside RLM',
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
+    const selected = await this.selectOperator(record, spec, rlmPlan, requiresBrowser)
     const rlmWorkerPlan = rlmPlan.enabled && rlmPlan.fidelity === 'dsh-optimized' && rlmPlan.maxTurns > 1
       ? await this.selectRlmWorker(record, spec, rlmPlan)
       : undefined
@@ -2054,8 +2144,38 @@ export class OrchestrationDaemon {
     const operator = this.ctx.physicalOperators.getOperator(plan.operatorPlan.operatorId)
     if (operator === undefined) throw new OrchestrationError(`physical operator is unavailable: ${plan.operatorPlan.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'resident')
+    const requiresBrowser = capabilityPlan.resolvedCapabilities.includes(BROWSER_CAPABILITY)
+    let browserBinding: Awaited<ReturnType<BrowserModelToolBridge['bind']>> | undefined
     try {
       await this.replicateClusterAuthority()
+      if (requiresBrowser) {
+        if (this.browserBridge === undefined) {
+          throw new OrchestrationError(
+            'browser capability requires a configured headless Browser Provider module',
+            'ORCHESTRATION_UNAVAILABLE',
+          )
+        }
+        browserBinding = await this.browserBridge.bind(String(plan.executionId), controller.signal)
+        const binding = browserBinding.descriptor
+        const bindingArtifact = {
+          version: 1 as const,
+          kind: 'browser-model-tool-binding' as const,
+          executionId: String(plan.executionId),
+          sessionId: binding.sessionId,
+          socketPath: binding.socketPath,
+        } satisfies BrowserBindingArtifactV1
+        const bindingRef = this.store.putArtifact(bindingArtifact)
+        const acceptedRecord = this.store.getRun(String(record.snapshot.runId))
+        const acceptedNode = acceptedRecord.snapshot.nodes.find(value => value.id === spec.id)
+        this.store.recordArtifact('compilation_artifacts', {
+          ref: String(bindingRef), runId: String(record.snapshot.runId), nodeId: spec.id,
+          attempt: plan.attempt, generation: plan.capabilityGeneration,
+        })
+        this.store.appendEvents([event(record.snapshot.runId, 'browser.binding.created', {
+          executionId: String(plan.executionId), bindingRef: String(bindingRef),
+          sessionId: binding.sessionId, socketPath: binding.socketPath,
+        }, acceptedNode)])
+      }
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
@@ -2064,7 +2184,8 @@ export class OrchestrationDaemon {
         parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
-        nativeToolPolicy: plan.operatorPlan.nativeToolPolicy,
+        ...browserBinding === undefined ? {} : { modelToolBridge: browserBinding.descriptor },
+        nativeToolPolicy: requiresBrowser ? 'dsh-tools-authoritative' : plan.operatorPlan.nativeToolPolicy,
       })
       const receipt = acceptedReceipt(run, String(plan.executionId))
       const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', turnId: receipt.turnId, updatedAt: now() }
@@ -2101,8 +2222,14 @@ export class OrchestrationDaemon {
           await this.syncActiveProgress(active)
           this.failAttempt(active, error)
         },
-      ).finally(() => { timeout.clearTimeout(); this.active.delete(key); this.triggerTick() })
+      ).finally(() => {
+        browserBinding?.release()
+        timeout.clearTimeout()
+        this.active.delete(key)
+        this.triggerTick()
+      })
     } catch (error) {
+      browserBinding?.release()
       timeout.clearTimeout()
       this.failDispatch(acceptedAttempt, error)
     }
@@ -3977,6 +4104,76 @@ export class OrchestrationDaemon {
     this.store.saveRun(next, [event(next.snapshot.runId, 'node.indeterminate', { executionId: attempt.executionId }, nodes.find(value => value.id === attempt.nodeId))])
   }
 
+  /**
+   * Recover the exact browser binding recorded before a Resident command was
+   * admitted.  The native Resident daemon retains the original descriptor;
+   * this owner daemon must recreate the same session on its stable endpoint
+   * before observing the turn again.  Missing or corrupt evidence is a hard
+   * indeterminate outcome, never a reason to retry the product call.
+   */
+  private recoveredBrowserBinding(
+    attempt: AttemptRecord,
+    record: RuntimeRunRecord,
+  ): { readonly required: false } | {
+    readonly required: true
+    readonly artifact?: BrowserBindingArtifactV1
+    readonly error?: string
+  } {
+    const graphNode = record.graph.nodes.find(value => value.id === attempt.nodeId)
+    const declared = graphNode?.capabilityRequirements.some(value => value.capability === BROWSER_CAPABILITY) === true
+    let plan: NodeExecutionPlanV1
+    try {
+      plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
+    } catch (error) {
+      return declared
+        ? { required: true, error: `browser execution plan cannot be read: ${renderError(error)}` }
+        : { required: false }
+    }
+    let capabilityPlan: CapabilityBindingPlanV1
+    try {
+      capabilityPlan = this.store.readArtifact(OrchestrationArtifactRef(String(plan.capabilityPlanRef))) as CapabilityBindingPlanV1
+    } catch (error) {
+      return declared
+        ? { required: true, error: `browser capability plan cannot be read: ${renderError(error)}` }
+        : { required: false }
+    }
+    if (!Array.isArray(capabilityPlan.resolvedCapabilities)) {
+      return declared
+        ? { required: true, error: 'browser capability plan has no valid resolved capability list' }
+        : { required: false }
+    }
+    if (!capabilityPlan.resolvedCapabilities.includes(BROWSER_CAPABILITY)) return { required: false }
+
+    let afterSequence = 0
+    let bindingRef: string | undefined
+    while (bindingRef === undefined) {
+      const page = this.store.readEvents(attempt.runId, afterSequence, 500)
+      const match = page.events.find(value => (
+        value.type === 'browser.binding.created'
+        && value.nodeId === attempt.nodeId
+        && value.attempt === attempt.attempt
+        && value.generation === attempt.generation
+        && value.data.executionId === attempt.executionId
+        && typeof value.data.bindingRef === 'string'
+      ))
+      if (match !== undefined) bindingRef = String(match.data.bindingRef)
+      if (page.events.length < 500) break
+      afterSequence = page.nextSequence
+    }
+    if (bindingRef === undefined) {
+      return { required: true, error: 'browser binding receipt is missing for the recovered Resident execution' }
+    }
+    try {
+      const artifact = browserBindingArtifact(this.store.readArtifact(OrchestrationArtifactRef(bindingRef)))
+      if (artifact.executionId !== attempt.executionId) {
+        return { required: true, error: 'browser binding receipt belongs to a different execution' }
+      }
+      return { required: true, artifact }
+    } catch (error) {
+      return { required: true, error: `browser binding receipt is invalid: ${renderError(error)}` }
+    }
+  }
+
   private blockNode(runId: string, nodeId: string, blockers: readonly OrchestrationBlocker[]): void {
     const record = this.store.getRun(runId)
     const nodes = record.snapshot.nodes.map(value => value.id === nodeId ? { ...value, state: 'blocked' as const, blockers, updatedAt: now() } : value)
@@ -4101,10 +4298,12 @@ export class OrchestrationDaemon {
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
     rlmPlan: RlmExecutionPlanV1,
+    requiresBrowser = false,
   ): Promise<{ readonly provider?: PhysicalOperatorResidentCatalog; readonly allocation: ModelAllocationPlan }> {
     const providers = await this.ctx.physicalOperators.residentCatalogs()
-    const residentOffers = this.residentOffers(record, spec, providers, true, rlmPlan.enabled)
-    const modelWorkerOffers = spec.writeScopes.length === 0
+    const residentOffers = this.residentOffers(record, spec, providers, true, rlmPlan.enabled || requiresBrowser)
+    const modelWorkerOffers = !requiresBrowser
+      && spec.writeScopes.length === 0
       && spec.effectBudget.write.length === 0
       && spec.effectBudget.execute.length === 0
       ? await this.ctx.modelWorkers.offers()
@@ -4169,7 +4368,30 @@ export class OrchestrationDaemon {
         continue
       }
       const record = this.store.getRun(attempt.runId)
-      const operatorId = record.snapshot.nodes.find(value => value.id === attempt.nodeId)?.operatorId
+      const node = record.snapshot.nodes.find(value => value.id === attempt.nodeId)
+      const browserBridge = this.browserBridge
+      const browserRecovery = this.recoveredBrowserBinding(attempt, record)
+      if (browserRecovery.required && browserRecovery.error !== undefined) {
+        this.applyIndeterminate({
+          ...attempt,
+          state: 'indeterminate',
+          errorCode: 'BROWSER_BINDING_UNRECOVERABLE',
+          errorMessage: browserRecovery.error,
+          updatedAt: now(),
+        })
+        continue
+      }
+      if (browserRecovery.required && browserBridge === undefined) {
+        this.applyIndeterminate({
+          ...attempt,
+          state: 'indeterminate',
+          errorCode: 'BROWSER_BINDING_UNRECOVERABLE',
+          errorMessage: 'recovered browser execution has no configured Browser model-tool bridge',
+          updatedAt: now(),
+        })
+        continue
+      }
+      const operatorId = node?.operatorId
       if (operatorId === undefined) {
         this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: 'recovered attempt has no sealed physical operator identity', updatedAt: now() })
         continue
@@ -4183,7 +4405,33 @@ export class OrchestrationDaemon {
         this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: 'NODE_INDETERMINATE', errorMessage: `physical operator ${operatorId} cannot reattach its durable turn`, updatedAt: now() })
         continue
       }
+      let browserBinding: Awaited<ReturnType<BrowserModelToolBridge['bind']>> | undefined
+      let browserSignal: AbortController | undefined
       try {
+        if (browserRecovery.required && browserRecovery.artifact !== undefined) {
+          if (browserBridge === undefined) {
+            throw new OrchestrationError(
+              'recovered browser execution has no configured Browser model-tool bridge',
+              'COMMAND_INDETERMINATE',
+            )
+          }
+          browserSignal = new AbortController()
+          browserBinding = await browserBridge.bind(attempt.executionId, browserSignal.signal)
+          if (
+            browserBinding.descriptor.sessionId !== browserRecovery.artifact.sessionId
+            || browserBinding.descriptor.socketPath !== browserRecovery.artifact.socketPath
+          ) {
+            throw new OrchestrationError(
+              'recovered browser binding does not match its durable descriptor',
+              'COMMAND_INDETERMINATE',
+            )
+          }
+          this.store.appendEvents([event(record.snapshot.runId, 'browser.binding.rebound', {
+            executionId: attempt.executionId,
+            sessionId: browserBinding.descriptor.sessionId,
+            socketPath: browserBinding.descriptor.socketPath,
+          }, node)])
+        }
         const run = await operator.reattach(attempt.turnId)
         const receipt = run.receipt
         if (receipt === undefined) throw new OrchestrationError('reattached Provider omitted its durable receipt', 'ORCHESTRATION_UNAVAILABLE')
@@ -4211,11 +4459,24 @@ export class OrchestrationDaemon {
             await this.syncActiveProgress(recovered)
             this.failAttempt(recovered, error)
           },
-        ).finally(() => { this.active.delete(key); this.triggerTick() })
+        ).finally(() => {
+          browserSignal?.abort(new Error('recovered browser binding detached'))
+          browserBinding?.release()
+          this.active.delete(key)
+          this.triggerTick()
+        })
       } catch (error) {
+        browserSignal?.abort(error)
+        browserBinding?.release()
         const code = error instanceof Error && 'code' in error ? String(error.code) : 'ORCHESTRATION_UNAVAILABLE'
-        if (code === 'COMMAND_INDETERMINATE') {
-          this.applyIndeterminate({ ...attempt, state: 'indeterminate', errorCode: code, errorMessage: error instanceof Error ? error.message : String(error), updatedAt: now() })
+        if (code === 'COMMAND_INDETERMINATE' || browserRecovery.required) {
+          this.applyIndeterminate({
+            ...attempt,
+            state: 'indeterminate',
+            errorCode: code === 'COMMAND_INDETERMINATE' ? code : 'BROWSER_BINDING_UNRECOVERABLE',
+            errorMessage: error instanceof Error ? error.message : String(error),
+            updatedAt: now(),
+          })
         } else {
           this.reconcileRetryAfter.set(key, Date.now() + 2_000)
         }
