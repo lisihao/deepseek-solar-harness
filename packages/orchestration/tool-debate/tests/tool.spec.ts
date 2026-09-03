@@ -351,6 +351,7 @@ describe('debate model Consumer', () => {
     const turn = round.turns[0]
     if (turn === undefined) throw new Error('missing Debate fixture turn')
     const { convergence: _convergence, ...roundWithoutConvergence } = round
+    const { outputRef: _outputRef, outputPreview: _outputPreview, ...turnWithoutOutput } = turn
     const secondTurn = {
       ...turn,
       round: 2,
@@ -379,10 +380,8 @@ describe('debate model Consumer', () => {
         ...roundWithoutConvergence,
         state: 'running',
         turns: [{
-          ...turn,
+          ...turnWithoutOutput,
           state: 'planned',
-          outputRef: undefined,
-          outputPreview: undefined,
         }],
       }],
     })
@@ -394,10 +393,8 @@ describe('debate model Consumer', () => {
         ...roundWithoutConvergence,
         state: 'running',
         turns: [{
-          ...turn,
+          ...turnWithoutOutput,
           state: 'dispatched',
-          outputRef: undefined,
-          outputPreview: undefined,
         }],
       }],
     })
@@ -557,13 +554,12 @@ describe('debate model Consumer', () => {
     if (round === undefined || proposer === undefined) throw new Error('missing Debate fixture turn')
     const { synthesis: _synthesis, ...withoutSynthesis } = template
     const { convergence: _convergence, ...withoutConvergence } = round
+    const { outputRef: _outputRef, outputPreview: _outputPreview, ...proposerWithoutOutput } = proposer
     const proposerBlocker = { code: 'DEBATE_INTERRUPTED', message: 'active stop', nodeId: 'node-stop' }
     const proposerTurn = {
-      ...proposer,
+      ...proposerWithoutOutput,
       state: 'failed' as const,
       attempt: 1,
-      outputRef: undefined,
-      outputPreview: undefined,
       errorCode: 'DEBATE_INTERRUPTED',
       blockers: [proposerBlocker, proposerBlocker, { ...proposerBlocker, message: 'second active failure', nodeId: 'node-second' }],
     }
@@ -577,12 +573,10 @@ describe('debate model Consumer', () => {
       outputPreview: 'Falsifier output after stop.',
     }
     const judgeTurn = {
-      ...proposer,
+      ...proposerWithoutOutput,
       slotId: 'slot-judge',
       role: 'decision-judge' as const,
       state: 'failed' as const,
-      outputRef: undefined,
-      outputPreview: undefined,
       errorCode: 'DEBATE_INTERRUPTED',
       blockers: [{ code: 'DEBATE_INTERRUPTED', message: 'judge interrupted', nodeId: 'node-judge' }],
     }

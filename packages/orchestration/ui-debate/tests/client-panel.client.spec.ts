@@ -210,17 +210,26 @@ describe('Debate Desktop panel transport', () => {
     fixture.rounds = [{
       ...fixture.rounds[0]!,
       state: 'running',
-      turnStates: fixture.rounds[0]!.turnStates.map((entry, index) => index === 0
-        ? { ...entry, state: 'planned' as const, outputRef: undefined, outputPreview: undefined, claimIds: [], evidenceRefs: [] }
-        : index === 1
-          ? { ...entry, state: 'dispatched' as const, outputRef: undefined, outputPreview: undefined, claimIds: [], evidenceRefs: [] }
-          : entry),
+      turnStates: fixture.rounds[0]!.turnStates.map((entry, index) => {
+        const { outputRef: _outputRef, outputPreview: _outputPreview, ...withoutOutput } = entry
+        return index === 0
+          ? { ...withoutOutput, state: 'planned' as const, claimIds: [], evidenceRefs: [] }
+          : index === 1
+            ? { ...withoutOutput, state: 'dispatched' as const, claimIds: [], evidenceRefs: [] }
+            : entry
+      }),
     }]
-    fixture.roles = fixture.roles.map((role, index) => index === 0
-      ? { ...role, latestTurn: { ...role.latestTurn!, state: 'planned' as const, outputRef: undefined, outputPreview: undefined, claimIds: [], evidenceRefs: [] } }
-      : index === 1
-        ? { ...role, latestTurn: { ...role.latestTurn!, state: 'dispatched' as const, outputRef: undefined, outputPreview: undefined, claimIds: [], evidenceRefs: [] } }
-        : role)
+    fixture.roles = fixture.roles.map((role, index) => {
+      if (index === 0) {
+        const { outputRef: _outputRef, outputPreview: _outputPreview, ...withoutOutput } = role.latestTurn!
+        return { ...role, latestTurn: { ...withoutOutput, state: 'planned' as const, claimIds: [], evidenceRefs: [] } }
+      }
+      if (index === 1) {
+        const { outputRef: _outputRef, outputPreview: _outputPreview, ...withoutOutput } = role.latestTurn!
+        return { ...role, latestTurn: { ...withoutOutput, state: 'dispatched' as const, claimIds: [], evidenceRefs: [] } }
+      }
+      return role
+    })
     const markup = renderToStaticMarkup(createElement(RunDetail, {
       run: fixture,
       events: [],
@@ -242,13 +251,13 @@ describe('Debate Desktop panel transport', () => {
     const falsifier = firstRound.turnStates[1]
     const judge = firstRound.turnStates[2]
     if (proposer === undefined || falsifier === undefined || judge === undefined) throw new Error('missing Debate fixture turns')
-    const plannedProposer = { ...proposer, state: 'planned' as const, outputRef: undefined, outputPreview: undefined, claimIds: [], evidenceRefs: [] }
+    const { outputRef: _proposerOutputRef, outputPreview: _proposerOutputPreview, ...proposerWithoutOutput } = proposer
+    const plannedProposer = { ...proposerWithoutOutput, state: 'planned' as const, claimIds: [], evidenceRefs: [] }
     const settledFalsifier = { ...falsifier, state: 'settled' as const }
+    const { outputRef: _judgeOutputRef, outputPreview: _judgeOutputPreview, ...judgeWithoutOutput } = judge
     const failedJudge = {
-      ...judge,
+      ...judgeWithoutOutput,
       state: 'failed' as const,
-      outputRef: undefined,
-      outputPreview: undefined,
       claimIds: [],
       evidenceRefs: [],
       errorCode: 'DEBATE_INTERRUPTED',
@@ -256,7 +265,7 @@ describe('Debate Desktop panel transport', () => {
     }
     fixture.state = 'stopped'
     fixture.currentRound = 1
-    fixture.synthesis = undefined
+    delete fixture.synthesis
     fixture.rounds = [{ ...firstRound, state: 'running', turnStates: [plannedProposer, settledFalsifier, failedJudge] }]
     fixture.roles = fixture.roles.map(role => role.role === 'constructive-proposer'
       ? { ...role, latestTurn: plannedProposer }
@@ -327,11 +336,10 @@ describe('Debate Desktop panel transport', () => {
     const sourceTurn = secondRound.turnStates[1]
     if (sourceTurn === undefined) throw new Error('missing Debate fixture turn')
     const firstBlocker = { code: 'DUPLICATE_ERROR', message: 'First blocker.', nodeId: 'node-first' }
+    const { outputRef: _outputRef, outputPreview: _outputPreview, ...turnWithoutOutput } = sourceTurn
     const blockedTurn = {
-      ...sourceTurn,
+      ...turnWithoutOutput,
       state: 'blocked' as const,
-      outputRef: undefined,
-      outputPreview: undefined,
       claimIds: [],
       evidenceRefs: [],
       attempt: 1,
