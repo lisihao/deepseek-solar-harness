@@ -4181,7 +4181,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DebateRunSnapshotV1',
-    declaration: 'export interface DebateRunSnapshotV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly revision: number;\n    readonly state: DebateLifecycle;\n    readonly mode: DebateMode;\n    readonly promptSha256: string;\n    readonly objective?: string;\n    readonly policy: DebatePolicyV1;\n    readonly roster: readonly DebateRoleSpecV1[];\n    readonly currentRound: number;\n    readonly rounds: readonly DebateRoundSnapshotV1[];\n    readonly claimLedger: DebateClaimLedgerV1;\n    readonly dissent: readonly DebateDissentV1[];\n    readonly unresolved: readonly DebateUnresolvedV1[];\n    readonly evidence: DebateEvidenceSummaryV1;\n    readonly cost: DebateCostSummaryV1;\n    readonly provenance: DebateProvenanceV1;\n    readonly synthesis?: DebateSynthesisV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface DebateRunSnapshotV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly revision: number;\n    readonly state: DebateLifecycle;\n    readonly mode: DebateMode;\n    readonly promptSha256: string;\n    readonly topic?: DebateTopicV1;\n    readonly objective?: string;\n    readonly policy: DebatePolicyV1;\n    readonly roster: readonly DebateRoleSpecV1[];\n    readonly currentRound: number;\n    readonly rounds: readonly DebateRoundSnapshotV1[];\n    readonly claimLedger: DebateClaimLedgerV1;\n    readonly dissent: readonly DebateDissentV1[];\n    readonly unresolved: readonly DebateUnresolvedV1[];\n    readonly evidence: DebateEvidenceSummaryV1;\n    readonly cost: DebateCostSummaryV1;\n    readonly provenance: DebateProvenanceV1;\n    readonly synthesis?: DebateSynthesisV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'DebateRunSummaryV1',
@@ -4206,6 +4206,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DebateSynthesisV1',
     declaration: 'export interface DebateSynthesisV1 {\n    readonly version: 1;\n    readonly state: DebateSynthesisState;\n    readonly artifactRef?: string;\n    readonly outputPreview?: string;\n    readonly unresolvedClaimIds: readonly string[];\n    readonly dissentCount: number;\n}',
+  },
+  {
+    name: 'DebateTopicV1',
+    declaration: 'export interface DebateTopicV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly source: \'user\' | \'objective\' | \'legacy-missing\';\n}',
   },
   {
     name: 'DebateTurnBlockerV1',

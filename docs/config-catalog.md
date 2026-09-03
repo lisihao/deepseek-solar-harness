@@ -3512,6 +3512,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-model-allocation-local` ([`packages/orchestration/model-allocation-local/src/index.ts`](../packages/orchestration/model-allocation-local/src/index.ts))
 - `@deepseek-ai/dsh-model-worker` ([`packages/orchestration/model-worker/src/index.ts`](../packages/orchestration/model-worker/src/index.ts))
 - `@deepseek-ai/dsh-orchestrations` ([`packages/bundle/orchestrations/src/index.ts`](../packages/bundle/orchestrations/src/index.ts))
+- `@deepseek-ai/dsh-output-style` — requires `systemPrompt` ([`packages/core/output-style/src/index.ts`](../packages/core/output-style/src/index.ts))
 - `@deepseek-ai/dsh-physical-operator` ([`packages/physical-operator/physical-operator/src/index.ts`](../packages/physical-operator/physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-resident-operators` ([`packages/bundle/resident-operators/src/index.ts`](../packages/bundle/resident-operators/src/index.ts))
 - `@deepseek-ai/dsh-rlm-strategy-local` ([`packages/orchestration/rlm-strategy-local/src/index.ts`](../packages/orchestration/rlm-strategy-local/src/index.ts))

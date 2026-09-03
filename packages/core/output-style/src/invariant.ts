@@ -12,6 +12,9 @@ export const name = 'output-style-invariant'
 export const inject = ['invariants']
 
 /**
+ * No runtime invariant: ctx.systemPrompt already owns section identity, order,
+ * replacement, and disposal for this stateless policy contribution.
+ *
  * The system-prompt registry owns section ordering, duplicate detection, and
  * disposal. This package contributes one fixed section and owns no separate
  * runtime state to validate.

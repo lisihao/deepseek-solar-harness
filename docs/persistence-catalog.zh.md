@@ -407,7 +407,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:80`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:101`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -429,7 +429,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:93`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:114`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -440,7 +440,22 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'debate/preferences': DebateExecutionPreferences
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:78`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:99`](../packages/orchestration/tool-debate/src/index.ts)
+
+<a id="debatetrace--log-only"></a>
+
+#### `debate/trace` — log-only
+
+```ts persistence-catalog
+/**
+ * One bounded public fact from a durable Debate run, keyed by its source event sequence.
+ * @param runId Persistent Debate run identity.
+ * @param sourceSequence Durable sequence from the Debate Provider.
+ */
+'debate/trace': DebateTraceSessionEventV1
+```
+
+来源：[`packages/orchestration/tool-debate/src/index.ts:125`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 
