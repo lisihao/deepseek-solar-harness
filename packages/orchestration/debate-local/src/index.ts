@@ -14,6 +14,8 @@ import DebateService, {
   validateDebateStartRequest,
 } from '@deepseek-ai/dsh-debate'
 import type {
+  DebateAgentProgressKindV1,
+  DebateAgentProgressUsageV1,
   DebateAgentTurnV1,
   DebateClaimLedgerV1,
   DebateClaimSeverity,
@@ -26,6 +28,7 @@ import type {
   DebateEventType,
   DebateEventV1,
   DebateEvidenceRefV1,
+  DebateJsonValue,
   DebateLifecycle,
   DebateRoleId,
   DebateRoleSpecV1,
@@ -34,6 +37,7 @@ import type {
   DebateRunSummaryV1,
   DebateStartRequestV1,
   DebateTopicV1,
+  DebateTurnRoutingV1,
   DebateUnresolvedV1,
   DebateUsageV1,
 } from '@deepseek-ai/dsh-debate'
@@ -42,6 +46,7 @@ import type {
   Config as ProviderConfig,
   DebateRoundExecutor,
   DebateRoundExecutionResultV1,
+  DebateRoundAgentProgressV1,
   DebateTurnPhase,
   DebateTurnRequestV1,
   DebateTurnResultV1,
@@ -62,6 +67,9 @@ const DEFAULT_EVENT_LIMIT = 100
 const MAX_PREVIEW_LENGTH = 4_000
 const MAX_OUTPUT_REF_LENGTH = 2_000
 const MAX_FOLLOW_UP_JUDGE_CLAIMS = 4
+const MAX_PROGRESS_SOURCE_ID_LENGTH = 512
+const MAX_PROGRESS_TEXT_LENGTH = 1_600
+const MAX_PROGRESS_NAME_LENGTH = 160
 const DEBATE_ROLE_ORDER: readonly DebateRoleId[] = [
   'constructive-proposer',
   'skeptical-falsifier',
@@ -72,6 +80,14 @@ const ROLE_INDEX = new Map<string, number>(DEBATE_ROLE_ORDER.map((role, index) =
 const CLAIM_STATUSES = new Set<DebateClaimStatus>(['open', 'supported', 'refuted', 'settled', 'unresolved'])
 const CLAIM_SEVERITIES = new Set<DebateClaimSeverity>(['low', 'medium', 'high', 'critical'])
 const EVIDENCE_KINDS = new Set<DebateEvidenceRefV1['kind']>(['source', 'artifact', 'observation', 'quote'])
+const PROGRESS_KINDS = new Set<DebateAgentProgressKindV1>([
+  'phase',
+  'public-output',
+  'tool-started',
+  'tool-completed',
+  'approval-required',
+  'usage-updated',
+])
 
 /** Runtime record kept beside the inspect projection so a resumed run can re-enter the executor. */
 interface StoredRun {
@@ -363,6 +379,142 @@ function normalizeUsage(value: unknown, path: string): DebateUsageV1 {
     ...(cacheRead === undefined ? {} : { cacheReadInputTokens: nonNegativeInteger(cacheRead, `${path}.cacheReadInputTokens`) }),
     ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: nonNegativeInteger(cacheWrite, `${path}.cacheWriteInputTokens`) }),
     ...(cost === undefined ? {} : { costUsd: nonNegativeNumber(cost, `${path}.costUsd`) }),
+  }
+}
+
+function normalizeProgressText(value: unknown, path: string, max: number): string {
+  const normalized = text(value, path, max).replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, max)
+  if (normalized.trim().length === 0) invalid(`${path} must contain visible text`)
+  return normalized
+}
+
+function normalizeProgressUsage(value: unknown, path: string): DebateAgentProgressUsageV1 {
+  const raw = record(value, path)
+  const usage: {
+    inputTokens?: number
+    outputTokens?: number
+    cacheReadInputTokens?: number
+    cacheWriteInputTokens?: number
+    costUsd?: number
+  } = {}
+  for (const field of ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens'] as const) {
+    if (raw[field] !== undefined) usage[field] = nonNegativeInteger(raw[field], `${path}.${field}`)
+  }
+  if (raw.costUsd !== undefined) usage.costUsd = nonNegativeNumber(raw.costUsd, `${path}.costUsd`)
+  if (Object.keys(usage).length === 0) invalid(`${path} must include at least one counter`)
+  return usage
+}
+
+function normalizeProgressRouting(value: unknown, path: string): DebateTurnRoutingV1 {
+  const routing = record(value, path)
+  if (routing.version !== 1) invalid(`${path}.version must be 1`)
+  const requestedOperatorId = normalizeProgressText(routing.requestedOperatorId, `${path}.requestedOperatorId`, MAX_PROGRESS_NAME_LENGTH)
+  const requestedModel = normalizeProgressText(routing.requestedModel, `${path}.requestedModel`, MAX_PROGRESS_NAME_LENGTH)
+  const actualOperatorId = routing.actualOperatorId === undefined
+    ? undefined
+    : normalizeProgressText(routing.actualOperatorId, `${path}.actualOperatorId`, MAX_PROGRESS_NAME_LENGTH)
+  const actualModel = routing.actualModel === undefined
+    ? undefined
+    : normalizeProgressText(routing.actualModel, `${path}.actualModel`, MAX_PROGRESS_NAME_LENGTH)
+  const fallbackReasonCode = routing.fallbackReasonCode === undefined
+    ? undefined
+    : normalizeProgressText(routing.fallbackReasonCode, `${path}.fallbackReasonCode`, MAX_PROGRESS_NAME_LENGTH)
+  return {
+    version: 1,
+    requestedOperatorId,
+    requestedModel,
+    ...(actualOperatorId === undefined ? {} : { actualOperatorId }),
+    ...(actualModel === undefined ? {} : { actualModel }),
+    ...(fallbackReasonCode === undefined ? {} : { fallbackReasonCode }),
+  }
+}
+
+function progressUsageData(usage: DebateAgentProgressUsageV1): Readonly<Record<string, DebateJsonValue>> {
+  return {
+    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
+    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
+    ...(usage.cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens: usage.cacheReadInputTokens }),
+    ...(usage.cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
+    ...(usage.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
+  }
+}
+
+function progressRoutingData(routing: DebateTurnRoutingV1): Readonly<Record<string, DebateJsonValue>> {
+  const result: Record<string, DebateJsonValue> = {
+    version: 1,
+    requestedOperatorId: routing.requestedOperatorId,
+    requestedModel: routing.requestedModel,
+  }
+  if (routing.actualOperatorId !== undefined) result.actualOperatorId = routing.actualOperatorId
+  if (routing.actualModel !== undefined) result.actualModel = routing.actualModel
+  if (routing.fallbackReasonCode !== undefined) result.fallbackReasonCode = routing.fallbackReasonCode
+  return result
+}
+
+function normalizeRoundAgentProgress(
+  value: DebateRoundAgentProgressV1,
+  expected: { readonly runId: string; readonly round: number; readonly slotId: string; readonly role: DebateRoleId },
+): DebateRoundAgentProgressV1 {
+  const candidate = record(value, 'round progress')
+  if (candidate.version !== 1) invalid('round progress.version must be 1')
+  if (candidate.runId !== expected.runId || candidate.round !== expected.round
+    || candidate.slotId !== expected.slotId || candidate.role !== expected.role) {
+    invalid('round progress does not belong to the admitted Debate slot')
+  }
+  const progress = record(candidate.progress, 'round progress.progress')
+  if (progress.version !== 1) invalid('round progress.progress.version must be 1')
+  const kind = enumValue(progress.kind, 'round progress.progress.kind', PROGRESS_KINDS)
+  const source = record(progress.source, 'round progress.progress.source')
+  const orchestrationRunId = normalizeProgressText(
+    source.orchestrationRunId,
+    'round progress.progress.source.orchestrationRunId',
+    MAX_PROGRESS_SOURCE_ID_LENGTH,
+  )
+  const sequence = nonNegativeInteger(source.sequence, 'round progress.progress.source.sequence')
+  if (sequence < 1) invalid('round progress.progress.source.sequence must be positive')
+  const time = normalizeProgressText(source.time, 'round progress.progress.source.time', MAX_PROGRESS_NAME_LENGTH)
+  if (!Number.isFinite(Date.parse(time))) invalid('round progress.progress.source.time must be an ISO timestamp')
+  const phase = progress.phase === undefined ? undefined : normalizeProgressText(progress.phase, 'round progress.progress.phase', MAX_PROGRESS_NAME_LENGTH)
+  const publicOutputPreview = progress.publicOutputPreview === undefined
+    ? undefined
+    : normalizeProgressText(progress.publicOutputPreview, 'round progress.progress.publicOutputPreview', MAX_PROGRESS_TEXT_LENGTH)
+  const toolName = progress.toolName === undefined
+    ? undefined
+    : normalizeProgressText(progress.toolName, 'round progress.progress.toolName', MAX_PROGRESS_NAME_LENGTH)
+  const approvalKind = progress.approvalKind === undefined
+    ? undefined
+    : normalizeProgressText(progress.approvalKind, 'round progress.progress.approvalKind', MAX_PROGRESS_NAME_LENGTH)
+  const approvalPreview = progress.approvalPreview === undefined
+    ? undefined
+    : normalizeProgressText(progress.approvalPreview, 'round progress.progress.approvalPreview', MAX_PROGRESS_TEXT_LENGTH)
+  const usage = progress.usage === undefined ? undefined : normalizeProgressUsage(progress.usage, 'round progress.progress.usage')
+  const routing = progress.routing === undefined ? undefined : normalizeProgressRouting(progress.routing, 'round progress.progress.routing')
+  switch (kind) {
+    case 'phase': if (phase === undefined) invalid('phase progress must include phase'); break
+    case 'public-output': if (publicOutputPreview === undefined) invalid('public-output progress must include publicOutputPreview'); break
+    case 'tool-started':
+    case 'tool-completed': if (toolName === undefined) invalid('tool progress must include toolName'); break
+    case 'approval-required': if (approvalKind === undefined) invalid('approval progress must include approvalKind'); break
+    case 'usage-updated': if (usage === undefined) invalid('usage progress must include usage'); break
+  }
+  return {
+    version: 1,
+    runId: expected.runId,
+    round: expected.round,
+    slotId: expected.slotId,
+    role: expected.role,
+    progress: {
+      version: 1,
+      kind,
+      source: { orchestrationRunId, sequence, time: new Date(time).toISOString() },
+      ...(phase === undefined ? {} : { phase }),
+      ...(publicOutputPreview === undefined ? {} : { publicOutputPreview }),
+      ...(toolName === undefined ? {} : { toolName }),
+      ...(approvalKind === undefined ? {} : { approvalKind }),
+      ...(approvalPreview === undefined ? {} : { approvalPreview }),
+      ...(usage === undefined ? {} : { usage }),
+      ...(routing === undefined ? {} : { routing }),
+    },
   }
 }
 
@@ -1389,6 +1541,7 @@ export class LocalDebateProvider extends DebateService {
       round,
       turns,
       maxParallel: Math.max(1, slots.filter(slot => slot.kind === 'participant').length),
+      onProgress: async progress => this.appendRoundAgentProgress(run.runId, progress),
       signal,
     })
     const expected = new Set(slots.map(slot => slot.role))
@@ -1399,6 +1552,50 @@ export class LocalDebateProvider extends DebateService {
     if (new Set(actual).size !== actual.length) invalid('round executor returned both result and failure for one slot')
     if (actual.length !== expected.size) invalid('round executor omitted a slot outcome')
     return result
+  }
+
+  /** Persist one whitelisted TaskGraph operator detail before the round settles. */
+  private async appendRoundAgentProgress(
+    runId: string,
+    candidate: DebateRoundAgentProgressV1,
+  ): Promise<void> {
+    await this.mutate(() => {
+      const run = this.requireRun(runId)
+      if (lifecycleTerminal(run.snapshot.state)) return
+      const round = this.round(run, candidate.round)
+      const turn = round.turns.find(value => value.slotId === candidate.slotId)
+      if (turn === undefined) invalid(`round progress slot is not admitted: ${candidate.slotId}`)
+      const progress = normalizeRoundAgentProgress(candidate, {
+        runId,
+        round: round.round,
+        slotId: turn.slotId,
+        role: turn.role,
+      })
+      if (turn.state !== 'dispatched') return
+      const source = progress.progress.source
+      const duplicate = run.events.some(event => (
+        event.type === 'debate.agent.progress'
+        && event.round === progress.round
+        && event.slotId === progress.slotId
+        && event.data.orchestrationRunId === source.orchestrationRunId
+        && event.data.orchestrationSequence === source.sequence
+      ))
+      if (duplicate) return
+      this.appendEvent(run, 'debate.agent.progress', {
+        role: progress.role,
+        orchestrationRunId: source.orchestrationRunId,
+        orchestrationSequence: source.sequence,
+        orchestrationTime: source.time,
+        kind: progress.progress.kind,
+        ...(progress.progress.phase === undefined ? {} : { phase: progress.progress.phase }),
+        ...(progress.progress.publicOutputPreview === undefined ? {} : { publicOutputPreview: progress.progress.publicOutputPreview }),
+        ...(progress.progress.toolName === undefined ? {} : { toolName: progress.progress.toolName }),
+        ...(progress.progress.approvalKind === undefined ? {} : { approvalKind: progress.progress.approvalKind }),
+        ...(progress.progress.approvalPreview === undefined ? {} : { approvalPreview: progress.progress.approvalPreview }),
+        ...(progress.progress.usage === undefined ? {} : { usage: progressUsageData(progress.progress.usage) }),
+        ...(progress.progress.routing === undefined ? {} : { routing: progressRoutingData(progress.progress.routing) }),
+      }, {}, { round: progress.round, slotId: progress.slotId })
+    })
   }
 
   private roundSlots(roster: readonly DebateRoleSpecV1[], maxAgents: number): DebateRoleSpecV1[] {
@@ -1461,7 +1658,7 @@ export class LocalDebateProvider extends DebateService {
   private appendEvent(
     run: StoredRun,
     type: DebateEventType,
-    data: Readonly<Record<string, string | number | boolean | readonly string[] | readonly DebateEvidenceRefV1[]>>,
+    data: Readonly<Record<string, DebateJsonValue>>,
     patch: Partial<Pick<DebateRunSnapshotV1, 'state' | 'currentRound' | 'rounds' | 'claimLedger' | 'dissent' | 'unresolved' | 'evidence' | 'cost' | 'provenance' | 'synthesis'>> = {},
     context: { readonly round?: number; readonly slotId?: string } = {},
   ): void {

@@ -10,7 +10,12 @@ import type {
   DebatePolicyV1,
   DebateStartRequestV1,
 } from '@deepseek-ai/dsh-debate'
-import type { DebateRoundExecutorPort, DebateTurnRequestV1, DebateTurnResultV1 } from '../src/types.ts'
+import type {
+  DebateRoundAgentProgressV1,
+  DebateRoundExecutorPort,
+  DebateTurnRequestV1,
+  DebateTurnResultV1,
+} from '../src/types.ts'
 
 const contexts: Context[] = []
 
@@ -295,6 +300,87 @@ describe('local Debate Provider', () => {
     expect(Math.max(...dispatches.map(event => event.sequence))).toBeLessThan(
       Math.min(...settlements.map(event => event.sequence)),
     )
+  })
+
+  it('immediately persists one safe, source-deduplicated TaskGraph operator progress fact before round settlement', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-progress-'))
+    const ctx = new Context()
+    contexts.push(ctx)
+    let persistedBeforeSettlement = false
+    const executor: DebateRoundExecutorPort = {
+      async executeRound(round) {
+        const turn = round.turns[0]
+        if (turn === undefined || round.onProgress === undefined) throw new Error('fixture requires an admitted progress callback')
+        const unsafeProgress = {
+          version: 1,
+          runId: round.runId,
+          round: round.round,
+          slotId: turn.slotId,
+          role: turn.role,
+          progress: {
+            version: 1,
+            kind: 'public-output',
+            source: {
+              orchestrationRunId: 'taskgraph-progress-fixture',
+              sequence: 42,
+              time: '2026-09-03T10:00:00.000Z',
+            },
+            publicOutputPreview: 'Safe public operator update.',
+            routing: {
+              version: 1,
+              requestedOperatorId: turn.operatorId,
+              requestedModel: turn.model,
+              actualOperatorId: 'codex',
+              actualModel: 'gpt-5.6-luna',
+            },
+            prompt: 'must-not-copy',
+            nativeSessionId: 'must-not-copy',
+            commandId: 'must-not-copy',
+          },
+        } as DebateRoundAgentProgressV1
+        await round.onProgress(unsafeProgress)
+        await round.onProgress(unsafeProgress)
+        const events = (await service.readEvents({ runId: round.runId, limit: 100 })).events
+        persistedBeforeSettlement = events.some(event => event.type === 'debate.agent.progress')
+        return {
+          version: 1,
+          resultsBySlot: Object.fromEntries(round.turns.map(entry => [entry.slotId, resultFor(entry)])),
+        }
+      },
+    }
+    const service = new LocalDebateProvider(ctx, { root, executor, idFactory: () => 'run-progress' })
+    const pending = await service.start(request('enabled', { commandId: 'start-progress' }))
+    const completed = await service.control({
+      version: 1,
+      commandId: 'approve-progress',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture approval',
+    })
+
+    const events = (await service.readEvents({ runId: completed.runId, limit: 100 })).events
+    const progress = events.filter(event => event.type === 'debate.agent.progress')
+    const settled = events.filter(event => event.type === 'debate.agent.settled')
+    expect(persistedBeforeSettlement).toBe(true)
+    expect(progress).toHaveLength(1)
+    expect(progress[0]).toMatchObject({
+      round: 1,
+      slotId: 'constructive-proposer',
+      data: {
+        orchestrationRunId: 'taskgraph-progress-fixture',
+        orchestrationSequence: 42,
+        kind: 'public-output',
+        publicOutputPreview: 'Safe public operator update.',
+        routing: {
+          requestedOperatorId: 'fixture-proposer',
+          actualOperatorId: 'codex',
+          actualModel: 'gpt-5.6-luna',
+        },
+      },
+    })
+    expect(progress[0]?.sequence).toBeLessThan(Math.min(...settled.map(event => event.sequence)))
+    expect(JSON.stringify(progress)).not.toContain('must-not-copy')
   })
 
   it('preserves settled work and structured blockers when a round TaskGraph fails partially', async () => {

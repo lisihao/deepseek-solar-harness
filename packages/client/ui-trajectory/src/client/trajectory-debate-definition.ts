@@ -4,7 +4,7 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   TrajectoryDebateClaim, TrajectoryDebateExecution, TrajectoryDebateRole,
-  TrajectoryDebateTraceEntry,
+  TrajectoryDebateProgress, TrajectoryDebateTraceEntry,
 } from './trajectory-contract.ts'
 import { trajectoryNode } from './trajectory-definition-common.ts'
 
@@ -121,6 +121,35 @@ function publicUsage(value: unknown): TrajectoryDebateTraceEntry['usage'] | unde
   }
 }
 
+function publicProgress(value: unknown): TrajectoryDebateProgress | undefined {
+  const input = object(value)
+  if (input === undefined) return undefined
+  const kind = string(input.kind)
+  if (kind !== 'phase'
+    && kind !== 'public-output'
+    && kind !== 'tool-started'
+    && kind !== 'tool-completed'
+    && kind !== 'approval-required'
+    && kind !== 'usage-updated') return undefined
+  const sourceTime = string(input.sourceTime)
+  if (sourceTime === undefined) return undefined
+  const phase = string(input.phase)
+  const publicOutputPreview = string(input.publicOutputPreview)
+  const toolName = string(input.toolName)
+  const approvalKind = string(input.approvalKind)
+  const approvalPreview = string(input.approvalPreview)
+  const usage = publicUsage(input.usage)
+  return Object.assign(
+    { kind, sourceTime },
+    phase === undefined ? {} : { phase },
+    publicOutputPreview === undefined ? {} : { publicOutputPreview },
+    toolName === undefined ? {} : { toolName },
+    approvalKind === undefined ? {} : { approvalKind },
+    approvalPreview === undefined ? {} : { approvalPreview },
+    usage === undefined ? {} : { usage },
+  )
+}
+
 function publicConvergence(value: unknown): TrajectoryDebateTraceEntry['convergence'] | undefined {
   const input = object(value)
   if (input === undefined) return undefined
@@ -168,6 +197,8 @@ function debateTrace(event: { readonly type: string; readonly data: unknown }): 
   const publicOutputPreview = string(output?.preview)
   const publicOutputRef = string(output?.ref)
   const usage = publicUsage(input.usage)
+  const progress = publicProgress(input.progress)
+  if (state === 'progress' && progress === undefined) return undefined
   const convergence = publicConvergence(input.convergence)
   const synthesis = publicSynthesis(input.synthesis)
   return {
@@ -186,10 +217,22 @@ function debateTrace(event: { readonly type: string; readonly data: unknown }): 
       claims: publicClaims(input.claims),
       evidenceRefs: publicEvidenceRefs(input.evidenceRefs),
       ...(usage === undefined ? {} : { usage }),
+      ...(progress === undefined ? {} : { progress }),
       ...(convergence === undefined ? {} : { convergence }),
       ...(synthesis === undefined ? {} : { synthesis }),
     },
   }
+}
+
+function mergeTraceEntry(
+  previous: TrajectoryDebateTraceEntry,
+  next: TrajectoryDebateTraceEntry,
+): TrajectoryDebateTraceEntry {
+  // A replay with the same durable source sequence is the same public fact.
+  // Keep its first lifecycle projection, but allow a reconnect to fill a
+  // progress field that was unavailable in the initial session event.
+  if (previous.progress !== undefined || next.progress === undefined) return previous
+  return { ...previous, progress: next.progress }
 }
 
 function entry(match: ConversationMatch, trace: DebateTracePayload): TrajectoryDebateTraceEntry {
@@ -244,9 +287,17 @@ const trajectoryDebateDefinition: ConversationNodeDefinition<DebateTraceState> =
   update: (context, match) => {
     const trace = debateTrace(match.event)
     if (trace === undefined) return context.state
-    if (context.state.entries.has(trace.sourceSequence)) return context.state
+    const nextEntry = entry(match, trace)
+    const previousEntry = context.state.entries.get(trace.sourceSequence)
+    if (previousEntry !== undefined) {
+      const merged = mergeTraceEntry(previousEntry, nextEntry)
+      if (merged === previousEntry) return context.state
+      const entries = new Map(context.state.entries)
+      entries.set(trace.sourceSequence, merged)
+      return { ...context.state, entries }
+    }
     const entries = new Map(context.state.entries)
-    entries.set(trace.sourceSequence, entry(match, trace))
+    entries.set(trace.sourceSequence, nextEntry)
     return {
       ...context.state,
       ...(context.state.topic === undefined && trace.topic !== undefined ? { topic: trace.topic } : {}),

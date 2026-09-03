@@ -240,6 +240,59 @@ export interface DebateTraceRoleV1 {
   readonly fallbackReasonCode?: string
 }
 
+/** Safe usage counters reported while one physical Debate turn is still running. */
+export interface DebateAgentProgressUsageV1 {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly cacheReadInputTokens?: number
+  readonly cacheWriteInputTokens?: number
+  readonly costUsd?: number
+}
+
+/** One whitelisted public detail received from a physical operator. */
+export type DebateAgentProgressKindV1 =
+  | 'phase'
+  | 'public-output'
+  | 'tool-started'
+  | 'tool-completed'
+  | 'approval-required'
+  | 'usage-updated'
+
+/**
+ * Durable, source-addressable operator progress for one Debate roster slot.
+ * It intentionally carries only a whitelisted public projection; prompt text,
+ * hidden reasoning, credentials, and native product identifiers are absent.
+ */
+export interface DebateAgentProgressV1 {
+  readonly version: 1
+  readonly kind: DebateAgentProgressKindV1
+  readonly source: {
+    readonly orchestrationRunId: string
+    readonly sequence: number
+    readonly time: string
+  }
+  readonly phase?: string
+  readonly publicOutputPreview?: string
+  readonly toolName?: string
+  readonly approvalKind?: string
+  readonly approvalPreview?: string
+  readonly usage?: DebateAgentProgressUsageV1
+  /** Requested/actual public route known when the progress was observed. */
+  readonly routing?: DebateTurnRoutingV1
+}
+
+/** Public subset of one durable physical-operator progress fact in a Session trace. */
+export interface DebateTraceProgressV1 {
+  readonly kind: DebateAgentProgressKindV1
+  readonly sourceTime: string
+  readonly phase?: string
+  readonly publicOutputPreview?: string
+  readonly toolName?: string
+  readonly approvalKind?: string
+  readonly approvalPreview?: string
+  readonly usage?: DebateAgentProgressUsageV1
+}
+
 /** Bounded public synthesis data retained in a Debate Session trace. */
 export interface DebateTraceSynthesisV1 {
   readonly state: DebateSynthesisState
@@ -255,6 +308,7 @@ export type DebateTraceStateV1 =
   | 'planned'
   | 'dispatched'
   | 'running'
+  | 'progress'
   | 'settled'
   | 'blocked'
   | 'failed'
@@ -295,6 +349,8 @@ export interface DebateTraceSessionEventV1 {
   readonly claims?: readonly DebateTraceClaimV1[]
   readonly evidenceRefs?: readonly DebateEvidenceRefV1[]
   readonly usage?: DebateUsageV1
+  /** Safe, incrementally projected operator detail for a running Debate turn. */
+  readonly progress?: DebateTraceProgressV1
   readonly convergence?: DebateConvergenceV1
   readonly synthesis?: DebateTraceSynthesisV1
 }
@@ -490,6 +546,7 @@ export type DebateEventType =
   | 'debate.admitted'
   | 'debate.round.started'
   | 'debate.agent.dispatched'
+  | 'debate.agent.progress'
   | 'debate.agent.settled'
   | 'debate.agent.blocked'
   | 'debate.agent.failed'

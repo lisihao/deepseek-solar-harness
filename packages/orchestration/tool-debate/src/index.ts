@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   type DebateControlAction,
+  type DebateAgentProgressUsageV1,
   DebateError,
   type DebateEventV1,
   type DebatePolicyV1,
@@ -11,7 +12,9 @@ import {
   type DebateRunSummaryV1,
   type DebateStartRequestV1,
   type DebateTraceSessionEventV1,
+  type DebateTraceProgressV1,
   type DebateTraceStateV1,
+  type DebateTurnRoutingV1,
 } from '@deepseek-ai/dsh-debate'
 import {
   isAgentLoopRequest,
@@ -137,6 +140,18 @@ interface DebateHostDispatch {
   readonly promptMessageId: string
   readonly turn: number
   readonly step: number
+}
+
+/**
+ * Session-local placement for a Debate trace projection.
+ *
+ * Host-routed Debate has an explicit message dispatch. A model-invoked
+ * `debate` tool instead owns a normal `tool/call`; it can still recover its
+ * turn/step from that durable call without inventing a user-message id.
+ */
+interface DebateTraceDispatch {
+  readonly turn?: number
+  readonly step?: number
 }
 
 type ToolArgs = {
@@ -420,6 +435,14 @@ function persistHostDispatch(
   }
   agent.session.append('debate/dispatch', dispatch, { ignorable: true })
   return dispatch
+}
+
+function toolTraceDispatch(agent: Agent, callId: string): DebateTraceDispatch {
+  const call = agent.session.events.findLast(event => event.type === 'tool/call'
+    && String(event.data.callId) === callId
+    && event.data.name === 'debate')
+  if (call?.type !== 'tool/call') return {}
+  return { turn: call.data.turn, step: call.data.step }
 }
 
 function latestDirectUser(messages: readonly HostMessage[]): HostMessage | undefined {
@@ -830,6 +853,7 @@ function traceState(event: DebateEventV1): DebateTraceStateV1 | undefined {
     case 'debate.admitted':
     case 'debate.round.started': return 'running'
     case 'debate.agent.dispatched': return 'dispatched'
+    case 'debate.agent.progress': return 'progress'
     case 'debate.agent.settled': return 'settled'
     case 'debate.agent.blocked': return 'blocked'
     case 'debate.agent.failed': return 'failed'
@@ -865,11 +889,13 @@ function traceRole(
   run: DebateRunSnapshotV1,
   turn: DebateRunSnapshotV1['rounds'][number]['turns'][number],
   includeActualRoute: boolean,
+  routingOverride?: DebateTurnRoutingV1,
 ): NonNullable<DebateTraceSessionEventV1['role']> {
-  const requestedOperatorId = turn.routing?.requestedOperatorId ?? turn.operatorId
-  const requestedModel = turn.routing?.requestedModel ?? turn.model
-  const actualOperatorId = turn.routing?.actualOperatorId
-  const actualModel = turn.routing?.actualModel
+  const routing = routingOverride ?? turn.routing
+  const requestedOperatorId = routing?.requestedOperatorId ?? turn.operatorId
+  const requestedModel = routing?.requestedModel ?? turn.model
+  const actualOperatorId = routing?.actualOperatorId
+  const actualModel = routing?.actualModel
   return {
     title: roleTitle(turn.role, run.roster),
     kind: turn.role === 'decision-judge' ? 'judge' : 'participant',
@@ -877,9 +903,102 @@ function traceRole(
     ...(!includeActualRoute || actualOperatorId === undefined || actualModel === undefined
       ? {}
       : { actual: { operatorId: actualOperatorId, model: actualModel } }),
-    ...(!includeActualRoute || turn.routing?.fallbackReasonCode === undefined
+    ...(!includeActualRoute || routing?.fallbackReasonCode === undefined
       ? {}
-      : { fallbackReasonCode: turn.routing.fallbackReasonCode }),
+      : { fallbackReasonCode: routing.fallbackReasonCode }),
+  }
+}
+
+function traceProgressText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  return preview(value.replace(/[\u0000-\u001f\u007f]/gu, ''))
+}
+
+function traceProgressUsage(value: unknown): DebateAgentProgressUsageV1 | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const usage: {
+    inputTokens?: number
+    outputTokens?: number
+    cacheReadInputTokens?: number
+    cacheWriteInputTokens?: number
+    costUsd?: number
+  } = {}
+  for (const field of ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens', 'costUsd'] as const) {
+    const counter = source[field]
+    if (typeof counter === 'number' && Number.isFinite(counter) && counter >= 0) usage[field] = counter
+  }
+  return Object.keys(usage).length === 0 ? undefined : usage
+}
+
+function traceProgressRouting(value: unknown): DebateTurnRoutingV1 | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const routing = value as Record<string, unknown>
+  if (routing.version !== 1 || typeof routing.requestedOperatorId !== 'string' || typeof routing.requestedModel !== 'string') {
+    return undefined
+  }
+  const requestedOperatorId = traceProgressText(routing.requestedOperatorId)
+  const requestedModel = traceProgressText(routing.requestedModel)
+  if (requestedOperatorId === undefined || requestedModel === undefined) return undefined
+  const actualOperatorId = traceProgressText(routing.actualOperatorId)
+  const actualModel = traceProgressText(routing.actualModel)
+  const fallbackReasonCode = traceProgressText(routing.fallbackReasonCode)
+  return {
+    version: 1,
+    requestedOperatorId,
+    requestedModel,
+    ...(actualOperatorId === undefined ? {} : { actualOperatorId }),
+    ...(actualModel === undefined ? {} : { actualModel }),
+    ...(fallbackReasonCode === undefined ? {} : { fallbackReasonCode }),
+  }
+}
+
+function traceProgress(event: DebateEventV1): {
+  readonly progress: DebateTraceProgressV1
+  readonly routing?: DebateTurnRoutingV1
+} | undefined {
+  if (event.type !== 'debate.agent.progress') return undefined
+  const sourceTime = traceProgressText(event.data.orchestrationTime)
+  const kind = event.data.kind
+  if (sourceTime === undefined || !Number.isFinite(Date.parse(sourceTime)) || typeof kind !== 'string') return undefined
+  const routing = traceProgressRouting(event.data.routing)
+  const base = { sourceTime: new Date(sourceTime).toISOString() }
+  switch (kind) {
+    case 'phase': {
+      const phase = traceProgressText(event.data.phase)
+      return phase === undefined ? undefined : { progress: { kind, ...base, phase }, ...(routing === undefined ? {} : { routing }) }
+    }
+    case 'public-output': {
+      const publicOutputPreview = traceProgressText(event.data.publicOutputPreview)
+      return publicOutputPreview === undefined
+        ? undefined
+        : { progress: { kind, ...base, publicOutputPreview }, ...(routing === undefined ? {} : { routing }) }
+    }
+    case 'tool-started':
+    case 'tool-completed': {
+      const toolName = traceProgressText(event.data.toolName)
+      return toolName === undefined ? undefined : { progress: { kind, ...base, toolName }, ...(routing === undefined ? {} : { routing }) }
+    }
+    case 'approval-required': {
+      const approvalKind = traceProgressText(event.data.approvalKind)
+      const approvalPreview = traceProgressText(event.data.approvalPreview)
+      return approvalKind === undefined
+        ? undefined
+        : {
+          progress: {
+            kind,
+            ...base,
+            approvalKind,
+            ...(approvalPreview === undefined ? {} : { approvalPreview }),
+          },
+          ...(routing === undefined ? {} : { routing }),
+        }
+    }
+    case 'usage-updated': {
+      const usage = traceProgressUsage(event.data.usage)
+      return usage === undefined ? undefined : { progress: { kind, ...base, usage }, ...(routing === undefined ? {} : { routing }) }
+    }
+    default: return undefined
   }
 }
 
@@ -953,13 +1072,15 @@ function settledTraceDetails(
 function traceForEvent(
   run: DebateRunSnapshotV1,
   event: DebateEventV1,
-  dispatch: DebateHostDispatch,
+  dispatch: DebateTraceDispatch,
 ): DebateTraceSessionEventV1 | undefined {
   const state = traceState(event)
   if (state === undefined) return undefined
   const turn = turnForTraceEvent(run, event)
   const agentEvent = event.type.startsWith('debate.agent.')
   if (agentEvent && turn === undefined) return undefined
+  const progress = traceProgress(event)
+  if (event.type === 'debate.agent.progress' && progress === undefined) return undefined
   const convergence = event.type === 'debate.convergence.evaluated'
     ? run.rounds.find(round => round.round === event.round)?.convergence
     : undefined
@@ -979,11 +1100,19 @@ function traceForEvent(
     sourceSequence: event.sequence,
     state,
     ...(event.type === 'debate.planned' ? { topic: traceTopic(run) } : {}),
-    sessionTurn: dispatch.turn,
-    sessionStep: dispatch.step,
+    ...(dispatch.turn === undefined ? {} : { sessionTurn: dispatch.turn }),
+    ...(dispatch.step === undefined ? {} : { sessionStep: dispatch.step }),
     ...(event.round === undefined ? {} : { round: event.round }),
-    ...(turn === undefined ? {} : { role: traceRole(run, turn, event.type !== 'debate.agent.dispatched') }),
+    ...(turn === undefined ? {} : {
+      role: traceRole(
+        run,
+        turn,
+        event.type !== 'debate.agent.dispatched',
+        progress?.routing,
+      ),
+    }),
     ...settledDetails,
+    ...(progress === undefined ? {} : { progress: progress.progress }),
     ...(convergence === undefined ? {} : { convergence }),
     ...(synthesis === undefined ? {} : { synthesis }),
   }
@@ -1005,7 +1134,7 @@ async function projectDebateTrace(
   ctx: Context,
   agent: Agent,
   run: DebateRunSnapshotV1,
-  dispatch: DebateHostDispatch,
+  dispatch: DebateTraceDispatch,
 ): Promise<void> {
   let afterSequence = 0
   while (true) {
@@ -1245,16 +1374,22 @@ export function apply(ctx: Context): void {
       render: (_args, value) => [{ type: 'text' as const, text: JSON.stringify(value) }],
     },
     async execute(args: ToolArgs, exec) {
+      const agent = exec.agent
+      const projectToolTrace = async (run: DebateRunSnapshotV1): Promise<void> => {
+        if (agent === undefined) return
+        await projectDebateTrace(ctx, agent, run, toolTraceDispatch(agent, String(exec.callId)))
+      }
       if (args.action === 'list') {
         const runs = await ctx.debates.list()
         return jsonObject({ kind: 'list', runs: runs.slice(0, MAX_LIST_ITEMS).map(boundedSummary), truncated: runs.length > MAX_LIST_ITEMS })
       }
 
       if (args.action === 'inspect') {
-        return jsonObject({ kind: 'inspect', run: boundedRun(await ctx.debates.inspect(requiredRunId(args))) })
+        const run = await ctx.debates.inspect(requiredRunId(args))
+        await projectToolTrace(run)
+        return jsonObject({ kind: 'inspect', run: boundedRun(run) })
       }
 
-      const agent = exec.agent
       const stableCommandId = commandId(agent === undefined ? undefined : String(agent.id), String(exec.callId))
       if (args.action === 'control') {
         if (args.expected_revision === undefined || !Number.isInteger(args.expected_revision) || args.expected_revision < 0) {
@@ -1270,6 +1405,7 @@ export function apply(ctx: Context): void {
           action: args.control_action,
           reason: args.reason,
         })
+        await projectToolTrace(run)
         return jsonObject({ kind: 'control', run: boundedRun(run) })
       }
 
@@ -1293,9 +1429,11 @@ export function apply(ctx: Context): void {
         sourceSessionId: String(agent.id),
       }
       const started = await ctx.debates.start(request)
+      await projectToolTrace(started)
       const run = preferences.mode === 'enabled'
         ? await approveExplicitDebate(ctx, started, stableCommandId)
         : started
+      await projectToolTrace(run)
       agent.session.append('debate/admission', {
         runId: run.runId,
         mode: preferences.mode,

@@ -3,12 +3,18 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
-import { DebateError, type DebateTurnRoutingV1 } from '@deepseek-ai/dsh-debate'
+import {
+  DebateError,
+  type DebateAgentProgressUsageV1,
+  type DebateAgentProgressV1,
+  type DebateTurnRoutingV1,
+} from '@deepseek-ai/dsh-debate'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import LocalDebateProvider from '@deepseek-ai/dsh-debate-local'
 import type {
   DebateRoundExecutionRequestV1,
   DebateRoundExecutionResultV1,
+  DebateRoundAgentProgressV1,
   DebateRoundExecutorPort,
   DebateTurnFailureV1,
   DebateTurnRequestV1,
@@ -23,6 +29,7 @@ import type {
   NodeExecutionPlanV1,
   OrchestrationNodeSnapshot,
   OrchestrationNodeSpecV1,
+  OrchestrationEvent,
   OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
 import type {
@@ -40,6 +47,8 @@ const DEFAULT_MAX_PARALLEL = 3
 const DEFAULT_POLL_INTERVAL_MS = 50
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000
 const MAX_RESULT_PREVIEW = 4_000
+const MAX_PROGRESS_PREVIEW = 1_600
+const MAX_PROGRESS_NAME = 160
 
 /** Loader configuration for the local Debate owner and TaskGraph adapter. */
 export interface Config extends DebateTaskGraphAdapterOptions {
@@ -236,6 +245,86 @@ function evidenceUsage(value: unknown): DebateTurnResultV1['usage'] {
   }
 }
 
+function boundedPublicText(value: unknown, limit: number): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const text = value.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, limit)
+  return text.length === 0 ? undefined : text
+}
+
+function publicProgressUsage(value: unknown): DebateAgentProgressUsageV1 | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const entries = ['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens', 'costUsd']
+    .flatMap((field) => {
+      const counter = source[field]
+      return typeof counter === 'number' && Number.isFinite(counter) && counter >= 0
+        ? [[field, counter] as const]
+        : []
+    })
+  return entries.length === 0
+    ? undefined
+    : Object.fromEntries(entries) as DebateAgentProgressUsageV1
+}
+
+function publicProgress(
+  event: OrchestrationEvent,
+  orchestrationRunId: string,
+  routing: DebateTurnRoutingV1,
+): DebateAgentProgressV1 | undefined {
+  if (!Number.isSafeInteger(event.sequence) || event.sequence < 1 || !Number.isFinite(Date.parse(event.time))) return undefined
+  const source = {
+    orchestrationRunId,
+    sequence: event.sequence,
+    time: new Date(event.time).toISOString(),
+  }
+  const publicRouting: DebateTurnRoutingV1 = Object.assign(
+    { version: 1 as const, requestedOperatorId: routing.requestedOperatorId, requestedModel: routing.requestedModel },
+    routing.actualOperatorId === undefined ? {} : { actualOperatorId: routing.actualOperatorId },
+    routing.actualModel === undefined ? {} : { actualModel: routing.actualModel },
+    routing.fallbackReasonCode === undefined ? {} : { fallbackReasonCode: routing.fallbackReasonCode },
+  )
+  if (event.type === 'node.operator.progress') {
+    const phase = boundedPublicText(event.data.phase, MAX_PROGRESS_NAME)
+    return phase === undefined ? undefined : { version: 1, kind: 'phase', source, phase, routing: publicRouting }
+  }
+  if (event.type !== 'node.operator.observation') return undefined
+  const observation = event.data.observation
+  if (observation === null || typeof observation !== 'object' || Array.isArray(observation)) return undefined
+  const value = observation as Record<string, unknown>
+  switch (value.kind) {
+    case 'public-output': {
+      const publicOutputPreview = boundedPublicText(value.preview, MAX_PROGRESS_PREVIEW)
+      return publicOutputPreview === undefined
+        ? undefined
+        : { version: 1, kind: 'public-output', source, publicOutputPreview, routing: publicRouting }
+    }
+    case 'tool-started':
+    case 'tool-completed': {
+      const toolName = boundedPublicText(value.toolName, MAX_PROGRESS_NAME)
+      return toolName === undefined ? undefined : { version: 1, kind: value.kind, source, toolName, routing: publicRouting }
+    }
+    case 'approval-required': {
+      const approvalKind = boundedPublicText(value.approvalKind, MAX_PROGRESS_NAME)
+      const approvalPreview = boundedPublicText(value.preview, MAX_PROGRESS_PREVIEW)
+      return approvalKind === undefined
+        ? undefined
+        : {
+          version: 1,
+          kind: 'approval-required',
+          source,
+          approvalKind,
+          ...(approvalPreview === undefined ? {} : { approvalPreview }),
+          routing: publicRouting,
+        }
+    }
+    case 'usage-updated': {
+      const usage = publicProgressUsage(value.usage)
+      return usage === undefined ? undefined : { version: 1, kind: 'usage-updated', source, usage, routing: publicRouting }
+    }
+    default: return undefined
+  }
+}
+
 function terminal(state: OrchestrationRunSnapshot['state']): boolean {
   return state === 'completed' || state === 'failed' || state === 'cancelled' || state === 'indeterminate'
 }
@@ -384,6 +473,56 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
       commandId: `debate:${request.runId}:round:${String(request.round)}`,
       compilationId: compilation.compilationId,
     })
+    let progressCursor = 0
+    const reportedProgress = new Set<string>()
+    const routingByNode = new Map<string, Promise<DebateTurnRoutingV1>>()
+    const drainProgress = async (): Promise<void> => {
+      if (request.onProgress === undefined) return
+      for (;;) {
+        const page = await this.orchestrations.readEvents({
+          runId: run.runId,
+          afterSequence: progressCursor,
+          limit: 200,
+        })
+        if (!Number.isSafeInteger(page.nextSequence) || page.nextSequence < progressCursor) {
+          throw new DebateError(`Debate TaskGraph ${String(run.runId)} returned an invalid progress cursor`, 'DEBATE_INVALID')
+        }
+        if (page.events.length === 0) return
+        if (page.nextSequence <= progressCursor) {
+          throw new DebateError(`Debate TaskGraph ${String(run.runId)} progress cursor did not advance`, 'DEBATE_INVALID')
+        }
+        for (const event of page.events) {
+          if (event.type !== 'node.operator.progress' && event.type !== 'node.operator.observation') continue
+          const identity = plan.identities.find(candidate => candidate.nodeId === event.nodeId)
+          if (identity === undefined) continue
+          const node = run.nodes.find(candidate => candidate.id === identity.nodeId)
+          const turn = request.turns.find(candidate => candidate.slotId === identity.slotId)
+          if (node === undefined || turn === undefined) continue
+          const routingKey = `${node.id}\u0000${String(node.attempt)}`
+          let routing = routingByNode.get(routingKey)
+          if (routing === undefined) {
+            routing = this.routing(turn, node)
+            routingByNode.set(routingKey, routing)
+          }
+          const progress = publicProgress(event, String(run.runId), await routing)
+          if (progress === undefined) continue
+          const key = `${identity.round}\u0000${identity.slotId}\u0000${progress.source.orchestrationRunId}\u0000${String(progress.source.sequence)}`
+          if (reportedProgress.has(key)) continue
+          await request.onProgress({
+            version: 1,
+            runId: request.runId,
+            round: identity.round,
+            slotId: identity.slotId,
+            role: turn.role,
+            progress,
+          } satisfies DebateRoundAgentProgressV1)
+          reportedProgress.add(key)
+        }
+        progressCursor = page.nextSequence
+        if (page.events.length < 200) return
+      }
+    }
+    await drainProgress()
     const deadline = Date.now() + this.timeoutMs
     while (!terminal(run.state)) {
       if (request.signal?.aborted === true) {
@@ -417,7 +556,9 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
       }
       await new Promise(resolve => setTimeout(resolve, this.pollIntervalMs))
       run = await this.orchestrations.inspect(OrchestrationRunId(String(run.runId)))
+      await drainProgress()
     }
+    await drainProgress()
     const resultsBySlot: Record<string, DebateTurnResultV1> = {}
     const failuresBySlot: Record<string, DebateTurnFailureV1> = {}
     let hasNonPassedNodeFailure = false

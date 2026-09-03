@@ -1,6 +1,6 @@
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { DebateTurnRequestV1 } from '@deepseek-ai/dsh-debate-local'
+import type { DebateRoundAgentProgressV1, DebateTurnRequestV1 } from '@deepseek-ai/dsh-debate-local'
 import {
   OrchestrationArtifactRef,
   OrchestrationRunId,
@@ -127,11 +127,11 @@ describe('Debate TaskGraph round adapter', () => {
         usage: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 2 },
       })
     }
-    const snapshot = (): OrchestrationRunSnapshot => ({
+    const snapshot = (state: OrchestrationRunSnapshot['state'] = 'completed'): OrchestrationRunSnapshot => ({
       runId: OrchestrationRunId('taskgraph-run-1'),
       title: 'Debate',
       workspace: '/workspace',
-      state: 'completed',
+      state,
       revision: 4,
       graphRevision: 1,
       maxParallel: 2,
@@ -178,6 +178,81 @@ describe('Debate TaskGraph round adapter', () => {
         },
       },
     })
+    const progress: DebateRoundAgentProgressV1[] = []
+    const progressEvents = [
+      {
+        sequence: 2,
+        runId: OrchestrationRunId('taskgraph-run-1'),
+        nodeId: 'debate-r1-constructive-proposer',
+        attempt: 1,
+        type: 'node.operator.progress',
+        time: '2026-09-03T00:00:02.000Z',
+        data: {
+          phase: 'reasoning',
+          commandId: 'must-not-copy',
+          nativeSessionId: 'must-not-copy',
+          prompt: 'must-not-copy',
+        },
+      },
+      {
+        sequence: 3,
+        runId: OrchestrationRunId('taskgraph-run-1'),
+        nodeId: 'debate-r1-constructive-proposer',
+        attempt: 1,
+        type: 'node.operator.observation',
+        time: '2026-09-03T00:00:03.000Z',
+        data: {
+          observation: { kind: 'public-output', preview: 'Safe public progress.' },
+          prompt: 'must-not-copy',
+        },
+      },
+      {
+        sequence: 4,
+        runId: OrchestrationRunId('taskgraph-run-1'),
+        nodeId: 'debate-r1-skeptical-falsifier',
+        attempt: 1,
+        type: 'node.operator.observation',
+        time: '2026-09-03T00:00:04.000Z',
+        data: { observation: { kind: 'tool-started', toolName: 'Read' } },
+      },
+      {
+        sequence: 5,
+        runId: OrchestrationRunId('taskgraph-run-1'),
+        nodeId: 'debate-r1-skeptical-falsifier',
+        attempt: 1,
+        type: 'node.operator.observation',
+        time: '2026-09-03T00:00:05.000Z',
+        data: { observation: { kind: 'tool-completed', toolName: 'Read' } },
+      },
+      {
+        sequence: 6,
+        runId: OrchestrationRunId('taskgraph-run-1'),
+        nodeId: 'debate-r1-decision-judge',
+        attempt: 1,
+        type: 'node.operator.observation',
+        time: '2026-09-03T00:00:06.000Z',
+        data: { observation: { kind: 'approval-required', approvalKind: 'Bash', preview: 'Approve tool access?' } },
+      },
+      {
+        sequence: 7,
+        runId: OrchestrationRunId('taskgraph-run-1'),
+        nodeId: 'debate-r1-decision-judge',
+        attempt: 1,
+        type: 'node.operator.observation',
+        time: '2026-09-03T00:00:07.000Z',
+        data: { observation: { kind: 'usage-updated', usage: { inputTokens: 7, outputTokens: 3 } } },
+      },
+      {
+        sequence: 8,
+        runId: OrchestrationRunId('taskgraph-run-1'),
+        nodeId: 'debate-r1-decision-judge',
+        attempt: 1,
+        type: 'node.operator.observation',
+        time: '2026-09-03T00:00:08.000Z',
+        data: { observation: { kind: 'private-reasoning', preview: 'must-not-copy' } },
+      },
+    ]
+    let progressWasReportedBeforeTerminalInspect = false
     const orchestrations: DebateTaskGraphOrchestrations = {
       async compile(request) {
         compileRequests.push(request)
@@ -194,17 +269,36 @@ describe('Debate TaskGraph round adapter', () => {
           blockers: [],
         }
       },
-      async start(request) { startRequests.push(request); return snapshot() },
-      async inspect() { return snapshot() },
+      async start(request) {
+        startRequests.push(request)
+        const running = snapshot('running')
+        return { ...running, nodes: running.nodes.map(node => ({ ...node, attempt: 0 })) }
+      },
+      async inspect() {
+        progressWasReportedBeforeTerminalInspect = progress.length === 6
+        return snapshot()
+      },
       async control() { return snapshot() },
+      async readEvents(request) {
+        const after = request.afterSequence ?? 0
+        const events = progressEvents.filter(event => event.sequence > after).slice(0, request.limit ?? 100)
+        return { events, nextSequence: events.at(-1)?.sequence ?? after }
+      },
       async readArtifact(ref) {
         const artifact = artifacts.get(String(ref))
         if (artifact === undefined) throw new Error(`missing ${String(ref)}`)
         return artifact
       },
     }
-    const executor = new DebateTaskGraphRoundExecutor(orchestrations)
-    const result = await executor.executeRound({ version: 1, runId: 'debate-1', round: 1, turns, maxParallel: 2 })
+    const executor = new DebateTaskGraphRoundExecutor(orchestrations, { pollIntervalMs: 1 })
+    const result = await executor.executeRound({
+      version: 1,
+      runId: 'debate-1',
+      round: 1,
+      turns,
+      maxParallel: 2,
+      onProgress: async (event) => { progress.push(event) },
+    })
 
     expect(compileRequests).toHaveLength(1)
     expect(startRequests).toEqual([{ commandId: 'debate:debate-1:round:1', compilationId: 'cmp-1' }])
@@ -224,6 +318,23 @@ describe('Debate TaskGraph round adapter', () => {
       fallbackReasonCode: 'AUTHENTICATION_UNQUALIFIED',
       allocationPlanRef: 'sha256:allocation:skeptical-falsifier',
     })
+    expect(progressWasReportedBeforeTerminalInspect).toBe(true)
+    expect(progress.map(event => [event.slotId, event.progress.kind, event.progress.source.sequence])).toEqual([
+      ['constructive-proposer', 'phase', 2],
+      ['constructive-proposer', 'public-output', 3],
+      ['skeptical-falsifier', 'tool-started', 4],
+      ['skeptical-falsifier', 'tool-completed', 5],
+      ['decision-judge', 'approval-required', 6],
+      ['decision-judge', 'usage-updated', 7],
+    ])
+    expect(progress[1]?.progress).toMatchObject({ publicOutputPreview: 'Safe public progress.' })
+    expect(progress[5]?.progress).toMatchObject({ usage: { inputTokens: 7, outputTokens: 3 } })
+    expect(progress[2]?.progress.routing).toMatchObject({
+      requestedOperatorId: 'claude-code',
+      actualOperatorId: 'codex',
+      actualModel: 'gpt-5.6-luna',
+    })
+    expect(JSON.stringify(progress)).not.toContain('must-not-copy')
   })
 
   it('keeps valid participant results when another Evidence, JSON, or usage payload is malformed', async () => {
@@ -291,6 +402,9 @@ describe('Debate TaskGraph round adapter', () => {
       async start() { return run },
       async inspect() { return run },
       async control() { return run },
+      async readEvents(request) {
+        return { events: [], nextSequence: request.afterSequence ?? 0 }
+      },
       async readArtifact(ref) {
         const artifact = artifacts.get(String(ref))
         if (artifact === undefined) throw new Error(`missing artifact ${String(ref)}`)
@@ -365,6 +479,9 @@ describe('Debate TaskGraph round adapter', () => {
       async start() { return failedRun },
       async inspect() { return failedRun },
       async control() { return failedRun },
+      async readEvents(request) {
+        return { events: [], nextSequence: request.afterSequence ?? 0 }
+      },
       async readArtifact(ref) {
         if (String(ref) !== String(proposerRef)) throw new Error(`unexpected artifact ${String(ref)}`)
         return {
@@ -416,6 +533,9 @@ describe('Debate TaskGraph round adapter', () => {
           expectedRevision: request.expectedRevision,
         })
         return { ...running, state: 'cancelled', revision: 8 }
+      },
+      async readEvents(request) {
+        return { events: [], nextSequence: request.afterSequence ?? 0 }
       },
       async readArtifact() { throw new Error('cancelled run must not read Evidence') },
     }

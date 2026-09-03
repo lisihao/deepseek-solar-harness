@@ -946,6 +946,73 @@ describe('debate model Consumer', () => {
     expect(provider.starts[1]?.commandId).toBe(commandId)
   })
 
+  it('projects ordinary Debate tool start, control, and inspect calls into deduplicated Session trace facts', async () => {
+    const { ctx, agent, provider } = await setup()
+    const completed = snapshot()
+    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
+    provider.controlResult = completed
+    provider.inspectFallback = completed
+    provider.events.push(
+      { version: 1, sequence: 1, runId: completed.runId, revision: 1, generation: 1, type: 'debate.planned', createdAt: completed.createdAt, data: {} },
+      { version: 1, sequence: 2, runId: completed.runId, revision: 2, generation: 2, type: 'debate.agent.dispatched', createdAt: completed.updatedAt, round: 1, slotId: 'slot-proposer', data: {} },
+      {
+        version: 1,
+        sequence: 3,
+        runId: completed.runId,
+        revision: 3,
+        generation: 3,
+        type: 'debate.agent.progress',
+        createdAt: completed.updatedAt,
+        round: 1,
+        slotId: 'slot-proposer',
+        data: {
+          orchestrationRunId: 'must-not-copy',
+          orchestrationSequence: 7,
+          orchestrationTime: '2026-09-03T10:00:00.000Z',
+          kind: 'tool-started',
+          toolName: 'Read',
+          routing: { version: 1, requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol' },
+          prompt: 'must-not-copy',
+          nativeSessionId: 'must-not-copy',
+        },
+      },
+      { version: 1, sequence: 4, runId: completed.runId, revision: 4, generation: 4, type: 'debate.agent.settled', createdAt: completed.updatedAt, round: 1, slotId: 'slot-proposer', data: {} },
+    )
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    agent.session.append('turn/start', { turn: 1 })
+    agent.session.append('step/start', { turn: 1, step: 1 })
+
+    agent.session.append('tool/call', {
+      turn: 1, step: 1, callId: CallId('ordinary-start'), name: 'debate', arguments: '{}',
+    })
+    await call(ctx, agent, { action: 'start', prompt: 'Trace this ordinary Debate call.' }, 'ordinary-start')
+
+    agent.session.append('tool/call', {
+      turn: 1, step: 1, callId: CallId('ordinary-control'), name: 'debate', arguments: '{}',
+    })
+    await call(ctx, agent, {
+      action: 'control', run_id: completed.runId, expected_revision: completed.revision,
+      control_action: 'resume', reason: 'fixture replay check',
+    }, 'ordinary-control')
+
+    agent.session.append('tool/call', {
+      turn: 1, step: 1, callId: CallId('ordinary-inspect'), name: 'debate', arguments: '{}',
+    })
+    await call(ctx, agent, { action: 'inspect', run_id: completed.runId }, 'ordinary-inspect')
+
+    const traces = agent.session.events.filter((event): event is Extract<typeof event, { type: 'debate/trace' }> => event.type === 'debate/trace')
+    expect(traces.map(event => event.data.sourceSequence)).toEqual([1, 2, 3, 4])
+    expect(traces[2]?.data).toMatchObject({
+      state: 'progress',
+      sessionTurn: 1,
+      sessionStep: 1,
+      role: { title: '建设性提案者', requested: { operatorId: 'codex', model: 'gpt-5.6-sol' } },
+      progress: { kind: 'tool-started', toolName: 'Read', sourceTime: '2026-09-03T10:00:00.000Z' },
+    })
+    expect(new Set(traces.map(event => `${event.data.runId}:${String(event.data.sourceSequence)}`)).size).toBe(traces.length)
+    expect(JSON.stringify(traces)).not.toContain('must-not-copy')
+  })
+
   it('lists, inspects, and revision-fences controls with bounded projections', async () => {
     const { ctx, agent, provider } = await setup()
     const listed = resultValue(await call(ctx, agent, { action: 'list' }))

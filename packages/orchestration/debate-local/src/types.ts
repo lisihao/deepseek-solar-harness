@@ -1,6 +1,7 @@
 /** Types for the owner-local Debate Provider and its injected turn executor. */
 
 import type {
+  DebateAgentProgressV1,
   DebateClaimLedgerV1,
   DebateClaimV1,
   DebateDissentV1,
@@ -108,6 +109,22 @@ export interface DebateTurnFailureV1 {
   readonly routing?: DebateTurnRoutingV1
 }
 
+/** One safe progress fact emitted while a TaskGraph-backed roster slot is running. */
+export interface DebateRoundAgentProgressV1 {
+  /** Progress schema version. */
+  readonly version: 1
+  /** Stable Debate run identity. */
+  readonly runId: string
+  /** One-based Debate round identity. */
+  readonly round: number
+  /** Fixed roster slot identity. */
+  readonly slotId: string
+  /** Fixed role retained even when its physical route falls back. */
+  readonly role: DebateRoleId
+  /** Whitelisted physical-operator projection and its original event position. */
+  readonly progress: DebateAgentProgressV1
+}
+
 /** One immutable round admitted as one TaskGraph. */
 export interface DebateRoundExecutionRequestV1 {
   /** Request schema version. */
@@ -120,6 +137,12 @@ export interface DebateRoundExecutionRequestV1 {
   readonly turns: readonly DebateTurnRequestV1[]
   /** Certified maximum parallel participant count for this round. */
   readonly maxParallel: number
+  /**
+   * Optional durable-progress sink. The executor awaits it in source event
+   * order; an unavailable sink must fail the round rather than lose a claimed
+   * public trace.
+   */
+  readonly onProgress?: (progress: DebateRoundAgentProgressV1) => Promise<void>
   /** Cancellation signal for the complete TaskGraph round. */
   readonly signal?: AbortSignal
 }

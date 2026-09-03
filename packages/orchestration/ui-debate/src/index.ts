@@ -114,6 +114,7 @@ const PUBLIC_EVENT_DATA_KEYS: Readonly<Record<DebateEventType, readonly string[]
   'debate.admitted': ['action'],
   'debate.round.started': ['round', 'phase', 'slotIds'],
   'debate.agent.dispatched': ['round', 'role', 'model', 'operatorId', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
+  'debate.agent.progress': ['role', 'kind', 'phase', 'publicOutputPreview', 'toolName', 'approvalKind', 'approvalPreview', 'usage', 'routing'],
   'debate.agent.settled': ['round', 'role', 'claimCount', 'evidenceCount', 'confidence', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
   'debate.agent.blocked': ['round', 'role', 'errorCode', 'error', 'blockers', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],
   'debate.agent.failed': ['round', 'role', 'errorCode', 'error', 'blockers', 'operatorId', 'model', 'requestedOperatorId', 'requestedModel', 'actualOperatorId', 'actualModel', 'fallbackReasonCode', 'allocationPlanRef', 'attempt'],

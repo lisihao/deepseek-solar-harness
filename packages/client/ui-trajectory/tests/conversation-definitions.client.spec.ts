@@ -197,6 +197,73 @@ describe('Trajectory conversation Definitions', () => {
     expect(JSON.stringify(debate)).not.toContain('重连重复事件不得覆盖原观点。')
   })
 
+  it('projects each safe native Debate progress event and merges a reconnect detail without exposing private data', () => {
+    const trace = (sourceSequence: number, progress: Record<string, unknown> | undefined) => at(
+      50 + sourceSequence,
+      'debate/trace',
+      {
+        version: 1,
+        runId: 'debate-progress-run',
+        sourceSequence,
+        state: sourceSequence === 1 ? 'planned' : 'progress',
+        topic: { version: 1, title: '进度展示议题', source: 'user' },
+        sessionTurn: 4,
+        sessionStep: 2,
+        ...(sourceSequence === 1 ? {} : {
+          round: 1,
+          role: {
+            title: '建设性提案者', kind: 'participant',
+            requested: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+            actual: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+          },
+        }),
+        ...(progress === undefined ? {} : { progress }),
+      },
+      { ignorable: true },
+    )
+    const current = snapshot(assembler([
+      trace(1, undefined),
+      trace(2, { kind: 'phase', sourceTime: '2026-09-03T09:00:00.000Z', phase: 'reasoning' }),
+      trace(3, { kind: 'public-output', sourceTime: '2026-09-03T09:00:01.000Z', publicOutputPreview: '公开进展：已完成基线。' }),
+      trace(4, { kind: 'tool-started', sourceTime: '2026-09-03T09:00:02.000Z', toolName: 'Bash' }),
+      trace(5, { kind: 'tool-completed', sourceTime: '2026-09-03T09:00:03.000Z', toolName: 'Bash' }),
+      trace(6, { kind: 'approval-required', sourceTime: '2026-09-03T09:00:04.000Z', approvalKind: 'workspace-write', approvalPreview: '需要用户批准工作区写入。' }),
+      trace(7, { kind: 'usage-updated', sourceTime: '2026-09-03T09:00:05.000Z', usage: { inputTokens: 12, outputTokens: 5 } }),
+      // A reconnect may first replay an event without progress and then make
+      // the safe native detail available at the same durable source sequence.
+      trace(8, undefined),
+      at(60, 'debate/trace', {
+        version: 1,
+        runId: 'debate-progress-run',
+        sourceSequence: 8,
+        state: 'progress',
+        round: 1,
+        role: {
+          title: '建设性提案者', kind: 'participant',
+          requested: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+        },
+        progress: { kind: 'public-output', sourceTime: '2026-09-03T09:00:06.000Z', publicOutputPreview: '重连后公开进展。' },
+      }, { ignorable: true }),
+      // Unknown progress kinds are ignored by the public projection.
+      trace(9, { kind: 'private-reasoning', sourceTime: '2026-09-03T09:00:07.000Z', publicOutputPreview: '不应出现' }),
+    ]))
+
+    const debate = current.debateExecutions[0]
+    expect(debate?.entries.map(entry => entry.sourceSequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+    expect(debate?.entries[1]?.progress).toEqual({
+      kind: 'phase', sourceTime: '2026-09-03T09:00:00.000Z', phase: 'reasoning',
+    })
+    expect(debate?.entries[2]?.progress?.publicOutputPreview).toBe('公开进展：已完成基线。')
+    expect(debate?.entries[3]?.progress?.toolName).toBe('Bash')
+    expect(debate?.entries[5]?.progress).toMatchObject({
+      kind: 'approval-required', approvalKind: 'workspace-write',
+    })
+    expect(debate?.entries[6]?.progress?.usage).toEqual({ inputTokens: 12, outputTokens: 5 })
+    expect(debate?.entries[7]?.progress?.publicOutputPreview).toBe('重连后公开进展。')
+    const exposed = JSON.stringify(debate)
+    expect(exposed).not.toMatch(/private-reasoning|不应出现|prompt|arguments|stderr|sessionId/iu)
+  })
+
   it('ignores Physical Operator authority payloads when no Host trace is present', () => {
     const current = snapshot(assembler([
       at(1, 'physical-operator/dispatch', {

@@ -214,8 +214,16 @@ describe('Debate Host projection', () => {
               version: 1, sequence: 1, runId: selected.runId, revision: 7, generation: 2, round: 1,
               slotId: 'constructive-proposer', type: 'debate.agent.settled', createdAt: selected.updatedAt,
               data: { outputRef: 'artifact:turn-1', role: 'constructive-proposer', privateInstructions: 'do not expose' },
+            }, {
+              version: 1, sequence: 2, runId: selected.runId, revision: 7, generation: 2, round: 1,
+              slotId: 'constructive-proposer', type: 'debate.agent.progress', createdAt: selected.updatedAt,
+              data: {
+                role: 'constructive-proposer', kind: 'tool-started', toolName: 'Bash',
+                routing: { requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol' },
+                orchestrationRunId: 'private-run-id', orchestrationSequence: 9,
+              },
             }],
-            nextSequence: 2,
+            nextSequence: 3,
           }
         },
       },
@@ -240,12 +248,16 @@ describe('Debate Host projection', () => {
         synthesis: { artifactRef: 'artifact:synthesis' },
         cost: { usageStatus: 'partial', costStatus: 'unknown', unknownUsageTurns: 1 },
       },
-      events: [{ type: 'debate.agent.settled' }],
-      nextSequence: 2,
+      events: [
+        { type: 'debate.agent.settled' },
+        { type: 'debate.agent.progress', data: { role: 'constructive-proposer', kind: 'tool-started', toolName: 'Bash' } },
+      ],
+      nextSequence: 3,
     })
     expect((projected.selectedRun as { roles: unknown[] }).roles[0]).toMatchObject({
       role: 'constructive-proposer', mandate: 'public responsibility Proposer', latestTurn: { outputRef: 'artifact:r2-proposer' },
     })
+    expect(JSON.stringify(projected)).not.toContain('private-run-id')
     const rounds = (projected.selectedRun as { rounds: Array<{ turnStates: unknown[] }> }).rounds
     expect(rounds).toHaveLength(2)
     expect(rounds[0]?.turnStates).toHaveLength(3)

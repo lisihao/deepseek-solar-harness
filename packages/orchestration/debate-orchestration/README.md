@@ -10,7 +10,7 @@ The plugin injects only `orchestrations`. It never imports, injects, or calls `p
 
 The first adapter accepts native-subscription roster slots only because the current TaskGraph service can enforce exact native Resident model profiles. Metered/local slots fail explicitly until their Scheduler offer path exposes the same exact-model guarantee.
 
-One round produces one TaskGraph. The adapter returns a slot-keyed result map after reading the immutable execution Evidence retained by `ctx.orchestrations`. Missing usage remains absent; the Debate Provider projects it as unknown rather than zero.
+One round produces one TaskGraph. While it is running, the adapter cursor-reads `ctx.orchestrations.readEvents` and forwards only ordered, whitelisted `node.operator.progress` / `node.operator.observation` facts to the local Provider: phase, bounded public output, tool names, approval requirements, and usage. The callback is awaited in source sequence order and never forwards prompts, private reasoning, credentials, or native identifiers. The adapter returns a slot-keyed result map after reading immutable execution Evidence. Missing usage remains absent; the Debate Provider projects it as unknown rather than zero.
 
 The Debate command receipt is durable before this adapter is called, and the TaskGraph start command is deterministically `debate:<run>:round:<n>`. A stop signal uses the existing Orchestration `cancel` control and waits for a confirmed cancelled projection. Revision conflict or an otherwise unproven cancellation returns `DEBATE_INDETERMINATE`; the Provider does not replay the round.
 

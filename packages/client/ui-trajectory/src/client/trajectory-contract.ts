@@ -78,6 +78,40 @@ export interface TrajectoryDebateClaim {
   readonly severity: string
 }
 
+/** Safe public progress kinds copied from a native Debate operator. */
+export type TrajectoryDebateProgressKind =
+  | 'phase'
+  | 'public-output'
+  | 'tool-started'
+  | 'tool-completed'
+  | 'approval-required'
+  | 'usage-updated'
+
+/**
+ * One Host-safe native progress fact attached to a Debate trace event.
+ *
+ * `sourceTime` is retained as an origin coordinate for ordering and display;
+ * it is not a product/session identifier. The Host owns redaction, and the
+ * client has no fields for prompts, arguments/results, stderr, credentials,
+ * hidden reasoning, or native product identifiers.
+ */
+export interface TrajectoryDebateProgress {
+  readonly kind: TrajectoryDebateProgressKind
+  readonly sourceTime: string
+  readonly phase?: string
+  readonly publicOutputPreview?: string
+  readonly toolName?: string
+  readonly approvalKind?: string
+  readonly approvalPreview?: string
+  readonly usage?: {
+    readonly inputTokens?: number
+    readonly outputTokens?: number
+    readonly cacheReadInputTokens?: number
+    readonly cacheWriteInputTokens?: number
+    readonly costUsd?: number
+  }
+}
+
 /** One safe, replayable public Debate trace entry emitted by the Host. */
 export interface TrajectoryDebateTraceEntry {
   /** Session-log sequence that carries this trace projection. */
@@ -112,6 +146,8 @@ export interface TrajectoryDebateTraceEntry {
     readonly unresolvedCount: number
     readonly dissentCount: number
   }
+  /** Optional native execution fact. Older traces simply omit this field. */
+  readonly progress?: TrajectoryDebateProgress
 }
 
 /** Public multi-round Debate execution reconstructed from `debate/trace` records. */

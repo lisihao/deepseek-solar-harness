@@ -18,7 +18,7 @@ import type {
   TrajectorySourceBlock,
 } from './trajectory-record.ts'
 import type {
-  TrajectoryDebateExecution, TrajectoryDebateTraceEntry,
+  TrajectoryDebateExecution, TrajectoryDebateProgress, TrajectoryDebateTraceEntry,
   TrajectoryPhysicalOperatorExecution,
 } from './trajectory-contract.ts'
 import { formatElapsedSeconds } from './trajectory-record.ts'
@@ -542,12 +542,23 @@ export function deriveTrajectoryLayout(input: TrajectoryLayoutInput): readonly T
 
   for (const current of [...debateExecutions]
     .sort((left, right) => left.dispatchSeq - right.dispatchSeq || left.runId.localeCompare(right.runId))) {
+    const laid: LaidCell[] = []
+    for (const entry of current.entries) {
+      if (entry.progress === undefined) {
+        laid.push({
+          absTime: finiteTime(entry.time),
+          cell: debateCell(current, entry, ++index),
+        })
+      } else {
+        laid.push({
+          absTime: debateProgressTime(entry.progress, entry.time),
+          cell: debateProgressCell(current, entry, entry.progress, ++index),
+        })
+      }
+    }
     const debateGroup: LaidGroup = {
       title: `Debate · ${current.topic ?? '未记录议题'}`,
-      laid: current.entries.map(entry => ({
-        absTime: finiteTime(entry.time),
-        cell: debateCell(current, entry, ++index),
-      })),
+      laid,
     }
     if (debateGroup.laid.length === 0) continue
     bucket(current.turn).groups.push(debateGroup)
@@ -782,6 +793,89 @@ function debateCell(
     ...(details === undefined ? {} : { outputDetail: details }),
     ...detailedUsageProps(usage),
   }
+}
+
+function debateProgressTime(progress: TrajectoryDebateProgress, fallback: number): number | null {
+  const timestamp = Date.parse(progress.sourceTime)
+  return Number.isFinite(timestamp) ? timestamp : finiteTime(fallback)
+}
+
+function debateProgressCell(
+  execution: TrajectoryDebateExecution,
+  entry: TrajectoryDebateTraceEntry,
+  progress: TrajectoryDebateProgress,
+  index: number,
+): TrajectoryCellProps {
+  const role = entry.role
+  const roleTitle = role?.title
+  const round = entry.round === undefined ? undefined : `第 ${String(entry.round)} 轮`
+  const prefix = [round, roleTitle].filter((value): value is string => value !== undefined)
+  const label = debateProgressLabel(progress)
+  const output = progress.publicOutputPreview ?? progress.approvalPreview
+  const details = debateProgressDetails(progress, role === undefined ? undefined : debateRouteLabel(role))
+  return {
+    index,
+    recordId: `debate\u0000${execution.runId}\u0000${String(entry.sourceSequence)}\u0000progress`,
+    kind: 'debate',
+    sourceSeq: entry.seq,
+    text: [...prefix, label].join(' · '),
+    ...(output === undefined ? {} : { previewMarkdown: output }),
+    ...(details === undefined ? {} : { outputDetail: details }),
+    ...(progress.kind === 'approval-required' ? { isError: true } : {}),
+    timeSeconds: 0,
+    startedAt: debateProgressTime(progress, entry.time),
+    ...detailedUsageProps(progress.usage),
+  }
+}
+
+function debateProgressLabel(progress: TrajectoryDebateProgress): string {
+  if (progress.kind === 'phase') {
+    return `阶段 · ${physicalOperatorPhaseLabel(progress.phase)}`
+  }
+  if (progress.kind === 'public-output') return '公开输出更新'
+  if (progress.kind === 'tool-started') {
+    return `工具开始${progress.toolName === undefined ? '' : ` · ${progress.toolName}`}`
+  }
+  if (progress.kind === 'tool-completed') {
+    return `工具完成${progress.toolName === undefined ? '' : ` · ${progress.toolName}`}`
+  }
+  if (progress.kind === 'approval-required') {
+    return `需要批准${progress.approvalKind === undefined ? '' : ` · ${progress.approvalKind}`}`
+  }
+  const usage = progress.usage
+  const fragments = [
+    usage?.inputTokens === undefined ? undefined : `输入 ${String(usage.inputTokens)}`,
+    usage?.outputTokens === undefined ? undefined : `输出 ${String(usage.outputTokens)}`,
+  ].filter((value): value is string => value !== undefined)
+  return fragments.length === 0 ? '用量更新' : `用量更新 · ${fragments.join(' · ')}`
+}
+
+function debateProgressDetails(
+  progress: TrajectoryDebateProgress,
+  route: string | undefined,
+): string | undefined {
+  const usage = progress.usage
+  const usageLines = [
+    usage?.inputTokens === undefined ? undefined : `- 输入：${String(usage.inputTokens)}`,
+    usage?.outputTokens === undefined ? undefined : `- 输出：${String(usage.outputTokens)}`,
+    usage?.cacheReadInputTokens === undefined ? undefined : `- 缓存命中：${String(usage.cacheReadInputTokens)}`,
+    usage?.cacheWriteInputTokens === undefined ? undefined : `- 缓存写入：${String(usage.cacheWriteInputTokens)}`,
+    usage?.costUsd === undefined ? undefined : `- 成本：$${usage.costUsd.toFixed(6)}`,
+  ].filter((value): value is string => value !== undefined)
+  const sections = [
+    route === undefined ? undefined : `**模型路由**：${route}`,
+    progress.phase === undefined ? undefined : `**执行阶段**：${physicalOperatorPhaseLabel(progress.phase)}`,
+    progress.toolName === undefined ? undefined : `### 工具\n\n- ${progress.toolName}`,
+    progress.approvalKind === undefined ? undefined : [
+      '### 权限请求',
+      '',
+      `- 类型：${progress.approvalKind}`,
+      ...(progress.approvalPreview === undefined ? [] : ['', progress.approvalPreview]),
+    ].join('\n'),
+    progress.publicOutputPreview === undefined ? undefined : `### 公开输出\n\n${progress.publicOutputPreview}`,
+    usageLines.length === 0 ? undefined : `### 用量\n\n${usageLines.join('\n')}`,
+  ].filter((value): value is string => value !== undefined)
+  return sections.length === 0 ? undefined : sections.join('\n\n')
 }
 
 function debateRouteLabel(role: NonNullable<TrajectoryDebateTraceEntry['role']>): string {
