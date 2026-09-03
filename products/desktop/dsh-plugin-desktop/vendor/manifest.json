@@ -172,9 +172,9 @@
       "commit": "c826e6c3a7abad19c0f3cd1ca57207d54b1ad8de"
     },
     {
-      "name": "Structured Debate presentation, public durable trace, and shared output style",
+      "name": "Structured Debate presentation, native operator progress trace, and shared output style",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "4efe689361"
+      "commit": "d95c91b54d0317355037c8f356b9d66bf4999c03"
     }
   ],
   "sourcePackages": {
@@ -292,14 +292,14 @@
     "dsh-packages/deepseek-ai-dsh-client-ui-primitives-0.1.0-rc.5.tgz": "41f6dc75a5d538368e532388300c9a2e61f9e02a8b0a1de65b99d63b10e93102",
     "dsh-packages/deepseek-ai-dsh-client-ui-remote-modules-0.1.0-rc.5.tgz": "de18e4c1d12cbad02d5ef62aeecf99f7dea59abe421e34d65c97e262496400c2",
     "dsh-packages/deepseek-ai-dsh-client-ui-sidebar-0.1.0-rc.5.tgz": "462e8d39eed6f169fae4beceac28417ae4f4002116355d38f552235312375838",
-    "dsh-packages/deepseek-ai-dsh-client-ui-trajectory-0.1.0-rc.5.tgz": "41d91159794b669b76f8b4805188fb68bcc587c6543631a8aa94ceac380ee3a3",
+    "dsh-packages/deepseek-ai-dsh-client-ui-trajectory-0.1.0-rc.5.tgz": "a53bda3ac0b44fbec968dce9eedf56ce5e44feeb14ee527944364d3a26a9bcc8",
     "dsh-packages/deepseek-ai-dsh-client-web-0.1.0-rc.5.tgz": "693461b1e0a2c0872da8ffe163bef9f70231189b6626a957727f964d54cd470c",
     "dsh-packages/deepseek-ai-dsh-context-compiler-0.1.0-rc.5.tgz": "ccb35b4520bb2cf05b5faa5446f0dc7bac974786286adcda273a8edb454a951b",
     "dsh-packages/deepseek-ai-dsh-continual-harness-0.1.0-rc.5.tgz": "981c94cef095b24e5c7011cd20bab0bc7f40620285a509e81d882b78795b6156",
     "dsh-packages/deepseek-ai-dsh-continual-harness-local-0.1.0-rc.5.tgz": "89449594d35b8afa6fc5f6e32fd5d86e1c0dec3e44c230c02a66cf0c30a9edf6",
-    "dsh-packages/deepseek-ai-dsh-debate-0.1.0-rc.5.tgz": "b0288d38617c8cbf8bbf77d09f3145ff4c6bad62a46324d1c2e13ee50d6084bc",
-    "dsh-packages/deepseek-ai-dsh-debate-local-0.1.0-rc.5.tgz": "03695b0ae51bea27ec638df0b2e744e54cf93d41bca399473623ffba602b1615",
-    "dsh-packages/deepseek-ai-dsh-debate-orchestration-0.1.0-rc.5.tgz": "29f7fab95d005ef7ffd2e0c3f509e665c14a1ae09822f901220d74f04f0cd55b",
+    "dsh-packages/deepseek-ai-dsh-debate-0.1.0-rc.5.tgz": "f0614da6f5920bc9c721560ebaba39572d3959df4f31a333f13c1966307d712b",
+    "dsh-packages/deepseek-ai-dsh-debate-local-0.1.0-rc.5.tgz": "41f5c01c49f31aaeeaba8765520e9b4fa930978d26323aae58e8872213f36538",
+    "dsh-packages/deepseek-ai-dsh-debate-orchestration-0.1.0-rc.5.tgz": "d9b1c444476b12a051a4009d3a1688464af14f13f74ef8d8c36861ee35530ef8",
     "dsh-packages/deepseek-ai-dsh-ego-lite-browser-0.1.0-rc.5.tgz": "8e20964a34f187da71d6366a59431f3c44eaf2cded09b5e907eb15695c5ff5fd",
     "dsh-packages/deepseek-ai-dsh-home-paths-0.1.0-rc.5.tgz": "19c7efd115c5a43adf6ef532d5f38dc14bdcde75c9d840c900030fd653464aec",
     "dsh-packages/deepseek-ai-dsh-host-apiproxy-0.1.0-rc.5.tgz": "85ad09a35bc94186ba64135d2a4588ec2171f161c815f67bb9d32d36dc86fd5c",
@@ -331,7 +331,7 @@
     "dsh-packages/deepseek-ai-dsh-session-projection-cache-0.1.0-rc.5.tgz": "24a5b3cf369eb0d9751a525793b1dc00066787ba897acfd9f140e90678c7e7fb",
     "dsh-packages/deepseek-ai-dsh-subagent-codex-0.1.0-rc.5.tgz": "eab5cb76cb7288781eab14638ffc0e56d1549e55d6d260d16f159fd78fe1e8ba",
     "dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz": "18e0f88aefe69709e3bf46971bcf99f1e5996e09d9639461b791182c8ed355af",
-    "dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz": "b271bef041dd2fea76f7dca05f45f6688c74b4ca4fc2e21577fd9d2e39d5cd58",
+    "dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz": "506821b035da03e751fc847b89c0837f8063d9547d257a7bb2165703bf0147b6",
     "dsh-packages/deepseek-ai-dsh-tool-browser-0.1.0-rc.5.tgz": "7336f098115f7518bff5fb11fb8821f5a24ada9a7242cf9f6aad4b17c6a615b5",
     "dsh-packages/deepseek-ai-dsh-tool-fs-0.1.0-rc.5.tgz": "e79de6bf417f08e60e93faa77ac83e915f06568d1b64eb42dc43f25040a64af6",
     "dsh-packages/deepseek-ai-dsh-tool-markdown-0.0.1.tgz": "79c85b9e8cf8349577d2ade3f33326f885fe7e1fc53dedcb914d694d5342ab07",
@@ -341,7 +341,7 @@
     "dsh-packages/deepseek-ai-dsh-tool-stat-0.0.1.tgz": "1ba60c1cf0ac0223f6066d3462f08a2cd6ab498d2319ce505e7ab207615eed64",
     "dsh-packages/deepseek-ai-dsh-tool-time-0.0.1.tgz": "074f755f4aeee4dc135c68889414ae996bc0be6ed2a4d04d62049e39b37a4b7f",
     "dsh-packages/deepseek-ai-dsh-tools-0.1.0-rc.5.tgz": "000debc0221660c5498518e5c5de1e277e409b645b905ce063bcab033a93fd3a",
-    "dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz": "04fd41a96562a62a4501f8f9dee67d1a2be34a425d30626273207c4c68180e2c",
+    "dsh-packages/deepseek-ai-dsh-ui-debate-0.1.0-rc.5.tgz": "405371761f73cbe5bd320a91a52fc117f08f4a23c543bee34e93a8860ffb9a3f",
     "dsh-packages/deepseek-ai-dsh-ui-orchestration-0.1.0-rc.5.tgz": "da9a8dee016a7d09a190d5530f55f1c9fd271c7bc78126f3dfbbd555d28865e0",
     "dsh-packages/deepseek-ai-dsh-ui-physical-operator-0.1.0-rc.5.tgz": "1f998b1d10b3b378c31f6dfcc4decbc0dc773746b85e1f1a52992c4d05b4156b",
     "dsh-packages/deepseek-ai-dsh-web-app-0.1.0-rc.5.tgz": "a99df0376e50f978b9549444b9ad1ac52ca5ad9bc4ef9037ca79ac32445c2c7e",
