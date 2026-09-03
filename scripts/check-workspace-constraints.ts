@@ -450,11 +450,12 @@ function checkBrowserCapabilityBoundary(manifests: readonly WorkspaceManifest[])
 
   for (const rel of runtimeFiles) {
     const source = readFileSync(join(root, rel), 'utf8')
+    const normalizedRel = rel.replaceAll('\\', '/')
     if (directTransports.test(source)) {
-      errors.push(`${rel}: product runtime browser automation must inject ctx.browser instead of importing a browser transport directly`)
+      errors.push(`${normalizedRel}: product runtime browser automation must inject ctx.browser instead of importing a browser transport directly`)
     }
-    if (!rel.startsWith(`${providerDir}/src/`) && source.includes('ego-browser')) {
-      errors.push(`${rel}: only ${providerDir} may reference the Ego Lite executable; Consumers inject ctx.browser`)
+    if (!normalizedRel.startsWith(`${providerDir}/src/`) && source.includes('ego-browser')) {
+      errors.push(`${normalizedRel}: only ${providerDir} may reference the Ego Lite executable; Consumers inject ctx.browser`)
     }
   }
   return errors

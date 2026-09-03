@@ -593,7 +593,7 @@ describe('Ego Lite discovery and explicit partial mappings', () => {
       source: 'application',
     })
     expect(subprocess.resolutions).toEqual([
-      '/Users/fixture/.local/bin/ego-browser',
+      join('/Users/fixture', '.local', 'bin', 'ego-browser'),
       EgoLite.DEFAULT_EGO_LITE_APP_EXECUTABLE,
     ])
   })
