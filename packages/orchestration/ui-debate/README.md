@@ -14,10 +14,11 @@ The browser panel uses the shared theme tokens but owns its styles and transport
 
 The selected Run is rendered as a forum thread:
 
-- The topic post is shown first, followed by a full-width collapsible roster with localized role categories and the configured public persona title and mandate.
-- Each round is a separate section and each terminal participant turn is an independent, globally numbered floor; planned and dispatched turns remain roster status rather than empty posts. Later-round turns identify the claim-ledger phase; submitted claims display their real statements, but the UI does not claim a reply relationship that the v1 protocol does not record.
-- The visible card contains only the durable public output preview, status, and evidence count. Provider/model routing, fallback, attempt, artifact, usage, timestamps, and identifiers are available under collapsed technical details.
-- The decision judge appears once as the pinned moderator synthesis rather than again as a discussion floor. Unresolved claims, preserved dissent, and convergence metrics remain separate sections so disagreement is not hidden by the final answer.
+- Opening the panel starts from the newest Run; an inspected response is rendered only when it matches the selected Run, so an earlier response cannot show a stale topic after a new selection.
+- The topic post is followed by an always-visible semantic roster table with localized role, public responsibility, friendly operator/model names, and current state. Internal role and slot identifiers stay out of the normal browser view.
+- Each round is a separate section and every terminal role turn, including the decision judge, is an independent, globally numbered floor; planned and dispatched turns remain roster status rather than empty posts. Later-round turns identify the claim-ledger phase; submitted claims are individual list items, but the UI does not claim a reply relationship that the v1 protocol does not record.
+- Durable public output previews and moderator synthesis render through the shared safe Markdown renderer. Headings, lists, quotes, tables, and priority markers remain structured; raw HTML is never executed or displayed as a layout primitive.
+- Friendly route, fallback, artifact, usage, and timing data remain available under collapsed execution details. Unresolved claims, preserved dissent, and separate Run, Round, and convergence states keep a budget limit from being presented as a contradictory active or stopped state.
 - Replayed copies of the same durable error event are collapsed by sequence, attempt, node, and message. Distinct attempts or messages remain separate even when the error code matches. Missing output stays explicitly missing; the panel does not manufacture text for a role that never produced it.
 
 ## Model Experience

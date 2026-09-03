@@ -699,6 +699,19 @@
   );
 }
 
+.debate {
+  color: color-mix(
+    in srgb,
+    var(--dsw-alias-state-business-primary) 68%,
+    var(--dsw-alias-label-primary)
+  );
+  background: color-mix(
+    in srgb,
+    var(--dsw-alias-state-business-primary) 14%,
+    var(--dsw-alias-bg-layer-1)
+  );
+}
+
 .toolAmber {
   color: var(--dsw-alias-state-warn-label);
   background: var(--dsw-alias-state-warn-tertiary);

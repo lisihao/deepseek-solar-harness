@@ -2,7 +2,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopDebateRound, DesktopDebateRun } from '../src/contracts.ts'
-import { controlDebate, EvidenceColumn, loadDebateDashboard, RunDetail } from '../src/client/DebatePanel.tsx'
+import { controlDebate, EvidenceColumn, loadDebateDashboard, RunDetail, selectedDashboardRun } from '../src/client/DebatePanel.tsx'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -37,6 +37,7 @@ function run(): DesktopDebateRun {
     updatedAt: '2026-08-29T01:01:00.000Z',
     createdAt: '2026-08-29T01:00:00.000Z',
     objective: 'Choose A or B.',
+    topic: { version: 1, title: 'User-selected topic: choose A or B.', source: 'user' },
     sourceSessionId: 'session-1',
     roles: [{
       role: 'constructive-proposer', kind: 'participant', title: 'Proposer', mandate: '提出可执行方案与成功标准。', operatorId: 'codex', model: 'gpt-5.6-sol', tier: 'high', source: 'native-subscription', required: true,
@@ -104,6 +105,25 @@ describe('Debate Desktop panel transport', () => {
     })
   })
 
+  it('does not render a stale inspected Run while the user has selected the newest Run', () => {
+    const stale = run()
+    const newest = {
+      ...stale,
+      runId: 'debate-newest',
+      objective: 'Stale objective.',
+      topic: { version: 1 as const, title: 'Newest user topic.', source: 'user' as const },
+    }
+    const dashboard = {
+      version: 1 as const,
+      generatedAt: stale.updatedAt,
+      runs: [{ ...newest }],
+      selectedRunId: stale.runId,
+      selectedRun: stale,
+    }
+    expect(selectedDashboardRun(dashboard, newest.runId)).toBeUndefined()
+    expect(selectedDashboardRun({ ...dashboard, selectedRunId: newest.runId, selectedRun: newest }, newest.runId)?.topic?.title).toBe('Newest user topic.')
+  })
+
   it('renders roles, rounds, claims, dissent, unresolved, accounting, and synthesis ref', () => {
     const fixture = run()
     const events = [
@@ -117,19 +137,21 @@ describe('Debate Desktop panel transport', () => {
       createElement(EvidenceColumn, { run: fixture }),
     ))
     for (const expected of [
-      'Choose A or B.', '参与 Agent 与角色职责', '建设性提案者', '怀疑式证伪者', '决策裁判（主持人）',
-      '角色：Proposer', '职责：提出可执行方案与成功标准。', 'gpt-5.6-sol', '第 1 轮', '第 2 轮',
+      'User-selected topic: choose A or B.', '参与 Agent 与角色职责', '参与者名册', '建设性提案者', '怀疑式证伪者', '决策裁判（主持人）',
+      'Proposer', '提出可执行方案与成功标准。', 'GPT-5.6 Sol', '第 1 轮', '第 2 轮',
       'Round one proposal: choose A.', 'Round one challenge: verify rollback.',
       'Round two proposal: retain A with a gate.', 'Round two challenge: keep the cost dissent.',
-      'artifact:r1-proposer', 'Claim refs：claim-1', 'Evidence refs：artifact:evidence', 'Claim Ledger', 'Option A is safer.',
+      'Round one ruling: continue review.', 'Round two ruling: choose A and record dissent.',
+      'artifact:r1-proposer', 'Evidence refs：artifact:evidence', 'Claim Ledger', 'Option A is safer.',
       '讨论动态', 'Debate 已规划', '轮次已开始', 'Agent 输出已完成', '主持人总结 / 决策裁判', 'Usage / Cost', '用量部分归集', '费用归集未知', 'artifact:synthesis',
     ]) expect(markup).toContain(expected)
-    expect(markup).toContain('角色：Proposer')
-    expect(markup).toContain('职责：提出可执行方案与成功标准。')
+    expect(markup).not.toContain('Choose A or B.')
+    expect(markup).toContain('<table>')
+    expect(markup).toContain('<th scope="col">角色</th>')
+    expect(markup).toContain('本楼提交主张')
     expect(markup).not.toContain('提出最可执行的方案，明确关键主张、假设和验收标准。')
-    expect(markup).not.toContain('Round one ruling: continue review.')
-    expect(markup).not.toContain('Round two ruling: choose A and record dissent.')
-    expect(markup).not.toContain('artifact:r2-judge')
+    expect(markup).not.toContain('角色技术详情')
+    expect(markup).not.toContain('constructive-proposer')
     expect(markup).toContain('费用 N/A')
     expect(markup).not.toContain('NaN')
     expect(markup).toContain('批准')
@@ -176,15 +198,43 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).toContain('dshDesktopDebateRoster')
     expect(markup).toContain('参与者名册')
     expect(markup).toContain('1 楼')
-    expect(markup).toContain('4 楼')
-    expect(markup).toContain('本楼提交主张：“Option A is safer.”')
+    expect(markup).toContain('6 楼')
+    expect(markup).toContain('本楼提交主张')
+    expect(markup).toContain('<li>Option A is safer.</li>')
     expect(markup).toContain('Claim Ledger 后续发言')
-    expect(markup).toContain('公开发言：')
+    expect(markup).toContain('Round one ruling: continue review.')
     expect(markup).toContain('技术详情')
-    expect(markup.match(/错误码：DUPLICATE_ERROR/g)?.length).toBe(2)
-    expect(markup).toContain('Attempt：1')
-    expect(markup).toContain('Attempt：2')
+    expect(markup).toContain('Agent 输出失败')
+    expect(markup).not.toContain('DUPLICATE_ERROR')
+    expect(markup).not.toContain('node-first')
+    expect(markup).not.toContain('node-second')
     expect(markup).not.toContain('open=""')
+  })
+
+  it('renders public Markdown into separate priority sections and removes legacy raw-HTML wrappers', () => {
+    const fixture = run()
+    const firstRound = fixture.rounds[0]
+    if (firstRound === undefined) throw new Error('missing Debate fixture round')
+    const firstTurn = firstRound.turnStates[0]
+    if (firstTurn === undefined) throw new Error('missing Debate fixture turn')
+    firstRound.turnStates[0] = {
+      ...firstTurn,
+      outputPreview: '<details><summary>角色技术详情</summary>internal</details>立场：先建立可靠性基线。P0：持久化状态机。P1：隔离并行工作区。P2：扩展可替换能力。\n\n- 保留证据\n- 验证恢复',
+    }
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup).toContain('<h3>P0</h3>')
+    expect(markup).toContain('<h3>P1</h3>')
+    expect(markup).toContain('<h3>P2</h3>')
+    expect(markup).toContain('<li>保留证据</li>')
+    expect(markup).toContain('<li>验证恢复</li>')
+    expect(markup).not.toContain('&lt;details&gt;')
+    expect(markup).not.toContain('角色技术详情')
+    expect(markup).not.toContain('internal')
   })
 
   it('renders fully unknown optional accounting totals as N/A instead of zero or NaN', () => {
@@ -216,7 +266,7 @@ describe('Debate Desktop panel transport', () => {
           ? { ...withoutOutput, state: 'planned' as const, claimIds: [], evidenceRefs: [] }
           : index === 1
             ? { ...withoutOutput, state: 'dispatched' as const, claimIds: [], evidenceRefs: [] }
-            : entry
+            : { ...withoutOutput, state: 'planned' as const, claimIds: [], evidenceRefs: [] }
       }),
     }]
     fixture.roles = fixture.roles.map((role, index) => {
@@ -228,7 +278,8 @@ describe('Debate Desktop panel transport', () => {
         const { outputRef: _outputRef, outputPreview: _outputPreview, ...withoutOutput } = role.latestTurn!
         return { ...role, latestTurn: { ...withoutOutput, state: 'dispatched' as const, claimIds: [], evidenceRefs: [] } }
       }
-      return role
+      const { outputRef: _outputRef, outputPreview: _outputPreview, ...withoutOutput } = role.latestTurn!
+      return { ...role, latestTurn: { ...withoutOutput, state: 'planned' as const, claimIds: [], evidenceRefs: [] } }
     })
     const markup = renderToStaticMarkup(createElement(RunDetail, {
       run: fixture,
@@ -282,9 +333,11 @@ describe('Debate Desktop panel transport', () => {
     }))
     expect(markup.match(/<span class="dshDesktopDebateFloor">[0-9]+ 楼<\/span>/g)).toEqual([
       '<span class="dshDesktopDebateFloor">1 楼</span>',
+      '<span class="dshDesktopDebateFloor">2 楼</span>',
     ])
     expect(markup).toContain('Round one challenge: verify rollback.')
     expect(markup).not.toContain('Round one proposal: choose A.')
+    expect(markup).toContain('未产生公开输出：judge interrupted')
   })
 
   it('keeps settled roles visible when another role is blocked and shows route provenance', () => {
@@ -320,12 +373,12 @@ describe('Debate Desktop panel transport', () => {
     ))
     expect(markup).toContain('data-state="settled"')
     expect(markup).toContain('data-state="blocked"')
-    expect(markup).toContain('请求：<span>claude-code · claude-fable-5</span>')
-    expect(markup).toContain('实际：<span>codex · gpt-5.6-luna</span>')
-    expect(markup).toContain('回退：AUTHENTICATION_UNQUALIFIED')
-    expect(markup).toContain('EXPLICIT_MODEL_UNAVAILABLE')
+    expect(markup).toContain('请求：<span>Claude Code · Claude Fable 5</span>')
+    expect(markup).toContain('实际：<span>Codex · GPT-5.6 Luna</span>')
+    expect(markup).toContain('回退：请求模型尚未通过可用性确认，已改用可用模型。')
+    expect(markup).toContain('指定模型不可用')
     expect(markup).toContain('Claude Code unavailable because the VPN is blocked.')
-    expect(markup).toContain('节点 debate-r1-skeptical-falsifier')
+    expect(markup).not.toContain('debate-r1-skeptical-falsifier')
     expect(markup).not.toContain('Agent 输出失败')
   })
 
@@ -358,13 +411,13 @@ describe('Debate Desktop panel transport', () => {
       pending: false,
       onControl: async () => {},
     }))
-    expect(markup.match(/节点 node-first/g)).toHaveLength(1)
-    expect(markup.match(/节点 node-second/g)).toHaveLength(1)
+    expect(markup).not.toContain('node-first')
+    expect(markup).not.toContain('node-second')
     expect(markup).toContain('First blocker.')
     expect(markup).toContain('Second blocker.')
   })
 
-  it('truncates long route values visually while preserving complete values in titles', () => {
+  it('keeps technical route labels readable without exposing internal node identifiers', () => {
     const fixture = run()
     const longModel = `claude-model-${'x'.repeat(72)}`
     const longNodeId = `debate-node-${'y'.repeat(72)}`
@@ -389,9 +442,9 @@ describe('Debate Desktop panel transport', () => {
       ? { ...round, turnStates: round.turnStates.map((turn, turnIndex) => turnIndex === 1 ? blockedTurn : turn) }
       : round)
     const markup = renderToStaticMarkup(createElement(RunDetail, { run: fixture, events: [], pending: false, onControl: async () => {} }))
-    expect(markup).toContain(`title="claude-code · ${longModel}"`)
-    expect(markup).toContain(`title="${longNodeId}"`)
-    expect(markup).toMatch(/请求：<span>claude-code · claude-model-x+…x+<\/span>/)
+    expect(markup).toContain(`Claude Code · ${longModel}`)
+    expect(markup).not.toContain(longNodeId)
+    expect(markup).toContain('请求模型当前不可用，已改用可用模型。')
   })
 
   it('offers resume only when the durable stop event proves a pause', () => {

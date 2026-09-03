@@ -32,6 +32,7 @@ describe('dsh-base bundle', () => {
     )
     expect(rows.length).toBeGreaterThan(50)
     expect(rows.some(row => row.id === 'agent-loop')).toBe(true)
+    expect(rows.some(row => row.id === 'output-style')).toBe(true)
     expect(rows.find(row => row.id === 'session-telemetry-otel')?.config?.['mode']).toEqual({
       __jsExpr: "process.env.DSH_TELEMETRY_MODE || 'DISABLED'",
     })
@@ -39,6 +40,7 @@ describe('dsh-base bundle', () => {
     expect(rows.filter(row => row.id === 'subagent-claude-code')).toHaveLength(0)
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-codex')
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-claude-code')
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-output-style', 'workspace:^')
   })
 
   it('gates each shell stack by platform with a symmetric disabled expression', () => {

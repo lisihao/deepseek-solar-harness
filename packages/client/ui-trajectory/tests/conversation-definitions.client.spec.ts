@@ -6,6 +6,7 @@ import type {
 import { ConversationNodeAssembler } from '@deepseek-ai/dsh-client-runtime/client'
 import { registerTrajectoryAssistantDefinition } from '../src/client/trajectory-assistant-definition.ts'
 import { registerTrajectoryCompactionDefinitions } from '../src/client/trajectory-compaction-definition.ts'
+import { registerTrajectoryDebateDefinition } from '../src/client/trajectory-debate-definition.ts'
 import type { TrajectorySnapshot } from '../src/client/trajectory-contract.ts'
 import { registerTrajectoryMessageDefinitions } from '../src/client/trajectory-message-definitions.ts'
 import { registerTrajectoryPhysicalOperatorDefinition } from '../src/client/trajectory-physical-operator-definition.ts'
@@ -24,6 +25,7 @@ const registrationContext = {
 } as unknown as Context
 
 registerTrajectoryMessageDefinitions(registrationContext)
+registerTrajectoryDebateDefinition(registrationContext)
 registerTrajectoryPhysicalOperatorDefinition(registrationContext)
 registerTrajectoryRequestHeaderDefinition(registrationContext)
 registerTrajectoryAssistantDefinition(registrationContext)
@@ -92,6 +94,109 @@ function assistantMessage(id: string, text: string) {
 }
 
 describe('Trajectory conversation Definitions', () => {
+  it('projects a complete public multi-round Debate trace in source order and ignores reconnect duplicates', () => {
+    const trace = (sourceSequence: number, state: string, extra: Record<string, unknown> = {}) => at(
+      20 + sourceSequence,
+      'debate/trace',
+      {
+        version: 1,
+        runId: 'debate-run-1',
+        sourceSequence,
+        state,
+        topic: { version: 1, title: '当前用户议题', source: 'user' },
+        sessionTurn: 3,
+        sessionStep: 1,
+        ...extra,
+      },
+      { ignorable: true },
+    )
+    const current = snapshot(assembler([
+      trace(1, 'planned'),
+      trace(2, 'settled', {
+        round: 1,
+        role: {
+          title: '建设性提案者', kind: 'participant',
+          requested: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+          actual: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+        },
+        publicOutput: { preview: '先建立可靠性基线。', ref: 'artifact:proposer-r1' },
+        claims: [{ statement: '先补齐恢复基线。', status: 'supported', severity: 'high' }],
+        evidenceRefs: [{ version: 1, ref: 'artifact:baseline', kind: 'artifact' }],
+        usage: { inputTokens: 120, outputTokens: 48 },
+      }),
+      trace(3, 'failed', {
+        round: 1,
+        role: {
+          title: '怀疑式证伪者', kind: 'participant',
+          requested: { operatorId: 'claude-code', model: 'claude-fable-5' },
+          actual: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+          fallbackReasonCode: 'MODEL_UNAVAILABLE',
+        },
+      }),
+      trace(4, 'settled', {
+        round: 1,
+        role: {
+          title: '证据审计员', kind: 'participant',
+          requested: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+        },
+        publicOutput: { preview: '当前没有可验证的故障样本。' },
+      }),
+      trace(5, 'settled', {
+        round: 1,
+        role: {
+          title: '决策裁判（主持人）', kind: 'judge',
+          requested: { operatorId: 'claude-code', model: 'claude-opus-5' },
+          actual: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+        },
+      }),
+      trace(6, 'settled', {
+        round: 2,
+        role: {
+          title: '建设性提案者', kind: 'participant',
+          requested: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+        },
+      }),
+      trace(7, 'budget-limited', {
+        round: 2,
+        convergence: { status: 'budget_limited', score: 0.44, threshold: 0.82, reason: '输入预算已用完。' },
+      }),
+      trace(8, 'synthesis-settled', {
+        synthesis: {
+          state: 'settled', outputPreview: '主持人结论：先测量再重构。', artifactRef: 'artifact:synthesis',
+          unresolvedCount: 1, dissentCount: 1,
+        },
+      }),
+      at(40, 'debate/trace', {
+        version: 1,
+        runId: 'debate-run-1',
+        sourceSequence: 2,
+        state: 'settled',
+        publicOutput: { preview: '重连重复事件不得覆盖原观点。' },
+      }, { ignorable: true }),
+    ]))
+
+    expect(current.debateExecutions).toHaveLength(1)
+    const debate = current.debateExecutions[0]
+    expect(debate).toMatchObject({
+      runId: 'debate-run-1', topic: '当前用户议题', turn: 3, step: 1,
+    })
+    expect(debate?.entries.map(entry => entry.sourceSequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+    expect(debate?.entries[1]).toMatchObject({
+      publicOutputPreview: '先建立可靠性基线。',
+      role: { title: '建设性提案者', actualOperatorId: 'codex' },
+      claims: [{ statement: '先补齐恢复基线。' }],
+    })
+    expect(debate?.entries[2]).toMatchObject({
+      state: 'failed',
+      role: { title: '怀疑式证伪者', actualModel: 'gpt-5.6-sol', fallbackReasonCode: 'MODEL_UNAVAILABLE' },
+    })
+    expect(debate?.entries[6]?.convergence).toMatchObject({ status: 'budget_limited', score: 0.44 })
+    expect(debate?.entries[7]?.synthesis).toMatchObject({
+      outputPreview: '主持人结论：先测量再重构。', unresolvedCount: 1, dissentCount: 1,
+    })
+    expect(JSON.stringify(debate)).not.toContain('重连重复事件不得覆盖原观点。')
+  })
+
   it('ignores Physical Operator authority payloads when no Host trace is present', () => {
     const current = snapshot(assembler([
       at(1, 'physical-operator/dispatch', {

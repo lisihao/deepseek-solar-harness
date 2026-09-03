@@ -33,6 +33,7 @@ import type {
   DebateRunSnapshotV1,
   DebateRunSummaryV1,
   DebateStartRequestV1,
+  DebateTopicV1,
   DebateUnresolvedV1,
   DebateUsageV1,
 } from '@deepseek-ai/dsh-debate'
@@ -623,6 +624,37 @@ function lifecycleTerminal(state: DebateLifecycle): boolean {
     || state === 'indeterminate' || state === 'budget_limited' || state === 'max_rounds'
 }
 
+/** Final lifecycle states cannot be reopened; a paused `stopped` run may resume. */
+function lifecycleFinal(state: DebateLifecycle): boolean {
+  return state === 'completed' || state === 'failed' || state === 'indeterminate'
+    || state === 'budget_limited' || state === 'max_rounds'
+}
+
+/**
+ * Return whether a persisted terminal run proves the outcome of a pending
+ * command receipt. A terminal snapshot without its committing event is not
+ * sufficient: recovery must preserve the indeterminate state in that case.
+ */
+function hasProvenTerminalOutcome(run: StoredRun): boolean {
+  switch (run.snapshot.state) {
+    case 'completed':
+    case 'budget_limited':
+    case 'max_rounds':
+      return run.events.some((event) => {
+        if (event.type !== 'debate.synthesis.settled') return false
+        const lifecycleState = (event.data as { readonly lifecycleState?: unknown }).lifecycleState
+        return lifecycleState === undefined || lifecycleState === run.snapshot.state
+      })
+    case 'failed':
+      return run.events.some(event => event.type === 'debate.failed')
+    case 'stopped':
+      return run.events.some(event => event.type === 'debate.stopped')
+    case 'indeterminate':
+    default:
+      return false
+  }
+}
+
 /** Persistent local implementation of {@link DebateService}. */
 export class LocalDebateProvider extends DebateService {
   static Config: z<Config> = z.object({
@@ -684,7 +716,7 @@ export class LocalDebateProvider extends DebateService {
       const policy = validateDebatePolicy(normalized.policy)
       const roster = orderedRoster(policy.roster)
       const sourceRefs = normalized.sourceRefs ?? []
-      const baseSnapshot: DebateRunSnapshotV1 = {
+      const baseSnapshot: DebateRunSnapshotV1 & { readonly topic: DebateTopicV1 } = {
         version: 1,
         runId,
         revision: 0,
@@ -692,6 +724,11 @@ export class LocalDebateProvider extends DebateService {
         mode: policy.mode,
         promptSha256: `sha256:${sha256(normalized.prompt)}`,
         ...(normalized.objective === undefined ? {} : { objective: normalized.objective }),
+        topic: {
+          version: 1,
+          title: normalized.objective ?? normalized.prompt,
+          source: normalized.objective === undefined ? 'user' : 'objective',
+        },
         policy,
         roster,
         currentRound: 0,
@@ -896,12 +933,44 @@ export class LocalDebateProvider extends DebateService {
   }
 
   private async runRound(run: StoredRun, signal: AbortSignal): Promise<'continue' | 'converged' | 'terminal'> {
+    // A settled run is immutable from the scheduler's point of view. This
+    // guard keeps a late recovery/control path from dispatching another round
+    // after a terminal lifecycle event has committed.
+    if (lifecycleFinal(run.snapshot.state)) return 'terminal'
     const number = run.snapshot.currentRound + 1
     const { policy } = run.snapshot
     if (number > policy.budget.maxRounds) {
-      this.appendEvent(run, 'debate.convergence.evaluated', {
-        status: 'max_rounds', round: number - 1, reason: 'maximum rounds already exhausted',
-      }, { state: 'max_rounds' })
+      const lastRound = run.snapshot.rounds.at(-1)
+      if (lastRound === undefined) {
+        // This is only reachable after an externally edited/legacy state. Do
+        // not leave the run in a non-terminal state after reporting the
+        // exhausted budget; settle an empty synthesis explicitly instead.
+        this.appendEvent(run, 'debate.convergence.evaluated', {
+          status: 'max_rounds', round: number - 1, reason: 'maximum rounds already exhausted',
+          lifecycleState: 'synthesizing',
+        }, { state: 'synthesizing' })
+        const synthesis = {
+          version: 1 as const,
+          state: 'settled' as const,
+          unresolvedClaimIds: run.snapshot.unresolved.map(entry => entry.claimId),
+          dissentCount: run.snapshot.dissent.length,
+        }
+        this.appendEvent(run, 'debate.synthesis.started', {
+          round: number - 1,
+          lifecycleState: 'synthesizing',
+        }, {
+          state: 'synthesizing',
+          synthesis: { ...synthesis, state: 'running' as const },
+        })
+        this.appendEvent(run, 'debate.synthesis.settled', {
+          round: number - 1,
+          unresolvedClaimIds: synthesis.unresolvedClaimIds,
+          dissentCount: synthesis.dissentCount,
+          lifecycleState: 'max_rounds',
+        }, { state: 'max_rounds', synthesis })
+      } else {
+        this.synthesize(run, lastRound, 'max_rounds')
+      }
       return 'terminal'
     }
     const slots = this.roundSlots(run.snapshot.roster, policy.budget.maxAgentsPerRound)
@@ -1136,12 +1205,13 @@ export class LocalDebateProvider extends DebateService {
       unresolvedHighSeverity: convergence.unresolvedHighSeverity,
       settledAgents: convergence.settledAgents,
       reason: convergence.reason,
+      lifecycleState: convergence.status === 'continue' ? 'next_round' : 'synthesizing',
     }, {
       state: convergence.status === 'converged'
-        ? 'converged'
+        ? 'synthesizing'
         : convergence.status === 'continue'
           ? 'next_round'
-          : convergence.status,
+          : 'synthesizing',
       claimLedger: ledger,
       dissent,
       unresolved,
@@ -1261,7 +1331,10 @@ export class LocalDebateProvider extends DebateService {
       unresolvedClaimIds: run.snapshot.unresolved.map(entry => entry.claimId),
       dissentCount: run.snapshot.dissent.length,
     }
-    this.appendEvent(run, 'debate.synthesis.started', { round: round.round }, { state: 'synthesizing', synthesis: running }, { round: round.round })
+    this.appendEvent(run, 'debate.synthesis.started', {
+      round: round.round,
+      lifecycleState: 'synthesizing',
+    }, { state: 'synthesizing', synthesis: running }, { round: round.round })
     const settled = {
       version: 1 as const,
       state: 'settled' as const,
@@ -1271,7 +1344,10 @@ export class LocalDebateProvider extends DebateService {
       ...(judge?.outputPreview === undefined ? {} : { outputPreview: judge.outputPreview }),
     }
     this.appendEvent(run, 'debate.synthesis.settled', {
-      round: round.round, unresolvedClaimIds: settled.unresolvedClaimIds, dissentCount: settled.dissentCount,
+      round: round.round,
+      unresolvedClaimIds: settled.unresolvedClaimIds,
+      dissentCount: settled.dissentCount,
+      lifecycleState: finalState,
     }, { state: finalState, synthesis: settled }, { round: round.round })
   }
 
@@ -1389,6 +1465,13 @@ export class LocalDebateProvider extends DebateService {
     patch: Partial<Pick<DebateRunSnapshotV1, 'state' | 'currentRound' | 'rounds' | 'claimLedger' | 'dissent' | 'unresolved' | 'evidence' | 'cost' | 'provenance' | 'synthesis'>> = {},
     context: { readonly round?: number; readonly slotId?: string } = {},
   ): void {
+    const nextState = patch.state ?? run.snapshot.state
+    if (lifecycleFinal(run.snapshot.state) && nextState !== run.snapshot.state) {
+      throw new DebateError(
+        `terminal Debate ${run.runId} cannot transition from ${run.snapshot.state} to ${nextState}`,
+        'DEBATE_STATE_CONFLICT',
+      )
+    }
     const createdAt = this.now()
     const revision = run.snapshot.revision + 1
     run.snapshot = { ...run.snapshot, ...patch, revision, updatedAt: createdAt }
@@ -1601,8 +1684,13 @@ export class LocalDebateProvider extends DebateService {
     }
     for (const command of this.document.commands) {
       if (command.state !== 'accepted' && command.state !== 'running') continue
-      command.state = 'indeterminate'
       const run = this.document.runs.find(entry => entry.runId === command.runId)
+      if (run !== undefined && hasProvenTerminalOutcome(run)) {
+        command.state = 'settled'
+        command.response = clone(run.snapshot)
+        continue
+      }
+      command.state = 'indeterminate'
       if (run !== undefined) command.response = clone(run.snapshot)
     }
     this.persist()

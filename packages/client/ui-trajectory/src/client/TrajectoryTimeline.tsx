@@ -91,6 +91,7 @@ function timelineKindLabel(kind: TrajectoryCellKind): string {
     case 'tool': return 'TOOL'
     case 'subtool': return 'SUBTOOL'
     case 'operator': return 'OPERATOR'
+    case 'debate': return 'DEBATE'
   }
 }
 

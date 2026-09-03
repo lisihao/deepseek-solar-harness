@@ -12,10 +12,13 @@
       "path": "../../../vendor/cordis"
     },
     {
-      "path": "../../runtime-diagnostics/invariants"
+      "path": "../system-prompt"
     },
     {
-      "path": "../../core/output-style"
+      "path": "../scope"
+    },
+    {
+      "path": "../../runtime-diagnostics/invariants"
     }
   ]
 }

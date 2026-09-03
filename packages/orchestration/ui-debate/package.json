@@ -16,11 +16,14 @@
   },
   "dsh": {
     "client": {
-      "inject": ["@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-ui-conversation"],
+      "inject": ["@deepseek-ai/dsh-client-connection", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-primitives"],
       "platform": "web"
     }
   },
   "scripts": { "bundle": "tsdown", "watch": "tsdown --watch" },
+  "dependencies": {
+    "@deepseek-ai/dsh-client-ui-primitives": "workspace:^"
+  },
   "files": ["lib/index.js", "lib/invariant.js", "lib/client.js", "lib/types/**/*.d.ts"],
   "license": "MIT",
   "peerDependencies": {

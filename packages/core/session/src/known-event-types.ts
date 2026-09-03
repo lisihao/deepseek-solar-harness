@@ -33,6 +33,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'debate/admission',
   'debate/dispatch',
   'debate/preferences',
+  'debate/trace',
   'feedback/record',
   'goal/change',
   'hook/invoked',

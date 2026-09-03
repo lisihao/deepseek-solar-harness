@@ -189,8 +189,17 @@ export interface DesktopDebateRound {
   }
 }
 
+/** Explicit user-facing topic recorded with a Debate run. */
+export interface DesktopDebateTopic {
+  version: 1
+  title: string
+  source: 'user' | 'objective' | 'legacy-missing'
+}
+
 /** Full browser-safe inspect projection for one Debate run. */
 export interface DesktopDebateRun extends DesktopDebateRunSummary {
+  /** Preferred title for the topic post; older runs may only have `objective`. */
+  topic?: DesktopDebateTopic
   objective?: string
   roles: DesktopDebateRole[]
   rounds: DesktopDebateRound[]

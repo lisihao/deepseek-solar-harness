@@ -67,7 +67,7 @@ function nodeId(round: number, slotId: string): string {
 function outputSchema(): string {
   return JSON.stringify({
     confidence: 'number 0..1',
-    outputPreview: 'bounded final answer or analysis',
+    outputPreview: 'bounded public user-facing summary; never hidden reasoning, chain-of-thought, or private analysis',
     claims: [{
       version: 1,
       claimId: 'stable claim id',

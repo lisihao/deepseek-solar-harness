@@ -12,12 +12,14 @@ This package depends only on the provider-neutral Debate Service Definition and 
 
 The host response is presented as a readable forum thread rather than a diagnostic dump:
 
-- A topic post opens the thread with the public objective and lifecycle state.
-- The participant roster is grouped once, with a localized role category plus the configured public persona title and mandate; operator, model, and tier remain in a collapsed technical-details block.
+- A topic post opens the thread with the public topic recorded by the Debate Run and its lifecycle state. Legacy Runs without a recorded topic are explicitly labelled as missing their topic instead of borrowing text from another Session message.
+- The participant roster is grouped once in a Markdown table with the readable role, mandate, requested or actual operator and model, and current state. It does not expose slot identifiers, internal role identifiers, hashes, or raw HTML.
 - Every round gets one heading and every terminal participant turn receives a stable global floor number. First-round posts are independent; later posts identify the claim-ledger phase, while claim text is labelled only as a claim submitted by that turn because the v1 protocol does not record reply targets.
-- Only durable `outputPreview` values are quoted as public speech. A blocked, failed, or indeterminate turn explicitly says that no public output was produced; the Consumer never invents a missing response.
-- Convergence, unresolved claims, preserved dissent, and the moderator's final synthesis remain visible. The decision judge is represented by this single pinned moderator post instead of a duplicated ordinary floor; a judge failure remains an explicit moderator status. Run IDs, hashes, provider versions, routing, artifacts, and usage stay behind collapsible technical details.
+- Only durable `outputPreview` values are emitted as public speech, preserving headings, priority labels, and list structure. A blocked, failed, or indeterminate turn explicitly says that no public output was produced; the Consumer never invents a missing response.
+- Convergence, unresolved claims, preserved dissent, and the moderator's final synthesis remain visible. A budget or round limit says that the moderator is synthesizing until the final summary has settled, then says that the summary is complete. The decision judge is represented by this single pinned moderator post instead of a duplicated ordinary floor; a judge failure remains an explicit moderator status.
 - Planned and dispatched lifecycle snapshots never create duplicate floors. Exact blocker copies use attempt, node, code, and message identity; different failures with the same code remain visible.
+
+Each durable public Debate event is also appended as one ignorable `debate/trace` Session fact keyed by `(runId, sourceSequence)`. It carries the topic, round, readable role route, bounded public output, claims, Evidence references, convergence, or synthesis that is available for that event. The Session log never receives a synthetic assistant message, raw prompt, private reasoning, credentials, or native-product transcript through this projection.
 
 ## Model Experience
 

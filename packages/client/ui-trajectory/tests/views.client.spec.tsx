@@ -85,6 +85,7 @@ function historySnapshot(
     partial: null,
     runningCalls: [],
     physicalOperatorExecutions: [],
+    debateExecutions: [],
     ...inspection,
   }
   return {

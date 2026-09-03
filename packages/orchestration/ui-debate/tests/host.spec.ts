@@ -77,6 +77,7 @@ function run(): DebateRunSnapshotV1 {
     mode: 'enabled',
     promptSha256: 'sha256:prompt',
     objective: 'Choose A or B.',
+    topic: { version: 1, title: 'User-selected topic: choose A or B.', source: 'user' },
     policy: policy(),
     roster: policy().roster,
     currentRound: 2,
@@ -234,6 +235,7 @@ describe('Debate Host projection', () => {
     expect(projected).toMatchObject({
       selectedRunId: 'debate-1',
       selectedRun: {
+        topic: { title: 'User-selected topic: choose A or B.', source: 'user' },
         claims: [{ claimId: 'claim-1', status: 'supported' }],
         synthesis: { artifactRef: 'artifact:synthesis' },
         cost: { usageStatus: 'partial', costStatus: 'unknown', unknownUsageTurns: 1 },

@@ -5,6 +5,7 @@ import CommandRuntime from '@deepseek-ai/dsh-commands'
 import DebateService, {
   validateDebatePolicy,
   type DebateControlRequestV1,
+  type DebateEventV1,
   type DebateEventPageV1,
   type DebateEventReadRequestV1,
   type DebateRunSnapshotV1,
@@ -117,6 +118,7 @@ class ScriptedDebates extends DebateService {
   controlResult: DebateRunSnapshotV1 = this.run
   inspectFallback: DebateRunSnapshotV1 = this.run
   readonly inspectSnapshots: DebateRunSnapshotV1[] = []
+  readonly events: DebateEventV1[] = []
   controlGate: Promise<DebateRunSnapshotV1> | undefined
   readonly starts: DebateStartRequestV1[] = []
   readonly controls: DebateControlRequestV1[] = []
@@ -143,8 +145,10 @@ class ScriptedDebates extends DebateService {
   async inspect(_runId: string): Promise<DebateRunSnapshotV1> {
     return this.inspectSnapshots.shift() ?? this.inspectFallback
   }
-  async readEvents(_request: DebateEventReadRequestV1): Promise<DebateEventPageV1> {
-    return { events: [], nextSequence: 0 }
+  async readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV1> {
+    const afterSequence = request.afterSequence ?? 0
+    const events = this.events.filter(event => event.sequence > afterSequence).slice(0, request.limit ?? 20)
+    return { events, nextSequence: events.at(-1)?.sequence ?? afterSequence }
   }
 
   async control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1> {
@@ -439,7 +443,7 @@ describe('debate model Consumer', () => {
       source: { kind: 'user' },
     }))
     const idle = agent.whenIdle()
-    await waitFor(() => textDeltas(agent).some(text => text.includes('# 主题帖 · Debate')))
+    await waitFor(() => textDeltas(agent).some(text => text.includes('# 主题帖')))
     expect(agent.session.events.some(event => event.type === 'assistant/message')).toBe(false)
 
     await waitFor(() => {
@@ -460,7 +464,7 @@ describe('debate model Consumer', () => {
     const streamText = textDeltas(agent).join('')
     expect(streamText).toContain('建设性提案者')
     expect(streamText).toContain('主题帖状态更新')
-    expect(streamText.indexOf('# 主题帖 · Debate')).toBeLessThan(streamText.indexOf('第 1 轮'))
+    expect(streamText.indexOf('# 主题帖')).toBeLessThan(streamText.indexOf('第 1 轮'))
     expect(streamText.indexOf('Proposal output summary')).toBeLessThan(streamText.indexOf('第 2 轮'))
     expect(streamText.indexOf('第 2 轮')).toBeLessThan(streamText.indexOf('Falsifier output summary'))
     expect(streamText.indexOf('本轮收敛判断')).toBeLessThan(streamText.lastIndexOf('本轮收敛判断'))
@@ -469,10 +473,15 @@ describe('debate model Consumer', () => {
     expect(streamText.match(/### 1 楼/g)).toHaveLength(1)
     expect(streamText.match(/Proposal output summary/g)).toHaveLength(1)
     expect(streamText.match(/Final host decision summary/g)).toHaveLength(1)
-    expect(streamText).toContain('请求算子/模型：claude-code/claude-fable-5')
-    expect(streamText).toContain('→ codex/gpt-5.6-sol')
+    expect(streamText).toContain('**执行者：** Codex · GPT-5.6 Sol（已从 Claude Code · Claude Fable 5 自动回退）')
     expect(streamText).toContain('## 置顶 · 主持人总结')
     expect(streamText).toContain('Final host decision summary')
+    expect(streamText).toContain('| 角色 | 职责 | 执行算子 | 模型 | 当前状态 |')
+    expect(streamText).not.toContain('<details>')
+    expect(streamText).not.toContain('<summary>')
+    expect(streamText).not.toContain('角色 ID')
+    expect(streamText).not.toContain('Slot：')
+    expect(streamText).not.toContain('sha256:')
     expect(streamText).not.toContain('reasoning')
 
     const chunks = agent.session.events
@@ -483,6 +492,181 @@ describe('debate model Consumer', () => {
       throw new Error('missing Debate text block-end')
     }
     expect(blockEnd.block.text).toBe(streamText)
+  })
+
+  it('renders the current user topic and structured public posts without internal identifiers', async () => {
+    const { ctx, agent, provider } = await setupAutomatic()
+    const template = snapshot()
+    const round = template.rounds[0]
+    const turn = round?.turns[0]
+    if (round === undefined || turn === undefined) throw new Error('missing Debate fixture turn')
+    const claim = {
+      version: 1 as const,
+      claimId: 'claim-verify',
+      statement: 'P0：未通过证据校验的节点不得进入完成状态。',
+      status: 'supported' as const,
+      severity: 'high' as const,
+      confidence: 0.9,
+      supportingSlotIds: [turn.slotId],
+      opposingSlotIds: [],
+      evidenceRefs: [],
+    }
+    const ledger = { ...template.claimLedger, claims: [claim] }
+    const { objective: _objective, ...templateWithoutObjective } = template
+    const budgetLimited: DebateRunSnapshotV1 = {
+      ...templateWithoutObjective,
+      state: 'budget_limited',
+      rounds: [{
+        ...round,
+        claimLedger: ledger,
+        turns: [{
+          ...turn,
+          outputPreview: '立场：先补可靠性。 P0：证据校验必须阻断未验证完成。 P1：使用租约隔离并发写入。 P2：再扩展新的执行入口。',
+          claimIds: [claim.claimId],
+        }],
+        convergence: { ...round.convergence!, status: 'budget_limited' as const },
+      }],
+      claimLedger: ledger,
+      synthesis: {
+        ...template.synthesis!,
+        outputPreview: '结论：先补可靠性。 P0：完成证据门禁。 P1：验证恢复。',
+      },
+    }
+    provider.startResult = budgetLimited
+    provider.controlResult = budgetLimited
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: '本轮真正的用户议题是什么？' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    const streamText = textDeltas(agent).join('')
+    expect(streamText).toContain('## 本轮真正的用户议题是什么？')
+    expect(streamText).toContain('| 角色 | 职责 | 执行算子 | 模型 | 当前状态 |')
+    expect(streamText).toContain('**立场**：先补可靠性。')
+    expect(streamText).toContain('**P0**：证据校验必须阻断未验证完成。')
+    expect(streamText).toContain('**P1**：使用租约隔离并发写入。')
+    expect(streamText).toContain('**P2**：再扩展新的执行入口。')
+    expect(streamText).toContain('**本楼主张：**')
+    expect(streamText).toContain('1. P0：未通过证据校验的节点不得进入完成状态。')
+    expect(streamText).toContain('预算已达上限，主持人总结已完成')
+    expect(streamText).not.toContain('预算停止')
+    expect(streamText).not.toContain('<details>')
+    expect(streamText).not.toContain('<summary>')
+    expect(streamText).not.toContain('constructive-proposer')
+    expect(streamText).not.toContain('slot-proposer')
+    expect(streamText).not.toContain('sha256:')
+  })
+
+  it('projects every durable public Debate event into separately replayable Session trace facts', async () => {
+    const { ctx, agent, provider } = await setupAutomatic()
+    const template = snapshot()
+    const round = template.rounds[0]
+    const turn = round?.turns[0]
+    if (round === undefined || turn === undefined) throw new Error('missing Debate fixture turn')
+    const claim = {
+      version: 1 as const,
+      claimId: 'claim-trace',
+      statement: 'Evidence verification must block an unsupported completion.',
+      status: 'supported' as const,
+      severity: 'high' as const,
+      confidence: 0.95,
+      supportingSlotIds: [turn.slotId],
+      opposingSlotIds: [],
+      evidenceRefs: [],
+    }
+    const ledger = { ...template.claimLedger, claims: [claim] }
+    const { outputRef: _failedOutputRef, outputPreview: _failedOutputPreview, ...failedTurnBase } = turn
+    const failedTurn = {
+      ...failedTurnBase,
+      slotId: 'slot-falsifier',
+      role: 'skeptical-falsifier' as const,
+      operatorId: 'claude-code',
+      model: 'claude-fable-5',
+      state: 'failed' as const,
+      claimIds: [],
+      evidenceRefs: [],
+      errorCode: 'AUTH_MODE_MISMATCH',
+      blockers: [{ code: 'AUTH_MODE_MISMATCH', message: 'Claude Code subscription is unavailable.' }],
+    }
+    const traced = snapshot({
+      topic: { version: 1, title: 'Trace every Debate participant.', source: 'user' },
+      rounds: [{
+        ...round,
+        claimLedger: ledger,
+        turns: [{
+          ...turn,
+          claimIds: [claim.claimId],
+          evidenceRefs: [{ version: 1, ref: 'artifact:trace-evidence', kind: 'artifact' }],
+          routing: {
+            version: 1,
+            requestedOperatorId: 'claude-code',
+            requestedModel: 'claude-fable-5',
+            actualOperatorId: 'codex',
+            actualModel: 'gpt-5.6-sol',
+            fallbackReasonCode: 'MODEL_UNAVAILABLE',
+          },
+          usage: { inputTokens: 11, outputTokens: 7 },
+        }, failedTurn],
+      }],
+      claimLedger: ledger,
+    })
+    provider.startResult = traced
+    provider.controlResult = traced
+    provider.events.push(
+      { version: 1, sequence: 1, runId: traced.runId, revision: 1, generation: 1, type: 'debate.planned', createdAt: traced.createdAt, data: {} },
+      { version: 1, sequence: 2, runId: traced.runId, revision: 2, generation: 2, type: 'debate.round.started', createdAt: traced.updatedAt, round: 1, data: {} },
+      { version: 1, sequence: 3, runId: traced.runId, revision: 3, generation: 3, type: 'debate.agent.dispatched', createdAt: traced.updatedAt, round: 1, slotId: turn.slotId, data: {} },
+      { version: 1, sequence: 4, runId: traced.runId, revision: 4, generation: 4, type: 'debate.agent.settled', createdAt: traced.updatedAt, round: 1, slotId: turn.slotId, data: {} },
+      { version: 1, sequence: 5, runId: traced.runId, revision: 5, generation: 5, type: 'debate.agent.failed', createdAt: traced.updatedAt, round: 1, slotId: failedTurn.slotId, data: {} },
+      { version: 1, sequence: 6, runId: traced.runId, revision: 6, generation: 6, type: 'debate.convergence.evaluated', createdAt: traced.updatedAt, round: 1, data: { status: 'converged' } },
+      { version: 1, sequence: 7, runId: traced.runId, revision: 7, generation: 7, type: 'debate.synthesis.started', createdAt: traced.updatedAt, round: 1, data: {} },
+      { version: 1, sequence: 8, runId: traced.runId, revision: 8, generation: 8, type: 'debate.synthesis.settled', createdAt: traced.updatedAt, round: 1, data: {} },
+    )
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Trace every Debate participant.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    const traces = agent.session.events.filter((event): event is Extract<typeof event, { type: 'debate/trace' }> => event.type === 'debate/trace')
+    expect(traces.map(event => event.data.sourceSequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+    expect(traces.map(event => event.data.state)).toEqual([
+      'planned', 'running', 'dispatched', 'settled', 'failed', 'round-completed', 'synthesis-running', 'synthesis-settled',
+    ])
+    expect(traces[0]?.data).toMatchObject({
+      topic: { title: 'Trace every Debate participant.', source: 'user' },
+      sessionTurn: 1,
+      sessionStep: 1,
+    })
+    expect(traces[3]?.data).toMatchObject({
+      role: {
+        title: '建设性提案者',
+        requested: { operatorId: 'claude-code', model: 'claude-fable-5' },
+        actual: { operatorId: 'codex', model: 'gpt-5.6-sol' },
+        fallbackReasonCode: 'MODEL_UNAVAILABLE',
+      },
+      publicOutput: { preview: 'Proposal output summary', ref: 'artifact:proposer-output' },
+      claims: [{ statement: 'Evidence verification must block an unsupported completion.' }],
+      evidenceRefs: [{ ref: 'artifact:trace-evidence' }],
+      usage: { inputTokens: 11, outputTokens: 7 },
+    })
+    expect(traces[2]?.data.role).toMatchObject({ requested: { operatorId: 'claude-code', model: 'claude-fable-5' } })
+    expect(traces[2]?.data.role?.actual).toBeUndefined()
+    expect(traces[4]?.data).toMatchObject({
+      role: { title: '怀疑式证伪者', requested: { operatorId: 'claude-code', model: 'claude-fable-5' } },
+    })
+    expect(traces[4]?.data.publicOutput).toBeUndefined()
+    expect(traces[5]?.data.convergence).toMatchObject({ status: 'converged' })
+    expect(traces[6]?.data.synthesis).toMatchObject({ state: 'running', unresolvedCount: 0, dissentCount: 0 })
+    expect(traces[6]?.data.synthesis?.outputPreview).toBeUndefined()
+    expect(traces[6]?.data.synthesis?.artifactRef).toBeUndefined()
+    expect(traces[7]?.data.synthesis).toMatchObject({ state: 'settled', outputPreview: 'Decision summary' })
+    expect(new Set(traces.map(event => event.data.sourceSequence)).size).toBe(traces.length)
+    expect(agent.session.events.filter(event => event.type === 'assistant/message')).toHaveLength(1)
+    expect(JSON.stringify(traces)).not.toContain('slot-proposer')
   })
 
   it('streams the durable blocker when a roster slot was never dispatched', async () => {

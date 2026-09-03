@@ -141,6 +141,67 @@ describe('deriveTrajectoryLayout', () => {
     expect(group?.cells[2]?.outputDetail).toBeUndefined()
   })
 
+  it('lays out public Debate rounds, fallback routing, convergence, and synthesis as readable records', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      debateExecutions: [{
+        runId: 'debate-run-123456789', topic: '当前用户议题', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [
+          { seq: 10, time: 10_000, sourceSequence: 1, state: 'planned', claims: [], evidenceRefs: [] },
+          {
+            seq: 11, time: 10_100, sourceSequence: 2, state: 'settled', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            publicOutputPreview: '先建立恢复基线。', publicOutputRef: 'artifact:proposer-r1',
+            claims: [{ statement: '先补齐恢复基线。', status: 'supported', severity: 'high' }],
+            evidenceRefs: ['artifact:baseline'], usage: { inputTokens: 120, outputTokens: 48 },
+          },
+          {
+            seq: 12, time: 10_200, sourceSequence: 3, state: 'failed', round: 1,
+            role: {
+              title: '怀疑式证伪者', kind: 'participant', requestedOperatorId: 'claude-code', requestedModel: 'claude-fable-5',
+              actualOperatorId: 'codex', actualModel: 'gpt-5.6-sol', fallbackReasonCode: 'MODEL_UNAVAILABLE',
+            },
+            claims: [], evidenceRefs: [],
+          },
+          {
+            seq: 13, time: 10_300, sourceSequence: 4, state: 'budget-limited', round: 2,
+            claims: [], evidenceRefs: [],
+            convergence: { status: 'budget_limited', score: 0.44, threshold: 0.82, reason: '输入预算已用完。' },
+          },
+          {
+            seq: 14, time: 10_400, sourceSequence: 5, state: 'synthesis-settled', claims: [], evidenceRefs: [],
+            synthesis: {
+              state: 'settled', outputPreview: '主持人结论：先测量再重构。', artifactRef: 'artifact:synthesis',
+              unresolvedCount: 1, dissentCount: 1,
+            },
+          },
+        ],
+      }],
+    })
+
+    const group = turns[0]?.groups.find(value => value.title === 'Debate · 当前用户议题')
+    expect(group?.cells).toMatchObject([
+      { kind: 'debate', text: '已创建' },
+      { kind: 'debate', text: '第 1 轮 · 建设性提案者 · 已提交观点', previewMarkdown: '先建立恢复基线。', input: 120, output: 48 },
+      { kind: 'debate', text: '第 1 轮 · 怀疑式证伪者 · 执行失败', isError: true },
+      { kind: 'debate', text: '第 2 轮 · 预算已到上限' },
+      { kind: 'debate', text: '主持人总结完成', previewMarkdown: '主持人结论：先测量再重构。' },
+    ])
+    const settled = group?.cells[1]
+    expect(settled?.outputDetail).toContain('### 本楼主张')
+    expect(settled?.outputDetail).toContain('- 先补齐恢复基线。（supported · high）')
+    expect(settled?.outputDetail).toContain('**模型路由**：Codex / gpt-5.6-sol')
+    expect(group?.cells[2]?.outputDetail).toContain('Claude Code / claude-fable-5 → Codex / gpt-5.6-sol')
+    expect(group?.cells[3]?.outputDetail).toContain('### 收敛判断')
+    expect(group?.cells[4]?.outputDetail).toContain('### 主持人总结')
+    expect(group?.cells[1]?.recordId).toBe(['debate', 'debate-run-123456789', '2'].join('\u0000'))
+  })
+
   it('renders a paired physical tool call with bounded input/result details and stable identity', () => {
     const turns = deriveTrajectoryLayout({
       nodes: [],
