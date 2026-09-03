@@ -6,6 +6,18 @@
 
 适配器冻结于 upstream [`v1.2.5`](https://github.com/citrolabs/ego-lite/tree/v1.2.5) 与 commit [`fd3aae7146cf6c9c52014a9752f411bf9978ae93`](https://github.com/citrolabs/ego-lite/commit/fd3aae7146cf6c9c52014a9752f411bf9978ae93)。主要契约证据是 upstream [agent skill](https://github.com/citrolabs/ego-lite/blob/v1.2.5/skills/ego-browser/SKILL.md)、[stdin runner](https://github.com/citrolabs/ego-lite/blob/v1.2.5/package/ego-browser/src/run.ts)、[稳定错误码](https://github.com/citrolabs/ego-lite/blob/v1.2.5/package/ego-browser/src/ego-errors.ts)、[hard-stop output sink](https://github.com/citrolabs/ego-lite/blob/v1.2.5/package/ego-browser/src/output-sink.ts) 和 [update notice](https://github.com/citrolabs/ego-lite/blob/v1.2.5/package/ego-browser/src/update-notice.ts)。
 
+## 运行时兼容面与接缝
+
+Provider 支持当前支持运行时使用的两种公共 helper 表面：
+
+| 运行时表面 | Provider 映射 | 状态 |
+|---|---|---|
+| Ego Lite upstream v1.2.5 对象 facade（`taskSpaces`、`browser`、`page`） | 在生成的 heredoc 内直接使用冻结的 facade API | supported |
+| 已安装的 macOS Ego Lite 0.4.7.4 扁平 helper（`useOrCreateTaskSpace`、`openOrReuseTab`、`pageInfo`、`snapshotText` 及相关 helper） | 进程启动时识别扁平表面，并映射到同一组 Provider 私有操作 | supported |
+| DSH `ctx.browser` 及其 Consumer | 只暴露可移植浏览器契约；Ego 专用对象、target ID 和原生 handle 不跨越接缝 | invariant |
+
+运行时表面识别和兼容映射属于本 Provider 的实现细节。包括 `@deepseek-ai/dsh-tool-browser` 在内的 Consumer 只依赖 `ctx.browser`，不会 import 或按 Ego Lite API 分支。这样替换其他浏览器 Provider 时，不需要修改面向模型的工具或其他插件。
+
 ## 配置
 
 | 字段 | 默认值 | 含义 |
@@ -62,7 +74,7 @@ Program 局部 page alias 仅在生成的 heredoc 内映射到原生 `targetId`�
 
 ## 已知限制与延期工作
 
-- **Binary 仍是外部前置条件** — 本包不再分发 Ego Lite，也不管理其 extension/onboarding 生命周期。`@deepseek-ai/dsh-tool-browser` 提供面向模型的 Consumer，`@deepseek-ai/dsh-ego-lite-browser` 提供 Bundle，DSH Desktop 默认组合二者。真实已安装浏览器验收仍须等待 Ego Lite 完成 onboarding；fixture 覆盖不会冒充该证据。
+- **Binary 仍是外部前置条件** — 本包不再分发 Ego Lite，也不管理其 extension/onboarding 生命周期。`@deepseek-ai/dsh-tool-browser` 提供面向模型的 Consumer，`@deepseek-ai/dsh-ego-lite-browser` 提供 Bundle，DSH Desktop 默认组合二者。已安装的 macOS Ego Lite helper 0.4.7.4 已完成 onboarding。无副作用的正向 E2E 已让真实安装 helper 经 `ctx.browser` 访问本地页面，并依次通过打开、DOM-ready 等待、填写/读取、语义点击、可见性等待、勾选、选择/读取、计数、截图、原生刷新、snapshot 与完成操作；运行同时验证了 `DSH Browser Seam Ready` 标记和 63,466-byte PNG。外部网站的 DNS/网络访问没有作为本次验收证据；那是独立的环境问题。
 - **不支持 `current` workspace** — upstream v1.2.5 公共 helper 无法无损给出当前选中的 task-space identity，因此 Provider 会在启动前返回 `BROWSER_UNSUPPORTED_OPERATION`。
 - **不支持 `reuse: "never"` 的 `open`** — 公共 `browser` facade 暴露 `openOrReuseTab`，但不暴露 `newTab`；Provider 不会伪装成可保证新页面。
 - **不支持 `pages`** — upstream 返回原生 `targetId`，而 portable result 要求 Consumer 创建 page key；Provider 会失败，而不是导出或持久化原生标识符。

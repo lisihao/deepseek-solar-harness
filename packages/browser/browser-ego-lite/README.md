@@ -6,6 +6,18 @@ Ego Lite Service Provider for [`@deepseek-ai/dsh-browser`](../browser/README.md)
 
 The adapter is frozen against upstream [`v1.2.5`](https://github.com/citrolabs/ego-lite/tree/v1.2.5) at commit [`fd3aae7146cf6c9c52014a9752f411bf9978ae93`](https://github.com/citrolabs/ego-lite/commit/fd3aae7146cf6c9c52014a9752f411bf9978ae93). Its primary contracts are the upstream [agent skill](https://github.com/citrolabs/ego-lite/blob/v1.2.5/skills/ego-browser/SKILL.md), [stdin runner](https://github.com/citrolabs/ego-lite/blob/v1.2.5/package/ego-browser/src/run.ts), [stable errors](https://github.com/citrolabs/ego-lite/blob/v1.2.5/package/ego-browser/src/ego-errors.ts), [hard-stop output sink](https://github.com/citrolabs/ego-lite/blob/v1.2.5/package/ego-browser/src/output-sink.ts), and [update notice](https://github.com/citrolabs/ego-lite/blob/v1.2.5/package/ego-browser/src/update-notice.ts).
 
+## Runtime compatibility and seam
+
+The Provider supports both public helper surfaces used by the supported runtimes:
+
+| Runtime surface | Provider mapping | Status |
+|---|---|---|
+| Ego Lite upstream v1.2.5 object facades (`taskSpaces`, `browser`, `page`) | Uses the frozen facade API directly inside the generated heredoc | supported |
+| Installed macOS Ego Lite 0.4.7.4 flat helpers (`useOrCreateTaskSpace`, `openOrReuseTab`, `pageInfo`, `snapshotText`, and related helpers) | Detects the flat surface at process start and maps it to the same private Provider operations | supported |
+| DSH `ctx.browser` and its Consumers | Exposes only the portable browser contract; no Ego-specific object, target ID, or native handle crosses the seam | invariant |
+
+The runtime-surface detection and compatibility mapping are implementation details of this Provider. Consumers, including `@deepseek-ai/dsh-tool-browser`, depend only on `ctx.browser`; they do not import or branch on Ego Lite APIs. This keeps another browser Provider replaceable without changing model-facing tools or other plugins.
+
 ## Configuration
 
 | Field | Default | Meaning |
@@ -62,7 +74,7 @@ No direct invalidation. This Provider registers no prompt, tool schema, or Sessi
 
 ## Known Limitations and Deferred Work
 
-- **The binary remains an external prerequisite** — this package does not redistribute Ego Lite or manage its extension/onboarding lifecycle. `@deepseek-ai/dsh-tool-browser` supplies the model Consumer, `@deepseek-ai/dsh-ego-lite-browser` supplies the Bundle, and DSH Desktop composes both by default. Real installed-browser acceptance remains pending until Ego Lite onboarding is complete; fixture coverage is not presented as that evidence.
+- **The binary remains an external prerequisite** — this package does not redistribute Ego Lite or manage its extension/onboarding lifecycle. `@deepseek-ai/dsh-tool-browser` supplies the model Consumer, `@deepseek-ai/dsh-ego-lite-browser` supplies the Bundle, and DSH Desktop composes both by default. Ego Lite onboarding is complete for the installed macOS helper 0.4.7.4. A no-side-effect positive E2E has exercised the real installed helper through `ctx.browser` against a local page: open, DOM-ready wait, fill/read, semantic click, visible wait, check, select/read, count, screenshot, native reload, snapshot, and completion all passed. The run verified the `DSH Browser Seam Ready` marker and a 63,466-byte PNG. External-site DNS/network access was intentionally not used as acceptance evidence; it is a separate environment concern.
 - **`current` workspace is unsupported** — upstream v1.2.5 public helpers do not expose a lossless selected-task-space identity, so the Provider fails with `BROWSER_UNSUPPORTED_OPERATION` before launch.
 - **`open` with `reuse: "never"` is unsupported** — the public `browser` facade exposes `openOrReuseTab` but not `newTab`, so the Provider does not pretend it can guarantee a fresh page.
 - **`pages` is unsupported** — upstream returns native `targetId` values while the portable result requires Consumer-minted page keys; the Provider fails instead of exporting or persisting native identifiers.
