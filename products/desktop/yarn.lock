@@ -1352,13 +1352,13 @@ __metadata:
 
 "@deepseek-ai/dsh-chatgpt-web-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-chatgpt-web-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz::hash=565d21&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-chatgpt-web-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz::hash=a89166&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-physical-operator-chatgpt-web": "npm:^0.1.0-rc.5"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
-  checksum: 10c0/7aa6e051bea32d499172f036b8071b0b784e349f7ca55b4e064b87940a96570e0c58a816fa1acf0eec18b5be0914dde6d2695f1fac7b1b415e4861e0f53678b2
+  checksum: 10c0/30f0b323a68a356b63f1b2b5701517a5d481b2e7b6e6876209b8a0202d71c656e6eddd2b3c8be0e8c686631b682a20475028ff7e5b1279b70a9cfef070014363
   languageName: node
   linkType: hard
 
@@ -3097,7 +3097,7 @@ __metadata:
 
 "@deepseek-ai/dsh-physical-operator-chatgpt-web@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-physical-operator-chatgpt-web@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz::hash=f0efaf&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-physical-operator-chatgpt-web@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz::hash=afb1fe&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -3105,7 +3105,7 @@ __metadata:
     "@deepseek-ai/dsh-browser": ^0.1.0-rc.5
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/dsh-physical-operator": ^0.1.0-rc.5
-  checksum: 10c0/8825527aff5351563f877bfb9e36a3f2588df413df935a6340bd1584a27b8fa027423c99ec3876aeb561b0bc6433d4de46c6dfdd9c9437df46cbe189d1e19680
+  checksum: 10c0/4223f21d3cd6192a7054b8350f7205f0827be01d27fa8fd9f60d0e9b5c586752cbd3f6655940379065fc41c0373eef3fab3594882856bd8931ae12fa94af352a
   languageName: node
   linkType: hard
 
@@ -4365,7 +4365,7 @@ __metadata:
 
 "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::hash=a0cdbe&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-tool-physical-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-physical-operator-0.1.0-rc.5.tgz::hash=92642f&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-agent": ^0.1.0-rc.5
@@ -4380,7 +4380,7 @@ __metadata:
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
     zod: ^4.4.3
-  checksum: 10c0/f2626987974dd350feeb4096974d2f524c0389a5b9a1edcca34f72c3fc5434423bf234b972f648128a68a13e02a82a0da55407396134cfc10fab2c1f0645385e
+  checksum: 10c0/89a5f67678a7934af7b4683cbd145d9baddfb442a348588221ddc9848ec854277c9530840d6bd10937cc5d2653f1da10f1e2dcfc538c4c164f30674a3c86f164
   languageName: node
   linkType: hard
 

@@ -10,8 +10,8 @@ export const name = 'chatgpt-web-operator-bundle-invariant'
 /** The invariant registry must be mounted before registration. */
 export const inject = ['invariants']
 
-// This is a composition-only package. The inserted Service Definition,
-// Provider, and Consumer each own their own mutable-state invariants.
+// No runtime invariant: this is a composition-only package. The inserted
+// Service Definition, Provider, and Consumer own their mutable-state invariants.
 const install: InvariantInstaller = () => {}
 
 /** Register the package companion without adding another runtime authority. */

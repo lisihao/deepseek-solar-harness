@@ -396,15 +396,11 @@ describe('host physical-operator routing', () => {
     expect(agent.session.events.find(event => event.type === 'physical-operator/dispatch')).toMatchObject({
       data: { operatorId: 'chatgpt-web', executionMode: 'ephemeral' },
     })
-    expect(agent.session.events.filter(event => event.type === 'physical-operator/progress')).toEqual([
-      expect.objectContaining({
-        data: expect.objectContaining({
-          operatorId: 'chatgpt-web',
-          type: 'turn.settled',
-          data: expect.objectContaining({ stopReason: 'completed' }),
-        }),
-      }),
-    ])
+    const settled = agent.session.events.find(event => event.type === 'physical-operator/progress')
+    if (settled?.type !== 'physical-operator/progress') throw new Error('expected a settled progress event')
+    expect(settled.data.operatorId).toBe('chatgpt-web')
+    expect(settled.data.type).toBe('turn.settled')
+    expect(settled.data.data.stopReason).toBe('completed')
   })
 
   it('recognizes an explicitly named ChatGPT Web request without changing Smart Auto', async () => {

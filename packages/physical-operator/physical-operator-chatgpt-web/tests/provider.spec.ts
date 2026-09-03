@@ -1,3 +1,4 @@
+import { Script } from 'node:vm'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -188,7 +189,7 @@ describe('ChatGPT Web physical operator', () => {
     expect(encodedEvaluators).toHaveLength(4)
     for (const encoded of encodedEvaluators) {
       const evaluator = JSON.parse(encoded!) as string
-      expect(() => Function(`return (${evaluator})`)()).not.toThrow()
+      expect(() => new Script(`(${evaluator})`)).not.toThrow()
     }
   })
 

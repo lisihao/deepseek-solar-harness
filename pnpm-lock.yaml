@@ -6510,18 +6510,12 @@ importers:
       '@deepseek-ai/dsh-agent':
         specifier: workspace:^
         version: link:../../core/agent
-      '@deepseek-ai/dsh-app-boot':
-        specifier: workspace:^
-        version: link:../../boot/app-boot
       '@deepseek-ai/dsh-browser':
         specifier: workspace:^
         version: link:../../browser/browser
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
-      '@deepseek-ai/dsh-loader-smoke':
-        specifier: workspace:^
-        version: link:../../test-support/loader-smoke
       '@deepseek-ai/dsh-physical-operator':
         specifier: workspace:^
         version: link:../physical-operator

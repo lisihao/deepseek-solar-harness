@@ -713,7 +713,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       })
       observer = observePhysicalOperatorProgress(this.ctx, agent, run, dispatch.commandId)
       const result = await run.result
-      await observer?.stop()
+      await observer.stop()
       if (result.stopReason === 'error' || result.stopReason === 'refusal') {
         agent.session.append('physical-operator/dispatch-terminal', {
           commandId: dispatch.commandId,

@@ -833,6 +833,11 @@
         "@deepseek-ai/dsh-tool-browser"
       ]
     },
+    "packages/bundle/chatgpt-web-operator": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-physical-operator-chatgpt-web"
+      ]
+    },
     "packages/orchestration/capability-capsule": {
       "project": [
         "src/**/*.ts"
