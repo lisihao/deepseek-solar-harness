@@ -14,7 +14,7 @@ import type {
   HistoryEntry, ModelCatalogFailure, ModelCatalogModel, ModelProviderGroup, ModelReasoning,
   ModelReasoningEffort, ModelSelection, SessionListMetadata, SessionProjectionsBlock, SessionSearchItem, SessionSummary,
 } from './sessions.ts'
-import type { ToolEventView } from './events.ts'
+import type { PhysicalOperatorTraceView, PhysicalOperatorValueShape, ToolEventView } from './events.ts'
 import type { AttachmentIdType, ImageAttachmentLimits, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { WorkspaceId } from './workspace.ts'
 import {
@@ -198,10 +198,90 @@ export const toolEventViewSchema = z.discriminatedUnion('for', [
   z.object({ for: z.literal('result'), view: z.looseObject({ card: z.string() }) }),
 ]) as unknown as z.ZodType<ToolEventView>
 
+/** Text-free structural descriptor used by the Physical Operator public trace. */
+export const physicalOperatorValueShapeSchema: z.ZodType<PhysicalOperatorValueShape> = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('object'), fields: z.number().int().nonnegative() }),
+  z.object({ kind: z.literal('array'), items: z.number().int().nonnegative() }),
+  z.object({ kind: z.literal('string'), characters: z.number().int().nonnegative() }),
+  z.object({ kind: z.literal('number') }),
+  z.object({ kind: z.literal('boolean') }),
+  z.object({ kind: z.literal('null') }),
+  z.object({ kind: z.literal('unavailable') }),
+])
+
+const physicalTraceBase = {
+  version: z.literal(1),
+  commandId: z.string().min(1),
+}
+
+/** Fixed Host projection for Physical Operator events; no arbitrary text fields exist. */
+export const physicalOperatorTraceViewSchema = z.discriminatedUnion('kind', [
+  z.object({
+    ...physicalTraceBase,
+    kind: z.literal('dispatch'),
+    operator: z.union([z.literal('codex'), z.literal('claude-code'), z.literal('physical-operator')]),
+    turn: z.number().int().nonnegative(),
+    step: z.number().int().nonnegative(),
+  }),
+  z.object({
+    ...physicalTraceBase,
+    kind: z.literal('progress'),
+    sourceSequence: z.number().int().nonnegative(),
+    phase: z.union([
+      z.literal('connecting'), z.literal('session-ready'), z.literal('reasoning'),
+      z.literal('tool-activity'), z.literal('finalizing'), z.literal('working'),
+    ]),
+  }),
+  z.object({
+    ...physicalTraceBase,
+    kind: z.literal('public-output'),
+    sourceSequence: z.number().int().nonnegative(),
+  }),
+  z.object({
+    ...physicalTraceBase,
+    kind: z.literal('native-tool'),
+    sourceSequence: z.number().int().nonnegative(),
+    status: z.union([z.literal('running'), z.literal('completed')]),
+  }),
+  z.object({
+    ...physicalTraceBase,
+    kind: z.literal('approval-required'),
+    sourceSequence: z.number().int().nonnegative(),
+  }),
+  z.object({
+    ...physicalTraceBase,
+    kind: z.literal('usage'),
+    sourceSequence: z.number().int().nonnegative(),
+    inputTokens: z.number().optional(),
+    outputTokens: z.number().optional(),
+    cacheReadInputTokens: z.number().optional(),
+    cacheWriteInputTokens: z.number().optional(),
+  }),
+  z.object({
+    ...physicalTraceBase,
+    kind: z.literal('terminal'),
+    sourceSequence: z.number().int().nonnegative().optional(),
+    outcome: z.union([z.literal('success'), z.literal('error')]),
+  }),
+  z.object({ ...physicalTraceBase, kind: z.literal('degraded') }),
+  z.object({
+    ...physicalTraceBase,
+    kind: z.literal('tool'),
+    toolCallId: z.string().min(1),
+    standalone: z.boolean(),
+    status: z.union([
+      z.literal('running'), z.literal('completed'), z.literal('error'), z.literal('indeterminate'),
+    ]),
+    argumentsShape: physicalOperatorValueShapeSchema.optional(),
+    resultShape: physicalOperatorValueShapeSchema.optional(),
+  }),
+]) as unknown as z.ZodType<PhysicalOperatorTraceView>
+
 /** One session.history item: the session event plus its optional host-computed tool view. */
 export const historyEntrySchema: z.ZodType<Wire<HistoryEntry>> = z.object({
   event: sessionEventSchema,
   view: toolEventViewSchema.optional(),
+  physicalOperatorTrace: physicalOperatorTraceViewSchema.optional(),
 }) as unknown as z.ZodType<Wire<HistoryEntry>>
 
 /**

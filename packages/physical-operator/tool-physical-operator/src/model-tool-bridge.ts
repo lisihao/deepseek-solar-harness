@@ -156,7 +156,18 @@ export class PhysicalOperatorModelToolBridge {
     const existing = binding.receipts.get(commandId)
     if (existing !== undefined) {
       if (existing.hash !== hash) throw new Error(`model tool command conflict: ${commandId}`)
-      if (existing.result === undefined) throw new Error(`model tool command is indeterminate and will not be replayed: ${commandId}`)
+      if (existing.result === undefined) {
+        // A previous in-flight execution may append its durable result after
+        // this binding recovered the call as indeterminate. Refresh only from
+        // that authority log; never invoke the tool again.
+        const settled = recoverReceipts(binding.agent.session.events).receipts.get(commandId)
+        if (settled?.result === undefined) {
+          throw new Error(`model tool command is indeterminate and will not be replayed: ${commandId}`)
+        }
+        if (settled.hash !== hash) throw new Error(`model tool command conflict: ${commandId}`)
+        binding.receipts.set(commandId, settled)
+        return settled.result
+      }
       return existing.result
     }
     const result = this.execute(binding, commandId, tool, args)
@@ -215,6 +226,7 @@ function recoverReceipts(events: readonly SessionEvent[]): RecoveredBridgeState 
   const markedIndeterminate = new Set<string>()
   for (const event of events) {
     if (event.type === 'physical-operator/tool-call') {
+      if (calls.has(event.data.commandId)) continue
       const call = {
         hash: requestHash(event.data.tool, event.data.arguments),
         tool: event.data.tool,
@@ -232,6 +244,7 @@ function recoverReceipts(events: readonly SessionEvent[]): RecoveredBridgeState 
       continue
     }
     if (event.type !== 'physical-operator/tool-result') continue
+    if (settled.has(event.data.commandId)) continue
     const call = calls.get(event.data.commandId)
     if (call === undefined || call.tool !== event.data.tool) continue
     settled.add(event.data.commandId)

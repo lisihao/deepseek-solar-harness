@@ -4,7 +4,7 @@
 
 本包是面向模型的 `ctx.physicalOperators` Consumer。它注册一个固定的 `physical_operator` 工具，包含发现实时算子和运行一个稳定算子 ID 两个动作。动态 system-prompt 区段会说明何时委派、何时使用 Resident 连续性，并列出当前实时 descriptor、tag 与 mode。Provider 传输不会出现在工具约定中。
 
-同一个包还会通过 `dsh-physical-operator` 模型路由公布每个可用物理算子。因此 Codex 与 Claude Code 可以被直接选为第一等主模型，这条路径不需要 DeepSeek API key，也不会先发起 DeepSeek 请求。选中的订阅模型会收到该 turn 精确组装的 DSH system prompt 与模型可见工具 schema。工具调用经属主本地桥回到原 Agent 的 `ctx.tools`，因此既有 scope、guard、approval、插件所有权与结果渲染继续生效。桥会记录可忽略的调用／结果事件，并保留 Receipt 的 `commandId`、稳定 `toolCallId` 及其所属物理执行 ID，供轨迹配对；在 DSH 重载后重建工具 Receipt：已结算调用返回已记录结果；请求变化返回冲突；只观察到调用而没有结果的命令会持久记录明确的 indeterminate 轨迹，不会显示为仍在运行，也绝不自动重放。轨迹只消费带封闭标量元数据白名单的结构化参数／结果摘要；原始工具字符串只留在持久权威日志中，不会复制到公开投影。
+同一个包还会通过 `dsh-physical-operator` 模型路由公布每个可用物理算子。因此 Codex 与 Claude Code 可以被直接选为第一等主模型，这条路径不需要 DeepSeek API key，也不会先发起 DeepSeek 请求。选中的订阅模型会收到该 turn 精确组装的 DSH system prompt 与模型可见工具 schema。工具调用经属主本地桥回到原 Agent 的 `ctx.tools`，因此既有 scope、guard、approval、插件所有权与结果渲染继续生效。桥会记录可忽略的调用／结果事件，并保留 Receipt 的 `commandId`、稳定 `toolCallId` 及其所属物理执行 ID，供轨迹配对；在 DSH 重载后重建工具 Receipt：已结算调用返回已记录结果；请求变化返回冲突；只观察到调用而没有结果的命令会持久记录明确的 indeterminate 轨迹，不会显示为仍在运行，也绝不自动重放。若同一活动 binding 期间后来到达持久结果，bridge 会从权威日志刷新并缓存该结果，绝不再次执行工具。原始参数、结果、错误、prompt 和 Provider 文本只留在持久权威日志；Host 会在公开 history 或 mux 交付前移除它们，仅输出固定、无文本的轨迹 schema。
 
 Resident 原生进度页会在运行结束（或运行报告错误）后复制到当前 Session，成为可忽略的 `physical-operator/progress` 事件。投影有界、限定于当前 command，并在重连时按 sequence 去重；它携带阶段和终止元数据，但绝不携带 prompt 文本、推理、stderr 或原生 transcript。最终 assistant 输出仍使用普通的 `assistant/chunk`／`assistant/message` Trace；只有 Provider 提供权威 usage 时才附加（未知的可选 bucket 保持缺省），原生 stop/error 原因在 stream 与 turn 结束事件中保持明确。
 

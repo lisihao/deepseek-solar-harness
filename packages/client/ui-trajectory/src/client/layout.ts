@@ -661,19 +661,22 @@ function physicalOperatorCell(
       : tool.status === 'indeterminate'
         ? '状态不确定'
         : tool.status === 'error' ? '失败' : '完成'
+    const inputDetail = physicalOperatorShapeLabel(tool.argumentsShape)
+    const resultDetail = physicalOperatorShapeLabel(tool.resultShape)
     const outputDetail = [
-      tool.resultSummary === undefined ? undefined : `结果\n${tool.resultSummary}`,
-      tool.error === undefined ? undefined : `错误\n${tool.error}`,
+      resultDetail === undefined ? undefined : `结果结构\n${resultDetail}`,
+      tool.status === 'error' ? '工具报告失败' : undefined,
+      tool.status === 'indeterminate' ? '工具结果尚无法证明' : undefined,
     ].filter((value): value is string => value !== undefined).join('\n\n')
     return {
       ...base,
-      text: `工具${status} · ${tool.name}`,
+      text: `DSH 工具${status}`,
       callId: tool.toolCallId,
-      ...(tool.argumentsSummary === undefined ? {} : {
-        inputDetail: tool.argumentsSummary,
-        previewMarkdown: tool.argumentsSummary,
+      ...(inputDetail === undefined ? {} : {
+        inputDetail,
+        previewMarkdown: inputDetail,
       }),
-      ...(tool.resultSummary === undefined ? {} : { resultPreviewMarkdown: tool.resultSummary }),
+      ...(resultDetail === undefined ? {} : { resultPreviewMarkdown: resultDetail }),
       ...(outputDetail === '' ? {} : { outputDetail }),
       ...(tool.status === 'error' || tool.status === 'indeterminate' ? { isError: true } : {}),
     }
@@ -682,22 +685,19 @@ function physicalOperatorCell(
   if (observation === undefined) return { ...base, text: '已收到原生状态更新' }
   if (observation.kind === 'public-output') return {
     ...base,
-    // This is a bounded progress summary, never the final assistant transcript.
-    text: observation.preview === undefined ? '公开输出已更新' : `公开输出 · ${observation.preview}`,
-    ...(observation.preview === undefined ? {} : { outputDetail: observation.preview }),
+    text: '公开输出已更新',
   }
   if (observation.kind === 'tool-started') return {
     ...base,
-    text: `工具开始 · ${observation.toolName ?? '原生工具'}`,
+    text: '原生工具开始',
   }
   if (observation.kind === 'tool-completed') return {
     ...base,
-    text: `工具完成 · ${observation.toolName ?? '原生工具'}`,
+    text: '原生工具完成',
   }
   if (observation.kind === 'approval-required') return {
     ...base,
-    text: `需要批准 · ${observation.approvalKind ?? '原生权限'}`,
-    ...(observation.preview === undefined ? {} : { previewMarkdown: observation.preview }),
+    text: '需要批准 · 原生权限',
     isError: true,
   }
   const usage = observation.usage
@@ -718,11 +718,26 @@ function physicalOperatorCell(
 function physicalOperatorPhaseLabel(phase: string | undefined): string {
   return ({
     connecting: '连接原生产品',
-    session_ready: '原生会话已接通',
+    'session-ready': '原生会话已接通',
     reasoning: '推理与执行',
-    tool_activity: '使用工具',
+    'tool-activity': '使用工具',
     finalizing: '整理结果',
   } as Record<string, string>)[phase ?? ''] ?? '正在执行'
+}
+
+function physicalOperatorShapeLabel(
+  shape: NonNullable<TrajectoryPhysicalOperatorExecution['entries'][number]['tool']>['argumentsShape'] | undefined,
+): string | undefined {
+  if (shape === undefined) return undefined
+  if (shape.kind === 'object') return `对象 · ${String(shape.fields)} 个字段`
+  if (shape.kind === 'array') return `数组 · ${String(shape.items)} 项`
+  if (shape.kind === 'string') return `文本 · ${String(shape.characters)} 字符`
+  return ({
+    number: '数字',
+    boolean: '布尔值',
+    null: '空值',
+    unavailable: '结构不可用',
+  } as Record<string, string>)[shape.kind]
 }
 
 /**

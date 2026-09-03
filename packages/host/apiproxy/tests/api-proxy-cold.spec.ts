@@ -303,6 +303,63 @@ describe('attached updatedAt tracks human prompts', () => {
 })
 
 describe('cold history recovery view', () => {
+  it('projects legacy Physical Operator authority payloads without sending raw text', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(UserQuestionService)
+    const sessionId = sid('session-physical-legacy')
+    const meta = header(sessionId, 1000)
+    const events = [
+      {
+        type: 'physical-operator/tool-call', seq: 0, time: 1, ignorable: true,
+        data: {
+          commandId: 'legacy-secret-command', tool: 'Read',
+          arguments: { prompt: 'private prompt', token: 'plain-secret-4711', path: '/private/file' },
+        },
+      },
+      {
+        type: 'physical-operator/tool-result', seq: 1, time: 2, ignorable: true,
+        data: {
+          commandId: 'legacy-secret-command', tool: 'Read',
+          result: { isError: true, error: 'private error', value: { transcript: 'private transcript' } },
+        },
+      },
+      {
+        type: 'physical-operator/future-event', seq: 2, time: 3, ignorable: true,
+        data: { prompt: 'future private prompt', transcript: 'future private transcript' },
+      },
+    ] as unknown as SessionEvent[]
+    ctx.provide('sessionPersistence', {
+      list: () => Promise.resolve([meta]),
+      inspect: () => Promise.resolve({ meta, events }),
+      locate: () => undefined,
+    } as never)
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
+
+    const history = await api.sessions.history(request({ sessionId }))
+    if (!history.result.ok) throw new Error('history failed')
+    const publicJson = JSON.stringify(history.result.value.events)
+    for (const privateText of [
+      'legacy-secret-command', 'private prompt', 'plain-secret-4711', '/private/file',
+      'private error', 'private transcript', 'future private prompt', 'future private transcript', 'Read',
+    ]) expect(publicJson).not.toContain(privateText)
+    expect(history.result.value.events.map(entry => entry.event.data)).toEqual([{}, {}, {}])
+    expect(history.result.value.events.map(entry => entry.physicalOperatorTrace)).toMatchObject([
+      {
+        version: 1, kind: 'tool', standalone: true, status: 'running',
+        argumentsShape: { kind: 'object', fields: 3 },
+      },
+      {
+        version: 1, kind: 'tool', standalone: true, status: 'error',
+        resultShape: { kind: 'object', fields: 1 },
+      },
+      undefined,
+    ])
+    expect(history.result.value.events[0]?.physicalOperatorTrace?.commandId)
+      .toBe(history.result.value.events[1]?.physicalOperatorTrace?.commandId)
+    await ctx.fiber.dispose()
+  })
+
   it('shows in-memory interruption repair without activating the session', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)

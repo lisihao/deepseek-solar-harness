@@ -7,38 +7,6 @@ import type {
 } from './trajectory-contract.ts'
 import { trajectoryNode } from './trajectory-definition-common.ts'
 
-const MAX_PREVIEW_CHARACTERS = 1_600
-const MAX_PREVIEW_LINES = 12
-const MAX_SUMMARY_DEPTH = 4
-const MAX_SUMMARY_ITEMS = 24
-
-const SENSITIVE_LABEL = [
-  'api[_-]?key', 'authorization', 'password', 'access[_-]?token', 'refresh[_-]?token',
-  'token', 'secret', 'credential', 'stderr', 'prompt', 'system[_-]?prompt',
-  'hidden[_-]?reasoning', 'reasoning', 'transcript', 'environment', 'env',
-  'chain[_-]?of[_-]?thought', 'internal',
-].join('|')
-const SENSITIVE_KEY = new RegExp(SENSITIVE_LABEL, 'iu')
-const SENSITIVE_TEXT = new RegExp(
-  String.raw`\b(["']?(?:${SENSITIVE_LABEL})["']?\s*[:=]\s*)`
-    + String.raw`(?:"[^"\n]*"|'[^'\n]*'|[^\n,;}]+)`,
-  'giu',
-)
-const BEARER_TEXT = /\b(Bearer\s+)[^\s,;}"']+/giu
-const COMMON_CREDENTIAL_TEXT = new RegExp([
-  String.raw`\bsk-[A-Za-z0-9_-]{8,}\b`,
-  String.raw`\bgh[pousr]_[A-Za-z0-9_]{8,}\b`,
-  String.raw`\bxox[baprs]-[A-Za-z0-9-]{8,}\b`,
-  String.raw`\bAKIA[0-9A-Z]{16}\b`,
-].join('|'), 'gu')
-const PRIVATE_KEY_TEXT = /-----BEGIN [^-\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\n]*PRIVATE KEY-----/gu
-const PUBLIC_SCALAR_KEYS = new Set([
-  'action', 'bytes', 'code', 'column', 'count', 'durationMs', 'end', 'exitCode',
-  'isError', 'kind', 'limit', 'line', 'method', 'offset', 'operation', 'start',
-  'state', 'status', 'success', 'total', 'type',
-])
-const PUBLIC_SCALAR_TEXT = /^[A-Za-z0-9_.:/-]{1,160}$/u
-
 interface PhysicalOperatorState {
   readonly commandId: string
   readonly operatorId: string
@@ -49,231 +17,92 @@ interface PhysicalOperatorState {
   readonly entries: ReadonlyMap<string, TrajectoryPhysicalOperatorTraceEntry>
 }
 
-type PhysicalObservation = NonNullable<TrajectoryPhysicalOperatorTraceEntry['observation']>
+type PhysicalTrace = NonNullable<ConversationMatch['physicalOperatorTrace']>
+type ToolTrace = Extract<PhysicalTrace, { kind: 'tool' }>
 
-/** Local view of the registered durable event vocabulary without importing a Host package into the browser bundle. */
 interface PhysicalSessionEvent {
   readonly seq: number
   readonly time: number
   readonly type: string
-  readonly data: Record<string, unknown>
 }
 
 function physicalEvent(match: ConversationMatch): PhysicalSessionEvent {
-  return match.event as unknown as PhysicalSessionEvent
+  return match.event
 }
 
-function isExecutionStart(event: PhysicalSessionEvent): boolean {
-  return event.type === 'physical-operator/dispatch' || event.type === 'physical-operator/tool-dispatch'
+function eventTypeIs(event: PhysicalSessionEvent, type: string): boolean {
+  return event.type === type
 }
 
-function nonEmptyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value : undefined
-}
-
-function scrubText(value: string): string {
-  return value
-    .replace(PRIVATE_KEY_TEXT, '[PRIVATE KEY REDACTED]')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, ' ')
-    .replace(SENSITIVE_TEXT, '$1[REDACTED]')
-    .replace(BEARER_TEXT, '$1[REDACTED]')
-    .replace(COMMON_CREDENTIAL_TEXT, '[CREDENTIAL REDACTED]')
-}
-
-function boundedMultiline(value: string, limit = MAX_PREVIEW_CHARACTERS): string | undefined {
-  const lines = scrubText(value.replace(/\r\n?/gu, '\n')).split('\n')
-  const hasMoreLines = lines.length > MAX_PREVIEW_LINES
-  let bounded = lines.slice(0, MAX_PREVIEW_LINES).join('\n').trim()
-  if (hasMoreLines) bounded = `${bounded}\n…`
-  if (bounded.length > limit) bounded = `${bounded.slice(0, Math.max(0, limit - 1))}…`
-  return bounded === '' ? undefined : bounded
-}
-
-function safePreview(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  return boundedMultiline(value)
-}
-
-function structuralDescriptor(value: unknown): string {
-  if (typeof value === 'string') return `[string:${String(value.length)}]`
-  if (typeof value === 'number') return '[number]'
-  if (typeof value === 'boolean') return '[boolean]'
-  if (value === null) return '[null]'
-  if (Array.isArray(value)) return `[array:${String(value.length)}]`
-  if (typeof value === 'object') return `[object:${String(Object.keys(value).length)}]`
-  return '[unavailable]'
-}
-
-function safePublicScalar(key: string, value: unknown): unknown {
-  if (!PUBLIC_SCALAR_KEYS.has(key)) return structuralDescriptor(value)
-  if (typeof value === 'boolean' || typeof value === 'number' || value === null) return value
-  if (typeof value === 'string' && PUBLIC_SCALAR_TEXT.test(value) && scrubText(value) === value) return value
-  return structuralDescriptor(value)
-}
-
-/**
- * Describe an arbitrary tool payload without copying arbitrary values. Only a
- * closed set of status/count metadata may expose scalar values; every other
- * value is represented by its JSON shape.
- */
-function safeSummaryValue(value: unknown, depth = 0, key = ''): unknown {
-  if (depth > MAX_SUMMARY_DEPTH) return '[TRUNCATED]'
-  if (value === null || typeof value !== 'object') return safePublicScalar(key, value)
-  if (Array.isArray(value)) return structuralDescriptor(value)
-  const source = value as Record<string, unknown>
-  const entries = Object.entries(source).sort(([left], [right]) => left.localeCompare(right))
-  const result: Record<string, unknown> = {}
-  for (const [key, item] of entries.slice(0, MAX_SUMMARY_ITEMS)) {
-    if (SENSITIVE_KEY.test(key)) continue
-    result[key] = item !== null && typeof item === 'object' && !Array.isArray(item)
-      ? safeSummaryValue(item, depth + 1, key)
-      : safePublicScalar(key, item)
-  }
-  if (entries.length > MAX_SUMMARY_ITEMS) result['…'] = '[TRUNCATED]'
-  return result
-}
-
-function safeJsonSummary(value: unknown): string | undefined {
-  try {
-    const serialized = JSON.stringify(safeSummaryValue(value), null, 2)
-    return typeof serialized === 'string' ? boundedMultiline(serialized) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function safeErrorSummary(value: unknown): string {
-  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-    const code = (value as Record<string, unknown>).code
-    if (typeof code === 'string' && PUBLIC_SCALAR_TEXT.test(code)) return `错误码 ${code}`
-  }
-  return '错误详情未公开'
-}
-
-function usage(value: unknown): PhysicalObservation['usage'] | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
-  const record = value as Record<string, unknown>
-  const number = (key: string): number | undefined =>
-    typeof record[key] === 'number' && Number.isFinite(record[key]) ? record[key] : undefined
-  const inputTokens = number('inputTokens')
-  const outputTokens = number('outputTokens')
-  const cacheReadInputTokens = number('cacheReadInputTokens')
-  const cacheWriteInputTokens = number('cacheWriteInputTokens')
-  if (inputTokens === undefined && outputTokens === undefined
-    && cacheReadInputTokens === undefined && cacheWriteInputTokens === undefined) return undefined
-  return {
-    ...(inputTokens === undefined ? {} : { inputTokens }),
-    ...(outputTokens === undefined ? {} : { outputTokens }),
-    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
-    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
-  }
-}
-
-function observation(value: unknown): PhysicalObservation | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
-  const record = value as Record<string, unknown>
-  const kind = nonEmptyString(record.kind)
-  switch (kind) {
-    case 'public-output': {
-      const preview = safePreview(record.preview)
-      return { kind, ...(preview === undefined ? {} : { preview }) }
-    }
-    case 'tool-started':
-    case 'tool-completed': {
-      const toolName = nonEmptyString(record.toolName)
-      return { kind, ...(toolName === undefined ? {} : { toolName }) }
-    }
-    case 'approval-required': {
-      const approvalKind = nonEmptyString(record.approvalKind)
-      const preview = safePreview(record.preview)
-      return {
-        kind,
-        ...(approvalKind === undefined ? {} : { approvalKind }),
-        ...(preview === undefined ? {} : { preview }),
-      }
-    }
-    case 'usage-updated': {
-      const current = usage(record.usage)
-      return current === undefined ? undefined : { kind, usage: current }
-    }
-    default: return undefined
-  }
-}
-
-function toolTraceId(data: Record<string, unknown>): string | undefined {
-  return nonEmptyString(data.toolCallId) ?? nonEmptyString(data.commandId)
-}
-
-function executionTraceId(data: Record<string, unknown>): string | undefined {
-  return nonEmptyString(data.executionCommandId) ?? nonEmptyString(data.commandId)
-}
-
-function toolTraceEntry(event: PhysicalSessionEvent): {
+function traceEntry(match: ConversationMatch): {
   readonly key: string
   readonly entry: TrajectoryPhysicalOperatorTraceEntry
 } | undefined {
-  const toolCallId = toolTraceId(event.data)
-  const name = nonEmptyString(event.data.tool)
-  if (toolCallId === undefined || name === undefined) return undefined
-  if (event.type === 'physical-operator/tool-call') {
-    const argumentsSummary = safeJsonSummary(event.data.arguments)
+  const trace = match.physicalOperatorTrace
+  if (trace === undefined || trace.kind === 'dispatch') return undefined
+  const event = physicalEvent(match)
+  if (trace.kind === 'tool') return toolTraceEntry(event, trace)
+  if (trace.kind === 'progress') {
     return {
-      key: `tool:${toolCallId}`,
+      key: `progress:${String(trace.sourceSequence)}`,
+      entry: { seq: event.seq, time: event.time, type: 'progress', phase: trace.phase },
+    }
+  }
+  if (trace.kind === 'terminal') {
+    return {
+      key: trace.sourceSequence === undefined
+        ? `event:${String(event.seq)}`
+        : `progress:${String(trace.sourceSequence)}`,
       entry: {
         seq: event.seq,
         time: event.time,
-        type: 'tool',
-        tool: {
-          toolCallId,
-          name,
-          status: 'running',
-          ...(argumentsSummary === undefined ? {} : { argumentsSummary }),
-          callSeq: event.seq,
-        },
+        type: 'terminal',
+        code: trace.outcome === 'success' ? 'completed' : 'error',
+        outcome: trace.outcome,
       },
     }
   }
-  if (event.type === 'physical-operator/tool-indeterminate') {
+  if (trace.kind === 'degraded') {
     return {
-      key: `tool:${toolCallId}`,
-      entry: {
-        seq: event.seq,
-        time: event.time,
-        type: 'tool',
-        tool: {
-          toolCallId,
-          name,
-          status: 'indeterminate',
-          error: 'COMMAND_INDETERMINATE',
-          resultSeq: event.seq,
-        },
-      },
+      key: `event:${String(event.seq)}`,
+      entry: { seq: event.seq, time: event.time, type: 'degraded', code: 'PROGRESS_UNAVAILABLE' },
     }
   }
-  if (event.type !== 'physical-operator/tool-result') return undefined
-  const result = event.data.result
-  const resultRecord = typeof result === 'object' && result !== null && !Array.isArray(result)
-    ? result as Record<string, unknown>
-    : undefined
-  const isError = resultRecord?.isError === true || resultRecord?.error !== undefined
-  const error = resultRecord?.error === undefined ? undefined : safeErrorSummary(resultRecord.error)
-  const resultValue = resultRecord === undefined
-    ? result
-    : resultRecord.value === undefined ? resultRecord.content : resultRecord.value
-  const resultSummary = safeJsonSummary(resultValue)
+  const observation = trace.kind === 'usage'
+    ? {
+      kind: 'usage-updated' as const,
+      usage: {
+        ...(trace.inputTokens === undefined ? {} : { inputTokens: trace.inputTokens }),
+        ...(trace.outputTokens === undefined ? {} : { outputTokens: trace.outputTokens }),
+        ...(trace.cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens: trace.cacheReadInputTokens }),
+        ...(trace.cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens: trace.cacheWriteInputTokens }),
+      },
+    }
+    : trace.kind === 'native-tool'
+      ? { kind: trace.status === 'running' ? 'tool-started' as const : 'tool-completed' as const }
+      : { kind: trace.kind }
   return {
-    key: `tool:${toolCallId}`,
+    key: `progress:${String(trace.sourceSequence)}`,
+    entry: { seq: event.seq, time: event.time, type: 'observation', observation },
+  }
+}
+
+function toolTraceEntry(
+  event: PhysicalSessionEvent,
+  trace: ToolTrace,
+): { readonly key: string; readonly entry: TrajectoryPhysicalOperatorTraceEntry } {
+  return {
+    key: `tool:${trace.toolCallId}`,
     entry: {
       seq: event.seq,
       time: event.time,
       type: 'tool',
       tool: {
-        toolCallId,
-        name,
-        status: isError ? 'error' : 'completed',
-        ...(resultSummary === undefined ? {} : { resultSummary }),
-        ...(error === undefined ? {} : { error }),
-        resultSeq: event.seq,
+        toolCallId: trace.toolCallId,
+        status: trace.status,
+        ...(trace.argumentsShape === undefined ? {} : { argumentsShape: trace.argumentsShape }),
+        ...(trace.resultShape === undefined ? {} : { resultShape: trace.resultShape }),
+        ...(trace.status === 'running' ? { callSeq: event.seq } : { resultSeq: event.seq }),
       },
     },
   }
@@ -286,8 +115,8 @@ function mergeToolTraceEntries(
   if (previous.type !== 'tool' || next.type !== 'tool' || previous.tool === undefined || next.tool === undefined) {
     return previous
   }
-  // The first settled result wins. This keeps reconnect/replay events from
-  // replacing a durable receipt with a later duplicate.
+  // A proven settlement is immutable; an indeterminate receipt may still
+  // accept a later Host-projected durable result.
   if (previous.tool.status === 'completed' || previous.tool.status === 'error') return previous
   if (next.tool.status === 'running') return previous
   if (previous.tool.status === 'indeterminate' && next.tool.status === 'indeterminate') return previous
@@ -302,58 +131,6 @@ function mergeToolTraceEntries(
   }
 }
 
-function traceEntry(match: ConversationMatch): { readonly key: string; readonly entry: TrajectoryPhysicalOperatorTraceEntry } | undefined {
-  const event = physicalEvent(match)
-  if (event.type === 'physical-operator/tool-call'
-    || event.type === 'physical-operator/tool-result'
-    || event.type === 'physical-operator/tool-indeterminate') {
-    return toolTraceEntry(event)
-  }
-  if (event.type === 'physical-operator/dispatch-terminal') {
-    return {
-      key: `event:${String(event.seq)}`,
-      entry: { seq: event.seq, time: event.time, type: 'terminal', code: String(event.data.code) },
-    }
-  }
-  if (event.type === 'physical-operator/trace-degraded') {
-    return {
-      key: `event:${String(event.seq)}`,
-      entry: { seq: event.seq, time: event.time, type: 'degraded', code: String(event.data.code) },
-    }
-  }
-  if (event.type !== 'physical-operator/progress') return undefined
-  const nativeType = String(event.data.type)
-  const native = event.data.data as Record<string, unknown>
-  if (nativeType === 'turn.progress') {
-    const phase = typeof native.phase === 'string' ? native.phase : undefined
-    return {
-      key: `progress:${String(event.data.sequence)}`,
-      entry: { seq: event.seq, time: event.time, type: 'progress', ...(phase === undefined ? {} : { phase }) },
-    }
-  }
-  if (nativeType === 'turn.settled') {
-    const stopReason = nonEmptyString(native.stopReason) ?? 'unknown'
-    return {
-      key: `progress:${String(event.data.sequence)}`,
-      entry: {
-        seq: event.seq,
-        time: event.time,
-        type: 'terminal',
-        code: stopReason,
-        outcome: stopReason === 'completed' ? 'success' : 'error',
-      },
-    }
-  }
-  if (nativeType !== 'turn.observation') return undefined
-  const current = observation(native)
-  return current === undefined
-    ? undefined
-    : {
-      key: `progress:${String(event.data.sequence)}`,
-      entry: { seq: event.seq, time: event.time, type: 'observation', observation: current },
-    }
-}
-
 function execution(state: PhysicalOperatorState): TrajectoryPhysicalOperatorExecution {
   return {
     commandId: state.commandId,
@@ -366,66 +143,48 @@ function execution(state: PhysicalOperatorState): TrajectoryPhysicalOperatorExec
   }
 }
 
-/** Command-scoped, trace-safe Physical Operator execution projection. */
+/** Command-scoped projection consuming only the Host-built public trace. */
 const trajectoryPhysicalOperatorDefinition: ConversationNodeDefinition<PhysicalOperatorState> = {
   kind: 'trajectory-physical-operator-execution',
   target: 'trajectory',
-  match: (raw) => {
-    const event = raw as unknown as PhysicalSessionEvent
-    if (isExecutionStart(event)) return { id: String(event.data.commandId), role: 'start' }
-    if (event.type === 'physical-operator/progress'
-      || event.type === 'physical-operator/dispatch-terminal'
-      || event.type === 'physical-operator/trace-degraded') return { id: String(event.data.commandId), role: 'update' }
-    if (event.type === 'physical-operator/tool-call'
-      || event.type === 'physical-operator/tool-result'
-      || event.type === 'physical-operator/tool-indeterminate') {
-      const id = executionTraceId(event.data)
-      if (id === undefined) return null
-      // New events carry the parent execution id. Legacy events without it
-      // remain visible as a synthetic command keyed by their receipt id.
-      return {
-        id,
-        role: event.data.executionCommandId === undefined && event.type === 'physical-operator/tool-call'
-          ? 'start'
-          : 'update',
-      }
+  match: (event, input) => {
+    const trace = input?.physicalOperatorTrace
+    if (trace === undefined) return null
+    if (trace.kind === 'dispatch') return { id: trace.commandId, role: 'start' }
+    if (trace.kind === 'tool' && trace.standalone && eventTypeIs(event, 'physical-operator/tool-call')) {
+      return { id: trace.commandId, role: 'start' }
     }
-    return null
+    return { id: trace.commandId, role: 'update' }
   },
   start: (_context, match) => {
+    const trace = match.physicalOperatorTrace
     const event = physicalEvent(match)
-    const legacyTool = event.type === 'physical-operator/tool-call' && event.data.executionCommandId === undefined
-      ? toolTraceEntry(event)
-      : undefined
-    if (!isExecutionStart(event) && legacyTool === undefined) {
-      throw new Error('trajectory physical-operator execution requires a dispatch start')
-    }
-    if (legacyTool !== undefined) {
+    if (trace?.kind === 'dispatch') {
       return {
-        commandId: String(event.data.commandId),
-        operatorId: nonEmptyString(event.data.operatorId) ?? 'physical-operator',
-        turn: 0,
-        step: 0,
+        commandId: trace.commandId,
+        operatorId: trace.operator,
+        turn: trace.turn,
+        step: trace.step,
         dispatchSeq: event.seq,
         dispatchTime: event.time,
-        entries: new Map([
-          ['dispatch', { seq: event.seq, time: event.time, type: 'dispatch' }],
-          [legacyTool.key, legacyTool.entry],
-        ]),
+        entries: new Map([['dispatch', { seq: event.seq, time: event.time, type: 'dispatch' }]]),
       }
     }
-    // Tool dispatches are not agent-loop events and intentionally carry no turn/step.
-    // `0/0` is the stable prelude location; layout folds it into the first displayed turn.
-    const turn = typeof event.data.turn === 'number' ? event.data.turn : 0
-    const step = typeof event.data.step === 'number' ? event.data.step : 0
+    if (trace?.kind !== 'tool' || !trace.standalone) {
+      throw new Error('trajectory physical-operator execution requires a public dispatch start')
+    }
+    const tool = toolTraceEntry(event, trace)
     return {
-      commandId: String(event.data.commandId),
-      operatorId: String(event.data.operatorId),
-      turn,
-      step,
+      commandId: trace.commandId,
+      operatorId: 'physical-operator',
+      turn: 0,
+      step: 0,
       dispatchSeq: event.seq,
       dispatchTime: event.time,
-      entries: new Map([['dispatch', { seq: event.seq, time: event.time, type: 'dispatch' }]]),
+      entries: new Map([
+        ['dispatch', { seq: event.seq, time: event.time, type: 'dispatch' }],
+        [tool.key, tool.entry],
+      ]),
     }
   },
   update: (context, match) => {
@@ -444,7 +203,7 @@ const trajectoryPhysicalOperatorDefinition: ConversationNodeDefinition<PhysicalO
     entries.set(trace.key, trace.entry)
     return { ...context.state, entries }
   },
-  publication: match => physicalEvent(match).type === 'physical-operator/progress' ? 'animation-frame' : 'immediate',
+  publication: match => match.physicalOperatorTrace?.kind === 'progress' ? 'animation-frame' : 'immediate',
   buildViewNode: context => context.state === undefined
     ? null
     : trajectoryNode(context, context.state.dispatchSeq, {
@@ -453,10 +212,7 @@ const trajectoryPhysicalOperatorDefinition: ConversationNodeDefinition<PhysicalO
     }),
 }
 
-/**
- * Register the command-scoped Resident trace projection.
- * @param ctx - Plugin context receiving the Definition.
- */
+/** Register the Host-projected Physical Operator trace Definition. */
 export function registerTrajectoryPhysicalOperatorDefinition(ctx: Context): void {
   ctx.conversationEvents.register(trajectoryPhysicalOperatorDefinition)
 }

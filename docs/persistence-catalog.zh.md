@@ -709,6 +709,10 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 /** One Resident-native model call into the current Agent's real DSH tool surface. */
 'physical-operator/tool-call': {
   commandId: string
+  /** Stable receipt identity; legacy events use commandId when absent. */
+  toolCallId?: string
+  /** Parent physical execution command that owns this model-tool call. */
+  executionCommandId?: string
   tool: string
   arguments: Record<string, JsonValue>
 }
@@ -733,6 +737,23 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:84`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
+<a id="physical-operatortool-indeterminate--log-only"></a>
+
+#### `physical-operator/tool-indeterminate` — log-only
+
+```ts persistence-catalog
+/** A recovered bridge Receipt has a call but no provable settled result. */
+'physical-operator/tool-indeterminate': {
+  commandId: string
+  toolCallId: string
+  executionCommandId: string
+  tool: string
+  code: 'COMMAND_INDETERMINATE'
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:133`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
 <a id="physical-operatortool-result--log-only"></a>
 
 #### `physical-operator/tool-result` — log-only
@@ -741,12 +762,16 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 /** Settled result of one bridged DSH tool call. */
 'physical-operator/tool-result': {
   commandId: string
+  /** Stable receipt identity; legacy events use commandId when absent. */
+  toolCallId?: string
+  /** Parent physical execution command that owns this model-tool call. */
+  executionCommandId?: string
   tool: string
   result: JsonValue
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:119`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:123`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 

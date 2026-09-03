@@ -126,7 +126,13 @@ const TEST_EVENT_DEFINITION: ConversationNodeDefinition<TestEventState> = {
   kind: 'runtime-test-event',
   target: 'chat',
   match: event => ({ id: String(event.seq), role: 'start' }),
-  start: (_context, match) => ({ event: match.event, view: match.view }),
+  start: (_context, match) => ({
+    event: match.event,
+    view: match.view,
+    ...(match.physicalOperatorTrace === undefined ? {} : {
+      physicalOperatorTrace: match.physicalOperatorTrace,
+    }),
+  }),
   update: context => context.state,
   publication: match => match.event.type === 'assistant/chunk' ? 'animation-frame' : 'immediate',
   buildViewNode: (context) => {
@@ -882,13 +888,16 @@ describe('remaining branches', () => {
     expect(() => { session.dispose() }).not.toThrow()
   })
 
-  it('carries history-entry and mux-frame views into the business-neutral Event input', async () => {
+  it('carries Host views and safe Physical Operator traces into the business-neutral Event input', async () => {
     const { api, session } = makeSession()
     const callView = { for: 'call', view: { card: 'generic', title: '历史卡' } }
+    const historyTrace = {
+      version: 1, kind: 'dispatch', commandId: 'trace-history', operator: 'codex', turn: 1, step: 1,
+    } as const
     api.onHistory = () => Promise.resolve(ok({
       events: [
         ...entries(plainTurn(0, 0, 'a', 'b')),
-        { event: ev.toolCall(6, 1, 'h1', 'bash', '{}'), view: callView },
+        { event: ev.toolCall(6, 1, 'h1', 'bash', '{}'), view: callView, physicalOperatorTrace: historyTrace },
         { event: ev.toolResult(7, 1, 'h1', 'done'), view: { for: 'result', view: { card: 'generic', title: '历史果' } } },
       ] as never[],
       hasMore: false,
@@ -899,13 +908,19 @@ describe('remaining branches', () => {
       callView,
       { for: 'result', view: { card: 'generic', title: '历史果' } },
     ])
+    expect(chatEvents(session.getSnapshot()).at(-2)?.physicalOperatorTrace).toEqual(historyTrace)
+    const liveTrace = {
+      version: 1, kind: 'progress', commandId: 'trace-live', sourceSequence: 2, phase: 'reasoning',
+    } as const
     session.handleMuxEnvelope('rv1' as never, {
       type: 'session/event', sessionId: SID, event: ev.toolCall(8, 2, 'l1', 'write', '{}'),
       view: { for: 'call', view: { card: 'generic', title: '直播卡' } },
+      physicalOperatorTrace: liveTrace,
     } as never)
     expect(chatEvents(session.getSnapshot()).at(-1)?.view).toEqual({
       for: 'call', view: { card: 'generic', title: '直播卡' },
     })
+    expect(chatEvents(session.getSnapshot()).at(-1)?.physicalOperatorTrace).toEqual(liveTrace)
     session.handleMuxEnvelope('rv2' as never, {
       type: 'session/event', sessionId: SID, event: ev.toolResult(9, 2, 'l1', 'ok'),
       view: { for: 'result', view: { card: 'generic', title: '直播果' } },

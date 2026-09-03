@@ -224,7 +224,7 @@ describe('TrajectorySnapshotBuilder', () => {
             seq: 8,
             time: 8,
             type: 'observation',
-            observation: { kind: 'public-output', preview: 'bounded public update' },
+            observation: { kind: 'public-output' },
           }],
         },
       })],

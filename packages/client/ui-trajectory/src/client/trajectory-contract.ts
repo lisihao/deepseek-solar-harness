@@ -36,23 +36,18 @@ export interface TrajectoryPhysicalOperatorTraceEntry {
     | 'terminal'
     | 'degraded'
   readonly phase?: string
-  /** One paired model-tool call/result from a physical operator bridge. */
+  /** One paired model-tool call/result from the Host-built public projection. */
   readonly tool?: {
-    /** Stable bridge receipt identity used to pair call and result events. */
+    /** Stable public pseudonym used to pair call and result events. */
     readonly toolCallId: string
-    readonly name: string
     readonly status: 'running' | 'completed' | 'error' | 'indeterminate'
-    readonly argumentsSummary?: string
-    readonly resultSummary?: string
-    readonly error?: string
+    readonly argumentsShape?: TrajectoryPhysicalOperatorValueShape
+    readonly resultShape?: TrajectoryPhysicalOperatorValueShape
     readonly callSeq?: number
     readonly resultSeq?: number
   }
   readonly observation?: {
     readonly kind: 'public-output' | 'tool-started' | 'tool-completed' | 'approval-required' | 'usage-updated'
-    readonly preview?: string
-    readonly toolName?: string
-    readonly approvalKind?: string
     readonly usage?: {
       readonly inputTokens?: number
       readonly outputTokens?: number
@@ -64,6 +59,13 @@ export interface TrajectoryPhysicalOperatorTraceEntry {
   readonly outcome?: 'success' | 'error'
   readonly code?: string
 }
+
+/** Text-free structural shape supplied by the Host public trace. */
+export type TrajectoryPhysicalOperatorValueShape =
+  | { readonly kind: 'object'; readonly fields: number }
+  | { readonly kind: 'array'; readonly items: number }
+  | { readonly kind: 'string'; readonly characters: number }
+  | { readonly kind: 'number' | 'boolean' | 'null' | 'unavailable' }
 
 /** One independently assembled contribution to the legacy Trajectory ledger. */
 export type TrajectoryContribution =

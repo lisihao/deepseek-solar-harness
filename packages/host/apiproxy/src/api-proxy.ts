@@ -62,6 +62,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 // Type-only: resolves `ctx.get('tasks')` to the background job registry.
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
+import { projectPublicSessionEvent } from './physical-operator-trace.ts'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -815,7 +816,7 @@ function historyPage(
   return {
     events: page.events.map((event) => {
       const view = viewFor(ctx, event, callId => backscanArgs(page.events, callId), scope)
-      return { event, ...view === undefined ? {} : { view } }
+      return { ...projectPublicSessionEvent(event), ...view === undefined ? {} : { view } }
     }),
     hasMore: page.hasMore,
   }
@@ -3523,7 +3524,12 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               callId => openCalls.get(session.id)?.get(callId) ?? backscanArgs(session.events, callId),
               ctx.agents.get(session.id),
             )
-            queue.push(frame({ type: 'session/event', sessionId: session.id, event, ...view === undefined ? {} : { view } }))
+            queue.push(frame({
+              type: 'session/event',
+              sessionId: session.id,
+              ...projectPublicSessionEvent(event),
+              ...view === undefined ? {} : { view },
+            }))
           }),
           ctx.on('session/created', (session: Session) => {
             subscribeSession(queue, session)

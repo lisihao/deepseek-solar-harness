@@ -51,6 +51,7 @@ function at(
   type: string,
   data: unknown,
   extra: Record<string, unknown> = {},
+  physicalOperatorTrace?: ConversationEventInput['physicalOperatorTrace'],
 ): ConversationEventInput {
   return {
     event: {
@@ -61,6 +62,7 @@ function at(
       ...extra,
     } as unknown as ConversationEventInput['event'],
     view: undefined,
+    ...(physicalOperatorTrace === undefined ? {} : { physicalOperatorTrace }),
   }
 }
 
@@ -90,12 +92,28 @@ function assistantMessage(id: string, text: string) {
 }
 
 describe('Trajectory conversation Definitions', () => {
+  it('ignores Physical Operator authority payloads when no Host trace is present', () => {
+    const current = snapshot(assembler([
+      at(1, 'physical-operator/dispatch', {
+        commandId: 'private-command', operatorId: 'codex', promptMessageId: 'private-prompt',
+        requestedByMessageId: 'private-request', turn: 1, step: 1, recovered: false,
+      }),
+      at(2, 'physical-operator/tool-call', {
+        commandId: 'private-tool', executionCommandId: 'private-command', tool: 'SecretTool',
+        arguments: { prompt: 'must never render', token: 'ORCHID-4711' },
+      }, { ignorable: true }),
+    ]))
+
+    expect(current.physicalOperatorExecutions).toEqual([])
+    expect(JSON.stringify(current)).not.toMatch(/private-command|private-prompt|SecretTool|ORCHID-4711/u)
+  })
+
   it('groups a Resident command by command id, dedupes reconnect sequence, and keeps only safe observations', () => {
     const current = snapshot(assembler([
       at(1, 'physical-operator/dispatch', {
         commandId: 'command-1', operatorId: 'codex', promptMessageId: 'm', requestedByMessageId: 'm',
         turn: 2, step: 1, recovered: false,
-      }),
+      }, {}, { version: 1, kind: 'dispatch', commandId: 'public-command-1', operator: 'codex', turn: 2, step: 1 }),
       at(2, 'physical-operator/progress', {
         commandId: 'command-1', operatorId: 'codex', sequence: 4, type: 'turn.observation',
         time: '2026-09-01T10:00:00.000Z',
@@ -114,41 +132,35 @@ describe('Trajectory conversation Definitions', () => {
             'x'.repeat(400),
           ].join('\n'),
         },
-      }, { ignorable: true }),
+      }, { ignorable: true }, { version: 1, kind: 'public-output', commandId: 'public-command-1', sourceSequence: 4 }),
       at(3, 'physical-operator/progress', {
         commandId: 'command-1', operatorId: 'codex', sequence: 4, type: 'turn.observation',
         time: '2026-09-01T10:00:00.000Z',
         data: { kind: 'public-output', preview: 'reconnect duplicate' },
-      }, { ignorable: true }),
+      }, { ignorable: true }, { version: 1, kind: 'public-output', commandId: 'public-command-1', sourceSequence: 4 }),
       at(4, 'physical-operator/progress', {
         commandId: 'command-1', operatorId: 'codex', sequence: 5, type: 'turn.observation',
         time: '2026-09-01T10:00:01.000Z',
         data: { kind: 'tool-started', toolName: 'Bash', arguments: { secret: 'never render' } },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'native-tool', commandId: 'public-command-1', sourceSequence: 5, status: 'running',
+      }),
       at(5, 'physical-operator/dispatch-terminal', {
         commandId: 'command-1', code: 'OPERATOR_ERROR',
-      }, { ignorable: true }),
+      }, { ignorable: true }, { version: 1, kind: 'terminal', commandId: 'public-command-1', outcome: 'error' }),
     ]))
 
     expect(current.physicalOperatorExecutions).toHaveLength(1)
     expect(current.physicalOperatorExecutions[0]).toMatchObject({
-      commandId: 'command-1', operatorId: 'codex', turn: 2, step: 1,
+      commandId: 'public-command-1', operatorId: 'codex', turn: 2, step: 1,
     })
     const entries = current.physicalOperatorExecutions[0]?.entries ?? []
     expect(entries).toHaveLength(4)
-    expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
-      .toContain('[REDACTED]')
-    expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
-      .toContain('\nsecond line')
-    const publicPreview = entries.find(entry => entry.type === 'observation')?.observation?.preview ?? ''
-    expect(publicPreview).not.toMatch(/secret|correct horse|sk-live|ghp_|chain of thought|private-key-body/iu)
-    expect(publicPreview).toContain('[PRIVATE KEY REDACTED]')
-    expect(entries.find(entry => entry.type === 'observation')?.observation?.preview?.length)
-      .toBeLessThanOrEqual(1_600)
-    expect(entries.find(entry => entry.type === 'observation')?.observation?.preview)
-      .not.toContain('reconnect duplicate')
+    expect(entries.find(entry => entry.type === 'observation')?.observation).toEqual({ kind: 'public-output' })
+    const exposed = JSON.stringify(current.physicalOperatorExecutions)
+    expect(exposed).not.toMatch(/secret|correct horse|sk-live|ghp_|chain of thought|private-key-body|second line/iu)
     expect(entries.find(entry => entry.type === 'observation' && entry.observation?.kind === 'tool-started')?.observation)
-      .toEqual({ kind: 'tool-started', toolName: 'Bash' })
+      .toEqual({ kind: 'tool-started' })
     expect(entries.some(entry => entry.type === 'terminal')).toBe(true)
   })
 
@@ -157,12 +169,14 @@ describe('Trajectory conversation Definitions', () => {
       at(1, 'physical-operator/dispatch', {
         commandId: 'command-success', operatorId: 'codex', promptMessageId: 'm', requestedByMessageId: 'm',
         turn: 1, step: 1, recovered: false,
-      }),
+      }, {}, { version: 1, kind: 'dispatch', commandId: 'public-success', operator: 'codex', turn: 1, step: 1 }),
       at(2, 'physical-operator/progress', {
         commandId: 'command-success', operatorId: 'codex', sequence: 1, type: 'turn.settled',
         time: '2026-09-01T10:00:01.000Z',
         data: { commandId: 'command-success', turnId: 'turn-1', stopReason: 'completed' },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'terminal', commandId: 'public-success', sourceSequence: 1, outcome: 'success',
+      }),
     ]))
 
     expect(current.physicalOperatorExecutions[0]?.entries).toContainEqual(expect.objectContaining({
@@ -175,25 +189,29 @@ describe('Trajectory conversation Definitions', () => {
       at(1, 'physical-operator/tool-dispatch', {
         commandId: 'tool-command-1', operatorId: 'claude-code', toolCallId: 'tool-1', mode: 'resident',
         description: 'bounded local summary',
+      }, {}, {
+        version: 1, kind: 'dispatch', commandId: 'public-tool-command', operator: 'claude-code', turn: 0, step: 0,
       }),
       at(2, 'physical-operator/progress', {
         commandId: 'tool-command-1', operatorId: 'claude-code', sequence: 1, type: 'turn.progress',
         time: '2026-09-01T10:00:00.000Z', data: { phase: 'reasoning' },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'progress', commandId: 'public-tool-command', sourceSequence: 1, phase: 'reasoning',
+      }),
     ]))
 
     expect(current.physicalOperatorExecutions).toMatchObject([{
-      commandId: 'tool-command-1', operatorId: 'claude-code', turn: 0, step: 0,
+      commandId: 'public-tool-command', operatorId: 'claude-code', turn: 0, step: 0,
     }])
     expect(current.physicalOperatorExecutions[0]?.entries.map(entry => entry.type)).toEqual(['dispatch', 'progress'])
   })
 
-  it('pairs durable physical tool events and exposes only structural whitelist summaries after replay', () => {
+  it('pairs durable physical tool events and exposes only Host-projected shapes after replay', () => {
     const current = snapshot(assembler([
       at(1, 'physical-operator/dispatch', {
         commandId: 'command-tools', operatorId: 'codex', promptMessageId: 'm', requestedByMessageId: 'm',
         turn: 1, step: 1, recovered: false,
-      }),
+      }, {}, { version: 1, kind: 'dispatch', commandId: 'public-tools', operator: 'codex', turn: 1, step: 1 }),
       at(2, 'physical-operator/tool-call', {
         commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
         tool: 'Bash', arguments: {
@@ -206,7 +224,10 @@ describe('Trajectory conversation Definitions', () => {
           token: 'ghp_abcdefghijklmnopqrstuvwxyz',
           limit: 5,
         },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'tool', commandId: 'public-tools', toolCallId: 'public-tool-1', standalone: false,
+        status: 'running', argumentsShape: { kind: 'object', fields: 7 },
+      }),
       at(3, 'physical-operator/tool-result', {
         commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
         tool: 'Bash', result: {
@@ -216,39 +237,46 @@ describe('Trajectory conversation Definitions', () => {
             transcript: 'full transcript must not render', code: 'sk-live-secret', count: 2,
           },
         },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'tool', commandId: 'public-tools', toolCallId: 'public-tool-1', standalone: false,
+        status: 'completed', resultShape: { kind: 'object', fields: 3 },
+      }),
       // A reconnect/reload can expose the same durable tool call and result at
       // new session sequence positions. The stable toolCallId keeps one row.
       at(4, 'physical-operator/tool-call', {
         commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
         tool: 'Bash', arguments: { command: 'duplicate' },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'tool', commandId: 'public-tools', toolCallId: 'public-tool-1', standalone: false,
+        status: 'running', argumentsShape: { kind: 'object', fields: 1 },
+      }),
       at(5, 'physical-operator/tool-result', {
         commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
         tool: 'Bash', result: { isError: false, value: { text: 'duplicate' } },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'tool', commandId: 'public-tools', toolCallId: 'public-tool-1', standalone: false,
+        status: 'completed', resultShape: { kind: 'object', fields: 1 },
+      }),
     ]))
     const execution = current.physicalOperatorExecutions[0]
     const tool = execution?.entries.find(entry => entry.type === 'tool')
-    expect(execution?.commandId).toBe('command-tools')
+    expect(execution?.commandId).toBe('public-tools')
     expect(execution?.entries.filter(entry => entry.type === 'tool')).toHaveLength(1)
     expect(tool).toMatchObject({
       type: 'tool', seq: 2,
       tool: {
-        toolCallId: 'tool-call-1', name: 'Bash', status: 'completed', callSeq: 2, resultSeq: 3,
+        toolCallId: 'public-tool-1', status: 'completed', callSeq: 2, resultSeq: 3,
+        argumentsShape: { kind: 'object', fields: 7 }, resultShape: { kind: 'object', fields: 3 },
       },
     })
     if (tool?.type !== 'tool' || tool.tool === undefined) throw new Error('expected paired physical tool trace')
-    expect(tool.tool.argumentsSummary).toContain('"command": "[string:')
-    expect(tool.tool.argumentsSummary).toContain('"limit": 5')
-    expect(tool.tool.resultSummary).toContain('"count": 2')
-    const exposed = `${tool.tool.argumentsSummary ?? ''}\n${tool.tool.resultSummary ?? ''}`
+    const exposed = JSON.stringify(tool.tool)
     for (const secret of [
       'Authorization', 'sk-live', 'original request', 'correct horse', 'private-key-body',
       'hidden prompt', 'chain of thought', 'ghp_', 'line one', 'line two', 'full transcript',
       'do-not-render',
     ]) expect(exposed).not.toContain(secret)
-    expect(tool.tool.resultSummary).not.toContain('api_key')
+    expect(exposed).not.toContain('api_key')
   })
 
   it('projects a recovered call without a result as indeterminate and accepts later proof of settlement', () => {
@@ -256,27 +284,38 @@ describe('Trajectory conversation Definitions', () => {
       at(1, 'physical-operator/dispatch', {
         commandId: 'command-indeterminate', operatorId: 'codex', promptMessageId: 'm', requestedByMessageId: 'm',
         turn: 1, step: 1, recovered: false,
+      }, {}, {
+        version: 1, kind: 'dispatch', commandId: 'public-indeterminate', operator: 'codex', turn: 1, step: 1,
       }),
       at(2, 'physical-operator/tool-call', {
         commandId: 'command-indeterminate:codex-tool:1', toolCallId: 'tool-call-indeterminate',
         executionCommandId: 'command-indeterminate', tool: 'Bash', arguments: { command: 'side effect' },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'tool', commandId: 'public-indeterminate', toolCallId: 'public-indeterminate-tool',
+        standalone: false, status: 'running', argumentsShape: { kind: 'object', fields: 1 },
+      }),
       at(3, 'physical-operator/tool-indeterminate', {
         commandId: 'command-indeterminate:codex-tool:1', toolCallId: 'tool-call-indeterminate',
         executionCommandId: 'command-indeterminate', tool: 'Bash', code: 'COMMAND_INDETERMINATE',
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'tool', commandId: 'public-indeterminate', toolCallId: 'public-indeterminate-tool',
+        standalone: false, status: 'indeterminate',
+      }),
     ])
     const indeterminateEntry = snapshot(value).physicalOperatorExecutions[0]?.entries
       .find(entry => entry.type === 'tool')
     expect(indeterminateEntry?.type).toBe('tool')
     expect(indeterminateEntry?.tool).toMatchObject({
-      toolCallId: 'tool-call-indeterminate', status: 'indeterminate', error: 'COMMAND_INDETERMINATE',
+      toolCallId: 'public-indeterminate-tool', status: 'indeterminate',
     })
 
     value.append(at(4, 'physical-operator/tool-result', {
       commandId: 'command-indeterminate:codex-tool:1', toolCallId: 'tool-call-indeterminate',
       executionCommandId: 'command-indeterminate', tool: 'Bash', result: { isError: false, value: { count: 1 } },
-    }, { ignorable: true }))
+    }, { ignorable: true }, {
+      version: 1, kind: 'tool', commandId: 'public-indeterminate', toolCallId: 'public-indeterminate-tool',
+      standalone: false, status: 'completed', resultShape: { kind: 'object', fields: 1 },
+    }))
     value.flush()
     const settledEntry = snapshot(value).physicalOperatorExecutions[0]?.entries
       .find(entry => entry.type === 'tool')
@@ -288,14 +327,20 @@ describe('Trajectory conversation Definitions', () => {
     const current = snapshot(assembler([
       at(1, 'physical-operator/tool-call', {
         commandId: 'legacy-tool-1', tool: 'Read', arguments: { path: '/tmp/a' },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'tool', commandId: 'public-legacy', toolCallId: 'public-legacy', standalone: true,
+        status: 'running', argumentsShape: { kind: 'object', fields: 1 },
+      }),
       at(2, 'physical-operator/tool-result', {
         commandId: 'legacy-tool-1', tool: 'Read', result: { isError: true, error: 'permission denied' },
-      }, { ignorable: true }),
+      }, { ignorable: true }, {
+        version: 1, kind: 'tool', commandId: 'public-legacy', toolCallId: 'public-legacy', standalone: true,
+        status: 'error', resultShape: { kind: 'unavailable' },
+      }),
     ]))
     expect(current.physicalOperatorExecutions).toMatchObject([{
-      commandId: 'legacy-tool-1', operatorId: 'physical-operator',
-      entries: [{ type: 'dispatch' }, { type: 'tool', tool: { status: 'error', toolCallId: 'legacy-tool-1' } }],
+      commandId: 'public-legacy', operatorId: 'physical-operator',
+      entries: [{ type: 'dispatch' }, { type: 'tool', tool: { status: 'error', toolCallId: 'public-legacy' } }],
     }])
   })
 
