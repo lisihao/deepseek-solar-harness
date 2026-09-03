@@ -3040,12 +3040,12 @@ __metadata:
 
 "@deepseek-ai/dsh-output-style@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-output-style@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz::hash=79517f&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-output-style@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz::hash=d5f47e&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
-  checksum: 10c0/cb05dcf97d6e5fccc47b05575f4b1cea97e462e53bc8e2242aad8db50ab3512a39dbfdc282f69d6000425a336830e7c7e47a0fdcd3e23d40c29499237e6e345f
+  checksum: 10c0/630585c0e0bd6e14035746515b22b3ee195beb4dab4ed2d262bcd708c510b0e7d5136dc0889dccc14209b63f8b906809861be82aa60cd1b78865f079ede1a694
   languageName: node
   linkType: hard
 

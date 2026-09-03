@@ -174,7 +174,7 @@
     {
       "name": "Structured Debate presentation, public durable trace, and shared output style",
       "repository": "https://github.com/lisihao/deepseek-solar-harness",
-      "commit": "035d901fb2"
+      "commit": "4efe689361"
     }
   ],
   "sourcePackages": {
@@ -316,7 +316,7 @@
     "dsh-packages/deepseek-ai-dsh-orchestration-0.1.0-rc.5.tgz": "60a9eaa3a8caa9e3f38623e9ed129876b11da7b4e9386023694909f50d09bfb9",
     "dsh-packages/deepseek-ai-dsh-orchestration-local-0.1.0-rc.5.tgz": "2d0d98a50c1a7cbe74cd7d2a3d2596255cd55d50d522090db64599c1e9fc17a8",
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "00455d9f3cf2a1bb4703c857009f2d278f48044a4c102841a6aeb6332b9698d8",
-    "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "e36395662f49c92201b246af05bdb244ef25d27ac71fbbe6208231eea74766f8",
+    "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "53567cb6b6c49d1380e6f5fbd1ffa60b82da53328b1e0e5d3646350424124185",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "5aa5625abe5c801f7db2b618fb00bf070461a90ca331e519bab5b68f54bd3e21",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "b348fb840fc866e14b04ac5055f068261894201cc8afda4c31881414b8f06fb8",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "2bf1dd9d8d4bfb22134f6a637f532851e5e341c31c6f4ebbcc0b155958a5500a",
