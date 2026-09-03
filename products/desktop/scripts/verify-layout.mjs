@@ -22,6 +22,7 @@ const notePaths = [`${noteDirectory}/${noteName}.md`, `${noteDirectory}/${noteNa
 const noteRecordPath = `${noteDirectory}/${noteName}.i18n.yaml`
 const sealedDshExtensions = new Set([
   '@deepseek-ai/dsh-atomic-write',
+  '@deepseek-ai/dsh-api-remotes',
   '@deepseek-ai/dsh-archify',
   '@deepseek-ai/dsh-browser',
   '@deepseek-ai/dsh-browser-ego-lite',
