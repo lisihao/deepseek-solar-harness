@@ -15,10 +15,10 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { PwshLocalExecutor, ENCODING_PREAMBLE, candidatePwshPaths, resolvePwshPath } from '@deepseek-ai/dsh-pwsh-local'
+import { PwshLocalExecutor, ENCODING_PREAMBLE, candidatePwshPaths, resolvePwshPath } from '../src/index.ts'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import SubprocessRuntime from '@deepseek-ai/dsh-subprocess'
-import type { SubprocessHandle, SubprocessOutputReader, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import type { SubprocessHandle, SubprocessOutcome, SubprocessOutputReader, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type { ShellProcess } from '@deepseek-ai/dsh-shell'
 
@@ -151,10 +151,19 @@ describe('resolvePwshPath and candidatePwshPaths (pure, every platform)', () => 
   })
 })
 
+interface CapturingSubprocessOptions {
+  stdout?: SubprocessOutputReader
+  stderr?: SubprocessOutputReader
+  outcome?: SubprocessOutcome
+  done?: Promise<SubprocessOutcome>
+}
 describe('spawn construction (pure, every platform)', () => {
   /** A subprocess service that records spawn specs and settles instantly. */
   class CapturingSubprocessRuntime extends SubprocessRuntime {
     specs: SubprocessSpawnSpec[] = []
+    constructor(ctx: Context, private readonly options: CapturingSubprocessOptions = {}) {
+      super(ctx)
+    }
     override async resolveExecutable(command: string): Promise<string> { return command }
     override spawnTerminal(): Promise<never> { throw new Error('pwsh spawns pipes, never terminals') }
     private readonly reader: SubprocessOutputReader = {
@@ -167,11 +176,21 @@ describe('spawn construction (pure, every platform)', () => {
         stdin: undefined,
         stdout: undefined,
         stderr: undefined,
-        collected: { stdout: this.reader, stderr: this.reader },
-        done: Promise.resolve({ exitCode: 0, signal: null }),
+        collected: { stdout: this.options.stdout ?? this.reader, stderr: this.options.stderr ?? this.reader },
+        done: this.options.done ?? Promise.resolve(this.options.outcome ?? { exitCode: 0, signal: null }),
         terminate: () => {},
         waitForExit: async () => true,
       }
+    }
+  }
+  function outputReader(text: string, spillPath?: string): SubprocessOutputReader {
+    return {
+      readFrom: () => ({
+        text,
+        lossy: spillPath !== undefined,
+        nextOffset: text.length,
+        ...(spillPath === undefined ? {} : { spillPath }),
+      }),
     }
   }
 
@@ -186,6 +205,110 @@ describe('spawn construction (pure, every platform)', () => {
     expect(argv[5]).toBe(`${ENCODING_PREAMBLE}Write-Output 你好`)
     expect(ENCODING_PREAMBLE).toContain('[Console]::OutputEncoding')
     expect(ENCODING_PREAMBLE).toContain('$OutputEncoding')
+  })
+  it('resolves optional request fields and preserves foreground spill paths', async () => {
+    const ctx = new Context()
+    const subprocess = new CapturingSubprocessRuntime(ctx, {
+      stdout: outputReader('out', '/tmp/stdout-spill'),
+      stderr: outputReader('err', '/tmp/stderr-spill'),
+    })
+    await ctx.plugin(PwshLocalExecutor)
+    const bash = ctx.shell as PwshLocalExecutor
+    const controller = new AbortController()
+    const spec = bash.resolve({
+      command: 'Write-Output out',
+      stdin: 'input',
+      env: { SEAM_VAR: 'env-ok' },
+      dshEnv: { DSH_SEAM_VAR: 'dsh-ok' },
+      signal: controller.signal,
+    })
+    expect(spec.stdin).toBe('input')
+    expect(spec.env).toEqual({ SEAM_VAR: 'env-ok' })
+    expect(spec.dshEnv).toEqual({ DSH_SEAM_VAR: 'dsh-ok' })
+    const result = await bash.run(spec)
+    expect(result.stdout).toMatchObject({ text: 'out', truncated: true, spillPath: '/tmp/stdout-spill' })
+    expect(result.stderr).toMatchObject({ text: 'err', truncated: true, spillPath: '/tmp/stderr-spill' })
+    expect(subprocess.specs[0]!.stdio.stdin).toEqual({ data: 'input' })
+  })
+  it('marks a foreground run aborted when the caller signal is already aborted', async () => {
+    const ctx = new Context()
+    new CapturingSubprocessRuntime(ctx)
+    await ctx.plugin(PwshLocalExecutor)
+    const bash = ctx.shell as PwshLocalExecutor
+    const controller = new AbortController()
+    controller.abort('caller stopped')
+    const result = await bash.run(bash.resolve({ command: 'Write-Output cancelled', signal: controller.signal }))
+    expect(result.timedOut).toBe(false)
+    expect(result.aborted).toBe(true)
+  })
+  it('projects background output and kill lifecycle through a fake subprocess', async () => {
+    const ctx = new Context()
+    new CapturingSubprocessRuntime(ctx, {
+      stdout: outputReader('out', '/tmp/stdout-spill'),
+      stderr: outputReader('err', '/tmp/stderr-spill'),
+    })
+    await ctx.plugin(PwshLocalExecutor)
+    const bash = ctx.shell as PwshLocalExecutor
+    const proc = bash.start(bash.resolve({ command: 'Write-Output out' }))
+    expect(proc.status).toBe('running')
+    await proc.done
+    expect(proc.status).toBe('completed')
+    expect(proc.readOutput()).toEqual({
+      delta: 'out\n[stderr]\nerr',
+      lossy: true,
+      stdoutSpillPath: '/tmp/stdout-spill',
+      stderrSpillPath: '/tmp/stderr-spill',
+    })
+    expect(proc.kill()).toBe(false)
+    const killed = bash.start(bash.resolve({ command: 'Write-Output done' }))
+    expect(killed.kill()).toBe(true)
+    await killed.done
+    expect(killed.status).toBe('killed')
+  })
+
+  it('does not add a separator when background stdout already ends with a newline', async () => {
+    const ctx = new Context()
+    new CapturingSubprocessRuntime(ctx, {
+      stdout: outputReader('out\n'),
+      stderr: outputReader('err'),
+    })
+    await ctx.plugin(PwshLocalExecutor)
+    const bash = ctx.shell as PwshLocalExecutor
+    const proc = bash.start(bash.resolve({ command: 'Write-Output out' }))
+    await proc.done
+    expect(proc.readOutput().delta).toBe('out\n[stderr]\nerr')
+  })
+
+  it('classifies a background signal outcome as killed', async () => {
+    const ctx = new Context()
+    new CapturingSubprocessRuntime(ctx, {
+      outcome: { exitCode: null, signal: 'SIGTERM' },
+    })
+    await ctx.plugin(PwshLocalExecutor)
+    const bash = ctx.shell as PwshLocalExecutor
+    const proc = bash.start(bash.resolve({ command: 'Write-Output interrupted' }))
+    await proc.done
+    expect(proc.status).toBe('killed')
+  })
+
+  it('surfaces a background spawn failure once through readOutput', async () => {
+    const done = new Promise<SubprocessOutcome>((_resolve, reject) => {
+      setTimeout(() => { reject(new Error('spawn boom')) }, 0)
+    })
+    const ctx = new Context()
+    new CapturingSubprocessRuntime(ctx, { done })
+    await ctx.plugin(PwshLocalExecutor)
+    const bash = ctx.shell as PwshLocalExecutor
+    const proc = bash.start(bash.resolve({ command: 'Write-Output unreachable' }))
+    await expect(proc.done).resolves.toBeUndefined()
+    expect(proc.status).toBe('killed')
+    expect(proc.readOutput().delta).toContain('spawn failed: Error: spawn boom')
+    expect(proc.readOutput().delta).toBe('')
+  })
+
+  it('rejects a grace period beyond the timer bound without requiring pwsh', async () => {
+    await expect(setup({ graceMs: MAX_TIMER_DELAY_MS + 1 }))
+      .rejects.toThrow(`graceMs must be no greater than ${MAX_TIMER_DELAY_MS}`)
   })
 })
 
