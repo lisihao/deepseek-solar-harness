@@ -52,9 +52,25 @@ function validRuntimeText(filename: string): string {
   throw new Error(`unexpected runtime text path: ${filename}`)
 }
 
+const SYNAPSE_RUNTIME_ENTRIES = [
+  'node_modules/dsh-synapse/index.js',
+  'node_modules/dsh-synapse/client.js',
+  'node_modules/dsh-synapse/app.js',
+  'node_modules/dsh-synapse/styles.css',
+  'node_modules/dsh-synapse/cordis.patch.yml',
+  'node_modules/dsh-synapse/package.json',
+] as const
+
 const readValidRuntime = vi.fn<TextReader>(validRuntimeText)
 
 describe('packaged desktop runtime verification', () => {
+  it('requires every Synapse runtime entry in both archive and unpacked trees', () => {
+    for (const entry of SYNAPSE_RUNTIME_ENTRIES) {
+      expect(REQUIRED_PACKAGED_RUNTIME_ENTRIES).toContain(entry)
+      expect(REQUIRED_UNPACKED_RUNTIME_ENTRIES).toContain(entry)
+    }
+  })
+
   it.each([
     [
       'darwin',

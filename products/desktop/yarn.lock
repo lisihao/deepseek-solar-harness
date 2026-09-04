@@ -9297,6 +9297,7 @@ __metadata:
     dsh-codegraph: "file:vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz"
     dsh-llm-fallbacks: "file:vendor/dsh-packages/dsh-llm-fallbacks-0.3.3-solar.1.tgz"
     dsh-mnemon: "file:vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz"
+    dsh-synapse: "file:vendor/dsh-packages/dsh-synapse-0.4.1.tgz"
     dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.6.tgz"
     electron: "npm:43.4.0"
     electron-builder: "npm:26.15.3"
@@ -9318,6 +9319,13 @@ __metadata:
     dsh-product-server: lib/product-server-bin.js
   languageName: unknown
   linkType: soft
+
+"dsh-synapse@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.1.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.4.1
+  resolution: "dsh-synapse@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.1.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.1.tgz::hash=036d25&locator=deepseek-harness-desktop%40workspace%3A."
+  checksum: 10c0/9c003f20181944a63456903d5a1473f2be010d7c55f1a1b4f29290c88b83b9ad82c55ada2b23a70298be207171354c36d9f2a4b53596fafe002d86406f51695a
+  languageName: node
+  linkType: hard
 
 "dsh-web-billing@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-web-billing-1.1.6.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 1.1.6

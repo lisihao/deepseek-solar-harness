@@ -26,7 +26,13 @@ import {
   readDesktopShellMode,
 } from '../src/profile.ts'
 import { packagedRuntimePackageDirectory } from '../src/module-resolution.ts'
-import { PRODUCT_BUNDLE_ROW_IDS } from '../src/product-bundles.ts'
+import {
+  PRODUCT_BUNDLE_PACKAGES,
+  PRODUCT_BUNDLE_ROW_IDS,
+  SEALED_RUNTIME_PACKAGES,
+  SYNAPSE_PACKAGE,
+  SYNAPSE_ROW_ID,
+} from '../src/product-bundles.ts'
 
 const homes: string[] = []
 
@@ -149,6 +155,23 @@ describe('desktop profile composition', () => {
       'desktop-profiles',
       'desktop-updates',
     ]) expect(rowIds).not.toContain(desktopRow)
+  })
+
+  it('mounts the sealed Synapse bundle exactly once on Desktop and Product Server', () => {
+    expect(PRODUCT_BUNDLE_PACKAGES).toContain(SYNAPSE_PACKAGE)
+    expect(SEALED_RUNTIME_PACKAGES).toContain(SYNAPSE_PACKAGE)
+    expect(PRODUCT_BUNDLE_ROW_IDS.get(SYNAPSE_PACKAGE)).toBe(SYNAPSE_ROW_ID)
+
+    const home = temporaryHome()
+    for (const patches of [
+      prepareDesktopProfile(undefined, home, 'darwin').patches,
+      prepareProductServerProfile(undefined, home, 'darwin').patches,
+    ]) {
+      const rows = composeEntries([patches])
+      const synapseRows = rows.filter(row => row.id === SYNAPSE_ROW_ID)
+      expect(synapseRows).toHaveLength(1)
+      expect(synapseRows[0]).toEqual(expect.objectContaining({ name: SYNAPSE_PACKAGE }))
+    }
   })
 
   it('selects the native Codex operator by default on Desktop and Product Server', () => {

@@ -59,11 +59,12 @@ Desktop and Product Server are generated from one sealed composition. They load 
 | Remote execution | Exact-commit repository materialization, isolated per-command workspaces, durable Resident execution, artifact return | Only allowlisted repositories; credentials and sender absolute paths never cross the wire |
 | Multi-Server cluster | Fixed membership, majority-backed Leader lease, term/vote fencing, logical state replication, Frontend Leader discovery | First release uses bounded full snapshots; membership changes and unbounded incremental replication are deferred |
 | Session handoff | Revision-aware transfer of complete balanced event logs between Frontend/local Server/Product Server | No open-turn replication, SQLite/WAL copying, or continuous dual writing |
+| Synapse session map | Visual canvas for DSH sessions, branches, messages, and tool activity, with restart-persistent layout | Session Log remains the sole source of truth; Synapse private JSON is a removable projection |
 | Memory | Mnemon memory spaces, multi-provider adapters, recall, graph projection, runtime memory, supervised writes, backup surfaces | Memory is a managed plugin capability, not orchestration truth |
 | Trace and evidence | Session events, Collaboration Trace, orchestration events, operator phases, bounded output, immutable Evidence/Artifact refs | Private reasoning, raw prompts, terminal screens, and native product transcripts stay outside projections |
 | Billing | Local usage ledger, DeepSeek official balance, time-of-day pricing, model detail, local savings, multi-Server aggregation | Local DSH totals are not the provider's official invoice; unavailable sources are shown, not projected as zero |
 | Desktop experience | Thin Electron Host, official Web carrier, advanced/compatibility modes, profiles, tray, terminal, updates, themes, plugins | Current stable release contract is macOS; Windows/Linux paths are not accepted stable Desktop releases |
-| Managed plugins | Sealed Better Sidebar, GenUI, diagnostics, code graph, Mnemon, Aegis skills, billing, remote modules, provenance registry | Optional third-party plugins remain profile extensions unless admitted into the sealed product |
+| Managed plugins | Sealed Better Sidebar, GenUI, diagnostics, code graph, Mnemon, Synapse, Aegis skills, billing, remote modules, provenance registry | Optional third-party plugins remain profile extensions unless admitted into the sealed product |
 | Governance | Agent Notes, bilingual docs, package constraints, Code-as-Harness, source/package/runtime identity, protected PR delivery | Passing governance does not replace real installed-product acceptance where required |
 
 ## Architecture

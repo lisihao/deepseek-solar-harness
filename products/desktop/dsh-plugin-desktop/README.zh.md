@@ -10,7 +10,7 @@ Electron 可执行文件只包含最小启动代码。它获取单实例锁、�
 
 两种呈现模式都复用现有 loopback Web carrier。profile 挂载普通 `dsh-base` 与 `dsh-web-app` bundle；Host 把 HTTP 与 WebSocket surface 绑定到 `127.0.0.1` 的临时端口；Electron 在沙箱 renderer 中加载该同源页面。Electron 不维护自有插件 roster，不使用 preload bridge，renderer 也不会获得原始 Electron API。
 
-同一 package 还提供 `dsh-product-server`，它是远程部署使用的纯 Node Host Adapter。Desktop 与 Product Server 都从唯一的封装产品组合生成，因此会加载相同的 Resident、Orchestration、AgentTeams、Billing、Remote Modules、RLM／Continuous Harness、模型分配、记忆、治理和产品 UI row。只有 Host Adapter row 不同：Desktop 拥有 Electron 窗口、托盘、终端、profile 与更新 effect；Product Server 拥有持久 Web endpoint，为远程客户端固定使用浏览器目录选择器，并始终保留 compatibility 浏览器布局，因为它不会加载 Electron 所有的 advanced layout provider。普通 `dsh server` 命令仍是兼容上游的裸 Server profile，不是 DSH Desktop 产品部署。
+同一 package 还提供 `dsh-product-server`，它是远程部署使用的纯 Node Host Adapter。Desktop 与 Product Server 都从唯一的封装产品组合生成，因此会加载相同的 Resident、Orchestration、AgentTeams、Billing、Remote Modules、RLM／Continuous Harness、模型分配、记忆、治理、Synapse 会话地图和产品 UI row。只有 Host Adapter row 不同：Desktop 拥有 Electron 窗口、托盘、终端、profile 与更新 effect；Product Server 拥有持久 Web endpoint，为远程客户端固定使用浏览器目录选择器，并始终保留 compatibility 浏览器布局，因为它不会加载 Electron 所有的 advanced layout provider。普通 `dsh server` 命令仍是兼容上游的裸 Server profile，不是 DSH Desktop 产品部署。
 
 DSH Desktop 保存一个带名称的 Product Server 列表和一项当前 Server 选择，且这两项不依赖当前部署角色。原生 **Connect to Remote Server…** 窗口可新增、编辑、选择和删除条目；手工切换当前条目会让 Frontend 重启并连接对应 endpoint，而不会启动本机 Host。连接建立后，Desktop 自有 monitor 会持续资格检查整个目录；发现新的可调度 Leader 时，只重新挂载浏览器 generation，不重启应用。成功接管的备用项会成为持久化的当前 Server，并显示在原生窗口标题中。若全部条目均不可用，系统会保留完整目录并打开本地部署恢复界面，不会静默启动本机 Host。切回本机 Server 后，系统仍保留完整列表、最后选择和呈现模式，因此用户无需重新配置就能再次选择任一已保存 Server。已有的单 Server 部署状态会迁移为列表中的第一个条目。`http://127.0.0.1:13080` 这类 loopback endpoint 通常通过 owner 控制的 SSH 本地转发访问 Product Server，会直接使用已经认证的隧道，不再要求第二份配对码或 Keychain 凭据。手机／pocket 等直接访问远程 HTTPS 的客户端仍使用一次性配对挑战、加密持久设备凭据和短期访问 session。Frontend billing bridge 会读取每个已配置 Server 的账本，只加一次未启动的 MacBook 历史，并在费用面板保留各 Server 的 ready/unavailable 来源明细。
 
@@ -38,7 +38,7 @@ Resident 派发还会将提供方无关的连接、推理／执行、工具活�
 
 位于 `/tmp/dsh-orchestration-*` 或 `/private/tmp/dsh-orchestration-*` 下的本地验收 Run 仍持久化保留，并带有**验收**标签。工作台默认包含它们，同时提供仅影响展示的隐藏控制，并保持已存储数量可见。
 
-Desktop 会把 Solar 受控的 Better Sidebar、GenUI、插件诊断、模型 fallback、代码图谱、Mnemon、Aegis skills 和有界工具作为产品输入封装。即使聚合 UI 包依赖旧版本，product-first 解析也会保持已接受 Better Sidebar 实现的权威性，而其挂载 guard 会阻止 sidebar 重复归属。Mnemon 是唯一产品记忆 bundle；陈旧的 Memory Evolve row 会被禁用，但不会删除用户数据。原生 DeepSeek provider 将 `deepseek-v4-flash-vision-exp` 声明为支持图像输入，因此 Desktop 不会加载 Luna Vision Bridge 或 Modlens。Aegis 只贡献 skills；Code-as-Harness 仍是唯一的完成与准入权威。
+Desktop 会把 Solar 受控的 Better Sidebar、GenUI、插件诊断、模型 fallback、代码图谱、Mnemon、Aegis skills、Synapse 会话地图和有界工具作为产品输入封装。Synapse 把现有 DSH 会话与分支投影到可视画布，同时 DSH Session Log 仍是唯一权威记录；其可卸载私有存储只保存插件投影与布局状态。即使聚合 UI 包依赖旧版本，product-first 解析也会保持已接受 Better Sidebar 实现的权威性，而其挂载 guard 会阻止 sidebar 重复归属。Mnemon 是唯一产品记忆 bundle；陈旧的 Memory Evolve row 会被禁用，但不会删除用户数据。原生 DeepSeek provider 将 `deepseek-v4-flash-vision-exp` 声明为支持图像输入，因此 Desktop 不会加载 Luna Vision Bridge 或 Modlens。Aegis 只贡献 skills；Code-as-Harness 仍是唯一的完成与准入权威。
 
 打包内的 `anchored-standard` preset 是 system-trust 产品输入，并排在同名上游 preset root 之前。它的首轮 gate 会覆盖 delegated agent，因此 AgentTeams worker 会与主 agent 一样从 `bash` 和 `str_replace_editor` 两个 bootstrap 工具开始，而不是被当作已经 promoted。AgentTeams 还会把 member protocol 放入首条 user prompt，不再替换所选 preset 的 persona。若用户 profile 已声明 AgentTeams，产品层不会重复加载；最终 patch 仍会强制这一 prompt placement。
 

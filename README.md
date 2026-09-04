@@ -59,11 +59,12 @@ Desktop 与 Product Server 从同一个密封组合生成，加载相同产品�
 | 远程执行 | 精确 commit 的仓库物化、per-command 隔离 workspace、持久 Resident 执行、Artifact 回传 | 仅允许 allowlist 仓库；凭据与发送端绝对路径不跨 wire |
 | 多 Server 集群 | 固定成员、majority-backed Leader Lease、term/vote fencing、逻辑状态复制、Frontend Leader 发现 | 首版使用有界完整 snapshot；成员变更与无界增量复制后置 |
 | Session handoff | Frontend/local Server/Product Server 间按 revision 传输完整且已闭合的事件日志 | 不复制 open turn、SQLite/WAL，也不做 continuous dual write |
+| Synapse 会话地图 | 以可视画布组织 DSH 会话、分支、消息和工具活动；布局跨重启保存 | Session Log 仍是唯一事实源；Synapse 私有 JSON 只是可卸载投影 |
 | Memory | Mnemon Memory Space、多 Provider adapter、Recall、Graph Projection、Runtime Memory、受监督写入与备份面 | Memory 是受管插件能力，不是编排事实源 |
 | Trace 与 Evidence | Session event、Collaboration Trace、Orchestration event、算子阶段、有界输出、不可变 Evidence/Artifact ref | 私有推理、原始 prompt、完整 terminal screen 与产品私有 transcript 不进入通用投影 |
 | Billing | 本地 usage ledger、DeepSeek 官方余额、分时价格、模型明细、本地节省、多 Server 聚合 | DSH 本地总额不是 Provider 官方账单；不可用来源会显式显示，不冒充零 |
 | Desktop 体验 | Thin Electron Host、官方 Web carrier、advanced/compatibility mode、profile、tray、terminal、update、theme 与 plugin | 当前稳定发行合同是 macOS；Windows/Linux 路径不是已接受的稳定 Desktop 发行版 |
-| 受管插件 | 密封 Better Sidebar、GenUI、diagnostics、code graph、Mnemon、Aegis skill、billing、remote module 与来源 registry | 可选第三方插件仍是 profile extension，除非进入密封产品 |
+| 受管插件 | 密封 Better Sidebar、GenUI、diagnostics、code graph、Mnemon、Synapse、Aegis skill、billing、remote module 与来源 registry | 可选第三方插件仍是 profile extension，除非进入密封产品 |
 | 治理 | Agent Note、双语文档、包约束、Code-as-Harness、source/package/runtime identity、受保护 PR 交付 | 需要真实安装产品验收时，治理通过不能替代它 |
 
 ## 系统架构
