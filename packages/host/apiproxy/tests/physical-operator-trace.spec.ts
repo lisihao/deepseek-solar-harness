@@ -158,11 +158,35 @@ describe('projectPublicSessionEvent', () => {
       data: { kind: 'tool-completed', toolName: 'Bash' },
     })).toMatchObject({ kind: 'native-tool', status: 'completed', sourceSequence: 3, toolName: 'Bash' })
     expect(project('progress', {
+      commandId: 'observation-tool-no-name',
+      sequence: 3,
+      type: 'turn.observation',
+      data: { kind: 'tool-completed' },
+    })).toMatchObject({ kind: 'native-tool', status: 'completed', sourceSequence: 3 })
+    expect(project('progress', {
+      commandId: 'observation-output-empty',
+      sequence: 1,
+      type: 'turn.observation',
+      data: { kind: 'public-output', preview: '' },
+    })).toMatchObject({ kind: 'public-output', sourceSequence: 1 })
+    expect(project('progress', {
+      commandId: 'observation-output-empty-after-scrub',
+      sequence: 1,
+      type: 'turn.observation',
+      data: { kind: 'public-output', preview: '\u0000\u0001' },
+    })).toMatchObject({ kind: 'public-output', sourceSequence: 1 })
+    expect(project('progress', {
       commandId: 'observation-approval',
       sequence: 4,
       type: 'turn.observation',
       data: { kind: 'approval-required', approvalKind: 'Bash', preview: 'safe approval summary' },
     })).toMatchObject({ kind: 'approval-required', sourceSequence: 4, approvalKind: 'Bash', preview: 'safe approval summary' })
+    expect(project('progress', {
+      commandId: 'observation-approval-no-details',
+      sequence: 4,
+      type: 'turn.observation',
+      data: { kind: 'approval-required', approvalKind: '', preview: '' },
+    })).toMatchObject({ kind: 'approval-required', sourceSequence: 4 })
 
     expect(project('progress', {
       commandId: 'observation-usage-all',
@@ -306,6 +330,12 @@ describe('projectPublicSessionEvent', () => {
       arguments: { safe: true },
     })).toMatchObject({ kind: 'tool', standalone: false, status: 'running' })
     expect(project('tool-call', {
+      commandId: 'named-tool-command',
+      toolCallId: 'named-tool-call',
+      publicToolName: 'Bash',
+      arguments: { safe: true },
+    })).toMatchObject({ kind: 'tool', standalone: true, status: 'running', toolName: 'Bash' })
+    expect(project('tool-call', {
       executionCommandId: null,
       commandId: 'null-execution-fallback',
       toolCallId: 'null-execution-tool',
@@ -330,6 +360,11 @@ describe('projectPublicSessionEvent', () => {
       commandId: 'indeterminate-command',
       toolCallId: 'indeterminate-tool',
     })).toMatchObject({ kind: 'tool', status: 'indeterminate' })
+    expect(project('tool-indeterminate', {
+      commandId: 'named-indeterminate-command',
+      toolCallId: 'named-indeterminate-tool',
+      publicToolName: 'Bash',
+    })).toMatchObject({ kind: 'tool', standalone: true, status: 'indeterminate', toolName: 'Bash' })
     expect(project('tool-indeterminate', {
       commandId: 'missing-tool-command',
     })).toMatchObject({ kind: 'tool', status: 'indeterminate', standalone: true })
