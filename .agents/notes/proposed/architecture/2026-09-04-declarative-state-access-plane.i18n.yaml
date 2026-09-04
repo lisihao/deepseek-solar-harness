@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-09-04-declarative-state-access-plane.md
-2026-09-04-declarative-state-access-plane.md: 3b5fe44cfdf537125360e47d653872d5dfc1b0db
+2026-09-04-declarative-state-access-plane.md: becc5196e0e14c97f3db172d90532886a44399ad
 2026-09-04-declarative-state-access-plane.zh.md: 464490195c42d287f3bd2cc4cf79f4d3e6a60ae1
