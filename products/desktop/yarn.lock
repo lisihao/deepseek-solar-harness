@@ -1352,13 +1352,13 @@ __metadata:
 
 "@deepseek-ai/dsh-chatgpt-web-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-chatgpt-web-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz::hash=a89166&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-chatgpt-web-operator@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz::hash=dd1b4f&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-physical-operator-chatgpt-web": "npm:^0.1.0-rc.5"
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
-  checksum: 10c0/30f0b323a68a356b63f1b2b5701517a5d481b2e7b6e6876209b8a0202d71c656e6eddd2b3c8be0e8c686631b682a20475028ff7e5b1279b70a9cfef070014363
+  checksum: 10c0/7653895073778439a1db8bd24686b3508d7a7d919dc6d558ca84563f233fff5166cfc2a7bb689b9825c202a21515d575ba505dd82322a2c5fe599f4cb04c7d61
   languageName: node
   linkType: hard
 

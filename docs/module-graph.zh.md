@@ -122,6 +122,7 @@ flowchart TD
   end
   subgraph group_bundle["packages/bundle"]
     pkg_base["base"]
+    pkg_chatgpt_web_operator["chatgpt-web-operator"]
     pkg_ego_lite_browser["ego-lite-browser"]
     pkg_headless["headless"]
     pkg_orchestrations["orchestrations"]
@@ -274,6 +275,7 @@ flowchart TD
   end
   subgraph group_physical_operator["packages/physical-operator"]
     pkg_physical_operator["physical-operator"]
+    pkg_physical_operator_chatgpt_web["physical-operator-chatgpt-web"]
     pkg_physical_operator_resident["physical-operator-resident"]
     pkg_physical_operator_subagent["physical-operator-subagent"]
     pkg_resident_operator["resident-operator"]
@@ -380,6 +382,7 @@ flowchart TD
   pkg_scope --> pkg_invariants
   pkg_cmdline --> pkg_invariants
   pkg_base --> pkg_invariants
+  pkg_chatgpt_web_operator --> pkg_invariants
   pkg_ego_lite_browser --> pkg_invariants
   pkg_orchestrations --> pkg_invariants
   pkg_resident_operators --> pkg_invariants
@@ -768,6 +771,9 @@ flowchart TD
   pkg_rlm_runtime --> pkg_invariants
   pkg_rlm_runtime --> pkg_llm
   pkg_rlm_runtime --> pkg_physical_operator
+  pkg_physical_operator_chatgpt_web --> pkg_browser
+  pkg_physical_operator_chatgpt_web --> pkg_invariants
+  pkg_physical_operator_chatgpt_web --> pkg_physical_operator
   pkg_resident_operator --> pkg_brand
   pkg_resident_operator --> pkg_invariants
   pkg_resident_operator --> pkg_llm
@@ -1681,6 +1687,7 @@ flowchart TD
 | [`scope`](../packages/core/scope) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`cmdline`](../packages/boot/cmdline) | `boot` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`base`](../packages/bundle/base) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`chatgpt-web-operator`](../packages/bundle/chatgpt-web-operator) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`ego-lite-browser`](../packages/bundle/ego-lite-browser) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`orchestrations`](../packages/bundle/orchestrations) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`resident-operators`](../packages/bundle/resident-operators) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
@@ -1799,6 +1806,7 @@ flowchart TD
 | [`lsp-stdio`](../packages/lsp/lsp-stdio) | `lsp` | [`brand`](../packages/util/brand), [`fs`](../packages/fs/fs), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`lsp`](../packages/lsp/lsp), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
 | [`model-allocation`](../packages/orchestration/model-allocation) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator) |
 | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | `orchestration` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator) |
+| [`physical-operator-chatgpt-web`](../packages/physical-operator/physical-operator-chatgpt-web) | `physical-operator` | [`browser`](../packages/browser/browser), [`invariants`](../packages/runtime-diagnostics/invariants), [`physical-operator`](../packages/physical-operator/physical-operator) |
 | [`resident-operator`](../packages/physical-operator/resident-operator) | `physical-operator` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator) |
 | [`session-title-llm`](../packages/session/session-title-llm) | `session` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-title`](../packages/session/session-title), [`timeout`](../packages/util/timeout) |
 | [`bash-local`](../packages/shell/bash-local) | `shell` | [`invariants`](../packages/runtime-diagnostics/invariants), [`settings`](../packages/settings/settings), [`shell`](../packages/shell/shell), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
