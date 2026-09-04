@@ -1,5 +1,7 @@
 # 项目状态
 
+[English](PROJECT_STATE.md) | 中文
+
 本文件记录 Solar 分支当前执行链路、持久架构决策、阻塞缺口和唯一下一实施切片。它不替代当前状态的[架构图](architecture.zh.md)、Package Contract、生成的 Subsystem Reference，或 [Agent Notes](../.agents/notes/README.md) 中的决策依据。
 
 ## 当前执行链路
