@@ -30,19 +30,19 @@ const ROLE_SUMMARIES: Readonly<Record<string, string>> = {
 
 function turnPreview(round: number, role: string, title: string): string {
   const summary = ROLE_SUMMARIES[role] ?? 'records a deterministic role-specific observation'
-  return `R${String(round)} ${title} [${role}]: ${summary}. output-preview:r${String(round)}:${role}`
+  return `R${String(round)} ${title}: ${summary}.`
 }
 
 function evidenceRef(round: number, role: string): DebateEvidenceRefV1 {
   return { version: 1, ref: `fixture:evidence:r${String(round)}:${role}`, kind: 'observation' }
 }
 
-function claim(round: number, role: string, evidence: DebateEvidenceRefV1): DebateClaimV1 {
+function claim(round: number, role: string, title: string, evidence: DebateEvidenceRefV1): DebateClaimV1 {
   const claimId = `fixture:claim:r${String(round)}:${role}`
   return {
     version: 1,
     claimId,
-    statement: `R${String(round)} ${role} observation is bounded and replayable.`,
+    statement: `R${String(round)} ${title} observation is bounded and replayable.`,
     status: 'supported',
     severity: 'medium',
     confidence: role === 'decision-judge' ? 0.95 : 0.9,
@@ -65,7 +65,7 @@ function turn(round: number, slot: DebateRunSnapshotV1['roster'][number]): Debat
     state: 'settled',
     outputRef: `artifact:${RUN_ID}:round-${String(round)}:${slot.role}`,
     outputPreview: turnPreview(round, slot.role, slot.persona.title),
-    claimIds: [claim(round, slot.role, evidence).claimId],
+    claimIds: [claim(round, slot.role, slot.persona.title, evidence).claimId],
     evidenceRefs: [evidence],
     usage: { inputTokens: 10, outputTokens: 5, costUsd: 0 },
     startedAt: CREATED_AT,
@@ -90,13 +90,18 @@ function renderTranscript(
   roster: DebateRunSnapshotV1['roster'],
   rounds: readonly DebateRoundSnapshotV1[],
 ): string {
+  const titleByRole = new Map<string, string>(roster.map(slot => [slot.role, slot.persona.title]))
+  const titleFor = (role: string): string => titleByRole.get(role) ?? 'Participant'
+  const operatorTitle = (operatorId: string): string => operatorId === 'codex'
+    ? 'Codex'
+    : operatorId === 'claude-code' ? 'Claude Code' : operatorId
   const rosterText = roster
-    .map(slot => `- ${slot.role} (${slot.kind}) · ${slot.persona.title} · ${slot.operatorId}/${slot.model}`)
+    .map(slot => `- ${slot.persona.title} · ${operatorTitle(slot.operatorId)} · ${slot.model}`)
     .join('\n')
   const roundsText = rounds
     .map(round => [
       `ROUND ${String(round.round)}`,
-      ...round.turns.map(entry => `- ${entry.role}: ${entry.outputPreview ?? entry.outputRef ?? 'no preview'}`),
+      ...round.turns.map(entry => `- ${titleFor(entry.role)}: ${entry.outputPreview ?? entry.outputRef ?? 'no preview'}`),
     ].join('\n'))
     .join('\n\n')
   return [
@@ -107,7 +112,7 @@ function renderTranscript(
     roundsText,
     '',
     'MODERATOR SYNTHESIS',
-    'Decision Judge / moderator: choose fixture option A, retain the falsifier dissent, and require the rollback artifact before release.',
+    `${roster.find(slot => slot.kind === 'judge')?.persona.title ?? 'Moderator'}: choose fixture option A, retain the dissent, and require the rollback artifact before release.`,
     'Synthesis is settled from both rounds; no external model or paid API was called.',
   ].join('\n')
 }
@@ -118,7 +123,10 @@ function completedProjection(request: DebateStartRequestV1, pending: DebateRunSn
   const allEvidence: DebateEvidenceRefV1[] = []
   for (const roundNumber of ROUND_NUMBERS) {
     const turns = request.policy.roster.map(slot => turn(roundNumber, slot))
-    const roundClaims = turns.map(entry => claim(roundNumber, entry.role, entry.evidenceRefs[0]!))
+    const roundClaims = turns.map((entry) => {
+      const slot = request.policy.roster.find(candidate => candidate.role === entry.role)!
+      return claim(roundNumber, entry.role, slot.persona.title, entry.evidenceRefs[0]!)
+    })
     allClaims.push(...roundClaims)
     allEvidence.push(...turns.flatMap(entry => entry.evidenceRefs))
     const roundDissent = roundNumber === 2 && request.policy.roster.some(slot => slot.role === 'skeptical-falsifier')
