@@ -1143,6 +1143,45 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
   type WebModelSelectionRef = ModelSelectionRef & { current: ModelSelection }
   const selections = new WeakMap<Agent, WebModelSelectionRef>()
+
+  /**
+   * Debate owns the dsh-debate-host/debate route only for the turn it serves.
+   * It is an implementation route, not a model a user can select or a
+   * persistent session preference.  The actual request header still records
+   * it so the session transcript remains reconstructable; model-directory
+   * projection must therefore skip it when recovering the user's selection.
+   */
+  function isTransientDebateRoute(selection: Pick<ModelSelection, 'provider' | 'model'>): boolean {
+    return selection.provider === 'dsh-debate-host' && selection.model === 'debate'
+  }
+
+  /** Recover the most recent user-visible route from request/header history. */
+  function lastUserSelection(agent: Agent): ModelSelection | undefined {
+    for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
+      const event = agent.session.events[index]
+      if (event?.type !== 'request/header') continue
+      const { config } = event.data.header
+      if (isTransientDebateRoute(config)) continue
+      return {
+        provider: config.provider,
+        model: config.model,
+        ...config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort },
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * Value exposed by sessions.models.  A live user selection wins; after a
+   * restart, recover the last non-Debate route rather than making the
+   * implementation route appear as the selected model.  No event is written
+   * and the Debate route remains available to the runtime adapter itself.
+   */
+  function userFacingSelection(agent: Agent, selection: WebModelSelectionRef): ModelSelection {
+    const current = selection.current
+    if (!isTransientDebateRoute(current)) return current
+    return lastUserSelection(agent) ?? defaults.defaultModelSelection()
+  }
   /**
    * Serializes `agentPreset.select` per session. Two concurrent selects both
    * pass the blank check, and the second `unmountPresetFor` then finds nothing
@@ -2307,7 +2346,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const { sessionId } = request.payload
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
-        const current = selectionFor(found.agent).current
+        const current = userFacingSelection(found.agent, selectionFor(found.agent))
         const { groups, failures } = await buildModelCatalog(ctx)
         const routable = routeServed(current.provider)
         return ok(request, { current: { ...current }, routable, groups, failures })

@@ -251,7 +251,7 @@ describe('debate model Consumer', () => {
       maxRounds: 1,
       maxTurnsPerAgent: 1,
       maxAgentsPerRound: 3,
-      maxTotalTokens: 80_000,
+      maxTotalTokens: 120_000,
       maxCostUsd: 2,
     })
     expect(policy.convergence.minSettledAgents).toBe(3)
@@ -260,9 +260,19 @@ describe('debate model Consumer', () => {
       ['skeptical-falsifier', ['codex']],
       ['decision-judge', ['codex']],
     ])
+    expect(policy.budget).toMatchObject({
+      maxInputTokens: 80_000,
+      maxOutputTokens: 40_000,
+    })
+    expect(policy.convergence.minSettledAgents).toBe(3)
     expect(tool.debatePolicyForPrompt('Evaluate this contested architecture.')).toMatchObject({
       budget: { maxRounds: 3 },
       roster: { length: 4 },
+    })
+    expect(tool.DEFAULT_DEBATE_POLICY.budget).toMatchObject({
+      maxInputTokens: 400_000,
+      maxOutputTokens: 180_000,
+      maxTotalTokens: 580_000,
     })
   })
 
@@ -476,7 +486,15 @@ describe('debate model Consumer', () => {
     expect(streamText).toContain('**执行者：** Codex · GPT-5.6 Sol（已从 Claude Code · Claude Fable 5 自动回退）')
     expect(streamText).toContain('## 置顶 · 主持人总结')
     expect(streamText).toContain('Final host decision summary')
-    expect(streamText).toContain('| 角色 | 职责 | 执行算子 | 模型 | 当前状态 |')
+    expect(streamText).not.toContain('| 角色 | 职责 | 执行算子 | 模型 | 启动状态 |')
+    expect(streamText).not.toMatch(/\n\| ---/u)
+    expect(streamText).toContain('**建设性提案者**')
+    expect(streamText).toContain('**怀疑式证伪者**')
+    expect(streamText).toContain('**证据审计员**')
+    expect(streamText).toContain('**决策裁判（主持人）**')
+    expect(streamText).toContain('职责 · 提出可执行的正向方案，并明确前提。')
+    expect(streamText).toContain('执行 · Codex · GPT-5.6 Sol')
+    expect(streamText).toContain('启动状态 · 等待分派')
     expect(streamText).not.toContain('<details>')
     expect(streamText).not.toContain('<summary>')
     expect(streamText).not.toContain('角色 ID')
@@ -492,6 +510,110 @@ describe('debate model Consumer', () => {
       throw new Error('missing Debate text block-end')
     }
     expect(blockEnd.block.text).toBe(streamText)
+  })
+
+  it('emits a roster status update when terminal statuses become available', async () => {
+    const { ctx, agent, provider } = await setupAutomatic()
+    const template = snapshot()
+    const round = template.rounds[0]
+    if (round === undefined) throw new Error('missing Debate fixture round')
+    const proposer = round.turns[0]
+    if (proposer === undefined) throw new Error('missing Debate fixture turn')
+    const { convergence: _convergence, ...roundWithoutConvergence } = round
+    const { outputRef: _outputRef, outputPreview: _outputPreview, ...proposerWithoutOutput } = proposer
+    provider.startResult = snapshot({
+      state: 'round_running',
+      revision: 5,
+      currentRound: 1,
+      rounds: [{
+        ...roundWithoutConvergence,
+        state: 'running',
+        turns: [{
+          ...proposerWithoutOutput,
+          state: 'dispatched',
+        }],
+      }],
+    })
+    const settled = snapshot({
+      state: 'completed',
+      revision: 7,
+      currentRound: 1,
+      rounds: [{
+        ...roundWithoutConvergence,
+        state: 'completed',
+        turns: [{
+          ...proposerWithoutOutput,
+          state: 'settled',
+          outputRef: 'artifact:proposer-output',
+          outputPreview: 'Settled proposer output',
+        }],
+      }],
+    })
+    const completion = deferred<DebateRunSnapshotV1>()
+    provider.controlGate = completion.promise
+    provider.inspectFallback = settled
+
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Start this Debate for status change.' }],
+      source: { kind: 'user' },
+    }))
+    completion.resolve({ ...settled, state: 'completed' })
+    await agent.whenIdle()
+
+    const streamText = textDeltas(agent).join('')
+    expect(streamText).toContain('## 参与者名册')
+    expect(streamText).toContain('**参与者状态更新：** 建设性提案者：已完成')
+  })
+
+  it('treats ANSI/SGR and trailing [1m] markers as equivalent in route comparisons', async () => {
+    const { ctx, agent, provider } = await setupAutomatic()
+    const template = snapshot()
+    const round = template.rounds[0]
+    const turn = round?.turns[0]
+    if (round === undefined || turn === undefined) throw new Error('missing Debate fixture turn')
+    const { convergence: _convergence, ...roundWithoutConvergence } = round
+    const { outputRef: _outputRef, outputPreview: _outputPreview, ...proposerWithoutOutput } = turn
+    const completed = snapshot({
+      state: 'completed',
+      revision: 9,
+      currentRound: 1,
+      rounds: [{
+        ...roundWithoutConvergence,
+        state: 'completed',
+        turns: [{
+          ...proposerWithoutOutput,
+          state: 'settled',
+          routing: {
+            version: 1 as const,
+            requestedOperatorId: 'codex',
+            requestedModel: 'claude-fable-5',
+            actualOperatorId: 'codex',
+            actualModel: '\u001b[1mclaude-fable-5[1m',
+          },
+        }],
+      }],
+    })
+    const completion = deferred<DebateRunSnapshotV1>()
+    provider.controlGate = completion.promise
+    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 4, currentRound: 0, rounds: [] })
+    provider.inspectFallback = completed
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'How should route matching handle ANSI markers?' }],
+      source: { kind: 'user' },
+    }))
+    const idle = agent.whenIdle()
+    await waitFor(() => textDeltas(agent).some(text => text.includes('### 1 楼')))
+    completion.resolve(completed)
+    await idle
+
+    const streamText = textDeltas(agent).join('')
+    expect(streamText).toContain('### 1 楼 · 建设性提案者')
+    expect(streamText).toContain('**执行者：** Codex · Claude Fable 5')
+    expect(streamText).not.toContain('（已从')
   })
 
   it('renders the current user topic and structured public posts without internal identifiers', async () => {
@@ -543,7 +665,15 @@ describe('debate model Consumer', () => {
 
     const streamText = textDeltas(agent).join('')
     expect(streamText).toContain('## 本轮真正的用户议题是什么？')
-    expect(streamText).toContain('| 角色 | 职责 | 执行算子 | 模型 | 当前状态 |')
+    expect(streamText).not.toContain('| 角色 | 职责 | 执行算子 | 模型 | 启动状态 |')
+    expect(streamText).not.toMatch(/\n\| ---/u)
+    expect(streamText).toContain('**建设性提案者**')
+    expect(streamText).toContain('**怀疑式证伪者**')
+    expect(streamText).toContain('**证据审计员**')
+    expect(streamText).toContain('**决策裁判（主持人）**')
+    expect(streamText).toContain('职责 · 提出可执行的正向方案，并明确前提。')
+    expect(streamText).toContain('执行 · Codex · GPT-5.6 Sol')
+    expect(streamText).toContain('启动状态 · 等待分派')
     expect(streamText).toContain('**立场**：先补可靠性。')
     expect(streamText).toContain('**P0**：证据校验必须阻断未验证完成。')
     expect(streamText).toContain('**P1**：使用租约隔离并发写入。')
@@ -723,11 +853,11 @@ describe('debate model Consumer', () => {
     await agent.whenIdle()
 
     const streamText = textDeltas(agent).join('')
-    expect(streamText).not.toContain('楼 · 决策裁判（主持人）')
+    expect(streamText).toContain('楼 · 决策裁判（主持人）')
     expect(streamText).toContain('主持人状态')
     expect(streamText).toContain('已阻断：participant execution did not complete')
     expect(streamText).toContain('evidence audit execution did not complete')
-    expect(streamText.match(/participant execution did not complete/g)).toHaveLength(1)
+    expect(streamText.match(/participant execution did not complete/g)).toHaveLength(2)
   })
 
   it('renders terminal participant turns from a stopped active round with contiguous floors', async () => {
@@ -784,8 +914,8 @@ describe('debate model Consumer', () => {
     const streamText = textDeltas(agent).join('')
     expect(streamText).toContain('### 1 楼 · 建设性提案者')
     expect(streamText).toContain('### 2 楼 · 怀疑式证伪者')
-    expect(streamText).not.toContain('### 3 楼')
-    expect(streamText).not.toContain('楼 · 决策裁判（主持人）')
+    expect(streamText).toContain('### 3 楼 · 决策裁判（主持人）')
+    expect(streamText).toContain('未完成：judge interrupted')
     expect(streamText.match(/未完成：active stop/g)).toHaveLength(1)
     expect(streamText.match(/未完成：second active failure/g)).toHaveLength(1)
     expect(streamText).not.toContain('未完成：DEBATE_INTERRUPTED')

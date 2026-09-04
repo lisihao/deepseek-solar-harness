@@ -12,6 +12,7 @@ import type {
 } from '@deepseek-ai/dsh-debate'
 import type {
   DebateRoundAgentProgressV1,
+  DebateRoundExecutionRequestV1,
   DebateRoundExecutorPort,
   DebateTurnRequestV1,
   DebateTurnResultV1,
@@ -581,6 +582,164 @@ describe('local Debate Provider', () => {
     await expectTerminalConvergenceOrder(maxService, maxed.runId, 'max_rounds', 'max_rounds')
   })
 
+
+  it('reserves observed role usage before dispatching an over-budget follow-up round', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-reservation-'))
+    const turns: DebateTurnRequestV1[] = []
+    const cappedPolicy = policy('enabled', {
+      maxInputTokens: 60,
+      maxOutputTokens: 30,
+      maxTotalTokens: 100,
+    })
+    const service = await provider(root, async (turn) => {
+      turns.push(turn)
+      return {
+        ...resultFor(turn),
+        usage: { inputTokens: 14, outputTokens: 1, costUsd: 0.01 },
+      }
+    })
+    const pending = await service.start(request('enabled', {
+      commandId: 'start-reservation',
+      policy: {
+        ...cappedPolicy,
+        convergence: { ...cappedPolicy.convergence, scoreThreshold: 1 },
+      },
+    }))
+    const limited = await service.control({
+      version: 1,
+      commandId: 'control-reservation',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture predicts the next round before dispatch',
+    })
+
+    expect(limited.state).toBe('budget_limited')
+    expect(limited.currentRound).toBe(1)
+    expect(limited.rounds).toHaveLength(1)
+    expect(turns).toHaveLength(3)
+    expect(turns.every(turn => turn.round === 1)).toBe(true)
+    const events = (await service.readEvents({ runId: limited.runId, limit: 100 })).events
+    expect(events.filter(event => event.type === 'debate.round.started').map(event => event.round)).toEqual([1])
+    const admission = events.find(event => event.type === 'debate.convergence.evaluated'
+      && event.data.status === 'budget_limited')
+    expect(admission?.data).toMatchObject({
+      budgetKind: 'input-tokens',
+      budgetUsed: 42,
+      budgetReserved: 42,
+      budgetLimit: 60,
+    })
+    expect(admission?.data.reason).toBe('input token budget admission denied (used 42 + reserved 42 >= limit 60)')
+    await expectTerminalConvergenceOrder(service, limited.runId, 'budget_limited', 'budget_limited')
+  })
+
+  it('preflights a first round before it creates a TaskGraph or dispatches a slot', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-preflight-'))
+    const ctx = new Context()
+    contexts.push(ctx)
+    const preflightRequests: DebateRoundExecutionRequestV1[] = []
+    let executeCalls = 0
+    const executor: DebateRoundExecutorPort = {
+      preflight(round) {
+        preflightRequests.push(round)
+        return {
+          version: 1,
+          status: 'budget_limited',
+          estimate: { inputTokens: 73_638, outputTokens: 36_000, totalTokens: 109_638 },
+          limit: {
+            kind: 'input-tokens',
+            used: 0,
+            reserved: 73_638,
+            limit: 72_000,
+            reason: 'input token budget preflight denied (used 0 + reserved 73638 >= limit 72000)',
+          },
+        }
+      },
+      async executeRound() {
+        executeCalls += 1
+        throw new Error('budget-limited first round must not execute')
+      },
+    }
+    const service = new LocalDebateProvider(ctx, { root, executor, idFactory: () => 'run-preflight' })
+    const cappedPolicy = policy('enabled', {
+      maxInputTokens: 72_000,
+      maxOutputTokens: 48_000,
+      maxTotalTokens: 120_000,
+    })
+    const pending = await service.start(request('enabled', {
+      commandId: 'start-preflight',
+      policy: {
+        ...cappedPolicy,
+        convergence: { ...cappedPolicy.convergence, scoreThreshold: 1 },
+      },
+    }))
+    const limited = await service.control({
+      version: 1,
+      commandId: 'control-preflight',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture first-round budget preflight',
+    })
+
+    expect(limited.state).toBe('budget_limited')
+    expect(limited.currentRound).toBe(0)
+    expect(limited.rounds).toEqual([])
+    expect(executeCalls).toBe(0)
+    expect(preflightRequests).toHaveLength(1)
+    expect(preflightRequests[0]?.budgetEnvelope).toEqual({
+      version: 1,
+      usedInputTokens: 0,
+      usedOutputTokens: 0,
+      maxInputTokens: 72_000,
+      maxOutputTokens: 48_000,
+      maxTotalTokens: 120_000,
+    })
+    const events = (await service.readEvents({ runId: limited.runId, limit: 100 })).events
+    expect(events.some(event => event.type === 'debate.round.started')).toBe(false)
+    expect(events.some(event => event.type === 'debate.agent.dispatched')).toBe(false)
+    const admission = events.find(event => event.type === 'debate.convergence.evaluated'
+      && event.data.status === 'budget_limited')
+    expect(admission?.data).toMatchObject({
+      budgetKind: 'input-tokens',
+      budgetUsed: 0,
+      budgetReserved: 73_638,
+      budgetLimit: 72_000,
+      reason: 'input token budget preflight denied (used 0 + reserved 73638 >= limit 72000)',
+    })
+    await expectTerminalConvergenceOrder(service, limited.runId, 'budget_limited', 'budget_limited')
+  })
+
+  it('labels a configured single round as max-round completion rather than budget limited', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-single-round-'))
+    const singleRoundPolicy = policy('enabled', { maxRounds: 1 })
+    const service = await provider(root, async turn => resultFor(turn))
+    const pending = await service.start(request('enabled', {
+      commandId: 'start-single-round',
+      policy: {
+        ...singleRoundPolicy,
+        convergence: { ...singleRoundPolicy.convergence, scoreThreshold: 1 },
+      },
+    }))
+    const completed = await service.control({
+      version: 1,
+      commandId: 'control-single-round',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture compact debate completion',
+    })
+
+    expect(completed.state).toBe('max_rounds')
+    expect(completed.rounds).toHaveLength(1)
+    const events = (await service.readEvents({ runId: completed.runId, limit: 100 })).events
+    const terminal = events.find(event => event.type === 'debate.convergence.evaluated'
+      && event.data.status === 'max_rounds')
+    expect(terminal?.data.reason).toBe('configured single-round Debate completed without convergence')
+    expect(events.some(event => event.type === 'debate.convergence.evaluated'
+      && event.data.status === 'budget_limited')).toBe(false)
+    await expectTerminalConvergenceOrder(service, completed.runId, 'max_rounds', 'max_rounds')
+  })
   it('rejects a new follow-up claim instead of expanding outside the ledger', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-ledger-'))
     const service = await provider(root, async turn => resultFor(turn, { newClaim: turn.round > 1 }))

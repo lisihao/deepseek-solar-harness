@@ -407,7 +407,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:101`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:106`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -429,7 +429,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:114`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:119`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -440,7 +440,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'debate/preferences': DebateExecutionPreferences
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:99`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:104`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatetrace--log-only"></a>
 
@@ -455,7 +455,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'debate/trace': DebateTraceSessionEventV1
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:125`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:130`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 
@@ -731,6 +731,8 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   /** Parent physical execution command that owns this model-tool call. */
   executionCommandId?: string
   tool: string
+  /** Bounded, credential-scrubbed display label for public trajectory projection. */
+  publicToolName?: string
   arguments: Record<string, JsonValue>
 }
 ```
@@ -765,11 +767,13 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   toolCallId: string
   executionCommandId: string
   tool: string
+  /** Bounded, credential-scrubbed display label for public trajectory projection. */
+  publicToolName?: string
   code: 'COMMAND_INDETERMINATE'
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:137`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:145`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -784,11 +788,17 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   /** Parent physical execution command that owns this model-tool call. */
   executionCommandId?: string
   tool: string
+  /** Bounded, credential-scrubbed display label for public trajectory projection. */
+  publicToolName?: string
+  /** Bounded, credential-scrubbed public success text; raw result remains authority-only. */
+  publicResultPreview?: string
+  /** Bounded, credential-scrubbed public failure text; raw error remains authority-only. */
+  publicErrorPreview?: string
   result: JsonValue
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:127`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:129`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 

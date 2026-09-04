@@ -121,6 +121,8 @@ declare module '@deepseek-ai/dsh-session/types' {
       /** Parent physical execution command that owns this model-tool call. */
       executionCommandId?: string
       tool: string
+      /** Bounded, credential-scrubbed display label for public trajectory projection. */
+      publicToolName?: string
       arguments: Record<string, JsonValue>
     }
     /** Settled result of one bridged DSH tool call. */
@@ -131,6 +133,12 @@ declare module '@deepseek-ai/dsh-session/types' {
       /** Parent physical execution command that owns this model-tool call. */
       executionCommandId?: string
       tool: string
+      /** Bounded, credential-scrubbed display label for public trajectory projection. */
+      publicToolName?: string
+      /** Bounded, credential-scrubbed public success text; raw result remains authority-only. */
+      publicResultPreview?: string
+      /** Bounded, credential-scrubbed public failure text; raw error remains authority-only. */
+      publicErrorPreview?: string
       result: JsonValue
     }
     /** A recovered bridge Receipt has a call but no provable settled result. */
@@ -139,6 +147,8 @@ declare module '@deepseek-ai/dsh-session/types' {
       toolCallId: string
       executionCommandId: string
       tool: string
+      /** Bounded, credential-scrubbed display label for public trajectory projection. */
+      publicToolName?: string
       code: 'COMMAND_INDETERMINATE'
     }
   }

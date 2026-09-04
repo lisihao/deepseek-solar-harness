@@ -634,6 +634,29 @@ defineAcpSnapshotSuite({
   hasPwsh,
 })
 
+const DEBATE_PUBLIC_INTERNAL_MARKER
+  = /(?:constructive-proposer|skeptical-falsifier|evidence-auditor|decision-judge|\((?:participant|judge)\))/
+const DEBATE_PUBLIC_TEXT_KEYS = new Set(['text', 'texts', 'preview', 'outputPreview', 'statement', 'position', 'reason'])
+
+function collectDebatePublicText(value: unknown, key?: string): string[] {
+  if (typeof value === 'string') return key !== undefined && DEBATE_PUBLIC_TEXT_KEYS.has(key) ? [value] : []
+  if (Array.isArray(value)) return value.flatMap(item => collectDebatePublicText(item, key))
+  if (value === null || typeof value !== 'object') return []
+  return Object.entries(value).flatMap(([childKey, child]) => collectDebatePublicText(child, childKey))
+}
+
+it('debate-tool-turn public text omits internal roster identifiers', () => {
+  const stdout = readFileSync(join(SNAPSHOTS_DIR, 'debate-tool-turn', 'stdout.expected.jsonl'), 'utf8')
+    .trimEnd()
+    .split('\n')
+    .flatMap(line => collectDebatePublicText(JSON.parse(line) as unknown))
+  const session = fixtureRecords('debate-tool-turn').flatMap(record => collectDebatePublicText(record))
+  expect(stdout.length).toBeGreaterThan(0)
+  expect(session.length).toBeGreaterThan(0)
+  expect(stdout.join('\n')).not.toMatch(DEBATE_PUBLIC_INTERNAL_MARKER)
+  expect(session.join('\n')).not.toMatch(DEBATE_PUBLIC_INTERNAL_MARKER)
+})
+
 it('packed ACP fixture retains every chunk row kind without changing the logical session', () => {
   const source = fixtureRecords(PACKED_CHUNKS_SOURCE)
   const packed = fixtureRecords('packed-chunks')

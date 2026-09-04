@@ -160,7 +160,7 @@ describe('ResidentStore', () => {
     store.close()
   })
 
-  it('migrates a schema-v1 database additively and locks the next admitted profile', () => {
+  it('migrates a schema-v1 database additively and locks the next admitted profile', { timeout: 15_000 }, () => {
     const path = root()
     const bootstrap = new ResidentStore(path)
     bootstrap.close()

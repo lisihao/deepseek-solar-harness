@@ -19,5 +19,9 @@
     "client.js": "d97f1bb7b51f612dcdb4e2c1cdc612432ae3909be3682b69d03bde5a599cbac2",
     "app.js": "3107ad9a74de80da03f7c3420f69e715a18afb8d19270ab8aa10e2698a8fc530"
   },
-  "copy_policy": "The release tree is copied from the locked commit. Runtime files remain byte-for-byte faithful; only this lock and the fidelity record are downstream metadata."
+  "downstream_adapter_files": [
+    "adapter-host.js",
+    "client-adapter.js"
+  ],
+  "copy_policy": "The release tree is copied from the locked commit. Runtime files remain byte-for-byte faithful. DSH-owned companion adapter files, Cordis patch, manifest, tests, and docs are downstream integration files and are not claimed as upstream source."
 }

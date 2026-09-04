@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CallId, type ToolSchema } from '@deepseek-ai/dsh-llm'
+import { CallId, type ContentBlock, type ToolSchema } from '@deepseek-ai/dsh-llm'
 import { localIpcAddress, localIpcUsesFilesystem, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
 import { LocalJsonRpcRequestServer } from '@deepseek-ai/dsh-sdk-protocol'
@@ -41,6 +41,44 @@ function record(value: unknown, label: string): Record<string, unknown> {
 function nonBlank(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) throw new Error(`${label} must be a non-empty string`)
   return value
+}
+
+const PUBLIC_TOOL_NAME_LIMIT = 160
+const PUBLIC_TOOL_PREVIEW_LIMIT = 1_600
+const PUBLIC_TRACE_REDACTIONS = [
+  /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/gu,
+  /\b(?:api[_-]?key|authorization|password|token|secret)\s*[:=]\s*[^\s,;]+/giu,
+  /\b(?:sk-[A-Za-z0-9_-]+|gh[pousr]_[A-Za-z0-9]+|xox[baprs]-[A-Za-z0-9-]+)\b/gu,
+] as const
+
+function publicTraceText(value: string, limit: number): string | undefined {
+  let text = value
+  for (const pattern of PUBLIC_TRACE_REDACTIONS) text = text.replace(pattern, '[REDACTED]')
+  text = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '').slice(0, limit)
+  return text.length === 0 ? undefined : text
+}
+
+function publicToolLabel(value: string): { readonly publicToolName?: string } {
+  const publicToolName = publicTraceText(value, PUBLIC_TOOL_NAME_LIMIT)
+  return publicToolName === undefined ? {} : { publicToolName }
+}
+
+function publicContentText(content: readonly ContentBlock[]): string | undefined {
+  const text = content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
+  return text.length === 0 ? undefined : text
+}
+
+function publicToolResultPreview(result: Awaited<ReturnType<Context['tools']['execute']>>): {
+  readonly publicResultPreview?: string
+  readonly publicErrorPreview?: string
+} {
+  const source = result.isError
+    ? result.error.message
+    : typeof result.value === 'string' ? result.value : publicContentText(result.content)
+  if (source === undefined) return {}
+  const preview = publicTraceText(source, PUBLIC_TOOL_PREVIEW_LIMIT)
+  if (preview === undefined) return {}
+  return result.isError ? { publicErrorPreview: preview } : { publicResultPreview: preview }
 }
 
 function requestHash(tool: string, args: Record<string, unknown>): string {
@@ -115,6 +153,7 @@ export class PhysicalOperatorModelToolBridge {
         toolCallId: receipt.toolCallId,
         executionCommandId: commandId,
         tool: receipt.tool,
+        ...publicToolLabel(receipt.tool),
         code: 'COMMAND_INDETERMINATE',
       }, { ignorable: true })
     }
@@ -187,6 +226,7 @@ export class PhysicalOperatorModelToolBridge {
       toolCallId: commandId,
       executionCommandId: binding.executionCommandId,
       tool,
+      ...publicToolLabel(tool),
       arguments: args as Record<string, import('@deepseek-ai/dsh-session').JsonValue>,
     }, { ignorable: true })
     const result = await this.ctx.tools.execute({
@@ -208,6 +248,8 @@ export class PhysicalOperatorModelToolBridge {
       toolCallId: commandId,
       executionCommandId: binding.executionCommandId,
       tool,
+      ...publicToolLabel(tool),
+      ...publicToolResultPreview(result),
       result: envelope as unknown as JsonValue,
     }, { ignorable: true })
     return envelope

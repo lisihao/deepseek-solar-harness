@@ -413,6 +413,32 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('keeps the user model selected when a Debate turn logs its transient host route', async () => {
+    const { ctx, agent, sessionId } = await harness({
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+      reasoningEffort: ReasoningEffortId('max'),
+    })
+    const stored = { provider: 'deepseek-official', model: 'deepseek-chat' }
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => stored,
+      cwd: '/tmp',
+    })
+
+    agent.session.append('request/header', {
+      header: { config: { provider: 'dsh-debate-host', model: 'debate' } },
+      reason: 'change',
+    })
+
+    // The Debate adapter route is an actual logged request route, but it is
+    // not a user-selectable model and must not replace the selector's durable
+    // preference after a restart/cold resume.
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).current)
+      .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner', reasoningEffort: 'max' })
+    expect(stored).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+    await ctx.fiber.dispose()
+  })
+
   it('saves an accepted selection as the default and survives a storage failure', async () => {
     const { ctx, sessionId } = await harness()
     const saved: unknown[] = []

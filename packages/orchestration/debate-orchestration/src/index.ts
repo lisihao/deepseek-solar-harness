@@ -12,6 +12,7 @@ import {
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import LocalDebateProvider from '@deepseek-ai/dsh-debate-local'
 import type {
+  DebateRoundBudgetPreflightV1,
   DebateRoundExecutionRequestV1,
   DebateRoundExecutionResultV1,
   DebateRoundAgentProgressV1,
@@ -49,6 +50,9 @@ const DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000
 const MAX_RESULT_PREVIEW = 4_000
 const MAX_PROGRESS_PREVIEW = 1_600
 const MAX_PROGRESS_NAME = 160
+const DEBATE_CONTEXT_MAX_TOKENS = 16_000
+const NATIVE_SUBSCRIPTION_SESSION_BASELINE_TOKENS = 8_546
+const NATIVE_SUBSCRIPTION_OUTPUT_ALLOWANCE_TOKENS = 12_000
 
 /** Loader configuration for the local Debate owner and TaskGraph adapter. */
 export interface Config extends DebateTaskGraphAdapterOptions {
@@ -161,7 +165,7 @@ function graphNode(turn: DebateTurnRequestV1, participantIds: readonly string[])
     capabilityRequirements: [],
     capabilityBudget: [],
     contextPolicy: {
-      maxTokens: 16_000,
+      maxTokens: DEBATE_CONTEXT_MAX_TOKENS,
       allowedSourceKinds: ['intent', 'artifact'],
       unavailableSource: 'block',
     },
@@ -420,6 +424,69 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
     }
   }
 
+  /**
+   * Reserve native-session context and response capacity before TaskGraph
+   * compilation. The envelope is optional to preserve non-budgeted Consumers.
+   * @param request - Sealed round request with an optional transient envelope.
+   * @returns Deterministic admission result without TaskGraph side effects.
+   */
+  preflight(request: DebateRoundExecutionRequestV1): DebateRoundBudgetPreflightV1 {
+    const inputTokens = request.turns.length * (
+      DEBATE_CONTEXT_MAX_TOKENS + NATIVE_SUBSCRIPTION_SESSION_BASELINE_TOKENS
+    )
+    const outputTokens = request.turns.length * NATIVE_SUBSCRIPTION_OUTPUT_ALLOWANCE_TOKENS
+    const estimate = { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens }
+    const envelope = request.budgetEnvelope
+    if (envelope === undefined) return { version: 1, status: 'admitted', estimate }
+
+    const usedInputTokens = envelope.usedInputTokens
+    if (usedInputTokens + estimate.inputTokens >= envelope.maxInputTokens) {
+      return {
+        version: 1,
+        status: 'budget_limited',
+        estimate,
+        limit: {
+          kind: 'input-tokens',
+          used: usedInputTokens,
+          reserved: estimate.inputTokens,
+          limit: envelope.maxInputTokens,
+          reason: `input token budget preflight denied (used ${String(usedInputTokens)} + reserved ${String(estimate.inputTokens)} >= limit ${String(envelope.maxInputTokens)})`,
+        },
+      }
+    }
+    const usedOutputTokens = envelope.usedOutputTokens
+    if (usedOutputTokens + estimate.outputTokens >= envelope.maxOutputTokens) {
+      return {
+        version: 1,
+        status: 'budget_limited',
+        estimate,
+        limit: {
+          kind: 'output-tokens',
+          used: usedOutputTokens,
+          reserved: estimate.outputTokens,
+          limit: envelope.maxOutputTokens,
+          reason: `output token budget preflight denied (used ${String(usedOutputTokens)} + reserved ${String(estimate.outputTokens)} >= limit ${String(envelope.maxOutputTokens)})`,
+        },
+      }
+    }
+    const usedTotalTokens = usedInputTokens + usedOutputTokens
+    if (usedTotalTokens + estimate.totalTokens >= envelope.maxTotalTokens) {
+      return {
+        version: 1,
+        status: 'budget_limited',
+        estimate,
+        limit: {
+          kind: 'total-tokens',
+          used: usedTotalTokens,
+          reserved: estimate.totalTokens,
+          limit: envelope.maxTotalTokens,
+          reason: `total token budget preflight denied (used ${String(usedTotalTokens)} + reserved ${String(estimate.totalTokens)} >= limit ${String(envelope.maxTotalTokens)})`,
+        },
+      }
+    }
+    return { version: 1, status: 'admitted', estimate }
+  }
+
   private async routing(
     turn: DebateTurnRequestV1,
     node: OrchestrationNodeSnapshot,
@@ -448,6 +515,10 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
 
   /** Execute one round through the single durable TaskGraph authority. */
   async executeRound(request: DebateRoundExecutionRequestV1): Promise<DebateRoundExecutionResultV1> {
+    const preflight = this.preflight(request)
+    if (preflight.status === 'budget_limited') {
+      throw new DebateError(preflight.limit.reason, 'DEBATE_BUDGET_EXCEEDED')
+    }
     const plan = this.plan(request)
     const sourceSessionId = request.turns.find(turn => turn.sourceSessionId !== undefined)?.sourceSessionId
       ?? `debate:${request.runId}`

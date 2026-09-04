@@ -218,6 +218,7 @@ async function setup(options: {
   primary?: 'deepseek' | 'codex' | 'claude-code' | 'chatgpt-web'
   registerDeepSeek?: boolean
   mountTool?: boolean
+  echoResult?: string
 } = {}) {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
@@ -242,7 +243,7 @@ async function setup(options: {
     },
     execute: (args) => {
       echoCalls.push(args.value)
-      return Promise.resolve(`subscription:${args.value}`)
+      return Promise.resolve(options.echoResult ?? `subscription:${args.value}`)
     },
   }))
   const codex = new DurableOperator(
@@ -343,10 +344,13 @@ describe('host physical-operator routing', () => {
   })
 
   it('runs Codex as the first-class main model without a DeepSeek adapter and exposes the real DSH tools', async () => {
+    const secret = 'sk-must-not-be-public'
+    const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nprivate material\n-----END OPENSSH PRIVATE KEY-----'
     const { agent, deepseek, codex } = await setup({
       primary: 'codex',
       registerDeepSeek: false,
       codexBridgeTool: 'subscription_echo',
+      echoResult: `subscription:hello token=hidden ${secret}\n${privateKey}\n${'x'.repeat(2_000)}`,
     })
 
     send(agent, '你好')
@@ -372,6 +376,13 @@ describe('host physical-operator routing', () => {
     expect(toolResult.data.toolCallId).toBe(toolResult.data.commandId)
     expect(toolCall.data.executionCommandId).toBe(toolResult.data.executionCommandId)
     expect(toolCall.data.executionCommandId).not.toBe(toolCall.data.commandId)
+    expect(toolCall.data.publicToolName).toBe('subscription_echo')
+    expect(toolResult.data.publicToolName).toBe('subscription_echo')
+    expect(toolResult.data.publicResultPreview).toContain('subscription:hello')
+    expect(toolResult.data.publicResultPreview).toContain('[REDACTED]')
+    expect(toolResult.data.publicResultPreview).not.toContain(secret)
+    expect(toolResult.data.publicResultPreview).not.toContain('private material')
+    expect(toolResult.data.publicResultPreview?.length).toBeLessThanOrEqual(1_600)
   })
 
   it('runs ChatGPT Web as a first-class ephemeral main-model route without DeepSeek or a Resident bridge', async () => {

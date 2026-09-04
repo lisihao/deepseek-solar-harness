@@ -1,47 +1,22 @@
 export const GOVERNANCE_TRACE_PATH = '/code-harness/v1/trace'
 
-const DIRECT_OPERATOR_PROVIDER = 'dsh-physical-operator'
-const COLLABORATION_EVENT_TYPES = new Set([
+/**
+ * Session events that record an admission, route, or durable receipt decision.
+ *
+ * This is deliberately narrower than the ordinary execution trace. The
+ * Governance Trace answers whether work was authorized and proven; the
+ * Trajectory tab owns native progress, tools, and model-visible output.
+ */
+const GOVERNANCE_DECISION_EVENT_TYPES = new Set([
   'physical-operator/routing-decision',
   'physical-operator/dispatch',
   'physical-operator/tool-dispatch',
   'physical-operator/dispatch-terminal',
-  'physical-operator/progress',
-  'physical-operator/trace-degraded',
-  'physical-operator/tool-call',
-  'physical-operator/tool-result',
   'orchestration/admission',
 ])
-const MAX_OUTPUT_PREVIEW = 4_000
 
-function boundedText(value, limit = MAX_OUTPUT_PREVIEW) {
+function boundedDecisionText(value, limit = 400) {
   return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, limit) : undefined
-}
-
-function directOperatorObservation(data) {
-  const nested = data?.data
-  if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) return undefined
-  const kind = boundedText(nested.kind, 160)
-  if (kind === 'public-output') {
-    const output = boundedText(nested.preview)
-    return output === undefined ? undefined : { kind, output, outputPreview: output, outputTruncated: false }
-  }
-  if (kind === 'tool-started' || kind === 'tool-completed') {
-    const tool = boundedText(nested.toolName, 160)
-    return tool === undefined ? undefined : { kind, tool }
-  }
-  if (kind === 'approval-required') {
-    const approvalKind = boundedText(nested.approvalKind, 160)
-    const preview = boundedText(nested.preview)
-    return approvalKind === undefined ? undefined : { kind, approvalKind, ...preview === undefined ? {} : { output: preview, outputPreview: preview, outputTruncated: false } }
-  }
-  if (kind === 'usage-updated' && nested.usage !== null && typeof nested.usage === 'object' && !Array.isArray(nested.usage)) {
-    const usage = Object.fromEntries(['inputTokens', 'outputTokens', 'cacheReadInputTokens', 'cacheWriteInputTokens', 'costUsd']
-      .flatMap(key => typeof nested.usage[key] === 'number' && Number.isFinite(nested.usage[key]) ? [[key, nested.usage[key]]] : []))
-    return Object.keys(usage).length === 0 ? undefined : { kind, usage }
-  }
-  if (typeof nested.phase === 'string') return { kind: 'progress', phase: boundedText(nested.phase, 160) }
-  return undefined
 }
 
 function isLegacyGovernanceRefusal(error) {
@@ -67,10 +42,7 @@ function rawGovernanceSession(raw, sessionId) {
     }
     if (typeof record?.type !== 'string') continue
     const traceEvent = record.type.startsWith('governance/')
-      || COLLABORATION_EVENT_TYPES.has(record.type)
-      || record.type === 'assistant/message'
-      || record.type === 'tool/call'
-      || record.type === 'tool/result'
+      || GOVERNANCE_DECISION_EVENT_TYPES.has(record.type)
     if (!traceEvent) continue
     if (!Number.isSafeInteger(record.seq) || record.seq < 0 || record.data === null || typeof record.data !== 'object') {
       throw new Error(`raw session ${sessionId} contains an invalid trace event at line ${String(index + 1)}`)
@@ -86,148 +58,68 @@ function eventTimestamp(event) {
   return null
 }
 
-function directOperatorOutput(event) {
-  if (event.type !== 'assistant/message') return undefined
-  const message = event.data?.message
-  if (message?.source?.provider !== DIRECT_OPERATOR_PROVIDER || !Array.isArray(message.content)) return undefined
-  const text = message.content
-    .filter(block => block?.type === 'text' && typeof block.text === 'string')
-    .map(block => block.text)
-    .join('\n')
-    .trim()
-  if (text === '') return undefined
-  return {
-    output: text,
-    outputPreview: text.slice(0, MAX_OUTPUT_PREVIEW),
-    outputTruncated: text.length > MAX_OUTPUT_PREVIEW,
-    operatorId: typeof message.source.model === 'string' ? message.source.model : undefined,
-  }
-}
-
-function visibleContentText(content) {
-  if (!Array.isArray(content)) return ''
-  return content.flatMap(block => {
-    if (block === null || typeof block !== 'object' || Array.isArray(block)) return []
-    if (block.type === 'reasoning') return []
-    if (block.type === 'text' && typeof block.text === 'string') return [block.text]
-    if (block.type === 'tool-result' && Array.isArray(block.content)) return [visibleContentText(block.content)]
-    return [JSON.stringify(block)]
-  }).filter(Boolean).join('\n')
-}
-
-function subagentOperator(toolName) {
-  if (!/^subagent[_-](?:codex|claude(?:[_-]code)?)$/iu.test(toolName)) return undefined
-  return /claude/iu.test(toolName) ? 'claude-code' : 'codex'
-}
-
-function projectCollaborationEvent(event, index, subagentCalls) {
-  const output = directOperatorOutput(event)
+function projectGovernanceDecisionEvent(event, index) {
   const data = event.data ?? {}
-  if (event.type === 'tool/call') {
-    const operatorId = subagentOperator(String(data.name ?? ''))
-    if (operatorId === undefined || typeof data.callId !== 'string') return undefined
-    const call = { operatorId, tool: data.name, input: String(data.arguments ?? '') }
-    subagentCalls.set(data.callId, call)
+  const base = {
+    sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
+    timestamp: eventTimestamp(event),
+  }
+  if (event.type === 'physical-operator/routing-decision') {
+    const reason = boundedDecisionText(data.reason)
     return {
-      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
-      type: 'subagent/call',
-      timestamp: eventTimestamp(event),
-      ...call,
+      ...base,
+      type: 'operator.route-selected',
+      category: 'policy',
+      ...typeof data.policy === 'string' ? { policy: data.policy } : {},
+      ...typeof data.route === 'string' ? { route: data.route } : {},
+      ...typeof data.operatorId === 'string' ? { operatorId: data.operatorId } : {},
+      ...reason === undefined ? {} : { reason },
     }
   }
-  if (event.type === 'tool/result') {
-    const callId = data.message?.source?.callId
-    const call = typeof callId === 'string' ? subagentCalls.get(callId) : undefined
-    if (call === undefined) return undefined
-    const text = visibleContentText(data.message?.content)
+  if (event.type === 'orchestration/admission') {
     return {
-      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
-      type: 'subagent/output',
-      timestamp: eventTimestamp(event),
-      operatorId: call.operatorId,
-      tool: call.tool,
-      output: text,
-      outputPreview: text.slice(0, MAX_OUTPUT_PREVIEW),
-      outputTruncated: text.length > MAX_OUTPUT_PREVIEW,
-      isError: data.message?.content?.some?.(block => block?.type === 'tool-result' && block.isError === true) === true,
+      ...base,
+      type: 'orchestration.admitted',
+      category: 'admission',
+      ...typeof data.policy === 'string' ? { policy: data.policy } : {},
+      ...typeof data.route === 'string' ? { route: data.route } : {},
+      ...typeof data.runId === 'string' ? { runId: data.runId } : {},
+      ...Number.isSafeInteger(data.maxParallel) ? { maxParallel: data.maxParallel } : {},
     }
   }
-  if (!COLLABORATION_EVENT_TYPES.has(event.type) && output === undefined) return undefined
-  if (event.type === 'physical-operator/progress') {
-    const observation = directOperatorObservation(data)
-    if (observation === undefined) return undefined
+  if (event.type === 'physical-operator/dispatch' || event.type === 'physical-operator/tool-dispatch') {
     return {
-      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
-      type: 'physical-operator/observation',
-      timestamp: eventTimestamp(event),
+      ...base,
+      type: 'operator.dispatch-accepted',
+      category: 'receipt',
       ...typeof data.commandId === 'string' ? { commandId: data.commandId } : {},
       ...typeof data.operatorId === 'string' ? { operatorId: data.operatorId } : {},
-      ...observation,
+      ...typeof data.mode === 'string' ? { mode: data.mode } : {},
     }
   }
-  if (event.type === 'physical-operator/trace-degraded') {
-    const message = boundedText(data.message, 400)
+  if (event.type === 'physical-operator/dispatch-terminal') {
     return {
-      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
-      type: event.type,
-      timestamp: eventTimestamp(event),
+      ...base,
+      type: 'operator.receipt-terminal',
+      category: 'receipt',
       ...typeof data.commandId === 'string' ? { commandId: data.commandId } : {},
       ...typeof data.operatorId === 'string' ? { operatorId: data.operatorId } : {},
       ...typeof data.code === 'string' ? { code: data.code } : {},
-      ...message === undefined ? {} : { message },
+      ...typeof data.stopReason === 'string' ? { stopReason: data.stopReason } : {},
     }
   }
-  if (event.type === 'physical-operator/tool-call') {
-    return {
-      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
-      type: event.type,
-      timestamp: eventTimestamp(event),
-      commandId: typeof data.commandId === 'string' ? data.commandId : undefined,
-      tool: typeof data.tool === 'string' ? data.tool : undefined,
-      input: JSON.stringify(data.arguments ?? {}, null, 2),
-    }
-  }
-  if (event.type === 'physical-operator/tool-result') {
-    const text = visibleContentText(data.result?.content)
-    return {
-      sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
-      type: event.type,
-      timestamp: eventTimestamp(event),
-      commandId: typeof data.commandId === 'string' ? data.commandId : undefined,
-      tool: typeof data.tool === 'string' ? data.tool : undefined,
-      output: text,
-      outputPreview: text.slice(0, MAX_OUTPUT_PREVIEW),
-      outputTruncated: text.length > MAX_OUTPUT_PREVIEW,
-      isError: data.result?.isError === true,
-    }
-  }
-  return {
-    sequence: Number.isSafeInteger(event.seq) ? event.seq : index,
-    type: output === undefined ? event.type : 'physical-operator/output',
-    timestamp: eventTimestamp(event),
-    ...typeof data.policy === 'string' ? { policy: data.policy } : {},
-    ...typeof data.route === 'string' ? { route: data.route } : {},
-    ...typeof data.reason === 'string' ? { reason: data.reason } : {},
-    ...typeof data.operatorId === 'string' ? { operatorId: data.operatorId } : {},
-    ...typeof data.commandId === 'string' ? { commandId: data.commandId } : {},
-    ...typeof data.toolCallId === 'string' ? { toolCallId: data.toolCallId } : {},
-    ...typeof data.description === 'string' ? { description: boundedText(data.description, 160) } : {},
-    ...typeof data.code === 'string' ? { code: data.code } : {},
-    ...typeof data.runId === 'string' ? { runId: data.runId } : {},
-    ...Number.isSafeInteger(data.maxParallel) ? { maxParallel: data.maxParallel } : {},
-    ...output,
-  }
+  return undefined
 }
 
-function projectCollaboration(session, requestedLimit) {
+function projectGovernanceDecisions(session, requestedLimit) {
   const limit = requestedLimit ?? 200
-  const calls = new Map()
   const events = []
   for (const [index, event] of session.events.entries()) {
-    const projected = projectCollaborationEvent(event, index, calls)
+    const projected = projectGovernanceDecisionEvent(event, index)
     if (projected !== undefined) events.push(projected)
   }
   return {
+    kind: 'governance-decisions',
     totalEvents: events.length,
     returnedEvents: Math.min(events.length, limit),
     events: events.slice(-limit),
@@ -303,7 +195,7 @@ export function createGovernanceTraceHandler(ctx, governance) {
         sessionId,
         source,
         ...governance.traceSession(session, limit),
-        collaboration: projectCollaboration(session, limit),
+        collaboration: projectGovernanceDecisions(session, limit),
       }, req.method === 'HEAD')
     } catch (error) {
       const invalidLimit = error instanceof RangeError

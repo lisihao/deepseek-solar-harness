@@ -19,6 +19,8 @@
 
 Synapse is an interface layer, not a second conversation system. DSH continues to own sessions, model requests, tools, permissions, and the Web server.
 
+The DSH bundle also ships a small companion adapter for the view switch. It registers the switch in the native Session header action row, hides only the legacy body-level switch, and delegates the view change to the locked Synapse bridge. The iframe, session projection, and map transport remain unchanged.
+
 ## Features
 
 | | Feature | 功能 |
@@ -29,6 +31,7 @@ Synapse is an interface layer, not a second conversation system. DSH continues t
 | 📥 | Project committed and streaming replies into cards | 将已提交和流式回复投影到卡片 |
 | 🔧 | Fold tool calls and results into assistant replies | 将工具调用和结果折叠到助手回答 |
 | ⚡ | Synchronize the active session with native chat | 与 DSH 原生对话双向同步当前会话 |
+| 🧭 | Place the Dialogue / Session Map switch in the native DSH header | 将“对话 / 会话地图”切换放入 DSH 原生会话页头 |
 | 🎨 | Pan, zoom, drag, fold descendant subtrees, focus, and persist card positions | 支持平移、缩放、拖动、展开/折叠后续子树、定位和位置保存 |
 
 ![Native dialogue and Synapse toggle](docs/images/native-webui.png)
@@ -72,6 +75,7 @@ See the [development and release guide](docs/development.md) for CI/CD and npm p
 - Synapse stores canvas metadata separately under `$DSH_HOME/synapse/`.
 - Projected card text is capped at 8000 characters; the full message remains available in conversation details.
 - The plugin does not modify prompts, model requests, tool schemas, provider routing, or reusable KV-cache prefixes.
+- The DSH companion adapter is an in-flow header projection; it does not add a fixed-position control, duplicate the iframe, or create another server.
 - Only the DSH `web` profile is supported by the bundled patch.
 
 See [Architecture and runtime boundaries](docs/architecture.md) for the complete model.

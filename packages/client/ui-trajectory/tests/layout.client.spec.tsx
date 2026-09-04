@@ -122,11 +122,15 @@ describe('deriveTrajectoryLayout', () => {
           { seq: 11, time: 10_100, type: 'progress', phase: 'reasoning' },
           {
             seq: 12, time: 10_200, type: 'observation',
-            observation: { kind: 'public-output' },
+            observation: { kind: 'public-output', publicOutputPreview: '已完成物理执行阶段。' },
           },
           {
             seq: 13, time: 10_300, type: 'observation',
-            observation: { kind: 'tool-started' },
+            observation: { kind: 'tool-started', toolName: 'Bash' },
+          },
+          {
+            seq: 14, time: 10_400, type: 'observation',
+            observation: { kind: 'usage-updated', usage: { inputTokens: 120, outputTokens: 48, costUsd: 0.012345 } },
           },
         ],
       }],
@@ -135,10 +139,12 @@ describe('deriveTrajectoryLayout', () => {
     expect(group?.cells).toMatchObject([
       { kind: 'operator', text: 'Codex 已派发' },
       { kind: 'operator', text: '阶段 · 推理与执行' },
-      { kind: 'operator', text: '公开输出已更新' },
-      { kind: 'operator', text: '原生工具开始' },
+      { kind: 'operator', text: '公开输出' },
+      { kind: 'operator', text: '原生工具开始 · Bash' },
+      { kind: 'operator', text: '用量更新 · 输入 120 · 输出 48 · 费用 $0.012345' },
     ])
-    expect(group?.cells[2]?.outputDetail).toBeUndefined()
+    expect(group?.cells[2]?.outputDetail).toContain('已完成物理执行阶段。')
+    expect(group?.cells[4]?.outputDetail).toContain('- 费用：$0.012345')
   })
 
   it('lays out public Debate rounds, fallback routing, convergence, and synthesis as readable records', () => {
@@ -301,8 +307,10 @@ describe('deriveTrajectoryLayout', () => {
           seq: 11, time: 10_100, type: 'tool',
           tool: {
             toolCallId: 'tool-call-1', status: 'error',
+            toolName: 'Bash',
             argumentsShape: { kind: 'object', fields: 1 },
             resultShape: { kind: 'object', fields: 1 },
+            errorPreview: '权限被拒绝；未执行写入。',
             callSeq: 11, resultSeq: 12,
           },
         }],
@@ -310,11 +318,11 @@ describe('deriveTrajectoryLayout', () => {
     })
     const cell = turns[0]?.groups[0]?.cells[0]
     expect(cell).toMatchObject({
-      kind: 'operator', text: 'DSH 工具失败', callId: 'tool-call-1', isError: true,
+      kind: 'operator', text: 'DSH 工具失败 · Bash', callId: 'tool-call-1', toolName: 'Bash', isError: true,
       inputDetail: '对象 · 1 个字段',
-      outputDetail: '结果结构\n对象 · 1 个字段\n\n工具报告失败',
+      outputDetail: '结果结构\n对象 · 1 个字段\n\n错误预览\n\n权限被拒绝；未执行写入。\n\n工具报告失败',
       previewMarkdown: '对象 · 1 个字段',
-      resultPreviewMarkdown: '对象 · 1 个字段',
+      resultPreviewMarkdown: '权限被拒绝；未执行写入。',
     })
     expect(cell?.recordId).toBe(['physical-operator', 'command-tools', 'tool', 'tool-call-1'].join('\u0000'))
   })

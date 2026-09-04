@@ -44,7 +44,9 @@ import type {
 import type {
   Config,
   Config as ProviderConfig,
+  DebateRoundBudgetEnvelopeV1,
   DebateRoundExecutor,
+  DebateRoundExecutionRequestV1,
   DebateRoundExecutionResultV1,
   DebateRoundAgentProgressV1,
   DebateTurnPhase,
@@ -143,6 +145,22 @@ interface TurnContribution {
   readonly result: NormalizedTurnResult
 }
 
+/** Structured budget boundary retained in the durable convergence event. */
+interface BudgetLimit {
+  readonly kind: 'usage-accounting' | 'cost-accounting' | 'input-tokens' | 'output-tokens' | 'total-tokens' | 'cost-usd' | 'turns'
+  readonly reason: string
+  readonly used?: number
+  readonly limit?: number
+  readonly reserved?: number
+}
+
+/** Conservative next-round forecast derived only from prior settled turns. */
+interface BudgetReservation {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly costUsd?: number
+}
+
 interface ConvergenceResult {
   readonly version: 1
   readonly status: 'converged' | 'continue' | 'budget_limited' | 'max_rounds'
@@ -153,6 +171,7 @@ interface ConvergenceResult {
   readonly unresolvedHighSeverity: number
   readonly settledAgents: number
   readonly reason: string
+  readonly budget?: BudgetLimit
 }
 
 function invalid(message: string): never {
@@ -1126,11 +1145,24 @@ export class LocalDebateProvider extends DebateService {
       return 'terminal'
     }
     const slots = this.roundSlots(run.snapshot.roster, policy.budget.maxAgentsPerRound)
+    const admission = this.roundBudgetAdmission(run, slots, number)
+    if (admission !== undefined) {
+      this.synthesizeBudgetAdmission(run, number, admission)
+      return 'terminal'
+    }
+
     const phase: DebateTurnPhase = number === 1
       ? 'blind-independent'
       : run.snapshot.unresolved.some(entry => entry.severity === 'high' || entry.severity === 'critical')
         ? 'high-severity-unresolved'
         : 'claim-ledger'
+    const executionRequest = this.roundExecutionRequest(run, slots, number, phase, signal)
+    const preflight = this.preflightBudgetLimit(executionRequest)
+    if (preflight !== undefined) {
+      this.synthesizeBudgetAdmission(run, number, preflight)
+      return 'terminal'
+    }
+
     const plannedTurns: DebateAgentTurnV1[] = slots.map(slot => ({
       version: 1,
       round: number,
@@ -1159,22 +1191,16 @@ export class LocalDebateProvider extends DebateService {
 
     const priorUnresolved = run.snapshot.unresolved
     const contributions: TurnContribution[] = []
-    let budgetReason: string | undefined
+    let budget: BudgetLimit | undefined
     const dispatchedTurns: Array<{ readonly slot: DebateRoleSpecV1; readonly turn: DebateAgentTurnV1 }> = []
-    const turnBudgetSlot = slots.find(slot => this.turnCount(run, slot.role, number) >= policy.budget.maxTurnsPerAgent)
-    budgetReason = turnBudgetSlot === undefined
-      ? this.budgetReason(run.snapshot.cost, policy)
-      : `turn budget exhausted for ${turnBudgetSlot.role}`
-    if (budgetReason === undefined) {
-      for (const slot of slots) {
-        const planned = this.round(run, number).turns.find(turn => turn.slotId === slot.role)
-        if (planned === undefined) unavailable(`planned turn missing for ${slot.role}`)
-        const dispatched: DebateAgentTurnV1 = { ...planned, state: 'dispatched', startedAt: this.now() }
-        this.replaceTurn(run, number, dispatched, 'debate.agent.dispatched', {
-          round: number, role: slot.role, model: slot.model,
-        })
-        dispatchedTurns.push({ slot, turn: dispatched })
-      }
+    for (const slot of slots) {
+      const planned = this.round(run, number).turns.find(turn => turn.slotId === slot.role)
+      if (planned === undefined) unavailable(`planned turn missing for ${slot.role}`)
+      const dispatched: DebateAgentTurnV1 = { ...planned, state: 'dispatched', startedAt: this.now() }
+      this.replaceTurn(run, number, dispatched, 'debate.agent.dispatched', {
+        round: number, role: slot.role, model: slot.model,
+      })
+      dispatchedTurns.push({ slot, turn: dispatched })
     }
 
     let batch: { readonly ok: true; readonly value: DebateRoundExecutionResultV1 }
@@ -1184,13 +1210,7 @@ export class LocalDebateProvider extends DebateService {
       try {
         batch = {
           ok: true,
-          value: await this.executeRound(
-            run,
-            dispatchedTurns.map(entry => entry.slot),
-            number,
-            phase,
-            signal,
-          ),
+          value: await this.executeRound(executionRequest),
         }
       } catch (error) {
         batch = { ok: false, error }
@@ -1302,9 +1322,9 @@ export class LocalDebateProvider extends DebateService {
         confidence: result.confidence,
       }, { cost: nextCost })
       contributions.push({ slot, result })
-      const afterCostReason = this.budgetReason(run.snapshot.cost, policy)
-      if (afterCostReason !== undefined) {
-        budgetReason = afterCostReason
+      const afterCostBudget = this.budgetLimit(run.snapshot.cost, policy)
+      if (afterCostBudget !== undefined) {
+        budget = afterCostBudget
       }
     }
 
@@ -1345,8 +1365,9 @@ export class LocalDebateProvider extends DebateService {
     this.replaceRoundProjection(run, reviewingRound, 'debate.claims.compiled', {
       round: number, claimCount: ledger.claims.length, dissentCount: dissent.length, unresolvedCount: unresolved.length,
     }, { claimLedger: ledger, dissent, unresolved, evidence })
-    const convergence = this.convergence(run, reviewingRound, priorUnresolved, budgetReason)
-    const completedRound: DebateRoundSnapshotV1 = { ...reviewingRound, state: 'completed', convergence }
+    const convergence = this.convergence(run, reviewingRound, priorUnresolved, budget)
+    const { budget: _budget, ...snapshotConvergence } = convergence
+    const completedRound: DebateRoundSnapshotV1 = { ...reviewingRound, state: 'completed', convergence: snapshotConvergence }
     this.replaceRoundProjection(run, completedRound, 'debate.convergence.evaluated', {
       round: number,
       status: convergence.status,
@@ -1358,6 +1379,7 @@ export class LocalDebateProvider extends DebateService {
       settledAgents: convergence.settledAgents,
       reason: convergence.reason,
       lifecycleState: convergence.status === 'continue' ? 'next_round' : 'synthesizing',
+      ...this.budgetEventData(convergence.budget),
     }, {
       state: convergence.status === 'converged'
         ? 'synthesizing'
@@ -1369,13 +1391,7 @@ export class LocalDebateProvider extends DebateService {
       unresolved,
       evidence,
     })
-    this.appendEvent(run, 'debate.cost.accounted', {
-      usageStatus: run.snapshot.cost.usageStatus,
-      costStatus: run.snapshot.cost.costStatus,
-      ...(run.snapshot.cost.inputTokens === undefined ? {} : { inputTokens: run.snapshot.cost.inputTokens }),
-      ...(run.snapshot.cost.outputTokens === undefined ? {} : { outputTokens: run.snapshot.cost.outputTokens }),
-      ...(run.snapshot.cost.costUsd === undefined ? {} : { costUsd: run.snapshot.cost.costUsd }),
-    }, { cost: run.snapshot.cost }, { round: number })
+    this.appendCostAccounted(run, number)
     if (convergence.status !== 'continue') {
       this.synthesize(
         run,
@@ -1391,7 +1407,7 @@ export class LocalDebateProvider extends DebateService {
     run: StoredRun,
     round: DebateRoundSnapshotV1,
     priorUnresolved: readonly DebateUnresolvedV1[],
-    budgetReason: string | undefined,
+    budget: BudgetLimit | undefined,
   ): ConvergenceResult {
     const policy = run.snapshot.policy.convergence
     const settledAgents = new Set(round.turns.filter(turn => turn.state === 'settled').map(turn => turn.slotId)).size
@@ -1416,22 +1432,28 @@ export class LocalDebateProvider extends DebateService {
       && unresolvedHighSeverity <= policy.maxUnresolvedHighSeverity
       && !newUnresolved
       && !criticalEvidenceMissing
-    const reason = budgetReason !== undefined
-      ? budgetReason
+    const atRoundLimit = round.round >= run.snapshot.policy.budget.maxRounds
+    const nonConvergedReason = [
+      settledAgents < policy.minSettledAgents ? `settled agents ${String(settledAgents)} below ${String(policy.minSettledAgents)}` : undefined,
+      score < policy.scoreThreshold ? `score ${String(score)} below ${String(policy.scoreThreshold)}` : undefined,
+      unresolvedHighSeverity > policy.maxUnresolvedHighSeverity ? `unresolved high-severity claims ${String(unresolvedHighSeverity)} exceed ${String(policy.maxUnresolvedHighSeverity)}` : undefined,
+      newUnresolved ? 'round introduced an unresolved claim' : undefined,
+      criticalEvidenceMissing ? 'critical claim lacks evidence' : undefined,
+    ].filter((entry): entry is string => entry !== undefined).join('; ')
+    const reason = budget !== undefined
+      ? budget.reason
       : eligible
         ? 'settled agents, evidence coverage, confidence, and disagreement satisfy the convergence policy'
-        : [
-          settledAgents < policy.minSettledAgents ? `settled agents ${String(settledAgents)} below ${String(policy.minSettledAgents)}` : undefined,
-          score < policy.scoreThreshold ? `score ${String(score)} below ${String(policy.scoreThreshold)}` : undefined,
-          unresolvedHighSeverity > policy.maxUnresolvedHighSeverity ? `unresolved high-severity claims ${String(unresolvedHighSeverity)} exceed ${String(policy.maxUnresolvedHighSeverity)}` : undefined,
-          newUnresolved ? 'round introduced an unresolved claim' : undefined,
-          criticalEvidenceMissing ? 'critical claim lacks evidence' : undefined,
-        ].filter((entry): entry is string => entry !== undefined).join('; ')
-    const status = budgetReason !== undefined
+        : atRoundLimit
+          ? run.snapshot.policy.budget.maxRounds === 1
+            ? 'configured single-round Debate completed without convergence'
+            : `maximum rounds reached (${String(round.round)} / ${String(run.snapshot.policy.budget.maxRounds)})`
+          : nonConvergedReason
+    const status = budget !== undefined
       ? 'budget_limited'
       : eligible
         ? 'converged'
-        : round.round >= run.snapshot.policy.budget.maxRounds
+        : atRoundLimit
           ? 'max_rounds'
           : 'continue'
     return {
@@ -1444,6 +1466,7 @@ export class LocalDebateProvider extends DebateService {
       unresolvedHighSeverity,
       settledAgents,
       reason,
+      ...(budget === undefined ? {} : { budget }),
     }
   }
 
@@ -1503,13 +1526,48 @@ export class LocalDebateProvider extends DebateService {
     }, { state: finalState, synthesis: settled }, { round: round.round })
   }
 
-  private async executeRound(
+  private synthesizeBudgetAdmission(
+    run: StoredRun,
+    round: number,
+    budget: BudgetLimit,
+  ): void {
+    const lastRound = run.snapshot.rounds.at(-1)
+    const prior = lastRound?.convergence
+    const synthesisRound = lastRound ?? {
+      version: 1 as const,
+      round,
+      state: 'completed' as const,
+      turns: [],
+      claimLedger: run.snapshot.claimLedger,
+      dissent: run.snapshot.dissent,
+      unresolved: run.snapshot.unresolved,
+    }
+    this.appendEvent(run, 'debate.convergence.evaluated', {
+      round,
+      status: 'budget_limited',
+      score: prior?.score ?? 0,
+      threshold: prior?.threshold ?? run.snapshot.policy.convergence.scoreThreshold,
+      disagreement: prior?.disagreement ?? 0,
+      coverage: prior?.coverage ?? run.snapshot.claimLedger.coverage,
+      unresolvedHighSeverity: prior?.unresolvedHighSeverity
+        ?? run.snapshot.unresolved.filter(entry => entry.severity === 'high' || entry.severity === 'critical').length,
+      settledAgents: prior?.settledAgents
+        ?? new Set((lastRound?.turns ?? []).filter(turn => turn.state === 'settled').map(turn => turn.slotId)).size,
+      reason: budget.reason,
+      ...this.budgetEventData(budget),
+      lifecycleState: 'synthesizing',
+    }, { state: 'synthesizing' }, { round })
+    this.appendCostAccounted(run, round)
+    this.synthesize(run, synthesisRound, 'budget_limited')
+  }
+
+  private roundExecutionRequest(
     run: StoredRun,
     slots: readonly DebateRoleSpecV1[],
     round: number,
     phase: DebateTurnPhase,
     signal: AbortSignal,
-  ): Promise<DebateRoundExecutionResultV1> {
+  ): DebateRoundExecutionRequestV1 {
     const turns = slots.map((slot): DebateTurnRequestV1 => ({
       version: 1,
       runId: run.runId,
@@ -1534,19 +1592,24 @@ export class LocalDebateProvider extends DebateService {
       priorUnresolved: clone(run.snapshot.unresolved),
       signal,
     }))
-    if (this.executor === undefined) unavailable('debate-local has no injected round executor')
-    const result = await this.executor.executeRound({
+    return {
       version: 1,
       runId: run.runId,
       round,
       turns,
       maxParallel: Math.max(1, slots.filter(slot => slot.kind === 'participant').length),
+      budgetEnvelope: this.budgetEnvelope(run),
       onProgress: async progress => this.appendRoundAgentProgress(run.runId, progress),
       signal,
-    })
-    const expected = new Set(slots.map(slot => slot.role))
+    }
+  }
+
+  private async executeRound(request: DebateRoundExecutionRequestV1): Promise<DebateRoundExecutionResultV1> {
+    if (this.executor === undefined) unavailable('debate-local has no injected round executor')
+    const result = await this.executor.executeRound(request)
+    const expected = new Set(request.turns.map(turn => turn.slotId))
     const actual = [...Object.keys(result.resultsBySlot), ...Object.keys(result.failuresBySlot ?? {})]
-    if (actual.some(slotId => !expected.has(slotId as DebateRoleId))) {
+    if (actual.some(slotId => !expected.has(slotId))) {
       invalid('round executor returned an unsupported slot result')
     }
     if (new Set(actual).size !== actual.length) invalid('round executor returned both result and failure for one slot')
@@ -1612,15 +1675,176 @@ export class LocalDebateProvider extends DebateService {
       .filter(turn => turn.slotId === slotId && turn.round < beforeRound).length
   }
 
-  private budgetReason(cost: DebateRunSnapshotV1['cost'], policy: DebateRunSnapshotV1['policy']): string | undefined {
+  private budgetLimit(
+    cost: DebateRunSnapshotV1['cost'],
+    policy: DebateRunSnapshotV1['policy'],
+  ): BudgetLimit | undefined {
     const budget = policy.budget
-    if (cost.unknownUsageTurns > 0) return 'token usage accounting is unavailable'
-    if (budget.maxCostUsd !== undefined && cost.unknownCostTurns > 0) return 'cost accounting is unavailable'
-    if ((cost.inputTokens ?? 0) >= budget.maxInputTokens) return 'input token budget exhausted'
-    if ((cost.outputTokens ?? 0) >= budget.maxOutputTokens) return 'output token budget exhausted'
-    if ((cost.inputTokens ?? 0) + (cost.outputTokens ?? 0) >= budget.maxTotalTokens) return 'total token budget exhausted'
-    if (budget.maxCostUsd !== undefined && (cost.costUsd ?? 0) >= budget.maxCostUsd) return 'cost budget exhausted'
+    if (cost.unknownUsageTurns > 0) return {
+      kind: 'usage-accounting',
+      reason: 'token usage accounting is unavailable',
+    }
+    if (budget.maxCostUsd !== undefined && cost.unknownCostTurns > 0) return {
+      kind: 'cost-accounting',
+      reason: 'cost accounting is unavailable',
+    }
+    const inputTokens = cost.inputTokens ?? 0
+    if (inputTokens >= budget.maxInputTokens) return {
+      kind: 'input-tokens',
+      used: inputTokens,
+      limit: budget.maxInputTokens,
+      reason: `input token budget exhausted (used ${String(inputTokens)} / limit ${String(budget.maxInputTokens)})`,
+    }
+    const outputTokens = cost.outputTokens ?? 0
+    if (outputTokens >= budget.maxOutputTokens) return {
+      kind: 'output-tokens',
+      used: outputTokens,
+      limit: budget.maxOutputTokens,
+      reason: `output token budget exhausted (used ${String(outputTokens)} / limit ${String(budget.maxOutputTokens)})`,
+    }
+    const totalTokens = inputTokens + outputTokens
+    if (totalTokens >= budget.maxTotalTokens) return {
+      kind: 'total-tokens',
+      used: totalTokens,
+      limit: budget.maxTotalTokens,
+      reason: `total token budget exhausted (used ${String(totalTokens)} / limit ${String(budget.maxTotalTokens)})`,
+    }
+    const costUsd = cost.costUsd ?? 0
+    if (budget.maxCostUsd !== undefined && costUsd >= budget.maxCostUsd) return {
+      kind: 'cost-usd',
+      used: costUsd,
+      limit: budget.maxCostUsd,
+      reason: `cost budget exhausted (used ${String(costUsd)} / limit ${String(budget.maxCostUsd)})`,
+    }
     return undefined
+  }
+
+
+  private budgetEnvelope(run: StoredRun): DebateRoundBudgetEnvelopeV1 {
+    const { cost, policy } = run.snapshot
+    return {
+      version: 1,
+      usedInputTokens: cost.inputTokens ?? 0,
+      usedOutputTokens: cost.outputTokens ?? 0,
+      maxInputTokens: policy.budget.maxInputTokens,
+      maxOutputTokens: policy.budget.maxOutputTokens,
+      maxTotalTokens: policy.budget.maxTotalTokens,
+    }
+  }
+
+  private preflightBudgetLimit(request: DebateRoundExecutionRequestV1): BudgetLimit | undefined {
+    const preflight = this.executor?.preflight?.(request)
+    if (preflight?.status !== 'budget_limited') return undefined
+    return {
+      kind: preflight.limit.kind,
+      used: preflight.limit.used,
+      reserved: preflight.limit.reserved,
+      limit: preflight.limit.limit,
+      reason: preflight.limit.reason,
+    }
+  }
+
+  private roundReservation(
+    run: StoredRun,
+    slots: readonly DebateRoleSpecV1[],
+  ): BudgetReservation | undefined {
+    const latest = new Map<string, DebateAgentTurnV1>()
+    const selectedRoles = new Set<string>(slots.map(slot => slot.role))
+    for (const round of [...run.snapshot.rounds].reverse()) {
+      for (const turn of [...round.turns].reverse()) {
+        if (turn.state !== 'settled' || !selectedRoles.has(turn.slotId) || latest.has(turn.slotId)) continue
+        latest.set(turn.slotId, turn)
+      }
+    }
+    const usages = slots.map(slot => latest.get(slot.role)?.usage)
+    if (usages.some(usage => usage === undefined)) return undefined
+    const settledUsages = usages as readonly DebateUsageV1[]
+    const costUsd = settledUsages.every(usage => usage.costUsd !== undefined)
+      ? roundNumber(settledUsages.reduce((sum, usage) => sum + (usage.costUsd ?? 0), 0))
+      : undefined
+    return {
+      inputTokens: settledUsages.reduce((sum, usage) => sum + usage.inputTokens, 0),
+      outputTokens: settledUsages.reduce((sum, usage) => sum + usage.outputTokens, 0),
+      ...(costUsd === undefined ? {} : { costUsd }),
+    }
+  }
+
+  private reservedBudgetLimit(
+    kind: 'input-tokens' | 'output-tokens' | 'total-tokens' | 'cost-usd',
+    label: string,
+    used: number,
+    reserved: number,
+    limit: number,
+  ): BudgetLimit {
+    return {
+      kind,
+      used,
+      reserved,
+      limit,
+      reason: `${label} budget admission denied (used ${String(used)} + reserved ${String(reserved)} >= limit ${String(limit)})`,
+    }
+  }
+
+  private roundBudgetAdmission(
+    run: StoredRun,
+    slots: readonly DebateRoleSpecV1[],
+    nextRound: number,
+  ): BudgetLimit | undefined {
+    const actual = this.budgetLimit(run.snapshot.cost, run.snapshot.policy)
+    if (actual !== undefined) return actual
+    const budget = run.snapshot.policy.budget
+    const turnBudgetSlot = slots.find(slot => this.turnCount(run, slot.role, nextRound) >= budget.maxTurnsPerAgent)
+    if (turnBudgetSlot !== undefined) {
+      const used = this.turnCount(run, turnBudgetSlot.role, nextRound)
+      return {
+        kind: 'turns',
+        used,
+        limit: budget.maxTurnsPerAgent,
+        reason: `turn budget exhausted for ${turnBudgetSlot.role} (used ${String(used)} / limit ${String(budget.maxTurnsPerAgent)})`,
+      }
+    }
+    const reservation = this.roundReservation(run, slots)
+    if (reservation === undefined) return undefined
+    const inputTokens = run.snapshot.cost.inputTokens ?? 0
+    if (inputTokens + reservation.inputTokens >= budget.maxInputTokens) {
+      return this.reservedBudgetLimit('input-tokens', 'input token', inputTokens, reservation.inputTokens, budget.maxInputTokens)
+    }
+    const outputTokens = run.snapshot.cost.outputTokens ?? 0
+    if (outputTokens + reservation.outputTokens >= budget.maxOutputTokens) {
+      return this.reservedBudgetLimit('output-tokens', 'output token', outputTokens, reservation.outputTokens, budget.maxOutputTokens)
+    }
+    const totalTokens = inputTokens + outputTokens
+    const totalReservation = reservation.inputTokens + reservation.outputTokens
+    if (totalTokens + totalReservation >= budget.maxTotalTokens) {
+      return this.reservedBudgetLimit('total-tokens', 'total token', totalTokens, totalReservation, budget.maxTotalTokens)
+    }
+    if (budget.maxCostUsd !== undefined && reservation.costUsd !== undefined) {
+      const costUsd = run.snapshot.cost.costUsd ?? 0
+      if (costUsd + reservation.costUsd >= budget.maxCostUsd) {
+        return this.reservedBudgetLimit('cost-usd', 'cost', costUsd, reservation.costUsd, budget.maxCostUsd)
+      }
+    }
+    return undefined
+  }
+
+  private budgetEventData(budget: BudgetLimit | undefined): Readonly<Record<string, DebateJsonValue>> {
+    if (budget === undefined) return {}
+    return {
+      budgetKind: budget.kind,
+      ...(budget.used === undefined ? {} : { budgetUsed: budget.used }),
+      ...(budget.limit === undefined ? {} : { budgetLimit: budget.limit }),
+      ...(budget.reserved === undefined ? {} : { budgetReserved: budget.reserved }),
+    }
+  }
+
+  private appendCostAccounted(run: StoredRun, round: number): void {
+    this.appendEvent(run, 'debate.cost.accounted', {
+      usageStatus: run.snapshot.cost.usageStatus,
+      costStatus: run.snapshot.cost.costStatus,
+      ...(run.snapshot.cost.inputTokens === undefined ? {} : { inputTokens: run.snapshot.cost.inputTokens }),
+      ...(run.snapshot.cost.outputTokens === undefined ? {} : { outputTokens: run.snapshot.cost.outputTokens }),
+      ...(run.snapshot.cost.costUsd === undefined ? {} : { costUsd: run.snapshot.cost.costUsd }),
+    }, { cost: run.snapshot.cost }, { round })
   }
 
   private replaceTurn(

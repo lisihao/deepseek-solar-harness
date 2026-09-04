@@ -3,7 +3,7 @@ policy: docs/architecture/adr-003-managed-plugin-lifecycle.md
 managed:
   - id: governance
     path: plugins/managed/governance
-    package: '@lisihao/dsh-code-harness-governance@0.3.12'
+    package: '@lisihao/dsh-code-harness-governance@0.3.14'
     source: https://github.com/lisihao/agent-development-governance.git
     upstream: null
     source_branch: codex/parallel-governance-v031
@@ -169,7 +169,7 @@ managed:
       - corepack pnpm --ignore-workspace run test
   - id: web-billing
     path: plugins/managed/web-billing
-    package: dsh-web-billing@1.1.6
+    package: dsh-web-billing@1.1.7
     source: https://github.com/lisihao/dsh-web-billing.git
     upstream: https://github.com/bpc-oss/dsh-web-billing.git
     source_branch: master
@@ -222,7 +222,7 @@ managed:
       - npm run check
   - id: synapse
     path: plugins/managed/synapse
-    package: dsh-synapse@0.4.1
+    package: dsh-synapse@0.4.2
     source: https://github.com/liangmianya/dsh-synapse.git
     upstream: https://github.com/liangmianya/dsh-synapse.git
     source_branch: v0.4.1

@@ -15,6 +15,17 @@ The plugin:
 - does not replace DSH authentication or permission checks;
 - does not support non-Web profiles unless those profiles explicitly add the plugin.
 
+## DSH header companion adapter
+
+The upstream Synapse runtime remains locked. The DSH bundle adds the separate adapter-host.js / client-adapter.js companion through the dsh-synapse/adapter-host patch row:
+
+- the host serves a cache-busted browser bundle and appends one row to the existing DSH client boot manifest;
+- the browser bundle registers synapse-view-switch in conversation.session.header.actions at order 82, immediately after the orchestration and Debate actions;
+- the adapter hides the upstream body-level switch but keeps its host and iframe overlay alive, then delegates clicks to the upstream buttons so the existing postMessage bridge remains authoritative;
+- the new control uses DSH theme tokens and normal flex flow, with compact responsive sizing. It has no position: fixed, viewport anchoring, or terminal/iframe state of its own.
+
+This is a DSH-owned presentation seam, not an upstream source change. Removing the adapter row restores the original upstream switch; removing the Synapse service still removes the map itself.
+
 ## Conversation ownership
 
 DSH session logs remain the source of truth for conversation content and lifecycle. Native DSH operations own:

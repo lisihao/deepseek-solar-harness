@@ -65,6 +65,12 @@ function validInput() {
           command: ['node', 'scripts/solar/install-controlled-plugin-deps.mjs'],
         },
         { id: 'controlled-plugin-suite', needs: ['controlled-plugin-install'] },
+        {
+          id: 'billing-install',
+          cwd: 'plugins/managed/web-billing',
+          command: ['corepack', 'pnpm', 'install', '--ignore-workspace', '--frozen-lockfile'],
+        },
+        { id: 'billing-tests', needs: ['billing-install'] },
       ],
     },
     vitestConfig: [
@@ -151,10 +157,12 @@ test('rejects isolated workspace gates without deterministic install prerequisit
   input.governanceProfile.gates.find(gate => gate.id === 'agent-teams-install').command = ['pnpm', 'install']
   input.governanceProfile.gates.find(gate => gate.id === 'web-ui-tests').needs = []
   input.governanceProfile.gates.find(gate => gate.id === 'controlled-plugin-suite').needs = []
+  input.governanceProfile.gates.find(gate => gate.id === 'billing-tests').needs = []
   const errors = validateMonorepo(input).join('\n')
   assert.match(errors, /Agent Teams governance must install/u)
   assert.match(errors, /web-ui-tests must depend on web-ui-install/u)
   assert.match(errors, /controlled-plugin-suite must depend on controlled-plugin-install/u)
+  assert.match(errors, /billing-tests must depend on billing-install/u)
 })
 
 test('rejects uncached or full-history-blob Solar governance checkout', () => {

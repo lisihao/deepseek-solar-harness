@@ -110,6 +110,8 @@ class FakeResidentClient {
   claudeQuotaUsedPercent = 50
   /** Let composite trace tests model one independent native lane per turn. */
   uniqueSessionPerCommand = false
+  progressReadError?: Error
+  progressReadCalls = 0
   onExecute?: (request: FakeResidentRequest) => Promise<void>
   private readonly deferredResolvers: Array<() => void> = []
   turns = new Map<string, { state: 'running' | 'settled'; result?: TestResult }>()
@@ -148,7 +150,11 @@ class FakeResidentClient {
             displayName: 'Claude Fable 5', efforts: [],
           },
           {
-            model: 'opus', resolvedModel: 'claude-opus-5',
+            model: 'default', resolvedModel: 'claude-opus-5[1m]',
+            displayName: 'Default Claude Opus 5', efforts: [], isDefault: true,
+          },
+          {
+            model: 'opus[1m]', resolvedModel: 'claude-opus-5[1m]',
             displayName: 'Claude Opus 5', efforts: [],
           },
         ],
@@ -231,6 +237,8 @@ class FakeResidentClient {
   }
 
   async readEvents(sessionId: string, afterSequence = 0, limit = 100) {
+    this.progressReadCalls += 1
+    if (this.progressReadError !== undefined) throw this.progressReadError
     const events = (this.residentEvents.get(sessionId) ?? [])
       .filter(value => value.sequence > afterSequence)
       .slice(0, limit)
@@ -1316,6 +1324,109 @@ describe('orchestration daemon', () => {
     expect(JSON.stringify(observations)).not.toContain('must not persist')
   })
 
+  it('records one durable trace-degraded event when a Resident progress cursor fails and still settles', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-progress-degraded-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    fake.defer = true
+    fake.progressReadError = new Error('sensitive native progress failure')
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const oneNodeGraph: LogicalTaskGraphV1 = { ...fixture, nodes: [fixture.nodes[0]!] }
+    const compilation = await client.compile({ intent: { request: 'Project progress remains observable when native events fail.' }, graph: oneNodeGraph })
+    const started = await startCompilation(client, compilation.compilationId)
+    await eventually(() => client.inspect(String(started.runId)), value => value.nodes[0]?.state === 'running')
+    const degraded = await eventually(
+      async () => (await client.readEvents({ runId: started.runId, limit: 200 })).events
+        .filter(value => value.type === 'node.operator.trace-degraded'),
+      value => value.length === 1,
+    )
+    await new Promise(resolve => setTimeout(resolve, 75))
+    const after = await client.readEvents({ runId: started.runId, limit: 200 })
+    expect(after.events.filter(value => value.type === 'node.operator.trace-degraded')).toHaveLength(1)
+    expect(fake.progressReadCalls).toBeGreaterThan(1)
+    const degradedEvent = degraded[0]
+    expect(degradedEvent).toMatchObject({
+      runId: started.runId, nodeId: 'code', attempt: 1, generation: 1,
+      type: 'node.operator.trace-degraded',
+      data: { commandId: 'orch:' + String(started.runId) + ':code:1', operatorId: 'codex', code: 'PROGRESS_UNAVAILABLE' },
+    })
+    expect(JSON.stringify(degradedEvent)).not.toContain('sensitive native progress failure')
+    fake.defer = false
+    fake.resolveAllDeferred()
+    await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+  })
+
+  it('records one trace-degraded event per native source in an RLM composite and still settles', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-rlm-progress-degraded-'))
+    const root = join(home, 'orchestrations')
+    const fake = new FakeResidentClient()
+    fake.uniqueSessionPerCommand = true
+    fake.progressReadError = new Error('sensitive composite progress failure')
+    fake.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined) return
+      if (request.commandId.endsWith(':rlm:root')) {
+        await callRlmTool(request, 'root-cell', [
+          'const worker = await rlm("bounded child", { name: "worker" });',
+          'const received = await agentMessage.read();',
+          '({ worker, received })',
+        ].join('\n'))
+      } else if (request.commandId.endsWith(':deliver')) {
+        await callRlmTool(request, 'delivery-cell:' + request.commandId, 'await agentMessage.read()')
+      } else {
+        await callRlmTool(request, 'child-cell:' + request.commandId, 'await agentMessage.send("bounded child evidence", { receiverRole: "parent", mode: "auto" }); "sent"')
+      }
+    }
+    const daemon = createDaemon(root, home, fake, 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const fixture = graph(workspace)
+    const { operator: _preferredOperator, ...rlmNode } = fixture.nodes[0]!
+    const rlmGraph: LogicalTaskGraphV1 = {
+      ...fixture,
+      nodes: [{ ...rlmNode, role: 'recursive synthesis', task: 'Use bounded RLM recursion to exercise composite progress projection.' }],
+    }
+    const compilation = await client.compile({
+      intent: { request: 'Project each native source failure without losing the composite result.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'degraded-composite',
+        rlm: 'enabled', continualHarness: 'off', optimization: 'balanced',
+      },
+      graph: rlmGraph,
+    })
+    const started = await startCompilation(client, compilation.compilationId)
+    const degraded = await eventually(
+      async () => (await client.readEvents({ runId: started.runId, limit: 300 })).events
+        .filter(value => value.type === 'node.operator.trace-degraded'),
+      value => value.length >= 2,
+    )
+    const completed = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+    expect(completed.nodes[0]).toMatchObject({ state: 'passed', rlm: 'enabled' })
+    const after = await client.readEvents({ runId: started.runId, limit: 300 })
+    const counts = new Map<string, number>()
+    for (const item of after.events.filter(value => value.type === 'node.operator.trace-degraded')) {
+      const commandId = item.data.commandId
+      if (typeof commandId === 'string') counts.set(commandId, (counts.get(commandId) ?? 0) + 1)
+      expect(item).toMatchObject({
+        runId: started.runId, nodeId: 'code', attempt: 1, generation: 1,
+        data: { operatorId: 'claude-code', code: 'PROGRESS_UNAVAILABLE' },
+      })
+    }
+    expect(degraded.length).toBeGreaterThanOrEqual(2)
+    expect(counts.size).toBeGreaterThanOrEqual(2)
+    expect([...counts.values()].every(value => value === 1)).toBe(true)
+    expect(JSON.stringify(after)).not.toContain('sensitive composite progress failure')
+    expect(fake.progressReadCalls).toBeGreaterThan(2)
+  })
+
   it('binds the browser capability to a Resident model tool bridge and seals DSH tool authority', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-orch-browser-'))
     const root = join(home, 'orchestrations')
@@ -1911,7 +2022,7 @@ describe('orchestration daemon', () => {
     )
     expect(completed.state, JSON.stringify(completed, null, 2)).toBe('completed')
     expect(completed.nodes.every(node => node.state === 'passed')).toBe(true)
-    expect(fake.requests.map(request => request.profile?.model).sort()).toEqual(['claude-fable-5[1m]', 'opus'])
+    expect(fake.requests.map(request => request.profile?.model).sort()).toEqual(['claude-fable-5[1m]', 'opus[1m]'])
   }, 10_000)
 
   it('serializes conflicting scopes and retries only an explicitly retryable failure', async () => {

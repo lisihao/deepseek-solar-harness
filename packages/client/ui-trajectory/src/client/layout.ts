@@ -61,6 +61,7 @@ interface DetailedUsageLike {
   readonly outputTokens?: number
   readonly cacheReadInputTokens?: number
   readonly cacheWriteInputTokens?: number
+  readonly costUsd?: number
 }
 
 function detailedUsageProps(usage: DetailedUsageLike | undefined): Pick<
@@ -710,51 +711,80 @@ function physicalOperatorCell(
         : tool.status === 'error' ? '失败' : '完成'
     const inputDetail = physicalOperatorShapeLabel(tool.argumentsShape)
     const resultDetail = physicalOperatorShapeLabel(tool.resultShape)
+    const preview = tool.status === 'error' ? tool.errorPreview : tool.resultPreview
+    const previewLabel = tool.status === 'error' ? '错误预览' : '公开结果预览'
+    const resultPreview = preview ?? resultDetail
     const outputDetail = [
       resultDetail === undefined ? undefined : `结果结构\n${resultDetail}`,
+      preview === undefined ? undefined : `${previewLabel}\n\n${preview}`,
       tool.status === 'error' ? '工具报告失败' : undefined,
       tool.status === 'indeterminate' ? '工具结果尚无法证明' : undefined,
     ].filter((value): value is string => value !== undefined).join('\n\n')
     return {
       ...base,
-      text: `DSH 工具${status}`,
+      text: `DSH 工具${status}${tool.toolName === undefined ? '' : ` · ${tool.toolName}`}`,
       callId: tool.toolCallId,
+      ...(tool.toolName === undefined ? {} : { toolName: tool.toolName }),
       ...(inputDetail === undefined ? {} : {
         inputDetail,
         previewMarkdown: inputDetail,
       }),
-      ...(resultDetail === undefined ? {} : { resultPreviewMarkdown: resultDetail }),
+      ...(resultPreview === undefined ? {} : { resultPreviewMarkdown: resultPreview }),
       ...(outputDetail === '' ? {} : { outputDetail }),
       ...(tool.status === 'error' || tool.status === 'indeterminate' ? { isError: true } : {}),
     }
   }
   const observation = entry.observation
   if (observation === undefined) return { ...base, text: '已收到原生状态更新' }
-  if (observation.kind === 'public-output') return {
-    ...base,
-    text: '公开输出已更新',
+  if (observation.kind === 'public-output') {
+    const preview = observation.publicOutputPreview
+    return {
+      ...base,
+      text: preview === undefined ? '公开输出已更新' : '公开输出',
+      ...(preview === undefined ? {} : {
+        previewMarkdown: preview,
+        outputDetail: `公开输出\n\n${preview}`,
+      }),
+    }
   }
-  if (observation.kind === 'tool-started') return {
-    ...base,
-    text: '原生工具开始',
+  if (observation.kind === 'tool-started' || observation.kind === 'tool-completed') {
+    const toolName = observation.toolName
+    const phase = observation.kind === 'tool-started' ? '开始' : '完成'
+    return {
+      ...base,
+      text: `原生工具${phase}${toolName === undefined ? '' : ` · ${toolName}`}`,
+      ...(toolName === undefined ? {} : { toolName, outputDetail: `原生工具\n\n${toolName}` }),
+    }
   }
-  if (observation.kind === 'tool-completed') return {
-    ...base,
-    text: '原生工具完成',
-  }
-  if (observation.kind === 'approval-required') return {
-    ...base,
-    text: '需要批准 · 原生权限',
-    isError: true,
+  if (observation.kind === 'approval-required') {
+    const approvalDetail = [
+      observation.approvalKind === undefined ? undefined : `权限：${observation.approvalKind}`,
+      observation.approvalPreview,
+    ].filter((value): value is string => value !== undefined && value.length > 0).join('\n\n')
+    return {
+      ...base,
+      text: `需要批准 · ${observation.approvalKind ?? '原生权限'}`,
+      ...(approvalDetail === '' ? {} : { outputDetail: approvalDetail }),
+      isError: true,
+    }
   }
   const usage = observation.usage
   const fragments = [
     usage?.inputTokens === undefined ? undefined : `输入 ${String(usage.inputTokens)}`,
     usage?.outputTokens === undefined ? undefined : `输出 ${String(usage.outputTokens)}`,
+    usage?.costUsd === undefined ? undefined : `费用 $${usage.costUsd.toFixed(6)}`,
+  ].filter((value): value is string => value !== undefined)
+  const usageLines = [
+    usage?.inputTokens === undefined ? undefined : `- 输入：${String(usage.inputTokens)}`,
+    usage?.outputTokens === undefined ? undefined : `- 输出：${String(usage.outputTokens)}`,
+    usage?.cacheReadInputTokens === undefined ? undefined : `- 缓存命中：${String(usage.cacheReadInputTokens)}`,
+    usage?.cacheWriteInputTokens === undefined ? undefined : `- 缓存写入：${String(usage.cacheWriteInputTokens)}`,
+    usage?.costUsd === undefined ? undefined : `- 费用：$${usage.costUsd.toFixed(6)}`,
   ].filter((value): value is string => value !== undefined)
   return {
     ...base,
     text: fragments.length === 0 ? '用量已更新' : `用量更新 · ${fragments.join(' · ')}`,
+    ...(usageLines.length === 0 ? {} : { outputDetail: `用量\n\n${usageLines.join('\n')}` }),
     ...detailedUsageProps(usage),
   }
 }

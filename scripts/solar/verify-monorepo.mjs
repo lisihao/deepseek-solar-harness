@@ -142,6 +142,13 @@ export function validateMonorepo({
       command: ['node', 'scripts/solar/install-controlled-plugin-deps.mjs'],
       consumers: ['controlled-plugin-suite'],
     },
+    {
+      name: 'Web Billing',
+      installId: 'billing-install',
+      cwd: 'plugins/managed/web-billing',
+      command: ['corepack', 'pnpm', 'install', '--ignore-workspace', '--frozen-lockfile'],
+      consumers: ['billing-tests'],
+    },
   ]) {
     const installGate = governanceGates.get(workspace.installId)
     if (installGate?.cwd !== workspace.cwd

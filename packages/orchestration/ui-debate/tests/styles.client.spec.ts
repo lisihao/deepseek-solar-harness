@@ -31,6 +31,17 @@ describe('Debate panel layout styles', () => {
     expect(css).toContain('var(--dsw-alias-brand-primary)')
     expect(css).toContain('overflow-wrap:anywhere')
     expect(css).toContain('text-overflow:ellipsis')
+    expect(css).toContain('.dshDesktopDebatePanel{display:flex;flex-direction:column')
+    expect(css).toContain('grid-template-columns:240px minmax(640px,1fr) 340px')
+    expect(css).toContain('@media(max-width:1499px)')
+    expect(css).toContain('@media(max-width:1023px)')
+    expect(css).toContain('.dshDesktopDebateEvidence[data-open="true"]')
+    expect(css).toContain('.dshDesktopDebateRuns[data-open="true"]')
+    expect(css).toContain('font-size:14px!important;line-height:22px!important')
+    expect(css).toContain('font-size:13px!important;line-height:20px!important')
+    expect(css).toContain('font-size:11px!important;line-height:16px!important')
+    expect(css).toContain('table-layout:fixed')
+    expect(css).toContain('.dshDesktopDebateEvents>summary')
   })
 
   it('disposes only the Debate-owned style element', () => {

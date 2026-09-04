@@ -63,6 +63,8 @@ export interface Config {
   readonly skillProviderModules?: string[]
   /** Trusted complete Browser Provider plugins loaded by the headless daemon. */
   readonly browserProviderModules?: string[]
+  /** Explicit executable or helper used for the detached headless daemon. */
+  readonly headlessNodeExecutable?: string
   /** Maximum time for one Server-side exact-commit Git materialization. */
   readonly remoteMaterializationTimeoutMs?: number
   /** Maximum time for one bounded Resident artifact read. */
@@ -79,6 +81,7 @@ export const Config: z<Config> = z.object({
   connectTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
   residentDriverModules: z.array(z.string()).default([]),
   skillProviderModules: z.array(z.string()).default([]),
+  headlessNodeExecutable: z.string(),
   browserProviderModules: z.array(z.string()).default([]),
   remoteMaterializationTimeoutMs: z.number().step(1).min(1_000).max(15 * 60_000).default(120_000),
   remoteArtifactReadTimeoutMs: z.number().step(1).min(100).max(60_000).default(15_000),
@@ -98,6 +101,7 @@ class LocalOrchestrationService extends OrchestrationService {
       dshHome,
       autoStart: config.autoStart,
       connectTimeoutMs: config.connectTimeoutMs,
+      headlessNodeExecutable: config.headlessNodeExecutable,
       residentDriverModules: config.residentDriverModules.map((module) => {
         if (ctx.baseUrl === undefined) throw new Error('orchestration-local requires ctx.baseUrl to resolve Resident Driver modules')
         return createRequire(ctx.baseUrl).resolve(module)

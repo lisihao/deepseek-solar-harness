@@ -40,13 +40,13 @@ function run(): DesktopDebateRun {
     topic: { version: 1, title: 'User-selected topic: choose A or B.', source: 'user' },
     sourceSessionId: 'session-1',
     roles: [{
-      role: 'constructive-proposer', kind: 'participant', title: 'Proposer', mandate: '提出可执行方案与成功标准。', operatorId: 'codex', model: 'gpt-5.6-sol', tier: 'high', source: 'native-subscription', required: true,
+      role: 'constructive-proposer', kind: 'participant', title: '建设性提案者', mandate: '提出可执行方案与成功标准。', operatorId: 'codex', model: 'gpt-5.6-sol', tier: 'high', source: 'native-subscription', required: true,
       latestTurn: { round: 2, state: 'settled', outputRef: 'artifact:r2-proposer', outputPreview: 'Round two proposal: retain A with a gate.', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'], usage: { inputTokens: 1_100, outputTokens: 450 }, startedAt: '2026-08-29T01:01:01.000Z', settledAt: '2026-08-29T01:01:11.000Z' },
     }, {
-      role: 'skeptical-falsifier', kind: 'participant', title: 'Falsifier', mandate: '寻找反例、风险和失败条件。', operatorId: 'claude-code', model: 'claude-fable-5', tier: 'medium', source: 'native-subscription', required: true,
+      role: 'skeptical-falsifier', kind: 'participant', title: '怀疑式证伪者', mandate: '寻找反例、风险和失败条件。', operatorId: 'claude-code', model: 'claude-fable-5', tier: 'medium', source: 'native-subscription', required: true,
       latestTurn: { round: 2, state: 'settled', outputRef: 'artifact:r2-falsifier', outputPreview: 'Round two challenge: keep the cost dissent.', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'], usage: { inputTokens: 950, outputTokens: 380 }, startedAt: '2026-08-29T01:01:02.000Z', settledAt: '2026-08-29T01:01:12.000Z' },
     }, {
-      role: 'decision-judge', kind: 'judge', title: 'Judge', mandate: '综合证据、裁定分歧并给出决策。', operatorId: 'claude-code', model: 'claude-opus-5', tier: 'high', source: 'native-subscription', required: true,
+      role: 'decision-judge', kind: 'judge', title: '决策裁判（主持人）', mandate: '综合证据、裁定分歧并给出决策。', operatorId: 'claude-code', model: 'claude-opus-5', tier: 'high', source: 'native-subscription', required: true,
       latestTurn: { round: 2, state: 'settled', outputRef: 'artifact:r2-judge', outputPreview: 'Round two ruling: choose A and record dissent.', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'], usage: { inputTokens: 850, outputTokens: 320 }, startedAt: '2026-08-29T01:01:03.000Z', settledAt: '2026-08-29T01:01:13.000Z' },
     }],
     rounds: [{
@@ -138,20 +138,24 @@ describe('Debate Desktop panel transport', () => {
     ))
     for (const expected of [
       'User-selected topic: choose A or B.', '参与 Agent 与角色职责', '参与者名册', '建设性提案者', '怀疑式证伪者', '决策裁判（主持人）',
-      'Proposer', '提出可执行方案与成功标准。', 'GPT-5.6 Sol', '第 1 轮', '第 2 轮',
+      '提出可执行方案与成功标准。', 'GPT-5.6 Sol', '第 1 轮', '第 2 轮',
       'Round one proposal: choose A.', 'Round one challenge: verify rollback.',
       'Round two proposal: retain A with a gate.', 'Round two challenge: keep the cost dissent.',
       'Round one ruling: continue review.', 'Round two ruling: choose A and record dissent.',
-      'artifact:r1-proposer', 'Evidence refs：artifact:evidence', 'Claim Ledger', 'Option A is safer.',
+      'artifact:r1-proposer', 'Evidence refs：artifact:evidence', '主张账本', 'Option A is safer.',
       '讨论动态', 'Debate 已规划', '轮次已开始', 'Agent 输出已完成', '主持人总结 / 决策裁判', 'Usage / Cost', '用量部分归集', '费用归集未知', 'artifact:synthesis',
     ]) expect(markup).toContain(expected)
     expect(markup).not.toContain('Choose A or B.')
     expect(markup).toContain('<table>')
+    expect(markup).toContain('<colgroup>')
     expect(markup).toContain('<th scope="col">角色</th>')
+    expect(markup).toContain('<details class="dshDesktopDebateEvents"')
+    expect(markup.indexOf('dshDesktopDebateClaims')).toBeLessThan(markup.indexOf('dshDesktopDebateEvents'))
     expect(markup).toContain('本楼提交主张')
     expect(markup).not.toContain('提出最可执行的方案，明确关键主张、假设和验收标准。')
     expect(markup).not.toContain('角色技术详情')
     expect(markup).not.toContain('constructive-proposer')
+    expect(markup).not.toContain('Proposer')
     expect(markup).toContain('费用 N/A')
     expect(markup).not.toContain('NaN')
     expect(markup).toContain('批准')
@@ -209,6 +213,72 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).not.toContain('node-first')
     expect(markup).not.toContain('node-second')
     expect(markup).not.toContain('open=""')
+  })
+
+  it('orders public floors by roster order even when turns arrive out of order', () => {
+    const fixture = run()
+    const firstRound = fixture.rounds[0]
+    if (firstRound === undefined) throw new Error('missing Debate fixture round')
+    fixture.rounds[0] = { ...firstRound, turnStates: [...firstRound.turnStates].reverse() }
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup.match(/<span class="dshDesktopDebateFloor">[0-9]+ 楼<\/span>/g)?.slice(0, 3)).toEqual([
+      '<span class="dshDesktopDebateFloor">1 楼</span>',
+      '<span class="dshDesktopDebateFloor">2 楼</span>',
+      '<span class="dshDesktopDebateFloor">3 楼</span>',
+    ])
+    expect(markup.indexOf('Round one proposal: choose A.')).toBeLessThan(markup.indexOf('Round one challenge: verify rollback.'))
+    expect(markup.indexOf('Round one challenge: verify rollback.')).toBeLessThan(markup.indexOf('Round one ruling: continue review.'))
+  })
+
+  it('renders structured progress once with a custom public role title and no raw event fallback', () => {
+    const fixture = run()
+    fixture.roles = fixture.roles.map(role => role.role === 'skeptical-falsifier' ? { ...role, title: '风险证伪官' } : role)
+    const progress = {
+      version: 1 as const,
+      sequence: 20,
+      runId: fixture.runId,
+      revision: 8,
+      generation: 8,
+      round: 1,
+      slotId: 'skeptical-falsifier',
+      type: 'debate.agent.progress',
+      createdAt: '2026-08-29T01:00:08.000Z',
+      data: {
+        role: 'skeptical-falsifier',
+        kind: 'phase',
+        phase: 'reasoning',
+        orchestrationRunId: 'taskgraph-1',
+        orchestrationSequence: 4,
+      },
+    }
+    const toolProgress = {
+      ...progress,
+      sequence: 21,
+      data: {
+        ...progress.data,
+        kind: 'tool-started',
+        toolName: 'Bash',
+        orchestrationSequence: 5,
+      },
+    }
+    const markup = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture,
+      events: [progress, { ...progress, revision: 9 }, toolProgress],
+      pending: false,
+      onControl: async () => {},
+    }))
+    expect(markup).toContain('Agent 执行进展')
+    expect(markup).toContain('阶段：推理中')
+    expect(markup).toContain('开始调用工具：Bash')
+    expect(markup).toContain('风险证伪官')
+    expect(markup).not.toContain('debate.agent.progress')
+    expect(markup).not.toContain('状态已记录')
+    expect((markup.match(/阶段：推理中/g) ?? []).length).toBe(1)
   })
 
   it('renders public Markdown into separate priority sections and removes legacy raw-HTML wrappers', () => {
@@ -294,7 +364,7 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).not.toContain('公开发言：尚未记录公开输出。')
   })
 
-  it('keeps stopped active terminal turns visible and assigns contiguous floors after filtering', () => {
+  it('keeps stopped active terminal turns visible without treating failed turns as public floors', () => {
     const fixture = run()
     const firstRound = fixture.rounds[0]
     if (firstRound === undefined) throw new Error('missing Debate fixture round')
@@ -332,7 +402,6 @@ describe('Debate Desktop panel transport', () => {
       onControl: async () => {},
     }))
     expect(markup.match(/<span class="dshDesktopDebateFloor">[0-9]+ 楼<\/span>/g)).toEqual([
-      '<span class="dshDesktopDebateFloor">1 楼</span>',
       '<span class="dshDesktopDebateFloor">2 楼</span>',
     ])
     expect(markup).toContain('Round one challenge: verify rollback.')
@@ -375,11 +444,67 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).toContain('data-state="blocked"')
     expect(markup).toContain('请求：<span>Claude Code · Claude Fable 5</span>')
     expect(markup).toContain('实际：<span>Codex · GPT-5.6 Luna</span>')
-    expect(markup).toContain('回退：请求模型尚未通过可用性确认，已改用可用模型。')
+    expect(markup).toContain('执行：Codex · GPT-5.6 Luna · Claude Fable 尚未通过订阅资格确认，已改用 Codex Luna')
+    expect(markup).toContain('回退：AUTHENTICATION_UNQUALIFIED · 请求模型尚未通过订阅资格确认。')
     expect(markup).toContain('指定模型不可用')
     expect(markup).toContain('Claude Code unavailable because the VPN is blocked.')
     expect(markup).not.toContain('debate-r1-skeptical-falsifier')
     expect(markup).not.toContain('Agent 输出失败')
+  })
+
+  it('keeps a native Claude 1M model variant as a normal execution', () => {
+    const fixture = run()
+    const nativeTurn = {
+      ...fixture.rounds[1]!.turnStates[1]!,
+      operatorId: 'claude-code',
+      model: 'claude-fable-5[1m]',
+      routing: {
+        version: 1 as const,
+        requestedOperatorId: 'claude-code',
+        requestedModel: 'claude-fable-5',
+        actualOperatorId: 'claude-code',
+        actualModel: 'claude-fable-5[1m]',
+      },
+    }
+    fixture.rounds = fixture.rounds.map((round, index) => index === 1
+      ? { ...round, turnStates: round.turnStates.map((turn, turnIndex) => turnIndex === 1 ? nativeTurn : turn) }
+      : round)
+    fixture.roles = fixture.roles.map(role => role.role === 'skeptical-falsifier'
+      ? { ...role, latestTurn: nativeTurn }
+      : role)
+    const markup = renderToStaticMarkup(createElement(RunDetail, { run: fixture, events: [], pending: false, onControl: async () => {} }))
+    expect(markup).toContain('Claude Fable 5 · 1M 上下文')
+    expect(markup).not.toContain('claude-fable-5[1m]')
+    expect(markup).not.toContain('已改用')
+    expect(markup).not.toContain('已回退')
+    expect(markup).not.toContain('回退：')
+  })
+
+  it('explains a true Opus-to-Codex fallback without polluting the public route with a raw code', () => {
+    const fixture = run()
+    const fallbackTurn = {
+      ...fixture.rounds[1]!.turnStates[2]!,
+      operatorId: 'codex',
+      model: 'gpt-5.6-sol',
+      routing: {
+        version: 1 as const,
+        requestedOperatorId: 'claude-code',
+        requestedModel: 'claude-opus-5',
+        actualOperatorId: 'codex',
+        actualModel: 'gpt-5.6-sol',
+        fallbackReasonCode: 'MODEL_UNAVAILABLE',
+      },
+    }
+    fixture.rounds = fixture.rounds.map((round, index) => index === 1
+      ? { ...round, turnStates: round.turnStates.map((turn, turnIndex) => turnIndex === 2 ? fallbackTurn : turn) }
+      : round)
+    fixture.roles = fixture.roles.map(role => role.role === 'decision-judge'
+      ? { ...role, latestTurn: fallbackTurn }
+      : role)
+    const markup = renderToStaticMarkup(createElement(RunDetail, { run: fixture, events: [], pending: false, onControl: async () => {} }))
+    expect(markup).toContain('执行：Codex · GPT-5.6 Sol · Claude Opus 当前不可用，已改用 Codex Sol')
+    expect(markup).toContain('回退：MODEL_UNAVAILABLE · 请求模型当前不可用。')
+    expect(markup).not.toContain('已回退')
   })
 
   it('deduplicates exact blockers within one turn while preserving distinct messages', () => {
@@ -444,7 +569,7 @@ describe('Debate Desktop panel transport', () => {
     const markup = renderToStaticMarkup(createElement(RunDetail, { run: fixture, events: [], pending: false, onControl: async () => {} }))
     expect(markup).toContain(`Claude Code · ${longModel}`)
     expect(markup).not.toContain(longNodeId)
-    expect(markup).toContain('请求模型当前不可用，已改用可用模型。')
+    expect(markup).toContain('MODEL_UNAVAILABLE · 请求模型当前不可用。')
   })
 
   it('offers resume only when the durable stop event proves a pause', () => {

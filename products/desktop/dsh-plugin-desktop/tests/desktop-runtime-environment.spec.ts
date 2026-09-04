@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import {
   lstatSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -15,6 +16,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   installDesktopPnpmRuntime,
+  resolveHeadlessNodeExecutable,
   type DesktopPnpmRuntimeOptions,
 } from '../src/desktop-runtime-environment.ts'
 
@@ -71,6 +73,10 @@ describe('desktop Host pnpm runtime', () => {
     expect(lstatSync(installation.nodeBinDir).mode & 0o777).toBe(0o700)
     expect(lstatSync(installation.pnpmShimPath).mode & 0o777).toBe(0o700)
     expect(lstatSync(installation.nodeShimPath).mode & 0o777).toBe(0o700)
+    expect(readdirSync(join(stateDir, 'private')).sort()).toEqual(['clear-env.mjs', 'headless-node', 'node-bin'])
+    expect(lstatSync(installation.headlessNodePath).mode & 0o777).toBe(0o700)
+    const headless = readFileSync(installation.headlessNodePath, 'utf8')
+    expect(headless).toContain('export ELECTRON_RUN_AS_NODE=1')
     expect(lstatSync(installation.clearEnvironmentPath).mode & 0o777).toBe(0o600)
 
     const clearEnvironmentUrl = pathToFileURL(installation.clearEnvironmentPath).href
@@ -290,6 +296,78 @@ describe('desktop Host pnpm runtime', () => {
 
     expect(readdirSync(pathDir)).toEqual(['pnpm'])
     installation.dispose()
+  })
+
+  it('runs a detached helper through real Node with RunAsNode enabled', () => {
+    const stateDir = join(temporaryDirectory(), 'runtime')
+    const installation = installDesktopPnpmRuntime({
+      ...options(stateDir, 'linux', { PATH: process.env.PATH ?? '/usr/bin' }),
+      headlessNodeExecutable: process.execPath,
+    })
+    const result = spawnSync(installation.headlessNodePath, [
+      '-e',
+      'process.stdout.write(JSON.stringify(Object.keys(process.env).filter(name => name.toUpperCase() === "ELECTRON_RUN_AS_NODE")))',
+    ], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        ELECTRON_RUN_AS_NODE: '1',
+      },
+    })
+
+    expect(result.error).toBeUndefined()
+    expect(result.status).toBe(0)
+    expect(result.stdout).toBe('["ELECTRON_RUN_AS_NODE"]')
+    installation.dispose()
+  })
+
+  it('prefers the packaged macOS Helper over a system Node executable', () => {
+    const root = temporaryDirectory()
+    const appExecutable = join(root, 'DSH Desktop.app', 'Contents', 'MacOS', 'DSH Desktop')
+    const helperExecutable = join(
+      root,
+      'DSH Desktop.app',
+      'Contents',
+      'Frameworks',
+      'DSH Desktop Helper.app',
+      'Contents',
+      'MacOS',
+      'DSH Desktop Helper',
+    )
+    mkdirSync(join(root, 'DSH Desktop.app', 'Contents', 'MacOS'), { recursive: true })
+    mkdirSync(join(helperExecutable, '..'), { recursive: true })
+    writeFileSync(appExecutable, '#!/bin/sh\n')
+    writeFileSync(helperExecutable, '#!/bin/sh\n')
+    chmodSync(appExecutable, 0o700)
+    chmodSync(helperExecutable, 0o700)
+
+    expect(resolveHeadlessNodeExecutable({
+      platform: 'darwin',
+      appExecutable,
+      environment: { PATH: '/opt/homebrew/bin:/usr/bin' },
+    })).toBe(helperExecutable)
+  })
+
+  it('does not resolve the Electron application as a headless executable', () => {
+    const root = temporaryDirectory()
+    const appExecutable = join(root, 'node')
+    writeFileSync(appExecutable, '#!/bin/sh\n')
+    chmodSync(appExecutable, 0o700)
+
+    expect(resolveHeadlessNodeExecutable({
+      platform: 'freebsd',
+      appExecutable,
+      environment: { PATH: root },
+    })).toBeUndefined()
+  })
+
+  it('rejects an explicit Electron application executable for headless daemons', () => {
+    const stateDir = join(temporaryDirectory(), 'runtime')
+    const configured = options(stateDir, 'linux', { PATH: '/usr/bin' })
+    expect(() => installDesktopPnpmRuntime({
+      ...configured,
+      headlessNodeExecutable: configured.appExecutable,
+    })).toThrow('must not be the Electron application executable')
   })
 
   it('fails loud for unsupported platforms and unsafe generated values', () => {

@@ -47,6 +47,8 @@ export interface Config {
   readonly pollIntervalMs?: number
   /** Independently packaged Driver modules loaded by the detached daemon. */
   readonly driverModules?: string[]
+  /** Explicit executable or helper used for the detached headless daemon. */
+  readonly headlessNodeExecutable?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -54,6 +56,7 @@ export const Config: z<Config> = z.object({
   autoStart: z.boolean().default(true),
   connectTimeoutMs: z.number().step(1).min(100).max(60_000).default(5_000),
   pollIntervalMs: z.number().step(1).min(10).max(10_000).default(250),
+  headlessNodeExecutable: z.string(),
   driverModules: z.array(z.string()).default([]),
 })
 
@@ -71,6 +74,7 @@ class LocalResidentOperatorService extends ResidentOperatorService {
       autoStart: config.autoStart,
       connectTimeoutMs: config.connectTimeoutMs,
       pollIntervalMs: config.pollIntervalMs,
+      headlessNodeExecutable: config.headlessNodeExecutable,
       driverModules,
     })
   }

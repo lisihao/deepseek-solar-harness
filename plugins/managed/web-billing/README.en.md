@@ -13,9 +13,11 @@ policy schedule** (including the peak/off-peak pricing effective 2026-08-17),
 persists a ledger, shows the **account balance**, and renders live cost badges
 in the browser — **displaying USD when the UI language is English**.
 
-> Token and cost figures are a **local DSH ledger**: only completed
+> Token and cost figures are a **local DSH ledger**: only billable DeepSeek
 > `assistant/message` events captured in this `$DSH_HOME` after the plugin was
-> installed. They are not the official DeepSeek account invoice. The balance
+> installed are included. Subscription-backed Codex/Claude Code operators and
+> aggregate Debate hosts keep usage in their own traces and are not presented
+> as DeepSeek API spend. This is not the official DeepSeek account invoice. The balance
 > comes from `/user/balance`; reconcile usage across API keys and applications
 > with the DeepSeek console Usage export.
 
@@ -24,7 +26,7 @@ in the browser — **displaying USD when the UI language is English**.
 | ![Mixed session panel](docs/screenshots/panel-mixed-en.png) | ![Local-only panel](docs/screenshots/panel-local-en.png) | ![Cloud-only panel](docs/screenshots/panel-cloud-en.png) |
 
 - **Host side**: subscribes to `session/event` and prices each `assistant/message`
-  that carries usage, using the message's own timestamp (policy + peak/off-peak
+  that carries usage and is not in `nonBillableProviders`, using its timestamp (policy + peak/off-peak
   phase at that moment). Ledger: `$DSH_HOME/storages/web-billing.json`.
   Also queries the official `GET /user/balance` with the provider's API key
   (60s refresh, silent degradation) and reports it with the billing state.

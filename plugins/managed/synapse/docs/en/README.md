@@ -67,6 +67,10 @@ corepack pnpm dsh web --port 0
 
 Open the top **Session Map** switch after startup. Do not run two `dsh web` processes that share the same profile.
 
+In the DSH bundle, the **Dialogue / Session Map** switch is rendered in the native Session header. The companion only hides the old floating switch; the Synapse iframe, session projection, and bridge remain unchanged. The control uses DSH theme tokens and compact responsive sizing, so it stays in normal header flow instead of overlapping the viewport or other actions.
+
+In the DSH bundle, the **Dialogue / Session Map** switch is rendered in the native Session header. The companion only hides the old floating switch; the Synapse iframe, session projection, and bridge remain unchanged. The control uses DSH theme tokens and compact responsive sizing, so it stays in normal header flow instead of overlapping the viewport or other actions.
+
 ## Usage
 
 1. Select a working directory in DSH or open an existing session.
@@ -137,6 +141,7 @@ A leftover `allowBuilds` key in `pnpm-workspace.yaml` is harmless and may also b
 - Deleting `workspaces.json` loses canvas layout, never DSH sessions.
 - Projected message text is capped at 8000 characters; longer card text ends with “—…（详情查看全文）”, while the full content remains available in conversation details.
 - The plugin starts no second Web server and creates no second agent system.
+- The DSH companion adapter only owns header presentation; the upstream button and iframe bridge still perform the view change.
 
 See [Architecture and runtime boundaries](../architecture.md) for details.
 

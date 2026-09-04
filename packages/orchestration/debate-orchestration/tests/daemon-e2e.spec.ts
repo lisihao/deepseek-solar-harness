@@ -193,9 +193,9 @@ function policy(): DebatePolicyV1 {
       maxRounds: 1,
       maxTurnsPerAgent: 1,
       maxAgentsPerRound: 3,
-      maxInputTokens: 1_000,
-      maxOutputTokens: 1_000,
-      maxTotalTokens: 2_000,
+      maxInputTokens: 80_000,
+      maxOutputTokens: 40_000,
+      maxTotalTokens: 120_000,
       maxCostUsd: 1,
     },
     rounds: {

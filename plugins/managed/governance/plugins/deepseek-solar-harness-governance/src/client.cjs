@@ -6,7 +6,6 @@ const {
 const { useCallback, useEffect, useRef, useState } = React
 const h = React.createElement
 const TRACE_PATH = '/code-harness/v1/trace'
-const ORCHESTRATION_PATH = '/api/orchestrations'
 
 function phaseLabel(phase) {
   switch (phase) {
@@ -62,184 +61,72 @@ function collaborationPolicyLabel(policy) {
   })[String(policy)] ?? '历史策略 N/A'
 }
 
-function runStateLabel(state) {
-  return ({
-    awaiting_clarification: '待澄清', awaiting_approval: '待批准', running: '运行中', paused: '已暂停',
-    completed: '已完成', failed: '失败', cancelled: '已取消', indeterminate: '待确认',
-  })[String(state)] ?? String(state ?? 'N/A')
-}
-
-function orchestrationEventLabel(type) {
-  return ({
-    'run.started': 'TaskGraph 已启动',
-    'capsule.resolved': 'Context Capsule 已解析',
-    'context.compiled': '上下文已编译',
-    'execution_plan.sealed': 'ExecutionPlan 已封印',
-    'node.dispatched': 'Resident 算子已派发',
-    'node.operator.progress': 'Resident 执行进度',
-    'node.operator.observation': 'Resident 公开观察',
-    'node.evidence.accepted': 'Resident 结果与 Evidence',
-    'node.failed': 'Resident 节点失败',
-    'run.completed': 'TaskGraph 已完成',
-    'run.failed': 'TaskGraph 失败',
-  })[String(type)] ?? String(type)
-}
-
-function operatorProgressLabel(phase) {
-  return ({
-    connecting: '正在连接原生产品', session_ready: '原生会话已接通', reasoning: '正在推理与执行',
-    tool_activity: '正在使用工具', finalizing: '正在整理结果',
-  })[String(phase)] ?? '正在执行'
-}
-
 function shortRef(value) {
   const text = String(value ?? 'N/A')
   const tail = text.includes(':') ? text.slice(text.lastIndexOf(':') + 1) : text
   return tail.length <= 10 ? tail : tail.slice(0, 10)
 }
 
-function orchestrationEventDetail(event) {
-  if (event.type === 'run.started') {
-    return `${collaborationPolicyLabel(event.data?.admission?.policy)} · 并行上限 ${String(event.data?.maxParallel ?? 'N/A')}`
+function governanceDecisionLabel(type) {
+  return ({
+    'operator.route-selected': '执行路由已决定',
+    'orchestration.admitted': 'TaskGraph 已准入',
+    'operator.dispatch-accepted': '算子回执已接受',
+    'operator.receipt-terminal': '算子回执已终结',
+  })[String(type)] ?? String(type)
+}
+
+function governanceDecisionCategory(category) {
+  return ({ policy: '策略', admission: '准入', receipt: '回执' })[String(category)] ?? '决策'
+}
+
+function governanceDecisionDetail(event) {
+  if (event.type === 'operator.route-selected') {
+    return [collaborationPolicyLabel(event.policy), event.route, event.operatorId, event.reason]
+      .filter(value => typeof value === 'string' && value !== '')
+      .join(' · ')
   }
-  if (event.type === 'node.dispatched') {
-    return `${String(event.data?.operatorId ?? 'N/A')} · ${String(event.data?.contextIsolation ?? 'N/A')} · lane ${shortRef(event.data?.laneId)}`
+  if (event.type === 'orchestration.admitted') {
+    return [
+      collaborationPolicyLabel(event.policy),
+      event.route,
+      event.runId === undefined ? undefined : 'TaskGraph ' + shortRef(event.runId),
+      event.maxParallel === undefined ? undefined : '并行上限 ' + String(event.maxParallel),
+    ].filter(value => typeof value === 'string' && value !== '').join(' · ')
   }
-  if (event.type === 'node.operator.progress') {
-    return `${String(event.data?.operatorId ?? 'N/A')} · ${operatorProgressLabel(event.data?.phase)}`
+  if (event.type === 'operator.dispatch-accepted') {
+    return [
+      event.operatorId,
+      event.commandId === undefined ? undefined : 'receipt ' + shortRef(event.commandId),
+      event.mode,
+    ].filter(value => typeof value === 'string' && value !== '').join(' · ')
   }
-  if (event.type === 'node.operator.observation') {
-    const observation = event.data?.observation ?? {}
-    const prefix = `${String(event.data?.operatorId ?? 'N/A')} · `
-    if (observation.kind === 'public-output') return `${prefix}${String(observation.preview ?? '')}`
-    if (observation.kind === 'tool-started') return `${prefix}开始使用工具 ${String(observation.toolName ?? 'N/A')}`
-    if (observation.kind === 'tool-completed') return `${prefix}完成工具 ${String(observation.toolName ?? 'N/A')}`
-    if (observation.kind === 'approval-required') return `${prefix}需要批准 ${String(observation.approvalKind ?? 'N/A')}${observation.preview === undefined ? '' : `\n${String(observation.preview)}`}`
-    if (observation.kind === 'usage-updated') return `${prefix}用量更新 ${JSON.stringify(observation.usage ?? {})}`
-    return `${prefix}公开观察`
-  }
-  if (event.type === 'node.evidence.accepted' || (event.type === 'node.failed' && typeof event.data?.outputPreview === 'string')) {
-    const output = String(event.data?.outputPreview ?? '')
-    const truncated = event.data?.outputTruncated === true ? '\n…输出已截断，完整结果保留在 Evidence 产物中。' : ''
-    return `${String(event.data?.operatorId ?? 'N/A')} · ${String(event.data?.stopReason ?? 'N/A')} · Evidence ${shortRef(event.data?.evidenceRef)}\n${output}${truncated}`
+  if (event.type === 'operator.receipt-terminal') {
+    return [
+      event.operatorId,
+      event.commandId === undefined ? undefined : 'receipt ' + shortRef(event.commandId),
+      event.code,
+      event.stopReason,
+    ].filter(value => typeof value === 'string' && value !== '').join(' · ')
   }
   return ''
 }
 
-function modelVisibleEvidenceText(value) {
-  const content = value?.evidence?.output
-  if (!Array.isArray(content)) throw new Error('Evidence has no model-visible output')
-  return content.flatMap(block => {
-    if (block === null || typeof block !== 'object' || Array.isArray(block)) return []
-    if (block.type === 'reasoning') return []
-    if (block.type === 'text' && typeof block.text === 'string') return [block.text]
-    if (block.type === 'tool-result' && Array.isArray(block.content)) {
-      return [modelVisibleEvidenceText({ evidence: { output: block.content } })]
-    }
-    return [JSON.stringify(block)]
-  }).filter(Boolean).join('\n')
-}
-
-async function fetchOrchestrationEvidence(runId, evidenceRef) {
-  const url = new URL(ORCHESTRATION_PATH, window.location.origin)
-  url.searchParams.set('run_id', runId)
-  url.searchParams.set('evidence_ref', evidenceRef)
-  const response = await fetch(url, { cache: 'no-store' })
-  const body = await response.json()
-  if (!response.ok) throw new Error(body?.message ?? `HTTP ${String(response.status)}`)
-  return modelVisibleEvidenceText(body)
-}
-
-function OrchestrationEvidenceOutput({ runId, event }) {
-  const evidenceRef = typeof event.data?.evidenceRef === 'string' ? event.data.evidenceRef : undefined
-  const [output, setOutput] = useState()
-  const [error, setError] = useState()
-  const [loading, setLoading] = useState(false)
-  if (evidenceRef === undefined || event.data?.outputTruncated !== true) return null
-  const load = async () => {
-    setLoading(true)
-    try {
-      setOutput(await fetchOrchestrationEvidence(runId, evidenceRef))
-      setError(undefined)
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught))
-    } finally {
-      setLoading(false)
-    }
-  }
-  return h('div', { className: 'dsh-governance-evidence-output' },
-    output === undefined && error === undefined
-      ? h('button', { type: 'button', disabled: loading, onClick: () => { void load() } }, loading ? '读取中…' : '查看完整 Evidence 输出')
-      : null,
-    error === undefined ? null : h('div', { className: 'dsh-governance-error', role: 'alert' }, error),
-    output === undefined ? null : h('div', { className: 'dsh-governance-event-message' }, output),
-  )
-}
-
-function SessionCollaborationEvent({ event }) {
-  const detail = event.type === 'physical-operator/routing-decision'
-    ? `${collaborationPolicyLabel(event.policy)} · ${String(event.route ?? 'N/A')} · ${String(event.reason ?? '')}`
-    : event.type === 'physical-operator/dispatch'
-      ? `${String(event.operatorId ?? 'N/A')} · command ${shortRef(event.commandId)}`
-      : event.type === 'physical-operator/tool-dispatch'
-        ? `${String(event.operatorId ?? 'N/A')} · 显式算子 · command ${shortRef(event.commandId)} · ${String(event.description ?? '')}`
-      : event.type === 'physical-operator/dispatch-terminal'
-        ? `${String(event.code ?? 'N/A')} · command ${shortRef(event.commandId)}`
-        : event.type === 'orchestration/admission'
-          ? `${collaborationPolicyLabel(event.policy)} · TaskGraph ${shortRef(event.runId)} · 并行上限 ${String(event.maxParallel ?? 'N/A')}`
-          : event.type === 'physical-operator/tool-call' || event.type === 'subagent/call'
-            ? `${String(event.operatorId ?? 'Resident')} · ${String(event.tool ?? 'N/A')}\n${String(event.input ?? '')}`
-            : event.type === 'physical-operator/tool-result' || event.type === 'subagent/output'
-              ? `${String(event.operatorId ?? 'Resident')} · ${String(event.tool ?? 'N/A')}\n${String(event.output ?? event.outputPreview ?? '')}`
-              : event.type === 'physical-operator/observation'
-                ? `${String(event.operatorId ?? 'Resident')} · ${String(event.kind ?? 'progress')}${event.phase === undefined ? '' : ` ${String(event.phase)}`}${event.tool === undefined ? '' : ` ${String(event.tool)}`}${event.usage === undefined ? '' : `\n${JSON.stringify(event.usage)}`}${event.output === undefined ? '' : `\n${String(event.output)}`}`
-                : event.type === 'physical-operator/trace-degraded'
-                  ? `${String(event.operatorId ?? 'Resident')} · Trace 降级 ${String(event.code ?? 'N/A')}\n${String(event.message ?? '')}`
-              : `${String(event.operatorId ?? 'N/A')}\n${String(event.output ?? event.outputPreview ?? '')}`
-  const failed = event.type === 'physical-operator/dispatch-terminal' || event.type === 'physical-operator/trace-degraded' || event.isError === true
-  const status = event.type.endsWith('/call') || event.type.endsWith('/tool-call')
-    ? '调用'
-    : failed ? '降级' : event.type.includes('output') || event.type.endsWith('/tool-result') || event.type === 'physical-operator/observation' ? '观察' : '会话'
-  return h('li', { className: 'dsh-governance-event dsh-collaboration-event' },
+function GovernanceDecisionEvent({ event }) {
+  const detail = governanceDecisionDetail(event)
+  return h('li', { className: 'dsh-governance-event dsh-governance-decision', 'data-category': event.category },
     h('div', { className: 'dsh-governance-event-head' },
-      h('span', { className: 'dsh-governance-sequence' }, `#${String(event.sequence)}`),
-      h('strong', null, String(event.type)),
-      h('span', { className: 'dsh-governance-event-status' }, status),
+      h('span', { className: 'dsh-governance-sequence' }, '#' + String(event.sequence)),
+      h('strong', null, governanceDecisionLabel(event.type)),
+      h('span', { className: 'dsh-governance-event-status' }, governanceDecisionCategory(event.category)),
     ),
     h('div', { className: 'dsh-governance-event-meta' }, formatTime(event.timestamp)),
-    h('div', { className: 'dsh-governance-event-message' }, detail),
+    detail === '' ? null : h('div', { className: 'dsh-governance-event-detail' }, detail),
   )
-}
-
-function OrchestrationEvent({ runId, event }) {
-  return h('li', { className: 'dsh-governance-event dsh-collaboration-event' },
-    h('div', { className: 'dsh-governance-event-head' },
-      h('span', { className: 'dsh-governance-sequence' }, `#${String(event.sequence)}`),
-      h('strong', null, orchestrationEventLabel(event.type)),
-      h('span', { className: 'dsh-governance-event-status' }, event.nodeId === undefined ? 'Run' : String(event.nodeId)),
-    ),
-    h('div', { className: 'dsh-governance-event-meta' }, formatTime(event.time)),
-    orchestrationEventDetail(event) === '' ? null : h('div', { className: 'dsh-governance-event-message' }, orchestrationEventDetail(event)),
-    h(OrchestrationEvidenceOutput, { runId, event }),
-  )
-}
-
-async function fetchSessionOrchestrations(sessionId) {
-  const listResponse = await fetch(`${ORCHESTRATION_PATH}?include_diagnostics=1`)
-  const list = await listResponse.json()
-  if (!listResponse.ok) throw new Error(list?.message ?? `HTTP ${String(listResponse.status)}`)
-  const runs = (list.runs ?? []).filter(run => run.admission?.sourceSessionId === sessionId)
-  return Promise.all(runs.map(async run => {
-    const response = await fetch(`${ORCHESTRATION_PATH}?run_id=${encodeURIComponent(run.runId)}&include_diagnostics=1`)
-    const detail = await response.json()
-    if (!response.ok) throw new Error(detail?.message ?? `HTTP ${String(response.status)}`)
-    return { run: (detail.runs ?? []).find(value => value.runId === run.runId) ?? run, events: detail.events ?? [] }
-  }))
 }
 
 function GovernanceTraceView({ sessionId }) {
   const [trace, setTrace] = useState(null)
-  const [orchestrations, setOrchestrations] = useState([])
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const requestSequence = useRef(0)
@@ -248,15 +135,11 @@ function GovernanceTraceView({ sessionId }) {
     const request = ++requestSequence.current
     setLoading(true)
     try {
-      const [response, sessionOrchestrations] = await Promise.all([
-        fetch(`${TRACE_PATH}?sessionId=${encodeURIComponent(sessionId)}`),
-        fetchSessionOrchestrations(sessionId),
-      ])
+      const response = await fetch(TRACE_PATH + '?sessionId=' + encodeURIComponent(sessionId))
       const body = await response.json()
-      if (!response.ok) throw new Error(body?.error?.message ?? `HTTP ${String(response.status)}`)
+      if (!response.ok) throw new Error(body?.error?.message ?? 'HTTP ' + String(response.status))
       if (request !== requestSequence.current) return
       setTrace(body)
-      setOrchestrations(sessionOrchestrations)
       setError(null)
     } catch (caught) {
       if (request !== requestSequence.current) return
@@ -281,7 +164,7 @@ function GovernanceTraceView({ sessionId }) {
       },
       h('header', { className: 'dsh-governance-header' },
         h('div', null,
-          h('h2', null, 'Code-as-Harness 治理与智能协作 Trace'),
+          h('h2', null, 'Code-as-Harness 治理 Trace'),
           h('p', null, `DSH 会话 ${String(sessionId)}`),
         ),
         h('div', { className: 'dsh-governance-actions' },
@@ -297,37 +180,31 @@ function GovernanceTraceView({ sessionId }) {
         loading ? h('span', null, '刷新中…') : null,
       ),
       error === null ? null : h('div', { className: 'dsh-governance-error', role: 'alert' }, error),
-      trace !== null && trace.events.length === 0
-        ? h('div', { className: 'dsh-governance-empty' },
-          '当前 DSH 会话尚未产生 Code-as-Harness 治理事件。')
-        : h('ol', { className: 'dsh-governance-events' },
-          ...(trace?.events ?? []).slice().reverse().map(event => h(TraceEvent, { event, key: event.sequence })),
-        ),
-      h('section', { className: 'dsh-collaboration-section', 'data-testid': 'collaboration-trace-panel' },
-        h('h3', null, '智能协作、首模型与 Resident 算子'),
-        h('div', { className: 'dsh-governance-summary' },
-          h('span', null, trace === null ? '会话协作事件 N/A' : `会话协作事件 ${String(trace.collaboration?.returnedEvents ?? 0)}/${String(trace.collaboration?.totalEvents ?? 0)}`),
-          h('span', null, `TaskGraph ${String(orchestrations.length)}`),
-        ),
-        (trace?.collaboration?.events ?? []).length === 0 && orchestrations.length === 0
-          ? h('div', { className: 'dsh-governance-empty dsh-collaboration-empty' }, '当前会话尚未派发 Codex、Claude Code 或持久 TaskGraph。')
-          : h(React.Fragment, null,
-            (trace?.collaboration?.events ?? []).length === 0 ? null : h('ol', { className: 'dsh-governance-events' },
-              ...trace.collaboration.events.slice().reverse().map(event => h(SessionCollaborationEvent, { event, key: `session-${String(event.sequence)}` })),
-            ),
-            ...orchestrations.map(({ run, events }) => h('article', { className: 'dsh-orchestration-run', key: run.runId },
-              h('header', null,
-                h('strong', null, String(run.title)),
-                h('span', null, `${collaborationPolicyLabel(run.admission?.policy)} · ${runStateLabel(run.state)} · ${String(run.nodes?.length ?? 0)} 节点`),
-              ),
-              h('ol', { className: 'dsh-governance-events' },
-                ...events.slice().reverse().map(event => h(OrchestrationEvent, { runId: String(run.runId), event, key: `${String(run.runId)}-${String(event.sequence)}` })),
-              ),
-            )),
+      h('section', { className: 'dsh-governance-evidence-section', 'data-testid': 'governance-evidence-panel' },
+        h('h3', null, '治理证据'),
+        trace !== null && trace.events.length === 0
+          ? h('div', { className: 'dsh-governance-empty' }, '当前 DSH 会话尚未产生 Code-as-Harness 治理事件。')
+          : h('ol', { className: 'dsh-governance-events' },
+            ...(trace?.events ?? []).slice().reverse().map(event => h(TraceEvent, { event, key: event.sequence })),
           ),
       ),
+      h('section', { className: 'dsh-governance-decisions-section', 'data-testid': 'governance-decisions-panel' },
+        h('h3', null, '调度决策'),
+        h('p', { className: 'dsh-governance-decision-hint' },
+          '这里只记录策略、准入与回执；算子进度、工具和 Debate 发言请切换到“轨迹”标签查看。',
+        ),
+        h('div', { className: 'dsh-governance-summary' },
+          h('span', null, trace === null ? '调度决策 N/A' : '调度决策 ' + String(trace.collaboration?.returnedEvents ?? 0) + '/' + String(trace.collaboration?.totalEvents ?? 0)),
+          h('span', null, '执行详情请查看“轨迹”标签。'),
+        ),
+        (trace?.collaboration?.events ?? []).length === 0
+          ? h('div', { className: 'dsh-governance-empty dsh-governance-decisions-empty' }, '当前会话尚未产生可展示的调度决策。')
+          : h('ol', { className: 'dsh-governance-events' },
+            ...(trace?.collaboration?.events ?? []).slice().reverse().map(event => h(GovernanceDecisionEvent, { event, key: 'decision-' + String(event.sequence) })),
+          ),
       ),
-    )
+    ),
+  )
 }
 
 exports.inject = ['slots']

@@ -15,7 +15,7 @@ import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
-import { installDesktopPnpmRuntime } from './desktop-runtime-environment.ts'
+import { installDesktopPnpmRuntime, resolveHeadlessNodeExecutable } from './desktop-runtime-environment.ts'
 import { ElectronDesktopRuntime } from './electron-runtime.ts'
 import { installProfilePackageResolver } from './module-resolution.ts'
 import { installNativeProductRuntime } from './native-product-runtime.ts'
@@ -377,6 +377,11 @@ async function start(): Promise<void> {
       throw new Error(`${BIN_NAME}: plugin runtime requires the Electron runtime version`)
     }
     const pnpmBinPath = packagedDependencyPath(import.meta.url, 'pnpm/bin/pnpm.mjs')
+    const headlessNodeExecutable = resolveHeadlessNodeExecutable({
+      platform: process.platform,
+      appExecutable: process.execPath,
+      environment: process.env,
+    })
     const pnpmRuntime = installDesktopPnpmRuntime({
       platform: process.platform,
       appExecutable: process.execPath,
@@ -384,6 +389,7 @@ async function start(): Promise<void> {
       electronVersion,
       stateDir: join(app.getPath('userData'), 'runtime-commands'),
       environment: process.env,
+      ...headlessNodeExecutable === undefined ? {} : { headlessNodeExecutable },
     })
     const releasePnpmRuntime = (): void => { pnpmRuntime.dispose() }
     disposePnpmRuntime = releasePnpmRuntime
@@ -407,6 +413,16 @@ async function start(): Promise<void> {
       process.platform,
       activeProfileName,
     )
+    for (const patch of prepared.patches) {
+      if (patch.id !== 'resident-operators' && patch.id !== 'orchestration-local') continue
+      if (patch.config === null || typeof patch.config !== 'object' || Array.isArray(patch.config)) {
+        throw new Error(`${BIN_NAME}: ${patch.id} row must expose an object config for the headless launcher`)
+      }
+      patch.config = {
+        ...patch.config,
+        headlessNodeExecutable: pnpmRuntime.headlessNodePath,
+      }
+    }
     const desktopPnpmBootstrap: DesktopPnpmBootstrap = {
       activeProfileName,
       activeProfileDir: prepared.profile.dir,
