@@ -2,7 +2,7 @@
 
 [English](PROJECT_STATE.md) | 中文
 
-本文件记录 Solar 分支当前执行链路、持久架构决策、阻塞缺口和唯一下一实施切片。它不替代当前状态的[架构图](architecture.zh.md)、Package Contract、生成的 Subsystem Reference，或 [Agent Notes](../.agents/notes/README.md) 中的决策依据。
+本文件记录 Solar 分支当前执行链路、持久架构决策、阻塞缺口和唯一下一实施切片。它不替代当前状态的[架构图](architecture.md)、Package Contract、生成的 Subsystem Reference，或 [Agent Notes](../.agents/notes/README.md) 中的决策依据。
 
 ## 当前执行链路
 
@@ -31,9 +31,9 @@ Orchestration Store 由 Single-writer SQLite Database 与 Content-addressed Arti
 
 ## 活跃架构提案
 
-[Declarative State Access Plane 提案](../.agents/notes/proposed/architecture/2026-09-04-declarative-state-access-plane.zh.md)定义 Agentic Transaction Processing 缺失的读侧能力。它区分 Complete Journal、Authorized State Address Space、Dynamic Working Set 与 Provider-specific Attention Set；定义 Typed Access Intent、Grant 和 Receipt；规定 Child Permission Attenuation；并为 Native KV-block Provider 预留接口，同时在首个实现中选择 Logical Materialization。
+[Declarative State Access Plane 提案](../.agents/notes/proposed/architecture/2026-09-04-declarative-state-access-plane.md)定义 Agentic Transaction Processing 缺失的读侧能力。它区分 Complete Journal、Authorized State Address Space、Dynamic Working Set 与 Provider-specific Attention Set；定义 Typed Access Intent、Grant 和 Receipt；规定 Child Permission Attenuation；并为 Native KV-block Provider 预留接口，同时在首个实现中选择 Logical Materialization。
 
-现有 [Domain KV Storage and Workspace 提案](../.agents/notes/proposed/architecture/2026-07-24-domain-kv-storage-and-workspace.zh.md)拥有 Durable Storage Media 与 Domain-record Semantics。它不拥有 Model-visible State Selection、Access Authority、Working-set Revision 或 Attention Control，因此不被 Declarative State Access 提案 supersede。
+现有 [Domain KV Storage and Workspace 提案](../.agents/notes/proposed/architecture/2026-07-24-domain-kv-storage-and-workspace.md)拥有 Durable Storage Media 与 Domain-record Semantics。它不拥有 Model-visible State Selection、Access Authority、Working-set Revision 或 Attention Control，因此不被 Declarative State Access 提案 supersede。
 
 Semantic Isolation、Governed Effect Commit 与更完整的 Agent Transaction Engine 仍属于尚未交付的架构工作。Declarative State Access 通过 Semantic-epoch Ref、Authority Revision、Observed Read-set Digest 与 Effect Read Basis 为未来组合预留接口，但不把这些机制写成已有能力。
 
