@@ -16,7 +16,7 @@ Future inference providers may support native KV-block filtering, while current 
 
 Agentic Transaction Processing also needs a read-side record. A future effect intent can be admitted at commit time only when the runtime knows the exact semantic epoch and state versions made readable to the decision. The initial Context Packet is not a complete dynamic read history.
 
-## Decision
+## Proposal
 
 Introduce a provider-neutral Declarative State Access Plane. It compiles an immutable, versioned state address space for each Agent Transaction; treats every model-generated access declaration as an untrusted proposal; validates that proposal against authority, capability, semantic epoch, policy, budget, and provider limits; creates an immutable working-set revision; and appends an access receipt describing the provider-observable readable set.
 
