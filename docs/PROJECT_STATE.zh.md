@@ -54,20 +54,20 @@ Semantic Isolation、Governed Effect Commit 与更完整的 Agent Transaction En
 MODE = EVOLVE
 
 TASK =
-实现 Declarative State Access V1 的单个依赖闭合 Logical-materialization 纵向切片。增加 @deepseek-ai/dsh-state-access 和 @deepseek-ai/dsh-state-access-local；把 Artifact、Evidence、Child Result、Agent Message 和 Claim Ledger 接入一条 State-aware RLM Root/Child Path；通过 Typed Host Bridge 增加 state.navigate、state.focus、state.release 和 state.inspect；持久化并复制 Address-space、Working-set、Command、Lease 和 Receipt State。
+Implement Declarative State Access V1 as one dependency-closed logical-materialization slice. Add @deepseek-ai/dsh-state-access and @deepseek-ai/dsh-state-access-local; integrate Artifact, Evidence, Child Result, Agent Message, and Claim Ledger objects into one state-aware RLM root/child path; add state.navigate, state.focus, state.release, and state.inspect through the typed host bridge; persist and replicate address-space, working-set, command, lease, and receipt state.
 
 TARGET =
-State-aware RLM Attempt 使用不可变 Address-space Ref、Initial Working-set Ref、State-access Policy 和 Logical Provider Offer 编译 ContextPacketV2 与 NodeExecutionPlanV2。Child 获得 Attenuated Address Space。Focus 与 Release 产生幂等 Working-set Revision 和 Access Receipt。Recovery 重新绑定相同 Ref，Effect-intent Test Fixture 可以绑定 Observed Read-set Digest，但首片不实现 External Effect Commit。
+A state-aware RLM attempt compiles ContextPacketV2 and NodeExecutionPlanV2 with an immutable address-space reference, initial working-set reference, state-access policy, and logical provider offer. A child receives an attenuated address space. Focus and release produce idempotent working-set revisions and access receipts. Recovery rebinds the same references, and an effect-intent test fixture can bind the observed read-set digest without implementing external effect commit.
 
 ACCEPTANCE_CRITERIA =
-1. 实现 Public State Access Schema 与严格 Model/Wire Validator，使用 Branded Ref 与 Content Digest。
-2. Logical Provider 只物化已准入 Object，并为每个 Source 标注 Version、Digest、Sensitivity 与 Lineage。
-3. ContextPacketV1 与 Legacy Execution/Evidence Record 保持可读；新 State-aware Attempt 生成显式 V2 Record。
-4. RLM Model Tool 使用 Caller-stable Command ID、Request-digest Conflict Detection、Durable Accepted/Settled/Indeterminate State 和 Provider Reconciliation。
-5. Child Address-space Construction 证明 Subset、Authority、Capability、Policy 与 Semantic-epoch Constraint。
-6. Capability Resolution 包含 ContextAccessContractV1；Physical Operator Catalog 暴露 AttentionControlOfferV1，但不声称 Native KV Support。
-7. SQLite Migration 与 Cluster Replica Change 保留 Existing Data，并拒绝 Missing Table、Invalid Row、Stale Term 与 Artifact Digest Mismatch。
-8. Test 覆盖 Wrong Focus、Unauthorized Object、Cross-epoch Read、Replay Drift、Child Escape、Full/global Budget Abuse、Context Miss、Full Fallback、Provider-application Crash、Cluster Failover 和 Legacy Recovery。
-9. Model-visible Access Result 被记录，且 Keyless Snapshot 覆盖组装后的 RLM Path。
-10. Full Repository Governance Verification 与 Attestation 对 Exact Delivered Commit 通过。
+1. Public State Access schemas and strict model/wire validators are implemented with branded refs and content digests.
+2. The logical provider materializes only admitted objects and labels every source with version, digest, sensitivity, and lineage.
+3. ContextPacketV1 and legacy execution/evidence records remain readable; new state-aware attempts emit explicit V2 records.
+4. RLM model tools use caller-stable command IDs, request-digest conflict detection, durable accepted/settled/indeterminate states, and provider reconciliation.
+5. Child address-space construction proves subset, authority, capability, policy, and semantic-epoch constraints.
+6. Capability resolution includes ContextAccessContractV1; physical operator catalogs expose AttentionControlOfferV1 without claiming native KV support.
+7. SQLite migration and cluster replica changes preserve existing data and reject missing tables, invalid rows, stale terms, and artifact digest mismatches.
+8. Tests cover wrong focus, unauthorized objects, cross-epoch reads, replay drift, child escape, full/global budget abuse, context misses, full fallback, provider-application crash, cluster failover, and legacy recovery.
+9. Model-visible access results are logged and a keyless snapshot exercises the assembled RLM path.
+10. Full repository governance verification and attestation pass for the exact delivered commit.
 ```
