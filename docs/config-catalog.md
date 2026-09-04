@@ -692,6 +692,13 @@ export type DebateRoundExecutor = DebateRoundExecutorPort
 
 /** Existing-Scheduler execution port consumed by the local Debate owner. */
 export interface DebateRoundExecutorPort {
+  /**
+   * Optionally estimate and admit a sealed round without creating a TaskGraph
+   * or dispatching an operator.
+   * @param request - Sealed roster turns and optional transient budget bounds.
+   * @returns Deterministic token admission result.
+   */
+  preflight?(request: DebateRoundExecutionRequestV1): DebateRoundBudgetPreflightV1
   /** Execute one complete round without creating another Scheduler. */
   executeRound(request: DebateRoundExecutionRequestV1): Promise<DebateRoundExecutionResultV1>
 }
@@ -709,6 +716,12 @@ export interface DebateRoundExecutionRequestV1 {
   /** Certified maximum parallel participant count for this round. */
   readonly maxParallel: number
   /**
+   * Optional in-memory token bounds for deterministic admission before the
+   * executor creates a TaskGraph. This metadata is never persisted in a
+   * Debate snapshot.
+   */
+  readonly budgetEnvelope?: DebateRoundBudgetEnvelopeV1
+  /**
    * Optional durable-progress sink. The executor awaits it in source event
    * order; an unavailable sink must fail the round rather than lose a claimed
    * public trace.
@@ -717,6 +730,27 @@ export interface DebateRoundExecutionRequestV1 {
   /** Cancellation signal for the complete TaskGraph round. */
   readonly signal?: AbortSignal
 }
+
+/** Deterministic result of an optional executor-side budget admission probe. */
+export type DebateRoundBudgetPreflightV1 =
+  | {
+    /** Preflight schema version. */
+    readonly version: 1
+    /** The round fits the supplied envelope. */
+    readonly status: 'admitted'
+    /** Conservative reservation calculated by the executor. */
+    readonly estimate: DebateRoundBudgetEstimateV1
+  }
+  | {
+    /** Preflight schema version. */
+    readonly version: 1
+    /** The round would exhaust a supplied token bound. */
+    readonly status: 'budget_limited'
+    /** Conservative reservation calculated by the executor. */
+    readonly estimate: DebateRoundBudgetEstimateV1
+    /** Exact bound and values that denied admission. */
+    readonly limit: DebateRoundBudgetLimitV1
+  }
 
 /** Slot-keyed results returned after the round TaskGraph reaches a terminal state. */
 export interface DebateRoundExecutionResultV1 {
@@ -776,6 +810,22 @@ export interface DebateTurnRequestV1 {
   readonly signal?: AbortSignal
 }
 
+/** Ephemeral settled usage and bounds used to admit one sealed TaskGraph round. */
+export interface DebateRoundBudgetEnvelopeV1 {
+  /** Envelope schema version. */
+  readonly version: 1
+  /** Input tokens settled before this round is admitted. */
+  readonly usedInputTokens: number
+  /** Output tokens settled before this round is admitted. */
+  readonly usedOutputTokens: number
+  /** Run-wide input-token cap. */
+  readonly maxInputTokens: number
+  /** Run-wide output-token cap. */
+  readonly maxOutputTokens: number
+  /** Run-wide combined token cap. */
+  readonly maxTotalTokens: number
+}
+
 /** One safe progress fact emitted while a TaskGraph-backed roster slot is running. */
 export interface DebateRoundAgentProgressV1 {
   /** Progress schema version. */
@@ -790,6 +840,30 @@ export interface DebateRoundAgentProgressV1 {
   readonly role: DebateRoleId
   /** Whitelisted physical-operator projection and its original event position. */
   readonly progress: DebateAgentProgressV1
+}
+
+/** Conservative token reservation for one sealed round. */
+export interface DebateRoundBudgetEstimateV1 {
+  /** Estimated input tokens for all roster slots. */
+  readonly inputTokens: number
+  /** Estimated output tokens for all roster slots. */
+  readonly outputTokens: number
+  /** Estimated combined input and output tokens for all roster slots. */
+  readonly totalTokens: number
+}
+
+/** One token bound that prevents an otherwise sealed round from starting. */
+export interface DebateRoundBudgetLimitV1 {
+  /** Token counter whose bound would be exceeded. */
+  readonly kind: 'input-tokens' | 'output-tokens' | 'total-tokens'
+  /** Settled counter value before the round. */
+  readonly used: number
+  /** Conservative reservation for the requested round. */
+  readonly reserved: number
+  /** Configured run-wide counter bound. */
+  readonly limit: number
+  /** Human-readable deterministic admission reason. */
+  readonly reason: string
 }
 
 /** Result returned by one injected executor turn; no model or CLI is assumed. */
@@ -838,7 +912,7 @@ export type DebateTurnPhase = 'blind-independent' | 'claim-ledger' | 'high-sever
 
 Depends on: [`DebateAgentProgressV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimLedgerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimV1`](../packages/orchestration/debate/src/index.ts) · [`DebateDissentV1`](../packages/orchestration/debate/src/index.ts) · [`DebateEvidenceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateExecutionRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateModelSource`](../packages/orchestration/debate/src/index.ts) · [`DebateModelTier`](../packages/orchestration/debate/src/index.ts) · [`DebateRoleId`](../packages/orchestration/debate/src/index.ts) · [`DebateRolePersonaV1`](../packages/orchestration/debate/src/index.ts) · [`DebateSourceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnBlockerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnRoutingV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUnresolvedV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUsageV1`](../packages/orchestration/debate/src/index.ts)
 
-Source: [`packages/orchestration/debate-local/src/types.ts:194`](../packages/orchestration/debate-local/src/types.ts)
+Source: [`packages/orchestration/debate-local/src/types.ts:268`](../packages/orchestration/debate-local/src/types.ts)
 
 <a id="deepseek-aidsh-debate-orchestration"></a>
 
@@ -868,7 +942,7 @@ export interface DebateTaskGraphAdapterOptions {
 }
 ```
 
-Source: [`packages/orchestration/debate-orchestration/src/index.ts:54`](../packages/orchestration/debate-orchestration/src/index.ts)
+Source: [`packages/orchestration/debate-orchestration/src/index.ts:58`](../packages/orchestration/debate-orchestration/src/index.ts)
 
 <a id="deepseek-aidsh-e2b"></a>
 
@@ -1639,6 +1713,8 @@ export interface Config {
   readonly skillProviderModules?: string[]
   /** Trusted complete Browser Provider plugins loaded by the headless daemon. */
   readonly browserProviderModules?: string[]
+  /** Explicit executable or helper used for the detached headless daemon. */
+  readonly headlessNodeExecutable?: string
   /** Maximum time for one Server-side exact-commit Git materialization. */
   readonly remoteMaterializationTimeoutMs?: number
   /** Maximum time for one bounded Resident artifact read. */
@@ -1935,6 +2011,8 @@ export interface Config {
   readonly pollIntervalMs?: number
   /** Independently packaged Driver modules loaded by the detached daemon. */
   readonly driverModules?: string[]
+  /** Explicit executable or helper used for the detached headless daemon. */
+  readonly headlessNodeExecutable?: string
 }
 ```
 

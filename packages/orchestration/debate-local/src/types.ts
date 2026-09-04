@@ -125,6 +125,67 @@ export interface DebateRoundAgentProgressV1 {
   readonly progress: DebateAgentProgressV1
 }
 
+/** Ephemeral settled usage and bounds used to admit one sealed TaskGraph round. */
+export interface DebateRoundBudgetEnvelopeV1 {
+  /** Envelope schema version. */
+  readonly version: 1
+  /** Input tokens settled before this round is admitted. */
+  readonly usedInputTokens: number
+  /** Output tokens settled before this round is admitted. */
+  readonly usedOutputTokens: number
+  /** Run-wide input-token cap. */
+  readonly maxInputTokens: number
+  /** Run-wide output-token cap. */
+  readonly maxOutputTokens: number
+  /** Run-wide combined token cap. */
+  readonly maxTotalTokens: number
+}
+
+/** Conservative token reservation for one sealed round. */
+export interface DebateRoundBudgetEstimateV1 {
+  /** Estimated input tokens for all roster slots. */
+  readonly inputTokens: number
+  /** Estimated output tokens for all roster slots. */
+  readonly outputTokens: number
+  /** Estimated combined input and output tokens for all roster slots. */
+  readonly totalTokens: number
+}
+
+/** One token bound that prevents an otherwise sealed round from starting. */
+export interface DebateRoundBudgetLimitV1 {
+  /** Token counter whose bound would be exceeded. */
+  readonly kind: 'input-tokens' | 'output-tokens' | 'total-tokens'
+  /** Settled counter value before the round. */
+  readonly used: number
+  /** Conservative reservation for the requested round. */
+  readonly reserved: number
+  /** Configured run-wide counter bound. */
+  readonly limit: number
+  /** Human-readable deterministic admission reason. */
+  readonly reason: string
+}
+
+/** Deterministic result of an optional executor-side budget admission probe. */
+export type DebateRoundBudgetPreflightV1 =
+  | {
+    /** Preflight schema version. */
+    readonly version: 1
+    /** The round fits the supplied envelope. */
+    readonly status: 'admitted'
+    /** Conservative reservation calculated by the executor. */
+    readonly estimate: DebateRoundBudgetEstimateV1
+  }
+  | {
+    /** Preflight schema version. */
+    readonly version: 1
+    /** The round would exhaust a supplied token bound. */
+    readonly status: 'budget_limited'
+    /** Conservative reservation calculated by the executor. */
+    readonly estimate: DebateRoundBudgetEstimateV1
+    /** Exact bound and values that denied admission. */
+    readonly limit: DebateRoundBudgetLimitV1
+  }
+
 /** One immutable round admitted as one TaskGraph. */
 export interface DebateRoundExecutionRequestV1 {
   /** Request schema version. */
@@ -137,6 +198,12 @@ export interface DebateRoundExecutionRequestV1 {
   readonly turns: readonly DebateTurnRequestV1[]
   /** Certified maximum parallel participant count for this round. */
   readonly maxParallel: number
+  /**
+   * Optional in-memory token bounds for deterministic admission before the
+   * executor creates a TaskGraph. This metadata is never persisted in a
+   * Debate snapshot.
+   */
+  readonly budgetEnvelope?: DebateRoundBudgetEnvelopeV1
   /**
    * Optional durable-progress sink. The executor awaits it in source event
    * order; an unavailable sink must fail the round rather than lose a claimed
@@ -159,6 +226,13 @@ export interface DebateRoundExecutionResultV1 {
 
 /** Existing-Scheduler execution port consumed by the local Debate owner. */
 export interface DebateRoundExecutorPort {
+  /**
+   * Optionally estimate and admit a sealed round without creating a TaskGraph
+   * or dispatching an operator.
+   * @param request - Sealed roster turns and optional transient budget bounds.
+   * @returns Deterministic token admission result.
+   */
+  preflight?(request: DebateRoundExecutionRequestV1): DebateRoundBudgetPreflightV1
   /** Execute one complete round without creating another Scheduler. */
   executeRound(request: DebateRoundExecutionRequestV1): Promise<DebateRoundExecutionResultV1>
 }

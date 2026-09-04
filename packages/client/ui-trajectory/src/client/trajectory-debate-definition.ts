@@ -30,6 +30,8 @@ interface DebateTraceState {
   readonly entries: ReadonlyMap<number, TrajectoryDebateTraceEntry>
 }
 
+type PublicUsage = NonNullable<TrajectoryDebateTraceEntry['usage']>
+
 function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>>
@@ -99,26 +101,18 @@ function publicEvidenceRefs(value: unknown): readonly string[] {
   })
 }
 
-function publicUsage(value: unknown): TrajectoryDebateTraceEntry['usage'] | undefined {
+function publicUsage(value: unknown): PublicUsage | undefined {
   const input = object(value)
   if (input === undefined) return undefined
-  const inputTokens = nonNegativeInteger(input.inputTokens)
-  const outputTokens = nonNegativeInteger(input.outputTokens)
-  const cacheReadInputTokens = nonNegativeInteger(input.cacheReadInputTokens)
-  const cacheWriteInputTokens = nonNegativeInteger(input.cacheWriteInputTokens)
-  const costUsd = finiteNumber(input.costUsd)
-  if (inputTokens === undefined
-    && outputTokens === undefined
-    && cacheReadInputTokens === undefined
-    && cacheWriteInputTokens === undefined
-    && costUsd === undefined) return undefined
-  return {
-    ...(inputTokens === undefined ? {} : { inputTokens }),
-    ...(outputTokens === undefined ? {} : { outputTokens }),
-    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
-    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
-    ...(costUsd === undefined ? {} : { costUsd }),
-  }
+  const fields: ReadonlyArray<readonly [keyof PublicUsage, number | undefined]> = [
+    ['inputTokens', nonNegativeInteger(input.inputTokens)],
+    ['outputTokens', nonNegativeInteger(input.outputTokens)],
+    ['cacheReadInputTokens', nonNegativeInteger(input.cacheReadInputTokens)],
+    ['cacheWriteInputTokens', nonNegativeInteger(input.cacheWriteInputTokens)],
+    ['costUsd', finiteNumber(input.costUsd)],
+  ]
+  const usage = Object.fromEntries(fields.filter(([, amount]) => amount !== undefined)) as PublicUsage
+  return Object.keys(usage).length === 0 ? undefined : usage
 }
 
 function publicProgress(value: unknown): TrajectoryDebateProgress | undefined {

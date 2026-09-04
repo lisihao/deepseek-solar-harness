@@ -158,60 +158,32 @@
   text-align: center;
 }
 
-.dsh-collaboration-section {
+.dsh-governance-evidence-section,
+.dsh-governance-decisions-section {
   border-top: 1px solid var(--dsw-alias-border-l2);
 }
 
-.dsh-collaboration-section > h3 {
+.dsh-governance-evidence-section > h3,
+.dsh-governance-decisions-section > h3 {
   font-size: 15px;
   margin: 0;
   padding: 16px 20px 10px;
 }
 
-.dsh-collaboration-empty {
-  min-height: 120px;
-}
-
-.dsh-collaboration-event .dsh-governance-event-message {
-  white-space: pre-wrap;
-}
-
-.dsh-governance-evidence-output {
-  margin-top: 8px;
-}
-
-.dsh-governance-evidence-output button {
-  background: var(--dsw-alias-bg-layer-1);
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 7px;
+.dsh-governance-decision-hint {
   color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-  padding: 6px 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 0 20px 12px;
 }
 
-.dsh-governance-evidence-output button:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.dsh-governance-evidence-output .dsh-governance-event-message {
-  white-space: pre-wrap;
-}
-
-.dsh-orchestration-run {
+.dsh-governance-decisions-section .dsh-governance-summary {
   border-top: 1px solid var(--dsw-alias-border-l2);
 }
 
-.dsh-orchestration-run > header {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
-  padding: 14px 20px 0;
-}
-
-.dsh-orchestration-run > header span {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
+.dsh-governance-decisions-empty {
+  min-height: 120px;
 }
 
 @media (max-width: 720px) {

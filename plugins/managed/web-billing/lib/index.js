@@ -46,6 +46,9 @@ import {
 /** Stable Cordis plugin name. */
 const name = "dsh-web-billing";
 
+/** Providers that project subscription or aggregate usage instead of DeepSeek API charges. */
+const DEFAULT_NON_BILLABLE_PROVIDERS = ["dsh-physical-operator", "dsh-debate-host"];
+
 /** 单模型单价 schema。 */
 const PRICE_SCHEMA = z.object({
   input: z.number().default(1),
@@ -84,6 +87,8 @@ const Config = z.object({
   localProviders: z.array(z.string()).default([]),
   /** 本地模型的实际单价（¥/1M，所有 token 统一；默认 0 即免费，可填电费/算力成本）。 */
   localCostPerM: z.number().min(0).default(0),
+  /** 只携带订阅态/聚合用量、不代表 DeepSeek API 请求的 provider。 */
+  nonBillableProviders: z.array(z.string()).default(DEFAULT_NON_BILLABLE_PROVIDERS),
   /** 追加到官方时间表之后的政策（since 更晚者覆盖内置条目）。 */
   policyOverrides: z.array(POLICY_OVERRIDE_SCHEMA).default([]),
   /** 账本文件；默认落在 $DSH_HOME/storages 下。 */
@@ -203,6 +208,7 @@ class BillingLedger {
     const seen = /* @__PURE__ */ new Set();
     const entries = [];
     const push = (sessionId, messageId, record) => {
+      if (!pricing.shouldRecord(record.provider)) return;
       const key = `${sessionId}\n${messageId}`;
       if (seen.has(key)) return;
       seen.add(key);
@@ -421,10 +427,12 @@ function apply(ctx, config) {
       usdPrices: config.usdPrices,
       policyOverrides: config.policyOverrides,
       localProviders: config.localProviders,
-      localCostPerM: config.localCostPerM
+      localCostPerM: config.localCostPerM,
+      nonBillableProviders: config.nonBillableProviders
     }),
     localProviders: config.localProviders,
     localCostPerM: config.localCostPerM,
+    shouldRecord: (provider) => !config.nonBillableProviders.includes(provider),
     at: (model, time) => priceAt(model, time, {
       official: config.officialPricing === "auto",
       prices: userPrices,
@@ -480,6 +488,7 @@ function apply(ctx, config) {
       const header = headersBySession.get(session.id);
       const provider = typeof source?.provider === "string" ? source.provider : header?.provider ?? "";
       const model = typeof source?.model === "string" ? source.model : header?.model ?? "unknown";
+      if (!pricing.shouldRecord(provider)) return;
       ledger.record({
         sessionId: session.id,
         messageId: String(data.message?.id ?? `seq-${event.seq}`),

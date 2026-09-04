@@ -23,6 +23,42 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
+const MAX_PUBLIC_PREVIEW_CHARS = 1_600
+const MAX_PUBLIC_LABEL_CHARS = 160
+
+/** Keep only bounded, credential-scrubbed display text at the public boundary. */
+function scrubPublicText(value: unknown, limit: number) {
+  if (typeof value !== 'string') return undefined
+  const scrubbed = value
+    .replace(/-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/gu, '[REDACTED]')
+    .replace(/\b(?:api[_-]?key|authorization|password|token|secret)\s*[:=]\s*[^\s,;]+/giu, '[REDACTED]')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]+|gh[pousr]_[A-Za-z0-9]+|xox[baprs]-[A-Za-z0-9-]+)\b/gu, '[REDACTED]')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '')
+    .slice(0, limit)
+  return scrubbed.length === 0 ? undefined : scrubbed
+}
+
+function toolResultPreviews(
+  data: Record<string, unknown>,
+  isError: boolean,
+): Pick<Extract<PhysicalOperatorTraceView, { kind: 'tool' }>, 'resultPreview' | 'errorPreview'> {
+  // Legacy tool receipts contain raw provider output under `result`. It is
+  // intentionally shape-only at this boundary. A producer must opt in to
+  // display text by writing one of the explicit public fields below; this
+  // keeps an old log from becoming a data-exfiltration channel when replayed.
+  const result = record(data.result)
+  const publicResultPreview = scrubPublicText(
+    data.publicResultPreview ?? result?.publicResultPreview,
+    MAX_PUBLIC_PREVIEW_CHARS,
+  )
+  const publicErrorPreview = scrubPublicText(
+    data.publicErrorPreview ?? result?.publicErrorPreview,
+    MAX_PUBLIC_PREVIEW_CHARS,
+  )
+  if (isError) return publicErrorPreview === undefined ? {} : { errorPreview: publicErrorPreview }
+  return publicResultPreview === undefined ? {} : { resultPreview: publicResultPreview }
+}
+
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
@@ -74,10 +110,34 @@ function observationTrace(
 ): PhysicalOperatorTraceView | undefined {
   const data = record(value)
   switch (data?.kind) {
-    case 'public-output': return { version: 1, kind: 'public-output', commandId, sourceSequence }
-    case 'tool-started': return { version: 1, kind: 'native-tool', commandId, sourceSequence, status: 'running' }
-    case 'tool-completed': return { version: 1, kind: 'native-tool', commandId, sourceSequence, status: 'completed' }
-    case 'approval-required': return { version: 1, kind: 'approval-required', commandId, sourceSequence }
+    case 'public-output': {
+      const preview = scrubPublicText(data.preview, MAX_PUBLIC_PREVIEW_CHARS)
+      return {
+        version: 1, kind: 'public-output', commandId, sourceSequence,
+        ...(preview === undefined ? {} : { preview }),
+      }
+    }
+    case 'tool-started':
+    case 'tool-completed': {
+      const toolName = scrubPublicText(data.toolName, MAX_PUBLIC_LABEL_CHARS)
+      return {
+        version: 1,
+        kind: 'native-tool',
+        commandId,
+        sourceSequence,
+        status: data.kind === 'tool-started' ? 'running' : 'completed',
+        ...(toolName === undefined ? {} : { toolName }),
+      }
+    }
+    case 'approval-required': {
+      const approvalKind = scrubPublicText(data.approvalKind, MAX_PUBLIC_LABEL_CHARS)
+      const preview = scrubPublicText(data.preview, MAX_PUBLIC_PREVIEW_CHARS)
+      return {
+        version: 1, kind: 'approval-required', commandId, sourceSequence,
+        ...(approvalKind === undefined ? {} : { approvalKind }),
+        ...(preview === undefined ? {} : { preview }),
+      }
+    }
     case 'usage-updated': {
       const usage = record(data.usage)
       if (usage === undefined) return undefined
@@ -85,8 +145,9 @@ function observationTrace(
       const outputTokens = finiteNumber(usage.outputTokens)
       const cacheReadInputTokens = finiteNumber(usage.cacheReadInputTokens)
       const cacheWriteInputTokens = finiteNumber(usage.cacheWriteInputTokens)
+      const costUsd = finiteNumber(usage.costUsd)
       if (inputTokens === undefined && outputTokens === undefined
-        && cacheReadInputTokens === undefined && cacheWriteInputTokens === undefined) return undefined
+        && cacheReadInputTokens === undefined && cacheWriteInputTokens === undefined && costUsd === undefined) return undefined
       return {
         version: 1,
         kind: 'usage',
@@ -96,6 +157,7 @@ function observationTrace(
         ...(outputTokens === undefined ? {} : { outputTokens }),
         ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
         ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+        ...(costUsd === undefined ? {} : { costUsd }),
       }
     }
     default: return undefined
@@ -109,6 +171,7 @@ function toolTrace(
   const executionCommandId = publicIdentity(data.executionCommandId)
   const commandId = executionCommandId ?? publicIdentity(data.commandId)
   const toolCallId = publicIdentity(data.toolCallId ?? data.commandId)
+  const toolName = scrubPublicText(data.publicToolName, MAX_PUBLIC_LABEL_CHARS)
   if (commandId === undefined || toolCallId === undefined) return undefined
   if (event.type === 'physical-operator/tool-call') {
     return {
@@ -119,6 +182,7 @@ function toolTrace(
       standalone: executionCommandId === undefined,
       status: 'running',
       argumentsShape: valueShape(data.arguments),
+      ...(toolName === undefined ? {} : { toolName }),
     }
   }
   if (event.type === 'physical-operator/tool-indeterminate') {
@@ -129,6 +193,7 @@ function toolTrace(
       toolCallId,
       standalone: executionCommandId === undefined,
       status: 'indeterminate',
+      ...(toolName === undefined ? {} : { toolName }),
     }
   }
   const result = record(data.result)
@@ -136,6 +201,7 @@ function toolTrace(
   const resultValue = result === undefined
     ? data.result
     : result.value === undefined ? result.content : result.value
+  const previews = toolResultPreviews(data, isError)
   return {
     version: 1,
     kind: 'tool',
@@ -144,6 +210,8 @@ function toolTrace(
     standalone: executionCommandId === undefined,
     status: isError ? 'error' : 'completed',
     resultShape: valueShape(resultValue),
+    ...(toolName === undefined ? {} : { toolName }),
+    ...previews,
   }
 }
 

@@ -198,7 +198,7 @@ export const toolEventViewSchema = z.discriminatedUnion('for', [
   z.object({ for: z.literal('result'), view: z.looseObject({ card: z.string() }) }),
 ]) as unknown as z.ZodType<ToolEventView>
 
-/** Text-free structural descriptor used by the Physical Operator public trace. */
+/** Structural descriptor used by the Physical Operator public trace. */
 export const physicalOperatorValueShapeSchema: z.ZodType<PhysicalOperatorValueShape> = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('object'), fields: z.number().int().nonnegative() }),
   z.object({ kind: z.literal('array'), items: z.number().int().nonnegative() }),
@@ -214,7 +214,7 @@ const physicalTraceBase = {
   commandId: z.string().min(1),
 }
 
-/** Fixed Host projection for Physical Operator events; no arbitrary text fields exist. */
+/** Fixed Host projection for Physical Operator events; display text is bounded and scrubbed. */
 export const physicalOperatorTraceViewSchema = z.discriminatedUnion('kind', [
   z.object({
     ...physicalTraceBase,
@@ -236,17 +236,21 @@ export const physicalOperatorTraceViewSchema = z.discriminatedUnion('kind', [
     ...physicalTraceBase,
     kind: z.literal('public-output'),
     sourceSequence: z.number().int().nonnegative(),
+    preview: z.string().max(1600).optional(),
   }),
   z.object({
     ...physicalTraceBase,
     kind: z.literal('native-tool'),
     sourceSequence: z.number().int().nonnegative(),
     status: z.union([z.literal('running'), z.literal('completed')]),
+    toolName: z.string().max(160).optional(),
   }),
   z.object({
     ...physicalTraceBase,
     kind: z.literal('approval-required'),
     sourceSequence: z.number().int().nonnegative(),
+    approvalKind: z.string().max(160).optional(),
+    preview: z.string().max(1600).optional(),
   }),
   z.object({
     ...physicalTraceBase,
@@ -256,6 +260,7 @@ export const physicalOperatorTraceViewSchema = z.discriminatedUnion('kind', [
     outputTokens: z.number().optional(),
     cacheReadInputTokens: z.number().optional(),
     cacheWriteInputTokens: z.number().optional(),
+    costUsd: z.number().nonnegative().optional(),
   }),
   z.object({
     ...physicalTraceBase,
@@ -272,8 +277,11 @@ export const physicalOperatorTraceViewSchema = z.discriminatedUnion('kind', [
     status: z.union([
       z.literal('running'), z.literal('completed'), z.literal('error'), z.literal('indeterminate'),
     ]),
+    toolName: z.string().max(160).optional(),
     argumentsShape: physicalOperatorValueShapeSchema.optional(),
     resultShape: physicalOperatorValueShapeSchema.optional(),
+    resultPreview: z.string().max(1600).optional(),
+    errorPreview: z.string().max(1600).optional(),
   }),
 ]) as unknown as z.ZodType<PhysicalOperatorTraceView>
 

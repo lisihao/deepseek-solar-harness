@@ -11,3 +11,5 @@
         # Extra authorities the /synapse Host check accepts (host or host:port);
         # localhost and 127.0.0.1 are always allowed.
         trustedHosts: []
+    - id: synapse-view-adapter-host
+      name: dsh-synapse/adapter-host

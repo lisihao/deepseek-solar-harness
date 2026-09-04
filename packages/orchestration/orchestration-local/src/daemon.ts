@@ -192,6 +192,8 @@ interface ActiveAttempt {
   readonly sessionId: string
   readonly turnId: string
   readonly operatorId: string
+  /** Command/attempt keys that already emitted a durable trace degradation. */
+  readonly degradedProgressCommands: Set<string>
   progressCursor: number
   progressSync?: Promise<void>
   readonly run: Pick<PhysicalOperatorRun, 'result' | 'dispose'>
@@ -803,6 +805,46 @@ function modelTier(model: PhysicalOperatorResidentModel): ModelExecutionOffer['t
   if (/\b(?:sol|opus|fable)\b|xhigh|max|ultra/u.test(label)) return 'high'
   if (/\b(?:luna|spark|haiku|flash)\b/u.test(label)) return 'low'
   return 'medium'
+}
+
+/**
+ * Compare a user-facing native model alias without rewriting the CLI token
+ * retained in a Resident execution profile.
+ *
+ * Claude Code can surface a terminal SGR suffix in its model catalog. The
+ * suffix is presentation residue, not part of the model identity, but the
+ * original `model` field remains the exact token passed to the native driver.
+ */
+function canonicalResidentModelId(value: string): string {
+  return value
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/gu, '')
+    .replace(/\[\d+(?:;\d+)*m\]$/u, '')
+}
+
+function residentModelMatches(model: PhysicalOperatorResidentModel, requestedModel: string): boolean {
+  const requested = canonicalResidentModelId(requestedModel)
+  return canonicalResidentModelId(model.model) === requested
+    || (model.resolvedModel !== undefined && canonicalResidentModelId(model.resolvedModel) === requested)
+}
+
+/** Return the exact native token for one canonical user-facing model request. */
+function residentNativeModel(
+  models: readonly PhysicalOperatorResidentModel[],
+  requestedModel: string,
+): string | undefined {
+  const requested = canonicalResidentModelId(requestedModel)
+  const raw = models.find(model => canonicalResidentModelId(model.model) === requested)
+  if (raw !== undefined) return raw.model
+  const resolvedNonDefault = models.find(model => (
+    model.resolvedModel !== undefined
+    && canonicalResidentModelId(model.resolvedModel) === requested
+    && !model.isDefault
+  ))
+  if (resolvedNonDefault !== undefined) return resolvedNonDefault.model
+  return models.find(model => (
+    model.resolvedModel !== undefined
+    && canonicalResidentModelId(model.resolvedModel) === requested
+  ))?.model
 }
 
 function nodePhase(spec: OrchestrationNodeSpecV1): ModelTaskPhase {
@@ -2205,6 +2247,7 @@ export class OrchestrationDaemon {
         generation: plan.capabilityGeneration, executionId: String(plan.executionId),
         sessionId: receipt.sessionId, turnId: receipt.turnId,
         operatorId: plan.operatorPlan.operatorId,
+        degradedProgressCommands: new Set(),
         progressCursor: this.residentProgressCursor(
           String(record.snapshot.runId), spec.id, plan.attempt, plan.capabilityGeneration, String(plan.executionId),
         ),
@@ -3777,7 +3820,7 @@ export class OrchestrationDaemon {
       kind, runId: String(record.snapshot.runId), nodeId: spec.id,
       attempt: plan.attempt, generation: plan.capabilityGeneration,
       executionId: String(plan.executionId), sessionId: '', turnId: '',
-      operatorId: plan.operatorPlan.operatorId, progressCursor: 0, run,
+      operatorId: plan.operatorPlan.operatorId, degradedProgressCommands: new Set(), progressCursor: 0, run,
       progressSources,
     })
   }
@@ -3856,7 +3899,10 @@ export class OrchestrationDaemon {
     source: PhysicalProgressSource,
   ): Promise<void> {
     const readEvents = source.run.readEvents
-    if (readEvents === undefined) return
+    if (readEvents === undefined) {
+      this.recordPhysicalProgressDegraded(active, source)
+      return
+    }
     try {
       const page = await readEvents(source.progressCursor, 200)
       if (!Number.isSafeInteger(page.nextSequence) || page.nextSequence < source.progressCursor) {
@@ -3905,8 +3951,42 @@ export class OrchestrationDaemon {
       }
       source.progressCursor = page.nextSequence
     } catch (error) {
+      this.recordPhysicalProgressDegraded(active, source)
       this.ctx.logger.warn(
         `orchestration progress projection failed for ${source.commandId}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+
+  /**
+   * Persist one bounded indication that native progress could not be copied.
+   * The execution result remains authoritative: a projection failure must not
+   * fail or retry the physical operator turn.
+   */
+  private recordPhysicalProgressDegraded(
+    active: ActiveAttempt,
+    source: PhysicalProgressSource,
+  ): void {
+    const key = `${String(active.attempt)}\0${String(active.generation)}\0${source.commandId}`
+    if (active.degradedProgressCommands.has(key)) return
+    active.degradedProgressCommands.add(key)
+    try {
+      this.store.appendEvents([{
+        runId: OrchestrationRunId(active.runId),
+        nodeId: active.nodeId,
+        attempt: active.attempt,
+        generation: active.generation,
+        type: 'node.operator.trace-degraded',
+        time: now(),
+        data: {
+          commandId: source.commandId,
+          operatorId: source.operatorId,
+          code: 'PROGRESS_UNAVAILABLE',
+        },
+      }])
+    } catch (error) {
+      this.ctx.logger.warn(
+        `orchestration progress degradation could not be persisted for ${source.commandId}: ${renderError(error)}`,
       )
     }
   }
@@ -4222,9 +4302,7 @@ export class OrchestrationDaemon {
           .map((model): ModelExecutionOffer => {
             const quotaPool = quotaForModel(provider.quotaPools, model)
             const offerId = `${provider.operatorId}:${model.model}`
-            const modelQualified = requestedModel === undefined
-              || model.model === requestedModel
-              || model.resolvedModel === requestedModel
+            const modelQualified = requestedModel === undefined || residentModelMatches(model, requestedModel)
             const quotaExhausted = exhaustedOfferIds.has(offerId)
               || (quotaPool !== undefined && exhaustedQuotaPoolIds.has(quotaPool.poolId))
             const unavailableReasonCode = provider.authentication !== 'native-subscription'
@@ -4319,9 +4397,9 @@ export class OrchestrationDaemon {
       ? undefined
       : providers
         .filter(provider => spec.operator?.preferredIds?.includes(provider.operatorId) === true)
-        .flatMap(provider => provider.models)
-        .find(model => model.model === requestedModel || model.resolvedModel === requestedModel)
-        ?.model ?? requestedModel
+        .map(provider => residentNativeModel(provider.models, requestedModel))
+        .find((model): model is string => model !== undefined)
+        ?? requestedModel
     const allocation = await this.ctx.modelAllocation.allocate({
       runId: String(record.snapshot.runId),
       nodeId: spec.id,
@@ -4440,7 +4518,7 @@ export class OrchestrationDaemon {
           runId: attempt.runId, nodeId: attempt.nodeId, attempt: attempt.attempt,
           generation: attempt.generation, executionId: attempt.executionId,
           sessionId: receipt.sessionId, turnId: receipt.turnId,
-          run, operatorId,
+          run, operatorId, degradedProgressCommands: new Set(),
           progressCursor: this.residentProgressCursor(
             attempt.runId, attempt.nodeId, attempt.attempt, attempt.generation, attempt.executionId,
           ),

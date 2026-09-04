@@ -35,7 +35,7 @@ corepack pnpm pack
 npm pack --dry-run --json
 ```
 
-The package has no generated build output. `build` runs `node --check` over `index.js`, `client.js`, and `app.js`.
+The package has no generated build output. The build command runs node --check over index.js, client.js, adapter-host.js, client-adapter.js, and app.js. The two adapter files are DSH-owned downstream integration code; the first three upstream runtime files remain source-locked.
 
 ## GitHub Actions
 

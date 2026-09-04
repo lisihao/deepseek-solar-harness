@@ -40,6 +40,7 @@ import { unwrapWire } from './protocol.ts'
 import { ORCHESTRATION_STATE_SCHEMA_VERSION } from './store.ts'
 
 const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
+type ProviderModulePaths = readonly string[]
 
 /** Connection and daemon-start policy for one local orchestration client. */
 export interface OrchestrationClientOptions {
@@ -50,6 +51,8 @@ export interface OrchestrationClientOptions {
   readonly residentDriverModules?: readonly string[]
   readonly skillProviderModules?: readonly string[]
   readonly browserProviderModules?: readonly string[]
+  /** Explicit executable or helper used for the detached headless daemon. */
+  readonly headlessNodeExecutable?: string
 }
 
 /** Stateless-per-request client for the durable local Scheduler. */
@@ -253,6 +256,7 @@ export class OrchestrationDaemonClient {
       this.options.residentDriverModules ?? [],
       this.options.skillProviderModules ?? [],
       this.options.browserProviderModules ?? [],
+      this.options.headlessNodeExecutable,
     )
     const deadline = Date.now() + this.options.connectTimeoutMs
     let lastError: unknown
@@ -370,25 +374,35 @@ export class OrchestrationDaemonClient {
  * @param residentDriverModules - absolute independent Resident Driver entries for the headless composition.
  * @param skillProviderModules - absolute trusted TypeScript Skill Provider plugin entries.
  * @param browserProviderModules - absolute trusted Browser Provider plugin entries.
+ * @param headlessNodeExecutable - executable/helper that must not be the Electron APPL.
  * @returns detached child process identity.
  */
 export function startDetachedOrchestrationDaemon(
   root: string,
   dshHome: string,
-  residentDriverModules: readonly string[] = [],
-  skillProviderModules: readonly string[] = [],
-  browserProviderModules: readonly string[] = [],
+  residentDriverModules: ProviderModulePaths = [],
+  skillProviderModules: ProviderModulePaths = [],
+  browserProviderModules: ProviderModulePaths = [],
+  headlessNodeExecutable?: string,
 ): number {
   const builtEntry = fileURLToPath(new URL('./startup.js', import.meta.url))
   const sourceEntry = fileURLToPath(new URL('./startup.ts', import.meta.url))
   const entry = existsSync(builtEntry) ? builtEntry : sourceEntry
+  if (headlessNodeExecutable !== undefined && headlessNodeExecutable.trim().length === 0) {
+    throw new OrchestrationError(
+      'orchestration daemon headless executable must not be blank',
+      'ORCHESTRATION_UNAVAILABLE',
+    )
+  }
+  const executable = headlessNodeExecutable ?? process.execPath
+  const useElectronNode = headlessNodeExecutable === undefined && process.versions.electron !== undefined
   const environment = { ...process.env }
   for (const key of Object.keys(environment)) {
     if (key.toUpperCase() === ELECTRON_RUN_AS_NODE) Reflect.deleteProperty(environment, key)
   }
-  if (process.versions.electron !== undefined) environment[ELECTRON_RUN_AS_NODE] = '1'
-  const child = spawn(process.execPath, [
-    ...process.execArgv,
+  if (useElectronNode) environment[ELECTRON_RUN_AS_NODE] = '1'
+  const child = spawn(executable, [
+    ...(headlessNodeExecutable === undefined ? process.execArgv : []),
     entry,
     '--root', root,
     '--dsh-home', dshHome,

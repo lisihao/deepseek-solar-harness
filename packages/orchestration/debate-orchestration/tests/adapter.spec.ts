@@ -1,6 +1,8 @@
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { DebateRoundAgentProgressV1, DebateTurnRequestV1 } from '@deepseek-ai/dsh-debate-local'
+import type { DebateRoundAgentProgressV1,
+  DebateRoundExecutionRequestV1,
+  DebateTurnRequestV1 } from '@deepseek-ai/dsh-debate-local'
 import {
   OrchestrationArtifactRef,
   OrchestrationRunId,
@@ -111,6 +113,51 @@ describe('Debate TaskGraph round adapter', () => {
       { preferredIds: ['claude-code'], fallbackIds: ['codex'], profile: { model: 'claude-sonnet-4-6' } },
       { preferredIds: ['codex'], profile: { model: 'gpt-5.6-sol' } },
     ])
+  })
+
+  it('preflights native-session context before compiling a TaskGraph', async () => {
+    let compilationCalls = 0
+    const executor = new DebateTaskGraphRoundExecutor({
+      async compile() {
+        compilationCalls += 1
+        throw new Error('budget-limited round must not compile a TaskGraph')
+      },
+    } as unknown as DebateTaskGraphOrchestrations)
+    const request: DebateRoundExecutionRequestV1 = {
+      version: 1,
+      runId: 'debate-preflight',
+      round: 1,
+      maxParallel: 3,
+      turns: [
+        turn('constructive-proposer', 'constructive-proposer', 'codex', 'gpt-5.6-luna'),
+        turn('skeptical-falsifier', 'skeptical-falsifier', 'claude-code', 'claude-sonnet-4-6', ['codex']),
+        turn('evidence-auditor', 'evidence-auditor', 'codex', 'gpt-5.6-sol'),
+        turn('decision-judge', 'decision-judge', 'codex', 'gpt-5.6-sol'),
+      ],
+      budgetEnvelope: {
+        version: 1,
+        usedInputTokens: 0,
+        usedOutputTokens: 0,
+        maxInputTokens: 72_000,
+        maxOutputTokens: 48_000,
+        maxTotalTokens: 120_000,
+      },
+    }
+
+    expect(executor.preflight(request)).toEqual({
+      version: 1,
+      status: 'budget_limited',
+      estimate: { inputTokens: 98_184, outputTokens: 48_000, totalTokens: 146_184 },
+      limit: {
+        kind: 'input-tokens',
+        used: 0,
+        reserved: 98_184,
+        limit: 72_000,
+        reason: 'input token budget preflight denied (used 0 + reserved 98184 >= limit 72000)',
+      },
+    })
+    await expect(executor.executeRound(request)).rejects.toMatchObject({ code: 'DEBATE_BUDGET_EXCEEDED' })
+    expect(compilationCalls).toBe(0)
   })
 
   it('uses one TaskGraph run, reads its Evidence, and preserves unknown account cost', async () => {

@@ -41,18 +41,32 @@ export interface TrajectoryPhysicalOperatorTraceEntry {
     /** Stable public pseudonym used to pair call and result events. */
     readonly toolCallId: string
     readonly status: 'running' | 'completed' | 'error' | 'indeterminate'
+    /** Bounded Host-scrubbed name from the persisted tool receipt. */
+    readonly toolName?: string
     readonly argumentsShape?: TrajectoryPhysicalOperatorValueShape
     readonly resultShape?: TrajectoryPhysicalOperatorValueShape
+    /** Bounded Host-scrubbed public result text; structured values remain shape-only. */
+    readonly resultPreview?: string
+    /** Bounded Host-scrubbed error message; never a terminal transcript. */
+    readonly errorPreview?: string
     readonly callSeq?: number
     readonly resultSeq?: number
   }
   readonly observation?: {
     readonly kind: 'public-output' | 'tool-started' | 'tool-completed' | 'approval-required' | 'usage-updated'
+    /** Bounded public text supplied by the Host projection; never prompt or hidden reasoning. */
+    readonly publicOutputPreview?: string
+    /** Bounded native tool label; arguments and results remain structural-only. */
+    readonly toolName?: string
+    /** Bounded approval metadata from the native operator. */
+    readonly approvalKind?: string
+    readonly approvalPreview?: string
     readonly usage?: {
       readonly inputTokens?: number
       readonly outputTokens?: number
       readonly cacheReadInputTokens?: number
       readonly cacheWriteInputTokens?: number
+      readonly costUsd?: number
     }
   }
   /** Terminal outcome from the Resident product. Successful settlement is not an error. */

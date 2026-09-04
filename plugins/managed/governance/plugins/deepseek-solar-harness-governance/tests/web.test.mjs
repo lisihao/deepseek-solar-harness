@@ -43,8 +43,8 @@ test('trace HTTP projection returns one live session without mutating it', async
   assert.equal(body.events[0].type, 'governance/work-opened')
 })
 
-test('trace HTTP projection includes exact safe main-model and subscription-subagent outputs from the same session', async () => {
-  const session = { id: 'session-collaboration', events: [{
+test('trace HTTP projection keeps bounded governance decisions and excludes ordinary execution details', async () => {
+  const session = { id: 'session-decisions', events: [{
     type: 'physical-operator/routing-decision', seq: 3, time: Date.parse('2026-08-21T01:00:00.000Z'),
     data: { policy: 'auto', route: 'resident', reason: 'bounded implementation', operatorId: 'codex' },
   }, {
@@ -88,34 +88,37 @@ test('trace HTTP projection includes exact safe main-model and subscription-suba
   }, {
     type: 'physical-operator/trace-degraded', seq: 13, time: Date.parse('2026-08-21T01:00:03.300Z'),
     data: { commandId: 'resident-1', operatorId: 'codex', code: 'PROGRESS_UNAVAILABLE', message: 'stream detached' },
+  }, {
+    type: 'physical-operator/dispatch-terminal', seq: 14, time: Date.parse('2026-08-21T01:00:04.000Z'),
+    data: { commandId: 'resident-1', operatorId: 'codex', code: 'completed', stopReason: 'completed' },
   }] }
   const ctx = context(session)
   const handler = createGovernanceTraceHandler(ctx, new GovernanceService(ctx, {}))
   const res = response()
-  await handler({ method: 'GET', url: `${GOVERNANCE_TRACE_PATH}?sessionId=${session.id}` }, res)
+  await handler({ method: 'GET', url: GOVERNANCE_TRACE_PATH + '?sessionId=' + session.id }, res)
   assert.equal(res.status, 200)
   const body = JSON.parse(res.body)
   assert.equal(body.sessionId, session.id)
-  assert.equal(body.collaboration.totalEvents, 11)
-  assert.equal(body.collaboration.events[2].type, 'physical-operator/output')
-  assert.equal(body.collaboration.events[2].output, 'bounded final result')
-  assert.equal(body.collaboration.events[2].outputPreview, 'bounded final result')
-  assert.equal(body.collaboration.events[4].output, 'exact DSH tool output')
-  assert.equal(body.collaboration.events[6].type, 'subagent/output')
-  assert.equal(body.collaboration.events[6].operatorId, 'claude-code')
-  assert.equal(body.collaboration.events[6].output, 'exact Claude child output')
-  assert.doesNotMatch(JSON.stringify(body.collaboration), /private reasoning/u)
-  assert.equal(body.collaboration.events[7].runId, 'run-1')
-  assert.deepEqual(body.collaboration.events[8], {
-    sequence: 11, type: 'physical-operator/observation', timestamp: '2026-08-21T01:00:03.100Z',
-    commandId: 'resident-1', operatorId: 'codex', kind: 'public-output', output: 'safe native progress', outputPreview: 'safe native progress', outputTruncated: false,
-  })
-  assert.deepEqual(body.collaboration.events[9], {
-    sequence: 12, type: 'physical-operator/observation', timestamp: '2026-08-21T01:00:03.200Z',
-    commandId: 'resident-1', operatorId: 'codex', kind: 'tool-started', tool: 'Bash',
-  })
-  assert.equal(body.collaboration.events[10].type, 'physical-operator/trace-degraded')
-  assert.doesNotMatch(JSON.stringify(body.collaboration), /must not project/u)
+  assert.equal(body.collaboration.kind, 'governance-decisions')
+  assert.equal(body.collaboration.totalEvents, 4)
+  assert.deepEqual(body.collaboration.events, [{
+    sequence: 3, timestamp: '2026-08-21T01:00:00.000Z', type: 'operator.route-selected', category: 'policy',
+    policy: 'auto', route: 'resident', operatorId: 'codex', reason: 'bounded implementation',
+  }, {
+    sequence: 4, timestamp: '2026-08-21T01:00:01.000Z', type: 'operator.dispatch-accepted', category: 'receipt',
+    commandId: 'resident-1', operatorId: 'codex',
+  }, {
+    sequence: 10, timestamp: '2026-08-21T01:00:03.000Z', type: 'orchestration.admitted', category: 'admission',
+    policy: 'auto', route: 'taskgraph', runId: 'run-1', maxParallel: 2,
+  }, {
+    sequence: 14, timestamp: '2026-08-21T01:00:04.000Z', type: 'operator.receipt-terminal', category: 'receipt',
+    commandId: 'resident-1', operatorId: 'codex', code: 'completed', stopReason: 'completed',
+  }])
+  const projected = JSON.stringify(body.collaboration)
+  for (const hidden of [
+    'private reasoning must stay hidden', 'bounded final result', 'exact DSH tool output',
+    'exact Claude child output', 'safe native progress', 'must not project', 'Bash', 'stream detached',
+  ]) assert.doesNotMatch(projected, new RegExp(hidden, 'u'))
 })
 
 test('trace HTTP projection rejects missing and unknown sessions', async () => {
@@ -174,6 +177,18 @@ test('trace HTTP projection reads legacy unmarked governance events from a raw a
             time: 2,
             data: { workId: 'work-legacy', project: '/tmp/project', openedAt: '2026-08-15T00:00:00.000Z' },
           }),
+          JSON.stringify({
+            type: 'assistant/message', seq: 10, time: 3,
+            data: { message: { content: [{ type: 'text', text: 'legacy execution must not project' }] } },
+          }),
+          JSON.stringify({
+            type: 'physical-operator/routing-decision', seq: 11, time: 4,
+            data: { policy: 'auto', route: 'resident', operatorId: 'codex' },
+          }),
+          JSON.stringify({
+            type: 'physical-operator/progress', seq: 12, time: 5,
+            data: { data: { kind: 'public-output', preview: 'legacy progress must not project' } },
+          }),
         ].join('\n'),
       }
     },
@@ -187,6 +202,12 @@ test('trace HTTP projection reads legacy unmarked governance events from a raw a
   assert.equal(body.source, 'raw-persistence')
   assert.equal(body.phase, 'open')
   assert.equal(body.events[0].sequence, 9)
+  assert.equal(body.collaboration.totalEvents, 1)
+  assert.deepEqual(body.collaboration.events[0], {
+    sequence: 11, timestamp: '1970-01-01T00:00:00.004Z', type: 'operator.route-selected', category: 'policy',
+    policy: 'auto', route: 'resident', operatorId: 'codex',
+  })
+  assert.doesNotMatch(JSON.stringify(body), /legacy execution must not project|legacy progress must not project/u)
 })
 
 test('trace HTTP projection does not bypass refusals for other unknown event types', async () => {

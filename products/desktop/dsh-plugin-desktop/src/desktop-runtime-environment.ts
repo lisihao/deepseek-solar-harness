@@ -2,7 +2,9 @@
 
 import { randomUUID } from 'node:crypto'
 import {
+  accessSync,
   chmodSync,
+  constants as fsConstants,
   lstatSync,
   mkdirSync,
   readdirSync,
@@ -10,7 +12,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
@@ -35,6 +37,8 @@ export interface DesktopPnpmRuntimeOptions {
   stateDir: string
   /** Parent environment whose PATH is updated; defaults to `process.env`. */
   environment?: NodeJS.ProcessEnv
+  /** Optional real Node/helper executable used by detached headless daemons. */
+  headlessNodeExecutable?: string
 }
 
 /** Files and reversible PATH update created for the Host runtime. */
@@ -49,6 +53,8 @@ export interface DesktopPnpmRuntimeInstallation {
   nodeShimPath: string
   /** Preloaded module that removes Electron RunAsNode from child environments. */
   clearEnvironmentPath: string
+  /** Headless Node launcher used by detached daemons; never points at the APPL binary. */
+  headlessNodePath: string
   /** Remove this installation's PATH entry without deleting persistent generated files. */
   dispose(): void
 }
@@ -309,7 +315,16 @@ export function installDesktopPnpmRuntime(options: DesktopPnpmRuntimeOptions): D
     ['pnpm entry', options.pnpmBinPath],
     ['Electron version', options.electronVersion],
     ['state directory', options.stateDir],
+    ...(options.headlessNodeExecutable === undefined
+      ? []
+      : [['headless Node executable', options.headlessNodeExecutable] as const]),
   ] as const) assertScriptValue(label, value)
+  if (options.headlessNodeExecutable !== undefined
+    && platformResolve(options.headlessNodeExecutable, options.platform).toLowerCase()
+      === platformResolve(options.appExecutable, options.platform).toLowerCase()) {
+    throw new Error('dsh-plugin-desktop: headless Node executable must not be the Electron application executable')
+  }
+
 
   const pathDir = join(options.stateDir, 'bin')
   const privateDir = join(options.stateDir, 'private')
@@ -322,15 +337,27 @@ export function installDesktopPnpmRuntime(options: DesktopPnpmRuntimeOptions): D
   const windows = options.platform === 'win32'
   const pnpmShimName = windows ? 'pnpm.cmd' : 'pnpm'
   const nodeShimName = windows ? 'node.cmd' : 'node'
+  const headlessNodeName = windows ? 'headless-node.cmd' : 'headless-node'
+  const headlessNodeExecutable = options.headlessNodeExecutable
+    ?? (process.versions.electron === undefined
+      ? process.execPath
+      : resolveHeadlessNodeExecutable({
+        platform: options.platform,
+        appExecutable: options.appExecutable,
+        ...options.environment === undefined ? {} : { environment: options.environment },
+      }))
   removeStaleTemporaryFiles(pathDir, pnpmShimName)
   removeStaleTemporaryFiles(nodeBinDir, nodeShimName)
   removeStaleTemporaryFiles(privateDir, 'clear-env.mjs')
+  removeStaleTemporaryFiles(privateDir, headlessNodeName)
   assertOwnedDirectoryEntries(pathDir, [pnpmShimName])
   assertOwnedDirectoryEntries(nodeBinDir, [nodeShimName])
+  assertOwnedDirectoryEntries(privateDir, ['clear-env.mjs', 'node-bin', headlessNodeName])
   const pnpmShimPath = join(pathDir, pnpmShimName)
   const nodeShimPath = join(nodeBinDir, nodeShimName)
   const clearEnvironmentPath = join(privateDir, 'clear-env.mjs')
   replacePrivateFile(clearEnvironmentPath, clearEnvironmentModule(), PRIVATE_FILE_MODE)
+  const headlessNodePath = join(privateDir, headlessNodeName)
   const clearEnvironmentUrl = pathToFileURL(clearEnvironmentPath).href
   replacePrivateFile(
     nodeShimPath,
@@ -346,6 +373,13 @@ export function installDesktopPnpmRuntime(options: DesktopPnpmRuntimeOptions): D
       : posixPnpmShim(options, nodeBinDir, nodeShimPath, clearEnvironmentUrl),
     windows ? PRIVATE_FILE_MODE : EXECUTABLE_FILE_MODE,
   )
+  replacePrivateFile(
+    headlessNodePath,
+    windows
+      ? windowsHeadlessNodeShim(headlessNodeExecutable)
+      : posixHeadlessNodeShim(headlessNodeExecutable),
+    windows ? PRIVATE_FILE_MODE : EXECUTABLE_FILE_MODE,
+  )
 
   return {
     pathDir,
@@ -353,6 +387,87 @@ export function installDesktopPnpmRuntime(options: DesktopPnpmRuntimeOptions): D
     nodeBinDir,
     nodeShimPath,
     clearEnvironmentPath,
+    headlessNodePath,
     dispose: installPathDirectory(options.environment ?? process.env, pathDir, options.platform),
   }
+}
+/** Return whether one candidate is an executable regular file or symlink. */
+function isExecutableFile(filename: string): boolean {
+  try {
+    const stat = lstatSync(filename)
+    if (!stat.isFile() && !stat.isSymbolicLink()) return false
+    accessSync(filename, fsConstants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Resolve one absolute path using the selected platform's path rules. */
+function platformAbsolute(filename: string, platform: NodeJS.Platform): boolean {
+  return platform === 'win32' ? win32.isAbsolute(filename) : isAbsolute(filename)
+}
+
+/** Resolve one candidate path using the selected platform's path rules. */
+function platformResolve(filename: string, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? win32.resolve(filename) : resolve(filename)
+}
+
+/** Find a real Node executable without ever selecting the Electron APPL. */
+export function resolveHeadlessNodeExecutable(options: {
+  platform: NodeJS.Platform
+  appExecutable: string
+  environment?: NodeJS.ProcessEnv
+}): string | undefined {
+  const environment = options.environment ?? process.env
+  const pathKey = Object.keys(environment).find(key => (
+    options.platform === 'win32' ? key.toUpperCase() === PATH : key === PATH
+  ))
+  const pathValue = pathKey === undefined ? undefined : environment[pathKey]
+  const delimiter = options.platform === 'win32' ? ';' : ':'
+  const executableNames = options.platform === 'win32' ? ['node.exe', 'node.cmd', 'node'] : ['node']
+  const pathCandidates = (pathValue ?? '')
+    .split(delimiter)
+    .map(directory => directory.trim().replace(/^"|"$/gu, ''))
+    .filter(directory => platformAbsolute(directory, options.platform))
+    .flatMap(directory => executableNames.map(name => (
+      options.platform === 'win32' ? win32.join(directory, name) : join(directory, name)
+    )))
+  const fixedCandidates = options.platform === 'darwin'
+    ? ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node']
+    : options.platform === 'linux'
+      ? ['/usr/local/bin/node', '/usr/bin/node']
+      : []
+  const appExecutable = platformResolve(options.appExecutable, options.platform).toLowerCase()
+  for (const candidate of [...pathCandidates, ...fixedCandidates]) {
+    if (!platformAbsolute(candidate, options.platform)) continue
+    if (platformResolve(candidate, options.platform).toLowerCase() === appExecutable) continue
+    if (isExecutableFile(candidate)) return candidate
+  }
+  return undefined
+}
+/** Build a detached-daemon launcher that does not execute the Electron APPL. */
+function posixHeadlessNodeShim(headlessNodeExecutable: string | undefined): string {
+  return [
+    '#!/bin/sh',
+    'unset ELECTRON_RUN_AS_NODE',
+    headlessNodeExecutable === undefined
+      ? 'exec /usr/bin/env node "$@"'
+      : `exec ${quoteSh(headlessNodeExecutable)} "$@"`,
+    '',
+  ].join('\n')
+}
+
+/** Build a detached-daemon launcher that does not execute the Electron APPL. */
+function windowsHeadlessNodeShim(headlessNodeExecutable: string | undefined): string {
+  return [
+    '@echo off',
+    'setlocal DisableDelayedExpansion',
+    `set "${RUN_AS_NODE}="`,
+    headlessNodeExecutable === undefined
+      ? 'node.exe %*'
+      : `${quoteBatchWord(headlessNodeExecutable)} %*`,
+    'exit /b %errorlevel%',
+    '',
+  ].join('\r\n')
 }

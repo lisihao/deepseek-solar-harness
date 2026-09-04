@@ -67,6 +67,10 @@ corepack pnpm dsh web --port 0
 
 启动后点击顶部“会话地图”进入 Synapse。不要同时运行两个共享同一 profile 的 `dsh web` 实例。
 
+DSH bundle 会把“对话 / 会话地图”切换放入原生会话页头。它只是隐藏旧的页面浮动切换，不改变 Synapse 的 iframe、会话投影或 bridge；控件会跟随 DSH 主题并在窄窗口中收缩，不会顶到屏幕边缘或与其他页头操作重叠。
+
+DSH bundle 会把“对话 / 会话地图”切换放入原生会话页头。它只是隐藏旧的页面浮动切换，不改变 Synapse 的 iframe、会话投影或 bridge；控件会跟随 DSH 主题并在窄窗口中收缩，不会顶到屏幕边缘或与其他页头操作重叠。
+
 ## 使用方式
 
 1. 在 DSH 中选择工作目录，或打开已有会话。
@@ -138,6 +142,7 @@ $DSH_HOME/synapse/
 - 单条消息投影上限为 8000 字符；超出部分在卡片中截断并标注“—…（详情查看全文）”，完整内容仍可在会话详情中查看。
 - 插件不启动第二个 Web 服务，也不创建第二套 Agent。
 - 插件只读取已经提交的会话事件，不修改模型请求、系统提示、工具 schema 或 KV cache 前缀。
+- DSH companion adapter 只负责原生页头呈现，实际视图切换仍由上游按钮和 iframe bridge 完成。
 
 更详细的内部说明见[架构与运行边界](../architecture.md)。
 

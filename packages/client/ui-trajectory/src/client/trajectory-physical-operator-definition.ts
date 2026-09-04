@@ -76,11 +76,24 @@ function traceEntry(match: ConversationMatch): {
         ...(trace.outputTokens === undefined ? {} : { outputTokens: trace.outputTokens }),
         ...(trace.cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens: trace.cacheReadInputTokens }),
         ...(trace.cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens: trace.cacheWriteInputTokens }),
+        ...(trace.costUsd === undefined ? {} : { costUsd: trace.costUsd }),
       },
     }
     : trace.kind === 'native-tool'
-      ? { kind: trace.status === 'running' ? 'tool-started' as const : 'tool-completed' as const }
-      : { kind: trace.kind }
+      ? {
+        kind: trace.status === 'running' ? 'tool-started' as const : 'tool-completed' as const,
+        ...(trace.toolName === undefined ? {} : { toolName: trace.toolName }),
+      }
+      : trace.kind === 'public-output'
+        ? {
+          kind: 'public-output' as const,
+          ...(trace.preview === undefined ? {} : { publicOutputPreview: trace.preview }),
+        }
+        : {
+          kind: 'approval-required' as const,
+          ...(trace.approvalKind === undefined ? {} : { approvalKind: trace.approvalKind }),
+          ...(trace.preview === undefined ? {} : { approvalPreview: trace.preview }),
+        }
   return {
     key: `progress:${String(trace.sourceSequence)}`,
     entry: { seq: event.seq, time: event.time, type: 'observation', observation },
@@ -100,8 +113,11 @@ function toolTraceEntry(
       tool: {
         toolCallId: trace.toolCallId,
         status: trace.status,
+        ...(trace.toolName === undefined ? {} : { toolName: trace.toolName }),
         ...(trace.argumentsShape === undefined ? {} : { argumentsShape: trace.argumentsShape }),
         ...(trace.resultShape === undefined ? {} : { resultShape: trace.resultShape }),
+        ...(trace.resultPreview === undefined ? {} : { resultPreview: trace.resultPreview }),
+        ...(trace.errorPreview === undefined ? {} : { errorPreview: trace.errorPreview }),
         ...(trace.status === 'running' ? { callSeq: event.seq } : { resultSeq: event.seq }),
       },
     },

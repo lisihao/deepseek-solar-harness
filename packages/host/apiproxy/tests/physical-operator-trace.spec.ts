@@ -142,27 +142,27 @@ describe('projectPublicSessionEvent', () => {
       commandId: 'observation-output',
       sequence: 1,
       type: 'turn.observation',
-      data: { kind: 'public-output' },
-    })).toMatchObject({ kind: 'public-output', sourceSequence: 1 })
+      data: { kind: 'public-output', preview: 'visible public output' },
+    })).toMatchObject({ kind: 'public-output', sourceSequence: 1, preview: 'visible public output' })
 
     expect(project('progress', {
       commandId: 'observation-tool-start',
       sequence: 2,
       type: 'turn.observation',
-      data: { kind: 'tool-started' },
-    })).toMatchObject({ kind: 'native-tool', status: 'running', sourceSequence: 2 })
+      data: { kind: 'tool-started', toolName: 'Bash' },
+    })).toMatchObject({ kind: 'native-tool', status: 'running', sourceSequence: 2, toolName: 'Bash' })
     expect(project('progress', {
       commandId: 'observation-tool-done',
       sequence: 3,
       type: 'turn.observation',
-      data: { kind: 'tool-completed' },
-    })).toMatchObject({ kind: 'native-tool', status: 'completed', sourceSequence: 3 })
+      data: { kind: 'tool-completed', toolName: 'Bash' },
+    })).toMatchObject({ kind: 'native-tool', status: 'completed', sourceSequence: 3, toolName: 'Bash' })
     expect(project('progress', {
       commandId: 'observation-approval',
       sequence: 4,
       type: 'turn.observation',
-      data: { kind: 'approval-required' },
-    })).toMatchObject({ kind: 'approval-required', sourceSequence: 4 })
+      data: { kind: 'approval-required', approvalKind: 'Bash', preview: 'safe approval summary' },
+    })).toMatchObject({ kind: 'approval-required', sourceSequence: 4, approvalKind: 'Bash', preview: 'safe approval summary' })
 
     expect(project('progress', {
       commandId: 'observation-usage-all',
@@ -175,6 +175,7 @@ describe('projectPublicSessionEvent', () => {
           outputTokens: 20,
           cacheReadInputTokens: 30,
           cacheWriteInputTokens: 40,
+          costUsd: 1.25,
         },
       },
     })).toMatchObject({
@@ -182,6 +183,7 @@ describe('projectPublicSessionEvent', () => {
       inputTokens: 10,
       outputTokens: 20,
       cacheReadInputTokens: 30,
+      costUsd: 1.25,
       cacheWriteInputTokens: 40,
     })
     const partialUsage = project('progress', {
@@ -244,6 +246,33 @@ describe('projectPublicSessionEvent', () => {
       sequence: 11,
       type: 'turn.progress',
     })).toMatchObject({ kind: 'progress', phase: 'working', sourceSequence: 11 })
+  })
+
+  it('keeps public details bounded and scrubs credential-shaped text', () => {
+    const trace = project('progress', {
+      commandId: 'observation-scrubbed',
+      sequence: 12,
+      type: 'turn.observation',
+      data: {
+        kind: 'public-output',
+        preview: 'safe output API_KEY=hidden sk-abcdef123456 ' + 'x'.repeat(2_000),
+      },
+    })
+    expect(trace).toMatchObject({ kind: 'public-output' })
+    expect(trace && 'preview' in trace ? trace.preview : undefined).toContain('safe output')
+    expect(trace && 'preview' in trace ? trace.preview : undefined).not.toContain('hidden')
+    expect(trace && 'preview' in trace ? trace.preview?.length : 0).toBeLessThanOrEqual(1_600)
+
+    const keyTrace = project('progress', {
+      commandId: 'observation-key',
+      sequence: 13,
+      type: 'turn.observation',
+      data: {
+        kind: 'public-output',
+        preview: '-----BEGIN OPENSSH PRIVATE KEY-----\\nsecret\\n-----END OPENSSH PRIVATE KEY-----',
+      },
+    })
+    expect(keyTrace && 'preview' in keyTrace ? keyTrace.preview : undefined).not.toContain('secret')
   })
 
   it('projects tool calls, including standalone calls and all value shapes', () => {
@@ -369,4 +398,74 @@ describe('projectPublicSessionEvent', () => {
       result: 'hidden',
     })).toBeUndefined()
   })
+  it('projects only bounded scrubbed text from durable tool result fields', () => {
+    const contentTrace = project('tool-result', {
+      commandId: 'safe-content-command',
+      toolCallId: 'safe-content-tool',
+      tool: 'RawToolNameMustNotRender',
+      publicToolName: 'Bash',
+      publicResultPreview: 'visible API_KEY=hidden\n-----BEGIN PRIVATE KEY-----\nprivate material\n-----END PRIVATE KEY-----\n' + 'x'.repeat(2_000),
+      result: {
+        isError: false,
+        content: [{
+          type: 'text',
+          text: 'raw result content must not render',
+        }, { type: 'image', data: 'raw image payload must not render' }],
+        value: { structured: 'structured result must not render', stderr: 'raw stderr must not render' },
+      },
+    })
+    if (contentTrace?.kind !== 'tool') throw new Error('expected a tool trace')
+    expect(contentTrace).toMatchObject({
+      status: 'completed',
+      toolName: 'Bash',
+      resultShape: { kind: 'object', fields: 2 },
+    })
+    expect(contentTrace.resultPreview).toContain('visible')
+    for (const secret of ['hidden', 'private material', 'structured result', 'raw stderr', 'raw image payload']) {
+      expect(contentTrace.resultPreview).not.toContain(secret)
+    }
+    expect(contentTrace.resultPreview?.length).toBeLessThanOrEqual(1_600)
+
+    const stringValueTrace = project('tool-result', {
+      commandId: 'safe-string-command',
+      toolCallId: 'safe-string-tool',
+      publicResultPreview: 'visible value token=hidden',
+      result: { value: 'raw result value must not render' },
+    })
+    expect(stringValueTrace).toMatchObject({
+      kind: 'tool',
+      status: 'completed',
+      resultPreview: 'visible value [REDACTED]',
+    })
+
+    const errorTrace = project('tool-result', {
+      commandId: 'safe-error-command',
+      toolCallId: 'safe-error-tool',
+      publicErrorPreview: 'denied token=hidden',
+      result: { isError: true, error: { message: 'raw error message must not render' } },
+    })
+    expect(errorTrace).toMatchObject({
+      kind: 'tool',
+      status: 'error',
+      errorPreview: 'denied [REDACTED]',
+    })
+
+    const shapeOnlyTrace = project('tool-result', {
+      commandId: 'shape-only-command',
+      toolCallId: 'shape-only-tool',
+      result: {
+        content: [{ type: 'image', data: 'image bytes must not render' }],
+        value: { stderr: 'terminal transcript must not render' },
+      },
+    })
+    expect(shapeOnlyTrace).toMatchObject({
+      kind: 'tool',
+      status: 'completed',
+      resultShape: { kind: 'object', fields: 1 },
+    })
+    expect(shapeOnlyTrace && 'resultPreview' in shapeOnlyTrace ? shapeOnlyTrace.resultPreview : undefined).toBeUndefined()
+    expect(JSON.stringify(shapeOnlyTrace)).not.toContain('terminal transcript')
+    expect(JSON.stringify(shapeOnlyTrace)).not.toContain('image bytes')
+  })
+
 })

@@ -405,7 +405,7 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:104`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:106`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -427,7 +427,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:104`](../packages/orch
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:117`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:119`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -438,7 +438,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:117`](../packages/orch
 'debate/preferences': DebateExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:102`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:104`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatetrace--log-only"></a>
 
@@ -453,7 +453,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:102`](../packages/orch
 'debate/trace': DebateTraceSessionEventV1
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:128`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:130`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 
@@ -729,6 +729,8 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:65`](..
   /** Parent physical execution command that owns this model-tool call. */
   executionCommandId?: string
   tool: string
+  /** Bounded, credential-scrubbed display label for public trajectory projection. */
+  publicToolName?: string
   arguments: Record<string, JsonValue>
 }
 ```
@@ -763,11 +765,13 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:88`](..
   toolCallId: string
   executionCommandId: string
   tool: string
+  /** Bounded, credential-scrubbed display label for public trajectory projection. */
+  publicToolName?: string
   code: 'COMMAND_INDETERMINATE'
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:137`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:145`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -782,11 +786,17 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:137`](.
   /** Parent physical execution command that owns this model-tool call. */
   executionCommandId?: string
   tool: string
+  /** Bounded, credential-scrubbed display label for public trajectory projection. */
+  publicToolName?: string
+  /** Bounded, credential-scrubbed public success text; raw result remains authority-only. */
+  publicResultPreview?: string
+  /** Bounded, credential-scrubbed public failure text; raw error remains authority-only. */
+  publicErrorPreview?: string
   result: JsonValue
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:127`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:129`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 

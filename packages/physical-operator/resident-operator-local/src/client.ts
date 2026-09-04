@@ -133,6 +133,8 @@ export interface ResidentClientOptions {
   readonly connectTimeoutMs: number
   readonly pollIntervalMs: number
   readonly driverModules?: readonly string[]
+  /** Explicit executable or helper used for the detached headless daemon. */
+  readonly headlessNodeExecutable?: string
 }
 
 /**
@@ -453,7 +455,7 @@ export class ResidentDaemonClient {
 
   /** Start the configured detached daemon and wait for one compatible handshake. */
   private async startAndWaitForReady(): Promise<void> {
-    startDetachedResidentDaemon(this.options.root, this.options.driverModules ?? [])
+    startDetachedResidentDaemon(this.options.root, this.options.driverModules ?? [], this.options.headlessNodeExecutable)
     const deadline = Date.now() + this.options.connectTimeoutMs
     let lastError: unknown
     while (Date.now() < deadline) {
@@ -679,17 +681,30 @@ export class ResidentDaemonClient {
  * Start a daemon process that is independent of the current DSH lifecycle.
  * @param root - owner-only daemon state root.
  * @param driverModules - absolute independent product Driver entries loaded by the daemon.
+ * @param headlessNodeExecutable - executable/helper that must not be the Electron APPL.
  * @returns detached child process id.
  */
-export function startDetachedResidentDaemon(root: string, driverModules: readonly string[] = []): number {
+export function startDetachedResidentDaemon(
+  root: string,
+  driverModules: readonly string[] = [],
+  headlessNodeExecutable?: string,
+): number {
   const builtEntry = fileURLToPath(new URL('./startup.js', import.meta.url))
   const sourceEntry = fileURLToPath(new URL('./startup.ts', import.meta.url))
   const entry = existsSync(builtEntry) ? builtEntry : sourceEntry
   const driverArgs = driverModules.flatMap(module => ['--driver-module', module])
-  const child = spawn(process.execPath, [...process.execArgv, entry, '--root', root, ...driverArgs], {
+  if (headlessNodeExecutable !== undefined && headlessNodeExecutable.trim().length === 0) {
+    throw new ResidentOperatorError('resident daemon headless executable must not be blank', 'RUNTIME_UNAVAILABLE')
+  }
+  const executable = headlessNodeExecutable ?? process.execPath
+  const useElectronNode = headlessNodeExecutable === undefined && process.versions.electron !== undefined
+  const child = spawn(executable, [
+    ...(headlessNodeExecutable === undefined ? process.execArgv : []),
+    entry, '--root', root, ...driverArgs,
+  ], {
     detached: true,
     stdio: 'ignore',
-    env: residentDaemonEnvironment(process.env, process.versions.electron),
+    env: residentDaemonEnvironment(process.env, useElectronNode ? process.versions.electron : undefined),
   })
   child.unref()
   if (child.pid === undefined) {

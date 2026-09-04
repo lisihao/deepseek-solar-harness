@@ -12,7 +12,9 @@ DeepSeek Harness（`dsh web`）的人民币/美元 token 计费插件：**按官
 浏览器端展示费用（**界面语言自动切换 ¥/$**）。
 
 > 这里的 token 与费用是 **DSH 本地统计**：只包含本插件安装后、当前
-> `$DSH_HOME` 捕获到的已完成 `assistant/message`。它不是 DeepSeek 账号的官方
+> `$DSH_HOME` 捕获到的可计费 DeepSeek `assistant/message`。Codex、Claude Code
+> 等订阅算子以及 Debate 聚合宿主的 token 会留在各自用量轨迹中，不会冒充
+> DeepSeek API 消费。它不是 DeepSeek 账号的官方
 > 用量账单；官方余额来自 `/user/balance`，而跨 API key / 应用的消费核对应以
 > DeepSeek 控制台 Usage 导出为准。
 
@@ -20,7 +22,8 @@ DeepSeek Harness（`dsh web`）的人民币/美元 token 计费插件：**按官
 | --- | --- | --- |
 | ![混合会话面板](docs/screenshots/panel-mixed.png) | ![纯本地面板](docs/screenshots/panel-local.png) | ![纯云端面板](docs/screenshots/panel-cloud.png) |
 
-- **记账（host 端）**：订阅 `session/event`，对每条带 usage 的 `assistant/message`
+- **记账（host 端）**：订阅 `session/event`，对每条带 usage、且不属于
+  `nonBillableProviders` 的 `assistant/message`
   按消息时刻取价计费（CNY 与 USD 双币种，官方美元价独立发布），账本持久化到
   `$DSH_HOME/storages/web-billing.json`。
 - **账号余额（host 端）**：复用 provider 的 API key 调用官方 `GET /user/balance`
@@ -119,6 +122,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -Profile web
 | `usdPrices` | `{}` | 美元价覆盖（可选，单位 $/1M） |
 | `localProviders` | `[]` | 本地（自托管）provider 名单：调用按官方价计「名义价值」，实际成本按 `localCostPerM`，差值计入「已节省」 |
 | `localCostPerM` | `0` | 本地模型实际单价（¥/1M，所有 token 统一；默认 0 = 免费，可填电费/算力成本） |
+| `nonBillableProviders` | `[dsh-physical-operator, dsh-debate-host]` | 订阅态或聚合用量来源；保留其执行轨迹，但不进入 DeepSeek API 费用账本。启动时会从历史账本重估并剔除误记。 |
 | `policyOverrides` | `[]` | 追加的官方政策条目（`since` 必填，`prices` 或 `peak`+`offPeak`） |
 | `persistPath` | `~/.dsh/storages/web-billing.json` | 账本文件路径 |
 | `maxRecent` | `20000` | 最近流水保留条数 |

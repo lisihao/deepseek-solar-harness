@@ -4,7 +4,16 @@
 
 本目录复制自 `https://github.com/liangmianya/dsh-synapse.git` 的 tag `v0.4.1`，其发布 commit 为 `589aed43fece8a38fe9267d47ed9756eab343fec`。复制内容来自该 commit 的完整 Git 发布树，包含上游源码、测试、文档、图片、`LICENSE`、`package.json`、锁文件和 CI 文件；文件树信息见 [SOURCE-LOCK.json](SOURCE-LOCK.json)。
 
-`index.js`、`client.js`、`app.js` 是上游运行时代码的逐字节 faithful copy。下游没有在运行时代码中加入适配层、重写、功能开关或行为修改；本文件和 `SOURCE-LOCK.json` 是额外的下游来源元数据。
+index.js、client.js、app.js 是上游运行时代码的逐字节 faithful copy。DSH 的适配器放在独立的 adapter-host.js、client-adapter.js 和 Cordis patch 行中，不改写这三份上游运行时；本文件和 SOURCE-LOCK.json 是额外的下游来源元数据。
+
+## DSH companion adapter
+
+下游 adapter 是 DSH 的集成层，不宣称为上游 Synapse 的 faithful source：
+
+- adapter-host.js 只服务 companion bundle，并向既有 DSH boot manifest 追加一个可重复识别的 entry。
+- client-adapter.js 把视图控件注册到 conversation.session.header.actions 的 order 82，隐藏上游 body switch 后仍保留其 iframe overlay，并把点击委托给上游按钮。
+- adapter 使用 DSH 主题 token 和正常 flex 流布局；它不复制 map iframe、不解析屏幕文本、不创建第二个服务，也不改变会话/模型请求。
+- dsh-synapse/adapter-host 是可卸载的 DSH patch 行；移除它不会改变锁定的上游文件。
 
 ## DSH 权威边界
 
@@ -26,4 +35,4 @@
 
 ## 验收定位
 
-本快照的运行时保真验收是对上游 commit 与复制版本的 `sha256` 比对：三份运行时文件必须逐一相同；语法检查和上游 Node test command 必须通过。任何未来运行时修改都必须创建新的来源锁定和保真记录，不得把修改后的代码标记为 faithful。
+本快照的运行时保真验收是对上游 commit 与复制版本的 sha256 比对：三份运行时文件必须逐一相同；语法检查和上游 Node test command 必须通过。adapter 自身另由 DSH focused tests 验证 boot row 幂等、slot/order、主题布局约束和上游锁定文件未变。任何未来上游运行时修改都必须创建新的来源锁定和保真记录，不得把修改后的代码标记为 faithful。

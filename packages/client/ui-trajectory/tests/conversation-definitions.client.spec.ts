@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import type {
@@ -94,6 +95,65 @@ function assistantMessage(id: string, text: string) {
 }
 
 describe('Trajectory conversation Definitions', () => {
+  it('replays the keyless Debate transcript fixture with structured topic, floors, and terminal outcome', async () => {
+    const fixture = JSON.parse(await readFile(
+      new URL('./fixtures/debate-transcript.keyless.json', import.meta.url), 'utf8',
+    )) as {
+      readonly topic: string
+      readonly events: readonly {
+        readonly seq: number
+        readonly type: string
+        readonly data: unknown
+        readonly ignorable?: boolean
+      }[]
+      readonly expectedTranscriptShape: {
+        readonly rosterTable: string
+        readonly terminalLabels: readonly string[]
+        readonly forbiddenMarkup: readonly string[]
+      }
+    }
+    const projected = snapshot(assembler(fixture.events.map(event => at(
+      event.seq,
+      event.type,
+      event.data,
+      event.ignorable === undefined ? {} : { ignorable: event.ignorable },
+    ))))
+    const debate = projected.debateExecutions[0]
+    expect(debate).toMatchObject({ runId: 'fixture-debate-run', topic: fixture.topic, turn: 4, step: 1 })
+    expect(debate?.entries.map(entry => entry.sourceSequence)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(debate?.entries[1]).toMatchObject({
+      round: 1,
+      role: { title: '建设性提案者', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol' },
+      publicOutputPreview: '先用可恢复性基线约束扩展。',
+      claims: [{ statement: '可靠性门禁先于新能力。' }],
+    })
+    expect(debate?.entries[4]?.convergence).toMatchObject({
+      status: 'budget_limited', score: 0.76, threshold: 0.82,
+      reason: '本轮达到配置预算；主持人总结已完成。',
+    })
+    expect(debate?.entries[5]?.synthesis).toMatchObject({
+      state: 'settled', outputPreview: '主持人总结：可靠性优先，完成一次对照后再扩展。',
+      unresolvedCount: 1, dissentCount: 1,
+    })
+
+    // The production Consumer owns this Markdown transcript shape. Keep the
+    // fixture contract beside the keyless event replay so future changes do
+    // not silently regress the user-facing table/terminal vocabulary.
+    const roster = fixture.expectedTranscriptShape.rosterTable
+    expect(roster.split('\n')).toHaveLength(3)
+    expect(roster).toMatch(/\| 角色 \| 职责 \| 执行算子 \| 模型 \| 当前状态 \|\n\| --- \| --- \| --- \| --- \| --- \|\n\| /u)
+    for (const label of fixture.expectedTranscriptShape.terminalLabels) {
+      expect([
+        debate?.entries[4]?.convergence?.reason,
+        debate?.entries[5]?.synthesis?.outputPreview,
+      ]).toContain(label)
+    }
+    const publicSnapshot = JSON.stringify(debate)
+    for (const marker of fixture.expectedTranscriptShape.forbiddenMarkup) {
+      expect(publicSnapshot).not.toContain(marker)
+    }
+  })
+
   it('projects a complete public multi-round Debate trace in source order and ignores reconnect duplicates', () => {
     const trace = (sourceSequence: number, state: string, extra: Record<string, unknown> = {}) => at(
       20 + sourceSequence,
@@ -304,7 +364,7 @@ describe('Trajectory conversation Definitions', () => {
             'x'.repeat(400),
           ].join('\n'),
         },
-      }, { ignorable: true }, { version: 1, kind: 'public-output', commandId: 'public-command-1', sourceSequence: 4 }),
+      }, { ignorable: true }, { version: 1, kind: 'public-output', commandId: 'public-command-1', sourceSequence: 4, preview: 'Visible public output' }),
       at(3, 'physical-operator/progress', {
         commandId: 'command-1', operatorId: 'codex', sequence: 4, type: 'turn.observation',
         time: '2026-09-01T10:00:00.000Z',
@@ -315,7 +375,7 @@ describe('Trajectory conversation Definitions', () => {
         time: '2026-09-01T10:00:01.000Z',
         data: { kind: 'tool-started', toolName: 'Bash', arguments: { secret: 'never render' } },
       }, { ignorable: true }, {
-        version: 1, kind: 'native-tool', commandId: 'public-command-1', sourceSequence: 5, status: 'running',
+        version: 1, kind: 'native-tool', commandId: 'public-command-1', sourceSequence: 5, status: 'running', toolName: 'Bash',
       }),
       at(5, 'physical-operator/dispatch-terminal', {
         commandId: 'command-1', code: 'OPERATOR_ERROR',
@@ -328,11 +388,11 @@ describe('Trajectory conversation Definitions', () => {
     })
     const entries = current.physicalOperatorExecutions[0]?.entries ?? []
     expect(entries).toHaveLength(4)
-    expect(entries.find(entry => entry.type === 'observation')?.observation).toEqual({ kind: 'public-output' })
+    expect(entries.find(entry => entry.type === 'observation')?.observation).toEqual({ kind: 'public-output', publicOutputPreview: 'Visible public output' })
     const exposed = JSON.stringify(current.physicalOperatorExecutions)
     expect(exposed).not.toMatch(/secret|correct horse|sk-live|ghp_|chain of thought|private-key-body|second line/iu)
     expect(entries.find(entry => entry.type === 'observation' && entry.observation?.kind === 'tool-started')?.observation)
-      .toEqual({ kind: 'tool-started' })
+      .toEqual({ kind: 'tool-started', toolName: 'Bash' })
     expect(entries.some(entry => entry.type === 'terminal')).toBe(true)
   })
 
@@ -398,7 +458,7 @@ describe('Trajectory conversation Definitions', () => {
         },
       }, { ignorable: true }, {
         version: 1, kind: 'tool', commandId: 'public-tools', toolCallId: 'public-tool-1', standalone: false,
-        status: 'running', argumentsShape: { kind: 'object', fields: 7 },
+        status: 'running', toolName: 'Bash', argumentsShape: { kind: 'object', fields: 7 },
       }),
       at(3, 'physical-operator/tool-result', {
         commandId: 'command-tools:tool:1', toolCallId: 'tool-call-1', executionCommandId: 'command-tools',
@@ -411,7 +471,7 @@ describe('Trajectory conversation Definitions', () => {
         },
       }, { ignorable: true }, {
         version: 1, kind: 'tool', commandId: 'public-tools', toolCallId: 'public-tool-1', standalone: false,
-        status: 'completed', resultShape: { kind: 'object', fields: 3 },
+        status: 'completed', toolName: 'Bash', resultShape: { kind: 'object', fields: 3 }, resultPreview: '已读取 2 个文件。',
       }),
       // A reconnect/reload can expose the same durable tool call and result at
       // new session sequence positions. The stable toolCallId keeps one row.
@@ -438,7 +498,7 @@ describe('Trajectory conversation Definitions', () => {
       type: 'tool', seq: 2,
       tool: {
         toolCallId: 'public-tool-1', status: 'completed', callSeq: 2, resultSeq: 3,
-        argumentsShape: { kind: 'object', fields: 7 }, resultShape: { kind: 'object', fields: 3 },
+        toolName: 'Bash', argumentsShape: { kind: 'object', fields: 7 }, resultShape: { kind: 'object', fields: 3 }, resultPreview: '已读取 2 个文件。',
       },
     })
     if (tool?.type !== 'tool' || tool.tool === undefined) throw new Error('expected paired physical tool trace')

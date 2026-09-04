@@ -49,6 +49,8 @@ const MAX_REF_ITEMS = 20
 const DEBATE_TRANSCRIPT_POLL_INTERVAL_MS = 100
 const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
 const CONCISE_DEBATE_HINT = /(?:简洁|简要|精简|三条|要点|concise|brief)/iu
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/gu
+const TRAILING_FALLBACK_ANSI = /\[1m$/u
 
 const ROLE_COPY: Readonly<Record<string, { readonly title: string; readonly mandate: string }>> = {
   'constructive-proposer': {
@@ -226,7 +228,7 @@ export const DEFAULT_DEBATE_POLICY: DebatePolicyV1 = Object.freeze({
   ]),
   budget: Object.freeze({
     version: 1, maxRounds: 3, maxTurnsPerAgent: 3, maxAgentsPerRound: 4,
-    maxInputTokens: 72_000, maxOutputTokens: 48_000, maxTotalTokens: 120_000,
+    maxInputTokens: 400_000, maxOutputTokens: 180_000, maxTotalTokens: 580_000,
   }),
   rounds: Object.freeze({
     version: 1, firstRound: 'blind-independent', followUp: 'claim-ledger',
@@ -261,9 +263,9 @@ export function debatePolicyForPrompt(
       maxRounds: 1,
       maxTurnsPerAgent: 1,
       maxAgentsPerRound: roster.length,
-      maxInputTokens: 64_000,
-      maxOutputTokens: 16_000,
-      maxTotalTokens: 80_000,
+      maxInputTokens: 80_000,
+      maxOutputTokens: 40_000,
+      maxTotalTokens: 120_000,
       maxCostUsd: 2,
     },
     convergence: { ...DEFAULT_DEBATE_POLICY.convergence, minSettledAgents: roster.length },
@@ -541,6 +543,7 @@ interface TranscriptTracker {
   topicEmitted: boolean
   topicState?: DebateRunSnapshotV1['state']
   rosterEmitted: boolean
+  rosterStatusSignature?: string
   readonly roundStates: Map<number, string>
   readonly emittedTurnKeys: Set<string>
   readonly turnFloors: Map<string, number>
@@ -585,24 +588,27 @@ function transcriptLines(
   }
   if (!tracker.rosterEmitted) {
     tracker.rosterEmitted = true
-    lines.push(
-      '## 参与者名册',
-      '| 角色 | 职责 | 执行算子 | 模型 | 当前状态 |',
-      '| --- | --- | --- | --- | --- |',
-    )
+    const rosterLines = ['## 参与者名册']
     for (const role of run.roster.slice(0, MAX_REF_ITEMS)) {
       const turn = latestRoleTurn(run, role.role)
       const route = turn === undefined ? configuredRoute(role) : actualRoute(turn)
-      const cells = [
-        rosterRoleTitle(role),
-        roleMandate(role),
-        route.operator,
-        route.model,
-        turn === undefined ? '等待分派' : turnStateLabel(turn.state),
-      ].map(tableCell)
-      lines.push(`| ${cells.join(' | ')} |`)
+      rosterLines.push(
+        `**${rosterRoleTitle(role)}**`,
+        `职责 · ${roleMandate(role)}`,
+        `执行 · ${routeDescription(route)}`,
+        `启动状态 · ${turn === undefined ? '等待分派' : turnStateLabel(turn.state)}`,
+        '',
+      )
     }
-    lines.push('')
+    lines.push(...rosterLines)
+    tracker.rosterStatusSignature = rosterTerminalStatusSignature(run)
+  } else {
+    const currentSignature = rosterTerminalStatusSignature(run)
+    if (tracker.rosterStatusSignature !== currentSignature) {
+      const update = rosterTerminalStatusSummary(run)
+      if (update !== undefined) lines.push(`**参与者状态更新：** ${update}`)
+      tracker.rosterStatusSignature = currentSignature
+    }
   }
 
   for (const round of run.rounds.slice(0, MAX_REF_ITEMS)) {
@@ -619,7 +625,6 @@ function transcriptLines(
       if ((!roundIsTerminal(round.state) && run.state !== 'stopped') || !turnIsTerminal(turn.state)) continue
       if (tracker.emittedTurnKeys.has(key)) continue
       tracker.emittedTurnKeys.add(key)
-      if (turn.role === 'decision-judge') continue
       if (!tracker.turnFloors.has(key)) tracker.turnFloors.set(key, tracker.nextFloor++)
       const floor = tracker.turnFloors.get(key)
       if (floor !== undefined) lines.push(...transcriptTurnLines(run, round.round, floor, turn))
@@ -750,14 +755,40 @@ function formatPublicSpeech(value: string): string {
     .replace(/^(立场|结论|建议|验收标准|主要风险|最高影响不确定性)\s*[：:]\s*/gmu, (_match, heading: string) => `**${heading}**：`)
 }
 
-function tableCell(value: string): string {
-  return formatInlineText(value).replace(/\n/gu, ' ')
-}
-
 interface DisplayRoute {
   readonly operator: string
+
   readonly model: string
   readonly requested?: { readonly operator: string; readonly model: string }
+}
+function normalizeRouteValue(value: string): string {
+  return value
+    .replace(ANSI_SGR_RE, '')
+    .replace(TRAILING_FALLBACK_ANSI, '')
+    .trim()
+}
+
+function rosterTerminalStatusSignature(run: DebateRunSnapshotV1): string {
+  const values: string[] = []
+  for (const role of run.roster) {
+    const status = latestRoleTerminalState(run, role.role)
+    if (status !== undefined) values.push(`${role.role}:${status}`)
+  }
+  return values.join('\u0000')
+}
+
+function rosterTerminalStatusSummary(run: DebateRunSnapshotV1): string | undefined {
+  const lines: string[] = []
+  for (const role of run.roster) {
+    const status = latestRoleTerminalState(run, role.role)
+    if (status === undefined) continue
+    lines.push(`${roleTitle(role.role, run.roster)}：${turnStateLabel(status)}`)
+  }
+  return lines.length === 0 ? undefined : lines.join('；')
+}
+
+function latestRoleTerminalState(run: DebateRunSnapshotV1, role: string): DebateRunSnapshotV1['rounds'][number]['turns'][number]['state'] | undefined {
+  return latestRoleTurn(run, role, turn => turnIsTerminal(turn.state))?.state
 }
 
 function configuredRoute(role: DebateRunSnapshotV1['roster'][number]): DisplayRoute {
@@ -768,10 +799,10 @@ function configuredRoute(role: DebateRunSnapshotV1['roster'][number]): DisplayRo
 }
 
 function actualRoute(turn: DebateRunSnapshotV1['rounds'][number]['turns'][number]): DisplayRoute {
-  const requestedOperator = turn.routing?.requestedOperatorId ?? turn.operatorId
-  const requestedModel = turn.routing?.requestedModel ?? turn.model
-  const actualOperator = turn.routing?.actualOperatorId ?? turn.operatorId
-  const actualModel = turn.routing?.actualModel ?? turn.model
+  const requestedOperator = normalizeRouteValue(turn.routing?.requestedOperatorId ?? turn.operatorId)
+  const requestedModel = normalizeRouteValue(turn.routing?.requestedModel ?? turn.model)
+  const actualOperator = normalizeRouteValue(turn.routing?.actualOperatorId ?? turn.operatorId)
+  const actualModel = normalizeRouteValue(turn.routing?.actualModel ?? turn.model)
   const requested = requestedOperator === actualOperator && requestedModel === actualModel
     ? undefined
     : { operator: operatorLabel(requestedOperator), model: modelLabel(requestedModel) }
@@ -796,13 +827,16 @@ function modelLabel(value: string): string {
 function latestRoleTurn(
   run: DebateRunSnapshotV1,
   role: string,
+  predicate?: (turn: DebateRunSnapshotV1['rounds'][number]['turns'][number]) => boolean,
 ): DebateRunSnapshotV1['rounds'][number]['turns'][number] | undefined {
   for (let roundIndex = run.rounds.length - 1; roundIndex >= 0; roundIndex -= 1) {
     const round = run.rounds[roundIndex]
     if (round === undefined) continue
     for (let turnIndex = round.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
       const turn = round.turns[turnIndex]
-      if (turn?.role === role) return turn
+      if (turn === undefined || turn.role !== role) continue
+      if (predicate !== undefined && !predicate(turn)) continue
+      return turn
     }
   }
   return undefined
