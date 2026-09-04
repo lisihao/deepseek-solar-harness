@@ -345,7 +345,7 @@ export function installDesktopPnpmRuntime(options: DesktopPnpmRuntimeOptions): D
         platform: options.platform,
         appExecutable: options.appExecutable,
         ...options.environment === undefined ? {} : { environment: options.environment },
-      }))
+      }) ?? options.appExecutable)
   removeStaleTemporaryFiles(pathDir, pnpmShimName)
   removeStaleTemporaryFiles(nodeBinDir, nodeShimName)
   removeStaleTemporaryFiles(privateDir, 'clear-env.mjs')
@@ -413,7 +413,7 @@ function platformResolve(filename: string, platform: NodeJS.Platform): string {
   return platform === 'win32' ? win32.resolve(filename) : resolve(filename)
 }
 
-/** Find a real Node executable without ever selecting the Electron APPL. */
+/** Find a packaged background Helper or real Node without selecting the Electron APPL. */
 export function resolveHeadlessNodeExecutable(options: {
   platform: NodeJS.Platform
   appExecutable: string
@@ -438,8 +438,20 @@ export function resolveHeadlessNodeExecutable(options: {
     : options.platform === 'linux'
       ? ['/usr/local/bin/node', '/usr/bin/node']
       : []
+  const packagedHelper = options.platform === 'darwin'
+    ? resolve(
+      dirname(options.appExecutable),
+      '..',
+      'Frameworks',
+      `${basename(options.appExecutable)} Helper.app`,
+      'Contents',
+      'MacOS',
+      `${basename(options.appExecutable)} Helper`,
+    )
+    : undefined
   const appExecutable = platformResolve(options.appExecutable, options.platform).toLowerCase()
-  for (const candidate of [...pathCandidates, ...fixedCandidates]) {
+  for (const candidate of [packagedHelper, ...pathCandidates, ...fixedCandidates]) {
+    if (candidate === undefined) continue
     if (!platformAbsolute(candidate, options.platform)) continue
     if (platformResolve(candidate, options.platform).toLowerCase() === appExecutable) continue
     if (isExecutableFile(candidate)) return candidate
@@ -450,7 +462,7 @@ export function resolveHeadlessNodeExecutable(options: {
 function posixHeadlessNodeShim(headlessNodeExecutable: string | undefined): string {
   return [
     '#!/bin/sh',
-    'unset ELECTRON_RUN_AS_NODE',
+    'export ELECTRON_RUN_AS_NODE=1',
     headlessNodeExecutable === undefined
       ? 'exec /usr/bin/env node "$@"'
       : `exec ${quoteSh(headlessNodeExecutable)} "$@"`,
@@ -463,7 +475,7 @@ function windowsHeadlessNodeShim(headlessNodeExecutable: string | undefined): st
   return [
     '@echo off',
     'setlocal DisableDelayedExpansion',
-    `set "${RUN_AS_NODE}="`,
+    `set "${RUN_AS_NODE}=1"`,
     headlessNodeExecutable === undefined
       ? 'node.exe %*'
       : `${quoteBatchWord(headlessNodeExecutable)} %*`,

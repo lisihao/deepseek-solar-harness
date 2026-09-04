@@ -9322,8 +9322,8 @@ __metadata:
 
 "dsh-synapse@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.2.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.4.2
-  resolution: "dsh-synapse@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.2.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.2.tgz::hash=6cd846&locator=deepseek-harness-desktop%40workspace%3A."
-  checksum: 10c0/eb228cda40422ba13c4f2eb6e37091bc0350284356e6094ee91fef4f54f2032ec354e92e3c94ef28cbb0e019cbf08af9f3c966e16b7c4f60101eee28dfd352cf
+  resolution: "dsh-synapse@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.2.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.2.tgz::hash=562237&locator=deepseek-harness-desktop%40workspace%3A."
+  checksum: 10c0/a1f278213d4e9f94c390bce2453331d427296ce6d386688ecc34d871d26ff77f29c7a731d6b0abd244e1585cbf636bc44ecd27edbf9a2fdd7663857234d3717c
   languageName: node
   linkType: hard
 
