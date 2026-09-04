@@ -1717,6 +1717,38 @@ export interface Config {
 
 来源：[`packages/preset/persona/src/index.ts:34`](../packages/preset/persona/src/index.ts)
 
+<a id="deepseek-aidsh-physical-operator-chatgpt-web"></a>
+
+## `@deepseek-ai/dsh-physical-operator-chatgpt-web`
+
+需要：`browser` · `physicalOperators`
+
+```ts config-catalog
+/** Deployment-owned settings for one ChatGPT web operator. */
+export interface Config {
+  /** Stable physical-operator identity. */
+  readonly id?: string
+  /** Human-readable discovery name. */
+  readonly displayName?: string
+  /** Concise discovery description. */
+  readonly description?: string
+  /** Selection hints with no authority semantics. */
+  readonly tags?: string[]
+  /** Named browser workspace that owns the authenticated ChatGPT page. */
+  readonly workspaceName?: string
+  /** HTTPS ChatGPT URL opened or reused within the named workspace. */
+  readonly url?: string
+  /** Maximum time spent awaiting one assistant response. */
+  readonly generationTimeoutMs?: number
+  /** Polling delay while awaiting a finished assistant response. */
+  readonly pollIntervalMs?: number
+  /** Maximum serialized output retained from the webpage. */
+  readonly outputMaxBytes?: number
+}
+```
+
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:63`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
+
 <a id="deepseek-aidsh-physical-operator-resident"></a>
 
 ## `@deepseek-ai/dsh-physical-operator-resident`
@@ -3605,6 +3637,7 @@ export interface Config {
 - `@deepseek-ai/dsh-atomic-write`（[`packages/util/atomic-write/src/index.ts`](../packages/util/atomic-write/src/index.ts)）
 - `@deepseek-ai/dsh-base`（[`packages/bundle/base/src/index.ts`](../packages/bundle/base/src/index.ts)）
 - `@deepseek-ai/dsh-brand`（[`packages/util/brand/src/index.ts`](../packages/util/brand/src/index.ts)）
+- `@deepseek-ai/dsh-chatgpt-web-operator`（[`packages/bundle/chatgpt-web-operator/src/index.ts`](../packages/bundle/chatgpt-web-operator/src/index.ts)）
 - `@deepseek-ai/dsh-client-schema-form`（[`packages/client/schema-form/src/index.ts`](../packages/client/schema-form/src/index.ts)）
 - `@deepseek-ai/dsh-client-test-runtime`（[`packages/test-support/client-runtime/src/index.ts`](../packages/test-support/client-runtime/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-attachment`（[`packages/client/ui-attachment/src/index.ts`](../packages/client/ui-attachment/src/index.ts)）
