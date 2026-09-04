@@ -122,6 +122,7 @@ describe('physical_operator tool', () => {
       ['direct', 'Current Model Only'],
       ['codex', 'Codex'],
       ['claude-code', 'Claude Code'],
+      ['chatgpt-web', 'ChatGPT Web'],
     ])
     const automatic = (await ctx.systemPrompt.assemble({ agent })).sections
       .find(candidate => candidate.name === 'tool:physical-operator')?.text

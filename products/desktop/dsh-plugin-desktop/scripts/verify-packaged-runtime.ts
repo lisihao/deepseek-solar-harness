@@ -165,6 +165,8 @@ export const REQUIRED_UNPACKED_PACKAGE_SPECIFIERS = [
   '@deepseek-ai/dsh-browser-ego-lite',
   '@deepseek-ai/dsh-tool-browser',
   '@deepseek-ai/dsh-ego-lite-browser/cordis.patch.yml',
+  '@deepseek-ai/dsh-chatgpt-web-operator/cordis.patch.yml',
+  '@deepseek-ai/dsh-physical-operator-chatgpt-web',
   '@deepseek-ai/dsh-archify',
   '@deepseek-ai/dsh-archify/cordis.patch.yml',
   '@deepseek-ai/dsh-resident-operators/cordis.patch.yml',

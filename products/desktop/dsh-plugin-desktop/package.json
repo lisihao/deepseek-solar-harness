@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.12.3",
+  "version": "3.12.4",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -141,6 +141,7 @@
     "@deepseek-ai/dsh-browser": "file:vendor/dsh-packages/deepseek-ai-dsh-browser-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-browser-ego-lite": "file:vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-capability-capsule": "file:vendor/dsh-packages/deepseek-ai-dsh-capability-capsule-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-chatgpt-web-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-chatgpt-web-operator-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-connection": "file:vendor/dsh-packages/deepseek-ai-dsh-client-connection-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-hmr": "file:vendor/dsh-packages/deepseek-ai-dsh-client-hmr-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.6",
@@ -210,6 +211,7 @@
     "@deepseek-ai/dsh-output-style": "file:vendor/dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-permission-presets": "0.1.0-rc.6",
     "@deepseek-ai/dsh-physical-operator": "file:vendor/dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz",
+    "@deepseek-ai/dsh-physical-operator-chatgpt-web": "file:vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-physical-operator-resident": "file:vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz",
     "@deepseek-ai/dsh-plan-mode": "0.1.0-rc.6",
     "@deepseek-ai/dsh-pwsh-local": "0.1.0-rc.6",

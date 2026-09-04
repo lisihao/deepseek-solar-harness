@@ -10,7 +10,10 @@ export interface PhysicalOperatorProfilePreference {
 }
 
 /** User-selected policy controlling whether the main Agent delegates work. */
-export type PhysicalOperatorRoutingPolicy = 'auto' | 'direct' | 'codex' | 'claude-code'
+export type PhysicalOperatorRoutingPolicy = 'auto' | 'direct' | 'codex' | 'claude-code' | 'chatgpt-web'
+
+/** A concrete operator that a user can select as a main-model route. */
+export type PhysicalOperatorRoutingTarget = Exclude<PhysicalOperatorRoutingPolicy, 'auto' | 'direct'>
 
 /** One routing choice displayed by a client. */
 export interface PhysicalOperatorRoutingOption {

@@ -115,6 +115,9 @@ describe('desktop profile composition', () => {
     expect(rows.find(row => row.id === 'tool-browser')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-tool-browser',
     }))
+    expect(rows.find(row => row.id === 'physical-operator-chatgpt-web')).toEqual(expect.objectContaining({
+      name: '@deepseek-ai/dsh-physical-operator-chatgpt-web',
+    }))
     expect(rows.find(row => row.id === 'archify')).toEqual(expect.objectContaining({
       name: '@deepseek-ai/dsh-archify',
     }))

@@ -1,6 +1,6 @@
 # Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
-#   pnpm run verify-translation-pairing --write packages/physical-operator/tool-physical-operator/README.md
-README.md: b8d637f80af09ba49b669b36f76273ecdebdc789
-README.zh.md: ef51e3f0f713c151a22c030c793db3ba1acdd276
+#   pnpm run verify-translation-pairing --write packages/physical-operator/physical-operator-chatgpt-web/README.md
+README.md: d72e43a22999d04c651bef9d520113cdbf32434c
+README.zh.md: 44b1cef51ed9a7f669b694ed91cd34df67f673ca

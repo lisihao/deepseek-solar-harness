@@ -137,6 +137,7 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-headless': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-resident-operators': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-orchestrations': ['cordis.patch.yml'],
+  '@deepseek-ai/dsh-chatgpt-web-operator': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-ego-lite-browser': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-client-ui-remote-modules': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-client-ui-theme': ['lib/styles'],
