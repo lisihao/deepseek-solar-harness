@@ -191,10 +191,16 @@ const SELECT_MODEL = String.raw`async (input) => {
 }`
 
 const RESPONSE_STATE = String.raw`() => {
-  const replies = [...document.querySelectorAll('[data-message-author-role="assistant"]')]
+  const replyElements = [...document.querySelectorAll('[data-message-author-role="assistant"]')];
+  const replies = replyElements
     .map((element) => element.querySelector('.markdown') ?? element)
     .map((element) => element.textContent ?? '')
     .filter((text) => text.trim().length > 0);
+  const latestReply = replyElements.at(-1) ?? null;
+  const turn = latestReply?.closest('[data-testid^="conversation-turn-"]') ?? null;
+  const settled = turn !== null && turn.querySelector(
+    '[data-testid="copy-turn-action-button"],[aria-label="Copy response"],[aria-label="复制回复"]',
+  ) !== null;
   const generating = [...document.querySelectorAll('button,[role="button"]')].some((element) => {
     const label = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/g, ' ').trim();
     return /stop generating|stop streaming|停止生成/i.test(label);
@@ -203,6 +209,7 @@ const RESPONSE_STATE = String.raw`() => {
     assistantCount: replies.length,
     response: replies.at(-1) ?? '',
     generating,
+    settled,
   };
 }`
 
@@ -240,9 +247,16 @@ await browser.run({
   reuse: 'exact-url',
   waitUntil: 'dom-content-loaded',
 });
-const inspect = asRecord(await browser.evaluate(page, ${JSON.stringify(INSPECT_PAGE)}));
-if (inspect === undefined) return { status: 'protocol-error' };
-if (inspect.loginRequired === true) return { status: 'auth-required' };
+const readinessStartedAt = Date.now();
+const readinessTimeoutMs = Math.min(10_000, request.generationTimeoutMs);
+let inspect;
+while (Date.now() - readinessStartedAt <= readinessTimeoutMs) {
+  inspect = asRecord(await browser.evaluate(page, ${JSON.stringify(INSPECT_PAGE)}));
+  if (inspect === undefined) return { status: 'protocol-error' };
+  if (inspect.loginRequired === true) return { status: 'auth-required' };
+  if (inspect.inputReady === true && Number.isSafeInteger(inspect.assistantCount)) break;
+  await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
+}
 if (inspect.inputReady !== true || !Number.isSafeInteger(inspect.assistantCount)) {
   return { status: 'input-unavailable' };
 }
@@ -270,7 +284,6 @@ await browser.run({
 await browser.evaluate(page, ${JSON.stringify(REMOVE_INPUT_MARKER)});
 const initialCount = inspect.assistantCount;
 const startedAt = Date.now();
-let sawGenerating = false;
 let stableResponse = '';
 let stableSamples = 0;
 while (Date.now() - startedAt <= request.generationTimeoutMs) {
@@ -278,14 +291,16 @@ while (Date.now() - startedAt <= request.generationTimeoutMs) {
   if (state === undefined
     || !Number.isSafeInteger(state.assistantCount)
     || typeof state.response !== 'string'
-    || typeof state.generating !== 'boolean') {
+    || typeof state.generating !== 'boolean'
+    || typeof state.settled !== 'boolean') {
     return { status: 'protocol-error' };
   }
-  if (state.generating) sawGenerating = true;
   if (state.assistantCount > initialCount && state.response.trim().length > 0) {
-    stableSamples = state.response === stableResponse && !state.generating ? stableSamples + 1 : 0;
+    stableSamples = state.response === stableResponse && state.settled && !state.generating
+      ? stableSamples + 1
+      : 0;
     stableResponse = state.response;
-    if ((sawGenerating && !state.generating) || stableSamples >= 2) {
+    if (stableSamples >= 1) {
       const reserveBytes = Math.min(512, Math.floor(request.outputMaxBytes / 2));
       const responseBudget = request.outputMaxBytes - reserveBytes;
       const encoder = new TextEncoder();

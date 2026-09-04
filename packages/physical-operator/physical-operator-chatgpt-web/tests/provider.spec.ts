@@ -156,7 +156,7 @@ describe('ChatGPT Web physical operator', () => {
       outputMaxBytes: 2_048,
     })
     const open = program.source.indexOf("id: 'chatgpt-open'")
-    const inspect = program.source.indexOf('const inspect =')
+    const inspect = program.source.indexOf('const readinessStartedAt =')
     const select = program.source.indexOf('const selection =')
     const fill = program.source.indexOf("id: 'chatgpt-fill'")
     const send = program.source.indexOf("id: 'chatgpt-send'")
@@ -170,7 +170,54 @@ describe('ChatGPT Web physical operator', () => {
     expect(program.source).toContain("return { status: 'auth-required' }")
     expect(program.source).toContain("return { status: 'model-selection-unavailable' }")
     expect(program.source).toContain("return { status: 'generation-timeout' }")
+    expect(program.source).toContain('copy-turn-action-button')
+    expect(program.source).toContain("typeof state.settled !== 'boolean'")
+    expect(program.source).toContain('state.settled && !state.generating')
+    expect(program.source).not.toContain('(sawGenerating && !state.generating) || stableSamples >= 2')
     expect(program.source).not.toContain("kind: 'close-page'")
+  })
+
+  it('does not settle a stable ChatGPT thinking placeholder before final response controls appear', async () => {
+    const program = adapter.buildChatGptWebProgram({
+      url: 'https://chatgpt.com/',
+      workspaceName: 'fixture-chatgpt-web',
+      prompt: 'question',
+      generationTimeoutMs: 1_000,
+      pollIntervalMs: 1,
+      outputMaxBytes: 2_048,
+    })
+    const observations = [
+      { assistantCount: 1, response: 'Pro 思考中', generating: false, settled: false },
+      { assistantCount: 1, response: 'Pro 思考中', generating: false, settled: false },
+      { assistantCount: 1, response: 'final response', generating: false, settled: true },
+      { assistantCount: 1, response: 'final response', generating: false, settled: true },
+    ]
+    let inspection = 0
+    let observation = 0
+    const browser = {
+      run: async () => undefined,
+      evaluate: async (_page: string, evaluator: string) => {
+        if (evaluator.includes('loginRequired')) {
+          const inputReady = inspection > 0
+          inspection += 1
+          return { loginRequired: false, inputReady, assistantCount: 0 }
+        }
+        if (evaluator.includes('removeAttribute')) return true
+        return observations[Math.min(observation++, observations.length - 1)]
+      },
+    }
+    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (
+      ...args: string[]
+    ) => (browserArgument: unknown) => Promise<unknown>
+    const execute = new AsyncFunction('browser', program.source)
+
+    await expect(execute(browser)).resolves.toEqual({
+      status: 'completed',
+      response: 'final response',
+      truncated: false,
+    })
+    expect(inspection).toBe(2)
+    expect(observation).toBe(4)
   })
 
   it('emits browser evaluator functions as executable JavaScript rather than TypeScript source', () => {
