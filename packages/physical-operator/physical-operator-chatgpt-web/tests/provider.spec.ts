@@ -206,7 +206,7 @@ describe('ChatGPT Web physical operator', () => {
         return observations[Math.min(observation++, observations.length - 1)]
       },
     }
-    const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (
+    const AsyncFunction = (async function () {}).constructor as unknown as new (
       ...args: string[]
     ) => (browserArgument: unknown) => Promise<unknown>
     const execute = new AsyncFunction('browser', program.source)
