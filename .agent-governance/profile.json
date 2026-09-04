@@ -305,6 +305,15 @@
       "timeout_seconds": 1800
     },
     {
+      "id": "billing-install",
+      "label": "Web Billing dependency install",
+      "command": ["corepack", "pnpm", "install", "--ignore-workspace", "--frozen-lockfile"],
+      "cwd": "plugins/managed/web-billing",
+      "scopes": ["managed-billing"],
+      "levels": ["full"],
+      "timeout_seconds": 300
+    },
+    {
       "id": "billing-check",
       "label": "Web Billing syntax contract",
       "command": ["npm", "run", "check"],
@@ -320,6 +329,7 @@
       "cwd": "plugins/managed/web-billing",
       "scopes": ["managed-billing"],
       "levels": ["full"],
+      "needs": ["billing-install"],
       "timeout_seconds": 300
     },
     {
