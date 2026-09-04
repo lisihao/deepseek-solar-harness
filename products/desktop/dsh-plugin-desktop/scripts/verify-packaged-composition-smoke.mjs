@@ -90,6 +90,7 @@ try {
   const teamRows = rowsWithId('agent-teams')
   const remoteRows = rowsWithId('remote-web-ui')
   const billingRows = rowsWithId('web-billing')
+  const synapseRows = rowsWithId('synapse')
   const remoteModuleRows = rowsWithId('ui-remote-modules')
   if (residentRows.length !== 1 || residentRows[0].name !== '@deepseek-ai/dsh-resident-operator-local') {
     throw new Error('verify-packaged-composition-smoke: Resident bundle is not composed exactly once')
@@ -148,6 +149,9 @@ try {
   }
   if (billingRows.length !== 1 || billingRows[0].name !== 'dsh-web-billing') {
     throw new Error('verify-packaged-composition-smoke: Billing bundle is not composed exactly once')
+  }
+  if (synapseRows.length !== 1 || synapseRows[0].name !== 'dsh-synapse') {
+    throw new Error('verify-packaged-composition-smoke: Synapse bundle is not composed exactly once')
   }
   for (const [id, name] of [
     ['genui', '@omdsh-dev/dsh-genui'],
@@ -227,6 +231,7 @@ try {
       memberPersonaPlacement: teamRows[0].config.memberPersonaPlacement,
       remoteWebUi: remoteRows[0].name,
       billing: billingRows[0].name,
+      synapse: synapseRows[0].name,
       deepSeekVisionModel: visionModel.id,
       deepSeekVisionModalities: visionModel.inputModalities,
       remoteModules: remoteModuleRows[0].name,

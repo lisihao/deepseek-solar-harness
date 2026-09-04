@@ -20,6 +20,7 @@ export const MANAGED_IDS = [
   'mnemon',
   'plugin-check',
   'plugin-console',
+  'synapse',
   'tool-markdown',
   'tool-regex',
   'tool-stat',

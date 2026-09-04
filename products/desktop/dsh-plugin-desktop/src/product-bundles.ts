@@ -31,6 +31,8 @@ export const TOOL_REGEX_PACKAGE = '@deepseek-ai/dsh-tool-regex'
 export const TOOL_MARKDOWN_PACKAGE = '@deepseek-ai/dsh-tool-markdown'
 export const CODEGRAPH_PACKAGE = 'dsh-codegraph'
 export const MNEMON_PACKAGE = 'dsh-mnemon'
+export const SYNAPSE_PACKAGE = 'dsh-synapse'
+export const SYNAPSE_ROW_ID = 'synapse'
 export const AEGIS_PACKAGE = 'aegis'
 export const BETTER_SIDEBAR_PACKAGE = 'dsh-better-sidebar'
 
@@ -56,6 +58,7 @@ export const PRODUCT_BUNDLE_ROW_IDS = new Map<string, string>([
   [TOOL_MARKDOWN_PACKAGE, 'tool-markdown'],
   [CODEGRAPH_PACKAGE, 'codegraph'],
   [MNEMON_PACKAGE, 'mnemon'],
+  [SYNAPSE_PACKAGE, SYNAPSE_ROW_ID],
   [AEGIS_PACKAGE, 'aegis-method-pack'],
   [BETTER_SIDEBAR_PACKAGE, 'better-sidebar'],
 ])
@@ -82,6 +85,7 @@ export const PRODUCT_BUNDLE_PACKAGES = [
   TOOL_MARKDOWN_PACKAGE,
   CODEGRAPH_PACKAGE,
   MNEMON_PACKAGE,
+  SYNAPSE_PACKAGE,
   AEGIS_PACKAGE,
   BETTER_SIDEBAR_PACKAGE,
 ] as const
