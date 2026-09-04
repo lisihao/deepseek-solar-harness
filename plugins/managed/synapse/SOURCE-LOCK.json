@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "package": "dsh-synapse",
+  "version": "0.4.1",
+  "repository": "https://github.com/liangmianya/dsh-synapse.git",
+  "tag": "v0.4.1",
+  "commit": "589aed43fece8a38fe9267d47ed9756eab343fec",
+  "license": "MIT",
+  "license_files": [
+    "LICENSE"
+  ],
+  "source_path": "plugins/managed/synapse",
+  "source_snapshot": {
+    "file_count": 25,
+    "git_tree_sha1": "99d69e4f99e8c6858598958e0e4c21bb4f82ef69"
+  },
+  "runtime_files": {
+    "index.js": "3486c5a9743f9642df4328aca0dd8b00b35930d13b30c25fb9a169d0cca10c80",
+    "client.js": "d97f1bb7b51f612dcdb4e2c1cdc612432ae3909be3682b69d03bde5a599cbac2",
+    "app.js": "3107ad9a74de80da03f7c3420f69e715a18afb8d19270ab8aa10e2698a8fc530"
+  },
+  "copy_policy": "The release tree is copied from the locked commit. Runtime files remain byte-for-byte faithful; only this lock and the fidelity record are downstream metadata."
+}

@@ -220,3 +220,16 @@ managed:
     license_evidence: plugins/managed/archify/LICENSE
     tests:
       - npm run check
+  - id: synapse
+    path: plugins/managed/synapse
+    package: dsh-synapse@0.4.1
+    source: https://github.com/liangmianya/dsh-synapse.git
+    upstream: https://github.com/liangmianya/dsh-synapse.git
+    source_branch: v0.4.1
+    accepted_sha: 589aed43fece8a38fe9267d47ed9756eab343fec
+    license: MIT
+    license_status: license-file
+    license_evidence: plugins/managed/synapse/LICENSE
+    tests:
+      - node --check index.js && node --check client.js && node --check app.js
+      - node --test test/*.test.js
