@@ -1,5 +1,7 @@
 # Project State
 
+English | [中文](PROJECT_STATE.zh.md)
+
 This file records the current execution path, durable architecture decisions, blocking gaps, and the single next implementation slice for the Solar branch. It does not replace the current-state [architecture map](architecture.md), package contracts, generated subsystem references, or rationale in [Agent Notes](../.agents/notes/README.md).
 
 ## Current execution path
