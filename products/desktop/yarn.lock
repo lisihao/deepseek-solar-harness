@@ -9297,7 +9297,7 @@ __metadata:
     dsh-codegraph: "file:vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz"
     dsh-llm-fallbacks: "file:vendor/dsh-packages/dsh-llm-fallbacks-0.3.3-solar.1.tgz"
     dsh-mnemon: "file:vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz"
-    dsh-synapse: "file:vendor/dsh-packages/dsh-synapse-0.4.2.tgz"
+    dsh-synapse: "file:vendor/dsh-packages/dsh-synapse-0.4.3.tgz"
     dsh-web-billing: "file:vendor/dsh-packages/dsh-web-billing-1.1.7.tgz"
     electron: "npm:43.4.0"
     electron-builder: "npm:26.15.3"
@@ -9320,10 +9320,10 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"dsh-synapse@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.2.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
-  version: 0.4.2
-  resolution: "dsh-synapse@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.2.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.2.tgz::hash=562237&locator=deepseek-harness-desktop%40workspace%3A."
-  checksum: 10c0/a1f278213d4e9f94c390bce2453331d427296ce6d386688ecc34d871d26ff77f29c7a731d6b0abd244e1585cbf636bc44ecd27edbf9a2fdd7663857234d3717c
+"dsh-synapse@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.3.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
+  version: 0.4.3
+  resolution: "dsh-synapse@file:./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.3.tgz#./dsh-plugin-desktop/vendor/dsh-packages/dsh-synapse-0.4.3.tgz::hash=ddb8e0&locator=deepseek-harness-desktop%40workspace%3A."
+  checksum: 10c0/0cfcb34baf3925126ad7907999216bb9ccf6fc39699d47360d5e13266adeacb901764d8e2a5d97147a820f4ce54760faa24495897b65c07df708096c01ae3dfb
   languageName: node
   linkType: hard
 

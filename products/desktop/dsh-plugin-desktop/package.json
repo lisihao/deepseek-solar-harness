@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-desktop",
-  "version": "3.14.0",
+  "version": "3.14.1",
   "description": "DSH Desktop: an Electron shell composed as a DeepSeek Harness Cordis plugin",
   "license": "MIT",
   "repository": {
@@ -288,7 +288,7 @@
     "dsh-codegraph": "file:vendor/dsh-packages/dsh-codegraph-0.1.0-solar.1.tgz",
     "dsh-llm-fallbacks": "file:vendor/dsh-packages/dsh-llm-fallbacks-0.3.3-solar.1.tgz",
     "dsh-mnemon": "file:vendor/dsh-packages/dsh-mnemon-0.2.15-solar.1.tgz",
-    "dsh-synapse": "file:vendor/dsh-packages/dsh-synapse-0.4.2.tgz",
+    "dsh-synapse": "file:vendor/dsh-packages/dsh-synapse-0.4.3.tgz",
     "dsh-web-billing": "file:vendor/dsh-packages/dsh-web-billing-1.1.7.tgz",
     "node-addon-require-builtin": "^0.1.4",
     "pnpm": "11.7.0",
