@@ -21,6 +21,8 @@ Synapse is an interface layer, not a second conversation system. DSH continues t
 
 The DSH bundle also ships a small companion adapter for the view switch. It registers the switch in the native Session header action row, hides only the legacy body-level switch, and delegates the view change to the locked Synapse bridge. The iframe, session projection, and map transport remain unchanged.
 
+The adapter pairs the legacy switch's `hidden` attribute with an explicit CSS rule, so Synapse's `display: flex` cannot make a second floating switch visible. DOM regression tests load both real client bundles in either order and verify computed visibility, map switching, and cleanup.
+
 ## Features
 
 | | Feature | 功能 |

@@ -12,6 +12,7 @@ index.js、client.js、app.js 是上游运行时代码的逐字节 faithful copy
 
 - adapter-host.js 只服务 companion bundle，并向既有 DSH boot manifest 追加一个可重复识别的 entry。
 - client-adapter.js 把视图控件注册到 conversation.session.header.actions 的 order 82，隐藏上游 body switch 后仍保留其 iframe overlay，并把点击委托给上游按钮。
+- 隐藏属性配合 adapter 内的显式 CSS 规则生效，避免上游 `display: flex` 覆盖浏览器默认隐藏样式。DOM 回归测试按两种顺序加载真实 client bundle，检查计算样式、地图切换和卸载恢复；不以源码字符串断言代替可见性验证。
 - adapter 使用 DSH 主题 token 和正常 flex 流布局；它不复制 map iframe、不解析屏幕文本、不创建第二个服务，也不改变会话/模型请求。
 - dsh-synapse/adapter-host 是可卸载的 DSH patch 行；移除它不会改变锁定的上游文件。
 
