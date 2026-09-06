@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 // @ts-expect-error The executable acceptance script is intentionally plain ESM.
-import { assertParallelWorkerEvents, assertRecursiveRlmEvents, assertSerializedScopeWorkerEvents, buildBlindRlmQualityRecording, countNativeSubscriptionTurns, resolveSubscriptionE2EMode } from '../scripts/verify-installed-orchestration-e2e.mjs'
+import { assertParallelWorkerEvents, assertRecursiveRlmEvents, assertSerializedScopeWorkerEvents, buildBlindRlmQualityRecording, countNativeSubscriptionTurns, installedBrowserProviderModule, resolveSubscriptionE2EMode } from '../scripts/verify-installed-orchestration-e2e.mjs'
 
 describe('installed orchestration E2E event assertions', () => {
+  it('resolves the installed Browser Provider from app.asar', () => {
+    expect(installedBrowserProviderModule('/Applications/DSH Desktop.app')).toBe(
+      '/Applications/DSH Desktop.app/Contents/Resources/app.asar/node_modules/@deepseek-ai/dsh-browser-ego-lite/lib/index.js',
+    )
+  })
+
   it('requires explicit authorization and defaults to the minimal subscription matrix', () => {
     expect(() => resolveSubscriptionE2EMode({})).toThrow('DSH_ALLOW_SUBSCRIPTION_E2E=1')
     expect(resolveSubscriptionE2EMode({ DSH_ALLOW_SUBSCRIPTION_E2E: '1' })).toBe('minimal')
