@@ -36,6 +36,20 @@ function appVersion(appRoot) {
   ], { encoding: 'utf8' }).trim()
 }
 
+export function installedBrowserProviderModule(appRoot) {
+  return join(
+    appRoot,
+    'Contents',
+    'Resources',
+    'app.asar',
+    'node_modules',
+    '@deepseek-ai',
+    'dsh-browser-ego-lite',
+    'lib',
+    'index.js',
+  )
+}
+
 function commonNode(id, overrides = {}) {
   return {
     id,
@@ -333,6 +347,7 @@ async function runInner(appRoot) {
     'lib',
     'index.js',
   )).href
+  const browserProviderModule = installedBrowserProviderModule(appRoot)
   const [{ OrchestrationDaemonClient }, { ResidentDaemonClient }] = await Promise.all([
     import(orchestrationModule),
     import(residentModule),
@@ -344,6 +359,7 @@ async function runInner(appRoot) {
     autoStart: false,
     connectTimeoutMs: 15_000,
     residentDriverModules: [],
+    browserProviderModules: [browserProviderModule],
   })
   const resident = new ResidentDaemonClient({
     root: join(dshHome, 'resident-operators'),
