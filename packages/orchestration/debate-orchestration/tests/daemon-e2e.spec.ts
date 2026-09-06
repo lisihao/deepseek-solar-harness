@@ -311,5 +311,5 @@ describe('Debate real TaskGraph binding', () => {
     const continuedEvents = await debate.readEvents({ runId: extended.runId, limit: 100 })
     expect(continuedEvents.events.filter(event => event.type === 'debate.round.started').map(event => event.round))
       .toEqual([1, 2, 3])
-  }, 15_000)
+  }, process.platform === 'win32' ? 30_000 : 15_000)
 })

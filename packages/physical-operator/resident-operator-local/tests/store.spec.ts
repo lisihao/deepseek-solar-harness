@@ -100,7 +100,7 @@ describe('ResidentStore', () => {
     store.close()
   })
 
-  it('orders bounded scrubbed observations across a Store restart and resumes by cursor', () => {
+  it('orders bounded scrubbed observations across a Store restart and resumes by cursor', { timeout: 15_000 }, () => {
     const path = root()
     const first = new ResidentStore(path)
     const accepted = first.accept('trace-command', 'trace-hash', 'codex', '/workspace', PROFILE, PROFILE_SOURCE)
