@@ -282,7 +282,12 @@ describe('Debate Service Definition', () => {
     expect(isDebateCommandReceiptReplay(receipt, 'control', 'continue-1', 'sha256:continue')).toBe(true)
     expect(isDebateCommandReceiptReplay(receipt, 'control', 'continue-1', 'sha256:other')).toBe(false)
     const { version: _legacyVersion, action: _legacyAction, expectedRevision: _legacyRevision, ...legacyReceipt } = receipt
-    expect(validateDebateCommandReceipt(legacyReceipt)).toMatchObject({ version: 1, method: 'control', commandId: 'continue-1' })
+    const normalizedLegacy = validateDebateCommandReceipt(legacyReceipt)
+    expect(normalizedLegacy).toMatchObject({ version: 1, method: 'control', commandId: 'continue-1' })
+    expect(validateDebateCommandReceipt(normalizedLegacy)).toEqual(normalizedLegacy)
+    expect(() => validateDebateCommandReceipt({ ...normalizedLegacy, action: 'continue' })).toThrow('action and expectedRevision')
+    expect(() => validateDebateCommandReceipt({ ...normalizedLegacy, expectedRevision: 3 })).toThrow('action and expectedRevision')
+    expect(() => validateDebateCommandReceipt({ ...normalizedLegacy, state: 'accepted' })).toThrow('action and expectedRevision')
   })
 
   it('rejects unknown fields, invalid versions, roster shape, and unsafe budgets', () => {

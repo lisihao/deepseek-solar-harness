@@ -20,6 +20,8 @@ Provider 必须使用导出的 policy、start、control、event-read、event、s
 
 Provider 在自己的写锁下持有 `DebateCommandReceiptV1`。相同的 `commandId`、method 和请求摘要会重放原始 response；同一 id 对应不同请求会冲突。revision fence 和 receipt commit 在 continuation grant 之前完成，因此两个过期控制请求不能同时预留相同的回合。
 
+已 settled 的历史控制回执可以同时省略 `action` 和 `expectedRevision`，包括先前加载时已规范化为 version-1 的回执。其原始 response 在后续写入和重启后仍可重放。仅包含一个控制字段的回执无效；新控制请求和未完成的 version-1 回执仍必须携带这两个字段。
+
 Debate 包是既有执行系统的 Consumer/Provider 接缝。它可以通过 `execution` 从 TaskGraph 节点或 RLM 会话调用，但不能创建图节点、派发物理算子、修改调度器状态或越过父级运行权限。Provider 负责这些集成，并必须保留它们的权威边界。
 
 ## Model Experience

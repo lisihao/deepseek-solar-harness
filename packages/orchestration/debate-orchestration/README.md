@@ -26,7 +26,7 @@ Each participant executing a sealed `NodeExecutionPlan` sees its fixed role pers
 
 #### Token effect
 
-Each roster slot receives one bounded prompt. Participant turns can overlap, while the judge starts only after their Evidence settles. The adapter preflights each new round against the effective token envelope supplied by the Provider.
+Each roster slot receives one bounded prompt. Its certified context budget includes the estimated serialized task, objective and workspace, plus 16,000 tokens for Context Packet metadata, capsule instructions and bounded upstream Evidence. The complete task includes the prior ledger, dissent and unresolved gaps, so later rounds retain them without a fixed total-context cutoff. Participant turns can overlap, while the judge starts only after their Evidence settles. The adapter uses the same context reservation when preflighting each new round against the Provider's effective token envelope; an insufficient envelope stops admission before any participant dispatch. A reservation does not represent actual billed usage.
 
 #### KV Cache effect
 

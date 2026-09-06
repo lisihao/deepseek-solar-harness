@@ -128,6 +128,7 @@ function resultFor(
 async function provider(
   root: string,
   executor: (turn: DebateTurnRequestV1) => Promise<DebateTurnResultV1>,
+  idFactory: () => string = () => 'run-fixture',
 ): Promise<LocalDebateProvider> {
   const ctx = new Context()
   contexts.push(ctx)
@@ -137,7 +138,7 @@ async function provider(
       return { version: 1, resultsBySlot: Object.fromEntries(entries) }
     },
   }
-  return new LocalDebateProvider(ctx, { root, executor: roundExecutor, idFactory: () => 'run-fixture' })
+  return new LocalDebateProvider(ctx, { root, executor: roundExecutor, idFactory })
 }
 
 async function expectTerminalConvergenceOrder(
@@ -912,6 +913,76 @@ describe('local Debate Provider', () => {
       throw new Error('unproven recovery must not execute another turn')
     })
     await expect(uncertain.start(startRequest)).rejects.toMatchObject({ code: 'DEBATE_INDETERMINATE' })
+  })
+
+  it.each([
+    { label: 'a published settled control receipt with omitted control fields', variant: 'settled-fields' as const },
+    { label: 'an unversioned settled control receipt', variant: 'unversioned' as const },
+  ])('recovers and rewrites $label without redispatch', async ({ variant }) => {
+    type PersistedCommand = {
+      commandId: string
+      version?: number
+      state?: string
+      action?: string
+      expectedRevision?: number
+    }
+    type PersistedState = {
+      commands: PersistedCommand[]
+      [key: string]: unknown
+    }
+
+    const root = await mkdtemp(join(tmpdir(), `dsh-debate-local-${variant}-`))
+    const source = await provider(root, async turn => resultFor(turn))
+    const startRequest = request('enabled', {
+      commandId: `start-${variant}`,
+      policy: policy('enabled', { maxRounds: 1 }),
+    })
+    const pending = await source.start(startRequest)
+    const approve = {
+      version: 1 as const,
+      commandId: `approve-${variant}`,
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve' as const,
+      reason: `fixture ${variant} receipt`,
+    }
+    const completed = await source.control(approve)
+    expect(completed.state).toBe('completed')
+    const originalEvents = (await source.readEvents({ runId: completed.runId, limit: 100 })).events
+
+    const persisted = JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as PersistedState
+    const receipt = persisted.commands.find(command => command.commandId === approve.commandId)
+    if (receipt === undefined) throw new Error(`fixture ${variant} control receipt is missing`)
+    delete receipt.action
+    delete receipt.expectedRevision
+    if (variant === 'unversioned') delete receipt.version
+    await writeFile(join(root, 'state.json'), `${JSON.stringify(persisted)}\n`, { mode: 0o600 })
+
+    let replayCalls = 0
+    const restored = await provider(root, async () => {
+      replayCalls += 1
+      throw new Error(`${variant} receipt replay must not execute another turn`)
+    })
+    await expect(restored.inspect(completed.runId)).resolves.toEqual(completed)
+    await expect(restored.readEvents({ runId: completed.runId, limit: 100 })).resolves.toMatchObject({ events: originalEvents })
+    await expect(restored.control(approve)).resolves.toEqual(completed)
+    expect(replayCalls).toBe(0)
+
+    const nextRunId = `run-after-${variant}`
+    const next = await provider(root, async turn => resultFor(turn), () => nextRunId)
+    const nextResult = await next.start(request('auto', { commandId: `start-after-${variant}` }))
+    expect(nextResult).toMatchObject({ runId: nextRunId, state: 'completed' })
+    const normalized = JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as PersistedState
+    if (variant === 'unversioned') {
+      expect(normalized.commands.find(command => command.commandId === approve.commandId)).toMatchObject({ version: 1, state: 'settled' })
+    }
+
+    const restarted = await provider(root, async () => {
+      throw new Error(`${variant} receipt must survive the second restart`)
+    }, () => 'unused-run-id')
+    await expect(restarted.inspect(completed.runId)).resolves.toEqual(completed)
+    await expect(restarted.inspect(nextResult.runId)).resolves.toEqual(nextResult)
+    await expect(restarted.readEvents({ runId: completed.runId, limit: 100 })).resolves.toMatchObject({ events: originalEvents })
   })
 
   it('pauses an active run at the round boundary and resumes without replaying the settled round', async () => {

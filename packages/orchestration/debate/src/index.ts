@@ -1156,8 +1156,9 @@ export function validateDebateEvent(value: unknown): DebateEventV1 {
 }
 
 /**
- * Validate a provider-owned idempotency receipt. The missing `version` form is
- * accepted only for already persisted receipts and is normalized to version 1.
+ * Validate a provider-owned idempotency receipt. Persisted receipts without a
+ * version normalize to version 1; settled historical control receipts may
+ * omit both control fields, including after that normalization is persisted.
  * @param value - untrusted receipt record.
  * @returns a validated receipt record.
  */
@@ -1169,13 +1170,16 @@ export function validateDebateCommandReceipt(value: unknown): DebateCommandRecei
   const method = enumValue(required(receipt, 'method', 'command receipt'), 'command receipt.method', new Set<DebateCommandReceiptV1['method']>(['start', 'control']))
   const actionValue = optional(receipt, 'action')
   const expectedRevisionValue = optional(receipt, 'expectedRevision')
+  const state = enumValue(required(receipt, 'state', 'command receipt'), 'command receipt.state', RECEIPT_STATES)
   if (method === 'start' && (actionValue !== undefined || expectedRevisionValue !== undefined)) {
     invalid('command receipt', 'start receipts cannot contain control fields')
   }
-  if (!legacy && method === 'control' && (actionValue === undefined || expectedRevisionValue === undefined)) {
+  if (method === 'control' && (actionValue === undefined) !== (expectedRevisionValue === undefined)) {
+    invalid('command receipt', 'control receipts require action and expectedRevision together')
+  }
+  if (!legacy && method === 'control' && state !== 'settled' && actionValue === undefined) {
     invalid('command receipt', 'new control receipts require action and expectedRevision')
   }
-  const state = enumValue(required(receipt, 'state', 'command receipt'), 'command receipt.state', RECEIPT_STATES)
   const responseValue = optional(receipt, 'response')
   if (state === 'settled' && responseValue === undefined) invalid('command receipt.response', 'is required for a settled receipt')
   const response = responseValue === undefined ? undefined : validateDebateRunSnapshot(responseValue)

@@ -50,7 +50,7 @@ const DEFAULT_TIMEOUT_MS = 30 * 60 * 1_000
 const MAX_RESULT_PREVIEW = 4_000
 const MAX_PROGRESS_PREVIEW = 1_600
 const MAX_PROGRESS_NAME = 160
-const DEBATE_CONTEXT_MAX_TOKENS = 16_000
+const DEBATE_CONTEXT_OVERHEAD_TOKENS = 16_000
 const NATIVE_SUBSCRIPTION_SESSION_BASELINE_TOKENS = 8_546
 const NATIVE_SUBSCRIPTION_OUTPUT_ALLOWANCE_TOKENS = 12_000
 
@@ -153,6 +153,17 @@ function taskFor(turn: DebateTurnRequestV1): string {
   ].join('\n')
 }
 
+function contextTokensFor(turn: DebateTurnRequestV1): number {
+  // Reserve the complete ledger separately from Context Packet metadata,
+  // capsule instructions and the judge's bounded upstream Evidence bodies.
+  const taskTokens = Math.ceil(JSON.stringify({
+    objective: turn.objective ?? turn.prompt,
+    workspace: turn.workspace,
+    task: taskFor(turn),
+  }).length / 4)
+  return taskTokens + DEBATE_CONTEXT_OVERHEAD_TOKENS
+}
+
 function graphNode(turn: DebateTurnRequestV1, participantIds: readonly string[]): OrchestrationNodeSpecV1 {
   const judge = turn.role === 'decision-judge'
   return {
@@ -165,7 +176,7 @@ function graphNode(turn: DebateTurnRequestV1, participantIds: readonly string[])
     capabilityRequirements: [],
     capabilityBudget: [],
     contextPolicy: {
-      maxTokens: DEBATE_CONTEXT_MAX_TOKENS,
+      maxTokens: contextTokensFor(turn),
       allowedSourceKinds: ['intent', 'artifact'],
       unavailableSource: 'block',
     },
@@ -436,9 +447,9 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
    * @returns Deterministic admission result without TaskGraph side effects.
    */
   preflight(request: DebateRoundExecutionRequestV1): DebateRoundBudgetPreflightV1 {
-    const inputTokens = request.turns.length * (
-      DEBATE_CONTEXT_MAX_TOKENS + NATIVE_SUBSCRIPTION_SESSION_BASELINE_TOKENS
-    )
+    const inputTokens = request.turns.reduce((total, turn) => (
+      total + contextTokensFor(turn) + NATIVE_SUBSCRIPTION_SESSION_BASELINE_TOKENS
+    ), 0)
     const outputTokens = request.turns.length * NATIVE_SUBSCRIPTION_OUTPUT_ALLOWANCE_TOKENS
     const estimate = { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens }
     const envelope = request.budgetEnvelope
