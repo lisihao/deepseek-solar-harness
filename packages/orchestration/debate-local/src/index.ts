@@ -7,10 +7,17 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { withFileLock, writeFileAtomicSync } from '@deepseek-ai/dsh-atomic-write'
 import DebateService, {
+  assertDebateExpectedRevision,
   DebateError,
+  deriveDebateEffectiveBudget,
+  evaluateDebateContinuationEligibility,
+  isDebateCommandReceiptReplay,
+  validateDebateCommandReceipt,
   validateDebateControlRequest,
+  validateDebateEvent,
   validateDebateEventReadRequest,
   validateDebatePolicy,
+  validateDebateRunSnapshot,
   validateDebateStartRequest,
 } from '@deepseek-ai/dsh-debate'
 import type {
@@ -21,8 +28,14 @@ import type {
   DebateClaimSeverity,
   DebateClaimStatus,
   DebateClaimV1,
+  DebateCommandReceiptStateV1,
+  DebateContinuationAllowanceV1,
+  DebateContinuationEligibilityV1,
+  DebateContinuationGrantV1,
+  DebateContinuationStateV1,
   DebateControlRequestV1,
   DebateDissentV1,
+  DebateEffectiveBudgetV1,
   DebateEventPageV1,
   DebateEventReadRequestV1,
   DebateEventType,
@@ -33,6 +46,7 @@ import type {
   DebateRoleId,
   DebateRoleSpecV1,
   DebateRoundSnapshotV1,
+  DebateRunResultV1,
   DebateRunSnapshotV1,
   DebateRunSummaryV1,
   DebateStartRequestV1,
@@ -106,11 +120,14 @@ interface StoredRun {
 
 /** Durable idempotency receipt for one accepted start or control command. */
 interface StoredCommand {
+  readonly version: 1
   readonly commandId: string
   readonly method: 'start' | 'control'
   readonly requestSha256: string
   readonly runId: string
-  state: 'accepted' | 'running' | 'settled' | 'indeterminate'
+  readonly action?: DebateControlRequestV1['action']
+  readonly expectedRevision?: number
+  state: DebateCommandReceiptStateV1
   response?: DebateRunSnapshotV1
 }
 
@@ -161,6 +178,15 @@ interface BudgetReservation {
   readonly costUsd?: number
 }
 
+/** Settled usage aggregated from one or more fully completed Debate rounds. */
+interface ObservedRoundUsage {
+  readonly roundCount: number
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly totalTokens: number
+  readonly costUsd?: number
+}
+
 interface ConvergenceResult {
   readonly version: 1
   readonly status: 'converged' | 'continue' | 'budget_limited' | 'max_rounds'
@@ -185,6 +211,11 @@ function unavailable(message: string, options?: ErrorOptions): never {
 function record(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) invalid(`${path} must be an object`)
   return value as Record<string, unknown>
+}
+
+function storedKeys(value: Record<string, unknown>, keys: readonly string[], path: string): void {
+  const unknown = Object.keys(value).filter(key => !keys.includes(key))
+  if (unknown.length > 0) unavailable(`${path} has unsupported fields: ${unknown.sort().join(', ')}`)
 }
 
 function text(value: unknown, path: string, max = 16_000): string {
@@ -247,6 +278,18 @@ function clone<T>(value: T): T {
 
 function roundNumber(value: number): number {
   return Math.round(value * 10_000) / 10_000
+}
+
+function safeIntegerSum(values: readonly number[], label: string): number {
+  const total = values.reduce((sum, value) => sum + value, 0)
+  if (!Number.isSafeInteger(total) || total < 0) invalid(`${label} must remain a non-negative safe integer`)
+  return total
+}
+
+function perRoundAllowance(total: number, rounds: number, label: string): number {
+  const allowance = Math.ceil(total / rounds)
+  if (!Number.isSafeInteger(allowance) || allowance < 1) invalid(`${label} must remain a positive safe integer`)
+  return allowance
 }
 
 function sortedUnique(values: readonly string[]): string[] {
@@ -795,7 +838,7 @@ function lifecycleTerminal(state: DebateLifecycle): boolean {
     || state === 'indeterminate' || state === 'budget_limited' || state === 'max_rounds'
 }
 
-/** Final lifecycle states cannot be reopened; a paused `stopped` run may resume. */
+/** Only the locked continuation grant may leave a settled final lifecycle; a paused `stopped` run may resume. */
 function lifecycleFinal(state: DebateLifecycle): boolean {
   return state === 'completed' || state === 'failed' || state === 'indeterminate'
     || state === 'budget_limited' || state === 'max_rounds'
@@ -910,12 +953,23 @@ export class LocalDebateProvider extends DebateService {
         evidence: collectEvidence(sourceRefs, emptyLedger(), [], []),
         cost: emptyCost(),
         provenance: this.provenance(normalized, requestSha256, policy),
+        result: {
+          version: 1,
+          outcome: 'running',
+          reason: 'debate plan has not reached a terminal outcome',
+        },
         createdAt: this.now(),
         updatedAt: this.now(),
       }
-      const run: StoredRun = { runId, request: clone({ ...normalized, policy }), snapshot: baseSnapshot, events: [] }
+      const run: StoredRun = {
+        runId,
+        request: clone({ ...normalized, policy }),
+        snapshot: this.withContinuation(baseSnapshot),
+        events: [],
+      }
       this.document.runs.push(run)
-      this.document.commands.push({
+      this.recordCommand({
+        version: 1,
         commandId: normalized.commandId,
         method: 'start',
         requestSha256,
@@ -924,6 +978,9 @@ export class LocalDebateProvider extends DebateService {
       })
       this.appendEvent(run, 'debate.planned', { mode: policy.mode, rosterSize: roster.length }, {
         state: policy.mode === 'disabled' ? 'stopped' : 'awaiting_approval',
+        ...(policy.mode === 'disabled' ? {
+          result: this.terminalResult('stopped', 'debate policy is disabled'),
+        } : {}),
       })
       this.appendEvent(run, 'debate.roster.qualified', {
         roles: roster.map(role => role.role),
@@ -931,7 +988,10 @@ export class LocalDebateProvider extends DebateService {
         maxAgentsPerRound: policy.budget.maxAgentsPerRound,
       })
       if (policy.mode === 'disabled') {
-        this.appendEvent(run, 'debate.stopped', { action: 'disabled', reason: 'debate policy is disabled' }, { state: 'stopped' })
+        this.appendEvent(run, 'debate.stopped', { action: 'disabled', reason: 'debate policy is disabled' }, {
+          state: 'stopped',
+          result: this.terminalResult('stopped', 'debate policy is disabled'),
+        })
       }
       /* jscpd:ignore-start -- start and control intentionally retain separate
        * receipt transitions; combining them would blur their distinct durable
@@ -984,7 +1044,7 @@ export class LocalDebateProvider extends DebateService {
     return { events, nextSequence }
   }
 
-  /** Apply an approval, pause, resume, stop, or reject with revision fencing. */
+  /** Apply an explicit lifecycle or two-round continuation command with revision fencing. */
   async control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1> {
     const normalized = validateDebateControlRequest(request)
     const admission = await this.mutate(() => {
@@ -992,12 +1052,7 @@ export class LocalDebateProvider extends DebateService {
       const existing = this.command('control', normalized.commandId, requestSha256)
       if (existing !== undefined) return { existing: clone(existing) } as const
       const run = this.requireRun(normalized.runId)
-      if (run.snapshot.revision !== normalized.expectedRevision) {
-        throw new DebateError(
-          `debate revision changed for ${run.runId}: expected ${String(normalized.expectedRevision)}, found ${String(run.snapshot.revision)}`,
-          'DEBATE_REVISION_CONFLICT',
-        )
-      }
+      assertDebateExpectedRevision(run.runId, normalized.expectedRevision, run.snapshot.revision)
       switch (normalized.action) {
         case 'approve':
           if (run.snapshot.state !== 'awaiting_approval') this.stateConflict(run, normalized.action)
@@ -1012,12 +1067,21 @@ export class LocalDebateProvider extends DebateService {
         case 'reject':
           if (run.snapshot.state !== 'awaiting_approval') this.stateConflict(run, normalized.action)
           break
+        case 'continue':
+          this.assertContinuationEligible(run)
+          break
+      }
+      if (normalized.action === 'continue') {
+        return this.admitContinuation(run, normalized, requestSha256)
       }
       this.recordCommand({
+        version: 1,
         commandId: normalized.commandId,
         method: 'control',
         requestSha256,
         runId: run.runId,
+        action: normalized.action,
+        expectedRevision: normalized.expectedRevision,
         state: 'accepted',
       })
       switch (normalized.action) {
@@ -1035,7 +1099,10 @@ export class LocalDebateProvider extends DebateService {
             this.persist()
             return { runId: run.runId, waitForActive: true as const }
           }
-          this.appendEvent(run, 'debate.stopped', { action: 'pause', reason: normalized.reason }, { state: 'stopped' })
+          this.appendEvent(run, 'debate.stopped', { action: 'pause', reason: normalized.reason }, {
+            state: 'stopped',
+            result: this.terminalResult('stopped', normalized.reason),
+          })
           break
         case 'stop':
           if (this.activeRuns.has(run.runId)) {
@@ -1048,10 +1115,16 @@ export class LocalDebateProvider extends DebateService {
             this.persist()
             return { runId: run.runId, waitForActive: true as const }
           }
-          this.appendEvent(run, 'debate.stopped', { action: 'stop', reason: normalized.reason }, { state: 'stopped' })
+          this.appendEvent(run, 'debate.stopped', { action: 'stop', reason: normalized.reason }, {
+            state: 'stopped',
+            result: this.terminalResult('stopped', normalized.reason),
+          })
           break
         case 'reject':
-          this.appendEvent(run, 'debate.stopped', { action: 'reject', reason: normalized.reason }, { state: 'stopped' })
+          this.appendEvent(run, 'debate.stopped', { action: 'reject', reason: normalized.reason }, {
+            state: 'stopped',
+            result: this.terminalResult('rejected', normalized.reason),
+          })
           break
       }
       const response = clone(run.snapshot)
@@ -1086,10 +1159,13 @@ export class LocalDebateProvider extends DebateService {
 
   private async runUntilTerminal(
     run: StoredRun,
-    action: 'auto' | 'approve' | 'resume',
+    action: 'auto' | 'approve' | 'resume' | 'continue',
     signal: AbortSignal,
   ): Promise<void> {
-    this.appendEvent(run, 'debate.admitted', { action }, { state: 'admitting' })
+    this.appendEvent(run, 'debate.admitted', { action }, {
+      state: 'admitting',
+      result: this.runningResult(`debate admitted through ${action}`),
+    })
     for (;;) {
       const result = await this.runRound(run, signal)
       if (result !== 'continue' || lifecycleTerminal(run.snapshot.state)) return
@@ -1097,7 +1173,10 @@ export class LocalDebateProvider extends DebateService {
       if (run.controlIntent?.action === 'pause' || active?.intent === 'pause') {
         const reason = run.controlIntent?.reason ?? 'pause requested at the round boundary'
         delete run.controlIntent
-        this.appendEvent(run, 'debate.stopped', { action: 'pause', reason }, { state: 'stopped' })
+        this.appendEvent(run, 'debate.stopped', { action: 'pause', reason }, {
+          state: 'stopped',
+          result: this.terminalResult('stopped', reason),
+        })
         return
       }
     }
@@ -1109,8 +1188,8 @@ export class LocalDebateProvider extends DebateService {
     // after a terminal lifecycle event has committed.
     if (lifecycleFinal(run.snapshot.state)) return 'terminal'
     const number = run.snapshot.currentRound + 1
-    const { policy } = run.snapshot
-    if (number > policy.budget.maxRounds) {
+    const effectiveBudget = this.effectiveBudget(run.snapshot)
+    if (number > effectiveBudget.maxRounds) {
       const lastRound = run.snapshot.rounds.at(-1)
       if (lastRound === undefined) {
         // This is only reachable after an externally edited/legacy state. Do
@@ -1138,14 +1217,18 @@ export class LocalDebateProvider extends DebateService {
           unresolvedClaimIds: synthesis.unresolvedClaimIds,
           dissentCount: synthesis.dissentCount,
           lifecycleState: 'max_rounds',
-        }, { state: 'max_rounds', synthesis })
+        }, {
+          state: 'max_rounds',
+          synthesis,
+          result: this.terminalResult('max_rounds', 'maximum rounds already exhausted'),
+        })
       } else {
-        this.synthesize(run, lastRound, 'max_rounds')
+        this.synthesize(run, lastRound, 'max_rounds', 'maximum rounds already exhausted')
       }
       return 'terminal'
     }
-    const slots = this.roundSlots(run.snapshot.roster, policy.budget.maxAgentsPerRound)
-    const admission = this.roundBudgetAdmission(run, slots, number)
+    const slots = this.roundSlots(run.snapshot.roster, effectiveBudget.maxAgentsPerRound)
+    const admission = this.roundBudgetAdmission(run, slots, number, effectiveBudget)
     if (admission !== undefined) {
       this.synthesizeBudgetAdmission(run, number, admission)
       return 'terminal'
@@ -1322,7 +1405,7 @@ export class LocalDebateProvider extends DebateService {
         confidence: result.confidence,
       }, { cost: nextCost })
       contributions.push({ slot, result })
-      const afterCostBudget = this.budgetLimit(run.snapshot.cost, policy)
+      const afterCostBudget = this.budgetLimit(run.snapshot.cost, effectiveBudget)
       if (afterCostBudget !== undefined) {
         budget = afterCostBudget
       }
@@ -1331,7 +1414,10 @@ export class LocalDebateProvider extends DebateService {
     if (interrupted) {
       const reason = run.controlIntent?.reason ?? 'active TaskGraph was interrupted'
       delete run.controlIntent
-      this.appendEvent(run, 'debate.stopped', { action: 'stop', reason }, { state: 'stopped' }, { round: number })
+      this.appendEvent(run, 'debate.stopped', { action: 'stop', reason }, {
+        state: 'stopped',
+        result: this.terminalResult('stopped', reason),
+      }, { round: number })
       return 'terminal'
     }
 
@@ -1345,7 +1431,13 @@ export class LocalDebateProvider extends DebateService {
         failedRound,
         terminalState === 'indeterminate' ? 'debate.indeterminate' : 'debate.failed',
         { round: number, errorCode: terminalState === 'indeterminate' ? 'DEBATE_INDETERMINATE' : 'DEBATE_TURN_FAILED' },
-        { state: terminalState },
+        {
+          state: terminalState,
+          result: this.terminalResult(
+            terminalState,
+            terminalState === 'indeterminate' ? 'a round outcome could not be proved' : 'a round slot failed',
+          ),
+        },
       )
       return 'terminal'
     }
@@ -1365,7 +1457,7 @@ export class LocalDebateProvider extends DebateService {
     this.replaceRoundProjection(run, reviewingRound, 'debate.claims.compiled', {
       round: number, claimCount: ledger.claims.length, dissentCount: dissent.length, unresolvedCount: unresolved.length,
     }, { claimLedger: ledger, dissent, unresolved, evidence })
-    const convergence = this.convergence(run, reviewingRound, priorUnresolved, budget)
+    const convergence = this.convergence(run, reviewingRound, priorUnresolved, budget, effectiveBudget)
     const { budget: _budget, ...snapshotConvergence } = convergence
     const completedRound: DebateRoundSnapshotV1 = { ...reviewingRound, state: 'completed', convergence: snapshotConvergence }
     this.replaceRoundProjection(run, completedRound, 'debate.convergence.evaluated', {
@@ -1397,6 +1489,7 @@ export class LocalDebateProvider extends DebateService {
         run,
         completedRound,
         convergence.status === 'converged' ? 'completed' : convergence.status,
+        convergence.reason,
       )
       return convergence.status === 'converged' ? 'converged' : 'terminal'
     }
@@ -1408,6 +1501,7 @@ export class LocalDebateProvider extends DebateService {
     round: DebateRoundSnapshotV1,
     priorUnresolved: readonly DebateUnresolvedV1[],
     budget: BudgetLimit | undefined,
+    effectiveBudget: DebateEffectiveBudgetV1,
   ): ConvergenceResult {
     const policy = run.snapshot.policy.convergence
     const settledAgents = new Set(round.turns.filter(turn => turn.state === 'settled').map(turn => turn.slotId)).size
@@ -1432,7 +1526,11 @@ export class LocalDebateProvider extends DebateService {
       && unresolvedHighSeverity <= policy.maxUnresolvedHighSeverity
       && !newUnresolved
       && !criticalEvidenceMissing
-    const atRoundLimit = round.round >= run.snapshot.policy.budget.maxRounds
+    const activeGrant = run.snapshot.continuation?.grants.at(-1)
+    const mustCompleteGrant = activeGrant !== undefined
+      && round.round >= activeGrant.firstRound
+      && round.round < activeGrant.lastRound
+    const atRoundLimit = round.round >= effectiveBudget.maxRounds
     const nonConvergedReason = [
       settledAgents < policy.minSettledAgents ? `settled agents ${String(settledAgents)} below ${String(policy.minSettledAgents)}` : undefined,
       score < policy.scoreThreshold ? `score ${String(score)} below ${String(policy.scoreThreshold)}` : undefined,
@@ -1442,16 +1540,18 @@ export class LocalDebateProvider extends DebateService {
     ].filter((entry): entry is string => entry !== undefined).join('; ')
     const reason = budget !== undefined
       ? budget.reason
-      : eligible
+      : eligible && !mustCompleteGrant
         ? 'settled agents, evidence coverage, confidence, and disagreement satisfy the convergence policy'
         : atRoundLimit
-          ? run.snapshot.policy.budget.maxRounds === 1
+          ? effectiveBudget.maxRounds === 1
             ? 'configured single-round Debate completed without convergence'
-            : `maximum rounds reached (${String(round.round)} / ${String(run.snapshot.policy.budget.maxRounds)})`
-          : nonConvergedReason
+            : `maximum rounds reached (${String(round.round)} / ${String(effectiveBudget.maxRounds)})`
+          : mustCompleteGrant
+            ? `continuation grant reserves round ${String(activeGrant.lastRound)} before convergence may settle`
+            : nonConvergedReason
     const status = budget !== undefined
       ? 'budget_limited'
-      : eligible
+      : eligible && !mustCompleteGrant
         ? 'converged'
         : atRoundLimit
           ? 'max_rounds'
@@ -1498,6 +1598,7 @@ export class LocalDebateProvider extends DebateService {
     run: StoredRun,
     round: DebateRoundSnapshotV1,
     finalState: 'completed' | 'budget_limited' | 'max_rounds',
+    reason: string,
   ): void {
     const judge = [...round.turns].reverse().find(turn => turn.role === 'decision-judge' && turn.state === 'settled')
     const running = {
@@ -1523,7 +1624,11 @@ export class LocalDebateProvider extends DebateService {
       unresolvedClaimIds: settled.unresolvedClaimIds,
       dissentCount: settled.dissentCount,
       lifecycleState: finalState,
-    }, { state: finalState, synthesis: settled }, { round: round.round })
+    }, {
+      state: finalState,
+      synthesis: settled,
+      result: this.terminalResult(finalState, reason),
+    }, { round: round.round })
   }
 
   private synthesizeBudgetAdmission(
@@ -1558,7 +1663,7 @@ export class LocalDebateProvider extends DebateService {
       lifecycleState: 'synthesizing',
     }, { state: 'synthesizing' }, { round })
     this.appendCostAccounted(run, round)
-    this.synthesize(run, synthesisRound, 'budget_limited')
+    this.synthesize(run, synthesisRound, 'budget_limited', budget.reason)
   }
 
   private roundExecutionRequest(
@@ -1661,6 +1766,252 @@ export class LocalDebateProvider extends DebateService {
     })
   }
 
+  /** Derive the currently authorized ceilings without changing the initial policy. */
+  private effectiveBudget(snapshot: DebateRunSnapshotV1): DebateEffectiveBudgetV1 {
+    return snapshot.continuation?.effectiveBudget
+      ?? deriveDebateEffectiveBudget(snapshot.policy, [])
+  }
+
+  private runningResult(reason: string): DebateRunResultV1 {
+    return { version: 1, outcome: 'running', reason }
+  }
+
+  private terminalResult(
+    outcome: Exclude<DebateRunResultV1['outcome'], 'running'>,
+    reason: string,
+  ): DebateRunResultV1 {
+    return { version: 1, outcome, reason: reason.slice(0, 4_000) }
+  }
+
+  /** Aggregate up to the most recent fully settled rounds without using a projected slot subtotal. */
+  private observedRoundUsage(
+    snapshot: DebateRunSnapshotV1,
+    count: number,
+  ): ObservedRoundUsage | undefined {
+    const rounds = snapshot.rounds
+      .filter(round => round.state === 'completed' && round.turns.length > 0 && round.turns.every(turn => turn.state === 'settled'))
+      .slice(-count)
+    if (rounds.length === 0) return undefined
+    const usages = rounds.flatMap(round => round.turns.map(turn => turn.usage))
+    if (usages.some(usage => usage === undefined)) return undefined
+    const settled = usages as readonly DebateUsageV1[]
+    const inputTokens = safeIntegerSum(settled.map(usage => usage.inputTokens), 'observed input tokens')
+    const outputTokens = safeIntegerSum(settled.map(usage => usage.outputTokens), 'observed output tokens')
+    const totalTokens = safeIntegerSum([inputTokens, outputTokens], 'observed total tokens')
+    const costs = settled.map(usage => usage.costUsd)
+    const costUsd = costs.every(cost => cost !== undefined)
+      ? roundNumber(costs.reduce((sum, cost) => sum + cost, 0))
+      : undefined
+    return {
+      roundCount: rounds.length,
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      ...(costUsd === undefined ? {} : { costUsd }),
+    }
+  }
+
+  /** Calculate fresh capacity for exactly two continuation rounds. */
+  private continuationAllowance(snapshot: DebateRunSnapshotV1): DebateContinuationAllowanceV1 {
+    const budget = snapshot.policy.budget
+    const observed = this.observedRoundUsage(snapshot, 2)
+    const normalInput = safeIntegerSum([
+      perRoundAllowance(budget.maxInputTokens, budget.maxRounds, 'normal input round allowance'),
+      perRoundAllowance(budget.maxInputTokens, budget.maxRounds, 'normal input round allowance'),
+    ], 'two normal input round allowances')
+    const normalOutput = safeIntegerSum([
+      perRoundAllowance(budget.maxOutputTokens, budget.maxRounds, 'normal output round allowance'),
+      perRoundAllowance(budget.maxOutputTokens, budget.maxRounds, 'normal output round allowance'),
+    ], 'two normal output round allowances')
+    const normalTotal = safeIntegerSum([
+      perRoundAllowance(budget.maxTotalTokens, budget.maxRounds, 'normal total round allowance'),
+      perRoundAllowance(budget.maxTotalTokens, budget.maxRounds, 'normal total round allowance'),
+    ], 'two normal total round allowances')
+    const observedInput = observed === undefined
+      ? 0
+      : safeIntegerSum([
+        observed.inputTokens,
+        ...(observed.roundCount === 1 ? [observed.inputTokens] : []),
+        1,
+      ], 'observed input continuation allowance')
+    const observedOutput = observed === undefined
+      ? 0
+      : safeIntegerSum([
+        observed.outputTokens,
+        ...(observed.roundCount === 1 ? [observed.outputTokens] : []),
+        1,
+      ], 'observed output continuation allowance')
+    const observedTotal = observed === undefined
+      ? 0
+      : safeIntegerSum([
+        observed.totalTokens,
+        ...(observed.roundCount === 1 ? [observed.totalTokens] : []),
+        1,
+      ], 'observed total continuation allowance')
+    const additionalInputTokens = Math.max(normalInput, observedInput)
+    const additionalOutputTokens = Math.max(normalOutput, observedOutput)
+    const additionalTotalTokens = Math.max(
+      normalTotal,
+      observedTotal,
+      safeIntegerSum([additionalInputTokens, additionalOutputTokens], 'continuation input plus output allowance'),
+    )
+    return {
+      version: 1,
+      additionalRounds: 2,
+      additionalTurnsPerAgent: 2,
+      additionalInputTokens,
+      additionalOutputTokens,
+      additionalTotalTokens,
+    }
+  }
+
+  /** Keep actual metered spend separate from native-subscription capacity. */
+  private continuationEligibility(snapshot: DebateRunSnapshotV1): DebateContinuationEligibilityV1 {
+    const eligibility = evaluateDebateContinuationEligibility(snapshot)
+    if (eligibility.status !== 'eligible') return eligibility
+    const maxCostUsd = snapshot.policy.budget.maxCostUsd
+    if (maxCostUsd === undefined || !snapshot.roster.some(slot => slot.source === 'metered-api')) return eligibility
+    const observed = this.observedRoundUsage(snapshot, 1)
+    if (observed?.costUsd === undefined) return eligibility
+    const usedUsd = snapshot.cost.costUsd ?? 0
+    const reservedUsd = roundNumber(observed.costUsd * 2)
+    if (usedUsd + reservedUsd < maxCostUsd) return eligibility
+    return {
+      version: 1,
+      status: 'approval_required',
+      outcome: eligibility.outcome,
+      accounting: 'sufficient',
+      reason: 'cost_cap_requires_approval',
+      message: `metered continuation would exceed the caller cost cap (${String(usedUsd)} + ${String(reservedUsd)} / ${String(maxCostUsd)} USD)`,
+      costLimit: {
+        version: 1,
+        limitUsd: maxCostUsd,
+        usedUsd,
+        ...(reservedUsd > 0 && reservedUsd <= 100_000 ? { reservedUsd } : {}),
+      },
+    }
+  }
+
+  /** Build a continuation projection from immutable grants and sealed summaries. */
+  private continuationState(
+    snapshot: DebateRunSnapshotV1,
+    grants = snapshot.continuation?.grants ?? [],
+    synthesisHistory = snapshot.continuation?.synthesisHistory ?? [],
+  ): DebateContinuationStateV1 {
+    const eligibility = this.continuationEligibility(snapshot)
+    const offeredAllowance = eligibility.status === 'ineligible'
+      ? undefined
+      : this.continuationAllowance(snapshot)
+    return {
+      version: 1,
+      grants: clone(grants),
+      synthesisHistory: clone(synthesisHistory),
+      effectiveBudget: deriveDebateEffectiveBudget(snapshot.policy, grants),
+      ...(offeredAllowance === undefined ? {} : { offeredAllowance }),
+      eligibility,
+    }
+  }
+
+  /** Add or refresh the public continuation projection without changing the initial policy. */
+  private withContinuation(
+    snapshot: DebateRunSnapshotV1,
+    grants = snapshot.continuation?.grants ?? [],
+    synthesisHistory = snapshot.continuation?.synthesisHistory ?? [],
+  ): DebateRunSnapshotV1 {
+    return {
+      ...snapshot,
+      continuation: this.continuationState(snapshot, grants, synthesisHistory),
+    }
+  }
+
+  private assertContinuationEligible(run: StoredRun): void {
+    const eligibility = this.continuationEligibility(run.snapshot)
+    if (eligibility.status !== 'eligible') {
+      throw new DebateError(eligibility.message, 'DEBATE_STATE_CONFLICT')
+    }
+    if (run.snapshot.synthesis?.state !== 'settled') {
+      throw new DebateError('the previous moderator summary is not settled', 'DEBATE_STATE_CONFLICT')
+    }
+    const priorGrant = run.snapshot.continuation?.grants.at(-1)
+    if (priorGrant !== undefined && priorGrant.lastRound !== run.snapshot.currentRound) {
+      throw new DebateError('the previous continuation grant has unexecuted rounds', 'DEBATE_STATE_CONFLICT')
+    }
+  }
+
+  /** Persist one continuation grant and its command receipt as one locked state replacement. */
+  private admitContinuation(
+    run: StoredRun,
+    request: DebateControlRequestV1,
+    requestSha256: string,
+  ): { readonly runId: string; readonly execute: 'continue' } {
+    const previous = this.continuationState(run.snapshot)
+    const summary = run.snapshot.synthesis
+    if (summary?.state !== 'settled') unavailable('settled Debate continuation omitted its moderator summary')
+    const firstRound = run.snapshot.currentRound + 1
+    if (!Number.isSafeInteger(firstRound) || firstRound > Number.MAX_SAFE_INTEGER - 1) {
+      invalid('continuation round numbers exceed the supported finite range')
+    }
+    const allowance = this.continuationAllowance(run.snapshot)
+    const grant: DebateContinuationGrantV1 = {
+      version: 1,
+      commandId: request.commandId,
+      expectedRevision: request.expectedRevision,
+      grantedAt: this.now(),
+      firstRound,
+      lastRound: firstRound + 1,
+      allowance,
+    }
+    const synthesisHistory = [
+      ...previous.synthesisHistory,
+      {
+        version: 1 as const,
+        throughRound: run.snapshot.currentRound,
+        sealedAt: grant.grantedAt,
+        synthesis: clone(summary),
+      },
+    ]
+    const grants = [...previous.grants, grant]
+    const pendingSynthesis = {
+      version: 1 as const,
+      state: 'pending' as const,
+      unresolvedClaimIds: run.snapshot.unresolved.map(entry => entry.claimId),
+      dissentCount: run.snapshot.dissent.length,
+    }
+    const continuation = this.continuationState({
+      ...run.snapshot,
+      state: 'admitting',
+      synthesis: pendingSynthesis,
+      result: this.runningResult('two-round continuation granted'),
+    }, grants, synthesisHistory)
+    this.recordCommand({
+      version: 1,
+      commandId: request.commandId,
+      method: 'control',
+      requestSha256,
+      runId: run.runId,
+      action: 'continue',
+      expectedRevision: request.expectedRevision,
+      state: 'accepted',
+    }, false)
+    this.transitionCommand(request.commandId, 'running', undefined, false)
+    this.appendEvent(run, 'debate.continuation.granted', {
+      firstRound: grant.firstRound,
+      lastRound: grant.lastRound,
+      additionalRounds: allowance.additionalRounds,
+      additionalTurnsPerAgent: allowance.additionalTurnsPerAgent,
+      additionalInputTokens: allowance.additionalInputTokens,
+      additionalOutputTokens: allowance.additionalOutputTokens,
+      additionalTotalTokens: allowance.additionalTotalTokens,
+    }, {
+      state: 'admitting',
+      synthesis: pendingSynthesis,
+      continuation,
+      result: this.runningResult('two-round continuation granted'),
+    }, { round: grant.firstRound }, false)
+    this.persist()
+    return { runId: run.runId, execute: 'continue' }
+  }
+
   private roundSlots(roster: readonly DebateRoleSpecV1[], maxAgents: number): DebateRoleSpecV1[] {
     const ordered = orderedRoster(roster)
     if (ordered.length <= maxAgents) return ordered
@@ -1677,9 +2028,8 @@ export class LocalDebateProvider extends DebateService {
 
   private budgetLimit(
     cost: DebateRunSnapshotV1['cost'],
-    policy: DebateRunSnapshotV1['policy'],
+    budget: DebateEffectiveBudgetV1,
   ): BudgetLimit | undefined {
-    const budget = policy.budget
     if (cost.unknownUsageTurns > 0) return {
       kind: 'usage-accounting',
       reason: 'token usage accounting is unavailable',
@@ -1721,14 +2071,15 @@ export class LocalDebateProvider extends DebateService {
 
 
   private budgetEnvelope(run: StoredRun): DebateRoundBudgetEnvelopeV1 {
-    const { cost, policy } = run.snapshot
+    const { cost } = run.snapshot
+    const budget = this.effectiveBudget(run.snapshot)
     return {
       version: 1,
       usedInputTokens: cost.inputTokens ?? 0,
       usedOutputTokens: cost.outputTokens ?? 0,
-      maxInputTokens: policy.budget.maxInputTokens,
-      maxOutputTokens: policy.budget.maxOutputTokens,
-      maxTotalTokens: policy.budget.maxTotalTokens,
+      maxInputTokens: budget.maxInputTokens,
+      maxOutputTokens: budget.maxOutputTokens,
+      maxTotalTokens: budget.maxTotalTokens,
     }
   }
 
@@ -1789,10 +2140,10 @@ export class LocalDebateProvider extends DebateService {
     run: StoredRun,
     slots: readonly DebateRoleSpecV1[],
     nextRound: number,
+    budget: DebateEffectiveBudgetV1,
   ): BudgetLimit | undefined {
-    const actual = this.budgetLimit(run.snapshot.cost, run.snapshot.policy)
+    const actual = this.budgetLimit(run.snapshot.cost, budget)
     if (actual !== undefined) return actual
-    const budget = run.snapshot.policy.budget
     const turnBudgetSlot = slots.find(slot => this.turnCount(run, slot.role, nextRound) >= budget.maxTurnsPerAgent)
     if (turnBudgetSlot !== undefined) {
       const used = this.turnCount(run, turnBudgetSlot.role, nextRound)
@@ -1867,7 +2218,7 @@ export class LocalDebateProvider extends DebateService {
     round: DebateRoundSnapshotV1,
     type: DebateEventType,
     data: Readonly<Record<string, unknown>>,
-    patch: Partial<Pick<DebateRunSnapshotV1, 'state' | 'claimLedger' | 'dissent' | 'unresolved' | 'evidence'>> = {},
+    patch: Partial<Pick<DebateRunSnapshotV1, 'state' | 'claimLedger' | 'dissent' | 'unresolved' | 'evidence' | 'result'>> = {},
   ): void {
     const rounds = run.snapshot.rounds.map(entry => entry.round === round.round ? round : entry)
     this.appendEvent(
@@ -1883,11 +2234,18 @@ export class LocalDebateProvider extends DebateService {
     run: StoredRun,
     type: DebateEventType,
     data: Readonly<Record<string, DebateJsonValue>>,
-    patch: Partial<Pick<DebateRunSnapshotV1, 'state' | 'currentRound' | 'rounds' | 'claimLedger' | 'dissent' | 'unresolved' | 'evidence' | 'cost' | 'provenance' | 'synthesis'>> = {},
+    patch: Partial<Pick<DebateRunSnapshotV1,
+      'state' | 'currentRound' | 'rounds' | 'claimLedger' | 'dissent' | 'unresolved' | 'evidence' | 'cost'
+      | 'provenance' | 'synthesis' | 'continuation' | 'result'
+    >> = {},
     context: { readonly round?: number; readonly slotId?: string } = {},
+    persist = true,
   ): void {
     const nextState = patch.state ?? run.snapshot.state
-    if (lifecycleFinal(run.snapshot.state) && nextState !== run.snapshot.state) {
+    const continuationTransition = type === 'debate.continuation.granted'
+      && ['completed', 'max_rounds', 'budget_limited'].includes(run.snapshot.result?.outcome ?? run.snapshot.state)
+      && nextState === 'admitting'
+    if (lifecycleFinal(run.snapshot.state) && nextState !== run.snapshot.state && !continuationTransition) {
       throw new DebateError(
         `terminal Debate ${run.runId} cannot transition from ${run.snapshot.state} to ${nextState}`,
         'DEBATE_STATE_CONFLICT',
@@ -1895,9 +2253,10 @@ export class LocalDebateProvider extends DebateService {
     }
     const createdAt = this.now()
     const revision = run.snapshot.revision + 1
-    run.snapshot = { ...run.snapshot, ...patch, revision, updatedAt: createdAt }
+    const candidate: DebateRunSnapshotV1 = { ...run.snapshot, ...patch, revision, updatedAt: createdAt }
+    run.snapshot = validateDebateRunSnapshot(this.withContinuation(candidate))
     this.document.generation += 1
-    const event: DebateEventV1 = {
+    const event = validateDebateEvent({
       version: 1,
       sequence: run.events.length + 1,
       runId: run.runId,
@@ -1908,9 +2267,9 @@ export class LocalDebateProvider extends DebateService {
       data,
       ...(context.round === undefined ? {} : { round: context.round }),
       ...(context.slotId === undefined ? {} : { slotId: context.slotId }),
-    }
+    })
     run.events.push(event)
-    this.persist()
+    if (persist) this.persist()
   }
 
   private provenance(
@@ -1975,27 +2334,30 @@ export class LocalDebateProvider extends DebateService {
   private command(method: StoredCommand['method'], commandId: string, requestSha256: string): StoredCommand | undefined {
     const existing = this.document.commands.find(command => command.commandId === commandId)
     if (existing === undefined) return undefined
-    if (existing.method !== method || existing.requestSha256 !== requestSha256) {
+    if (!isDebateCommandReceiptReplay(existing, method, commandId, requestSha256)) {
       throw new DebateError(`commandId already belongs to another Debate request: ${commandId}`, 'DEBATE_STATE_CONFLICT')
     }
     return existing
   }
 
-  private recordCommand(command: StoredCommand): void {
-    this.document.commands.push(command)
-    this.persist()
+  private recordCommand(command: StoredCommand, persist = true): void {
+    this.document.commands.push(validateDebateCommandReceipt(command))
+    if (persist) this.persist()
   }
 
   private transitionCommand(
     commandId: string,
     state: StoredCommand['state'],
     response?: DebateRunSnapshotV1,
+    persist = true,
   ): void {
     const command = this.document.commands.find(entry => entry.commandId === commandId)
     if (command === undefined) unavailable(`debate command receipt is missing: ${commandId}`)
     command.state = state
     if (response !== undefined) command.response = clone(response)
-    this.persist()
+    const normalized = validateDebateCommandReceipt(command)
+    Object.assign(command, normalized)
+    if (persist) this.persist()
   }
 
   private replayCommand(command: StoredCommand): Promise<DebateRunSnapshotV1> | DebateRunSnapshotV1 {
@@ -2011,12 +2373,12 @@ export class LocalDebateProvider extends DebateService {
   private drive(
     runId: string,
     commandId: string,
-    action: 'auto' | 'approve' | 'resume',
+    action: 'auto' | 'approve' | 'resume' | 'continue',
   ): Promise<DebateRunSnapshotV1> {
     const current = this.activeRuns.get(runId)
     if (current !== undefined) return current.promise
     const controller = new AbortController()
-    const promise = (async (): Promise<DebateRunSnapshotV1> => {
+    const promise = Promise.resolve().then(async (): Promise<DebateRunSnapshotV1> => {
       const run = this.requireRun(runId)
       try {
         await this.runUntilTerminal(run, action, controller.signal)
@@ -2036,7 +2398,10 @@ export class LocalDebateProvider extends DebateService {
             this.appendEvent(latest, 'debate.indeterminate', {
               errorCode: executorErrorCode(error),
               error: errorMessage(error),
-            }, { state: 'indeterminate' })
+            }, {
+              state: 'indeterminate',
+              result: this.terminalResult('indeterminate', errorMessage(error)),
+            })
           }
           this.transitionCommand(commandId, 'indeterminate', clone(latest.snapshot))
         })
@@ -2044,7 +2409,7 @@ export class LocalDebateProvider extends DebateService {
       } finally {
         if (this.activeRuns.get(runId)?.commandId === commandId) this.activeRuns.delete(runId)
       }
-    })()
+    })
     const active: ActiveRun = { commandId, controller, promise }
     this.activeRuns.set(runId, active)
     return promise
@@ -2086,13 +2451,19 @@ export class LocalDebateProvider extends DebateService {
     if (interruptedRunIds.size === 0) return
     for (const runId of interruptedRunIds) {
       const run = this.document.runs.find(entry => entry.runId === runId)
-      if (run === undefined || lifecycleTerminal(run.snapshot.state)) continue
+      if (run === undefined || hasProvenTerminalOutcome(run)) continue
       delete run.controlIntent
       const createdAt = this.now()
       const revision = run.snapshot.revision + 1
-      run.snapshot = { ...run.snapshot, state: 'indeterminate', revision, updatedAt: createdAt }
+      run.snapshot = validateDebateRunSnapshot(this.withContinuation({
+        ...run.snapshot,
+        state: 'indeterminate',
+        result: this.terminalResult('indeterminate', 'provider restarted before the command outcome was proven'),
+        revision,
+        updatedAt: createdAt,
+      }))
       this.document.generation += 1
-      run.events.push({
+      run.events.push(validateDebateEvent({
         version: 1,
         sequence: run.events.length + 1,
         runId,
@@ -2101,7 +2472,7 @@ export class LocalDebateProvider extends DebateService {
         type: 'debate.indeterminate',
         createdAt,
         data: { errorCode: 'DEBATE_INDETERMINATE', error: 'provider restarted before the command outcome was proven' },
-      })
+      }))
     }
     for (const command of this.document.commands) {
       if (command.state !== 'accepted' && command.state !== 'running') continue
@@ -2109,10 +2480,12 @@ export class LocalDebateProvider extends DebateService {
       if (run !== undefined && hasProvenTerminalOutcome(run)) {
         command.state = 'settled'
         command.response = clone(run.snapshot)
+        Object.assign(command, validateDebateCommandReceipt(command))
         continue
       }
       command.state = 'indeterminate'
       if (run !== undefined) command.response = clone(run.snapshot)
+      Object.assign(command, validateDebateCommandReceipt(command))
     }
     this.persist()
   }
@@ -2126,6 +2499,7 @@ export class LocalDebateProvider extends DebateService {
       unavailable(`cannot read debate-local state: ${errorMessage(error)}`, { cause: error })
     }
     const document = record(parsed, 'debate-local state')
+    storedKeys(document, ['version', 'generation', 'runs', 'commands'], 'debate-local state')
     const generation = document.generation
     if (document.version !== STATE_VERSION || typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 0
       || !Array.isArray(document.runs) || !Array.isArray(document.commands)) {
@@ -2134,6 +2508,7 @@ export class LocalDebateProvider extends DebateService {
     const runs: StoredRun[] = []
     for (const value of document.runs as unknown[]) {
       const stored = record(value, 'debate-local stored run')
+      storedKeys(stored, ['runId', 'request', 'snapshot', 'events', 'controlIntent'], 'debate-local stored run')
       if (typeof stored.runId !== 'string' || stored.request === undefined || stored.snapshot === undefined || !Array.isArray(stored.events)) {
         unavailable('debate-local state contains an invalid run')
       }
@@ -2144,21 +2519,38 @@ export class LocalDebateProvider extends DebateService {
       } catch (error) {
         unavailable(`stored Debate request is invalid: ${errorMessage(error)}`, { cause: error })
       }
-      const snapshot = record(stored.snapshot, `debate-local snapshot ${runId}`)
-      if (snapshot.runId !== runId || typeof snapshot.revision !== 'number' || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) {
-        unavailable(`stored Debate snapshot is invalid: ${runId}`)
+      let snapshot: DebateRunSnapshotV1
+      try {
+        snapshot = validateDebateRunSnapshot(stored.snapshot)
+      } catch (error) {
+        unavailable(`stored Debate snapshot is invalid: ${runId}: ${errorMessage(error)}`, { cause: error })
+      }
+      if (snapshot.continuation === undefined) snapshot = validateDebateRunSnapshot(this.withContinuation(snapshot))
+      if (snapshot.runId !== runId || canonical(snapshot.policy) !== canonical(request.policy)) {
+        unavailable(`stored Debate snapshot does not preserve its immutable request policy: ${runId}`)
       }
       const events: DebateEventV1[] = []
-      for (const eventValue of stored.events) {
-        const event = record(eventValue, `debate-local event ${runId}`)
-        if (event.runId !== runId || typeof event.sequence !== 'number' || !Number.isSafeInteger(event.sequence) || event.sequence < 1) {
-          unavailable(`stored Debate event is invalid: ${runId}`)
+      for (const [index, eventValue] of stored.events.entries()) {
+        let event: DebateEventV1
+        try {
+          event = validateDebateEvent(eventValue)
+        } catch (error) {
+          unavailable(`stored Debate event is invalid: ${runId}: ${errorMessage(error)}`, { cause: error })
         }
-        events.push(event as unknown as DebateEventV1)
+        const previous = events.at(-1)
+        if (event.runId !== runId || event.sequence !== index + 1 || event.generation > generation
+          || (previous !== undefined && (event.revision <= previous.revision || event.generation <= previous.generation))) {
+          unavailable(`stored Debate event is not monotonic: ${runId}`)
+        }
+        events.push(event)
+      }
+      if ((events.at(-1)?.revision ?? 0) > snapshot.revision) {
+        unavailable(`stored Debate event revision exceeds its snapshot revision: ${runId}`)
       }
       let controlIntent: StoredRun['controlIntent']
       if (stored.controlIntent !== undefined) {
         const intent = record(stored.controlIntent, `debate-local control intent ${runId}`)
+        storedKeys(intent, ['action', 'reason', 'commandId'], `debate-local control intent ${runId}`)
         if ((intent.action !== 'pause' && intent.action !== 'stop')
           || typeof intent.reason !== 'string' || typeof intent.commandId !== 'string') {
           unavailable(`stored Debate control intent is invalid: ${runId}`)
@@ -2172,37 +2564,58 @@ export class LocalDebateProvider extends DebateService {
       runs.push({
         runId,
         request,
-        snapshot: snapshot as unknown as DebateRunSnapshotV1,
+        snapshot,
         events,
         ...(controlIntent === undefined ? {} : { controlIntent }),
       })
     }
+    if (new Set(runs.map(run => run.runId)).size !== runs.length) {
+      unavailable('debate-local state contains duplicate run identities')
+    }
     const commands: StoredCommand[] = []
     for (const value of document.commands as unknown[]) {
       const stored = record(value, 'debate-local command receipt')
+      storedKeys(stored, [
+        'version', 'commandId', 'method', 'requestSha256', 'runId', 'state', 'action', 'expectedRevision', 'response',
+      ], 'debate-local command receipt')
       if (typeof stored.commandId !== 'string' || (stored.method !== 'start' && stored.method !== 'control')
         || typeof stored.requestSha256 !== 'string') {
         unavailable('debate-local state contains an invalid command receipt')
       }
-      const legacyResponse = stored.response === undefined ? undefined : stored.response as DebateRunSnapshotV1
+      const legacyResponse = stored.response === undefined ? undefined : stored.response
+      const legacyRunId = legacyResponse !== null && typeof legacyResponse === 'object'
+        ? (legacyResponse as { readonly runId?: unknown }).runId
+        : undefined
       const runId = typeof stored.runId === 'string'
         ? stored.runId
-        : legacyResponse?.runId
+        : typeof legacyRunId === 'string' ? legacyRunId : undefined
       const state = stored.state === undefined && legacyResponse !== undefined ? 'settled' : stored.state
       if (typeof runId !== 'string' || !['accepted', 'running', 'settled', 'indeterminate'].includes(String(state))) {
         unavailable('debate-local state contains an unsupported command receipt')
       }
-      if (state === 'settled' && legacyResponse === undefined) {
-        unavailable('debate-local settled command receipt omitted its response')
+      let command: StoredCommand
+      try {
+        command = validateDebateCommandReceipt({
+          ...(stored.version === undefined ? {} : { version: stored.version }),
+          commandId: stored.commandId,
+          method: stored.method,
+          requestSha256: stored.requestSha256,
+          runId,
+          state,
+          ...(stored.action === undefined ? {} : { action: stored.action }),
+          ...(stored.expectedRevision === undefined ? {} : { expectedRevision: stored.expectedRevision }),
+          ...(legacyResponse === undefined ? {} : { response: legacyResponse }),
+        })
+      } catch (error) {
+        unavailable(`stored Debate command receipt is invalid: ${errorMessage(error)}`, { cause: error })
       }
-      commands.push({
-        commandId: stored.commandId,
-        method: stored.method,
-        requestSha256: stored.requestSha256,
-        runId,
-        state: state as StoredCommand['state'],
-        ...(legacyResponse === undefined ? {} : { response: legacyResponse }),
-      })
+      if (!runs.some(run => run.runId === command.runId)) {
+        unavailable(`stored Debate command receipt has no matching run: ${command.commandId}`)
+      }
+      commands.push(command)
+    }
+    if (new Set(commands.map(command => command.commandId)).size !== commands.length) {
+      unavailable('debate-local state contains duplicate command identities')
     }
     return {
       version: 1,

@@ -714,13 +714,14 @@ Start a bounded multi-agent debate, list or inspect persistent runs, or apply an
     },
     "control_action": {
       "type": "string",
-      "description": "Explicit control decision.",
+      "description": "Explicit control decision; continue grants two further rounds only when the Provider reports eligibility.",
       "enum": [
         "approve",
         "reject",
         "pause",
         "resume",
-        "stop"
+        "stop",
+        "continue"
       ]
     },
     "reason": {

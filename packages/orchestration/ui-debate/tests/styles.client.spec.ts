@@ -25,6 +25,7 @@ describe('Debate panel layout styles', () => {
     expect(css).toContain('.dshDesktopDebateRosterScroller{overflow:auto}')
     expect(css).toContain('.dshDesktopDebateRoster table{width:100%;min-width:560px')
     expect(css).toContain('.dshDesktopDebateStatusStrip')
+    expect(css).toContain('.dshDesktopDebateContinuation')
     expect(css).toContain('.dshDesktopDebateTurnClaims')
     expect(css).toContain('.dshDesktopDebateTechDetails')
     expect(css).toContain('.dshDesktopDebatePinned')

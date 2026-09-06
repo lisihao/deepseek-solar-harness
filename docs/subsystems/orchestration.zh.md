@@ -262,14 +262,14 @@ abstract inspect(runId: string): Promise<DebateRunSnapshotV1>
 abstract readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV1>
 
 /**
- * Apply an explicit approval, pause, resume, stop, or reject decision.
+ * Apply an explicit approval, pause, resume, stop, reject, or two-round continuation decision.
  * @param request - revision-fenced control command.
- * @returns the updated run projection.
+ * @returns the original receipt projection on an identical command replay, otherwise the updated run projection.
  */
 abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>
 ```
 
-Source: [`packages/orchestration/debate/src/index.ts:354`](../../packages/orchestration/debate/src/index.ts)
+Source: [`packages/orchestration/debate/src/index.ts:1340`](../../packages/orchestration/debate/src/index.ts)
 
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 

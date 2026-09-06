@@ -1011,4 +1011,458 @@ describe('local Debate Provider', () => {
       reason: 'stop the active TaskGraph',
     })).resolves.toEqual(stopped)
   })
+
+  it('grants two new settled rounds at a time without redispatching sealed rounds', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-'))
+    const turns: DebateTurnRequestV1[] = []
+    const initialPolicy = policy('enabled', { maxRounds: 1, maxTurnsPerAgent: 1 })
+    const service = await provider(root, async (turn) => {
+      turns.push(turn)
+      return resultFor(turn)
+    })
+    const pending = await service.start(request('enabled', {
+      commandId: 'start-continuation',
+      policy: initialPolicy,
+    }))
+    const first = await service.control({
+      version: 1,
+      commandId: 'approve-continuation',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture initial settlement',
+    })
+    expect(first).toMatchObject({ state: 'completed', currentRound: 1 })
+    expect(first.continuation).toMatchObject({
+      effectiveBudget: { maxRounds: 1, maxTurnsPerAgent: 1, maxCostUsd: 2 },
+      offeredAllowance: { additionalRounds: 2, additionalTurnsPerAgent: 2 },
+      eligibility: { status: 'eligible', reason: 'eligible' },
+    })
+
+    const firstCommand = {
+      version: 1 as const,
+      commandId: 'continue-1',
+      runId: first.runId,
+      expectedRevision: first.revision,
+      action: 'continue' as const,
+      reason: '继续讨论 2 轮',
+    }
+    const afterFirstGrant = await service.control(firstCommand)
+    expect(afterFirstGrant).toMatchObject({ state: 'completed', currentRound: 3 })
+    expect(afterFirstGrant.policy).toEqual(initialPolicy)
+    expect(afterFirstGrant.continuation).toMatchObject({
+      grants: [{ commandId: 'continue-1', firstRound: 2, lastRound: 3 }],
+      synthesisHistory: [{ throughRound: 1, synthesis: first.synthesis }],
+      effectiveBudget: { maxRounds: 3, maxTurnsPerAgent: 3, maxCostUsd: 2 },
+      eligibility: { status: 'eligible' },
+    })
+    await expect(service.control(firstCommand)).resolves.toEqual(afterFirstGrant)
+    expect(turns.map(turn => turn.round)).toEqual([1, 1, 1, 2, 2, 2, 3, 3, 3])
+    expect(turns.filter(turn => turn.round > 1).every(turn => turn.priorLedger.claims.some(entry => entry.claimId === 'claim:answer'))).toBe(true)
+
+    const secondCommand = {
+      version: 1 as const,
+      commandId: 'continue-2',
+      runId: afterFirstGrant.runId,
+      expectedRevision: afterFirstGrant.revision,
+      action: 'continue' as const,
+      reason: '继续讨论 2 轮',
+    }
+    const afterSecondGrant = await service.control(secondCommand)
+    expect(afterSecondGrant).toMatchObject({ state: 'completed', currentRound: 5 })
+    expect(afterSecondGrant.continuation).toMatchObject({
+      grants: [
+        { commandId: 'continue-1', firstRound: 2, lastRound: 3 },
+        { commandId: 'continue-2', firstRound: 4, lastRound: 5 },
+      ],
+      synthesisHistory: [
+        { throughRound: 1, synthesis: first.synthesis },
+        { throughRound: 3, synthesis: afterFirstGrant.synthesis },
+      ],
+      effectiveBudget: { maxRounds: 5, maxTurnsPerAgent: 5, maxCostUsd: 2 },
+    })
+    expect(turns.map(turn => turn.round)).toEqual([
+      1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5,
+    ])
+    const events = (await service.readEvents({ runId: afterSecondGrant.runId, limit: 100 })).events
+    expect(events.filter(event => event.type === 'debate.round.started').map(event => event.round)).toEqual([1, 2, 3, 4, 5])
+    expect(events.filter(event => event.type === 'debate.continuation.granted').map(event => [event.round, event.data.lastRound]))
+      .toEqual([[2, 3], [4, 5]])
+    expect(events.map(event => event.sequence)).toEqual(events.map((_event, index) => index + 1))
+
+    const reloaded = await provider(root, async () => {
+      throw new Error('reloaded continuation must not redispatch settled rounds')
+    })
+    await expect(reloaded.inspect(afterSecondGrant.runId)).resolves.toEqual(afterSecondGrant)
+  })
+
+  it('projects continuation capacity for a released settled snapshot before its first extension', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-legacy-source-'))
+    const source = await provider(sourceRoot, async turn => resultFor(turn))
+    const original = await source.start(request('auto', {
+      commandId: 'start-continuation-legacy',
+      policy: policy('auto', { maxRounds: 1, maxTurnsPerAgent: 1 }),
+    }))
+    type PersistedState = {
+      runs: Array<{ snapshot: { continuation?: unknown; result?: unknown } }>
+      commands: Array<{ response?: { continuation?: unknown; result?: unknown } }>
+      [key: string]: unknown
+    }
+    const persisted = JSON.parse(await readFile(join(sourceRoot, 'state.json'), 'utf8')) as PersistedState
+    const storedRun = persisted.runs[0]
+    if (storedRun === undefined) throw new Error('fixture legacy run is missing')
+    delete storedRun.snapshot.continuation
+    delete storedRun.snapshot.result
+    for (const command of persisted.commands) {
+      if (command.response === undefined) continue
+      delete command.response.continuation
+      delete command.response.result
+    }
+    const legacyRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-legacy-'))
+    await writeFile(join(legacyRoot, 'state.json'), `${JSON.stringify(persisted)}\n`, { mode: 0o600 })
+    const restored = await provider(legacyRoot, async turn => resultFor(turn))
+    const projected = await restored.inspect(original.runId)
+    expect(projected.continuation).toMatchObject({
+      effectiveBudget: { maxRounds: 1, maxTurnsPerAgent: 1 },
+      offeredAllowance: { additionalRounds: 2 },
+      eligibility: { status: 'eligible' },
+    })
+    const extended = await restored.control({
+      version: 1,
+      commandId: 'continue-legacy',
+      runId: projected.runId,
+      expectedRevision: projected.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })
+    expect(extended).toMatchObject({ currentRound: 3, continuation: { grants: [{ commandId: 'continue-legacy' }] } })
+  })
+
+  it('persists a pending replacement summary and one receipt before a continuation round executes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-pending-'))
+    let entered!: () => void
+    const enteredRound = new Promise<void>((resolve) => { entered = resolve })
+    let release!: () => void
+    const releaseRound = new Promise<void>((resolve) => { release = resolve })
+    let held = false
+    const service = await provider(root, async (turn) => {
+      if (turn.round === 2 && !held) {
+        held = true
+        entered()
+        await releaseRound
+      }
+      return resultFor(turn)
+    })
+    const initial = await service.start(request('auto', {
+      commandId: 'start-continuation-pending',
+      policy: policy('auto', { maxRounds: 1, maxTurnsPerAgent: 1 }),
+    }))
+    const command = {
+      version: 1 as const,
+      commandId: 'continue-pending',
+      runId: initial.runId,
+      expectedRevision: initial.revision,
+      action: 'continue' as const,
+      reason: '继续讨论 2 轮',
+    }
+    const continuing = service.control(command)
+    await enteredRound
+    const active = await service.inspect(initial.runId)
+    expect(active).toMatchObject({
+      state: 'round_running',
+      currentRound: 2,
+      synthesis: { state: 'pending' },
+      result: { outcome: 'running' },
+      continuation: {
+        grants: [{ commandId: 'continue-pending', firstRound: 2, lastRound: 3 }],
+        synthesisHistory: [{ throughRound: 1, synthesis: initial.synthesis }],
+      },
+    })
+    await expect(service.control({
+      version: 1,
+      commandId: 'continue-while-running',
+      runId: active.runId,
+      expectedRevision: active.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })).rejects.toMatchObject({ code: 'DEBATE_STATE_CONFLICT' })
+    const persisted = JSON.parse(await readFile(join(root, 'state.json'), 'utf8')) as {
+      commands: Array<{ commandId: string; state: string; action?: string; expectedRevision?: number }>
+    }
+    expect(persisted.commands.find(receipt => receipt.commandId === command.commandId)).toMatchObject({
+      state: 'running',
+      action: 'continue',
+      expectedRevision: initial.revision,
+    })
+    const recoveryRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-recovered-'))
+    await writeFile(join(recoveryRoot, 'state.json'), `${JSON.stringify(persisted)}\n`, { mode: 0o600 })
+    const recovered = await provider(recoveryRoot, async () => {
+      throw new Error('continuation recovery must not replay a pending TaskGraph')
+    })
+    const indeterminate = await recovered.inspect(initial.runId)
+    expect(indeterminate).toMatchObject({
+      state: 'indeterminate',
+      continuation: {
+        grants: [{ commandId: 'continue-pending', firstRound: 2, lastRound: 3 }],
+        effectiveBudget: { maxRounds: 3 },
+      },
+    })
+    await expect(recovered.control(command)).rejects.toMatchObject({ code: 'DEBATE_INDETERMINATE' })
+    const replay = service.control(command)
+    release()
+    const [settled, replayed] = await Promise.all([continuing, replay])
+    expect(replayed).toEqual(settled)
+    expect(settled.continuation?.grants).toHaveLength(1)
+  })
+
+  it('delivers the sealed ledger, dissent, unresolved gaps, participants, and evidence to continuation rounds', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-context-'))
+    const turns: DebateTurnRequestV1[] = []
+    const service = await provider(root, async (turn) => {
+      turns.push(turn)
+      const result = resultFor(turn, { unresolved: turn.round === 1 })
+      return turn.round !== 1 ? result : {
+        ...result,
+        dissent: [{
+          version: 1,
+          slotId: turn.slotId,
+          claimId: 'claim:answer',
+          position: 'The fixture keeps a material alternative visible.',
+          reason: 'The first-round evidence is deliberately incomplete.',
+          confidence: 0.2,
+          evidenceRefs: [{ version: 1, ref: `fixture:dissent:${turn.slotId}`, kind: 'observation' }],
+        }],
+      }
+    })
+    const initialPolicy = policy('auto', { maxRounds: 1, maxTurnsPerAgent: 1 })
+    const settled = await service.start(request('auto', {
+      commandId: 'start-continuation-context',
+      policy: initialPolicy,
+    }))
+    expect(settled.state).toBe('max_rounds')
+    const extended = await service.control({
+      version: 1,
+      commandId: 'continue-context',
+      runId: settled.runId,
+      expectedRevision: settled.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })
+    expect(extended.currentRound).toBe(3)
+    const secondRound = turns.filter(turn => turn.round === 2)
+    expect(secondRound).toHaveLength(3)
+    expect(secondRound.every(turn => turn.phase === 'high-severity-unresolved')).toBe(true)
+    expect(secondRound.every(turn => turn.priorLedger.claims.some(claim => claim.claimId === 'claim:answer'))).toBe(true)
+    expect(secondRound.every(turn => turn.priorDissent.length === 3)).toBe(true)
+    // All three first-round slots identify the same unresolved claim; the
+    // durable ledger intentionally canonicalizes it before the next round.
+    expect(secondRound.every(turn => turn.priorUnresolved.length === 1)).toBe(true)
+    expect(secondRound.every(turn => turn.priorUnresolved[0]?.claimId === 'claim:answer')).toBe(true)
+    expect(secondRound.every(turn => turn.sourceRefs.some(ref => ref.ref === 'fixture:brief'))).toBe(true)
+    expect(secondRound.map(turn => turn.slotId)).toEqual([
+      'constructive-proposer', 'skeptical-falsifier', 'decision-judge',
+    ])
+  })
+
+  it('extends a known token-limited run but refuses unknown usage accounting', async () => {
+    const exhaustedRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-exhausted-'))
+    const rounds: number[] = []
+    const exhaustedPolicy = policy('auto', {
+      maxRounds: 1,
+      maxTurnsPerAgent: 1,
+      maxInputTokens: 30,
+      maxOutputTokens: 20,
+      maxTotalTokens: 50,
+    })
+    const exhausted = await provider(exhaustedRoot, async (turn) => {
+      rounds.push(turn.round)
+      return resultFor(turn)
+    })
+    const limited = await exhausted.start(request('auto', {
+      commandId: 'start-continuation-exhausted',
+      policy: exhaustedPolicy,
+    }))
+    expect(limited).toMatchObject({
+      state: 'budget_limited',
+      cost: { usageStatus: 'known', inputTokens: 30 },
+      continuation: {
+        eligibility: { status: 'eligible', reason: 'eligible' },
+        offeredAllowance: { additionalInputTokens: 61, additionalOutputTokens: 40 },
+      },
+    })
+    const extended = await exhausted.control({
+      version: 1,
+      commandId: 'continue-exhausted',
+      runId: limited.runId,
+      expectedRevision: limited.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })
+    expect(extended).toMatchObject({
+      state: 'completed',
+      currentRound: 3,
+      continuation: { effectiveBudget: { maxInputTokens: 91, maxCostUsd: 2 } },
+    })
+    expect(rounds).toEqual([1, 1, 1, 2, 2, 2, 3, 3, 3])
+
+    const unknownRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-unknown-'))
+    const unknown = await provider(unknownRoot, async (turn) => {
+      const { usage: _usage, ...withoutUsage } = resultFor(turn)
+      return withoutUsage
+    })
+    const unknownRun = await unknown.start(request('auto', {
+      commandId: 'start-continuation-unknown',
+      policy: policy('auto', { maxRounds: 1, maxTurnsPerAgent: 1 }),
+    }))
+    expect(unknownRun).toMatchObject({
+      state: 'budget_limited',
+      continuation: { eligibility: { status: 'ineligible', reason: 'usage_accounting_unknown' } },
+    })
+    await expect(unknown.control({
+      version: 1,
+      commandId: 'continue-unknown',
+      runId: unknownRun.runId,
+      expectedRevision: unknownRun.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })).rejects.toMatchObject({ code: 'DEBATE_STATE_CONFLICT' })
+  })
+
+  it('fences competing continuation commands and rejects unsafe continuation states', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-fence-'))
+    const service = await provider(root, async turn => resultFor(turn))
+    const pending = await service.start(request('enabled', {
+      commandId: 'start-continuation-fence',
+      policy: policy('enabled', { maxRounds: 1, maxTurnsPerAgent: 1 }),
+    }))
+    const settled = await service.control({
+      version: 1,
+      commandId: 'approve-continuation-fence',
+      runId: pending.runId,
+      expectedRevision: pending.revision,
+      action: 'approve',
+      reason: 'fixture initial settlement',
+    })
+    const competing = await Promise.allSettled([
+      service.control({
+        version: 1,
+        commandId: 'continue-fence-a',
+        runId: settled.runId,
+        expectedRevision: settled.revision,
+        action: 'continue',
+        reason: '继续讨论 2 轮',
+      }),
+      service.control({
+        version: 1,
+        commandId: 'continue-fence-b',
+        runId: settled.runId,
+        expectedRevision: settled.revision,
+        action: 'continue',
+        reason: '继续讨论 2 轮',
+      }),
+    ])
+    expect(competing.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    const rejected = competing.find(result => result.status === 'rejected')
+    expect(rejected).toMatchObject({ reason: { code: 'DEBATE_REVISION_CONFLICT' } })
+    const latest = await service.inspect(settled.runId)
+    expect(latest.continuation?.grants).toHaveLength(1)
+
+    const meteredRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-metered-'))
+    const meteredBase = policy('auto', { maxRounds: 1, maxTurnsPerAgent: 1, maxCostUsd: 0.05 })
+    const meteredPolicy: DebatePolicyV1 = {
+      ...meteredBase,
+      roster: meteredBase.roster.map(role => ({ ...role, source: 'metered-api' as const })),
+    }
+    const metered = await provider(meteredRoot, async turn => resultFor(turn))
+    const meteredRun = await metered.start(request('auto', {
+      commandId: 'start-continuation-metered',
+      policy: meteredPolicy,
+    }))
+    expect(meteredRun.continuation).toMatchObject({
+      eligibility: {
+        status: 'approval_required',
+        reason: 'cost_cap_requires_approval',
+        costLimit: { limitUsd: 0.05, usedUsd: 0.03, reservedUsd: 0.06 },
+      },
+    })
+    expect(meteredRun.continuation?.effectiveBudget.maxCostUsd).toBe(0.05)
+    await expect(metered.control({
+      version: 1,
+      commandId: 'continue-metered',
+      runId: meteredRun.runId,
+      expectedRevision: meteredRun.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })).rejects.toThrow('caller cost cap')
+
+    const rejectedRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-rejected-'))
+    const rejectedProvider = await provider(rejectedRoot, async turn => resultFor(turn))
+    const awaiting = await rejectedProvider.start(request('enabled', { commandId: 'start-continuation-rejected' }))
+    const rejectedRun = await rejectedProvider.control({
+      version: 1,
+      commandId: 'reject-continuation',
+      runId: awaiting.runId,
+      expectedRevision: awaiting.revision,
+      action: 'reject',
+      reason: 'fixture rejection',
+    })
+    await expect(rejectedProvider.control({
+      version: 1,
+      commandId: 'continue-rejected',
+      runId: rejectedRun.runId,
+      expectedRevision: rejectedRun.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })).rejects.toMatchObject({ code: 'DEBATE_STATE_CONFLICT' })
+
+    const stoppedRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-stopped-'))
+    const stoppedProvider = await provider(stoppedRoot, async turn => resultFor(turn))
+    const pausable = await stoppedProvider.start(request('enabled', { commandId: 'start-continuation-stopped' }))
+    const stoppedRun = await stoppedProvider.control({
+      version: 1,
+      commandId: 'pause-continuation',
+      runId: pausable.runId,
+      expectedRevision: pausable.revision,
+      action: 'pause',
+      reason: 'fixture pause',
+    })
+    await expect(stoppedProvider.control({
+      version: 1,
+      commandId: 'continue-stopped',
+      runId: stoppedRun.runId,
+      expectedRevision: stoppedRun.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })).rejects.toMatchObject({ code: 'DEBATE_STATE_CONFLICT' })
+
+    const failedRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-failed-'))
+    const failedProvider = await provider(failedRoot, async () => {
+      throw new DebateError('fixture execution failure', 'DEBATE_PROVIDER_UNAVAILABLE')
+    })
+    const failedRun = await failedProvider.start(request('auto', { commandId: 'start-continuation-failed' }))
+    expect(failedRun.state).toBe('failed')
+    await expect(failedProvider.control({
+      version: 1,
+      commandId: 'continue-failed',
+      runId: failedRun.runId,
+      expectedRevision: failedRun.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })).rejects.toMatchObject({ code: 'DEBATE_STATE_CONFLICT' })
+
+    const indeterminateRoot = await mkdtemp(join(tmpdir(), 'dsh-debate-local-continuation-indeterminate-'))
+    const indeterminateProvider = await provider(indeterminateRoot, async () => {
+      throw new DebateError('fixture outcome is unknown', 'DEBATE_INDETERMINATE')
+    })
+    const indeterminateRun = await indeterminateProvider.start(request('auto', { commandId: 'start-continuation-indeterminate' }))
+    expect(indeterminateRun.state).toBe('indeterminate')
+    await expect(indeterminateProvider.control({
+      version: 1,
+      commandId: 'continue-indeterminate',
+      runId: indeterminateRun.runId,
+      expectedRevision: indeterminateRun.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })).rejects.toMatchObject({ code: 'DEBATE_STATE_CONFLICT' })
+  })
 })

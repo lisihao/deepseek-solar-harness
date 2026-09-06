@@ -735,9 +735,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>',
-        description: 'Apply an explicit approval, pause, resume, stop, or reject decision.',
+        description: 'Apply an explicit approval, pause, resume, stop, reject, or two-round continuation decision.',
         parameters: [{ name: 'request', description: 'revision-fenced control command.' }],
-        returns: 'the updated run projection.',
+        returns: 'the original receipt projection on an identical command replay, otherwise the updated run projection.',
       },
     ],
   },
@@ -4064,8 +4064,36 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DebateClaimV1 {\n    readonly version: 1;\n    readonly claimId: string;\n    readonly statement: string;\n    readonly status: DebateClaimStatus;\n    readonly severity: DebateClaimSeverity;\n    readonly confidence: number;\n    readonly supportingSlotIds: readonly string[];\n    readonly opposingSlotIds: readonly string[];\n    readonly evidenceRefs: readonly DebateEvidenceRefV1[];\n    readonly rationale?: string;\n}',
   },
   {
+    name: 'DebateContinuationAccountingStatusV1',
+    declaration: 'export type DebateContinuationAccountingStatusV1 = \'sufficient\' | \'usage_unknown\' | \'cost_unknown\';',
+  },
+  {
+    name: 'DebateContinuationAllowanceV1',
+    declaration: 'export interface DebateContinuationAllowanceV1 {\n    readonly version: 1;\n    readonly additionalRounds: 2;\n    readonly additionalTurnsPerAgent: 2;\n    readonly additionalInputTokens: number;\n    readonly additionalOutputTokens: number;\n    readonly additionalTotalTokens: number;\n}',
+  },
+  {
+    name: 'DebateContinuationCostLimitV1',
+    declaration: 'export interface DebateContinuationCostLimitV1 {\n    readonly version: 1;\n    readonly limitUsd: number;\n    readonly usedUsd: number;\n    readonly reservedUsd?: number;\n}',
+  },
+  {
+    name: 'DebateContinuationEligibilityReasonV1',
+    declaration: 'export type DebateContinuationEligibilityReasonV1 = \'eligible\' | \'run_not_settled\' | \'last_round_not_settled\' | \'usage_accounting_unknown\' | \'cost_accounting_unknown\' | \'cost_cap_requires_approval\';',
+  },
+  {
+    name: 'DebateContinuationEligibilityV1',
+    declaration: 'export interface DebateContinuationEligibilityV1 {\n    readonly version: 1;\n    readonly status: \'eligible\' | \'ineligible\' | \'approval_required\';\n    readonly outcome: DebateRunOutcomeV1;\n    readonly accounting: DebateContinuationAccountingStatusV1;\n    readonly reason: DebateContinuationEligibilityReasonV1;\n    readonly message: string;\n    readonly costLimit?: DebateContinuationCostLimitV1;\n}',
+  },
+  {
+    name: 'DebateContinuationGrantV1',
+    declaration: 'export interface DebateContinuationGrantV1 {\n    readonly version: 1;\n    readonly commandId: string;\n    readonly expectedRevision: number;\n    readonly grantedAt: string;\n    readonly firstRound: number;\n    readonly lastRound: number;\n    readonly allowance: DebateContinuationAllowanceV1;\n}',
+  },
+  {
+    name: 'DebateContinuationStateV1',
+    declaration: 'export interface DebateContinuationStateV1 {\n    readonly version: 1;\n    readonly grants: readonly DebateContinuationGrantV1[];\n    readonly synthesisHistory: readonly DebateSynthesisHistoryEntryV1[];\n    readonly effectiveBudget: DebateEffectiveBudgetV1;\n    readonly offeredAllowance?: DebateContinuationAllowanceV1;\n    readonly eligibility: DebateContinuationEligibilityV1;\n}',
+  },
+  {
     name: 'DebateControlAction',
-    declaration: 'export type DebateControlAction = \'approve\' | \'reject\' | \'pause\' | \'resume\' | \'stop\';',
+    declaration: 'export type DebateControlAction = \'approve\' | \'reject\' | \'pause\' | \'resume\' | \'stop\' | \'continue\';',
   },
   {
     name: 'DebateControlRequestV1',
@@ -4092,6 +4120,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DebateDissentV1 {\n    readonly version: 1;\n    readonly slotId: string;\n    readonly claimId: string;\n    readonly position: string;\n    readonly reason: string;\n    readonly confidence: number;\n    readonly evidenceRefs: readonly DebateEvidenceRefV1[];\n}',
   },
   {
+    name: 'DebateEffectiveBudgetV1',
+    declaration: 'export interface DebateEffectiveBudgetV1 {\n    readonly version: 1;\n    readonly maxRounds: number;\n    readonly maxTurnsPerAgent: number;\n    readonly maxAgentsPerRound: number;\n    readonly maxInputTokens: number;\n    readonly maxOutputTokens: number;\n    readonly maxTotalTokens: number;\n    readonly maxCostUsd?: number;\n}',
+  },
+  {
     name: 'DebateEventPageV1',
     declaration: 'export interface DebateEventPageV1 {\n    readonly events: readonly DebateEventV1[];\n    readonly nextSequence: number;\n}',
   },
@@ -4101,7 +4133,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DebateEventType',
-    declaration: 'export type DebateEventType = \'debate.planned\' | \'debate.roster.qualified\' | \'debate.roster.rejected\' | \'debate.admitted\' | \'debate.round.started\' | \'debate.agent.dispatched\' | \'debate.agent.progress\' | \'debate.agent.settled\' | \'debate.agent.blocked\' | \'debate.agent.failed\' | \'debate.agent.indeterminate\' | \'debate.claims.compiled\' | \'debate.convergence.evaluated\' | \'debate.synthesis.started\' | \'debate.synthesis.settled\' | \'debate.cost.accounted\' | \'debate.stopped\' | \'debate.failed\' | \'debate.indeterminate\';',
+    declaration: 'export type DebateEventType = \'debate.planned\' | \'debate.roster.qualified\' | \'debate.roster.rejected\' | \'debate.admitted\' | \'debate.round.started\' | \'debate.agent.dispatched\' | \'debate.agent.progress\' | \'debate.agent.settled\' | \'debate.agent.blocked\' | \'debate.agent.failed\' | \'debate.agent.indeterminate\' | \'debate.claims.compiled\' | \'debate.convergence.evaluated\' | \'debate.synthesis.started\' | \'debate.synthesis.settled\' | \'debate.continuation.granted\' | \'debate.cost.accounted\' | \'debate.stopped\' | \'debate.failed\' | \'debate.indeterminate\';',
   },
   {
     name: 'DebateEventV1',
@@ -4180,8 +4212,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DebateRoundStrategyV1 {\n    readonly version: 1;\n    readonly firstRound: \'blind-independent\';\n    readonly followUp: \'claim-ledger\';\n    readonly escalation: \'high-severity-unresolved\';\n}',
   },
   {
+    name: 'DebateRunOutcomeV1',
+    declaration: 'export type DebateRunOutcomeV1 = \'running\' | \'completed\' | \'max_rounds\' | \'budget_limited\' | \'failed\' | \'indeterminate\' | \'rejected\' | \'stopped\';',
+  },
+  {
+    name: 'DebateRunResultV1',
+    declaration: 'export interface DebateRunResultV1 {\n    readonly version: 1;\n    readonly outcome: DebateRunOutcomeV1;\n    readonly reason: string;\n    readonly settledAt?: string;\n}',
+  },
+  {
     name: 'DebateRunSnapshotV1',
-    declaration: 'export interface DebateRunSnapshotV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly revision: number;\n    readonly state: DebateLifecycle;\n    readonly mode: DebateMode;\n    readonly promptSha256: string;\n    readonly topic?: DebateTopicV1;\n    readonly objective?: string;\n    readonly policy: DebatePolicyV1;\n    readonly roster: readonly DebateRoleSpecV1[];\n    readonly currentRound: number;\n    readonly rounds: readonly DebateRoundSnapshotV1[];\n    readonly claimLedger: DebateClaimLedgerV1;\n    readonly dissent: readonly DebateDissentV1[];\n    readonly unresolved: readonly DebateUnresolvedV1[];\n    readonly evidence: DebateEvidenceSummaryV1;\n    readonly cost: DebateCostSummaryV1;\n    readonly provenance: DebateProvenanceV1;\n    readonly synthesis?: DebateSynthesisV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface DebateRunSnapshotV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly revision: number;\n    readonly state: DebateLifecycle;\n    readonly mode: DebateMode;\n    readonly promptSha256: string;\n    readonly topic?: DebateTopicV1;\n    readonly objective?: string;\n    readonly policy: DebatePolicyV1;\n    readonly roster: readonly DebateRoleSpecV1[];\n    readonly currentRound: number;\n    readonly rounds: readonly DebateRoundSnapshotV1[];\n    readonly claimLedger: DebateClaimLedgerV1;\n    readonly dissent: readonly DebateDissentV1[];\n    readonly unresolved: readonly DebateUnresolvedV1[];\n    readonly evidence: DebateEvidenceSummaryV1;\n    readonly cost: DebateCostSummaryV1;\n    readonly provenance: DebateProvenanceV1;\n    readonly synthesis?: DebateSynthesisV1;\n    readonly continuation?: DebateContinuationStateV1;\n    readonly result?: DebateRunResultV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'DebateRunSummaryV1',
@@ -4198,6 +4238,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DebateStartRequestV1',
     declaration: 'export interface DebateStartRequestV1 {\n    readonly version: 1;\n    readonly commandId: string;\n    readonly workspace: string;\n    readonly prompt: string;\n    readonly objective?: string;\n    readonly policy: DebatePolicyV1;\n    readonly sourceRefs?: readonly DebateSourceRefV1[];\n    readonly execution?: DebateExecutionRefV1;\n    readonly sourceSessionId?: string;\n}',
+  },
+  {
+    name: 'DebateSynthesisHistoryEntryV1',
+    declaration: 'export interface DebateSynthesisHistoryEntryV1 {\n    readonly version: 1;\n    readonly throughRound: number;\n    readonly sealedAt: string;\n    readonly synthesis: DebateSynthesisV1;\n}',
   },
   {
     name: 'DebateSynthesisState',

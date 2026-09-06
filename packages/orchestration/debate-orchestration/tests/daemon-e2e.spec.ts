@@ -54,11 +54,11 @@ function turnBody(slotId: string): string {
 /** Keyless deterministic Resident fixture exercising the real daemon and Scheduler. */
 class ScriptedKeylessResident {
   readonly requests: ScriptedResidentRequest[] = []
-  participantSettled = 0
   peakParticipants = 0
   judgeStartedAfterParticipants = false
   judgeReceivedParticipantEvidence = false
   private activeParticipants = 0
+  private readonly participantSettledByRound = new Map<number, number>()
   private readonly turns = new Map<string, ScriptedResult>()
 
   async providers() {
@@ -104,8 +104,11 @@ class ScriptedKeylessResident {
 
   async execute(request: ScriptedResidentRequest) {
     this.requests.push(request)
-    const slotId = /:debate-r1-([^:]+):1$/u.exec(request.commandId)?.[1]
-    if (slotId === undefined) throw new Error(`fixture could not identify Debate slot from ${request.commandId}`)
+    const identity = /:debate-r(\d+)-([^:]+):1$/u.exec(request.commandId)
+    const roundText = identity?.[1]
+    const slotId = identity?.[2]
+    if (roundText === undefined || slotId === undefined) throw new Error(`fixture could not identify Debate slot from ${request.commandId}`)
+    const round = Number(roundText)
     const turnId = `turn:${request.commandId}`
     const sessionId = `session:${request.operatorId}`
     const resultValue: ScriptedResult = {
@@ -120,13 +123,13 @@ class ScriptedKeylessResident {
       this.peakParticipants = Math.max(this.peakParticipants, this.activeParticipants)
       result = new Promise(resolve => setTimeout(() => {
         this.activeParticipants -= 1
-        this.participantSettled += 1
+        this.participantSettledByRound.set(round, (this.participantSettledByRound.get(round) ?? 0) + 1)
         this.turns.set(turnId, resultValue)
         resolve(resultValue)
       }, 40))
     } else {
       const prompt = request.prompt?.map(block => block.text ?? '').join('\n') ?? ''
-      this.judgeStartedAfterParticipants = this.participantSettled === 2
+      this.judgeStartedAfterParticipants = this.participantSettledByRound.get(round) === 2
       this.judgeReceivedParticipantEvidence = prompt.includes('Upstream Evidence contents:')
         && prompt.includes('settled constructive-proposer')
         && prompt.includes('settled skeptical-falsifier')
@@ -287,5 +290,26 @@ describe('Debate real TaskGraph binding', () => {
       unknownUsageTurns: 0,
       unknownCostTurns: 0,
     })
+    const extended = await debate.control({
+      version: 1,
+      commandId: 'debate-e2e:continue',
+      runId: completed.runId,
+      expectedRevision: completed.revision,
+      action: 'continue',
+      reason: '继续讨论 2 轮',
+    })
+    expect(extended).toMatchObject({
+      state: 'completed',
+      currentRound: 3,
+      continuation: {
+        grants: [{ firstRound: 2, lastRound: 3 }],
+        effectiveBudget: { maxRounds: 3, maxCostUsd: 1 },
+      },
+    })
+    const physicalRounds = resident.requests.map(request => /:debate-r(\d+)-/u.exec(request.commandId)?.[1])
+    expect(physicalRounds).toEqual(['1', '1', '1', '2', '2', '2', '3', '3', '3'])
+    const continuedEvents = await debate.readEvents({ runId: extended.runId, limit: 100 })
+    expect(continuedEvents.events.filter(event => event.type === 'debate.round.started').map(event => event.round))
+      .toEqual([1, 2, 3])
   }, 15_000)
 })

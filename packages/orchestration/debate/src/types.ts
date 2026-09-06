@@ -29,6 +29,28 @@ export type DebateLifecycle =
   | 'failed'
   | 'indeterminate'
 
+/**
+ * User-observable disposition of a run. `rejected` remains distinct from a
+ * user stop even though both use the historical `stopped` lifecycle state.
+ */
+export type DebateRunOutcomeV1 =
+  | 'running'
+  | 'completed'
+  | 'max_rounds'
+  | 'budget_limited'
+  | 'failed'
+  | 'indeterminate'
+  | 'rejected'
+  | 'stopped'
+
+/** Durable result metadata for a run whose lifecycle alone is ambiguous. */
+export interface DebateRunResultV1 {
+  readonly version: 1
+  readonly outcome: DebateRunOutcomeV1
+  readonly reason: string
+  readonly settledAt?: string
+}
+
 /** The only role identifiers admitted by the first Debate contract. */
 export type DebateRoleId =
   | 'constructive-proposer'
@@ -74,7 +96,7 @@ export interface DebateRoundStrategyV1 {
   readonly escalation: 'high-severity-unresolved'
 }
 
-/** Hard bounds for one run; providers must stop at the first exhausted bound. */
+/** Hard bounds for the immutable initial v1 plan; providers derive later effective bounds from continuation grants. */
 export interface DebateBudgetV1 {
   readonly version: 1
   readonly maxRounds: number
@@ -84,6 +106,48 @@ export interface DebateBudgetV1 {
   readonly maxOutputTokens: number
   readonly maxTotalTokens: number
   readonly maxCostUsd?: number
+}
+
+/**
+ * Finite run ceilings derived from the immutable initial policy and accepted
+ * continuation grants. Providers stop at the first exhausted ceiling;
+ * `maxCostUsd` remains the original caller cap.
+ */
+export interface DebateEffectiveBudgetV1 {
+  readonly version: 1
+  readonly maxRounds: number
+  readonly maxTurnsPerAgent: number
+  readonly maxAgentsPerRound: number
+  readonly maxInputTokens: number
+  readonly maxOutputTokens: number
+  readonly maxTotalTokens: number
+  readonly maxCostUsd?: number
+}
+
+/** Fresh non-monetary capacity added by one deliberate two-round continuation. */
+export interface DebateContinuationAllowanceV1 {
+  readonly version: 1
+  /** A continuation command always authorizes exactly two numbered rounds. */
+  readonly additionalRounds: 2
+  /** One additional turn per roster slot in each newly authorized round. */
+  readonly additionalTurnsPerAgent: 2
+  readonly additionalInputTokens: number
+  readonly additionalOutputTokens: number
+  readonly additionalTotalTokens: number
+}
+
+/**
+ * Immutable receipt of one accepted continuation command. `firstRound` and
+ * `lastRound` reserve the two next round numbers without reopening old rounds.
+ */
+export interface DebateContinuationGrantV1 {
+  readonly version: 1
+  readonly commandId: string
+  readonly expectedRevision: number
+  readonly grantedAt: string
+  readonly firstRound: number
+  readonly lastRound: number
+  readonly allowance: DebateContinuationAllowanceV1
 }
 
 /** Explicit convergence policy; dissent remains observable even after convergence. */
@@ -209,7 +273,7 @@ export interface DebateUnresolvedV1 {
   readonly requiredEvidenceRefs: readonly DebateEvidenceRefV1[]
 }
 
-/** Model usage reported by one agent turn; cost remains provider/account-sourced. */
+/** Model usage reported by one agent turn; `costUsd` is actual account-sourced API spend, never subscription usage. */
 export interface DebateUsageV1 {
   readonly inputTokens: number
   readonly outputTokens: number
@@ -363,7 +427,7 @@ export interface DebateSlotCostV1 {
   readonly usage: DebateUsageV1
 }
 
-/** Aggregated cost and token accounting, retained as a projection rather than authority. */
+/** Aggregated token accounting and actual account-sourced API spend, retained as a projection rather than authority. */
 export interface DebateCostSummaryV1 {
   readonly version: 1
   /** Whether token totals cover every settled turn. */
@@ -385,6 +449,44 @@ export interface DebateCostSummaryV1 {
   /** Settled turns whose Evidence contained no account-sourced cost. */
   readonly unknownCostTurns: number
   readonly bySlot: readonly DebateSlotCostV1[]
+}
+
+/** Whether recorded usage is sufficient to admit a continuation safely. */
+export type DebateContinuationAccountingStatusV1 =
+  | 'sufficient'
+  | 'usage_unknown'
+  | 'cost_unknown'
+
+/** Specific monetary cap that prevents automatic continuation admission. */
+export interface DebateContinuationCostLimitV1 {
+  readonly version: 1
+  readonly limitUsd: number
+  readonly usedUsd: number
+  readonly reservedUsd?: number
+}
+
+/** Explainable continuation decision rendered by trusted Consumers. */
+export type DebateContinuationEligibilityReasonV1 =
+  | 'eligible'
+  | 'run_not_settled'
+  | 'last_round_not_settled'
+  | 'usage_accounting_unknown'
+  | 'cost_accounting_unknown'
+  | 'cost_cap_requires_approval'
+
+/**
+ * Provider decision about whether a deliberate continuation may be admitted.
+ * A metered cap can require the existing explicit approval path without
+ * changing the caller's cap.
+ */
+export interface DebateContinuationEligibilityV1 {
+  readonly version: 1
+  readonly status: 'eligible' | 'ineligible' | 'approval_required'
+  readonly outcome: DebateRunOutcomeV1
+  readonly accounting: DebateContinuationAccountingStatusV1
+  readonly reason: DebateContinuationEligibilityReasonV1
+  readonly message: string
+  readonly costLimit?: DebateContinuationCostLimitV1
 }
 
 /** Bounded Evidence coverage projection for one run. */
@@ -499,6 +601,28 @@ export interface DebateSynthesisV1 {
   readonly dissentCount: number
 }
 
+/** Sealed moderator summary retained before an accepted continuation starts. */
+export interface DebateSynthesisHistoryEntryV1 {
+  readonly version: 1
+  readonly throughRound: number
+  readonly sealedAt: string
+  readonly synthesis: DebateSynthesisV1
+}
+
+/**
+ * Durable continuation projection. Providers persist grants and summary
+ * history, then derive `effectiveBudget` from the immutable policy and grants.
+ */
+export interface DebateContinuationStateV1 {
+  readonly version: 1
+  readonly grants: readonly DebateContinuationGrantV1[]
+  readonly synthesisHistory: readonly DebateSynthesisHistoryEntryV1[]
+  readonly effectiveBudget: DebateEffectiveBudgetV1
+  /** Capacity shown before a Consumer sends its next continuation command. */
+  readonly offeredAllowance?: DebateContinuationAllowanceV1
+  readonly eligibility: DebateContinuationEligibilityV1
+}
+
 /** Full inspect projection. It deliberately contains no scheduler or database handle. */
 export interface DebateRunSnapshotV1 {
   readonly version: 1
@@ -521,6 +645,10 @@ export interface DebateRunSnapshotV1 {
   readonly cost: DebateCostSummaryV1
   readonly provenance: DebateProvenanceV1
   readonly synthesis?: DebateSynthesisV1
+  /** Present on new writes; omitted by released snapshots with no continuation data. */
+  readonly continuation?: DebateContinuationStateV1
+  /** Present on new writes when a Provider records a distinct terminal disposition. */
+  readonly result?: DebateRunResultV1
   readonly createdAt: string
   readonly updatedAt: string
 }
@@ -555,6 +683,7 @@ export type DebateEventType =
   | 'debate.convergence.evaluated'
   | 'debate.synthesis.started'
   | 'debate.synthesis.settled'
+  | 'debate.continuation.granted'
   | 'debate.cost.accounted'
   | 'debate.stopped'
   | 'debate.failed'
@@ -588,7 +717,7 @@ export interface DebateEventPageV1 {
 }
 
 /** Revision-fenced lifecycle actions accepted by the Debate Provider. */
-export type DebateControlAction = 'approve' | 'reject' | 'pause' | 'resume' | 'stop'
+export type DebateControlAction = 'approve' | 'reject' | 'pause' | 'resume' | 'stop' | 'continue'
 
 /** Idempotent, revision-fenced control command. */
 export interface DebateControlRequestV1 {
@@ -598,6 +727,26 @@ export interface DebateControlRequestV1 {
   readonly expectedRevision: number
   readonly action: DebateControlAction
   readonly reason: string
+}
+
+/** Durable receipt state for an idempotent start or revision-fenced control command. */
+export type DebateCommandReceiptStateV1 = 'accepted' | 'running' | 'settled' | 'indeterminate'
+
+/**
+ * Provider-owned receipt fields persisted under its write lock. A settled
+ * receipt stores the original response so an identical command replay cannot
+ * create another continuation grant.
+ */
+export interface DebateCommandReceiptV1 {
+  readonly version: 1
+  readonly commandId: string
+  readonly method: 'start' | 'control'
+  readonly requestSha256: string
+  readonly runId: string
+  readonly state: DebateCommandReceiptStateV1
+  readonly action?: DebateControlAction
+  readonly expectedRevision?: number
+  readonly response?: DebateRunSnapshotV1
 }
 
 /** Stable role order advertised to Providers and Consumers. */
