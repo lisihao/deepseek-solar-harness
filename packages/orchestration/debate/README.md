@@ -20,6 +20,8 @@ Providers must validate untrusted JSON with the exported policy, start, control,
 
 Providers own `DebateCommandReceiptV1` under their write lock. An identical `commandId`, method, and request digest replays its original response; a different request with the same id conflicts. The revision fence and receipt commit precede a continuation grant, so two stale control requests cannot both reserve the same rounds.
 
+Settled historical control receipts may omit both `action` and `expectedRevision`, including version-1 receipts normalized by an earlier load. Their recorded response remains replayable after subsequent writes and restarts. A partial control-field pair is invalid; new control requests and unfinished version-1 receipts still require both fields.
+
 The Debate package is a Consumer/Provider seam for the existing execution system. It may be called from a TaskGraph node or an RLM session through `execution`, but it cannot create graph nodes, dispatch a physical operator, mutate scheduler state, or bypass the parent run's permissions. The Provider owns those integrations and must preserve their authority boundaries.
 
 ## Model Experience

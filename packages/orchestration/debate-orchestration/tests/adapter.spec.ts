@@ -1,4 +1,5 @@
 import { join, resolve } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import type { DebateRoundAgentProgressV1,
   DebateRoundExecutionRequestV1,
@@ -14,6 +15,7 @@ import type {
   OrchestrationRunSnapshot,
   OrchestrationStartRequest,
 } from '@deepseek-ai/dsh-orchestration'
+import { BasicContextCompiler } from '@deepseek-ai/dsh-orchestration-local'
 import { Config, DebateTaskGraphRoundExecutor, apply } from '../src/index.ts'
 import type { DebateTaskGraphOrchestrations } from '../src/types.ts'
 
@@ -165,6 +167,68 @@ describe('Debate TaskGraph round adapter', () => {
     expect(() => executor.plan({ ...request, turns })).toThrow('cannot reuse turns from another round')
   })
 
+  it('reserves the complete later-round ledger before admitting participant and judge contexts', async ({ onTestFinished }) => {
+    const laterTurns = turns.map(entry => ({
+      ...entry,
+      round: 5,
+      phase: 'claim-ledger' as const,
+      priorLedger: {
+        version: 1 as const,
+        claims: Array.from({ length: 48 }, (_, index) => ({
+          version: 1 as const,
+          claimId: `claim:${String(index)}`,
+          statement: '保留已经讨论的可验证主张。'.repeat(90),
+          status: 'unresolved' as const,
+          severity: 'high' as const,
+          confidence: 0.8,
+          supportingSlotIds: ['constructive-proposer'],
+          opposingSlotIds: ['skeptical-falsifier'],
+          evidenceRefs: [],
+        })),
+        coverage: 0,
+        digest: 'sha256:later-ledger',
+      },
+    }))
+    const request: DebateRoundExecutionRequestV1 = {
+      version: 1, runId: 'debate-1', round: 5, turns: laterTurns, maxParallel: 2,
+    }
+    const executor = new DebateTaskGraphRoundExecutor({} as DebateTaskGraphOrchestrations)
+    const plan = executor.plan(request)
+    const context = new Context()
+    onTestFinished(() => context.root.fiber.dispose())
+    const compiler = new BasicContextCompiler(context)
+    for (const node of plan.graph.nodes) {
+      const packet = await compiler.compile({
+        runId: request.runId,
+        nodeId: node.id,
+        objective: laterTurns[0]!.objective!,
+        workspace: plan.graph.workspace,
+        task: node.task,
+        sourceRefs: node.dependsOn.map(ref => ({ ref, kind: 'artifact' as const, required: true })),
+        sourceMaterials: node.dependsOn.map(ref => ({ ref, text: '证据'.repeat(2_000), truncated: true })),
+        readScopes: [], writeScopes: [],
+        acceptance: node.acceptance.map(requirement => requirement.description),
+        capsuleInstructions: [],
+        policy: node.contextPolicy,
+      })
+      expect(packet.estimatedTokens).toBeGreaterThan(16_000)
+      expect(packet.estimatedTokens).toBeLessThanOrEqual(node.contextPolicy.maxTokens)
+      expect(packet.task).toContain('claim:47')
+    }
+    const preflight = executor.preflight(request)
+    expect(preflight.estimate.inputTokens).toBe(
+      plan.graph.nodes.reduce((total, node) => total + node.contextPolicy.maxTokens + 8_546, 0),
+    )
+    expect(executor.preflight({
+      ...request,
+      budgetEnvelope: {
+        version: 1, usedInputTokens: 0, usedOutputTokens: 0,
+        maxInputTokens: preflight.estimate.inputTokens,
+        maxOutputTokens: 100_000, maxTotalTokens: 1_000_000,
+      },
+    })).toMatchObject({ status: 'budget_limited', limit: { kind: 'input-tokens' } })
+  })
+
   it('preflights native-session context before compiling a TaskGraph', async () => {
     let compilationCalls = 0
     const executor = new DebateTaskGraphRoundExecutor({
@@ -194,16 +258,19 @@ describe('Debate TaskGraph round adapter', () => {
       },
     }
 
+    const reservedInputTokens = executor.plan(request).graph.nodes.reduce((total, node) => (
+      total + node.contextPolicy.maxTokens + 8_546
+    ), 0)
     expect(executor.preflight(request)).toEqual({
       version: 1,
       status: 'budget_limited',
-      estimate: { inputTokens: 98_184, outputTokens: 48_000, totalTokens: 146_184 },
+      estimate: { inputTokens: reservedInputTokens, outputTokens: 48_000, totalTokens: reservedInputTokens + 48_000 },
       limit: {
         kind: 'input-tokens',
         used: 0,
-        reserved: 98_184,
+        reserved: reservedInputTokens,
         limit: 72_000,
-        reason: 'input token budget preflight denied (used 0 + reserved 98184 >= limit 72000)',
+        reason: `input token budget preflight denied (used 0 + reserved ${String(reservedInputTokens)} >= limit 72000)`,
       },
     })
     await expect(executor.executeRound(request)).rejects.toMatchObject({ code: 'DEBATE_BUDGET_EXCEEDED' })

@@ -26,7 +26,7 @@ Debate Command Receipt 会在调用本适配器前持久化，TaskGraph 的 star
 
 #### Token effect
 
-每个 roster slot 收到一个有界 prompt。参与者 turn 可以重叠，judge 只在其 Evidence 结算后启动。适配器会根据 Provider 提供的有效 token envelope 对每个新回合做 preflight。
+每个 roster slot 收到一个有界 prompt。其认证上下文预算包含序列化 task、objective 和 workspace 的估算量，另为 Context Packet 元数据、胶囊说明和有界上游 Evidence 预留 16,000 token。完整 task 包含先前的 ledger、dissent 和未解决缺口，因此后续轮次会保留这些内容，不受固定的总上下文截断限制。参与者 turn 可以重叠，judge 只在其 Evidence 结算后启动。适配器使用相同的上下文预留量，根据 Provider 的有效 token envelope 对每个新回合做 preflight；额度不足时，在任何参与者派发前停止准入。预留量不代表实际计费用量。
 
 #### KV Cache effect
 
