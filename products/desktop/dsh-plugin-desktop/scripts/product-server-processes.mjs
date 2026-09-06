@@ -64,6 +64,16 @@ async function processCommand(pid) {
   return stdout.trim()
 }
 
+function signalOwnedProcess(signalProcess, pid, signal) {
+  try {
+    signalProcess(pid, signal)
+    return true
+  } catch (cause) {
+    if (cause?.code === 'ESRCH') return false
+    throw cause
+  }
+}
+
 export function assertOwnedDaemonCommand(command, root, executable = process.execPath) {
   const rootArgument = ` --root ${root}`
   const rootIndex = command.indexOf(rootArgument)
@@ -117,9 +127,9 @@ export async function stopOwnedDaemon(root, timeoutMs = 7_000, dependencies = {}
   }
   assertOwnedDaemonCommand(command, root, dependencies.executable ?? process.execPath)
   const signal = dependencies.signalProcess ?? process.kill
-  signal(pid, 'SIGTERM')
+  if (!signalOwnedProcess(signal, pid, 'SIGTERM')) return
   if (await waitForExit(pid, timeoutMs)) return
-  signal(pid, 'SIGKILL')
+  if (!signalOwnedProcess(signal, pid, 'SIGKILL')) return
   if (!await waitForExit(pid, timeoutMs)) {
     throw new Error(`daemon ${String(pid)} below ${root} did not stop`)
   }

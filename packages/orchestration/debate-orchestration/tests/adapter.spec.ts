@@ -115,6 +115,56 @@ describe('Debate TaskGraph round adapter', () => {
     ])
   })
 
+  it('assigns fresh physical identifiers and honors the Provider-derived continuation envelope', () => {
+    const continuationTurns = turns.map(turn => ({
+      ...turn,
+      round: 3,
+      phase: 'claim-ledger' as const,
+      priorLedger: {
+        version: 1 as const,
+        claims: [{
+          version: 1 as const,
+          claimId: 'claim:decision',
+          statement: 'The settled claim remains in scope.',
+          status: 'supported' as const,
+          severity: 'medium' as const,
+          confidence: 0.9,
+          supportingSlotIds: ['constructive-proposer'],
+          opposingSlotIds: [],
+          evidenceRefs: [{ version: 1 as const, ref: 'artifact:brief', kind: 'artifact' as const }],
+        }],
+        coverage: 1,
+        digest: 'sha256:continuation-ledger',
+      },
+    }))
+    const request: DebateRoundExecutionRequestV1 = {
+      version: 1,
+      runId: 'debate-1',
+      round: 3,
+      turns: continuationTurns,
+      maxParallel: 2,
+      budgetEnvelope: {
+        version: 1,
+        usedInputTokens: 73_638,
+        usedOutputTokens: 36_000,
+        maxInputTokens: 240_000,
+        maxOutputTokens: 120_000,
+        maxTotalTokens: 360_000,
+      },
+    }
+    const executor = new DebateTaskGraphRoundExecutor({} as DebateTaskGraphOrchestrations)
+    const plan = executor.plan(request)
+
+    expect(plan.graph.nodes.map(node => node.id)).toEqual([
+      'debate-r3-constructive-proposer',
+      'debate-r3-skeptical-falsifier',
+      'debate-r3-decision-judge',
+    ])
+    expect(plan.graph.nodes.some(node => node.id.includes('debate-r1-'))).toBe(false)
+    expect(executor.preflight(request)).toMatchObject({ status: 'admitted' })
+    expect(() => executor.plan({ ...request, turns })).toThrow('cannot reuse turns from another round')
+  })
+
   it('preflights native-session context before compiling a TaskGraph', async () => {
     let compilationCalls = 0
     const executor = new DebateTaskGraphRoundExecutor({

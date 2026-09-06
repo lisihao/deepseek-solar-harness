@@ -38,6 +38,13 @@ function run(): DesktopDebateRun {
     createdAt: '2026-08-29T01:00:00.000Z',
     objective: 'Choose A or B.',
     topic: { version: 1, title: 'User-selected topic: choose A or B.', source: 'user' },
+    initialPlan: {
+      plannedRounds: 3,
+      reason: '初始策略采用 3 轮基线。',
+      maxInputTokens: 1_200_000,
+      maxOutputTokens: 180_000,
+      maxTotalTokens: 1_380_000,
+    },
     sourceSessionId: 'session-1',
     roles: [{
       role: 'constructive-proposer', kind: 'participant', title: '建设性提案者', mandate: '提出可执行方案与成功标准。', operatorId: 'codex', model: 'gpt-5.6-sol', tier: 'high', source: 'native-subscription', required: true,
@@ -94,7 +101,7 @@ describe('Debate Desktop panel transport', () => {
   })
 
   it('sends an exact revision-fenced control through the trusted header', async () => {
-    const intent = { version: 1 as const, commandId: 'pause-1', runId: 'debate-1', expectedRevision: 7, action: 'pause' as const, reason: 'review' }
+    const intent = { version: 1 as const, commandId: 'continue-1', runId: 'debate-1', expectedRevision: 7, action: 'continue' as const, reason: '继续讨论 2 轮' }
     const request = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify(run()), { status: 200 }))
     await expect(controlDebate(intent, request)).resolves.toMatchObject({ runId: 'debate-1' })
     expect(request.mock.calls[0]?.[0]).toBe('/api/debates')
@@ -570,6 +577,146 @@ describe('Debate Desktop panel transport', () => {
     expect(markup).toContain(`Claude Code · ${longModel}`)
     expect(markup).not.toContain(longNodeId)
     expect(markup).toContain('MODEL_UNAVAILABLE · 请求模型当前不可用。')
+  })
+
+  it('shows one eligible two-round continuation control, disables it while pending, and reconciles a later grant', () => {
+    const fixture = run()
+    const allowance = {
+      additionalRounds: 2 as const,
+      additionalTurnsPerAgent: 2 as const,
+      additionalInputTokens: 800_000,
+      additionalOutputTokens: 120_000,
+      additionalTotalTokens: 920_000,
+    }
+    fixture.state = 'completed'
+    fixture.cost = { ...fixture.cost, usageStatus: 'known', costStatus: 'known', costUsd: 0 }
+    fixture.result = { outcome: 'completed', reason: 'evidence-backed convergence' }
+    const continuation: NonNullable<DesktopDebateRun['continuation']> = {
+      grants: [],
+      synthesisHistory: [],
+      effectiveBudget: {
+        maxRounds: 3,
+        maxTurnsPerAgent: 3,
+        maxAgentsPerRound: 3,
+        maxInputTokens: 1_200_000,
+        maxOutputTokens: 180_000,
+        maxTotalTokens: 1_380_000,
+      },
+      offeredAllowance: allowance,
+      eligibility: {
+        status: 'eligible',
+        outcome: 'completed',
+        accounting: 'sufficient',
+        reason: 'eligible',
+        message: 'the settled debate may continue for two rounds',
+      },
+    }
+    fixture.continuation = continuation
+    const ready = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture, events: [], pending: false, onControl: async () => {},
+    }))
+    const pending = renderToStaticMarkup(createElement(RunDetail, {
+      run: fixture, events: [], pending: true, onControl: async () => {},
+    }))
+    expect(ready).toContain('继续讨论 2 轮')
+    expect(ready).toContain('可追加第 3–4 轮：输入')
+    expect(ready).toContain('输出')
+    expect(ready).toContain('token。')
+    expect((ready.match(/继续讨论 2 轮/g) ?? [])).toHaveLength(1)
+    expect(pending).toMatch(/data-action="continue" disabled=""/u)
+    for (const state of ['max_rounds', 'budget_limited'] as const) {
+      const terminal = renderToStaticMarkup(createElement(RunDetail, {
+        run: { ...fixture, state }, events: [], pending: false, onControl: async () => {},
+      }))
+      expect(terminal).toContain('data-action="continue"')
+    }
+    const forbidden = renderToStaticMarkup(createElement(RunDetail, {
+      run: { ...fixture, state: 'failed' }, events: [], pending: false, onControl: async () => {},
+    }))
+    expect(forbidden).not.toContain('data-action="continue"')
+
+    const costCapped: DesktopDebateRun = {
+      ...fixture,
+      cost: { ...fixture.cost, costUsd: 5 },
+      initialPlan: { ...fixture.initialPlan, maxCostUsd: 5 },
+      continuation: {
+        ...continuation,
+        eligibility: {
+          status: 'approval_required',
+          outcome: 'completed',
+          accounting: 'sufficient',
+          reason: 'cost_cap_requires_approval',
+          message: 'metered cost cap exhausted',
+          costLimit: { limitUsd: 5, usedUsd: 5 },
+        },
+      },
+    }
+    const accountingUnknown: DesktopDebateRun = {
+      ...fixture,
+      continuation: {
+        ...continuation,
+        eligibility: {
+          status: 'ineligible',
+          outcome: 'completed',
+          accounting: 'usage_unknown',
+          reason: 'usage_accounting_unknown',
+          message: 'token accounting is incomplete',
+        },
+      },
+    }
+    const cappedMarkup = renderToStaticMarkup(createElement(RunDetail, {
+      run: costCapped, events: [], pending: false, onControl: async () => {},
+    }))
+    const unknownMarkup = renderToStaticMarkup(createElement(RunDetail, {
+      run: accountingUnknown, events: [], pending: false, onControl: async () => {},
+    }))
+    expect(cappedMarkup).toContain('继续讨论需要费用审批：已用 $5.0000 / 上限 $5.0000。')
+    expect(cappedMarkup).not.toContain('data-action="continue"')
+    expect(unknownMarkup).toContain('Token 用量归集未知，不能继续。')
+    expect(unknownMarkup).not.toContain('data-action="continue"')
+
+    const secondRound = fixture.rounds[1]
+    if (secondRound === undefined) throw new Error('missing second Debate round')
+    const extensionRounds = [3, 4].map(round => ({
+      ...secondRound,
+      round,
+      turnStates: secondRound.turnStates.map(turnState => ({ ...turnState, round })),
+    }))
+    const continued: DesktopDebateRun = {
+      ...fixture,
+      revision: 9,
+      currentRound: 4,
+      rounds: [...fixture.rounds, ...extensionRounds],
+      synthesis: { state: 'pending', unresolvedClaimIds: [], dissentCount: 1 },
+      continuation: {
+        ...continuation,
+        grants: [{ firstRound: 3, lastRound: 4, grantedAt: '2026-08-29T01:02:00.000Z', allowance }],
+        synthesisHistory: [{ throughRound: 2, sealedAt: '2026-08-29T01:02:00.000Z', synthesis: fixture.synthesis! }],
+        effectiveBudget: {
+          ...continuation.effectiveBudget,
+          maxRounds: 5,
+          maxTurnsPerAgent: 5,
+          maxInputTokens: 2_000_000,
+          maxOutputTokens: 300_000,
+          maxTotalTokens: 2_300_000,
+        },
+      },
+    }
+    const reconciled = renderToStaticMarkup(createElement('div', null,
+      createElement(RunDetail, {
+        run: continued,
+        events: [{ version: 1, sequence: 10, runId: continued.runId, revision: continued.revision, generation: 10, type: 'debate.continuation.granted', createdAt: continued.updatedAt, data: { firstRound: 3, lastRound: 4 } }],
+        pending: false,
+        onControl: async () => {},
+      }),
+      createElement(EvidenceColumn, { run: continued }),
+    ))
+    expect(reconciled).toContain('第 3 轮')
+    expect(reconciled).toContain('第 4 轮')
+    expect(reconciled).toContain('已追加讨论轮次')
+    expect(reconciled).toContain('历史主持人总结')
+    expect(reconciled).toContain('已追加讨论；新的主持人总结等待后续轮次完成。')
+    expect(reconciled).toContain('可追加第 5–6 轮')
   })
 
   it('offers resume only when the durable stop event proves a pause', () => {

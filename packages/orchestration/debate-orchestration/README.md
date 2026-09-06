@@ -12,7 +12,7 @@ The first adapter accepts native-subscription roster slots only because the curr
 
 One round produces one TaskGraph. While it is running, the adapter cursor-reads `ctx.orchestrations.readEvents` and forwards only ordered, whitelisted `node.operator.progress` / `node.operator.observation` facts to the local Provider: phase, bounded public output, tool names, approval requirements, and usage. The callback is awaited in source sequence order and never forwards prompts, private reasoning, credentials, or native identifiers. The adapter returns a slot-keyed result map after reading immutable execution Evidence. Missing usage remains absent; the Debate Provider projects it as unknown rather than zero.
 
-The Debate command receipt is durable before this adapter is called, and the TaskGraph start command is deterministically `debate:<run>:round:<n>`. A stop signal uses the existing Orchestration `cancel` control and waits for a confirmed cancelled projection. Revision conflict or an otherwise unproven cancellation returns `DEBATE_INDETERMINATE`; the Provider does not replay the round.
+The Debate command receipt is durable before this adapter is called, and the TaskGraph start command is deterministically `debate:<run>:round:<n>`. A continuation reaches this adapter only after the Provider records its grant, so it uses new round and node identifiers instead of replaying a sealed TaskGraph. Its transient budget envelope contains the Provider-derived effective token ceilings; the adapter neither changes the immutable policy nor expands a caller cost cap. A stop signal uses the existing Orchestration `cancel` control and waits for a confirmed cancelled projection. Revision conflict or an otherwise unproven cancellation returns `DEBATE_INDETERMINATE`; the Provider does not replay the round.
 
 The optional `dshHome` configuration follows the harness-wide home resolution rules. Debate run state is stored under `$DSH_HOME/debates`; Bundle users do not configure an independent state path.
 
@@ -26,7 +26,7 @@ Each participant executing a sealed `NodeExecutionPlan` sees its fixed role pers
 
 #### Token effect
 
-Each roster slot receives one bounded prompt. Participant turns can overlap, while the judge starts only after their Evidence settles.
+Each roster slot receives one bounded prompt. Participant turns can overlap, while the judge starts only after their Evidence settles. The adapter preflights each new round against the effective token envelope supplied by the Provider.
 
 #### KV Cache effect
 

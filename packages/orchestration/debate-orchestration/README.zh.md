@@ -12,7 +12,7 @@
 
 每轮只生成一个 TaskGraph。运行期间，适配器会 cursor-read `ctx.orchestrations.readEvents`，并只把按来源 sequence 排序的白名单 `node.operator.progress` / `node.operator.observation` 事实转发给本地 Provider：phase、有界公开输出、工具名称、审批要求和 usage。回调按来源 sequence 逐条 await，绝不转发提示词、私有推理、凭据或原生标识。适配器随后读取不可变执行 Evidence，并按 slot 返回结果映射。缺失的 usage 保持缺失；Debate Provider 将其投影为 unknown，而不是零。
 
-Debate Command Receipt 会在调用本适配器前持久化，TaskGraph 的 start command 确定性固定为 `debate:<run>:round:<n>`。stop 信号会调用现有 Orchestration `cancel` control，并等待已确认的 cancelled 投影。revision 冲突或其他无法证明的取消结果会返回 `DEBATE_INDETERMINATE`；Provider 不会重放该轮。
+Debate Command Receipt 会在调用本适配器前持久化，TaskGraph 的 start command 确定性固定为 `debate:<run>:round:<n>`。continuation 只有在 Provider 记录 grant 后才会到达本适配器，因此使用新的 round 和 node 标识，不会重放已密封的 TaskGraph。其瞬态 budget envelope 带有 Provider 推导出的有效 token ceiling；适配器既不修改不可变 policy，也不扩展调用方 cost cap。stop 信号会调用现有 Orchestration `cancel` control，并等待已确认的 cancelled 投影。revision 冲突或其他无法证明的取消结果会返回 `DEBATE_INDETERMINATE`；Provider 不会重放该轮。
 
 可选的 `dshHome` 配置遵循 harness 统一的主目录解析规则。Debate 运行状态保存在 `$DSH_HOME/debates`；Bundle 用户不需要配置独立状态路径。
 
@@ -26,7 +26,7 @@ Debate Command Receipt 会在调用本适配器前持久化，TaskGraph 的 star
 
 #### Token effect
 
-每个 roster slot 收到一个有界 prompt。参与者 turn 可以重叠，judge 只在其 Evidence 结算后启动。
+每个 roster slot 收到一个有界 prompt。参与者 turn 可以重叠，judge 只在其 Evidence 结算后启动。适配器会根据 Provider 提供的有效 token envelope 对每个新回合做 preflight。
 
 #### KV Cache effect
 

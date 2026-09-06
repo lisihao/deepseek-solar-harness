@@ -6,6 +6,7 @@ import {
   DEBATE_DASHBOARD_PATH,
   type DesktopDebateControlAction,
   type DesktopDebateControlRequest,
+  type DesktopDebateContinuationAllowance,
   type DesktopDebateDashboard,
   type DesktopDebateEvent,
   type DesktopDebateLifecycle,
@@ -167,7 +168,9 @@ export function DebatePanel({ request: browserRequest }: { request: BrowserReque
         runId: run.runId,
         expectedRevision: run.revision,
         action,
-        reason: `User selected ${action} in DSH Desktop Debate panel.`,
+        reason: action === 'continue'
+          ? '用户在 Debate 面板选择继续讨论 2 轮。'
+          : `User selected ${action} in DSH Desktop Debate panel.`,
       }, browserRequest)
       await refresh()
     } catch (cause) {
@@ -347,12 +350,64 @@ function topicTitle(run: DesktopDebateRun): string {
 
 function RunStatusStrip({ run }: { run: DesktopDebateRun }) {
   const round = run.rounds.find(item => item.round === run.currentRound) ?? run.rounds.at(-1)
+  const finishReason = runFinishReason(run, round)
   return <dl className="dshDesktopDebateStatusStrip">
     <div><dt>运行状态</dt><dd data-state={run.state}>{lifecycleLabel(run.state)}</dd></div>
     <div><dt>当前轮次</dt><dd>{round === undefined ? `第 ${String(run.currentRound)} 轮` : `第 ${String(round.round)} 轮 · ${roundStateLabel(round.state)}`}</dd></div>
+    <div>
+      <dt>初始计划</dt>
+      <dd>
+        {String(run.initialPlan.plannedRounds)} 轮 · {run.initialPlan.reason}
+        <br />
+        输入 {formatOptionalNumber(run.initialPlan.maxInputTokens)}
+        {' · '}输出 {formatOptionalNumber(run.initialPlan.maxOutputTokens)} token
+      </dd>
+    </div>
     <div><dt>未决问题</dt><dd>{run.unresolved.length === 0 ? '无' : `${String(run.unresolved.length)} 项`}</dd></div>
     {round?.convergence !== undefined && <div><dt>收敛检查</dt><dd>{convergenceLabel(round.convergence.status)}</dd></div>}
+    {finishReason !== undefined && <div><dt>结束原因</dt><dd>{finishReason}</dd></div>}
+    {run.continuation !== undefined && <ContinuationStatus run={run} />}
   </dl>
+}
+
+function runFinishReason(run: DesktopDebateRun, round: DesktopDebateRound | undefined): string | undefined {
+  if (round?.convergence?.status === 'converged') return '已收敛'
+  if (run.state === 'max_rounds') return '达到轮次上限'
+  if (run.state === 'budget_limited') {
+    const cap = run.initialPlan.maxCostUsd
+    const used = run.cost.costUsd
+    if (cap !== undefined && used !== undefined && used >= cap) return `费用上限已用尽（${formatOptionalCost(used)} / ${formatOptionalCost(cap)}）`
+    return 'Token 上限已用尽'
+  }
+  return run.result?.reason
+}
+
+function ContinuationStatus({ run }: { run: DesktopDebateRun }) {
+  const continuation = run.continuation
+  if (continuation === undefined) return null
+  const { eligibility } = continuation
+  if (eligibility.status === 'eligible') {
+    const allowance = continuation.offeredAllowance
+    return <div><dt>继续讨论</dt><dd>{allowance === undefined ? '本次讨论可继续。' : continuationAllowanceText(run, allowance)}</dd></div>
+  }
+  if (eligibility.status === 'approval_required') {
+    const limit = eligibility.costLimit
+    return <div><dt>继续讨论</dt><dd>{limit === undefined
+      ? '继续讨论需要沿用现有费用审批。'
+      : `继续讨论需要费用审批：已用 ${formatOptionalCost(limit.usedUsd)} / 上限 ${formatOptionalCost(limit.limitUsd)}。`}</dd></div>
+  }
+  return <div><dt>继续讨论</dt><dd>{continuationIneligibleLabel(eligibility.reason)}</dd></div>
+}
+
+function continuationIneligibleLabel(reason: NonNullable<DesktopDebateRun['continuation']>['eligibility']['reason']): string {
+  return ({
+    run_not_settled: '当前讨论尚未结算，不能继续。',
+    last_round_not_settled: '最后一轮尚未完整结算，不能继续。',
+    usage_accounting_unknown: 'Token 用量归集未知，不能继续。',
+    cost_accounting_unknown: '费用归集未知，不能继续。',
+    cost_cap_requires_approval: '继续讨论需要沿用现有费用审批。',
+    eligible: '本次讨论可继续。',
+  } as const)[reason]
 }
 
 function ConvergenceSummary({ convergence }: { convergence: NonNullable<DesktopDebateRound['convergence']> }) {
@@ -690,6 +745,7 @@ export function EvidenceColumn({ run, open = false }: { run?: DesktopDebateRun |
   return <aside id="dshDesktopDebateInsights" className="dshDesktopDebateColumn dshDesktopDebateEvidence" data-open={open ? 'true' : 'false'}>
     <CostCard run={run} />
     <section className="dshDesktopDebatePinned" aria-label="置顶 · 主持人总结 / 决策裁判"><h3><span className="dshDesktopDebatePinnedLabel">置顶</span> 主持人总结 / 决策裁判</h3>
+      {run.continuation !== undefined && run.continuation.grants.length > 0 && run.synthesis?.state === 'pending' && <p>已追加讨论；新的主持人总结等待后续轮次完成。</p>}
       {run.synthesis === undefined
         ? <>
           <p className="dshDesktopDebateEmpty">尚未生成综合结果。</p>
@@ -702,6 +758,14 @@ export function EvidenceColumn({ run, open = false }: { run?: DesktopDebateRun |
           {run.synthesis.artifactRef !== undefined && <details className="dshDesktopDebateTechDetails"><summary>总结技术详情</summary><code title={run.synthesis.artifactRef}>{run.synthesis.artifactRef}</code></details>}
         </>}
     </section>
+    {run.continuation !== undefined && run.continuation.synthesisHistory.length > 0 && <section className="dshDesktopDebateSynthesisHistory">
+      <h3>历史主持人总结</h3>
+      {run.continuation.synthesisHistory.map(entry => <details key={`${String(entry.throughRound)}-${entry.sealedAt}`}>
+        <summary>第 {String(entry.throughRound)} 轮后的总结</summary>
+        <p><strong>{synthesisLabel(entry.synthesis.state)}</strong> · 保留异议 {String(entry.synthesis.dissentCount)}</p>
+        {entry.synthesis.outputPreview !== undefined && <div className="dshDesktopDebateSynthesis"><MarkdownText text={publicMarkdown(entry.synthesis.outputPreview)} /></div>}
+      </details>)}
+    </section>}
     <section><h3>未决问题</h3>
       {run.unresolved.length === 0 && <p className="dshDesktopDebateEmpty">无未决问题。</p>}
       {run.unresolved.map(item => <article key={item.claimId} data-severity={item.severity}>
@@ -743,17 +807,46 @@ function RunControls(props: {
   pending: boolean
   onControl: (action: DesktopDebateControlAction) => Promise<void>
 }) {
-  const actions = controlActions(props.run.state, props.resumable)
+  const actions = controlActions(props.run, props.resumable)
   if (actions.length === 0) return null
   return <div className="dshDesktopDebateControls">
-    {actions.map(action => <button key={action} type="button" disabled={props.pending} onClick={() => { void props.onControl(action) }}>{controlLabel(action)}</button>)}
+    {actions.map(action => action === 'continue'
+      ? <ContinuationButton key={action} run={props.run} pending={props.pending} onControl={props.onControl} />
+      : <button key={action} type="button" disabled={props.pending} onClick={() => { void props.onControl(action) }}>{controlLabel(action)}</button>)}
   </div>
 }
 
-function controlActions(state: DesktopDebateLifecycle, resumable: boolean): DesktopDebateControlAction[] {
-  if (state === 'awaiting_approval') return ['approve', 'stop']
-  if (state === 'stopped') return resumable ? ['resume'] : []
-  if (isActive(state)) return ['pause', 'stop']
+function ContinuationButton(props: {
+  run: DesktopDebateRun
+  pending: boolean
+  onControl: (action: DesktopDebateControlAction) => Promise<void>
+}) {
+  const allowance = continuationOffer(props.run)
+  if (allowance === undefined) return null
+  return <span className="dshDesktopDebateContinuation">
+    <small>{continuationAllowanceText(props.run, allowance)}</small>
+    <button type="button" data-action="continue" disabled={props.pending} onClick={() => { void props.onControl('continue') }}>继续讨论 2 轮</button>
+  </span>
+}
+
+function continuationOffer(run: DesktopDebateRun): DesktopDebateContinuationAllowance | undefined {
+  if (!['completed', 'max_rounds', 'budget_limited'].includes(run.state)) return undefined
+  const continuation = run.continuation
+  if (continuation?.eligibility.status !== 'eligible') return undefined
+  return continuation.offeredAllowance
+}
+
+function continuationAllowanceText(run: DesktopDebateRun, allowance: DesktopDebateContinuationAllowance): string {
+  const firstRound = run.currentRound + 1
+  const lastRound = firstRound + allowance.additionalRounds - 1
+  return `可追加第 ${String(firstRound)}–${String(lastRound)} 轮：输入 ${formatOptionalNumber(allowance.additionalInputTokens)}，输出 ${formatOptionalNumber(allowance.additionalOutputTokens)}，共 ${formatOptionalNumber(allowance.additionalTotalTokens)} token。`
+}
+
+function controlActions(run: DesktopDebateRun, resumable: boolean): DesktopDebateControlAction[] {
+  if (run.state === 'awaiting_approval') return ['approve', 'stop']
+  if (run.state === 'stopped') return resumable ? ['resume'] : []
+  if (isActive(run.state)) return ['pause', 'stop']
+  if (continuationOffer(run) !== undefined) return ['continue']
   return []
 }
 
@@ -804,6 +897,7 @@ function debateEventSummary(event: DesktopDebateEvent, roles: readonly DesktopDe
   if (event.type === 'debate.convergence.evaluated') return `本轮判断：${convergenceLabel(eventValue(event, 'status'))}。`
   if (event.type === 'debate.synthesis.started') return '主持人正在综合各楼层发言。'
   if (event.type === 'debate.synthesis.settled') return '主持人已提交最终综合结果。'
+  if (event.type === 'debate.continuation.granted') return '已追加两轮讨论，主持人将基于新的轮次重新综合。'
   if (event.type === 'debate.cost.accounted') return '本轮用量与费用已更新。'
   if (event.type === 'debate.stopped') return `讨论已${eventValue(event, 'action') === 'pause' ? '暂停' : '停止'}。`
   if (event.type === 'debate.failed') return '讨论失败，未能完成全部流程。'
@@ -828,6 +922,7 @@ function debateEventLabel(type: string): string {
     'debate.convergence.evaluated': '收敛已评估',
     'debate.synthesis.started': '主持人总结已启动',
     'debate.synthesis.settled': '主持人总结已完成',
+    'debate.continuation.granted': '已追加讨论轮次',
     'debate.cost.accounted': '用量与费用已归集',
     'debate.stopped': 'Debate 已停止',
     'debate.failed': 'Debate 失败',
@@ -939,5 +1034,5 @@ function accountingLabel(value: DesktopDebateRun['cost']['usageStatus']): string
 }
 
 function controlLabel(action: DesktopDebateControlAction): string {
-  return ({ approve: '批准', reject: '拒绝', pause: '暂停', resume: '恢复', stop: '终止' } as const)[action]
+  return ({ approve: '批准', reject: '拒绝', pause: '暂停', resume: '恢复', stop: '终止', continue: '继续讨论 2 轮' } as const)[action]
 }

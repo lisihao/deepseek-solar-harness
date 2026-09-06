@@ -718,9 +718,9 @@ export interface DebateRoundExecutionRequestV1 {
   /** Certified maximum parallel participant count for this round. */
   readonly maxParallel: number
   /**
-   * Optional in-memory token bounds for deterministic admission before the
-   * executor creates a TaskGraph. This metadata is never persisted in a
-   * Debate snapshot.
+   * Optional in-memory effective token ceilings for deterministic admission
+   * before the executor creates a TaskGraph. This metadata is never persisted
+   * in a Debate snapshot.
    */
   readonly budgetEnvelope?: DebateRoundBudgetEnvelopeV1
   /**
@@ -812,7 +812,7 @@ export interface DebateTurnRequestV1 {
   readonly signal?: AbortSignal
 }
 
-/** Ephemeral settled usage and bounds used to admit one sealed TaskGraph round. */
+/** Ephemeral settled usage and effective ceilings used to admit one sealed TaskGraph round. */
 export interface DebateRoundBudgetEnvelopeV1 {
   /** Envelope schema version. */
   readonly version: 1
@@ -820,11 +820,11 @@ export interface DebateRoundBudgetEnvelopeV1 {
   readonly usedInputTokens: number
   /** Output tokens settled before this round is admitted. */
   readonly usedOutputTokens: number
-  /** Run-wide input-token cap. */
+  /** Effective run-wide input-token cap, including accepted continuation grants. */
   readonly maxInputTokens: number
-  /** Run-wide output-token cap. */
+  /** Effective run-wide output-token cap, including accepted continuation grants. */
   readonly maxOutputTokens: number
-  /** Run-wide combined token cap. */
+  /** Effective run-wide combined token cap, including accepted continuation grants. */
   readonly maxTotalTokens: number
 }
 

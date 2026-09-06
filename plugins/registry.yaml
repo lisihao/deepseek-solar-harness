@@ -222,7 +222,7 @@ managed:
       - npm run check
   - id: synapse
     path: plugins/managed/synapse
-    package: dsh-synapse@0.4.2
+    package: dsh-synapse@0.4.3
     source: https://github.com/liangmianya/dsh-synapse.git
     upstream: https://github.com/liangmianya/dsh-synapse.git
     source_branch: v0.4.1

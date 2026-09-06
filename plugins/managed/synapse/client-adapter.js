@@ -96,6 +96,9 @@ window.__ModuleLoader__.load({
       style.dataset.plugin = 'dsh-synapse-view-adapter'
       style.dataset.pluginCss = 'dsh-synapse-view-adapter'
       style.textContent = [
+        '.dsh-synapse-switch[hidden] {',
+        '  display: none;',
+        '}',
         '.dsh-synapse-header-switch {',
         '  display: inline-flex;',
         '  flex: 0 1 auto;',

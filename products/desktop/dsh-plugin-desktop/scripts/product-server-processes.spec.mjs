@@ -77,6 +77,36 @@ test('accepts a daemon exit that races an unavailable owner socket', async () =>
   }
 })
 
+test('accepts a daemon exit that races the proven process signal', async () => {
+  const home = await mkdtemp('/tmp/dsh-product-process-signal-race-')
+  const root = join(home, 'orchestrations')
+  await mkdir(root, { recursive: true })
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)', '--root', root], { stdio: 'ignore' })
+  try {
+    assert.ok(child.pid)
+    await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)
+    const signals = []
+    await stopOwnedDaemon(root, 1_000, {
+      requestShutdown: async () => { throw new Error('owner socket unavailable') },
+      inspectProcess: async () => {
+        const command = `${process.execPath} daemon.js --root ${root}`
+        child.kill('SIGTERM')
+        await new Promise(resolve => exited(child) ? resolve() : child.once('exit', resolve))
+        return command
+      },
+      signalProcess: (_pid, signal) => {
+        signals.push(signal)
+        throw Object.assign(new Error('process already exited'), { code: 'ESRCH' })
+      },
+    })
+    assert.deepEqual(signals, ['SIGTERM'])
+    assert.ok(exited(child))
+  } finally {
+    if (!exited(child)) child.kill('SIGKILL')
+    await rm(home, { recursive: true, force: true })
+  }
+})
+
 test('uses the shared IPC address for a long Product Server root', async () => {
   const home = await mkdtemp(join(tmpdir(), 'dsh-product-process-long-'))
   const root = join(home, 'resident-operators-with-a-root-long-enough-to-require-the-shared-ipc-address-contract')

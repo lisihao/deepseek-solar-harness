@@ -12,8 +12,9 @@
 - 每次 mutation 都有 revision fence、command-id 幂等、写锁和原子替换。持久 Command Receipt 会在任何 TaskGraph 调用前进入 `accepted`，再从 `running` 进入 `settled` 或 `indeterminate`。重放已 settled 的命令会返回已记录响应；无法证明结果的命令绝不会自动再执行。事件只追加，`readEvents` 会把最后一条已消费 sequence 作为续读 cursor 返回。
 - TaskGraph 适配的 executor 可以在槽位仍为 `dispatched` 时调用每轮的 `onProgress` sink。Provider 会校验并立即把白名单公开投影追加为 `debate.agent.progress`，并按 `(round, slot, orchestration run, source sequence)` 去重；不会持久化原始提示词、私有推理、凭据或原生 session/command ID。
 - snapshot 保留固定 roster、回合投影、Claim Ledger、异议、未解决缺口、证据引用、provenance 以及逐槽位 token/cost ledger。缺失 usage 或 cost 会在公共投影中标记为 `unknown` 或 `partial`；无法证明未超出已配置预算时进入 `budget_limited` 终态，不会伪装成成功。
-- 收敛判断达到 `converged`、`budget_limited` 或 `max_rounds` 后，运行会保持 `synthesizing`，直到 `debate.synthesis.settled` 提交最终的 `completed`、`budget_limited` 或 `max_rounds` 状态。最终状态不能重新打开或再次派发回合。新接收的运行会优先从 `objective` 持久化公开议题；没有 objective 时使用 `prompt`；旧记录缺少议题正文时保持缺失，不会借用其他议题。
-- `control` 支持 approve、pause、resume、stop、reject。运行中的 pause 会持久化为回合边界意图，stop 则中断注入的 round executor；若无法证明下游 TaskGraph 的中断结果，就进入 `indeterminate`。暂停运行只能以当前 revision 和匹配的 `resume` command 恢复。
+- 收敛判断达到 `converged`、`budget_limited` 或 `max_rounds` 后，运行会保持 `synthesizing`，直到 `debate.synthesis.settled` 提交最终的 `completed`、`budget_limited` 或 `max_rounds` 状态。只有这些已结算 outcome、最后一轮完整结算且 accounting 充足时，才可接受 `continue` command。它在写锁内记录不可变的两轮 grant、此前已结算的 moderator summary 和待生成的新 summary；旧回合及其 attempt 保持密封。新接收的运行会优先从 `objective` 持久化公开议题；没有 objective 时使用 `prompt`；旧记录缺少议题正文时保持缺失，不会借用其他议题。
+- 初始 policy 保持不可变。有效的 round、turn 和 token ceiling 由它和 grants 推导。每个 grant 恰好增加两轮、每个 roster slot 增加两个 turn，并增加至少两次普通回合 allowance 或最近两个完整回合的已观测容量。它绝不修改 `maxCostUsd`；若 metered 预测无法纳入调用方 cap，会报告该 cap 并要求走现有 approval 路径。
+- `control` 支持 approve、pause、resume、stop、reject、continue。运行中的 pause 会持久化为回合边界意图，stop 则中断注入的 round executor；若无法证明下游 TaskGraph 的中断结果，就进入 `indeterminate`。暂停运行只能以当前 revision 和匹配的 `resume` command 恢复。
 
 ## 确定性回合协议
 
@@ -22,7 +23,7 @@
 1. 首轮是 `blind-independent`。每个固定 roster 槽位都会收到空的 prior ledger、dissent 和 unresolved。Provider 在调用 round executor 前写入全部派发事件，并按稳定 roster 顺序应用其 slot 结果。
 2. 后续回合使用 `claim-ledger`；若存在 high/critical 未解决缺口，则使用 `high-severity-unresolved`。参与者必须复用上一轮 ledger 的 claim ID。决策裁判最多可以新增四条为整合本轮参与者证据所必需的 reconciliation claim；dissent 和 unresolved 仍必须引用 prior claim，或引用该裁判结果同批新建的 reconciliation claim。未知或无界扩张的 follow-up ID 会使该 turn 失败。
 3. 每个 executor 结果都必须提交 `[0, 1]` 内的 calibrated turn-level `confidence`。Claim 和 dissent 也带 confidence 与证据引用；Provider 会把这些值保留在 ledger/event 投影中。
-4. 收敛要求 settled-agent 和策略阈值、没有新增 unresolved，并满足按 confidence 加权的一致性。Opposed claim 和 dissent 使用其报告的 confidence 计入 disagreement；分数是平均 claim confidence 乘以 `(1 - disagreement)`。否则继续推进，直到 `maxRounds`、token、turn 或 cost budget 结构化地产生 `max_rounds` 或 `budget_limited`。
+4. 收敛要求 settled-agent 和策略阈值、没有新增 unresolved，并满足按 confidence 加权的一致性。Opposed claim 和 dissent 使用其报告的 confidence 计入 disagreement；分数是平均 claim confidence 乘以 `(1 - disagreement)`。否则继续推进，直到有效的 round、token、turn 或 cost ceiling 结构化地产生 `max_rounds` 或 `budget_limited`。已接受的 continuation 会完成其获授的两轮，除非 stop、failure、indeterminate outcome 或 budget limit 介入。
 5. ledger 收敛后通过 decision-judge 投影进行 synthesis；dissent 仍可见。Consumer 应保留独立 majority vote/synthesis 基线并与 debate 对比。`auto` 是调用方选择，不代表辩论普遍提升质量。
 
 roster 保持小规模，默认契约限制回合、turn、agent、token 和 cost。Provider 会按契约中的固定 role ID 确定性排序；能力筛选和模型选择仍由 Consumer 负责。
@@ -59,7 +60,7 @@ roster 保持小规模，默认契约限制回合、turn、agent、token 和 cos
 
 #### Token effect
 
-策略限制 Agent、回合、Turn 和 Token。本地 Provider 不额外添加模型提示词，只记录 executor 报告的用量。
+不可变 policy 和持久 grants 限制 Agent、回合、Turn 和 Token。本地 Provider 不额外添加模型提示词，只记录 executor 报告的用量；native-subscription usage 不会报告为 API spend。
 
 #### KV Cache effect
 

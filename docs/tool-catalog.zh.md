@@ -716,13 +716,14 @@ Schema 暴露稳定物理算子 ID，而不是 Provider 传输实现。部署方
     },
     "control_action": {
       "type": "string",
-      "description": "Explicit control decision.",
+      "description": "Explicit control decision; continue grants two further rounds only when the Provider reports eligibility.",
       "enum": [
         "approve",
         "reject",
         "pause",
         "resume",
-        "stop"
+        "stop",
+        "continue"
       ]
     },
     "reason": {

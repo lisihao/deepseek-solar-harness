@@ -1,14 +1,28 @@
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  assertDebateExpectedRevision,
   DebateService,
+  deriveDebateEffectiveBudget,
+  deriveDebateRunOutcome,
+  evaluateDebateContinuationEligibility,
+  isDebateCommandReceiptReplay,
+  validateDebateCommandReceipt,
   validateDebateControlRequest,
+  validateDebateContinuationGrant,
+  validateDebateContinuationState,
   validateDebateEventReadRequest,
+  validateDebateEvent,
   validateDebatePolicy,
+  validateDebateRunSnapshot,
   validateDebateStartRequest,
 } from '../src/index.ts'
 import type {
   DebateClaimLedgerV1,
+  DebateCommandReceiptV1,
+  DebateContinuationAllowanceV1,
+  DebateContinuationGrantV1,
+  DebateContinuationStateV1,
   DebateControlRequestV1,
   DebateEventPageV1,
   DebateEventReadRequestV1,
@@ -120,6 +134,47 @@ function snapshot(): DebateRunSnapshotV1 {
   }
 }
 
+function continuationAllowance(): DebateContinuationAllowanceV1 {
+  return {
+    version: 1,
+    additionalRounds: 2,
+    additionalTurnsPerAgent: 2,
+    additionalInputTokens: 8_000,
+    additionalOutputTokens: 8_000,
+    additionalTotalTokens: 16_000,
+  }
+}
+
+function continuationGrant(overrides: Partial<DebateContinuationGrantV1> = {}): DebateContinuationGrantV1 {
+  return {
+    version: 1,
+    commandId: 'continue-1',
+    expectedRevision: 3,
+    grantedAt: '2026-08-28T01:02:00.000Z',
+    firstRound: 2,
+    lastRound: 3,
+    allowance: continuationAllowance(),
+    ...overrides,
+  }
+}
+
+function continuationState(run: DebateRunSnapshotV1): DebateContinuationStateV1 {
+  const grants = [continuationGrant()]
+  return {
+    version: 1,
+    grants,
+    synthesisHistory: [{
+      version: 1,
+      throughRound: 1,
+      sealedAt: '2026-08-28T01:02:00.000Z',
+      synthesis: run.synthesis!,
+    }],
+    effectiveBudget: deriveDebateEffectiveBudget(run.policy, grants),
+    offeredAllowance: continuationAllowance(),
+    eligibility: evaluateDebateContinuationEligibility(run),
+  }
+}
+
 describe('Debate Service Definition', () => {
   it('normalizes a fixed role roster and preserves a JSON-only policy', () => {
     const validated = validateDebatePolicy(policy())
@@ -129,6 +184,105 @@ describe('Debate Service Definition', () => {
     expect(validated.roster.find(role => role.role === 'decision-judge')?.required).toBe(true)
     expect(validated.roster.find(role => role.role === 'skeptical-falsifier')?.fallbackOperatorIds).toEqual(['codex'])
     expect(JSON.parse(JSON.stringify(validated))).toEqual(validated)
+  })
+
+  it('derives two-round continuation ceilings without changing the initial v1 policy or cost cap', () => {
+    const initial = policy()
+    const grant = continuationGrant()
+    const effective = deriveDebateEffectiveBudget(initial, [grant])
+    expect(effective).toEqual({
+      version: 1,
+      maxRounds: 3,
+      maxTurnsPerAgent: 3,
+      maxAgentsPerRound: 3,
+      maxInputTokens: 12_000,
+      maxOutputTokens: 12_000,
+      maxTotalTokens: 36_000,
+      maxCostUsd: 2,
+    })
+    expect(initial.budget).toEqual({
+      version: 1, maxRounds: 3, maxTurnsPerAgent: 1, maxAgentsPerRound: 3,
+      maxInputTokens: 4_000, maxOutputTokens: 4_000, maxTotalTokens: 20_000, maxCostUsd: 2,
+    })
+    const earlyFourRoundPlan = { ...initial, budget: { ...initial.budget, maxRounds: 4 } }
+    expect(deriveDebateEffectiveBudget(earlyFourRoundPlan, [grant]).maxRounds).toBe(3)
+    const huge = continuationGrant({
+      allowance: {
+        version: 1, additionalRounds: 2, additionalTurnsPerAgent: 2,
+        additionalInputTokens: Number.MAX_SAFE_INTEGER - 1,
+        additionalOutputTokens: 1,
+        additionalTotalTokens: Number.MAX_SAFE_INTEGER,
+      },
+    })
+    expect(() => deriveDebateEffectiveBudget(initial, [huge])).toThrow('finite safe integer')
+  })
+
+  it('strictly validates durable continuation state while accepting released snapshots without it', () => {
+    const released = snapshot()
+    expect(validateDebateRunSnapshot(released)).toEqual(released)
+    const blockedBeforePhysicalDispatch = {
+      ...released,
+      state: 'failed' as const,
+      rounds: [{
+        ...released.rounds[0]!,
+        state: 'failed' as const,
+        turns: [{
+          ...released.rounds[0]!.turns[0]!,
+          state: 'blocked' as const,
+          attempt: 0,
+          blockers: [{ code: 'EXPLICIT_MODEL_UNAVAILABLE', message: 'Native subscription unavailable.' }],
+        }],
+      }],
+    }
+    expect(validateDebateRunSnapshot(blockedBeforePhysicalDispatch)).toEqual(blockedBeforePhysicalDispatch)
+    const continued = { ...released, continuation: continuationState(released) }
+    expect(validateDebateRunSnapshot(continued)).toEqual(continued)
+    expect(() => validateDebateContinuationGrant({
+      ...continuationGrant(), allowance: { ...continuationAllowance(), additionalRounds: 1 },
+    })).toThrow('additionalRounds')
+    expect(() => validateDebateContinuationState({
+      ...continuationState(released), effectiveBudget: { ...continuationState(released).effectiveBudget, maxInputTokens: 9_999 },
+    }, released.policy)).toThrow('policy-plus-grants')
+    expect(() => validateDebateRunSnapshot({
+      ...continued, continuation: { ...continued.continuation, unexpected: true },
+    })).toThrow('unknown field')
+  })
+
+  it('distinguishes continuation eligibility, stale revisions, and idempotent receipt replay', () => {
+    const settled = snapshot()
+    expect(evaluateDebateContinuationEligibility(settled)).toMatchObject({
+      status: 'eligible', outcome: 'completed', accounting: 'sufficient', reason: 'eligible',
+    })
+    const unknownUsage = { ...settled, cost: { ...settled.cost, usageStatus: 'unknown' as const, unknownUsageTurns: 1 } }
+    expect(evaluateDebateContinuationEligibility(unknownUsage)).toMatchObject({
+      status: 'ineligible', reason: 'usage_accounting_unknown', accounting: 'usage_unknown',
+    })
+    const exhaustedCost = { ...settled, cost: { ...settled.cost, costUsd: 2 } }
+    expect(evaluateDebateContinuationEligibility(exhaustedCost)).toMatchObject({
+      status: 'approval_required', reason: 'cost_cap_requires_approval',
+      costLimit: { limitUsd: 2, usedUsd: 2 },
+    })
+    const rejected = { ...settled, state: 'stopped' as const, result: { version: 1 as const, outcome: 'rejected' as const, reason: 'reviewer declined' } }
+    expect(deriveDebateRunOutcome(rejected)).toBe('rejected')
+    expect(evaluateDebateContinuationEligibility(rejected)).toMatchObject({ status: 'ineligible', outcome: 'rejected' })
+    expect(() => { assertDebateExpectedRevision('run-1', 3, 4) }).toThrow('debate revision changed')
+
+    const receipt: DebateCommandReceiptV1 = {
+      version: 1,
+      commandId: 'continue-1',
+      method: 'control',
+      requestSha256: 'sha256:continue',
+      runId: settled.runId,
+      state: 'settled',
+      action: 'continue',
+      expectedRevision: 3,
+      response: settled,
+    }
+    expect(validateDebateCommandReceipt(receipt)).toEqual(receipt)
+    expect(isDebateCommandReceiptReplay(receipt, 'control', 'continue-1', 'sha256:continue')).toBe(true)
+    expect(isDebateCommandReceiptReplay(receipt, 'control', 'continue-1', 'sha256:other')).toBe(false)
+    const { version: _legacyVersion, action: _legacyAction, expectedRevision: _legacyRevision, ...legacyReceipt } = receipt
+    expect(validateDebateCommandReceipt(legacyReceipt)).toMatchObject({ version: 1, method: 'control', commandId: 'continue-1' })
   })
 
   it('rejects unknown fields, invalid versions, roster shape, and unsafe budgets', () => {
@@ -165,6 +319,7 @@ describe('Debate Service Definition', () => {
   it('validates revision-safe controls and bounded event reads', () => {
     const control: DebateControlRequestV1 = { version: 1, commandId: 'control-1', runId: 'run-1', expectedRevision: 3, action: 'pause', reason: 'User requested review.' }
     expect(validateDebateControlRequest(control)).toEqual(control)
+    expect(validateDebateControlRequest({ ...control, commandId: 'continue-1', action: 'continue', reason: '继续讨论 2 轮' })).toMatchObject({ action: 'continue' })
     expect(() => validateDebateControlRequest({ ...control, expectedRevision: -1 })).toThrow('expectedRevision')
     expect(() => validateDebateControlRequest({ ...control, extra: true })).toThrow('unknown field')
     const read: DebateEventReadRequestV1 = { runId: 'run-1', afterSequence: 4, limit: 20 }
@@ -178,6 +333,8 @@ describe('Debate Service Definition', () => {
       version: 1, sequence: 1, runId: run.runId, revision: run.revision, generation: 1, round: 1, slotId: 'constructive-proposer',
       type: 'debate.agent.settled', createdAt: run.updatedAt, data: { claimId: 'claim-1', settled: true },
     }
+    expect(validateDebateEvent(event)).toEqual(event)
+    expect(() => validateDebateEvent({ ...event, type: 'debate.unknown' })).toThrow('unsupported value')
     const page: DebateEventPageV1 = { events: [event], nextSequence: 2 }
     class Provider extends DebateService {
       async start(_request: DebateStartRequestV1): Promise<DebateRunSnapshotV1> { return run }

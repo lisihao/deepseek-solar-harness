@@ -32,6 +32,7 @@ import type {
   DebateExecutionMode,
   DebateExecutionPreferences,
   DebateExecutionPreferencesSelect,
+  DebateInitialPlan,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -48,7 +49,18 @@ const MAX_PREVIEW_CHARS = 600
 const MAX_REF_ITEMS = 20
 const DEBATE_TRANSCRIPT_POLL_INTERVAL_MS = 100
 const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
-const CONCISE_DEBATE_HINT = /(?:简洁|简要|精简|三条|要点|concise|brief)/iu
+const AUTOMATIC_INPUT_TOKENS_PER_PARTICIPANT_PER_ROUND = 100_000
+const AUTOMATIC_OUTPUT_TOKENS_PER_PARTICIPANT_PER_ROUND = 15_000
+const EXACT_ONE_ROUND_HINT = new RegExp(
+  [
+    String.raw`\b(?:exactly|just|only)\s+(?:one|1)\s+rounds?\b`,
+    String.raw`(?:只|仅|恰好|正好|明确)\s*(?:讨论|进行)?\s*(?:一|1)\s*轮(?:即可|就够)?`,
+    String.raw`(?:一|1)\s*轮(?:即可|就够)`,
+  ].join('|'),
+  'iu',
+)
+const QUICK_OR_BASIC_DEBATE_HINT = /(?:\b(?:quick|basic|simple)\b|快速|基础(?:讨论|请求|方案)?|简单(?:讨论|请求|方案)?)/iu
+const DEEP_OR_SYSTEM_DESIGN_HINT = /(?:\b(?:deep|system[\s-]*design|architecture|multi[\s-]*constraints?)\b|深入|深度|系统设计|架构|多项?约束)/iu
 const ANSI_SGR_RE = /\x1b\[[0-9;]*m/gu
 const TRAILING_FALLBACK_ANSI = /\[1m$/u
 
@@ -226,10 +238,7 @@ export const DEFAULT_DEBATE_POLICY: DebatePolicyV1 = Object.freeze({
       }),
     }),
   ]),
-  budget: Object.freeze({
-    version: 1, maxRounds: 3, maxTurnsPerAgent: 3, maxAgentsPerRound: 4,
-    maxInputTokens: 400_000, maxOutputTokens: 180_000, maxTotalTokens: 580_000,
-  }),
+  budget: Object.freeze(automaticDebateBudget(3, 4)),
   rounds: Object.freeze({
     version: 1, firstRound: 'blind-independent', followUp: 'claim-ledger',
     escalation: 'high-severity-unresolved',
@@ -242,38 +251,70 @@ export const DEFAULT_DEBATE_POLICY: DebatePolicyV1 = Object.freeze({
 })
 
 /**
- * Use one three-role round when the user explicitly asks for a concise result.
+ * Resolve the transparent automatic depth policy without treating presentation
+ * requests as a request for less deliberation.
  *
- * @param prompt - The user request inspected for an explicit concise-output hint.
- * @param mode - The selected debate policy mode to preserve in the derived policy.
- * @returns The default policy or its bounded single-round concise variant.
+ * Exact one-round wording wins over every other cue. An explicit deep or
+ * system-design request wins over a quick/basic cue; ordinary requests use
+ * the three-round baseline.
+ * @param prompt - user request inspected for explicit depth wording.
+ * @returns selected initial plan and its user-facing explanation.
+ */
+export function debateInitialPlanForPrompt(prompt: string): DebateInitialPlan {
+  if (EXACT_ONE_ROUND_HINT.test(prompt)) {
+    return { plannedRounds: 1, reason: 'explicit-one-round', explanation: '用户明确要求只讨论 1 轮。' }
+  }
+  if (DEEP_OR_SYSTEM_DESIGN_HINT.test(prompt)) {
+    return { plannedRounds: 4, reason: 'deep-or-system-design', explanation: '请求明确涉及深度分析、系统设计、架构或多项约束。' }
+  }
+  if (QUICK_OR_BASIC_DEBATE_HINT.test(prompt)) {
+    return { plannedRounds: 2, reason: 'quick-or-basic', explanation: '请求明确为快速或基础讨论。' }
+  }
+  return { plannedRounds: 3, reason: 'ordinary', explanation: '普通讨论采用默认深度。' }
+}
+
+function automaticDebateBudget(
+  maxRounds: DebateInitialPlan['plannedRounds'],
+  participantCount: number,
+): DebatePolicyV1['budget'] {
+  const roundParticipants = maxRounds * participantCount
+  const maxInputTokens = roundParticipants * AUTOMATIC_INPUT_TOKENS_PER_PARTICIPANT_PER_ROUND
+  const maxOutputTokens = roundParticipants * AUTOMATIC_OUTPUT_TOKENS_PER_PARTICIPANT_PER_ROUND
+  return {
+    version: 1,
+    maxRounds,
+    maxTurnsPerAgent: maxRounds,
+    maxAgentsPerRound: participantCount,
+    maxInputTokens,
+    maxOutputTokens,
+    maxTotalTokens: maxInputTokens + maxOutputTokens,
+  }
+}
+
+/**
+ * Resolve the automatic policy for a prompt while retaining a caller-supplied
+ * policy byte-for-byte, including its monetary cap.
+ * @param prompt - user request inspected only when no policy was supplied.
+ * @param mode - mode applied to the automatically derived policy.
+ * @param explicitPolicy - complete caller-selected policy that must not be rewritten.
+ * @returns caller policy or the deterministic automatic policy.
  */
 export function debatePolicyForPrompt(
   prompt: string,
   mode: DebatePolicyV1['mode'] = 'enabled',
+  explicitPolicy?: DebatePolicyV1,
 ): DebatePolicyV1 {
-  if (!CONCISE_DEBATE_HINT.test(prompt)) return { ...DEFAULT_DEBATE_POLICY, mode }
-  const roster = DEFAULT_DEBATE_POLICY.roster.filter(role => role.role !== 'evidence-auditor')
+  if (explicitPolicy !== undefined) return explicitPolicy
+  const plan = debateInitialPlanForPrompt(prompt)
   return {
     ...DEFAULT_DEBATE_POLICY,
     mode,
-    roster,
-    budget: {
-      ...DEFAULT_DEBATE_POLICY.budget,
-      maxRounds: 1,
-      maxTurnsPerAgent: 1,
-      maxAgentsPerRound: roster.length,
-      maxInputTokens: 80_000,
-      maxOutputTokens: 40_000,
-      maxTotalTokens: 120_000,
-      maxCostUsd: 2,
-    },
-    convergence: { ...DEFAULT_DEBATE_POLICY.convergence, minSettledAgents: roster.length },
+    budget: automaticDebateBudget(plan.plannedRounds, DEFAULT_DEBATE_POLICY.roster.length),
   }
 }
 
 /** Model-visible guidance. Debate is an explicit/automatic strategy, not a second Scheduler. */
-export const debateGuidance = 'The debate tool runs a bounded, persistent multi-agent deliberation through the provider-neutral Debate service. Use action=start only when this Session has Debate enabled, or when Smart Auto has selected Debate for a genuinely contested, high-impact decision that benefits from independent proposals, falsification, evidence audit, and a final judge. Do not use Debate for greetings, simple retrieval, or one obvious implementation step. Debate preserves dissent, stops early on evidence-backed convergence, caps the roster at four native-subscription agents and the run at three rounds, and returns bounded status plus artifact references instead of large reports. Use list or inspect after a restart; use control only for an explicit user decision. Debate does not replace the DSH TaskGraph Scheduler and never calls a physical operator directly.'
+export const debateGuidance = 'The debate tool runs a bounded, persistent multi-agent deliberation through the provider-neutral Debate service. Use action=start only when this Session has Debate enabled, or when Smart Auto has selected Debate for a genuinely contested, high-impact decision that benefits from independent proposals, falsification, evidence audit, and a final judge. Do not use Debate for greetings, simple retrieval, or one obvious implementation step. Presentation requests such as concise or three bullets do not reduce depth: explicit one-round requests use one round, explicit quick/basic requests two, ordinary requests three, and explicit deep/system-design/architecture/multi-constraint requests four. Debate preserves dissent, stops early on evidence-backed convergence, caps the roster at four native-subscription agents, and returns bounded status plus artifact references instead of large reports. Use list or inspect after a restart; use control only for an explicit user decision. Debate does not replace the DSH TaskGraph Scheduler and never calls a physical operator directly.'
 
 function jsonObject(value: object): Record<string, JsonValue> {
   return JSON.parse(JSON.stringify(value)) as Record<string, JsonValue>
@@ -534,6 +575,7 @@ function runText(run: DebateRunSnapshotV1): string {
     '',
     '### 本场结果',
     `- 状态：${finalLifecycleLabel(run.state)}`,
+    `- 初始计划：${String(run.policy.budget.maxRounds)} 轮；输入上限 ${String(run.policy.budget.maxInputTokens)}，输出上限 ${String(run.policy.budget.maxOutputTokens)}`,
     `- 已完成轮次：${String(run.currentRound)}`,
   )
   return lines.join('\n')
@@ -571,6 +613,7 @@ function transcriptLines(
   tracker: TranscriptTracker,
   final: boolean,
   requestTopic?: string,
+  initialPlan?: DebateInitialPlan,
 ): string[] {
   const lines: string[] = []
   if (!tracker.topicEmitted) {
@@ -580,6 +623,9 @@ function transcriptLines(
       '# 主题帖',
       `## ${topicTitle(run, requestTopic)}`,
       `**当前状态：** ${transcriptLifecycleLabel(run, final)}`,
+      ...(initialPlan === undefined
+        ? []
+        : [`**初始计划：** ${String(initialPlan.plannedRounds)} 轮（${initialPlan.explanation}）`]),
       '',
     )
   } else if (tracker.topicState !== run.state) {
@@ -1249,6 +1295,7 @@ class DebateHostAdapter extends LlmAdapter {
     if (workspace === undefined || workspace.length === 0) {
       throw new DebateError('Debate requires a Session workspace', 'DEBATE_INVALID')
     }
+    const initialPlan = debateInitialPlanForPrompt(prompt)
     const started = await this.ctx.debates.start({
       version: 1,
       commandId: dispatch.commandId,
@@ -1270,7 +1317,7 @@ class DebateHostAdapter extends LlmAdapter {
 
     yield { type: 'block-start', index: 0, blockType: 'text' }
     await projectDebateTrace(this.ctx, agent, started, dispatch)
-    for (const line of transcriptLines(started, tracker, startedIsTerminal, prompt)) {
+    for (const line of transcriptLines(started, tracker, startedIsTerminal, prompt, initialPlan)) {
       const delta = `${line}\n\n`
       assembledText += delta
       yield { type: 'text-delta', index: 0, text: delta }
@@ -1281,7 +1328,7 @@ class DebateHostAdapter extends LlmAdapter {
       options.signal?.throwIfAborted()
       const observed = await this.ctx.debates.inspect(started.runId)
       await projectDebateTrace(this.ctx, agent, observed, dispatch)
-      for (const line of transcriptLines(observed, tracker, false, prompt)) {
+      for (const line of transcriptLines(observed, tracker, false, prompt, initialPlan)) {
         const delta = `${line}\n\n`
         assembledText += delta
         yield { type: 'text-delta', index: 0, text: delta }
@@ -1298,7 +1345,7 @@ class DebateHostAdapter extends LlmAdapter {
     if (!completion.ok) throw completion.error
     const admitted = completion.value
     await projectDebateTrace(this.ctx, agent, admitted, dispatch)
-    for (const line of transcriptLines(admitted, tracker, true, prompt)) {
+    for (const line of transcriptLines(admitted, tracker, true, prompt, initialPlan)) {
       const delta = `${line}\n\n`
       assembledText += delta
       yield { type: 'text-delta', index: 0, text: delta }
@@ -1400,7 +1447,7 @@ export function apply(ctx: Context): void {
       objective: { type: 'string', description: 'Optional concise decision objective for start.' },
       run_id: { type: 'string', description: 'Persistent Debate run id; required for inspect/control.' },
       expected_revision: { type: 'number', description: 'Current run revision; required for control.' },
-      control_action: { type: 'string', enum: ['approve', 'reject', 'pause', 'resume', 'stop'], description: 'Explicit control decision.' },
+      control_action: { type: 'string', enum: ['approve', 'reject', 'pause', 'resume', 'stop', 'continue'], description: 'Explicit control decision; continue grants two further rounds only when the Provider reports eligibility.' },
       reason: { type: 'string', description: 'Human reason; required for control.' },
     },
     output: {
@@ -1452,6 +1499,7 @@ export function apply(ctx: Context): void {
       const workspace = agent.session.header.cwd
       if (workspace === undefined || workspace.length === 0) throw new Error('action=start requires a Session workspace')
 
+      const initialPlan = debateInitialPlanForPrompt(args.prompt)
       const request: DebateStartRequestV1 = {
         version: 1,
         commandId: stableCommandId,
@@ -1474,7 +1522,7 @@ export function apply(ctx: Context): void {
         revision: run.revision,
         state: run.state,
       }, { ignorable: true })
-      return jsonObject({ kind: 'start', run: boundedRun(run) })
+      return jsonObject({ kind: 'start', initialPlan, run: boundedRun(run) })
     },
     presentCall: args => ({
       card: 'generic',

@@ -3,6 +3,7 @@ import { createServer } from 'node:net'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { RESIDENT_PROTOCOL_VERSION, RESIDENT_STATE_SCHEMA_VERSION } from '@deepseek-ai/dsh-resident-operator'
 import { ResidentDaemonClient, waitForDaemonSocketRelease } from '../src/client.ts'
@@ -39,6 +40,7 @@ async function listenMockDaemon(
   socketPath: string,
   handshake: () => Record<string, unknown>,
   shutdownOnRequest = false,
+  onShutdownComplete?: () => void,
 ): Promise<{ readonly server: ReturnType<typeof createServer>; readonly methods: string[][] }> {
   const methods: string[][] = []
   const server = createServer((socket) => {
@@ -71,7 +73,7 @@ async function listenMockDaemon(
         if (frame.method === 'system.shutdown' && shutdownOnRequest) {
           setTimeout(() => {
             socket.end()
-            server.close()
+            server.close(() => { onShutdownComplete?.() })
           }, 0)
         }
       }
@@ -80,6 +82,32 @@ async function listenMockDaemon(
   server.listen(socketPath)
   await once(server, 'listening')
   return { server, methods }
+}
+
+function createMockAuthority(root: string, pid: number, instanceId: string): () => void {
+  const path = join(root, 'daemon-authority.sqlite')
+  const authority = new DatabaseSync(path)
+  authority.exec(`
+    CREATE TABLE daemon_authority (
+      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+      pid INTEGER NOT NULL,
+      instance_id TEXT NOT NULL
+    ) STRICT;
+  `)
+  authority.prepare(
+    'INSERT INTO daemon_authority (singleton, pid, instance_id) VALUES (1, ?, ?)',
+  ).run(pid, instanceId)
+  authority.close()
+  return () => {
+    const release = new DatabaseSync(path)
+    try {
+      release.prepare(
+        'DELETE FROM daemon_authority WHERE singleton = 1 AND pid = ? AND instance_id = ?',
+      ).run(pid, instanceId)
+    } finally {
+      release.close()
+    }
+  }
 }
 
 async function closeMockDaemon(server: ReturnType<typeof createServer>): Promise<void> {
@@ -179,16 +207,22 @@ describe('ResidentDaemonClient request qualification', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-resident-client-upgrade-'))
     const client = new ResidentDaemonClient({ root, autoStart: true, connectTimeoutMs: 5_000, pollIntervalMs: 10 })
     writeFileSync(join(root, 'daemon.pid'), `${process.pid}\n`)
+    let authorityReleased = false
+    const releaseAuthority = createMockAuthority(root, process.pid, 'mock-daemon')
     const mock = await listenMockDaemon(client.socketPath, () => ({
       ...mockHandshake(),
       protocolVersion: RESIDENT_PROTOCOL_VERSION - 1,
-    }), true)
+    }), true, () => {
+      releaseAuthority()
+      authorityReleased = true
+    })
     const internals = client as unknown as {
       handshake: () => Promise<void>
       startAndWaitForReady: () => Promise<void>
     }
     let replacement: Awaited<ReturnType<typeof listenMockDaemon>> | undefined
     internals.startAndWaitForReady = async () => {
+      expect(authorityReleased).toBe(true)
       replacement = await listenMockDaemon(client.socketPath, mockHandshake)
       await internals.handshake()
     }
