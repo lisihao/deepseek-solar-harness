@@ -85,16 +85,22 @@ test('accepts a daemon exit that races the proven process signal', async () => {
   try {
     assert.ok(child.pid)
     await writeFile(join(root, 'daemon.pid'), `${String(child.pid)}\n`)
-    let signalAttempts = 0
+    const signals = []
     await stopOwnedDaemon(root, 1_000, {
       requestShutdown: async () => { throw new Error('owner socket unavailable') },
-      inspectProcess: async () => `${process.execPath} daemon.js --root ${root}`,
-      signalProcess: () => {
-        signalAttempts += 1
+      inspectProcess: async () => {
+        const command = `${process.execPath} daemon.js --root ${root}`
+        child.kill('SIGTERM')
+        await new Promise(resolve => exited(child) ? resolve() : child.once('exit', resolve))
+        return command
+      },
+      signalProcess: (_pid, signal) => {
+        signals.push(signal)
         throw Object.assign(new Error('process already exited'), { code: 'ESRCH' })
       },
     })
-    assert.equal(signalAttempts, 1)
+    assert.deepEqual(signals, ['SIGTERM'])
+    assert.ok(exited(child))
   } finally {
     if (!exited(child)) child.kill('SIGKILL')
     await rm(home, { recursive: true, force: true })
