@@ -2,7 +2,9 @@
 
 [English](README.md) | 中文
 
-本包是面向模型的 `ctx.physicalOperators` Consumer。它注册一个固定的 `physical_operator` 工具，包含发现实时算子和运行一个稳定算子 ID 两个动作。Provider 传输不会出现在工具约定中。
+本包是面向模型的 `ctx.physicalOperators` Consumer。它注册一个固定的 `physical_operator` 工具，包含发现实时算子和运行一个稳定算子 ID 两个动作。动态 system-prompt 区段会说明何时委派、何时使用 Resident 连续性，并列出当前实时 descriptor、tag 与 mode。Provider 传输不会出现在工具约定中。
+
+每个 Session 还拥有持久化的路由策略。未配置的 Session 会投影为“智能自动”；确定性的宿主路由把实现/调试类工作识别为 Codex，把分析/研究类工作识别为 Claude Code。`/operator codex`、`/operator claude-code`、`/operator direct` 和 `/operator auto` 提供可见的人工覆盖。`/operator-profile <product> <model|auto> <effort|auto>` 保存每个产品的可选执行字段；Resident daemon 会根据原生订阅目录校验并补全。当前消息明确点名产品或可识别的原生模型系列时，始终高于已保存偏好（`Sonnet`/`Opus`/`Haiku` 选择 Claude Code，`GPT-5.x` 选择 Codex）。已接受的路由只在该模型 step 内替换为 Resident 物理算子适配器，并把被替换的主模型配置记录在 dispatch 中。后续无法匹配的消息会恢复该配置，插件重载后同样如此；适配器也会拒绝结果已经交付的 dispatch。`continue`/`继续` 会使用同一份已复制偏好重连尚未交付的命令回执，冷恢复 Session 也会自动请求该待交付结果。派发、策略和 profile 事件均持久化，并可被旧 reader 忽略。
 
 ## 工具约定
 
@@ -48,6 +50,7 @@ prompt 必须包含本轮所需的完整工作。Ephemeral Provider 会在全新
 ## 已知限制与后续工作
 
 - **仅前台执行**：模型不会获得后台句柄、进度流、管理状态、reset 或 interrupt 操作；可信 CLI 和插件负责 Resident 管理。
-- **不自动选择算子**：模型必须调用 `list` 并选择稳定 ID；工具没有排序或策略引擎。
+- **保守的确定性分类器**：明确点名和已选择产品策略由宿主硬路由。智能自动使用可审计的任务形态规则，无法匹配或琐碎工作仍留给当前模型；首版没有另行训练的排序服务或成本/容量优化器。
+- **没有队列或亲和调度器**：单次调用仍在前台运行；Consumer 尚不会规划多算子 DAG，也不会优化 workspace/provider 亲和性。
 - **没有类型化物理 payload**：首版接受文本任务，返回普通内容块或 Provider 持有的产物引用。
 - **没有通用输出大小策略**：Resident 本地执行提供有界产物策略，其他 Provider 仍需对完整结果大小负责。

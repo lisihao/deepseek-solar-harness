@@ -14,7 +14,7 @@ The default execution mode remains `ephemeral`. Resident mode is explicit and wo
 
 ## Model Experience
 
-Indirectly, through one `physical_operator` tool whose run action defaults to ephemeral and explicitly accepts resident continuation.
+Indirectly, through one `physical_operator` tool. A fresh Session uses Smart Auto routing, so the main Agent can choose a suitable operator and explicitly request resident continuation without requiring the user to name the product. The low-level run request still defaults to ephemeral when `mode` is omitted, preserving third-party compatibility.
 
 #### KV Cache effect
 

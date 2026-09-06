@@ -208,6 +208,50 @@ describe('CI workflow', () => {
   })
 })
 
+describe('fork branch CI workflow', () => {
+  it('maps codex branch pushes to the repository-native required gates', () => {
+    const workflow = loadWorkflow('.github/workflows/fork-ci.yml')
+    const push = workflowEvent(workflow, 'push')
+    const linux = workflowJob(workflow, 'linux-primary')
+    const compat = workflowJob(workflow, 'node-compat')
+    const pythonSdk = workflowJob(workflow, 'python-sdk')
+    const pythonRuntime = workflowJob(workflow, 'python-runtime')
+    const windows = workflowJob(workflow, 'windows')
+    const aggregate = workflowJob(workflow, 'all-checks-passed')
+    if (!Array.isArray(linux.steps)
+      || !Array.isArray(compat.steps)
+      || !Array.isArray(pythonSdk.steps)
+      || !Array.isArray(windows.steps)
+      || !Array.isArray(aggregate.needs)) {
+      throw new TypeError('fork CI jobs must define executable steps and aggregate dependencies')
+    }
+
+    expect(push).toEqual({ branches: ['codex/**'] })
+    expect(workflow.permissions).toEqual({ contents: 'read' })
+    expect(linux['runs-on']).toBe('ubuntu-latest')
+    expect(JSON.stringify(linux.steps)).toContain('pnpm run check:ci:linux-primary')
+    expect(JSON.stringify(compat.steps)).toContain('pnpm run check:node-compat')
+    expect(JSON.stringify(pythonSdk.steps)).toContain('python/sdk pytest')
+    expect(pythonRuntime).toMatchObject({
+      uses: './.github/workflows/build-exe-for-python-sdk.yml',
+      with: { targets: 'node24-linux-x64', ci: true },
+    })
+    expect(windows['runs-on']).toBe('windows-latest')
+    expect(JSON.stringify(windows.steps)).toContain('pnpm run check:ci:windows-blocking')
+    expect(aggregate).toMatchObject({
+      name: 'all checks passed',
+      if: 'always()',
+    })
+    expect(aggregate.needs).toEqual([
+      'linux-primary',
+      'node-compat',
+      'python-sdk',
+      'python-runtime',
+      'windows',
+    ])
+  })
+})
+
 describe('E2B e2e workflow', () => {
   it('is manual-only and fails loud before running the focused live suite', () => {
     const workflow = loadWorkflow('.github/workflows/e2b-e2e.yml')
@@ -339,12 +383,20 @@ describe('Python release workflows', () => {
     expect(plan.if).toContain('inputs.release')
     expect(JSON.stringify(plan.steps)).toContain('pep440_version')
     expect(JSON.stringify(workflow)).toContain('macosx_14_0_arm64')
+    if (!isRecord(manylinuxAddon) || typeof manylinuxAddon.run !== 'string') {
+      throw new TypeError('Linux node-pty rebuild must define a shell script')
+    }
+    const manylinuxAddonRun = manylinuxAddon.run
     expect(manylinuxAddon).toMatchObject({ if: "runner.os == 'Linux'" })
     expect(JSON.stringify(manylinuxAddon)).toContain('manylinux_2_28_x86_64')
     expect(JSON.stringify(manylinuxAddon)).toContain('manylinux_2_28_aarch64')
     expect(JSON.stringify(manylinuxAddon)).toContain('$HOME/setup-pnpm:$HOME/setup-pnpm:ro')
     expect(JSON.stringify(manylinuxAddon)).toContain('node-pty-glibc-versions.txt')
     expect(JSON.stringify(manylinuxAddon)).toContain('le 2.28')
+    expect(manylinuxAddonRun).toContain('npm_config_build_from_source=true pnpm --dir "$addon_dir" run install')
+    expect(manylinuxAddonRun.indexOf('pnpm --dir "$addon_dir" run install')).toBeLessThan(
+      manylinuxAddonRun.indexOf('make -C build'),
+    )
     expect(macosCheck).toMatchObject({ if: "runner.os == 'macOS'" })
     expect(JSON.stringify(macosCheck)).toContain('scripts/check-macos-deployment-target.py')
     expect(JSON.stringify(macosCheck)).toContain('$EXE-spawn-helper')

@@ -35,6 +35,17 @@ export function PhysicalOperatorExecutionId(id: string): PhysicalOperatorExecuti
 /** Execution lifetime requested from one stable physical operator. */
 export type PhysicalOperatorExecutionMode = 'ephemeral' | 'resident'
 
+/** Provider-neutral reasoning intensity accepted by native Resident products. */
+export type PhysicalOperatorReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
+
+/** Optional caller preference resolved and locked by the Resident authority. */
+export interface PhysicalOperatorExecutionPreference {
+  /** Native product model id. Omission lets Smart Auto choose from the live product catalog. */
+  readonly model?: string
+  /** Native product reasoning intensity. Omission lets Smart Auto choose a supported level. */
+  readonly effort?: PhysicalOperatorReasoningEffort
+}
+
 /** Stable descriptive and admission metadata owned by an operator provider. */
 export interface PhysicalOperatorDescriptor {
   /** Stable id selected by callers; it does not expose the backing transport. */
@@ -70,6 +81,12 @@ export interface PhysicalOperatorStatus extends Omit<PhysicalOperatorDescriptor,
 
 /** Caller-owned input for one operator execution. */
 export interface PhysicalOperatorStartRequest {
+  /**
+   * Optional caller-owned idempotency identity. Trusted durable routers use
+   * this to reconnect to the same Resident command after their process
+   * restarts. Ordinary callers omit it and receive a generated identity.
+   */
+  readonly executionId?: PhysicalOperatorExecutionId
   /** Optional short description used as the child run label. */
   readonly label?: string
   /** Complete standalone task content for the selected operator. */
@@ -80,6 +97,8 @@ export interface PhysicalOperatorStartRequest {
   readonly signal: AbortSignal
   /** Requested lifetime. Absence means `ephemeral` for backward compatibility. */
   readonly mode?: PhysicalOperatorExecutionMode
+  /** Optional Resident model/effort preference; the daemon resolves omitted fields and locks the result. */
+  readonly residentProfile?: PhysicalOperatorExecutionPreference
 }
 
 /** Provider-facing request after the service owns identity and mode normalization. */
@@ -135,8 +154,8 @@ export interface PhysicalOperatorRun extends PhysicalOperatorProviderRun {
 export interface PhysicalOperator {
   /** Immutable discovery and capacity contract. */
   readonly descriptor: PhysicalOperatorDescriptor
-  /** Resolve current transport or deployment availability without starting work. */
-  availability(): PhysicalOperatorAvailability
+  /** Resolve current transport or deployment availability, optionally for one requested lifetime. */
+  availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability
   /** Establish one run; fulfillment transfers ownership to the caller. */
   start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>
 }

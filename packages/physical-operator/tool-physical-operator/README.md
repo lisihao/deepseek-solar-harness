@@ -2,7 +2,9 @@
 
 English | [中文](README.zh.md)
 
-The model-facing Consumer for `ctx.physicalOperators`. It registers one fixed `physical_operator` tool with two actions: discover live operators and run one stable operator id. Provider transport never appears in the tool contract.
+The model-facing Consumer for `ctx.physicalOperators`. It registers one fixed `physical_operator` tool with two actions: discover live operators and run one stable operator id. A dynamic system-prompt section describes when to delegate, when to request Resident continuity, and the current live descriptors/tags/modes. Provider transport never appears in the tool contract.
+
+Every Session also has a durable routing policy. Untouched Sessions project `Smart Auto`; deterministic host routing recognizes implementation/debugging work as Codex-shaped and analysis/research work as Claude-Code-shaped. `/operator codex`, `/operator claude-code`, `/operator direct`, and `/operator auto` provide visible manual overrides. `/operator-profile <product> <model|auto> <effort|auto>` stores optional per-product execution fields; the Resident daemon validates and completes them against the native subscription catalog. An explicit product or recognizable native model family named in the current message always wins over the stored preference (`Sonnet`/`Opus`/`Haiku` select Claude Code; `GPT-5.x` selects Codex). An accepted route replaces only that model step with a Resident physical-operator adapter and logs the displaced primary model config beside the dispatch. A later unmatched message restores that config, including after plugin reload, while the adapter refuses a dispatch whose result was already delivered. `continue`/`继续` reconnects an undelivered command receipt with the same copied preference, and a cold-resumed Session automatically requests that pending result. Dispatch, policy, and profile events are durable and ignorable by older readers.
 
 ## Tool contract
 
@@ -48,6 +50,7 @@ Append-only after the existing request prefix.
 ## Known Limitations and Deferred Work
 
 - **Foreground execution only** — the model receives no background handle, progress stream, management status, reset, or interrupt operation; trusted CLI and plugins own Resident management.
-- **No automatic operator selection** — the model must call `list` and choose a stable id; the tool has no ranking or policy engine.
+- **Conservative deterministic classifier** — explicit requests and selected product policies are hard-routed by the host. Smart Auto uses auditable task-shape rules and leaves unmatched/trivial work on the current model; it has no separately trained ranking service or cost/capacity optimizer.
+- **No queue or affinity scheduler** — one turn runs in the foreground; the Consumer does not yet plan a multi-operator DAG or optimize workspace/provider affinity.
 - **No typed physics payloads** — the first release accepts text tasks and returns ordinary content blocks or Provider-owned artifact references.
 - **No generic output-size policy** — Resident local execution has a bounded artifact policy, while other Providers remain responsible for their complete result size.

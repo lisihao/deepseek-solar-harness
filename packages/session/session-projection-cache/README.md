@@ -11,6 +11,7 @@ A stored row `(key → {ver, seq, val})` is a fold shortcut, never an authority:
 - **Whole-record writes.** Each write replaces the session's full checkpoint (the registry cut is always complete), snapshotted through the lossless-JSON boundary — a unit state violating the plain-JSON contract fails loud.
 - **Records are bound to a log lifecycle, not just an id.** Each record stores the header identity (`createdAt`, `cwd`) it was folded from; every read validates it (the live or stored header is the witness) before accepting a row, so a deleted-then-recreated id or a persistence store swapped under a surviving cache discards the unrelated record instead of seeding phantom values.
 - **The log leads, the cache follows.** A live checkpoint flushes the session's buffered events durably BEFORE the cache row lands, so a crash can leave the cache behind the log (a longer tail replay) but never ahead of it.
+- **Cold exactness is revision-bound.** A cold refresh may store the source-qualified persistence revision beside the rows. `cachedSnapshot(meta, expectedRevision)` serves only an exact revision match; a live checkpoint or legacy row carries no revision and therefore forces one repair before it can be used as an exact Session-list value.
 
 ## Write policy
 
@@ -25,13 +26,13 @@ Two mandatory points, throttled in between:
 
 Both `Config` fields are required (no defaults): flush cadence is a deployment choice with no universally correct value, stated in cordis.yml.
 
-## Listing read (`cachedSnapshot(meta)`)
+## Listing read (`cachedSnapshot(meta, expectedRevision?)`)
 
-The zero-I/O rung: whole values viewed straight from the identity-matching stored record (version-matching keys only), returned as a `{asOfSeq, values}` cut — `asOfSeq` is the lowest served-row watermark, so a client seeding its per-session value store under higher-seq-wins can never let a stale list block overwrite a newer push frame. `undefined` when no usable record exists (unknown id, unrelated lifecycle, or no version-matching rows); the api-proxy list carrier turns that into an absent column.
+The zero-I/O rung: whole values viewed straight from the identity-matching stored record (version-matching keys only), returned as a `{asOfSeq, values}` cut — `asOfSeq` is the lowest served-row watermark, so a client seeding its per-session value store under higher-seq-wins can never let a stale list block overwrite a newer push frame. When `expectedRevision` is supplied, the record must also carry that exact persistence revision; a mismatch or revision-less legacy/live row returns `undefined` and lets the caller run the cold ladder. Without `expectedRevision`, the method retains its stale-safe hint behavior. Unknown ids, unrelated lifecycles, and records with no version-matching rows also return `undefined`.
 
-## Cold read (`coldSnapshot(id, signal?)`)
+## Cold read (`coldSnapshot(id, signal?, sourceRevision?)`)
 
-The read ladder, zero full-log load on the happy path: cached rows → `sessionProjections.restoreFloor` (anchored one event below the lowest usable watermark) → persistence `readFrom(id, floor)` → `sessionProjections.restore` → fail-soft write-back of the refreshed rows. The anchor makes a shrunk log (crash-repair truncation) provable: an overreaching row triggers exactly one full re-read from seq 0 instead of serving a ghost value. No registered units serve `{asOfSeq: -1, values: {}}` without touching persistence; a session with no persisted log rejects with the seam's `not found`.
+The read ladder, zero full-log load on the happy path: cached rows → `sessionProjections.restoreFloor` (anchored one event below the lowest usable watermark) → persistence `readFrom(id, floor)` → `sessionProjections.restore` → fail-soft write-back of the refreshed rows and optional `sourceRevision`. The anchor makes a shrunk log (crash-repair truncation) provable: an overreaching row triggers exactly one full re-read from seq 0 instead of serving a ghost value. No registered units serve `{asOfSeq: -1, values: {}}` without touching persistence; a session with no persisted log rejects with the seam's `not found`.
 
 `write(session)` is the synchronous-cut checkpoint both mandatory points use; carriers may call it directly (not fail-soft — the fail-soft wrappers own containment).
 

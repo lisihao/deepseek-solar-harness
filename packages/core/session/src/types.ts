@@ -388,6 +388,15 @@ export interface SurfaceIntent {
   sourceEventSeqs?: number[]
 }
 
+/** Compatibility metadata for a non-surface {@link Session.append} event. */
+export interface SessionEventIntent {
+  /**
+   * Mark a purely informational event safe for a reader that does not know its
+   * type to skip. Surface events cannot carry this marker.
+   */
+  ignorable?: true
+}
+
 /**
  * One immutable entry in the session log.
  *

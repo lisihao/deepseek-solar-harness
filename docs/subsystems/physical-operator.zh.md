@@ -2,9 +2,11 @@
 
 [English](physical-operator.md) | 中文
 
-物理算子 seam 为 DSH 的有界物理工作提供由部署定义的稳定身份，同时允许替换执行产品。[Service Definition](../../packages/physical-operator/physical-operator/README.md) 负责 `ctx.physicalOperators`、模式发现、可用性、快速失败容量、预分配 execution identity 和成对生命周期观察。一次性 [Service Provider](../../packages/physical-operator/physical-operator-subagent/README.md) 把这些 ID 映射到现有 `ctx.subagents`；[双模式 Provider](../../packages/physical-operator/physical-operator-resident/README.md) 保持该默认行为，并把显式 Resident 请求路由到独立控制 seam。[Consumer](../../packages/physical-operator/tool-physical-operator/README.md) 暴露一个与 Provider 无关的模型工具。
+物理算子 seam 为 DSH 的有界物理工作提供由部署定义的稳定身份，同时允许替换执行产品。[Service Definition](../../packages/physical-operator/physical-operator/README.md) 负责 `ctx.physicalOperators`、模式发现、可用性、快速失败容量、预分配 execution identity 和成对生命周期观察。一次性 [Service Provider](../../packages/physical-operator/physical-operator-subagent/README.md) 把这些 ID 映射到现有 `ctx.subagents`；[双模式 Provider](../../packages/physical-operator/physical-operator-resident/README.md) 保持该默认行为，并把显式 Resident 请求路由到独立控制 seam。[Consumer](../../packages/physical-operator/tool-physical-operator/README.md) 暴露一个与 Provider 无关的模型工具，并提供实时 descriptor/tag/mode 选择指引。
 
-[`ctx.residentOperators`](../../packages/physical-operator/resident-operator/README.md) 定义工作区级产品原生连续性的可信管理接口。其[本地 Provider](../../packages/physical-operator/resident-operator-local/README.md) 是独立 Unix-socket daemon 的可释放客户端；daemon 唯一持有 Receipt、Lease、Session 关联、事件与 Artifact。原生 Claude Code Session 和 Codex thread 仍由各产品权威持有。DSH Session、Jobs、Web UI、tmux 与插件生命周期只是投影或客户端，不是第二写者。
+[`ctx.residentOperators`](../../packages/physical-operator/resident-operator/README.md) 定义工作区级产品原生连续性的可信管理接口。其[本地 Provider](../../packages/physical-operator/resident-operator-local/README.md) 是独立 Unix-socket daemon 的可释放客户端；daemon 唯一持有 Receipt、Lease、Session 关联、事件与 Artifact。Session 快照与 turn 检查允许新连接的 DSH 或 Desktop 客户端恢复最新有界进度和已结算结果，而不复制状态。原生 Claude Code Session 和 Codex thread 仍由各产品权威持有。DSH Session、Jobs、Web UI、tmux 与插件生命周期只是投影或客户端，不是第二写者。
+
+Resident Provider 资格审查还会发布 Claude Code 与 Codex 的实时原生模型目录及其支持的推理/effort 档位。调用方可以把两个字段都留空交给 Smart Auto，也可以显式选择其中任一字段。daemon 会在接受 command 前解析最终组合，并将其锁定到 `operator_id + realpath(workspace)`；后续 turn 复用同一原生模型与档位，直到 Session 在 idle 状态下经过 revision 校验后 reset。若显式选择与已锁定配置冲突，则返回 `EXECUTION_PROFILE_CONFLICT`，不会悄悄切换正在延续的原生会话。
 
 本子系统不导入 AI4Research 调度器、状态库、TaskGraph、文件收件箱或算子目录。抽取理由和后续执行底座工作记录在[物理算子 capability seam Agent Note](../../.agents/notes/implemented/architecture/2026-08-15-physical-operator-capability-seam.md)中。
 
@@ -16,7 +18,7 @@
 
 注册生命周期与执行生命周期有意分离。移除或热重载 Provider 后，该注册不再接受新发现，但不会撤销已接受的运行。使用同一稳定 ID 重新注册时，替代实现仍会看到旧注册的未结束执行所占容量，直至旧执行结束。
 
-只有 `completed` 表示成功。取消、拒绝、token 耗尽与 Provider 失败会保留为明确停止原因或基础设施 rejection。Physical Service Definition 不负责排队、重试、持久化或回滚；Resident 持久化隔离在独立 Service Definition 与单写 daemon 后。协议 v1 仍为快速失败，且永不自动重放 indeterminate command。
+只有 `completed` 表示成功。取消、拒绝、token 耗尽与 Provider 失败会保留为明确停止原因或基础设施 rejection。Physical Service Definition 不负责排队、重试、持久化或回滚；Resident 持久化隔离在独立 Service Definition 与单写 daemon 后。协议 v3 仍为快速失败，且永不自动重放 indeterminate command。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -71,7 +73,7 @@ status(id: string): PhysicalOperatorStatus
 async start(id: string, request: PhysicalOperatorStartRequest): Promise<PhysicalOperatorRun>
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:83`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:85`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="ctxresidentoperators--residentoperatorservice-abstract-seam"></a>
 
@@ -107,6 +109,13 @@ abstract list(): Promise<ResidentSessionSnapshot[]>
 abstract inspect(sessionId: string): Promise<ResidentSessionSnapshot>
 
 /**
+ * Read the durable receipt and bounded result for one turn after caller reconnect.
+ * @param turnId - opaque turn identity from execution, a Session snapshot, or an event.
+ * @returns the current receipt state, result reference, and terminal result when available.
+ */
+abstract inspectTurn(turnId: string): Promise<ResidentTurnSnapshot>
+
+/**
  * Read a bounded page of structured observation events.
  * @param request - Session identity, exclusive cursor, bound, and optional signal.
  * @returns ordered events and the next exclusive cursor.
@@ -135,7 +144,7 @@ abstract reset(request: ResidentResetRequest): Promise<ResidentSessionSnapshot>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:165`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:231`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 
@@ -156,7 +165,7 @@ A stable operator became discoverable.
 'physical-operator/added'(operator: PhysicalOperator): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:60`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:62`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorend--emit"></a>
 
@@ -173,7 +182,7 @@ A published execution settled.
 'physical-operator/end'(info: PhysicalOperatorExecutionEndInfo): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:78`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:80`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorremoved--emit"></a>
 
@@ -190,7 +199,7 @@ An operator stopped accepting new executions. Accepted runs survive.
 'physical-operator/removed'(id: PhysicalOperatorId): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:66`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:68`](../../packages/physical-operator/physical-operator/src/index.ts)
 
 <a id="physical-operatorstart--emit"></a>
 
@@ -207,5 +216,5 @@ A provider published an accepted execution.
 'physical-operator/start'(info: PhysicalOperatorExecutionInfo): void
 ```
 
-Source: [`packages/physical-operator/physical-operator/src/index.ts:72`](../../packages/physical-operator/physical-operator/src/index.ts)
+Source: [`packages/physical-operator/physical-operator/src/index.ts:74`](../../packages/physical-operator/physical-operator/src/index.ts)
 <!-- END GENERATED cordis-surface -->

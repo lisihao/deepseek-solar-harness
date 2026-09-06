@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CallId } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import LlmRuntime, { CallId } from '@deepseek-ai/dsh-llm'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import PhysicalOperatorRuntime, {
@@ -15,8 +17,11 @@ import PhysicalOperatorRuntime, {
 import * as tool from '../src/index.ts'
 
 function fakeAgent(): Agent {
-  return { id: SessionId('parent') } as unknown as Agent
+  const session = Session.create(SessionId(`parent-${++agents}`))
+  return { id: session.id, session } as unknown as Agent
 }
+
+let agents = 0
 
 class ScriptedOperator implements PhysicalOperator {
   readonly descriptor = {
@@ -55,6 +60,11 @@ class ScriptedOperator implements PhysicalOperator {
 
 async function setup(operator = new ScriptedOperator()) {
   const ctx = new Context()
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(LlmRuntime)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(CommandRuntime)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(PhysicalOperatorRuntime)
@@ -92,6 +102,46 @@ describe('physical_operator tool', () => {
     expect(Object.keys(properties).sort()).toEqual(['action', 'description', 'mode', 'operator_id', 'prompt'])
     expect(schema!.description).not.toMatch(/codex|claude|subagent/i)
     expect(schema!.description).toContain('backing provider')
+    const section = (await ctx.systemPrompt.assemble()).sections
+      .find(candidate => candidate.name === 'tool:physical-operator')
+    expect(section?.text).toContain('SMART AUTO')
+    expect(section?.text).toContain('Choose resident mode for repository implementation')
+    expect(section?.text).toContain('without waiting for the user to name Claude Code or Codex')
+    expect(section?.text).toContain('physics-solver: Solves bounded physics problems. [physics, reasoning]')
+  })
+
+  it('logs a per-session routing policy, projects it to clients, and changes model guidance', async () => {
+    const { ctx } = await setup()
+    const session = ctx.sessions.create(SessionId('routing'))
+    const agent = { id: session.id, session } as Agent
+
+    const projected = ctx.sessionProjections.snapshot(session).values.physicalOperatorRouting
+    expect(projected?.currentValue).toBe('auto')
+    expect(projected?.options.map(option => [option.value, option.name])).toEqual([
+      ['auto', 'Smart Auto'],
+      ['direct', 'Current Model Only'],
+      ['codex', 'Codex'],
+      ['claude-code', 'Claude Code'],
+    ])
+    const automatic = (await ctx.systemPrompt.assemble({ agent })).sections
+      .find(candidate => candidate.name === 'tool:physical-operator')?.text
+    expect(automatic).toContain('SMART AUTO')
+
+    const changed = await ctx.commands.execute(agent, '/operator codex', new AbortController().signal)
+    expect(changed?.result).toEqual({ kind: 'success', text: 'routing codex' })
+    expect(tool.foldPhysicalOperatorRouting(session.events)).toBe('codex')
+    expect(ctx.sessionProjections.snapshot(session).values.physicalOperatorRouting?.currentValue).toBe('codex')
+    expect(session.events.find(event => event.type === 'physical-operator/policy')?.ignorable).toBe(true)
+    const preferred = (await ctx.systemPrompt.assemble({ agent })).sections
+      .find(candidate => candidate.name === 'tool:physical-operator')?.text
+    expect(preferred).toContain('CODEX PREFERRED')
+
+    await ctx.commands.execute(agent, '/operator codex', new AbortController().signal)
+    expect(session.events.filter(event => event.type === 'physical-operator/policy')).toHaveLength(1)
+
+    const rejected = await ctx.commands.execute(agent, '/operator random', new AbortController().signal)
+    expect(rejected?.result).toMatchObject({ kind: 'error' })
+    expect(tool.foldPhysicalOperatorRouting(session.events)).toBe('codex')
   })
 
   it('lists canonical live status without requiring a calling agent', async () => {
@@ -200,6 +250,11 @@ describe('physical_operator tool', () => {
 
   it('unmounts with its plugin fiber and never owns the operator registry', async () => {
     const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(CommandRuntime)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(PhysicalOperatorRuntime)
@@ -207,8 +262,10 @@ describe('physical_operator tool', () => {
     ctx.physicalOperators.registerOperator(operator)
     const mounted = await ctx.plugin(tool)
     expect(ctx.tools.schemas().some(schema => schema.name === 'physical_operator')).toBe(true)
+    expect((await ctx.systemPrompt.assemble()).sections.some(section => section.name === 'tool:physical-operator')).toBe(true)
     await mounted.dispose()
     expect(ctx.tools.schemas().some(schema => schema.name === 'physical_operator')).toBe(false)
+    expect((await ctx.systemPrompt.assemble()).sections.some(section => section.name === 'tool:physical-operator')).toBe(false)
     expect(ctx.physicalOperators.getOperator('physics-solver')).toBe(operator)
   })
 })

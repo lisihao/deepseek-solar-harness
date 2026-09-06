@@ -1,0 +1,14 @@
+# Opt-in persistent TaskGraph bundle. Resident Physical Operators must be
+# mounted by the deployment; this layer owns orchestration only.
+- insert:
+    - id: orchestration-local
+      name: '@deepseek-ai/dsh-orchestration-local'
+      config:
+        autoStart: true
+        connectTimeoutMs: 5000
+
+    - id: tool-orchestration
+      name: '@deepseek-ai/dsh-tool-orchestration'
+
+    - id: ui-orchestration
+      name: '@deepseek-ai/dsh-ui-orchestration'

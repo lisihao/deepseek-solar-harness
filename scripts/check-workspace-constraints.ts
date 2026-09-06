@@ -136,6 +136,7 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-web-app': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-headless': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-resident-operators': ['cordis.patch.yml'],
+  '@deepseek-ai/dsh-orchestrations': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-client-ui-remote-modules': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-client-ui-theme': ['lib/styles'],
   // The Python runtime uses a distinct closed-resolution bin; the public CLI
@@ -148,6 +149,7 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // The Resident package's index and standalone daemon share one product,
   // receipt, and SQLite implementation emitted as a content-hashed chunk.
   '@deepseek-ai/dsh-resident-operator-local': ['lib/daemon-*.js'],
+  '@deepseek-ai/dsh-orchestration-local': ['lib/daemon-*.js'],
   '@deepseek-ai/dsh-skill-badge': ['assets'],
   '@deepseek-ai/dsh-subprocess-local': ['scripts/ensure-spawn-helper.mjs'],
 }

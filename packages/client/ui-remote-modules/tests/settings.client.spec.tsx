@@ -51,6 +51,29 @@ describe('Remote Modules settings validation', () => {
       id: 'duplicateId', url: 'invalidUrl', relayPort: 'duplicatePort', order: 'invalidOrder',
     })
   })
+
+  it('rejects every incomplete draft field without coercing browser text input', () => {
+    expect(validateRemoteModuleDrafts([])).toEqual({ errors: {} })
+    const invalid = validateRemoteModuleDrafts([
+      draft({
+        id: '  ', label: '  ', url: 'not a url', relayPort: 'not-a-port', order: 'not-an-order',
+      }),
+      draft({
+        key: 'two', id: 'Not Valid', url: 'ftp://example.test', relayPort: '65536', order: '1.5',
+      }),
+      draft({
+        key: 'three', id: 'credentials', url: 'https://user:secret@example.test', relayPort: '0', order: '-1',
+      }),
+    ])
+    expect(invalid.config).toBeUndefined()
+    expect(invalid.errors.one).toEqual({
+      id: 'required', label: 'required', url: 'invalidUrl', relayPort: 'invalidPort', order: 'invalidOrder',
+    })
+    expect(invalid.errors.two).toEqual({
+      id: 'invalidId', url: 'invalidUrl', relayPort: 'invalidPort', order: 'invalidOrder',
+    })
+    expect(invalid.errors.three).toEqual({ url: 'invalidUrl' })
+  })
 })
 
 describe('Remote Modules settings surface', () => {

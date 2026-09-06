@@ -49,6 +49,7 @@ dsh --profile web --dump-config
 | [`core/agent-loop`](subsystems/core.md) | 实现该接口的默认驱动器 | `ctx.agentLoop` |
 | [`core/scope`](subsystems/scope.md) | 按 agent 划分作用域的注册原语 | 库，无 ctx 键 |
 | [`llm/llm`](subsystems/llm-streaming.md) | 消息与流式词汇表，以及适配器 seam | `ctx.llm` |
+| [`orchestration/orchestration`](../packages/orchestration/orchestration/README.md) | 持久化 TaskGraph、审批、恢复与已封存执行计划 | `ctx.orchestrations` |
 
 <a id="events"></a>
 
@@ -117,6 +118,7 @@ seam 正是替换一个提供方就能改变整个产品的原因。文件系统
 | 添加 shell 执行 | 注册 `ctx.shell` 后端；本地后端通过 `ctx.subprocess` spawn 进程 |
 | 添加持久化终端执行 | 注册 `ctx.terminals` 后端和 `dsh-tool-terminal` |
 | 添加产品原生持久连续性 | 实现 `ctx.residentOperators`，再路由显式 `resident` 物理算子模式；Receipt 不写入 DSH Session |
+| 添加持久化多节点编排 | 通过 `ctx.intentCompiler`、`ctx.capabilityCapsules` 和 `ctx.contextCompiler` 编译不可变 IR；仅让 `ctx.orchestrations` 执行已封存计划 |
 | 添加用户命令 | 在 `ctx.commands` 上注册；它无需模型轮次即可分派 |
 | 添加后台工作 | 在 `ctx.jobs` 上注册；`job_*` 工具负责收集或停止 |
 | 添加文件系统访问或策略 | 注册 `ctx.fs` 提供方，或监听 `fs/*` 事件 |

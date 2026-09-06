@@ -62,6 +62,17 @@ flowchart LR
   pkg_resident_operator["resident-operator"]
   svc_residentOperators["ctx.residentOperators<br/>Resident operator control"]
   pkg_resident_operator_local["resident-operator-local"]
+  pkg_intent_compiler["intent-compiler"]
+  svc_intentCompiler["ctx.intentCompiler<br/>Immutable Intent IR compiler"]
+  pkg_orchestration_local["orchestration-local"]
+  pkg_context_compiler["context-compiler"]
+  svc_contextCompiler["ctx.contextCompiler<br/>Bounded Context Packet compiler"]
+  pkg_capability_capsule["capability-capsule"]
+  svc_capabilityCapsules["ctx.capabilityCapsules<br/>Capability Capsule registry and resolver"]
+  pkg_orchestration["orchestration"]
+  svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
+  pkg_tool_orchestration["tool-orchestration"]
+  pkg_ui_orchestration["ui-orchestration"]
   pkg_storage["storage"]
   svc_storage["ctx.storage<br/>Non-session storage hub"]
   pkg_storage_json["storage-json"]
@@ -213,12 +224,14 @@ flowchart LR
   pkg_attachment_local --> svc_attachments
   pkg_bash_local --> svc_shell
   pkg_bash_sandbox --> svc_shell
+  pkg_capability_capsule --> svc_capabilityCapsules
   pkg_code_runtime --> svc_codeRuntime
   pkg_code_runtime_worker --> svc_codeRuntime
   pkg_commands --> svc_commands
   pkg_compaction --> svc_compaction
   pkg_compaction_basic --> svc_compaction
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
+  pkg_context_compiler --> svc_contextCompiler
   pkg_cordis_host_runner --> svc_cordisInspect
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
@@ -232,6 +245,7 @@ flowchart LR
   pkg_fs_local --> svc_fs
   pkg_fs_sandbox --> svc_fs
   pkg_goal --> svc_goals
+  pkg_intent_compiler --> svc_intentCompiler
   pkg_invariants --> svc_invariants
   pkg_jobs --> svc_jobs
   pkg_jobs_local --> svc_jobs
@@ -243,6 +257,11 @@ flowchart LR
   pkg_lsp_local --> svc_lsp
   pkg_message_feedback --> svc_messageFeedback
   pkg_modules --> svc_clientModules
+  pkg_orchestration --> svc_orchestrations
+  pkg_orchestration_local --> svc_capabilityCapsules
+  pkg_orchestration_local --> svc_contextCompiler
+  pkg_orchestration_local --> svc_intentCompiler
+  pkg_orchestration_local --> svc_orchestrations
   pkg_permission_presets --> svc_permissionPresets
   pkg_physical_operator --> svc_physicalOperators
   pkg_physical_operator_resident --> svc_physicalOperators
@@ -341,6 +360,8 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_orchestrations --> pkg_tool_orchestration
+  svc_orchestrations --> pkg_ui_orchestration
   svc_physicalOperators --> pkg_tool_physical_operator
   svc_residentOperators --> pkg_physical_operator_resident
   svc_sandbox --> pkg_bash_sandbox
@@ -440,6 +461,10 @@ flowchart LR
 | `ctx.sessionTelemetry` | `seam` | [`session-telemetry`](../packages/session/session-telemetry) | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | - | - | The seam captures, redacts, and hands session records to one backend; nothing else consumes the service — its output leaves the process. |
 | `ctx.physicalOperators` | `seam` | [`physical-operator`](../packages/physical-operator/physical-operator) | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent), [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | - | Stable deployment-owned operator ids, explicit execution lifetime, live availability, fail-fast capacity admission, and paired lifecycle events; providers keep subagent and resident transports outside the consumer. |
 | `ctx.residentOperators` | `seam` | [`resident-operator`](../packages/physical-operator/resident-operator) | [`resident-operator-local`](../packages/physical-operator/resident-operator-local) | [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | - | Trusted management and durable turn execution over one daemon-owned Session, Receipt, Lease, Event, and Artifact store; model execution enters through ctx.physicalOperators. |
+| `ctx.intentCompiler` | `seam` | [`intent-compiler`](../packages/orchestration/intent-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers compile immutable raw requests into versioned Intent IR with deterministic lineage; they cannot create runs or dispatch operators. |
+| `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers project certified sources under token, lineage, redaction, and degradation policy without becoming a source of record. |
+| `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Late-binds content-addressed capability manifests under the Graph certificate; bindings may only implement or narrow authority. |
+| `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | Waits for every configured backend, then publishes the domain form as one lifecycle-bound service for typed durable state. |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | Owns local per-assistant-message feedback, lifecycle and target validation, per-item compare-and-set, and the Host unary Remote contract without entering Session history or telemetry. |

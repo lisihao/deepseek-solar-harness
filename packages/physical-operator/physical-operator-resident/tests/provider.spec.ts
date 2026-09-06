@@ -56,6 +56,7 @@ class ResidentStub extends ResidentOperatorService {
   }
   list() { return Promise.resolve([]) }
   inspect(): Promise<never> { return Promise.reject(new Error('unused')) }
+  inspectTurn(): Promise<never> { return Promise.reject(new Error('unused')) }
   readEvents() { return Promise.resolve({ events: [], nextSequence: 0 }) }
   interrupt() { return Promise.resolve() }
   reset(): Promise<never> { return Promise.reject(new Error('unused')) }
@@ -85,7 +86,7 @@ describe('physical-operator-resident', () => {
     expect(oneShot.starts).toBe(1)
 
     const resident = await ctx.physicalOperators.start('codex', {
-      mode: 'resident', prompt: [{ type: 'text', text: 'continue' }],
+      mode: 'resident', label: 'Continue the proof', prompt: [{ type: 'text', text: 'continue' }],
       parent: parent(), signal: new AbortController().signal,
     })
     expect(await resident.result).toEqual({
@@ -97,7 +98,36 @@ describe('physical-operator-resident', () => {
       commandId: ResidentOperatorCommandId(String(resident.id)),
       operatorId: 'codex',
       workspace: '/workspace',
+      taskLabel: 'Continue the proof',
     })
     expect(oneShot.starts).toBe(1)
+  })
+
+  it('keeps resident available when only the ephemeral subagent lacks subscription attestation', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(PhysicalOperatorRuntime)
+    new ResidentStub(ctx)
+    const unqualified = new OneShotProvider()
+    Object.defineProperty(unqualified, 'authentication', { value: undefined })
+    ctx.subagents.registerProvider(unqualified)
+    await ctx.plugin(provider, {
+      operators: [{
+        id: 'codex', ephemeralProvider: 'codex', residentProvider: 'codex',
+        displayName: 'Codex', description: 'Runs Codex through the user subscription.',
+      }],
+    })
+
+    expect(ctx.physicalOperators.status('codex')).toMatchObject({ state: 'available' })
+    await expect(ctx.physicalOperators.start('codex', {
+      mode: 'ephemeral', prompt: [{ type: 'text', text: 'one shot' }],
+      parent: parent(), signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'OPERATOR_UNAVAILABLE' })
+
+    const resident = await ctx.physicalOperators.start('codex', {
+      mode: 'resident', prompt: [{ type: 'text', text: 'continue' }],
+      parent: parent(), signal: new AbortController().signal,
+    })
+    await expect(resident.result).resolves.toMatchObject({ stopReason: 'completed' })
   })
 })

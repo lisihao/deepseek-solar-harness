@@ -11,6 +11,7 @@
 - **整记录写入。** 每次写入替换该会话的完整检查点（注册表切面始终是完整的），并经无损 JSON 边界快照——违反纯 JSON 约定的单元状态会显式失败并报错。
 - **记录绑定到日志生命周期，而不只是 id。** 每条记录存储其折叠来源的 header 身份（`createdAt`、`cwd`）；每次读取先以活 header 或存储 header 为证验证它，再接受任何行——被删后重建的 id、或缓存幸存而持久化存储被换掉时，无关记录被整体丢弃，绝不播种幻影值。
 - **日志领先，缓存跟随。** 活会话检查点先把缓冲事件持久 flush，缓存行才落地，因此崩溃只会让缓存落后于日志（更长的尾部回放），绝不领先于它。
+- **冷读精确性绑定 revision。** 冷刷新可把来源限定的持久化 revision 与行一同保存。`cachedSnapshot(meta, expectedRevision)` 只服务精确匹配的 revision；活检查点或旧记录不带 revision，因此在作为精确会话列表值使用前必须先修复一次。
 
 ## 写策略
 
@@ -25,13 +26,13 @@
 
 两个 `Config` 字段均必填（无默认值）：写入节奏是部署选择，没有普适正确值，由 cordis.yml 明示。
 
-## 列表读（`cachedSnapshot(meta)`）
+## 列表读（`cachedSnapshot(meta, expectedRevision?)`）
 
-零 I/O 一档：从身份匹配的存储记录直接 view 全量值（仅版本匹配的 key），以 `{asOfSeq, values}` 切面返回——`asOfSeq` 取所服务行的最低水位，客户端在 higher-seq-wins 规则下播种值存储时，陈旧列表块永远压不过更新的推送帧。无可用记录（未知 id、无关生命周期、无版本匹配行）时返回 `undefined`；api-proxy 列表载体将其转为列缺席。
+零 I/O 一档：从身份匹配的存储记录直接 view 全量值（仅版本匹配的 key），以 `{asOfSeq, values}` 切面返回——`asOfSeq` 取所服务行的最低水位，客户端在 higher-seq-wins 规则下播种值存储时，陈旧列表块永远压不过更新的推送帧。传入 `expectedRevision` 时，记录还必须携带完全相同的持久化 revision；不匹配或不带 revision 的旧记录/活检查点返回 `undefined`，由调用方运行冷读阶梯。不传 `expectedRevision` 时，方法保留陈旧但安全的提示语义。未知 id、无关生命周期、无版本匹配行同样返回 `undefined`。
 
-## 冷读（`coldSnapshot(id, signal?)`）
+## 冷读（`coldSnapshot(id, signal?, sourceRevision?)`）
 
-读取阶梯，正常路径无需加载全量日志：缓存行 → `sessionProjections.restoreFloor`（锚定在最低可用水位之前一个事件的位置）→ 持久化 `readFrom(id, floor)` → `sessionProjections.restore` → 刷新行的 fail-soft 写回。这个锚使缩短的日志（崩溃修复截断）可被证明：越界的行恰好触发一次从 seq 0 的全量重读，而不是把幽灵值当现值服务。无已注册单元时直接服务 `{asOfSeq: -1, values: {}}`，不触碰持久化；无持久日志的会话以 seam 的 `not found` 拒绝。
+读取阶梯，正常路径无需加载全量日志：缓存行 → `sessionProjections.restoreFloor`（锚定在最低可用水位之前一个事件的位置）→ 持久化 `readFrom(id, floor)` → `sessionProjections.restore` → 刷新行及可选 `sourceRevision` 的 fail-soft 写回。这个锚使缩短的日志（崩溃修复截断）可被证明：越界的行恰好触发一次从 seq 0 的全量重读，而不是把幽灵值当现值服务。无已注册单元时直接服务 `{asOfSeq: -1, values: {}}`，不触碰持久化；无持久日志的会话以 seam 的 `not found` 拒绝。
 
 `write(session)` 是两个必写点共用的同步切面检查点；载体可以直接调用（非 fail-soft——由 fail-soft 包装层负责遏制）。
 

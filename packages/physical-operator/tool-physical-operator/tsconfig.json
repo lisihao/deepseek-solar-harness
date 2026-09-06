@@ -24,6 +24,12 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../session/session-projection"
+    },
+    {
+      "path": "../../interaction/commands"
+    },
+    {
       "path": "../../core/system-prompt"
     },
     {

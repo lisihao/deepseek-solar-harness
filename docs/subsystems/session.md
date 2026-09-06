@@ -289,6 +289,21 @@ type SurfaceOp =
 
 `'append'` is the normal tail-append path. `replace` shadows surface entries from `start` through `end` inclusive (both must be valid surface seqs; `start === end` replaces a single entry) and inserts the new event in their place.
 
+### `SessionEventIntent` — optional metadata for a non-surface append
+
+```ts type-equiv
+/** Compatibility metadata for a non-surface {@link Session.append} event. */
+interface SessionEventIntent {
+  /**
+   * Mark a purely informational event safe for a reader that does not know its
+   * type to skip. Surface events cannot carry this marker.
+   */
+  ignorable?: true
+}
+```
+
+An out-of-repository plugin uses this optional argument only for an informational event that can disappear without changing conversation reconstruction. Omitting the marker makes the event required; passing it to a surface event rejects before append.
+
 ### `SurfaceIntent` — the parameter to `session.append()`
 
 ```ts type-equiv
@@ -444,22 +459,17 @@ declare class Session {
    *
    * @param type - The event type (key of {@link SessionEventMap}).
    * @param data - The event payload; must be JSON-serializable.
-   * @param opts - Surface metadata: `surfaceOp` controls how the event enters
-   *   the ordered surface; `sourceEventSeqs` lists the seq numbers of earlier
-   *   events this one derives from. REQUIRED for
-   *   {@link SurfaceEventType} events (every message-producing event must
-   *   declare how it joins the surface, the sole source of derived model
-   *   history) and
-   *   rejected by the compiler for non-surface types like `turn/start` or
-   *   `assistant/chunk`.
+   * @param opts - Surface events require {@link SurfaceIntent}. Non-surface
+   *   events may pass {@link SessionEventIntent} only when a reader that does
+   *   not know their type can safely skip them.
    * @returns the logged event — its assigned `seq`/`time` plus the SNAPSHOT of
    *   `data` that entered the log, so reading `event.data` back sees the logged
    *   value, never the caller's still-mutable input.
-   * @throws if `data` or surface metadata is not losslessly JSON-serializable
+   * @throws if `data` or event metadata is not losslessly JSON-serializable
    *   (BigInt, function, symbol, undefined, negative zero, non-finite number,
    *   circular reference, sparse array, or an exotic object such as
    *   Map/Set/Date/class instance), or when the candidate violates the
-   *   canonical surface contract (marker shape and eligibility, unique
+   *   canonical event contract (marker shape and eligibility, unique
    *   earlier source-event references, positional replacement validity, and complete
    *   shadowed-node coverage). One recursive pass reads, validates, and
    *   copies each nested value once, so a stateful getter cannot supply one value
@@ -472,7 +482,7 @@ declare class Session {
   append<T extends SessionEventType>(
     type: T,
     data: SessionEventMap[T],
-    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent] : []
+    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent] : [opts?: SessionEventIntent]
   ): SessionEvent<T>;
   /**
    * The {@link EpochHeader} in force after the log's last header event — the
@@ -746,7 +756,7 @@ fork(source: SessionForkSource, boundary?: number, childSessionId?: SessionId): 
 
 Types: [CreateSessionOptions](persistence.md) · [PrepareSessionOptions](persistence.md) · [SessionId](core.md)
 
-Source: [`packages/core/session/src/index.ts:792`](../../packages/core/session/src/index.ts)
+Source: [`packages/core/session/src/index.ts:796`](../../packages/core/session/src/index.ts)
 
 <a id="session-events"></a>
 

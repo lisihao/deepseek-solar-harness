@@ -17,6 +17,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 import SessionProjectionCache from '../src/index.ts'
+import { SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
@@ -100,6 +101,7 @@ function storedRecord(pool: MemoryMediaPool, id: Session['id']) {
   return pool.media.get('session_projcache')?.tables.get('sessions')?.get(String(id)) as
     {
       identity: { createdAt: number; cwd?: string }
+      sourceRevision?: string
       rows: Record<string, { ver: number; seq: number; val: unknown }>
     } | undefined
 }
@@ -259,6 +261,25 @@ describe('SessionProjectionCache cold read', () => {
     // Write-back: the stored row advanced to the served cut.
     expect(storedRows(samePool, id)?.['cache-test/marks'])
       .toEqual({ ver: 1, seq: 3, val: { marks: ['a', 'b'] } })
+  })
+
+  it('binds a cold refresh to the observed log revision and rejects it after the log changes', async () => {
+    const pool = new MemoryMediaPool()
+    const logs = new Map([['revision-bound', storedLog([['a']])]])
+    const { cache, pool: samePool } = await harness({ pool, logs })
+    const id = SessionId('revision-bound')
+    const firstRevision = SessionPersistenceRevision('store-a:revision-1')
+    const nextRevision = SessionPersistenceRevision('store-a:revision-2')
+
+    await cache.coldSnapshot(id, undefined, firstRevision)
+
+    expect(storedRecord(samePool, id)?.sourceRevision).toBe(firstRevision)
+    expect(cache.cachedSnapshot(headerOf(id), firstRevision)?.values['cache-test/marks'])
+      .toEqual({ marks: ['a'] })
+    expect(cache.cachedSnapshot(headerOf(id), nextRevision)).toBeUndefined()
+    // Callers that only need a stale-safe projection hint retain the old API.
+    expect(cache.cachedSnapshot(headerOf(id))?.values['cache-test/marks'])
+      .toEqual({ marks: ['a'] })
   })
 
   it('discards a version-mismatched row and refolds the full log', async () => {

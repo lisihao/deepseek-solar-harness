@@ -132,6 +132,44 @@ describe('sessions.list cold merge', () => {
     ]))
   })
 
+  it('repairs missing cold metadata once and reuses it while the persistence revision is unchanged', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(UserQuestionService)
+    const meta = header('revision-refreshed', 100)
+    const revision = SessionPersistenceRevision('jsonl:revision-1')
+    const exact = {
+      asOfSeq: 4,
+      values: { sessionListMetadata: { blank: false, lastPromptAt: 1_200 } },
+    }
+    let cached: typeof exact | undefined
+    const cachedSnapshot = vi.fn((_meta: SessionHeader, expected?: SessionPersistenceRevision) =>
+      expected === revision ? cached : undefined)
+    const coldSnapshot = vi.fn(async () => {
+      cached = exact
+      return exact
+    })
+    ctx.provide('sessionPersistence', {
+      listSnapshots: () => Promise.resolve([{ header: meta, revision }]),
+      locate: () => undefined,
+    } as never)
+    ctx.provide('sessionProjectionCache', { cachedSnapshot, coldSnapshot } as never)
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
+
+    const first = await api.sessions.list(request({}))
+    const second = await api.sessions.list(request({}))
+    if (!first.result.ok || !second.result.ok) throw new Error('list failed')
+
+    expect(first.result.value.items).toEqual([
+      expect.objectContaining({ sessionId: meta.id, blank: false, updatedAt: 1_200 }),
+    ])
+    expect(second.result.value.items).toEqual([
+      expect.objectContaining({ sessionId: meta.id, blank: false, updatedAt: 1_200 }),
+    ])
+    expect(coldSnapshot).toHaveBeenCalledTimes(1)
+    expect(coldSnapshot).toHaveBeenCalledWith(meta.id, undefined, revision)
+  })
+
   it('can disable bounded blank probes without hiding cold Sessions', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)

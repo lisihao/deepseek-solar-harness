@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ResidentProviderStatus } from '@deepseek-ai/dsh-resident-operator'
 import { ResidentDaemonClient } from '../src/client.ts'
-import { ResidentDaemon } from '../src/daemon.ts'
+import { normalizeResidentDriverError, ResidentDaemon } from '../src/daemon.ts'
 import {
   EXPECTED_CODEX_CLI_VERSION,
   EXPECTED_CODEX_SCHEMA_SHA256,
@@ -13,6 +13,15 @@ import {
 } from '../src/drivers.ts'
 
 const roots: string[] = []
+const MODELS = [{
+  model: 'gpt-test',
+  displayName: 'GPT Test',
+  description: 'Balanced everyday test model',
+  supportedEfforts: ['low', 'medium', 'high', 'xhigh', 'max'] as const,
+  defaultEffort: 'medium' as const,
+  isDefault: true,
+  supportsAdaptiveThinking: false,
+}]
 const temporaryRoot = (): string => {
   const value = mkdtempSync(join(tmpdir(), 'dsh-resident-daemon-'))
   roots.push(value)
@@ -23,8 +32,19 @@ afterEach(() => {
   for (const value of roots.splice(0)) rmSync(value, { recursive: true, force: true })
 })
 
+describe('Resident daemon Driver error boundary', () => {
+  it('preserves actionable Claude subscription expiry across the daemon boundary', () => {
+    const error = new Error('Claude Code returned an error result: Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.')
+    expect(normalizeResidentDriverError(error, false)).toMatchObject({
+      code: 'AUTH_MODE_MISMATCH',
+      message: 'Claude Code subscription authentication expired; run `claude auth login` and retry the node.',
+    })
+  })
+})
+
 class MemoryDriver implements ResidentProductDriver {
   readonly operatorId = 'codex' as const
+  readonly profiles: DriverExecuteRequest['profile'][] = []
   constructor(readonly counts = new Map<string, number>()) {}
 
   qualify(): Promise<ResidentProviderStatus> {
@@ -35,14 +55,18 @@ class MemoryDriver implements ResidentProductDriver {
       authentication: 'native-subscription',
       productVersion: 'test',
       protocolHash: 'test',
+      models: MODELS,
     })
   }
 
   async execute(request: DriverExecuteRequest) {
+    this.profiles.push(request.profile)
+    request.onProgress('connecting')
     const session = request.nativeSessionId ?? `native-${this.counts.size + 1}`
     const count = (this.counts.get(session) ?? 0) + 1
     this.counts.set(session, count)
     request.onRunning(session, `turn-${count}`)
+    request.onProgress('reasoning')
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(resolve, 5)
       request.signal.addEventListener('abort', () => {
@@ -70,6 +94,38 @@ class BlockingDriver extends MemoryDriver {
   }
 }
 
+class ReconnectDriver extends MemoryDriver {
+  readonly running: Promise<void>
+  readonly release: () => void
+  private readonly markRunning: () => void
+
+  constructor() {
+    super()
+    let markRunning = (): void => {}
+    let release = (): void => {}
+    this.running = new Promise<void>((resolve) => { markRunning = resolve })
+    this.release = () => { release() }
+    this.markRunning = markRunning
+    this.released = new Promise<void>((resolve) => { release = resolve })
+  }
+
+  private readonly released: Promise<void>
+
+  override async execute(request: DriverExecuteRequest) {
+    request.onProgress('connecting')
+    request.onRunning('native-reconnect', 'turn-reconnect')
+    request.onProgress('reasoning')
+    this.markRunning()
+    await this.released
+    request.onProgress('finalizing')
+    return {
+      output: [{ type: 'text' as const, text: 'reconnected result' }],
+      stopReason: 'completed' as const,
+      nativeSessionId: 'native-reconnect',
+    }
+  }
+}
+
 class FailingDriver extends MemoryDriver {
   override async execute(request: DriverExecuteRequest): Promise<never> {
     const prompt = request.prompt[0]
@@ -88,6 +144,7 @@ class UnavailableTransportDriver extends MemoryDriver {
       authentication: 'native-subscription',
       productVersion: EXPECTED_CODEX_CLI_VERSION,
       protocolHash: EXPECTED_CODEX_SCHEMA_SHA256,
+      models: MODELS,
     })
   }
 }
@@ -109,9 +166,33 @@ describe('ResidentDaemon', () => {
     const firstClient = client(root)
     const first = await firstClient.execute({
       commandId: 'command-1', operatorId: 'codex', workspace,
+      taskLabel: '  Analyze\n 🐳 runtime\u0000  ',
       prompt: [{ type: 'text', text: 'first' }], signal: new AbortController().signal,
     })
     expect(await first.result).toMatchObject({ output: [{ text: 'session=native-1;count=1' }] })
+    expect(driver.profiles[0]).toEqual({ model: 'gpt-test', effort: 'medium' })
+    const reconnected = await firstClient.inspect(first.sessionId)
+    expect(reconnected).toMatchObject({
+      executionProfile: { model: 'gpt-test', effort: 'medium' },
+      executionProfileSource: 'smart-auto',
+    })
+    expect(reconnected.latestTurn).toMatchObject({
+      turnId: first.turnId,
+      state: 'settled',
+      stopReason: 'completed',
+      taskLabel: 'Analyze 🐳 runtime',
+    })
+    expect(reconnected.latestEvent).toMatchObject({ type: 'turn.settled' })
+    expect(await firstClient.inspectTurn(first.turnId)).toMatchObject({
+      commandId: 'command-1',
+      sessionId: first.sessionId,
+      state: 'settled',
+      result: { stopReason: 'completed' },
+    })
+    const reasoning = (await firstClient.readEvents(first.sessionId)).events.find(event => (
+      event.type === 'turn.progress' && event.data.phase === 'reasoning'
+    ))
+    expect(reasoning).toBeDefined()
 
     const restartedClient = client(root)
     const second = await restartedClient.execute({
@@ -127,6 +208,69 @@ describe('ResidentDaemon', () => {
     })
     expect(isolated.sessionId).not.toBe(first.sessionId)
     expect(await isolated.result).toMatchObject({ output: [{ text: 'session=native-2;count=1' }] })
+    await daemon.close()
+  })
+
+  it('reattaches a fresh client to an active turn and observes durable progress through settlement', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new ReconnectDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const original = await client(root).execute({
+      commandId: 'reconnect-active', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'keep running' }], signal: new AbortController().signal,
+    })
+    await driver.running
+
+    const reattached = client(root)
+    expect(await reattached.inspect(original.sessionId)).toMatchObject({
+      lifecycle: 'running',
+      activeTurnId: original.turnId,
+      latestTurn: { turnId: original.turnId, state: 'running' },
+      latestEvent: { type: 'turn.progress', data: { phase: 'reasoning' } },
+    })
+    expect(await reattached.inspectTurn(original.turnId)).toMatchObject({
+      commandId: 'reconnect-active',
+      state: 'running',
+    })
+
+    driver.release()
+    await expect(original.result).resolves.toMatchObject({ output: [{ text: 'reconnected result' }] })
+    expect(await reattached.inspectTurn(original.turnId)).toMatchObject({
+      state: 'settled',
+      result: { stopReason: 'completed' },
+    })
+    await daemon.close()
+  })
+
+  it('detaches an aborted caller without interrupting the daemon-owned turn', async () => {
+    const root = temporaryRoot()
+    const workspace = join(root, 'workspace')
+    mkdirSync(workspace)
+    const driver = new ReconnectDriver()
+    const daemon = new ResidentDaemon({ root, drivers: [driver] })
+    await daemon.start()
+    const caller = new AbortController()
+    const original = await client(root).execute({
+      commandId: 'detach-active', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'keep running after the app exits' }], signal: caller.signal,
+    })
+    await driver.running
+
+    caller.abort(new Error('desktop process stopped'))
+    await expect(original.result).rejects.toThrow('desktop process stopped')
+    expect(await client(root).inspectTurn(original.turnId)).toMatchObject({ state: 'running' })
+
+    const reattached = await client(root).execute({
+      commandId: 'detach-active', operatorId: 'codex', workspace,
+      prompt: [{ type: 'text', text: 'keep running after the app exits' }],
+      signal: new AbortController().signal,
+    })
+    expect(reattached.turnId).toBe(original.turnId)
+    driver.release()
+    await expect(reattached.result).resolves.toMatchObject({ output: [{ text: 'reconnected result' }] })
     await daemon.close()
   })
 
@@ -210,6 +354,13 @@ describe('ResidentDaemon', () => {
       operator_id: 'codex',
       workspace,
       prompt: [{ type: 'text', text: 42 }],
+    })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
+    await expect(raw.rawRequest('turn.execute', {
+      command_id: 'invalid-label',
+      operator_id: 'codex',
+      workspace,
+      task_label: { unsafe: true },
+      prompt: [{ type: 'text', text: 'valid' }],
     })).rejects.toMatchObject({ code: 'INVALID_RESULT' })
     expect(driver.counts.size).toBe(0)
     await daemon.close()

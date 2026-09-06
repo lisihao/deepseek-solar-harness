@@ -116,10 +116,13 @@ The persisted projection cache service. Opens the `session_projcache` domain at 
  * paths (the history tail baseline, {@link coldSnapshot}) supersede these
  * values whenever a session is actually opened.
  * @param meta - the listed session's header (identity witness; no log read).
+ * @param expectedRevision - when supplied, require a cold-read checkpoint
+ *   bound to this exact persistence revision; live checkpoints without a
+ *   revision deliberately miss so the caller repairs them once.
  * @returns the cut (`asOfSeq` = lowest served-row watermark), or
  *   `undefined` when no usable row exists for this lifecycle.
  */
-cachedSnapshot(meta: SessionHeader): ProjectionSnapshot | undefined
+cachedSnapshot(meta: SessionHeader, expectedRevision?: SessionPersistenceRevision): ProjectionSnapshot | undefined
 
 /**
  * Durably checkpoint one live session NOW (both mandatory points call
@@ -141,14 +144,16 @@ async write(session: Session): Promise<void>
  * persisted log (`not found` from the persistence seam).
  * @param id - the persisted session to read.
  * @param signal - optional cancellation for the persistence reads.
+ * @param sourceRevision - persistence revision observed by the caller; it is
+ *   stored with the refreshed checkpoint for future zero-I/O validation.
  * @returns the snapshot cut at the stored log end.
  */
-async coldSnapshot(id: SessionId, signal?: AbortSignal): Promise<ProjectionSnapshot>
+async coldSnapshot( id: SessionId, signal?: AbortSignal, sourceRevision?: SessionPersistenceRevision, ): Promise<ProjectionSnapshot>
 ```
 
-Types: [Session](session.md) · [SessionHeader](persistence.md) · [SessionId](core.md)
+Types: [Session](session.md) · [SessionHeader](persistence.md) · [SessionId](core.md) · [SessionPersistenceRevision](persistence.md)
 
-Source: [`packages/session/session-projection-cache/src/index.ts:71`](../../packages/session/session-projection-cache/src/index.ts)
+Source: [`packages/session/session-projection-cache/src/index.ts:72`](../../packages/session/session-projection-cache/src/index.ts)
 
 <a id="ctxsessionprojections--sessionprojectionregistry"></a>
 

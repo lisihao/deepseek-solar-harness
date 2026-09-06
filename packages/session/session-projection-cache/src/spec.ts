@@ -52,6 +52,8 @@ export type CheckpointIdentity = z.infer<typeof checkpointIdentity>
  */
 export const checkpointRecord = z.object({
   identity: checkpointIdentity,
+  /** Durable log revision this checkpoint exactly reflects, when observed on a cold read. */
+  sourceRevision: z.string().optional(),
   rows: z.record(z.string(), checkpointRow),
 })
 

@@ -379,6 +379,31 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'capabilityCapsules',
+    summary: 'Provider-neutral Capsule registry and late-binding resolver.',
+    description: 'Provider-neutral Capsule registry and late-binding resolver.',
+    methods: [
+      {
+        signature: 'abstract snapshot(request: CapsuleSnapshotRequest): Promise<CapsuleCatalogSnapshot>',
+        description: 'Snapshot the live immutable catalog.',
+        parameters: [{ name: 'request', description: 'optional capability-tag catalog filter.' }],
+        returns: 'one revisioned content-addressed catalog snapshot.',
+      },
+      {
+        signature: 'abstract get(ref: CapabilityCapsuleRef): Promise<CapabilityCapsuleManifestV1>',
+        description: 'Read and digest-verify one immutable manifest.',
+        parameters: [{ name: 'ref', description: 'exact content-addressed Capsule reference.' }],
+        returns: 'the validated version-one manifest.',
+      },
+      {
+        signature: 'abstract resolve(request: CapsuleResolutionRequest): Promise<CapabilityBindingPlanV1>',
+        description: 'Resolve bindings without mutating the source Graph.',
+        parameters: [{ name: 'request', description: 'attempt identity, requirements, budgets, and operator support.' }],
+        returns: 'an immutable binding plan or structured blockers.',
+      },
+    ],
+  },
+  {
     key: 'clientModules',
     summary: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index tap.',
     description: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index tap. Construction runs the activation scan synchronously — a malformed declaration or missing bundle among the already-loaded entries aggregates into one loud throw (FAILED fiber; the boot activation audit reports it).',
@@ -493,6 +518,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'start', description: 'first surface seq, inclusive.' }, { name: 'end', description: 'last surface seq, inclusive.' }, { name: 'agent', description: 'context whose session is mutated and whose routing options guide summarization.' }, { name: 'signal', description: 'optional cancellation; model-backed implementations must forward it.' }],
         returns: 'the appended event seqs, summary, replaced range, and token accounting.',
         throws: ['when compaction is active or the range is missing, reversed, or unbalanced.'],
+      },
+    ],
+  },
+  {
+    key: 'contextCompiler',
+    summary: 'Provider-neutral context projection compiler.',
+    description: 'Provider-neutral context projection compiler.',
+    methods: [
+      {
+        signature: 'abstract compile(request: ContextCompileRequest): Promise<ContextPacketV1>',
+        description: 'Compile one bounded, lineage-bearing node context packet.',
+        parameters: [{ name: 'request', description: 'certified node inputs, sources, and context policy.' }],
+        returns: 'one immutable Context Packet for a sealed attempt.',
       },
     ],
   },
@@ -710,6 +748,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'intentCompiler',
+    summary: 'Provider-neutral Intent compilation service.',
+    description: 'Provider-neutral Intent compilation service.',
+    methods: [
+      {
+        signature: 'abstract compile(request: IntentCompileRequest): Promise<IntentIRV1>',
+        description: 'Compile immutable request input into one content-verifiable Intent IR.',
+        parameters: [{ name: 'request', description: 'immutable raw request and source identities.' }],
+        returns: 'one versioned Intent IR with deterministic provenance.',
+      },
+    ],
+  },
+  {
     key: 'invariants',
     summary: 'Package-owned invariant registry with global and regex-based selection.',
     description: 'Package-owned invariant registry with global and regex-based selection.',
@@ -907,6 +958,67 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'orchestrations',
+    summary: 'Provider-neutral durable orchestration control service.',
+    description: 'Provider-neutral durable orchestration control service.',
+    methods: [
+      {
+        signature: 'abstract compile(request: OrchestrationCompileRequest): Promise<OrchestrationCompilationV1>',
+        description: 'Compile immutable Intent and Graph inputs.',
+        parameters: [{ name: 'request', description: 'immutable compilation input.' }],
+        returns: 'the certified compilation.',
+      },
+      {
+        signature: 'abstract start(request: OrchestrationStartRequest): Promise<OrchestrationRunSnapshot>',
+        description: 'Start one accepted certified compilation.',
+        parameters: [{ name: 'request', description: 'accepted compilation identity and optional approval.' }],
+        returns: 'the new durable run.',
+      },
+      {
+        signature: 'abstract list(): Promise<OrchestrationRunSnapshot[]>',
+        description: 'List known durable runs.',
+        parameters: [],
+        returns: 'bounded snapshots for known runs.',
+      },
+      {
+        signature: 'abstract inspect(runId: OrchestrationRunId): Promise<OrchestrationRunSnapshot>',
+        description: 'Inspect one durable run.',
+        parameters: [{ name: 'runId', description: 'durable run identity.' }],
+        returns: 'the current bounded run snapshot.',
+      },
+      {
+        signature: 'abstract readEvents(request: OrchestrationEventReadRequest): Promise<OrchestrationEventPage>',
+        description: 'Read append-only orchestration events.',
+        parameters: [{ name: 'request', description: 'run cursor and page bounds.' }],
+        returns: 'an ordered event page.',
+      },
+      {
+        signature: 'abstract control(request: OrchestrationControlRequest): Promise<OrchestrationRunSnapshot>',
+        description: 'Apply a revision-checked run control.',
+        parameters: [{ name: 'request', description: 'revision-checked run control.' }],
+        returns: 'the updated run snapshot.',
+      },
+      {
+        signature: 'abstract decide(request: OrchestrationDecisionRequest): Promise<OrchestrationRunSnapshot>',
+        description: 'Apply a revision-checked human decision.',
+        parameters: [{ name: 'request', description: 'revision-checked human decision.' }],
+        returns: 'the updated run snapshot.',
+      },
+      {
+        signature: 'abstract resolveIndeterminate(request: OrchestrationIndeterminateRequest): Promise<OrchestrationRunSnapshot>',
+        description: 'Resolve an indeterminate physical outcome explicitly.',
+        parameters: [{ name: 'request', description: 'explicit indeterminate resolution.' }],
+        returns: 'the updated run snapshot.',
+      },
+      {
+        signature: 'abstract proposeCapabilityUpdate(request: CapabilityUpdateRequest): Promise<CapabilityUpdateReceipt>',
+        description: 'Propose one late-bound capability change.',
+        parameters: [{ name: 'request', description: 'requested capability change.' }],
+        returns: 'the durable update receipt.',
+      },
+    ],
+  },
+  {
     key: 'permissionPresets',
     summary: 'Owns the deployment\'s permission presets and their write path.',
     description: 'Owns the deployment\'s permission presets and their write path. Requires a confining `ctx.shell` executor and `ctx.approval`; unmatched knob values are reported as CUSTOM_PRESET, not an error.',
@@ -1028,6 +1140,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read one Resident Session snapshot.',
         parameters: [{ name: 'sessionId', description: 'opaque Session identity returned by execution or listing.' }],
         returns: 'the current lifecycle, health, revision, and native association.',
+      },
+      {
+        signature: 'abstract inspectTurn(turnId: string): Promise<ResidentTurnSnapshot>',
+        description: 'Read the durable receipt and bounded result for one turn after caller reconnect.',
+        parameters: [{ name: 'turnId', description: 'opaque turn identity from execution, a Session snapshot, or an event.' }],
+        returns: 'the current receipt state, result reference, and terminal result when available.',
       },
       {
         signature: 'abstract readEvents(request: ResidentEventReadRequest): Promise<ResidentEventPage>',
@@ -1174,9 +1292,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'The persisted projection cache service. Opens the `session_projcache` domain at init, checkpoints live sessions on a throttled write-behind (count/interval triggers from Config) plus two mandatory points — `turn/end` and session disposal (the live-to-cold moment) — and serves the cold-read ladder: cached row, persistence `readFrom` tail, registry `restore`, durable write-back. Every durable write is fail-soft: failures log a warning and the cache self-heals on the next write or cold read.',
     methods: [
       {
-        signature: 'cachedSnapshot(meta: SessionHeader): ProjectionSnapshot | undefined',
+        signature: 'cachedSnapshot(meta: SessionHeader, expectedRevision?: SessionPersistenceRevision): ProjectionSnapshot | undefined',
         description: 'The zero-I/O listing read: whole values viewed straight from the stored rows (version-matching keys only), each cut carried with its watermark so a client value store can seed under its higher-seq-wins rule — as stale as the last durable checkpoint but never wrong, and never from an unrelated log (the caller\'s header is the identity witness). Fresher paths (the history tail baseline, coldSnapshot) supersede these values whenever a session is actually opened.',
-        parameters: [{ name: 'meta', description: 'the listed session\'s header (identity witness; no log read).' }],
+        parameters: [{ name: 'meta', description: 'the listed session\'s header (identity witness; no log read).' }, { name: 'expectedRevision', description: 'when supplied, require a cold-read checkpoint bound to this exact persistence revision; live checkpoints without a revision deliberately miss so the caller repairs them once.' }],
         returns: 'the cut (`asOfSeq` = lowest served-row watermark), or `undefined` when no usable row exists for this lifecycle.',
       },
       {
@@ -1186,9 +1304,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'resolution after durability and event emission.',
       },
       {
-        signature: 'async coldSnapshot(id: SessionId, signal?: AbortSignal): Promise<ProjectionSnapshot>',
+        signature: 'async coldSnapshot( id: SessionId, signal?: AbortSignal, sourceRevision?: SessionPersistenceRevision, ): Promise<ProjectionSnapshot>',
         description: 'Cold-read one persisted session\'s projections with zero full-log load: cached rows + a persistence `readFrom` tail from the registry\'s restore floor, refolded by the registry and written back (fail-soft) so the next cold read starts closer. A cache row invalidated by a shrunk log (crash-repair truncation) triggers one full re-read from seq 0 — the ladder\'s slow rung, still no crash. Rejects when the session has no persisted log (`not found` from the persistence seam).',
-        parameters: [{ name: 'id', description: 'the persisted session to read.' }, { name: 'signal', description: 'optional cancellation for the persistence reads.' }],
+        parameters: [{ name: 'id', description: 'the persisted session to read.' }, { name: 'signal', description: 'optional cancellation for the persistence reads.' }, { name: 'sourceRevision', description: 'persistence revision observed by the caller; it is stored with the refreshed checkpoint for future zero-I/O validation.' }],
         returns: 'the snapshot cut at the stored log end.',
       },
     ],
@@ -2862,6 +2980,42 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CancelOptions {\n    keepInbox?: boolean | undefined;\n}',
   },
   {
+    name: 'CapabilityBindingPlanV1',
+    declaration: 'export interface CapabilityBindingPlanV1 {\n    readonly version: 1;\n    readonly catalogRevision: number;\n    readonly catalogSha256: string;\n    readonly capsuleRefs: readonly CapabilityCapsuleRef[];\n    readonly instructions: readonly {\n        readonly ref: CapabilityCapsuleRef;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly resourceRefs: readonly string[];\n    readonly dataRefs: readonly string[];\n    readonly toolsAllow: readonly string[];\n    readonly toolsDeny: readonly string[];\n    readonly mcpServers: readonly string[];\n    readonly secretRefs: readonly string[];\n    readonly guardRefs: readonly string[];\n    readonly resolvedCapabilities: readonly string[];\n    readonly effectiveEffects: CapabilityEffectSet;\n    readonly effectiveReadScopes: readonly string[];\n    readonly effectiveWriteScopes: readonly string[];\n    readonly verification: readonly string[];\n    readonly blockers: readonly {\n        readonly code: string;\n        readonly message: string;\n    }[];\n    readonly planSha256: string;\n}',
+  },
+  {
+    name: 'CapabilityCapsuleManifestV1',
+    declaration: 'export interface CapabilityCapsuleManifestV1 {\n    readonly version: 1;\n    readonly id: string;\n    readonly capsuleVersion: string;\n    readonly kind: \'instruction\' | \'skill\' | \'tool\' | \'mcp\' | \'resource\' | \'data\' | \'secret\' | \'guard\';\n    readonly digest: string;\n    readonly provenance: {\n        readonly publisher: string;\n        readonly sourceRef: string;\n    };\n    readonly applicability: readonly string[];\n    readonly capabilityTags: readonly string[];\n    readonly inputs: readonly string[];\n    readonly outputs: readonly string[];\n    readonly preconditions: readonly string[];\n    readonly postconditions: readonly string[];\n    readonly invariants: readonly string[];\n    readonly consumes: readonly string[];\n    readonly produces: readonly string[];\n    readonly requires: readonly string[];\n    readonly compatible: readonly string[];\n    readonly incompatible: readonly string[];\n    readonly effects: CapabilityEffectSet;\n    readonly bindings: {\n        readonly instructions: readonly string[];\n        readonly skills: readonly string[];\n        readonly toolsAllow: readonly string[];\n        readonly toolsDeny: readonly string[];\n        readonly mcpServers: readonly string[];\n        readonly resourceRefs: readonly string[];\n        readonly dataRefs: readonly string[];\n        readonly secretRefs: readonly string[];\n        readonly guardRefs: readonly string[];\n    };\n    readonly verification: readonly string[];\n    readonly operatorCompatibility: readonly st /* …truncated — full shape in source */',
+  },
+  {
+    name: 'CapabilityEffectSet',
+    declaration: 'export interface CapabilityEffectSet {\n    readonly read: readonly string[];\n    readonly write: readonly string[];\n    readonly execute: readonly string[];\n    readonly network: readonly string[];\n    readonly cost: readonly string[];\n    readonly risk: readonly string[];\n}',
+  },
+  {
+    name: 'CapabilityRequirement',
+    declaration: 'export interface CapabilityRequirement {\n    readonly capability: string;\n    readonly minimumLevel?: number;\n    readonly required: boolean;\n    readonly preferredCapsuleIds?: readonly string[];\n}',
+  },
+  {
+    name: 'CapabilityUpdateReceipt',
+    declaration: 'export interface CapabilityUpdateReceipt {\n    readonly updateId: string;\n    readonly state: \'queued\' | \'awaiting_approval\' | \'rejected\';\n    readonly generation: number;\n    readonly updateSha256: string;\n    readonly errorCode?: string;\n}',
+  },
+  {
+    name: 'CapabilityUpdateRequest',
+    declaration: 'export interface CapabilityUpdateRequest {\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly requestedCapabilities: readonly string[];\n    readonly applyAt: \'next-turn\' | \'immediate\';\n}',
+  },
+  {
+    name: 'CapsuleCatalogSnapshot',
+    declaration: 'export interface CapsuleCatalogSnapshot {\n    readonly revision: number;\n    readonly generatedAt: string;\n    readonly refs: readonly CapabilityCapsuleRef[];\n    readonly catalogSha256: string;\n}',
+  },
+  {
+    name: 'CapsuleResolutionRequest',
+    declaration: 'export interface CapsuleResolutionRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly attempt: number;\n    readonly generation: number;\n    readonly requirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly operatorId?: string;\n    readonly operatorInjectionKinds?: readonly string[];\n}',
+  },
+  {
+    name: 'CapsuleSnapshotRequest',
+    declaration: 'export interface CapsuleSnapshotRequest {\n    readonly capabilityTags?: readonly string[];\n}',
+  },
+  {
     name: 'ClientResponse',
     declaration: 'export interface ClientResponse {\n    type: \'client-response\';\n    rpcId: RpcId;\n    result: RpcResult<unknown>;\n}',
   },
@@ -2962,12 +3116,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ContentBlockType = keyof ContentBlockMap;',
   },
   {
+    name: 'ContextCompileRequest',
+    declaration: 'export interface ContextCompileRequest {\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly sourceRefs: readonly ContextSourceRef[];\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly acceptance: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly policy: ContextPolicy;\n}',
+  },
+  {
     name: 'ContextFormed',
     declaration: 'export type ContextFormed = {\n    readonly form?: never;\n} | {\n    readonly form: \'instructions\';\n} | {\n    readonly form: \'catalog\';\n} | {\n    readonly form: \'snapshot\';\n    readonly sections: readonly ContextSnapshotSection[];\n} | {\n    readonly form: \'notice\';\n    readonly summary: string;\n} | {\n    readonly form: \'relay\';\n} | {\n    readonly form: \'recall\';\n};',
   },
   {
+    name: 'ContextPacketV1',
+    declaration: 'export interface ContextPacketV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly objective: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly included: readonly ContextSourceRef[];\n    readonly summarized: readonly ContextSourceRef[];\n    readonly dropped: readonly {\n        readonly source: ContextSourceRef;\n        readonly reason: string;\n    }[];\n    readonly estimatedTokens: number;\n    readonly tokenBudget: number;\n    readonly truncationReason?: string;\n    readonly lineage: readonly string[];\n    readonly degradedSources: readonly string[];\n    readonly redactions: readonly string[];\n    readonly capsuleInstructions: readonly {\n        readonly ref: string;\n        readonly digest: string;\n        readonly text: string;\n    }[];\n    readonly compilerId: string;\n    readonly compilerVersion: string;\n    readonly packetSha256: string;\n}',
+  },
+  {
+    name: 'ContextPolicy',
+    declaration: 'export interface ContextPolicy {\n    readonly maxTokens: number;\n    readonly allowedSourceKinds: readonly ContextSourceRef[\'kind\'][];\n    readonly unavailableSource: \'degrade\' | \'block\';\n}',
+  },
+  {
     name: 'ContextSnapshotSection',
     declaration: 'export interface ContextSnapshotSection {\n    readonly name: string;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'ContextSourceRef',
+    declaration: 'export interface ContextSourceRef {\n    readonly ref: string;\n    readonly kind: \'intent\' | \'requirement\' | \'task\' | \'artifact\' | \'session\' | \'knowledge\' | \'capsule\';\n    readonly required: boolean;\n}',
   },
   {
     name: 'ContinuableCreateRequest',
@@ -3282,6 +3452,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type InboxTarget = \'next-turn\' | \'next-step\';',
   },
   {
+    name: 'IntentCompileRequest',
+    declaration: 'export interface IntentCompileRequest {\n    readonly request: string;\n    readonly sourceRefs?: readonly string[];\n    readonly attachmentRefs?: readonly string[];\n    readonly compilerHint?: string;\n}',
+  },
+  {
+    name: 'IntentCompilerProvenanceV1',
+    declaration: 'export interface IntentCompilerProvenanceV1 {\n    readonly compilerId: string;\n    readonly compilerVersion: string;\n    readonly inputSha256: string;\n    readonly outputSha256: string;\n}',
+  },
+  {
+    name: 'IntentIRV1',
+    declaration: 'export interface IntentIRV1 {\n    readonly version: 1;\n    readonly objective: string;\n    readonly expectedOutcomes: readonly string[];\n    readonly constraints: readonly string[];\n    readonly nonGoals: readonly string[];\n    readonly acceptanceRequirements: readonly string[];\n    readonly sourceRefs: readonly string[];\n    readonly attachmentRefs: readonly string[];\n    readonly riskHints: readonly string[];\n    readonly ambiguities: readonly string[];\n    readonly requiresClarification: boolean;\n    readonly provenance: IntentCompilerProvenanceV1;\n}',
+  },
+  {
     name: 'InvariantFailure',
     declaration: 'export type InvariantFailure = (message: string) => never;',
   },
@@ -3442,6 +3624,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export class LlmRuntime extends Service {\n    constructor(ctx: Context);\n    registerAdapter(providers: string[], adapter: LlmAdapter): AdapterRegistrationHandle;\n    listProviders(): LlmProviderInfo[];\n    registerConfigurableProviders(entries: readonly LlmConfigurableProvider[]): DirectoryRegistrationHandle;\n    listConfigurableProviders(): LlmConfigurableProvider[];\n    registerModelDiscovery(settingsNs: string, discover: (request: LlmModelDiscoveryRequest) => Promise<readonly LlmDiscoveredModel[]>): () => void;\n    async discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest): Promise<LlmDiscoveredModel[]>;\n    providerRetryPolicy(provider: string): ResolvedRetryPolicy;\n    async listModels(provider: string): Promise<LlmModelInfo[]>;\n    async resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    async resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>;\n    async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>;\n    stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
   },
   {
+    name: 'LogicalTaskGraphV1',
+    declaration: 'export interface LogicalTaskGraphV1 {\n    readonly version: 1;\n    readonly title: string;\n    readonly workspace: string;\n    readonly maxParallel: number;\n    readonly risk: \'low\' | \'medium\' | \'high\';\n    readonly nodes: readonly OrchestrationNodeSpecV1[];\n}',
+  },
+  {
     name: 'LspHover',
     declaration: 'export interface LspHover {\n    readonly contents: string;\n    readonly range?: LspRange;\n}',
   },
@@ -3598,12 +3784,88 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
   },
   {
+    name: 'OrchestrationAcceptanceRequirement',
+    declaration: 'export interface OrchestrationAcceptanceRequirement {\n    readonly id: string;\n    readonly description: string;\n    readonly kind: \'operator-completed\' | \'artifact-present\' | \'human-review\';\n}',
+  },
+  {
+    name: 'OrchestrationArtifactRef',
+    declaration: 'export type OrchestrationArtifactRef = Branded<\'OrchestrationArtifactRef\'>;',
+  },
+  {
+    name: 'OrchestrationBlocker',
+    declaration: 'export interface OrchestrationBlocker {\n    readonly code: string;\n    readonly message: string;\n    readonly nodeId?: string;\n}',
+  },
+  {
+    name: 'OrchestrationCompilationV1',
+    declaration: 'export interface OrchestrationCompilationV1 {\n    readonly version: 1;\n    readonly compilationId: string;\n    readonly intent: IntentIRV1;\n    readonly intentRef: OrchestrationArtifactRef;\n    readonly requirementRef?: OrchestrationArtifactRef;\n    readonly graphRef: OrchestrationArtifactRef;\n    readonly graph: LogicalTaskGraphV1;\n    readonly certificate: PlanCertificateV1;\n    readonly requiresClarification: boolean;\n    readonly blockers: readonly OrchestrationBlocker[];\n}',
+  },
+  {
+    name: 'OrchestrationCompileRequest',
+    declaration: 'export interface OrchestrationCompileRequest {\n    readonly intent: IntentCompileRequest;\n    readonly graph: LogicalTaskGraphV1;\n    readonly requirement?: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'OrchestrationControlRequest',
+    declaration: 'export interface OrchestrationControlRequest {\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly action: \'pause\' | \'resume\' | \'cancel\';\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'OrchestrationDecisionRequest',
+    declaration: 'export interface OrchestrationDecisionRequest {\n    readonly runId: OrchestrationRunId;\n    readonly expectedRevision: number;\n    readonly nodeId?: string;\n    readonly decision: \'approve\' | \'reject\';\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'OrchestrationEvent',
+    declaration: 'export interface OrchestrationEvent {\n    readonly sequence: number;\n    readonly runId: OrchestrationRunId;\n    readonly nodeId?: string;\n    readonly attempt?: number;\n    readonly generation?: number;\n    readonly type: string;\n    readonly time: string;\n    readonly data: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'OrchestrationEventPage',
+    declaration: 'export interface OrchestrationEventPage {\n    readonly events: readonly OrchestrationEvent[];\n    readonly nextSequence: number;\n}',
+  },
+  {
+    name: 'OrchestrationEventReadRequest',
+    declaration: 'export interface OrchestrationEventReadRequest {\n    readonly runId: OrchestrationRunId;\n    readonly afterSequence?: number;\n    readonly limit?: number;\n}',
+  },
+  {
+    name: 'OrchestrationIndeterminateRequest',
+    declaration: 'export interface OrchestrationIndeterminateRequest {\n    readonly runId: OrchestrationRunId;\n    readonly nodeId: string;\n    readonly expectedRevision: number;\n    readonly decision: \'abandon\' | \'retry\';\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'OrchestrationNodeSnapshot',
+    declaration: 'export interface OrchestrationNodeSnapshot {\n    readonly id: string;\n    readonly title: string;\n    readonly role: string;\n    readonly dependsOn: readonly string[];\n    readonly state: OrchestrationNodeState;\n    readonly attempt: number;\n    readonly capabilityGeneration: number;\n    readonly operatorId?: string;\n    readonly operatorProfile?: PhysicalOperatorExecutionPreference;\n    readonly capabilityPlanRef?: OrchestrationArtifactRef;\n    readonly contextPacketRef?: OrchestrationArtifactRef;\n    readonly executionPlanRef?: OrchestrationArtifactRef;\n    readonly evidenceRefs: readonly OrchestrationArtifactRef[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'OrchestrationNodeSpecV1',
+    declaration: 'export interface OrchestrationNodeSpecV1 {\n    readonly id: string;\n    readonly dependsOn: readonly string[];\n    readonly requiredForCompletion: boolean;\n    readonly title: string;\n    readonly task: string;\n    readonly role: string;\n    readonly capabilityRequirements: readonly CapabilityRequirement[];\n    readonly capabilityBudget: readonly string[];\n    readonly contextPolicy: ContextPolicy;\n    readonly effectBudget: CapabilityEffectSet;\n    readonly readScopes: readonly string[];\n    readonly writeScopes: readonly string[];\n    readonly approvedSecretRefs: readonly string[];\n    readonly acceptance: readonly OrchestrationAcceptanceRequirement[];\n    readonly retryPolicy: OrchestrationRetryPolicy;\n    readonly operator?: {\n        readonly preferredIds?: readonly string[];\n        readonly profile?: PhysicalOperatorExecutionPreference;\n    };\n}',
+  },
+  {
+    name: 'OrchestrationNodeState',
+    declaration: 'export type OrchestrationNodeState = \'pending\' | \'ready\' | \'awaiting_recompile\' | \'awaiting_approval\' | \'running\' | \'retry_wait\' | \'passed\' | \'failed\' | \'blocked\' | \'indeterminate\' | \'cancelled\';',
+  },
+  {
+    name: 'OrchestrationRetryPolicy',
+    declaration: 'export interface OrchestrationRetryPolicy {\n    readonly maxAttempts: number;\n    readonly backoffMs: number;\n    readonly retryableCodes: readonly string[];\n}',
+  },
+  {
+    name: 'OrchestrationRunId',
+    declaration: 'export type OrchestrationRunId = Branded<\'OrchestrationRunId\'>;',
+  },
+  {
+    name: 'OrchestrationRunSnapshot',
+    declaration: 'export interface OrchestrationRunSnapshot {\n    readonly runId: OrchestrationRunId;\n    readonly title: string;\n    readonly workspace: string;\n    readonly state: OrchestrationRunState;\n    readonly revision: number;\n    readonly graphRevision: number;\n    readonly certificate: PlanCertificateV1;\n    readonly nodes: readonly OrchestrationNodeSnapshot[];\n    readonly blockers: readonly OrchestrationBlocker[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'OrchestrationRunState',
+    declaration: 'export type OrchestrationRunState = \'awaiting_clarification\' | \'awaiting_approval\' | \'running\' | \'paused\' | \'completed\' | \'failed\' | \'cancelled\' | \'indeterminate\';',
+  },
+  {
+    name: 'OrchestrationStartRequest',
+    declaration: 'export interface OrchestrationStartRequest {\n    readonly compilationId: string;\n    readonly approvalRef?: string;\n}',
+  },
+  {
     name: 'PermissionSelect',
     declaration: 'export interface PermissionSelect {\n    options: PresetOption[];\n    currentValue: string;\n}',
   },
   {
     name: 'PhysicalOperator',
-    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(): PhysicalOperatorAvailability;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
+    declaration: 'export interface PhysicalOperator {\n    readonly descriptor: PhysicalOperatorDescriptor;\n    availability(mode?: PhysicalOperatorExecutionMode): PhysicalOperatorAvailability;\n    start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun>;\n}',
   },
   {
     name: 'PhysicalOperatorAvailability',
@@ -3630,6 +3892,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PhysicalOperatorExecutionMode = \'ephemeral\' | \'resident\';',
   },
   {
+    name: 'PhysicalOperatorExecutionPreference',
+    declaration: 'export interface PhysicalOperatorExecutionPreference {\n    readonly model?: string;\n    readonly effort?: PhysicalOperatorReasoningEffort;\n}',
+  },
+  {
     name: 'PhysicalOperatorId',
     declaration: 'export type PhysicalOperatorId = Branded<\'PhysicalOperatorId\'>;',
   },
@@ -3642,6 +3908,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhysicalOperatorProviderStartRequest extends PhysicalOperatorStartRequest {\n    readonly executionId: PhysicalOperatorExecutionId;\n    readonly mode: PhysicalOperatorExecutionMode;\n}',
   },
   {
+    name: 'PhysicalOperatorReasoningEffort',
+    declaration: 'export type PhysicalOperatorReasoningEffort = \'low\' | \'medium\' | \'high\' | \'xhigh\' | \'max\' | \'ultra\';',
+  },
+  {
     name: 'PhysicalOperatorResult',
     declaration: 'export interface PhysicalOperatorResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: PhysicalOperatorStopReason;\n    readonly continuity?: {\n        readonly sessionId: string;\n        readonly stateRevision: number;\n    };\n}',
   },
@@ -3651,7 +3921,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',
@@ -3664,6 +3934,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PhysicalOperatorStopReasonMap',
     declaration: 'export interface PhysicalOperatorStopReasonMap {\n    completed: \'completed\';\n    aborted: \'aborted\';\n    error: \'error\';\n    \'max-tokens\': \'max-tokens\';\n    refusal: \'refusal\';\n}',
+  },
+  {
+    name: 'PlanCertificateV1',
+    declaration: 'export interface PlanCertificateV1 {\n    readonly version: 1;\n    readonly graphSha256: string;\n    readonly certificateSha256: string;\n    readonly nodeIds: readonly string[];\n    readonly maximumRisk: LogicalTaskGraphV1[\'risk\'];\n    readonly requiresApproval: boolean;\n    readonly generatedAt: string;\n}',
   },
   {
     name: 'PostToolDecision',
@@ -3795,7 +4069,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
+    name: 'ResidentExecutionProfile',
+    declaration: 'export interface ResidentExecutionProfile {\n    readonly model: string;\n    readonly effort?: PhysicalOperatorReasoningEffort;\n}',
+  },
+  {
+    name: 'ResidentExecutionProfileSource',
+    declaration: 'export type ResidentExecutionProfileSource = \'smart-auto\' | \'mixed\' | \'manual\';',
   },
   {
     name: 'ResidentHealth',
@@ -3818,6 +4100,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ResidentLifecycle = \'starting\' | \'idle\' | \'running\' | \'draining\' | \'stopped\';',
   },
   {
+    name: 'ResidentModelOption',
+    declaration: 'export interface ResidentModelOption {\n    readonly model: string;\n    readonly resolvedModel?: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly supportedEfforts: readonly PhysicalOperatorReasoningEffort[];\n    readonly defaultEffort?: PhysicalOperatorReasoningEffort;\n    readonly isDefault: boolean;\n    readonly supportsAdaptiveThinking: boolean;\n}',
+  },
+  {
     name: 'ResidentOperatorCommandId',
     declaration: 'export type ResidentOperatorCommandId = Branded<\'ResidentOperatorCommandId\'>;',
   },
@@ -3831,7 +4117,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentProviderStatus',
-    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: \'claude-code\' | \'codex\';\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n}',
+    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: \'claude-code\' | \'codex\';\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n}',
+  },
+  {
+    name: 'ResidentReceiptState',
+    declaration: 'export type ResidentReceiptState = \'accepted\' | \'running\' | \'settled\' | \'indeterminate\';',
   },
   {
     name: 'ResidentResetRequest',
@@ -3839,7 +4129,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentSessionSnapshot',
-    declaration: 'export interface ResidentSessionSnapshot {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly lifecycle: ResidentLifecycle;\n    readonly health: ResidentHealth;\n    readonly healthReason?: ResidentHealthReason;\n    readonly control: \'automation\';\n    readonly stateRevision: number;\n    readonly nativeSessionId?: string;\n    readonly activeTurnId?: ResidentOperatorTurnId;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface ResidentSessionSnapshot {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly lifecycle: ResidentLifecycle;\n    readonly health: ResidentHealth;\n    readonly healthReason?: ResidentHealthReason;\n    readonly control: \'automation\';\n    readonly stateRevision: number;\n    readonly nativeSessionId?: string;\n    readonly executionProfile?: ResidentExecutionProfile;\n    readonly executionProfileSource?: ResidentExecutionProfileSource;\n    readonly activeTurnId?: ResidentOperatorTurnId;\n    readonly latestTurn?: ResidentTurnSummary;\n    readonly latestEvent?: ResidentEvent;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'ResidentStopReason',
@@ -3852,6 +4142,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ResidentTurnResult',
     declaration: 'export interface ResidentTurnResult {\n    readonly output: ContentBlock[];\n    readonly stopReason: ResidentStopReason;\n    readonly resultRef?: string;\n}',
+  },
+  {
+    name: 'ResidentTurnSnapshot',
+    declaration: 'export interface ResidentTurnSnapshot extends ResidentTurnSummary {\n    readonly sessionId: ResidentOperatorSessionId;\n    readonly stateRevision: number;\n    readonly result?: ResidentTurnResult;\n    readonly error?: {\n        readonly code: string;\n        readonly message: string;\n    };\n}',
+  },
+  {
+    name: 'ResidentTurnSummary',
+    declaration: 'export interface ResidentTurnSummary {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly turnId: ResidentOperatorTurnId;\n    readonly state: ResidentReceiptState;\n    readonly taskLabel?: string;\n    readonly nativeTurnId?: string;\n    readonly stopReason?: ResidentStopReason;\n    readonly resultRef?: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'ResolvedAlwaysRetryPolicy',

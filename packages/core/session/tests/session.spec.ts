@@ -11,7 +11,42 @@ import SessionStore, {
 } from '@deepseek-ai/dsh-session'
 import type { CreateSessionOptions, SessionEventType, SessionHeader, SessionSurface, TodoItem } from '@deepseek-ai/dsh-session'
 
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'plugin/informational': { value: string }
+  }
+}
+
 describe('Session', () => {
+  it('preserves ignorable metadata for downstream informational events', () => {
+    const session = Session.create(SessionId('ignorable-plugin-event'))
+
+    const event = session.append('plugin/informational', { value: 'trace' }, { ignorable: true })
+
+    expect(event).toMatchObject({
+      type: 'plugin/informational',
+      data: { value: 'trace' },
+      ignorable: true,
+    })
+    expect(session.events).toEqual([event])
+    expect(session.deriveMessages()).toEqual([])
+  })
+
+  it('rejects invalid or surface-event ignorable metadata', () => {
+    const session = Session.create(SessionId('invalid-ignorable-event'))
+
+    expect(() => session.append(
+      'plugin/informational',
+      { value: 'trace' },
+      { ignorable: false } as never,
+    )).toThrow('session event "plugin/informational" has an invalid ignorable marker')
+    expect(() => session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' },
+    }), { surfaceOp: 'append', ignorable: true } as never))
+      .toThrow('surface session event "user/message" cannot be marked ignorable')
+    expect(session.events).toEqual([])
+  })
+
   it('exposes one stable readonly surface view', () => {
     const session = Session.create(SessionId('surface-view'))
     const surface = session.surface
