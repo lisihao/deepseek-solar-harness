@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { localIpcAddress, localIpcUsesFilesystem } from '@deepseek-ai/dsh-home-paths'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
@@ -164,6 +165,67 @@ export async function waitForDaemonSocketRelease(
     await new Promise(resolve => setTimeout(resolve, Math.min(50, remaining)))
   }
   return true
+}
+
+interface DaemonAuthorityIdentity {
+  readonly pid: number
+  readonly instanceId: string
+}
+
+function readDaemonAuthorityIdentity(root: string): DaemonAuthorityIdentity | undefined {
+  const authorityPath = join(root, 'daemon-authority.sqlite')
+  if (!existsSync(authorityPath)) return undefined
+  const authority = new DatabaseSync(authorityPath, { readOnly: true })
+  try {
+    const table = authority.prepare(
+      "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'daemon_authority'",
+    ).get()
+    if (table === undefined) return undefined
+    const owner = authority.prepare(
+      'SELECT pid, instance_id FROM daemon_authority WHERE singleton = 1',
+    ).get() as { readonly pid: number; readonly instance_id: string } | undefined
+    if (owner === undefined) return undefined
+    if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0 || owner.instance_id.length === 0) {
+      throw new ResidentOperatorError(
+        'resident daemon authority contains an invalid owner; refusing unsafe replacement',
+        'RUNTIME_UNAVAILABLE',
+      )
+    }
+    return { pid: owner.pid, instanceId: owner.instance_id }
+  } finally {
+    authority.close()
+  }
+}
+
+function daemonProcessExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
+    throw error
+  }
+}
+
+async function waitForDaemonAuthorityRelease(
+  root: string,
+  observed: DaemonAuthorityIdentity | undefined,
+  observedPid: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (observed === undefined) {
+      if (!daemonProcessExists(observedPid)) return true
+    } else {
+      const current = readDaemonAuthorityIdentity(root)
+      if (current === undefined || current.pid !== observed.pid || current.instanceId !== observed.instanceId) return true
+      if (!daemonProcessExists(observedPid)) return true
+    }
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return false
+    await new Promise(resolve => setTimeout(resolve, Math.min(50, remaining)))
+  }
 }
 
 function localIpcReachable(socketPath: string, timeoutMs: number): Promise<boolean> {
@@ -523,6 +585,17 @@ export class ResidentDaemonClient {
     const expectedInstanceId = initialError instanceof DaemonQualificationError
       ? initialError.daemonInstanceId
       : `legacy-protocol-pid-${observedPid}`
+    const observedAuthority = readDaemonAuthorityIdentity(this.options.root)
+    if (observedAuthority !== undefined && (
+      observedAuthority.pid !== observedPid
+      || (initialError instanceof DaemonQualificationError && observedAuthority.instanceId !== expectedInstanceId)
+    )) {
+      throw new ResidentOperatorError(
+        `resident daemon upgrade is blocked because its authority identity changed: ${errorMessage(initialError)}`,
+        'PROTOCOL_MISMATCH',
+      )
+    }
+    const retirementDeadline = Date.now() + this.options.connectTimeoutMs
     try {
       const response = await this.rawRequest<{ readonly draining: boolean; readonly replaced?: boolean }>(
         'system.shutdown',
@@ -542,13 +615,32 @@ export class ResidentDaemonClient {
           'PROTOCOL_MISMATCH',
         )
       }
-      return true
     }
-    if (!await waitForDaemonSocketRelease(this.socketPath, this.options.connectTimeoutMs)) {
+    if (!await waitForDaemonSocketRelease(
+      this.socketPath,
+      Math.max(1, retirementDeadline - Date.now()),
+    ) || !await waitForDaemonAuthorityRelease(
+      this.options.root,
+      observedAuthority,
+      observedPid,
+      Math.max(1, retirementDeadline - Date.now()),
+    )) {
       throw new ResidentOperatorError(
         `resident daemon upgrade is blocked because the old daemon did not drain: ${errorMessage(initialError)}`,
         'PROTOCOL_MISMATCH',
       )
+    }
+    const currentAuthority = readDaemonAuthorityIdentity(this.options.root)
+    const replacementPid = this.daemonPid()
+    if (
+      (currentAuthority !== undefined && (
+        currentAuthority.pid !== observedPid
+        || currentAuthority.instanceId !== observedAuthority?.instanceId
+      ))
+      || (replacementPid !== undefined && replacementPid !== observedPid)
+    ) {
+      await this.handshake()
+      return false
     }
     return true
   }
