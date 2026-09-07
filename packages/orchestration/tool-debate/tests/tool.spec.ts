@@ -112,6 +112,19 @@ function snapshot(overrides: Partial<DebateRunSnapshotV1> = {}): DebateRunSnapsh
   }
 }
 
+function roundsWithStates(
+  states: readonly DebateRunSnapshotV1['rounds'][number]['state'][],
+): DebateRunSnapshotV1['rounds'] {
+  const template = snapshot().rounds[0]
+  if (template === undefined) throw new Error('missing Debate fixture round')
+  return states.map((state, index) => ({
+    ...template,
+    round: index + 1,
+    state,
+    turns: template.turns.map(turn => ({ ...turn, round: index + 1 })),
+  }))
+}
+
 class ScriptedDebates extends DebateService {
   readonly run = snapshot()
   startResult: DebateRunSnapshotV1 = this.run
@@ -946,6 +959,7 @@ describe('debate model Consumer', () => {
     expect(streamText.match(/未完成：second active failure/g)).toHaveLength(1)
     expect(streamText).not.toContain('未完成：DEBATE_INTERRUPTED')
     expect(streamText).toContain('主持人状态')
+    expect(streamText).toContain('已完成轮次：0')
   })
 
   it('uses configured personas and renders each terminal lifecycle deterministically without a judge floor', async () => {
@@ -1175,10 +1189,16 @@ describe('debate model Consumer', () => {
 
   it('lists, inspects, and revision-fences controls with bounded projections', async () => {
     const { ctx, agent, provider } = await setup()
+    provider.inspectFallback = snapshot({
+      currentRound: 1,
+      rounds: roundsWithStates(['running']),
+    })
     const listed = resultValue(await call(ctx, agent, { action: 'list' }))
     expect((listed.runs as unknown[])).toHaveLength(20)
     expect(listed.truncated).toBe(true)
+    expect(listed.runs).toEqual(expect.arrayContaining([expect.objectContaining({ currentRound: 0 })]))
 
+    provider.inspectFallback = snapshot()
     const inspected = resultValue(await call(ctx, agent, { action: 'inspect', run_id: 'debate-run-1' }))
     expect(inspected).toMatchObject({
       kind: 'inspect',
@@ -1217,6 +1237,18 @@ describe('debate model Consumer', () => {
     expect(provider.controls[0]).toMatchObject({
       runId: 'debate-run-1', expectedRevision: 4, action: 'pause', reason: 'Review the evidence.',
     })
+  })
+
+  it('reports only persisted completed rounds in model-visible run projections', async () => {
+    const { ctx, agent, provider } = await setup()
+    provider.inspectFallback = snapshot({
+      currentRound: 6,
+      rounds: roundsWithStates(['completed', 'planned', 'running', 'reviewing', 'failed', 'indeterminate']),
+    })
+
+    const inspected = resultValue(await call(ctx, agent, { action: 'inspect', run_id: 'debate-run-1' }))
+
+    expect(inspected).toMatchObject({ kind: 'inspect', run: { currentRound: 1 } })
   })
 
   it('projects bounded requested and actual routing with blockers', async () => {

@@ -14,6 +14,8 @@ The persistent Debate snapshot remains the single authority. Every Run persists 
 
 The browser projection retains bounded public role mandates and bounded per-round explicit output summaries with their Artifact references, claims, Evidence references, usage, timestamps, and errors. The panel renders the public topic, a semantic participant table, every round in agent order, and the decision judge's synthesis as the moderator summary. Markdown headings and lists stay structured; claims render as individual items, while internal role and slot identifiers remain diagnostic data.
 
+Model-visible run projections and the final host summary report completed-round progress from the persisted round states, not from the Provider's active round ordinal. Only rounds in `completed` state increment that count; planned, running, reviewing, failed, and indeterminate rounds remain inspectable without being presented as completed work.
+
 The host appends one ignorable `debate/trace` Session event for each durable Debate event, keyed by `(runId, sourceSequence)`. This bounded projection lets the generic trajectory show rounds, roles, requested and actual models, fallbacks, public output, claims, Evidence, convergence, and synthesis without creating additional `assistant/message` records or feeding trace data back into model history. Replay deduplicates the projection by the same source identity.
 
 Run lifecycle and convergence disposition are separate facts. A terminal convergence result enters `synthesizing` while the moderator prepares the final result, and the Run commits `completed`, `budget_limited`, or `max_rounds` only after synthesis settles; a terminal Run cannot dispatch another round.
@@ -22,7 +24,7 @@ Only explicit agent output summaries are exposed. Browser event data is projecte
 
 ## Verification
 
-Focused Consumer tests pin topic and roster-first streaming, per-round output order, convergence, moderator-last synthesis, trace deduplication, and the absence of raw HTML or internal identifiers. Host, client, and trajectory projection tests cover multiple agents across multiple rounds, requested and actual models, fallback, bounded previews, role mandates, Artifact references, event-field filtering, invalid empty results, and reconstruction from persisted state. The keyless Debate composition fixture proves the complete visible sequence without invoking a paid model.
+Focused Consumer tests pin topic and roster-first streaming, per-round output order, completed-round counting across every round state, convergence, moderator-last synthesis, trace deduplication, and the absence of raw HTML or internal identifiers. Host, client, and trajectory projection tests cover multiple agents across multiple rounds, requested and actual models, fallback, bounded previews, role mandates, Artifact references, event-field filtering, invalid empty results, and reconstruction from persisted state. The keyless Debate composition fixture proves the complete visible sequence without invoking a paid model.
 
 ## Alternatives considered
 

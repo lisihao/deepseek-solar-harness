@@ -325,12 +325,16 @@ function preview(value: string | undefined): string | undefined {
   return value.length <= MAX_PREVIEW_CHARS ? value : `${value.slice(0, MAX_PREVIEW_CHARS - 1)}…`
 }
 
-function boundedSummary(summary: DebateRunSummaryV1): Record<string, JsonValue> {
+function completedRoundCount(run: Pick<DebateRunSnapshotV1, 'rounds'>): number {
+  return run.rounds.filter(round => round.state === 'completed').length
+}
+
+function boundedSummary(summary: DebateRunSummaryV1, completedRounds: number): Record<string, JsonValue> {
   return jsonObject({
     runId: summary.runId,
     state: summary.state,
     mode: summary.mode,
-    currentRound: summary.currentRound,
+    currentRound: completedRounds,
     revision: summary.revision,
     unresolvedCount: summary.unresolvedCount,
     cost: summary.cost,
@@ -343,7 +347,7 @@ function boundedRun(run: DebateRunSnapshotV1): Record<string, JsonValue> {
     runId: run.runId,
     state: run.state,
     mode: run.mode,
-    currentRound: run.currentRound,
+    currentRound: completedRoundCount(run),
     revision: run.revision,
     roster: run.roster.slice(0, MAX_REF_ITEMS).map(role => ({
       role: role.role,
@@ -576,7 +580,7 @@ function runText(run: DebateRunSnapshotV1): string {
     '### 本场结果',
     `- 状态：${finalLifecycleLabel(run.state)}`,
     `- 初始计划：${String(run.policy.budget.maxRounds)} 轮；输入上限 ${String(run.policy.budget.maxInputTokens)}，输出上限 ${String(run.policy.budget.maxOutputTokens)}`,
-    `- 已完成轮次：${String(run.currentRound)}`,
+    `- 已完成轮次：${String(completedRoundCount(run))}`,
   )
   return lines.join('\n')
 }
@@ -1462,7 +1466,16 @@ export function apply(ctx: Context): void {
       }
       if (args.action === 'list') {
         const runs = await ctx.debates.list()
-        return jsonObject({ kind: 'list', runs: runs.slice(0, MAX_LIST_ITEMS).map(boundedSummary), truncated: runs.length > MAX_LIST_ITEMS })
+        const listed = runs.slice(0, MAX_LIST_ITEMS)
+        const entries = await Promise.all(listed.map(async run => ({
+          run,
+          snapshot: await ctx.debates.inspect(run.runId),
+        })))
+        return jsonObject({
+          kind: 'list',
+          runs: entries.map(({ run, snapshot }) => boundedSummary(run, completedRoundCount(snapshot))),
+          truncated: runs.length > MAX_LIST_ITEMS,
+        })
       }
 
       if (args.action === 'inspect') {

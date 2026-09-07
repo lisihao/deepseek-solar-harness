@@ -27,7 +27,7 @@ Each durable public Debate event is also appended as one ignorable `debate/trace
 
 #### What the model sees
 
-The model sees one `debate` tool schema for start, list, inspect, and revision-fenced control, plus the stable Debate policy. A `start` result also exposes the selected automatic initial plan and reason when this Consumer derived the policy. Results expose run state, the public roster, bounded per-round agent output summaries, requested and actual operator/model routing with fallback reasons, Evidence and Artifact references, blockers, and accounting status. The host transcript labels actual routing on every turn and distinguishes a blocked, never-dispatched slot from an execution failure. These summaries are explicit agent outputs, not private reasoning or chain-of-thought.
+The model sees one `debate` tool schema for start, list, inspect, and revision-fenced control, plus the stable Debate policy. A `start` result also exposes the selected automatic initial plan and reason when this Consumer derived the policy. Results expose run state, the public roster, bounded per-round agent output summaries, requested and actual operator/model routing with fallback reasons, Evidence and Artifact references, blockers, and accounting status. Their `currentRound` field counts only persisted rounds whose state is `completed`; planned, running, reviewing, failed, and indeterminate rounds remain visible when a result includes the bounded `rounds` projection but do not increment that count. The host transcript labels actual routing on every turn and distinguishes a blocked, never-dispatched slot from an execution failure. These summaries are explicit agent outputs, not private reasoning or chain-of-thought.
 
 #### Token effect
 
