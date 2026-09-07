@@ -14,6 +14,8 @@ Debate Provider 已持久化阵容、每轮 agent 轮次、收敛结果和最终
 
 浏览器投影保留有界的公开角色职责，以及逐轮的有界明确输出摘要、Artifact 引用、Claim、Evidence 引用、usage、时间戳和错误。面板依次渲染公开议题、语义化参与者表格、按 agent 顺序排列的每轮内容，并把决策裁判的综合结果标记为主持人总结。Markdown 标题与列表保持结构，Claim 逐条显示；内部角色和 Slot 标识仍只属于诊断数据。
 
+面向模型的 Run 投影与宿主最终总结根据持久化轮次状态报告已完成进度，而不是采用 Provider 的当前活动轮次序号。只有 `completed` 状态的轮次会增加该计数；planned、running、reviewing、failed 和 indeterminate 轮次仍可检查，但不会被呈现为已完成工作。
+
 宿主会为每个 durable Debate 事件追加一条可忽略的 `debate/trace` Session 事件，并以 `(runId, sourceSequence)` 为键。这个有界投影让通用轨迹显示轮次、角色、请求和实际模型、回退、公开输出、Claim、Evidence、收敛与综合，同时不会创建额外的 `assistant/message` 记录，也不会把轨迹数据重新送入模型历史。回放使用同一来源身份去重。
 
 Run 生命周期与收敛处置是两类事实。终止性的收敛结果会在主持人准备最终结果时进入 `synthesizing`，并且只在综合结算后提交 `completed`、`budget_limited` 或 `max_rounds`；终态 Run 不能再派发新轮次。
@@ -22,7 +24,7 @@ Run 生命周期与收敛处置是两类事实。终止性的收敛结果会在�
 
 ## Verification
 
-聚焦 Consumer 测试固定议题和阵容优先输出、逐轮输出顺序、收敛结果、主持人最后总结、轨迹去重，以及不存在原始 HTML 和内部标识。Host、Client 与轨迹投影测试覆盖多个 agent、多个轮次、请求和实际模型、回退、有界预览、角色职责、Artifact 引用、事件字段过滤、无效空结果，以及从持久化状态重建。无密钥 Debate 组合 fixture 在不调用付费模型的前提下证明完整可见顺序。
+聚焦 Consumer 测试固定议题和阵容优先输出、逐轮输出顺序、所有轮次状态下的已完成轮次计数、收敛结果、主持人最后总结、轨迹去重，以及不存在原始 HTML 和内部标识。Host、Client 与轨迹投影测试覆盖多个 agent、多个轮次、请求和实际模型、回退、有界预览、角色职责、Artifact 引用、事件字段过滤、无效空结果，以及从持久化状态重建。无密钥 Debate 组合 fixture 在不调用付费模型的前提下证明完整可见顺序。
 
 ## Alternatives considered
 

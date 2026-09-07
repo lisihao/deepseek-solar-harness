@@ -27,7 +27,7 @@
 
 #### What the model sees
 
-模型看到一个支持 start、list、inspect 和 revision-fenced control 的 `debate` 工具 Schema，以及稳定的 Debate 策略。本 Consumer 推导策略时，`start` 结果还会暴露所选自动初始计划及原因。结果只暴露 Run 状态、公开阵容、有界的逐轮 agent 输出摘要、请求的与实际的 operator/model 路由及 fallback 原因、Evidence 与 Artifact 引用、blocker 和归集状态。宿主 transcript 在每个 turn 上标注实际路由，并区分“未派发的 blocked 槽位”与“执行失败”。这些摘要是 agent 明确提交的输出，不是私有推理或思维链。
+模型看到一个支持 start、list、inspect 和 revision-fenced control 的 `debate` 工具 Schema，以及稳定的 Debate 策略。本 Consumer 推导策略时，`start` 结果还会暴露所选自动初始计划及原因。结果只暴露 Run 状态、公开阵容、有界的逐轮 agent 输出摘要、请求的与实际的 operator/model 路由及 fallback 原因、Evidence 与 Artifact 引用、blocker 和归集状态。其中 `currentRound` 字段只统计已持久化且状态为 `completed` 的轮次；当结果包含有界 `rounds` 投影时，planned、running、reviewing、failed 和 indeterminate 轮次仍会保留，但不会增加该计数。宿主 transcript 在每个 turn 上标注实际路由，并区分“未派发的 blocked 槽位”与“执行失败”。这些摘要是 agent 明确提交的输出，不是私有推理或思维链。
 
 #### Token effect
 
