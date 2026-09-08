@@ -163,6 +163,7 @@ function providerValue(provider: ResidentProviderStatus): DesktopResidentProvide
     injectionBoundaries: [...provider.injectionBoundaries],
     available: provider.available,
     ...provider.unavailableReason === undefined ? {} : { unavailableReason: provider.unavailableReason },
+    ...provider.unavailableCode === undefined ? {} : { unavailableCode: provider.unavailableCode },
     ...provider.quotaUnavailableReason === undefined ? {} : {
       quotaUnavailableReason: provider.quotaUnavailableReason,
     },

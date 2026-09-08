@@ -12,9 +12,9 @@ DSH 已有一次性 Codex／Claude Code subagent Provider 和持久 Resident 物
 
 ## 决策
 
-`@deepseek-ai/dsh-tool-physical-operator` 拥有名为 `dsh-physical-operator` 的 LLM adapter 路由。当前可用的每个 Resident Codex 或 Claude Code descriptor 都成为该路由下可选择的模型。选择后，原生产品就是普通 Agent Loop 当前回合的主模型；不存在一个隐藏父模型先调用 `physical_operator`，也不会发送 DeepSeek 请求。
+`@deepseek-ai/dsh-tool-physical-operator` 拥有名为 `dsh-physical-operator` 的 LLM adapter 路由。当前可用的每个 Resident Codex 或 Claude Code descriptor 都成为该路由下可选择的模型。选择后，原生产品就是普通 Agent Loop 当前回合的主模型；之前的自动路由策略不会静默替换这项明确选择。显式 Debate 模式仍是独立执行机制，会暂时接管直接消息，直到用户切换回标准模式；协作控制会显示该生效机制，同时保持已选主模型不变。原生路由不是先调用 `physical_operator` 的隐藏父模型，也不会发送 DeepSeek 请求。
 
-派发前，Consumer 会组装当前精确的 DSH system prompt 与模型可见 Tool schema。它把这些 schema 绑定到一个属主本地模型工具 socket，再把密封 descriptor 与 Resident 请求一并发送。协议 v9 同时携带 system prompt 与工具 descriptor。Claude Code 把前者追加到原生 preset，并通过进程内 Agent SDK MCP server 接收后者；Codex 则接收 developer instructions 与 app-server dynamic tools。调用回到原 Agent 的 `ctx.tools`，所以 scope、guard、approval、日志、插件所有权和渲染仍归 DSH。
+派发前，Consumer 会组装当前精确的 DSH system prompt 与模型可见 Tool schema。它把这些 schema 绑定到一个属主本地模型工具 socket，再把密封 descriptor 与 Resident 请求一并发送。Resident 协议 v13 同时携带 system prompt 与工具 descriptor。Claude Code 把前者追加到原生 preset，并通过进程内 Agent SDK MCP server 接收后者；Codex 则接收 developer instructions 与 app-server dynamic tools。调用回到原 Agent 的 `ctx.tools`，所以 scope、guard、approval、日志、插件所有权和渲染仍归 DSH。
 
 工具桥追加可忽略的 `physical-operator/tool-call` 与 `physical-operator/tool-result` Session 事件。以原生调用身份和 canonical request hash 为键的 Receipt 会在 DSH 重载后从这些事件重建。重复同一个已结算调用会返回其结果；请求变化则冲突。只有调用事件而没有匹配结果的命令进入 indeterminate，绝不自动重放，因此 DSH 崩溃不会静默重复工具副作用。
 
@@ -34,7 +34,7 @@ Governance Trace 会一致投影一条 Session 谱系：路由与派发事件、
 
 ## 验证
 
-离线 composition 测试在不挂载 DeepSeek adapter 的情况下组合真实 Agent Loop seam。Codex 与 Claude fixture 分别把原生订阅路由选作第一模型。Codex fixture 经真实 JSON-RPC 执行一个已注册 DSH Tool，并断言精确工具结果与 Session 事件；Claude fixture 证明其路由接收同一份已组装系统与目录约定。重载覆盖会在桥 remount 后重复同一个已结算原生调用，并证明 DSH Tool 只执行一次。协议、Driver、引导、经 digest 校验的 Evidence 读取、Host／Client typecheck 与 Governance Trace 测试均不使用产品凭据或订阅调用。
+离线 composition 测试在不挂载 DeepSeek adapter 的情况下组合真实 Agent Loop seam。Codex 与 Claude fixture 分别把原生订阅路由选作第一模型。路由测试会在先前自动策略存在时保留该显式路由、让 Debate 保持生效直到用户选择标准模式，并在协作控制中展示生效机制。Codex fixture 经真实 JSON-RPC 执行一个已注册 DSH Tool，并断言精确工具结果与 Session 事件；Claude fixture 证明其路由接收同一份已组装系统与目录约定。重载覆盖会在桥 remount 后重复同一个已结算原生调用，并证明 DSH Tool 只执行一次。协议、Driver、引导、经 digest 校验的 Evidence 读取、Host／Client typecheck 与 Governance Trace 测试均不使用产品凭据或订阅调用。
 
 发布验收只从已安装 Desktop 构建执行一次最小真实 Codex 订阅主 Agent canary 和一次最小真实 Claude Code 订阅主 Agent canary。每条都必须证明原生订阅资格、没有 DeepSeek key 或请求、一次 DSH Tool 调用、精确 Trace 输出、持久续接，以及源码／包／运行版本一致。
 

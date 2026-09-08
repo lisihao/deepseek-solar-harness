@@ -5357,7 +5357,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentProviderStatus',
-    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly supportsExplicitAuthentication?: boolean;\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n    readonly quotaPools?: readonly ResidentQuotaPool[];\n}',
+    declaration: 'export interface ResidentProviderStatus {\n    readonly operatorId: string;\n    readonly product: string;\n    readonly displayName: string;\n    readonly description: string;\n    readonly tags: readonly string[];\n    readonly maxConcurrency: number;\n    readonly injectionBoundaries: readonly (\'pre-dispatch\' | \'next-turn\' | \'checkpoint\')[];\n    readonly available: boolean;\n    readonly unavailableReason?: string;\n    readonly unavailableCode?: ResidentProviderUnavailableCode;\n    readonly quotaUnavailableReason?: string;\n    readonly authentication: \'native-subscription\' | \'unqualified\';\n    readonly supportsExplicitAuthentication?: boolean;\n    readonly productVersion: string;\n    readonly protocolHash: string;\n    readonly models: readonly ResidentModelOption[];\n    readonly quotaPools?: readonly ResidentQuotaPool[];\n}',
+  },
+  {
+    name: 'ResidentProviderUnavailableCode',
+    declaration: 'export type ResidentProviderUnavailableCode = \'AUTH_MODE_MISMATCH\' | \'INVALID_RESULT\' | \'PROVIDER_VERSION_MISMATCH\' | \'QUOTA_EXHAUSTED\' | \'RUNTIME_UNAVAILABLE\';',
   },
   {
     name: 'ResidentQuotaPool',

@@ -483,6 +483,7 @@ export class CodexAppServerWire {
     profile?: CodexAppServerExecutionProfile,
     executionBoundary?: CodexAppServerExecutionBoundary,
   ): Promise<SubagentResult> {
+    this.resetTurnState()
     const completion = Promise.withResolvers<JsonObject>()
     this.turnCompleted = completion
     const threadId = this.threadId as string
@@ -565,6 +566,15 @@ export class CodexAppServerWire {
 
   private fail(error: Error): void {
     this.fatal.reject(error)
+  }
+
+  private resetTurnState(): void {
+    this.turnId = undefined
+    this.pendingTurnId = undefined
+    this.earlyTurnNotifications.length = 0
+    this.lastFinalAnswer = undefined
+    this.lastUnphasedAnswer = undefined
+    this.lastUsage = undefined
   }
 
   private readonly onInputError = (error: Error): void => {

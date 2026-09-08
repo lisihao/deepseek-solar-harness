@@ -356,11 +356,39 @@ describe('debate model Consumer', () => {
       ignorable: true,
       data: { runId: 'debate-run-1', state: 'completed' },
     })
+    const header = [...agent.session.events].reverse().find(event => event.type === 'request/header')
+    if (header?.type !== 'request/header') throw new Error('missing Debate request header')
+    expect(header.data.header.config).toMatchObject({ provider: 'dsh-debate-host', model: 'debate' })
     const assistant = [...agent.session.events].reverse().find(event => event.type === 'assistant/message')
     if (assistant?.type !== 'assistant/message') throw new Error('missing assistant response')
+    expect(assistant.data.message.source).toMatchObject({ provider: 'dsh-debate-host', model: 'debate' })
     const response = assistant.data.message.content[0]
     expect(response?.type).toBe('text')
     expect(response?.type === 'text' ? response.text : '').toContain('Decision summary')
+  })
+
+  it.each(['auto', 'disabled'] as const)('does not resurrect a prior Debate host route after an explicit %s switch', async (mode) => {
+    const { ctx, agent, provider } = await setupAutomatic()
+    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
+    provider.controlResult = snapshot({ revision: 3 })
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Use Debate once.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+    expect(provider.starts).toHaveLength(1)
+
+    await ctx.commands.execute(agent, `/debate-mode ${mode}`, new AbortController().signal)
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Use the selected primary model.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    expect(provider.starts).toHaveLength(1)
+    expect(agent.session.events.filter(event => event.type === 'debate/dispatch')).toHaveLength(1)
   })
 
   it('durably admits a turn when a legacy Session selected the internal Debate route as its primary model', async () => {

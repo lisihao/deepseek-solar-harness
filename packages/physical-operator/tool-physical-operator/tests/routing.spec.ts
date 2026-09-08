@@ -214,7 +214,9 @@ async function setup(options: {
   codexProgressError?: string
   codexObservations?: readonly Record<string, unknown>[]
   codexObservationsAfterSettle?: boolean
+  codexExecutionModes?: readonly ('ephemeral' | 'resident')[]
   claudeStartErrorCode?: string
+  claudeExecutionModes?: readonly ('ephemeral' | 'resident')[]
   primary?: 'deepseek' | 'codex' | 'claude-code' | 'chatgpt-web'
   registerDeepSeek?: boolean
   mountTool?: boolean
@@ -256,6 +258,8 @@ async function setup(options: {
     options.codexProgressError,
     options.codexObservations,
     options.codexObservationsAfterSettle,
+    undefined,
+    options.codexExecutionModes,
   )
   const claude = new DurableOperator(
     'claude-code',
@@ -268,6 +272,7 @@ async function setup(options: {
     [],
     false,
     options.claudeStartErrorCode,
+    options.claudeExecutionModes,
   )
   const chatgpt = new DurableOperator(
     'chatgpt-web',
@@ -412,6 +417,26 @@ describe('host physical-operator routing', () => {
     expect(settled.data.operatorId).toBe('chatgpt-web')
     expect(settled.data.type).toBe('turn.settled')
     expect(settled.data.data.stopReason).toBe('completed')
+  })
+
+  it('keeps a selected ChatGPT Web main model sealed when the prompt looks Claude-shaped', async () => {
+    const { agent, deepseek, codex, claude, chatgpt } = await setup({
+      primary: 'chatgpt-web',
+      registerDeepSeek: false,
+      claudeStartErrorCode: 'AUTH_MODE_MISMATCH',
+    })
+
+    send(agent, '请深度分析这个架构设计，并给出三个可执行建议。')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(codex.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(0)
+    expect(chatgpt.requests).toHaveLength(1)
+    expect(lastAssistantMessage(agent).source).toMatchObject({
+      provider: 'dsh-physical-operator',
+      model: 'chatgpt-web',
+    })
   })
 
   it('recognizes an explicitly named ChatGPT Web request without changing Smart Auto', async () => {
@@ -936,6 +961,46 @@ describe('host physical-operator routing', () => {
     expect(agent.session.events.filter(event => event.type === 'physical-operator/routing-decision')).toHaveLength(2)
   })
 
+  it('falls back only after Smart Auto cannot admit its selected Claude runtime', async () => {
+    const { agent, deepseek, codex, claude } = await setup({
+      claudeStartErrorCode: 'RUNTIME_UNAVAILABLE',
+      claudeExecutionModes: ['ephemeral'],
+      codexExecutionModes: ['ephemeral'],
+    })
+
+    send(agent, '你觉得 DSH 应该怎么优化架构更好')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(1)
+    expect(codex.requests).toHaveLength(1)
+    expect(agent.session.events.some(event => (
+      event.type === 'physical-operator/dispatch-terminal'
+      && event.data.code === 'RUNTIME_UNAVAILABLE'
+    ))).toBe(true)
+  })
+
+  it.each(['INVALID_RESULT', 'QUOTA_EXHAUSTED'] as const)(
+    'preserves a Smart Auto Claude %s error instead of switching providers',
+    async (code) => {
+      const { agent, deepseek, codex, claude } = await setup({
+        claudeStartErrorCode: code,
+        claudeExecutionModes: ['ephemeral'],
+      })
+
+      send(agent, '你觉得 DSH 应该怎么优化架构更好')
+      await agent.whenIdle()
+
+      expect(deepseek.requests).toHaveLength(0)
+      expect(claude.requests).toHaveLength(1)
+      expect(codex.requests).toHaveLength(0)
+      expect(agent.session.events.at(-1)).toMatchObject({
+        type: 'turn/end',
+        data: { reason: { kind: 'error', error: { code } } },
+      })
+    },
+  )
+
   it('does not override an explicit Claude request when subscription qualification fails', async () => {
     const { agent, deepseek, codex, claude } = await setup({
       claudeStartErrorCode: 'AUTH_MODE_MISMATCH',
@@ -952,6 +1017,22 @@ describe('host physical-operator routing', () => {
       type: 'turn/end',
       data: { reason: { kind: 'error', error: { code: 'AUTH_MODE_MISMATCH' } } },
     })
+  })
+
+  it('keeps a direct DeepSeek route sealed without probing Claude', async () => {
+    const { ctx, agent, deepseek, codex, claude, chatgpt } = await setup({
+      claudeStartErrorCode: 'AUTH_MODE_MISMATCH',
+    })
+    await ctx.commands.execute(agent, '/operator direct', new AbortController().signal)
+
+    send(agent, '请深度分析这个架构设计，并给出三个可执行建议。')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(1)
+    expect(codex.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(0)
+    expect(chatgpt.requests).toHaveLength(0)
+    expect(lastAssistantMessage(agent).source).toMatchObject({ provider: 'deepseek', model: 'deepseek' })
   })
 
   it('does not override a manually selected Claude policy when subscription qualification fails', async () => {

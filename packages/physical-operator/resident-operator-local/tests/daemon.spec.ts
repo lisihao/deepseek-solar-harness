@@ -552,7 +552,8 @@ class UnavailableTransportDriver extends MemoryDriver {
       injectionBoundaries: ['pre-dispatch', 'next-turn'],
       available: false,
       unavailableReason: 'managed app-server daemon is unavailable',
-      authentication: 'native-subscription',
+      unavailableCode: 'RUNTIME_UNAVAILABLE',
+      authentication: 'unqualified',
       productVersion: EXPECTED_CODEX_CLI_VERSION,
       protocolHash: EXPECTED_CODEX_SCHEMA_SHA256,
       models: MODELS,
@@ -1103,12 +1104,19 @@ describe('ResidentDaemon', () => {
     await daemon.close()
   })
 
-  it('reports a qualified subscription with an unavailable native transport as runtime unavailable', async () => {
+  it('preserves an unavailable native transport code across the daemon qualification status', async () => {
     const root = temporaryRoot()
     const workspace = join(root, 'workspace')
     mkdirSync(workspace)
     const daemon = new ResidentDaemon({ root, drivers: [new UnavailableTransportDriver()] })
     await daemon.start()
+    await expect(client(root).providers()).resolves.toEqual([
+      expect.objectContaining({
+        operatorId: 'codex',
+        available: false,
+        unavailableCode: 'RUNTIME_UNAVAILABLE',
+      }),
+    ])
     await expect(client(root).execute({
       commandId: 'transport-unavailable', operatorId: 'codex', workspace,
       prompt: [{ type: 'text', text: 'never admitted' }], signal: new AbortController().signal,

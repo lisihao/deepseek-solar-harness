@@ -253,6 +253,7 @@ function safeDiagnostic(message: string, prompt: readonly ContentBlock[]): strin
 }
 
 function unavailableProviderCode(status: ResidentProviderStatus): string {
+  if (status.unavailableCode !== undefined) return status.unavailableCode
   if (status.authentication !== 'native-subscription') return 'AUTH_MODE_MISMATCH'
   if (status.product === 'claude-code' && status.productVersion !== EXPECTED_CLAUDE_CLI_VERSION) {
     return 'PROVIDER_VERSION_MISMATCH'
@@ -544,6 +545,9 @@ export class ResidentDaemon {
         const reason = status.unavailableReason ?? 'Claude Code qualification is unavailable'
         const nativeLoginRequired = reason === 'Claude Code is not authenticated with a claude.ai subscription'
         if (!nativeLoginRequired) {
+          if (status.unavailableCode !== undefined && status.unavailableCode !== 'AUTH_MODE_MISMATCH') {
+            throw new ResidentOperatorError(reason, status.unavailableCode)
+          }
           const classified = claudeAuthenticationFailureCode(reason)
           throw new ResidentOperatorError(
             reason,

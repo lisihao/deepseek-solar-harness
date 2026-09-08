@@ -213,6 +213,36 @@ describe('Resident Operator Desktop projection', () => {
     })])
   })
 
+  it('preserves the trusted provider qualification code for the browser panel', async () => {
+    const dashboard = await readResidentDashboard({
+      residentOperators: {
+        providers: vi.fn(async () => [{
+          operatorId: 'claude-code',
+          product: 'claude-code',
+          displayName: 'Claude Code',
+          description: 'Test Resident provider.',
+          tags: ['coding'],
+          maxConcurrency: 4,
+          injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
+          available: false,
+          unavailableReason: 'Claude Code model catalog timed out',
+          unavailableCode: 'RUNTIME_UNAVAILABLE' as const,
+          authentication: 'unqualified' as const,
+          supportsExplicitAuthentication: true,
+          productVersion: '0.1.0',
+          protocolHash: 'test',
+          models: [],
+        }]),
+        list: vi.fn(async () => []),
+      },
+    } as unknown as Context)
+
+    expect(dashboard.providers).toEqual([expect.objectContaining({
+      operatorId: 'claude-code',
+      unavailableCode: 'RUNTIME_UNAVAILABLE',
+    })])
+  })
+
   it('keeps development canary sessions out of the user task list', async () => {
     const residentOperators = {
       providers: vi.fn(async () => []),
