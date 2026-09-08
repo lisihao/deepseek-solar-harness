@@ -1,5 +1,14 @@
 /** JSON-safe read model shared by the Resident Host route and browser panel. */
 
+/** Provider failure codes mirrored from the Resident control service for the client face. */
+export type DesktopResidentProviderUnavailableCode =
+  | 'AUTH_MODE_MISMATCH'
+  | 'INVALID_RESULT'
+  | 'PROVIDER_VERSION_MISMATCH'
+  | 'QUOTA_EXHAUSTED'
+  | 'RUNTIME_UNAVAILABLE'
+
+/** Same-origin HTTP path for the bounded Resident dashboard projection. */
 export const RESIDENT_DASHBOARD_PATH = '/api/resident-operators'
 
 /** Qualification and model catalog for one Resident physical operator. */
@@ -13,6 +22,8 @@ export interface DesktopResidentProvider {
   injectionBoundaries: Array<'pre-dispatch' | 'next-turn' | 'checkpoint'>
   available: boolean
   unavailableReason?: string
+  /** Trusted reason for an unavailable provider; only auth mismatch is login-actionable. */
+  unavailableCode?: DesktopResidentProviderUnavailableCode
   quotaUnavailableReason?: string
   authentication: 'native-subscription' | 'unqualified'
   supportsExplicitAuthentication?: boolean

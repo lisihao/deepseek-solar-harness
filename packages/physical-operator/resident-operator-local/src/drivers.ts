@@ -116,6 +116,36 @@ export function isClaudeNativeSubscription(status: Readonly<Record<string, unkno
 }
 
 /**
+ * Parse the supported Claude Code authentication-status envelope.
+ *
+ * @param output Native `claude auth status --json` output.
+ * @returns A status record whose login discriminator can be evaluated safely.
+ */
+export function parseClaudeAuthenticationStatus(output: string): Readonly<Record<string, unknown>> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(output)
+  } catch (error) {
+    throw new ResidentOperatorError(
+      `Claude Code authentication status returned malformed JSON: ${error instanceof Error ? error.message : String(error)}`,
+      'INVALID_RESULT',
+      { cause: error },
+    )
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ResidentOperatorError('Claude Code authentication status returned an unsupported JSON value', 'INVALID_RESULT')
+  }
+  const status = parsed as Record<string, unknown>
+  if (typeof status.loggedIn !== 'boolean') {
+    throw new ResidentOperatorError('Claude Code authentication status omitted its loggedIn discriminator', 'INVALID_RESULT')
+  }
+  if (status.loggedIn && (typeof status.authMethod !== 'string' || typeof status.apiProvider !== 'string')) {
+    throw new ResidentOperatorError('Claude Code authentication status omitted its native-subscription fields', 'INVALID_RESULT')
+  }
+  return status
+}
+
+/**
  * Classify one failed explicit Claude subscription-login attempt.
  *
  * The native CLI owns OAuth and its loopback callback listener. DSH only
@@ -159,10 +189,15 @@ export function resolveProductExecutable(
   environment: NodeJS.ProcessEnv = scrubbedParentEnv(),
   platform: NodeJS.Platform = process.platform,
 ): string {
-  if (command.length === 0) throw new Error('resident product executable must be non-empty')
+  if (command.length === 0) {
+    throw new ResidentOperatorError('resident product executable must be non-empty', 'INVALID_RESULT')
+  }
   const absolute = isAbsolute(command)
   if (!absolute && (command.includes('/') || (platform === 'win32' && command.includes('\\')))) {
-    throw new Error(`resident product executable ${JSON.stringify(command)} must be absolute or a bare PATH name`)
+    throw new ResidentOperatorError(
+      `resident product executable ${JSON.stringify(command)} must be absolute or a bare PATH name`,
+      'INVALID_RESULT',
+    )
   }
   const extensions = platform === 'win32' && extname(command) === ''
     ? (environmentValue(environment, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';')
@@ -180,7 +215,10 @@ export function resolveProductExecutable(
       // Try the next PATH candidate; the final miss receives one stable error.
     }
   }
-  throw new Error(`resident product executable ${JSON.stringify(command)} was not found`)
+  throw new ResidentOperatorError(
+    `resident product executable ${JSON.stringify(command)} was not found`,
+    'RUNTIME_UNAVAILABLE',
+  )
 }
 
 function reasoningEffort(value: string | undefined): PhysicalOperatorReasoningEffort | undefined {
@@ -427,7 +465,9 @@ async function claudeModels(claudeExecutable: string): Promise<ResidentModelOpti
     await new Promise<never>(() => {})
   }
   const controller = new AbortController()
-  const timeout = setTimeout(() => { controller.abort(new Error('Claude model catalog timed out')) }, 15_000)
+  const timeout = setTimeout(() => {
+    controller.abort(new Error('Claude model catalog timed out'))
+  }, 15_000)
   const query = claudeQuery({
     prompt: idleInput(),
     options: {
@@ -450,6 +490,11 @@ async function claudeModels(claudeExecutable: string): Promise<ResidentModelOpti
   })
   try {
     return (await query.supportedModels()).map(claudeModelOption)
+  } catch (error) {
+    throw residentQualificationFailure(
+      'Claude Code model catalog',
+      controller.signal.reason instanceof Error ? controller.signal.reason : error,
+    )
   } finally {
     clearTimeout(timeout)
     query.close()
@@ -615,6 +660,112 @@ export function codexExecutionBoundary(
     : undefined
 }
 
+/** Stable error codes emitted for trusted native-product qualification failures. */
+export type ResidentQualificationFailureCode =
+  | 'AUTH_MODE_MISMATCH'
+  | 'INVALID_RESULT'
+  | 'PROVIDER_VERSION_MISMATCH'
+  | 'QUOTA_EXHAUSTED'
+  | 'RUNTIME_UNAVAILABLE'
+
+interface QualificationProcessError {
+  readonly code?: unknown
+  readonly killed?: unknown
+  readonly signal?: unknown
+  readonly timedOut?: unknown
+  readonly stderr?: unknown
+}
+
+function qualificationProcessError(error: unknown): QualificationProcessError | undefined {
+  return error !== null && typeof error === 'object' ? error : undefined
+}
+
+function qualificationFailureDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const stderr = qualificationProcessError(error)?.stderr
+  return typeof stderr === 'string' && stderr.length > 0 ? `${message}\n${stderr}` : message
+}
+
+/**
+ * Classify a trusted native-product qualification failure without treating every process error as authentication.
+ *
+ * @param error Failure from executable resolution, a bounded product command, or model discovery.
+ * @returns One stable Resident error code.
+ */
+export function residentQualificationFailureCode(error: unknown): ResidentQualificationFailureCode {
+  if (error instanceof ResidentOperatorError) {
+    switch (error.code) {
+      case 'AUTH_MODE_MISMATCH':
+      case 'INVALID_RESULT':
+      case 'PROVIDER_VERSION_MISMATCH':
+      case 'QUOTA_EXHAUSTED':
+      case 'RUNTIME_UNAVAILABLE':
+        return error.code
+      default:
+        return 'INVALID_RESULT'
+    }
+  }
+  const processError = qualificationProcessError(error)
+  const code = processError?.code
+  const detail = qualificationFailureDetail(error)
+  const processSignal = typeof processError?.signal === 'string' && processError.signal.length > 0
+  const processCode = typeof code === 'string' ? code : undefined
+  const processRuntime = processCode === 'ENOENT'
+    || processCode === 'EACCES'
+    || processCode === 'ENOTDIR'
+    || processCode === 'EPERM'
+    || processCode === 'ETIMEDOUT'
+    || processCode === 'EAI_AGAIN'
+    || processCode === 'ECONNREFUSED'
+    || processCode === 'ENETUNREACH'
+    || processCode === 'EHOSTUNREACH'
+    || processCode === 'ECONNABORTED'
+    || processCode === 'ECONNRESET'
+    || processCode === 'EPIPE'
+    || processError?.killed === true
+    || processSignal
+    || processError?.timedOut === true
+    // A timeout is a runtime failure even when the product's diagnostic also mentions login.
+    || /\b(?:timed out|timeout)\b/iu.test(detail)
+  if (processRuntime) return 'RUNTIME_UNAVAILABLE'
+  if (/(?:usage limit|quota (?:is )?(?:exhausted|reached)|rate limit|too many requests|\b429\b)/iu.test(detail)) {
+    return 'QUOTA_EXHAUSTED'
+  }
+  const authenticationMismatch = [
+    /not (?:logged in|authenticated)/iu,
+    /(?:please |must )?(?:log in|login)/iu,
+    /authentication (?:is )?required/iu,
+    /native subscription|api key|\b401\b/iu,
+  ].some(pattern => pattern.test(detail))
+  if (authenticationMismatch) {
+    return 'AUTH_MODE_MISMATCH'
+  }
+  const runtimeDiagnostic = [
+    /executable .* was not found/iu,
+    /timed out|timeout/iu,
+    /unable to connect|certificate verification/iu,
+    /network (?:is )?unavailable/iu,
+  ].some(pattern => pattern.test(detail))
+  if (runtimeDiagnostic) return 'RUNTIME_UNAVAILABLE'
+  return 'INVALID_RESULT'
+}
+
+/**
+ * Preserve a trusted native-product qualification failure as a stable Resident error.
+ *
+ * @param command Product command or qualification operation that failed.
+ * @param error Original process or control-channel failure.
+ * @returns The original Resident error or one classified Resident error.
+ */
+export function residentQualificationFailure(command: string, error: unknown): ResidentOperatorError {
+  if (error instanceof ResidentOperatorError) return error
+  return new ResidentOperatorError(
+    `${command} qualification failed: ${error instanceof Error ? error.message : String(error)}`,
+    residentQualificationFailureCode(error),
+    { cause: error },
+  )
+}
+
 async function command(command: string, args: string[]): Promise<{ stdout: string; stderr: string; executable: string }> {
   try {
     const executable = resolveProductExecutable(command)
@@ -626,10 +777,7 @@ async function command(command: string, args: string[]): Promise<{ stdout: strin
     })
     return { ...result, executable }
   } catch (error) {
-    throw new ResidentOperatorError(
-      `${command} qualification failed: ${error instanceof Error ? error.message : String(error)}`,
-      'AUTH_MODE_MISMATCH',
-    )
+    throw residentQualificationFailure(command, error)
   }
 }
 
@@ -722,11 +870,18 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     try {
       const { stdout: version, executable } = await command('claude', ['--version'])
       const { stdout: auth } = await command(executable, ['auth', 'status', '--json'])
-      const parsed = JSON.parse(auth) as Record<string, unknown>
+      const parsed = parseClaudeAuthenticationStatus(auth)
       const subscription = isClaudeNativeSubscription(parsed)
       const exactVersion = version.trim() === EXPECTED_CLAUDE_CLI_VERSION
       const models = subscription && exactVersion ? await this.models(executable) : []
       const catalogReady = models.length > 0
+      const unavailableCode = !subscription
+        ? 'AUTH_MODE_MISMATCH'
+        : !exactVersion
+          ? 'PROVIDER_VERSION_MISMATCH'
+          : !catalogReady
+            ? 'RUNTIME_UNAVAILABLE'
+            : undefined
       return {
         operatorId: this.operatorId,
         product: this.operatorId,
@@ -736,6 +891,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
         maxConcurrency: 4,
         injectionBoundaries: ['pre-dispatch', 'next-turn'],
         available: subscription && exactVersion && catalogReady,
+        ...unavailableCode === undefined ? {} : { unavailableCode },
         ...subscription && exactVersion && catalogReady ? {} : {
           unavailableReason: !subscription
             ? 'Claude Code is not authenticated with a claude.ai subscription'
@@ -759,9 +915,9 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     if (!qualification.available) {
       throw new ResidentOperatorError(
         qualification.unavailableReason ?? 'Claude Code unavailable',
-        qualification.authentication === 'native-subscription'
+        qualification.unavailableCode ?? (qualification.authentication === 'native-subscription'
           ? 'PROVIDER_VERSION_MISMATCH'
-          : 'AUTH_MODE_MISMATCH',
+          : 'AUTH_MODE_MISMATCH'),
       )
     }
     const texts = textPrompt(request.prompt, 'Claude Code')
@@ -895,9 +1051,9 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
     if (!qualification.available) {
       throw new ResidentOperatorError(
         qualification.unavailableReason ?? 'Claude Code unavailable',
-        qualification.authentication === 'native-subscription'
+        qualification.unavailableCode ?? (qualification.authentication === 'native-subscription'
           ? 'PROVIDER_VERSION_MISMATCH'
-          : 'AUTH_MODE_MISMATCH',
+          : 'AUTH_MODE_MISMATCH'),
       )
     }
     const controller = new AbortController()
@@ -971,6 +1127,15 @@ export class CodexResidentDriver implements ResidentProductDriver {
       }) : { models: [], quotaPools: [], quotaUnavailableReason: undefined }
       const { models, quotaPools, quotaUnavailableReason } = catalog
       const available = subscription && exactVersion && exactSchema && transportReady && models.length > 0
+      const unavailableCode = !subscription
+        ? 'AUTH_MODE_MISMATCH'
+        : !exactVersion || !exactSchema
+          ? 'PROVIDER_VERSION_MISMATCH'
+          : transportError !== undefined
+            ? residentQualificationFailureCode(transportError)
+            : !available
+              ? 'RUNTIME_UNAVAILABLE'
+              : undefined
       return {
         operatorId: this.operatorId,
         product: this.operatorId,
@@ -980,6 +1145,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
         maxConcurrency: 4,
         injectionBoundaries: ['pre-dispatch', 'next-turn'],
         available,
+        ...unavailableCode === undefined ? {} : { unavailableCode },
         ...available ? {} : {
           unavailableReason: !subscription
             ? 'Codex is not authenticated with a ChatGPT subscription'
@@ -1100,12 +1266,12 @@ export class CodexResidentDriver implements ResidentProductDriver {
   private async requireAvailable(): Promise<void> {
     const qualification = await this.qualify()
     if (qualification.available) return
-    const code = qualification.authentication !== 'native-subscription'
+    const code = qualification.unavailableCode ?? (qualification.authentication !== 'native-subscription'
       ? 'AUTH_MODE_MISMATCH'
       : qualification.productVersion !== EXPECTED_CODEX_CLI_VERSION
         || qualification.protocolHash !== EXPECTED_CODEX_SCHEMA_SHA256
         ? 'PROVIDER_VERSION_MISMATCH'
-        : 'RUNTIME_UNAVAILABLE'
+        : 'RUNTIME_UNAVAILABLE')
     throw new ResidentOperatorError(qualification.unavailableReason ?? 'Codex unavailable', code)
   }
 
@@ -1150,6 +1316,7 @@ function unavailable(product: 'claude-code' | 'codex', error: unknown): Resident
     injectionBoundaries: ['pre-dispatch', 'next-turn'],
     available: false,
     unavailableReason: error instanceof Error ? error.message : String(error),
+    unavailableCode: residentQualificationFailureCode(error),
     authentication: 'unqualified',
     productVersion: 'unavailable',
     protocolHash: 'unavailable',

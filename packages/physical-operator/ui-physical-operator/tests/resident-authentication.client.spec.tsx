@@ -11,6 +11,25 @@ afterEach(() => {
 })
 
 describe('Resident owner authentication UI', () => {
+  it('does not qualify Resident providers until the closed panel is opened', async () => {
+    window.history.replaceState({}, '', '/')
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      generatedAt: '2026-09-01T10:00:00.000Z',
+      providers: [],
+      sessions: [],
+      events: [],
+      activities: [],
+      hiddenDiagnosticSessions: 0,
+      activeWorkers: 0,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })) as BrowserRequest
+
+    render(<ResidentOperatorsPanel request={request} />)
+    expect(request).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /物理算子/ }))
+    await waitFor(() => { expect(request).toHaveBeenCalledOnce() })
+  })
+
   it('expands selected turn observations without rendering tool args or credential-like output', async () => {
     window.history.replaceState({}, '', '/')
     const request = vi.fn(async () => new Response(JSON.stringify({
@@ -65,6 +84,7 @@ describe('Resident owner authentication UI', () => {
           injectionBoundaries: ['pre-dispatch', 'next-turn'],
           available: false,
           unavailableReason: 'subscription login required',
+          unavailableCode: 'AUTH_MODE_MISMATCH',
           authentication: 'unqualified',
           supportsExplicitAuthentication: true,
           productVersion: 'test',
@@ -90,5 +110,30 @@ describe('Resident owner authentication UI', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '重试登录 Claude Code' }))
     await waitFor(() => { expect(loginAttempts).toBe(2) })
+  })
+
+  it.each([
+    ['RUNTIME_UNAVAILABLE', 'Claude Code model catalog timed out'],
+    ['INVALID_RESULT', 'Claude Code authentication status was malformed'],
+    ['QUOTA_EXHAUSTED', 'Claude Code subscription allowance is exhausted'],
+    ['PROVIDER_VERSION_MISMATCH', 'Claude Code version is unsupported'],
+  ] as const)('does not offer a login action for %s qualification failures', async (unavailableCode, unavailableReason) => {
+    window.history.replaceState({}, '', '/')
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      generatedAt: '2026-09-01T10:00:00.000Z',
+      providers: [{
+        operatorId: 'claude-code', product: 'claude-code', displayName: 'Claude Code',
+        description: 'Persistent Claude Code', tags: ['subscription'], maxConcurrency: 4,
+        injectionBoundaries: ['pre-dispatch', 'next-turn'], available: false,
+        unavailableReason, unavailableCode, authentication: 'unqualified',
+        supportsExplicitAuthentication: true, productVersion: 'test', models: [],
+      }],
+      sessions: [], events: [], activities: [], hiddenDiagnosticSessions: 0, activeWorkers: 0,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })) as BrowserRequest
+
+    render(<ResidentOperatorsPanel request={request} />)
+    fireEvent.click(await screen.findByRole('button', { name: /物理算子/ }))
+    await screen.findByText(unavailableReason)
+    expect(screen.queryByRole('button', { name: /登录 Claude Code/ })).toBeNull()
   })
 })

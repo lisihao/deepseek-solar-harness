@@ -1229,6 +1229,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // O(new events) rather than a rescan.
         const logged = agent.session.requestHeader()?.config
         if (logged === undefined) return defaults.defaultModelSelection()
+        // The Debate host route is only valid while tool-debate has a
+        // dispatch for the current turn. Its logged request header remains
+        // necessary for transcript reconstruction, but cannot seed a later
+        // ordinary turn after Debate was disabled or switched to Auto.
+        if (isTransientDebateRoute(logged)) {
+          return lastUserSelection(agent) ?? defaults.defaultModelSelection()
+        }
         return {
           provider: logged.provider,
           model: logged.model,

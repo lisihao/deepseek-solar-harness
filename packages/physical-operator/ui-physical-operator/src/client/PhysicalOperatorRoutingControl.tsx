@@ -95,6 +95,37 @@ export function orchestrationExecutionMechanismLabel(mode: OrchestrationExecutio
   return EXECUTION_MECHANISM_LABELS[mode]
 }
 
+/** Resolve the mechanism that owns the next direct message when both preference projections are available.
+ * @param rlm - persisted RLM execution preference, when its projection is loaded.
+ * @param debate - persisted Debate execution preference, when its projection is loaded.
+ * @returns effective mechanism, or undefined while one preference projection is absent.
+ */
+export function physicalOperatorEffectiveExecutionMechanism(
+  rlm: RlmExecutionMode | undefined,
+  debate: DebateExecutionMode | undefined,
+): OrchestrationExecutionMechanism | undefined {
+  if (debate === 'enabled') return 'debate'
+  if (rlm === undefined || debate === undefined) return undefined
+  return orchestrationExecutionMechanism(rlm, debate)
+}
+
+/** Render the effective mechanism instead of implying that the selected primary model owns a Debate turn.
+ * @param policy - selected physical-operator policy shown by the primary route control.
+ * @param rlm - persisted RLM execution preference, when its projection is loaded.
+ * @param debate - persisted Debate execution preference, when its projection is loaded.
+ * @returns a compact label for the next direct message.
+ */
+export function physicalOperatorEffectiveExecutionLabel(
+  policy: PhysicalOperatorRoutingPolicy,
+  rlm: RlmExecutionMode | undefined,
+  debate: DebateExecutionMode | undefined,
+): string {
+  const mechanism = physicalOperatorEffectiveExecutionMechanism(rlm, debate)
+  return mechanism === undefined || mechanism === 'auto'
+    ? physicalOperatorRoutingSummary(policy)
+    : orchestrationExecutionMechanismLabel(mechanism)
+}
+
 type SaveExecutionSubmode = (mode: 'auto' | 'enabled' | 'disabled') => Promise<string | null>
 
 async function executionModeStep(
@@ -180,7 +211,7 @@ export function physicalOperatorRoutingSummary(policy: PhysicalOperatorRoutingPo
   } as const)[policy]
 }
 
-/** Refresh quickly while the collaboration panel is visible, conservatively while closed. */
+/** Refresh interval after a visible collaboration panel has loaded its provider projection. */
 export function physicalOperatorDashboardRefreshMs(open: boolean): number {
   return open ? 10_000 : 60_000
 }
@@ -233,6 +264,7 @@ export function PhysicalOperatorRoutingControl({
 
   useEffect(() => () => { alive.current = false }, [])
   useEffect(() => {
+    if (!open) return
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const refresh = async (): Promise<void> => {
@@ -241,7 +273,9 @@ export function PhysicalOperatorRoutingControl({
       } catch {
         // The Resident status panel owns availability diagnostics; selection remains fail-closed.
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(() => { void refresh() }, physicalOperatorDashboardRefreshMs(open))
+        if (open && !controller.signal.aborted) {
+          timer = setTimeout(() => { void refresh() }, physicalOperatorDashboardRefreshMs(true))
+        }
       }
     }
     void refresh()
@@ -280,7 +314,15 @@ export function PhysicalOperatorRoutingControl({
   if (routing === undefined) return null
 
   const locked = session.removed || input.phase !== 'plain' || saving
-  const currentLabel = physicalOperatorRoutingSummary(routing.currentValue)
+  const effectiveMechanism = physicalOperatorEffectiveExecutionMechanism(
+    orchestrationPreferences?.rlm,
+    debatePreferences?.mode,
+  )
+  const currentLabel = physicalOperatorEffectiveExecutionLabel(
+    routing.currentValue,
+    orchestrationPreferences?.rlm,
+    debatePreferences?.mode,
+  )
   const profileOwner = routing.currentValue === 'codex'
     || routing.currentValue === 'claude-code'
     ? routing.currentValue
@@ -357,7 +399,13 @@ export function PhysicalOperatorRoutingControl({
     ))
   }
   const chooseExecutionMechanism = (target: OrchestrationExecutionMechanism): void => {
-    if (orchestrationPreferences === undefined || debatePreferences === undefined) return
+    if (debatePreferences === undefined) return
+    if (orchestrationPreferences === undefined) {
+      if (target === 'standard' && debatePreferences.mode !== 'disabled') {
+        persist(() => selectDebateMode('disabled'))
+      }
+      return
+    }
     persist(() => changeOrchestrationExecutionMechanism(
       { rlm: orchestrationPreferences.rlm, debate: debatePreferences.mode },
       target,
@@ -429,6 +477,21 @@ export function PhysicalOperatorRoutingControl({
                   </button>
                 ))}
               </div>
+              {effectiveMechanism === 'debate' && (
+                <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
+                  <div>
+                    <strong>当前生效：Debate</strong>
+                    <small>下一条直接消息将由 Debate 阵容执行；模型选择器中的主模型仅在标准模式下生效。</small>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => { chooseExecutionMechanism('standard') }}
+                  >
+                    切换到标准（使用当前主模型）
+                  </button>
+                </div>
+              )}
               {profileOwner !== undefined && (
                 <div className="dshDesktopOperatorProfilePreferences" hidden={page !== 'basic'}>
                   <div>

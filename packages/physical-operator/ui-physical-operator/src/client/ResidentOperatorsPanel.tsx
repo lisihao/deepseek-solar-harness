@@ -27,7 +27,13 @@ export class ResidentAuthenticationError extends Error {
   }
 }
 
-/** Load one same-origin daemon projection for the Desktop Resident panel. */
+/**
+ * Load one same-origin daemon projection for the Desktop Resident panel.
+ * @param sessionId - optional durable Session whose bounded events are expanded.
+ * @param signal - local cancellation for the browser request.
+ * @param request - authenticated same-origin browser request.
+ * @returns one bounded Resident dashboard projection.
+ */
 export async function loadResidentDashboard(
   sessionId?: string,
   signal?: AbortSignal,
@@ -91,17 +97,18 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
   const [authenticating, setAuthenticating] = useState<string>()
 
   useEffect(() => {
+    if (!open) return
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const refresh = async (): Promise<void> => {
       try {
-        const next = await loadResidentDashboard(open ? selectedSessionId : undefined, controller.signal, request)
+        const next = await loadResidentDashboard(selectedSessionId, controller.signal, request)
         setDashboard(next)
         setError(undefined)
       } catch (cause) {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause))
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(() => { void refresh() }, open ? 2_000 : 10_000)
+        if (!controller.signal.aborted) timer = setTimeout(() => { void refresh() }, 2_000)
       }
     }
     void refresh()
@@ -211,7 +218,7 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
                           <small role="status">{authenticationFailureMessage(authenticationFailure.reason)}</small>
                         )}
                         {provider.quotaUnavailableReason !== undefined && <small>配额状态暂不可用，执行仍可继续</small>}
-                        {!provider.available && provider.authentication === 'unqualified' && provider.supportsExplicitAuthentication && (
+                        {!provider.available && provider.unavailableCode === 'AUTH_MODE_MISMATCH' && provider.authentication === 'unqualified' && provider.supportsExplicitAuthentication && (
                           remoteFrontend
                             ? <small>请在服务器本机完成订阅登录</small>
                             : <button

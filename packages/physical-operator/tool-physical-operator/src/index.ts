@@ -160,6 +160,12 @@ export const inject = ['tools', 'physicalOperators', 'systemPrompt', 'llm', 'age
 const ROUTER_PROVIDER = 'dsh-physical-operator'
 const RESUME_SOURCE = 'physical-operator-resume'
 const FALLBACK_REQUIRED_CODE = 'PHYSICAL_OPERATOR_FALLBACK_REQUIRED'
+const SMART_AUTO_UNAVAILABLE_CODES = new Set([
+  'AUTH_MODE_MISMATCH',
+  'OPERATOR_UNAVAILABLE',
+  'PROVIDER_VERSION_MISMATCH',
+  'RUNTIME_UNAVAILABLE',
+])
 
 interface PendingHostRoute {
   readonly commandId: string
@@ -742,7 +748,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
           commandId: dispatch.commandId,
           code,
         }, { ignorable: true })
-        if (run === undefined && dispatch.fallbackOperatorId !== undefined && code === 'AUTH_MODE_MISMATCH') {
+        if (run === undefined && dispatch.fallbackOperatorId !== undefined && smartAutoUnavailable(code)) {
           throw new PhysicalOperatorError(
             `${operatorDisplayName(dispatch.operatorId)} subscription qualification failed; trying the Smart Auto fallback`,
             FALLBACK_REQUIRED_CODE,
@@ -822,6 +828,10 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
       hostRoute,
     }
   }
+  const selected = selectedPhysicalMainOperator(agent)
+  if (selected !== undefined) {
+    return operatorDecision(ctx, agent, current.id, policy, selected, `当前主模型已选择 ${operatorDisplayName(selected)}`)
+  }
   if (policy === 'direct') return primaryDecision(current.id, policy, '用户选择仅主模型')
   if (policy === 'chatgpt-web') {
     return isDelegable(text)
@@ -891,6 +901,17 @@ function operatorDecision(
     operatorId,
     hostRoute,
   }
+}
+
+/** Keep a selected first-class model on its current physical route. */
+function selectedPhysicalMainOperator(agent: Agent): PhysicalOperatorRoutingTarget | undefined {
+  const { provider, model } = agent.options
+  if (provider !== ROUTER_PROVIDER) return undefined
+  return isPhysicalOperatorRoutingTarget(model) ? model : undefined
+}
+
+function smartAutoUnavailable(code: string): boolean {
+  return SMART_AUTO_UNAVAILABLE_CODES.has(code)
 }
 
 function primaryDecision(
@@ -1464,6 +1485,10 @@ function profileEquals(
 /** Whether a command argument is one supported routing policy. */
 function isPhysicalOperatorRoutingPolicy(value: string): value is PhysicalOperatorRoutingPolicy {
   return PHYSICAL_OPERATOR_ROUTING_POLICIES.some(policy => policy === value)
+}
+
+function isPhysicalOperatorRoutingTarget(value: string | undefined): value is PhysicalOperatorRoutingTarget {
+  return value === 'codex' || value === 'claude-code' || value === 'chatgpt-web'
 }
 
 /** Render task-selection guidance from the logged policy and the same live descriptors the tool lists. */

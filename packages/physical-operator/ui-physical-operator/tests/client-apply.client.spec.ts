@@ -9,6 +9,8 @@ import {
   orchestrationExecutionModeLabel,
   physicalOperatorDashboardRefreshMs,
   physicalOperatorEffortLabel,
+  physicalOperatorEffectiveExecutionLabel,
+  physicalOperatorEffectiveExecutionMechanism,
   physicalOperatorRoutingDescription,
   physicalOperatorRoutingLabel,
   physicalOperatorRoutingSummary,
@@ -132,6 +134,12 @@ describe('physical operator client plugin', () => {
     expect(orchestrationExecutionMechanism('enabled', 'disabled')).toBe('rlm')
     expect(orchestrationExecutionMechanism('disabled', 'enabled')).toBe('debate')
     expect(orchestrationExecutionMechanismLabel('debate')).toBe('Debate（多 Agent 辩论）')
+    expect(physicalOperatorEffectiveExecutionMechanism('auto', 'enabled')).toBe('debate')
+    expect(physicalOperatorEffectiveExecutionMechanism('disabled', 'enabled')).toBe('debate')
+    expect(physicalOperatorEffectiveExecutionLabel('chatgpt-web', 'auto', 'enabled'))
+      .toBe('Debate（多 Agent 辩论）')
+    expect(physicalOperatorEffectiveExecutionLabel('chatgpt-web', 'auto', 'disabled'))
+      .toBe('ChatGPT 网页版')
   })
 
   it('closes the non-target mechanism before enabling the selected mechanism', async () => {

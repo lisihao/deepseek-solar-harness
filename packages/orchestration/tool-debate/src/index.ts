@@ -21,6 +21,7 @@ import {
   LlmAdapter,
   type ContentBlock,
   type GenerateOptions,
+  type LlmCallConfig,
   type StreamChunk,
   type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
@@ -42,6 +43,7 @@ export const inject = ['debates', 'tools', 'systemPrompt']
 
 const DEBATE_HOST_PROVIDER = 'dsh-debate-host'
 const DEBATE_HOST_MODEL = 'debate'
+const DEBATE_HOST_ROUTE = { provider: DEBATE_HOST_PROVIDER, model: DEBATE_HOST_MODEL } as const
 const MODE_OPTIONS = ['auto', 'enabled', 'disabled'] as const satisfies readonly DebateExecutionMode[]
 const DEFAULT_PREFERENCES: DebateExecutionPreferences = { mode: 'disabled' }
 const MAX_LIST_ITEMS = 20
@@ -425,13 +427,19 @@ function boundedRun(run: DebateRunSnapshotV1): Record<string, JsonValue> {
 export function foldDebatePreferences(
   events: readonly { readonly type: string; readonly data: unknown }[],
 ): DebateExecutionPreferences {
+  return { mode: latestDebateMode(events) ?? DEFAULT_PREFERENCES.mode }
+}
+
+function latestDebateMode(
+  events: readonly { readonly type: string; readonly data: unknown }[],
+): DebateExecutionMode | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (event?.type !== 'debate/preferences') continue
     const mode = (event.data as { readonly mode?: unknown }).mode
-    if (isDebateMode(mode)) return { mode }
+    if (isDebateMode(mode)) return mode
   }
-  return { ...DEFAULT_PREFERENCES }
+  return undefined
 }
 
 function preferenceProjection(value: DebateExecutionPreferences): DebateExecutionPreferencesSelect {
@@ -1372,6 +1380,12 @@ class DebateHostAdapter extends LlmAdapter {
   }
 }
 
+/** Replace the selected primary route with the durable Debate host route after admission. */
+function debateHostRequest(base: LlmCallConfig): LlmCallConfig {
+  const { reasoningEffort: _reasoningEffort, ...portable } = base
+  return { ...portable, ...DEBATE_HOST_ROUTE }
+}
+
 function requiredRunId(args: ToolArgs): string {
   if (args.run_id === undefined || args.run_id.trim().length === 0) {
     throw new Error('run_id is required for this action')
@@ -1396,14 +1410,17 @@ export function apply(ctx: Context): void {
     hostCtx.on('agent/request', async ({ agent, turn, step }, next) => {
       const base = await next()
       let dispatch = dispatchForPosition(agent.session.events, turn, step)
-      if (dispatch === undefined && base.provider === DEBATE_HOST_PROVIDER && base.model === DEBATE_HOST_MODEL) {
+      const mode = latestDebateMode(agent.session.events)
+      if (dispatch === undefined
+        && base.provider === DEBATE_HOST_ROUTE.provider
+        && base.model === DEBATE_HOST_ROUTE.model
+        && (mode === undefined || mode === 'enabled')) {
         const current = latestDirectUser(agent.session.deriveMessages())
         if (current === undefined) throw new Error('Debate host route requires a current direct user message')
         dispatch = persistHostDispatch(agent, current, turn, step)
       }
       if (dispatch === undefined) return base
-      const { reasoningEffort: _reasoningEffort, ...portable } = base
-      return { ...portable, provider: DEBATE_HOST_PROVIDER, model: DEBATE_HOST_MODEL }
+      return debateHostRequest(base)
     })
   })
   ctx.systemPrompt.section({ name: 'tool:debate', order: 119, text: debateGuidance })

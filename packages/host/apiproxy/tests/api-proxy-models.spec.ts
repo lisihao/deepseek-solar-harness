@@ -436,6 +436,20 @@ describe('Web session model selection', () => {
     expect(expectValue(await api.sessions.models(request({ sessionId }))).current)
       .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner', reasoningEffort: 'max' })
     expect(stored).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+
+    // This must also restore the live request path, not merely the model
+    // directory: otherwise a subsequent Standard or Auto turn enters the
+    // Debate adapter without a dispatch record.
+    expect((await ctx.systemPrompt.assemble()).variables)
+      .toMatchObject({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+    await expect(agentEvents(ctx, agent).waterfall(
+      'agent/request', { turn: 2, step: 1, signal: new AbortController().signal },
+      () => Promise.resolve({ provider: 'seed', model: 'seed' }),
+    )).resolves.toMatchObject({
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+      reasoningEffort: 'max',
+    })
     await ctx.fiber.dispose()
   })
 

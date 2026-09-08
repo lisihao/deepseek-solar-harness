@@ -164,6 +164,14 @@ export interface ResidentExecutionProfile {
 /** How the daemon obtained a Session's effective profile. */
 export type ResidentExecutionProfileSource = 'smart-auto' | 'mixed' | 'manual'
 
+/** Stable failure classification carried by an unavailable native product. */
+export type ResidentProviderUnavailableCode =
+  | 'AUTH_MODE_MISMATCH'
+  | 'INVALID_RESULT'
+  | 'PROVIDER_VERSION_MISMATCH'
+  | 'QUOTA_EXHAUSTED'
+  | 'RUNTIME_UNAVAILABLE'
+
 /** Current qualification result for one native product Driver. */
 export interface ResidentProviderStatus {
   readonly operatorId: string
@@ -175,6 +183,8 @@ export interface ResidentProviderStatus {
   readonly injectionBoundaries: readonly ('pre-dispatch' | 'next-turn' | 'checkpoint')[]
   readonly available: boolean
   readonly unavailableReason?: string
+  /** Trusted native qualification failure code, present only when the provider is unavailable. */
+  readonly unavailableCode?: ResidentProviderUnavailableCode
   /** Non-fatal quota telemetry failure; execution remains available with unknown allowance. */
   readonly quotaUnavailableReason?: string
   readonly authentication: 'native-subscription' | 'unqualified'

@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
 import { describe, expect, it } from 'vitest'
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
@@ -25,6 +26,9 @@ import {
   createCodexRlmToolHandler,
   isClaudeNativeSubscription,
   nativeToolSystemPrompt,
+  parseClaudeAuthenticationStatus,
+  residentQualificationFailure,
+  residentQualificationFailureCode,
   residentClaudeObservations,
   resolveProductExecutable,
 } from '../src/drivers.ts'
@@ -113,16 +117,61 @@ describe('Claude Code resident driver environment', () => {
   })
 
   it('rejects non-claude.ai and non-first-party authentication', () => {
-    expect(isClaudeNativeSubscription({
+    expect(isClaudeNativeSubscription(parseClaudeAuthenticationStatus(JSON.stringify({
       loggedIn: true,
       authMethod: 'apiKey',
       apiProvider: 'firstParty',
-    })).toBe(false)
-    expect(isClaudeNativeSubscription({
+    })))).toBe(false)
+    expect(isClaudeNativeSubscription(parseClaudeAuthenticationStatus(JSON.stringify({
       loggedIn: true,
       authMethod: 'claude.ai',
       apiProvider: 'thirdParty',
-    })).toBe(false)
+    })))).toBe(false)
+    expect(isClaudeNativeSubscription(parseClaudeAuthenticationStatus(JSON.stringify({ loggedIn: false })))).toBe(false)
+  })
+
+  it('rejects malformed and unsupported authentication status output', () => {
+    for (const output of [
+      '{',
+      '[]',
+      JSON.stringify({ loggedIn: 'true' }),
+      JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }),
+    ]) {
+      expect(() => parseClaudeAuthenticationStatus(output)).toThrow(expect.objectContaining({ code: 'INVALID_RESULT' }))
+    }
+  })
+
+  it('classifies native qualification failures by their trustworthy process or product signal', () => {
+    const timeout = Object.assign(new Error('qualification command timed out'), {
+      code: 'ETIMEDOUT', killed: true, signal: 'SIGTERM',
+    })
+    const commandFailure = Object.assign(new Error('Command failed: claude auth status --json'), { code: 1 })
+    expect(residentQualificationFailure('claude', timeout)).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    expect(residentQualificationFailure('claude', new Error('Claude Code is not logged in')))
+      .toMatchObject({ code: 'AUTH_MODE_MISMATCH' })
+    expect(residentQualificationFailure('claude', new Error('Usage limit reached for this subscription')))
+      .toMatchObject({ code: 'QUOTA_EXHAUSTED' })
+    expect(residentQualificationFailure('claude', commandFailure)).toMatchObject({ code: 'INVALID_RESULT' })
+    expect(residentQualificationFailure('claude', new Error('login command timed out')))
+      .toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    expect(residentQualificationFailure('claude', Object.assign(new Error('login failed'), { code: 'ECONNREFUSED' })))
+      .toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+    expect(residentQualificationFailureCode(new ResidentOperatorError('provider version is unsupported', 'PROVIDER_VERSION_MISMATCH')))
+      .toBe('PROVIDER_VERSION_MISMATCH')
+  })
+
+  it('classifies a missing product executable as runtime unavailability', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-missing-product-'))
+    try {
+      try {
+        resolveProductExecutable('claude', { PATH: root }, process.platform)
+        throw new Error('expected missing executable failure')
+      } catch (error) {
+        expect(error).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' })
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('uses the macOS system CA store without changing the parent environment', () => {

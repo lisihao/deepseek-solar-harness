@@ -466,6 +466,130 @@ describe('CodexAppServerWire', () => {
     wire.close()
   })
 
+  it('keeps an early item when turn/start response follows turn notifications', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.send(
+      agentMessage('early final', 'final_answer'),
+      { method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-1' } } },
+      { id: turnStart.id, result: { turn: { id: 'turn-1' } } },
+      turnCompleted('completed'),
+    )
+    await expect(result).resolves.toEqual({
+      output: [{ type: 'text', text: 'early final' }],
+      stopReason: 'completed',
+    })
+    wire.close()
+  })
+
+  it('queues the terminal notification until turn/start establishes its id', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.send(
+      { method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-1' } } },
+      agentMessage('terminal-ordered final', 'final_answer'),
+      turnCompleted('completed'),
+    )
+    await nextTask()
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await expect(result).resolves.toEqual({
+      output: [{ type: 'text', text: 'terminal-ordered final' }],
+      stopReason: 'completed',
+    })
+    wire.close()
+  })
+
+  it('keeps a late item before the authoritative terminal notification', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(agentMessage('late final', 'final_answer'))
+    child.peer.send(turnCompleted('completed'))
+    await expect(result).resolves.toEqual({
+      output: [{ type: 'text', text: 'late final' }],
+      stopReason: 'completed',
+    })
+    wire.close()
+  })
+
+  it('keeps final_answer precedence over a later unphased message', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(
+      agentMessage('explicit final', 'final_answer'),
+      agentMessage('unphased fallback', null),
+      turnCompleted('completed'),
+    )
+    await expect(result).resolves.toEqual({
+      output: [{ type: 'text', text: 'explicit final' }],
+      stopReason: 'completed',
+    })
+    wire.close()
+  })
+
+  it('rejects a completed turn that has commentary but no public answer', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(agentMessage('progress only', 'commentary'), turnCompleted('completed'))
+    await expect(result).rejects.toThrow('without a final answer')
+    wire.close()
+  })
+
+  it('resets output and turn association state for consecutive turns', async () => {
+    const { child, wire } = await initializeWire()
+    const first = wire.runTurn(['first task'], new AbortController().signal)
+    const firstStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(firstStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(
+      agentMessage('first final', 'final_answer'),
+      {
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          tokenUsage: { last: { inputTokens: 3, cachedInputTokens: 1, outputTokens: 2 } },
+        },
+      },
+      turnCompleted('completed'),
+    )
+    await expect(first).resolves.toEqual({
+      output: [{ type: 'text', text: 'first final' }],
+      stopReason: 'completed',
+      usage: {
+        inputTokens: 2,
+        outputTokens: 2,
+        cacheReadInputTokens: 1,
+        cacheWriteInputTokens: 0,
+      },
+    })
+
+    const second = wire.runTurn(['second task'], new AbortController().signal)
+    const secondStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(secondStart, { turn: { id: 'turn-2' } })
+    await nextTask()
+    expect(wire.currentTurnId).toBe('turn-2')
+    child.peer.send(agentMessage('second unphased', null, 'turn-2'), turnCompleted('completed', 'turn-2'))
+    await nextTask()
+    expect(wire.collectOutput()).toEqual([{ type: 'text', text: 'second unphased' }])
+    await expect(second).resolves.toEqual({
+      output: [{ type: 'text', text: 'second unphased' }],
+      stopReason: 'completed',
+    })
+    expect(wire.currentTurnId).toBe('turn-2')
+    wire.close()
+  })
+
   it('normalizes only public text, tool lifecycle, approval, and usage for Resident trace observers', async () => {
     const child = fakeChild()
     const observations: unknown[] = []

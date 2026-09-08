@@ -10,13 +10,13 @@ Resident session polling reused `operator.list`, so reading durable session stat
 
 ## Decision
 
-Resident control protocol version 4 separates `session.list` from `operator.list`. Session reads return only the daemon store projection and never qualify a native product. The daemon coalesces concurrent qualification for each operator id, while distinct product Drivers remain independent. Claude Code qualification runs the version probe, subscription-status probe, and model-catalog probe in order; model discovery starts only after the expected CLI version and a native subscription are established.
+Resident control protocol version 13 separates `session.list` from `operator.list`. Session reads return only the daemon store projection and never qualify a native product. Provider dashboards request `operator.list` only while their user-visible panel is open. The daemon coalesces concurrent qualification for each operator id, while distinct product Drivers remain independent. Claude Code qualification runs the version probe, subscription-status probe, and model-catalog probe in order; model discovery starts only after the expected CLI version and a native subscription are established. An unavailable status carries the stable cause reported by the failing executable, authentication, catalog, quota, or transport stage, and the daemon preserves that classification instead of rewriting every failure as an authentication mismatch.
 
 The temporary-workspace classifier still identifies runs whose normalized workspace is under `/tmp/dsh-orchestration-*` or `/private/tmp/dsh-orchestration-*` without using titles, failure codes, or task content. Its original default-hidden presentation is superseded by [Visible session and orchestration evidence](2026-08-21-visible-session-and-orchestration-evidence.md), which labels and includes retained diagnostic Runs by default while allowing an explicit projection-only hide.
 
 ## Verification
 
-Daemon tests pin that a session list after handshake performs no additional qualification and that overlapping provider reads share one in-flight qualification. Presentation tests pin the narrow temporary-workspace classification while retaining an ordinary project. The packaged Desktop verification exercises the sealed Resident and orchestration packages from the same source commit.
+Daemon tests pin that a session list after handshake performs no additional qualification, overlapping provider reads share one in-flight qualification, and stable unavailable codes survive the control protocol. Client tests pin that closed provider panels do not request qualification. Driver tests distinguish authentication, invalid output, quota, runtime, and version failures. Presentation tests pin the narrow temporary-workspace classification while retaining an ordinary project. The packaged Desktop verification exercises the sealed Resident and orchestration packages from the same source commit.
 
 ## Alternatives considered
 
@@ -28,4 +28,4 @@ Daemon tests pin that a session list after handshake performs no additional qual
 
 ## Consequences
 
-Session activity remains fresh without touching native credentials. Provider status refresh still observes current native state, but simultaneous requests share one qualification and Claude Code never runs its own credential-bearing probes concurrently. Protocol version 4 intentionally rejects an older daemon method set, while the persisted state schema remains version 3. Diagnostic classification depends on the dedicated temporary workspace convention, so acceptance tooling must keep that convention when it expects Runs to carry the acceptance label.
+Session activity remains fresh without touching native credentials, and a closed collaboration panel causes no product probe. Provider status refresh still observes current native state, but simultaneous requests share one qualification and Claude Code never runs its own credential-bearing probes concurrently. Protocol version 13 intentionally rejects an older daemon method set, while the persisted state schema is version 5. Diagnostic classification depends on the dedicated temporary workspace convention, so acceptance tooling must keep that convention when it expects Runs to carry the acceptance label.
