@@ -60,7 +60,7 @@ function requestOwnerShutdown(socketPath, timeoutMs) {
 }
 
 async function processCommand(pid) {
-  const { stdout } = await execFileAsync('/bin/ps', ['-p', String(pid), '-o', 'command='])
+  const { stdout } = await execFileAsync('/bin/ps', ['-ww', '-p', String(pid), '-o', 'command='])
   return stdout.trim()
 }
 
