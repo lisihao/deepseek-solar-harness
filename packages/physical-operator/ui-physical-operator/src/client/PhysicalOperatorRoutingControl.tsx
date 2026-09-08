@@ -273,7 +273,7 @@ export function PhysicalOperatorRoutingControl({
       } catch {
         // The Resident status panel owns availability diagnostics; selection remains fail-closed.
       } finally {
-        if (open && !controller.signal.aborted) {
+        if (!controller.signal.aborted) {
           timer = setTimeout(() => { void refresh() }, physicalOperatorDashboardRefreshMs(true))
         }
       }
