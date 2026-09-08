@@ -23,7 +23,9 @@
   config:
     workspaceName: dsh-chatgpt-web
     generationTimeoutMs: 1800000
+    submissionTimeoutMs: 10000
     pollIntervalMs: 500
+    progressIntervalMs: 15000
     outputMaxBytes: 24576
 ```
 
@@ -32,7 +34,9 @@
 | `id` | 调用方可见的稳定算子 ID；默认 `chatgpt-web`。 |
 | `workspaceName` | 为 ChatGPT 复用的已认证命名浏览器工作区。 |
 | `url` | 必须是 `https://chatgpt.com/`；默认也是该地址。 |
-| `generationTimeoutMs` / `pollIntervalMs` | 有界的回复等待时间与轮询间隔。 |
+| `submissionTimeoutMs` | 证明网页已接受所填提示的有界等待；默认 10 秒。 |
+| `generationTimeoutMs` / `pollIntervalMs` | 提交成功后的有界回复等待时间与轮询间隔。 |
+| `progressIntervalMs` | 不含内容的等待心跳间隔；默认 15 秒。 |
 | `outputMaxBytes` | 经 `ctx.browser` 返回的 JSON 最大长度；默认 24 KiB。 |
 
 已配置的浏览器 Provider 必须声明 `browser-js-v1`，以及 `authenticated-profile-reuse`、`named-workspace`、`page-evaluate` 三项能力。本算子不会启动浏览器、不会连接调试端口，也绝不发起 OpenAI API 请求或 API Key 回退。
@@ -40,10 +44,11 @@
 ## 行为
 
 - 发现界面暴露一个 `chatgpt-web` 算子，固定 `maxConcurrency: 1`、`executionModes: [ephemeral]`。
-- 每次已接受调用都会在命名工作区内打开或复用 `https://chatgpt.com/`，检测是否需要登录，提交文本提示，等待一条新的助手回复，再只返回最终文本。
+- 每次已接受调用都会在命名工作区内打开或复用 `https://chatgpt.com/`，检测是否需要登录，填入提示，点击 ChatGPT 的可见发送控件，并在等待最终助手文本前证明新用户轮次或生成已经开始。
+- 网页未接受已填提示时，会在 `submissionTimeoutMs` 内以 `CHATGPT_WEB_SUBMIT_FAILED` 失败，不进入更长的生成等待；生成超时只附带不含提示或回复正文的有界页面状态。
 - 若物理算子调用方提供 `systemPrompt`，它会按 `systemPrompt + "\n\n---\n\n" + task` 与任务合并；这与旧 Solar 网页路由一致。
 - `AbortSignal` 会取消浏览器程序并得到 aborted 终态。dispose 不会关闭用户浏览器或已认证工作区。
-- 进度流只保存生命周期阶段和结果大小元数据；它刻意不包含 prompt 或网页回复正文。
+- 进度流只保存生命周期阶段、等待时长心跳、失败状态和结果大小元数据；它刻意不包含 prompt 或网页回复正文。
 
 ## 旧 Solar 保真矩阵
 
@@ -56,7 +61,7 @@
 | 打开或复用 `https://chatgpt.com/` | 在 `dsh-chatgpt-web` 中打开或复用完全一致的 URL | faithful |
 | 提交前检测可见登录控件 | 返回 `CHATGPT_WEB_AUTH_REQUIRED` | faithful，并提供类型化失败 |
 | 合并 `systemPrompt + "\n\n---\n\n" + task` | 保留完全相同的文本边界 | faithful |
-| 填写输入框、按 Enter、等待并提取最新 Markdown 回复 | 在一个可信 browser program 中按相同顺序执行 | faithful |
+| 填写输入框、按 Enter、等待并提取最新 Markdown 回复 | 点击当前可见发送控件，证明提交后在同一可信 browser program 中等待并提取 | 平台适配；避免依赖编辑器的 Enter 行为 |
 | 可选模型选择失败时静默保留当前模型 | 显式请求的模型必须被选择并验证，否则调用失败 | 有意的可靠性改进 |
 | 断开但不关闭用户浏览器 | dispose 只取消当前调用并保留命名 workspace | faithful |
 | 不存在 durable receipt、`submit/poll/collect`、原生 resume 或 Deep Research 模式 | 首版 Provider 不宣称支持这些能力 | faithful 的范围边界 |
