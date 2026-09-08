@@ -148,6 +148,7 @@ interface ProgramDiagnostic {
 type ProgramOutcome = CompletedProgramOutcome
   | { readonly status: 'auth-required' }
   | { readonly status: 'input-unavailable' }
+  | { readonly status: 'context-not-isolated' }
   | { readonly status: 'model-selection-unavailable' }
   | { readonly status: 'submission-failed'; readonly diagnostic: ProgramDiagnostic }
   | { readonly status: 'generation-timeout'; readonly diagnostic: ProgramDiagnostic }
@@ -171,6 +172,9 @@ const INSPECT_PAGE = String.raw`() => {
     .map((element) => element.textContent ?? '')
     .filter((text) => text.trim().length > 0);
   const userCount = document.querySelectorAll('[data-message-author-role="user"]').length;
+  const page = location.pathname === '/'
+    ? 'root'
+    : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
   let input = document.querySelector('#prompt-textarea');
   if (input === null || !visible(input)) {
     input = [...document.querySelectorAll('textarea,div[contenteditable="true"]')]
@@ -178,8 +182,11 @@ const INSPECT_PAGE = String.raw`() => {
   }
   document.querySelectorAll('[data-dsh-chatgpt-web-input="true"]')
     .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-input'));
-  if (input !== null) input.setAttribute('data-dsh-chatgpt-web-input', 'true');
+  if (input !== null && page === 'root' && userCount === 0 && replies.length === 0) {
+    input.setAttribute('data-dsh-chatgpt-web-input', 'true');
+  }
   return {
+    page,
     loginRequired,
     inputReady: input !== null,
     assistantCount: replies.length,
@@ -290,6 +297,13 @@ await browser.run({
   reuse: 'exact-url',
   waitUntil: 'dom-content-loaded',
 });
+await browser.run({
+  id: 'chatgpt-reset-conversation',
+  kind: 'navigate',
+  page,
+  url: request.url,
+  waitUntil: 'dom-content-loaded',
+});
 const readinessStartedAt = Date.now();
 const readinessTimeoutMs = Math.min(10_000, request.generationTimeoutMs);
 let inspect;
@@ -297,13 +311,18 @@ while (Date.now() - readinessStartedAt <= readinessTimeoutMs) {
   inspect = asRecord(await browser.evaluate(page, ${JSON.stringify(INSPECT_PAGE)}));
   if (inspect === undefined) return { status: 'protocol-error' };
   if (inspect.loginRequired === true) return { status: 'auth-required' };
+  if (!['root', 'conversation', 'other'].includes(inspect.page)
+    || !Number.isSafeInteger(inspect.userCount)
+    || !Number.isSafeInteger(inspect.assistantCount)) return { status: 'protocol-error' };
+  if (inspect.page !== 'root' || inspect.userCount !== 0 || inspect.assistantCount !== 0) {
+    return { status: 'context-not-isolated' };
+  }
   if (inspect.inputReady === true && Number.isSafeInteger(inspect.assistantCount)) break;
   await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
 }
 if (inspect.inputReady !== true || !Number.isSafeInteger(inspect.assistantCount)) {
   return { status: 'input-unavailable' };
 }
-if (!Number.isSafeInteger(inspect.userCount)) return { status: 'protocol-error' };
 if (request.model !== undefined) {
   const selection = asRecord(await browser.evaluate(page, ${JSON.stringify(SELECT_MODEL)}, {
     model: request.model,
@@ -536,6 +555,11 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
           throw new PhysicalOperatorError('ChatGPT Web requires a logged-in browser session', 'CHATGPT_WEB_AUTH_REQUIRED')
         case 'input-unavailable':
           throw new PhysicalOperatorError('ChatGPT Web input is unavailable in the selected browser workspace', 'RUNTIME_UNAVAILABLE')
+        case 'context-not-isolated':
+          throw new PhysicalOperatorError(
+            'ChatGPT Web could not establish a fresh conversation before prompt submission',
+            'CHATGPT_WEB_CONTEXT_NOT_ISOLATED',
+          )
         case 'model-selection-unavailable':
           throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested model selection', 'MODEL_SELECTION_UNAVAILABLE')
         case 'submission-failed':
@@ -671,6 +695,7 @@ function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
         : { status: 'protocol-error' }
     case 'auth-required': return { status: 'auth-required' }
     case 'input-unavailable': return { status: 'input-unavailable' }
+    case 'context-not-isolated': return { status: 'context-not-isolated' }
     case 'model-selection-unavailable': return { status: 'model-selection-unavailable' }
     case 'submission-failed': {
       const diagnostic = programDiagnostic(value.diagnostic)

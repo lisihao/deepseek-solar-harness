@@ -159,7 +159,7 @@ describe('ChatGPT Web physical operator', () => {
     await ctx.fiber.dispose()
   })
 
-  it('builds a browser program in the required order: open, inspect, submit, then wait for a fresh response', () => {
+  it('builds a browser program in the required order: open, reset, inspect, submit, then wait for a fresh response', () => {
     const program = adapter.buildChatGptWebProgram({
       url: 'https://chatgpt.com/',
       workspaceName: 'fixture-chatgpt-web',
@@ -171,18 +171,21 @@ describe('ChatGPT Web physical operator', () => {
       outputMaxBytes: 2_048,
     })
     const open = program.source.indexOf("id: 'chatgpt-open'")
+    const reset = program.source.indexOf("id: 'chatgpt-reset-conversation'")
     const inspect = program.source.indexOf('const readinessStartedAt =')
     const select = program.source.indexOf('const selection =')
     const fill = program.source.indexOf("id: 'chatgpt-fill'")
     const send = program.source.indexOf("id: 'chatgpt-send'")
     const responsePoll = program.source.indexOf('const initialCount =')
     expect(open).toBeGreaterThan(-1)
-    expect(inspect).toBeGreaterThan(open)
+    expect(reset).toBeGreaterThan(open)
+    expect(inspect).toBeGreaterThan(reset)
     expect(select).toBeGreaterThan(inspect)
     expect(fill).toBeGreaterThan(select)
     expect(send).toBeGreaterThan(fill)
     expect(responsePoll).toBeGreaterThan(send)
     expect(program.source).toContain("return { status: 'auth-required' }")
+    expect(program.source).toContain("return { status: 'context-not-isolated' }")
     expect(program.source).toContain("return { status: 'model-selection-unavailable' }")
     expect(program.source).toContain("kind: 'click'")
     expect(program.source).toContain("selector: '#composer-submit-button,button[data-testid=\"send-button\"]'")
@@ -220,7 +223,7 @@ describe('ChatGPT Web physical operator', () => {
         if (evaluator.includes('loginRequired')) {
           const inputReady = inspection > 0
           inspection += 1
-          return { loginRequired: false, inputReady, assistantCount: 0, userCount: 0 }
+          return { page: 'root', loginRequired: false, inputReady, assistantCount: 0, userCount: 0 }
         }
         if (evaluator.includes('removeAttribute')) return true
         return observations[Math.min(observation++, observations.length - 1)]
@@ -264,7 +267,7 @@ describe('ChatGPT Web physical operator', () => {
       run: async () => undefined,
       evaluate: async (_page: string, evaluator: string) => {
         if (evaluator.includes('loginRequired')) {
-          return { loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0 }
+          return { page: 'root', loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0 }
         }
         if (evaluator.includes('removeAttribute')) return true
         return unchanged
@@ -307,6 +310,89 @@ describe('ChatGPT Web physical operator', () => {
       const evaluator = JSON.parse(encoded!) as string
       expect(() => new Script(`(${evaluator})`)).not.toThrow()
     }
+  })
+
+  it('resets a reused conversation before it fills the current standalone task', async () => {
+    const program = adapter.buildChatGptWebProgram({
+      url: 'https://chatgpt.com/',
+      workspaceName: 'fixture-chatgpt-web',
+      prompt: 'current unrelated task only',
+      generationTimeoutMs: 1_000,
+      submissionTimeoutMs: 100,
+      pollIntervalMs: 1,
+      outputMaxBytes: 2_048,
+    })
+    let page: 'conversation' | 'root' = 'conversation'
+    let filled = ''
+    let assistantCount = 0
+    const operations: string[] = []
+    const browser = {
+      run: async (operation: { id: string; kind: string; value?: string }) => {
+        operations.push(operation.id)
+        if (operation.kind === 'navigate') page = 'root'
+        if (operation.kind === 'fill') filled = operation.value ?? ''
+        if (operation.id === 'chatgpt-send') assistantCount = 1
+      },
+      evaluate: async (_page: string, evaluator: string) => {
+        if (evaluator.includes('loginRequired')) {
+          return { page, loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0 }
+        }
+        if (evaluator.includes('removeAttribute')) return true
+        return {
+          page: 'conversation',
+          userCount: 1,
+          assistantCount,
+          inputCharacters: 0,
+          response: assistantCount === 0 ? '' : 'current task response',
+          generating: false,
+          settled: assistantCount > 0,
+          sendAvailable: true,
+        }
+      },
+    }
+    const AsyncFunction = (async function () {}).constructor as unknown as new (
+      ...args: string[]
+    ) => (browserArgument: unknown) => Promise<unknown>
+
+    await expect(new AsyncFunction('browser', program.source)(browser)).resolves.toEqual({
+      status: 'completed',
+      response: 'current task response',
+      truncated: false,
+    })
+    expect(operations.slice(0, 4)).toEqual([
+      'chatgpt-open',
+      'chatgpt-reset-conversation',
+      'chatgpt-fill',
+      'chatgpt-send',
+    ])
+    expect(filled).toBe('current unrelated task only')
+  })
+
+  it('fails before filling when the ChatGPT root still contains a prior user turn', async () => {
+    const program = adapter.buildChatGptWebProgram({
+      url: 'https://chatgpt.com/',
+      workspaceName: 'fixture-chatgpt-web',
+      prompt: 'must not be submitted',
+      generationTimeoutMs: 1_000,
+      submissionTimeoutMs: 100,
+      pollIntervalMs: 1,
+      outputMaxBytes: 2_048,
+    })
+    const operations: string[] = []
+    const browser = {
+      run: async (operation: { id: string }) => { operations.push(operation.id) },
+      evaluate: async (_page: string, evaluator: string) => evaluator.includes('loginRequired')
+        ? { page: 'root', loginRequired: false, inputReady: true, assistantCount: 0, userCount: 1 }
+        : true,
+    }
+    const AsyncFunction = (async function () {}).constructor as unknown as new (
+      ...args: string[]
+    ) => (browserArgument: unknown) => Promise<unknown>
+
+    await expect(new AsyncFunction('browser', program.source)(browser)).resolves.toEqual({
+      status: 'context-not-isolated',
+    })
+    expect(operations).toEqual(['chatgpt-open', 'chatgpt-reset-conversation'])
   })
 
   it('fails loud instead of silently falling back when an explicit model cannot be verified', async () => {
@@ -433,6 +519,7 @@ describe('ChatGPT Web physical operator', () => {
   })
 
   it.each([
+    ['context-not-isolated', 'CHATGPT_WEB_CONTEXT_NOT_ISOLATED'],
     ['submission-failed', 'CHATGPT_WEB_SUBMIT_FAILED'],
     ['generation-timeout', 'CHATGPT_WEB_TIMEOUT'],
   ] as const)('projects %s with bounded non-sensitive diagnostics', async (status, code) => {
@@ -445,7 +532,9 @@ describe('ChatGPT Web physical operator', () => {
       settled: false,
       sendAvailable: true,
     }
-    const provider = new StubBrowserProvider(async () => resultFor({ status, diagnostic }))
+    const provider = new StubBrowserProvider(async () => resultFor(
+      status === 'context-not-isolated' ? { status } : { status, diagnostic },
+    ))
     const { ctx, plugin } = await setup(provider)
     const run = await ctx.physicalOperators.start('chatgpt-web', request())
 
@@ -455,7 +544,11 @@ describe('ChatGPT Web physical operator', () => {
     )
     expect(error).toBeInstanceOf(PhysicalOperatorError)
     expect((error as PhysicalOperatorError).code).toBe(code)
-    expect((error as Error).message).toContain('inputCharacters=321')
+    if (status === 'context-not-isolated') {
+      expect((error as Error).message).toContain('fresh conversation')
+    } else {
+      expect((error as Error).message).toContain('inputCharacters=321')
+    }
     const progress = await run.readEvents?.(0, 20)
     expect(progress?.events.at(-1)).toMatchObject({
       type: 'chatgpt-web.failed',
