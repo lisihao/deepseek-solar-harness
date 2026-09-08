@@ -187,6 +187,11 @@
       "commit": "5965bc96f77c9a3d192e53fea847183fa07df89c"
     },
     {
+      "name": "ChatGPT Web ephemeral conversation isolation",
+      "repository": "https://github.com/lisihao/deepseek-solar-harness",
+      "commit": "d8350d3af832e86d32d5efbc96b41bfa9f4b6452"
+    },
+    {
       "name": "dsh-synapse v0.4.1 visual session map",
       "repository": "https://github.com/liangmianya/dsh-synapse",
       "commit": "589aed43fece8a38fe9267d47ed9756eab343fec"
@@ -342,7 +347,7 @@
     "dsh-packages/deepseek-ai-dsh-orchestrations-0.1.0-rc.5.tgz": "00455d9f3cf2a1bb4703c857009f2d278f48044a4c102841a6aeb6332b9698d8",
     "dsh-packages/deepseek-ai-dsh-output-style-0.1.0-rc.5.tgz": "161e04385b2a6b10539563d0e6e8babe1bea991a7538fe8447dc905c45069ebd",
     "dsh-packages/deepseek-ai-dsh-physical-operator-0.1.0-rc.5.tgz": "5aa5625abe5c801f7db2b618fb00bf070461a90ca331e519bab5b68f54bd3e21",
-    "dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz": "b2d3f7ea9c43934720091c44bc064701cfdb42e2f422eddb97b53ba93683b510",
+    "dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz": "2d9c98d94dc917c8986d62c798215d3c446840b4817625e2e288322b5f0b5f46",
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "b348fb840fc866e14b04ac5055f068261894201cc8afda4c31881414b8f06fb8",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "e24db84d7e9549e8b16582a9d157ab96c7143873e82d2c3c52a517f8006c0110",
     "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "dfd0f2ab5b5c358c3203876842bbdbb5239cf7b184f02ee8b0054577c7b4c598",
