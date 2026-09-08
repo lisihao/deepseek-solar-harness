@@ -12,7 +12,7 @@ import BrowserRuntime, {
   type BrowserRunProgramResultV1,
   type BrowserRunProgramV1,
 } from '@deepseek-ai/dsh-browser'
-import PhysicalOperatorRuntime from '@deepseek-ai/dsh-physical-operator'
+import PhysicalOperatorRuntime, { PhysicalOperatorError } from '@deepseek-ai/dsh-physical-operator'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import * as adapter from '../src/index.ts'
 
@@ -71,7 +71,18 @@ class StubBrowserProvider implements BrowserProvider {
   }
 }
 
-async function setup(provider = new StubBrowserProvider()) {
+interface SetupConfig {
+  readonly generationTimeoutMs?: number
+  readonly submissionTimeoutMs?: number
+  readonly pollIntervalMs?: number
+  readonly progressIntervalMs?: number
+  readonly outputMaxBytes?: number
+}
+
+async function setup(
+  provider = new StubBrowserProvider(),
+  config: SetupConfig = {},
+) {
   const ctx = new Context()
   await ctx.plugin(BrowserRuntime)
   await ctx.plugin(PhysicalOperatorRuntime)
@@ -79,8 +90,11 @@ async function setup(provider = new StubBrowserProvider()) {
   const plugin = await ctx.plugin(adapter, {
     workspaceName: 'fixture-chatgpt-web',
     generationTimeoutMs: 1_000,
+    submissionTimeoutMs: 100,
     pollIntervalMs: 10,
+    progressIntervalMs: 20,
     outputMaxBytes: 2_048,
+    ...config,
   })
   return { ctx, plugin, provider }
 }
@@ -152,6 +166,7 @@ describe('ChatGPT Web physical operator', () => {
       prompt: 'question',
       model: 'GPT-5',
       generationTimeoutMs: 1_000,
+      submissionTimeoutMs: 100,
       pollIntervalMs: 1,
       outputMaxBytes: 2_048,
     })
@@ -169,7 +184,10 @@ describe('ChatGPT Web physical operator', () => {
     expect(responsePoll).toBeGreaterThan(send)
     expect(program.source).toContain("return { status: 'auth-required' }")
     expect(program.source).toContain("return { status: 'model-selection-unavailable' }")
-    expect(program.source).toContain("return { status: 'generation-timeout' }")
+    expect(program.source).toContain("kind: 'click'")
+    expect(program.source).toContain("selector: '#composer-submit-button,button[data-testid=\"send-button\"]'")
+    expect(program.source).toContain("status: 'submission-failed'")
+    expect(program.source).toContain("status: 'generation-timeout'")
     expect(program.source).toContain('copy-turn-action-button')
     expect(program.source).toContain("typeof state.settled !== 'boolean'")
     expect(program.source).toContain('state.settled && !state.generating')
@@ -183,14 +201,16 @@ describe('ChatGPT Web physical operator', () => {
       workspaceName: 'fixture-chatgpt-web',
       prompt: 'question',
       generationTimeoutMs: 1_000,
+      submissionTimeoutMs: 100,
       pollIntervalMs: 1,
       outputMaxBytes: 2_048,
     })
     const observations = [
-      { assistantCount: 1, response: 'Pro 思考中', generating: false, settled: false },
-      { assistantCount: 1, response: 'Pro 思考中', generating: false, settled: false },
-      { assistantCount: 1, response: 'final response', generating: false, settled: true },
-      { assistantCount: 1, response: 'final response', generating: false, settled: true },
+      { page: 'conversation', userCount: 1, assistantCount: 0, inputCharacters: 0, response: '', generating: true, settled: false, sendAvailable: false },
+      { page: 'conversation', userCount: 1, assistantCount: 1, inputCharacters: 0, response: 'Pro 思考中', generating: false, settled: false, sendAvailable: true },
+      { page: 'conversation', userCount: 1, assistantCount: 1, inputCharacters: 0, response: 'Pro 思考中', generating: false, settled: false, sendAvailable: true },
+      { page: 'conversation', userCount: 1, assistantCount: 1, inputCharacters: 0, response: 'final response', generating: false, settled: true, sendAvailable: true },
+      { page: 'conversation', userCount: 1, assistantCount: 1, inputCharacters: 0, response: 'final response', generating: false, settled: true, sendAvailable: true },
     ]
     let inspection = 0
     let observation = 0
@@ -200,7 +220,7 @@ describe('ChatGPT Web physical operator', () => {
         if (evaluator.includes('loginRequired')) {
           const inputReady = inspection > 0
           inspection += 1
-          return { loginRequired: false, inputReady, assistantCount: 0 }
+          return { loginRequired: false, inputReady, assistantCount: 0, userCount: 0 }
         }
         if (evaluator.includes('removeAttribute')) return true
         return observations[Math.min(observation++, observations.length - 1)]
@@ -217,7 +237,55 @@ describe('ChatGPT Web physical operator', () => {
       truncated: false,
     })
     expect(inspection).toBe(2)
-    expect(observation).toBe(4)
+    expect(observation).toBe(5)
+  })
+
+  it('fails within the submission bound when clicking send does not create a user turn', async () => {
+    const program = adapter.buildChatGptWebProgram({
+      url: 'https://chatgpt.com/',
+      workspaceName: 'fixture-chatgpt-web',
+      prompt: 'question',
+      generationTimeoutMs: 1_000,
+      submissionTimeoutMs: 5,
+      pollIntervalMs: 1,
+      outputMaxBytes: 2_048,
+    })
+    const unchanged = {
+      page: 'root',
+      userCount: 0,
+      assistantCount: 0,
+      inputCharacters: 8,
+      response: '',
+      generating: false,
+      settled: false,
+      sendAvailable: true,
+    }
+    const browser = {
+      run: async () => undefined,
+      evaluate: async (_page: string, evaluator: string) => {
+        if (evaluator.includes('loginRequired')) {
+          return { loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0 }
+        }
+        if (evaluator.includes('removeAttribute')) return true
+        return unchanged
+      },
+    }
+    const AsyncFunction = (async function () {}).constructor as unknown as new (
+      ...args: string[]
+    ) => (browserArgument: unknown) => Promise<unknown>
+
+    await expect(new AsyncFunction('browser', program.source)(browser)).resolves.toEqual({
+      status: 'submission-failed',
+      diagnostic: {
+        page: 'root',
+        userCount: 0,
+        assistantCount: 0,
+        inputCharacters: 8,
+        generating: false,
+        settled: false,
+        sendAvailable: true,
+      },
+    })
   })
 
   it('emits browser evaluator functions as executable JavaScript rather than TypeScript source', () => {
@@ -227,13 +295,14 @@ describe('ChatGPT Web physical operator', () => {
       prompt: 'question',
       model: 'GPT-5',
       generationTimeoutMs: 1_000,
+      submissionTimeoutMs: 100,
       pollIntervalMs: 1,
       outputMaxBytes: 2_048,
     })
     const encodedEvaluators = [
       ...program.source.matchAll(/browser\.evaluate\(page, ("(?:\\.|[^"\\])*")/g),
     ].map(match => match[1])
-    expect(encodedEvaluators).toHaveLength(4)
+    expect(encodedEvaluators).toHaveLength(5)
     for (const encoded of encodedEvaluators) {
       const evaluator = JSON.parse(encoded!) as string
       expect(() => new Script(`(${evaluator})`)).not.toThrow()
@@ -304,6 +373,24 @@ describe('ChatGPT Web physical operator', () => {
     await ctx.fiber.dispose()
   })
 
+  it('emits bounded waiting heartbeats while one browser program remains active', async () => {
+    const deferred = Promise.withResolvers<BrowserRunProgramResultV1>()
+    const provider = new StubBrowserProvider(async () => deferred.promise)
+    const { ctx, plugin } = await setup(provider)
+    const run = await ctx.physicalOperators.start('chatgpt-web', request())
+    await new Promise(resolve => setTimeout(resolve, 45))
+
+    const progress = await run.readEvents?.(0, 20)
+    expect(progress?.events.filter(event => event.type === 'chatgpt-web.waiting').length).toBeGreaterThanOrEqual(2)
+    expect(progress?.events.at(-1)?.data).toMatchObject({ phase: 'waiting' })
+    expect(progress?.events.at(-1)?.data.elapsedMs).toEqual(expect.any(Number))
+
+    deferred.resolve(resultFor({ status: 'completed', response: 'done', truncated: false }))
+    await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' })
+    await plugin.dispose()
+    await ctx.fiber.dispose()
+  })
+
   it('rejects an unavailable browser seam and invalid direct settings before it registers an operator', async () => {
     const unavailable = new StubBrowserProvider(undefined, ['page-evaluate'])
     const { ctx, plugin } = await setup(unavailable)
@@ -315,6 +402,14 @@ describe('ChatGPT Web physical operator', () => {
 
     expect(() => { adapter.apply(ctx, { url: 'http://chatgpt.com/' }) }).toThrow('https://chatgpt.com/')
     expect(() => { adapter.apply(ctx, { url: 'https://chatgpt.com/other' }) }).toThrow('exactly')
+    expect(() => { adapter.apply(ctx, { generationTimeoutMs: 1_000, submissionTimeoutMs: 1_001 }) })
+      .toThrow('submissionTimeoutMs must not exceed generationTimeoutMs')
+    expect(() => { adapter.apply(ctx, {
+      generationTimeoutMs: 1_000,
+      submissionTimeoutMs: 100,
+      progressIntervalMs: 1_001,
+    }) })
+      .toThrow('progressIntervalMs must not exceed generationTimeoutMs')
     expect(ctx.physicalOperators.list()).toEqual([])
     await ctx.fiber.dispose()
   })
@@ -332,6 +427,41 @@ describe('ChatGPT Web physical operator', () => {
       ...request(), residentProfile: { effort: 'high' },
     })).rejects.toMatchObject({ code: 'OPERATOR_OPTION_UNSUPPORTED' })
     expect(provider.programs).toEqual([])
+
+    await plugin.dispose()
+    await ctx.fiber.dispose()
+  })
+
+  it.each([
+    ['submission-failed', 'CHATGPT_WEB_SUBMIT_FAILED'],
+    ['generation-timeout', 'CHATGPT_WEB_TIMEOUT'],
+  ] as const)('projects %s with bounded non-sensitive diagnostics', async (status, code) => {
+    const diagnostic = {
+      page: 'root',
+      userCount: 0,
+      assistantCount: 0,
+      inputCharacters: 321,
+      generating: false,
+      settled: false,
+      sendAvailable: true,
+    }
+    const provider = new StubBrowserProvider(async () => resultFor({ status, diagnostic }))
+    const { ctx, plugin } = await setup(provider)
+    const run = await ctx.physicalOperators.start('chatgpt-web', request())
+
+    const error = await run.result.then(
+      () => { throw new Error('expected ChatGPT Web run to fail') },
+      (caught: unknown) => caught,
+    )
+    expect(error).toBeInstanceOf(PhysicalOperatorError)
+    expect((error as PhysicalOperatorError).code).toBe(code)
+    expect((error as Error).message).toContain('inputCharacters=321')
+    const progress = await run.readEvents?.(0, 20)
+    expect(progress?.events.at(-1)).toMatchObject({
+      type: 'chatgpt-web.failed',
+      data: { phase: 'failed', code },
+    })
+    expect(JSON.stringify(progress)).not.toContain('private task body')
 
     await plugin.dispose()
     await ctx.fiber.dispose()

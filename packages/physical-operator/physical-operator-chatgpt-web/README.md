@@ -23,7 +23,9 @@ This physical-operator Service Provider sends one bounded text task through an a
   config:
     workspaceName: dsh-chatgpt-web
     generationTimeoutMs: 1800000
+    submissionTimeoutMs: 10000
     pollIntervalMs: 500
+    progressIntervalMs: 15000
     outputMaxBytes: 24576
 ```
 
@@ -32,7 +34,9 @@ This physical-operator Service Provider sends one bounded text task through an a
 | `id` | Stable caller-visible operator id. Defaults to `chatgpt-web`. |
 | `workspaceName` | Named authenticated browser workspace reused for ChatGPT. |
 | `url` | Must be `https://chatgpt.com/`; the default is the same URL. |
-| `generationTimeoutMs` / `pollIntervalMs` | Bounded response wait and polling interval. |
+| `submissionTimeoutMs` | Bounded proof that the website accepted the filled prompt; default 10 seconds. |
+| `generationTimeoutMs` / `pollIntervalMs` | Bounded response wait and polling interval after submission. |
+| `progressIntervalMs` | Interval for content-free waiting heartbeats; default 15 seconds. |
 | `outputMaxBytes` | Maximum JSON result returned across `ctx.browser`; default 24 KiB. |
 
 The configured browser Provider must declare `browser-js-v1` plus `authenticated-profile-reuse`, `named-workspace`, and `page-evaluate`. The operator starts no browser, never opens a debugging connection, and makes no OpenAI API request or API-key fallback.
@@ -40,10 +44,11 @@ The configured browser Provider must declare `browser-js-v1` plus `authenticated
 ## Behavior
 
 - Discovery exposes one `chatgpt-web` operator with `maxConcurrency: 1` and `executionModes: [ephemeral]`.
-- Each accepted call opens or reuses `https://chatgpt.com/` inside its named workspace, detects a login requirement, submits the text prompt, waits for a fresh assistant response, and returns only that final text.
+- Each accepted call opens or reuses `https://chatgpt.com/` inside its named workspace, detects a login requirement, fills the prompt, clicks ChatGPT's visible send control, and proves that a new user turn or generation began before waiting for the final assistant text.
+- A filled prompt that the website does not accept fails as `CHATGPT_WEB_SUBMIT_FAILED` within `submissionTimeoutMs`; it never enters the longer generation wait. A generation timeout includes bounded page state without prompt or response text.
 - A `systemPrompt`, when supplied by the physical-operator caller, is merged with the task as `systemPrompt + "\n\n---\n\n" + task`, matching the legacy Solar web route.
 - `AbortSignal` cancels the browser program and yields an aborted result. Dispose never closes the user's browser or authenticated workspace.
-- Progress is bounded to lifecycle phases and result size metadata; it deliberately excludes the prompt and webpage output.
+- Progress is bounded to lifecycle phases, elapsed waiting heartbeats, failure state, and result size metadata; it deliberately excludes the prompt and webpage output.
 
 ## Legacy Solar fidelity
 
@@ -56,7 +61,7 @@ The migration baseline is Solar commit `cf7df54d0`, where `core/chatgpt-web/clie
 | Open or reuse `https://chatgpt.com/` | Opens or reuses the exact URL in `dsh-chatgpt-web` | faithful |
 | Detect a visible login control before submission | Returns `CHATGPT_WEB_AUTH_REQUIRED` | faithful, with a typed failure |
 | Merge `systemPrompt + "\n\n---\n\n" + task` | Preserves the same text boundary | faithful |
-| Fill the composer, press Enter, wait, and extract the newest Markdown reply | Performs the same ordered interaction in one trusted browser program | faithful |
+| Fill the composer, press Enter, wait, and extract the newest Markdown reply | Clicks the current visible send control, proves submission, then waits and extracts in one trusted browser program | platform adaptation; avoids editor-specific Enter behavior |
 | Optional model selector could fail and silently keep the current model | A requested model must be selected and verified or the call fails | deliberate reliability improvement |
 | Disconnect without closing the user's browser | Dispose cancels only this call and keeps the named workspace | faithful |
 | No durable receipt, `submit/poll/collect`, native resume, or Deep Research mode | This first Provider does not claim those capabilities | faithful scope boundary |

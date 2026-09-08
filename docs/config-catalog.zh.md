@@ -1816,14 +1816,18 @@ export interface Config {
   readonly url?: string
   /** Maximum time spent awaiting one assistant response. */
   readonly generationTimeoutMs?: number
+  /** Maximum time spent proving that ChatGPT accepted the filled prompt. */
+  readonly submissionTimeoutMs?: number
   /** Polling delay while awaiting a finished assistant response. */
   readonly pollIntervalMs?: number
+  /** Interval between bounded waiting progress events. */
+  readonly progressIntervalMs?: number
   /** Maximum serialized output retained from the webpage. */
   readonly outputMaxBytes?: number
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:63`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:67`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-resident"></a>
 

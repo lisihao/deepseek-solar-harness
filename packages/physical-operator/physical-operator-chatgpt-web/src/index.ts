@@ -45,8 +45,12 @@ export const DEFAULT_WORKSPACE_NAME = 'dsh-chatgpt-web'
 export const DEFAULT_CHATGPT_URL = 'https://chatgpt.com/'
 /** Default bounded generation wait in milliseconds. */
 export const DEFAULT_GENERATION_TIMEOUT_MS = 30 * 60_000
+/** Default bounded wait for the website to accept a filled prompt. */
+export const DEFAULT_SUBMISSION_TIMEOUT_MS = 10_000
 /** Default polling delay in milliseconds while the website is generating. */
 export const DEFAULT_POLL_INTERVAL_MS = 500
+/** Default interval for durable waiting progress while the browser program runs. */
+export const DEFAULT_PROGRESS_INTERVAL_MS = 15_000
 /** Default maximum JSON result size returned across `ctx.browser`. */
 export const DEFAULT_OUTPUT_MAX_BYTES = 24 * 1024
 
@@ -75,8 +79,12 @@ export interface Config {
   readonly url?: string
   /** Maximum time spent awaiting one assistant response. */
   readonly generationTimeoutMs?: number
+  /** Maximum time spent proving that ChatGPT accepted the filled prompt. */
+  readonly submissionTimeoutMs?: number
   /** Polling delay while awaiting a finished assistant response. */
   readonly pollIntervalMs?: number
+  /** Interval between bounded waiting progress events. */
+  readonly progressIntervalMs?: number
   /** Maximum serialized output retained from the webpage. */
   readonly outputMaxBytes?: number
 }
@@ -90,7 +98,9 @@ export const Config: z<Config> = z.object({
   workspaceName: z.string().default(DEFAULT_WORKSPACE_NAME),
   url: z.string().default(DEFAULT_CHATGPT_URL),
   generationTimeoutMs: z.number().default(DEFAULT_GENERATION_TIMEOUT_MS),
+  submissionTimeoutMs: z.number().default(DEFAULT_SUBMISSION_TIMEOUT_MS),
   pollIntervalMs: z.number().default(DEFAULT_POLL_INTERVAL_MS),
+  progressIntervalMs: z.number().default(DEFAULT_PROGRESS_INTERVAL_MS),
   outputMaxBytes: z.number().default(DEFAULT_OUTPUT_MAX_BYTES),
 })
 
@@ -102,7 +112,9 @@ interface ResolvedConfig {
   readonly workspaceName: string
   readonly url: string
   readonly generationTimeoutMs: number
+  readonly submissionTimeoutMs: number
   readonly pollIntervalMs: number
+  readonly progressIntervalMs: number
   readonly outputMaxBytes: number
 }
 
@@ -112,6 +124,7 @@ interface ProgramRequest {
   readonly prompt: string
   readonly model?: string
   readonly generationTimeoutMs: number
+  readonly submissionTimeoutMs: number
   readonly pollIntervalMs: number
   readonly outputMaxBytes: number
 }
@@ -122,11 +135,22 @@ interface CompletedProgramOutcome {
   readonly truncated: boolean
 }
 
+interface ProgramDiagnostic {
+  readonly page: 'root' | 'conversation' | 'other'
+  readonly userCount: number
+  readonly assistantCount: number
+  readonly inputCharacters: number
+  readonly generating: boolean
+  readonly settled: boolean
+  readonly sendAvailable: boolean
+}
+
 type ProgramOutcome = CompletedProgramOutcome
   | { readonly status: 'auth-required' }
   | { readonly status: 'input-unavailable' }
   | { readonly status: 'model-selection-unavailable' }
-  | { readonly status: 'generation-timeout' }
+  | { readonly status: 'submission-failed'; readonly diagnostic: ProgramDiagnostic }
+  | { readonly status: 'generation-timeout'; readonly diagnostic: ProgramDiagnostic }
   | { readonly status: 'protocol-error' }
 
 const INSPECT_PAGE = String.raw`() => {
@@ -146,6 +170,7 @@ const INSPECT_PAGE = String.raw`() => {
     .map((element) => element.querySelector('.markdown') ?? element)
     .map((element) => element.textContent ?? '')
     .filter((text) => text.trim().length > 0);
+  const userCount = document.querySelectorAll('[data-message-author-role="user"]').length;
   let input = document.querySelector('#prompt-textarea');
   if (input === null || !visible(input)) {
     input = [...document.querySelectorAll('textarea,div[contenteditable="true"]')]
@@ -158,6 +183,7 @@ const INSPECT_PAGE = String.raw`() => {
     loginRequired,
     inputReady: input !== null,
     assistantCount: replies.length,
+    userCount,
   };
 }`
 
@@ -205,11 +231,28 @@ const RESPONSE_STATE = String.raw`() => {
     const label = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/g, ' ').trim();
     return /stop generating|stop streaming|停止生成/i.test(label);
   });
+  const visible = (element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  };
+  const input = document.querySelector('#prompt-textarea')
+    ?? [...document.querySelectorAll('textarea,div[contenteditable="true"]')].find(visible)
+    ?? null;
+  const inputText = String(input?.value ?? input?.textContent ?? '').trim();
+  const send = document.querySelector('#composer-submit-button,button[data-testid="send-button"]');
+  const page = location.pathname === '/'
+    ? 'root'
+    : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
   return {
+    page,
+    userCount: document.querySelectorAll('[data-message-author-role="user"]').length,
     assistantCount: replies.length,
+    inputCharacters: inputText.length,
     response: replies.at(-1) ?? '',
     generating,
     settled,
+    sendAvailable: send !== null && visible(send) && !send.disabled,
   };
 }`
 
@@ -260,6 +303,7 @@ while (Date.now() - readinessStartedAt <= readinessTimeoutMs) {
 if (inspect.inputReady !== true || !Number.isSafeInteger(inspect.assistantCount)) {
   return { status: 'input-unavailable' };
 }
+if (!Number.isSafeInteger(inspect.userCount)) return { status: 'protocol-error' };
 if (request.model !== undefined) {
   const selection = asRecord(await browser.evaluate(page, ${JSON.stringify(SELECT_MODEL)}, {
     model: request.model,
@@ -276,23 +320,60 @@ await browser.run({
 });
 await browser.run({
   id: 'chatgpt-send',
-  kind: 'press',
+  kind: 'click',
   page,
-  locator: { kind: 'css', selector: '[data-dsh-chatgpt-web-input="true"]' },
-  key: 'Enter',
+  locator: { kind: 'css', selector: '#composer-submit-button,button[data-testid="send-button"]' },
 });
 await browser.evaluate(page, ${JSON.stringify(REMOVE_INPUT_MARKER)});
 const initialCount = inspect.assistantCount;
+const initialUserCount = inspect.userCount;
+const submissionStartedAt = Date.now();
+let state;
+let submitted = false;
+while (Date.now() - submissionStartedAt <= request.submissionTimeoutMs) {
+  state = asRecord(await browser.evaluate(page, ${JSON.stringify(RESPONSE_STATE)}));
+  if (state === undefined
+    || !['root', 'conversation', 'other'].includes(state.page)
+    || !Number.isSafeInteger(state.userCount)
+    || !Number.isSafeInteger(state.assistantCount)
+    || !Number.isSafeInteger(state.inputCharacters)
+    || typeof state.response !== 'string'
+    || typeof state.generating !== 'boolean'
+    || typeof state.settled !== 'boolean'
+    || typeof state.sendAvailable !== 'boolean') {
+    return { status: 'protocol-error' };
+  }
+  submitted = state.userCount > initialUserCount
+    || state.assistantCount > initialCount
+    || state.generating
+    || state.page === 'conversation' && state.inputCharacters === 0;
+  if (submitted) break;
+  await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
+}
+const diagnostic = (value) => ({
+  page: value.page,
+  userCount: value.userCount,
+  assistantCount: value.assistantCount,
+  inputCharacters: value.inputCharacters,
+  generating: value.generating,
+  settled: value.settled,
+  sendAvailable: value.sendAvailable,
+});
+if (!submitted) return { status: 'submission-failed', diagnostic: diagnostic(state) };
 const startedAt = Date.now();
 let stableResponse = '';
 let stableSamples = 0;
 while (Date.now() - startedAt <= request.generationTimeoutMs) {
-  const state = asRecord(await browser.evaluate(page, ${JSON.stringify(RESPONSE_STATE)}));
+  state = asRecord(await browser.evaluate(page, ${JSON.stringify(RESPONSE_STATE)}));
   if (state === undefined
+    || !['root', 'conversation', 'other'].includes(state.page)
+    || !Number.isSafeInteger(state.userCount)
     || !Number.isSafeInteger(state.assistantCount)
+    || !Number.isSafeInteger(state.inputCharacters)
     || typeof state.response !== 'string'
     || typeof state.generating !== 'boolean'
-    || typeof state.settled !== 'boolean') {
+    || typeof state.settled !== 'boolean'
+    || typeof state.sendAvailable !== 'boolean') {
     return { status: 'protocol-error' };
   }
   if (state.assistantCount > initialCount && state.response.trim().length > 0) {
@@ -322,7 +403,7 @@ while (Date.now() - startedAt <= request.generationTimeoutMs) {
   }
   await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
 }
-return { status: 'generation-timeout' };
+return { status: 'generation-timeout', diagnostic: diagnostic(state) };
 `,
   }
 }
@@ -393,6 +474,7 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
       prompt,
       ...model === undefined ? {} : { model },
       generationTimeoutMs: this.config.generationTimeoutMs,
+      submissionTimeoutMs: this.config.submissionTimeoutMs,
       pollIntervalMs: this.config.pollIntervalMs,
       outputMaxBytes: this.config.outputMaxBytes,
     }, controller.signal, progress)
@@ -424,7 +506,19 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
         ...request.model === undefined ? {} : { requestedModel: request.model },
       })
       progress.append('chatgpt-web.waiting', { phase: 'waiting' })
-      const result = await this.ctx.browser.runProgram(buildChatGptWebProgram(request), signal)
+      const waitingStartedAt = Date.now()
+      const heartbeat = setInterval(() => {
+        progress.append('chatgpt-web.waiting', {
+          phase: 'waiting',
+          elapsedMs: Date.now() - waitingStartedAt,
+        })
+      }, this.config.progressIntervalMs)
+      let result
+      try {
+        result = await this.ctx.browser.runProgram(buildChatGptWebProgram(request), signal)
+      } finally {
+        clearInterval(heartbeat)
+      }
       const outcome = programOutcome(result.output.kind === 'json' ? result.output.value : undefined)
       switch (outcome.status) {
         case 'completed': {
@@ -444,8 +538,16 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
           throw new PhysicalOperatorError('ChatGPT Web input is unavailable in the selected browser workspace', 'RUNTIME_UNAVAILABLE')
         case 'model-selection-unavailable':
           throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested model selection', 'MODEL_SELECTION_UNAVAILABLE')
+        case 'submission-failed':
+          throw new PhysicalOperatorError(
+            `ChatGPT Web did not accept the filled prompt (${diagnosticText(outcome.diagnostic)})`,
+            'CHATGPT_WEB_SUBMIT_FAILED',
+          )
         case 'generation-timeout':
-          throw new PhysicalOperatorError('ChatGPT Web did not finish generation before the configured timeout', 'CHATGPT_WEB_TIMEOUT')
+          throw new PhysicalOperatorError(
+            `ChatGPT Web did not finish generation before the configured timeout (${diagnosticText(outcome.diagnostic)})`,
+            'CHATGPT_WEB_TIMEOUT',
+          )
         case 'protocol-error':
           throw new PhysicalOperatorError('ChatGPT Web returned an invalid browser program result', 'CHATGPT_WEB_PROTOCOL')
       }
@@ -476,9 +578,17 @@ function resolveConfig(config: Config): ResolvedConfig {
     throw new Error(`physical-operator-chatgpt-web: url must be exactly ${DEFAULT_CHATGPT_URL}`)
   }
   const generationTimeoutMs = positiveTimer('generationTimeoutMs', config.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS)
+  const submissionTimeoutMs = positiveTimer('submissionTimeoutMs', config.submissionTimeoutMs ?? DEFAULT_SUBMISSION_TIMEOUT_MS)
   const pollIntervalMs = positiveTimer('pollIntervalMs', config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS)
+  const progressIntervalMs = positiveTimer('progressIntervalMs', config.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS)
   if (pollIntervalMs > generationTimeoutMs) {
     throw new Error('physical-operator-chatgpt-web: pollIntervalMs must not exceed generationTimeoutMs')
+  }
+  if (submissionTimeoutMs > generationTimeoutMs) {
+    throw new Error('physical-operator-chatgpt-web: submissionTimeoutMs must not exceed generationTimeoutMs')
+  }
+  if (progressIntervalMs > generationTimeoutMs) {
+    throw new Error('physical-operator-chatgpt-web: progressIntervalMs must not exceed generationTimeoutMs')
   }
   const outputMaxBytes = config.outputMaxBytes ?? DEFAULT_OUTPUT_MAX_BYTES
   if (!Number.isSafeInteger(outputMaxBytes) || outputMaxBytes < MIN_OUTPUT_MAX_BYTES) {
@@ -492,7 +602,9 @@ function resolveConfig(config: Config): ResolvedConfig {
     workspaceName,
     url: url.toString(),
     generationTimeoutMs,
+    submissionTimeoutMs,
     pollIntervalMs,
+    progressIntervalMs,
     outputMaxBytes,
   })
 }
@@ -560,11 +672,40 @@ function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
     case 'auth-required': return { status: 'auth-required' }
     case 'input-unavailable': return { status: 'input-unavailable' }
     case 'model-selection-unavailable': return { status: 'model-selection-unavailable' }
-    case 'generation-timeout': return { status: 'generation-timeout' }
+    case 'submission-failed': {
+      const diagnostic = programDiagnostic(value.diagnostic)
+      return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'submission-failed', diagnostic }
+    }
+    case 'generation-timeout': {
+      const diagnostic = programDiagnostic(value.diagnostic)
+      return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'generation-timeout', diagnostic }
+    }
     case 'protocol-error': return { status: 'protocol-error' }
     default:
       return { status: 'protocol-error' }
   }
+}
+
+function programDiagnostic(value: BrowserJsonValue | undefined): ProgramDiagnostic | undefined {
+  if (!isRecord(value)) return undefined
+  const page = value.page
+  if (page !== 'root' && page !== 'conversation' && page !== 'other') return undefined
+  if (!Number.isSafeInteger(value.userCount) || !Number.isSafeInteger(value.assistantCount)
+    || !Number.isSafeInteger(value.inputCharacters) || typeof value.generating !== 'boolean'
+    || typeof value.settled !== 'boolean' || typeof value.sendAvailable !== 'boolean') return undefined
+  return {
+    page,
+    userCount: value.userCount as number,
+    assistantCount: value.assistantCount as number,
+    inputCharacters: value.inputCharacters as number,
+    generating: value.generating,
+    settled: value.settled,
+    sendAvailable: value.sendAvailable,
+  }
+}
+
+function diagnosticText(diagnostic: ProgramDiagnostic): string {
+  return `page=${diagnostic.page}, userMessages=${diagnostic.userCount}, assistantMessages=${diagnostic.assistantCount}, inputCharacters=${diagnostic.inputCharacters}, generating=${diagnostic.generating}, settled=${diagnostic.settled}, sendAvailable=${diagnostic.sendAvailable}`
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, BrowserJsonValue>> {
