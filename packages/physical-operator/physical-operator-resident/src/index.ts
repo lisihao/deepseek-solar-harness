@@ -14,6 +14,11 @@ import {
 } from '@deepseek-ai/dsh-physical-operator'
 import { residentProgressPage, ResidentOperatorCommandId, type ResidentTurn } from '@deepseek-ai/dsh-resident-operator'
 import type { SubagentProvider, SubagentRun } from '@deepseek-ai/dsh-subagent'
+import {
+  materializeOperatorContextEnvelopeNative,
+  receiveOperatorContextEnvelope,
+  renderOperatorContextEnvelopeText,
+} from '@deepseek-ai/dsh-system-prompt'
 
 export const name = 'physical-operator-resident'
 export const inject = ['physicalOperators', 'residentOperators', 'subagents']
@@ -153,11 +158,19 @@ class DualModePhysicalOperator implements PhysicalOperator {
     if (reason !== undefined) throw new PhysicalOperatorError(reason, 'OPERATOR_UNAVAILABLE')
     const run: SubagentRun = await this.ctx.subagents.start(ephemeralProvider, {
       ...request.label === undefined ? {} : { label: request.label },
-      prompt: request.prompt,
+      prompt: request.contextEnvelope === undefined
+        ? request.prompt
+        : [{ type: 'text', text: renderOperatorContextEnvelopeText(request.contextEnvelope) }],
       parent: request.parent,
       signal: request.signal,
     })
-    return { result: run.result, dispose: () => run.dispose() }
+    return {
+      ...request.contextEnvelope === undefined ? {} : {
+        contextReceipt: receiveOperatorContextEnvelope(request.contextEnvelope, String(this.descriptor.id), 'text'),
+      },
+      result: run.result,
+      dispose: () => run.dispose(),
+    }
   }
 
   private async startResident(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
@@ -172,20 +185,28 @@ class DualModePhysicalOperator implements PhysicalOperator {
     if (workspace === undefined) {
       throw new PhysicalOperatorError('resident physical operator requires a parent workspace', 'WORKSPACE_INVALID')
     }
+    const materialized = request.contextEnvelope === undefined
+      ? undefined
+      : materializeOperatorContextEnvelopeNative(request.contextEnvelope)
     const turn: ResidentTurn = await this.ctx.residentOperators.execute({
       commandId: ResidentOperatorCommandId(String(request.executionId)),
       operatorId: residentProvider,
       workspace,
       laneId: request.residentLaneId ?? String(request.parent.id),
       ...request.label === undefined ? {} : { taskLabel: request.label },
-      prompt: request.prompt,
-      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
+      prompt: materialized?.prompt ?? request.prompt,
+      ...(materialized?.systemPrompt ?? request.systemPrompt) === undefined
+        ? {}
+        : { systemPrompt: materialized?.systemPrompt ?? request.systemPrompt },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
       signal: request.signal,
     })
     return {
+      ...request.contextEnvelope === undefined ? {} : {
+        contextReceipt: receiveOperatorContextEnvelope(request.contextEnvelope, String(this.descriptor.id), 'native'),
+      },
       receipt: {
         sessionId: String(turn.sessionId),
         turnId: String(turn.turnId),

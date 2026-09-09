@@ -6,6 +6,8 @@
 
 节点可以把硬锁定的 `operator.preferredIds` 与显式准入的 `operator.fallbackIds` 配对。Scheduler 保持节点 task、role、authority 和 acceptance 不变；只有首选算子资格失败才允许改变已封存的算子／模型，并且分配计划会保留结构化 fallback 来源。首选算子繁忙时等待，不会 fallback。
 
+准入可以携带来自源 Session 的一份已校验运行时上下文快照。每个节点会根据自身目标和已封存算子确定性选择任务模板，把精确选择回执与 Artifact 共同保存，并将该快照和所选模板绑定进节点的算子上下文信封。重试会复用已封存的节点输入，不会在 Attempt 中途重新选择较新的模板版本。远程 Resident 执行会传输同一信封，并要求 Server 返回绑定摘要的物化回执。
+
 RLM 节点可以选择启用与 Prime 兼容的 Autonomous Mode。Graph 或 Run 准入选择 `disabled | auto | enabled`；解析后的 continuation、token、耗时与宿主质量门禁策略经过内容寻址，并封存进该 Attempt 的 `NodeExecutionPlanV1`。Autonomous Mode 是单个节点内部的宿主续接策略，不是 Goal，也不是另一套 Scheduler。它默认保持禁用。
 
 ## Model Experience

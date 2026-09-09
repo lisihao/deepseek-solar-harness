@@ -5,6 +5,10 @@ import type {
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session/types'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {
+  OperatorContextEnvelopeAcceptedReceiptV1,
+  OperatorContextEnvelopeV1,
+} from '@deepseek-ai/dsh-system-prompt'
 import { hostDescribeValueSchema } from '@deepseek-ai/dsh-host-apiproxy/api/host.schema'
 import { hostFrameSchema, muxFrameSchema } from '@deepseek-ai/dsh-host-apiproxy/api/events.schema'
 import { sessionListValueSchema } from '@deepseek-ai/dsh-host-apiproxy/api/sessions.schema'
@@ -71,6 +75,8 @@ export interface RemoteResidentAcceptedTurn {
   readonly sessionId: string
   readonly turnId: string
   readonly stateRevision: number
+  /** Server receipt proving exact materialization of an optional context envelope. */
+  readonly contextReceipt?: OperatorContextEnvelopeAcceptedReceiptV1
 }
 
 /** Browser-safe native model catalog entry exposed by a remote Resident Provider. */
@@ -183,6 +189,8 @@ export interface RemoteResidentExecuteRequest {
   readonly taskLabel?: string
   readonly prompt: readonly ContentBlock[]
   readonly systemPrompt?: string
+  /** Exact current-task context; new Servers materialize this instead of the redundant compatibility fields. */
+  readonly contextEnvelope?: OperatorContextEnvelopeV1
   readonly profile?: { readonly model?: string; readonly effort?: RemoteResidentReasoningEffort }
   /** Sealed native product-tool authority. Protocol 1.4 only. */
   readonly nativeToolPolicy?: 'inherit' | 'disabled'
@@ -642,6 +650,30 @@ export function parseRemoteResidentAcceptedTurn(value: unknown): RemoteResidentA
     sessionId: nonEmptyString(record.sessionId, 'sessionId'),
     turnId: nonEmptyString(record.turnId, 'turnId'),
     stateRevision: nonnegativeInteger(record.stateRevision, 'stateRevision'),
+    ...record.contextReceipt === undefined ? {} : {
+      contextReceipt: parseAcceptedContextReceipt(record.contextReceipt),
+    },
+  }
+}
+
+function parseAcceptedContextReceipt(value: unknown): OperatorContextEnvelopeAcceptedReceiptV1 {
+  const receipt = objectRecord(value, 'remote Resident context receipt')
+  if (receipt.version !== 1) throw new Error('remote Resident context receipt.version must be 1')
+  if (receipt.outcome !== 'accepted') throw new Error('remote Resident context receipt.outcome must be accepted')
+  if (receipt.format !== 'native' && receipt.format !== 'text') {
+    throw new Error('remote Resident context receipt.format is invalid')
+  }
+  const roleFidelity = receipt.format === 'native' ? 'native' : 'text-downgrade'
+  if (receipt.roleFidelity !== roleFidelity) {
+    throw new Error('remote Resident context receipt.roleFidelity does not match format')
+  }
+  return {
+    version: 1,
+    digest: nonEmptyString(receipt.digest, 'contextReceipt.digest'),
+    receiver: nonEmptyString(receipt.receiver, 'contextReceipt.receiver'),
+    outcome: 'accepted',
+    format: receipt.format,
+    roleFidelity,
   }
 }
 

@@ -25,6 +25,7 @@ import {
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
+import { receiveOperatorContextEnvelope, renderOperatorContextEnvelopeText } from '@deepseek-ai/dsh-system-prompt'
 
 /** Cordis plugin name used by Loader diagnostics. */
 export const name = 'physical-operator-chatgpt-web'
@@ -503,6 +504,9 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
     )
     let disposal: Promise<void> | undefined
     return Promise.resolve({
+      ...request.contextEnvelope === undefined ? {} : {
+        contextReceipt: receiveOperatorContextEnvelope(request.contextEnvelope, String(this.descriptor.id), 'text'),
+      },
       result,
       readEvents: (afterSequence, limit, signal) => progress.read(afterSequence, limit, signal),
       dispose: (): Promise<void> => {
@@ -658,6 +662,9 @@ function positiveTimer(field: string, value: number): number {
 }
 
 function promptForRequest(request: PhysicalOperatorProviderStartRequest): string {
+  if (request.contextEnvelope !== undefined) {
+    return renderOperatorContextEnvelopeText(request.contextEnvelope)
+  }
   const text: string[] = []
   for (const block of request.prompt) {
     if (block.type !== 'text') {

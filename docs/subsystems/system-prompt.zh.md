@@ -89,6 +89,10 @@ interface PromptContext {
 }
 ```
 
+## 物理算子上下文信封
+
+`OperatorContextEnvelopeV1` 会在物理算子交接前冻结精确的已组装系统文本、当前任务内容块、有效的命名运行时上下文，以及可重建的 Session、工具调用或 TaskGraph 来源。其 SHA-256 摘要不包含来源，只标识模型可见字段。原生 Consumer 保留 system 角色，并在精确任务前追加一段 JSON 框定上下文；仅文本 Consumer 会收到一份带显式角色的规范 JSON 文档。每个 Consumer 都必须返回绑定摘要的接受或拒绝回执；物理算子 Service 会拒绝缺失、不匹配或已拒绝的回执，避免静默丢失上下文。解析器会在跨进程或网络接收信封后重新构建并计算摘要，再进行物化。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>

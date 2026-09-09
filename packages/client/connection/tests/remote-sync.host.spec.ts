@@ -8,6 +8,7 @@ import {
   RpcId, type ApiProxy, type HostFrame, type MuxFrame, type RpcRequest,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { RemoteSyncHub, RemoteSyncJournal } from '../src/remote-sync-host.ts'
+import { buildOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
 
 function hostEnvelope(rpcId: string): RpcRequest<HostFrame> {
   return {
@@ -320,6 +321,32 @@ describe('RemoteSyncHub', () => {
     })).resolves.toMatchObject({ sessionId: 'resident-session' })
     expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
       taskLabel: 'label', systemPrompt: 'system', profile: { model: 'sol' },
+    }))
+    const contextEnvelope = buildOperatorContextEnvelope({
+      systemText: 'system from envelope',
+      task: [{ type: 'text', text: 'task from envelope' }],
+      contexts: [{ name: 'memory', text: 'preference from memory' }],
+      source: {
+        kind: 'taskgraph', runId: 'run-1', nodeId: 'node-1', contextPacketRef: 'sha256:context',
+      },
+    })
+    await expect(hub.operatorExecute({
+      commandId: 'command-3', operatorId: 'codex', laneId: 'lane-1', prompt: [],
+      systemPrompt: 'redundant compatibility system', contextEnvelope,
+      workspaceIdentity: {
+        version: 1, repository: 'github.com/lisihao/project', commit: 'c'.repeat(40),
+      },
+    })).resolves.toMatchObject({
+      contextReceipt: {
+        digest: contextEnvelope.digest, receiver: 'remote-resident:codex',
+        outcome: 'accepted', format: 'native', roleFidelity: 'native',
+      },
+    })
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
+      systemPrompt: 'system from envelope',
+      prompt: expect.arrayContaining([
+        expect.objectContaining({ type: 'text', text: 'task from envelope' }),
+      ]),
     }))
     await expect(hub.operatorReadArtifact(`sha256:${'a'.repeat(64)}`)).resolves.toEqual({
       ref: `sha256:${'a'.repeat(64)}`, json: '{}',

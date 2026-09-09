@@ -259,9 +259,18 @@ async function e2eHarness(prefix: string): Promise<{
   const root = join(home, 'orchestrations')
   const workspace = join(home, 'workspace')
   await mkdir(workspace)
+  const seededAt = '2026-08-24T00:00:00.000Z'
+  await writeFile(join(home, 'task-templates.json'), JSON.stringify({
+    formatVersion: 1,
+    templates: [{
+      id: 'coding-method', enabled: true, createdAt: seededAt, version: 1,
+      name: 'Coding method', rank: 10, match: { objectiveKeywords: ['formatting'] },
+      method: 'Apply the bounded coding method to {{objective}}.', updatedAt: seededAt, history: [],
+    }],
+    personalization: { 'coding-method': { preferences: 'Keep verification proportional.' } },
+  }), 'utf8')
   const harnessRoot = join(root, 'continual-harness')
   await mkdir(harnessRoot, { recursive: true })
-  const seededAt = '2026-08-24T00:00:00.000Z'
   await writeFile(join(harnessRoot, 'state.json'), JSON.stringify({
     version: 3,
     generation: 1,
@@ -329,7 +338,16 @@ describe('Prime-compatible orchestration offline E2E', () => {
     for (const direct of directRuns) {
       const compiled = await fixture.client.compile({
         intent: { request: direct.task },
-        admission: admission({ sourceSessionId: direct.sourceSessionId, rlm: direct.rlm }),
+        admission: admission({
+          sourceSessionId: direct.sourceSessionId,
+          rlm: direct.rlm,
+          runtimeContext: {
+            version: 1,
+            sourceSessionId: direct.sourceSessionId,
+            contextSnapshotMessageId: `snapshot:${direct.sourceSessionId}`,
+            sections: [{ name: 'mnemon:runtime-memory', text: 'USER preference: concise Chinese evidence.' }],
+          },
+        }),
         graph: taskGraph(fixture.workspace, [node('direct', direct.task, { operatorId: 'codex' })]),
       })
       const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
@@ -337,7 +355,21 @@ describe('Prime-compatible orchestration offline E2E', () => {
       expect(complete.nodes[0]).toMatchObject({ state: 'passed', rlm: 'disabled' })
       const request = fixture.resident.requests.at(-1)
       expect(request?.modelToolBridge).toBeUndefined()
+      const context = request?.prompt?.[0]?.text
+      const parsedContext = context === undefined
+        ? undefined
+        : JSON.parse(context) as { dshRuntimeContext?: { contexts?: unknown[] } }
+      expect(parsedContext?.dshRuntimeContext?.contexts).toEqual(expect.arrayContaining([
+        { name: 'mnemon:runtime-memory', text: 'USER preference: concise Chinese evidence.' },
+      ]))
       const events = await fixture.client.readEvents({ runId: run.runId, limit: 200 })
+      expect(events.events.find(event => event.type === 'operator.context.received')?.data).toMatchObject({
+        format: 'native', roleFidelity: 'native',
+      })
+      const templateEvent = events.events.find(event => event.type === 'task-template.selected')
+      expect(templateEvent?.data).toMatchObject(direct.sourceSessionId === 'auto-simple'
+        ? { decision: 'inject', templateId: 'coding-method' }
+        : { decision: 'skip', templateId: null })
       expect(events.events.find(event => event.type === 'rlm.resolved')?.data).toMatchObject({
         enabled: false,
         reason: direct.expectedReason,

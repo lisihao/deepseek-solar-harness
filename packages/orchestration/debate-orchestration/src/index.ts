@@ -550,6 +550,9 @@ export class DebateTaskGraphRoundExecutor implements DebateRoundExecutorPort {
         policy: 'auto',
         route: 'taskgraph',
         sourceSessionId,
+        ...request.turns[0]?.runtimeContext === undefined
+          ? {}
+          : { runtimeContext: request.turns[0].runtimeContext },
         rlm: 'disabled',
         autonomous: 'disabled',
         continualHarness: 'off',

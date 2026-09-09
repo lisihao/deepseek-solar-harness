@@ -22,7 +22,13 @@ import { isJsonValue } from '@deepseek-ai/dsh-session'
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { buildOperatorContextEnvelope, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import type {
+  OperatorContextEnvelopeReceiptV1,
+  OperatorContextEnvelopeSourceV1,
+  OperatorContextEnvelopeV1,
+} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-task-template-context'
 import { z as zod } from 'zod'
 import type {
   PhysicalOperatorExecutionMode,
@@ -96,6 +102,14 @@ declare module '@deepseek-ai/dsh-session/types' {
     'physical-operator/dispatch-terminal': {
       commandId: string
       code: string
+    }
+    /** Durable proof that one current-task context envelope crossed the operator boundary. */
+    'physical-operator/context-envelope': {
+      commandId: string
+      operatorId: string
+      digest: string
+      source: OperatorContextEnvelopeSourceV1
+      receipt: OperatorContextEnvelopeReceiptV1
     }
     /** One bounded native Resident observation copied into this Session's ignorable Trace. */
     'physical-operator/progress': {
@@ -618,6 +632,7 @@ export function apply(ctx: Context): void {
       const resident = request.mode === 'resident'
         ? await prepareResidentSurface(ctx, modelTools, executionId, parent, exec.signal)
         : undefined
+      const contextEnvelope = toolContextEnvelope(parent, String(exec.callId), [{ type: 'text', text: prompt }])
       let run: PhysicalOperatorRun | undefined
       let observer: ReturnType<typeof observePhysicalOperatorProgress> | undefined
       try {
@@ -632,6 +647,7 @@ export function apply(ctx: Context): void {
           executionId,
           label: description,
           prompt: [{ type: 'text', text: prompt }],
+          ...contextEnvelope === undefined ? {} : { contextEnvelope },
           parent,
           signal: exec.signal,
           ...request.mode === undefined ? {} : { mode: request.mode },
@@ -640,6 +656,15 @@ export function apply(ctx: Context): void {
           ...resident?.descriptor === undefined ? {} : { modelToolBridge: resident.descriptor },
           ...resident?.descriptor === undefined ? {} : { nativeToolPolicy: 'dsh-tools-authoritative' as const },
         })
+        if (contextEnvelope !== undefined && run.contextReceipt !== undefined) {
+          parent.session.append('physical-operator/context-envelope', {
+            commandId: String(executionId),
+            operatorId,
+            digest: contextEnvelope.digest,
+            source: contextEnvelope.source,
+            receipt: run.contextReceipt,
+          }, { ignorable: true })
+        }
         observer = observePhysicalOperatorProgress(ctx, parent, run, String(executionId))
         const result = await settleForeground(run, () => observer?.stop())
         return {
@@ -694,6 +719,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     if (prompt === undefined) {
       throw new Error(`physical-operator router cannot recover prompt message ${dispatch.promptMessageId}`)
     }
+    const contextEnvelope = operatorContextEnvelope(agent, options, dispatch.promptMessageId, prompt)
     const signal = options.signal ?? new AbortController().signal
     let run: PhysicalOperatorRun | undefined
     let observer: ReturnType<typeof observePhysicalOperatorProgress> | undefined
@@ -712,6 +738,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         executionId: PhysicalOperatorExecutionId(dispatch.commandId),
         label: labelFor(prompt),
         prompt,
+        contextEnvelope,
         parent: agent,
         signal,
         mode: dispatch.executionMode,
@@ -727,6 +754,15 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
           ? { residentProfile: dispatch.residentProfile }
           : {}),
       })
+      if (run.contextReceipt !== undefined) {
+        agent.session.append('physical-operator/context-envelope', {
+          commandId: dispatch.commandId,
+          operatorId: dispatch.operatorId,
+          digest: contextEnvelope.digest,
+          source: contextEnvelope.source,
+          receipt: run.contextReceipt,
+        }, { ignorable: true })
+      }
       observer = observePhysicalOperatorProgress(this.ctx, agent, run, dispatch.commandId)
       const result = await run.result
       await observer.stop()
@@ -1118,6 +1154,92 @@ function cloneCallConfig(config: LlmCallConfig): LlmCallConfig {
 function promptForMessage(events: readonly SessionEvent[], messageId: string): ContentBlock[] | undefined {
   const found = events.find(event => event.type === 'user/message' && String(event.data.id) === messageId)
   return found?.type === 'user/message' ? [...found.data.content] : undefined
+}
+
+/** Build the current-request-only envelope from the already-logged model input. */
+function operatorContextEnvelope(
+  agent: Agent,
+  options: GenerateOptions,
+  taskMessageId: string,
+  task: ContentBlock[],
+): OperatorContextEnvelopeV1 {
+  const header = [...agent.session.events].reverse().find(event => event.type === 'request/header')
+  if (header?.type !== 'request/header') {
+    throw new Error('physical-operator router cannot locate the frozen request/header for context handoff')
+  }
+  const taskIndex = options.messages.findIndex(message => String(message.id) === taskMessageId)
+  const taskMessage = options.messages[taskIndex]
+  if (taskMessage === undefined) {
+    throw new Error(`physical-operator router cannot locate task message ${taskMessageId} in the frozen request`)
+  }
+  const snapshot = [...options.messages].reverse().find(message => (
+    message.source.kind === 'plugin'
+    && message.source.plugin === '@deepseek-ai/dsh-system-prompt'
+    && message.source.form === 'snapshot'
+  ))
+  const instructions = options.messages.slice(taskIndex + 1).filter(message => message.source.kind === 'task-template')
+  const instructionContexts = instructions.map((message, index) => ({
+    name: `task-template:${message.source.kind === 'task-template'
+      ? String(message.source.receipt.templateId ?? index)
+      : String(index)}`,
+    text: textContent(message.content),
+  }))
+  const snapshotContexts = snapshot?.source.kind === 'plugin' && snapshot.source.form === 'snapshot'
+    ? snapshot.source.sections
+    : []
+  return buildOperatorContextEnvelope({
+    systemText: options.system ?? '',
+    task,
+    contexts: [...snapshotContexts, ...instructionContexts],
+    source: {
+      kind: 'session',
+      requestHeaderEventSeq: header.seq,
+      taskMessageId: taskMessage.id,
+      ...snapshot === undefined ? {} : { contextSnapshotMessageId: snapshot.id },
+      ...instructions.length === 0 ? {} : { instructionMessageIds: instructions.map(message => message.id) },
+    },
+  })
+}
+
+/** Build a tool-issued handoff from the current durable request projection. */
+function toolContextEnvelope(
+  agent: Agent,
+  toolCallId: string,
+  task: ContentBlock[],
+): OperatorContextEnvelopeV1 | undefined {
+  const header = [...agent.session.events].reverse().find(event => event.type === 'request/header')
+  if (header?.type !== 'request/header') return undefined
+  const messages = agent.session.deriveMessages()
+  const snapshot = [...messages].reverse().find(message => (
+    message.source.kind === 'plugin'
+    && message.source.plugin === '@deepseek-ai/dsh-system-prompt'
+    && message.source.form === 'snapshot'
+  ))
+  const currentTaskIndex = messages.findLastIndex(message => message.source.kind === 'user')
+  const instructions = currentTaskIndex < 0
+    ? []
+    : messages.slice(currentTaskIndex + 1).filter(message => message.source.kind === 'task-template')
+  const instructionContexts = instructions.map((message, index) => ({
+    name: `task-template:${message.source.kind === 'task-template'
+      ? String(message.source.receipt.templateId ?? index)
+      : String(index)}`,
+    text: textContent(message.content),
+  }))
+  const snapshotContexts = snapshot?.source.kind === 'plugin' && snapshot.source.form === 'snapshot'
+    ? snapshot.source.sections
+    : []
+  return buildOperatorContextEnvelope({
+    systemText: header.data.header.system ?? '',
+    task,
+    contexts: [...snapshotContexts, ...instructionContexts],
+    source: {
+      kind: 'tool',
+      requestHeaderEventSeq: header.seq,
+      toolCallId,
+      ...snapshot === undefined ? {} : { contextSnapshotMessageId: snapshot.id },
+      ...instructions.length === 0 ? {} : { instructionMessageIds: instructions.map(message => message.id) },
+    },
+  })
 }
 
 function latestUserPromptMessage(events: readonly SessionEvent[]): { readonly id: string; readonly content: ContentBlock[] } | undefined {

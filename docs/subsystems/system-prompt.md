@@ -89,6 +89,10 @@ interface PromptContext {
 }
 ```
 
+## Physical-operator context envelope
+
+`OperatorContextEnvelopeV1` freezes the exact assembled system text, current task blocks, effective named runtime contexts, and reconstructable Session, tool-call, or TaskGraph provenance before a physical operator handoff. Its SHA-256 digest excludes provenance and identifies only model-visible fields. Native Consumers preserve the system role and append a JSON-framed context block before the exact task; text-only Consumers receive one canonical JSON document with explicit roles. Every Consumer returns a digest-bound accepted or rejected receipt, and the physical-operator Service rejects missing, mismatched, or rejected receipts instead of allowing silent context loss. The parser reconstructs and re-digests envelopes received across process or network boundaries before materialization.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>

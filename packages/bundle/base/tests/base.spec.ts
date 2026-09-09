@@ -41,6 +41,9 @@ describe('dsh-base bundle', () => {
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-codex')
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-claude-code')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-output-style', 'workspace:^')
+    expect(rows.map(row => row.id)).toEqual(expect.arrayContaining(['task-template', 'task-template-context']))
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-task-template', 'workspace:^')
+    expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-task-template-context', 'workspace:^')
   })
 
   it('gates each shell stack by platform with a symmetric disabled expression', () => {

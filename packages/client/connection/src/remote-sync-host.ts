@@ -41,6 +41,10 @@ import {
 } from './remote-sync.ts'
 import type { RemoteOperatorHostService } from './remote-operator-host.ts'
 import type { RemoteDeviceScope } from './remote-auth-wire.ts'
+import {
+  materializeOperatorContextEnvelopeNative,
+  receiveOperatorContextEnvelope,
+} from '@deepseek-ai/dsh-system-prompt'
 
 type SourceStream = 'mux' | 'host'
 
@@ -375,16 +379,24 @@ export class RemoteSyncHub {
     const host = this.expectRemoteOperatorHost()
     const qualification = await host.qualification()
     if (!qualification.available) throw new Error(qualification.reason ?? 'remote execution host is unavailable')
-    const materialized = await host.materializeWorkspace(request.workspaceIdentity, request.commandId)
-    const { commandId, operatorId, laneId, taskLabel, prompt, systemPrompt, profile, nativeToolPolicy } = request
+    const materializedWorkspace = await host.materializeWorkspace(request.workspaceIdentity, request.commandId)
+    const {
+      commandId, operatorId, laneId, taskLabel, prompt, systemPrompt,
+      contextEnvelope, profile, nativeToolPolicy,
+    } = request
+    const materializedContext = contextEnvelope === undefined
+      ? undefined
+      : materializeOperatorContextEnvelopeNative(contextEnvelope)
     const turn = await this.expectResident().execute({
       commandId: commandId as never,
       operatorId,
-      workspace: materialized.path,
+      workspace: materializedWorkspace.path,
       laneId,
       ...taskLabel === undefined ? {} : { taskLabel },
-      prompt,
-      ...systemPrompt === undefined ? {} : { systemPrompt },
+      prompt: materializedContext?.prompt ?? prompt,
+      ...(materializedContext?.systemPrompt ?? systemPrompt) === undefined
+        ? {}
+        : { systemPrompt: materializedContext?.systemPrompt ?? systemPrompt },
       ...profile === undefined ? {} : { profile },
       ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
       signal: new AbortController().signal,
@@ -393,6 +405,13 @@ export class RemoteSyncHub {
       sessionId: String(turn.sessionId),
       turnId: String(turn.turnId),
       stateRevision: turn.stateRevision,
+      ...contextEnvelope === undefined ? {} : {
+        contextReceipt: receiveOperatorContextEnvelope(
+          contextEnvelope,
+          `remote-resident:${operatorId}`,
+          'native',
+        ),
+      },
     }
     await turn.dispose()
     return accepted

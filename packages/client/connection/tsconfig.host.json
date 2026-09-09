@@ -47,6 +47,9 @@
     },
     {
       "path": "../../orchestration/orchestration"
+    },
+    {
+      "path": "../../core/system-prompt"
     }
   ]
 }

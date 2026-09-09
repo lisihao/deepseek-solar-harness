@@ -1692,6 +1692,7 @@ export class LocalDebateProvider extends DebateService {
       sourceRefs: clone(run.request.sourceRefs ?? []),
       ...(run.request.execution === undefined ? {} : { execution: clone(run.request.execution) }),
       ...(run.request.sourceSessionId === undefined ? {} : { sourceSessionId: run.request.sourceSessionId }),
+      ...(run.request.runtimeContext === undefined ? {} : { runtimeContext: clone(run.request.runtimeContext) }),
       priorLedger: clone(run.snapshot.claimLedger),
       priorDissent: clone(run.snapshot.dissent),
       priorUnresolved: clone(run.snapshot.unresolved),

@@ -1,9 +1,11 @@
 /** Model-facing durable TaskGraph orchestration Consumer. */
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
 import {
   OrchestrationRunId,
   type LogicalTaskGraphV1,
+  type OrchestrationRuntimeContextV1,
   type RlmAutonomousMode,
   type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
@@ -116,6 +118,22 @@ function collaborationPolicy(events: readonly { readonly type: string; readonly 
   return 'auto'
 }
 
+/** Capture only the already-rendered dynamic contexts for this request. */
+function runtimeContextSnapshot(agent: Agent): OrchestrationRuntimeContextV1 | undefined {
+  const snapshot = [...agent.session.deriveMessages()].reverse().find(message => (
+    message.source.kind === 'plugin'
+    && message.source.plugin === '@deepseek-ai/dsh-system-prompt'
+    && message.source.form === 'snapshot'
+  ))
+  if (snapshot?.source.kind !== 'plugin' || snapshot.source.form !== 'snapshot') return undefined
+  return {
+    version: 1,
+    sourceSessionId: String(agent.id),
+    contextSnapshotMessageId: String(snapshot.id),
+    sections: snapshot.source.sections.map(section => ({ name: section.name, text: section.text })),
+  }
+}
+
 /**
  * Fold the latest orchestration strategy selection from a Session event stream.
  * @param events Ordered Session events.
@@ -226,11 +244,18 @@ export function apply(ctx: Context): void {
       const agent = exec.agent
       const policy = agent === undefined ? 'auto' : collaborationPolicy(agent.session.events)
       const preferences = agent === undefined ? DEFAULT_PREFERENCES : foldOrchestrationPreferences(agent.session.events)
+      const runtimeContext = agent === undefined ? undefined : runtimeContextSnapshot(agent)
       const compilation = await ctx.orchestrations.compile({
         intent: { request: args.objective },
         graph,
         ...agent === undefined ? {} : {
-          admission: { policy, route: 'taskgraph', sourceSessionId: String(agent.id), ...preferences },
+          admission: {
+            policy,
+            route: 'taskgraph',
+            sourceSessionId: String(agent.id),
+            ...runtimeContext === undefined ? {} : { runtimeContext },
+            ...preferences,
+          },
         },
       })
       const run = await ctx.orchestrations.start({

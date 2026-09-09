@@ -18,6 +18,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import { receiveOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import PhysicalOperatorRuntime, {
@@ -154,6 +155,9 @@ class DurableOperator implements PhysicalOperator {
       },
     }
     return {
+      ...request.contextEnvelope === undefined ? {} : {
+        contextReceipt: receiveOperatorContextEnvelope(request.contextEnvelope, this.id, 'native'),
+      },
       readEvents: async (afterSequence, limit) => {
         if (this.progressError !== undefined) throw new Error(this.progressError)
         const visibleObservations = this.observationsAfterSettle && !settled ? [] : observationEvents

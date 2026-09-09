@@ -10,6 +10,34 @@ import { AnonymousEntries, NamedEntries, ScopedLayers, scopeTarget } from '@deep
 import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
 import type { ContextSnapshotSection, ToolSchema } from '@deepseek-ai/dsh-llm'
 
+export {
+  buildOperatorContextEnvelope,
+  materializeOperatorContextEnvelopeNative,
+  OPERATOR_CONTEXT_ENVELOPE_VERSION,
+  operatorContextEnvelopeDigest,
+  parseOperatorContextEnvelope,
+  rejectOperatorContextEnvelope,
+  receiveOperatorContextEnvelope,
+  renderOperatorContextEnvelopeText,
+} from './envelope.ts'
+export type {
+  OperatorContextEnvelopeAcceptedReceiptV1,
+  OperatorContextEnvelopeContextV1,
+  OperatorContextEnvelopeContextSegmentV1,
+  OperatorContextEnvelopeInput,
+  OperatorContextEnvelopeNativeMaterializationV1,
+  OperatorContextEnvelopeReceiptV1,
+  OperatorContextEnvelopeRejectedReceiptV1,
+  OperatorContextEnvelopeSessionInputSourceV1,
+  OperatorContextEnvelopeSessionSourceV1,
+  OperatorContextEnvelopeSourceV1,
+  OperatorContextEnvelopeTaskGraphInputSourceV1,
+  OperatorContextEnvelopeTaskGraphSourceV1,
+  OperatorContextEnvelopeToolInputSourceV1,
+  OperatorContextEnvelopeToolSourceV1,
+  OperatorContextEnvelopeV1,
+} from './envelope.ts'
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     systemPrompt: SystemPrompt

@@ -212,15 +212,23 @@ export class PhysicalOperatorRuntime extends Service {
       operatorId: stableId,
     }
     this.active.set(stableId, status.active + 1)
+    const providerRequest: PhysicalOperatorProviderStartRequest = {
+      ...request,
+      executionId: identity.executionId,
+      mode,
+    }
     let providerRun: PhysicalOperatorProviderRun
     try {
-      const providerRequest: PhysicalOperatorProviderStartRequest = {
-        ...request,
-        executionId: identity.executionId,
-        mode,
-      }
       providerRun = await operator.start(providerRequest)
     } catch (error) {
+      this.release(stableId)
+      throw error
+    }
+
+    try {
+      validateContextReceipt(providerRequest, providerRun)
+    } catch (error) {
+      await providerRun.dispose().catch(() => {})
       this.release(stableId)
       throw error
     }
@@ -241,6 +249,7 @@ export class PhysicalOperatorRuntime extends Service {
     return {
       id: identity.executionId,
       operatorId: stableId,
+      ...providerRun.contextReceipt === undefined ? {} : { contextReceipt: providerRun.contextReceipt },
       ...providerRun.receipt === undefined ? {} : { receipt: providerRun.receipt },
       ...providerRun.readEvents === undefined ? {} : { readEvents: providerRun.readEvents.bind(providerRun) },
       result,
@@ -302,6 +311,42 @@ export class PhysicalOperatorRuntime extends Service {
         this.ctx.logger.warn(`physical-operator: ${name} listener threw: ${renderThrown(error)}`)
       }
     }
+  }
+}
+
+/** Refuse silent context loss or a receipt that does not identify this handoff. */
+function validateContextReceipt(
+  request: PhysicalOperatorProviderStartRequest,
+  run: PhysicalOperatorProviderRun,
+): void {
+  const envelope = request.contextEnvelope
+  const receipt = run.contextReceipt
+  if (envelope === undefined) {
+    if (receipt !== undefined) {
+      throw new PhysicalOperatorError(
+        'physical operator returned a context receipt without a supplied envelope',
+        'CONTEXT_ENVELOPE_INVALID',
+      )
+    }
+    return
+  }
+  if (receipt === undefined) {
+    throw new PhysicalOperatorError(
+      `physical operator "${String(request.executionId)}" did not acknowledge context envelope ${envelope.digest}`,
+      'CONTEXT_ENVELOPE_DROPPED',
+    )
+  }
+  if (receipt.digest !== envelope.digest) {
+    throw new PhysicalOperatorError(
+      `physical operator context receipt digest ${receipt.digest} does not match ${envelope.digest}`,
+      'CONTEXT_ENVELOPE_INVALID',
+    )
+  }
+  if (receipt.outcome === 'rejected') {
+    throw new PhysicalOperatorError(
+      `physical operator rejected context envelope ${envelope.digest}: ${receipt.reason}`,
+      'CONTEXT_ENVELOPE_REJECTED',
+    )
   }
 }
 

@@ -10,6 +10,7 @@ import {
   type DebatePolicyV1,
   type DebateRunSnapshotV1,
   type DebateRunSummaryV1,
+  type DebateRuntimeContextV1,
   type DebateStartRequestV1,
   type DebateTraceSessionEventV1,
   type DebateTraceProgressV1,
@@ -510,6 +511,22 @@ function messageText(message: HostMessage): string {
     .map(block => block.text)
     .join('\n')
     .trim()
+}
+
+/** Capture the owning request's rendered preference and memory contexts. */
+function debateRuntimeContext(agent: Agent): DebateRuntimeContextV1 | undefined {
+  const snapshot = [...agent.session.deriveMessages()].reverse().find(message => (
+    message.source.kind === 'plugin'
+    && message.source.plugin === '@deepseek-ai/dsh-system-prompt'
+    && message.source.form === 'snapshot'
+  ))
+  if (snapshot?.source.kind !== 'plugin' || snapshot.source.form !== 'snapshot') return undefined
+  return {
+    version: 1,
+    sourceSessionId: String(agent.id),
+    contextSnapshotMessageId: String(snapshot.id),
+    sections: snapshot.source.sections.map(section => ({ name: section.name, text: section.text })),
+  }
 }
 
 function dispatchForPosition(
@@ -1308,6 +1325,7 @@ class DebateHostAdapter extends LlmAdapter {
       throw new DebateError('Debate requires a Session workspace', 'DEBATE_INVALID')
     }
     const initialPlan = debateInitialPlanForPrompt(prompt)
+    const runtimeContext = debateRuntimeContext(agent)
     const started = await this.ctx.debates.start({
       version: 1,
       commandId: dispatch.commandId,
@@ -1317,6 +1335,7 @@ class DebateHostAdapter extends LlmAdapter {
       policy: debatePolicyForPrompt(prompt),
       execution: { version: 1, kind: 'standalone' },
       sourceSessionId: String(agent.id),
+      ...runtimeContext === undefined ? {} : { runtimeContext },
     })
     options.signal?.throwIfAborted()
     const completionResult = approveExplicitDebate(this.ctx, started, dispatch.commandId).then(
@@ -1530,6 +1549,7 @@ export function apply(ctx: Context): void {
       if (workspace === undefined || workspace.length === 0) throw new Error('action=start requires a Session workspace')
 
       const initialPlan = debateInitialPlanForPrompt(args.prompt)
+      const runtimeContext = debateRuntimeContext(agent)
       const request: DebateStartRequestV1 = {
         version: 1,
         commandId: stableCommandId,
@@ -1539,6 +1559,7 @@ export function apply(ctx: Context): void {
         policy: debatePolicyForPrompt(args.prompt, preferences.mode),
         execution: { version: 1, kind: 'standalone' },
         sourceSessionId: String(agent.id),
+        ...runtimeContext === undefined ? {} : { runtimeContext },
       }
       const started = await ctx.debates.start(request)
       await projectToolTrace(started)

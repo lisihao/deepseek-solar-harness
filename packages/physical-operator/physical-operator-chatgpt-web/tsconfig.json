@@ -11,6 +11,7 @@
     { "path": "../../../vendor/schemastery" },
     { "path": "../../browser/browser" },
     { "path": "../physical-operator" },
+    { "path": "../../core/system-prompt" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

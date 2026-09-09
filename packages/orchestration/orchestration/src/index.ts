@@ -8,6 +8,7 @@ import type {
   CapabilityRequirement,
 } from '@deepseek-ai/dsh-capability-capsule'
 import type { ContextPacketV1, ContextPolicy } from '@deepseek-ai/dsh-context-compiler'
+import type { TaskTemplateSelection } from '@deepseek-ai/dsh-task-template'
 import type { IntentCompileRequest, IntentIRV1 } from '@deepseek-ai/dsh-intent-compiler'
 import type {
   ContinualHarnessMode,
@@ -19,7 +20,7 @@ import type {
   PlannerVerifierPreference,
   RlmExecutionMode,
 } from '@deepseek-ai/dsh-model-allocation'
-import { HarnessError, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { HarnessError, type ContentBlock, type ContextSnapshotSection } from '@deepseek-ai/dsh-llm'
 import type {
   PhysicalOperatorExecutionId,
   PhysicalOperatorExecutionPreference,
@@ -264,11 +265,24 @@ export interface OrchestrationCompileRequest {
   readonly admission?: OrchestrationAdmissionTraceV1
 }
 
+/** Frozen dynamic contexts from the parent DSH request that admitted a graph. */
+export interface OrchestrationRuntimeContextV1 {
+  readonly version: 1
+  /** Session whose already-logged prompt snapshot supplied these sections. */
+  readonly sourceSessionId: string
+  /** Durable message identity of the system-prompt runtime snapshot. */
+  readonly contextSnapshotMessageId: string
+  /** Exact rendered sections, including user preference and memory contexts. */
+  readonly sections: readonly ContextSnapshotSection[]
+}
+
 /** User-selected collaboration policy and route captured before TaskGraph compilation. */
 export interface OrchestrationAdmissionTraceV1 {
   readonly policy: 'auto' | 'direct' | 'codex' | 'claude-code'
   readonly route: 'taskgraph'
   readonly sourceSessionId: string
+  /** Current-request dynamic contexts captured before crossing into the daemon. */
+  readonly runtimeContext?: OrchestrationRuntimeContextV1
   /** Independent user/system choice; RLM is a node strategy, not an operator. */
   readonly rlm?: RlmExecutionMode
   /** Autonomous continuation is independent from Goal and reuses the same RLM/TaskGraph authority. */
@@ -376,6 +390,12 @@ export interface NodeExecutionPlanV1 {
   readonly capabilityPlanRef: OrchestrationArtifactRef
   readonly capabilityGeneration: number
   readonly contextPacketRef: OrchestrationArtifactRef
+  /** Deterministic task-template decision sealed for this exact attempt. */
+  readonly taskTemplateRef?: OrchestrationArtifactRef
+  /** Exact selected content and receipt; a skip remains explicit and auditable. */
+  readonly taskTemplate?: TaskTemplateSelection
+  /** Parent-request dynamic contexts sealed for this exact attempt. */
+  readonly runtimeContext?: OrchestrationRuntimeContextV1
   readonly allocationPlanRef: OrchestrationArtifactRef
   readonly allocationPlan: ModelAllocationPlan
   readonly rlmPlan?: RlmExecutionPlanV1

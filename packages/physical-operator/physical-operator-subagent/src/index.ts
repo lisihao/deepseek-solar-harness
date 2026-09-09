@@ -17,6 +17,7 @@ import {
   type PhysicalOperatorProviderStartRequest,
 } from '@deepseek-ai/dsh-physical-operator'
 import type { SubagentProvider, SubagentRun } from '@deepseek-ai/dsh-subagent'
+import { receiveOperatorContextEnvelope, renderOperatorContextEnvelopeText } from '@deepseek-ai/dsh-system-prompt'
 
 export const name = 'physical-operator-subagent'
 export const inject = ['physicalOperators', 'subagents']
@@ -115,11 +116,16 @@ class SubagentPhysicalOperator implements PhysicalOperator {
     }
     const run: SubagentRun = await this.ctx.subagents.start(this.provider, {
       ...request.label === undefined ? {} : { label: request.label },
-      prompt: request.prompt,
+      prompt: request.contextEnvelope === undefined
+        ? request.prompt
+        : [{ type: 'text', text: renderOperatorContextEnvelopeText(request.contextEnvelope) }],
       parent: request.parent,
       signal: request.signal,
     })
     return {
+      ...request.contextEnvelope === undefined ? {} : {
+        contextReceipt: receiveOperatorContextEnvelope(request.contextEnvelope, String(this.descriptor.id), 'text'),
+      },
       result: run.result,
       dispose: () => run.dispose(),
     }

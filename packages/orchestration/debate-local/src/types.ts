@@ -8,6 +8,7 @@ import type {
   DebateExecutionRefV1,
   DebateEvidenceRefV1,
   DebateRolePersonaV1,
+  DebateRuntimeContextV1,
   DebateRoleId,
   DebateModelSource,
   DebateModelTier,
@@ -59,6 +60,8 @@ export interface DebateTurnRequestV1 {
   readonly execution?: DebateExecutionRefV1
   /** Source DSH Session retained for orchestration Trace lineage. */
   readonly sourceSessionId?: string
+  /** Frozen parent-request contexts handed to the TaskGraph admission. */
+  readonly runtimeContext?: DebateRuntimeContextV1
   /** Claims settled before this turn began. */
   readonly priorLedger: DebateClaimLedgerV1
   /** Dissent retained before this turn began. */

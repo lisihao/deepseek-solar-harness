@@ -38,6 +38,7 @@ import type {
   DebateRoleKind,
   DebateRolePersonaV1,
   DebateRoleSpecV1,
+  DebateRuntimeContextV1,
   DebateRunSnapshotV1,
   DebateRunOutcomeV1,
   DebateRunResultV1,
@@ -1268,6 +1269,39 @@ function validateSourceRef(value: unknown, path: string): DebateSourceRefV1 {
   }
 }
 
+/** Validate one bounded, current-request runtime-context snapshot. */
+function validateDebateRuntimeContext(value: unknown, path: string): DebateRuntimeContextV1 {
+  const runtime = record(value, path)
+  exactKeys(runtime, ['version', 'sourceSessionId', 'contextSnapshotMessageId', 'sections'], path)
+  version(runtime, path)
+  const rawSections = arrayValue(required(runtime, 'sections', path), `${path}.sections`, 0, 64)
+  const names = new Set<string>()
+  let characters = 0
+  const sections = rawSections.map((entry, index) => {
+    const sectionPath = `${path}.sections[${String(index)}]`
+    const section = record(entry, sectionPath)
+    exactKeys(section, ['name', 'text'], sectionPath)
+    const name = stringValue(required(section, 'name', sectionPath), `${sectionPath}.name`, 1, 256)
+    const text = stringValue(required(section, 'text', sectionPath), `${sectionPath}.text`, 0, 256 * 1024)
+    if (names.has(name)) invalid(`${sectionPath}.name`, 'must be unique')
+    names.add(name)
+    characters += name.length + text.length
+    return { name, text }
+  })
+  if (characters > 256 * 1024) invalid(`${path}.sections`, 'total content exceeds 256 KiB')
+  return {
+    version: 1,
+    sourceSessionId: stringValue(required(runtime, 'sourceSessionId', path), `${path}.sourceSessionId`, 1, 256),
+    contextSnapshotMessageId: stringValue(
+      required(runtime, 'contextSnapshotMessageId', path),
+      `${path}.contextSnapshotMessageId`,
+      1,
+      256,
+    ),
+    sections,
+  }
+}
+
 /**
  * Validate one Provider start request and its parent-seam identity.
  * @param value - untrusted start request.
@@ -1275,7 +1309,10 @@ function validateSourceRef(value: unknown, path: string): DebateSourceRefV1 {
  */
 export function validateDebateStartRequest(value: unknown): DebateStartRequestV1 {
   const request = record(value, 'request')
-  exactKeys(request, ['version', 'commandId', 'workspace', 'prompt', 'objective', 'policy', 'sourceRefs', 'execution', 'sourceSessionId'], 'request')
+  exactKeys(request, [
+    'version', 'commandId', 'workspace', 'prompt', 'objective', 'policy', 'sourceRefs', 'execution',
+    'sourceSessionId', 'runtimeContext',
+  ], 'request')
   version(request, 'request')
   const sourceRefsValue = optional(request, 'sourceRefs')
   const sourceRefs = sourceRefsValue === undefined
@@ -1285,6 +1322,13 @@ export function validateDebateStartRequest(value: unknown): DebateStartRequestV1
   const execution = executionValue === undefined ? undefined : validateExecution(executionValue, 'request.execution')
   const objective = optionalString(optional(request, 'objective'), 'request.objective', 16_000)
   const sourceSessionId = optionalString(optional(request, 'sourceSessionId'), 'request.sourceSessionId', 256)
+  const runtimeContextValue = optional(request, 'runtimeContext')
+  const runtimeContext = runtimeContextValue === undefined
+    ? undefined
+    : validateDebateRuntimeContext(runtimeContextValue, 'request.runtimeContext')
+  if (runtimeContext !== undefined && runtimeContext.sourceSessionId !== sourceSessionId) {
+    invalid('request.runtimeContext.sourceSessionId', 'must equal request.sourceSessionId')
+  }
   return {
     version: 1,
     commandId: stringValue(required(request, 'commandId', 'request'), 'request.commandId', 1, 256),
@@ -1295,6 +1339,7 @@ export function validateDebateStartRequest(value: unknown): DebateStartRequestV1
     ...(sourceRefs === undefined ? {} : { sourceRefs }),
     ...(execution === undefined ? {} : { execution }),
     ...(sourceSessionId === undefined ? {} : { sourceSessionId }),
+    ...(runtimeContext === undefined ? {} : { runtimeContext }),
   }
 }
 

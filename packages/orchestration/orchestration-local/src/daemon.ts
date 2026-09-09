@@ -29,7 +29,7 @@ import type {
 } from '@deepseek-ai/dsh-continual-harness'
 import { ContinualHarnessSkillRuntime } from '@deepseek-ai/dsh-continual-harness'
 import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
-import LlmRuntime, { type ContentBlock, type TokenUsage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { type ContentBlock, type ContextSnapshotSection, type TokenUsage } from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   ContinualHarnessMode,
@@ -40,6 +40,15 @@ import type {
 import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
 import ModelWorkerRuntime, { type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
+import FileTaskTemplateProvider, { type TaskTemplateSelection } from '@deepseek-ai/dsh-task-template'
+import { inferTaskAttributes, inferTaskType, renderTaskTemplateInjection } from '@deepseek-ai/dsh-task-template-context'
+import {
+  buildOperatorContextEnvelope,
+  materializeOperatorContextEnvelopeNative,
+  receiveOperatorContextEnvelope,
+  renderOperatorContextEnvelopeText,
+  type OperatorContextEnvelopeV1,
+} from '@deepseek-ai/dsh-system-prompt'
 import {
   RLM_TYPESCRIPT_REPL_TOOL_SCHEMA,
   RlmCommandId,
@@ -60,6 +69,7 @@ import {
   type CapabilityUpdateRequest,
   type NodeExecutionPlanV1,
   type OrchestrationBlocker,
+  type OrchestrationAdmissionTraceV1,
   type OrchestrationAutoRefineIndeterminateRequest,
   type OrchestrationCompilationV1,
   type OrchestrationClusterHeartbeatRequest,
@@ -364,6 +374,9 @@ class OrchestrationResidentOperator implements PhysicalOperator {
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
     const workspace = request.parent.session.header.cwd
     if (workspace === undefined) throw new OrchestrationError('orchestration operator requires a workspace', 'GRAPH_INVALID')
+    const materialized = request.contextEnvelope === undefined
+      ? undefined
+      : materializeOperatorContextEnvelopeNative(request.contextEnvelope)
     // The headless Scheduler intentionally maps the public Physical Operator
     // request to Resident IPC without depending on the installable Provider.
     /* jscpd:ignore-start */
@@ -373,8 +386,10 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       workspace,
       laneId: request.residentLaneId ?? String(request.executionId),
       ...request.label === undefined ? {} : { taskLabel: request.label },
-      prompt: request.prompt,
-      ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
+      prompt: materialized?.prompt ?? request.prompt,
+      ...(materialized?.systemPrompt ?? request.systemPrompt) === undefined
+        ? {}
+        : { systemPrompt: materialized?.systemPrompt ?? request.systemPrompt },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
@@ -382,6 +397,13 @@ class OrchestrationResidentOperator implements PhysicalOperator {
     })
     /* jscpd:ignore-end */
     return {
+      ...request.contextEnvelope === undefined ? {} : {
+        contextReceipt: receiveOperatorContextEnvelope(
+          request.contextEnvelope,
+          String(this.descriptor.id),
+          'native',
+        ),
+      },
       receipt: { sessionId: turn.sessionId, turnId: turn.turnId, stateRevision: turn.stateRevision },
       readEvents: async (afterSequence, limit, signal) => {
         const page = await this.resident.readEvents(turn.sessionId, afterSequence, limit, signal)
@@ -459,6 +481,18 @@ function acceptedReceipt(run: PhysicalOperatorRun, executionId: string): Physica
     throw new OrchestrationError(`resident receipt was not published for ${executionId}`, 'ORCHESTRATION_UNAVAILABLE')
   }
   return run.receipt
+}
+
+/** Recover the context receipt already validated by the physical-operator service. */
+function acceptedContextReceipt(
+  run: PhysicalOperatorRun,
+  envelope: OperatorContextEnvelopeV1,
+): ReturnType<typeof receiveOperatorContextEnvelope> {
+  const receipt = run.contextReceipt
+  if (receipt === undefined || receipt.outcome !== 'accepted' || receipt.digest !== envelope.digest) {
+    throw new OrchestrationError(`context envelope receipt is unavailable for ${String(run.id)}`, 'ORCHESTRATION_UNAVAILABLE')
+  }
+  return receipt
 }
 
 function selectedHarnessScope(mode: ContinualHarnessMode): ContinualHarnessScope | undefined {
@@ -800,6 +834,72 @@ function promptFromPlan(
   }]
 }
 
+const TASKGRAPH_SYSTEM_TEXT = 'You are a DSH TaskGraph worker. Execute only the sealed current node and preserve its declared authority and acceptance rules.'
+
+/** Project the selected task-template content as one named context field. */
+function taskTemplateContexts(selection: TaskTemplateSelection | undefined): ContextSnapshotSection[] {
+  return selection?.decision === 'inject'
+    ? [{
+      name: `task-template:${String(selection.selected?.id ?? 'unknown')}`,
+      text: renderTaskTemplateInjection(selection),
+    }]
+    : []
+}
+
+/** Build the exact current-node handoff, excluding every unrelated node or conversation turn. */
+function taskGraphContextEnvelope(
+  plan: NodeExecutionPlanV1,
+  prompt: readonly ContentBlock[],
+): OperatorContextEnvelopeV1 {
+  return buildOperatorContextEnvelope({
+    systemText: TASKGRAPH_SYSTEM_TEXT,
+    task: prompt,
+    contexts: [
+      ...(plan.runtimeContext?.sections ?? []),
+      ...taskTemplateContexts(plan.taskTemplate),
+    ],
+    source: {
+      kind: 'taskgraph',
+      runId: String(plan.runId),
+      nodeId: plan.nodeId,
+      contextPacketRef: String(plan.contextPacketRef),
+    },
+  })
+}
+
+/** Reject malformed or cross-session runtime contexts at the daemon wire boundary. */
+function validateAdmissionRuntimeContext(admission: OrchestrationAdmissionTraceV1 | undefined): void {
+  const runtime = admission?.runtimeContext
+  if (runtime === undefined) return
+  if (runtime.version !== 1
+    || runtime.sourceSessionId !== admission?.sourceSessionId
+    || runtime.contextSnapshotMessageId.trim().length === 0
+    || runtime.sections.length > 64) {
+    throw new OrchestrationError('orchestration runtime context is invalid', 'GRAPH_INVALID')
+  }
+  const names = new Set<string>()
+  let bytes = 0
+  for (const section of runtime.sections) {
+    if (typeof section.name !== 'string' || section.name.trim().length === 0 || section.name.length > 256
+      || typeof section.text !== 'string') {
+      throw new OrchestrationError('orchestration runtime context section is invalid', 'GRAPH_INVALID')
+    }
+    if (names.has(section.name)) {
+      throw new OrchestrationError(`duplicate orchestration runtime context: ${section.name}`, 'GRAPH_INVALID')
+    }
+    names.add(section.name)
+    bytes += Buffer.byteLength(section.name, 'utf8') + Buffer.byteLength(section.text, 'utf8')
+  }
+  if (bytes > 256 * 1024) {
+    throw new OrchestrationError('orchestration runtime context exceeds 256 KiB', 'GRAPH_INVALID')
+  }
+}
+
+/** Text-only model workers receive the same envelope with an explicit role downgrade. */
+function modelWorkerEnvelopePrompt(envelope: OperatorContextEnvelopeV1): ContentBlock[] {
+  return [{ type: 'text', text: renderOperatorContextEnvelopeText(envelope) }]
+}
+
 function modelTier(model: PhysicalOperatorResidentModel): ModelExecutionOffer['tier'] {
   const label = `${model.model} ${model.displayName}`.toLowerCase()
   if (/\b(?:sol|opus|fable)\b|xhigh|max|ultra/u.test(label)) return 'high'
@@ -1034,6 +1134,7 @@ export class OrchestrationDaemon {
     this.acquireLock()
     const thisRoot = this.options.root
     await this.ctx.plugin(PhysicalOperatorRuntime)
+    await this.ctx.plugin(FileTaskTemplateProvider, { dshHome: this.options.dshHome })
     await this.ctx.plugin(LlmRuntime)
     await this.ctx.plugin(ModelWorkerRuntime)
     if (this.options.modelWorkerProviders === undefined) {
@@ -1226,6 +1327,7 @@ export class OrchestrationDaemon {
 
   private async compile(request: Parameters<Context['orchestrations']['compile']>[0]): Promise<OrchestrationCompilationV1> {
     validateGraph(request.graph)
+    validateAdmissionRuntimeContext(request.admission)
     const workspace = await realpath(request.graph.workspace).catch(() => {
       throw new OrchestrationError(`graph workspace does not exist: ${request.graph.workspace}`, 'GRAPH_INVALID')
     })
@@ -2077,6 +2179,31 @@ export class OrchestrationDaemon {
         suggestedParallelism: rlmWorkerPlan.suggestedParallelism,
       }, node)])
     }
+    const inferredTemplateAttributes = inferTaskAttributes({
+      objective: spec.task,
+      operator: operatorId,
+      tools: capabilityPlan.toolsAllow,
+    })
+    const taskTemplate = this.ctx.taskTemplates.select({
+      attributes: {
+        ...inferredTemplateAttributes,
+        taskType: inferTaskType(`${spec.role}\n${spec.task}`),
+        riskLevel: record.graph.risk,
+      },
+    })
+    const taskTemplateRef = this.store.putArtifact(taskTemplate)
+    this.store.recordArtifact('compilation_artifacts', {
+      ref: String(taskTemplateRef), runId, nodeId, attempt, generation: node.capabilityGeneration,
+    })
+    this.store.saveRun(record, [event(record.snapshot.runId, 'task-template.selected', {
+      ref: String(taskTemplateRef),
+      decision: taskTemplate.decision,
+      overrideSource: taskTemplate.overrideSource,
+      templateId: taskTemplate.selected?.id ?? null,
+      templateVersion: taskTemplate.selected?.version ?? null,
+      contentSha256: taskTemplate.selected?.contentSha256 ?? null,
+      attributes: taskTemplate.receipt.attributes,
+    }, node)])
     const executionId = PhysicalOperatorExecutionId(`orch:${runId}:${nodeId}:${String(attempt)}`)
     const taskContract = workbenchTaskContract(
       record,
@@ -2102,6 +2229,11 @@ export class OrchestrationDaemon {
       capabilityPlanRef,
       capabilityGeneration: node.capabilityGeneration,
       contextPacketRef,
+      taskTemplateRef,
+      taskTemplate,
+      ...record.snapshot.admission?.runtimeContext === undefined
+        ? {}
+        : { runtimeContext: structuredClone(record.snapshot.admission.runtimeContext) },
       allocationPlanRef,
       allocationPlan: allocation,
       autonomousPolicy,
@@ -2161,6 +2293,33 @@ export class OrchestrationDaemon {
     return rlmPlan.enabled ? record.graph.maxParallel : allocation.suggestedParallelism
   }
 
+  /** Persist exact envelope Evidence and the receiver's materialization receipt. */
+  private recordContextEnvelope(
+    record: RuntimeRunRecord,
+    spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
+    commandId: string,
+    envelope: OperatorContextEnvelopeV1,
+    receipt: ReturnType<typeof receiveOperatorContextEnvelope>,
+  ): void {
+    const ref = this.store.putArtifact(envelope)
+    this.store.recordArtifact('compilation_artifacts', {
+      ref: String(ref),
+      runId: String(record.snapshot.runId),
+      nodeId: spec.id,
+      attempt: plan.attempt,
+      generation: plan.capabilityGeneration,
+    })
+    this.store.appendEvents([event(record.snapshot.runId, 'operator.context.received', {
+      commandId,
+      ref: String(ref),
+      digest: envelope.digest,
+      receiver: receipt.receiver,
+      format: receipt.format,
+      roleFidelity: receipt.roleFidelity,
+    }, record.snapshot.nodes.find(value => value.id === spec.id))])
+  }
+
   private async dispatchPlan(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
@@ -2218,17 +2377,28 @@ export class OrchestrationDaemon {
           sessionId: binding.sessionId, socketPath: binding.socketPath,
         }, acceptedNode)])
       }
+      const nodePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, plan.rlmPlan)
+      const contextEnvelope = taskGraphContextEnvelope(plan, nodePrompt)
       const run = await this.ctx.physicalOperators.start(plan.operatorPlan.operatorId, {
         executionId: plan.executionId,
         mode: 'resident',
         label: `${spec.id}: ${spec.title}`,
-        prompt: promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, plan.rlmPlan),
+        prompt: nodePrompt,
+        contextEnvelope,
         parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
         signal: controller.signal,
         ...plan.operatorPlan.profile === undefined ? {} : { residentProfile: plan.operatorPlan.profile },
         ...browserBinding === undefined ? {} : { modelToolBridge: browserBinding.descriptor },
         nativeToolPolicy: requiresBrowser ? 'dsh-tools-authoritative' : plan.operatorPlan.nativeToolPolicy,
       })
+      this.recordContextEnvelope(
+        record,
+        spec,
+        plan,
+        String(plan.executionId),
+        contextEnvelope,
+        acceptedContextReceipt(run, contextEnvelope),
+      )
       const receipt = acceptedReceipt(run, String(plan.executionId))
       const attempt: AttemptRecord = { ...acceptedAttempt, state: 'running', turnId: receipt.turnId, updatedAt: now() }
       this.store.saveAttempt(attempt)
@@ -2487,7 +2657,7 @@ export class OrchestrationDaemon {
     const rootExecutionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:root`)
     try {
       const root = await this.startResidentTurn(
-        record, spec, plan.executionWorkspace.path, rootExecutionId, plan.allocationPlan,
+        record, spec, plan, plan.executionWorkspace.path, rootExecutionId, plan.allocationPlan,
         rootPrompt, controller.signal, 'Prime RLM root', bridge, String(rootSessionId),
       )
       this.registerRlmPhysicalRun(record, spec, plan, rootExecutionId, root, physicalRuns)
@@ -2855,7 +3025,7 @@ export class OrchestrationDaemon {
     let run: PhysicalOperatorRun | undefined
     try {
       const started = await this.startResidentTurn(
-        record, spec, plan.executionWorkspace.path, executionId, allocation,
+        record, spec, plan, plan.executionWorkspace.path, executionId, allocation,
         [{ type: 'text', text: prompt }], timeout.controller.signal,
         `Continuous Harness auto-refine ${stage}`, undefined, `auto-refine:${String(sessionId)}`,
       )
@@ -2993,6 +3163,7 @@ export class OrchestrationDaemon {
           const started = await this.startResidentTurn(
             record,
             spec,
+            plan,
             plan.executionWorkspace.path,
             executionId,
             request.model,
@@ -3012,9 +3183,18 @@ export class OrchestrationDaemon {
           }, node)])
           return this.residentRlmExecution(started, settle, failed)
         }
+        const childEnvelope = taskGraphContextEnvelope(plan, childPrompt)
+        this.recordContextEnvelope(
+          record,
+          spec,
+          plan,
+          String(executionId),
+          childEnvelope,
+          receiveOperatorContextEnvelope(childEnvelope, `model-worker:${request.model.operatorId}`, 'text'),
+        )
         const workerResult = this.ctx.modelWorkers.execute({
           commandId: String(executionId), workerId: request.model.operatorId,
-          model: request.model.model, prompt: childPrompt,
+          model: request.model.model, prompt: modelWorkerEnvelopePrompt(childEnvelope),
           ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
           modelToolBridge: bridge, signal: controller.signal,
         })
@@ -3291,15 +3471,24 @@ export class OrchestrationDaemon {
     )
     if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
       const started = await this.startResidentTurn(
-        record, spec, plan.executionWorkspace.path, executionId, request.model,
+        record, spec, plan, plan.executionWorkspace.path, executionId, request.model,
         prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId),
       )
       this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
       return this.residentRlmExecution(started, settle, failed)
     }
+    const continuationEnvelope = taskGraphContextEnvelope(plan, prompt)
+    this.recordContextEnvelope(
+      record,
+      spec,
+      plan,
+      String(request.commandId),
+      continuationEnvelope,
+      receiveOperatorContextEnvelope(continuationEnvelope, `model-worker:${request.model.operatorId}`, 'text'),
+    )
     const result = this.ctx.modelWorkers.execute({
       commandId: String(request.commandId), workerId: request.model.operatorId,
-      model: request.model.model, prompt,
+      model: request.model.model, prompt: modelWorkerEnvelopePrompt(continuationEnvelope),
       ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
       modelToolBridge: bridge, signal: controller.signal,
     })
@@ -3600,6 +3789,7 @@ export class OrchestrationDaemon {
   private async startResidentTurn(
     record: RuntimeRunRecord,
     spec: OrchestrationNodeSpecV1,
+    plan: NodeExecutionPlanV1,
     workspace: string,
     executionId: PhysicalOperatorExecutionId,
     allocation: Pick<ModelAllocationPlan, 'operatorId' | 'model' | 'profile'>,
@@ -3613,17 +3803,27 @@ export class OrchestrationDaemon {
     if (operator === undefined) {
       throw new OrchestrationError(`physical operator is unavailable: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     }
+    const contextEnvelope = taskGraphContextEnvelope(plan, prompt)
     const run = await this.ctx.physicalOperators.start(allocation.operatorId, {
       executionId,
       mode: 'resident',
       label: `${spec.id}: ${label}`,
       prompt: [...prompt],
+      contextEnvelope,
       parent: fakeParent(workspace, String(record.snapshot.runId)),
       signal,
       ...allocation.profile === undefined ? {} : { residentProfile: allocation.profile },
       ...modelToolBridge === undefined ? {} : { modelToolBridge },
       ...residentLaneId === undefined ? {} : { residentLaneId },
     })
+    this.recordContextEnvelope(
+      record,
+      spec,
+      plan,
+      String(executionId),
+      contextEnvelope,
+      acceptedContextReceipt(run, contextEnvelope),
+    )
     return { run, receipt: acceptedReceipt(run, String(executionId)) }
   }
 
@@ -3661,11 +3861,21 @@ export class OrchestrationDaemon {
     const { rlmPlan, rootSessionId, bridge, rootPrompt } = prepared
     /* jscpd:ignore-end */
     try {
+      const rootEnvelope = taskGraphContextEnvelope(plan, rootPrompt)
+      const rootCommandId = `${String(plan.executionId)}:rlm:root`
+      this.recordContextEnvelope(
+        record,
+        spec,
+        plan,
+        rootCommandId,
+        rootEnvelope,
+        receiveOperatorContextEnvelope(rootEnvelope, `model-worker:${plan.operatorPlan.operatorId}`, 'text'),
+      )
       const rootExecution = this.ctx.modelWorkers.execute({
-        commandId: `${String(plan.executionId)}:rlm:root`,
+        commandId: rootCommandId,
         workerId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model,
-        prompt: rootPrompt,
+        prompt: modelWorkerEnvelopePrompt(rootEnvelope),
         rlmPlan,
         modelToolBridge: bridge,
         signal: controller.signal,
@@ -3687,7 +3897,7 @@ export class OrchestrationDaemon {
         record,
         plan,
         'root',
-        `${String(plan.executionId)}:rlm:root`,
+        rootCommandId,
         rootResult,
       )
       return await this.settleRlmExecution(record, spec, plan, prepared, {
@@ -3713,11 +3923,21 @@ export class OrchestrationDaemon {
     const acceptedAttempt = this.acceptDispatch(record, spec, plan, 'model-worker')
     try {
       await this.replicateClusterAuthority()
+      const nodePrompt = promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, plan.rlmPlan)
+      const contextEnvelope = taskGraphContextEnvelope(plan, nodePrompt)
+      this.recordContextEnvelope(
+        record,
+        spec,
+        plan,
+        String(plan.executionId),
+        contextEnvelope,
+        receiveOperatorContextEnvelope(contextEnvelope, `model-worker:${plan.operatorPlan.operatorId}`, 'text'),
+      )
       const result = this.ctx.modelWorkers.execute({
         commandId: String(plan.executionId),
         workerId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model,
-        prompt: promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, plan.rlmPlan),
+        prompt: modelWorkerEnvelopePrompt(contextEnvelope),
         signal: controller.signal,
         ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
       })

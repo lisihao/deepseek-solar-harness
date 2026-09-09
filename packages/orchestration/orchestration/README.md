@@ -6,6 +6,8 @@ English | [中文](README.zh.md)
 
 A node may pair hard-pinned `operator.preferredIds` with explicitly admitted `operator.fallbackIds`. The Scheduler keeps the node task, role, authority, and acceptance unchanged; only a preferred operator's qualification failure may change the sealed operator/model, and the allocation plan retains structured fallback provenance. A busy preferred operator waits instead of falling back.
 
+Admission may carry one validated runtime-context snapshot from its source Session. Each node deterministically selects a task template from its own objective and sealed operator, stores the exact selection receipt with its artifacts, and binds the snapshot plus selected template into the node's operator-context envelope. Retries reuse that sealed node input; they do not reselect a newer template version mid-attempt. Remote Resident execution transports the same envelope and requires the Server's digest-bound materialization receipt.
+
 An RLM node may opt into Prime-compatible Autonomous Mode. The Graph or run admission selects `disabled | auto | enabled`; the resolved continuation, token, elapsed-time, and host quality-gate policy is content addressed and sealed into that attempt's `NodeExecutionPlanV1`. Autonomous Mode is a host continuation policy inside one node, not a Goal and not another Scheduler. It remains disabled by default.
 
 ## Model Experience
