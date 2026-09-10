@@ -44,7 +44,7 @@ The configured browser Provider must declare `browser-js-v1` plus `authenticated
 ## Behavior
 
 - Discovery exposes one `chatgpt-web` operator with `maxConcurrency: 1` and `executionModes: [ephemeral]`.
-- Each accepted call reuses the authenticated named workspace but navigates the selected page to a fresh `https://chatgpt.com/` root conversation before filling the prompt. The root must contain zero user and assistant turns; otherwise the call fails as `CHATGPT_WEB_CONTEXT_NOT_ISOLATED` without submitting. It then clicks ChatGPT's visible send control and proves that a new user turn or generation began before waiting for the final assistant text.
+- Each accepted call reuses the authenticated named workspace but discards the selected page and opens a replacement `https://chatgpt.com/` root conversation before filling the prompt. The root must contain zero user and assistant turns; otherwise the call fails as `CHATGPT_WEB_CONTEXT_NOT_ISOLATED` without submitting. It then clicks ChatGPT's visible send control and proves that a new user turn or generation began before waiting for the final assistant text.
 - A filled prompt that the website does not accept fails as `CHATGPT_WEB_SUBMIT_FAILED` within `submissionTimeoutMs`; it never enters the longer generation wait. A generation timeout includes bounded page state without prompt or response text.
 - A `systemPrompt`, when supplied by the physical-operator caller, is merged with the task as `systemPrompt + "\n\n---\n\n" + task`, matching the legacy Solar web route.
 - `AbortSignal` cancels the browser program and yields an aborted result. Dispose never closes the user's browser or authenticated workspace.
@@ -58,7 +58,7 @@ The migration baseline is Solar commit `cf7df54d0`, where `core/chatgpt-web/clie
 |---|---|---|
 | Use the user's authenticated ChatGPT website subscription | Uses an authenticated named browser workspace; no API key is read | faithful |
 | Connect to a separately launched Chrome profile on port 9222 | Uses the public `ctx.browser` seam and Ego Lite authenticated-profile reuse | platform adaptation; removes the fragile debugging-port/profile ownership |
-| Open or reuse `https://chatgpt.com/` | Reuses the authenticated workspace, then navigates the selected page to the root and verifies it is not an existing conversation | deliberate task-isolation improvement |
+| Open or reuse `https://chatgpt.com/` | Reuses the authenticated workspace, then discards the selected page, opens a replacement root page, and verifies it is not an existing conversation | deliberate task-isolation improvement |
 | Detect a visible login control before submission | Returns `CHATGPT_WEB_AUTH_REQUIRED` | faithful, with a typed failure |
 | Merge `systemPrompt + "\n\n---\n\n" + task` | Preserves the same text boundary | faithful |
 | Fill the composer, press Enter, wait, and extract the newest Markdown reply | Clicks the current visible send control, proves submission, then waits and extracts in one trusted browser program | platform adaptation; avoids editor-specific Enter behavior |

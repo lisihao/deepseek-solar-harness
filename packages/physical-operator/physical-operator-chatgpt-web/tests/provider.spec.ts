@@ -159,7 +159,7 @@ describe('ChatGPT Web physical operator', () => {
     await ctx.fiber.dispose()
   })
 
-  it('builds a browser program in the required order: open, reset, inspect, submit, then wait for a fresh response', () => {
+  it('builds a browser program in the required order: open, discard, reset, inspect, submit, then wait for a fresh response', () => {
     const program = adapter.buildChatGptWebProgram({
       url: 'https://chatgpt.com/',
       workspaceName: 'fixture-chatgpt-web',
@@ -171,6 +171,7 @@ describe('ChatGPT Web physical operator', () => {
       outputMaxBytes: 2_048,
     })
     const open = program.source.indexOf("id: 'chatgpt-open'")
+    const discard = program.source.indexOf("id: 'chatgpt-discard-conversation'")
     const reset = program.source.indexOf("id: 'chatgpt-reset-conversation'")
     const inspect = program.source.indexOf('const readinessStartedAt =')
     const select = program.source.indexOf('const selection =')
@@ -178,7 +179,8 @@ describe('ChatGPT Web physical operator', () => {
     const send = program.source.indexOf("id: 'chatgpt-send'")
     const responsePoll = program.source.indexOf('const initialCount =')
     expect(open).toBeGreaterThan(-1)
-    expect(reset).toBeGreaterThan(open)
+    expect(discard).toBeGreaterThan(open)
+    expect(reset).toBeGreaterThan(discard)
     expect(inspect).toBeGreaterThan(reset)
     expect(select).toBeGreaterThan(inspect)
     expect(fill).toBeGreaterThan(select)
@@ -195,7 +197,8 @@ describe('ChatGPT Web physical operator', () => {
     expect(program.source).toContain("typeof state.settled !== 'boolean'")
     expect(program.source).toContain('state.settled && !state.generating')
     expect(program.source).not.toContain('(sawGenerating && !state.generating) || stableSamples >= 2')
-    expect(program.source).not.toContain("kind: 'close-page'")
+    expect(program.source).toContain("kind: 'close-page'")
+    expect(program.source).not.toContain("kind: 'navigate'")
   })
 
   it('does not settle a stable ChatGPT thinking placeholder before final response controls appear', async () => {
@@ -323,13 +326,15 @@ describe('ChatGPT Web physical operator', () => {
       outputMaxBytes: 2_048,
     })
     let page: 'conversation' | 'root' = 'conversation'
+    let discarded = false
     let filled = ''
     let assistantCount = 0
     const operations: string[] = []
     const browser = {
       run: async (operation: { id: string; kind: string; value?: string }) => {
         operations.push(operation.id)
-        if (operation.kind === 'navigate') page = 'root'
+        if (operation.kind === 'close-page') discarded = true
+        if (operation.kind === 'open' && discarded) page = 'root'
         if (operation.kind === 'fill') filled = operation.value ?? ''
         if (operation.id === 'chatgpt-send') assistantCount = 1
       },
@@ -359,8 +364,9 @@ describe('ChatGPT Web physical operator', () => {
       response: 'current task response',
       truncated: false,
     })
-    expect(operations.slice(0, 4)).toEqual([
+    expect(operations.slice(0, 5)).toEqual([
       'chatgpt-open',
+      'chatgpt-discard-conversation',
       'chatgpt-reset-conversation',
       'chatgpt-fill',
       'chatgpt-send',
@@ -392,7 +398,7 @@ describe('ChatGPT Web physical operator', () => {
     await expect(new AsyncFunction('browser', program.source)(browser)).resolves.toEqual({
       status: 'context-not-isolated',
     })
-    expect(operations).toEqual(['chatgpt-open', 'chatgpt-reset-conversation'])
+    expect(operations).toEqual(['chatgpt-open', 'chatgpt-discard-conversation', 'chatgpt-reset-conversation'])
   })
 
   it('fails loud instead of silently falling back when an explicit model cannot be verified', async () => {

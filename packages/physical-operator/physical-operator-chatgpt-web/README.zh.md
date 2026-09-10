@@ -44,7 +44,7 @@
 ## 行为
 
 - 发现界面暴露一个 `chatgpt-web` 算子，固定 `maxConcurrency: 1`、`executionModes: [ephemeral]`。
-- 每次已接受调用都会复用已认证的命名工作区，但在填入提示词前先把选中的页面导航到全新的 `https://chatgpt.com/` 根对话。根对话中的用户轮次与助手轮次必须均为零；否则本次调用会以 `CHATGPT_WEB_CONTEXT_NOT_ISOLATED` 失败且不会提交。随后它会点击 ChatGPT 的可见发送控件，并在等待最终助手文本前证明新用户轮次或生成已经开始。
+- 每次已接受调用都会复用已认证的命名工作区，但在填入提示词前先丢弃选中的页面，并打开一个替代的 `https://chatgpt.com/` 根对话。根对话中的用户轮次与助手轮次必须均为零；否则本次调用会以 `CHATGPT_WEB_CONTEXT_NOT_ISOLATED` 失败且不会提交。随后它会点击 ChatGPT 的可见发送控件，并在等待最终助手文本前证明新用户轮次或生成已经开始。
 - 网页未接受已填提示时，会在 `submissionTimeoutMs` 内以 `CHATGPT_WEB_SUBMIT_FAILED` 失败，不进入更长的生成等待；生成超时只附带不含提示或回复正文的有界页面状态。
 - 若物理算子调用方提供 `systemPrompt`，它会按 `systemPrompt + "\n\n---\n\n" + task` 与任务合并；这与旧 Solar 网页路由一致。
 - `AbortSignal` 会取消浏览器程序并得到 aborted 终态。dispose 不会关闭用户浏览器或已认证工作区。
@@ -58,7 +58,7 @@
 |---|---|---|
 | 使用用户已登录的 ChatGPT 网页订阅 | 使用经过认证的命名 browser workspace；不读取 API key | faithful |
 | 连接端口 9222 上单独启动的 Chrome Profile | 使用公共 `ctx.browser` seam 和 Ego Lite 的 authenticated-profile reuse | 平台适配；移除脆弱的调试端口和 Profile 所有权 |
-| 打开或复用 `https://chatgpt.com/` | 复用已认证工作区，再把选中的页面导航到根地址，并验证它不是已有对话 | 有意改进任务隔离 |
+| 打开或复用 `https://chatgpt.com/` | 复用已认证工作区，再丢弃选中的页面、打开替代的根页面，并验证它不是已有对话 | 有意改进任务隔离 |
 | 提交前检测可见登录控件 | 返回 `CHATGPT_WEB_AUTH_REQUIRED` | faithful，并提供类型化失败 |
 | 合并 `systemPrompt + "\n\n---\n\n" + task` | 保留完全相同的文本边界 | faithful |
 | 填写输入框、按 Enter、等待并提取最新 Markdown 回复 | 点击当前可见发送控件，证明提交后在同一可信 browser program 中等待并提取 | 平台适配；避免依赖编辑器的 Enter 行为 |

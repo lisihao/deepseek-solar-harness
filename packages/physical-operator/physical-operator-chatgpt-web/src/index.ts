@@ -271,6 +271,13 @@ const REMOVE_INPUT_MARKER = String.raw`() => {
 
 /**
  * Build one trusted browser program for a single ChatGPT webpage request.
+ *
+ * The program discards the selected page and opens a replacement instead of
+ * navigating it to the configured root. A page carrying a live conversation can
+ * arm `beforeunload`, and the v1 seam exposes no dialog control, so a reset
+ * navigation blocks in the provider's CDP client until that request times out.
+ * Closing the page releases the document without an unload prompt.
+ *
  * @param request - normalized prompt, optional model, and browser bounds.
  * @returns a provider-neutral browser-js-v1 request for the configured workspace.
  */
@@ -298,10 +305,16 @@ await browser.run({
   waitUntil: 'dom-content-loaded',
 });
 await browser.run({
+  id: 'chatgpt-discard-conversation',
+  kind: 'close-page',
+  page,
+});
+await browser.run({
   id: 'chatgpt-reset-conversation',
-  kind: 'navigate',
+  kind: 'open',
   page,
   url: request.url,
+  reuse: 'exact-url',
   waitUntil: 'dom-content-loaded',
 });
 const readinessStartedAt = Date.now();

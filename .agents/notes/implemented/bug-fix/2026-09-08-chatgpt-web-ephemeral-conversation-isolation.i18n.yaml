@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-08-chatgpt-web-ephemeral-conversation-isolation.md
-2026-09-08-chatgpt-web-ephemeral-conversation-isolation.md: fb811d53956fd29f458b9a440c8bea87c9f3410c
-2026-09-08-chatgpt-web-ephemeral-conversation-isolation.zh.md: ee2277d2a40339d0002f1ce44aa9a54abd8dde04
+2026-09-08-chatgpt-web-ephemeral-conversation-isolation.md: 294a928740d4a392fe3d990e3fd9db4c405799ee
+2026-09-08-chatgpt-web-ephemeral-conversation-isolation.zh.md: 052fd5eb2f5f5f93b54647cfc3e9fdf6675582b9
