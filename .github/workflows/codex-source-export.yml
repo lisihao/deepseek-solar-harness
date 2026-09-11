@@ -23,10 +23,18 @@ jobs:
         run: python3 tools/agent-development-governance/governance.py audit --project . --strict-warnings
       - name: Governance plan
         run: python3 tools/agent-development-governance/governance.py plan --project . --scope auto --level full --changed-from origin/solar
+      - name: Install locked dependencies
+        run: corepack pnpm install --frozen-lockfile
       - name: Pack source
         run: tar --exclude=.git --exclude=node_modules -czf /tmp/deepseek-solar-harness-source.tgz .
+      - name: Pack workspace dependencies
+        run: |
+          find . -type d -name node_modules -prune -print0 > /tmp/node-modules.list
+          tar --null -T /tmp/node-modules.list -czf /tmp/deepseek-solar-harness-deps.tgz
       - uses: actions/upload-artifact@v4
         with:
           name: codex-source-export
-          path: /tmp/deepseek-solar-harness-source.tgz
+          path: |
+            /tmp/deepseek-solar-harness-source.tgz
+            /tmp/deepseek-solar-harness-deps.tgz
           if-no-files-found: error
