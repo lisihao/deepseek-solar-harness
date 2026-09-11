@@ -1,0 +1,28 @@
+name: Codex Source Export
+
+on:
+  push:
+    branches:
+      - codex/declarative-state-access-v1
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Governance audit
+        run: python3 tools/agent-development-governance/governance.py audit --project . --strict-warnings
+      - name: Governance plan
+        run: python3 tools/agent-development-governance/governance.py plan --project . --scope auto --level full --changed-from origin/solar
+      - name: Pack source
+        run: tar --exclude=.git --exclude=node_modules -czf /tmp/deepseek-solar-harness-source.tgz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-source-export
+          path: /tmp/deepseek-solar-harness-source.tgz
+          if-no-files-found: error
