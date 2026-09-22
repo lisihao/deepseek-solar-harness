@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
+
 import { Script } from 'node:vm'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime, {
@@ -119,6 +121,152 @@ function serializedProgramRequest(program: BrowserRunProgramV1): Record<string, 
   return JSON.parse(match[1]) as Record<string, unknown>
 }
 
+interface ProgramOperation {
+  readonly id: string
+  readonly kind: string
+  readonly locator?: { readonly selector?: string }
+  readonly value?: string
+}
+
+interface ProgramBrowser {
+  run(operation: ProgramOperation): Promise<void>
+  evaluate(page: string, evaluator: string, input?: unknown): Promise<unknown>
+}
+
+const ProgramAsyncFunction = (async function () {}).constructor as unknown as new (
+  ...args: string[]
+) => (browserArgument: ProgramBrowser) => Promise<unknown>
+
+function executeGeneratedProgram(program: BrowserRunProgramV1, browser: ProgramBrowser): Promise<unknown> {
+  return new ProgramAsyncFunction('browser', program.source)(browser)
+}
+
+async function evaluatePage(evaluator: string, input?: unknown): Promise<unknown> {
+  const evaluate = new Script('(' + evaluator + ')').runInNewContext({
+    document, location, Node, setTimeout, getComputedStyle: window.getComputedStyle.bind(window),
+  }) as (argument?: unknown) => unknown
+  return await evaluate(input)
+}
+
+function operationTarget(operation: ProgramOperation): Element {
+  const selector = operation.locator?.selector
+  if (selector === undefined) throw new Error('fixture operation ' + operation.id + ' has no CSS selector')
+  const target = document.querySelector(selector)
+  if (target === null) throw new Error('fixture did not find ' + selector)
+  return target
+}
+
+function makeVisible(element: Element): void {
+  Object.defineProperty(element, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => ({ width: 100, height: 20 }),
+  })
+}
+
+function setComposerText(editor: HTMLElement, value: string): void {
+  const newline = String.fromCharCode(10)
+  const normalized = value
+    .replaceAll(String.fromCharCode(13) + newline, newline)
+    .replaceAll(String.fromCharCode(13), newline)
+  const blocks = normalized.split(newline).map((line) => {
+    const paragraph = document.createElement('p')
+    if (line.length === 0) {
+      const trailingBreak = document.createElement('br')
+      trailingBreak.className = 'ProseMirror-trailingBreak'
+      paragraph.append(trailingBreak)
+    } else {
+      paragraph.textContent = line
+    }
+    return paragraph
+  })
+  editor.replaceChildren(...blocks)
+}
+
+function createComposer(): HTMLDivElement {
+  const editor = document.createElement('div')
+  editor.className = 'ProseMirror'
+  editor.setAttribute('contenteditable', 'true')
+  makeVisible(editor)
+  return editor
+}
+
+function createSendButton(label: string, disabled = false): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'submit'
+  button.setAttribute('aria-label', label)
+  button.disabled = disabled
+  makeVisible(button)
+  return button
+}
+
+function appendCompletedDomTurn(response: string): void {
+  window.history.pushState(null, '', '/c/fixture')
+  const user = document.createElement('div')
+  user.setAttribute('data-message-author-role', 'user')
+  const turn = document.createElement('div')
+  turn.setAttribute('data-testid', 'conversation-turn-fixture')
+  const assistant = document.createElement('div')
+  assistant.setAttribute('data-message-author-role', 'assistant')
+  const markdown = document.createElement('div')
+  markdown.className = 'markdown'
+  markdown.textContent = response
+  const copy = document.createElement('button')
+  copy.setAttribute('data-testid', 'copy-turn-action-button')
+  assistant.append(markdown)
+  turn.append(assistant, copy)
+  document.body.append(user, turn)
+}
+
+function contentSearchUser(key: string): HTMLDivElement {
+  const unit = document.createElement('div')
+  unit.setAttribute('data-content-search-unit-key', key)
+  const bubble = document.createElement('div')
+  bubble.setAttribute('data-user-message-bubble', 'true')
+  unit.append(bubble)
+  return unit
+}
+
+function contentSearchAssistant(key: string, response: string, nested = false): HTMLDivElement {
+  const unit = document.createElement('div')
+  unit.setAttribute('data-content-search-unit-key', key)
+  const content = nested ? document.createElement('div') : unit
+  if (nested) {
+    content.setAttribute('data-content-search-unit-key', key)
+    unit.append(content)
+  }
+  const heading = document.createElement('h4')
+  heading.textContent = 'ChatGPT说：'
+  const body = document.createElement('div')
+  body.setAttribute('data-markdown-text-style', 'assistant-message')
+  body.textContent = response
+  content.append(heading, body)
+  return unit
+}
+
+function programFor(
+  prompt: string,
+  options: Readonly<{
+    readonly generationTimeoutMs?: number
+    readonly submissionTimeoutMs?: number
+    readonly pollIntervalMs?: number
+  }> = {},
+): BrowserRunProgramV1 {
+  return adapter.buildChatGptWebProgram({
+    url: 'https://chatgpt.com/',
+    workspaceName: 'fixture-chatgpt-web',
+    prompt,
+    generationTimeoutMs: options.generationTimeoutMs ?? 100,
+    submissionTimeoutMs: options.submissionTimeoutMs ?? 20,
+    pollIntervalMs: options.pollIntervalMs ?? 1,
+    outputMaxBytes: 2_048,
+  })
+}
+
+afterEach(() => {
+  document.body.replaceChildren()
+  window.history.replaceState(null, '', '/')
+})
+
 describe('ChatGPT Web physical operator', () => {
   it('registers an ephemeral, single-flight browser operator and submits the merged text prompt', async () => {
     const { ctx, plugin, provider } = await setup()
@@ -202,7 +350,7 @@ describe('ChatGPT Web physical operator', () => {
     const select = program.source.indexOf('const selection =')
     const fill = program.source.indexOf("id: 'chatgpt-fill'")
     const send = program.source.indexOf("id: 'chatgpt-send'")
-    const responsePoll = program.source.indexOf('const initialCount =')
+    const responsePoll = program.source.indexOf('let submitted = false')
     expect(open).toBeGreaterThan(-1)
     expect(reset).toBeGreaterThan(open)
     expect(inspect).toBeGreaterThan(reset)
@@ -214,7 +362,7 @@ describe('ChatGPT Web physical operator', () => {
     expect(program.source).toContain("return { status: 'context-not-isolated' }")
     expect(program.source).toContain("return { status: 'model-selection-unavailable' }")
     expect(program.source).toContain("kind: 'click'")
-    expect(program.source).toContain("selector: '#composer-submit-button,button[data-testid=\"send-button\"]'")
+    expect(program.source).toContain("selector: '[data-dsh-chatgpt-web-send=\"true\"]'")
     expect(program.source).toContain("status: 'submission-failed'")
     expect(program.source).toContain("status: 'generation-timeout'")
     expect(program.source).toContain('copy-turn-action-button')
@@ -250,6 +398,12 @@ describe('ChatGPT Web physical operator', () => {
           const inputReady = inspection > 0
           inspection += 1
           return { page: 'root', loginRequired: false, inputReady, assistantCount: 0, userCount: 0 }
+        }
+        if (evaluator.includes('typeof input.prompt')) {
+          return {
+            page: 'root', userCount: 0, assistantCount: 0, inputCharacters: 8,
+            generating: false, settled: false, sendAvailable: true, promptMatches: true, ready: true,
+          }
         }
         if (evaluator.includes('removeAttribute')) return true
         return observations[Math.min(observation++, observations.length - 1)]
@@ -295,6 +449,12 @@ describe('ChatGPT Web physical operator', () => {
         if (evaluator.includes('loginRequired')) {
           return { page: 'root', loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0 }
         }
+        if (evaluator.includes('typeof input.prompt')) {
+          return {
+            page: 'root', userCount: 0, assistantCount: 0, inputCharacters: 8,
+            generating: false, settled: false, sendAvailable: true, promptMatches: true, ready: true,
+          }
+        }
         if (evaluator.includes('removeAttribute')) return true
         return unchanged
       },
@@ -317,6 +477,374 @@ describe('ChatGPT Web physical operator', () => {
     })
   })
 
+  it('waits for a hydrated ProseMirror composer, then submits through a no-id Chinese send button', async () => {
+    const prompt = 'first line\r\nsecond line'
+    const program = programFor(prompt)
+    const form = document.createElement('form')
+    const ssrTextarea = document.createElement('textarea')
+    ssrTextarea.id = 'prompt-textarea'
+    makeVisible(ssrTextarea)
+    form.append(ssrTextarea)
+    const unrelatedForm = document.createElement('form')
+    const unrelatedSend = createSendButton('Send')
+    unrelatedForm.append(unrelatedSend)
+    document.body.append(form, unrelatedForm)
+
+    const editor = createComposer()
+    const send = createSendButton('发送')
+    let inspectionCount = 0
+    let hydrated = false
+    let filledBeforeHydration = false
+    let filledText = ''
+    let sendClicks = 0
+    let unrelatedClicks = 0
+    const operations: ProgramOperation[] = []
+    unrelatedSend.addEventListener('click', (event) => {
+      event.preventDefault()
+      unrelatedClicks += 1
+    })
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      sendClicks += 1
+      appendCompletedDomTurn('hydrated response')
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        operations.push(operation)
+        if (operation.id === 'chatgpt-fill') {
+          if (!hydrated) filledBeforeHydration = true
+          const target = operationTarget(operation)
+          expect(target).toBe(editor)
+          filledText = operation.value ?? ''
+          setComposerText(editor, filledText)
+        }
+        if (operation.id === 'chatgpt-send') {
+          expect(operationTarget(operation)).toBe(send)
+          send.click()
+        }
+      },
+      evaluate: async (_page, evaluator, input) => {
+        if (evaluator.includes('loginRequired')) {
+          inspectionCount += 1
+          if (inspectionCount === 2) {
+            form.replaceChildren(editor, send)
+            hydrated = true
+          }
+        }
+        return evaluatePage(evaluator, input)
+      },
+    }
+
+    await expect(executeGeneratedProgram(program, browser)).resolves.toEqual({
+      status: 'completed',
+      response: 'hydrated response',
+      truncated: false,
+    })
+    expect(filledBeforeHydration).toBe(false)
+    expect(filledText).toBe(prompt)
+    expect(sendClicks).toBe(1)
+    expect(unrelatedClicks).toBe(0)
+    expect(operations.map(operation => operation.id)).toEqual([
+      'chatgpt-open',
+      'chatgpt-reset-conversation',
+      'chatgpt-fill',
+      'chatgpt-send',
+    ])
+    expect(editor.hasAttribute('data-dsh-chatgpt-web-input')).toBe(false)
+    expect(send.hasAttribute('data-dsh-chatgpt-web-send')).toBe(false)
+  })
+
+  it('matches ProseMirror paragraphs and hard breaks without counting trailing breaks', async () => {
+    const newline = String.fromCharCode(10)
+    const prompt = ['a', '', '---', '', 'b', 'hard break'].join(newline)
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('Send prompt')
+    form.append(editor, send)
+    document.body.append(form)
+    let clicks = 0
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      clicks += 1
+      appendCompletedDomTurn('paragraph response')
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') {
+          const first = document.createElement('p')
+          first.textContent = 'a'
+          const firstTrailing = document.createElement('br')
+          firstTrailing.className = 'ProseMirror-trailingBreak'
+          first.append(firstTrailing)
+          const emptyBeforeDivider = document.createElement('p')
+          const emptyBeforeDividerTrailing = document.createElement('br')
+          emptyBeforeDividerTrailing.className = 'ProseMirror-trailingBreak'
+          emptyBeforeDivider.append(emptyBeforeDividerTrailing)
+          const divider = document.createElement('p')
+          divider.textContent = '---'
+          const emptyAfterDivider = document.createElement('p')
+          const emptyAfterDividerTrailing = document.createElement('br')
+          emptyAfterDividerTrailing.className = 'ProseMirror-trailingBreak'
+          emptyAfterDivider.append(emptyAfterDividerTrailing)
+          const finalParagraph = document.createElement('p')
+          finalParagraph.append('b', document.createElement('br'), 'hard break')
+          const finalTrailing = document.createElement('br')
+          finalTrailing.className = 'ProseMirror-trailingBreak'
+          finalParagraph.append(finalTrailing)
+          editor.replaceChildren(
+            first,
+            emptyBeforeDivider,
+            divider,
+            emptyAfterDivider,
+            finalParagraph,
+          )
+        }
+        if (operation.id === 'chatgpt-send') {
+          expect(operationTarget(operation)).toBe(send)
+          send.click()
+        }
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgram(programFor(prompt), browser)).resolves.toEqual({
+      status: 'completed',
+      response: 'paragraph response',
+      truncated: false,
+    })
+    expect(clicks).toBe(1)
+  })
+
+
+  it('collects a nested current content-search assistant unit and settles from its exact Chinese copy action', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('发送')
+    form.append(editor, send)
+    document.body.append(form)
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      form.remove()
+      window.history.pushState(null, '', '/c/new-dom')
+      const cluster = document.createElement('section')
+      const user = contentSearchUser('UUID:0:user')
+      const assistant = contentSearchAssistant('UUID:2:assistant', '我是 GPT-5.6 Sol。', true)
+      const copy = document.createElement('button')
+      copy.setAttribute('aria-label', '复制')
+      cluster.append(user, assistant, copy)
+      document.body.append(cluster)
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') setComposerText(editor, operation.value ?? '')
+        if (operation.id === 'chatgpt-send') {
+          expect(operationTarget(operation)).toBe(send)
+          send.click()
+        }
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgram(programFor('collect current reply'), browser)).resolves.toEqual({
+      status: 'completed',
+      response: '我是 GPT-5.6 Sol。',
+      truncated: false,
+    })
+  })
+
+  it('does not settle a current content-search assistant from a copy action above multiple assistant units', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('Send')
+    form.append(editor, send)
+    document.body.append(form)
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      form.remove()
+      window.history.pushState(null, '', '/c/multiple-assistants')
+      const cluster = document.createElement('section')
+      const user = contentSearchUser('UUID:0:user')
+      const previous = contentSearchAssistant('UUID:1:assistant', 'old reply')
+      const current = contentSearchAssistant('UUID:2:assistant', 'current reply')
+      const copy = document.createElement('button')
+      copy.setAttribute('aria-label', 'Copy')
+      cluster.append(user, previous, current, copy)
+      document.body.append(cluster)
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') setComposerText(editor, operation.value ?? '')
+        if (operation.id === 'chatgpt-send') send.click()
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgram(programFor('do not use old copy', {
+      generationTimeoutMs: 30,
+    }), browser)).resolves.toMatchObject({
+      status: 'generation-timeout',
+      diagnostic: {
+        page: 'conversation',
+        userCount: 1,
+        assistantCount: 2,
+        settled: false,
+      },
+    })
+  })
+
+  it('fails within the readiness bound when an SSR textarea never hydrates into a ProseMirror composer', async () => {
+    const form = document.createElement('form')
+    const ssrTextarea = document.createElement('textarea')
+    ssrTextarea.id = 'prompt-textarea'
+    makeVisible(ssrTextarea)
+    form.append(ssrTextarea)
+    document.body.append(form)
+    const operations: ProgramOperation[] = []
+    const browser: ProgramBrowser = {
+      run: async (operation) => { operations.push(operation) },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgram(programFor('never fill', {
+      generationTimeoutMs: 12,
+      submissionTimeoutMs: 5,
+    }), browser)).resolves.toEqual({ status: 'input-unavailable' })
+    expect(operations.map(operation => operation.id)).toEqual([
+      'chatgpt-open',
+      'chatgpt-reset-conversation',
+    ])
+  })
+
+  it('does not click when the filled ProseMirror text no longer matches the request', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('Send')
+    form.append(editor, send)
+    document.body.append(form)
+    let clicks = 0
+    const operations: ProgramOperation[] = []
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      clicks += 1
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        operations.push(operation)
+        if (operation.id === 'chatgpt-fill') setComposerText(editor, 'rewritten')
+        if (operation.id === 'chatgpt-send') send.click()
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgram(programFor('original', { submissionTimeoutMs: 5 }), browser)).resolves.toEqual({
+      status: 'submission-failed',
+      diagnostic: {
+        page: 'root',
+        userCount: 0,
+        assistantCount: 0,
+        inputCharacters: 'rewritten'.length,
+        generating: false,
+        settled: false,
+        sendAvailable: true,
+      },
+    })
+    expect(clicks).toBe(0)
+    expect(operations.map(operation => operation.id)).not.toContain('chatgpt-send')
+  })
+
+  it('waits for a disabled public send button without refilling, then clicks it once', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('Send message', true)
+    form.append(editor, send)
+    document.body.append(form)
+    let readinessChecks = 0
+    let fills = 0
+    let clicks = 0
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      clicks += 1
+      appendCompletedDomTurn('enabled response')
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') {
+          fills += 1
+          setComposerText(editor, operation.value ?? '')
+        }
+        if (operation.id === 'chatgpt-send') send.click()
+      },
+      evaluate: async (_page, evaluator, input) => {
+        if (evaluator.includes('typeof input.prompt')) {
+          readinessChecks += 1
+          if (readinessChecks === 2) send.disabled = false
+        }
+        return evaluatePage(evaluator, input)
+      },
+    }
+
+    await expect(executeGeneratedProgram(programFor('wait for send'), browser)).resolves.toEqual({
+      status: 'completed',
+      response: 'enabled response',
+      truncated: false,
+    })
+    expect(readinessChecks).toBeGreaterThanOrEqual(2)
+    expect(fills).toBe(1)
+    expect(clicks).toBe(1)
+  })
+
+  it('fails closed when a composer form contains ambiguous public send controls', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const first = createSendButton('Send')
+    const second = createSendButton('Send message')
+    form.append(editor, first, second)
+    document.body.append(form)
+    let clicks = 0
+    first.addEventListener('click', () => { clicks += 1 })
+    second.addEventListener('click', () => { clicks += 1 })
+    const operations: ProgramOperation[] = []
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        operations.push(operation)
+        if (operation.id === 'chatgpt-fill') setComposerText(editor, operation.value ?? '')
+        if (operation.id === 'chatgpt-send') operationTarget(operation)
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgram(programFor('ambiguous', { submissionTimeoutMs: 5 }), browser)).resolves.toMatchObject({
+      status: 'submission-failed',
+      diagnostic: { sendAvailable: false },
+    })
+    expect(clicks).toBe(0)
+    expect(operations.map(operation => operation.id)).not.toContain('chatgpt-send')
+  })
+
+  it('treats an invalid pre-submit browser evaluator result as a protocol error without clicking', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('Send prompt')
+    form.append(editor, send)
+    document.body.append(form)
+    const operations: ProgramOperation[] = []
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        operations.push(operation)
+        if (operation.id === 'chatgpt-fill') setComposerText(editor, operation.value ?? '')
+        if (operation.id === 'chatgpt-send') send.click()
+      },
+      evaluate: async (_page, evaluator, input) => evaluator.includes('typeof input.prompt')
+        ? {}
+        : evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgram(programFor('invalid result'), browser)).resolves.toEqual({
+      status: 'protocol-error',
+    })
+    expect(operations.map(operation => operation.id)).not.toContain('chatgpt-send')
+  })
+
   it('emits browser evaluator functions as executable JavaScript rather than TypeScript source', () => {
     const program = adapter.buildChatGptWebProgram({
       url: 'https://chatgpt.com/',
@@ -331,7 +859,7 @@ describe('ChatGPT Web physical operator', () => {
     const encodedEvaluators = [
       ...program.source.matchAll(/browser\.evaluate\(page, ("(?:\\.|[^"\\])*")/g),
     ].map(match => match[1])
-    expect(encodedEvaluators).toHaveLength(5)
+    expect(encodedEvaluators).toHaveLength(7)
     for (const encoded of encodedEvaluators) {
       const evaluator = JSON.parse(encoded!) as string
       expect(() => new Script(`(${evaluator})`)).not.toThrow()
@@ -362,6 +890,12 @@ describe('ChatGPT Web physical operator', () => {
       evaluate: async (_page: string, evaluator: string) => {
         if (evaluator.includes('loginRequired')) {
           return { page, loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0 }
+        }
+        if (evaluator.includes('typeof input.prompt')) {
+          return {
+            page: 'root', userCount: 0, assistantCount: 0, inputCharacters: 28,
+            generating: false, settled: false, sendAvailable: true, promptMatches: true, ready: true,
+          }
         }
         if (evaluator.includes('removeAttribute')) return true
         return {

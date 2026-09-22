@@ -485,6 +485,9 @@ importers:
       '@deepseek-ai/dsh-bash-sandbox':
         specifier: workspace:*
         version: link:../packages/shell/bash-sandbox
+      '@deepseek-ai/dsh-browser':
+        specifier: workspace:*
+        version: link:../packages/browser/browser
       '@deepseek-ai/dsh-code-runtime-worker-thread':
         specifier: workspace:*
         version: link:../packages/code-runtime/code-runtime-worker-thread
@@ -572,6 +575,9 @@ importers:
       '@deepseek-ai/dsh-physical-operator':
         specifier: workspace:*
         version: link:../packages/physical-operator/physical-operator
+      '@deepseek-ai/dsh-physical-operator-chatgpt-web':
+        specifier: workspace:*
+        version: link:../packages/physical-operator/physical-operator-chatgpt-web
       '@deepseek-ai/dsh-physical-operator-resident':
         specifier: workspace:*
         version: link:../packages/physical-operator/physical-operator-resident
@@ -797,6 +803,9 @@ importers:
       '@deepseek-ai/dsh-workflow-worker-thread':
         specifier: workspace:*
         version: link:../packages/workflow/workflow-worker-thread
+      jsdom:
+        specifier: 29.1.1
+        version: 29.1.1
 
   native/landlock-run:
     devDependencies:

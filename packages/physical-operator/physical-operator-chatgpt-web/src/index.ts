@@ -155,12 +155,94 @@ type ProgramOutcome = CompletedProgramOutcome
   | { readonly status: 'generation-timeout'; readonly diagnostic: ProgramDiagnostic }
   | { readonly status: 'protocol-error' }
 
-const INSPECT_PAGE = String.raw`() => {
+const COMPOSER_DOM_HELPERS = String.raw`
   const visible = (element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
   };
+  const normalizeNewlines = (value) => String(value ?? '').replace(/\r\n?/g, '\n');
+  const composer = () => {
+    const candidates = [...document.querySelectorAll('div.ProseMirror[contenteditable="true"]')].filter(visible);
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+  const newline = String.fromCharCode(10);
+  const nodeText = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const element = node;
+    if (element.tagName === 'BR') {
+      return element.classList.contains('ProseMirror-trailingBreak') ? '' : newline;
+    }
+    return [...element.childNodes].map(nodeText).join('');
+  };
+  const composerText = (element) => {
+    if (element === null) return '';
+    const blocks = [...element.children];
+    const text = blocks.length === 0
+      ? [...element.childNodes].map(nodeText).join('')
+      : blocks.map(nodeText).join(newline);
+    return normalizeNewlines(text);
+  };
+  const outermost = (elements) => {
+    const unique = [...new Set(elements)];
+    const roots = unique.filter((element) => !unique.some((other) => other !== element && other.contains(element)));
+    return roots.sort((left, right) => (
+      left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING
+    ) !== 0 ? -1 : 1);
+  };
+  const messageUnits = () => {
+    const contentUnits = [...document.querySelectorAll('[data-content-search-unit-key]')];
+    const key = (element) => String(element.getAttribute('data-content-search-unit-key') ?? '');
+    const users = contentUnits.filter((element) => key(element).endsWith(':user')
+      && element.querySelector('[data-user-message-bubble="true"]') !== null);
+    const assistants = contentUnits.filter((element) => key(element).endsWith(':assistant')
+      && element.querySelector('[data-markdown-text-style="assistant-message"]') !== null);
+    return {
+      users: outermost([...document.querySelectorAll('[data-message-author-role="user"]'), ...users]),
+      assistants: outermost([...document.querySelectorAll('[data-message-author-role="assistant"]'), ...assistants]),
+    };
+  };
+  const assistantText = (element) => {
+    if (element === null) return '';
+    const body = element.querySelector('[data-markdown-text-style="assistant-message"]')
+      ?? element.querySelector('.markdown')
+      ?? element;
+    return body.textContent ?? '';
+  };
+  const latestAssistantSettled = (latest, assistants) => {
+    if (latest === null || latest.querySelector('[data-markdown-text-style="assistant-message"]') === null) return false;
+    let ancestor = latest.parentElement;
+    while (ancestor !== null && ancestor !== document.body && ancestor.tagName !== 'MAIN') {
+      if (assistants.filter((assistant) => ancestor.contains(assistant)).length > 1) return false;
+      const copied = [...ancestor.querySelectorAll('button')].some((button) => {
+        const label = String(button.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+        return label === 'copy' || label === '复制';
+      });
+      if (copied) return true;
+      ancestor = ancestor.parentElement;
+    }
+    return false;
+  };
+  const sendButton = (editor) => {
+    if (editor === null) return null;
+    const form = editor.closest('form');
+    if (form === null) return null;
+    const semanticLabels = new Set(['send', 'send message', 'send prompt', '发送', '发送消息']);
+    const candidates = [...form.querySelectorAll('button')].filter((element) => {
+      if (!visible(element) || element.disabled || element.getAttribute('aria-disabled') === 'true'
+        || element.type !== 'submit') return false;
+      const ariaLabel = String(element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      return element.id === 'composer-submit-button'
+        || element.getAttribute('data-testid') === 'send-button'
+        || semanticLabels.has(ariaLabel);
+    });
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+`
+
+const INSPECT_PAGE = String.raw`() => {
+  ${COMPOSER_DOM_HELPERS}
   const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
   const label = (element) => normalize(
     element.getAttribute('aria-label') ?? element.getAttribute('title') ?? element.textContent,
@@ -168,29 +250,25 @@ const INSPECT_PAGE = String.raw`() => {
   const loginRequired = [...document.querySelectorAll('button,a')]
     .filter(visible)
     .some((element) => /^(log in|sign in|登录)$/i.test(label(element)));
-  const replies = [...document.querySelectorAll('[data-message-author-role="assistant"]')]
-    .map((element) => element.querySelector('.markdown') ?? element)
-    .map((element) => element.textContent ?? '')
-    .filter((text) => text.trim().length > 0);
-  const userCount = document.querySelectorAll('[data-message-author-role="user"]').length;
+  const { users, assistants } = messageUnits();
+  const assistantCount = assistants.length;
+  const userCount = users.length;
   const page = location.pathname === '/'
     ? 'root'
     : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
-  let input = document.querySelector('#prompt-textarea');
-  if (input === null || !visible(input)) {
-    input = [...document.querySelectorAll('textarea,div[contenteditable="true"]')]
-      .find((element) => visible(element)) ?? null;
-  }
   document.querySelectorAll('[data-dsh-chatgpt-web-input="true"]')
     .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-input'));
-  if (input !== null && page === 'root' && userCount === 0 && replies.length === 0) {
+  document.querySelectorAll('[data-dsh-chatgpt-web-send="true"]')
+    .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-send'));
+  const input = composer();
+  if (input !== null && page === 'root' && userCount === 0 && assistantCount === 0) {
     input.setAttribute('data-dsh-chatgpt-web-input', 'true');
   }
   return {
     page,
     loginRequired,
     inputReady: input !== null,
-    assistantCount: replies.length,
+    assistantCount,
     userCount,
   };
 }`
@@ -224,49 +302,73 @@ const SELECT_MODEL = String.raw`async (input) => {
   return { selected: label(selector) === target };
 }`
 
+const PREPARE_SUBMISSION = String.raw`(input) => {
+  ${COMPOSER_DOM_HELPERS}
+  if (input === null || typeof input !== 'object' || typeof input.prompt !== 'string') return { valid: false };
+  document.querySelectorAll('[data-dsh-chatgpt-web-send="true"]')
+    .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-send'));
+  const { users, assistants } = messageUnits();
+  const assistantCount = assistants.length;
+  const userCount = users.length;
+  const page = location.pathname === '/'
+    ? 'root'
+    : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
+  const editor = composer();
+  const inputText = composerText(editor);
+  const send = sendButton(editor);
+  const promptMatches = editor !== null && inputText === normalizeNewlines(input.prompt);
+  const ready = page === 'root' && userCount === 0 && assistantCount === 0 && promptMatches && send !== null;
+  if (ready) send.setAttribute('data-dsh-chatgpt-web-send', 'true');
+  return {
+    page,
+    userCount,
+    assistantCount,
+    inputCharacters: inputText.length,
+    generating: false,
+    settled: false,
+    sendAvailable: send !== null,
+    promptMatches,
+    ready,
+  };
+}`
+
 const RESPONSE_STATE = String.raw`() => {
-  const replyElements = [...document.querySelectorAll('[data-message-author-role="assistant"]')];
-  const replies = replyElements
-    .map((element) => element.querySelector('.markdown') ?? element)
-    .map((element) => element.textContent ?? '')
-    .filter((text) => text.trim().length > 0);
-  const latestReply = replyElements.at(-1) ?? null;
-  const turn = latestReply?.closest('[data-testid^="conversation-turn-"]') ?? null;
-  const settled = turn !== null && turn.querySelector(
+  ${COMPOSER_DOM_HELPERS}
+  const { users, assistants } = messageUnits();
+  const latestReply = assistants.at(-1) ?? null;
+  const response = assistantText(latestReply);
+  const legacyTurn = latestReply?.closest('[data-testid^="conversation-turn-"]') ?? null;
+  const legacySettled = legacyTurn !== null && legacyTurn.querySelector(
     '[data-testid="copy-turn-action-button"],[aria-label="Copy response"],[aria-label="复制回复"]',
   ) !== null;
   const generating = [...document.querySelectorAll('button,[role="button"]')].some((element) => {
     const label = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/g, ' ').trim();
     return /stop generating|stop streaming|停止生成/i.test(label);
   });
-  const visible = (element) => {
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-  };
-  const input = document.querySelector('#prompt-textarea')
-    ?? [...document.querySelectorAll('textarea,div[contenteditable="true"]')].find(visible)
-    ?? null;
-  const inputText = String(input?.value ?? input?.textContent ?? '').trim();
-  const send = document.querySelector('#composer-submit-button,button[data-testid="send-button"]');
+  const editor = composer();
+  const inputText = composerText(editor);
+  const send = sendButton(editor);
   const page = location.pathname === '/'
     ? 'root'
     : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
   return {
     page,
-    userCount: document.querySelectorAll('[data-message-author-role="user"]').length,
-    assistantCount: replies.length,
+    userCount: users.length,
+    assistantCount: assistants.length,
     inputCharacters: inputText.length,
-    response: replies.at(-1) ?? '',
+    response,
     generating,
-    settled,
-    sendAvailable: send !== null && visible(send) && !send.disabled,
+    settled: legacySettled || latestAssistantSettled(latestReply, assistants),
+    sendAvailable: send !== null,
   };
 }`
 
-const REMOVE_INPUT_MARKER = String.raw`() => {
-  document.querySelectorAll('[data-dsh-chatgpt-web-input="true"]')
-    .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-input'));
+const REMOVE_COMPOSER_MARKERS = String.raw`() => {
+  document.querySelectorAll('[data-dsh-chatgpt-web-input="true"],[data-dsh-chatgpt-web-send="true"]')
+    .forEach((element) => {
+      element.removeAttribute('data-dsh-chatgpt-web-input');
+      element.removeAttribute('data-dsh-chatgpt-web-send');
+    });
   return true;
 }`
 
@@ -338,17 +440,58 @@ await browser.run({
   locator: { kind: 'css', selector: '[data-dsh-chatgpt-web-input="true"]' },
   value: request.prompt,
 });
-await browser.run({
-  id: 'chatgpt-send',
-  kind: 'click',
-  page,
-  locator: { kind: 'css', selector: '#composer-submit-button,button[data-testid="send-button"]' },
-});
-await browser.evaluate(page, ${JSON.stringify(REMOVE_INPUT_MARKER)});
+await browser.evaluate(page, ${JSON.stringify(REMOVE_COMPOSER_MARKERS)});
 const initialCount = inspect.assistantCount;
 const initialUserCount = inspect.userCount;
 const submissionStartedAt = Date.now();
 let state;
+let sendReady = false;
+const diagnostic = (value) => ({
+  page: value.page,
+  userCount: value.userCount,
+  assistantCount: value.assistantCount,
+  inputCharacters: value.inputCharacters,
+  generating: value.generating,
+  settled: value.settled,
+  sendAvailable: value.sendAvailable,
+});
+while (Date.now() - submissionStartedAt <= request.submissionTimeoutMs) {
+  state = asRecord(await browser.evaluate(page, ${JSON.stringify(PREPARE_SUBMISSION)}, { prompt: request.prompt }));
+  if (state === undefined
+    || !['root', 'conversation', 'other'].includes(state.page)
+    || !Number.isSafeInteger(state.userCount)
+    || !Number.isSafeInteger(state.assistantCount)
+    || !Number.isSafeInteger(state.inputCharacters)
+    || typeof state.generating !== 'boolean'
+    || typeof state.settled !== 'boolean'
+    || typeof state.sendAvailable !== 'boolean'
+    || typeof state.promptMatches !== 'boolean'
+    || typeof state.ready !== 'boolean') {
+    return { status: 'protocol-error' };
+  }
+  if (state.page !== 'root' || state.userCount !== 0 || state.assistantCount !== 0) {
+    return { status: 'context-not-isolated' };
+  }
+  if (state.ready) {
+    sendReady = true;
+    break;
+  }
+  await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
+}
+if (!sendReady) {
+  if (state === undefined) return { status: 'protocol-error' };
+  return { status: 'submission-failed', diagnostic: diagnostic(state) };
+}
+try {
+  await browser.run({
+    id: 'chatgpt-send',
+    kind: 'click',
+    page,
+    locator: { kind: 'css', selector: '[data-dsh-chatgpt-web-send="true"]' },
+  });
+} finally {
+  await browser.evaluate(page, ${JSON.stringify(REMOVE_COMPOSER_MARKERS)});
+}
 let submitted = false;
 while (Date.now() - submissionStartedAt <= request.submissionTimeoutMs) {
   state = asRecord(await browser.evaluate(page, ${JSON.stringify(RESPONSE_STATE)}));
@@ -370,15 +513,6 @@ while (Date.now() - submissionStartedAt <= request.submissionTimeoutMs) {
   if (submitted) break;
   await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
 }
-const diagnostic = (value) => ({
-  page: value.page,
-  userCount: value.userCount,
-  assistantCount: value.assistantCount,
-  inputCharacters: value.inputCharacters,
-  generating: value.generating,
-  settled: value.settled,
-  sendAvailable: value.sendAvailable,
-});
 if (!submitted) return { status: 'submission-failed', diagnostic: diagnostic(state) };
 const startedAt = Date.now();
 let stableResponse = '';

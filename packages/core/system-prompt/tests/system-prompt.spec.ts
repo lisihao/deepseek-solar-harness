@@ -3,6 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import SystemPrompt, {
   AssembleContext,
+  captureRuntimeContextSnapshot,
   currentRuntimeContextSnapshot,
   PromptAssembly,
   renderContextSnapshot,
@@ -42,6 +43,13 @@ describe('SystemPrompt', () => {
       sections: [{ name: 'memory', text: 'Earlier context.' }],
     })
     expect(currentRuntimeContextSnapshot([earlier, cleared])).toBeUndefined()
+    expect(captureRuntimeContextSnapshot([earlier], 'session-1')).toEqual({
+      version: 1,
+      sourceSessionId: 'session-1',
+      contextSnapshotMessageId: String(earlier.id),
+      sections: [{ name: 'memory', text: 'Earlier context.' }],
+    })
+    expect(captureRuntimeContextSnapshot([earlier, cleared], 'session-1')).toBeUndefined()
   })
 
   describe('built-in sections', () => {

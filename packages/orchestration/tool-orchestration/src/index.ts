@@ -1,7 +1,7 @@
 /** Model-facing durable TaskGraph orchestration Consumer. */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { currentRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
+import { captureRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
 import {
   OrchestrationRunId,
@@ -121,14 +121,7 @@ function collaborationPolicy(events: readonly { readonly type: string; readonly 
 
 /** Capture only the already-rendered dynamic contexts for this request. */
 function runtimeContextSnapshot(agent: Agent): OrchestrationRuntimeContextV1 | undefined {
-  const snapshot = currentRuntimeContextSnapshot(agent.session.deriveMessages())
-  if (snapshot === undefined) return undefined
-  return {
-    version: 1,
-    sourceSessionId: String(agent.id),
-    contextSnapshotMessageId: String(snapshot.messageId),
-    sections: snapshot.sections.map(section => ({ name: section.name, text: section.text })),
-  }
+  return captureRuntimeContextSnapshot(agent.session.deriveMessages(), String(agent.id))
 }
 
 /**

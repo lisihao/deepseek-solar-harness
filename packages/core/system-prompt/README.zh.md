@@ -37,6 +37,7 @@
 - `PromptAssembly`：`{ sections: AssembledSection[], tools: ToolSchema[], variables: Record<string, string | undefined> }`。各段文本到达时已求值，但尚未插值；`variables` 保存所有已注册变量在当前上下文中求得的值。工具 schema 按设计属于组装结果：「模型获知自己能做什么」是一个连贯整体，尽管适配器把 schema 作为独立 wire 字段传输。
 - `OperatorContextEnvelopeV1`：一份不可变、绑定摘要的交接数据，包含精确 system 文本、当前任务内容块、命名运行时上下文与可重建来源。`buildOperatorContextEnvelope` 创建信封，`parseOperatorContextEnvelope` 校验网络／进程输入，原生与文本物化器保留角色或明确降级角色，每个接收物理算子都必须返回接受或拒绝回执。
 - `currentRuntimeContextSnapshot(messages)`：从冻结的请求历史读取最新 system-prompt 运行时快照。后续清除标记会返回 `undefined`，绝不会重新启用更早快照。
+- `captureRuntimeContextSnapshot(messages, sourceSessionId)`：system-prompt 拥有供下游请求记录使用的规范化、分离的 v1 投影。它携带来源 Session、快照消息标识和具名段；清除标记会返回 `undefined`，而非重新启用更早上下文。
 - `renderPrompt(assembly)`：只插值 `interpolate` 不为 false 的段中的 `{{variable}}` 引用，删除空段，并用空行连接。严格规则：未知引用（使用 `Object.hasOwn` 查找，因此 `{{constructor}}` 等原型名称未知）、已注册但无值的引用、格式错误的完整 `{{…}}` 组，或出现 `{{` 却没有形成完整组、而后文仍有 `}}`（`{{{model}}}`），都会抛出异常；明确失败胜过交付格式错误的提示词。孤立的 `{{` 如果后面任何位置都没有 `}}`，会按字面量通过；替换值绝不再次扫描。`interpolate: false` 的段按贡献时的原文通过。
 
 可通过合并扩展：插件可以借助声明合并，为 `PromptAssembly` 和 `AssembleContext` 声明额外字段。

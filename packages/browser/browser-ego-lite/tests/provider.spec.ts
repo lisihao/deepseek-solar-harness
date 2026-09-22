@@ -19,6 +19,7 @@ import {
   type SubprocessSpawnSpec,
 } from '@deepseek-ai/dsh-subprocess'
 import { describe, expect, it } from 'vitest'
+import { JSDOM } from 'jsdom'
 import * as EgoLite from '../src/index.ts'
 
 interface ScriptedRun {
@@ -176,6 +177,9 @@ async function setup(config: EgoLite.Config = { executable: '/Applications/ego-b
 }
 
 interface FixtureState {
+  dom?: JSDOM
+  filledValues?: string[]
+  pressedKeys?: string[]
   snapshotCalls: number
   takeoverCalls: number
 }
@@ -219,8 +223,16 @@ async function executeFixtureSource(
     'js',
     'wait',
   ] as const
-  const names = [...objectNames, ...helperNames]
+  const names = [...objectNames, ...helperNames, 'document', 'window', 'getComputedStyle']
   for (const name of names) previous.set(name, target[name])
+  if (state.dom !== undefined) {
+    target.document = state.dom.window.document
+    target.window = state.dom.window
+    target.getComputedStyle = state.dom.window.getComputedStyle.bind(state.dom.window)
+    state.dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+      x: 0, y: 0, width: 100, height: 20, top: 0, right: 100, bottom: 20, left: 0, toJSON: () => ({}),
+    })
+  }
   const originalConsole = globalThis.console
   const stdout: string[] = []
   const stderr: string[] = []
@@ -361,8 +373,20 @@ async function executeFixtureSource(
       waitForNetworkIdle: (options?: unknown) => call(nativePage, 'waitForLoadState', 'networkidle', options),
       waitForElement: () => Promise.resolve(true),
       click: () => Promise.resolve(true),
-      fillInput: () => Promise.resolve(true),
-      pressKey: () => Promise.resolve(true),
+      fillInput: (selector: string, value: string) => {
+        const element = state.dom?.window.document.querySelector<HTMLElement>(selector)
+        if (element !== undefined && element !== null) {
+          if (element.getAttribute('contenteditable') === 'true') element.append(value)
+          else (element as HTMLInputElement).value = value
+          state.filledValues?.push(element.getAttribute('contenteditable') === 'true' ? element.textContent : (element as HTMLInputElement).value)
+        }
+        return Promise.resolve(true)
+      },
+      pressKey: (key: string) => {
+        state.pressedKeys?.push(key)
+        if (key === 'Backspace') state.dom?.window.getSelection()?.deleteFromDocument()
+        return Promise.resolve(true)
+      },
       cdp: (method: string) => method === 'Page.reload'
         ? call(nativePage, 'reload')
         : Promise.reject(new Error(`unsupported fixture CDP method: ${method}`)),
@@ -395,6 +419,30 @@ async function executeFixtureSource(
 }
 
 describe('EgoLiteBrowserProvider process protocol', () => {
+  it('replaces and clears editable drafts through native deletion before a legacy fill', async () => {
+    const dom = new JSDOM('<div id="editor" contenteditable="true">old draft</div><input id="name" value="old name">')
+    const state: FixtureState = { snapshotCalls: 0, takeoverCalls: 0, dom, filledValues: [], pressedKeys: [] }
+    const source = EgoLite.buildEgoLitePlanSource({
+      ...plan,
+      operations: [
+        { kind: 'open', id: op('open'), page: pageKey('main'), url: 'https://example.com/', reuse: 'exact-url', waitUntil: 'dom-content-loaded' },
+        { kind: 'fill', id: op('first'), page: pageKey('main'), locator: { kind: 'css', selector: '#editor' }, value: 'first' },
+        { kind: 'fill', id: op('replace'), page: pageKey('main'), locator: { kind: 'css', selector: '#editor' }, value: 'second' },
+        { kind: 'clear', id: op('clear'), page: pageKey('main'), locator: { kind: 'css', selector: '#editor' } },
+        { kind: 'fill', id: op('plain'), page: pageKey('main'), locator: { kind: 'css', selector: '#name' }, value: 'Ada' },
+      ],
+    }, { operationTimeoutMs: 100 })
+    try {
+      const run = await executeFixtureSource(source, state, 'global-helpers')
+      expect(run.outcome.exitCode, run.stderr).toBe(0)
+      expect(state.filledValues).toEqual(['first', 'second', '', 'Ada'])
+      expect(state.pressedKeys).toEqual(['Backspace', 'Backspace', 'Backspace'])
+      expect(dom.window.document.querySelector('#editor')?.textContent).toBe('')
+    } finally {
+      dom.window.close()
+    }
+  })
+
   it('exports a complete default Cordis plugin for headless dynamic loading', () => {
     expect(EgoLite.default).toMatchObject({
       name: 'browser-ego-lite',

@@ -111,6 +111,12 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
     traces.set(session, trace)
     return trace
   }
+  /* jscpd:ignore-start */
+  /*
+   * This Consumer owns its staged task-template trace and failure attribution.
+   * Sharing this pre-publication sequencing with another package would couple
+   * independent Session-event protocols and their recovery state.
+   */
   /* v8 ignore next -- session/event always follows list() or session/created seeding */
   const traceFor = (session: Session): SessionTrace => traces.get(session) ?? seed(session)
 
@@ -123,6 +129,13 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
     applyEvent(trace, event, fail)
     staged.set(event, { session, trace })
   }, { global: true })
+  /* jscpd:ignore-end */
+  /* jscpd:ignore-start */
+  /*
+   * Publication commits the same package-owned trace that the dispatch hook
+   * staged. The TaskTemplate-specific error and trace lifetime must remain
+   * local instead of becoming a cross-protocol invariant utility.
+   */
   ctx.on('session/event', (session, event) => {
     const candidate = staged.get(event)
     /* v8 ignore next -- internal/dispatch stages the exact callback arguments */
@@ -132,6 +145,7 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
     staged.delete(event)
     traces.set(session, candidate.trace)
   }, { global: true })
+  /* jscpd:ignore-end */
 }, { inject: ['sessions'] })
 
 /**

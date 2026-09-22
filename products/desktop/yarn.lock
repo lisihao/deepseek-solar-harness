@@ -1314,7 +1314,7 @@ __metadata:
 
 "@deepseek-ai/dsh-browser-ego-lite@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-browser-ego-lite@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz::hash=fe3e03&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-browser-ego-lite@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-browser-ego-lite-0.1.0-rc.5.tgz::hash=c3c268&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -1323,7 +1323,7 @@ __metadata:
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subprocess": ^0.1.0-rc.5
     "@deepseek-ai/dsh-timeout": ^0.1.0-rc.5
-  checksum: 10c0/bdb200234315ed262c32c4e219612f584a79e0da5a3cbff5142c1750f3f71b7723e10056d95a919cf4dd6c9a3350a994545034365f4444106ab7c4f5da8be905
+  checksum: 10c0/0b39be1a0c2fcae543bd505a0b1f7d7fdfed69a66feababefd38608f7b190296b8fbb1207dc69d3ee3dbb9bf8cb59fff708a95de270974d5836f593a064c3ee2
   languageName: node
   linkType: hard
 
@@ -3122,7 +3122,7 @@ __metadata:
 
 "@deepseek-ai/dsh-physical-operator-chatgpt-web@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-physical-operator-chatgpt-web@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz::hash=5fef0d&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-physical-operator-chatgpt-web@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-chatgpt-web-0.1.0-rc.5.tgz::hash=9774bb&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -3131,13 +3131,13 @@ __metadata:
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/dsh-physical-operator": ^0.1.0-rc.5
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
-  checksum: 10c0/9b923fdbe8e4077eca3d8da64807eff85f2b011df37af7809bda94eab98fd01bc7ebd6935d6578f9f49f5f1658dd38358a91e2850f9c7333b77642cf1bcbb461
+  checksum: 10c0/72f0c11def2608f2b40cb503c886c9ed8da38c601dba8000d025c37a1e3ac0234d255877f3857d08cdc424238293c73c06f77fba22f73a7bb13cce6899807781
   languageName: node
   linkType: hard
 
 "@deepseek-ai/dsh-physical-operator-resident@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-physical-operator-resident@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz::hash=9f3949&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-physical-operator-resident@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz::hash=49cc37&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -3147,7 +3147,7 @@ __metadata:
     "@deepseek-ai/dsh-resident-operator": ^0.1.0-rc.5
     "@deepseek-ai/dsh-subagent": ^0.1.0-rc.5
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
-  checksum: 10c0/56d0573b100451de0aeea05d0174802414df48b7f50ed67d0d9c2f9a5489eb78ad09d65ce9ef7cbd15ae58d6a6b02bc924c2248ea6241d9b83e397cc2f298e22
+  checksum: 10c0/cab587d2deeb61d9384d595ff89d59838cd7f255155202e130ebf10c25ef3951a2e1ac3a31242262aa233fbd9b18755e7ec924878b4ab54bf19d74f17536d040
   languageName: node
   linkType: hard
 
@@ -4068,7 +4068,7 @@ __metadata:
 
 "@deepseek-ai/dsh-system-prompt@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-system-prompt@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz::hash=b2928d&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-system-prompt@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-system-prompt-0.1.0-rc.5.tgz::hash=ea7f9a&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/schemastery": "npm:^3.18.1"
   peerDependencies:
@@ -4076,13 +4076,13 @@ __metadata:
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/dsh-llm": ^0.1.0-rc.5
     "@deepseek-ai/dsh-scope": ^0.1.0-rc.5
-  checksum: 10c0/dccd9da4ebf5b5f72f0c74e62f00d77062ae187e7d75a1a3f4511e9a24ab1e682f93cc62ef6b1b450527d5a62b8c722edc5a79af6e9ffb97cd1abb5381db1177
+  checksum: 10c0/e03578f9112f668171ec260674ff092f5508dc3705bb4be835b6fb6739ab7bf1977f3c55a971aa2eb8095b6b570473b349285a2e78c6883e0ecc1835be0c77f2
   languageName: node
   linkType: hard
 
 "@deepseek-ai/dsh-task-template-context@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-context-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-task-template-context@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-context-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-context-0.1.0-rc.5.tgz::hash=c7dfc6&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-task-template-context@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-context-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-context-0.1.0-rc.5.tgz::hash=95e382&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-agent": ^0.1.0-rc.5
@@ -4091,7 +4091,7 @@ __metadata:
     "@deepseek-ai/dsh-session": ^0.1.0-rc.5
     "@deepseek-ai/dsh-task-template": ^0.1.0-rc.5
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
-  checksum: 10c0/9cb17d1cc8a83499e0975d1402545adf1dd4dadc38940b852380e3edd2798dd698fb433a878cc4a84d31c66aca7f8b2165a947415235adb5cbdb024335b7672e
+  checksum: 10c0/c16899469ab3f7d95164bf47b3f87cafe0c00b7d08d30f93cc77dec0f4b27e589cb950fe73db181293df8ad9f58b4dc249c5e2c1593755ba1f101fe22d007794
   languageName: node
   linkType: hard
 
@@ -4109,7 +4109,7 @@ __metadata:
 
 "@deepseek-ai/dsh-task-template@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-task-template@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-0.1.0-rc.5.tgz::hash=01cb79&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-task-template@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-task-template-0.1.0-rc.5.tgz::hash=6e5262&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-atomic-write": ^0.1.0-rc.5
@@ -4117,7 +4117,7 @@ __metadata:
     "@deepseek-ai/dsh-home-paths": ^0.1.0-rc.5
     "@deepseek-ai/dsh-invariants": ^0.1.0-rc.5
     "@deepseek-ai/schemastery": ^3.18.1
-  checksum: 10c0/cfe9e7004f09956c96be897cda93c3721ced899324b51bd446966c38e7baafbb2e081a2b7c5b5a26f3d5a8dd8745473b0d50acb4a57cffd25e15666a15e85718
+  checksum: 10c0/440b9e080657ac9dd765883d528c92d606a01982beb5df96ef821e9cfff7ef937a86fdc7d28ed6a2136ae6680d938f0fa20dca7e51756b04762e64fbc94a29ca
   languageName: node
   linkType: hard
 
@@ -4322,7 +4322,7 @@ __metadata:
 
 "@deepseek-ai/dsh-tool-debate@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-tool-debate@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz::hash=e0047c&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-tool-debate@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-debate-0.1.0-rc.5.tgz::hash=97b3d4&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-agent": ^0.1.0-rc.5
@@ -4335,7 +4335,7 @@ __metadata:
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
     zod: ^4.4.3
-  checksum: 10c0/92e6c182d0677cb0f8e23271e557ca046b6678ff8cdfaaaa6ad1115ca953101a1d0b357b4f2e08c52f874a757a102e683a6143cd58fecca703744f09ae6afece
+  checksum: 10c0/a49c2c9faf16d5c1d107bffb0c34cf6c9009f6b2f6cefa3c7a8d00744d567cf254c66b13227f2a57b9db22537677e5017d818f695519e600866aa9736e07cde5
   languageName: node
   linkType: hard
 
@@ -4431,7 +4431,7 @@ __metadata:
 
 "@deepseek-ai/dsh-tool-orchestration@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-tool-orchestration@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz::hash=b22e8f&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-tool-orchestration@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-tool-orchestration-0.1.0-rc.5.tgz::hash=8125d2&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ^4.0.1
     "@deepseek-ai/dsh-agent": ^0.1.0-rc.5
@@ -4444,7 +4444,7 @@ __metadata:
     "@deepseek-ai/dsh-system-prompt": ^0.1.0-rc.5
     "@deepseek-ai/dsh-tools": ^0.1.0-rc.5
     zod: ^4.4.3
-  checksum: 10c0/0f7cb014027a44a874d8ab0e8915017ef9b1ab20f8a809057d067eaeafed95696c1e601789988d4cbc82f7282aef8fa84ea7d86e5f72e547fc5c17c8549b2fa8
+  checksum: 10c0/ec252c672bbf9bc5d09a35c0ff2ff358855895fc44492b67d27037c5320fe56e046981adc227b2ce96d669ca5cbf80f23d3f5cdc87fc51e590e5675733e9b0e5
   languageName: node
   linkType: hard
 

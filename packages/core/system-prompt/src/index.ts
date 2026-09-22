@@ -108,6 +108,38 @@ export function currentRuntimeContextSnapshot(
   return undefined
 }
 
+/** Detached v1 projection of the active runtime-context snapshot for a downstream request. */
+export interface RuntimeContextSnapshotV1 {
+  /** Schema version for downstream durable request records. */
+  readonly version: 1
+  /** Session that supplied the already-rendered dynamic contexts. */
+  readonly sourceSessionId: string
+  /** Durable identity of the source snapshot message. */
+  readonly contextSnapshotMessageId: string
+  /** Exact named sections from the source snapshot. */
+  readonly sections: readonly ContextSnapshotSection[]
+}
+
+/**
+ * Capture the active runtime-context snapshot for one downstream request.
+ * @param messages - ordered derived model history for the owning Session.
+ * @param sourceSessionId - stable string identity of that Session.
+ * @returns a detached v1 projection, or `undefined` after a clearance marker.
+ */
+export function captureRuntimeContextSnapshot(
+  messages: readonly Message[],
+  sourceSessionId: string,
+): RuntimeContextSnapshotV1 | undefined {
+  const snapshot = currentRuntimeContextSnapshot(messages)
+  if (snapshot === undefined) return undefined
+  return {
+    version: 1,
+    sourceSessionId,
+    contextSnapshotMessageId: String(snapshot.messageId),
+    sections: snapshot.sections.map(section => ({ name: section.name, text: section.text })),
+  }
+}
+
 /** One contributed section of the system prompt (registry input). */
 export interface PromptSection {
   /** Unique name — a duplicate registration throws (see {@link SystemPrompt.section}). */

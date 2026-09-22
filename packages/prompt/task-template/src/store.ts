@@ -71,12 +71,19 @@ export class TaskTemplateStoreError extends TypeError {
   }
 }
 
+/* jscpd:ignore-start */
+/*
+ * This durable document parser owns its exact prototype rule. The maintained
+ * cosmokit predicate admits class instances, and depending on the unrelated
+ * settings seam would invert the task-template capability direction.
+ */
 /** Whether a value is a plain data object (not an array, null, or class instance). */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const proto: unknown = Object.getPrototypeOf(value)
   return proto === Object.prototype || proto === null
 }
+/* jscpd:ignore-end */
 
 /** Reject keys outside the allowed set, naming the first offender. */
 function rejectUnknownKeys(record: Record<string, unknown>, allowed: readonly string[], at: string): void {
@@ -217,20 +224,29 @@ function validateStoredId(value: unknown, at: string): TaskTemplateId {
 
 const REVISION_KEYS = ['version', 'name', 'rank', 'match', 'method', 'updatedAt'] as const
 
-/** Validate one archived method-layer revision. */
-function validateRevision(value: unknown, at: string): TaskTemplateRevision {
-  if (!isPlainObject(value)) {
-    throw new TaskTemplateStoreError(`${at} must be a revision object`)
-  }
-  rejectUnknownKeys(value, REVISION_KEYS, at)
+/** Validate fields shared by the current method layer and every archived revision. */
+function validateMethodLayer(
+  value: Record<string, unknown>,
+  at: string,
+  version = validateVersion(value['version'], `${at}.version`),
+): TaskTemplateRevision {
   return {
-    version: validateVersion(value['version'], `${at}.version`),
+    version,
     name: validateNonBlankString(value['name'], `${at}.name`),
     rank: validateRank(value['rank'], `${at}.rank`),
     match: validateMatch(value['match'], `${at}.match`),
     method: validateMethod(value['method'], `${at}.method`),
     updatedAt: validateInstant(value['updatedAt'], `${at}.updatedAt`),
   }
+}
+
+/** Validate one archived method-layer revision. */
+function validateRevision(value: unknown, at: string): TaskTemplateRevision {
+  if (!isPlainObject(value)) {
+    throw new TaskTemplateStoreError(`${at} must be a revision object`)
+  }
+  rejectUnknownKeys(value, REVISION_KEYS, at)
+  return validateMethodLayer(value, at)
 }
 
 const TEMPLATE_KEYS = ['id', 'enabled', 'createdAt', 'version', 'name', 'rank', 'match', 'method', 'updatedAt', 'history'] as const
@@ -266,12 +282,7 @@ function validateTemplate(value: unknown, at: string): TaskTemplate {
     id: validateStoredId(value['id'], `${at}.id`),
     enabled: value['enabled'],
     createdAt: validateInstant(value['createdAt'], `${at}.createdAt`),
-    version,
-    name: validateNonBlankString(value['name'], `${at}.name`),
-    rank: validateRank(value['rank'], `${at}.rank`),
-    match: validateMatch(value['match'], `${at}.match`),
-    method: validateMethod(value['method'], `${at}.method`),
-    updatedAt: validateInstant(value['updatedAt'], `${at}.updatedAt`),
+    ...validateMethodLayer(value, at, version),
     history,
   }
 }

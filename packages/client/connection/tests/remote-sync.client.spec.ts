@@ -278,6 +278,20 @@ describe('Remote Sync wire parsing', () => {
         outcome: 'accepted', format: 'native', roleFidelity: 'native', injected: true,
       },
     })).toThrow('unknown field')
+    const acceptedNativeReceipt = {
+      version: 1, digest: 'b'.repeat(64), receiver: 'remote-resident:codex',
+      outcome: 'accepted', format: 'native', roleFidelity: 'native',
+    }
+    for (const [contextReceipt, error] of [
+      [{ ...acceptedNativeReceipt, version: 2 }, 'version must be 1'],
+      [{ ...acceptedNativeReceipt, outcome: 'rejected' }, 'outcome must be accepted'],
+      [{ ...acceptedNativeReceipt, format: 'opaque' }, 'format is invalid'],
+      [{ ...acceptedNativeReceipt, receiver: '   ' }, 'receiver must not be blank'],
+    ] as const) {
+      expect(() => parseRemoteResidentAcceptedTurn({
+        sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0, contextReceipt,
+      })).toThrow(error)
+    }
 
     const provider = {
       operatorId: 'claude-code', product: 'claude-code', displayName: 'Claude Code', description: '',

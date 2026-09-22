@@ -1,7 +1,7 @@
 /** Model-facing Consumer and per-session policy for the provider-neutral Debate seam. */
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import { currentRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
+import { captureRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   type DebateControlAction,
@@ -516,14 +516,7 @@ function messageText(message: HostMessage): string {
 
 /** Capture the owning request's rendered preference and memory contexts. */
 function debateRuntimeContext(agent: Agent): DebateRuntimeContextV1 | undefined {
-  const snapshot = currentRuntimeContextSnapshot(agent.session.deriveMessages())
-  if (snapshot === undefined) return undefined
-  return {
-    version: 1,
-    sourceSessionId: String(agent.id),
-    contextSnapshotMessageId: String(snapshot.messageId),
-    sections: snapshot.sections.map(section => ({ name: section.name, text: section.text })),
-  }
+  return captureRuntimeContextSnapshot(agent.session.deriveMessages(), String(agent.id))
 }
 
 function dispatchForPosition(

@@ -259,7 +259,10 @@ describe('cross-process refresh', () => {
       expect(readerProvider.get(taskTemplateId('fixture-shared'))?.method).toBe('Fictional method v2.')
     })
     expect(events).toContainEqual([taskTemplateId('fixture-shared'), 'update'])
-    expect((await stat(join(home, 'task-templates.json'))).mode & 0o777).toBe(0o600)
+    // Windows stat mode does not represent the file's access-control list.
+    if (process.platform !== 'win32') {
+      expect((await stat(join(home, 'task-templates.json'))).mode & 0o777).toBe(0o600)
+    }
   })
 
   it('logs a corrupt external replacement, keeps watching, and adopts the next valid replacement', async () => {

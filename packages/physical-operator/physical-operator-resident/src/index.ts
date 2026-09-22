@@ -156,6 +156,13 @@ class DualModePhysicalOperator implements PhysicalOperator {
     }
     const reason = subagentReason(ephemeralProvider, this.ctx.subagents.getProvider(ephemeralProvider))
     if (reason !== undefined) throw new PhysicalOperatorError(reason, 'OPERATOR_UNAVAILABLE')
+    /* jscpd:ignore-start */
+    /*
+     * This dual-mode Provider owns an ephemeral fallback independently of the
+     * standalone subagent Provider: their configuration, availability checks,
+     * and teardown lifetimes differ, while this text-envelope forwarding must
+     * intentionally remain identical.
+     */
     const run: SubagentRun = await this.ctx.subagents.start(ephemeralProvider, {
       ...request.label === undefined ? {} : { label: request.label },
       prompt: request.contextEnvelope === undefined
@@ -171,6 +178,7 @@ class DualModePhysicalOperator implements PhysicalOperator {
       result: run.result,
       dispose: () => run.dispose(),
     }
+    /* jscpd:ignore-end */
   }
 
   private async startResident(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {

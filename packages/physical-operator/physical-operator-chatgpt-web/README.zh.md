@@ -44,8 +44,9 @@
 ## 行为
 
 - 发现界面暴露一个 `chatgpt-web` 算子，固定 `maxConcurrency: 1`、`executionModes: [ephemeral]`。
-- 每次已接受调用都会复用已认证的命名工作区，但在填入提示词前先把选中的页面导航到全新的 `https://chatgpt.com/` 根对话。根对话中的用户轮次与助手轮次必须均为零；否则本次调用会以 `CHATGPT_WEB_CONTEXT_NOT_ISOLATED` 失败且不会提交。随后它会点击 ChatGPT 的可见发送控件，并在等待最终助手文本前证明新用户轮次或生成已经开始。
-- 网页未接受已填提示时，会在 `submissionTimeoutMs` 内以 `CHATGPT_WEB_SUBMIT_FAILED` 失败，不进入更长的生成等待；生成超时只附带不含提示或回复正文的有界页面状态。
+- 每次已接受调用都会复用已认证的命名工作区，但在填入提示词前先把选中的页面导航到全新的 `https://chatgpt.com/` 根对话。根对话中的用户轮次与助手轮次必须均为零；否则本次调用会以 `CHATGPT_WEB_CONTEXT_NOT_ISOLATED` 失败且不会提交。在该空根页面上，程序会等待唯一可见的 `div.ProseMirror[contenteditable="true"]` 编辑器，并忽略服务端渲染的 textarea 占位框。填入后，它会规范化换行符、确认编辑器仍包含完整请求，并保持根页面为空。随后它只会在该编辑器所属 form 内选择唯一可见、启用且 `type="submit"` 的发送按钮：旧版 `#composer-submit-button`、`data-testid="send-button"`，或 `aria-label` 精确为 `Send`、`Send message`、`Send prompt`、`发送`、`发送消息` 的按钮。它只点击一次，并在等待最终助手文本前证明新用户轮次或生成已经开始。
+- 缺少或被改写的编辑器、不可用或歧义的发送控件，或网页未接受点击时，都会在 `submissionTimeoutMs` 内以 `CHATGPT_WEB_SUBMIT_FAILED` 失败，不进入更长的生成等待；生成超时只附带不含提示或回复正文的有界页面状态。
+- 回复收集器支持旧版 role 标记消息，以及当前 `data-content-search-unit-key` 用户和助手 unit。它会移除嵌套重复 unit、提取最新 `data-markdown-text-style="assistant-message"` 正文，并要求两次匹配且未生成的样本。对于当前 unit，只有其自身单助手 action ancestor 中精确为 `Copy` 或 `复制` 的按钮才能标记回复完成；搜索会在 `main`、`body` 或包含多个助手的 ancestor 之前停止。
 - 若物理算子调用方提供 `systemPrompt`，它会按 `systemPrompt + "\n\n---\n\n" + task` 与任务合并；这与旧 Solar 网页路由一致。
 - `AbortSignal` 会取消浏览器程序并得到 aborted 终态。dispose 不会关闭用户浏览器或已认证工作区。
 - 进度流只保存生命周期阶段、等待时长心跳、失败状态和结果大小元数据；它刻意不包含 prompt 或网页回复正文。
