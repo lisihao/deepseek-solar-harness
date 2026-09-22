@@ -4,7 +4,7 @@ import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { installModelSelection, type Agent, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LlmRuntime, {
   CallId,
@@ -1296,6 +1296,88 @@ describe('host physical-operator routing', () => {
     expect(lastAssistantMessage(agent).content).toEqual([
       { type: 'text', text: 'primary codex result' },
     ])
+  })
+
+  it('reattaches a pending Resident receipt when the selected physical main model stays the same', async () => {
+    const { agent, codex } = await setup({ codexImmediate: false })
+    const selection: ModelSelectionRef = {
+      current: { provider: 'dsh-physical-operator', model: 'codex' },
+      assembled: undefined,
+    }
+    const disposeSelection = installModelSelection(agent.ctx, selection)
+    try {
+      send(agent, '你好')
+      while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+      const first = codex.requests[0]
+      if (first === undefined) throw new Error('expected the initial Resident request')
+      const commandId = String(first.executionId)
+      const receipt = codex.receipts.get(commandId)
+      if (receipt === undefined) throw new Error('expected the initial Resident receipt')
+
+      agent.cancel({ kind: 'user' })
+      await agent.whenIdle()
+      send(agent, '继续啊')
+      while (codex.requests.length < 2) await new Promise(resolve => setTimeout(resolve, 1))
+
+      expect(String(codex.requests[1]?.executionId)).toBe(commandId)
+      expect(codex.productStarts).toBe(1)
+      receipt.result.resolve({
+        output: [{ type: 'text', text: 'reattached Resident result' }],
+        stopReason: 'completed',
+      })
+      await agent.whenIdle()
+    } finally {
+      disposeSelection()
+    }
+  })
+
+  it('uses a different selected physical main model instead of an older Resident continuation', async () => {
+    const { agent, codex, chatgpt } = await setup({ primary: 'codex', codexImmediate: false })
+
+    send(agent, '你好')
+    while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
+    agent.cancel({ kind: 'user' })
+    await agent.whenIdle()
+
+    const disposeSelection = installModelSelection(agent.ctx, {
+      current: { provider: 'dsh-physical-operator', model: 'chatgpt-web' },
+      assembled: undefined,
+    })
+    try {
+      send(agent, '继续啊')
+      await agent.whenIdle()
+
+      expect(codex.requests).toHaveLength(1)
+      expect(codex.productStarts).toBe(1)
+      expect(chatgpt.requests).toHaveLength(1)
+    } finally {
+      disposeSelection()
+    }
+  })
+
+  it('does not replay an unfinished ChatGPT Web receipt through a continuation', async () => {
+    const { agent, deepseek, chatgpt } = await setup()
+    const prompt = createUserMessage({
+      content: [{ type: 'text', text: '请用 ChatGPT 网页版回答：你好。' }],
+      source: { kind: 'user' },
+    })
+    agent.session.append('user/message', prompt, { surfaceOp: 'append' })
+    agent.session.append('physical-operator/dispatch', {
+      commandId: 'unfinished-browser-receipt',
+      operatorId: 'chatgpt-web',
+      promptMessageId: String(prompt.id),
+      requestedByMessageId: String(prompt.id),
+      turn: 1,
+      step: 0,
+      recovered: false,
+      executionMode: 'ephemeral',
+    }, { ignorable: true })
+
+    send(agent, '继续啊')
+    await agent.whenIdle()
+
+    expect(chatgpt.requests).toHaveLength(0)
+    expect(deepseek.requests).toHaveLength(1)
   })
 
   it('replays the same durable command after caller interruption and router remount', async () => {

@@ -1,8 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {
+  ModelDirectoryState,
+  ModelSelectInjected,
+} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type {
   PhysicalOperatorProfileOwner,
   PhysicalOperatorProfileReasoningEffort,
@@ -21,7 +25,7 @@ import type { DesktopResidentDashboard } from '../contracts.ts'
 import { loadResidentDashboard, type BrowserRequest } from './ResidentOperatorsPanel.tsx'
 
 /** Command face injected by the Desktop client registration. */
-export interface PhysicalOperatorRoutingInjected {
+export interface PhysicalOperatorRoutingInjected extends Pick<ModelSelectInjected, 'directory'> {
   /** Authenticated same-origin request from the shared browser Connection seam. */
   request: BrowserRequest
   /** Persist one Session routing policy through the host command boundary. */
@@ -113,17 +117,31 @@ export function physicalOperatorEffectiveExecutionMechanism(
  * @param policy - selected physical-operator policy shown by the primary route control.
  * @param rlm - persisted RLM execution preference, when its projection is loaded.
  * @param debate - persisted Debate execution preference, when its projection is loaded.
+ * @param directory - shared primary-model directory, when its projection has loaded.
  * @returns a compact label for the next direct message.
  */
 export function physicalOperatorEffectiveExecutionLabel(
   policy: PhysicalOperatorRoutingPolicy,
   rlm: RlmExecutionMode | undefined,
   debate: DebateExecutionMode | undefined,
+  directory?: ModelDirectoryState,
 ): string {
   const mechanism = physicalOperatorEffectiveExecutionMechanism(rlm, debate)
+  if (mechanism === 'debate') return orchestrationExecutionMechanismLabel(mechanism)
+  if (physicalOperatorMainModelIsChatGPTWeb(directory)) return physicalOperatorRoutingSummary('chatgpt-web')
   return mechanism === undefined || mechanism === 'auto'
     ? physicalOperatorRoutingSummary(policy)
     : orchestrationExecutionMechanismLabel(mechanism)
+}
+
+/**
+ * Whether the shared primary-model directory reports the browser-only ChatGPT route.
+ * @param directory - shared primary-model directory, when its projection has loaded.
+ * @returns whether the current route is the ChatGPT browser operator.
+ */
+export function physicalOperatorMainModelIsChatGPTWeb(directory: ModelDirectoryState | undefined): boolean {
+  return directory?.current?.provider === 'dsh-physical-operator'
+    && directory.current.model === 'chatgpt-web'
 }
 
 type SaveExecutionSubmode = (mode: 'auto' | 'enabled' | 'disabled') => Promise<string | null>
@@ -245,6 +263,7 @@ export function PhysicalOperatorRoutingControl({
   useProjection,
   session,
   input,
+  directory,
   request,
   select,
   selectProfile,
@@ -252,6 +271,11 @@ export function PhysicalOperatorRoutingControl({
   selectDebateMode,
 }: PhysicalOperatorRoutingControlProps) {
   const routing = useProjection('physicalOperatorRouting')
+  const modelDirectory = useSyncExternalStore(
+    fn => directory.subscribe(fn),
+    () => directory.getSnapshot(),
+  )
+  const browserMode = physicalOperatorMainModelIsChatGPTWeb(modelDirectory)
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -261,10 +285,19 @@ export function PhysicalOperatorRoutingControl({
   const alive = useRef(true)
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLElement>(null)
+  const profileOwner = browserMode || routing === undefined
+    ? undefined
+    : routing.currentValue === 'codex' || routing.currentValue === 'claude-code'
+      ? routing.currentValue
+      : undefined
+  const dashboardEligible = open
+    && profileOwner !== undefined
+    && modelDirectory.status !== 'idle'
+    && modelDirectory.status !== 'loading'
 
   useEffect(() => () => { alive.current = false }, [])
   useEffect(() => {
-    if (!open) return
+    if (!dashboardEligible) return
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     const refresh = async (): Promise<void> => {
@@ -283,7 +316,7 @@ export function PhysicalOperatorRoutingControl({
       controller.abort()
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [open, request])
+  }, [dashboardEligible, request])
   useLayoutEffect(() => {
     if (!open) return
     const place = (): void => {
@@ -322,11 +355,8 @@ export function PhysicalOperatorRoutingControl({
     routing.currentValue,
     orchestrationPreferences?.rlm,
     debatePreferences?.mode,
+    modelDirectory,
   )
-  const profileOwner = routing.currentValue === 'codex'
-    || routing.currentValue === 'claude-code'
-    ? routing.currentValue
-    : undefined
   const provider = profileOwner === undefined
     ? undefined
     : dashboard?.providers.find(candidate => candidate.operatorId === profileOwner)
@@ -466,7 +496,7 @@ export function PhysicalOperatorRoutingControl({
                     key={option.value}
                     type="button"
                     data-selected={option.value === routing.currentValue || undefined}
-                    disabled={saving}
+                    disabled={saving || browserMode}
                     onClick={() => { choose(option.value) }}
                   >
                     <span className="dshDesktopOperatorStrategyRadio" aria-hidden="true" />
@@ -477,6 +507,14 @@ export function PhysicalOperatorRoutingControl({
                   </button>
                 ))}
               </div>
+              {browserMode && (
+                <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
+                  <div>
+                    <strong>当前主模型：ChatGPT 网页版</strong>
+                    <small>已保留“{physicalOperatorRoutingLabel(routing.currentValue)}”协作偏好。请先在模型选择器中更改主模型，再修改原生协作方式。</small>
+                  </div>
+                </div>
+              )}
               {effectiveMechanism === 'debate' && (
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
                   <div>

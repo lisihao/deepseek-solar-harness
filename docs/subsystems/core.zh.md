@@ -52,6 +52,8 @@ interface AgentHandle {
 
 `AgentFactory` 是注册表背后的创建接口：循环经 `ctx.agents.setFactory()` 注册其工厂，因此消费方使用 `ctx.agents` 时无需依赖具体循环包。确切的 `create`/`resume` 签名及回滚约定见下方[生成区块](#ctxagents--agentregistry)。
 
+运行入口可以通过 `installModelSelection(agentCtx, ref)` 安装可变模型选择。`readModelSelection(agent)` 返回 `ModelSelectionSnapshot`：`installed` 标识作用域是否拥有模型选择，`selection` 包含提示组装捕获的模型。已安装但尚未捕获或已清除的选择保持 undefined；只有未安装选择时才使用创建选项。消费方使用这份快照，不把创建时的默认值当成当前浏览器选择。
+
 <a id="the-agent-handle"></a>
 
 ## Agent 句柄

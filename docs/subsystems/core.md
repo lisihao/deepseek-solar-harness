@@ -50,6 +50,8 @@ interface AgentHandle {
 
 `AgentFactory` is the creation interface behind the registry: the loop registers its factory via `ctx.agents.setFactory()`, so consumers use `ctx.agents` without depending on the concrete loop package. The exact `create`/`resume` signatures and rollback contracts are in the [generated section](#ctxagents--agentregistry) below.
 
+Runtime entry points can install a mutable model selection with `installModelSelection(agentCtx, ref)`. `readModelSelection(agent)` returns a `ModelSelectionSnapshot`: `installed` identifies whether the scope owns a selection, and `selection` contains the model captured by prompt assembly. An installed but uncaptured or cleared selection remains undefined; creation options are used only when no selection is installed. Consumers use this snapshot instead of interpreting creation defaults as the current browser choice.
+
 ## The agent handle
 
 `Agent` is the surface every plugin (UI, hooks, orchestrators) programs against; `ctx.agents.get(id)` returns it, and the [initiator scope](#initiating-agent) carries it. The concrete implementation is package-internal to dsh-agent-loop; nothing outside the loop depends on it. The unified `send` method exposes target and wakeup routing directly; `followup`, `steer`, and `inject` are fixed-preset aliases.

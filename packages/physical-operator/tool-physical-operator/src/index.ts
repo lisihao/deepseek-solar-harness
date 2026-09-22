@@ -8,7 +8,7 @@
 
 import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import { assembleContextFor, type Agent, type PreStepDecision } from '@deepseek-ai/dsh-agent'
+import { assembleContextFor, readModelSelection, type Agent, type ModelSelection, type PreStepDecision } from '@deepseek-ai/dsh-agent'
 import {
   isAgentLoopRequest,
   LlmAdapter,
@@ -846,7 +846,7 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
   const previous = latestDispatch(agent.session.events)
   const policy = foldPhysicalOperatorRouting(agent.session.events)
   if (resume !== undefined) {
-    const recoverable = recoverableDispatch(agent.session.events)
+    const recoverable = resumableResidentDispatch(agent.session.events)
     if (recoverable === undefined) return undefined
     const hostRoute = recoveredHostRoute(recoverable, resume.id)
     return {
@@ -870,8 +870,12 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
   const text = textContent(current.content)
   const explicit = explicitOperator(text)
   if (explicit !== undefined) return operatorDecision(ctx, agent, current.id, policy, explicit, '当前请求显式指定物理算子')
-  if (isContinuation(text) && previous !== undefined) {
-    const recoverable = recoverableDispatch(agent.session.events)
+  const selection = readModelSelection(agent)
+  const selected = selectedPhysicalMainOperator(selection.selection)
+  if (isContinuation(text)
+    && previous?.executionMode === 'resident'
+    && (!selection.installed || selected === previous.operatorId)) {
+    const recoverable = resumableResidentDispatch(agent.session.events)
     const hostRoute = recoverable === undefined
       ? newHostRoute(ctx, agent, current.id, previous.operatorId)
       : recoveredHostRoute(recoverable, current.id)
@@ -884,7 +888,6 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
       hostRoute,
     }
   }
-  const selected = selectedPhysicalMainOperator(agent)
   if (selected !== undefined) {
     return operatorDecision(ctx, agent, current.id, policy, selected, `当前主模型已选择 ${operatorDisplayName(selected)}`)
   }
@@ -960,10 +963,9 @@ function operatorDecision(
 }
 
 /** Keep a selected first-class model on its current physical route. */
-function selectedPhysicalMainOperator(agent: Agent): PhysicalOperatorRoutingTarget | undefined {
-  const { provider, model } = agent.options
-  if (provider !== ROUTER_PROVIDER) return undefined
-  return isPhysicalOperatorRoutingTarget(model) ? model : undefined
+function selectedPhysicalMainOperator(selection: ModelSelection | undefined): PhysicalOperatorRoutingTarget | undefined {
+  if (selection?.provider !== ROUTER_PROVIDER) return undefined
+  return isPhysicalOperatorRoutingTarget(selection.model) ? selection.model : undefined
 }
 
 function smartAutoUnavailable(code: string): boolean {

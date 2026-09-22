@@ -1,0 +1,22 @@
+{
+  "selected": {
+    "provider": "dsh-physical-operator",
+    "model": "chatgpt-web"
+  },
+  "savedCollaborationPreference": "claude-code",
+  "calls": {
+    "claudeQualifications": 0,
+    "claudeStarts": 0,
+    "chatgptBrowserPrograms": 1
+  },
+  "reply": "我是 ChatGPT Web",
+  "provenance": {
+    "kind": "model",
+    "provider": "dsh-physical-operator",
+    "model": "chatgpt-web"
+  },
+  "dispatch": {
+    "operatorId": "chatgpt-web",
+    "executionMode": "ephemeral"
+  }
+}

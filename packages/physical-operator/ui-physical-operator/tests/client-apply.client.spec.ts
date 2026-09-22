@@ -80,9 +80,14 @@ describe('physical operator client plugin', () => {
     }> = []
     const execute = vi.fn().mockResolvedValue({ ok: true, value: { matched: true } })
     const request = vi.fn()
+    const directory = {}
+    const modelDirectories = { directoryFor: vi.fn(() => ({ store: directory })) }
+    const inject = vi.fn()
     const ctx = {
       effect: vi.fn(),
       get: (key: string) => key === 'connection' ? { request } : undefined,
+      inject,
+      modelDirectories,
       remote: { commands: { execute } },
       slots: {
         inject: vi.fn((_name: string, install: () => unknown) => install()),
@@ -92,6 +97,7 @@ describe('physical operator client plugin', () => {
         }),
       },
     } as unknown as ClientContext
+    inject.mockImplementation((_services: readonly string[], install: (scope: ClientContext) => unknown) => install(ctx))
 
     apply(ctx)
 
@@ -101,6 +107,7 @@ describe('physical operator client plugin', () => {
     expect(resident?.options.inject?.('session-1')).toEqual({ request })
     expect(routing?.options.name).toBe('conversation.input.right')
     const injected = routing?.options.inject?.('session-1') as {
+      directory: unknown
       select: (policy: 'codex' | 'chatgpt-web') => Promise<string | null>
       selectProfile: (operatorId: 'codex', model?: string, effort?: 'high') => Promise<string | null>
       selectOrchestrationStrategy: (
@@ -109,6 +116,8 @@ describe('physical operator client plugin', () => {
       ) => Promise<string | null>
       selectDebateMode: (mode: 'enabled') => Promise<string | null>
     }
+    expect(injected.directory).toBe(directory)
+    expect(modelDirectories.directoryFor).toHaveBeenCalledWith('session-1')
     await expect(injected.select('codex')).resolves.toBeNull()
     await expect(injected.select('chatgpt-web')).resolves.toBeNull()
     await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBeNull()
