@@ -40,6 +40,8 @@ Attempt 运行时，daemon 会将有界 Resident 进度阶段复制到编排事�
 
 ## Known Limitations and Deferred Work
 
+- TaskGraph 准入会在写入编译产物前拒绝 `rlm=disabled` 与 `autonomous=enabled` 的组合。旧的持久化偏好仍可读取，只会在用于新的准入时失败。
+
 - 基础胶囊绑定支持指令和只读 resource/data 引用。Tool、MCP、secret 和可执行 Guard 绑定在提供方实现其强制机制前均会失败关闭。
 - Claude Code 与 Codex 只支持派发前和下一轮次注入；即时轮次内 checkpoint 更新返回 `CAPABILITY_HOTSWAP_UNSUPPORTED`。
 - RLM 只在一个已封存节点内进行有界递归；它是执行策略，不是另一个产品或全局 Scheduler；如果崩溃后无法证明复合执行的终态，就会进入 indeterminate，绝不自动重放。

@@ -8,6 +8,8 @@
 
 本包只依赖 provider-neutral Debate Service Definition 与普通 Agent／LLM 扩展点，不导入本地 Provider、TaskGraph daemon 或物理算子运行时。物理算子宿主路由器会在持久化 Session 偏好明确启用 Debate 时独立让位，因此 Codex 与 Claude Code 仍是阵容内执行算子，不会取代 Debate Run。内部 `dsh-debate-host/debate` 路由不再作为主聊天模型展示。已经选择该内部路由的旧 Session 会在请求发出前补写同一条持久化 `debate/dispatch` 并继续运行；新选择统一通过协作菜单的执行机制控件完成。
 
+如果组合了 Plan mode，Plan 已激活或已为下一步排队时，宿主级 Debate 会拒绝准入，并提示先执行 `/plan off` 或关闭 Debate。宿主 dispatch 会记录 effective 状态，request 和 Provider stream 会重新检查这份准入决定，因此准入后切换 Plan 不会取消当前步骤，也不能绕过门禁。该限制不影响模型调用 `debate` 工具：工具调用会回到普通模型请求，模型仍可使用 `exit_plan_mode` 完成用户审阅。
+
 ## BBS 式讨论记录
 
 宿主回复按易读的论坛主题组织，而不是直接倾倒诊断字符串：

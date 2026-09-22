@@ -18,6 +18,15 @@
             name: '@deepseek-ai/dsh-physical-operator'
           - id: route-switch-external-providers
             name: './tests/fixtures/model-route-switch/external-providers.ts'
+          - id: task-template
+            name: './tests/fixtures/task-template/provider.ts'
+            config:
+              dshHome: !!js process.env.DSH_HOME
+              watch: false
+          - id: task-template-context
+            name: './tests/fixtures/task-template/context.ts'
+          - id: task-template-context-invariant
+            name: './tests/fixtures/task-template/context-invariant.ts'
           - id: physical-operator-chatgpt-web
             name: '@deepseek-ai/dsh-physical-operator-chatgpt-web'
             config:

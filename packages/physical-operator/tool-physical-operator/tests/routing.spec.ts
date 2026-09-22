@@ -33,6 +33,7 @@ import PhysicalOperatorRuntime, {
   PhysicalOperatorId,
   type PhysicalOperator,
   type PhysicalOperatorProgressEvent,
+  type PhysicalOperatorResidentCatalog,
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
@@ -81,6 +82,7 @@ class DurableOperator implements PhysicalOperator {
     private readonly observationsAfterSettle = false,
     private readonly startErrorCode?: string,
     private readonly executionModes: readonly ('ephemeral' | 'resident')[] = ['ephemeral', 'resident'],
+    private readonly catalogAvailable = true,
   ) {
     this.descriptor = {
       id: PhysicalOperatorId(id),
@@ -94,6 +96,21 @@ class DurableOperator implements PhysicalOperator {
 
   availability() {
     return { available: true as const }
+  }
+
+  async residentCatalog(): Promise<PhysicalOperatorResidentCatalog> {
+    const models = this.id === 'codex'
+      ? [{ model: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol', description: 'Fixture Codex model', supportedEfforts: ['low', 'medium', 'high', 'xhigh'] as const, defaultEffort: 'medium' as const, isDefault: true, supportsAdaptiveThinking: false }]
+      : this.id === 'claude-code'
+        ? [{ model: 'claude-sonnet-4', displayName: 'Claude Sonnet 4', description: 'Fixture Claude model', supportedEfforts: ['low', 'medium', 'high'] as const, defaultEffort: 'medium' as const, isDefault: true, supportsAdaptiveThinking: false }]
+        : []
+    return {
+      operatorId: this.descriptor.id, product: 'fixture', injectionBoundaries: ['pre-dispatch'],
+      supportsModelToolBridge: this.id !== 'chatgpt-web', location: 'local', supportsWorkspaceMutationReturn: true,
+      available: this.catalogAvailable,
+      ...this.catalogAvailable ? {} : { unavailableReason: 'fixture Resident provider unavailable' },
+      authentication: 'native-subscription', productVersion: 'fixture', protocolHash: 'fixture', models,
+    }
   }
 
   async start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
@@ -236,6 +253,7 @@ async function setup(options: {
   codexObservations?: readonly Record<string, unknown>[]
   codexObservationsAfterSettle?: boolean
   codexExecutionModes?: readonly ('ephemeral' | 'resident')[]
+  codexCatalogAvailable?: boolean
   claudeStartErrorCode?: string
   claudeExecutionModes?: readonly ('ephemeral' | 'resident')[]
   primary?: 'deepseek' | 'codex' | 'claude-code' | 'chatgpt-web'
@@ -286,6 +304,7 @@ async function setup(options: {
     options.codexObservationsAfterSettle,
     undefined,
     options.codexExecutionModes,
+    options.codexCatalogAvailable ?? true,
   )
   const claude = new DurableOperator(
     'claude-code',
@@ -1251,6 +1270,36 @@ describe('host physical-operator routing', () => {
     })
     expect(agent.session.events.find(event => event.type === 'physical-operator/dispatch')).toMatchObject({
       data: { residentProfile: { model: 'gpt-5.6-sol', effort: 'xhigh' } },
+    })
+  })
+
+  it('rejects a profile model that the live Resident catalog does not advertise without mutating Session state', async () => {
+    const { ctx, agent } = await setup()
+    const invalidModel = await ctx.commands.execute(agent, '/operator-profile codex gpt-unknown xhigh', new AbortController().signal)
+    expect(invalidModel?.result).toMatchObject({ kind: 'error' })
+    expect(invalidModel?.result.text).toContain('not advertised by the live Resident catalog')
+    expect(agent.session.events.filter(event => event.type === 'physical-operator/profile')).toHaveLength(0)
+
+    const invalidEffort = await ctx.commands.execute(agent, '/operator-profile codex gpt-5.6-sol ultra', new AbortController().signal)
+    expect(invalidEffort?.result).toMatchObject({ kind: 'error' })
+    expect(invalidEffort?.result.text).toContain('does not advertise ultra effort')
+    expect(agent.session.events.filter(event => event.type === 'physical-operator/profile')).toHaveLength(0)
+  })
+
+  it('rejects a profile when the Resident catalog is unavailable and permits the auto reset', async () => {
+    const { ctx, agent } = await setup({ codexCatalogAvailable: false })
+    agent.session.append('physical-operator/profile', {
+      operatorId: 'codex', profile: { model: 'gpt-5.6-sol', effort: 'xhigh' },
+    }, { ignorable: true })
+    const rejected = await ctx.commands.execute(agent, '/operator-profile codex gpt-5.6-sol xhigh', new AbortController().signal)
+    expect(rejected?.result).toMatchObject({ kind: 'error' })
+    expect(rejected?.result.text).toContain('fixture Resident provider unavailable')
+    expect(agent.session.events.filter(event => event.type === 'physical-operator/profile')).toHaveLength(1)
+
+    const reset = await ctx.commands.execute(agent, '/operator-profile codex auto auto', new AbortController().signal)
+    expect(reset?.result).toMatchObject({ kind: 'success' })
+    expect(agent.session.events.findLast(event => event.type === 'physical-operator/profile')).toMatchObject({
+      data: { operatorId: 'codex', profile: null },
     })
   })
 

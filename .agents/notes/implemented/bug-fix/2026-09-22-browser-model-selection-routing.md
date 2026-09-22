@@ -12,7 +12,7 @@ The browser model picker maintains a mutable session selection, while physical-o
 
 The Agent owns the model selection captured for each prompt assembly. Physical-operator routing reads that same captured selection; entry points without a selection installation retain their configured Agent defaults. A model change during assembly takes effect on the next step. A selected ordinary provider never inherits a stale physical-operator default.
 
-The collaboration control subscribes to the model picker's existing session directory. An active ChatGPT Web main model is displayed as the browser route and suppresses conflicting native collaboration controls and qualification polling. The saved collaboration preference remains available when the user returns to an ordinary main model. Explicit Debate mode remains visibly distinct.
+The collaboration control subscribes to the model picker's existing session directory. An active physical main model owns the route label and suppresses conflicting collaboration choices; only the corresponding native product exposes model preferences. ChatGPT Web suppresses native model controls and qualification polling. The saved collaboration preference remains available when the user returns to an ordinary main model. Explicit Debate mode remains visibly distinct.
 
 ## Alternatives considered
 

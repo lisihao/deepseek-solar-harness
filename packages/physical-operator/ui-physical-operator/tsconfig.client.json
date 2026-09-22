@@ -20,6 +20,7 @@
     { "path": "../../client/runtime" },
     { "path": "../../client/ui-conversation" },
     { "path": "../../client/ui-model-selection" },
+    { "path": "../../plan/plan-mode" },
     { "path": "../../client/ui-primitives" },
     { "path": "../../client/ui-slots" },
     { "path": "../tool-physical-operator" },

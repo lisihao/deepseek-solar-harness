@@ -22,4 +22,6 @@ The stable policy and schema preserve their prefix. Dynamic tool results append 
 
 ## Known Limitations and Deferred Work
 
+- The `/orchestration-strategy` command rejects `rlm=disabled` with `autonomous=enabled`; the daemon repeats the same check at TaskGraph admission. Existing Session logs remain readable and are rejected only when an invalid admission is attempted.
+
 - The baseline Consumer accepts a complete `LogicalTaskGraphV1` as JSON. A future semantic Intent/Graph Compiler Provider may replace model-authored graph construction without changing `ctx.orchestrations`.

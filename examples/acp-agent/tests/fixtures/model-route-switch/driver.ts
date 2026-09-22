@@ -6,6 +6,8 @@ import { createApiProxy, RpcId } from '@deepseek-ai/dsh-host-apiproxy'
 import type {} from '@deepseek-ai/dsh-tool-physical-operator'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { taskTemplateId } from '@deepseek-ai/dsh-task-template'
+import type {} from '@deepseek-ai/dsh-task-template-context'
 import { calls } from './external-providers.ts'
 
 const configPath = process.argv[2]
@@ -15,6 +17,19 @@ const INITIAL_CLAUDE = { provider: 'dsh-physical-operator', model: 'claude-code'
 const SELECTED_CHATGPT = { provider: 'dsh-physical-operator', model: 'chatgpt-web' }
 const ctx = await boot('model-route-switch-loader-composition', resolveConfigPath(configPath, undefined))
 try {
+  await ctx.taskTemplates.create({
+    id: taskTemplateId('route-claude'),
+    name: 'Claude route template',
+    match: { operators: ['claude-code'] },
+    method: 'MODEL_ROUTE_OPERATOR_CLAUDE {{objective}}',
+  })
+  await ctx.taskTemplates.create({
+    id: taskTemplateId('route-chatgpt-web'),
+    name: 'ChatGPT Web route template',
+    match: { operators: ['chatgpt-web'] },
+    method: 'MODEL_ROUTE_OPERATOR_CHATGPT_WEB {{objective}}',
+  })
+
   const sessionId = SessionId('model-route-switch')
   const agent = ctx.agentLoop.create(sessionId, INITIAL_CLAUDE, { cwd: process.cwd() })
   // Preserve the existing collaboration preference while changing only the
@@ -49,10 +64,16 @@ try {
   await idle
 
   const policy = agent.session.events.findLast(event => event.type === 'physical-operator/policy')
+  const templateDecision = agent.session.events.findLast(event => event.type === 'task-template/decided')
   const dispatch = agent.session.events.findLast(event => event.type === 'physical-operator/dispatch')
   const reply = agent.session.events.findLast(event => event.type === 'assistant/message')
   if (policy?.type !== 'physical-operator/policy' || policy.data.policy !== 'claude-code') {
     throw new Error('the saved Claude collaboration preference changed during the model switch')
+  }
+  if (templateDecision?.type !== 'task-template/decided'
+    || templateDecision.data.receipt.templateId !== 'route-chatgpt-web'
+    || JSON.stringify(templateDecision.data.receipt.attributes.operators) !== JSON.stringify(['chatgpt-web'])) {
+    throw new Error('unexpected task-template route: ' + JSON.stringify(templateDecision))
   }
   if (calls.claudeQualifications !== 0 || calls.claudeStarts !== 0) {
     throw new Error(`Claude was admitted after the ChatGPT selection: ${JSON.stringify(calls)}`)
@@ -82,6 +103,10 @@ try {
   process.stdout.write(`${JSON.stringify({
     selected: switched.result.value.selected,
     savedCollaborationPreference: policy.data.policy,
+    template: {
+      id: templateDecision.data.receipt.templateId,
+      operators: templateDecision.data.receipt.attributes.operators,
+    },
     calls,
     reply: replyText,
     provenance: reply.data.message.source,

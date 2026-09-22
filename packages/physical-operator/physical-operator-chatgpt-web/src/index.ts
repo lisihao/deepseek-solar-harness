@@ -146,11 +146,18 @@ interface ProgramDiagnostic {
   readonly sendAvailable: boolean
 }
 
+interface DraftDiagnostic {
+  readonly page: 'root' | 'conversation' | 'other'
+  readonly inputCharacters: number
+  readonly attachmentCount: number
+}
+
 type ProgramOutcome = CompletedProgramOutcome
   | { readonly status: 'auth-required' }
   | { readonly status: 'input-unavailable' }
   | { readonly status: 'context-not-isolated' }
   | { readonly status: 'model-selection-unavailable' }
+  | { readonly status: 'draft-present'; readonly diagnostic: DraftDiagnostic }
   | { readonly status: 'submission-failed'; readonly diagnostic: ProgramDiagnostic }
   | { readonly status: 'generation-timeout'; readonly diagnostic: ProgramDiagnostic }
   | { readonly status: 'protocol-error' }
@@ -183,6 +190,26 @@ const COMPOSER_DOM_HELPERS = String.raw`
       ? [...element.childNodes].map(nodeText).join('')
       : blocks.map(nodeText).join(newline);
     return normalizeNewlines(text);
+  };
+  const composerAttachmentCount = (element) => {
+    if (element === null) return 0;
+    const form = element.closest('form');
+    if (form === null) return 0;
+    const fileInputs = [...form.querySelectorAll('input[type="file"]')]
+      .filter((input) => input.files !== null && input.files.length > 0).length;
+    const candidates = [...form.querySelectorAll('[data-testid],[aria-label],[data-file-id],[data-attachment-id],[role="progressbar"]')]
+      .filter(visible);
+    return fileInputs + candidates.filter((candidate) => {
+      if (candidate.matches('[data-file-id],[data-attachment-id],[role="progressbar"]')) return true;
+      const label = [
+        candidate.getAttribute('aria-label'),
+        candidate.getAttribute('title'),
+      ].map((value) => String(value ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase()).join(' ');
+      const testId = String(candidate.getAttribute('data-testid') ?? '')
+        .replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      return /(?:remove|delete)\s+(?:file|attachment)\b/.test(label)
+        || /(?:file|attachment)/.test(testId) && !/(?:add|upload|send|submit|input)/.test(testId);
+    }).length;
   };
   const outermost = (elements) => {
     const unique = [...new Set(elements)];
@@ -261,6 +288,8 @@ const INSPECT_PAGE = String.raw`() => {
   document.querySelectorAll('[data-dsh-chatgpt-web-send="true"]')
     .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-send'));
   const input = composer();
+  const inputText = composerText(input);
+  const attachmentCount = composerAttachmentCount(input);
   if (input !== null && page === 'root' && userCount === 0 && assistantCount === 0) {
     input.setAttribute('data-dsh-chatgpt-web-input', 'true');
   }
@@ -270,6 +299,9 @@ const INSPECT_PAGE = String.raw`() => {
     inputReady: input !== null,
     assistantCount,
     userCount,
+    inputCharacters: inputText.length,
+    attachmentCount,
+    draftPresent: inputText.length > 0 || attachmentCount > 0,
   };
 }`
 
@@ -392,6 +424,11 @@ export function buildChatGptWebProgram(request: ProgramRequest): BrowserRunProgr
     source: String.raw`const request = ${encodedRequest};
 const page = 'chatgpt-web';
 const asRecord = (value) => value !== null && typeof value === 'object' ? value : undefined;
+const draftDiagnostic = (value) => ({
+  page: value.page,
+  inputCharacters: value.inputCharacters,
+  attachmentCount: value.attachmentCount,
+});
 await browser.run({
   id: 'chatgpt-open',
   kind: 'open',
@@ -416,9 +453,17 @@ while (Date.now() - readinessStartedAt <= readinessTimeoutMs) {
   if (inspect.loginRequired === true) return { status: 'auth-required' };
   if (!['root', 'conversation', 'other'].includes(inspect.page)
     || !Number.isSafeInteger(inspect.userCount)
-    || !Number.isSafeInteger(inspect.assistantCount)) return { status: 'protocol-error' };
+    || !Number.isSafeInteger(inspect.assistantCount)
+    || !Number.isSafeInteger(inspect.inputCharacters)
+    || inspect.inputCharacters < 0
+    || !Number.isSafeInteger(inspect.attachmentCount)
+    || inspect.attachmentCount < 0
+    || typeof inspect.draftPresent !== 'boolean') return { status: 'protocol-error' };
   if (inspect.page !== 'root' || inspect.userCount !== 0 || inspect.assistantCount !== 0) {
     return { status: 'context-not-isolated' };
+  }
+  if (inspect.draftPresent === true) {
+    return { status: 'draft-present', diagnostic: draftDiagnostic(inspect) };
   }
   if (inspect.inputReady === true && Number.isSafeInteger(inspect.assistantCount)) break;
   await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
@@ -433,6 +478,24 @@ if (request.model !== undefined) {
   }));
   if (selection?.selected !== true) return { status: 'model-selection-unavailable' };
 }
+inspect = asRecord(await browser.evaluate(page, ${JSON.stringify(INSPECT_PAGE)}));
+if (inspect === undefined) return { status: 'protocol-error' };
+if (inspect.loginRequired === true) return { status: 'auth-required' };
+if (!['root', 'conversation', 'other'].includes(inspect.page)
+  || !Number.isSafeInteger(inspect.userCount)
+  || !Number.isSafeInteger(inspect.assistantCount)
+  || !Number.isSafeInteger(inspect.inputCharacters)
+  || inspect.inputCharacters < 0
+  || !Number.isSafeInteger(inspect.attachmentCount)
+  || inspect.attachmentCount < 0
+  || typeof inspect.draftPresent !== 'boolean') return { status: 'protocol-error' };
+if (inspect.page !== 'root' || inspect.userCount !== 0 || inspect.assistantCount !== 0) {
+  return { status: 'context-not-isolated' };
+}
+if (inspect.draftPresent === true) {
+  return { status: 'draft-present', diagnostic: draftDiagnostic(inspect) };
+}
+if (inspect.inputReady !== true) return { status: 'input-unavailable' };
 await browser.run({
   id: 'chatgpt-fill',
   kind: 'fill',
@@ -693,6 +756,12 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
           throw new PhysicalOperatorError('ChatGPT Web requires a logged-in browser session', 'CHATGPT_WEB_AUTH_REQUIRED')
         case 'input-unavailable':
           throw new PhysicalOperatorError('ChatGPT Web input is unavailable in the selected browser workspace', 'RUNTIME_UNAVAILABLE')
+        case 'draft-present':
+          throw new PhysicalOperatorError(
+            'ChatGPT Web has an existing composer draft or attachment (' + draftDiagnosticText(outcome.diagnostic)
+              + '). Clear or send it in the browser workspace, then retry.',
+            'CHATGPT_WEB_DRAFT_PRESENT',
+          )
         case 'context-not-isolated':
           throw new PhysicalOperatorError(
             'ChatGPT Web could not establish a fresh conversation before prompt submission',
@@ -838,6 +907,10 @@ function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
     case 'input-unavailable': return { status: 'input-unavailable' }
     case 'context-not-isolated': return { status: 'context-not-isolated' }
     case 'model-selection-unavailable': return { status: 'model-selection-unavailable' }
+    case 'draft-present': {
+      const diagnostic = programDraftDiagnostic(value.diagnostic)
+      return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'draft-present', diagnostic }
+    }
     case 'submission-failed': {
       const diagnostic = programDiagnostic(value.diagnostic)
       return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'submission-failed', diagnostic }
@@ -849,6 +922,22 @@ function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
     case 'protocol-error': return { status: 'protocol-error' }
     default:
       return { status: 'protocol-error' }
+  }
+}
+
+function programDraftDiagnostic(value: BrowserJsonValue | undefined): DraftDiagnostic | undefined {
+  if (!isRecord(value)) return undefined
+  const page = value.page
+  if (page !== 'root' && page !== 'conversation' && page !== 'other') return undefined
+  if (!Number.isSafeInteger(value.inputCharacters)
+    || !Number.isSafeInteger(value.attachmentCount)) return undefined
+  const inputCharacters = value.inputCharacters as number
+  const attachmentCount = value.attachmentCount as number
+  if (inputCharacters < 0 || attachmentCount < 0) return undefined
+  return {
+    page,
+    inputCharacters,
+    attachmentCount,
   }
 }
 
@@ -872,6 +961,10 @@ function programDiagnostic(value: BrowserJsonValue | undefined): ProgramDiagnost
 
 function diagnosticText(diagnostic: ProgramDiagnostic): string {
   return `page=${diagnostic.page}, userMessages=${diagnostic.userCount}, assistantMessages=${diagnostic.assistantCount}, inputCharacters=${diagnostic.inputCharacters}, generating=${diagnostic.generating}, settled=${diagnostic.settled}, sendAvailable=${diagnostic.sendAvailable}`
+}
+
+function draftDiagnosticText(diagnostic: DraftDiagnostic): string {
+  return `page=${diagnostic.page}, inputCharacters=${diagnostic.inputCharacters}, attachments=${diagnostic.attachmentCount}`
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, BrowserJsonValue>> {

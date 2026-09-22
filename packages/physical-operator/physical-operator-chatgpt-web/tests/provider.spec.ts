@@ -208,6 +208,14 @@ function createSendButton(label: string, disabled = false): HTMLButtonElement {
   return button
 }
 
+function createAttachmentButton(): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.setAttribute('aria-label', 'Remove file: draft.txt')
+  makeVisible(button)
+  return button
+}
+
 function appendCompletedDomTurn(response: string): void {
   window.history.pushState(null, '', '/c/fixture')
   const user = document.createElement('div')
@@ -371,6 +379,7 @@ describe('ChatGPT Web physical operator', () => {
     expect(program.source).toContain("return { status: 'auth-required' }")
     expect(program.source).toContain("return { status: 'context-not-isolated' }")
     expect(program.source).toContain("return { status: 'model-selection-unavailable' }")
+    expect(program.source).toContain("return { status: 'draft-present'")
     expect(program.source).toContain("kind: 'click'")
     expect(program.source).toContain("selector: '[data-dsh-chatgpt-web-send=\"true\"]'")
     expect(program.source).toContain("status: 'submission-failed'")
@@ -407,7 +416,10 @@ describe('ChatGPT Web physical operator', () => {
         if (evaluator.includes('loginRequired')) {
           const inputReady = inspection > 0
           inspection += 1
-          return { page: 'root', loginRequired: false, inputReady, assistantCount: 0, userCount: 0 }
+          return {
+            page: 'root', loginRequired: false, inputReady, assistantCount: 0, userCount: 0,
+            inputCharacters: 0, attachmentCount: 0, draftPresent: false,
+          }
         }
         if (evaluator.includes('typeof input.prompt')) {
           return {
@@ -429,7 +441,7 @@ describe('ChatGPT Web physical operator', () => {
       response: 'final response',
       truncated: false,
     })
-    expect(inspection).toBe(2)
+    expect(inspection).toBe(3)
     expect(observation).toBe(5)
   })
 
@@ -457,7 +469,10 @@ describe('ChatGPT Web physical operator', () => {
       run: async () => undefined,
       evaluate: async (_page: string, evaluator: string) => {
         if (evaluator.includes('loginRequired')) {
-          return { page: 'root', loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0 }
+          return {
+            page: 'root', loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0,
+            inputCharacters: 0, attachmentCount: 0, draftPresent: false,
+          }
         }
         if (evaluator.includes('typeof input.prompt')) {
           return {
@@ -501,6 +516,10 @@ describe('ChatGPT Web physical operator', () => {
     document.body.append(form, unrelatedForm)
 
     const editor = createComposer()
+    const addAttachment = document.createElement('button')
+    addAttachment.type = 'button'
+    addAttachment.setAttribute('aria-label', 'Add files and more')
+    makeVisible(addAttachment)
     const send = createSendButton('发送')
     let inspectionCount = 0
     let hydrated = false
@@ -537,7 +556,7 @@ describe('ChatGPT Web physical operator', () => {
         if (evaluator.includes('loginRequired')) {
           inspectionCount += 1
           if (inspectionCount === 2) {
-            form.replaceChildren(editor, send)
+            form.replaceChildren(editor, addAttachment, send)
             hydrated = true
           }
         }
@@ -551,6 +570,7 @@ describe('ChatGPT Web physical operator', () => {
       response: 'hydrated response',
       truncated: false,
     })
+    expect(addAttachment.isConnected).toBe(true)
     expect(filledBeforeHydration).toBe(false)
     expect(filledText).toBe(prompt)
     expect(sendClicks).toBe(1)
@@ -563,6 +583,93 @@ describe('ChatGPT Web physical operator', () => {
     ])
     expect(editor.hasAttribute('data-dsh-chatgpt-web-input')).toBe(false)
     expect(send.hasAttribute('data-dsh-chatgpt-web-send')).toBe(false)
+  })
+
+  it('preserves a restored composer draft and refuses to fill or send', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    setComposerText(editor, 'restored draft')
+    const send = createSendButton('Send')
+    form.append(editor, send)
+    document.body.append(form)
+    let fills = 0
+    let clicks = 0
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') fills += 1
+        if (operation.id === 'chatgpt-send') clicks += 1
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgramWithFakeClock(programFor('new task'), browser)).resolves.toEqual({
+      status: 'draft-present',
+      diagnostic: { page: 'root', inputCharacters: 'restored draft'.length, attachmentCount: 0 },
+    })
+    expect(editor.textContent).toBe('restored draft')
+    expect(fills).toBe(0)
+    expect(clicks).toBe(0)
+  })
+
+  it('preserves a visible attachment draft and refuses to fill or send', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const attachment = createAttachmentButton()
+    const send = createSendButton('Send')
+    form.append(editor, attachment, send)
+    document.body.append(form)
+    let fills = 0
+    let clicks = 0
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') fills += 1
+        if (operation.id === 'chatgpt-send') clicks += 1
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgramWithFakeClock(programFor('new task'), browser)).resolves.toEqual({
+      status: 'draft-present',
+      diagnostic: { page: 'root', inputCharacters: 0, attachmentCount: 1 },
+    })
+    expect(attachment.isConnected).toBe(true)
+    expect(fills).toBe(0)
+    expect(clicks).toBe(0)
+  })
+
+  it('rechecks the composer immediately before fill when a draft appears after readiness', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('Send')
+    form.append(editor, send)
+    document.body.append(form)
+    let inspections = 0
+    let fills = 0
+    let clicks = 0
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') fills += 1
+        if (operation.id === 'chatgpt-send') clicks += 1
+      },
+      evaluate: async (_page, evaluator, input) => {
+        if (evaluator.includes('loginRequired')) {
+          inspections += 1
+          const result = await evaluatePage(evaluator, input)
+          if (inspections === 1) setComposerText(editor, 'user draft')
+          return result
+        }
+        return evaluatePage(evaluator, input)
+      },
+    }
+
+    await expect(executeGeneratedProgramWithFakeClock(programFor('new task'), browser)).resolves.toEqual({
+      status: 'draft-present',
+      diagnostic: { page: 'root', inputCharacters: 'user draft'.length, attachmentCount: 0 },
+    })
+    expect(inspections).toBe(2)
+    expect(editor.textContent).toBe('user draft')
+    expect(fills).toBe(0)
+    expect(clicks).toBe(0)
   })
 
   it('matches ProseMirror paragraphs and hard breaks without counting trailing breaks', async () => {
@@ -871,7 +978,7 @@ describe('ChatGPT Web physical operator', () => {
     const encodedEvaluators = [
       ...program.source.matchAll(/browser\.evaluate\(page, ("(?:\\.|[^"\\])*")/g),
     ].map(match => match[1])
-    expect(encodedEvaluators).toHaveLength(7)
+    expect(encodedEvaluators).toHaveLength(8)
     for (const encoded of encodedEvaluators) {
       const evaluator = JSON.parse(encoded!) as string
       expect(() => new Script(`(${evaluator})`)).not.toThrow()
@@ -901,7 +1008,10 @@ describe('ChatGPT Web physical operator', () => {
       },
       evaluate: async (_page: string, evaluator: string) => {
         if (evaluator.includes('loginRequired')) {
-          return { page, loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0 }
+          return {
+            page, loginRequired: false, inputReady: true, assistantCount: 0, userCount: 0,
+            inputCharacters: 0, attachmentCount: 0, draftPresent: false,
+          }
         }
         if (evaluator.includes('typeof input.prompt')) {
           return {
@@ -954,7 +1064,10 @@ describe('ChatGPT Web physical operator', () => {
     const browser = {
       run: async (operation: { id: string }) => { operations.push(operation.id) },
       evaluate: async (_page: string, evaluator: string) => evaluator.includes('loginRequired')
-        ? { page: 'root', loginRequired: false, inputReady: true, assistantCount: 0, userCount: 1 }
+        ? {
+          page: 'root', loginRequired: false, inputReady: true, assistantCount: 0, userCount: 1,
+          inputCharacters: 0, attachmentCount: 0, draftPresent: false,
+        }
         : true,
     }
     const AsyncFunction = (async function () {}).constructor as unknown as new (
@@ -1085,6 +1198,29 @@ describe('ChatGPT Web physical operator', () => {
       ...request(), residentProfile: { effort: 'high' },
     })).rejects.toMatchObject({ code: 'OPERATOR_OPTION_UNSUPPORTED' })
     expect(provider.programs).toEqual([])
+
+    await plugin.dispose()
+    await ctx.fiber.dispose()
+  })
+
+  it('projects an occupied composer draft as an actionable typed error', async () => {
+    const diagnostic = { page: 'root', inputCharacters: 12, attachmentCount: 1 }
+    const provider = new StubBrowserProvider(async () => resultFor({
+      status: 'draft-present',
+      diagnostic,
+    }))
+    const { ctx, plugin } = await setup(provider)
+    const run = await ctx.physicalOperators.start('chatgpt-web', request())
+    const error = await run.result.then(
+      () => { throw new Error('expected ChatGPT Web run to fail') },
+      (caught: unknown) => caught,
+    )
+
+    expect(error).toBeInstanceOf(PhysicalOperatorError)
+    expect((error as PhysicalOperatorError).code).toBe('CHATGPT_WEB_DRAFT_PRESENT')
+    expect((error as Error).message).toContain('Clear or send it in the browser workspace')
+    expect((error as Error).message).toContain('inputCharacters=12')
+    expect((error as Error).message).toContain('attachments=1')
 
     await plugin.dispose()
     await ctx.fiber.dispose()

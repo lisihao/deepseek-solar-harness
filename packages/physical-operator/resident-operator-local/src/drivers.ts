@@ -788,6 +788,55 @@ async function command(command: string, args: string[]): Promise<{ stdout: strin
   }
 }
 
+interface ClaudeAuthenticationStatusProcessError {
+  readonly code?: number | string
+  readonly killed?: boolean
+  readonly signal?: NodeJS.Signals | null
+  readonly timedOut?: boolean
+  readonly stdout?: unknown
+}
+
+/**
+ * Read Claude's authentication status while preserving its structured logged-out response.
+ *
+ * The native CLI exits with status 1 for a valid "loggedIn: false" status document. A
+ * generic "execFile" wrapper treats that expected product result as a process failure, so
+ * this probe accepts only that exact exit/status combination. Signals, kills, timeouts,
+ * malformed documents, and non-logged-out status documents remain failures.
+ * @param executable - resolved native Claude executable.
+ * @returns validated authentication status from the native product.
+ */
+async function claudeAuthenticationStatus(
+  executable: string,
+): Promise<Readonly<Record<string, unknown>>> {
+  try {
+    const { stdout } = await execFileAsync(executable, ['auth', 'status', '--json'], {
+      encoding: 'utf8',
+      env: claudeEnvironment(),
+      timeout: 15_000,
+      maxBuffer: 2 * 1024 * 1024,
+    })
+    return parseClaudeAuthenticationStatus(stdout)
+  } catch (error: unknown) {
+    const processError = error as ClaudeAuthenticationStatusProcessError
+    if (
+      processError.code === 1
+      && processError.killed !== true
+      && processError.signal == null
+      && processError.timedOut !== true
+      && typeof processError.stdout === 'string'
+    ) {
+      try {
+        const status = parseClaudeAuthenticationStatus(processError.stdout)
+        if (status.loggedIn === false) return status
+      } catch {
+        // Keep the original process failure so malformed output remains INVALID_RESULT.
+      }
+    }
+    throw error
+  }
+}
+
 function claudeStopReason(result: SDKResultMessage): ResidentStopReason {
   if (result.subtype === 'success' && !result.is_error) return 'completed'
   if (result.subtype === 'error_max_turns' || result.subtype === 'error_max_budget_usd') return 'max-tokens'
@@ -876,8 +925,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
   async qualify(): Promise<ResidentProviderStatus> {
     try {
       const { stdout: version, executable } = await command('claude', ['--version'])
-      const { stdout: auth } = await command(executable, ['auth', 'status', '--json'])
-      const parsed = parseClaudeAuthenticationStatus(auth)
+      const parsed = await claudeAuthenticationStatus(executable)
       const subscription = isClaudeNativeSubscription(parsed)
       const exactVersion = version.trim() === EXPECTED_CLAUDE_CLI_VERSION
       const models = subscription && exactVersion ? await this.models(executable) : []

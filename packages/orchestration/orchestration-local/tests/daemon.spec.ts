@@ -2113,4 +2113,27 @@ describe('orchestration daemon', () => {
     expect(fake.requests[0]?.profile?.model).toBe('gpt-5.6-luna')
     expect(fake.requests[1]?.profile?.model).toBe('gpt-5.6-terra')
   })
+
+  it('rejects disabled RLM with enabled Autonomous Mode before persisting a compilation', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-invalid-strategy-'))
+    const root = join(home, 'o')
+    const daemon = createDaemon(root, home, new FakeResidentClient(), 10)
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    await expect(client.compile({
+      intent: { request: 'Invalid strategy fixture.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'invalid-strategy',
+        rlm: 'disabled', autonomous: 'enabled', continualHarness: 'off', optimization: 'balanced',
+      },
+      graph: graph(workspace),
+    })).rejects.toMatchObject({
+      code: 'GRAPH_INVALID',
+      message: 'Autonomous Mode requires RLM to be enabled or automatic',
+    })
+    await expect(client.list()).resolves.toHaveLength(0)
+  })
 })

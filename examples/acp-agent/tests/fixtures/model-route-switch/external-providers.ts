@@ -67,6 +67,9 @@ const browser: BrowserProvider = {
     if (!program.source.includes('你是那个模型')) {
       throw new Error('ChatGPT Web provider did not receive the exact user prompt')
     }
+    if (!program.source.includes('MODEL_ROUTE_OPERATOR_CHATGPT_WEB')) {
+      throw new Error('ChatGPT Web provider did not receive the selected operator template')
+    }
     return {
       version: 1,
       workspace: {

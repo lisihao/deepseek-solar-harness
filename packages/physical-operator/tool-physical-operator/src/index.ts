@@ -39,6 +39,7 @@ import type {
   PhysicalOperatorExecutionMode,
   PhysicalOperatorExecutionPreference,
   PhysicalOperatorReasoningEffort,
+  PhysicalOperatorResidentCatalog,
   PhysicalOperatorResult,
   PhysicalOperatorRun,
   PhysicalOperatorStatus,
@@ -486,9 +487,13 @@ export function apply(ctx: Context): void {
       name: 'operator-profile',
       description: 'Select a Resident model and reasoning effort for Codex or Claude Code',
       input: { hint: '<codex|claude-code> <model|auto> <effort|auto>' },
-      handler: ({ agent, rawInput }) => {
+      handler: async ({ agent, rawInput }) => {
         const parsed = parseProfileCommand(rawInput)
         if ('error' in parsed) return { kind: 'error', text: parsed.error }
+        if (parsed.profile !== null) {
+          const validationError = await validateResidentProfile(ctx, parsed.operatorId, parsed.profile)
+          if (validationError !== undefined) return { kind: 'error', text: validationError }
+        }
         const current = foldPhysicalOperatorProfiles(agent.session.events)[parsed.operatorId]
         if (!profileEquals(current, parsed.profile ?? undefined)) {
           agent.session.append('physical-operator/profile', {
@@ -1628,6 +1633,47 @@ function parseProfileCommand(rawInput: string): {
       ...effort === undefined || effort === 'auto' ? {} : { effort: effort as PhysicalOperatorReasoningEffort },
     },
   }
+}
+
+/** Validate one non-reset Resident profile against its live native catalog. */
+async function validateResidentProfile(
+  ctx: Context,
+  operatorId: PhysicalOperatorProfileOwner,
+  profile: PhysicalOperatorExecutionPreference,
+): Promise<string | undefined> {
+  const operator = ctx.physicalOperators.getOperator(operatorId)
+  if (operator?.residentCatalog === undefined) {
+    return `${operatorId} profile cannot be saved: Resident model catalog is unavailable`
+  }
+  let catalog: PhysicalOperatorResidentCatalog
+  try {
+    catalog = await operator.residentCatalog()
+  } catch (error: unknown) {
+    return `${operatorId} profile cannot be saved: Resident model catalog is unavailable (${error instanceof Error ? error.message : String(error)})`
+  }
+  if (String(catalog.operatorId) !== operatorId) {
+    return `${operatorId} profile cannot be saved: Resident catalog identity mismatch`
+  }
+  if (!catalog.available) {
+    const reason = catalog.unavailableReason ?? 'Resident subscription is unavailable'
+    return `${operatorId} profile cannot be saved: ${reason}`
+  }
+  const selected = profile.model === undefined
+    ? undefined
+    : catalog.models.find(model => model.model === profile.model || model.resolvedModel === profile.model)
+  if (profile.model !== undefined && selected === undefined) {
+    return `${operatorId} profile model "${profile.model}" is not advertised by the live Resident catalog`
+  }
+  const effort = profile.effort
+  if (effort !== undefined) {
+    const candidates = selected === undefined ? catalog.models : [selected]
+    if (!candidates.some(model => model.supportedEfforts.includes(effort))) {
+      return selected === undefined
+        ? `${operatorId} profile effort "${effort}" has no supporting model in the live Resident catalog`
+        : `${operatorId} profile model "${selected.model}" does not advertise ${effort} effort`
+    }
+  }
+  return undefined
 }
 
 function isPhysicalOperatorProfileOwner(value: string | undefined): value is PhysicalOperatorProfileOwner {

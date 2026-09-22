@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-plan-mode/client'
 import type {
   ModelDirectoryState,
   ModelSelectInjected,
@@ -11,6 +12,7 @@ import type {
   PhysicalOperatorProfileOwner,
   PhysicalOperatorProfileReasoningEffort,
   PhysicalOperatorRoutingPolicy,
+  PhysicalOperatorRoutingTarget,
 } from '@deepseek-ai/dsh-tool-physical-operator/client'
 import type {
   ContinualHarnessMode,
@@ -78,8 +80,8 @@ export type OrchestrationExecutionMechanism = 'auto' | 'standard' | 'rlm' | 'deb
 
 const EXECUTION_MECHANISM_LABELS: Record<OrchestrationExecutionMechanism, string> = {
   auto: '自动（系统选择）',
-  standard: '标准（单 Agent）',
-  rlm: 'RLM（Prime 递归）',
+  standard: '标准（关闭 RLM / Debate）',
+  rlm: 'RLM（仅 TaskGraph 节点）',
   debate: 'Debate（多 Agent 辩论）',
 }
 
@@ -128,10 +130,22 @@ export function physicalOperatorEffectiveExecutionLabel(
 ): string {
   const mechanism = physicalOperatorEffectiveExecutionMechanism(rlm, debate)
   if (mechanism === 'debate') return orchestrationExecutionMechanismLabel(mechanism)
-  if (physicalOperatorMainModelIsChatGPTWeb(directory)) return physicalOperatorRoutingSummary('chatgpt-web')
-  return mechanism === undefined || mechanism === 'auto'
-    ? physicalOperatorRoutingSummary(policy)
-    : orchestrationExecutionMechanismLabel(mechanism)
+  return physicalOperatorRoutingSummary(physicalOperatorMainModel(directory) ?? policy)
+}
+
+/** Resolve the explicitly selected physical primary model, when the shared directory reports one. */
+function physicalOperatorMainModel(
+  directory: ModelDirectoryState | undefined,
+): PhysicalOperatorRoutingTarget | undefined {
+  if (directory?.current?.provider !== 'dsh-physical-operator') return undefined
+  switch (directory.current.model) {
+    case 'codex':
+    case 'claude-code':
+    case 'chatgpt-web':
+      return directory.current.model
+    default:
+      return undefined
+  }
 }
 
 /**
@@ -140,8 +154,7 @@ export function physicalOperatorEffectiveExecutionLabel(
  * @returns whether the current route is the ChatGPT browser operator.
  */
 export function physicalOperatorMainModelIsChatGPTWeb(directory: ModelDirectoryState | undefined): boolean {
-  return directory?.current?.provider === 'dsh-physical-operator'
-    && directory.current.model === 'chatgpt-web'
+  return physicalOperatorMainModel(directory) === 'chatgpt-web'
 }
 
 type SaveExecutionSubmode = (mode: 'auto' | 'enabled' | 'disabled') => Promise<string | null>
@@ -160,7 +173,7 @@ async function executionModeStep(
  * a failed step is returned verbatim so the controlled select can be retried.
  */
 export async function changeOrchestrationExecutionMechanism(
-  current: { readonly rlm: RlmExecutionMode; readonly debate: DebateExecutionMode },
+  current: { readonly rlm: RlmExecutionMode; readonly debate: DebateExecutionMode; readonly autonomous?: RlmAutonomousMode },
   target: OrchestrationExecutionMechanism,
   saveRlm: SaveExecutionSubmode,
   saveDebate: SaveExecutionSubmode,
@@ -168,7 +181,7 @@ export async function changeOrchestrationExecutionMechanism(
   let rlm = current.rlm
   let debate = current.debate
   const setRlm = async (mode: RlmExecutionMode, label: string): Promise<string | null> => {
-    if (rlm === mode) return null
+    if (rlm === mode && !(mode === 'disabled' && current.autonomous === 'enabled')) return null
     const failure = await executionModeStep(label, () => saveRlm(mode))
     if (failure === null) rlm = mode
     return failure
@@ -275,7 +288,11 @@ export function PhysicalOperatorRoutingControl({
     fn => directory.subscribe(fn),
     () => directory.getSnapshot(),
   )
-  const browserMode = physicalOperatorMainModelIsChatGPTWeb(modelDirectory)
+  const profileProjection = useProjection('physicalOperatorProfiles')
+  const orchestrationPreferences = useProjection('orchestrationExecutionPreferences')
+  const debatePreferences = useProjection('debateExecutionPreferences')
+  const plan = useProjection('plan')
+  const planSelected = plan !== undefined && (plan.pending ? !plan.active : plan.active)
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -285,38 +302,55 @@ export function PhysicalOperatorRoutingControl({
   const alive = useRef(true)
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLElement>(null)
-  const profileOwner = browserMode || routing === undefined
+  const selectedMainModel = physicalOperatorMainModel(modelDirectory)
+  const selectedProfileOwner = selectedMainModel === 'codex' || selectedMainModel === 'claude-code'
+    ? selectedMainModel
+    : undefined
+  const effectiveMechanism = physicalOperatorEffectiveExecutionMechanism(
+    orchestrationPreferences?.rlm,
+    debatePreferences?.mode,
+  )
+  const savedProfileOwner = routing?.currentValue === 'codex' || routing?.currentValue === 'claude-code'
+    ? routing.currentValue
+    : undefined
+  const profileOwner = effectiveMechanism === 'debate'
     ? undefined
-    : routing.currentValue === 'codex' || routing.currentValue === 'claude-code'
-      ? routing.currentValue
-      : undefined
+    : selectedProfileOwner ?? (selectedMainModel === undefined ? savedProfileOwner : undefined)
   const dashboardEligible = open
     && profileOwner !== undefined
+    && effectiveMechanism !== 'debate'
     && modelDirectory.status !== 'idle'
     && modelDirectory.status !== 'loading'
 
-  useEffect(() => () => { alive.current = false }, [])
+  useEffect(() => {
+    alive.current = true
+    return () => { alive.current = false }
+  }, [])
   useEffect(() => {
     if (!dashboardEligible) return
     const controller = new AbortController()
+    let active = true
     let timer: ReturnType<typeof setTimeout> | undefined
+    setDashboard(undefined)
     const refresh = async (): Promise<void> => {
       try {
-        setDashboard(await loadResidentDashboard(undefined, controller.signal, request))
+        const next = await loadResidentDashboard(undefined, controller.signal, request)
+        if (active && !controller.signal.aborted) setDashboard(next)
       } catch {
         // The Resident status panel owns availability diagnostics; selection remains fail-closed.
       } finally {
-        if (!controller.signal.aborted) {
+        if (active && !controller.signal.aborted) {
           timer = setTimeout(() => { void refresh() }, physicalOperatorDashboardRefreshMs(true))
         }
       }
     }
     void refresh()
     return () => {
+      active = false
       controller.abort()
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [dashboardEligible, request])
+  }, [dashboardEligible, profileOwner, request])
   useLayoutEffect(() => {
     if (!open) return
     const place = (): void => {
@@ -341,16 +375,11 @@ export function PhysicalOperatorRoutingControl({
       document.removeEventListener('keydown', close)
     }
   }, [dashboard, open, page])
-  const profileProjection = useProjection('physicalOperatorProfiles')
-  const orchestrationPreferences = useProjection('orchestrationExecutionPreferences')
-  const debatePreferences = useProjection('debateExecutionPreferences')
   if (routing === undefined) return null
 
   const locked = session.removed || input.phase !== 'plain' || saving
-  const effectiveMechanism = physicalOperatorEffectiveExecutionMechanism(
-    orchestrationPreferences?.rlm,
-    debatePreferences?.mode,
-  )
+  const taskGraphInactive = effectiveMechanism === 'debate' || selectedMainModel === 'chatgpt-web'
+  const routingPreferencesLocked = locked || selectedMainModel !== undefined || effectiveMechanism === 'debate'
   const currentLabel = physicalOperatorEffectiveExecutionLabel(
     routing.currentValue,
     orchestrationPreferences?.rlm,
@@ -369,7 +398,16 @@ export function PhysicalOperatorRoutingControl({
   const availableEfforts = selectedModel === undefined
     ? [...new Set(provider?.models.flatMap(option => option.supportedEfforts) ?? profileProjection?.efforts ?? [])]
     : model?.supportedEfforts ?? []
+  const selectedModelUnavailable = selectedModel !== undefined
+    && provider !== undefined
+    && model === undefined
+  const selectedModelPending = selectedModel !== undefined && provider === undefined
+  const selectedEffortUnavailable = selectedEffort !== undefined
+    && provider !== undefined
+    && !availableEfforts.includes(selectedEffort)
+  const selectedEffortPending = selectedEffort !== undefined && provider === undefined
   const persist = (operation: () => Promise<string | null>): void => {
+    if (locked) return
     setSaving(true)
     setError(null)
     void operation().then((failure) => {
@@ -383,6 +421,7 @@ export function PhysicalOperatorRoutingControl({
     })
   }
   const choose = (id: string): void => {
+    if (routingPreferencesLocked) return
     const policy = routing.options.find(option => option.value === id)?.value
     if (policy === undefined || policy === routing.currentValue) return
     persist(() => select(policy))
@@ -392,14 +431,16 @@ export function PhysicalOperatorRoutingControl({
     modelValue?: string,
     effortValue?: PhysicalOperatorProfileReasoningEffort,
   ): void => {
+    if (locked) return
     persist(() => selectProfile(operatorId, modelValue, effortValue))
   }
   const chooseModel = (id: string): void => {
-    if (profileOwner === undefined) return
-    const nextModel = id === 'auto' ? undefined : provider?.models.find(candidate => candidate.model === id)?.model
-    const nextOption = nextModel === undefined ? undefined : provider?.models.find(candidate => candidate.model === nextModel)
+    if (locked || profileOwner === undefined || provider === undefined || !provider.available) return
+    const nextModel = id === 'auto' ? undefined : provider.models.find(candidate => candidate.model === id)?.model
+    if (id !== 'auto' && nextModel === undefined) return
+    const nextOption = nextModel === undefined ? undefined : provider.models.find(candidate => candidate.model === nextModel)
     const effortSupported = selectedEffort !== undefined && (nextOption === undefined
-      ? provider?.models.some(candidate => candidate.supportedEfforts.includes(selectedEffort)) === true
+      ? provider.models.some(candidate => candidate.supportedEfforts.includes(selectedEffort))
       : nextOption.supportedEfforts.includes(selectedEffort))
     const nextEffort = effortSupported
       ? selectedEffort
@@ -407,7 +448,8 @@ export function PhysicalOperatorRoutingControl({
     saveProfile(profileOwner, nextModel, nextEffort)
   }
   const chooseEffort = (id: string): void => {
-    if (profileOwner === undefined) return
+    if (locked || profileOwner === undefined || provider === undefined || !provider.available) return
+    if (id !== 'auto' && !availableEfforts.includes(id)) return
     const nextEffort = id === 'auto' ? undefined : id as PhysicalOperatorProfileReasoningEffort
     saveProfile(profileOwner, selectedModel, nextEffort)
   }
@@ -419,6 +461,7 @@ export function PhysicalOperatorRoutingControl({
     plannerVerifierPreference = orchestrationPreferences?.plannerVerifierPreference ?? 'codex-sol',
     executionPreference = orchestrationPreferences?.executionPreference ?? 'luna-first',
   ): void => {
+    if (locked || taskGraphInactive || (rlm === 'disabled' && autonomous === 'enabled')) return
     persist(() => selectOrchestrationStrategy(
       rlm,
       autonomous,
@@ -429,7 +472,9 @@ export function PhysicalOperatorRoutingControl({
     ))
   }
   const chooseExecutionMechanism = (target: OrchestrationExecutionMechanism): void => {
-    if (debatePreferences === undefined) return
+    if (locked || debatePreferences === undefined
+      || (target === 'debate' && planSelected)
+      || (target === 'rlm' && selectedMainModel === 'chatgpt-web')) return
     if (orchestrationPreferences === undefined) {
       if (target === 'standard' && debatePreferences.mode !== 'disabled') {
         persist(() => selectDebateMode('disabled'))
@@ -437,11 +482,13 @@ export function PhysicalOperatorRoutingControl({
       return
     }
     persist(() => changeOrchestrationExecutionMechanism(
-      { rlm: orchestrationPreferences.rlm, debate: debatePreferences.mode },
+      { rlm: orchestrationPreferences.rlm, debate: debatePreferences.mode, autonomous: orchestrationPreferences.autonomous },
       target,
       mode => selectOrchestrationStrategy(
         mode,
-        orchestrationPreferences.autonomous,
+        mode === 'disabled' && orchestrationPreferences.autonomous === 'enabled'
+          ? 'disabled'
+          : orchestrationPreferences.autonomous,
         orchestrationPreferences.continualHarness,
         orchestrationPreferences.optimization,
         orchestrationPreferences.plannerVerifierPreference,
@@ -462,6 +509,7 @@ export function PhysicalOperatorRoutingControl({
         disabled={locked}
         title={error ?? '设置主模型、订阅态 Codex/Claude Code/ChatGPT 网页版与 TaskGraph 执行机制'}
         onClick={() => {
+          if (locked) return
           setOpen((value) => {
             if (!value) setPage('basic')
             return !value
@@ -483,11 +531,11 @@ export function PhysicalOperatorRoutingControl({
           >
             <header>
               <div><strong>协作方式</strong><small>先选择谁参与当前会话；需要时再调整 TaskGraph 高级调度。</small></div>
-              <button type="button" aria-label="关闭协作方式" onClick={() => { setOpen(false) }}>×</button>
+              <button type="button" aria-label="关闭协作方式" disabled={locked} onClick={() => { if (!locked) setOpen(false) }}>×</button>
             </header>
             <nav className="dshDesktopOperatorStrategyTabs" aria-label="协作设置页面">
-              <button type="button" data-selected={page === 'basic' || undefined} onClick={() => { setPage('basic') }}>基础</button>
-              <button type="button" data-selected={page === 'advanced' || undefined} onClick={() => { setPage('advanced') }}>高级调度</button>
+              <button type="button" data-selected={page === 'basic' || undefined} disabled={locked} onClick={() => { if (!locked) setPage('basic') }}>基础</button>
+              <button type="button" data-selected={page === 'advanced' || undefined} disabled={locked} onClick={() => { if (!locked) setPage('advanced') }}>高级调度</button>
             </nav>
             <div className="dshDesktopOperatorStrategyBody">
               <div className="dshDesktopOperatorStrategyOptions" hidden={page !== 'basic'}>
@@ -496,7 +544,7 @@ export function PhysicalOperatorRoutingControl({
                     key={option.value}
                     type="button"
                     data-selected={option.value === routing.currentValue || undefined}
-                    disabled={saving || browserMode}
+                    disabled={routingPreferencesLocked}
                     onClick={() => { choose(option.value) }}
                   >
                     <span className="dshDesktopOperatorStrategyRadio" aria-hidden="true" />
@@ -507,10 +555,10 @@ export function PhysicalOperatorRoutingControl({
                   </button>
                 ))}
               </div>
-              {browserMode && (
+              {selectedMainModel !== undefined && effectiveMechanism !== 'debate' && (
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
                   <div>
-                    <strong>当前主模型：ChatGPT 网页版</strong>
+                    <strong>当前主模型：{physicalOperatorRoutingSummary(selectedMainModel)}</strong>
                     <small>已保留“{physicalOperatorRoutingLabel(routing.currentValue)}”协作偏好。请先在模型选择器中更改主模型，再修改原生协作方式。</small>
                   </div>
                 </div>
@@ -519,18 +567,18 @@ export function PhysicalOperatorRoutingControl({
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
                   <div>
                     <strong>当前生效：Debate</strong>
-                    <small>下一条直接消息将由 Debate 阵容执行；模型选择器中的主模型仅在标准模式下生效。</small>
+                    <small>下一条直接消息将由 Debate 阵容执行；保存的主模型和协作偏好在 Debate 期间不生效。退出后，下一条消息按当前主模型和协作偏好恢复会话路由。</small>
                   </div>
                   <button
                     type="button"
-                    disabled={saving}
+                    disabled={locked}
                     onClick={() => { chooseExecutionMechanism('standard') }}
                   >
-                    切换到标准（使用当前主模型）
+                    退出 Debate（恢复会话路由）
                   </button>
                 </div>
               )}
-              {profileOwner !== undefined && (
+              {profileOwner !== undefined && effectiveMechanism !== 'debate' && (
                 <div className="dshDesktopOperatorProfilePreferences" hidden={page !== 'basic'}>
                   <div>
                     <strong>{profileOwner === 'codex' ? 'Codex' : 'Claude Code'} 模型偏好</strong>
@@ -543,10 +591,15 @@ export function PhysicalOperatorRoutingControl({
                     <select
                       aria-label="执行模型"
                       value={selectedModel ?? 'auto'}
-                      disabled={saving || provider === undefined || !provider.available}
+                      disabled={locked || provider === undefined || !provider.available}
                       onChange={(event) => { chooseModel(event.currentTarget.value) }}
                     >
                       <option value="auto">按任务推荐</option>
+                      {(selectedModelUnavailable || selectedModelPending) && (
+                        <option value={selectedModel}>{selectedModelUnavailable
+                          ? `已保存的模型已不在目录中：${selectedModel}`
+                          : `已保存的模型：${selectedModel}`}</option>
+                      )}
                       {provider?.models.map(option => <option key={option.model} value={option.model}>{option.displayName}</option>)}
                     </select>
                   </label>
@@ -555,10 +608,16 @@ export function PhysicalOperatorRoutingControl({
                     <select
                       aria-label={profileOwner === 'claude-code' ? 'Claude 思考强度' : 'Codex 推理强度'}
                       value={selectedEffort ?? 'auto'}
-                      disabled={saving || provider === undefined || !provider.available || availableEfforts.length === 0}
+                      disabled={locked || provider === undefined || !provider.available
+                        || (availableEfforts.length === 0 && selectedEffort === undefined)}
                       onChange={(event) => { chooseEffort(event.currentTarget.value) }}
                     >
                       <option value="auto">按任务推荐</option>
+                      {(selectedEffortUnavailable || selectedEffortPending) && (
+                        <option value={selectedEffort}>{selectedEffortUnavailable
+                          ? `已保存的强度不受当前模型支持：${selectedEffort}`
+                          : `已保存的强度：${selectedEffort}`}</option>
+                      )}
                       {availableEfforts.map(effort => (
                         <option key={effort} value={effort}>
                           {physicalOperatorEffortLabel(effort, profileOwner)}
@@ -566,11 +625,31 @@ export function PhysicalOperatorRoutingControl({
                       ))}
                     </select>
                   </label>
+                  {preference !== undefined && (
+                    <button type="button" disabled={locked} onClick={() => { saveProfile(profileOwner) }}>
+                      清除模型与强度偏好
+                    </button>
+                  )}
                   {provider === undefined
                     ? <p>正在读取当前执行端的原生订阅模型目录…</p>
                     : !provider.available
                       ? <p>当前连接的执行端不可用：{provider.unavailableReason ?? '订阅资格未通过'}</p>
-                      : <p>{model?.displayName ?? '按任务推荐'}：{model?.description ?? '由系统按任务与配额选择。'}{model?.supportsAdaptiveThinking === true ? ' 支持原生自适应思考。' : ''}</p>}
+                      : selectedModelUnavailable
+                        ? <p>已保存的模型“{selectedModel}”已不在当前目录中；请选择可用模型或按任务推荐。</p>
+                        : selectedEffortUnavailable
+                          ? <p>已保存的强度“{selectedEffort}”不受当前模型支持；请选择可用强度或按任务推荐。</p>
+                          : <p>{model?.displayName ?? '按任务推荐'}：{model?.description ?? '由系统按任务与配额选择。'}{model?.supportsAdaptiveThinking === true ? ' 支持原生自适应思考。' : ''}</p>}
+                </div>
+              )}
+              {planSelected && (
+                <div className="dshDesktopOperatorProfilePreferences" role="status">
+                  <strong>Plan 与直接 Debate 不能同时执行</strong>
+                  <small>Plan 需要由主模型提交计划并等待批准。请先退出 Plan 再启用 Debate；已启用 Debate 时请退出 Debate 后继续计划。</small>
+                </div>
+              )}
+              {selectedMainModel === 'chatgpt-web' && (
+                <div className="dshDesktopOperatorProfilePreferences" role="status">
+                  <small>ChatGPT 网页版只接收文本，不访问 DSH 工作区文件或执行 TaskGraph；网页模型和思考强度请在 ChatGPT 中设置。</small>
                 </div>
               )}
               {orchestrationPreferences !== undefined && debatePreferences !== undefined && (
@@ -578,23 +657,25 @@ export function PhysicalOperatorRoutingControl({
                   <div>
                     <strong>{page === 'basic' ? '执行机制' : 'TaskGraph 高级调度'}</strong>
                     <small>{page === 'basic'
-                      ? '普通任务保持自动；需要对比时再固定 Standard、RLM 或 Debate。'
-                      : '只影响多节点任务，不改变“基础”页选择的主协作算子。'}</small>
+                      ? '标准关闭 RLM 和 Debate，但保留协作路由；RLM 只控制 TaskGraph 节点，Debate 接管直接消息。'
+                      : taskGraphInactive
+                        ? '当前路径不使用这些设置；已保存的 TaskGraph 偏好保留，当前不可编辑。'
+                        : '仅在 TaskGraph 节点执行时使用，不决定普通聊天的回答模型。'}</small>
                   </div>
                   <label>
                     <span>执行机制</span>
                     <select
                       aria-label="执行机制"
                       value={orchestrationExecutionMechanism(orchestrationPreferences.rlm, debatePreferences.mode)}
-                      disabled={saving}
+                      disabled={locked}
                       onChange={(event) => {
                         chooseExecutionMechanism(event.currentTarget.value as OrchestrationExecutionMechanism)
                       }}
                     >
                       <option value="auto">{orchestrationExecutionMechanismLabel('auto')}</option>
                       <option value="standard">{orchestrationExecutionMechanismLabel('standard')}</option>
-                      <option value="rlm">{orchestrationExecutionMechanismLabel('rlm')}</option>
-                      <option value="debate">{orchestrationExecutionMechanismLabel('debate')}</option>
+                      <option value="rlm" disabled={selectedMainModel === 'chatgpt-web'}>{orchestrationExecutionMechanismLabel('rlm')}</option>
+                      <option value="debate" disabled={planSelected}>{orchestrationExecutionMechanismLabel('debate')}</option>
                     </select>
                   </label>
                   <label>
@@ -602,7 +683,7 @@ export function PhysicalOperatorRoutingControl({
                     <select
                       aria-label="自主闭环策略"
                       value={orchestrationPreferences.autonomous}
-                      disabled={saving}
+                      disabled={locked || taskGraphInactive}
                       onChange={(event) => {
                         saveOrchestrationStrategy(
                           orchestrationPreferences.rlm,
@@ -613,7 +694,7 @@ export function PhysicalOperatorRoutingControl({
                       }}
                     >
                       <option value="auto">{orchestrationAutonomousModeLabel('auto')}</option>
-                      <option value="enabled">{orchestrationAutonomousModeLabel('enabled')}</option>
+                      <option value="enabled" disabled={orchestrationPreferences.rlm === 'disabled'}>{orchestrationAutonomousModeLabel('enabled')}</option>
                       <option value="disabled">{orchestrationAutonomousModeLabel('disabled')}</option>
                     </select>
                   </label>
@@ -622,7 +703,7 @@ export function PhysicalOperatorRoutingControl({
                     <select
                       aria-label="持续 Harness 策略"
                       value={orchestrationPreferences.continualHarness}
-                      disabled={saving}
+                      disabled={locked || taskGraphInactive}
                       onChange={(event) => {
                         saveOrchestrationStrategy(
                           orchestrationPreferences.rlm,
@@ -632,7 +713,7 @@ export function PhysicalOperatorRoutingControl({
                         )
                       }}
                     >
-                      <option value="auto">自动</option>
+                      <option value="auto">自动（当前工作区）</option>
                       <option value="off">关闭</option>
                       <option value="session">当前会话</option>
                       <option value="workspace">当前工作区</option>
@@ -644,7 +725,7 @@ export function PhysicalOperatorRoutingControl({
                     <select
                       aria-label="模型分配目标"
                       value={orchestrationPreferences.optimization}
-                      disabled={saving}
+                      disabled={locked || taskGraphInactive}
                       onChange={(event) => {
                         saveOrchestrationStrategy(
                           orchestrationPreferences.rlm,
@@ -665,7 +746,7 @@ export function PhysicalOperatorRoutingControl({
                     <select
                       aria-label="规划与验证模型策略"
                       value={orchestrationPreferences.plannerVerifierPreference}
-                      disabled={saving}
+                      disabled={locked || taskGraphInactive}
                       onChange={(event) => {
                         saveOrchestrationStrategy(
                           orchestrationPreferences.rlm,
@@ -687,7 +768,7 @@ export function PhysicalOperatorRoutingControl({
                     <select
                       aria-label="代码执行模型策略"
                       value={orchestrationPreferences.executionPreference}
-                      disabled={saving}
+                      disabled={locked || taskGraphInactive}
                       onChange={(event) => {
                         saveOrchestrationStrategy(
                           orchestrationPreferences.rlm,
@@ -704,7 +785,10 @@ export function PhysicalOperatorRoutingControl({
                       <option value="balanced">调度器综合选择</option>
                     </select>
                   </label>
-                  <p>Codex 和 Claude Code 均使用原生订阅目录。系统按目标、健康与配额分配并行节点；计费 API 只作最后兜底。</p>
+                  {orchestrationPreferences.rlm === 'disabled' && (
+                    <p>自主闭环需要 RLM；请先在基础页选择自动或 RLM，再启用自主闭环。</p>
+                  )}
+                  <p>Codex 和 Claude Code 均使用原生订阅目录。系统按目标、健康与配额分配并行节点；模型策略表示偏好，不保证固定使用该模型。持续 Harness 仅用于允许知识上下文的节点；计费 API 只作最后兜底。</p>
                 </div>
               )}
               {page === 'advanced' && orchestrationPreferences === undefined && (
@@ -724,7 +808,7 @@ export function PhysicalOperatorRoutingControl({
 export function physicalOperatorRoutingDescription(policy: PhysicalOperatorRoutingPolicy): string {
   return ({
     auto: '推荐。按任务类型在主模型、Codex 与 Claude Code 之间选择；复杂任务可进入 TaskGraph。',
-    direct: '始终由当前主聊天模型回答，不调用执行助手。',
+    direct: '由当前主模型处理；仅在消息中明确要求时调用执行助手。',
     codex: '代码、调试和测试任务优先交给 Codex；短问答仍由主模型处理。',
     'claude-code': '分析、架构和长上下文任务优先交给 Claude Code；短问答仍由主模型处理。',
     'chatgpt-web': '仅在你明确选择时通过已登录的 ChatGPT 网页订阅执行；不进入智能自动，模型与强度由网页端管理。',

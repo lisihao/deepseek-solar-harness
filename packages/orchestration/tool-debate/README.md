@@ -8,6 +8,8 @@ The default policy uses a fixed four-role, native-subscription-first roster: a C
 
 This package depends only on the provider-neutral Debate Service Definition and ordinary Agent/LLM extension points. It does not import the local Provider, TaskGraph daemon, or physical-operator runtime. The physical-operator host router independently yields when the durable Session preference says Debate is enabled, so Codex and Claude Code remain roster executors instead of replacing the Debate run. The internal `dsh-debate-host/debate` route is not advertised as a primary chat model. A legacy Session that already selected that internal route is admitted by writing the same durable `debate/dispatch` before its request, so it remains usable while new selections go through the collaboration execution-mechanism control.
 
+When Plan mode is composed, host-level Debate is rejected while Plan is active or queued for the next step, with guidance to run `/plan off` or disable Debate. The host dispatch records the effective state, and the request and Provider stream recheck that captured decision so changing Plan after admission cannot cancel or bypass the current step. This restriction does not apply to a model-invoked `debate` tool call: that call returns to the ordinary model request, which still owns `exit_plan_mode` and its user review.
+
 ## BBS-style transcript
 
 The host response is presented as a readable forum thread rather than a diagnostic dump:

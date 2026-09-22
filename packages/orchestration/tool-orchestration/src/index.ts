@@ -199,6 +199,9 @@ export function apply(ctx: Context): void {
           || extra.length > 0) {
           return { kind: 'error', text: 'usage: /orchestration-strategy <auto|enabled|disabled> <auto|enabled|disabled> <auto|off|session|workspace|global> <balanced|quality|speed|economy> <codex-sol|claude-frontier|best-high-tier> <luna-first|claude-sonnet|balanced>' }
         }
+        if (rlm === 'disabled' && autonomous === 'enabled') {
+          return { kind: 'error', text: 'autonomous=enabled requires rlm=auto or enabled' }
+        }
         const preferences = {
           rlm, autonomous, continualHarness, optimization, plannerVerifierPreference, executionPreference,
         } as OrchestrationExecutionPreferences

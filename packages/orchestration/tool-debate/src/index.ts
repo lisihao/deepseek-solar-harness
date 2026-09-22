@@ -31,6 +31,9 @@ import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
 import { z as zod } from 'zod'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-session-projection'
+// Type-only: the Plan service is an optional composition dependency. Host-level
+// Debate admission reads it when present without requiring Plan mode to load.
+import type {} from '@deepseek-ai/dsh-plan-mode'
 import type {
   DebateExecutionMode,
   DebateExecutionPreferences,
@@ -53,6 +56,7 @@ const MAX_PREVIEW_CHARS = 600
 const MAX_REF_ITEMS = 20
 const DEBATE_TRANSCRIPT_POLL_INTERVAL_MS = 100
 const EXPLICIT_DEBATE_APPROVAL_REASON = 'The user explicitly selected Debate for this Session and submitted this request.'
+const PLAN_DEBATE_CONFLICT_MESSAGE = 'Plan mode and host-level Debate cannot run together. Exit Plan mode with /plan off or disable Debate.'
 const AUTOMATIC_INPUT_TOKENS_PER_PARTICIPANT_PER_ROUND = 100_000
 const AUTOMATIC_OUTPUT_TOKENS_PER_PARTICIPANT_PER_ROUND = 15_000
 const EXACT_ONE_ROUND_HINT = new RegExp(
@@ -131,12 +135,14 @@ declare module '@deepseek-ai/dsh-session/types' {
      * @param promptMessageId User message owned by this admission.
      * @param turn Agent turn receiving the message.
      * @param step Agent step replaced by the Debate host adapter.
+     * @param planModeActive Effective Plan state captured for this host step.
      */
     'debate/dispatch': {
       readonly commandId: string
       readonly promptMessageId: string
       readonly turn: number
       readonly step: number
+      readonly planModeActive?: boolean
     }
     /**
      * One bounded public fact from a durable Debate run, keyed by its source event sequence.
@@ -158,6 +164,8 @@ interface DebateHostDispatch {
   readonly promptMessageId: string
   readonly turn: number
   readonly step: number
+  /** Effective Plan state captured when this host step was admitted. */
+  readonly planModeActive?: boolean
 }
 
 /**
@@ -483,12 +491,14 @@ function persistHostDispatch(
   current: HostMessage,
   turn: number,
   step: number,
+  planModeActive: boolean,
 ): DebateHostDispatch {
   const dispatch = {
     commandId: hostCommandId(String(agent.id), current.id),
     promptMessageId: current.id,
     turn,
     step,
+    planModeActive,
   }
   agent.session.append('debate/dispatch', dispatch, { ignorable: true })
   return dispatch
@@ -517,6 +527,55 @@ function messageText(message: HostMessage): string {
 /** Capture the owning request's rendered preference and memory contexts. */
 function debateRuntimeContext(agent: Agent): DebateRuntimeContextV1 | undefined {
   return captureRuntimeContextSnapshot(agent.session.deriveMessages(), String(agent.id))
+}
+
+/**
+ * Read the Plan state that will govern the next accepted step.
+ *
+ * Plan mode is optional in a deployment. When it is composed, a pending target
+ * is the effective next-step state; otherwise the last logged state remains in
+ * force. Host-level Debate cannot replace the Plan review interaction while
+ * that effective state is active.
+ *
+ * @param ctx - host context whose optional Plan service may be composed.
+ * @param agent - Session whose next host step would run Debate.
+ * @returns whether Plan mode is effective for the next step.
+ */
+function hostDebatePlanActive(ctx: Context, agent: Agent): boolean {
+  const plan = ctx.get('planMode')?.get(agent)
+  return plan === undefined ? false : (plan.pending ?? plan.active)
+}
+
+/**
+ * Reject a host-level Debate turn while Plan mode owns the next step.
+ *
+ * Model-invoked `debate` tool calls do not use this guard; they return to the
+ * ordinary model request, which still owns `exit_plan_mode` and its review.
+ *
+ * @param ctx - host context whose optional Plan service may be composed.
+ * @param agent - Session whose host-level Debate turn is being admitted.
+ */
+function assertHostDebateAllowed(ctx: Context, agent: Agent): void {
+  if (hostDebatePlanActive(ctx, agent)) throw new Error(PLAN_DEBATE_CONFLICT_MESSAGE)
+}
+
+/**
+ * Recheck a durable host dispatch without applying a later pending Plan target.
+ *
+ * @param ctx - host context whose optional Plan service may be composed.
+ * @param agent - Session whose host-level Debate turn is being requested.
+ * @param dispatch - durable dispatch captured at the step boundary.
+ */
+function assertHostDispatchAllowed(
+  ctx: Context,
+  agent: Agent,
+  dispatch: DebateHostDispatch,
+): void {
+  if (dispatch.planModeActive !== undefined) {
+    if (dispatch.planModeActive) throw new Error(PLAN_DEBATE_CONFLICT_MESSAGE)
+    return
+  }
+  assertHostDebateAllowed(ctx, agent)
 }
 
 function dispatchForPosition(
@@ -1314,6 +1373,7 @@ class DebateHostAdapter extends LlmAdapter {
     if (workspace === undefined || workspace.length === 0) {
       throw new DebateError('Debate requires a Session workspace', 'DEBATE_INVALID')
     }
+    assertHostDispatchAllowed(this.ctx, agent, dispatch)
     const initialPlan = debateInitialPlanForPrompt(prompt)
     const runtimeContext = debateRuntimeContext(agent)
     const started = await this.ctx.debates.start({
@@ -1410,9 +1470,11 @@ export function apply(ctx: Context): void {
     hostCtx.on('agent/pre-step', async ({ agent, turn, step }, next): Promise<PreStepDecision> => {
       const decision = await next()
       if (decision.kind !== 'enter' || foldDebatePreferences(agent.session.events).mode !== 'enabled') return decision
+      const planModeActive = hostDebatePlanActive(hostCtx, agent)
+      if (planModeActive) throw new Error(PLAN_DEBATE_CONFLICT_MESSAGE)
       const current = latestDirectUser(decision.messages)
       if (current === undefined || dispatchForPosition(agent.session.events, turn, step) !== undefined) return decision
-      persistHostDispatch(agent, current, turn, step)
+      persistHostDispatch(agent, current, turn, step, planModeActive)
       return decision
     })
 
@@ -1420,13 +1482,16 @@ export function apply(ctx: Context): void {
       const base = await next()
       let dispatch = dispatchForPosition(agent.session.events, turn, step)
       const mode = latestDebateMode(agent.session.events)
+      if (dispatch !== undefined) assertHostDispatchAllowed(hostCtx, agent, dispatch)
       if (dispatch === undefined
         && base.provider === DEBATE_HOST_ROUTE.provider
         && base.model === DEBATE_HOST_ROUTE.model
         && (mode === undefined || mode === 'enabled')) {
+        const planModeActive = hostDebatePlanActive(hostCtx, agent)
+        if (planModeActive) throw new Error(PLAN_DEBATE_CONFLICT_MESSAGE)
         const current = latestDirectUser(agent.session.deriveMessages())
         if (current === undefined) throw new Error('Debate host route requires a current direct user message')
-        dispatch = persistHostDispatch(agent, current, turn, step)
+        dispatch = persistHostDispatch(agent, current, turn, step, planModeActive)
       }
       if (dispatch === undefined) return base
       return debateHostRequest(base)
@@ -1459,6 +1524,9 @@ export function apply(ctx: Context): void {
         const mode = rawInput.trim()
         if (!isDebateMode(mode)) {
           return { kind: 'error', text: 'usage: /debate-mode <auto|enabled|disabled>' }
+        }
+        if (mode === 'enabled' && hostDebatePlanActive(ctx, agent)) {
+          return { kind: 'error', text: PLAN_DEBATE_CONFLICT_MESSAGE }
         }
         if (foldDebatePreferences(agent.session.events).mode !== mode) {
           agent.session.append('debate/preferences', { mode }, { ignorable: true })

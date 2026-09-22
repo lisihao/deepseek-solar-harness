@@ -929,6 +929,16 @@ function taskGraphContextEnvelope(
   })
 }
 
+/** Reject a session strategy that would silently promote Standard to RLM. */
+function validateAdmissionStrategy(admission: OrchestrationAdmissionTraceV1 | undefined): void {
+  if (admission?.rlm === 'disabled' && admission.autonomous === 'enabled') {
+    throw new OrchestrationError(
+      'Autonomous Mode requires RLM to be enabled or automatic',
+      'GRAPH_INVALID',
+    )
+  }
+}
+
 /** Reject malformed or cross-session runtime contexts at the daemon wire boundary. */
 function validateAdmissionRuntimeContext(admission: OrchestrationAdmissionTraceV1 | undefined): void {
   const runtime = admission?.runtimeContext
@@ -1391,6 +1401,7 @@ export class OrchestrationDaemon {
   private async compile(request: Parameters<Context['orchestrations']['compile']>[0]): Promise<OrchestrationCompilationV1> {
     validateGraph(request.graph)
     validateAdmissionRuntimeContext(request.admission)
+    validateAdmissionStrategy(request.admission)
     const workspace = await realpath(request.graph.workspace).catch(() => {
       throw new OrchestrationError(`graph workspace does not exist: ${request.graph.workspace}`, 'GRAPH_INVALID')
     })

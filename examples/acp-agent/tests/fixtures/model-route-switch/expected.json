@@ -4,6 +4,12 @@
     "model": "chatgpt-web"
   },
   "savedCollaborationPreference": "claude-code",
+  "template": {
+    "id": "route-chatgpt-web",
+    "operators": [
+      "chatgpt-web"
+    ]
+  },
   "calls": {
     "claudeQualifications": 0,
     "claudeStarts": 0,

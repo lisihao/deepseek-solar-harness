@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import AgentRegistry, { agentEvents, Inbox, type Agent } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { agentEvents, Inbox, installModelSelection, type Agent, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
@@ -38,6 +38,7 @@ class MemoryTemplates extends TaskTemplateService {
 function fakeAgent(
   session: Session,
   options: Agent['options'] = { provider: 'dsh-physical-operator', model: 'codex' },
+  ctx = new Context(),
 ): Agent {
   return {
     id: session.id,
@@ -45,7 +46,7 @@ function fakeAgent(
     session,
     inbox: new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} }),
     status: 'running',
-    ctx: new Context(),
+    ctx,
     send: () => {},
     followup: () => {},
     steer: () => {},
@@ -236,6 +237,101 @@ describe('agent task-template injection', () => {
     const injected = selected.messages.find(message => message.source.kind === 'task-template')
     if (injected?.source.kind !== 'task-template') throw new Error('missing task template')
     expect(injected.source.receipt.attributes.operators).toEqual([])
+  })
+
+  it.each([
+    { initialProvider: 'claude', initialModel: 'claude', provider: 'chatgpt', model: 'chatgpt', template: 'operator-chatgpt' },
+    { initialProvider: 'claude', initialModel: 'claude', provider: 'codex', model: 'codex', template: 'operator-codex' },
+    { initialProvider: 'dsh-physical-operator', initialModel: 'codex', provider: 'ordinary', model: 'ordinary-model', template: 'operator-ordinary' },
+  ])('uses the captured route after the initial route', async (route) => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(MemoryTemplates)
+    await ctx.plugin(TaskTemplateContext)
+    const initialOperator = route.initialProvider === 'dsh-physical-operator' ? route.initialModel : route.initialProvider
+    await ctx.taskTemplates.create({
+      id: taskTemplateId('operator-initial'),
+      name: 'operator-initial',
+      match: { operators: [initialOperator] },
+      method: 'Use the stale initial route.',
+    })
+    await ctx.taskTemplates.create({
+      id: taskTemplateId(route.template),
+      name: route.template,
+      match: { operators: [route.provider] },
+      method: 'Use the captured selected route.',
+    })
+
+    const session = Session.create(SessionId('task-template-context-' + route.provider))
+    const agent = fakeAgent(session, { provider: route.initialProvider, model: route.initialModel }, ctx)
+    const selection: ModelSelectionRef = {
+      current: { provider: route.initialProvider, model: route.initialModel },
+      assembled: undefined,
+    }
+    const disposeSelection = installModelSelection(ctx, selection)
+    try {
+      await ctx.systemPrompt.assemble({ scope: agent })
+      selection.current = { provider: route.provider, model: route.model }
+      await ctx.systemPrompt.assemble({ scope: agent })
+
+      const user = createUserMessage({
+        content: [{ type: 'text', text: 'Inspect this task.' }],
+        source: { kind: 'user' },
+      })
+      const decision = await agentEvents(ctx, agent).waterfall(
+        'agent/pre-step',
+        { messages: [user], turn: 1, step: 1, signal: new AbortController().signal },
+        () => Promise.resolve({ kind: 'enter' as const, messages: [user] }),
+      )
+      if (decision.kind !== 'enter') throw new Error('fixture step was rejected')
+      const injected = decision.messages.find(message => message.source.kind === 'task-template')
+      if (injected?.source.kind !== 'task-template') throw new Error('missing task template')
+      expect(injected.source.receipt.templateId).toBe(route.template)
+      expect(injected.source.receipt.attributes.operators).toEqual([route.provider])
+    } finally {
+      disposeSelection()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('does not fall back to immutable Agent options before selection capture', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(MemoryTemplates)
+    await ctx.plugin(TaskTemplateContext)
+    await ctx.taskTemplates.create({
+      id: taskTemplateId('operator-claude'),
+      name: 'operator-claude',
+      match: { operators: ['claude'] },
+      method: 'Use the immutable Claude route.',
+    })
+
+    const session = Session.create(SessionId('task-template-context-uncaptured'))
+    const agent = fakeAgent(session, { provider: 'claude', model: 'claude' }, ctx)
+    const disposeSelection = installModelSelection(ctx, {
+      current: { provider: 'chatgpt', model: 'chatgpt' },
+      assembled: undefined,
+    })
+    try {
+      const user = createUserMessage({
+        content: [{ type: 'text', text: 'Inspect this task.' }],
+        source: { kind: 'user' },
+      })
+      const decision = await agentEvents(ctx, agent).waterfall(
+        'agent/pre-step',
+        { messages: [user], turn: 1, step: 1, signal: new AbortController().signal },
+        () => Promise.resolve({ kind: 'enter' as const, messages: [user] }),
+      )
+      expect(decision).toEqual({ kind: 'enter', messages: [user] })
+      expect(decisionEvents(session)[0]?.data.receipt.attributes.operators).toEqual([])
+    } finally {
+      disposeSelection()
+      await ctx.fiber.dispose()
+    }
   })
 
   it('selects one matching template and logs exact rendered content in the entered message', async () => {

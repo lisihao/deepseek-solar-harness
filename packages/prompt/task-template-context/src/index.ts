@@ -19,7 +19,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import { readModelSelection, type Agent, type PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 import type {
   TaskAttributes,
@@ -242,8 +242,10 @@ function textOf(message: UserMessage): string {
 }
 
 function selectedOperator(agent: Agent): string | undefined {
-  if (agent.options.provider === 'dsh-physical-operator') return agent.options.model
-  return agent.options.provider
+  const selection = readModelSelection(agent).selection
+  if (selection === undefined) return undefined
+  if (selection.provider === 'dsh-physical-operator') return selection.model
+  return selection.provider
 }
 
 /**

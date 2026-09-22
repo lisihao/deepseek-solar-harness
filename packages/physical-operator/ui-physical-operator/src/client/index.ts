@@ -16,6 +16,16 @@ export * from './PhysicalOperatorRoutingControl.tsx'
 /** Browser services required by the Resident projection and routing control. */
 export const inject = ['slots', 'connection', 'remote', 'remote.commands', 'sessions']
 
+/** Fold one command Remote response into the routing control's failure line. */
+function commandFailure(
+  result: Awaited<ReturnType<ClientContext['remote']['commands']['execute']>>,
+  unknownCommand: string,
+): string | null {
+  if (!result.ok) return `${result.error.message} (${result.error.code})`
+  if (result.value === undefined) return `unknown command: ${unknownCommand}`
+  return result.value.result.kind === 'error' ? result.value.result.text : null
+}
+
 /** Register provider-neutral physical-operator controls in any DSH client shell. */
 export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as ConnectionHandle
@@ -39,18 +49,14 @@ export function apply(ctx: ClientContext): void {
         request: connection.request,
         select: async (policy) => {
           const result = await scope.remote.commands.execute(sessionId, `/operator ${policy}`)
-          if (!result.ok) return `${result.error.message} (${result.error.code})`
-          if (result.value === undefined) return 'unknown command: /operator'
-          return null
+          return commandFailure(result, '/operator')
         },
         selectProfile: async (operatorId, model, effort) => {
           const result = await scope.remote.commands.execute(
             sessionId,
             `/operator-profile ${operatorId} ${model ?? 'auto'} ${effort ?? 'auto'}`,
           )
-          if (!result.ok) return `${result.error.message} (${result.error.code})`
-          if (result.value === undefined) return 'unknown command: /operator-profile'
-          return null
+          return commandFailure(result, '/operator-profile')
         },
         selectOrchestrationStrategy: async (
           rlm,
@@ -64,15 +70,11 @@ export function apply(ctx: ClientContext): void {
             sessionId,
             `/orchestration-strategy ${rlm} ${autonomous} ${continualHarness} ${optimization} ${plannerVerifierPreference} ${executionPreference}`,
           )
-          if (!result.ok) return `${result.error.message} (${result.error.code})`
-          if (result.value === undefined) return 'unknown command: /orchestration-strategy'
-          return null
+          return commandFailure(result, '/orchestration-strategy')
         },
         selectDebateMode: async (mode) => {
           const result = await scope.remote.commands.execute(sessionId, `/debate-mode ${mode}`)
-          if (!result.ok) return `${result.error.message} (${result.error.code})`
-          if (result.value === undefined) return 'unknown command: /debate-mode'
-          return null
+          return commandFailure(result, '/debate-mode')
         },
       }),
     }, PhysicalOperatorRoutingControl))

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/physical-operator/ui-physical-operator/README.md
-README.md: fe11e7930a56ce6e5ef04d14ac0f420d3a4ead77
-README.zh.md: 305c8c28d4e2696309ec4f987b7a19e0a037054d
+README.md: 5a8f8a417de88073e62f4a49b6a1466963041d32
+README.zh.md: a4ba156d4bc6dd5ddb324334d2e4b1533ea2235f

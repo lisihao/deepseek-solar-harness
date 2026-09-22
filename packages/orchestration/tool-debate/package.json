@@ -23,11 +23,15 @@
     "@deepseek-ai/dsh-debate": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-plan-mode": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
     "@deepseek-ai/dsh-system-prompt": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "zod": "^4.4.3"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-plan-mode": { "optional": true }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -37,6 +41,7 @@
     "@deepseek-ai/dsh-debate": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-llm": "workspace:^",
+    "@deepseek-ai/dsh-plan-mode": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-projection": "workspace:^",
     "@deepseek-ai/dsh-system-prompt": "workspace:^",

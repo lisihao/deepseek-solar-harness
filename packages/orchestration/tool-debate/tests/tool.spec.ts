@@ -13,6 +13,7 @@ import DebateService, {
   type DebateStartRequestV1,
 } from '@deepseek-ai/dsh-debate'
 import LlmRuntime, { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import PlanModeController from '@deepseek-ai/dsh-plan-mode'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -214,6 +215,7 @@ async function setupAutomatic(
     provider: 'unavailable-primary',
     model: 'unavailable-primary',
   },
+  options: { readonly plan?: boolean } = {},
 ) {
   const ctx = new Context()
   contexts.push(ctx)
@@ -223,6 +225,7 @@ async function setupAutomatic(
   await ctx.plugin(CommandRuntime)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  if (options.plan === true) await ctx.plugin(PlanModeController, { section: 'Plan mode test guidance.' })
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(ScriptedDebates)
@@ -365,6 +368,109 @@ describe('debate model Consumer', () => {
     const response = assistant.data.message.content[0]
     expect(response?.type).toBe('text')
     expect(response?.type === 'text' ? response.text : '').toContain('Decision summary')
+  })
+
+  it('rejects enabling host Debate while Plan has a pending entry', async () => {
+    const { ctx, agent, provider } = await setupAutomatic(
+      { provider: 'unavailable-primary', model: 'unavailable-primary' },
+      { plan: true },
+    )
+    agent.session.append('turn/start', { turn: 1 })
+    expect(ctx.planMode.set(agent, true)).toBe('queued')
+    expect(ctx.planMode.get(agent)).toEqual({ active: false, pending: true })
+
+    const changed = await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+
+    expect(changed?.result.kind).toBe('error')
+    if (changed?.result.kind !== 'error') throw new Error('expected Plan conflict')
+    expect(changed.result.text).toContain('Exit Plan mode with /plan off or disable Debate.')
+    expect(tool.foldDebatePreferences(agent.session.events)).toEqual({ mode: 'disabled' })
+    expect(provider.starts).toHaveLength(0)
+  })
+
+  it('blocks a host Debate request when Plan is enabled after Debate selection', async () => {
+    const { ctx, agent, provider } = await setupAutomatic(
+      { provider: 'unavailable-primary', model: 'unavailable-primary' },
+      { plan: true },
+    )
+    const errors: Error[] = []
+    ctx.on('agent/error', ({ error }) => {
+      if (error instanceof Error) errors.push(error)
+    })
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    expect(ctx.planMode.set(agent, true)).toBe('committed')
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'This host Debate must be blocked while planning.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    expect(provider.starts).toHaveLength(0)
+    expect(agent.session.events.filter(event => event.type === 'debate/dispatch')).toHaveLength(0)
+    expect(errors.some(error => error.message.includes('Exit Plan mode with /plan off or disable Debate.'))).toBe(true)
+  })
+
+  it('keeps an admitted host Debate turn when Plan is queued mid-step', async () => {
+    const { ctx, agent, provider } = await setupAutomatic(
+      { provider: 'unavailable-primary', model: 'unavailable-primary' },
+      { plan: true },
+    )
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    let queued = false
+    ctx.on('agent/request', async ({ agent: subject }, next) => {
+      const base = await next()
+      if (subject === agent && !queued) {
+        queued = true
+        expect(ctx.planMode.set(agent, true)).toBe('queued')
+      }
+      return base
+    })
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Keep this already admitted Debate turn running.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    expect(provider.starts).toHaveLength(1)
+    const dispatch = agent.session.events.find(event => event.type === 'debate/dispatch')
+    expect(dispatch?.type === 'debate/dispatch' && dispatch.data.planModeActive).toBe(false)
+    expect(ctx.planMode.get(agent)).toEqual({ active: false, pending: true })
+  })
+
+  it('allows host Debate after Plan mode is turned off', async () => {
+    const { ctx, agent, provider } = await setupAutomatic(
+      { provider: 'unavailable-primary', model: 'unavailable-primary' },
+      { plan: true },
+    )
+    expect(ctx.planMode.set(agent, true)).toBe('committed')
+    expect(ctx.planMode.set(agent, false)).toBe('committed')
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+
+    agent.followup(createUserMessage({
+      content: [{ type: 'text', text: 'Run this Debate after leaving Plan mode.' }],
+      source: { kind: 'user' },
+    }))
+    await agent.whenIdle()
+
+    expect(provider.starts).toHaveLength(1)
+  })
+
+  it('keeps model-invoked Debate available while Plan mode is active', async () => {
+    const { ctx, agent, provider } = await setupAutomatic(
+      { provider: 'unavailable-primary', model: 'unavailable-primary' },
+      { plan: true },
+    )
+    await ctx.commands.execute(agent, '/debate-mode enabled', new AbortController().signal)
+    expect(ctx.planMode.set(agent, true)).toBe('committed')
+    provider.startResult = snapshot({ state: 'awaiting_approval', revision: 2, currentRound: 0, rounds: [] })
+    provider.controlResult = snapshot({ revision: 3 })
+
+    const started = await call(ctx, agent, { action: 'start', prompt: 'Use the model-owned Debate tool during planning.' })
+
+    expect(started.isError).toBe(false)
+    expect(provider.starts).toHaveLength(1)
   })
 
   it.each(['auto', 'disabled'] as const)('does not resurrect a prior Debate host route after an explicit %s switch', async (mode) => {

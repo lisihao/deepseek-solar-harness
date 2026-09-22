@@ -14,7 +14,7 @@ Only a live or pending message whose receipt matches the current turn's decision
 
 When compaction shadows the injected surface message while the same turn is still open, the exact pinned receipt from that log event is restored once — never a fresh selection — so the model keeps seeing the same instruction the earlier step committed to. A later turn (a new logical task) always re-selects from scratch and never reactivates an earlier task's template. DSH does not use a periodic reinjection timer because a fixed interval can duplicate instructions mid-operation and change behavior without a task boundary.
 
-Inference covers common research, insight-report, architecture, review, planning, coding, writing, frontend, backend, infrastructure, finance, legal, agent-system, output-format, risk, language, and urgency signals. The inferred risk is routing metadata only and never authorizes an action.
+Inference covers common research, insight-report, architecture, review, planning, coding, writing, frontend, backend, infrastructure, finance, legal, agent-system, output-format, risk, language, and urgency signals. The inferred risk is routing metadata only and never authorizes an action. Operator constraints use the model route captured for the current prompt assembly: a physical-operator route contributes its selected model id, an ordinary provider contributes its provider id, and an installed route that has not yet been captured contributes no operator.
 
 ## Model Experience
 
