@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { Script } from 'node:vm'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import BrowserRuntime, {
@@ -141,6 +141,15 @@ function executeGeneratedProgram(program: BrowserRunProgramV1, browser: ProgramB
   return new ProgramAsyncFunction('browser', program.source)(browser)
 }
 
+function executeGeneratedProgramWithFakeClock(
+  program: BrowserRunProgramV1,
+  browser: ProgramBrowser,
+): Promise<unknown> {
+  vi.useFakeTimers()
+  const result = executeGeneratedProgram(program, browser)
+  return vi.runAllTimersAsync().then(() => result)
+}
+
 async function evaluatePage(evaluator: string, input?: unknown): Promise<unknown> {
   const evaluate = new Script('(' + evaluator + ')').runInNewContext({
     document, location, Node, setTimeout, getComputedStyle: window.getComputedStyle.bind(window),
@@ -265,6 +274,7 @@ function programFor(
 afterEach(() => {
   document.body.replaceChildren()
   window.history.replaceState(null, '', '/')
+  vi.useRealTimers()
 })
 
 describe('ChatGPT Web physical operator', () => {
@@ -535,7 +545,8 @@ describe('ChatGPT Web physical operator', () => {
       },
     }
 
-    await expect(executeGeneratedProgram(program, browser)).resolves.toEqual({
+    const result = executeGeneratedProgramWithFakeClock(program, browser)
+    await expect(result).resolves.toEqual({
       status: 'completed',
       response: 'hydrated response',
       truncated: false,
@@ -607,7 +618,7 @@ describe('ChatGPT Web physical operator', () => {
       evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
     }
 
-    await expect(executeGeneratedProgram(programFor(prompt), browser)).resolves.toEqual({
+    await expect(executeGeneratedProgramWithFakeClock(programFor(prompt), browser)).resolves.toEqual({
       status: 'completed',
       response: 'paragraph response',
       truncated: false,
@@ -645,7 +656,7 @@ describe('ChatGPT Web physical operator', () => {
       evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
     }
 
-    await expect(executeGeneratedProgram(programFor('collect current reply'), browser)).resolves.toEqual({
+    await expect(executeGeneratedProgramWithFakeClock(programFor('collect current reply'), browser)).resolves.toEqual({
       status: 'completed',
       response: '我是 GPT-5.6 Sol。',
       truncated: false,
@@ -679,7 +690,7 @@ describe('ChatGPT Web physical operator', () => {
       evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
     }
 
-    await expect(executeGeneratedProgram(programFor('do not use old copy', {
+    await expect(executeGeneratedProgramWithFakeClock(programFor('do not use old copy', {
       generationTimeoutMs: 30,
     }), browser)).resolves.toMatchObject({
       status: 'generation-timeout',
@@ -705,10 +716,11 @@ describe('ChatGPT Web physical operator', () => {
       evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
     }
 
-    await expect(executeGeneratedProgram(programFor('never fill', {
+    const result = executeGeneratedProgramWithFakeClock(programFor('never fill', {
       generationTimeoutMs: 12,
       submissionTimeoutMs: 5,
-    }), browser)).resolves.toEqual({ status: 'input-unavailable' })
+    }), browser)
+    await expect(result).resolves.toEqual({ status: 'input-unavailable' })
     expect(operations.map(operation => operation.id)).toEqual([
       'chatgpt-open',
       'chatgpt-reset-conversation',
@@ -736,7 +748,7 @@ describe('ChatGPT Web physical operator', () => {
       evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
     }
 
-    await expect(executeGeneratedProgram(programFor('original', { submissionTimeoutMs: 5 }), browser)).resolves.toEqual({
+    await expect(executeGeneratedProgramWithFakeClock(programFor('original', { submissionTimeoutMs: 5 }), browser)).resolves.toEqual({
       status: 'submission-failed',
       diagnostic: {
         page: 'root',
@@ -783,7 +795,7 @@ describe('ChatGPT Web physical operator', () => {
       },
     }
 
-    await expect(executeGeneratedProgram(programFor('wait for send'), browser)).resolves.toEqual({
+    await expect(executeGeneratedProgramWithFakeClock(programFor('wait for send'), browser)).resolves.toEqual({
       status: 'completed',
       response: 'enabled response',
       truncated: false,
@@ -813,7 +825,7 @@ describe('ChatGPT Web physical operator', () => {
       evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
     }
 
-    await expect(executeGeneratedProgram(programFor('ambiguous', { submissionTimeoutMs: 5 }), browser)).resolves.toMatchObject({
+    await expect(executeGeneratedProgramWithFakeClock(programFor('ambiguous', { submissionTimeoutMs: 5 }), browser)).resolves.toMatchObject({
       status: 'submission-failed',
       diagnostic: { sendAvailable: false },
     })
@@ -839,7 +851,7 @@ describe('ChatGPT Web physical operator', () => {
         : evaluatePage(evaluator, input),
     }
 
-    await expect(executeGeneratedProgram(programFor('invalid result'), browser)).resolves.toEqual({
+    await expect(executeGeneratedProgramWithFakeClock(programFor('invalid result'), browser)).resolves.toEqual({
       status: 'protocol-error',
     })
     expect(operations.map(operation => operation.id)).not.toContain('chatgpt-send')
