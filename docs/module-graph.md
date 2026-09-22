@@ -1644,19 +1644,6 @@ flowchart TD
   pkg_ui_orchestration --> pkg_invariants
   pkg_ui_orchestration --> pkg_orchestration
   pkg_ui_orchestration --> pkg_rlm_runtime
-  pkg_ui_physical_operator --> pkg_api_remotes
-  pkg_ui_physical_operator --> pkg_client_connection
-  pkg_ui_physical_operator --> pkg_client_runtime
-  pkg_ui_physical_operator --> pkg_client_ui_conversation
-  pkg_ui_physical_operator --> pkg_client_ui_primitives
-  pkg_ui_physical_operator --> pkg_client_ui_slots
-  pkg_ui_physical_operator --> pkg_host_remote_auth
-  pkg_ui_physical_operator --> pkg_host_webserver
-  pkg_ui_physical_operator --> pkg_invariants
-  pkg_ui_physical_operator --> pkg_resident_operator
-  pkg_ui_physical_operator --> pkg_tool_debate
-  pkg_ui_physical_operator --> pkg_tool_orchestration
-  pkg_ui_physical_operator --> pkg_tool_physical_operator
   pkg_session_log_export --> pkg_client_locale
   pkg_session_log_export --> pkg_client_runtime
   pkg_session_log_export --> pkg_client_ui_commands
@@ -1707,6 +1694,20 @@ flowchart TD
   pkg_client_ui_cordis --> pkg_client_ui_tool
   pkg_client_ui_cordis --> pkg_cordis_client_runner
   pkg_client_ui_cordis --> pkg_invariants
+  pkg_ui_physical_operator --> pkg_api_remotes
+  pkg_ui_physical_operator --> pkg_client_connection
+  pkg_ui_physical_operator --> pkg_client_runtime
+  pkg_ui_physical_operator --> pkg_client_ui_conversation
+  pkg_ui_physical_operator --> pkg_client_ui_model_selection
+  pkg_ui_physical_operator --> pkg_client_ui_primitives
+  pkg_ui_physical_operator --> pkg_client_ui_slots
+  pkg_ui_physical_operator --> pkg_host_remote_auth
+  pkg_ui_physical_operator --> pkg_host_webserver
+  pkg_ui_physical_operator --> pkg_invariants
+  pkg_ui_physical_operator --> pkg_resident_operator
+  pkg_ui_physical_operator --> pkg_tool_debate
+  pkg_ui_physical_operator --> pkg_tool_orchestration
+  pkg_ui_physical_operator --> pkg_tool_physical_operator
 ```
 
 | Package | Group | Depends on |
@@ -1968,9 +1969,9 @@ flowchart TD
 | [`host-directory-picker-auto`](../packages/host/directory-picker-auto) | `host` | [`client-ui-directory-picker-browse`](../packages/client/ui-directory-picker-browse), [`client-ui-directory-picker-native`](../packages/client/ui-directory-picker-native), [`host-directory-picker-browse`](../packages/host/directory-picker-browse), [`host-directory-picker-native`](../packages/host/directory-picker-native), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`ui-debate`](../packages/orchestration/ui-debate) | `orchestration` | [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-slots`](../packages/client/ui-slots), [`debate`](../packages/orchestration/debate), [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`ui-orchestration`](../packages/orchestration/ui-orchestration) | `orchestration` | [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-slots`](../packages/client/ui-slots), [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`orchestration`](../packages/orchestration/orchestration), [`rlm-runtime`](../packages/orchestration/rlm-runtime) |
-| [`ui-physical-operator`](../packages/physical-operator/ui-physical-operator) | `physical-operator` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`resident-operator`](../packages/physical-operator/resident-operator), [`tool-debate`](../packages/orchestration/tool-debate), [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) |
 | [`session-log-export`](../packages/session-query/session-log-export) | `session-query` | [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-commands`](../packages/client/ui-commands), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`commands`](../packages/interaction/commands), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-model-selection`](../packages/client/ui-model-selection) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-commands`](../packages/client/ui-commands), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-permission-presets`](../packages/client/ui-permission-presets) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-schema-form`](../packages/client/schema-form), [`client-ui-commands`](../packages/client/ui-commands), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants), [`permission-presets`](../packages/interaction/permission-presets) |
 | [`client-ui-skill`](../packages/client/ui-skill) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`client-ui-tool`](../packages/client/ui-tool), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-cordis`](../packages/extensions/ui-cordis) | `extensions` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-sidebar`](../packages/client/ui-sidebar), [`client-ui-slots`](../packages/client/ui-slots), [`client-ui-tool`](../packages/client/ui-tool), [`cordis-client-runner`](../packages/extensions/cordis-client-runner), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`ui-physical-operator`](../packages/physical-operator/ui-physical-operator) | `physical-operator` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-model-selection`](../packages/client/ui-model-selection), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`resident-operator`](../packages/physical-operator/resident-operator), [`tool-debate`](../packages/orchestration/tool-debate), [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) |
