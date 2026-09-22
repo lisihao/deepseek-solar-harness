@@ -701,6 +701,12 @@ importers:
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:*
         version: link:../packages/core/system-prompt
+      '@deepseek-ai/dsh-task-template':
+        specifier: workspace:*
+        version: link:../packages/prompt/task-template
+      '@deepseek-ai/dsh-task-template-context':
+        specifier: workspace:*
+        version: link:../packages/prompt/task-template-context
       '@deepseek-ai/dsh-terminal':
         specifier: workspace:*
         version: link:../packages/terminal/terminal
