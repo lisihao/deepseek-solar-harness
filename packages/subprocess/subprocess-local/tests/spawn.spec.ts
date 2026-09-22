@@ -237,10 +237,11 @@ describe('spawnSubprocess', () => {
   })
 
   it('terminates the whole process group (grandchildren die too)', async () => {
-    // The subshell writes the sleep's pid then waits on it; terminating the
-    // group must take the sleep down with bash.
+    // Keep the direct leader alive independently of the grandchild. If bash is
+    // waiting on the grandchild, the group signal can reap that child first and
+    // let bash exit normally before its own SIGTERM is observed.
     const pidFile = join(spillDir, `grandchild-${Date.now()}.pid`)
-    const running = spawnSubprocess(spec(`sleep 60 & echo $! > ${pidFile}; wait`))
+    const running = spawnSubprocess(spec(`sleep 60 & echo $! > ${pidFile}; exec sleep 60`))
     const grandchild = await waitForPidFile(pidFile)
     expect(grandchild).toBeGreaterThan(0)
 
