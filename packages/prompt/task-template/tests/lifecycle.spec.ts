@@ -2,9 +2,46 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { taskTemplateId } from '../src/brand.ts'
 import type { TaskTemplateChangeKind, TaskTemplateId } from '../src/types.ts'
+import type { TaskTemplateStoreDocument } from '../src/store.ts'
 import { MemoryTaskTemplates } from './memory.ts'
 
 const REVIEW = taskTemplateId('fixture-code-review')
+
+class BlockingTaskTemplates extends MemoryTaskTemplates {
+  private persistGate: Promise<void> | undefined
+  private markStarted: (() => void) | undefined
+  private staleDocument: TaskTemplateStoreDocument | undefined
+
+  pauseNextPersist(staleDocument?: TaskTemplateStoreDocument): { started: Promise<void>; release: () => void } {
+    let release = (): void => {}
+    this.persistGate = new Promise((resolve) => { release = resolve })
+    const started = new Promise<void>((resolve) => { this.markStarted = resolve })
+    this.staleDocument = staleDocument
+    return { started, release }
+  }
+
+  refreshFrom(document: TaskTemplateStoreDocument): Promise<void> {
+    return this.refresh(() => Promise.resolve(document))
+  }
+
+  protected override async persist(document: TaskTemplateStoreDocument): Promise<'committed' | 'stale'> {
+    const gate = this.persistGate
+    if (gate !== undefined) {
+      this.persistGate = undefined
+      this.markStarted?.()
+      this.markStarted = undefined
+      await gate
+    }
+    const staleDocument = this.staleDocument
+    if (staleDocument !== undefined) {
+      this.staleDocument = undefined
+      this.doc = structuredClone(staleDocument)
+      this.adoptWithinWrite(structuredClone(staleDocument))
+      return 'stale'
+    }
+    return super.persist(document)
+  }
+}
 
 async function boot(options?: ConstructorParameters<typeof MemoryTaskTemplates>[1]) {
   const ctx = new Context()
@@ -89,6 +126,22 @@ describe('update and versioning', () => {
     const versions = provider.versions(REVIEW)
     expect(versions.map(revision => revision.version)).toEqual([1, 2])
     expect(versions.at(-1)?.method).toBe('Fictional method v2.')
+  })
+
+  it('replaces every supplied method-layer field in one revision', async () => {
+    const { provider } = await boot()
+    await provider.create({ id: REVIEW, name: 'Old name', method: 'Old method.' })
+    const updated = await provider.update(REVIEW, {
+      name: 'New name',
+      match: { domains: ['frontend'] },
+      rank: 7,
+    })
+    expect(updated).toMatchObject({
+      name: 'New name',
+      match: { domains: ['frontend'] },
+      method: 'Old method.',
+      rank: 7,
+    })
   })
 
   it('rejects an empty patch and an unknown template', async () => {
@@ -184,3 +237,42 @@ describe('delete', () => {
     await expect(provider.delete(REVIEW)).rejects.toThrow(/does not exist/)
   })
 })
+
+describe('disposal', () => {
+  it('drains the active write, rejects queued and later writes, and ignores a later refresh', async () => {
+    const ctx = new Context()
+    const fiber = ctx.plugin(BlockingTaskTemplates)
+    await fiber
+    const provider = ctx.get('taskTemplates') as BlockingTaskTemplates
+    const gate = provider.pauseNextPersist(emptyDocument())
+    const first = provider.create({
+      id: REVIEW,
+      name: 'Fictional active write',
+      method: 'Fictional method.',
+    })
+    await gate.started
+    const queued = provider.create({
+      id: taskTemplateId('fixture-queued'),
+      name: 'Fictional queued write',
+      method: 'Fictional method.',
+    })
+    const queuedAssertion = expect(queued).rejects.toThrow(/disposed before the queued write ran/)
+    const disposed = fiber.dispose()
+    await new Promise(resolve => setImmediate(resolve))
+    gate.release()
+
+    await expect(first).resolves.toMatchObject({ id: REVIEW })
+    await queuedAssertion
+    await disposed
+    await expect(provider.create({
+      id: taskTemplateId('fixture-late'),
+      name: 'Fictional late write',
+      method: 'Fictional method.',
+    })).rejects.toThrow(/service is disposed/)
+    await expect(provider.refreshFrom(emptyDocument())).resolves.toBeUndefined()
+  })
+})
+
+function emptyDocument(): TaskTemplateStoreDocument {
+  return { formatVersion: 1, templates: [], personalization: {} }
+}

@@ -391,10 +391,10 @@ describe('LocalRlmRuntime', () => {
     const service = new LocalRlmRuntime(ctx, root)
     const sessionId = RlmRuntimeSessionId('rlm-session-default-child')
     const defaultChildModel = { operatorId: 'codex', model: 'gpt-5.6-luna' } as const
-    let dispatchedModel: unknown
+    let dispatched: { readonly model: unknown; readonly modelOrigin: unknown } | undefined
     const bindings: RlmRuntimeHostBindings = {
       dispatchChild: async (request) => {
-        dispatchedModel = request.model
+        dispatched = { model: request.model, modelOrigin: request.modelOrigin }
         return {
           nativeSessionId: 'native-low-tier', nativeTurnId: 'turn-low-tier',
           result: Promise.resolve({ status: 'settled' }), interrupt: () => Promise.resolve(),
@@ -403,15 +403,15 @@ describe('LocalRlmRuntime', () => {
     }
     await service.create({
       sessionId, commandId: RlmCommandId('create-default-child'), executionId: 'execution-default-child',
-      workspace: root, task: 'plan with cheap children',
+      workspace: root, task: 'plan with cheap children', childModelPolicy: 'allocator-default',
       model: { operatorId: 'claude-code', model: 'claude-opus-4-1' }, defaultChildModel, limits,
     }, bindings)
     const admitted = await service.executeCell({
       sessionId, commandId: RlmCommandId('spawn-default-child'),
       code: 'await rlm("bounded exploration", { name: "cheap-worker" })',
     })
-    expect(admitted.value).toMatchObject({ name: 'cheap-worker', model: defaultChildModel })
-    expect(dispatchedModel).toEqual(defaultChildModel)
+    expect(admitted.value).toMatchObject({ name: 'cheap-worker', model: defaultChildModel, modelOrigin: 'allocator-default' })
+    expect(dispatched).toEqual({ model: defaultChildModel, modelOrigin: 'allocator-default' })
     await ctx.root.fiber.dispose()
   })
 
@@ -423,10 +423,10 @@ describe('LocalRlmRuntime', () => {
     const parentModel = {
       operatorId: 'claude-code', model: 'claude-opus-4-1', profile: { model: 'claude-opus-4-1', effort: 'max' as const },
     }
-    const dispatched: unknown[] = []
+    const dispatched: Array<{ readonly model: unknown; readonly modelOrigin: unknown }> = []
     const bindings: RlmRuntimeHostBindings = {
       dispatchChild: async (request) => {
-        dispatched.push(request.model)
+        dispatched.push({ model: request.model, modelOrigin: request.modelOrigin })
         return {
           nativeSessionId: `native-${request.name}`, nativeTurnId: `turn-${request.name}`,
           result: Promise.resolve({ status: 'settled' }), interrupt: () => Promise.resolve(),
@@ -435,7 +435,7 @@ describe('LocalRlmRuntime', () => {
     }
     await service.create({
       sessionId, commandId: RlmCommandId('create-prime-inheritance'), executionId: 'execution-prime-inheritance',
-      workspace: root, task: 'preserve Prime defaults', model: parentModel, limits,
+      workspace: root, task: 'preserve Prime defaults', model: parentModel, childModelPolicy: 'parent-inherit', limits,
     }, bindings)
     await service.executeCell({
       sessionId, commandId: RlmCommandId('spawn-inherited'),
@@ -446,9 +446,27 @@ describe('LocalRlmRuntime', () => {
       code: 'await rlm("use Codex", { name: "overridden", model: "codex/gpt-5.6-sol", thinking: "high" })',
     })
     expect(dispatched).toEqual([
-      parentModel,
-      { operatorId: 'codex', model: 'gpt-5.6-sol', profile: { effort: 'high' } },
+      { model: parentModel, modelOrigin: 'parent-inherited' },
+      { model: { operatorId: 'codex', model: 'gpt-5.6-sol', profile: { model: 'gpt-5.6-sol', effort: 'high' } }, modelOrigin: 'explicit' },
     ])
+    await ctx.root.fiber.dispose()
+  })
+
+  it('rejects an allocator child default when the sealed policy is Prime parent inheritance', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-prime-no-allocator-default-'))
+    const ctx = new Context()
+    const service = new LocalRlmRuntime(ctx, root)
+    expect(() => service.create({
+      sessionId: RlmRuntimeSessionId('rlm-session-prime-no-allocator-default'),
+      commandId: RlmCommandId('create-prime-no-allocator-default'),
+      executionId: 'execution-prime-no-allocator-default',
+      workspace: root,
+      task: 'preserve exact parent inheritance',
+      model: { operatorId: 'claude-code', model: 'claude-opus-4-1' },
+      defaultChildModel: { operatorId: 'codex', model: 'gpt-5.6-luna' },
+      childModelPolicy: 'parent-inherit',
+      limits,
+    }, { dispatchChild: () => { throw new Error('must not dispatch') } })).toThrow(expect.objectContaining({ code: 'RLM_INVALID' }))
     await ctx.root.fiber.dispose()
   })
 
@@ -467,6 +485,10 @@ describe('LocalRlmRuntime', () => {
       }],
       skills: [{
         alias: 'repo-inspect', title: 'Repository inspection', callable: 'repo.inspect', available: true,
+        binding: {
+          entryId: 'repo-inspect', entryVersion: 3, digest: 'repo-inspect-v3',
+          moduleId: 'repo-tools', callable: 'repo.inspect',
+        },
       }],
       retryPolicy: {
         mode: 'normal', maxRetries: 2, retryableCodes: ['TIMEOUT'],
@@ -478,10 +500,10 @@ describe('LocalRlmRuntime', () => {
         graphCertificateHash: 'sha256:graph',
       },
     } as const satisfies RlmChildExecutionOptionsV1
-    const dispatched: Array<{ model: unknown; executionOptions: unknown }> = []
+    const dispatched: Array<{ model: unknown; modelOrigin: unknown; executionOptions: unknown }> = []
     const bindings: RlmRuntimeHostBindings = {
       dispatchChild: async (request) => {
-        dispatched.push({ model: request.model, executionOptions: request.executionOptions })
+        dispatched.push({ model: request.model, modelOrigin: request.modelOrigin, executionOptions: request.executionOptions })
         return {
           nativeSessionId: `native-${request.name}`, nativeTurnId: `turn-${request.name}`,
           result: Promise.resolve({ status: 'settled' }), interrupt: () => Promise.resolve(),
@@ -490,16 +512,18 @@ describe('LocalRlmRuntime', () => {
     }
     await service.create({
       sessionId, commandId: RlmCommandId('create-prime-execution-options'), executionId: 'execution-prime-execution-options',
-      workspace: root, task: 'preserve parent execution context', model: parentModel, executionOptions, limits,
+      workspace: root, task: 'preserve parent execution context', model: parentModel,
+      childModelPolicy: 'parent-inherit', executionOptions, limits,
     }, bindings)
     await service.executeCell({
       sessionId, commandId: RlmCommandId('spawn-prime-execution-options'),
       code: 'await rlm("inherit execution options", { name: "inherited-options" })',
     })
     const child = (await service.listChildren(sessionId))[0]!
-    expect(dispatched).toEqual([{ model: parentModel, executionOptions }])
+    expect(dispatched).toEqual([{ model: parentModel, modelOrigin: 'parent-inherited', executionOptions }])
     await expect(service.inspect(child.sessionId)).resolves.toMatchObject({
       model: parentModel,
+      childModelPolicy: 'parent-inherit',
       executionOptions,
     })
     await ctx.root.fiber.dispose()
@@ -508,9 +532,154 @@ describe('LocalRlmRuntime', () => {
     const recovered = new LocalRlmRuntime(recoveredContext, root)
     await expect(recovered.inspect(child.sessionId)).resolves.toMatchObject({
       model: parentModel,
+      childModelPolicy: 'parent-inherit',
       executionOptions,
     })
     await recoveredContext.root.fiber.dispose()
+  })
+
+  it('does not replay a strict child dispatch receipt after Provider restart', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-strict-restart-'))
+    const pending = deferred<RlmChildExecutionResult>()
+    let dispatches = 0
+    const bindings: RlmRuntimeHostBindings = {
+      dispatchChild: async (request) => {
+        dispatches += 1
+        return {
+          nativeSessionId: `native-${request.name}`,
+          nativeTurnId: `turn-${request.name}`,
+          result: pending.promise,
+          interrupt: () => Promise.resolve(),
+        }
+      },
+    }
+    const first = await runtime(root, bindings)
+    await first.service.create({
+      sessionId: RlmRuntimeSessionId('rlm-session-strict-restart'),
+      commandId: RlmCommandId('create-strict-restart'),
+      executionId: 'execution-strict-restart',
+      workspace: root,
+      task: 'preserve one strict child receipt',
+      model: { operatorId: 'claude-code', model: 'claude-opus-4-1' },
+      childModelPolicy: 'parent-inherit',
+      executionOptions: { version: 1 },
+      limits,
+    }, bindings)
+    const strictSessionId = RlmRuntimeSessionId('rlm-session-strict-restart')
+    const admitted = await first.service.executeCell({
+      sessionId: strictSessionId,
+      commandId: RlmCommandId('spawn-before-restart'),
+      code: 'await rlm("preserve this native receipt", { name: "strict-child" })',
+    })
+    expect(dispatches).toBe(1)
+    const statePath = join(root, 'state.json')
+    const recoveredRoot = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-strict-recovered-'))
+    await copyFile(statePath, join(recoveredRoot, 'state.json'))
+    await first.ctx.root.fiber.dispose()
+
+    const recoveredContext = new Context()
+    const recovered = new LocalRlmRuntime(recoveredContext, recoveredRoot)
+    await recovered.bindHost(strictSessionId, bindings)
+    const child = (await recovered.listChildren(strictSessionId))[0]!
+    expect(child).toMatchObject({ lifecycle: 'indeterminate', modelOrigin: 'parent-inherited' })
+    await expect(recovered.inspect(child.sessionId)).resolves.toMatchObject({ childModelPolicy: 'parent-inherit' })
+    await expect(recovered.inspectReceipt(RlmCommandId('spawn-before-restart:child:1')))
+      .resolves.toMatchObject({ state: 'settled', operation: 'child.spawn' })
+    await expect(recovered.executeCell({
+      sessionId: strictSessionId,
+      commandId: RlmCommandId('spawn-before-restart'),
+      code: 'await rlm("preserve this native receipt", { name: "strict-child" })',
+    })).resolves.toEqual(admitted)
+    expect(dispatches).toBe(1)
+    await recoveredContext.root.fiber.dispose()
+  })
+
+  it('migrates v1-v4 child provenance and missing results without replaying uncertain work', async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-legacy-source-'))
+    let dispatches = 0
+    const bindings: RlmRuntimeHostBindings = {
+      dispatchChild: async (request) => {
+        dispatches += 1
+        return {
+          nativeSessionId: `native-${request.name}`,
+          nativeTurnId: `turn-${request.name}`,
+          result: Promise.resolve({ status: 'settled' }),
+          interrupt: () => Promise.resolve(),
+        }
+      },
+    }
+    const first = await runtime(sourceRoot, bindings)
+    const cellCommandId = RlmCommandId('legacy-fixture-cell')
+    const cellCode = 'await rlm("legacy fixture child", { name: "legacy-child" })'
+    await expect(first.service.executeCell({
+      sessionId: first.sessionId,
+      commandId: cellCommandId,
+      code: cellCode,
+    })).resolves.toMatchObject({ value: { modelOrigin: 'parent-inherited' } })
+    await waitUntil(async () => (await first.service.listChildren(first.sessionId))[0]?.lifecycle === 'settled')
+    const sourceState = JSON.parse(await readFile(join(sourceRoot, 'state.json'), 'utf8')) as Record<string, unknown>
+    await first.ctx.root.fiber.dispose()
+
+    // Remove fields introduced after each historical state version. The
+    // replacer also removes modelOrigin from nested cell receipt results.
+    const legacyStateJson = JSON.stringify(sourceState, (key, value: unknown) => {
+      if (key === 'modelOrigin' || key === 'childModelPolicy') return undefined
+      if (key === 'effectiveMode' || key === 'deliveryStatus' || key === 'queuedAt' || key === 'deliveredAt' || key === 'deliveryError') return undefined
+      return value
+    })
+
+    for (const version of [1, 2, 3, 4] as const) {
+      const recoveredRoot = await mkdtemp(join(tmpdir(), `dsh-rlm-runtime-legacy-v${String(version)}-`))
+      const state = JSON.parse(legacyStateJson) as {
+        version: number
+        receipts: Array<Record<string, unknown>>
+        heartbeats?: unknown
+        controlLeases?: unknown
+      }
+      state.version = version
+      if (version === 1) {
+        delete state.heartbeats
+        delete state.controlLeases
+      } else {
+        state.heartbeats = []
+        if (version === 4) state.controlLeases = []
+        else delete state.controlLeases
+      }
+      const childReceipt = state.receipts.find(receipt => receipt.operation === 'child.spawn')
+      if (childReceipt === undefined) throw new Error(`legacy fixture v${String(version)} is missing child receipt`)
+      const childCommandId = childReceipt.commandId
+      if (typeof childCommandId !== 'string') throw new Error('legacy child receipt has no command id')
+      // A settled receipt with no result cannot be replayed or decoded safely.
+      delete childReceipt.result
+      delete childReceipt.resultSha256
+      await writeFile(join(recoveredRoot, 'state.json'), `${JSON.stringify(state)}\n`, { mode: 0o600 })
+
+      const recoveredContext = new Context()
+      const recovered = new LocalRlmRuntime(recoveredContext, recoveredRoot)
+      await recovered.bindHost(first.sessionId, bindings)
+      await expect(recovered.listChildren(first.sessionId)).resolves.toMatchObject([{
+        lifecycle: 'settled',
+        modelOrigin: 'legacy',
+      }])
+      await expect(recovered.inspectReceipt(RlmCommandId(childCommandId))).resolves.toMatchObject({
+        state: 'indeterminate',
+        error: { code: 'RLM_COMMAND_INDETERMINATE' },
+      })
+      await expect(recovered.executeCell({
+        sessionId: first.sessionId,
+        commandId: cellCommandId,
+        code: cellCode,
+      })).resolves.toMatchObject({ value: { modelOrigin: 'legacy' } })
+      expect(dispatches).toBe(1)
+
+      const migrated = JSON.parse(await readFile(join(recoveredRoot, 'state.json'), 'utf8')) as {
+        version: number
+        sessions: Array<{ snapshot: { children: Array<{ modelOrigin?: unknown }> } }>
+      }
+      expect(migrated.version).toBe(5)
+      expect(migrated.sessions.flatMap(session => session.snapshot.children).every(child => child.modelOrigin === 'legacy')).toBe(true)
+      await recoveredContext.root.fiber.dispose()
+    }
   })
 
   it('rejects unknown rlm() options instead of silently ignoring them', async () => {
@@ -1075,11 +1244,15 @@ describe('LocalRlmRuntime', () => {
 
   it('calls only host-resolved managed skills and receipt-caches structured results', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-rlm-runtime-skills-'))
-    const requests: Array<{ method: string; params: Readonly<Record<string, unknown>> }> = []
+    const requests: Array<{
+      method: string
+      params: Readonly<Record<string, unknown>>
+      sealedSkill?: unknown
+    }> = []
     const bindings: RlmRuntimeHostBindings = {
       dispatchChild: () => { throw new Error('not used') },
       hostRequest: async (request) => {
-        requests.push({ method: request.method, params: request.params })
+        requests.push({ method: request.method, params: request.params, sealedSkill: request.sealedSkill })
         if (request.method === 'skills.call') {
           const alias = request.params.alias
           if (typeof alias !== 'string') throw new Error('expected managed skill alias')
@@ -1090,7 +1263,13 @@ describe('LocalRlmRuntime', () => {
     }
     const { ctx, service, sessionId } = await runtime(root, bindings, {
       version: 1,
-      skills: [{ alias: 'summarize', title: 'Summarize', callable: 'summarize', available: true }],
+      skills: [{
+        alias: 'summarize', title: 'Summarize', callable: 'summarize', available: true,
+        binding: {
+          entryId: 'summarize', entryVersion: 7, digest: 'summarize-v7',
+          moduleId: 'skill-provider-v1', callable: 'summarize',
+        },
+      }],
     })
     const cell = {
       sessionId,
@@ -1111,7 +1290,14 @@ describe('LocalRlmRuntime', () => {
     })
     await expect(service.executeCell(cell)).resolves.toEqual(first)
     expect(requests).toEqual([
-      { method: 'skills.call', params: { alias: 'summarize', args: { text: 'bounded evidence' } } },
+      {
+        method: 'skills.call',
+        params: { alias: 'summarize', args: { text: 'bounded evidence' } },
+        sealedSkill: {
+          entryId: 'summarize', entryVersion: 7, digest: 'summarize-v7',
+          moduleId: 'skill-provider-v1', callable: 'summarize',
+        },
+      },
     ])
     const invalid = await service.executeCell({
       sessionId,

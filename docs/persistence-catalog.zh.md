@@ -407,7 +407,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:120`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:122`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -429,7 +429,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:133`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:135`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -440,7 +440,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'debate/preferences': DebateExecutionPreferences
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:118`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:120`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatetrace--log-only"></a>
 
@@ -455,7 +455,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'debate/trace': DebateTraceSessionEventV1
 ```
 
-来源：[`packages/orchestration/tool-debate/src/index.ts:144`](../packages/orchestration/tool-debate/src/index.ts)
+来源：[`packages/orchestration/tool-debate/src/index.ts:146`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 
@@ -584,7 +584,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/orchestration/tool-orchestration/src/index.ts:40`](../packages/orchestration/tool-orchestration/src/index.ts)
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -595,7 +595,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-来源：[`packages/orchestration/tool-orchestration/src/index.ts:53`](../packages/orchestration/tool-orchestration/src/index.ts)
+来源：[`packages/orchestration/tool-orchestration/src/index.ts:56`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 
@@ -616,6 +616,27 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 来源：[`packages/interaction/permission-presets/src/index.ts:50`](../packages/interaction/permission-presets/src/index.ts)
 
 ### `physical-operator/*`
+
+<a id="physical-operatorcontext-envelope--log-only"></a>
+
+#### `physical-operator/context-envelope` — log-only
+
+```ts persistence-catalog
+/** Durable proof that one current-task context envelope crossed the operator boundary. */
+'physical-operator/context-envelope': {
+  commandId: string
+  operatorId: string
+  digest: string
+  source: OperatorContextEnvelopeSourceV1
+  receipt: OperatorContextEnvelopeReceiptV1
+  /** Exact tool-subtask template selection, when this handoff selected one. */
+  taskTemplate?: TaskTemplateSelection
+  /** Complete frozen model input materialized by the receiving operator. */
+  envelope: OperatorContextEnvelopeV1
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:112`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch--log-only"></a>
 
@@ -639,7 +660,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:73`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:84`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -653,7 +674,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:96`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:107`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -667,7 +688,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:58`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:69`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -681,7 +702,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:60`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:71`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprogress--log-only"></a>
 
@@ -699,7 +720,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:101`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:124`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -716,7 +737,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:65`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:76`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-call--log-only"></a>
 
@@ -737,7 +758,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:117`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:140`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-dispatch--log-only"></a>
 
@@ -754,7 +775,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:88`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:99`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-indeterminate--log-only"></a>
 
@@ -773,7 +794,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:145`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:168`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -798,7 +819,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:129`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:152`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -814,7 +835,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:110`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:133`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 
@@ -1009,6 +1030,31 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```
 
 来源：[`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent/subagent/src/descriptor.ts)
+
+### `task-template/*`
+
+<a id="task-templatedecided--log-only"></a>
+
+#### `task-template/decided` — log-only
+
+```ts persistence-catalog
+/**
+ * One decision for the open turn's logical user task — log-only, no
+ * surfaceOp, always appended with `ignorable: true` since it is this
+ * plugin's own attributable record and its loss cannot affect core
+ * session reconstruction. `restored: true` marks a compaction-recovery
+ * re-append of the exact pinned receipt from an earlier `inject` in the
+ * same turn, rather than a fresh selection, so a reader can tell the two
+ * apart without re-deriving the decision.
+ */
+'task-template/decided': {
+  turn: number
+  receipt: TaskTemplateInjectionReceipt
+  restored?: true
+}
+```
+
+来源：[`packages/prompt/task-template-context/src/index.ts:57`](../packages/prompt/task-template-context/src/index.ts)
 
 ### `todo/*`
 

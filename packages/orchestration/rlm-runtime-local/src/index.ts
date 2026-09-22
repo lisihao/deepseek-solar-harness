@@ -20,6 +20,9 @@ import RlmRuntimeService, {
   type RlmChildExecutionResult,
   type RlmChildExecutionOptionsV1,
   type RlmChildHandleV1,
+  type RlmChildModelOriginV1,
+  type RlmChildModelPolicyV1,
+  type RlmManagedSkillBindingV1,
   type RlmChildSnapshotV1,
   type RlmChildSpawnRequest,
   type RlmCommandReceiptSnapshotV1,
@@ -153,7 +156,7 @@ interface StoreDocumentV3 {
   heartbeats: RlmHeartbeatV1[]
 }
 
-interface StoreDocument {
+interface StoreDocumentV4 {
   readonly version: 4
   eventSequence: number
   sessions: StoredSession[]
@@ -163,6 +166,21 @@ interface StoreDocument {
   heartbeats: RlmHeartbeatV1[]
   controlLeases: StoredControlLease[]
 }
+
+/** Current on-disk shape after all legacy child provenance migrations. */
+interface StoreDocument {
+  readonly version: 5
+  eventSequence: number
+  sessions: StoredSession[]
+  receipts: StoredReceipt[]
+  messages: RlmMessageV1[]
+  events: RlmRuntimeEventV1[]
+  heartbeats: RlmHeartbeatV1[]
+  controlLeases: StoredControlLease[]
+}
+
+const RLM_STATE_SCHEMA_VERSION = 5
+const LEGACY_CHILD_MODEL_ORIGIN: RlmChildModelOriginV1 = 'legacy'
 
 // Kept local so the persistent RLM state owner does not acquire a runtime
 // dependency on the optional strategy Provider solely for request hashing.
@@ -176,6 +194,156 @@ function canonical(value: unknown): string {
 
 function sha256(value: unknown): string { return createHash('sha256').update(canonical(value)).digest('hex') }
 /* jscpd:ignore-end */
+
+function isChildModelOrigin(value: unknown): value is RlmChildModelOriginV1 {
+  return value === 'parent-inherited'
+    || value === 'allocator-default'
+    || value === 'explicit'
+    || value === LEGACY_CHILD_MODEL_ORIGIN
+}
+
+function migrateChildSnapshot(value: unknown): { readonly value: RlmChildSnapshotV1; readonly changed: boolean } {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new RlmRuntimeError('RLM child snapshot has an unsupported shape', 'RLM_UNAVAILABLE')
+  }
+  const child = value as Partial<RlmChildSnapshotV1>
+  if (child.modelOrigin === undefined) {
+    return { value: { ...child, modelOrigin: LEGACY_CHILD_MODEL_ORIGIN } as RlmChildSnapshotV1, changed: true }
+  }
+  if (!isChildModelOrigin(child.modelOrigin)) {
+    throw new RlmRuntimeError('RLM child snapshot has an unsupported model origin', 'RLM_UNAVAILABLE')
+  }
+  return { value: child as RlmChildSnapshotV1, changed: false }
+}
+
+function childModelOriginForHandle(
+  value: Readonly<Record<string, unknown>>,
+  sessions: readonly StoredSession[],
+): RlmChildModelOriginV1 {
+  const childId = value.rlmChildId
+  const sessionId = value.sessionId
+  for (const session of sessions) {
+    const child = session.snapshot.children.find(candidate => candidate.rlmChildId === childId || candidate.sessionId === sessionId)
+    if (child !== undefined) return child.modelOrigin
+  }
+  return LEGACY_CHILD_MODEL_ORIGIN
+}
+
+function isChildHandleShape(value: Readonly<Record<string, unknown>>): boolean {
+  return typeof value.rlmChildId === 'string'
+    && typeof value.sessionId === 'string'
+    && typeof value.name === 'string'
+    && typeof value.sessionDir === 'string'
+    && value.model !== undefined
+}
+
+/**
+ * Normalize legacy child handles embedded in settled cell/control receipts.
+ * Only values carrying the stable child identity are treated as handles; all
+ * other model output remains byte-for-byte structurally unchanged.
+ */
+function migrateChildHandles(
+  value: unknown,
+  sessions: readonly StoredSession[],
+): { readonly value: unknown; readonly changed: boolean } {
+  if (Array.isArray(value)) {
+    let changed = false
+    const entries = value.map((entry) => {
+      const migrated = migrateChildHandles(entry, sessions)
+      changed ||= migrated.changed
+      return migrated.value
+    })
+    return { value: entries, changed }
+  }
+  if (value === null || typeof value !== 'object') return { value, changed: false }
+  const record = value as Record<string, unknown>
+  if (isChildHandleShape(record)) {
+    if (record.modelOrigin === undefined) {
+      return {
+        value: { ...record, modelOrigin: childModelOriginForHandle(record, sessions) },
+        changed: true,
+      }
+    }
+    if (!isChildModelOrigin(record.modelOrigin)) {
+      throw new RlmRuntimeError('RLM child handle has an unsupported model origin', 'RLM_UNAVAILABLE')
+    }
+    return { value, changed: false }
+  }
+  let changed = false
+  const entries = Object.entries(record).map(([key, entry]) => {
+    const migrated = migrateChildHandles(entry, sessions)
+    changed ||= migrated.changed
+    return [key, migrated.value] as const
+  })
+  return { value: Object.fromEntries(entries), changed }
+}
+
+function migrateStoredSession(session: unknown): { readonly value: StoredSession; readonly changed: boolean } {
+  if (session === null || typeof session !== 'object' || !('snapshot' in session)
+    || session.snapshot === null || typeof session.snapshot !== 'object') {
+    throw new RlmRuntimeError('RLM session has an unsupported shape', 'RLM_UNAVAILABLE')
+  }
+  const stored = session as StoredSession
+  const snapshot = stored.snapshot
+  if (!Array.isArray(snapshot.children)) {
+    throw new RlmRuntimeError('RLM session children have an unsupported shape', 'RLM_UNAVAILABLE')
+  }
+  let changed = false
+  const children = snapshot.children.map((child) => {
+    const migrated = migrateChildSnapshot(child)
+    changed ||= migrated.changed
+    return migrated.value
+  })
+  const resolvedPolicy = snapshot.childModelPolicy
+    ?? (snapshot.defaultChildModel === undefined ? 'parent-inherit' : 'allocator-default')
+  if (snapshot.childModelPolicy === undefined) changed = true
+  const context = (stored as unknown as {
+    readonly context?: Readonly<Record<string, RlmJsonValue>>
+  }).context ?? {}
+  return {
+    value: {
+      ...stored,
+      snapshot: {
+        ...snapshot,
+        children,
+        childModelPolicy: resolvedPolicy,
+      },
+      context,
+    },
+    changed,
+  }
+}
+
+function migrateStoredReceipt(
+  receipt: StoredReceipt,
+  sessions: readonly StoredSession[],
+): { readonly value: StoredReceipt; readonly changed: boolean } {
+  // A settled command without a result cannot be replayed safely. Preserve
+  // the receipt as an explicit indeterminate outcome instead of returning an
+  // undefined value through the typed receipt decoder.
+  if (receipt.state === 'settled' && receipt.result === undefined) {
+    return {
+      value: {
+        ...receipt,
+        state: 'indeterminate',
+        error: receipt.error ?? {
+          message: 'RLM settled receipt has no durable result after state migration',
+          code: 'RLM_COMMAND_INDETERMINATE',
+        },
+      },
+      changed: true,
+    }
+  }
+  if (receipt.result === undefined) return { value: receipt, changed: false }
+  const migrated = migrateChildHandles(receipt.result, sessions)
+  const resultSha256 = receipt.resultSha256 ?? sha256(migrated.value)
+  if (!migrated.changed && resultSha256 === receipt.resultSha256) return { value: receipt, changed: false }
+  return {
+    value: { ...receipt, result: migrated.value, resultSha256 },
+    changed: true,
+  }
+}
+
 function now(): string { return new Date().toISOString() }
 function goalObjective(value: string): string {
   const objective = nonBlank(value, 'goal objective')
@@ -293,10 +461,44 @@ function explicitRlmModel(
   inherited: RlmRuntimeSessionSnapshotV1['model'],
 ): RlmRuntimeSessionSnapshotV1['model'] {
   const separator = selector.indexOf('/')
-  if (separator < 0) return { ...inherited, model: selector }
+  if (separator < 0) return {
+    ...inherited,
+    model: selector,
+    ...inherited.profile === undefined
+      ? {}
+      : { profile: { ...inherited.profile, model: selector } },
+  }
   const operatorId = nonBlank(selector.slice(0, separator), 'rlm() model provider')
   const model = nonBlank(selector.slice(separator + 1), 'rlm() model id')
   return { operatorId, model }
+}
+
+function childModelPolicy(snapshot: RlmRuntimeSessionSnapshotV1): RlmChildModelPolicyV1 {
+  // State written before the policy field existed used presence of a sealed
+  // default model as the only signal. Keep that historical state executable,
+  // but every newly created session persists an explicit policy.
+  return snapshot.childModelPolicy ?? (snapshot.defaultChildModel === undefined
+    ? 'parent-inherit'
+    : 'allocator-default')
+}
+
+function inheritedChildModel(snapshot: RlmRuntimeSessionSnapshotV1): RlmRuntimeSessionSnapshotV1['model'] {
+  if (childModelPolicy(snapshot) === 'parent-inherit') return snapshot.model
+  if (snapshot.defaultChildModel === undefined) {
+    throw new RlmRuntimeError('RLM allocator-default child policy has no sealed default child model', 'RLM_INVALID')
+  }
+  return snapshot.defaultChildModel
+}
+
+function childModelSelection(
+  snapshot: RlmRuntimeSessionSnapshotV1,
+  requested: RlmChildSpawnRequest['model'],
+): { readonly model: RlmRuntimeSessionSnapshotV1['model']; readonly modelOrigin: RlmChildModelOriginV1 } {
+  if (requested !== undefined) return { model: requested, modelOrigin: 'explicit' }
+  if (childModelPolicy(snapshot) === 'parent-inherit') {
+    return { model: snapshot.model, modelOrigin: 'parent-inherited' }
+  }
+  return { model: inheritedChildModel(snapshot), modelOrigin: 'allocator-default' }
 }
 
 function sessionStorageDirectory(sessionsRoot: string, sessionId: RlmRuntimeSessionId): string {
@@ -351,6 +553,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
   private readonly bridgeServer: Server
   private readonly bridgeSocketPath: string
   private readonly bridgeReady: Promise<void>
+  private legacyStateMigrated = false
   private document: StoreDocument
 
   constructor(ctx: Context, root: Config) {
@@ -363,6 +566,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     chmodSync(this.sessionsRoot, 0o700)
     this.filename = join(root, 'state.json')
     this.document = this.load()
+    if (this.legacyStateMigrated) this.persist()
     registerRuntimeOwner(this.runtimeOwnerKey, this.runtimeInstanceId)
     const accountingStartedAt = Date.now()
     for (const session of this.document.sessions) {
@@ -405,6 +609,17 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   create(request: RlmRuntimeCreateRequest, bindings: RlmRuntimeHostBindings): Promise<RlmRuntimeSessionSnapshotV1> {
     this.validateLimits(request.limits)
+    const requestedChildModelPolicy = request.childModelPolicy
+    const resolvedChildModelPolicy: RlmChildModelPolicyV1 = requestedChildModelPolicy
+      ?? (request.defaultChildModel === undefined ? 'parent-inherit' : 'allocator-default')
+    if (resolvedChildModelPolicy === 'parent-inherit' && request.defaultChildModel !== undefined) {
+      throw new RlmRuntimeError('RLM parent-inherit child policy must not carry an allocator default model', 'RLM_INVALID')
+    }
+    if (resolvedChildModelPolicy === 'allocator-default'
+      && request.defaultChildModel === undefined
+      && request.limits.maxTurns > 1) {
+      throw new RlmRuntimeError('RLM allocator-default child policy requires a sealed default child model', 'RLM_INVALID')
+    }
     const requestHash = sha256(request)
     const duplicate = this.receipt<RlmRuntimeSessionSnapshotV1>(String(request.commandId), requestHash)
     if (duplicate !== undefined) return Promise.resolve(duplicate)
@@ -430,6 +645,7 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       task: nonBlank(request.task, 'task'),
       model: request.model,
       ...request.defaultChildModel === undefined ? {} : { defaultChildModel: request.defaultChildModel },
+      childModelPolicy: resolvedChildModelPolicy,
       ...request.executionOptions === undefined ? {} : { executionOptions: request.executionOptions },
       limits: request.limits,
       depth: 0,
@@ -444,7 +660,11 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     }
     this.document.sessions.push({ snapshot, context: structuredClone(request.context ?? {}), variables: [] })
     this.bindings.set(String(request.sessionId), bindings)
-    this.appendEvent(request.sessionId, 'rlm.session.created', { executionId: request.executionId, model: request.model.model })
+    this.appendEvent(request.sessionId, 'rlm.session.created', {
+      executionId: request.executionId,
+      model: request.model.model,
+      childModelPolicy: resolvedChildModelPolicy,
+    })
     const current = this.requireSession(request.sessionId).snapshot
     this.settleReceipt(String(request.commandId), requestHash, current)
     this.persist()
@@ -823,20 +1043,21 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     if (bindings === undefined) throw new RlmRuntimeError('RLM host binding is unavailable after recovery', 'RLM_UNAVAILABLE')
     const childId = RlmChildId(`rlm-child-${randomUUID()}`)
     const childSessionId = RlmRuntimeSessionId(`rlm-session-${randomUUID()}`)
-    const model = request.model ?? parent.snapshot.defaultChildModel ?? parent.snapshot.model
+    const { model, modelOrigin } = childModelSelection(parent.snapshot, request.model)
     const createdAt = now()
     const sessionDir = sessionStorageDirectory(this.sessionsRoot, childSessionId)
     mkdirSync(sessionDir, { recursive: true, mode: 0o700 })
     chmodSync(sessionDir, 0o700)
     const child: RlmChildSnapshotV1 = {
       version: 1, rlmChildId: childId, sessionId: childSessionId, parentSessionId: parent.snapshot.sessionId,
-      name, sessionDir, model, depth, task, lifecycle: 'accepted', createdAt, updatedAt: createdAt,
+      name, sessionDir, model, modelOrigin, depth, task, lifecycle: 'accepted', createdAt, updatedAt: createdAt,
     }
     const childSession: RlmRuntimeSessionSnapshotV1 = {
       version: 1, sessionId: childSessionId, executionId: `${parent.snapshot.executionId}:rlm:${String(childId)}`,
       parentSessionId: parent.snapshot.sessionId, parentChildId: childId,
       workspace: parent.snapshot.workspace, sessionDir, task, model,
       ...parent.snapshot.defaultChildModel === undefined ? {} : { defaultChildModel: parent.snapshot.defaultChildModel },
+      childModelPolicy: childModelPolicy(parent.snapshot),
       ...parent.snapshot.executionOptions === undefined ? {} : { executionOptions: parent.snapshot.executionOptions },
       limits: parent.snapshot.limits, depth,
       lifecycle: 'idle', stateRevision: 0, eventCursor: this.document.eventSequence, children: [],
@@ -846,12 +1067,15 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     this.bindings.set(String(childSessionId), bindings)
     this.updateSession(parent, { children: [...parent.snapshot.children, child], stateRevision: parent.snapshot.stateRevision + 1 })
     this.acceptReceipt(String(request.commandId), requestHash, request.parentSessionId, 'child.spawn')
-    this.appendEvent(parent.snapshot.sessionId, 'rlm.child.accepted', { childId: String(childId), childSessionId: String(childSessionId), name, depth }, childId)
+    this.appendEvent(parent.snapshot.sessionId, 'rlm.child.accepted', {
+      childId: String(childId), childSessionId: String(childSessionId), name, depth,
+      model: model.model, modelOrigin, childModelPolicy: childModelPolicy(parent.snapshot),
+    }, childId)
     this.persist()
     try {
       const executionOptions: RlmChildExecutionOptionsV1 = parent.snapshot.executionOptions ?? { version: 1 }
       const execution = await bindings.dispatchChild({
-        ...request, name, task, childId, childSessionId, depth, model, executionOptions,
+        ...request, name, task, childId, childSessionId, depth, model, modelOrigin, executionOptions,
       })
       await this.trackExecution(childSessionId, execution)
       this.replaceChild(parent.snapshot.sessionId, childId, {
@@ -859,7 +1083,9 @@ export class LocalRlmRuntime extends RlmRuntimeService {
       })
       this.runningReceipt(String(request.commandId))
       this.appendEvent(parent.snapshot.sessionId, 'rlm.child.running', { childId: String(childId), nativeSessionId: execution.nativeSessionId, nativeTurnId: execution.nativeTurnId }, childId)
-      const handle: RlmChildHandleV1 = { rlmChildId: childId, sessionId: childSessionId, name, sessionDir, model }
+      const handle: RlmChildHandleV1 = {
+        rlmChildId: childId, sessionId: childSessionId, name, sessionDir, model, modelOrigin,
+      }
       this.settleReceipt(String(request.commandId), requestHash, handle)
       this.persist()
       void execution.result.then(
@@ -1495,15 +1721,17 @@ export class LocalRlmRuntime extends RlmRuntimeService {
     const hooks: KernelHooks = {
       spawn: async (task, rawOptions) => {
         const options = primeRlmSpawnOptions(rawOptions)
-        const inherited = session.snapshot.defaultChildModel ?? session.snapshot.model
+        const inherited = inheritedChildModel(session.snapshot)
         const selected = options.model === undefined ? inherited : explicitRlmModel(options.model, inherited)
         const model = options.model === undefined && options.thinking === undefined
           ? undefined
           : {
             ...selected,
-            ...options.thinking === undefined
-              ? {}
-              : { profile: { ...selected.profile, effort: options.thinking } },
+            profile: {
+              model: selected.model,
+              ...selected.profile?.effort === undefined ? {} : { effort: selected.profile.effort },
+              ...options.thinking === undefined ? {} : { effort: options.thinking },
+            },
           }
         return await this.spawn({
           commandId: nextCommand('child'), parentSessionId: session.snapshot.sessionId,
@@ -1581,7 +1809,11 @@ export class LocalRlmRuntime extends RlmRuntimeService {
         if (inherited === undefined || !inherited.available) {
           throw new RlmRuntimeError(`managed skill is absent from the sealed parent execution: ${skillAlias}`, 'RLM_INVALID')
         }
-        return bindings.hostRequest({ sessionId: session.snapshot.sessionId, method, params })
+        const sealedSkill = inherited.binding as RlmManagedSkillBindingV1 | undefined
+        if (sealedSkill === undefined) {
+          throw new RlmRuntimeError(`managed skill has no sealed dispatch binding: ${skillAlias}`, 'RLM_INVALID')
+        }
+        return bindings.hostRequest({ sessionId: session.snapshot.sessionId, method, params, sealedSkill })
       },
       setGoal: (objective, options) => {
         const goalOptions = options as typeof options & { readonly tokenBudget?: number; readonly reason?: string; readonly error?: string }
@@ -2101,41 +2333,46 @@ export class LocalRlmRuntime extends RlmRuntimeService {
 
   private load(): StoreDocument {
     try {
-      const parsed = JSON.parse(readFileSync(this.filename, 'utf8')) as StoreDocument | StoreDocumentV3 | StoreDocumentV2 | StoreDocumentV1
+      const parsed = JSON.parse(readFileSync(this.filename, 'utf8')) as StoreDocument | StoreDocumentV4 | StoreDocumentV3 | StoreDocumentV2 | StoreDocumentV1
       // Durable JSON is an untrusted boundary; supported historical shapes are validated before migration.
       // oxlint-disable typescript/no-unnecessary-condition
-      if ((parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3 && parsed.version !== 4)
+      if ((parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3
+        && parsed.version !== 4 && parsed.version !== RLM_STATE_SCHEMA_VERSION)
         || !Array.isArray(parsed.sessions) || !Array.isArray(parsed.receipts)
         || !Array.isArray(parsed.messages) || !Array.isArray(parsed.events) || !Number.isSafeInteger(parsed.eventSequence)
         || (parsed.version !== 1 && !Array.isArray(parsed.heartbeats))
-        || (parsed.version === 4 && !Array.isArray(parsed.controlLeases))) {
+        || ((parsed.version === 4 || parsed.version === RLM_STATE_SCHEMA_VERSION) && !Array.isArray(parsed.controlLeases))) {
         throw new RlmRuntimeError('RLM runtime state has an unsupported shape', 'RLM_UNAVAILABLE')
       }
       const loadedAt = now()
-      return {
-        ...parsed,
-        version: 4,
-        sessions: parsed.sessions.map((session) => {
-          const goal = normalizedGoal(session.snapshot.goal, loadedAt)
-          return {
-            ...session,
-            snapshot: { ...session.snapshot, ...goal === undefined ? {} : { goal } },
-            context: session.context ?? {},
-          }
-        }),
-        messages: parsed.messages.map((message) => {
-          const legacy = message as RlmMessageV1 & Partial<Pick<RlmMessageV1, 'effectiveMode' | 'deliveryStatus' | 'queuedAt'>>
-          if (legacy.deliveryStatus !== undefined && legacy.effectiveMode !== undefined && legacy.queuedAt !== undefined) return legacy
-          return {
-            ...legacy,
-            effectiveMode: legacy.mode === 'steer' ? 'steer' as const : 'follow_up' as const,
-            deliveryStatus: 'delivered' as const,
-            queuedAt: legacy.createdAt,
-            deliveredAt: legacy.createdAt,
-          }
-        }),
-        heartbeats: parsed.version === 1 ? [] : parsed.heartbeats,
-        controlLeases: parsed.version === 4 ? parsed.controlLeases.map((lease) => {
+      const sessions = parsed.sessions.map((session) => {
+        const migrated = migrateStoredSession(session)
+        this.legacyStateMigrated ||= migrated.changed
+        const goal = normalizedGoal(migrated.value.snapshot.goal, loadedAt)
+        return {
+          ...migrated.value,
+          snapshot: { ...migrated.value.snapshot, ...goal === undefined ? {} : { goal } },
+        }
+      })
+      const receipts = parsed.receipts.map((receipt) => {
+        const migrated = migrateStoredReceipt(receipt, sessions)
+        this.legacyStateMigrated ||= migrated.changed
+        return migrated.value
+      })
+      const messages = parsed.messages.map((message) => {
+        const legacy = message as RlmMessageV1 & Partial<Pick<RlmMessageV1, 'effectiveMode' | 'deliveryStatus' | 'queuedAt'>>
+        if (legacy.deliveryStatus !== undefined && legacy.effectiveMode !== undefined && legacy.queuedAt !== undefined) return legacy
+        this.legacyStateMigrated = true
+        return {
+          ...legacy,
+          effectiveMode: legacy.mode === 'steer' ? 'steer' as const : 'follow_up' as const,
+          deliveryStatus: 'delivered' as const,
+          queuedAt: legacy.createdAt,
+          deliveredAt: legacy.createdAt,
+        }
+      })
+      const controlLeases = (parsed.version === 4 || parsed.version === RLM_STATE_SCHEMA_VERSION)
+        ? parsed.controlLeases.map((lease) => {
           if (lease === null || typeof lease !== 'object' || Array.isArray(lease)) {
             throw new RlmRuntimeError('RLM control lease has an unsupported shape', 'RLM_UNAVAILABLE')
           }
@@ -2146,11 +2383,31 @@ export class LocalRlmRuntime extends RlmRuntimeService {
             throw new RlmRuntimeError('RLM control lease has an unsupported shape', 'RLM_UNAVAILABLE')
           }
           return { ...value, version: 1 } as StoredControlLease
-        }) : [],
+        })
+        : []
+      if (parsed.version !== RLM_STATE_SCHEMA_VERSION) this.legacyStateMigrated = true
+      return {
+        version: RLM_STATE_SCHEMA_VERSION,
+        eventSequence: parsed.eventSequence,
+        sessions,
+        receipts,
+        messages,
+        events: parsed.events,
+        heartbeats: parsed.version === 1 ? [] : parsed.heartbeats,
+        controlLeases,
       }
       // oxlint-enable typescript/no-unnecessary-condition
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 4, eventSequence: 0, sessions: [], receipts: [], messages: [], events: [], heartbeats: [], controlLeases: [] }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {
+        version: RLM_STATE_SCHEMA_VERSION,
+        eventSequence: 0,
+        sessions: [],
+        receipts: [],
+        messages: [],
+        events: [],
+        heartbeats: [],
+        controlLeases: [],
+      }
       throw error
     }
   }

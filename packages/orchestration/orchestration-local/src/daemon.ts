@@ -24,12 +24,11 @@ import type {
   ContinualHarnessRollbackRequest,
   ContinualHarnessScope,
   ContinualHarnessSnapshotV1,
-  ContinualHarnessSkillDescriptorV1,
   ContinualHarnessUpdateRequest,
 } from '@deepseek-ai/dsh-continual-harness'
 import { ContinualHarnessSkillRuntime } from '@deepseek-ai/dsh-continual-harness'
 import LocalContinualHarness from '@deepseek-ai/dsh-continual-harness-local'
-import LlmRuntime, { type ContentBlock, type ContextSnapshotSection, type TokenUsage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { type ContentBlock, type ContextSnapshotSection, type ResolvedRetryPolicy, type TokenUsage } from '@deepseek-ai/dsh-llm'
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import type {
   ContinualHarnessMode,
@@ -55,7 +54,11 @@ import {
   RlmRuntimeSessionId,
   type RlmChildExecution,
   type RlmChildExecutionResult,
+  type RlmChildExecutionOptionsV1,
+  type RlmChildModelPolicyV1,
   type RlmJsonValue,
+  type RlmManagedSkillBindingV1,
+  type RlmManagedSkillDescriptorV1,
   type RlmRuntimeHostBindings,
 } from '@deepseek-ai/dsh-rlm-runtime'
 import LocalRlmRuntime from '@deepseek-ai/dsh-rlm-runtime-local'
@@ -247,6 +250,7 @@ interface PreparedRlmExecution {
   readonly rootSessionId: RlmRuntimeSessionId
   readonly bindings: RlmRuntimeHostBindings
   readonly bridge: PhysicalOperatorModelToolBridgeV1
+  readonly executionOptions: RlmChildExecutionOptionsV1
   readonly rootPrompt: readonly ContentBlock[]
   readonly signal: AbortSignal
 }
@@ -309,6 +313,61 @@ function rlmAttributedUsage(
     model: model.model,
     authMode: rlmAuthMode(model.source, model.operatorId),
     ...usage,
+  }
+}
+
+function rlmChildModelPolicy(plan: RlmExecutionPlanV1): RlmChildModelPolicyV1 {
+  if (plan.fidelity === 'prime-strict') return 'parent-inherit'
+  if (plan.fidelity === 'dsh-optimized') return 'allocator-default'
+  throw new OrchestrationError(`enabled RLM plan has unsupported fidelity: ${plan.fidelity}`, 'GRAPH_INVALID')
+}
+
+function rlmChildRetryPolicy(spec: OrchestrationNodeSpecV1): ResolvedRetryPolicy {
+  return {
+    mode: 'normal',
+    maxRetries: Math.max(0, spec.retryPolicy.maxAttempts - 1),
+    retryableCodes: [...spec.retryPolicy.retryableCodes],
+    initialDelayMs: spec.retryPolicy.backoffMs,
+    maxDelayMs: spec.retryPolicy.backoffMs,
+    jitterRatio: 0,
+  }
+}
+
+function rlmExecutionOptionsSummary(options: RlmChildExecutionOptionsV1): RlmJsonValue {
+  return {
+    toolNames: (options.tools ?? []).map(tool => tool.name),
+    skillAliases: (options.skills ?? []).map(skill => skill.alias),
+    retryPolicy: options.retryPolicy === undefined
+      ? null
+      : options.retryPolicy.mode === 'normal'
+        ? {
+          mode: options.retryPolicy.mode,
+          maxRetries: options.retryPolicy.maxRetries,
+          retryableCodes: [...options.retryPolicy.retryableCodes],
+          initialDelayMs: options.retryPolicy.initialDelayMs,
+          maxDelayMs: options.retryPolicy.maxDelayMs,
+          jitterRatio: options.retryPolicy.jitterRatio,
+        }
+        : {
+          mode: options.retryPolicy.mode,
+          initialDelayMs: options.retryPolicy.initialDelayMs,
+          maxDelayMs: options.retryPolicy.maxDelayMs,
+          jitterRatio: options.retryPolicy.jitterRatio,
+        },
+  }
+}
+
+function assertRlmBridgeAllowed(
+  options: RlmChildExecutionOptionsV1,
+  bridge: PhysicalOperatorModelToolBridgeV1,
+): void {
+  const allowedTools = new Set((options.tools ?? []).map(tool => tool.name))
+  const unsealedTool = bridge.tools.find(tool => !allowedTools.has(tool.name))
+  if (unsealedTool !== undefined) {
+    throw new OrchestrationError(
+      `RLM model-tool bridge requested unsealed parent tool: ${unsealedTool.name}`,
+      'GRAPH_INVALID',
+    )
   }
 }
 
@@ -390,6 +449,9 @@ class OrchestrationResidentOperator implements PhysicalOperator {
       ...(materialized?.systemPrompt ?? request.systemPrompt) === undefined
         ? {}
         : { systemPrompt: materialized?.systemPrompt ?? request.systemPrompt },
+      ...request.contextEnvelope === undefined
+        ? {}
+        : { nativeContext: { version: 1, digest: request.contextEnvelope.digest } },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
@@ -871,7 +933,8 @@ function taskGraphContextEnvelope(
 function validateAdmissionRuntimeContext(admission: OrchestrationAdmissionTraceV1 | undefined): void {
   const runtime = admission?.runtimeContext
   if (runtime === undefined) return
-  if (runtime.version !== 1
+  const wireVersion: unknown = runtime.version
+  if (wireVersion !== 1
     || runtime.sourceSessionId !== admission?.sourceSessionId
     || runtime.contextSnapshotMessageId.trim().length === 0
     || runtime.sections.length > 64) {
@@ -1792,7 +1855,7 @@ export class OrchestrationDaemon {
         const plan = this.store.readArtifact(OrchestrationArtifactRef(attempt.executionPlanRef)) as NodeExecutionPlanV1
         const controller = new AbortController()
         this.recoveredRlmControllers.push(controller)
-        bindings = this.rlmHostBindings(record, spec, plan, controller, [])
+        bindings = this.rlmHostBindings(record, spec, plan, controller, [], this.sealedManagedSkills(plan))
         bindingsByRoot.set(rootId, bindings)
       }
       this.recoveredRlmDisposers.push(await this.ctx.rlmRuntime.bindHost(session.sessionId, bindings))
@@ -2108,12 +2171,20 @@ export class OrchestrationDaemon {
       } },
     })
     const rlmPlanRef = this.store.putArtifact(rlmPlan)
+    const childModelPolicy = rlmPlan.enabled ? rlmChildModelPolicy(rlmPlan) : undefined
     this.store.recordArtifact('compilation_artifacts', {
       ref: String(rlmPlanRef), runId, nodeId, attempt, generation: node.capabilityGeneration,
     })
     this.store.saveRun(record, [event(record.snapshot.runId, 'rlm.resolved', {
       ref: String(rlmPlanRef), enabled: rlmPlan.enabled, reason: rlmPlan.reason,
       fidelity: rlmPlan.fidelity, planSha256: rlmPlan.planSha256,
+      ...childModelPolicy === undefined ? {} : {
+        childModelPolicy,
+        defaultChildModelOrigin: childModelPolicy === 'parent-inherit'
+          ? 'parent-inherited'
+          : 'allocator-default',
+        inheritsParentModelByDefault: childModelPolicy === 'parent-inherit',
+      },
     }, node)])
     const autonomousPolicy = resolveAutonomousPolicy(
       spec.autonomous,
@@ -2177,6 +2248,9 @@ export class OrchestrationDaemon {
         source: rlmWorkerPlan.source,
         quotaPoolId: rlmWorkerPlan.quotaPoolId ?? null,
         suggestedParallelism: rlmWorkerPlan.suggestedParallelism,
+        childModelPolicy: 'allocator-default',
+        defaultChildModelOrigin: 'allocator-default',
+        inheritsParentModelByDefault: false,
       }, node)])
     }
     const inferredTemplateAttributes = inferTaskAttributes({
@@ -2559,9 +2633,34 @@ export class OrchestrationDaemon {
     const runId = String(record.snapshot.runId)
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
     const rootSessionId = RlmRuntimeSessionId(`rlm:${String(plan.executionId)}`)
-    const bindings = this.rlmHostBindings(record, spec, plan, controller, physicalRuns)
-    const managedSkills = (await this.listManagedSkills(plan.executionWorkspace.path, String(rootSessionId)))
-      .map(({ alias, title, callable, available }) => ({ alias, title, callable, available }))
+    const managedSkills = this.sealedManagedSkills(plan, harnessSnapshot)
+    const bindings = this.rlmHostBindings(record, spec, plan, controller, physicalRuns, managedSkills)
+    const childModelPolicy = rlmChildModelPolicy(rlmPlan)
+    if (childModelPolicy === 'allocator-default' && plan.rlmWorkerPlan === undefined && rlmPlan.maxTurns > 1) {
+      throw new OrchestrationError('optimized RLM plan omitted its sealed default child allocation', 'GRAPH_INVALID')
+    }
+    const executionOptions: RlmChildExecutionOptionsV1 = {
+      version: 1,
+      tools: [RLM_TYPESCRIPT_REPL_TOOL_SCHEMA],
+      skills: managedSkills,
+      retryPolicy: rlmChildRetryPolicy(spec),
+      capabilityContext: {
+        contextPacketRef: String(plan.contextPacketRef),
+        capabilityPlanRef: String(plan.capabilityPlanRef),
+        graphCertificateHash: plan.graphCertificateHash,
+        capabilityGeneration: plan.capabilityGeneration,
+        effectiveReadScopes: [...plan.effectiveReadScopes],
+        effectiveWriteScopes: [...plan.effectiveWriteScopes],
+        effectiveEffects: {
+          read: [...plan.effectiveEffects.read],
+          write: [...plan.effectiveEffects.write],
+          execute: [...plan.effectiveEffects.execute],
+          network: [...plan.effectiveEffects.network],
+          cost: [...plan.effectiveEffects.cost],
+          risk: [...plan.effectiveEffects.risk],
+        },
+      },
+    }
     await this.ctx.rlmRuntime.create({
       sessionId: rootSessionId,
       commandId: RlmCommandId(`${String(plan.executionId)}:rlm:create`),
@@ -2580,27 +2679,8 @@ export class OrchestrationDaemon {
         source: plan.rlmWorkerPlan.source,
         ...plan.rlmWorkerPlan.profile === undefined ? {} : { profile: plan.rlmWorkerPlan.profile },
       } },
-      executionOptions: {
-        version: 1,
-        tools: [RLM_TYPESCRIPT_REPL_TOOL_SCHEMA],
-        skills: managedSkills,
-        capabilityContext: {
-          contextPacketRef: String(plan.contextPacketRef),
-          capabilityPlanRef: String(plan.capabilityPlanRef),
-          graphCertificateHash: plan.graphCertificateHash,
-          capabilityGeneration: plan.capabilityGeneration,
-          effectiveReadScopes: [...plan.effectiveReadScopes],
-          effectiveWriteScopes: [...plan.effectiveWriteScopes],
-          effectiveEffects: {
-            read: [...plan.effectiveEffects.read],
-            write: [...plan.effectiveEffects.write],
-            execute: [...plan.effectiveEffects.execute],
-            network: [...plan.effectiveEffects.network],
-            cost: [...plan.effectiveEffects.cost],
-            risk: [...plan.effectiveEffects.risk],
-          },
-        },
-      },
+      childModelPolicy,
+      executionOptions,
       limits: {
         maxDepth: rlmPlan.maxDepth, maxChildren: rlmPlan.maxChildren, maxTurns: rlmPlan.maxTurns,
         maxCellMs: Math.min(spec.timeoutMs ?? 120_000, 300_000), maxOutputBytes: 512 * 1024,
@@ -2622,6 +2702,7 @@ export class OrchestrationDaemon {
       this.store.saveAutonomousState(runId, spec.id, plan.attempt, createAutonomousState(autonomousPolicy))
     }
     const bridge = await this.ctx.rlmRuntime.modelToolBridge(rootSessionId)
+    assertRlmBridgeAllowed(executionOptions, bridge)
     const rootPrompt = primeRlmRootPrompt(
       promptFromPlan(spec, contextPacket, capabilityPlan, harnessSnapshot, rlmPlan),
       rlmPlan,
@@ -2635,9 +2716,17 @@ export class OrchestrationDaemon {
       autonomousPolicySha256: autonomousPolicy?.policySha256 ?? null,
       rootOperatorId: plan.allocationPlan.operatorId, rootModel: plan.allocationPlan.model,
       tool: 'typescript_repl', topologyOwner: 'model',
+      childModelPolicy,
+      defaultChildModelOrigin: childModelPolicy === 'parent-inherit'
+        ? 'parent-inherited'
+        : 'allocator-default',
+      inheritsParentModelByDefault: childModelPolicy === 'parent-inherit',
+      executionOptions: rlmExecutionOptionsSummary(executionOptions),
       ...executor === 'model-worker' ? { executor } : {},
     }, node)])
-    return { rlmPlan, runId, node, rootSessionId, bindings, bridge, rootPrompt, signal: controller.signal }
+    return {
+      rlmPlan, runId, node, rootSessionId, bindings, bridge, executionOptions, rootPrompt, signal: controller.signal,
+    }
   }
 
   private async executeResidentRlm(
@@ -2658,7 +2747,7 @@ export class OrchestrationDaemon {
     try {
       const root = await this.startResidentTurn(
         record, spec, plan, plan.executionWorkspace.path, rootExecutionId, plan.allocationPlan,
-        rootPrompt, controller.signal, 'Prime RLM root', bridge, String(rootSessionId),
+        rootPrompt, controller.signal, 'Prime RLM root', bridge, String(rootSessionId), 'disabled',
       )
       this.registerRlmPhysicalRun(record, spec, plan, rootExecutionId, root, physicalRuns)
       await this.ctx.rlmRuntime.trackExecution(rootSessionId, {
@@ -3096,6 +3185,7 @@ export class OrchestrationDaemon {
     plan: NodeExecutionPlanV1,
     controller: AbortController,
     physicalRuns: PhysicalOperatorRun[],
+    sealedSkills: readonly RlmManagedSkillDescriptorV1[],
   ): RlmRuntimeHostBindings {
     const runId = String(record.snapshot.runId)
     const node = record.snapshot.nodes.find(value => value.id === spec.id)
@@ -3103,6 +3193,8 @@ export class OrchestrationDaemon {
       dispatchChild: async (request) => {
         const executionId = PhysicalOperatorExecutionId(`${String(plan.executionId)}:rlm:${String(request.childId)}`)
         const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.childSessionId)
+        assertRlmBridgeAllowed(request.executionOptions, bridge)
+        if (request.modelOrigin === 'explicit') await this.assertExplicitRlmChildSelection(request.model)
         const childPrompt: ContentBlock[] = [{
           type: 'text',
           text: [
@@ -3129,6 +3221,8 @@ export class OrchestrationDaemon {
             childId: String(request.childId), childSessionId: String(request.childSessionId),
             executionId: String(executionId), depth: request.depth, name: request.name,
             operatorId: request.model.operatorId, model: request.model.model,
+            modelOrigin: request.modelOrigin,
+            executionOptions: rlmExecutionOptionsSummary(request.executionOptions),
             stopReason: settled.stopReason, output: settled.output,
             ...settled.continuity === undefined ? {} : { continuity: settled.continuity },
           })
@@ -3172,6 +3266,7 @@ export class OrchestrationDaemon {
             `Prime RLM child ${request.name}`,
             bridge,
             String(request.childSessionId),
+            'disabled',
           )
           this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
           this.store.appendEvents([event(record.snapshot.runId, 'rlm.child.dispatched', {
@@ -3180,6 +3275,9 @@ export class OrchestrationDaemon {
             depth: request.depth, name: request.name, operatorId: request.model.operatorId,
             model: request.model.model, nativeSessionId: started.receipt.sessionId,
             nativeTurnId: started.receipt.turnId, executor: 'resident',
+            modelOrigin: request.modelOrigin,
+            inheritsParentModel: request.modelOrigin === 'parent-inherited',
+            executionOptions: rlmExecutionOptionsSummary(request.executionOptions),
           }, node)])
           return this.residentRlmExecution(started, settle, failed)
         }
@@ -3206,6 +3304,9 @@ export class OrchestrationDaemon {
           depth: request.depth, name: request.name, operatorId: request.model.operatorId,
           model: request.model.model, nativeSessionId: syntheticSessionId,
           nativeTurnId: syntheticTurnId, executor: 'model-worker',
+          modelOrigin: request.modelOrigin,
+          inheritsParentModel: request.modelOrigin === 'parent-inherited',
+          executionOptions: rlmExecutionOptionsSummary(request.executionOptions),
         }, node)])
         return {
           nativeSessionId: syntheticSessionId,
@@ -3220,7 +3321,7 @@ export class OrchestrationDaemon {
       dispatchContinuation: request => this.dispatchRlmContinuation(
         record, spec, plan, request, controller, physicalRuns,
       ),
-      hostRequest: async ({ sessionId, method, params }) => {
+      hostRequest: async ({ sessionId, method, params, sealedSkill }) => {
         const isRootSession = String(sessionId) === `rlm:${String(plan.executionId)}`
         if (method === 'compact.status') {
           const state = this.autoRefine.inspect(String(sessionId))
@@ -3267,10 +3368,12 @@ export class OrchestrationDaemon {
         let result: unknown
         switch (method) {
           case 'skills.list':
-            result = await this.listManagedSkills(plan.executionWorkspace.path, String(sessionId))
+            result = sealedSkills
             break
           case 'skills.call':
-            result = await this.callManagedSkill(plan.executionWorkspace.path, String(sessionId), params)
+            result = await this.callManagedSkill(
+              plan.executionWorkspace.path, String(sessionId), params, sealedSkills, sealedSkill,
+            )
             break
           case 'harness.list':
             result = await this.ctx.continualHarness.list(scoped)
@@ -3324,55 +3427,121 @@ export class OrchestrationDaemon {
     }
   }
 
-  private async listManagedSkills(workspace: string, sessionId: string): Promise<ContinualHarnessSkillDescriptorV1[]> {
-    const [globalEntries, workspaceEntries, sessionEntries] = await Promise.all([
-      this.ctx.continualHarness.list({ workspace, scope: 'global', kind: 'skill' }),
-      this.ctx.continualHarness.list({ workspace, scope: 'workspace', kind: 'skill' }),
-      this.ctx.continualHarness.list({ workspace, sessionId, scope: 'session', kind: 'skill' }),
-    ])
-    const entries = new Map<string, ContinualHarnessManagedEntryV2>()
-    for (const entry of [...globalEntries, ...workspaceEntries, ...sessionEntries]) {
-      entries.set(this.skillAlias(entry), entry)
-    }
-    return [...entries.entries()].map(([alias, entry]) => {
-      const { moduleId, callable } = this.managedSkillBinding(entry)
-      return {
-        alias,
-        title: entry.title,
-        callable,
-        arguments: entry.arguments ?? {},
-        available: this.ctx.continualHarnessSkills.has(moduleId, callable),
+  /**
+   * Prime treats an explicit child selector as a contract, not a hint. Check
+   * the live dispatch catalog before a native product can choose a fallback.
+   */
+  private async assertExplicitRlmChildSelection(
+    model: Parameters<RlmRuntimeHostBindings['dispatchChild']>[0]['model'],
+  ): Promise<void> {
+    if (this.ctx.physicalOperators.getOperator(model.operatorId) !== undefined) {
+      const catalog = (await this.ctx.physicalOperators.residentCatalogs())
+        .find(candidate => String(candidate.operatorId) === model.operatorId)
+      if (catalog === undefined || !catalog.available) {
+        throw new OrchestrationError(
+          `explicit RLM child model provider is unavailable: ${model.operatorId}`,
+          'ORCHESTRATION_UNAVAILABLE',
+        )
       }
-    })
+      const offered = catalog.models.find(candidate => (
+        candidate.model === model.model || candidate.resolvedModel === model.model
+      ))
+      if (offered === undefined) {
+        throw new OrchestrationError(
+          `explicit RLM child model is not advertised by ${model.operatorId}: ${model.model}`,
+          'ORCHESTRATION_UNAVAILABLE',
+        )
+      }
+      if (model.profile?.effort !== undefined && !offered.supportedEfforts.includes(model.profile.effort)) {
+        throw new OrchestrationError(
+          `explicit RLM child thinking is unsupported by ${model.operatorId}/${model.model}: ${model.profile.effort}`,
+          'ORCHESTRATION_UNAVAILABLE',
+        )
+      }
+      return
+    }
+    const offered = (await this.ctx.modelWorkers.offers()).some(candidate => (
+      candidate.operatorId === model.operatorId
+      && candidate.model === model.model
+    ))
+    if (!offered) {
+      throw new OrchestrationError(
+        `explicit RLM child model worker is unavailable: ${model.operatorId}/${model.model}`,
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
+    if (model.profile?.effort !== undefined) {
+      throw new OrchestrationError(
+        `explicit RLM child thinking cannot be honored by model worker ${model.operatorId}/${model.model}`,
+        'ORCHESTRATION_UNAVAILABLE',
+      )
+    }
+  }
+
+  /**
+   * Derive executable Skill bindings only from the snapshot referenced by the
+   * sealed ExecutionPlan. The live Harness catalog must not be consulted
+   * after sealing: an update with the same alias belongs to a later attempt.
+   */
+  private sealedManagedSkills(
+    plan: NodeExecutionPlanV1,
+    fallback?: ContinualHarnessSnapshotV1,
+  ): RlmManagedSkillDescriptorV1[] {
+    const snapshot = plan.harnessSnapshotRef === undefined
+      ? fallback
+      : this.store.readArtifact(plan.harnessSnapshotRef) as ContinualHarnessSnapshotV1
+    if (snapshot === undefined) return []
+    return snapshot.managedEntries
+      .filter(entry => entry.kind === 'skill' && entry.deletedAt === undefined)
+      .map((entry) => {
+        const { moduleId, callable } = this.managedSkillBinding(entry)
+        return {
+          alias: this.skillAlias(entry),
+          title: entry.title,
+          callable,
+          available: this.ctx.continualHarnessSkills.has(moduleId, callable),
+          binding: {
+            entryId: entry.entryId,
+            entryVersion: entry.entryVersion,
+            digest: entry.digest,
+            moduleId,
+            callable,
+          },
+        }
+      })
   }
 
   private async callManagedSkill(
     workspace: string,
     sessionId: string,
     params: Readonly<Record<string, RlmJsonValue>>,
+    sealedSkills: readonly RlmManagedSkillDescriptorV1[],
+    sealedSkill: RlmManagedSkillBindingV1 | undefined,
   ): Promise<ContinualHarnessJsonValue> {
     const alias = params.alias
     const args = params.args
     if (typeof alias !== 'string' || args === null || typeof args !== 'object' || Array.isArray(args)) {
       throw new OrchestrationError('skills.call requires a managed alias and JSON object arguments', 'GRAPH_INVALID')
     }
-    const [globalEntries, workspaceEntries, sessionEntries] = await Promise.all([
-      this.ctx.continualHarness.list({ workspace, scope: 'global', kind: 'skill' }),
-      this.ctx.continualHarness.list({ workspace, scope: 'workspace', kind: 'skill' }),
-      this.ctx.continualHarness.list({ workspace, sessionId, scope: 'session', kind: 'skill' }),
-    ])
-    const entry = [...globalEntries, ...workspaceEntries, ...sessionEntries]
-      .reverse()
-      .find(candidate => this.skillAlias(candidate) === alias)
-    if (entry === undefined) throw new OrchestrationError(`managed TypeScript skill not found: ${alias}`, 'GRAPH_INVALID')
-    const { moduleId, callable } = this.managedSkillBinding(entry)
+    const descriptor = sealedSkills.find(candidate => candidate.alias === alias)
+    if (descriptor === undefined) {
+      throw new OrchestrationError(`managed TypeScript skill is absent from the sealed execution: ${alias}`, 'GRAPH_INVALID')
+    }
+    if (sealedSkill === undefined
+      || sealedSkill.entryId !== descriptor.binding.entryId
+      || sealedSkill.entryVersion !== descriptor.binding.entryVersion
+      || sealedSkill.digest !== descriptor.binding.digest
+      || sealedSkill.moduleId !== descriptor.binding.moduleId
+      || sealedSkill.callable !== descriptor.binding.callable) {
+      throw new OrchestrationError(`managed TypeScript skill binding does not match the sealed execution: ${alias}`, 'GRAPH_INVALID')
+    }
     return this.ctx.continualHarnessSkills.invoke({
-      moduleId,
-      callable,
+      moduleId: descriptor.binding.moduleId,
+      callable: descriptor.binding.callable,
       args,
       workspace,
       sessionId,
-      entryId: entry.entryId,
+      entryId: descriptor.binding.entryId,
     })
   }
 
@@ -3405,6 +3574,7 @@ export class OrchestrationDaemon {
   ): Promise<Awaited<ReturnType<NonNullable<RlmRuntimeHostBindings['dispatchContinuation']>>>> {
     const executionId = PhysicalOperatorExecutionId(String(request.commandId))
     const bridge = await this.ctx.rlmRuntime.modelToolBridge(request.sessionId)
+    assertRlmBridgeAllowed(request.executionOptions ?? { version: 1 }, bridge)
     const prompt: ContentBlock[] = [{
       type: 'text',
       text: [
@@ -3472,7 +3642,7 @@ export class OrchestrationDaemon {
     if (this.ctx.physicalOperators.getOperator(request.model.operatorId) !== undefined) {
       const started = await this.startResidentTurn(
         record, spec, plan, plan.executionWorkspace.path, executionId, request.model,
-        prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId),
+        prompt, controller.signal, `Prime RLM ${request.source} continuation`, bridge, String(request.sessionId), 'disabled',
       )
       this.registerRlmPhysicalRun(record, spec, plan, executionId, started, physicalRuns)
       return this.residentRlmExecution(started, settle, failed)
@@ -3798,11 +3968,18 @@ export class OrchestrationDaemon {
     label: string,
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
     residentLaneId?: string,
+    nativeToolPolicy?: PhysicalOperatorNativeToolPolicy,
   ): Promise<StartedResidentTurn> {
     const operator = this.ctx.physicalOperators.getOperator(allocation.operatorId)
     if (operator === undefined) {
       throw new OrchestrationError(`physical operator is unavailable: ${allocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     }
+    const residentProfile = nativeToolPolicy === 'disabled'
+      ? {
+        model: allocation.model,
+        ...allocation.profile?.effort === undefined ? {} : { effort: allocation.profile.effort },
+      }
+      : allocation.profile
     const contextEnvelope = taskGraphContextEnvelope(plan, prompt)
     const run = await this.ctx.physicalOperators.start(allocation.operatorId, {
       executionId,
@@ -3812,8 +3989,9 @@ export class OrchestrationDaemon {
       contextEnvelope,
       parent: fakeParent(workspace, String(record.snapshot.runId)),
       signal,
-      ...allocation.profile === undefined ? {} : { residentProfile: allocation.profile },
+      ...residentProfile === undefined ? {} : { residentProfile },
       ...modelToolBridge === undefined ? {} : { modelToolBridge },
+      ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
       ...residentLaneId === undefined ? {} : { residentLaneId },
     })
     this.recordContextEnvelope(

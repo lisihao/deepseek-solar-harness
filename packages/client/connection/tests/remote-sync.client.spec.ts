@@ -264,6 +264,20 @@ describe('Remote Sync wire parsing', () => {
         outcome: 'accepted', format: 'native', roleFidelity: 'text-downgrade',
       },
     })).toThrow('roleFidelity does not match format')
+    expect(() => parseRemoteResidentAcceptedTurn({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0,
+      contextReceipt: {
+        version: 1, digest: 'not-a-digest', receiver: 'remote-resident:codex',
+        outcome: 'accepted', format: 'native', roleFidelity: 'native',
+      },
+    })).toThrow('lowercase SHA-256 digest')
+    expect(() => parseRemoteResidentAcceptedTurn({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0,
+      contextReceipt: {
+        version: 1, digest: 'b'.repeat(64), receiver: 'remote-resident:codex',
+        outcome: 'accepted', format: 'native', roleFidelity: 'native', injected: true,
+      },
+    })).toThrow('unknown field')
 
     const provider = {
       operatorId: 'claude-code', product: 'claude-code', displayName: 'Claude Code', description: '',

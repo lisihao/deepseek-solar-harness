@@ -49,7 +49,7 @@ Here are some core packages that contribute to the Cordis tree.
 | [`core/agent-loop`](subsystems/core.md) | The default driver implementing that interface | `ctx.agentLoop` |
 | [`core/scope`](subsystems/scope.md) | The per-agent scoped-registration primitive | library, no key |
 | [`llm/llm`](subsystems/llm-streaming.md) | Message and stream vocabulary plus the adapter seam | `ctx.llm` |
-| [`prompt/task-template`](../packages/prompt/task-template/README.md) | Private task-template lifecycle and deterministic selection | `ctx.taskTemplates` |
+| [`prompt/task-template`](subsystems/system-prompt.md#task-templates) | Private task-template lifecycle and deterministic selection | `ctx.taskTemplates` |
 | [`orchestration/orchestration`](../packages/orchestration/orchestration/README.md) | Persistent TaskGraph, approval, recovery, and sealed execution plans | `ctx.orchestrations` |
 
 ## Events

@@ -19,6 +19,13 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { receiveOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
+import {
+  emptyStoreDocument,
+  taskTemplateId,
+  TaskTemplateService,
+  type TaskTemplateDraft,
+  type TaskTemplateStoreDocument,
+} from '@deepseek-ai/dsh-task-template'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import PhysicalOperatorRuntime, {
@@ -185,6 +192,16 @@ class DurableOperator implements PhysicalOperator {
   }
 }
 
+class MemoryTaskTemplates extends TaskTemplateService {
+  protected load(): Promise<TaskTemplateStoreDocument> {
+    return Promise.resolve(emptyStoreDocument())
+  }
+
+  protected persist(_document: TaskTemplateStoreDocument): Promise<'committed' | 'stale'> {
+    return Promise.resolve('committed')
+  }
+}
+
 async function callBridgeTool(
   request: PhysicalOperatorProviderStartRequest,
   toolName: string,
@@ -225,6 +242,7 @@ async function setup(options: {
   registerDeepSeek?: boolean
   mountTool?: boolean
   echoResult?: string
+  taskTemplate?: TaskTemplateDraft
 } = {}) {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
@@ -232,6 +250,10 @@ async function setup(options: {
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(CommandRuntime)
   await ctx.plugin(SystemPrompt)
+  if (options.taskTemplate !== undefined) {
+    await ctx.plugin(MemoryTaskTemplates)
+    await ctx.taskTemplates.create(options.taskTemplate)
+  }
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(PhysicalOperatorRuntime)
   await ctx.plugin(AgentRegistry)
@@ -670,6 +692,63 @@ describe('host physical-operator routing', () => {
     if (receipt === undefined) throw new Error('expected durable receipt')
     receipt.result.resolve({ output: [{ type: 'text', text: 'complete' }], stopReason: 'completed' })
     await pending
+  })
+
+  it('selects and logs a template for the delegated tool task without inheriting the parent template', async () => {
+    const { ctx, agent, codex } = await setup({
+      taskTemplate: {
+        id: taskTemplateId('delegated-review'),
+        name: 'Delegated review',
+        method: 'Use the delegated-review method for {{objective}}.',
+        match: { objectiveKeywords: ['delegated'] },
+      },
+    })
+    const parentTask = agent.session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'Parent task.' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    agent.session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'PARENT TEMPLATE MUST NOT CROSS.' }],
+      source: {
+        kind: 'task-template',
+        form: 'instructions',
+        taskMessageId: parentTask.data.id,
+        receipt: {
+          receiptVersion: 1,
+          decision: 'skip',
+          overrideSource: 'none',
+          candidates: [],
+          rationale: ['fixture parent receipt'],
+          attributes: {
+            taskType: 'general', domain: 'general', objective: 'Parent task.', outputFormat: 'answer', riskLevel: 'low',
+            tools: [], skills: [], operators: [], language: 'en', priority: 'normal',
+          },
+        },
+      },
+    }), { surfaceOp: 'append' })
+    agent.session.append('request/header', {
+      header: { config: { provider: 'deepseek', model: 'deepseek' }, system: 'fixture system' },
+      reason: 'initial',
+    })
+
+    await callPhysicalOperator(ctx, agent, {
+      action: 'run', operator_id: 'codex', description: 'review delegated work', prompt: 'Review the delegated code change.',
+    })
+
+    const request = codex.requests[0]
+    expect(request?.contextEnvelope?.contexts).toEqual([expect.objectContaining({ name: 'task-template:delegated-review' })])
+    expect(JSON.stringify(request?.contextEnvelope)).not.toContain('PARENT TEMPLATE MUST NOT CROSS.')
+    const event = agent.session.events.find(value => value.type === 'physical-operator/context-envelope')
+    expect(event).toMatchObject({
+      data: {
+        taskTemplate: {
+          decision: 'inject',
+          selected: { id: 'delegated-review' },
+          receipt: { attributes: { objective: 'Review the delegated code change.' } },
+        },
+        envelope: { digest: request?.contextEnvelope?.digest },
+      },
+    })
   })
 
   it('rejects browser capability requests that omit Resident mode instead of silently using ephemeral', async () => {

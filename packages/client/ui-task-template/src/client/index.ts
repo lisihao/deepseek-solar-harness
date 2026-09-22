@@ -10,9 +10,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap { 'settings.taskTemplates': TaskTemplateLocaleKey }
 }
 
+/** Cordis browser function-plugin name. */
 export const name = 'client-ui-task-template'
+/** Services required by the browser registration. */
 export const inject = ['slots', 'locale', 'connection']
 
+/**
+ * Register localized task-template settings under the shared settings slot.
+ * @param ctx - Client context carrying slots, locale, and Connection.
+ * @returns nothing; registrations belong to the plugin fiber.
+ */
 export function apply(ctx: ClientContext): void {
   const namespace = 'settings.taskTemplates'
   ctx.effect(() => ctx.locale.register(namespace, { zh, en }), 'ui-task-template: dictionaries')

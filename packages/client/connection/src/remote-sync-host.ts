@@ -397,6 +397,9 @@ export class RemoteSyncHub {
       ...(materializedContext?.systemPrompt ?? systemPrompt) === undefined
         ? {}
         : { systemPrompt: materializedContext?.systemPrompt ?? systemPrompt },
+      ...contextEnvelope === undefined
+        ? {}
+        : { nativeContext: { version: 1, digest: contextEnvelope.digest } },
       ...profile === undefined ? {} : { profile },
       ...nativeToolPolicy === undefined ? {} : { nativeToolPolicy },
       signal: new AbortController().signal,

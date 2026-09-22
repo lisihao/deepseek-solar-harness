@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { taskTemplateId } from '../src/brand.ts'
-import { selectTaskTemplate } from '../src/selection.ts'
-import { taskTemplateContentSha256 } from '../src/render.ts'
-import type { TaskAttributes, TaskTemplate, TaskTemplatePersonalization } from '../src/types.ts'
+import { compareCandidates, selectTaskTemplate } from '../src/selection.ts'
+import { renderTaskTemplateMethod, taskTemplateContentSha256, taskTemplateRenderVariables } from '../src/render.ts'
+import type { TaskAttributes, TaskTemplate, TaskTemplateCandidate, TaskTemplatePersonalization } from '../src/types.ts'
 import { MemoryTaskTemplates } from './memory.ts'
 
 /** Fictional task attributes covering every dimension. */
@@ -108,6 +108,21 @@ describe('deterministic ordering', () => {
     const second = selectTaskTemplate(templates, NO_PERSONALIZATION, { attributes: attrs() })
     expect(second).toEqual(first)
   })
+
+  it('orders both id directions and equality after all earlier keys tie', () => {
+    const candidate = (id: string): TaskTemplateCandidate => ({
+      id: taskTemplateId(id),
+      version: 1,
+      name: 'same-name',
+      specificity: 1,
+      rank: 0,
+    })
+    const a = candidate('fixture-a')
+    const b = candidate('fixture-b')
+    expect(compareCandidates(a, b)).toBeLessThan(0)
+    expect(compareCandidates(b, a)).toBeGreaterThan(0)
+    expect(compareCandidates(a, a)).toBe(0)
+  })
 })
 
 describe('explicit override', () => {
@@ -126,6 +141,7 @@ describe('explicit override', () => {
     expect(selection.candidates.map(candidate => candidate.id)).toEqual(['fixture-auto'])
     expect(selection.rationale[0]).toMatch(/explicit template "fixture-manual" version 1 overrides/)
     expect(selection.receipt.overrideSource).toBe('explicit')
+    expect(selection.receipt.templateName).toBe('fixture-manual')
   })
 
   it('fails loud on an unknown or disabled explicit template', () => {
@@ -169,6 +185,7 @@ describe('injection receipt', () => {
       overrideSource: 'automatic',
       templateId: 'fixture-winner',
       templateVersion: 3,
+      templateName: 'fixture-winner',
       layers: { method: true, preferences: false, memory: false },
       renderedContent: { method: 'Fictional method for fixture-winner.' },
       renderVariables: {
@@ -197,6 +214,11 @@ describe('injection receipt', () => {
 })
 
 describe('controlled method variables', () => {
+  it('renders a method whose first token is a variable', () => {
+    expect(renderTaskTemplateMethod('{{objective}}', taskTemplateRenderVariables(attrs())))
+      .toBe('Review the fictional widget module for defects')
+  })
+
   it('renders the fixed task vocabulary and records exact reconstruction fields', () => {
     const templates = [template('fixture-rendered', {
       method: [

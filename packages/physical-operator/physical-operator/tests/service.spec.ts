@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import {
+  buildOperatorContextEnvelope,
+  receiveOperatorContextEnvelope,
+  rejectOperatorContextEnvelope,
+} from '@deepseek-ai/dsh-system-prompt'
 import PhysicalOperatorRuntime, {
   PhysicalOperatorError,
   PhysicalOperatorExecutionId,
@@ -25,6 +30,15 @@ function request(signal = new AbortController().signal): PhysicalOperatorStartRe
     parent: fakeParent(),
     signal,
   }
+}
+
+function contextEnvelope() {
+  return buildOperatorContextEnvelope({
+    systemText: 'fixture system',
+    task: [{ type: 'text', text: 'fixture task' }],
+    contexts: [{ name: 'memory', text: 'fixture memory' }],
+    source: { kind: 'tool', requestHeaderEventSeq: 1, toolCallId: 'fixture-call' },
+  })
 }
 
 class StubOperator implements PhysicalOperator {
@@ -149,6 +163,42 @@ describe('PhysicalOperatorRuntime', () => {
       events: [{ type: 'turn.progress', data: { phase: 'reasoning' } }],
       nextSequence: 1,
     })
+  })
+
+  it('rejects dropped, rejected, and tampered context receipts before publishing a run', async () => {
+    const { runtime: service } = await runtime()
+    const envelope = contextEnvelope()
+    const cases = [
+      ['dropped', undefined, 'CONTEXT_ENVELOPE_DROPPED'],
+      ['tampered-digest', {
+        ...receiveOperatorContextEnvelope(envelope, 'fixture', 'native'),
+        digest: 'a'.repeat(64),
+      }, 'CONTEXT_ENVELOPE_INVALID'],
+      ['tampered-format', {
+        ...receiveOperatorContextEnvelope(envelope, 'fixture', 'native'),
+        roleFidelity: 'text-downgrade' as const,
+      }, 'CONTEXT_ENVELOPE_INVALID'],
+      ['rejected', rejectOperatorContextEnvelope(envelope, 'fixture', 'unsupported'), 'CONTEXT_ENVELOPE_REJECTED'],
+    ] as const
+
+    for (const [id, contextReceipt, code] of cases) {
+      let disposed = 0
+      service.registerOperator({
+        descriptor: {
+          id: PhysicalOperatorId(id), displayName: id, description: 'receipt fixture', tags: [], maxConcurrency: 1,
+        },
+        availability: () => ({ available: true }),
+        start: async () => ({
+          ...contextReceipt === undefined ? {} : { contextReceipt },
+          result: Promise.resolve({ output: [], stopReason: 'completed' }),
+          dispose: async () => { disposed += 1 },
+        }),
+      })
+
+      await expect(service.start(id, { ...request(), contextEnvelope: envelope })).rejects.toMatchObject({ code })
+      expect(disposed).toBe(1)
+      expect(service.status(id)).toMatchObject({ state: 'available', active: 0 })
+    }
   })
 
   it('reserves capacity before async work and releases it only after settlement', async () => {

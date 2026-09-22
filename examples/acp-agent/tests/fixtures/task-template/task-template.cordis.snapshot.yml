@@ -1,0 +1,19 @@
+# Keyless counterpart of task-template.cordis.yml. The standard ACP replay
+# composition supplies model output while the real template Provider and Consumer run.
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ../../../cordis.snapshot.yml
+    patches:
+      - insert:
+          - id: task-template
+            name: './tests/fixtures/task-template/provider.ts'
+            config:
+              dshHome: !!js process.env.DSH_HOME
+              watch: false
+          - id: task-template-seed
+            name: './tests/fixtures/task-template/seed.ts'
+          - id: task-template-context
+            name: './tests/fixtures/task-template/context.ts'
+          - id: task-template-context-invariant
+            name: './tests/fixtures/task-template/context-invariant.ts'

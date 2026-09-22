@@ -8,7 +8,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { AnonymousEntries, NamedEntries, ScopedLayers, scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
-import type { ContextSnapshotSection, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { ContextSnapshotSection, Message, MessageId, ToolSchema } from '@deepseek-ai/dsh-llm'
 
 export {
   buildOperatorContextEnvelope,
@@ -75,6 +75,37 @@ export interface AssembleContext {
   scope?: ScopeKey
   /** Explicit control signal for the turn that requested this assembly, when any. */
   signal?: AbortSignal
+}
+
+/** Stable producer identity for dynamic runtime-context messages. */
+export const SYSTEM_PROMPT_RUNTIME_CONTEXT_SOURCE = '@deepseek-ai/dsh-system-prompt'
+
+/** The effective dynamic-context snapshot in one derived request history. */
+export interface CurrentRuntimeContextSnapshot {
+  /** Durable message identity of the active snapshot. */
+  readonly messageId: MessageId
+  /** Exact named sections supplied by the snapshot. */
+  readonly sections: readonly ContextSnapshotSection[]
+}
+
+/**
+ * Read the current runtime-context snapshot without reviving a cleared one.
+ * The newest system-prompt context message is authoritative: a snapshot
+ * supplies its sections, while the producer's form-less clearance marker
+ * explicitly removes every earlier snapshot.
+ * @param messages - ordered derived model history for one request.
+ * @returns the active snapshot, or `undefined` when none is active.
+ */
+export function currentRuntimeContextSnapshot(
+  messages: readonly Message[],
+): CurrentRuntimeContextSnapshot | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.source.kind !== 'plugin' || message.source.plugin !== SYSTEM_PROMPT_RUNTIME_CONTEXT_SOURCE) continue
+    if (message.source.form !== 'snapshot') return undefined
+    return { messageId: message.id, sections: message.source.sections }
+  }
+  return undefined
 }
 
 /** One contributed section of the system prompt (registry input). */

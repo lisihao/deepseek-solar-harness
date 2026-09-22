@@ -6,9 +6,6 @@ import {
   taskTemplateId,
   type TaskAttributes,
   type TaskTemplateDraft,
-  type TaskTemplateMatch,
-  type TaskTemplatePatch,
-  type TaskTemplatePersonalization,
   type TaskTemplateService,
 } from '@deepseek-ai/dsh-task-template'
 import { TASK_TEMPLATE_RPC_CHANNEL, type TaskTemplateRpcSnapshotV1 } from './shared.ts'
@@ -16,7 +13,9 @@ import { TASK_TEMPLATE_RPC_CHANNEL, type TaskTemplateRpcSnapshotV1 } from './sha
 export { TASK_TEMPLATE_RPC_CHANNEL } from './shared.ts'
 export type * from './shared.ts'
 
+/** Cordis function-plugin name. */
 export const name = 'task-template-rpc'
+/** Services required to expose the task-template RPC channel. */
 export const inject = ['taskTemplates', 'connection']
 
 type RpcResult = Awaited<ReturnType<ConnectionRpcHandler>>
@@ -28,6 +27,11 @@ function object(value: unknown, at = 'payload'): Record<string, unknown> {
 
 function string(value: unknown, at: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) throw new TypeError(`${at} must be a non-blank string`)
+  return value
+}
+
+function finiteNumber(value: unknown, at: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new TypeError(`${at} must be a finite number`)
   return value
 }
 
@@ -99,7 +103,11 @@ function snapshot(service: TaskTemplateService): TaskTemplateRpcSnapshotV1 {
   }
 }
 
-/** Create the strict endpoint dispatcher used by Host composition and tests. */
+/**
+ * Create the strict endpoint dispatcher used by Host composition and tests.
+ * @param service - authoritative private task-template service.
+ * @returns a handler that validates wire payloads and returns channel results.
+ */
 export function createTaskTemplateRpcHandler(service: TaskTemplateService): ConnectionRpcHandler {
   return async (endpoint, rawPayload) => {
     try {
@@ -116,8 +124,8 @@ export function createTaskTemplateRpcHandler(service: TaskTemplateService): Conn
           id: taskTemplateId(string(draft['id'], 'payload.draft.id')),
           name: string(draft['name'], 'payload.draft.name'),
           method: string(draft['method'], 'payload.draft.method'),
-          ...draft['rank'] === undefined ? {} : { rank: draft['rank'] as number },
-          ...draft['match'] === undefined ? {} : { match: draft['match'] as TaskTemplateMatch },
+          ...draft['rank'] === undefined ? {} : { rank: finiteNumber(draft['rank'], 'payload.draft.rank') },
+          ...draft['match'] === undefined ? {} : { match: object(draft['match'], 'payload.draft.match') },
         } satisfies TaskTemplateDraft)
         return success(snapshot(service))
       }
@@ -126,7 +134,7 @@ export function createTaskTemplateRpcHandler(service: TaskTemplateService): Conn
         exact(payload, ['id', 'patch'])
         const patch = object(payload['patch'], 'payload.patch')
         exact(patch, ['name', 'method', 'rank', 'match'], 'payload.patch')
-        await service.update(id, patch as TaskTemplatePatch)
+        await service.update(id, patch)
       } else if (endpoint === 'set-enabled') {
         exact(payload, ['id', 'enabled'])
         if (typeof payload['enabled'] !== 'boolean') throw new TypeError('payload.enabled must be a boolean')
@@ -137,7 +145,7 @@ export function createTaskTemplateRpcHandler(service: TaskTemplateService): Conn
       } else if (endpoint === 'personalize') {
         exact(payload, ['id', 'personalization'])
         const personal = payload['personalization']
-        const personalization = personal === null || personal === undefined
+        const personalization = personal === null
           ? undefined
           : object(personal, 'payload.personalization')
         if (personalization !== undefined) {
@@ -145,7 +153,7 @@ export function createTaskTemplateRpcHandler(service: TaskTemplateService): Conn
         }
         await service.personalize(
           id,
-          personalization as TaskTemplatePersonalization | undefined,
+          personalization,
         )
       } else if (endpoint === 'preview') {
         exact(payload, ['id', 'attributes'])
@@ -160,7 +168,11 @@ export function createTaskTemplateRpcHandler(service: TaskTemplateService): Conn
   }
 }
 
-/** Register the private template store on the authenticated trusted-Host RPC. */
+/**
+ * Register the private template store on the authenticated trusted-Host RPC.
+ * @param ctx - Cordis context carrying the template and Connection services.
+ * @returns nothing; the handler registration belongs to the plugin fiber.
+ */
 export function apply(ctx: Context): void {
   const connection = ctx.get('connection') as HostConnectionHandle
   ctx.effect(

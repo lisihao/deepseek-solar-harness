@@ -593,6 +593,12 @@ importers:
       '@deepseek-ai/dsh-resident-operator-local':
         specifier: workspace:*
         version: link:../packages/physical-operator/resident-operator-local
+      '@deepseek-ai/dsh-rlm-runtime':
+        specifier: workspace:*
+        version: link:../packages/orchestration/rlm-runtime
+      '@deepseek-ai/dsh-rlm-runtime-local':
+        specifier: workspace:*
+        version: link:../packages/orchestration/rlm-runtime-local
       '@deepseek-ai/dsh-sandbox':
         specifier: workspace:*
         version: link:../packages/sandbox/sandbox
@@ -6991,6 +6997,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: workspace:^
+        version: link:../../../vendor/loader
       '@deepseek-ai/dsh-agent':
         specifier: workspace:^
         version: link:../../core/agent
@@ -7006,6 +7015,12 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../../core/system-prompt
       '@deepseek-ai/dsh-task-template':
         specifier: workspace:^
         version: link:../task-template

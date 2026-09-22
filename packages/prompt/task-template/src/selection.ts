@@ -190,6 +190,7 @@ export function selectTaskTemplate(
         : {
           templateId: outcome.selected.id,
           templateVersion: outcome.selected.version,
+          templateName: outcome.selected.name,
           contentSha256: outcome.selected.contentSha256,
           renderedContent: outcome.selected.content,
           renderVariables: outcome.selected.renderVariables,

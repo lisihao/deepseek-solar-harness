@@ -548,11 +548,21 @@ describe('orchestration daemon', () => {
     }
     vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       if (typeof init?.body !== 'string') throw new Error('expected JSON body')
-      const call = JSON.parse(init.body) as { rpcId: string; method: string }
+      const call = JSON.parse(init.body) as {
+        rpcId: string
+        method: string
+        payload: { contextEnvelope: { digest: string } }
+      }
       methods.push(call.method)
       const value = call.method === 'operator.providers' ? [provider]
         : call.method === 'operator.execute'
-          ? { sessionId: 'remote-session', turnId: 'remote-turn', stateRevision: 1 }
+          ? {
+            sessionId: 'remote-session', turnId: 'remote-turn', stateRevision: 1,
+            contextReceipt: {
+              version: 1, digest: call.payload.contextEnvelope.digest, receiver: 'remote-resident:codex',
+              outcome: 'accepted', format: 'native', roleFidelity: 'native',
+            },
+          }
           : call.method === 'operator.inspect'
             ? remoteSettled ? {
               commandId: 'remote-command', sessionId: 'remote-session', turnId: 'remote-turn',

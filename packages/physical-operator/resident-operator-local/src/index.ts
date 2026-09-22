@@ -102,6 +102,7 @@ class LocalResidentOperatorService extends ResidentOperatorService {
       ...request.taskLabel === undefined ? {} : { taskLabel: request.taskLabel },
       prompt: request.prompt,
       ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
+      ...request.nativeContext === undefined ? {} : { nativeContext: request.nativeContext },
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },

@@ -1,0 +1,4 @@
+# All durable state belongs to the isolated smoke home.
+- id: prime-rlm-runtime
+  name: '@deepseek-ai/dsh-rlm-runtime-local'
+  config: !!js process.env.DSH_HOME

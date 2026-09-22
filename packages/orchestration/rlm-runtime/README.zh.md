@@ -16,6 +16,12 @@ Prime Agents View 的控制面按版本化的 `attach → input → detach` 提�
 
 模型侧压缩接口是 `compact.status()` 与 `compact.run({ instructions? })`。精确 Host wire method 分别为携带 `{}` 的 `compact.status`，以及携带 `{ instructions? }` 的 `compact.run`。`compact.run` 记录 Host 返回的 `scheduled`、可选 `reason` 和可选 `note`，不声称历史已经完成压缩；真实 turn boundary 调度与原生历史操作仍由 Host 持有。
 
+## Child 模型与执行继承
+
+每个 Root 都会密封 `childModelPolicy`。`parent-inherit` 是 Prime-compatible 规则：`rlm()` 未提供 `model` 时，Child 获得与 Parent 完全相同的 operator、model 与 reasoning profile。`allocator-default` 是显式的 DSH economy adaptation，必须带有 Scheduler 已密封的 `defaultChildModel`，绝不会作为隐式 fallback 出现。`RlmChildHandleV1.modelOrigin` 记录 `parent-inherited`、`allocator-default` 或 `explicit`，因此 Consumer 可以在 Plan 和 Event trace 中明确显示未继承情形。
+
+`RlmChildExecutionOptionsV1` 同样在 Root 准入时密封，并原样继承给每个 Child：模型可见的 bridge tools、Host 签发的 Skills、retry policy 与 capability references 都随 child dispatch request 传递。Runtime 只接受 Prime 的 `name`、`model` 与 `thinking` options。Consumer 必须根据实时 provider catalog 校验显式 model/thinking，并且不得在 Parent 已允许集合之外增加工具。
+
 ## 扩展点
 
 Provider 可以使用本地进程、远端 Worker 或其他持久 Kernel，只要不改变版本化可观察契约。Consumer 可以通过同一 Host interface 绑定 DSH Resident 物理算子或测试 Fixture。

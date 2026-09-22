@@ -198,6 +198,9 @@ class DualModePhysicalOperator implements PhysicalOperator {
       ...(materialized?.systemPrompt ?? request.systemPrompt) === undefined
         ? {}
         : { systemPrompt: materialized?.systemPrompt ?? request.systemPrompt },
+      ...request.contextEnvelope === undefined
+        ? {}
+        : { nativeContext: { version: 1, digest: request.contextEnvelope.digest } },
       ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
       ...request.modelToolBridge === undefined ? {} : { modelToolBridge: request.modelToolBridge },
       ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },

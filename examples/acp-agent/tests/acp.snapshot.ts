@@ -8,6 +8,12 @@ import { expect, it } from 'vitest'
 import { defineAcpSnapshotSuite, type Scenario, type SnapshotSuiteOptions } from '@deepseek-ai/dsh-acp-snapshot'
 import { resolvePwshPath } from '@deepseek-ai/dsh-pwsh-local'
 import { decodeStorageRecord } from '@deepseek-ai/dsh-session'
+import * as taskTemplateMockLlmFixture from './fixtures/task-template/mock-llm.ts'
+import TaskTemplateProviderFixture from './fixtures/task-template/provider.ts'
+// Cordis loads these modules from YAML; type-only edges keep static dependency analysis aligned without evaluating fixture entrypoints.
+import type {} from './fixtures/task-template/context-invariant.ts'
+import type {} from './fixtures/task-template/context.ts'
+import type {} from './fixtures/task-template/driver.ts'
 
 /**
  * The acp-agent example's snapshot suite: the scenario table for
@@ -66,9 +72,20 @@ const BACKGROUND_TASK_ADMISSION_CONFIG = fileURLToPath(
 const PRODUCT_SUBAGENT_CODEX_CONFIG = fileURLToPath(new URL('../product-subagent-codex.cordis.yml', import.meta.url))
 const PRODUCT_SUBAGENT_BOTH_CONFIG = fileURLToPath(new URL('../product-subagent-both.cordis.yml', import.meta.url))
 const DEBATE_CONFIG = fileURLToPath(new URL('../debate.cordis.yml', import.meta.url))
+const TASK_TEMPLATE_CONFIG = fileURLToPath(
+  new URL('./fixtures/task-template/task-template.cordis.yml', import.meta.url),
+)
 const FS_DIFF_BOUND_CONFIG = fileURLToPath(new URL('./fs-diff-bound.cordis.yml', import.meta.url))
 const SNAPSHOTS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'snapshots')
 const PACKED_CHUNKS_SOURCE = 'hook-cc-pretool-deny'
+
+it('exposes named mock and class-default provider task-template fixtures', () => {
+  expect(taskTemplateMockLlmFixture.name).toBe('task-template-mock-llm')
+  expect(taskTemplateMockLlmFixture.inject).toEqual(['llm'])
+  expect(taskTemplateMockLlmFixture.apply).toBeTypeOf('function')
+  expect('default' in taskTemplateMockLlmFixture).toBe(false)
+  expect(TaskTemplateProviderFixture).toBeTypeOf('function')
+})
 
 async function prepareDelimiterPathWorkspace(cwd: string): Promise<void> {
   const dir = join(cwd, 'scope</system-reminder>')
@@ -137,6 +154,15 @@ const SCENARIOS: Scenario[] = [
   // text-turn is the default header pin and owns the prompt and tool-schema
   // sidecars reused by alternate classes with identical component sequences.
   { name: 'text-turn', hasModelTurn: true, recorded: true, pinsHeader: true },
+  // Authored keyless replay through the assembled ACP app. A private fixture
+  // store seeds one template; the real Consumer must log its exact selection
+  // receipt and append one sourced instruction before the replayed request.
+  {
+    name: 'task-template',
+    hasModelTurn: true,
+    recorded: false,
+    configPath: TASK_TEMPLATE_CONFIG,
+  },
   // Product-subagent scenarios are authored schema-isolation fixtures: they
   // reuse the stable text-turn transcript so only Loader-composed headers and
   // tool sidecars vary. Model output and usage are not evidence here, so record

@@ -456,7 +456,7 @@ export interface ConnectionConfig {
 }
 ```
 
-来源：[`packages/client/connection/src/index.ts:101`](../packages/client/connection/src/index.ts)
+来源：[`packages/client/connection/src/index.ts:102`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -802,6 +802,8 @@ export interface DebateTurnRequestV1 {
   readonly execution?: DebateExecutionRefV1
   /** Source DSH Session retained for orchestration Trace lineage. */
   readonly sourceSessionId?: string
+  /** Frozen parent-request contexts handed to the TaskGraph admission. */
+  readonly runtimeContext?: DebateRuntimeContextV1
   /** Claims settled before this turn began. */
   readonly priorLedger: DebateClaimLedgerV1
   /** Dissent retained before this turn began. */
@@ -912,9 +914,9 @@ export interface DebateTurnFailureV1 {
 export type DebateTurnPhase = 'blind-independent' | 'claim-ledger' | 'high-severity-unresolved'
 ```
 
-依赖：[`DebateAgentProgressV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimLedgerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimV1`](../packages/orchestration/debate/src/index.ts) · [`DebateDissentV1`](../packages/orchestration/debate/src/index.ts) · [`DebateEvidenceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateExecutionRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateModelSource`](../packages/orchestration/debate/src/index.ts) · [`DebateModelTier`](../packages/orchestration/debate/src/index.ts) · [`DebateRoleId`](../packages/orchestration/debate/src/index.ts) · [`DebateRolePersonaV1`](../packages/orchestration/debate/src/index.ts) · [`DebateSourceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnBlockerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnRoutingV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUnresolvedV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUsageV1`](../packages/orchestration/debate/src/index.ts)
+依赖：[`DebateAgentProgressV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimLedgerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimV1`](../packages/orchestration/debate/src/index.ts) · [`DebateDissentV1`](../packages/orchestration/debate/src/index.ts) · [`DebateEvidenceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateExecutionRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateModelSource`](../packages/orchestration/debate/src/index.ts) · [`DebateModelTier`](../packages/orchestration/debate/src/index.ts) · [`DebateRoleId`](../packages/orchestration/debate/src/index.ts) · [`DebateRolePersonaV1`](../packages/orchestration/debate/src/index.ts) · [`DebateRuntimeContextV1`](../packages/orchestration/debate/src/index.ts) · [`DebateSourceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnBlockerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnRoutingV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUnresolvedV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUsageV1`](../packages/orchestration/debate/src/index.ts)
 
-来源：[`packages/orchestration/debate-local/src/types.ts:268`](../packages/orchestration/debate-local/src/types.ts)
+来源：[`packages/orchestration/debate-local/src/types.ts:271`](../packages/orchestration/debate-local/src/types.ts)
 
 <a id="deepseek-aidsh-debate-orchestration"></a>
 
@@ -1827,7 +1829,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:67`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:68`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-resident"></a>
 
@@ -1861,7 +1863,7 @@ export interface OperatorConfig {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:44`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-resident/src/index.ts:49`](../packages/physical-operator/physical-operator-resident/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-subagent"></a>
 
@@ -1893,7 +1895,7 @@ export interface OperatorConfig {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-subagent/src/index.ts:59`](../packages/physical-operator/physical-operator-subagent/src/index.ts)
+来源：[`packages/physical-operator/physical-operator-subagent/src/index.ts:60`](../packages/physical-operator/physical-operator-subagent/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 
@@ -2033,7 +2035,7 @@ export interface Config {
 export type Config = string
 ```
 
-来源：[`packages/orchestration/rlm-runtime-local/src/index.ts:64`](../packages/orchestration/rlm-runtime-local/src/index.ts)
+来源：[`packages/orchestration/rlm-runtime-local/src/index.ts:67`](../packages/orchestration/rlm-runtime-local/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -2816,7 +2818,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/core/system-prompt/src/index.ts:193`](../packages/core/system-prompt/src/index.ts)
+来源：[`packages/core/system-prompt/src/index.ts:252`](../packages/core/system-prompt/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 
@@ -3628,6 +3630,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-sidebar`（[`packages/client/ui-sidebar/src/index.ts`](../packages/client/ui-sidebar/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-skill`（[`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-subagent`（[`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-task-template`（[`packages/client/ui-task-template/src/index.ts`](../packages/client/ui-task-template/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-theme`（[`packages/client/ui-theme/src/index.ts`](../packages/client/ui-theme/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-tool`（[`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-trajectory`（[`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts)）
@@ -3664,6 +3667,8 @@ export interface Config {
 - `@deepseek-ai/dsh-storage`（[`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts)）
 - `@deepseek-ai/dsh-subagent`（[`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts)）
 - `@deepseek-ai/dsh-subprocess-local`（[`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts)）
+- `@deepseek-ai/dsh-task-template-context` — 需要 `taskTemplates` · `tools`（[`packages/prompt/task-template-context/src/index.ts`](../packages/prompt/task-template-context/src/index.ts)）
+- `@deepseek-ai/dsh-task-template-rpc` — 需要 `taskTemplates` · `connection`（[`packages/prompt/task-template-rpc/src/index.ts`](../packages/prompt/task-template-rpc/src/index.ts)）
 - `@deepseek-ai/dsh-terminal`（[`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts)）
 - `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userInteraction`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
 - `@deepseek-ai/dsh-tool-browser` — 需要 `browser` · `tools` · `systemPrompt`（[`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)）
@@ -3745,6 +3750,7 @@ export interface Config {
 - `@deepseek-ai/dsh-session-telemetry`（[`packages/session/session-telemetry/src/index.ts`](../packages/session/session-telemetry/src/index.ts)）
 - `@deepseek-ai/dsh-session-title-llm`（[`packages/session/session-title-llm/src/index.ts`](../packages/session/session-title-llm/src/index.ts)）
 - `@deepseek-ai/dsh-subagent-in-process-driver`（[`packages/subagent/subagent-in-process-driver/src/index.ts`](../packages/subagent/subagent-in-process-driver/src/index.ts)）
+- `@deepseek-ai/dsh-task-template`（[`packages/prompt/task-template/src/index.ts`](../packages/prompt/task-template/src/index.ts)）
 - `@deepseek-ai/dsh-timeout`（[`packages/util/timeout/src/index.ts`](../packages/util/timeout/src/index.ts)）
 - `@deepseek-ai/dsh-typert-generator`（[`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts)）
 - `@deepseek-ai/dsh-typert-protocol`（[`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts)）

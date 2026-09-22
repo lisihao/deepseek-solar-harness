@@ -109,6 +109,7 @@ test('ref and Git parsing failures emit a conservative full decision', () => {
       format_version: '1',
       classifier_version: '1',
       classification: 'full',
+      run_ci: 'true',
       run_dsh: 'true',
       run_vendor: 'true',
       path_count: '0',
@@ -129,8 +130,24 @@ test('non-PR invocations emit full outputs before any package install', () => {
     const outputs = parseOutputs(readFileSync(outputPath, 'utf8'))
     assert.equal(outputs.format_version, '1')
     assert.equal(outputs.classifier_version, '1')
+    assert.equal(outputs.run_ci, 'true')
     assert.equal(outputs.run_dsh, 'true')
     assert.equal(outputs.run_vendor, 'true')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('documentation-only classification exposes an ordinary CI bypass', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-pr-impact-ci-output-'))
+  const outputPath = join(root, 'github-output')
+  try {
+    emitOutputs(classifyPaths(['docs/guide.md']), outputPath)
+    const outputs = parseOutputs(readFileSync(outputPath, 'utf8'))
+    assert.equal(outputs.classification, 'docs-only')
+    assert.equal(outputs.run_ci, 'false')
+    assert.equal(outputs.run_dsh, 'false')
+    assert.equal(outputs.run_vendor, 'false')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

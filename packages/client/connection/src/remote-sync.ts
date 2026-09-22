@@ -658,6 +658,9 @@ export function parseRemoteResidentAcceptedTurn(value: unknown): RemoteResidentA
 
 function parseAcceptedContextReceipt(value: unknown): OperatorContextEnvelopeAcceptedReceiptV1 {
   const receipt = objectRecord(value, 'remote Resident context receipt')
+  const allowed = new Set(['version', 'digest', 'receiver', 'outcome', 'format', 'roleFidelity'])
+  const unknown = Object.keys(receipt).find(key => !allowed.has(key))
+  if (unknown !== undefined) throw new Error(`remote Resident context receipt has unknown field ${JSON.stringify(unknown)}`)
   if (receipt.version !== 1) throw new Error('remote Resident context receipt.version must be 1')
   if (receipt.outcome !== 'accepted') throw new Error('remote Resident context receipt.outcome must be accepted')
   if (receipt.format !== 'native' && receipt.format !== 'text') {
@@ -667,10 +670,16 @@ function parseAcceptedContextReceipt(value: unknown): OperatorContextEnvelopeAcc
   if (receipt.roleFidelity !== roleFidelity) {
     throw new Error('remote Resident context receipt.roleFidelity does not match format')
   }
+  const digest = nonEmptyString(receipt.digest, 'contextReceipt.digest')
+  if (!/^[a-f0-9]{64}$/u.test(digest)) {
+    throw new Error('remote Resident context receipt.digest must be a lowercase SHA-256 digest')
+  }
+  const receiver = nonEmptyString(receipt.receiver, 'contextReceipt.receiver')
+  if (receiver.trim().length === 0) throw new Error('remote Resident context receipt.receiver must not be blank')
   return {
     version: 1,
-    digest: nonEmptyString(receipt.digest, 'contextReceipt.digest'),
-    receiver: nonEmptyString(receipt.receiver, 'contextReceipt.receiver'),
+    digest,
+    receiver,
     outcome: 'accepted',
     format: receipt.format,
     roleFidelity,

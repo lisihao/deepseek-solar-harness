@@ -49,12 +49,28 @@ export const RlmControlLeaseId = (value: string): RlmControlLeaseId => value as 
 /** JSON-compatible value exposed by the TypeScript REPL. */
 export type RlmJsonValue = null | boolean | number | string | RlmJsonValue[] | { readonly [key: string]: RlmJsonValue }
 
-/** Host-issued stable alias for one callable managed TypeScript Skill. */
+/** Host-sealed managed Skill implementation selected for one execution. */
+export interface RlmManagedSkillBindingV1 {
+  /** Durable managed-entry identity captured by the sealed execution. */
+  readonly entryId: string
+  /** Managed-entry revision captured by the sealed execution. */
+  readonly entryVersion: number
+  /** Managed-entry digest captured by the sealed execution. */
+  readonly digest: string
+  /** Trusted TypeScript module selected when the execution was sealed. */
+  readonly moduleId: string
+  /** Callable selected when the execution was sealed. */
+  readonly callable: string
+}
+
+/** Host-issued Skill alias and its private executable binding. */
 export interface RlmManagedSkillDescriptorV1 {
   readonly alias: string
   readonly title: string
   readonly callable: string
   readonly available: boolean
+  /** Non-model-facing binding consumed by the Host at dispatch time. */
+  readonly binding: RlmManagedSkillBindingV1
 }
 
 /** Model-visible result of one managed Skill catalog or invocation request. */
@@ -80,6 +96,19 @@ export interface RlmModelSelectionV1 {
 }
 
 /**
+ * Sealed default-model rule for recursively admitted children.
+ *
+ * `parent-inherit` is the Prime-compatible rule: an omitted `rlm()` model
+ * uses the exact parent selection. `allocator-default` is the explicit DSH
+ * economy adaptation and may only be used with a Scheduler-sealed child
+ * allocation.
+ */
+export type RlmChildModelPolicyV1 = 'parent-inherit' | 'allocator-default'
+
+/** Observable reason one admitted child received its native model selection. */
+export type RlmChildModelOriginV1 = 'parent-inherited' | 'allocator-default' | 'explicit' | 'legacy'
+
+/**
  * Versioned execution context inherited by every Prime RLM child.
  *
  * Model/provider/profile remain in {@link RlmModelSelectionV1}; this object
@@ -93,7 +122,7 @@ export interface RlmChildExecutionOptionsV1 {
   readonly tools?: readonly ToolSchema[]
   /** Host-issued managed Skill descriptors available to the parent. */
   readonly skills?: readonly RlmManagedSkillDescriptorV1[]
-  /** Provider-owned retry authority resolved for the parent model route. */
+  /** Scheduler-resolved retry authority sealed with the parent dispatch. */
   readonly retryPolicy?: ResolvedRetryPolicy
   /** Sealed context/capability references; raw prompts and secrets are excluded. */
   readonly capabilityContext?: Readonly<Record<string, RlmJsonValue>>
@@ -109,6 +138,11 @@ export interface RlmRuntimeCreateRequest {
   readonly model: RlmModelSelectionV1
   /** Sealed economy-first allocation used when `rlm()` omits an explicit model. */
   readonly defaultChildModel?: RlmModelSelectionV1
+  /**
+   * Sealed default-model rule. New Consumers should always set this explicitly;
+   * omission preserves the legacy interpretation of `defaultChildModel`.
+   */
+  readonly childModelPolicy?: RlmChildModelPolicyV1
   /** Sealed parent execution inputs inherited by Prime children. */
   readonly executionOptions?: RlmChildExecutionOptionsV1
   readonly limits: RlmRuntimeLimitsV1
@@ -131,6 +165,8 @@ export interface RlmChildHandleV1 {
   readonly name: string
   readonly sessionDir: string
   readonly model: RlmModelSelectionV1
+  /** Why the child received its model; persisted for traceability. */
+  readonly modelOrigin: RlmChildModelOriginV1
 }
 
 /** Final child execution data supplied asynchronously by the DSH Consumer. */
@@ -168,6 +204,7 @@ export interface RlmRuntimeHostBindings {
     readonly childSessionId: RlmRuntimeSessionId
     readonly depth: number
     readonly model: RlmModelSelectionV1
+    readonly modelOrigin: RlmChildModelOriginV1
     readonly executionOptions: RlmChildExecutionOptionsV1
   }): Promise<RlmChildExecution>
   /** Continue one root session for a persistent goal or scheduled heartbeat. */
@@ -189,6 +226,8 @@ export interface RlmRuntimeHostBindings {
       | 'compact.status' | 'compact.run'
       | 'skills.list' | 'skills.call'
     readonly params: Readonly<Record<string, RlmJsonValue>>
+    /** Sealed binding selected from the parent ExecutionPlan for skills.call. */
+    readonly sealedSkill?: RlmManagedSkillBindingV1
   }): Promise<RlmJsonValue>
 }
 
@@ -301,6 +340,8 @@ export interface RlmRuntimeSessionSnapshotV1 {
   readonly model: RlmModelSelectionV1
   /** Sealed default for recursively admitted children; never inferred inside the runtime. */
   readonly defaultChildModel?: RlmModelSelectionV1
+  /** Persisted default-model rule for recursively admitted children. */
+  readonly childModelPolicy?: RlmChildModelPolicyV1
   /** Sealed parent execution inputs inherited by recursively admitted children. */
   readonly executionOptions?: RlmChildExecutionOptionsV1
   readonly limits: RlmRuntimeLimitsV1

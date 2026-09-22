@@ -18,7 +18,7 @@ Remote Sync 协议 1.4 保留 snapshot + cursor 投影，并为 cockpit/admin �
 
 挂载 `ctx.residentOperators` 后，同一认证通道会声明 `operator.read/interrupt`。只有协议 1.4 客户端、独立 `ctx.remoteOperatorHost` Provider 已完成资格审查、本节点启用远程执行且至少一个允许仓库可物化时，才会声明 `operator.execute`、`operator.workspace.materialize` 与 `operator.artifact.read`。协议 1.3 在滚动升级期间仍可读取投影，但不能提交新的执行 DTO 或读取其产物。调用方发送不含凭据的规范仓库身份、精确干净 commit 与可选仓库相对子目录，而不是自身绝对文件路径。Host Provider 会核验本地仓库允许列表，建立不可写 Git 对象缓存和按 command 隔离且带租约的可写 checkout，并且只把这个 Server 本地 checkout 交给 Resident。仓库凭据和配置的 source 位置都不会进入线路 DTO。
 
-远端调用方可以查看经过资格审查的原生订阅 Provider，提交一条持久命令后立即断开，再按 turn id 重连、读取有界结构化进展，并中断匹配的 Session／turn。超大已结算结果返回 `sha256:` 引用；`operator.artifact.read` 会在 Server deadline 内返回最多 8 MiB 的精确不可变 JSON，使调用方能验证远端 digest、校验完整 Resident 结果，并写入自己的本地 CAS。Server 自身的 Resident daemon 仍是唯一命令回执与原生会话权威。原始产品 transcript 与本机 Unix 模型工具桥地址不会跨越该边界；在单独的认证路由桥完成前，远端 model-tool bridge 请求会明确拒绝。
+远端调用方可以查看经过资格审查的原生订阅 Provider，提交一条持久命令后立即断开，再按 turn id 重连、读取有界结构化进展，并中断匹配的 Session／turn。`operator.execute` 的上下文信封会在原生物化前重新解析；Server 返回精确的已接受回执，调用方会拒绝缺失、格式错误或不匹配的回执。超大已结算结果返回 `sha256:` 引用；`operator.artifact.read` 会在 Server deadline 内返回最多 8 MiB 的精确不可变 JSON，使调用方能验证远端 digest、校验完整 Resident 结果，并写入自己的本地 CAS。Server 自身的 Resident daemon 仍是唯一命令回执与原生会话权威。原始产品 transcript 与本机 Unix 模型工具桥地址不会跨越该边界；在单独的认证路由桥完成前，远端 model-tool bridge 请求会明确拒绝。
 
 当 `ctx.orchestrations` 暴露集群权威时，每个经过认证的 description 都可以带有有界只读投影（`nodeId`、term、role、leader id 和 `canSchedule`）。这样，配置了多个 Server 的 Frontend 可以优先连接当前持有多数租约的 Leader，而不会获得选举权威。`orchestration.cluster` 控制能力只向 admin peer 声明，承载 vote、heartbeat、逻辑副本 export 和受 term 约束的 install。生产 peer 应当通过经过认证的回环隧道调用这些控制操作；普通 Frontend bearer 不是集群凭据。
 

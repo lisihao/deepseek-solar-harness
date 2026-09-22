@@ -49,7 +49,7 @@ dsh --profile web --dump-config
 | [`core/agent-loop`](subsystems/core.md) | 实现该接口的默认驱动器 | `ctx.agentLoop` |
 | [`core/scope`](subsystems/scope.md) | 按 agent 划分作用域的注册原语 | 库，无 ctx 键 |
 | [`llm/llm`](subsystems/llm-streaming.md) | 消息与流式词汇表，以及适配器 seam | `ctx.llm` |
-| [`prompt/task-template`](../packages/prompt/task-template/README.zh.md) | 私有任务模板生命周期与确定性选择 | `ctx.taskTemplates` |
+| [`prompt/task-template`](subsystems/system-prompt.md#task-templates) | 私有任务模板生命周期与确定性选择 | `ctx.taskTemplates` |
 | [`orchestration/orchestration`](../packages/orchestration/orchestration/README.md) | 持久化 TaskGraph、审批、恢复与已封存执行计划 | `ctx.orchestrations` |
 
 <a id="events"></a>

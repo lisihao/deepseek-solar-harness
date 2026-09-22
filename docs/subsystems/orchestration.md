@@ -269,7 +269,7 @@ abstract readEvents(request: DebateEventReadRequestV1): Promise<DebateEventPageV
 abstract control(request: DebateControlRequestV1): Promise<DebateRunSnapshotV1>
 ```
 
-Source: [`packages/orchestration/debate/src/index.ts:1344`](../../packages/orchestration/debate/src/index.ts)
+Source: [`packages/orchestration/debate/src/index.ts:1389`](../../packages/orchestration/debate/src/index.ts)
 
 <a id="ctxintentcompiler--intentcompilerservice-abstract-seam"></a>
 
@@ -454,7 +454,7 @@ abstract clusterExportReplica(): Promise<OrchestrationClusterReplicaV1>
 abstract clusterInstallReplica(request: OrchestrationClusterInstallRequest): Promise<OrchestrationClusterInstallReceipt>
 ```
 
-Source: [`packages/orchestration/orchestration/src/index.ts:637`](../../packages/orchestration/orchestration/src/index.ts)
+Source: [`packages/orchestration/orchestration/src/index.ts:657`](../../packages/orchestration/orchestration/src/index.ts)
 
 <a id="ctxrlmruntime--rlmruntimeservice-abstract-seam"></a>
 
@@ -748,7 +748,7 @@ abstract reconcile(sessionId: RlmRuntimeSessionId): Promise<RlmRuntimeSessionSna
 abstract resolveIndeterminate(request: RlmIndeterminateResolutionRequest): Promise<RlmCommandReceiptSnapshotV1>
 ```
 
-Source: [`packages/orchestration/rlm-runtime/src/index.ts:617`](../../packages/orchestration/rlm-runtime/src/index.ts)
+Source: [`packages/orchestration/rlm-runtime/src/index.ts:658`](../../packages/orchestration/rlm-runtime/src/index.ts)
 
 <a id="ctxrlmstrategy--rlmstrategyservice-abstract-seam"></a>
 

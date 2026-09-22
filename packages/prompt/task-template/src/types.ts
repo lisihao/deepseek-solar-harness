@@ -252,6 +252,8 @@ export interface TaskTemplateInjectionReceipt {
   templateId?: TaskTemplateId
   /** Injected template version; absent on skip. 注入模板版本。 */
   templateVersion?: number
+  /** Injected template display name; absent on skip and legacy receipts. 注入模板名称；跳过及旧回执中缺省。 */
+  templateName?: string
   /** Content layers carried by the injection; absent on skip. 注入内容层。 */
   layers?: TaskTemplateInjectionLayers
   /** SHA-256 of the exact rendered content layers; absent on skip. 精确渲染内容的 SHA-256。 */

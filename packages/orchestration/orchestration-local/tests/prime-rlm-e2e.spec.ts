@@ -25,6 +25,7 @@ interface ResidentRequestFixture {
   readonly profile?: { readonly model: string }
   readonly prompt?: readonly { readonly type: string; readonly text?: string }[]
   readonly modelToolBridge?: ModelToolBridgeFixture
+  readonly nativeToolPolicy?: 'inherit' | 'disabled'
   readonly workspace: string
 }
 
@@ -99,12 +100,12 @@ class KeylessResidentProvider {
       protocolHash: 'offline-fixture',
       models: operatorId === 'codex'
         ? [
-          { model: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', efforts: ['medium'], defaultEffort: 'medium' },
-          { model: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol', efforts: ['high'], defaultEffort: 'high' },
+          { model: 'gpt-5.6-luna', displayName: 'GPT-5.6 Luna', supportedEfforts: ['medium'], defaultEffort: 'medium' },
+          { model: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol', supportedEfforts: ['high'], defaultEffort: 'high' },
         ]
         : [
-          { model: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', efforts: [] },
-          { model: 'claude-opus-4-6', displayName: 'Claude Opus 4.6', efforts: [] },
+          { model: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', supportedEfforts: [] },
+          { model: 'claude-opus-4-6', displayName: 'Claude Opus 4.6', supportedEfforts: [] },
         ],
       ...operatorId === 'claude-code' ? {
         quotaPools: [{
@@ -203,6 +204,7 @@ function node(
     readonly writeScopes?: readonly string[]
     readonly operatorId?: string
     readonly knowledge?: boolean
+    readonly retryPolicy?: OrchestrationNodeSpecV1['retryPolicy']
   } = {},
 ): OrchestrationNodeSpecV1 {
   return {
@@ -226,7 +228,7 @@ function node(
     readScopes: [],
     writeScopes: [...options.writeScopes ?? [`fixture/${id}`]],
     acceptance: [{ id: 'done', description: 'offline provider completes', kind: 'operator-completed' }],
-    retryPolicy: { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
+    retryPolicy: options.retryPolicy ?? { maxAttempts: 1, backoffMs: 0, retryableCodes: [] },
     ...options.operatorId === undefined ? {} : { operator: { preferredIds: [options.operatorId] } },
   }
 }
@@ -289,7 +291,7 @@ async function e2eHarness(prefix: string): Promise<{
       tags: [],
       evidenceRefs: [],
       provenance: 'prime-e2e-fixture',
-      immutableBase: true,
+      immutableBase: false,
       createdAt: seededAt,
       updatedAt: seededAt,
       digest: 'prime-e2e-seeded-skill',
@@ -376,10 +378,13 @@ describe('Prime-compatible orchestration offline E2E', () => {
       })
     }
 
+    let mutateSealedSkillAfterSnapshot = false
     fixture.resident.onExecute = async (request) => {
       if (request.modelToolBridge === undefined) return
       let result: ToolCellResult
       if (request.commandId.endsWith(':rlm:root')) {
+        const shouldMutateSealedSkill = mutateSealedSkillAfterSnapshot
+        mutateSealedSkillAfterSnapshot = false
         result = await callTypescriptRepl(request, `${request.commandId}:root-program`, [
           'const children = await Promise.all([',
           '  rlm("produce independent evidence A", { name: "worker-a" }),',
@@ -387,7 +392,10 @@ describe('Prime-compatible orchestration offline E2E', () => {
           ']);',
           'const skillCatalog = await skills.list();',
           'const managedSkill = skillCatalog.result.find(skill => skill.alias === "summarize-evidence");',
-          'const skillResult = await skills.call("summarize-evidence", { text: "bounded family evidence" });',
+          ...(shouldMutateSealedSkill ? [
+            'await harness.update({ scope: "global", entryId: "summarize-evidence", expectedEntryVersion: 1, reference: { type: "typescript", import: "prime-e2e-replacement-skill-provider", callable: "summarizeReplacement" }, provenance: "prime-e2e-live-override" });',
+          ] : []),
+          'const skillResult = managedSkill === undefined ? null : await skills.call("summarize-evidence", { text: "bounded family evidence" });',
           'const proposal = await harness.planRefinement({',
           '  trigger: "prime-e2e",',
           '  observation: "family evidence should be retained at a real turn boundary",',
@@ -405,7 +413,7 @@ describe('Prime-compatible orchestration offline E2E', () => {
           'const compactNonce = "namespace-survives-native-compact";',
           'const nativeCompact = await compact.run();',
           'await goal.create("finish after both family messages arrive", { continuationBudget: 2 });',
-          '({ childCount: children.length, refinementState: queued.state, managedSkill: managedSkill.alias, skillCatalog, skillResult, nativeCompact })',
+          '({ childCount: children.length, refinementState: queued.state, managedSkill: managedSkill?.alias ?? null, skillCatalog, skillResult, nativeCompact })',
         ].join('\n'))
       } else if (request.commandId.includes(':goal-continuation:')) {
         result = await callTypescriptRepl(request, `goal:${request.commandId}`, [
@@ -426,12 +434,14 @@ describe('Prime-compatible orchestration offline E2E', () => {
 
     const explicitCompiled = await fixture.client.compile({
       intent: { request: 'Execute a simple task through explicitly selected RLM.' },
-      admission: admission({ sourceSessionId: 'explicit-rlm', rlm: 'enabled', continualHarness: 'session' }),
+      admission: admission({ sourceSessionId: 'explicit-rlm', rlm: 'enabled', continualHarness: 'global' }),
       graph: taskGraph(fixture.workspace, [node('explicit-rlm', 'Finish the bounded root goal.', {
         role: 'implementation',
         knowledge: true,
+        retryPolicy: { maxAttempts: 3, backoffMs: 25, retryableCodes: ['TIMEOUT'] },
       })]),
     })
+    mutateSealedSkillAfterSnapshot = true
     const explicitRun = await fixture.client.start({ commandId: `start:${explicitCompiled.compilationId}`, compilationId: explicitCompiled.compilationId })
     const explicitComplete = await eventually(
       () => fixture.client.inspect(String(explicitRun.runId)),
@@ -442,14 +452,27 @@ describe('Prime-compatible orchestration offline E2E', () => {
     expect(explicitEvents.events.find(event => event.type === 'rlm.resolved')?.data).toMatchObject({
       enabled: true,
       fidelity: 'prime-strict',
+      childModelPolicy: 'parent-inherit',
+      defaultChildModelOrigin: 'parent-inherited',
+      inheritsParentModelByDefault: true,
     })
     expect(explicitEvents.events.some(event => event.type === 'rlm.worker.allocated')).toBe(false)
     const started = explicitEvents.events.find(event => event.type === 'rlm.execution.started')?.data
     const childDispatches = explicitEvents.events.filter(event => event.type === 'rlm.child.dispatched')
     expect(childDispatches).toHaveLength(2)
     expect(childDispatches.every(event => (
-      event.data.operatorId === started?.rootOperatorId && event.data.model === started?.rootModel
+      event.data.operatorId === started?.rootOperatorId
+      && event.data.model === started?.rootModel
+      && event.data.modelOrigin === 'parent-inherited'
+      && event.data.inheritsParentModel === true
     ))).toBe(true)
+    for (const childDispatch of childDispatches) {
+      expect(childDispatch.data.executionOptions).toMatchObject({
+        toolNames: ['typescript_repl'],
+        skillAliases: ['summarize-evidence'],
+        retryPolicy: { mode: 'normal', maxRetries: 2, retryableCodes: ['TIMEOUT'], initialDelayMs: 25 },
+      })
+    }
     expect(explicitEvents.events.filter(event => event.type === 'rlm.child.settled')).toHaveLength(2)
     expect(explicitEvents.events.filter(event => event.type === 'rlm.message.continuation.settled')).toHaveLength(2)
     expect(explicitEvents.events).toContainEqual(expect.objectContaining({ type: 'rlm.goal.continuation.settled' }))
@@ -459,6 +482,10 @@ describe('Prime-compatible orchestration offline E2E', () => {
     const rootRequest = fixture.resident.requests.find(request => request.commandId.endsWith(':rlm:root'))
     if (rootRequest === undefined) throw new Error('explicit RLM root request was not dispatched')
     expect(rootRequest.modelToolBridge?.tools.map(tool => tool.name)).toEqual(['typescript_repl'])
+    expect(rootRequest.nativeToolPolicy).toBe('disabled')
+    expect(fixture.resident.requests
+      .filter(request => request.modelToolBridge !== undefined)
+      .every(request => request.nativeToolPolicy === 'disabled')).toBe(true)
     const rootCell = fixture.resident.cellResults.get(rootRequest.commandId)
     expect(rootCell?.value).toMatchObject({
       childCount: 2,
@@ -509,8 +536,51 @@ describe('Prime-compatible orchestration offline E2E', () => {
       enabled: true,
       fidelity: 'dsh-optimized',
       reason: 'auto-explicit-decomposition',
+      childModelPolicy: 'allocator-default',
+      defaultChildModelOrigin: 'allocator-default',
+      inheritsParentModelByDefault: false,
+    })
+    expect(autoEvents.events.find(event => event.type === 'rlm.worker.allocated')?.data).toMatchObject({
+      childModelPolicy: 'allocator-default',
+      defaultChildModelOrigin: 'allocator-default',
+      inheritsParentModelByDefault: false,
     })
   }, 30_000)
+
+  it('fails an explicit incompatible child thinking request before native child dispatch', async () => {
+    const fixture = await e2eHarness('dsh-p-ep-')
+    fixture.resident.onExecute = async (request) => {
+      if (request.modelToolBridge === undefined) return
+      const result = await callTypescriptRepl(request, `${request.commandId}:explicit-profile`, [
+        'let rejection: unknown;',
+        'try {',
+        '  await rlm("use an incompatible effort", {',
+        '    name: "incompatible-thinking", model: "codex/gpt-5.6-luna", thinking: "high"',
+        '  });',
+        '} catch (error) { rejection = error; }',
+        '({',
+        '  code: (rejection as { code?: string } | undefined)?.code,',
+        '  message: rejection instanceof Error ? rejection.message : String(rejection),',
+        '})',
+      ].join('\n'))
+      fixture.resident.cellResults.set(request.commandId, result)
+    }
+    const compiled = await fixture.client.compile({
+      intent: { request: 'Reject incompatible explicit RLM child thinking.' },
+      admission: admission({ sourceSessionId: 'explicit-profile', rlm: 'enabled' }),
+      graph: taskGraph(fixture.workspace, [node('explicit-profile', 'Validate child selection.', { operatorId: 'codex' })]),
+    })
+    const run = await fixture.client.start({ commandId: `start:${compiled.compilationId}`, compilationId: compiled.compilationId })
+    await eventually(() => fixture.client.inspect(String(run.runId)), value => value.state === 'completed')
+    const rootRequest = fixture.resident.requests.find(request => request.commandId.endsWith(':rlm:root'))
+    if (rootRequest === undefined) throw new Error('explicit profile root was not dispatched')
+    const result = fixture.resident.cellResults.get(rootRequest.commandId)?.value
+    expect(result).toMatchObject({ code: 'ORCHESTRATION_UNAVAILABLE' })
+    expect(result).toHaveProperty('message', expect.stringContaining(
+      'explicit RLM child thinking is unsupported by codex/gpt-5.6-luna: high',
+    ))
+    expect(fixture.resident.requests.filter(request => request.commandId.includes(':rlm:rlm-child-'))).toHaveLength(0)
+  })
 
   it('runs independent TaskGraph nodes in parallel, then serializes a shared scope without deadlock', async () => {
     const fixture = await e2eHarness('dsh-prime-dag-')

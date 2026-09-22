@@ -34,6 +34,7 @@ System prompt assembly registry. Plugins contribute ordered sections, tool schem
 - `PromptSection` — `{ name, order, text, interpolate?, complete? }`. Sections are concatenated in ascending `order`. Order bands: `-100` is the harness identity, `0` the deployment persona, tool guidance uses `100–199`. `interpolate` defaults to true; generated text that documents another template language sets it to false. One effective `complete` section suppresses all other sections after cooperative assembly.
 - `PromptAssembly` — `{ sections: AssembledSection[], tools: ToolSchema[], variables: Record<string, string | undefined> }`. Section texts arrive resolved but not yet interpolated; `variables` holds every registered variable resolved against the context. Tool schemas are part of the assembly by design: "what the model is told it can do" is one coherent thing, even though adapters transmit schemas as a separate wire field.
 - `OperatorContextEnvelopeV1` — an immutable, digest-bound handoff containing exact system text, current task blocks, named runtime contexts, and reconstructable provenance. `buildOperatorContextEnvelope` creates it; `parseOperatorContextEnvelope` validates network/process input; native and text materializers preserve or explicitly downgrade roles; every receiving physical operator returns an acceptance or rejection receipt.
+- `currentRuntimeContextSnapshot(messages)` — reads the newest system-prompt runtime snapshot from a frozen request history. A later clearance marker returns `undefined` and never revives an earlier snapshot.
 - `renderPrompt(assembly)` — interpolates `{{variable}}` references in sections whose `interpolate` field is not false, drops empty sections, and joins with blank lines. STRICT: an unknown reference (`Object.hasOwn` lookup — prototype names like `{{constructor}}` are unknown), a registered-but-valueless reference, a malformed complete `{{…}}` group, or a `{{` that opens no complete group while a `}}` still follows (`{{{model}}}`) throws — fail loud beats shipping a malformed prompt. A lone `{{` with no `}}` anywhere after it passes through verbatim; substituted values are never re-scanned. A section with `interpolate: false` passes through exactly as contributed.
 
 Merge-extensible: plugins can declare extra fields on `PromptAssembly` and `AssembleContext` via declaration merging.
@@ -67,9 +68,7 @@ Identity is a fixed per-request cost when enabled. Persona and plugin text are r
 
 #### KV Cache effect
 
-Prefix-stable while identity, persona, variables, section text, and order render identically. Any change may invalidate reuse from the first changed system-prompt token.
-
-Physical-operator envelopes contain only the current task and effective context. They do not copy prior conversation history into a child execution.
+Prefix-stable while identity, persona, variables, section text, and order render identically. Any change may invalidate reuse from the first changed system-prompt token. Physical-operator envelopes contain only the current task and effective context; they do not copy prior conversation history into a child execution.
 
 ### Tool schemas
 

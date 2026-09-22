@@ -2,7 +2,7 @@
 
 English | [中文](system-prompt.zh.md)
 
-The [system-prompt package](../../packages/core/system-prompt) owns the data exchanged between prompt contributors and one assembly call. The package [README](../../packages/core/system-prompt/README.md) documents registration, ordering, scoping, and rendering behavior; this page records the exact cross-package types that plugins implement or pass.
+The [system-prompt package](../../packages/core/system-prompt) owns the data exchanged between prompt contributors and one assembly call. The package [README](../../packages/core/system-prompt/README.md) documents registration, ordering, scoping, and rendering behavior; this page records the exact cross-package types that plugins implement or pass, plus the task-template and physical-operator inputs built from assembled prompt state.
 
 Source: [`packages/core/system-prompt/src/index.ts`](../../packages/core/system-prompt/src/index.ts).
 
@@ -89,9 +89,15 @@ interface PromptContext {
 }
 ```
 
+## Task templates
+
+`ctx.taskTemplates` stores versioned reusable methods and separately mutable personal preferences or memory under the private DSH home. Its selector filters enabled templates against complete task attributes and orders matches deterministically by specificity, rank, name, and branded id. An explicit id wins only when it names an enabled template; no match produces an attributable skip rather than generic fallback text. Selection receipts pin the rendered layers, variables, candidate order, rationale, and SHA-256 content identity.
+
+The direct Agent Consumer appends one JSON-framed user-role instruction per logical user task and records the same receipt in `task-template/decided`. Later steps reuse the retained message. If compaction shadows it during the same turn, the Consumer restores the exact receipt once; a new turn, tool subtask, Debate role, or TaskGraph node selects independently and cannot revive an unrelated parent or earlier-task template. The [task-template package](../../packages/prompt/task-template/README.md) documents storage and selection.
+
 ## Physical-operator context envelope
 
-`OperatorContextEnvelopeV1` freezes the exact assembled system text, current task blocks, effective named runtime contexts, and reconstructable Session, tool-call, or TaskGraph provenance before a physical operator handoff. Its SHA-256 digest excludes provenance and identifies only model-visible fields. Native Consumers preserve the system role and append a JSON-framed context block before the exact task; text-only Consumers receive one canonical JSON document with explicit roles. Every Consumer returns a digest-bound accepted or rejected receipt, and the physical-operator Service rejects missing, mismatched, or rejected receipts instead of allowing silent context loss. The parser reconstructs and re-digests envelopes received across process or network boundaries before materialization.
+`OperatorContextEnvelopeV1` freezes the exact assembled system text, current task blocks, effective named runtime contexts, and reconstructable Session, tool-call, or TaskGraph provenance before a physical operator handoff. Its SHA-256 digest excludes provenance and identifies only model-visible fields. Native Consumers preserve the system role and append a JSON-framed context block before the exact task; text-only Consumers receive one canonical JSON document with explicit roles. Every Consumer returns a digest-bound accepted or rejected receipt, and the physical-operator Service rejects missing, mismatched, or rejected receipts instead of allowing silent context loss. The parser reconstructs and re-digests envelopes received across process or network boundaries before materialization. The [physical-operator package](../../packages/physical-operator/physical-operator/README.md) documents admission failures and compatibility.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -165,7 +171,100 @@ variable(name: string, provider: (context: AssembleContext) => string | undefine
 async assemble(context: AssembleContext = {}): Promise<PromptAssembly>
 ```
 
-Source: [`packages/core/system-prompt/src/index.ts:347`](../../packages/core/system-prompt/src/index.ts)
+Source: [`packages/core/system-prompt/src/index.ts:406`](../../packages/core/system-prompt/src/index.ts)
+
+<a id="ctxtasktemplates--tasktemplateservice-abstract-seam"></a>
+
+### `ctx.taskTemplates` — `TaskTemplateService` (abstract seam)
+
+Abstract task-template service. Writes are serialized: each mutation derives the next document from the committed one, persists through the provider, then commits and emits `task-template/updated` while the service remains live; disposal drains an active commit without publishing from a service Cordis has already removed. A validation failure rejects before anything is persisted. Reads are synchronous over the committed, deeply frozen document.
+
+```ts cordis-catalog
+/**
+ * Every stored template in insertion order, enabled or not.
+ * 全部模板（含停用），按插入顺序。
+ * @returns the committed template records (frozen).
+ */
+list(): readonly TaskTemplate[]
+
+/**
+ * Read one template by id.
+ * @param id - the template to read.
+ * @returns the committed record (frozen), or `undefined` when absent.
+ */
+get(id: TaskTemplateId): TaskTemplate | undefined
+
+/**
+ * Complete method-layer version list of one template, ascending, current
+ * revision last.
+ * 模板方法层的完整版本列表，升序，最后一项为当前版本。
+ * @param id - the template whose versions to read; unknown ids fail loud.
+ * @returns every revision, ascending by version.
+ */
+versions(id: TaskTemplateId): readonly TaskTemplateRevision[]
+
+/**
+ * Read one template's personal layer.
+ * @param id - the template whose personal layer to read; unknown ids fail loud.
+ * @returns the stored personalization (frozen), or `undefined` when none is stored.
+ */
+personalization(id: TaskTemplateId): TaskTemplatePersonalization | undefined
+
+/**
+ * Create one template at version 1, enabled. The draft's semantic
+ * constraints (non-blank name/method, well-formed match lists, finite rank,
+ * unique id) are validated before anything persists.
+ * @param draft - the new template's id, name, match criteria, method, and rank.
+ * @returns the committed template record.
+ */
+async create(draft: TaskTemplateDraft): Promise<TaskTemplate>
+
+/**
+ * Edit one template's method layer. The previous revision is archived into
+ * `history` and the version bumps by one; absent patch fields keep their
+ * current value. An empty patch is rejected — versioning records changes,
+ * not intentions.
+ * @param id - the template to edit; unknown ids fail loud.
+ * @param patch - the fields to change.
+ * @returns the committed template record at its new version.
+ */
+async update(id: TaskTemplateId, patch: TaskTemplatePatch): Promise<TaskTemplate>
+
+/**
+ * Enable or disable one template. Enablement is activation state, not
+ * content: the version does not bump, and a no-change call neither persists
+ * nor emits.
+ * @param id - the template to toggle; unknown ids fail loud.
+ * @param enabled - whether the template participates in selection.
+ */
+async setEnabled(id: TaskTemplateId, enabled: boolean): Promise<void>
+
+/**
+ * Delete one template and its personal layer.
+ * @param id - the template to delete; unknown ids fail loud.
+ */
+async delete(id: TaskTemplateId): Promise<void>
+
+/**
+ * Replace or clear one template's personal layer. The personal layer stays
+ * separate from the reusable method layer: this never bumps the template
+ * version. Clearing an already-absent layer neither persists nor emits.
+ * @param id - the template to personalize; unknown ids fail loud.
+ * @param personalization - the complete next personal layer, or `undefined` to clear it.
+ */
+async personalize(id: TaskTemplateId, personalization?: TaskTemplatePersonalization): Promise<void>
+
+/**
+ * Deterministically select the template to inject for one task; see
+ * `selectTaskTemplate` for the filtering, ordering, override, and
+ * no-match/no-injection semantics. Synchronous over the committed document.
+ * @param request - the task's attributes and optional explicit override.
+ * @returns the selection outcome with its loggable receipt.
+ */
+select(request: TaskTemplateSelectionRequest): TaskTemplateSelection
+```
+
+Source: [`packages/prompt/task-template/src/service.ts:83`](../../packages/prompt/task-template/src/service.ts)
 
 <a id="system-prompt-events"></a>
 
@@ -195,7 +294,7 @@ Expert waterfall over the assembled sections, contexts, tools, and variables. Sc
 
 Types: [Scoped](scope.md)
 
-Source: [`packages/core/system-prompt/src/index.ts:31`](../../packages/core/system-prompt/src/index.ts)
+Source: [`packages/core/system-prompt/src/index.ts:59`](../../packages/core/system-prompt/src/index.ts)
 
 <a id="system-promptchange--emit"></a>
 
@@ -212,5 +311,30 @@ Emitted when any prompt provider changes. This registry notification is unfilter
 'system-prompt/change'(): void
 ```
 
-Source: [`packages/core/system-prompt/src/index.ts:37`](../../packages/core/system-prompt/src/index.ts)
+Source: [`packages/core/system-prompt/src/index.ts:65`](../../packages/core/system-prompt/src/index.ts)
+
+<a id="task-template-events"></a>
+
+### `task-template/*` events
+
+<a id="task-templateupdated--emit"></a>
+
+#### `task-template/updated` — emit
+
+Committed change to the template store, emitted after the provider persisted it. A listener throw propagates to the mutation caller.
+
+```ts cordis-catalog
+/**
+ * Committed change to the template store, emitted after the provider
+ * persisted it. A listener throw propagates to the mutation caller.
+ * @param id - the template the change applies to.
+ * @param kind - what changed; `delete` means the template no longer exists.
+ * @param version - the template's method-layer version after the change
+ * (for `delete`, the version the removed template last carried).
+ * @mode emit
+ */
+'task-template/updated'(id: TaskTemplateId, kind: TaskTemplateChangeKind, version: number): void
+```
+
+Source: [`packages/prompt/task-template/src/types.ts:334`](../../packages/prompt/task-template/src/types.ts)
 <!-- END GENERATED cordis-surface -->

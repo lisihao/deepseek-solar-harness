@@ -14,6 +14,10 @@ import BrowserRuntime, {
 } from '@deepseek-ai/dsh-browser'
 import PhysicalOperatorRuntime, { PhysicalOperatorError } from '@deepseek-ai/dsh-physical-operator'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import {
+  buildOperatorContextEnvelope,
+  renderOperatorContextEnvelopeText,
+} from '@deepseek-ai/dsh-system-prompt'
 import * as adapter from '../src/index.ts'
 
 const CAPABILITIES: readonly BrowserCapabilityV1[] = [
@@ -156,6 +160,28 @@ describe('ChatGPT Web physical operator', () => {
 
     await plugin.dispose()
     expect(ctx.physicalOperators.list()).toEqual([])
+    await ctx.fiber.dispose()
+  })
+
+  it('submits every sealed context field through the text-only ChatGPT Web transport', async () => {
+    const { ctx, plugin, provider } = await setup()
+    const envelope = buildOperatorContextEnvelope({
+      systemText: 'sealed system instructions',
+      task: [{ type: 'text', text: 'sealed current task' }],
+      contexts: [{ name: 'memory', text: 'sealed preference' }],
+      source: { kind: 'tool', requestHeaderEventSeq: 1, toolCallId: 'fixture-tool' },
+    })
+
+    const run = await ctx.physicalOperators.start('chatgpt-web', { ...request(), contextEnvelope: envelope })
+    await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' })
+    expect(run.contextReceipt).toMatchObject({
+      digest: envelope.digest, outcome: 'accepted', format: 'text', roleFidelity: 'text-downgrade',
+    })
+    expect(serializedProgramRequest(provider.programs[0]!)).toMatchObject({
+      prompt: renderOperatorContextEnvelopeText(envelope),
+    })
+
+    await plugin.dispose()
     await ctx.fiber.dispose()
   })
 

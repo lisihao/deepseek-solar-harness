@@ -20,6 +20,7 @@ import type {
   TaskPriority,
   TaskRiskLevel,
   TaskTemplate,
+  TaskTemplateChangeKind,
   TaskTemplateId,
   TaskTemplateMatch,
   TaskTemplatePersonalization,
@@ -370,4 +371,65 @@ export function parseStoreDocument(text: string, source: string): TaskTemplateSt
  */
 export function renderStoreDocument(document: TaskTemplateStoreDocument): string {
   return `${JSON.stringify(document, null, 2)}\n`
+}
+
+/** One template's change kind and the version to report it at. */
+export interface TaskTemplateStoreDiff {
+  id: TaskTemplateId
+  kind: TaskTemplateChangeKind
+  version: number
+}
+
+/**
+ * Compare two store documents and report, per affected template, the same
+ * `(id, kind, version)` triple {@link TaskTemplateService.write} would have
+ * emitted had the change happened through this process's own lifecycle
+ * methods instead of being observed from storage. A template present in both
+ * documents but otherwise unchanged (same version, enablement, and personal
+ * layer) contributes nothing: a provider reload with no net effect must not
+ * re-announce every template.
+ *
+ * Precedence per template mirrors the single-writer lifecycle, which never
+ * changes more than one of these facts in one commit: a version bump
+ * (`update`) is reported over an enablement flip (`enable`/`disable`) is
+ * reported over a personalization-only change (`personalize`), so a
+ * multi-field external edit still reports the one most-significant kind
+ * rather than silently dropping the others.
+ * @param before - the previously committed document.
+ * @param after - the newly observed document.
+ * @returns the diffs to emit, in `after.templates` order, then removed ids.
+ */
+export function diffStoreDocuments(
+  before: TaskTemplateStoreDocument,
+  after: TaskTemplateStoreDocument,
+): TaskTemplateStoreDiff[] {
+  const beforeById = new Map(before.templates.map(template => [template.id, template]))
+  const afterIds = new Set(after.templates.map(template => template.id))
+  const diffs: TaskTemplateStoreDiff[] = []
+  for (const template of after.templates) {
+    const previous = beforeById.get(template.id)
+    if (previous === undefined) {
+      diffs.push({ id: template.id, kind: 'create', version: template.version })
+      continue
+    }
+    if (previous.version !== template.version) {
+      diffs.push({ id: template.id, kind: 'update', version: template.version })
+      continue
+    }
+    if (previous.enabled !== template.enabled) {
+      diffs.push({ id: template.id, kind: template.enabled ? 'enable' : 'disable', version: template.version })
+      continue
+    }
+    const previousPersonalization = before.personalization[template.id]
+    const nextPersonalization = after.personalization[template.id]
+    if (JSON.stringify(previousPersonalization) !== JSON.stringify(nextPersonalization)) {
+      diffs.push({ id: template.id, kind: 'personalize', version: template.version })
+    }
+  }
+  for (const template of before.templates) {
+    if (!afterIds.has(template.id)) {
+      diffs.push({ id: template.id, kind: 'delete', version: template.version })
+    }
+  }
+  return diffs
 }

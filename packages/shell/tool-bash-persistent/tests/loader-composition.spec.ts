@@ -66,7 +66,7 @@ function text(result: { content: { type: string; text?: string }[] }): string {
 const suite = process.platform === 'linux' || process.platform === 'darwin' ? describe : describe.skip
 
 suite('persistent Bash through a real cordis.yml Loader composition', () => {
-  it('preserves cwd and environment across calls', async () => {
+  it('preserves cwd and environment across calls without waiting for idle fallback', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-persistent-bash-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [
@@ -83,9 +83,9 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
       "- name: '@deepseek-ai/dsh-terminal-bash'",
       '  config:',
       '    pollIntervalMs: 10',
-      '    exactProbeAfterMs: 20',
-      '    idleSilenceMs: 100',
-      '    handoffGraceMs: 100',
+      '    exactProbeAfterMs: 30000',
+      '    idleSilenceMs: 1000',
+      '    handoffGraceMs: 500',
       '    scrollbackLines: 20000',
       '    timeoutMs: 2000',
       '    disposeGraceMs: 500',
@@ -132,7 +132,9 @@ suite('persistent Bash through a real cordis.yml Loader composition', () => {
 
     expect(context.tools.schemas().map(schema => schema.name)).toEqual(['bash'])
     await execute('state', 'export KEEP=loader; mkdir -p nested; cd nested')
+    const startedAt = Date.now()
     const observed = text(await execute('observe', 'printf "cwd=%s keep=%s\\n" "$PWD" "$KEEP"'))
+    expect(Date.now() - startedAt).toBeLessThan(500)
     expect(observed).toContain(`cwd=${join(root, 'nested')} keep=loader`)
     expect(observed).not.toContain('DSH_PERSISTENT_BASH')
 

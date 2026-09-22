@@ -22,6 +22,7 @@ import {
   RESIDENT_STATE_SCHEMA_VERSION,
   type ResidentEventPage,
   type ResidentCompactResult,
+  type NativeContext,
   type ResidentProviderStatus,
   type ResidentSessionSnapshot,
   type ResidentTurnSnapshot,
@@ -326,6 +327,7 @@ export class ResidentDaemonClient {
     taskLabel?: string
     prompt: readonly unknown[]
     systemPrompt?: string
+    nativeContext?: NativeContext
     profile?: PhysicalOperatorExecutionPreference
     modelToolBridge?: PhysicalOperatorModelToolBridgeV1
     nativeToolPolicy?: PhysicalOperatorNativeToolPolicy
@@ -349,6 +351,7 @@ export class ResidentDaemonClient {
       ...request.taskLabel === undefined ? {} : { task_label: request.taskLabel },
       prompt: request.prompt,
       ...request.systemPrompt === undefined ? {} : { system_prompt: request.systemPrompt },
+      ...request.nativeContext === undefined ? {} : { native_context: request.nativeContext },
       ...request.profile === undefined ? {} : { profile: request.profile },
       ...request.modelToolBridge === undefined ? {} : { model_tool_bridge: request.modelToolBridge },
       native_tool_policy: request.nativeToolPolicy ?? 'inherit',

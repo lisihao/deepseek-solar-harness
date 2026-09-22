@@ -182,6 +182,22 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         { cause: error },
       )
     }
+    if (request.contextEnvelope !== undefined) {
+      const receipt = accepted.contextReceipt
+      if (receipt === undefined) {
+        throw new PhysicalOperatorError(
+          `remote physical operator did not acknowledge context envelope ${request.contextEnvelope.digest}`,
+          'CONTEXT_ENVELOPE_DROPPED',
+        )
+      }
+      if (receipt.digest !== request.contextEnvelope.digest
+        || receipt.receiver !== `remote-resident:${this.provider.operatorId}`) {
+        throw new PhysicalOperatorError(
+          `remote physical operator returned an invalid context receipt for ${request.contextEnvelope.digest}`,
+          'CONTEXT_ENVELOPE_INVALID',
+        )
+      }
+    }
     return this.observe(accepted, request.signal)
   }
 

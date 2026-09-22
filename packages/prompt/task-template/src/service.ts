@@ -20,6 +20,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { selectTaskTemplate } from './selection.ts'
 import {
   TaskTemplateStoreError,
+  diffStoreDocuments,
   emptyStoreDocument,
   validateMatch,
   validateMethod,
@@ -72,10 +73,12 @@ interface WriteOutcome<T> {
 
 /**
  * Abstract task-template service. Writes are serialized: each mutation
- * derives the next document from the committed one, persists through the
- * provider, then commits and emits `task-template/updated`; a validation
- * failure rejects before anything is persisted. Reads are synchronous over
- * the committed, deeply frozen document.
+   * derives the next document from the committed one, persists through the
+   * provider, then commits and emits `task-template/updated` while the service
+   * remains live; disposal drains an active commit without publishing from a
+   * service Cordis has already removed. A validation failure rejects before
+   * anything is persisted. Reads are synchronous over the committed, deeply
+   * frozen document.
  */
 export abstract class TaskTemplateService extends Service {
   /** Committed, deeply frozen store document. */
@@ -109,6 +112,71 @@ export abstract class TaskTemplateService extends Service {
   }
 
   /**
+   * Provider hook: adopt a complete document this process did not itself
+   * write — an external process (another CLI invocation, the Desktop UI's own
+   * process) edited the backing store and the provider observed the change.
+   * `read` runs queued behind every earlier write and reload, so it always
+   * observes storage strictly after any write already ahead of it in the
+   * queue committed, and an external edit discovered mid-write can never be
+   * superseded by a commit still using the document it obsoletes. A read
+   * that finds nothing changed (`undefined`) commits and emits nothing.
+   * Quietly a no-op once the service is disposed — a watcher event racing
+   * teardown is not a write failure.
+   *
+   * Emits `task-template/updated` for every template a comparison against the
+   * previously committed document shows changed, so an already-running
+   * Consumer (a long-lived daemon holding this same service instance) picks
+   * up the new content on its next {@link select} without restarting.
+   *
+   * A provider re-reading storage from INSIDE its own queued {@link persist}
+   * (to fold in a concurrent external edit before committing) adopts the
+   * result directly instead of calling this method, which would otherwise
+   * queue behind — and deadlock waiting for — that same in-flight write.
+   * @param read - reads and validates the externally observed document;
+   * returns `undefined` when storage is unchanged since the caller's own last
+   * observation.
+   */
+  protected refresh(read: () => Promise<TaskTemplateStoreDocument | undefined>): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.isStopped()) return
+      const document = await read()
+      if (document === undefined || this.isStopped()) return
+      this.commitExternal(document)
+    })
+  }
+
+  /**
+   * Adopt a complete externally observed document from INSIDE a provider's
+   * own queued {@link persist} — folding in a concurrent external edit before
+   * committing this write — and emit its diff. Callers already run inside the
+   * one operation queue, so this commits immediately instead of queuing
+   * behind, and thereby deadlocking on, themselves.
+   * @param document - the complete externally observed document, already
+   * validated by the provider's own trust boundary.
+   */
+  protected adoptWithinWrite(document: TaskTemplateStoreDocument): void {
+    this.commitExternal(document)
+  }
+
+  /** Publish a complete externally observed document and emit its diff. */
+  private commitExternal(document: TaskTemplateStoreDocument): void {
+    const before = this.document
+    const next = deepFreeze(document)
+    this.document = next
+    if (this.isStopped()) return
+    for (const change of diffStoreDocuments(before, next)) {
+      this.ctx.emit('task-template/updated', change.id, change.kind, change.version)
+    }
+  }
+
+  /** Queue one settled operation behind every earlier write or refresh. */
+  private enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
+    const run = this.operations.then(operation)
+    this.operations = run.then(() => undefined, () => undefined)
+    return run
+  }
+
+  /**
    * Read the provider's current store document, validated at the provider's
    * own trust boundary; absent storage returns the empty document.
    * @returns the detached, validated store document.
@@ -116,10 +184,34 @@ export abstract class TaskTemplateService extends Service {
   protected abstract load(): Promise<TaskTemplateStoreDocument>
 
   /**
-   * Durably store the complete next document.
+   * Durably store the complete next document, derived from the document
+   * observed by the most recent {@link reconcileBeforeWrite} (or the
+   * committed document, when that hook is the default no-op). A provider
+   * capable of cross-process writes persists under its own exclusive lock and
+   * returns `'stale'` instead of writing when it discovers, at the last
+   * possible moment inside that lock, a change {@link reconcileBeforeWrite}
+   * did not yet see — {@link write} then re-derives `document` from the
+   * refreshed state and calls this method again, so the eventual write is
+   * always built from a base that is truly still current, and a concurrent
+   * external writer's change is folded in rather than silently reverted.
    * @param document - the complete document to persist.
+   * @returns `'committed'` once persisted, or `'stale'` to request one retry.
    */
-  protected abstract persist(document: TaskTemplateStoreDocument): Promise<void>
+  protected abstract persist(document: TaskTemplateStoreDocument): Promise<'committed' | 'stale'>
+
+  /**
+   * Provider hook: fold in any change to storage this process has not yet
+   * observed, immediately before a queued write derives its next document
+   * from the committed one. A provider capable of cross-process writes
+   * (a file-backed store another process may also write) overrides this to
+   * re-read and {@link adoptWithinWrite} the freshest document, so the common
+   * case (no concurrent writer, or one that settled before this call) never
+   * pays for a `persist` retry. The default is a no-op, correct for a
+   * provider with no external writer to reconcile against.
+   */
+  protected reconcileBeforeWrite(): Promise<void> {
+    return Promise.resolve()
+  }
 
   /**
    * Current instant stamped on created and edited revisions; overridable so
@@ -130,25 +222,36 @@ export abstract class TaskTemplateService extends Service {
     return new Date().toISOString()
   }
 
+  /** Retries a `persist` that reports `'stale'` before giving up as a write failure. */
+  private static readonly MAX_STALE_RETRIES = 4
+
   /** Queue one mutation; `apply` runs against the committed document at the front of the queue. */
   private write<T>(apply: (next: TaskTemplateStoreDocument) => WriteOutcome<T> | undefined): Promise<T | undefined> {
     if (this.isStopped()) {
       throw new Error('task-template service is disposed: the store cannot be written')
     }
-    const run = this.operations.then(async () => {
+    return this.enqueue(async () => {
       if (this.isStopped()) {
         throw new Error('task-template service was disposed before the queued write ran')
       }
-      const next = structuredClone(this.document)
-      const outcome = apply(next)
-      if (outcome === undefined) return undefined
-      await this.persist(next)
-      this.document = deepFreeze(next)
-      this.ctx.emit('task-template/updated', outcome.id, outcome.kind, outcome.version)
-      return outcome.value
+      for (let attempt = 0; attempt <= TaskTemplateService.MAX_STALE_RETRIES; attempt += 1) {
+        await this.reconcileBeforeWrite()
+        const next = structuredClone(this.document)
+        const outcome = apply(next)
+        if (outcome === undefined) return undefined
+        const result = await this.persist(next)
+        if (result === 'stale') continue
+        this.document = deepFreeze(next)
+        if (!this.isStopped()) {
+          this.ctx.emit('task-template/updated', outcome.id, outcome.kind, outcome.version)
+        }
+        return outcome.value
+      }
+      throw new Error(
+        `task-template write could not commit after ${String(TaskTemplateService.MAX_STALE_RETRIES)} retries `
+        + 'against a repeatedly concurrently written store',
+      )
     })
-    this.operations = run.then(() => undefined, () => undefined)
-    return run
   }
 
   /* v8 ignore next 4 -- guards writes that by construction never skip */

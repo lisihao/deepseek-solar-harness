@@ -25,7 +25,7 @@ website/     VitePress projection of selected bilingual docs/ sources
 
 ## Source and generated runtime
 
-- Physical source and worktrees live only under `/Users/sihaoli/Projects`; `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness` is a compatibility symlink, never worktree or build storage.
+- MacBook is the sole DSH development host; edits, checks, builds, and commits run locally. Physical source and worktrees live only under `/Users/sihaoli/Projects`; `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness` is a compatibility symlink, never worktree or build storage.
 - `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness` is generated runtime. Never edit, commit, or reverse-copy it. Deploy only a verified source commit; on drift, redeploy from source.
 - The `com.lisihao.deepseek-solar-harness` LaunchAgents own runtime and tunnels. Acceptance verifies the recorded commit, process, port `3081`, forwards, GenesisPod, and ThunderOMLX; a loaded agent alone is insufficient.
 

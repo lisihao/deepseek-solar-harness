@@ -29,10 +29,10 @@ export class MemoryTaskTemplates extends TaskTemplateService {
     return Promise.resolve(structuredClone(this.doc))
   }
 
-  protected persist(document: TaskTemplateStoreDocument): Promise<void> {
+  protected persist(document: TaskTemplateStoreDocument): Promise<'committed' | 'stale'> {
     this.persisted.push(structuredClone(document))
     this.doc = structuredClone(document)
-    return Promise.resolve()
+    return Promise.resolve('committed')
   }
 
   /** Deterministic clock: each stamp advances one second from a fixed epoch. */

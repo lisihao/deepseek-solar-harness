@@ -348,6 +348,13 @@ function validateContextReceipt(
       'CONTEXT_ENVELOPE_REJECTED',
     )
   }
+  const roleFidelity = receipt.format === 'native' ? 'native' : 'text-downgrade'
+  if (receipt.roleFidelity !== roleFidelity) {
+    throw new PhysicalOperatorError(
+      `physical operator returned an invalid context receipt for ${envelope.digest}`,
+      'CONTEXT_ENVELOPE_INVALID',
+    )
+  }
 }
 
 /** Reject ambiguous identity, presentation, capacity, and selection metadata. */

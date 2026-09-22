@@ -385,6 +385,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Collects prompt sections and model-facing tool schemas for each step.',
   },
   {
+    key: 'taskTemplates',
+    pkg: 'task-template',
+    title: 'Private task-template lifecycle and selection',
+    mode: 'seam',
+    implementations: ['task-template'],
+    consumers: ['task-template-context', 'task-template-rpc', 'tool-physical-operator', 'orchestration-local'],
+    note: 'The file Provider atomically persists private template documents; direct Agent, physical-operator, TaskGraph, and RPC Consumers select or manage them without granting execution authority.',
+  },
+  {
     key: 'tools',
     pkg: 'tools',
     title: 'Tool registry and guarded execution pipeline',

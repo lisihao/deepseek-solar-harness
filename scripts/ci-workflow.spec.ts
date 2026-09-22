@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest'
 
 const root = resolve(import.meta.dirname, '..')
 const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
+const pullRequestImpactIf = "github.event_name == 'pull_request' && needs['pr-impact'].outputs.run_ci != 'false'"
+const docsOnlyIf = "github.event_name == 'pull_request' && needs['pr-impact'].outputs.run_ci == 'false' && github.base_ref != 'solar'"
 
 describe('CI workflow', () => {
   it('runs the dynamic Cordis browser lifecycle in a fresh Vitest process', () => {
@@ -72,7 +74,7 @@ describe('CI workflow', () => {
     // Required PR job: Wine on ubuntu-latest, runs wine-windows-gates.sh.
     expect(windows['runs-on']).toBe('ubuntu-latest')
     expect(windows.name).toBe('windows node 24 / wine blocking')
-    expect(windows.if).toBe("github.event_name == 'pull_request'")
+    expect(windows.if).toBe(pullRequestImpactIf)
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
 
     // windows-native: non-blocking native job with failover, runs windows-complete.
@@ -85,7 +87,7 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).toContain('windows-2025')
     expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
     expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toBe("github.event_name == 'pull_request'")
+    expect(windowsNative.if).toBe(pullRequestImpactIf)
     const nativeCommandSteps = (windowsNative.steps as unknown[]).filter((step): step is Record<string, unknown> & { run: string } => (
       isRecord(step) && typeof step.run === 'string'
     ))
@@ -164,6 +166,8 @@ describe('CI workflow', () => {
     const NOT_PUSH_REACHABLE = new Set([
       "github.event_name == 'pull_request'",
       "always() && github.event_name == 'pull_request'",
+      pullRequestImpactIf,
+      docsOnlyIf,
       "github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'",
       "github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'",
     ])
@@ -210,7 +214,7 @@ describe('CI workflow', () => {
     }
 
     expect(pythonRuntime).toMatchObject({
-      if: "github.event_name == 'pull_request'",
+      if: pullRequestImpactIf,
       name: 'python runtime / release-shaped Linux x64',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: {
@@ -219,6 +223,46 @@ describe('CI workflow', () => {
       },
     })
     expect(aggregate.needs).toContain('python-runtime')
+  })
+
+  it('classifies pull-request impact before ordinary CI and keeps docs-only green explicit', () => {
+    const workflow = loadWorkflow('.github/workflows/ci.yml')
+    const impact = workflowJob(workflow, 'pr-impact')
+    const docsOnly = workflowJob(workflow, 'docs-only')
+    const aggregate = workflowJob(workflow, 'all-checks-passed')
+    if (!Array.isArray(impact.steps) || !Array.isArray(aggregate.needs) || !Array.isArray(aggregate.steps)) {
+      throw new TypeError('CI impact and aggregate jobs must define steps and dependencies')
+    }
+
+    expect(impact).toMatchObject({
+      if: "github.event_name == 'pull_request'",
+      name: 'pull request / impact',
+      outputs: {
+        classification: '${{ steps.impact.outputs.classification }}',
+        run_ci: '${{ steps.impact.outputs.run_ci }}',
+      },
+    })
+    expect(JSON.stringify(impact.steps)).toContain('node scripts/pr-impact.mjs')
+    expect(aggregate.needs).toContain('pr-impact')
+    expect(docsOnly).toMatchObject({
+      needs: ['pr-impact'],
+      name: 'pull request / documentation',
+    })
+    expect(docsOnly.if).toBe(docsOnlyIf)
+    expect(JSON.stringify(docsOnly.steps)).toContain('pnpm run doc-sync')
+    expect(aggregate.needs).toContain('docs-only')
+
+    for (const jobName of ['node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-runtime', 'windows', 'windows-native']) {
+      const job = workflowJob(workflow, jobName)
+      expect(job.needs, `${jobName} must depend on impact classification`).toEqual(['pr-impact'])
+      expect(job.if, `${jobName} must fail open only after a classified full PR`).toBe(pullRequestImpactIf)
+    }
+
+    const aggregateText = JSON.stringify(aggregate.steps)
+    expect(aggregateText).toContain("needs['pr-impact'].outputs.run_ci == 'false'")
+    expect(aggregateText).toContain("needs['docs-only'].result != 'success'")
+    expect(aggregateText).toContain("contains(needs.*.result, 'cancelled')")
+    expect(aggregateText).toContain("needs['node-24'].result != 'success'")
   })
 
   it('keeps every Vitest project process-isolated on native Windows', () => {

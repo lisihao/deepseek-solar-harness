@@ -32,6 +32,7 @@ import {
   residentClaudeObservations,
   resolveProductExecutable,
 } from '../src/drivers.ts'
+import { validateResidentModelToolBridge } from '../src/model-tool-bridge.ts'
 
 const model = {
   id: 'sol',
@@ -186,6 +187,31 @@ describe('Claude Code resident driver environment', () => {
   it('preserves an explicit caller CA policy and does not change other platforms', () => {
     expect(claudeEnvironment({ NODE_USE_SYSTEM_CA: '0' }, 'darwin')).toEqual({ NODE_USE_SYSTEM_CA: '0' })
     expect(claudeEnvironment({ PATH: '/usr/bin' }, 'linux')).toEqual({ PATH: '/usr/bin' })
+  })
+
+  it('allows only the sealed RLM bridge when native tools are disabled', () => {
+    const bridge = {
+      version: 1 as const,
+      socketPath: '/tmp/dsh-model-tools.sock',
+      sessionId: 'rlm-session',
+      tools: [{ name: 'typescript_repl', description: 'Execute TypeScript.', inputSchema: { type: 'object' } }],
+    }
+    expect(validateResidentModelToolBridge(bridge, 'disabled')).toBe(bridge)
+    expect(() => validateResidentModelToolBridge({
+      ...bridge,
+      tools: [{ name: 'bash', description: 'Execute shell.', inputSchema: { type: 'object' } }],
+    }, 'disabled')).toThrow(/only permits the sealed typescript_repl model tool bridge/iu)
+    expect(() => validateResidentModelToolBridge({
+      ...bridge,
+      tools: [...bridge.tools, { name: 'bash', description: 'Execute shell.', inputSchema: { type: 'object' } }],
+    }, 'disabled')).toThrow(/only permits the sealed typescript_repl model tool bridge/iu)
+    expect(validateResidentModelToolBridge({
+      ...bridge,
+      tools: [{ name: 'bash', description: 'Execute shell.', inputSchema: { type: 'object' } }],
+    }, 'inherit')).toEqual({
+      ...bridge,
+      tools: [{ name: 'bash', description: 'Execute shell.', inputSchema: { type: 'object' } }],
+    })
   })
 
   it('removes the Claude native tool surface for a sealed no-tool execution', () => {
@@ -378,6 +404,10 @@ describe('Codex RLM host tool', () => {
           arguments: { code: '40 + 2' },
         },
       }])
+      await expect(handler({
+        threadId: 'thread-1', turnId: 'turn-1', callId: 'call-2',
+        tool: 'bash', arguments: { command: 'id' },
+      })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
     } finally {
       await new Promise<void>((resolve) => { bridgeServer.close(() => { resolve() }) })
       rmSync(root, { recursive: true, force: true })

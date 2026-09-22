@@ -30,12 +30,13 @@ export {
 export {
   TASK_TEMPLATE_STORE_FORMAT_VERSION,
   TaskTemplateStoreError,
+  diffStoreDocuments,
   emptyStoreDocument,
   parseStoreDocument,
   renderStoreDocument,
   validateMethod,
 } from './store.ts'
-export type { TaskTemplateStoreDocument } from './store.ts'
+export type { TaskTemplateStoreDiff, TaskTemplateStoreDocument } from './store.ts'
 export { TaskTemplateService } from './service.ts'
 export { FileTaskTemplateProvider, resolveStorePath } from './local.ts'
 export type { Config } from './local.ts'

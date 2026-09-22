@@ -4,6 +4,10 @@ English | [中文](README.zh.md)
 
 `dsh-plugin-desktop` runs DSH in Electron while remaining part of the ordinary Cordis composition. The installed application is named **DSH Desktop**. The package provides the `dsh-plugin-desktop` executable and the `dsh-desktop` alias; the registered npm package name is the reliable `npx` entry.
 
+## Task prompt templates
+
+Settings includes a task prompt template library. Users can edit methods and matching attributes, preview selection, and manage preferences separately from versioned instructions. Templates are stored privately by the connected DSH Server under its DSH home, not embedded in the application or published with its source. The ordinary model path and physical operator adapters receive the applicable task instructions and effective context through the existing execution services; the [template context plugin](../../../packages/prompt/task-template-context/README.md) defines task binding and compaction recovery.
+
 ## Architecture
 
 The Electron executable is minimal bootstrap code. It acquires the single-instance lock, resolves the selected DSH profile, provides the native runtime capability, and boots the Host Cordis root in the Electron main process. The `desktop-shell` Host plugin owns the `BrowserWindow`, navigation policy, settings namespace, and close-versus-quit lifecycle through Cordis effects. The native runtime owns the physical tray, while `desktop-shell`, `desktop-profiles`, `desktop-terminal`, and `desktop-updates` contribute effect-scoped commands through its ordered item registry.

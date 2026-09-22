@@ -7,6 +7,7 @@ import WebSocket from 'ws'
 import {
   RpcId, type ApiProxy, type HostFrame, type MuxFrame, type RpcRequest,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type { ResidentExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
 import { RemoteSyncHub, RemoteSyncJournal } from '../src/remote-sync-host.ts'
 import { buildOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
 
@@ -258,7 +259,7 @@ describe('RemoteSyncHub', () => {
       models: [],
     }
     const dispose = vi.fn(async () => undefined)
-    const execute = vi.fn(async () => ({
+    const execute = vi.fn(async (_request: ResidentExecuteRequest) => ({
       sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2,
       result: new Promise(() => {}), dispose,
     }))
@@ -342,12 +343,12 @@ describe('RemoteSyncHub', () => {
         outcome: 'accepted', format: 'native', roleFidelity: 'native',
       },
     })
-    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
+    const executed = execute.mock.calls.at(-1)?.[0]
+    expect(executed).toMatchObject({
       systemPrompt: 'system from envelope',
-      prompt: expect.arrayContaining([
-        expect.objectContaining({ type: 'text', text: 'task from envelope' }),
-      ]),
-    }))
+      nativeContext: { version: 1, digest: contextEnvelope.digest },
+    })
+    expect(executed?.prompt).toContainEqual({ type: 'text', text: 'task from envelope' })
     await expect(hub.operatorReadArtifact(`sha256:${'a'.repeat(64)}`)).resolves.toEqual({
       ref: `sha256:${'a'.repeat(64)}`, json: '{}',
     })

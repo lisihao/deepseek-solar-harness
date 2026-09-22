@@ -22,13 +22,18 @@ import { isJsonValue } from '@deepseek-ai/dsh-session'
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { buildOperatorContextEnvelope, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import {
+  buildOperatorContextEnvelope,
+  currentRuntimeContextSnapshot,
+  renderPrompt,
+} from '@deepseek-ai/dsh-system-prompt'
 import type {
   OperatorContextEnvelopeReceiptV1,
   OperatorContextEnvelopeSourceV1,
   OperatorContextEnvelopeV1,
 } from '@deepseek-ai/dsh-system-prompt'
-import type {} from '@deepseek-ai/dsh-task-template-context'
+import type { TaskTemplateSelection } from '@deepseek-ai/dsh-task-template'
+import { inferTaskAttributes, renderTaskTemplateInjection } from '@deepseek-ai/dsh-task-template-context'
 import { z as zod } from 'zod'
 import type {
   PhysicalOperatorExecutionMode,
@@ -110,6 +115,10 @@ declare module '@deepseek-ai/dsh-session/types' {
       digest: string
       source: OperatorContextEnvelopeSourceV1
       receipt: OperatorContextEnvelopeReceiptV1
+      /** Exact tool-subtask template selection, when this handoff selected one. */
+      taskTemplate?: TaskTemplateSelection
+      /** Complete frozen model input materialized by the receiving operator. */
+      envelope: OperatorContextEnvelopeV1
     }
     /** One bounded native Resident observation copied into this Session's ignorable Trace. */
     'physical-operator/progress': {
@@ -632,7 +641,15 @@ export function apply(ctx: Context): void {
       const resident = request.mode === 'resident'
         ? await prepareResidentSurface(ctx, modelTools, executionId, parent, exec.signal)
         : undefined
-      const contextEnvelope = toolContextEnvelope(parent, String(exec.callId), [{ type: 'text', text: prompt }])
+      const toolContext = toolContextEnvelope(
+        ctx,
+        parent,
+        String(exec.callId),
+        operatorId,
+        [{ type: 'text', text: prompt }],
+      )
+      const contextEnvelope = toolContext?.envelope
+      const taskTemplate = toolContext?.taskTemplate
       let run: PhysicalOperatorRun | undefined
       let observer: ReturnType<typeof observePhysicalOperatorProgress> | undefined
       try {
@@ -663,6 +680,8 @@ export function apply(ctx: Context): void {
             digest: contextEnvelope.digest,
             source: contextEnvelope.source,
             receipt: run.contextReceipt,
+            ...taskTemplate === undefined ? {} : { taskTemplate },
+            envelope: contextEnvelope,
           }, { ignorable: true })
         }
         observer = observePhysicalOperatorProgress(ctx, parent, run, String(executionId))
@@ -761,6 +780,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
           digest: contextEnvelope.digest,
           source: contextEnvelope.source,
           receipt: run.contextReceipt,
+          envelope: contextEnvelope,
         }, { ignorable: true })
       }
       observer = observePhysicalOperatorProgress(this.ctx, agent, run, dispatch.commandId)
@@ -1172,11 +1192,7 @@ function operatorContextEnvelope(
   if (taskMessage === undefined) {
     throw new Error(`physical-operator router cannot locate task message ${taskMessageId} in the frozen request`)
   }
-  const snapshot = [...options.messages].reverse().find(message => (
-    message.source.kind === 'plugin'
-    && message.source.plugin === '@deepseek-ai/dsh-system-prompt'
-    && message.source.form === 'snapshot'
-  ))
+  const snapshot = currentRuntimeContextSnapshot(options.messages)
   const instructions = options.messages.slice(taskIndex + 1).filter(message => message.source.kind === 'task-template')
   const instructionContexts = instructions.map((message, index) => ({
     name: `task-template:${message.source.kind === 'task-template'
@@ -1184,9 +1200,7 @@ function operatorContextEnvelope(
       : String(index)}`,
     text: textContent(message.content),
   }))
-  const snapshotContexts = snapshot?.source.kind === 'plugin' && snapshot.source.form === 'snapshot'
-    ? snapshot.source.sections
-    : []
+  const snapshotContexts = snapshot?.sections ?? []
   return buildOperatorContextEnvelope({
     systemText: options.system ?? '',
     task,
@@ -1195,51 +1209,72 @@ function operatorContextEnvelope(
       kind: 'session',
       requestHeaderEventSeq: header.seq,
       taskMessageId: taskMessage.id,
-      ...snapshot === undefined ? {} : { contextSnapshotMessageId: snapshot.id },
+      ...snapshot === undefined ? {} : { contextSnapshotMessageId: snapshot.messageId },
       ...instructions.length === 0 ? {} : { instructionMessageIds: instructions.map(message => message.id) },
     },
   })
 }
 
 /** Build a tool-issued handoff from the current durable request projection. */
+interface ToolContextEnvelope {
+  /** Current-task envelope delegated by one physical_operator tool call. */
+  readonly envelope: OperatorContextEnvelopeV1
+  /** Exact local selection receipt used for this subtask, when a Provider is mounted. */
+  readonly taskTemplate?: TaskTemplateSelection
+}
+
+/** Select a template for the delegated subtask rather than inheriting parent guidance. */
+function toolTaskTemplateSelection(
+  ctx: Context,
+  agent: Agent,
+  operatorId: string,
+  task: readonly ContentBlock[],
+): TaskTemplateSelection | undefined {
+  const templates = ctx.get('taskTemplates')
+  if (templates === undefined) return undefined
+  return templates.select({
+    attributes: inferTaskAttributes({
+      objective: textContent(task),
+      operator: operatorId,
+      tools: ctx.tools.schemas(agent).map(tool => tool.name),
+    }),
+  })
+}
+
+/** Build a tool-issued envelope from its own task and the current runtime context. */
 function toolContextEnvelope(
+  ctx: Context,
   agent: Agent,
   toolCallId: string,
+  operatorId: string,
   task: ContentBlock[],
-): OperatorContextEnvelopeV1 | undefined {
+): ToolContextEnvelope | undefined {
   const header = [...agent.session.events].reverse().find(event => event.type === 'request/header')
   if (header?.type !== 'request/header') return undefined
   const messages = agent.session.deriveMessages()
-  const snapshot = [...messages].reverse().find(message => (
-    message.source.kind === 'plugin'
-    && message.source.plugin === '@deepseek-ai/dsh-system-prompt'
-    && message.source.form === 'snapshot'
-  ))
-  const currentTaskIndex = messages.findLastIndex(message => message.source.kind === 'user')
-  const instructions = currentTaskIndex < 0
-    ? []
-    : messages.slice(currentTaskIndex + 1).filter(message => message.source.kind === 'task-template')
-  const instructionContexts = instructions.map((message, index) => ({
-    name: `task-template:${message.source.kind === 'task-template'
-      ? String(message.source.receipt.templateId ?? index)
-      : String(index)}`,
-    text: textContent(message.content),
-  }))
-  const snapshotContexts = snapshot?.source.kind === 'plugin' && snapshot.source.form === 'snapshot'
-    ? snapshot.source.sections
+  const snapshot = currentRuntimeContextSnapshot(messages)
+  const taskTemplate = toolTaskTemplateSelection(ctx, agent, operatorId, task)
+  const templateContexts = taskTemplate?.decision === 'inject'
+    ? [{
+      name: `task-template:${String(taskTemplate.selected?.id ?? 'unknown')}`,
+      text: renderTaskTemplateInjection(taskTemplate),
+    }]
     : []
-  return buildOperatorContextEnvelope({
+  const envelope = buildOperatorContextEnvelope({
     systemText: header.data.header.system ?? '',
     task,
-    contexts: [...snapshotContexts, ...instructionContexts],
+    contexts: [...(snapshot?.sections ?? []), ...templateContexts],
     source: {
       kind: 'tool',
       requestHeaderEventSeq: header.seq,
       toolCallId,
-      ...snapshot === undefined ? {} : { contextSnapshotMessageId: snapshot.id },
-      ...instructions.length === 0 ? {} : { instructionMessageIds: instructions.map(message => message.id) },
+      ...snapshot === undefined ? {} : { contextSnapshotMessageId: snapshot.messageId },
     },
   })
+  return {
+    envelope,
+    ...taskTemplate === undefined ? {} : { taskTemplate },
+  }
 }
 
 function latestUserPromptMessage(events: readonly SessionEvent[]): { readonly id: string; readonly content: ContentBlock[] } | undefined {

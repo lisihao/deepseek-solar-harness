@@ -10,6 +10,8 @@ DeepSeek-Solar-Harness 的开发分布在核心 checkout、内部又包含 Harne
 
 ## 决策
 
+MacBook 负责 DSH 的持续开发与验证。远端源码贡献以明确的 commit 或经过哈希校验的 patch 进入本地隔离 worktree；合入本地改动前保留已接受组合的证据。Mac mini 部署目录与失败执行的 worktree 不作为源码权威。该安排使后续开发不依赖远端登录和调度可用性，同时保留远端贡献供评审。
+
 受保护 `solar` 分支是集成权威，任务在 `/Users/sihaoli/Projects` 下的 linked worktree 中执行。核心保留在 monorepo 根目录，Desktop 位于 [`products/desktop`](../../../../products/desktop)，受管源码位于 [`plugins/managed`](../../../../plugins/managed)，产品元数据位于 [`distribution`](../../../../distribution)。Desktop 导入保留来源 revision `c4485d5a8b73b5fecc6b6424187a3524b4b2890c` 的历史，并移除嵌套 Harness gitlink。
 
 受管源码注册表覆盖 governance、Agent Teams、受控 Desktop 插件套件、Web Billing、Web UI 与 Plugin Console。每份已接受源码历史都通过 subtree 导入，[`plugins/registry.yaml`](../../../../plugins/registry.yaml) 记录 package 身份、source 与 upstream URL、branch、接受 SHA、许可证证据和原生检查。确切 revision 只保存在注册表数据中，不在说明文字中重复。[受控 Desktop 组合](../architecture/2026-08-22-controlled-desktop-plugin-composition.md)拥有当前 Mnemon、原生视觉、Aegis 与 Better Sidebar 决策；Luna Vision Bridge 和 Memory Evolve 不属于受管产品源码。

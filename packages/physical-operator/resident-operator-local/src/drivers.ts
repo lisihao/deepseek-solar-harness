@@ -45,7 +45,13 @@ import {
 } from '@deepseek-ai/dsh-subagent-codex'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { openCodexDaemonStream } from './codex-transport.ts'
-import { callModelToolBridge, claudeMcpRequestId, modelToolCommandId } from './model-tool-bridge.ts'
+import {
+  callModelToolBridge,
+  claudeMcpRequestId,
+  modelToolCommandId,
+  RESIDENT_RLM_TOOL_NAME,
+  validateResidentModelToolBridge,
+} from './model-tool-bridge.ts'
 
 const execFileAsync = promisify(execFile)
 const CLAUDE_AUTH_LOGIN_TIMEOUT_MS = 10 * 60_000
@@ -278,16 +284,11 @@ export function residentClaudeObservations(
 }
 
 function ensureModelToolBridge(request: ResidentDriverExecuteRequest): NonNullable<ResidentDriverExecuteRequest['modelToolBridge']> | undefined {
-  const bridge = request.modelToolBridge
-  if (bridge === undefined) return undefined
-  if (bridge.tools.length === 0 || new Set(bridge.tools.map(tool => tool.name)).size !== bridge.tools.length) {
-    throw new ResidentOperatorError('Resident model tool bridge must contain unique tools', 'PROTOCOL_MISMATCH')
-  }
-  return bridge
+  return validateResidentModelToolBridge(request.modelToolBridge, request.nativeToolPolicy)
 }
 
 function isRlmOnlyBridge(bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>): boolean {
-  return bridge.tools.length === 1 && bridge.tools[0]?.name === 'typescript_repl'
+  return bridge.tools.length === 1 && bridge.tools[0]?.name === RESIDENT_RLM_TOOL_NAME
 }
 
 function codexDynamicTools(request: ResidentDriverExecuteRequest): readonly CodexDynamicToolSpec[] {
@@ -354,6 +355,12 @@ export function createCodexRlmToolHandler(
   signal: AbortSignal,
 ): (call: CodexDynamicToolCall) => Promise<CodexDynamicToolResult> {
   return async (call) => {
+    if (!bridge.tools.some(spec => spec.name === call.tool)) {
+      throw new ResidentOperatorError(
+        `Codex requested a model tool that is not allowlisted: ${JSON.stringify(call.tool)}`,
+        'PROTOCOL_MISMATCH',
+      )
+    }
     const commandId = modelToolCommandId(executionId, 'codex', call.callId)
     const result = bridgeToolResult(await callModelToolBridge(bridge, call.tool, call.arguments, commandId, signal))
     return { success: !result.isError, text: bridgeToolText(result) }

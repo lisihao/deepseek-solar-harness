@@ -29,7 +29,7 @@ Groups hold `packages/<group>/<pkg>/`; names stay `@deepseek-ai/dsh-<pkg>`. **Gr
 | [`skill/`](skill/README.md) | Skill capability family: the provider registry, local provider, and model-facing catalog/loader | Product — stable API |
 | [`compaction/`](compaction/README.md) | Compaction capability family: Service Definition + basic provider + command Consumer | Product — stable API |
 | [`context/`](context/README.md) | Model-visible request context, including workspace instructions and time context | Product — stable API |
-| [`prompt/`](prompt/README.md) | User-managed task prompt templates, deterministic selection, injection, and management | Product — evolving v1 API |
+| [`prompt/`](prompt/README.md) | Private task-template lifecycle and injection | Product — evolving v1 API |
 | [`subagent/`](subagent/README.md) | Subagent capability family: the provider-registry contract and the model-facing delegation tool | Product — stable API |
 | [`orchestration/`](orchestration/README.md) | Persistent TaskGraph orchestration, immutable compiler IRs, capability capsules, and execution-plan sealing | Product — evolving v1 API |
 | [`jobs/`](jobs/README.md) | Generic background-job runtime and model-facing `job_*` control tools | Product — stable API |

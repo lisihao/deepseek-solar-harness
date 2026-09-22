@@ -23,6 +23,8 @@ Automatic routing still needs a decision source, but it does not require DeepSee
 
 The prompt must contain the complete work for this turn. An ephemeral Provider receives it in a fresh product context; a Resident Provider continues only the caller-owned lane within the canonical workspace. Large Resident results can return a content-addressed artifact reference instead of inline bytes.
 
+Each `run` builds a sealed operator-context envelope from the active runtime snapshot and a template selected for the delegated prompt itself. It never reuses a template attached to an earlier parent task. The Session records the exact envelope and delegated template receipt with the Provider receipt so the child input can be reconstructed after replay.
+
 ## Model Experience
 
 ### Tool schema
