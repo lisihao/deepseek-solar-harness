@@ -18,7 +18,7 @@ import {
 import clsx from 'clsx'
 import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import {
-  IconCheckOutline16, IconChevronDownOutline14, IconChevronRightOutline14,
+  IconCheckOutline16, IconChevronDownOutline14, IconChevronRightOutline14, IconRefreshOutline14,
   IconWarningOutline16, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -43,7 +43,7 @@ interface EffortChoice {
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, t }:
+  { locked, available, directory, load, refresh, select, t }:
   ModelSelectInjected & { locked: boolean } & PropsLocale<'model'>,
 ) {
   const state = useSyncExternalStore(
@@ -58,6 +58,9 @@ export function ModelSelect(
   // action was a load.
   const lastActionRef = useRef<'load' | 'select'>('load')
   const [toast, setToast] = useState<{ seq: number; text: string } | null>(null)
+  const [refreshState, setRefreshState] = useState<{ running: boolean; lines: readonly string[] }>({ running: false, lines: [] })
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false }, [])
   const toastSeq = useRef(0)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
@@ -130,6 +133,25 @@ export function ModelSelect(
     setPane('root')
     setOpen(true)
     reload()
+  }
+
+  const refreshCatalogs = (): void => {
+    if (refreshState.running) return
+    setRefreshState({ running: true, lines: [] })
+    void refresh().then((report) => {
+      if (!alive.current) return
+      const lines = [
+        report.directoryError === undefined
+          ? report.added.length === 0
+            ? t('refresh.none')
+            : t('refresh.added', { count: String(report.added.length), names: report.added.join('、') })
+          : t('refresh.directoryFailed', { message: report.directoryError }),
+        ...report.lines.flatMap(line => line.ok
+          ? line.message === undefined ? [] : [t('refresh.note', { name: line.name, message: line.message })]
+          : [t('refresh.failed', { name: line.name, message: line.message ?? '' })]),
+      ]
+      setRefreshState({ running: false, lines })
+    })
   }
 
   const close = (restoreFocus = false): void => {
@@ -263,6 +285,19 @@ export function ModelSelect(
                   <IconChevronRightOutline14 className={css.cellChevron} />
                 </button>
               )}
+              <button
+                ref={itemRef()}
+                type="button"
+                role="menuitem"
+                className={css.cell}
+                disabled={refreshState.running}
+                onClick={refreshCatalogs}
+              >
+                <span className={css.cellLabel}>{t('menu.refresh')}</span>
+                <IconRefreshOutline14 className={clsx(css.cellChevron, refreshState.running && css.spinning)} />
+              </button>
+              {refreshState.running && <div className={css.status}>{t('refresh.running')}</div>}
+              {refreshState.lines.map(line => <div className={css.status} key={line}>{line}</div>)}
             </>
           )}
 

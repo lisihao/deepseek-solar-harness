@@ -17,6 +17,7 @@ import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
 import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import type { CommandContribution, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { ModelSelectInjected } from '../src/client/slots.ts'
+import type { ModelDirectoryResolver } from '../src/client/service.ts'
 import { apply, inject } from '../src/client/index.ts'
 import { zh } from '../src/client/locales.ts'
 
@@ -58,11 +59,15 @@ async function bench() {
   const ctx = new Context()
   let current: ModelSelection = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
   const calls = { models: 0, select: 0 }
+  let groups: typeof GROUPS = GROUPS
+  let failures: { id: string; name: string; message: string }[] = []
+  let modelsError: string | undefined
   ctx.provide('connection', { api: { sessions: {
     models: () => {
       calls.models += 1
+      if (modelsError !== undefined) return Promise.reject(new Error(modelsError))
       return Promise.resolve({
-        result: { ok: true as const, value: { current, routable, groups: GROUPS, failures: [] } },
+        result: { ok: true as const, value: { current, routable, groups, failures } },
       })
     },
     selectModel: (payload: { provider: string; model: string; reasoningEffort?: string }) => {
@@ -130,6 +135,11 @@ async function bench() {
     setHostCurrent: (selection: ModelSelection) => { current = selection },
     address: (id: SessionId) => { addressed.add(id) },
     setRoutable: (next: boolean) => { routable = next },
+    setCatalog: (next: { groups?: typeof GROUPS; failures?: typeof failures; error?: string }) => {
+      groups = next.groups ?? groups
+      failures = next.failures ?? failures
+      modelsError = next.error
+    },
     blockOf: (key: string) => blocks.get(sid(key)),
   }
 }
@@ -221,6 +231,39 @@ describe('ui-model-selection dual entry', () => {
       current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       status: 'ready',
     })
+  })
+
+  it('refreshes the directory and every registered source through the seat, and unregisters sources', async () => {
+    const b = await bench()
+    b.mint('s1')
+    const service = b.ctx.get('modelDirectories') as ModelDirectoryResolver
+    const face = b.seat().inject!(sid('s1'))
+    expect(await face.refresh()).toEqual({ added: [], lines: [] })
+
+    b.setCatalog({
+      groups: [{ ...GROUPS[0]!, models: [...GROUPS[0]!.models, { id: 'deepseek-v4.1-flash', name: 'DeepSeek-V4.1-Flash' }] }] as typeof GROUPS,
+      failures: [{ id: 'pi', name: 'Pi', message: 'catalog unavailable' }],
+    })
+    const disposeNative = service.registerRefreshSource({ name: 'Native', refresh: () => Promise.resolve('Codex 6 models') })
+    const disposeQuiet = service.registerRefreshSource({ name: 'Quiet', refresh: () => Promise.resolve(undefined) })
+    const disposeWeb = service.registerRefreshSource({ name: 'Web', refresh: () => Promise.reject(new Error('HTTP 503')) })
+    expect(await face.refresh()).toEqual({
+      added: ['DeepSeek-V4.1-Flash'],
+      lines: [
+        { name: 'Pi', ok: false, message: 'catalog unavailable' },
+        { name: 'Native', ok: true, message: 'Codex 6 models' },
+        { name: 'Quiet', ok: true },
+        { name: 'Web', ok: false, message: 'HTTP 503' },
+      ],
+    })
+
+    disposeNative()
+    disposeQuiet()
+    disposeWeb()
+    b.setCatalog({ failures: [], error: 'host offline' })
+    const failed = await face.refresh()
+    expect(failed.directoryError).toContain('host offline')
+    expect(failed).toMatchObject({ added: [], lines: [] })
   })
 
   it('scope disposal drops the directory; a reborn scope gets a fresh one', async () => {

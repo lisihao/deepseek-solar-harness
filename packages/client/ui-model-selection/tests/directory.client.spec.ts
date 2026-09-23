@@ -232,3 +232,44 @@ describe('ModelDirectory catalog refresh', () => {
     })
   })
 })
+
+describe('ModelDirectory refresh joining', () => {
+  it('lets a plain load join an in-flight refresh so its result is kept', async () => {
+    const refreshed = deferred<RpcResponse<SessionModels>>()
+    const plain = vi.fn(() => Promise.resolve(response({ ok: true, value: value() })))
+    const sessions: Pick<IApiClient['sessions'], 'models' | 'selectModel'> = {
+      models: payload => payload.refresh === true ? refreshed.promise : plain(),
+      selectModel: () => Promise.resolve(response({ ok: true, value: { selected: selection } })),
+    }
+    const directory = new ModelDirectory(sessions, 's1' as SessionId, () => true)
+    const refresh = directory.load({ refresh: true })
+    const opened = directory.load()
+    expect(plain).not.toHaveBeenCalled()
+
+    const fresh = [...groups, { id: 'new', name: 'New', models: [{ id: 'v41', name: 'V4.1' }] }]
+    refreshed.resolve(response({ ok: true, value: value({ groups: fresh, failures: [] }) }))
+    await expect(opened).resolves.toMatchObject({ groups: fresh })
+    await refresh
+    expect(directory.store.getSnapshot().groups).toEqual(fresh)
+
+    await directory.load()
+    expect(plain).toHaveBeenCalledOnce()
+  })
+
+  it('releases a failed refresh and a reconnect so later plain loads query the Host', async () => {
+    const refreshed = deferred<RpcResponse<SessionModels>>()
+    const plain = vi.fn(() => Promise.resolve(response({ ok: true, value: value() })))
+    const sessions: Pick<IApiClient['sessions'], 'models' | 'selectModel'> = {
+      models: payload => payload.refresh === true ? refreshed.promise : plain(),
+      selectModel: () => Promise.resolve(response({ ok: true, value: { selected: selection } })),
+    }
+    const directory = new ModelDirectory(sessions, 's1' as SessionId, () => true)
+    const refresh = directory.load({ refresh: true })
+    directory.resetConnected()
+    expect(plain).toHaveBeenCalledOnce()
+    refreshed.reject(new Error('offline'))
+    await expect(refresh).rejects.toThrow('offline')
+    await directory.load()
+    expect(plain).toHaveBeenCalledTimes(2)
+  })
+})
