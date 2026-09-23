@@ -10,10 +10,10 @@ Repository prose can guide an AI coding agent but cannot prove which files chang
 
 ## Decision
 
-In DSH, Code-as-Harness refers only to the user-created Codex `agent-development-governance` project imported at `plugins/managed/governance`. Its repository-exported executable bundle, Profile, attestation, DSH completion tool, CI, and protected branch determine admission. The repository-local `dsh-code-as-harness` skill is a thin DSH entry point and never a second implementation.
+In DSH, Code-as-Harness refers only to the user-created `agent-development-governance` project imported at `plugins/managed/governance`. Its exported bundle and Profile run in `solar-governance.yml` on every PR to `solar`; that CI result, the other required checks, and the protected branch determine admission. The repository-local `dsh-code-as-harness` skill reproduces a failing gate or runs the harness on request and is never a second implementation.
 
-Every agent task starts with strict audit and a change-aware plan, runs in an isolated worktree, uses project-native controls, completes full verification and attestation, and revalidates exact committed bytes before push. Completion also requires remote-SHA equality and any applicable runtime or Desktop D00-D08 evidence.
+Agents work in an isolated worktree and run focused, change-relevant evidence before push through `dsh-pre-push-checks`. They do not repeat audit, plan, full verification, or attestation locally for each task: CI runs them against the exact pushed commit, so a local rerun costs agent time and tokens without adding admission evidence. Desktop packaging and installation follow `products/desktop/AGENTS.md` only for an explicit release or install request.
 
 ## Consequences
 
-An agent cannot self-certify by saying that it followed the rules. Missing wiring, stale evidence, skipped gates, remote movement, or an unavailable completion authority remains `pending` or `error`. Prompt instructions and skills route behavior; executable controls decide acceptance.
+An agent cannot self-certify by saying that it followed the rules. A PR stays unmerged until the governance workflow and required checks pass on its head commit. Focused local checks can miss a gate that only CI runs; that failure surfaces on the PR and is fixed there rather than prevented by a full local rehearsal. Prompt instructions and skills route behavior; executable controls decide acceptance.

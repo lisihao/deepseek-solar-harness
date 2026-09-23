@@ -21,7 +21,7 @@
 - [ ] 仅修改本 PR 的独立 worktree，未覆盖其他工作区或运行时
 - [ ] 新纳管源码已登记来源 SHA、许可证和上游只读地址
 - [ ] 未向任何 upstream push、提交 PR 或发布包
-- [ ] Desktop 用户可见/可安装变更已执行 D00–D08；不适用时已写明原因
+- [ ] 发布或安装 Desktop 时已执行 D00–D08；功能 PR 不改版本号、不打包安装
 - [ ] 正式 Desktop 标签符合 `DSH-desktop-v<major>.<minor>.<patch>`
 
 </details>
