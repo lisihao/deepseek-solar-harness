@@ -21,7 +21,7 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import { isJsonValue } from '@deepseek-ai/dsh-session'
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import {
   buildOperatorContextEnvelope,
@@ -184,6 +184,8 @@ export const inject = ['tools', 'physicalOperators', 'systemPrompt', 'llm', 'age
 
 const ROUTER_PROVIDER = 'dsh-physical-operator'
 const RESUME_SOURCE = 'physical-operator-resume'
+const TASKGRAPH_SOURCE = 'physical-operator-taskgraph'
+const ORCHESTRATION_TOOL = 'orchestration'
 const CHATGPT_WEB_OPERATOR_ID = 'chatgpt-web'
 const CHATGPT_WEB_HANDOFF_PLUGIN = 'chatgpt-web-handoff'
 const FALLBACK_REQUIRED_CODE = 'PHYSICAL_OPERATOR_FALLBACK_REQUIRED'
@@ -327,7 +329,8 @@ export function apply(ctx: Context): void {
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
     const decision = decideHostRoute(ctx, agent, messages)
     const route = decision?.hostRoute
-    if (decision !== undefined && !hasRoutingDecision(agent.session.events, decision.requestedByMessageId)) {
+    const firstDecision = decision !== undefined && !hasRoutingDecision(agent.session.events, decision.requestedByMessageId)
+    if (decision !== undefined && firstDecision) {
       agent.session.append('physical-operator/routing-decision', {
         policy: decision.policy,
         route: decision.route,
@@ -341,7 +344,15 @@ export function apply(ctx: Context): void {
       byPosition.set(`${turn}:${step}`, route)
       pending.set(agent, byPosition)
     }
-    return next()
+    const result = await next()
+    if (!firstDecision
+      || decision.route !== 'taskgraph-candidate'
+      || debateEnabled(agent.session.events)
+      || result.kind !== 'enter'
+      || !ctx.tools.schemas(agent).some(schema => schema.name === ORCHESTRATION_TOOL)) {
+      return result
+    }
+    return { kind: 'enter', messages: [...result.messages, taskGraphDirective(decision.operatorId)] }
   })
 
   ctx.on('agent/request', async ({ agent, turn, step }, next) => {
@@ -918,6 +929,7 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
         `当前主模型已选择 ${operatorDisplayName(selectedPrimaryOperator)}，保持其为协调者`,
       )
     }
+    if (policy === 'auto') return smartAutoDecision(ctx, agent, current.id, text)
     if (policy !== 'direct' && isParallelCandidate(text)) {
       const preferredOperatorId = taskGraphPreferredOperator(policy)
       return {
@@ -965,22 +977,51 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
       ? operatorDecision(ctx, agent, current.id, policy, policy, `用户策略为优先 ${operatorDisplayName(policy)}`)
       : primaryDecision(current.id, policy, '请求过小，不值得启动物理算子')
   }
+  return smartAutoDecision(ctx, agent, current.id, text)
+}
+
+/**
+ * The instruction that turns a TaskGraph-candidate routing decision into
+ * model-visible work for the current coordinator.
+ */
+function taskGraphDirective(preferredOperatorId: string | undefined): UserMessage {
+  const preference = preferredOperatorId === undefined
+    ? ''
+    : ` Set operator.preferredIds=["${preferredOperatorId}"] on each delegable node.`
+  return createUserMessage({
+    content: [{
+      type: 'text',
+      text: 'DSH Smart Collaboration classified the current request as a durable TaskGraph candidate. '
+        + `Before doing the work yourself, call the \`${ORCHESTRATION_TOOL}\` tool with action=start and a TaskGraph whose independent branches are separate nodes.`
+        + `${preference} You remain the coordinator: inspect the run and review its results before answering. `
+        + 'If the request has no genuinely independent branches, state that in one sentence and continue directly.',
+    }],
+    source: { kind: 'plugin', plugin: TASKGRAPH_SOURCE },
+  })
+}
+
+/**
+ * Smart Collaboration: parallel work becomes a TaskGraph candidate coordinated
+ * by the current model, recognized implementation or analysis work routes to
+ * one bounded physical operator, and everything else stays on the current model.
+ */
+function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, text: string): HostRoutingDecision {
   if (isParallelCandidate(text)) {
     return {
-      policy,
+      policy: 'auto',
       route: 'taskgraph-candidate',
-      requestedByMessageId: current.id,
+      requestedByMessageId: messageId,
       reason: '任务包含可并行分支或显式多角色协作，交由主模型构造持久 TaskGraph',
     }
   }
   const automatic = automaticOperator(text)
   return automatic === undefined
-    ? primaryDecision(current.id, policy, '未发现需要物理算子或 TaskGraph 的工作')
+    ? primaryDecision(messageId, 'auto', '未发现需要物理算子或 TaskGraph 的工作')
     : operatorDecision(
       ctx,
       agent,
-      current.id,
-      policy,
+      messageId,
+      'auto',
       automatic,
       '智能协作选择一个有界物理算子',
       automatic === 'claude-code' ? 'codex' : undefined,
@@ -1152,13 +1193,13 @@ function isDelegable(text: string): boolean {
 
 /**
  * Detect work whose independent branches should remain visible to the durable Scheduler.
+ * Length alone is not a signal: a long pasted document is one task.
  * @param text - current user-request text.
  * @returns whether Smart Collaboration should leave the request for TaskGraph admission.
  */
 export function isParallelCandidate(text: string): boolean {
   const value = text.trim()
-  return value.length >= 180
-    || /(?:并行|多个(?:任务|方向|模块|子任务)|分别(?:分析|研究|实现|验证)|多(?:角色|智能体|代理))/u.test(value)
+  return /(?:并行|多个(?:任务|方向|模块|子任务)|分别(?:分析|研究|实现|验证)|多(?:角色|智能体|代理))/u.test(value)
     || /(?:跨(?:学科|模块|仓库)|全面(?:分析|研究|调研)|系统性(?:分析|研究))/u.test(value)
     || /(?:parallel|multi[- ](?:agent|stage|module)|independent branches)/iu.test(value)
 }
@@ -1847,7 +1888,7 @@ function selectionGuidance(
   if (available.length === 0) return ''
   return [
     routingPolicyGuidance(policy),
-    'An explicitly selected primary model remains the coordinator for its step. A saved routing policy or a named product guides downstream collaboration; it does not replace that selected primary. A selected native Codex or Claude Code primary has the real DSH tool bridge and may coordinate downstream collaborators, so do not describe it as a preferred worker.',
+    'An explicitly selected primary model remains the coordinator for its step. A saved routing policy or a named product guides downstream collaboration; it does not replace that selected primary, except that Smart Auto may route one recognized request from a selected API primary to a physical operator. A selected native Codex or Claude Code primary has the real DSH tool bridge and may coordinate downstream collaborators, so do not describe it as a preferred worker.',
     'Physical operators use their own native subscription surface, including configured browser subscriptions; they are never an API fallback.',
     'Choose resident mode for repository implementation, multi-turn work, work that must remain inspectable across a DSH restart, or work that should continue in the same native product session. Keep ephemeral mode for one bounded independent check; a browser-only provider may intentionally support ephemeral mode only.',
     'When routing automatically, prefer implementation/debugging/testing tags for code changes and analysis/architecture/review/long-context tags for broad reasoning. A live ChatGPT Web catalog entry may be a bounded advisor for design, high-level planning, or research. That catalog-advisor route has no DSH file-write or test-execution capability and cannot establish acceptance; Smart Collaboration may choose it only from the available catalog. RLM and Continuous Harness are TaskGraph strategies, never operator ids. Call action=list if the suitable stable id is not already evident from the catalog below.',
@@ -1860,7 +1901,7 @@ function selectionGuidance(
 function routingPolicyGuidance(policy: PhysicalOperatorRoutingPolicy): string {
   switch (policy) {
     case 'auto':
-      return 'Physical-operator routing policy: SMART AUTO. At the start of every non-trivial request, explicitly decide whether durable TaskGraph orchestration or one physical operator improves the result. Use orchestration for work with parallel independent branches, explicit dependencies, recovery, or multiple roles; use one suitable operator for bounded single-worker work. Multi-file coding, debugging, refactoring, tests/builds, repository review, and long-running work normally qualify for collaboration. Smart Auto host routing does not replace an explicitly selected primary model.'
+      return 'Physical-operator routing policy: SMART AUTO. At the start of every non-trivial request, explicitly decide whether durable TaskGraph orchestration or one physical operator improves the result. Use orchestration for work with parallel independent branches, explicit dependencies, recovery, or multiple roles; use one suitable operator for bounded single-worker work. Multi-file coding, debugging, refactoring, tests/builds, repository review, and long-running work normally qualify for collaboration. With a selected API primary, Smart Auto host routing may send recognized implementation or analysis work to one physical operator for that request, and asks you to build a TaskGraph for parallel work; a selected Codex, Claude Code, or ChatGPT Web primary is never replaced.'
     case 'direct':
       return 'Physical-operator routing policy: CURRENT MODEL ONLY. Do not call physical_operator unless the current user message explicitly requests an operator.'
     case 'codex':

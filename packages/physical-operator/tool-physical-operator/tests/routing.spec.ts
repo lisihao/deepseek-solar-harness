@@ -1428,6 +1428,81 @@ describe('host physical-operator routing', () => {
     expect(decision.data.reason).toContain('Debate')
   })
 
+  it('lets Smart Auto dispatch recognized work to a physical operator while an API primary is selected', async () => {
+    const { agent, deepseek, codex, claude } = await setup()
+    const disposeSelection = installModelSelection(agent.ctx, {
+      current: { provider: 'deepseek', model: 'deepseek' },
+      assembled: undefined,
+    })
+    try {
+      send(agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
+      await agent.whenIdle()
+
+      expect(codex.requests).toHaveLength(1)
+      expect(claude.requests).toHaveLength(0)
+      expect(deepseek.requests).toHaveLength(0)
+      expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+        data: { policy: 'auto', operatorId: 'codex', reason: '智能协作选择一个有界物理算子' },
+      })
+    } finally {
+      disposeSelection()
+    }
+  })
+
+  it('keeps a long single-task paste on the selected API primary under Smart Auto', async () => {
+    const { agent, deepseek, codex, claude } = await setup()
+    const disposeSelection = installModelSelection(agent.ctx, {
+      current: { provider: 'deepseek', model: 'deepseek' },
+      assembled: undefined,
+    })
+    try {
+      send(agent, `请帮我看看这段播客文字稿：${'主持人讨论了 CPU 与 GPU 在推理集群中的分工。'.repeat(20)}`)
+      await agent.whenIdle()
+
+      expect(deepseek.requests).toHaveLength(1)
+      expect(codex.requests).toHaveLength(0)
+      expect(claude.requests).toHaveLength(0)
+      expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+        data: { policy: 'auto', route: 'primary-model' },
+      })
+    } finally {
+      disposeSelection()
+    }
+  })
+
+  it('asks the selected API primary to build a TaskGraph for parallel Smart Auto work', async () => {
+    const { ctx, agent, deepseek, codex, claude } = await setup()
+    ctx.tools.register(defineTool({
+      name: 'orchestration',
+      description: 'Start a durable TaskGraph.',
+      parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      execute: () => Promise.resolve('started'),
+    }))
+    const disposeSelection = installModelSelection(agent.ctx, {
+      current: { provider: 'deepseek', model: 'deepseek' },
+      assembled: undefined,
+    })
+    try {
+      send(agent, '请并行安排多个子任务，分别研究三个独立模块，最后综合验证结论。')
+      await agent.whenIdle()
+
+      expect(deepseek.requests).toHaveLength(1)
+      expect(codex.requests).toHaveLength(0)
+      expect(claude.requests).toHaveLength(0)
+      const directive = agent.session.events.find(event => event.type === 'user/message'
+        && event.data.source.kind === 'plugin'
+        && event.data.source.plugin === 'physical-operator-taskgraph')
+      expect(directive).toBeDefined()
+      expect(JSON.stringify(deepseek.requests[0]?.messages)).toContain('call the `orchestration` tool with action=start')
+      expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+        data: { policy: 'auto', route: 'taskgraph-candidate' },
+      })
+    } finally {
+      disposeSelection()
+    }
+  })
+
   it('keeps a parallel Smart Auto task on the main model for TaskGraph admission and logs the decision', async () => {
     const { agent, deepseek, codex, claude } = await setup()
     send(agent, '请并行安排多个子任务，分别研究三个独立模块，最后综合验证结论。')
@@ -1443,6 +1518,7 @@ describe('host physical-operator routing', () => {
         route: 'taskgraph-candidate',
       },
     })
+    expect(agent.session.events.some(event => event.type === 'user/message' && event.data.source.kind === 'plugin')).toBe(false)
   })
 
   it('keeps parallel preferred-product work on the main model with the selected TaskGraph operator hint', async () => {
