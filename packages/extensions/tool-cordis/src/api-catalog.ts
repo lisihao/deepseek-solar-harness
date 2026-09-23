@@ -1060,9 +1060,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the provider-owned policy, with normal defaults already resolved.',
       },
       {
-        signature: 'async listModels(provider: string): Promise<LlmModelInfo[]>',
+        signature: 'async listModels( provider: string, options?: { readonly refresh?: boolean }, ): Promise<LlmModelInfo[]>',
         description: 'Discover models advertised by one registered provider. Catalog membership is advisory and never changes routing or request validation.',
-        parameters: [{ name: 'provider', description: 'registered provider route to inspect.' }],
+        parameters: [{ name: 'provider', description: 'registered provider route to inspect.' }, { name: 'options', description: 'optional query controls; `refresh` is `false` by default.' }],
         returns: 'detached model metadata in adapter-preferred order.',
       },
       {
@@ -2539,6 +2539,70 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'taskTemplates',
+    summary: 'Abstract task-template service.',
+    description: 'Abstract task-template service. Writes are serialized: each mutation derives the next document from the committed one, persists through the provider, then commits and emits `task-template/updated` while the service remains live; disposal drains an active commit without publishing from a service Cordis has already removed. A validation failure rejects before anything is persisted. Reads are synchronous over the committed, deeply frozen document.',
+    methods: [
+      {
+        signature: 'list(): readonly TaskTemplate[]',
+        description: 'Every stored template in insertion order, enabled or not. 全部模板（含停用），按插入顺序。',
+        parameters: [],
+        returns: 'the committed template records (frozen).',
+      },
+      {
+        signature: 'get(id: TaskTemplateId): TaskTemplate | undefined',
+        description: 'Read one template by id.',
+        parameters: [{ name: 'id', description: 'the template to read.' }],
+        returns: 'the committed record (frozen), or `undefined` when absent.',
+      },
+      {
+        signature: 'versions(id: TaskTemplateId): readonly TaskTemplateRevision[]',
+        description: 'Complete method-layer version list of one template, ascending, current revision last. 模板方法层的完整版本列表，升序，最后一项为当前版本。',
+        parameters: [{ name: 'id', description: 'the template whose versions to read; unknown ids fail loud.' }],
+        returns: 'every revision, ascending by version.',
+      },
+      {
+        signature: 'personalization(id: TaskTemplateId): TaskTemplatePersonalization | undefined',
+        description: 'Read one template\'s personal layer.',
+        parameters: [{ name: 'id', description: 'the template whose personal layer to read; unknown ids fail loud.' }],
+        returns: 'the stored personalization (frozen), or `undefined` when none is stored.',
+      },
+      {
+        signature: 'async create(draft: TaskTemplateDraft): Promise<TaskTemplate>',
+        description: 'Create one template at version 1, enabled. The draft\'s semantic constraints (non-blank name/method, well-formed match lists, finite rank, unique id) are validated before anything persists.',
+        parameters: [{ name: 'draft', description: 'the new template\'s id, name, match criteria, method, and rank.' }],
+        returns: 'the committed template record.',
+      },
+      {
+        signature: 'async update(id: TaskTemplateId, patch: TaskTemplatePatch): Promise<TaskTemplate>',
+        description: 'Edit one template\'s method layer. The previous revision is archived into `history` and the version bumps by one; absent patch fields keep their current value. An empty patch is rejected — versioning records changes, not intentions.',
+        parameters: [{ name: 'id', description: 'the template to edit; unknown ids fail loud.' }, { name: 'patch', description: 'the fields to change.' }],
+        returns: 'the committed template record at its new version.',
+      },
+      {
+        signature: 'async setEnabled(id: TaskTemplateId, enabled: boolean): Promise<void>',
+        description: 'Enable or disable one template. Enablement is activation state, not content: the version does not bump, and a no-change call neither persists nor emits.',
+        parameters: [{ name: 'id', description: 'the template to toggle; unknown ids fail loud.' }, { name: 'enabled', description: 'whether the template participates in selection.' }],
+      },
+      {
+        signature: 'async delete(id: TaskTemplateId): Promise<void>',
+        description: 'Delete one template and its personal layer.',
+        parameters: [{ name: 'id', description: 'the template to delete; unknown ids fail loud.' }],
+      },
+      {
+        signature: 'async personalize(id: TaskTemplateId, personalization?: TaskTemplatePersonalization): Promise<void>',
+        description: 'Replace or clear one template\'s personal layer. The personal layer stays separate from the reusable method layer: this never bumps the template version. Clearing an already-absent layer neither persists nor emits.',
+        parameters: [{ name: 'id', description: 'the template to personalize; unknown ids fail loud.' }, { name: 'personalization', description: 'the complete next personal layer, or `undefined` to clear it.' }],
+      },
+      {
+        signature: 'select(request: TaskTemplateSelectionRequest): TaskTemplateSelection',
+        description: 'Deterministically select the template to inject for one task; see `selectTaskTemplate` for the filtering, ordering, override, and no-match/no-injection semantics. Synchronous over the committed document.',
+        parameters: [{ name: 'request', description: 'the task\'s attributes and optional explicit override.' }],
+        returns: 'the selection outcome with its loggable receipt.',
+      },
+    ],
+  },
+  {
     key: 'terminals',
     summary: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
     description: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
@@ -3342,6 +3406,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'Emitted when any prompt provider changes.',
     description: 'Emitted when any prompt provider changes. This registry notification is unfiltered because a global change affects every scope.',
     parameters: [],
+  },
+  {
+    name: 'task-template/updated',
+    mode: 'emit',
+    signature: '\'task-template/updated\'(id: TaskTemplateId, kind: TaskTemplateChangeKind, version: number): void',
+    summary: 'Committed change to the template store, emitted after the provider persisted it.',
+    description: 'Committed change to the template store, emitted after the provider persisted it. A listener throw propagates to the mutation caller.',
+    parameters: [{ name: 'id', description: 'the template the change applies to.' }, { name: 'kind', description: 'what changed; `delete` means the template no longer exists.' }, { name: 'version', description: 'the template\'s method-layer version after the change (for `delete`, the version the removed template last carried).' }],
   },
   {
     name: 'tools/change',
@@ -4228,6 +4300,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DebateRunSummaryV1 {\n    readonly version: 1;\n    readonly runId: string;\n    readonly state: DebateLifecycle;\n    readonly mode: DebateMode;\n    readonly currentRound: number;\n    readonly revision: number;\n    readonly unresolvedCount: number;\n    readonly cost: DebateCostSummaryV1;\n    readonly updatedAt: string;\n}',
   },
   {
+    name: 'DebateRuntimeContextV1',
+    declaration: 'export interface DebateRuntimeContextV1 {\n    readonly version: 1;\n    readonly sourceSessionId: string;\n    readonly contextSnapshotMessageId: string;\n    readonly sections: readonly {\n        readonly name: string;\n        readonly text: string;\n    }[];\n}',
+  },
+  {
     name: 'DebateSlotCostV1',
     declaration: 'export interface DebateSlotCostV1 {\n    readonly version: 1;\n    readonly slotId: string;\n    readonly model: string;\n    readonly usage: DebateUsageV1;\n}',
   },
@@ -4237,7 +4313,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DebateStartRequestV1',
-    declaration: 'export interface DebateStartRequestV1 {\n    readonly version: 1;\n    readonly commandId: string;\n    readonly workspace: string;\n    readonly prompt: string;\n    readonly objective?: string;\n    readonly policy: DebatePolicyV1;\n    readonly sourceRefs?: readonly DebateSourceRefV1[];\n    readonly execution?: DebateExecutionRefV1;\n    readonly sourceSessionId?: string;\n}',
+    declaration: 'export interface DebateStartRequestV1 {\n    readonly version: 1;\n    readonly commandId: string;\n    readonly workspace: string;\n    readonly prompt: string;\n    readonly objective?: string;\n    readonly policy: DebatePolicyV1;\n    readonly sourceRefs?: readonly DebateSourceRefV1[];\n    readonly execution?: DebateExecutionRefV1;\n    readonly sourceSessionId?: string;\n    readonly runtimeContext?: DebateRuntimeContextV1;\n}',
   },
   {
     name: 'DebateSynthesisHistoryEntryV1',
@@ -4633,7 +4709,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LlmAdapter',
-    declaration: 'export abstract class LlmAdapter {\n    providerInfo(provider: string): LlmProviderInfo;\n    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;\n    listModels(_provider: string): Promise<readonly LlmModelInfo[]>;\n    resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
+    declaration: 'export abstract class LlmAdapter {\n    providerInfo(provider: string): LlmProviderInfo;\n    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;\n    listModels(_provider: string, _options?: {\n        readonly refresh?: boolean;\n    }): Promise<readonly LlmModelInfo[]>;\n    resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
   },
   {
     name: 'LlmCallConfig',
@@ -4685,7 +4761,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LlmRuntime',
-    declaration: 'export class LlmRuntime extends Service {\n    constructor(ctx: Context);\n    registerAdapter(providers: string[], adapter: LlmAdapter): AdapterRegistrationHandle;\n    listProviders(): LlmProviderInfo[];\n    registerConfigurableProviders(entries: readonly LlmConfigurableProvider[]): DirectoryRegistrationHandle;\n    listConfigurableProviders(): LlmConfigurableProvider[];\n    registerModelDiscovery(settingsNs: string, discover: (request: LlmModelDiscoveryRequest) => Promise<readonly LlmDiscoveredModel[]>): () => void;\n    async discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest): Promise<LlmDiscoveredModel[]>;\n    providerRetryPolicy(provider: string): ResolvedRetryPolicy;\n    async listModels(provider: string): Promise<LlmModelInfo[]>;\n    async resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    async resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>;\n    async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>;\n    stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
+    declaration: 'export class LlmRuntime extends Service {\n    constructor(ctx: Context);\n    registerAdapter(providers: string[], adapter: LlmAdapter): AdapterRegistrationHandle;\n    listProviders(): LlmProviderInfo[];\n    registerConfigurableProviders(entries: readonly LlmConfigurableProvider[]): DirectoryRegistrationHandle;\n    listConfigurableProviders(): LlmConfigurableProvider[];\n    registerModelDiscovery(settingsNs: string, discover: (request: LlmModelDiscoveryRequest) => Promise<readonly LlmDiscoveredModel[]>): () => void;\n    async discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest): Promise<LlmDiscoveredModel[]>;\n    providerRetryPolicy(provider: string): ResolvedRetryPolicy;\n    async listModels(provider: string, options?: {\n        readonly refresh?: boolean;\n    }): Promise<LlmModelInfo[]>;\n    async resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    async resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>;\n    async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>;\n    stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
   },
   {
     name: 'LogicalTaskGraphV1',
@@ -4881,7 +4957,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelWorkerExecuteRequest',
-    declaration: 'export interface ModelWorkerExecuteRequest {\n    readonly commandId: string;\n    readonly workerId: string;\n    readonly model: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly rlmPlan?: RlmExecutionPlanV1;\n    readonly modelToolBridge?: ModelWorkerToolBridgeV1;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ModelWorkerExecuteRequest {\n    readonly commandId: string;\n    readonly workerId: string;\n    readonly model: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly parent?: Agent;\n    readonly rlmPlan?: RlmExecutionPlanV1;\n    readonly modelToolBridge?: ModelWorkerToolBridgeV1;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ModelWorkerProvider',
@@ -4896,6 +4972,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ModelWorkerToolBridgeV1 {\n    readonly version: 1;\n    readonly socketPath: string;\n    readonly sessionId: string;\n    readonly tools: readonly {\n        readonly name: string;\n        readonly description: string;\n        readonly inputSchema: Readonly<Record<string, unknown>>;\n    }[];\n}',
   },
   {
+    name: 'NativeContext',
+    declaration: 'export interface NativeContext {\n    readonly version: 1;\n    readonly digest: string;\n}',
+  },
+  {
     name: 'ObjectJsonSchema',
     declaration: 'export type ObjectJsonSchema = JsonSchemaNode & {\n    type: \'object\';\n};',
   },
@@ -4904,12 +4984,52 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
   },
   {
+    name: 'OperatorContextEnvelopeAcceptedReceiptV1',
+    declaration: 'export interface OperatorContextEnvelopeAcceptedReceiptV1 {\n    readonly version: 1;\n    readonly digest: string;\n    readonly receiver: string;\n    readonly outcome: \'accepted\';\n    readonly format: \'native\' | \'text\';\n    readonly roleFidelity: \'native\' | \'text-downgrade\';\n}',
+  },
+  {
+    name: 'OperatorContextEnvelopeContextSegmentV1',
+    declaration: 'export interface OperatorContextEnvelopeContextSegmentV1 {\n    readonly name: string;\n    readonly index: number;\n}',
+  },
+  {
+    name: 'OperatorContextEnvelopeContextV1',
+    declaration: 'export interface OperatorContextEnvelopeContextV1 {\n    readonly name: string;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'OperatorContextEnvelopeReceiptV1',
+    declaration: 'export type OperatorContextEnvelopeReceiptV1 = OperatorContextEnvelopeAcceptedReceiptV1 | OperatorContextEnvelopeRejectedReceiptV1;',
+  },
+  {
+    name: 'OperatorContextEnvelopeRejectedReceiptV1',
+    declaration: 'export interface OperatorContextEnvelopeRejectedReceiptV1 {\n    readonly version: 1;\n    readonly digest: string;\n    readonly receiver: string;\n    readonly outcome: \'rejected\';\n    readonly reason: string;\n}',
+  },
+  {
+    name: 'OperatorContextEnvelopeSessionSourceV1',
+    declaration: 'export interface OperatorContextEnvelopeSessionSourceV1 {\n    readonly kind: \'session\';\n    readonly requestHeaderEventSeq: number;\n    readonly taskMessageId: MessageId;\n    readonly contextSnapshotMessageId?: MessageId;\n    readonly instructionMessageIds?: readonly MessageId[];\n    readonly contextSegments: readonly OperatorContextEnvelopeContextSegmentV1[];\n}',
+  },
+  {
+    name: 'OperatorContextEnvelopeSourceV1',
+    declaration: 'export type OperatorContextEnvelopeSourceV1 = OperatorContextEnvelopeSessionSourceV1 | OperatorContextEnvelopeTaskGraphSourceV1 | OperatorContextEnvelopeToolSourceV1;',
+  },
+  {
+    name: 'OperatorContextEnvelopeTaskGraphSourceV1',
+    declaration: 'export interface OperatorContextEnvelopeTaskGraphSourceV1 {\n    readonly kind: \'taskgraph\';\n    readonly runId: string;\n    readonly nodeId: string;\n    readonly contextPacketRef: string;\n    readonly contextSegments: readonly OperatorContextEnvelopeContextSegmentV1[];\n}',
+  },
+  {
+    name: 'OperatorContextEnvelopeToolSourceV1',
+    declaration: 'export interface OperatorContextEnvelopeToolSourceV1 {\n    readonly kind: \'tool\';\n    readonly requestHeaderEventSeq: number;\n    readonly toolCallId: string;\n    readonly contextSnapshotMessageId?: MessageId;\n    readonly instructionMessageIds?: readonly MessageId[];\n    readonly contextSegments: readonly OperatorContextEnvelopeContextSegmentV1[];\n}',
+  },
+  {
+    name: 'OperatorContextEnvelopeV1',
+    declaration: 'export interface OperatorContextEnvelopeV1 {\n    readonly version: 1;\n    readonly systemText: string;\n    readonly task: readonly ContentBlock[];\n    readonly contexts: readonly OperatorContextEnvelopeContextV1[];\n    readonly source: OperatorContextEnvelopeSourceV1;\n    readonly digest: string;\n}',
+  },
+  {
     name: 'OrchestrationAcceptanceRequirement',
     declaration: 'export interface OrchestrationAcceptanceRequirement {\n    readonly id: string;\n    readonly description: string;\n    readonly kind: \'operator-completed\' | \'artifact-present\' | \'human-review\';\n}',
   },
   {
     name: 'OrchestrationAdmissionTraceV1',
-    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly sourceSessionId: string;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
+    declaration: 'export interface OrchestrationAdmissionTraceV1 {\n    readonly policy: \'auto\' | \'direct\' | \'codex\' | \'claude-code\';\n    readonly route: \'taskgraph\';\n    readonly sourceSessionId: string;\n    readonly runtimeContext?: OrchestrationRuntimeContextV1;\n    readonly rlm?: RlmExecutionMode;\n    readonly autonomous?: RlmAutonomousMode;\n    readonly continualHarness?: ContinualHarnessMode;\n    readonly optimization?: ModelAllocationObjective;\n    readonly plannerVerifierPreference?: PlannerVerifierPreference;\n    readonly executionPreference?: ExecutionModelPreference;\n}',
   },
   {
     name: 'OrchestrationArtifactRef',
@@ -5016,6 +5136,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type OrchestrationRunState = \'awaiting_clarification\' | \'awaiting_approval\' | \'running\' | \'paused\' | \'completed\' | \'failed\' | \'cancelled\' | \'indeterminate\';',
   },
   {
+    name: 'OrchestrationRuntimeContextV1',
+    declaration: 'export interface OrchestrationRuntimeContextV1 {\n    readonly version: 1;\n    readonly sourceSessionId: string;\n    readonly contextSnapshotMessageId: string;\n    readonly sections: readonly ContextSnapshotSection[];\n}',
+  },
+  {
     name: 'OrchestrationStartRequest',
     declaration: 'export interface OrchestrationStartRequest {\n    readonly commandId: string;\n    readonly compilationId: string;\n    readonly approvalRef?: string;\n}',
   },
@@ -5089,7 +5213,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorProviderRun',
-    declaration: 'export interface PhysicalOperatorProviderRun {\n    readonly receipt?: PhysicalOperatorAcceptedReceipt;\n    readEvents?(afterSequence: number, limit: number, signal?: AbortSignal): Promise<PhysicalOperatorProgressPage>;\n    readonly result: Promise<PhysicalOperatorResult>;\n    dispose(): Promise<void>;\n}',
+    declaration: 'export interface PhysicalOperatorProviderRun {\n    readonly contextReceipt?: OperatorContextEnvelopeReceiptV1;\n    readonly receipt?: PhysicalOperatorAcceptedReceipt;\n    readEvents?(afterSequence: number, limit: number, signal?: AbortSignal): Promise<PhysicalOperatorProgressPage>;\n    readonly result: Promise<PhysicalOperatorResult>;\n    dispose(): Promise<void>;\n}',
   },
   {
     name: 'PhysicalOperatorProviderStartRequest',
@@ -5125,7 +5249,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhysicalOperatorStartRequest',
-    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n}',
+    declaration: 'export interface PhysicalOperatorStartRequest {\n    readonly executionId?: PhysicalOperatorExecutionId;\n    readonly label?: string;\n    readonly prompt: ContentBlock[];\n    readonly contextEnvelope?: OperatorContextEnvelopeV1;\n    readonly systemPrompt?: string;\n    readonly parent: Agent;\n    readonly signal: AbortSignal;\n    readonly mode?: PhysicalOperatorExecutionMode;\n    readonly residentProfile?: PhysicalOperatorExecutionPreference;\n    readonly residentLaneId?: string;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n}',
   },
   {
     name: 'PhysicalOperatorStatus',
@@ -5309,7 +5433,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResidentExecuteRequest',
-    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n    readonly signal: AbortSignal;\n}',
+    declaration: 'export interface ResidentExecuteRequest {\n    readonly commandId: ResidentOperatorCommandId;\n    readonly supersedesCommandId?: ResidentOperatorCommandId;\n    readonly operatorId: string;\n    readonly workspace: string;\n    readonly laneId: string;\n    readonly taskLabel?: string;\n    readonly prompt: readonly ContentBlock[];\n    readonly systemPrompt?: string;\n    readonly nativeContext?: NativeContext;\n    readonly profile?: PhysicalOperatorExecutionPreference;\n    readonly modelToolBridge?: PhysicalOperatorModelToolBridgeV1;\n    readonly nativeToolPolicy?: PhysicalOperatorNativeToolPolicy;\n    readonly signal: AbortSignal;\n}',
   },
   {
     name: 'ResidentExecutionProfile',
@@ -5473,7 +5597,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmChildHandleV1',
-    declaration: 'export interface RlmChildHandleV1 {\n    readonly rlmChildId: RlmChildId;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly name: string;\n    readonly sessionDir: string;\n    readonly model: RlmModelSelectionV1;\n}',
+    declaration: 'export interface RlmChildHandleV1 {\n    readonly rlmChildId: RlmChildId;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly name: string;\n    readonly sessionDir: string;\n    readonly model: RlmModelSelectionV1;\n    readonly modelOrigin: RlmChildModelOriginV1;\n}',
   },
   {
     name: 'RlmChildId',
@@ -5482,6 +5606,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RlmChildLifecycle',
     declaration: 'export type RlmChildLifecycle = \'accepted\' | \'running\' | \'settled\' | \'failed\' | \'indeterminate\' | \'deleted\';',
+  },
+  {
+    name: 'RlmChildModelOriginV1',
+    declaration: 'export type RlmChildModelOriginV1 = \'parent-inherited\' | \'allocator-default\' | \'explicit\' | \'legacy\';',
+  },
+  {
+    name: 'RlmChildModelPolicyV1',
+    declaration: 'export type RlmChildModelPolicyV1 = \'parent-inherit\' | \'allocator-default\';',
   },
   {
     name: 'RlmChildSnapshotV1',
@@ -5620,8 +5752,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type RlmJsonValue = null | boolean | number | string | RlmJsonValue[] | {\n    readonly [key: string]: RlmJsonValue;\n};',
   },
   {
+    name: 'RlmManagedSkillBindingV1',
+    declaration: 'export interface RlmManagedSkillBindingV1 {\n    readonly entryId: string;\n    readonly entryVersion: number;\n    readonly digest: string;\n    readonly moduleId: string;\n    readonly callable: string;\n}',
+  },
+  {
     name: 'RlmManagedSkillDescriptorV1',
-    declaration: 'export interface RlmManagedSkillDescriptorV1 {\n    readonly alias: string;\n    readonly title: string;\n    readonly callable: string;\n    readonly available: boolean;\n}',
+    declaration: 'export interface RlmManagedSkillDescriptorV1 {\n    readonly alias: string;\n    readonly title: string;\n    readonly callable: string;\n    readonly available: boolean;\n    readonly binding: RlmManagedSkillBindingV1;\n}',
   },
   {
     name: 'RlmMessageMode',
@@ -5649,7 +5785,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmRuntimeCreateRequest',
-    declaration: 'export interface RlmRuntimeCreateRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly executionId: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly executionOptions?: RlmChildExecutionOptionsV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly context?: Readonly<Record<string, RlmJsonValue>>;\n}',
+    declaration: 'export interface RlmRuntimeCreateRequest {\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly commandId: RlmCommandId;\n    readonly executionId: string;\n    readonly workspace: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly childModelPolicy?: RlmChildModelPolicyV1;\n    readonly executionOptions?: RlmChildExecutionOptionsV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly context?: Readonly<Record<string, RlmJsonValue>>;\n}',
   },
   {
     name: 'RlmRuntimeEventV1',
@@ -5657,7 +5793,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmRuntimeHostBindings',
-    declaration: 'export interface RlmRuntimeHostBindings {\n    dispatchChild(request: RlmChildSpawnRequest & {\n        readonly childId: RlmChildId;\n        readonly childSessionId: RlmRuntimeSessionId;\n        readonly depth: number;\n        readonly model: RlmModelSelectionV1;\n        readonly executionOptions: RlmChildExecutionOptionsV1;\n    }): Promise<RlmChildExecution>;\n    dispatchContinuation?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly commandId: RlmCommandId;\n        readonly instruction: string;\n        readonly source: \'goal\' | \'heartbeat\' | \'message\' | \'autonomous\';\n        readonly deliveryMode: \'steer\' | \'follow_up\';\n        readonly model: RlmModelSelectionV1;\n        readonly executionOptions?: RlmChildExecutionOptionsV1;\n    }): Promise<RlmChildExecution>;\n    hostRequest?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly method: \'harness.list\' | \'harness.get\' | \'harness.create\' | \'harness.update\' | \'harness.delete\' | \'harness.plan_refinement\' | \'harness.apply_refinement\' | \'harness.rollback\' | \'compact.status\' | \'compact.run\' | \'skills.list\' | \'skills.call\';\n        readonly params: Readonly<Record<string, RlmJsonValue>>;\n    }): Promise<RlmJsonValue>;\n}',
+    declaration: 'export interface RlmRuntimeHostBindings {\n    dispatchChild(request: RlmChildSpawnRequest & {\n        readonly childId: RlmChildId;\n        readonly childSessionId: RlmRuntimeSessionId;\n        readonly depth: number;\n        readonly model: RlmModelSelectionV1;\n        readonly modelOrigin: RlmChildModelOriginV1;\n        readonly executionOptions: RlmChildExecutionOptionsV1;\n    }): Promise<RlmChildExecution>;\n    dispatchContinuation?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly commandId: RlmCommandId;\n        readonly instruction: string;\n        readonly source: \'goal\' | \'heartbeat\' | \'message\' | \'autonomous\';\n        readonly deliveryMode: \'steer\' | \'follow_up\';\n        readonly model: RlmModelSelectionV1;\n        readonly executionOptions?: RlmChildExecutionOptionsV1;\n    }): Promise<RlmChildExecution>;\n    hostRequest?(request: {\n        readonly sessionId: RlmRuntimeSessionId;\n        readonly method: \'harness.list\' | \'harness.get\' | \'harness.create\' | \'harness.update\' | \'harness.delete\' | \'harness.plan_refinement\' | \'harness.apply_refinement\' | \'harness.rollback\' | \'compact.status\' | \'compact.run\' | \'skills.list\' | \'skills.call\';\n        readonly params: Readonly<Record<string, RlmJsonValue>>;\n        readonly sealedSkill?: RlmManagedSkillBindingV1;\n    }): Promise<RlmJsonValue>;\n}',
   },
   {
     name: 'RlmRuntimeLimitsV1',
@@ -5669,7 +5805,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RlmRuntimeSessionSnapshotV1',
-    declaration: 'export interface RlmRuntimeSessionSnapshotV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly executionId: string;\n    readonly parentSessionId?: RlmRuntimeSessionId;\n    readonly parentChildId?: RlmChildId;\n    readonly workspace: string;\n    readonly sessionDir: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly executionOptions?: RlmChildExecutionOptionsV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly depth: number;\n    readonly lifecycle: \'idle\' | \'running\' | \'degraded\' | \'stopped\';\n    readonly stateRevision: number;\n    readonly eventCursor: number;\n    readonly children: readonly RlmChildSnapshotV1[];\n    readonly restorableVariables: readonly string[];\n    readonly degradedVariables: readonly string[];\n    readonly goal?: RlmGoalV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface RlmRuntimeSessionSnapshotV1 {\n    readonly version: 1;\n    readonly sessionId: RlmRuntimeSessionId;\n    readonly executionId: string;\n    readonly parentSessionId?: RlmRuntimeSessionId;\n    readonly parentChildId?: RlmChildId;\n    readonly workspace: string;\n    readonly sessionDir: string;\n    readonly task: string;\n    readonly model: RlmModelSelectionV1;\n    readonly defaultChildModel?: RlmModelSelectionV1;\n    readonly childModelPolicy?: RlmChildModelPolicyV1;\n    readonly executionOptions?: RlmChildExecutionOptionsV1;\n    readonly limits: RlmRuntimeLimitsV1;\n    readonly depth: number;\n    readonly lifecycle: \'idle\' | \'running\' | \'degraded\' | \'stopped\';\n    readonly stateRevision: number;\n    readonly eventCursor: number;\n    readonly children: readonly RlmChildSnapshotV1[];\n    readonly restorableVariables: readonly string[];\n    readonly degradedVariables: readonly string[];\n    readonly goal?: RlmGoalV1;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'RlmStrategyRequest',
@@ -6310,6 +6446,90 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TableValueOf',
     declaration: 'export type TableValueOf<S extends DomainSpec, N extends keyof S[\'tables\']> = S[\'tables\'][N] extends DomainTableSpec<string, infer V> ? V : never;',
+  },
+  {
+    name: 'TaskAttributes',
+    declaration: 'export interface TaskAttributes {\n    taskType: string;\n    domain: string;\n    objective: string;\n    outputFormat: string;\n    riskLevel: TaskRiskLevel;\n    tools: readonly string[];\n    skills: readonly string[];\n    operators: readonly string[];\n    language: string;\n    priority: TaskPriority;\n}',
+  },
+  {
+    name: 'TaskPriority',
+    declaration: 'export type TaskPriority = \'low\' | \'normal\' | \'high\' | \'urgent\';',
+  },
+  {
+    name: 'TaskRiskLevel',
+    declaration: 'export type TaskRiskLevel = \'low\' | \'medium\' | \'high\' | \'critical\';',
+  },
+  {
+    name: 'TaskTemplate',
+    declaration: 'export interface TaskTemplate {\n    id: TaskTemplateId;\n    enabled: boolean;\n    createdAt: string;\n    version: number;\n    name: string;\n    rank: number;\n    match: TaskTemplateMatch;\n    method: string;\n    updatedAt: string;\n    history: readonly TaskTemplateRevision[];\n}',
+  },
+  {
+    name: 'TaskTemplateCandidate',
+    declaration: 'export interface TaskTemplateCandidate {\n    id: TaskTemplateId;\n    version: number;\n    name: string;\n    specificity: number;\n    rank: number;\n}',
+  },
+  {
+    name: 'TaskTemplateChangeKind',
+    declaration: 'export type TaskTemplateChangeKind = \'create\' | \'update\' | \'enable\' | \'disable\' | \'delete\' | \'personalize\';',
+  },
+  {
+    name: 'TaskTemplateDraft',
+    declaration: 'export interface TaskTemplateDraft {\n    id: TaskTemplateId;\n    name: string;\n    match?: TaskTemplateMatch;\n    method: string;\n    rank?: number;\n}',
+  },
+  {
+    name: 'TaskTemplateId',
+    declaration: 'export type TaskTemplateId = Branded<\'TaskTemplateId\'>;',
+  },
+  {
+    name: 'TaskTemplateInjectionLayers',
+    declaration: 'export interface TaskTemplateInjectionLayers {\n    method: true;\n    preferences: boolean;\n    memory: boolean;\n}',
+  },
+  {
+    name: 'TaskTemplateInjectionReceipt',
+    declaration: 'export interface TaskTemplateInjectionReceipt {\n    receiptVersion: 1;\n    decision: \'inject\' | \'skip\';\n    overrideSource: TaskTemplateOverrideSource;\n    templateId?: TaskTemplateId;\n    templateVersion?: number;\n    templateName?: string;\n    layers?: TaskTemplateInjectionLayers;\n    contentSha256?: string;\n    renderedContent?: TaskTemplateSelectedContent;\n    renderVariables?: TaskTemplateRenderVariables;\n    candidates: readonly TaskTemplateCandidate[];\n    rationale: readonly string[];\n    attributes: TaskAttributes;\n}',
+  },
+  {
+    name: 'TaskTemplateMatch',
+    declaration: 'export interface TaskTemplateMatch {\n    taskTypes?: readonly string[];\n    domains?: readonly string[];\n    objectiveKeywords?: readonly string[];\n    outputFormats?: readonly string[];\n    riskLevels?: readonly TaskRiskLevel[];\n    requiredTools?: readonly string[];\n    requiredSkills?: readonly string[];\n    operators?: readonly string[];\n    languages?: readonly string[];\n    priorities?: readonly TaskPriority[];\n}',
+  },
+  {
+    name: 'TaskTemplateOverrideSource',
+    declaration: 'export type TaskTemplateOverrideSource = \'explicit\' | \'automatic\' | \'none\';',
+  },
+  {
+    name: 'TaskTemplatePatch',
+    declaration: 'export interface TaskTemplatePatch {\n    name?: string;\n    match?: TaskTemplateMatch;\n    method?: string;\n    rank?: number;\n}',
+  },
+  {
+    name: 'TaskTemplatePersonalization',
+    declaration: 'export interface TaskTemplatePersonalization {\n    preferences?: string;\n    memory?: string;\n}',
+  },
+  {
+    name: 'TaskTemplateRenderVariables',
+    declaration: 'export type TaskTemplateRenderVariables = Readonly<Record<TaskTemplateVariableName, string>>;',
+  },
+  {
+    name: 'TaskTemplateRevision',
+    declaration: 'export interface TaskTemplateRevision {\n    version: number;\n    name: string;\n    rank: number;\n    match: TaskTemplateMatch;\n    method: string;\n    updatedAt: string;\n}',
+  },
+  {
+    name: 'TaskTemplateSelected',
+    declaration: 'export interface TaskTemplateSelected {\n    id: TaskTemplateId;\n    version: number;\n    name: string;\n    content: TaskTemplateSelectedContent;\n    contentSha256: string;\n    renderVariables: TaskTemplateRenderVariables;\n}',
+  },
+  {
+    name: 'TaskTemplateSelectedContent',
+    declaration: 'export interface TaskTemplateSelectedContent {\n    method: string;\n    preferences?: string;\n    memory?: string;\n}',
+  },
+  {
+    name: 'TaskTemplateSelection',
+    declaration: 'export interface TaskTemplateSelection {\n    decision: \'inject\' | \'skip\';\n    overrideSource: TaskTemplateOverrideSource;\n    selected?: TaskTemplateSelected;\n    candidates: readonly TaskTemplateCandidate[];\n    rationale: readonly string[];\n    receipt: TaskTemplateInjectionReceipt;\n}',
+  },
+  {
+    name: 'TaskTemplateSelectionRequest',
+    declaration: 'export interface TaskTemplateSelectionRequest {\n    attributes: TaskAttributes;\n    explicitTemplateId?: TaskTemplateId;\n}',
+  },
+  {
+    name: 'TaskTemplateVariableName',
+    declaration: 'export type TaskTemplateVariableName = \'objective\' | \'taskType\' | \'domain\' | \'outputFormat\' | \'language\';',
   },
   {
     name: 'TerminalBackend',

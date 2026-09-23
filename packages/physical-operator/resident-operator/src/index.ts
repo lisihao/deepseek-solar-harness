@@ -21,7 +21,7 @@ import { ResidentOperatorError } from './error.ts'
 export { ResidentOperatorError } from './error.ts'
 
 /** Current local control protocol version. */
-export const RESIDENT_PROTOCOL_VERSION = 13
+export const RESIDENT_PROTOCOL_VERSION = 14
 /** Current forward-only daemon state schema version. */
 export const RESIDENT_STATE_SCHEMA_VERSION = 5
 
@@ -49,6 +49,18 @@ export type ResidentOperatorCommandId = Branded<'ResidentOperatorCommandId'>
  * @returns the branded command identity.
  */
 export const ResidentOperatorCommandId = (id: string): ResidentOperatorCommandId => id as ResidentOperatorCommandId
+
+/**
+ * Digest-only identity of the operator context materialized into one native
+ * product request. The text remains in `prompt` and `systemPrompt`; this
+ * identity participates in replay fencing with the native request fields.
+ */
+export interface NativeContext {
+  /** Native-context wire format version. */
+  readonly version: 1
+  /** SHA-256 digest of the sealed operator-context envelope. */
+  readonly digest: string
+}
 
 /** Independent lifecycle dimension for a Resident Session. */
 export type ResidentLifecycle = 'starting' | 'idle' | 'running' | 'draining' | 'stopped'
@@ -320,6 +332,8 @@ export interface ResidentExecuteRequest {
   readonly prompt: readonly ContentBlock[]
   /** DSH-owned system instructions assembled for this exact Agent request. */
   readonly systemPrompt?: string
+  /** Digest identity of the sealed context materialized into the native input. */
+  readonly nativeContext?: NativeContext
   /** Optional caller preference; omitted fields are resolved from task complexity and the live catalog. */
   readonly profile?: PhysicalOperatorExecutionPreference
   /** Optional genuine model-tool bridge sealed before dispatch. */

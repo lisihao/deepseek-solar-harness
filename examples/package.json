@@ -37,6 +37,7 @@
     "@deepseek-ai/dsh-hooks-claude-code": "workspace:*",
     "@deepseek-ai/dsh-hooks-codex": "workspace:*",
     "@deepseek-ai/dsh-cordis-host-runner": "workspace:*",
+    "@deepseek-ai/dsh-host-apiproxy": "workspace:*",
     "@deepseek-ai/dsh-invariants": "workspace:*",
     "@deepseek-ai/dsh-sdk-jsonrpc-server": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
@@ -52,6 +53,8 @@
     "@deepseek-ai/dsh-physical-operator-subagent": "workspace:*",
     "@deepseek-ai/dsh-resident-operator": "workspace:*",
     "@deepseek-ai/dsh-resident-operator-local": "workspace:*",
+    "@deepseek-ai/dsh-rlm-runtime": "workspace:*",
+    "@deepseek-ai/dsh-rlm-runtime-local": "workspace:*",
     "@deepseek-ai/dsh-plan-mode": "workspace:*",
     "@deepseek-ai/dsh-terminal": "workspace:*",
     "@deepseek-ai/dsh-terminal-bash": "workspace:*",
@@ -86,6 +89,8 @@
     "@deepseek-ai/dsh-subprocess-e2b": "workspace:*",
     "@deepseek-ai/dsh-subprocess-local": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
+    "@deepseek-ai/dsh-task-template": "workspace:*",
+    "@deepseek-ai/dsh-task-template-context": "workspace:*",
     "@deepseek-ai/dsh-jobs-local": "workspace:*",
     "@deepseek-ai/dsh-time-context": "workspace:*",
     "@deepseek-ai/dsh-tool-call-timeout-policy": "workspace:*",
@@ -119,6 +124,9 @@
     "@deepseek-ai/dsh-web": "workspace:*",
     "@deepseek-ai/dsh-web-fetch-http": "workspace:*",
     "@deepseek-ai/dsh-workflow-worker-thread": "workspace:*",
-    "@deepseek-ai/dsh-agent-instructions": "workspace:*"
+    "@deepseek-ai/dsh-agent-instructions": "workspace:*",
+    "@deepseek-ai/dsh-browser": "workspace:*",
+    "@deepseek-ai/dsh-physical-operator-chatgpt-web": "workspace:*",
+    "jsdom": "29.1.1"
   }
 }

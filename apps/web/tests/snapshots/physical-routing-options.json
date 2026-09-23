@@ -1,0 +1,43 @@
+{
+  "native": {
+    "chip": "协作 · Codex",
+    "mainModel": "Select model, current Codex",
+    "claudeAdvisorDisabled": false,
+    "webAdvisorDisabled": false,
+    "webAdvisorSelected": "true",
+    "executionModels": [
+      "按任务推荐",
+      "Fake Codex Main"
+    ]
+  },
+  "debate": {
+    "chip": "协作 · Debate（多 Agent 辩论）",
+    "claudeAdvisorDisabled": true,
+    "nativeProfileCount": 0
+  },
+  "restored": {
+    "chip": "协作 · Codex",
+    "claudeAdvisorDisabled": false
+  },
+  "webDirect": {
+    "chip": "协作 · ChatGPT 网页版",
+    "mainModel": "Select model, current ChatGPT Web",
+    "routingDisabled": true,
+    "taskGraphDisabled": true,
+    "claudeEffortCount": 0,
+    "webModels": [
+      "按网站设置",
+      "Fixture Web Route"
+    ],
+    "webEfforts": [
+      "按网站设置",
+      "Fixture Web Reasoning"
+    ]
+  },
+  "webCoordinator": {
+    "chip": "协作 · ChatGPT 网页版",
+    "routingDisabled": false,
+    "taskGraphDisabled": false,
+    "toolsNotice": true
+  }
+}

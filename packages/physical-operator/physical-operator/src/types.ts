@@ -7,6 +7,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { OperatorContextEnvelopeReceiptV1, OperatorContextEnvelopeV1 } from '@deepseek-ai/dsh-system-prompt'
 
 /** Stable deployment-owned identity for one physical operator. */
 export type PhysicalOperatorId = Branded<'PhysicalOperatorId'>
@@ -160,6 +161,8 @@ export interface PhysicalOperatorStartRequest {
   readonly label?: string
   /** Complete standalone task content for the selected operator. */
   readonly prompt: ContentBlock[]
+  /** Complete current-task context prepared by the dispatch authority. */
+  readonly contextEnvelope?: OperatorContextEnvelopeV1
   /** Exact assembled DSH system instructions for a native product acting as the current Agent. */
   readonly systemPrompt?: string
   /** Exact live agent whose workspace and authority the provider derives. */
@@ -245,6 +248,8 @@ export interface PhysicalOperatorProgressPage {
 
 /** Provider-owned run before the service adds identity and lifecycle observation. */
 export interface PhysicalOperatorProviderRun {
+  /** Receipt proving how a supplied context envelope was materialized. */
+  readonly contextReceipt?: OperatorContextEnvelopeReceiptV1
   /** Durable accepted receipt when the backing Provider supports reconnection. */
   readonly receipt?: PhysicalOperatorAcceptedReceipt
   /** Optional structured progress reader implemented by local and remote Resident Providers. */

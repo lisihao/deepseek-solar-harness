@@ -1,9 +1,12 @@
 /** Model-facing durable TaskGraph orchestration Consumer. */
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { captureRuntimeContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
 import {
   OrchestrationRunId,
   type LogicalTaskGraphV1,
+  type OrchestrationRuntimeContextV1,
   type RlmAutonomousMode,
   type OrchestrationRunSnapshot,
 } from '@deepseek-ai/dsh-orchestration'
@@ -116,6 +119,11 @@ function collaborationPolicy(events: readonly { readonly type: string; readonly 
   return 'auto'
 }
 
+/** Capture only the already-rendered dynamic contexts for this request. */
+function runtimeContextSnapshot(agent: Agent): OrchestrationRuntimeContextV1 | undefined {
+  return captureRuntimeContextSnapshot(agent.session.deriveMessages(), String(agent.id))
+}
+
 /**
  * Fold the latest orchestration strategy selection from a Session event stream.
  * @param events Ordered Session events.
@@ -191,6 +199,9 @@ export function apply(ctx: Context): void {
           || extra.length > 0) {
           return { kind: 'error', text: 'usage: /orchestration-strategy <auto|enabled|disabled> <auto|enabled|disabled> <auto|off|session|workspace|global> <balanced|quality|speed|economy> <codex-sol|claude-frontier|best-high-tier> <luna-first|claude-sonnet|balanced>' }
         }
+        if (rlm === 'disabled' && autonomous === 'enabled') {
+          return { kind: 'error', text: 'autonomous=enabled requires rlm=auto or enabled' }
+        }
         const preferences = {
           rlm, autonomous, continualHarness, optimization, plannerVerifierPreference, executionPreference,
         } as OrchestrationExecutionPreferences
@@ -226,11 +237,18 @@ export function apply(ctx: Context): void {
       const agent = exec.agent
       const policy = agent === undefined ? 'auto' : collaborationPolicy(agent.session.events)
       const preferences = agent === undefined ? DEFAULT_PREFERENCES : foldOrchestrationPreferences(agent.session.events)
+      const runtimeContext = agent === undefined ? undefined : runtimeContextSnapshot(agent)
       const compilation = await ctx.orchestrations.compile({
         intent: { request: args.objective },
         graph,
         ...agent === undefined ? {} : {
-          admission: { policy, route: 'taskgraph', sourceSessionId: String(agent.id), ...preferences },
+          admission: {
+            policy,
+            route: 'taskgraph',
+            sourceSessionId: String(agent.id),
+            ...runtimeContext === undefined ? {} : { runtimeContext },
+            ...preferences,
+          },
         },
       })
       const run = await ctx.orchestrations.start({

@@ -22,6 +22,45 @@ function responseRecorder(): {
   }
 }
 
+function localGet(url: string): {
+  method: 'GET'
+  url: string
+  headers: { host: string; origin: string }
+  socket: { remoteAddress: string }
+} {
+  return {
+    method: 'GET',
+    url,
+    headers: { host: '127.0.0.1:13080', origin: 'http://127.0.0.1:13080' },
+    socket: { remoteAddress: '127.0.0.1' },
+  }
+}
+
+function provider(model: string, supportedEfforts: readonly string[]) {
+  return {
+    operatorId: 'codex',
+    product: 'codex' as const,
+    displayName: 'Codex',
+    description: 'Test Resident provider.',
+    tags: ['coding'],
+    maxConcurrency: 4,
+    injectionBoundaries: ['pre-dispatch', 'next-turn'] as const,
+    available: true,
+    authentication: 'native-subscription' as const,
+    productVersion: 'test',
+    protocolHash: 'test',
+    models: [{
+      model,
+      displayName: model,
+      description: `${model} test catalog entry`,
+      supportedEfforts: [...supportedEfforts],
+      defaultEffort: 'medium',
+      isDefault: true,
+      supportsAdaptiveThinking: false,
+    }],
+  }
+}
+
 describe('Resident Operator Desktop projection', () => {
   it.each([
     ['AUTH_REQUIRED', 'auth_required'],
@@ -118,6 +157,106 @@ describe('Resident Operator Desktop projection', () => {
     expect(remote.status()).toBe(403)
     expect(remote.json()).toEqual({ error: 'LOCAL_OWNER_REQUIRED' })
     expect(authenticate).toHaveBeenCalledOnce()
+  })
+
+  it('serves cached provider catalogs normally and forces a fresh catalog only with refresh=1', async () => {
+    const providers = vi.fn()
+      .mockResolvedValueOnce([provider('gpt-5.5-stale', ['low', 'medium'])])
+      .mockResolvedValueOnce([provider('gpt-5.6-new', ['low', 'medium', 'high', 'ultra'])])
+    const authenticate = vi.fn()
+    const remoteAuth = {
+      authenticate: vi.fn(() => ({ deviceId: 'local', deviceName: 'Local', scope: 'admin' as const })),
+    }
+    const ctx = {
+      residentOperators: {
+        providers,
+        list: vi.fn(async () => []),
+        authenticate,
+      },
+      webServer: {
+        register: vi.fn((route: { handler: typeof handler }) => {
+          handler = route.handler
+          return () => {}
+        }),
+      },
+      get: (key: string) => key === 'remoteAuth' ? remoteAuth : undefined,
+      logger: { warn: vi.fn() },
+    } as unknown as Context
+    let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
+    registerResidentDashboard(ctx)
+    if (handler === undefined) throw new Error('dashboard route was not registered')
+
+    const cachedRequest = responseRecorder()
+    await handler(localGet('/api/resident-operators'), cachedRequest.response)
+    expect(cachedRequest.status()).toBe(200)
+    expect(cachedRequest.json()).toMatchObject({
+      providers: [{ models: [{ model: 'gpt-5.5-stale', supportedEfforts: ['low', 'medium'] }] }],
+    })
+
+    const cachedAgain = responseRecorder()
+    await handler(localGet('/api/resident-operators'), cachedAgain.response)
+    expect(cachedAgain.status()).toBe(200)
+    expect(cachedAgain.json()).toMatchObject({
+      providers: [{ models: [{ model: 'gpt-5.5-stale', supportedEfforts: ['low', 'medium'] }] }],
+    })
+    expect(providers).toHaveBeenCalledOnce()
+
+    const refreshed = responseRecorder()
+    await handler(localGet('/api/resident-operators?refresh=1'), refreshed.response)
+    expect(refreshed.status()).toBe(200)
+    expect(refreshed.json()).toMatchObject({
+      providers: [{ models: [{ model: 'gpt-5.6-new', supportedEfforts: ['low', 'medium', 'high', 'ultra'] }] }],
+    })
+    expect(providers).toHaveBeenCalledTimes(2)
+    expect(authenticate).not.toHaveBeenCalled()
+  })
+
+  it('keeps the last good provider cache after a failed refresh and surfaces the failure', async () => {
+    const providers = vi.fn()
+      .mockResolvedValueOnce([provider('gpt-5.5-stale', ['low', 'medium'])])
+      .mockRejectedValueOnce(new Error('fresh catalog unavailable'))
+    const authenticate = vi.fn()
+    const ctx = {
+      residentOperators: {
+        providers,
+        list: vi.fn(async () => []),
+        authenticate,
+      },
+      webServer: {
+        register: vi.fn((route: { handler: typeof handler }) => {
+          handler = route.handler
+          return () => {}
+        }),
+      },
+      get: (key: string) => key === 'remoteAuth' ? {
+        authenticate: vi.fn(() => ({ deviceId: 'local', deviceName: 'Local', scope: 'admin' as const })),
+      } : undefined,
+      logger: { warn: vi.fn() },
+    } as unknown as Context
+    let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
+    registerResidentDashboard(ctx)
+    if (handler === undefined) throw new Error('dashboard route was not registered')
+
+    const warm = responseRecorder()
+    await handler(localGet('/api/resident-operators'), warm.response)
+    expect(warm.status()).toBe(200)
+
+    const failed = responseRecorder()
+    await handler(localGet('/api/resident-operators?refresh=1'), failed.response)
+    expect(failed.status()).toBe(503)
+    expect(failed.json()).toEqual({
+      error: 'RESIDENT_DASHBOARD_UNAVAILABLE',
+      message: 'fresh catalog unavailable',
+    })
+
+    const stale = responseRecorder()
+    await handler(localGet('/api/resident-operators'), stale.response)
+    expect(stale.status()).toBe(200)
+    expect(stale.json()).toMatchObject({
+      providers: [{ models: [{ model: 'gpt-5.5-stale', supportedEfforts: ['low', 'medium'] }] }],
+    })
+    expect(providers).toHaveBeenCalledTimes(2)
+    expect(authenticate).not.toHaveBeenCalled()
   })
 
   it('reconnects to daemon-owned session, progress, and settled result state', async () => {

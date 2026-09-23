@@ -12,17 +12,52 @@ import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
 import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
+const ROUTE_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-options.json', import.meta.url))
+
 const FIXTURES = fileURLToPath(new URL('./fixtures/physical-routing-fixtures.mjs', import.meta.url))
+
+const CHATGPT_WEB_OPERATOR = fileURLToPath(new URL('../../../packages/physical-operator/physical-operator-chatgpt-web/lib/index.js', import.meta.url))
 
 function yamlString(value: string): string {
   return JSON.stringify(value)
 }
 
 async function writeOverlay(root: string): Promise<string> {
+  const browserFixture = join(root, 'physical-routing-browser-fixture.mjs')
+  await writeFile(browserFixture, `const catalog = {
+  status: 'ok',
+  models: [{ id: 'fixture-web-route', label: 'Fixture Web Route' }],
+  efforts: [{ id: 'fixture-web:standard', label: 'Fixture Web Reasoning' }],
+  selectedModel: 'fixture-web-route',
+  selectedEffort: 'fixture-web:standard',
+  observedAt: '2026-09-23T00:00:00.000Z',
+}
+
+export function apply(ctx) {
+  ctx.provide('browser', {
+    capabilities() {
+      return ['authenticated-profile-reuse', 'named-workspace', 'page-evaluate']
+    },
+    async runProgram(program) {
+      if (!program.source.includes('chatgpt-web-model-catalog')) {
+        throw new Error('physical-routing fixture permits only ChatGPT Web catalog discovery')
+      }
+      return {
+        version: 1,
+        workspace: { id: 'physical-routing-browser', name: 'physical-routing-browser', lifecycle: 'active', control: 'agent' },
+        output: { kind: 'json', value: catalog },
+      }
+    },
+  })
+}
+`)
   const path = join(root, 'physical-routing.overlay.yml')
   await writeFile(path, `- insert:
     - id: physical-operators
       name: '@deepseek-ai/dsh-physical-operator'
+
+    - id: physical-routing-browser
+      name: ${yamlString(browserFixture)}
 
     - id: resident-operators
       name: ${yamlString(FIXTURES)}
@@ -49,6 +84,13 @@ async function writeOverlay(root: string): Promise<string> {
 
     - id: ui-physical-operator
       name: '@deepseek-ai/dsh-ui-physical-operator'
+
+    - id: physical-operator-chatgpt-web
+      name: ${yamlString(CHATGPT_WEB_OPERATOR)}
+      config:
+        stateRoot: ${yamlString(join(root, 'chatgpt-web'))}
+        connectorName: Fixture ChatGPT Web
+        coordinatorPort: 0
 
     - id: tool-orchestration
       name: '@deepseek-ai/dsh-tool-orchestration'
@@ -126,7 +168,7 @@ describe('web e2e: physical operator qualification and routing', () => {
     ).toBe('true')
   }
 
-  it('qualifies only after a panel opens, preserves the selected route across Debate, and surfaces auth mismatch', async () => {
+  it('keeps a selected primary in charge while exposing bounded downstream and Web coordination controls', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-routing'))
     // Neither the closed Resident action nor the closed collaboration control
     // may qualify native providers or start a native-product operation.
@@ -138,28 +180,120 @@ describe('web e2e: physical operator qualification and routing', () => {
     expect(await numberInFile(codexQualification)).toBe(0)
 
     const dialog = await collaborationPanel()
+    expect(qualificationRequests).toEqual([])
+    await dialog.getByRole('button', { name: /优先 Claude Code/ }).click()
     await expect.poll(() => qualificationRequests.length, { timeout: 10_000 }).toBeGreaterThan(0)
     await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBeGreaterThan(0)
-    await dialog.getByRole('button', { name: /优先 Claude Code/ }).click()
     await expect.poll(() => dialog.getByText(/AUTH_MODE_MISMATCH/).isVisible(), { timeout: 10_000 }).toBe(true)
 
     await dialog.getByRole('button', { name: /优先 Codex/ }).click()
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible(), { timeout: 10_000 }).toBe(true)
     await setMechanism(dialog, 'debate', '协作 · Debate（多 Agent 辩论）')
-    await setMechanism(dialog, 'standard', '协作 · 标准（单 Agent）')
+    await setMechanism(dialog, 'standard', '协作 · Codex')
     await expectSelectedRoute(dialog, /优先 Codex/)
 
     for (const route of [
-      { option: /优先 Claude Code/ },
-      { option: /ChatGPT 网页订阅/ },
+      { option: /优先 Claude Code/, label: '协作 · Claude Code' },
+      { option: /ChatGPT 网页订阅/, label: '协作 · ChatGPT 网页版' },
     ]) {
       await dialog.getByRole('button', { name: route.option }).click()
       await expectSelectedRoute(dialog, route.option)
       await setMechanism(dialog, 'debate', '协作 · Debate（多 Agent 辩论）')
-      await setMechanism(dialog, 'standard', '协作 · 标准（单 Agent）')
+      await setMechanism(dialog, 'standard', route.label)
       await expectSelectedRoute(dialog, route.option)
     }
+    await dialog.getByRole('button', { name: /优先 Codex/ }).click()
+    await expectSelectedRoute(dialog, /优先 Codex/)
 
+    await dialog.getByRole('button', { name: '关闭协作方式' }).click()
+    await page.getByRole('button', { name: /^Select model/ }).click()
+    await page.getByRole('menuitem', { name: /^Model/ }).click()
+    await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
+    await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
+    const selectedPanel = await collaborationPanel()
+    const claudeOption = selectedPanel.getByRole('button', { name: /优先 Claude Code/ })
+    const webOption = selectedPanel.getByRole('button', { name: /ChatGPT 网页订阅/ })
+    await expect.poll(() => claudeOption.isDisabled()).toBe(false)
+    await expect.poll(() => webOption.isDisabled()).toBe(false)
+    await webOption.click()
+    await expectSelectedRoute(selectedPanel, /ChatGPT 网页订阅/)
+    await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
+    await expect.poll(() => selectedPanel.getByRole('combobox', { name: '执行模型' }).isEnabled()).toBe(true)
+    const native = {
+      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
+      mainModel: await page.getByRole('button', { name: /^Select model/ }).getAttribute('aria-label'),
+      claudeAdvisorDisabled: await claudeOption.isDisabled(),
+      webAdvisorDisabled: await webOption.isDisabled(),
+      webAdvisorSelected: await webOption.getAttribute('data-selected'),
+      executionModels: await selectedPanel.getByRole('combobox', { name: '执行模型' }).locator('option').allTextContents(),
+    }
+    await setMechanism(selectedPanel, 'debate', '协作 · Debate（多 Agent 辩论）')
+    const debate = {
+      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
+      claudeAdvisorDisabled: await claudeOption.isDisabled(),
+      nativeProfileCount: await selectedPanel.getByRole('combobox', { name: '执行模型' }).count(),
+    }
+    await selectedPanel.getByRole('button', { name: '退出 Debate（恢复会话路由）' }).click()
+    await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
+    const restored = {
+      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
+      claudeAdvisorDisabled: await claudeOption.isDisabled(),
+    }
+    await selectedPanel.getByRole('button', { name: '关闭协作方式' }).click()
+    await page.getByRole('button', { name: /^Select model/ }).click()
+    await page.getByRole('menuitem', { name: /^Model/ }).click()
+    await page.getByRole('menuitemradio', { name: /ChatGPT Web/ }).click()
+    await expect.poll(() => page.getByRole('button', { name: '协作 · ChatGPT 网页版' }).isVisible()).toBe(true)
+
+    const webPanel = await collaborationPanel()
+    await webPanel.getByText('连接器：Fixture ChatGPT Web').waitFor({ timeout: 10_000 })
+    const webMode = webPanel.getByRole('group', { name: 'ChatGPT 网页版协作模式' })
+    const webClaudeOption = webPanel.getByRole('button', { name: /优先 Claude Code/ })
+    await expect.poll(() => webMode.getByRole('button', { name: '独立问答' }).getAttribute('aria-pressed')).toBe('true')
+    await expect.poll(() => webClaudeOption.isDisabled()).toBe(true)
+    expect(await webPanel.getByRole('button', { name: '刷新模型与算子' }).isEnabled()).toBe(true)
+    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' }).isDisabled()).toBe(true)
+    expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 推理强度' }).isDisabled()).toBe(true)
+    expect(await webPanel.getByRole('combobox', { name: 'Claude 思考强度' }).count()).toBe(0)
+    await webPanel.getByRole('button', { name: '高级调度' }).click()
+    await expect.poll(() => webPanel.getByRole('combobox', { name: '模型分配目标' }).isDisabled()).toBe(true)
+    const directTaskGraphDisabled = await webPanel.getByRole('combobox', { name: '模型分配目标' }).isDisabled()
+    await webPanel.getByRole('button', { name: '基础' }).click()
+
+    const primaryBeforeRefresh = await page.getByRole('button', { name: /^Select model/ }).getAttribute('aria-label')
+    await webPanel.getByRole('button', { name: '刷新模型与算子' }).click()
+    await expect.poll(() => webPanel.getByText(/模型目录已刷新；原生算子目录已刷新；ChatGPT Web 目录已刷新/).isVisible(), { timeout: 15_000 })
+      .toBe(true)
+    const webModel = webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' })
+    const webEffort = webPanel.getByRole('combobox', { name: 'ChatGPT Web 推理强度' })
+    await expect.poll(() => webModel.isEnabled()).toBe(true)
+    await expect.poll(() => webEffort.isEnabled()).toBe(true)
+    expect(await page.getByRole('button', { name: /^Select model/ }).getAttribute('aria-label')).toBe(primaryBeforeRefresh)
+    const webDirect = {
+      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
+      mainModel: primaryBeforeRefresh,
+      routingDisabled: await webClaudeOption.isDisabled(),
+      taskGraphDisabled: directTaskGraphDisabled,
+      claudeEffortCount: await webPanel.getByRole('combobox', { name: 'Claude 思考强度' }).count(),
+      webModels: await webModel.locator('option').allTextContents(),
+      webEfforts: await webEffort.locator('option').allTextContents(),
+    }
+
+    await webMode.getByRole('button', { name: '工具协作' }).click()
+    await expect.poll(() => webMode.getByRole('button', { name: '工具协作' }).getAttribute('aria-pressed'), { timeout: 15_000 }).toBe('true')
+    await expect.poll(() => webClaudeOption.isDisabled()).toBe(false)
+    const coordinatorRoutingDisabled = await webClaudeOption.isDisabled()
+    await webPanel.getByRole('button', { name: '高级调度' }).click()
+    await expect.poll(() => webPanel.getByRole('combobox', { name: '模型分配目标' }).isEnabled()).toBe(true)
+    const webCoordinator = {
+      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
+      routingDisabled: coordinatorRoutingDisabled,
+      taskGraphDisabled: await webPanel.getByRole('combobox', { name: '模型分配目标' }).isDisabled(),
+      toolsNotice: await webPanel.getByText(/工具协作模式允许通过 Custom MCP 使用 DSH 工具和 TaskGraph/).isVisible(),
+    }
+    const transcript = `${JSON.stringify({ native, debate, restored, webDirect, webCoordinator }, null, 2)}\n`
+    if (scaffold.mode === 'refresh') await writeFile(ROUTE_SNAPSHOT, transcript)
+    expect(transcript).toBe(await readFile(ROUTE_SNAPSHOT, 'utf8'))
     expect(tripwire.pageErrors).toEqual([])
   }, 90_000)
 })

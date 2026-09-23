@@ -48,6 +48,9 @@
       "path": "../../llm/llm"
     },
     {
+      "path": "../../core/system-prompt"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     },
     {

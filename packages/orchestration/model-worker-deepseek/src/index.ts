@@ -1,6 +1,5 @@
 /** DeepSeek official API last-resort orchestration worker. @module @deepseek-ai/dsh-model-worker-deepseek */
 
-import { createConnection } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import {
@@ -13,7 +12,7 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import { ModelWorkerError, type ModelWorkerExecuteRequest, type ModelWorkerProvider, type ModelWorkerResult, type ModelWorkerToolBridgeV1 } from '@deepseek-ai/dsh-model-worker'
-import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { requestLocalJsonRpc } from '@deepseek-ai/dsh-sdk-protocol'
 
 export const name = 'model-worker-deepseek'
 /** Stable allocator identity for the metered DeepSeek API worker. */
@@ -172,28 +171,12 @@ async function callModelToolBridge(
   commandId: string,
   signal: AbortSignal,
 ): Promise<unknown> {
-  const socket = createConnection(bridge.socketPath)
-  const transport = new JsonRpcLineTransport(socket, socket)
-  const connected = new Promise<void>((resolve, reject) => {
-    socket.once('connect', resolve)
-    socket.once('error', reject)
-  })
-  const abort = (): void => { socket.destroy(signal.reason instanceof Error ? signal.reason : new Error('model tool bridge aborted')) }
-  signal.addEventListener('abort', abort, { once: true })
-  try {
-    await connected
-    transport.start()
-    return await transport.request('tool.call', {
-      session_id: bridge.sessionId,
-      command_id: commandId,
-      tool,
-      arguments: argumentsValue,
-    }, signal)
-  } finally {
-    signal.removeEventListener('abort', abort)
-    transport.close()
-    socket.destroy()
-  }
+  return await requestLocalJsonRpc(bridge.socketPath, 'tool.call', {
+    session_id: bridge.sessionId,
+    command_id: commandId,
+    tool,
+    arguments: argumentsValue,
+  }, signal, () => signal.reason instanceof Error ? signal.reason : new Error('model tool bridge aborted'))
 }
 
 /** Services required by the billed DeepSeek worker Provider. */

@@ -173,7 +173,13 @@ describe('Remote Sync wire parsing', () => {
         defaultEffort: 'medium', isDefault: true, supportsAdaptiveThinking: true,
       }],
     }
-    const accepted = { sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2 }
+    const accepted = {
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 2,
+      contextReceipt: {
+        version: 1, digest: 'a'.repeat(64), receiver: 'remote-resident:codex',
+        outcome: 'accepted', format: 'native', roleFidelity: 'native',
+      },
+    }
     const turn = {
       commandId: 'command-1', sessionId: accepted.sessionId, turnId: accepted.turnId,
       state: 'settled', stateRevision: 3, stopReason: 'completed', updatedAt: '2026-08-27T12:00:00.000Z',
@@ -244,6 +250,48 @@ describe('Remote Sync wire parsing', () => {
     expect(parseRemoteResidentAcceptedTurn({
       sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0,
     })).toMatchObject({ stateRevision: 0 })
+    expect(parseRemoteResidentAcceptedTurn({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0,
+      contextReceipt: {
+        version: 1, digest: 'b'.repeat(64), receiver: 'remote-resident:codex',
+        outcome: 'accepted', format: 'text', roleFidelity: 'text-downgrade',
+      },
+    })).toMatchObject({ contextReceipt: { format: 'text', roleFidelity: 'text-downgrade' } })
+    expect(() => parseRemoteResidentAcceptedTurn({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0,
+      contextReceipt: {
+        version: 1, digest: 'b'.repeat(64), receiver: 'remote-resident:codex',
+        outcome: 'accepted', format: 'native', roleFidelity: 'text-downgrade',
+      },
+    })).toThrow('roleFidelity does not match format')
+    expect(() => parseRemoteResidentAcceptedTurn({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0,
+      contextReceipt: {
+        version: 1, digest: 'not-a-digest', receiver: 'remote-resident:codex',
+        outcome: 'accepted', format: 'native', roleFidelity: 'native',
+      },
+    })).toThrow('lowercase SHA-256 digest')
+    expect(() => parseRemoteResidentAcceptedTurn({
+      sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0,
+      contextReceipt: {
+        version: 1, digest: 'b'.repeat(64), receiver: 'remote-resident:codex',
+        outcome: 'accepted', format: 'native', roleFidelity: 'native', injected: true,
+      },
+    })).toThrow('unknown field')
+    const acceptedNativeReceipt = {
+      version: 1, digest: 'b'.repeat(64), receiver: 'remote-resident:codex',
+      outcome: 'accepted', format: 'native', roleFidelity: 'native',
+    }
+    for (const [contextReceipt, error] of [
+      [{ ...acceptedNativeReceipt, version: 2 }, 'version must be 1'],
+      [{ ...acceptedNativeReceipt, outcome: 'rejected' }, 'outcome must be accepted'],
+      [{ ...acceptedNativeReceipt, format: 'opaque' }, 'format is invalid'],
+      [{ ...acceptedNativeReceipt, receiver: '   ' }, 'receiver must not be blank'],
+    ] as const) {
+      expect(() => parseRemoteResidentAcceptedTurn({
+        sessionId: 'resident-session', turnId: 'resident-turn', stateRevision: 0, contextReceipt,
+      })).toThrow(error)
+    }
 
     const provider = {
       operatorId: 'claude-code', product: 'claude-code', displayName: 'Claude Code', description: '',

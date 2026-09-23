@@ -1,0 +1,15 @@
+{
+  "output": [
+    {
+      "type": "text",
+      "text": "Composer ready; request accepted."
+    }
+  ],
+  "stopReason": "completed",
+  "phases": [
+    "chatgpt-web.connecting",
+    "chatgpt-web.submitting",
+    "chatgpt-web.waiting",
+    "chatgpt-web.completed"
+  ]
+}

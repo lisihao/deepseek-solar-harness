@@ -40,6 +40,8 @@ Each attempt receives one sealed Context Packet. Later graph, capsule, or capabi
 
 ## Known Limitations and Deferred Work
 
+- TaskGraph admission rejects `rlm=disabled` with `autonomous=enabled` before compilation artifacts are written. Legacy persisted preferences remain readable and fail only when used for a new admission.
+
 - Baseline capsule bindings support instruction and read-only resource/data references. Tool, MCP, secret, and executable Guard bindings fail closed until a Provider implements their enforcement.
 - Claude Code and Codex support pre-dispatch and next-turn injection only; immediate in-turn checkpoint updates return `CAPABILITY_HOTSWAP_UNSUPPORTED`.
 - RLM performs bounded recursion inside one sealed node. It is an execution strategy, not another product or global Scheduler; a crash without a provable composite terminal result becomes indeterminate and is never replayed automatically.

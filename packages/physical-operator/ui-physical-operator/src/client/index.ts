@@ -2,6 +2,7 @@ import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/c
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { ResidentOperatorsPanel } from './ResidentOperatorsPanel.tsx'
 import {
   PhysicalOperatorRoutingControl,
@@ -15,6 +16,16 @@ export * from './PhysicalOperatorRoutingControl.tsx'
 /** Browser services required by the Resident projection and routing control. */
 export const inject = ['slots', 'connection', 'remote', 'remote.commands', 'sessions']
 
+/** Fold one command Remote response into the routing control's failure line. */
+function commandFailure(
+  result: Awaited<ReturnType<ClientContext['remote']['commands']['execute']>>,
+  unknownCommand: string,
+): string | null {
+  if (!result.ok) return `${result.error.message} (${result.error.code})`
+  if (result.value === undefined) return `unknown command: ${unknownCommand}`
+  return result.value.result.kind === 'error' ? result.value.result.text : null
+}
+
 /** Register provider-neutral physical-operator controls in any DSH client shell. */
 export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as ConnectionHandle
@@ -26,50 +37,50 @@ export function apply(ctx: ClientContext): void {
     label: 'Resident 物理算子',
     inject: () => ({ request: connection.request }),
   }, ResidentOperatorsPanel))
-  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
-    name: 'conversation.input.right',
-    id: 'physical-operator-routing',
-    order: 900,
-    label: '物理算子执行策略',
-    inject: (sessionId: SessionId): PhysicalOperatorRoutingInjected => ({
-      request: connection.request,
-      select: async (policy) => {
-        const result = await ctx.remote.commands.execute(sessionId, `/operator ${policy}`)
-        if (!result.ok) return `${result.error.message} (${result.error.code})`
-        if (result.value === undefined) return 'unknown command: /operator'
-        return null
+  ctx.inject(['slots', 'modelDirectories'], (scope: ClientContext) => {
+    const models = scope.modelDirectories
+    scope.slots.inject('conversation.input.right', () => scope.slots.register({
+      name: 'conversation.input.right',
+      id: 'physical-operator-routing',
+      order: 900,
+      label: '物理算子执行策略',
+      inject: (sessionId: SessionId): PhysicalOperatorRoutingInjected => {
+        const directory = models.directoryFor(sessionId)
+        return {
+          directory: directory.store,
+          refreshModels: () => directory.load({ refresh: true }),
+          request: connection.request,
+          select: async (policy) => {
+            const result = await scope.remote.commands.execute(sessionId, `/operator ${policy}`)
+            return commandFailure(result, '/operator')
+          },
+          selectProfile: async (operatorId, model, effort) => {
+            const result = await scope.remote.commands.execute(
+              sessionId,
+              `/operator-profile ${operatorId} ${model ?? 'auto'} ${effort ?? 'auto'}`,
+            )
+            return commandFailure(result, '/operator-profile')
+          },
+          selectOrchestrationStrategy: async (
+            rlm,
+            autonomous,
+            continualHarness,
+            optimization,
+            plannerVerifierPreference,
+            executionPreference,
+          ) => {
+            const result = await scope.remote.commands.execute(
+              sessionId,
+              `/orchestration-strategy ${rlm} ${autonomous} ${continualHarness} ${optimization} ${plannerVerifierPreference} ${executionPreference}`,
+            )
+            return commandFailure(result, '/orchestration-strategy')
+          },
+          selectDebateMode: async (mode) => {
+            const result = await scope.remote.commands.execute(sessionId, `/debate-mode ${mode}`)
+            return commandFailure(result, '/debate-mode')
+          },
+        }
       },
-      selectProfile: async (operatorId, model, effort) => {
-        const result = await ctx.remote.commands.execute(
-          sessionId,
-          `/operator-profile ${operatorId} ${model ?? 'auto'} ${effort ?? 'auto'}`,
-        )
-        if (!result.ok) return `${result.error.message} (${result.error.code})`
-        if (result.value === undefined) return 'unknown command: /operator-profile'
-        return null
-      },
-      selectOrchestrationStrategy: async (
-        rlm,
-        autonomous,
-        continualHarness,
-        optimization,
-        plannerVerifierPreference,
-        executionPreference,
-      ) => {
-        const result = await ctx.remote.commands.execute(
-          sessionId,
-          `/orchestration-strategy ${rlm} ${autonomous} ${continualHarness} ${optimization} ${plannerVerifierPreference} ${executionPreference}`,
-        )
-        if (!result.ok) return `${result.error.message} (${result.error.code})`
-        if (result.value === undefined) return 'unknown command: /orchestration-strategy'
-        return null
-      },
-      selectDebateMode: async (mode) => {
-        const result = await ctx.remote.commands.execute(sessionId, `/debate-mode ${mode}`)
-        if (!result.ok) return `${result.error.message} (${result.error.code})`
-        if (result.value === undefined) return 'unknown command: /debate-mode'
-        return null
-      },
-    }),
-  }, PhysicalOperatorRoutingControl))
+    }, PhysicalOperatorRoutingControl))
+  })
 }

@@ -52,6 +52,8 @@ class ThrowingAdapter extends LlmAdapter {
 }
 
 class CatalogAdapter extends ScriptedAdapter {
+  lastListOptions: { readonly refresh?: boolean } | undefined
+
   constructor(
     private readonly provider: LlmProviderInfo,
     private readonly models: readonly LlmModelInfo[],
@@ -66,7 +68,11 @@ class CatalogAdapter extends ScriptedAdapter {
     return this.provider
   }
 
-  override listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
+  override listModels(
+    _provider: string,
+    options?: { readonly refresh?: boolean },
+  ): Promise<readonly LlmModelInfo[]> {
+    this.lastListOptions = options
     return Promise.resolve(this.models)
   }
 
@@ -539,6 +545,22 @@ describe('LlmRuntime', () => {
     await expect(ctx.llm.listModels('catalog')).resolves.toEqual([{
       provider: 'catalog', id: 'fast', name: 'source mutated', description: 'Low latency',
     }])
+  })
+
+  it('forwards an explicit catalog refresh request to the registered adapter', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    const adapter = new CatalogAdapter(
+      { id: 'catalog', name: 'Catalog Provider' },
+      [{ provider: 'catalog', id: 'fast', name: 'Fast' }],
+    )
+    ctx.llm.registerAdapter(['catalog'], adapter)
+    const options = { refresh: true } as const
+
+    await expect(ctx.llm.listModels('catalog', options)).resolves.toEqual([
+      { provider: 'catalog', id: 'fast', name: 'Fast' },
+    ])
+    expect(adapter.lastListOptions).toBe(options)
   })
 
   it('defaults adapters to their route name and an empty advisory model list', async () => {

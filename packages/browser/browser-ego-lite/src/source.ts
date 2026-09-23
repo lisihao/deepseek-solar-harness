@@ -328,17 +328,20 @@ async function __dshWithLegacyTarget(spec, call, timeout = 0) {
   }
 }
 
+async function __dshLegacyFill(selector, value, options) {
+  const selectedEditable = await __dshPage.evaluate("(() => { const element = document.querySelector(" + JSON.stringify(selector) + "); if (element === null || !(element.isContentEditable || element.getAttribute('contenteditable') === 'true')) return false; element.focus(); const range = document.createRange(); range.selectNodeContents(element); const selection = window.getSelection(); if (selection === null) throw new Error('Ego Lite editable selection unavailable'); selection.removeAllRanges(); selection.addRange(range); return true; })()");
+  if (selectedEditable) await pressKey("Backspace");
+  return fillInput(selector, value, {
+    clearFirst: true,
+    timeout: __dshLegacySeconds(options.timeout ?? 0),
+  });
+}
+
 function __dshLegacyLocator(spec) {
   return {
     click: (options = {}) => __dshWithLegacyTarget(spec, selector => click(selector, options), options.timeout),
-    fill: (value, options = {}) => __dshWithLegacyTarget(spec, selector => fillInput(selector, value, {
-      clearFirst: true,
-      timeout: __dshLegacySeconds(options.timeout ?? 0),
-    }), options.timeout),
-    clear: (options = {}) => __dshWithLegacyTarget(spec, selector => fillInput(selector, "", {
-      clearFirst: true,
-      timeout: __dshLegacySeconds(options.timeout ?? 0),
-    }), options.timeout),
+    fill: (value, options = {}) => __dshWithLegacyTarget(spec, selector => __dshLegacyFill(selector, value, options), options.timeout),
+    clear: (options = {}) => __dshWithLegacyTarget(spec, selector => __dshLegacyFill(selector, "", options), options.timeout),
     press: (key, options = {}) => __dshWithLegacyTarget(spec, async selector => {
       await __dshPage.evaluate("document.querySelector(" + JSON.stringify(selector) + ")?.focus()");
       await pressKey(key);

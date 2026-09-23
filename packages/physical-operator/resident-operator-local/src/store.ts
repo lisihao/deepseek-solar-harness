@@ -19,6 +19,7 @@ import {
   type ResidentCompactResult,
   type ResidentExecutionProfile,
   type ResidentExecutionProfileSource,
+  type NativeContext,
   type ResidentObservation,
   type ResidentProgressPhase,
   type ResidentReceiptState,
@@ -150,6 +151,7 @@ export type TurnInspection = ResidentTurnSnapshot
  * @param modelToolBridge - optional sealed RLM model-tool bridge.
  * @param systemPrompt - optional DSH-owned system instructions.
  * @param nativeToolPolicy - sealed native product tool authority.
+ * @param nativeContext - sealed operator-context identity materialized into native input.
  * @returns lowercase SHA-256 digest.
  */
 export function canonicalRequestHash(
@@ -162,6 +164,7 @@ export function canonicalRequestHash(
   modelToolBridge?: PhysicalOperatorModelToolBridgeV1,
   systemPrompt?: string,
   nativeToolPolicy: PhysicalOperatorNativeToolPolicy = 'inherit',
+  nativeContext?: NativeContext,
 ): string {
   return createHash('sha256')
     .update(JSON.stringify({
@@ -178,6 +181,9 @@ export function canonicalRequestHash(
         tools: modelToolBridge.tools,
       },
       nativeToolPolicy,
+      ...nativeContext === undefined ? {} : {
+        nativeContext: { version: nativeContext.version, digest: nativeContext.digest },
+      },
     }))
     .digest('hex')
 }

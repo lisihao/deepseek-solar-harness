@@ -332,6 +332,7 @@ export const sessionHistoryValueSchema: z.ZodType<Wire<ResponseValue<'session.hi
 /** session.models request payload. */
 export const sessionModelsRequestSchema = z.object({
   sessionId: sessionIdSchema,
+  refresh: z.boolean().optional(),
 }) satisfies z.ZodType<Wire<RequestPayload<'session.models'>>>
 
 /** session.models response value. */

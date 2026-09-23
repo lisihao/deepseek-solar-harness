@@ -11,12 +11,15 @@ import { LocalJsonRpcRequestServer } from '@deepseek-ai/dsh-sdk-protocol'
 import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
 
 interface Binding {
+  readonly sessionId: string
   readonly agent: Agent
   readonly signal: AbortSignal
   /** Parent physical execution that owns every model-visible tool call in this binding. */
   readonly executionCommandId: string
   readonly tools: ReadonlySet<string>
   readonly receipts: Map<string, { readonly hash: string; readonly result?: Promise<unknown> }>
+  readonly operations: Set<Promise<void>>
+  releasePromise?: Promise<void>
 }
 
 interface RecoveredIndeterminateReceipt {
@@ -112,6 +115,7 @@ function socketPath(): { readonly path: string; readonly directory?: string } {
 export class PhysicalOperatorModelToolBridge {
   private readonly endpoint = socketPath()
   private readonly bindings = new Map<string, Binding>()
+  private readonly ownedBindings = new Set<Binding>()
   private readonly server: LocalJsonRpcRequestServer
 
   constructor(private readonly ctx: Context) {
@@ -127,15 +131,16 @@ export class PhysicalOperatorModelToolBridge {
    * @param agent - owning Agent whose tool surface is exposed.
    * @param schemas - exact model-visible tool schemas.
    * @param signal - owning turn cancellation signal.
-   * @returns the native bridge descriptor and an idempotent release handle.
+   * @returns the native bridge descriptor and an idempotent release handle that
+   *   waits for accepted tool calls to settle.
    */
   async bind(
     commandId: string,
     agent: Agent,
     schemas: readonly ToolSchema[],
     signal: AbortSignal,
-  ): Promise<{ readonly descriptor?: PhysicalOperatorModelToolBridgeV1; release(): void }> {
-    if (schemas.length === 0) return { release: () => {} }
+  ): Promise<{ readonly descriptor?: PhysicalOperatorModelToolBridgeV1; release(): Promise<void> }> {
+    if (schemas.length === 0) return { release: async () => {} }
     await this.server.start()
     const sessionId = `${String(agent.id)}:${commandId}`
     const current = this.bindings.get(sessionId)
@@ -158,28 +163,42 @@ export class PhysicalOperatorModelToolBridge {
       }, { ignorable: true })
     }
     const binding: Binding = {
+      sessionId,
       agent,
       signal,
       executionCommandId: commandId,
       tools: new Set(tools.map(tool => tool.name)),
       receipts: recovered.receipts,
+      operations: new Set(),
     }
     this.bindings.set(sessionId, binding)
-    let attached = true
+    this.ownedBindings.add(binding)
     return {
       descriptor: { version: 1, socketPath: this.endpoint.path, sessionId, tools },
-      release: () => {
-        if (!attached) return
-        attached = false
-        if (this.bindings.get(sessionId) === binding) this.bindings.delete(sessionId)
-      },
+      release: () => this.release(binding),
     }
   }
 
   /** Close the endpoint and remove only this bridge's socket file. */
   async dispose(): Promise<void> {
-    this.bindings.clear()
+    await Promise.all([...this.ownedBindings].map(binding => this.release(binding)))
     await this.server.dispose()
+  }
+
+  private release(binding: Binding): Promise<void> {
+    if (binding.releasePromise !== undefined) return binding.releasePromise
+    if (this.bindings.get(binding.sessionId) === binding) this.bindings.delete(binding.sessionId)
+    const quiesced = this.waitForOperations(binding)
+    binding.releasePromise = quiesced.then(() => {
+      this.ownedBindings.delete(binding)
+    })
+    return binding.releasePromise
+  }
+
+  private async waitForOperations(binding: Binding): Promise<void> {
+    while (binding.operations.size > 0) {
+      await Promise.all([...binding.operations])
+    }
   }
 
   private call(params: unknown): Promise<unknown> {
@@ -211,6 +230,11 @@ export class PhysicalOperatorModelToolBridge {
     }
     const result = this.execute(binding, commandId, tool, args)
     binding.receipts.set(commandId, { hash, result })
+    const operation: Promise<void> = result.then(
+      () => { binding.operations.delete(operation) },
+      () => { binding.operations.delete(operation) },
+    )
+    binding.operations.add(operation)
     return result
   }
 

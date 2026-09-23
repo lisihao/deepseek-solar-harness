@@ -190,6 +190,26 @@ describe('unary round trip', () => {
     })
   })
 
+  it('carries a session model refresh request through the wire', async () => {
+    let seen: RpcRequest<{ sessionId: SessionId; refresh?: boolean }> | undefined
+    const api = scriptedApi({
+      sessions: {
+        models: (request) => {
+          seen = request
+          return ok(request, {
+            current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+            routable: true,
+            groups: [],
+            failures: [],
+          })
+        },
+      },
+    })
+    const response = await client(api).sessions.models({ sessionId: sid('s1'), refresh: true })
+    expect(seen?.payload).toEqual({ sessionId: 's1', refresh: true })
+    expect(response.result).toMatchObject({ ok: true, value: { routable: true } })
+  })
+
   it('rejects an overlong session-search snippet at the client value boundary', async () => {
     const api = scriptedApi({
       sessions: {
@@ -776,7 +796,7 @@ describe('config unary surface', () => {
     expect((await c.credentials.unset({ ref: 'OPENAI_API_KEY' })).result).toEqual({ ok: true, value: {} })
     const providers = await c.llm.providers({})
     expect(providers.result).toEqual({ ok: true, value: { providers: [providerRow] } })
-    const models = await c.llm.models({})
+    const models = await c.llm.models({ refresh: true })
     expect(models.result).toEqual({ ok: true, value: { groups: [group], failures: [] } })
     const discovered = await c.llm.discoverModels({
       settingsNs: 'llm-pi-ai',
@@ -795,6 +815,7 @@ describe('config unary surface', () => {
     expect(seen[4]?.payload)
       .toEqual({ ns: 'llm-deepseek', ops: [{ op: 'unset', path: ['baseURL'] }], expectedRevision: 0 })
     expect(seen[6]?.payload).toEqual({ ref: 'OPENAI_API_KEY', value: 'sk-x' })
+    expect(seen[9]?.payload).toEqual({ refresh: true })
     // The draft crosses whole, credential included: the host needs it for this
     // one interrogation and stores none of it.
     expect(seen[10]?.payload).toEqual({

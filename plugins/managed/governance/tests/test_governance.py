@@ -19,6 +19,7 @@ SCRIPT = (
 TEXT_CHECK = Path(__file__).resolve().parents[1] / "scripts" / "check_changed_text.py"
 FORMAT_CHECK = Path(__file__).resolve().parents[1] / "scripts" / "check_changed_format.py"
 EXPORT_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "export_bundle.py"
+PROJECT_PROFILE = Path(__file__).resolve().parents[4] / ".agent-governance" / "profile.json"
 SPEC = importlib.util.spec_from_file_location("governance", SCRIPT)
 assert SPEC and SPEC.loader
 governance = importlib.util.module_from_spec(SPEC)
@@ -152,6 +153,29 @@ class GovernanceTests(unittest.TestCase):
         invalid_incremental["gates"][0]["incremental_command"] = "unsafe shell"
         with self.assertRaisesRegex(governance.GovernanceError, "incremental_command"):
             governance.validate_profile(invalid_incremental, self.profile_path)
+
+        invalid_inputs = dict(self.profile)
+        invalid_inputs["gates"] = [dict(gate) for gate in self.profile["gates"]]
+        invalid_inputs["gates"][0]["input_patterns"] = []
+        with self.assertRaisesRegex(governance.GovernanceError, "input_patterns"):
+            governance.validate_profile(invalid_inputs, self.profile_path)
+
+    def test_select_when_and_input_patterns_are_decoupled(self):
+        gate = dict(self.profile["gates"][1])
+        gate.pop("scopes")
+        gate["select_when"] = ["governance"]
+        gate["input_patterns"] = ["src/**", "package.json"]
+        profile = dict(self.profile)
+        profile["gates"] = [gate]
+        governance.validate_profile(profile, self.profile_path)
+
+        selected = governance.select_gates(profile, ["governance"], "full")
+        self.assertEqual([item["id"] for item in selected], ["source"])
+        files = [".github/workflow.yml", "src/tracked.py", "package.json"]
+        self.assertEqual(
+            governance.gate_input_files(profile, gate, files),
+            ["src/tracked.py", "package.json"],
+        )
 
     def test_verify_propagates_failure(self):
         gate = dict(self.profile["gates"][0])
@@ -486,6 +510,194 @@ class GovernanceTests(unittest.TestCase):
         self.assertIn("source", reused)
         self.assertEqual(incremental, {})
         self.assertEqual(evidence_head, governance.git_head(self.root))
+
+    def test_docs_only_selection_reuses_source_build_with_explicit_inputs(self):
+        (self.root / "docs").mkdir()
+        source_build = dict(self.profile["gates"][1])
+        source_build["id"] = "source-build"
+        source_build.pop("scopes")
+        source_build["select_when"] = ["source", "docs"]
+        source_build["input_patterns"] = ["src/**", "package.json", "pnpm-lock.yaml"]
+        doc_sync = dict(self.profile["gates"][0])
+        doc_sync["id"] = "doc-sync"
+        doc_sync["scopes"] = ["docs"]
+        doc_sync["levels"] = ["full"]
+        doc_sync["needs"] = ["source-build"]
+        profile = dict(self.profile)
+        profile["scope_rules"] = [
+            *self.profile["scope_rules"],
+            {"scope": "docs", "patterns": ["docs/**"]},
+        ]
+        profile["gates"] = [source_build, doc_sync]
+        profile["evidence_reuse"] = {"enabled": True, "gates": ["source-build"]}
+        self.profile_path.write_text(json.dumps(profile), encoding="utf-8")
+        note = self.root / "docs" / "note.md"
+        note.write_text("first\n", encoding="utf-8")
+
+        payload = governance.plan_payload(
+            self.root, profile, self.profile_path, "auto", "full", None
+        )
+        self.assertEqual(payload["gates"], ["source-build", "doc-sync"])
+        gates = governance.select_gates(profile, payload["scopes"], "full")
+        fingerprints = governance.gate_input_fingerprints(
+            self.root, profile, gates, payload["changed_files"], None
+        )
+        results = governance.execute_gates(
+            self.root, gates, False, False, input_fingerprints=fingerprints
+        )
+        report = self.root / "docs-reuse.json"
+        governance.write_attestation(
+            report,
+            self.root,
+            profile,
+            self.profile_path,
+            payload,
+            results,
+            None,
+        )
+
+        note.write_text("second\n", encoding="utf-8")
+        current_payload = governance.plan_payload(
+            self.root, profile, self.profile_path, "auto", "full", None
+        )
+        current_fingerprints = governance.gate_input_fingerprints(
+            self.root, profile, gates, current_payload["changed_files"], None
+        )
+        self.assertEqual(
+            fingerprints["source-build"], current_fingerprints["source-build"]
+        )
+        reused, incremental, _ = governance.load_reusable_evidence(
+            report,
+            self.root,
+            profile,
+            self.profile_path,
+            gates,
+            current_payload["changed_files"],
+            None,
+            current_fingerprints,
+        )
+        self.assertIn("source-build", reused)
+        self.assertEqual(incremental, {})
+
+    def test_explicit_input_patterns_invalidate_source_manifest_lock_and_runtime(self):
+        gate = dict(self.profile["gates"][1])
+        gate["input_patterns"] = ["src/**", "package.json", "pnpm-lock.yaml"]
+        profile = dict(self.profile)
+        profile["gates"] = [gate]
+        lockfile = self.root / "pnpm-lock.yaml"
+        lockfile.write_text("lockfileVersion: 9\n", encoding="utf-8")
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "note.md").write_text("docs\n", encoding="utf-8")
+        files = ["src/tracked.py", "package.json", "pnpm-lock.yaml"]
+
+        def fingerprint(paths: list[str], runtime_version: str) -> str:
+            with mock.patch.object(
+                governance,
+                "executable_identity",
+                return_value={"program": sys.executable, "version": runtime_version},
+            ):
+                return governance.gate_input_fingerprints(
+                    self.root, profile, [gate], paths, None
+                )["source"]
+
+        baseline = fingerprint(files, "runtime-v1")
+        self.assertEqual(baseline, fingerprint([*files, "docs/note.md"], "runtime-v1"))
+
+        source = self.root / "src" / "tracked.py"
+        source_text = source.read_text(encoding="utf-8")
+        source.write_text("VALUE = 2\n", encoding="utf-8")
+        self.assertNotEqual(baseline, fingerprint(files, "runtime-v1"))
+        source.write_text(source_text, encoding="utf-8")
+
+        manifest = self.root / "package.json"
+        manifest_text = manifest.read_text(encoding="utf-8")
+        manifest.write_text('{"scripts":{"changed":true}}\n', encoding="utf-8")
+        self.assertNotEqual(baseline, fingerprint(files, "runtime-v1"))
+        manifest.write_text(manifest_text, encoding="utf-8")
+
+        lockfile.write_text("lockfileVersion: 10\n", encoding="utf-8")
+        self.assertNotEqual(baseline, fingerprint(files, "runtime-v1"))
+        self.assertNotEqual(baseline, fingerprint(files, "runtime-v2"))
+
+    def test_dsh_profile_migrates_shared_build_and_install_inputs(self):
+        profile = json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))
+        governance.validate_profile(profile, PROJECT_PROFILE)
+        gates = {gate["id"]: gate for gate in profile["gates"]}
+        for gate_id in (
+            "source-build",
+            "agent-teams-install",
+            "controlled-plugin-install",
+            "web-ui-install",
+        ):
+            self.assertIn("select_when", gates[gate_id])
+            self.assertNotIn("scopes", gates[gate_id])
+            self.assertIn("input_patterns", gates[gate_id])
+        for gate_id in (
+            "agent-teams-install",
+            "controlled-plugin-install",
+            "web-ui-install",
+        ):
+            self.assertIn("package.json", gates[gate_id]["input_patterns"])
+        source_build = gates["source-build"]
+        self.assertIn(
+            "source-build",
+            [gate["id"] for gate in governance.select_gates(profile, ["documentation"], "full")],
+        )
+        self.assertEqual(
+            governance.gate_input_files(
+                profile,
+                source_build,
+                ["docs/note.md", "packages/core/source.ts", "package.json", "pnpm-lock.yaml"],
+            ),
+            ["packages/core/source.ts", "package.json", "pnpm-lock.yaml"],
+        )
+        self.assertIn(
+            "scripts/solar/install-controlled-plugin-deps.mjs",
+            gates["controlled-plugin-install"]["input_patterns"],
+        )
+        install_cases = {
+            "agent-teams-install": (
+                [
+                    "plugins/managed/agent-teams/README.md",
+                    "plugins/managed/agent-teams/package.json",
+                    "plugins/managed/agent-teams/pnpm-lock.yaml",
+                ],
+                [
+                    "plugins/managed/agent-teams/package.json",
+                    "plugins/managed/agent-teams/pnpm-lock.yaml",
+                ],
+            ),
+            "controlled-plugin-install": (
+                [
+                    "plugins/managed/better-sidebar/README.md",
+                    "plugins/managed/better-sidebar/package.json",
+                    "plugins/managed/better-sidebar/pnpm-lock.yaml",
+                    "scripts/solar/install-controlled-plugin-deps.mjs",
+                ],
+                [
+                    "plugins/managed/better-sidebar/package.json",
+                    "plugins/managed/better-sidebar/pnpm-lock.yaml",
+                    "scripts/solar/install-controlled-plugin-deps.mjs",
+                ],
+            ),
+            "web-ui-install": (
+                [
+                    "plugins/managed/web-ui/README.md",
+                    "plugins/managed/web-ui/package.json",
+                    "plugins/managed/web-ui/pnpm-lock.yaml",
+                    "plugins/managed/web-ui/packages/dsh-pet/package.json",
+                ],
+                [
+                    "plugins/managed/web-ui/package.json",
+                    "plugins/managed/web-ui/pnpm-lock.yaml",
+                    "plugins/managed/web-ui/packages/dsh-pet/package.json",
+                ],
+            ),
+        }
+        for gate_id, (files, expected) in install_cases.items():
+            self.assertEqual(
+                governance.gate_input_files(profile, gates[gate_id], files), expected
+            )
 
     def test_reuses_exact_gate_inputs_after_commit_is_amended(self):
         self.profile["evidence_reuse"] = {"enabled": True, "gates": ["always"]}

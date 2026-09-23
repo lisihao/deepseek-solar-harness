@@ -13,6 +13,9 @@
     - button "Agent 预设":
       - img
       - text: Agent 预设
+    - button "任务模板":
+      - img
+      - text: 任务模板
   - button "打开配置文件"
   - button "关闭":
     - img

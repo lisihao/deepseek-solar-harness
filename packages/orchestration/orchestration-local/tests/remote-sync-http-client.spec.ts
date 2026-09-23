@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createRemotePhysicalOperators } from '../src/remote-physical-operator.ts'
 import { RemoteSyncHttpClient } from '../src/remote-sync-http-client.ts'
 import { OrchestrationStore } from '../src/store.ts'
+import { buildOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
 
 function fixtureStore(): OrchestrationStore {
   return new OrchestrationStore(mkdtempSync(join(tmpdir(), 'dsh-remote-result-store-')))
@@ -142,6 +143,14 @@ describe('RemoteSyncHttpClient', () => {
 describe('RemotePhysicalOperator', () => {
   it('projects a namespaced catalog and reconnectable remote run through the generic seam', async () => {
     const fixture = fixtureWorkspace()
+    const contextEnvelope = buildOperatorContextEnvelope({
+      systemText: 'system',
+      task: [{ type: 'text', text: 'remote task' }],
+      contexts: [{ name: 'memory', text: 'user preference' }],
+      source: {
+        kind: 'taskgraph', runId: 'run-remote', nodeId: 'node-remote', contextPacketRef: 'sha256:context',
+      },
+    })
     let inspections = 0
     const methods: string[] = []
     const provider = {
@@ -164,7 +173,13 @@ describe('RemotePhysicalOperator', () => {
       methods.push(call.method)
       const value = call.method === 'operator.providers' ? [provider]
         : call.method === 'operator.execute'
-          ? { sessionId: 'session-1', turnId: 'turn-1', stateRevision: 2 }
+          ? {
+            sessionId: 'session-1', turnId: 'turn-1', stateRevision: 2,
+            contextReceipt: {
+              version: 1, digest: contextEnvelope.digest, receiver: 'remote-resident:codex',
+              outcome: 'accepted', format: 'native', roleFidelity: 'native',
+            },
+          }
           : call.method === 'operator.inspect'
             ? ++inspections === 1
               ? {
@@ -198,11 +213,12 @@ describe('RemotePhysicalOperator', () => {
     const controller = new AbortController()
     const run = await operator!.start({
       executionId: 'command-1' as never,
-      mode: 'resident', prompt: [], signal: controller.signal,
+      mode: 'resident', prompt: [...contextEnvelope.task], contextEnvelope, signal: controller.signal,
       nativeToolPolicy: 'disabled',
       parent: { session: { header: { cwd: fixture.workspace } } } as never,
     })
     expect(run.receipt).toEqual({ sessionId: 'session-1', turnId: 'turn-1', stateRevision: 2 })
+    expect(run.contextReceipt).toMatchObject({ digest: contextEnvelope.digest, format: 'native' })
     await expect(run.readEvents?.(0, 100)).resolves.toMatchObject({
       events: [{ type: 'turn.progress', data: { phase: 'reasoning' } }],
     })
@@ -220,6 +236,7 @@ describe('RemotePhysicalOperator', () => {
     })?.[1]?.body as string) as { payload: Record<string, unknown> }
     expect(executeBody.payload).not.toHaveProperty('workspace')
     expect(executeBody.payload.nativeToolPolicy).toBe('disabled')
+    expect(executeBody.payload.contextEnvelope).toMatchObject({ digest: contextEnvelope.digest })
     expect(executeBody.payload.workspaceIdentity).toMatchObject({
       version: 1, repository: 'github.com/lisihao/remote-fixture', subdir: 'packages/core',
     })

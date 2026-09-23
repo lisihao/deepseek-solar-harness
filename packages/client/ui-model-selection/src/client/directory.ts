@@ -11,6 +11,8 @@ import type {
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 
+type SessionModelsResponse = Awaited<ReturnType<IApiClient['sessions']['models']>>
+
 /** Directory snapshot both entries render from. */
 export interface ModelDirectoryState {
   /** Model selection the host reports for the next assembled step; null before the first load. */
@@ -31,6 +33,29 @@ export interface ModelDirectoryState {
   status: 'idle' | 'loading' | 'ready' | 'selecting' | 'error'
   /** Whole-request or selection failure text; null when none. */
   error: string | null
+}
+
+/**
+ * Keep a provider's previous advisory list visible when an explicit refresh
+ * fails only for that provider. Fresh groups always win; stale groups are
+ * retained only for provider ids reported in `failures`.
+ *
+ * @param previous - the last successfully projected provider groups.
+ * @param fresh - groups returned by the latest Host request.
+ * @param failures - provider-local failures returned beside `fresh`.
+ * @returns fresh groups followed by retained failed-provider groups.
+ */
+function mergeRefreshGroups(
+  previous: readonly ModelProviderGroup[],
+  fresh: readonly ModelProviderGroup[],
+  failures: readonly ModelCatalogFailure[],
+): readonly ModelProviderGroup[] {
+  const failedIds = new Set(failures.map(failure => failure.id))
+  const freshIds = new Set(fresh.map(group => group.id))
+  return [
+    ...fresh,
+    ...previous.filter(group => failedIds.has(group.id) && !freshIds.has(group.id)),
+  ]
 }
 
 /** One session's shared directory controller; disposed with the session scope. */
@@ -58,13 +83,27 @@ export class ModelDirectory {
   /**
    * Refresh the advisory directory (both entries call this on open).
    * Failure preserves the last good groups and current selection.
+   * @param options - optional live-catalog refresh request forwarded to the Host.
    * @returns the fresh directory value.
    */
-  async load(): Promise<SessionModels> {
+  async load(options?: { readonly refresh?: boolean }): Promise<SessionModels> {
     this.assertAvailable()
     const generation = ++this.generation
     this.store.update((s) => { s.status = 'loading'; s.error = null })
-    const { result } = await this.sessions.models({ sessionId: this.sessionId })
+    let response: SessionModelsResponse
+    try {
+      response = await this.sessions.models({
+        sessionId: this.sessionId,
+        ...options?.refresh === true ? { refresh: true } : {},
+      })
+    } catch (error: unknown) {
+      if (!this.disposed && generation === this.generation) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.store.update((s) => { s.status = 'error'; s.error = message })
+      }
+      throw error
+    }
+    const { result } = response
     if (this.disposed || generation !== this.generation) {
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
       return result.value
@@ -77,7 +116,9 @@ export class ModelDirectory {
     this.store.update((s) => {
       s.current = current
       s.routable = routable
-      s.groups = groups
+      s.groups = options?.refresh === true
+        ? mergeRefreshGroups(s.groups, groups, failures)
+        : groups
       s.failures = failures
       s.status = 'ready'
       s.error = null

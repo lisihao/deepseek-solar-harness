@@ -2,6 +2,7 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { describe, expect, it, vi } from 'vitest'
 import {
   apply,
+  type PhysicalOperatorRoutingInjected,
   changeOrchestrationExecutionMechanism,
   orchestrationAutonomousModeLabel,
   orchestrationExecutionMechanism,
@@ -78,11 +79,20 @@ describe('physical operator client plugin', () => {
     const registrations: Array<{
       options: { id?: string; name?: string; inject?: (sessionId: string) => unknown }
     }> = []
-    const execute = vi.fn().mockResolvedValue({ ok: true, value: { matched: true } })
+    const execute = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { commandId: 'command-1', result: { kind: 'success' as const } },
+    })
     const request = vi.fn()
+    const directory = {}
+    const refreshModels = vi.fn(async () => undefined)
+    const modelDirectories = { directoryFor: vi.fn(() => ({ store: directory, load: refreshModels })) }
+    const inject = vi.fn()
     const ctx = {
       effect: vi.fn(),
       get: (key: string) => key === 'connection' ? { request } : undefined,
+      inject,
+      modelDirectories,
       remote: { commands: { execute } },
       slots: {
         inject: vi.fn((_name: string, install: () => unknown) => install()),
@@ -92,6 +102,7 @@ describe('physical operator client plugin', () => {
         }),
       },
     } as unknown as ClientContext
+    inject.mockImplementation((_services: readonly string[], install: (scope: ClientContext) => unknown) => install(ctx))
 
     apply(ctx)
 
@@ -100,15 +111,14 @@ describe('physical operator client plugin', () => {
     expect(resident?.options.name).toBe('conversation.session.header.actions')
     expect(resident?.options.inject?.('session-1')).toEqual({ request })
     expect(routing?.options.name).toBe('conversation.input.right')
-    const injected = routing?.options.inject?.('session-1') as {
-      select: (policy: 'codex' | 'chatgpt-web') => Promise<string | null>
-      selectProfile: (operatorId: 'codex', model?: string, effort?: 'high') => Promise<string | null>
-      selectOrchestrationStrategy: (
-        rlm: 'enabled', autonomous: 'enabled', harness: 'off', optimization: 'balanced',
-        plannerVerifierPreference: 'codex-sol', executionPreference: 'luna-first',
-      ) => Promise<string | null>
-      selectDebateMode: (mode: 'enabled') => Promise<string | null>
-    }
+    const injected = routing?.options.inject?.('session-1') as Pick<
+      PhysicalOperatorRoutingInjected,
+      'directory' | 'refreshModels' | 'select' | 'selectProfile' | 'selectOrchestrationStrategy' | 'selectDebateMode'
+    >
+    expect(injected.directory).toBe(directory)
+    expect(modelDirectories.directoryFor).toHaveBeenCalledWith('session-1')
+    await injected.refreshModels()
+    expect(refreshModels).toHaveBeenCalledWith({ refresh: true })
     await expect(injected.select('codex')).resolves.toBeNull()
     await expect(injected.select('chatgpt-web')).resolves.toBeNull()
     await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBeNull()
@@ -125,6 +135,70 @@ describe('physical operator client plugin', () => {
       '/orchestration-strategy enabled enabled off balanced codex-sol luna-first',
     )
     expect(execute).toHaveBeenNthCalledWith(5, 'session-1', '/debate-mode enabled')
+
+    execute
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'command-error-1', result: { kind: 'error', text: 'operator rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'command-error-2', result: { kind: 'error', text: 'profile rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'command-error-3', result: { kind: 'error', text: 'strategy rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'command-error-4', result: { kind: 'error', text: 'debate rejected' } },
+      })
+    await expect(injected.select('codex')).resolves.toBe('operator rejected')
+    await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBe('profile rejected')
+    await expect(injected.selectOrchestrationStrategy(
+      'enabled', 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
+    )).resolves.toBe('strategy rejected')
+    await expect(injected.selectDebateMode('enabled')).resolves.toBe('debate rejected')
+
+    execute.mockReset()
+    execute
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'transition-error-1', result: { kind: 'error', text: 'RLM rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'transition-success-1', result: { kind: 'success' } },
+      })
+    await expect(changeOrchestrationExecutionMechanism(
+      { rlm: 'enabled', debate: 'disabled' },
+      'debate',
+      mode => injected.selectOrchestrationStrategy(
+        mode, 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
+      ),
+      injected.selectDebateMode,
+    )).resolves.toBe('关闭 RLM失败：RLM rejected')
+    expect(execute).toHaveBeenCalledTimes(1)
+
+    execute.mockReset()
+    execute
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'transition-error-2', result: { kind: 'error', text: 'Debate rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'transition-success-2', result: { kind: 'success' } },
+      })
+    await expect(changeOrchestrationExecutionMechanism(
+      { rlm: 'disabled', debate: 'enabled' },
+      'rlm',
+      mode => injected.selectOrchestrationStrategy(
+        mode, 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
+      ),
+      injected.selectDebateMode,
+    )).resolves.toBe('关闭 Debate失败：Debate rejected')
+    expect(execute).toHaveBeenCalledTimes(1)
   })
 
   it('maps RLM and Debate preferences into one mutually exclusive execution selector', () => {

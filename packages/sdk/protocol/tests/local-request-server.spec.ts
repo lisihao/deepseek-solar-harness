@@ -31,7 +31,7 @@ vi.mock('node:fs', async (importOriginal) => {
   }
 })
 
-import { JsonRpcLineTransport, LocalJsonRpcRequestServer } from '../src/index.ts'
+import { JsonRpcLineTransport, LocalJsonRpcRequestServer, requestLocalJsonRpc } from '../src/index.ts'
 
 const roots: string[] = []
 
@@ -133,5 +133,36 @@ describe('LocalJsonRpcRequestServer', () => {
     const server = new LocalJsonRpcRequestServer({ path }, async () => 'unreachable')
 
     await expect(server.start()).rejects.toThrow()
+  })
+})
+
+describe('requestLocalJsonRpc', () => {
+  it('sends one request over a fresh connection and returns the result', async () => {
+    const endpoint = await temporaryEndpoint('client', true)
+    const server = new LocalJsonRpcRequestServer(endpoint, async (method, params) => ({ method, params }))
+    await server.start()
+    try {
+      await expect(requestLocalJsonRpc(endpoint.path, 'tool.call', { tool: 'echo' }, new AbortController().signal, () => new Error('aborted')))
+        .resolves.toEqual({ method: 'tool.call', params: { tool: 'echo' } })
+    } finally {
+      await server.dispose()
+    }
+  })
+
+  it('destroys the connection with the caller abort error', async () => {
+    const endpoint = await temporaryEndpoint('client-abort', true)
+    let release: (() => void) | undefined
+    const server = new LocalJsonRpcRequestServer(endpoint, () => new Promise<unknown>((resolve) => { release = () => { resolve('late') } }))
+    await server.start()
+    const controller = new AbortController()
+    try {
+      const pending = requestLocalJsonRpc(endpoint.path, 'slow', {}, controller.signal, () => new Error('caller aborted'))
+      await vi.waitFor(() => { expect(release).toBeDefined() })
+      controller.abort()
+      await expect(pending).rejects.toThrow()
+    } finally {
+      release?.()
+      await server.dispose()
+    }
   })
 })

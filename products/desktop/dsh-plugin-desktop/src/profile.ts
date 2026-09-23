@@ -439,9 +439,6 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
   const adapterPatches = adapter === 'desktop'
     ? loadOverlayPatches(BIN_NAME, DESKTOP_PATCH_PATH)
     : []
-  const sharedProductPatches: PatchOptions[] = [{
-    insert: [{ id: 'output-style', name: OUTPUT_STYLE_PACKAGE }],
-  }]
   const homePatches = loadOptionalPatches(BIN_NAME, join(home, PROFILE_PATCH_FILENAME)) ?? []
   const selectedProfilePatches = bindPluginConsolePatches([
     ...profile.layers.flatMap(layer => layer.patches),
@@ -452,6 +449,9 @@ function prepareProductProfile(options: ProductProfileOptions): PreparedProductP
     composeEntries([selectedProfilePatches])
       .flatMap(row => typeof row.id === 'string' ? [row.id] : []),
   )
+  const sharedProductPatches: PatchOptions[] = suppliedRows.has('output-style')
+    ? []
+    : [{ insert: [{ id: 'output-style', name: OUTPUT_STYLE_PACKAGE }] }]
   const productPatches = productBundlePatches(
     new Set(profile.layers.map(layer => layer.packageName)),
     suppliedRows,

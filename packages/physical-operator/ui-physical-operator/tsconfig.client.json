@@ -9,6 +9,8 @@
     "src/client/index.ts",
     "src/client/ResidentOperatorsPanel.tsx",
     "src/client/PhysicalOperatorRoutingControl.tsx",
+    "src/client/WebCoordinationSetup.tsx",
+    "src/client/WebModelControls.tsx",
     "src/client/styles.ts",
     "src/contracts.ts",
     "src/presentation.ts"
@@ -19,6 +21,8 @@
     { "path": "../../client/connection/tsconfig.client.json" },
     { "path": "../../client/runtime" },
     { "path": "../../client/ui-conversation" },
+    { "path": "../../client/ui-model-selection" },
+    { "path": "../../plan/plan-mode" },
     { "path": "../../client/ui-primitives" },
     { "path": "../../client/ui-slots" },
     { "path": "../tool-physical-operator" },

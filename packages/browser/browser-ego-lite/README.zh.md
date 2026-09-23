@@ -43,6 +43,8 @@ Upstream 尾部的 `[ego-browser:notice]` 更新提示会从结果通道移除�
 
 Provider 支持命名 task space 与稳定的 `ego-lite:<numeric-id>`；按完整 URL 打开/复用和选择页面；关闭、导航、刷新、页面元数据、snapshot、有界 screenshot bytes；语义/CSS locator 交互与读取；等待；显式 handoff/takeover；完成；以及 `browser-js-v1` 中的页面求值。
 
+平铺 helper 适配器保留 contenteditable 的 `fill` 和 `clear` 替换语义：先选中目标编辑器的内容，通过原生 Backspace 删除，再调用填入 helper，避免旧草稿被追加到下一次请求中。普通输入框和对象 facade 实现保持原有行为。
+
 | Upstream v1.2.5 契约 | DSH 实现 | 状态 |
 |---|---|---|
 | 一个 `ego-browser nodejs` heredoc 组合完整任务 | `browser-js-v1` 保留单进程及 JavaScript 变量、分支、循环、动作与验证 | faithful |

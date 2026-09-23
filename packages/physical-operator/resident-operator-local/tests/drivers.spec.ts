@@ -32,6 +32,7 @@ import {
   residentClaudeObservations,
   resolveProductExecutable,
 } from '../src/drivers.ts'
+import { validateResidentModelToolBridge } from '../src/model-tool-bridge.ts'
 
 const model = {
   id: 'sol',
@@ -160,6 +161,80 @@ describe('Claude Code resident driver environment', () => {
       .toBe('PROVIDER_VERSION_MISMATCH')
   })
 
+  it.runIf(process.platform !== 'win32')('qualifies structured logged-out status documents that exit 1', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-claude-qualification-'))
+    const executable = join(root, 'claude')
+    const previousPath = process.env.PATH
+    try {
+      writeFileSync(executable, [
+        '#!/bin/sh',
+        'if [ "$1" = "--version" ]; then',
+        '  printf "%s\\n" "2.1.239 (Claude Code)"',
+        '  exit 0',
+        'fi',
+        'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then',
+        '  printf "%s\\n" \'{"loggedIn":false}\'',
+        '  exit 1',
+        'fi',
+        'exit 64',
+        '',
+      ].join('\n'))
+      chmodSync(executable, 0o700)
+      process.env.PATH = root
+
+      await expect(new ClaudeCodeResidentDriver().qualify()).resolves.toMatchObject({
+        available: false,
+        unavailableCode: 'AUTH_MODE_MISMATCH',
+        authentication: 'unqualified',
+        productVersion: '2.1.239 (Claude Code)',
+      })
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it.runIf(process.platform !== 'win32')('keeps malformed and failed auth status processes unavailable', async () => {
+    const cases = [
+      { name: 'malformed', output: '{', exitCode: 1 },
+      { name: 'nonzero logged-in', output: '{\"loggedIn\":true,\"authMethod\":\"claude.ai\",\"apiProvider\":\"firstParty\"}', exitCode: 1 },
+      { name: 'process failure', output: '', exitCode: 2 },
+    ] as const
+    for (const testCase of cases) {
+      const root = mkdtempSync(join(tmpdir(), 'dsh-claude-qualification-' + testCase.name.replace(' ', '-') + '-'))
+      const executable = join(root, 'claude')
+      const previousPath = process.env.PATH
+      try {
+        writeFileSync(executable, [
+          '#!/bin/sh',
+          'if [ "$1" = "--version" ]; then',
+          '  printf "%s\\n" "2.1.239 (Claude Code)"',
+          '  exit 0',
+          'fi',
+          'if [ "$1" = "auth" ] && [ "$2" = "status" ]; then',
+          '  printf "%s\\n" ' + "'" + testCase.output + "'",
+          '  exit ' + String(testCase.exitCode),
+          'fi',
+          'exit 64',
+          '',
+        ].join('\n'))
+        chmodSync(executable, 0o700)
+        process.env.PATH = root
+
+        await expect(new ClaudeCodeResidentDriver().qualify()).resolves.toMatchObject({
+          available: false,
+          unavailableCode: 'INVALID_RESULT',
+          authentication: 'unqualified',
+        })
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH
+        else process.env.PATH = previousPath
+        rmSync(root, { recursive: true, force: true })
+      }
+    }
+  })
+
   it('classifies a missing product executable as runtime unavailability', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-missing-product-'))
     try {
@@ -186,6 +261,31 @@ describe('Claude Code resident driver environment', () => {
   it('preserves an explicit caller CA policy and does not change other platforms', () => {
     expect(claudeEnvironment({ NODE_USE_SYSTEM_CA: '0' }, 'darwin')).toEqual({ NODE_USE_SYSTEM_CA: '0' })
     expect(claudeEnvironment({ PATH: '/usr/bin' }, 'linux')).toEqual({ PATH: '/usr/bin' })
+  })
+
+  it('allows only the sealed RLM bridge when native tools are disabled', () => {
+    const bridge = {
+      version: 1 as const,
+      socketPath: '/tmp/dsh-model-tools.sock',
+      sessionId: 'rlm-session',
+      tools: [{ name: 'typescript_repl', description: 'Execute TypeScript.', inputSchema: { type: 'object' } }],
+    }
+    expect(validateResidentModelToolBridge(bridge, 'disabled')).toBe(bridge)
+    expect(() => validateResidentModelToolBridge({
+      ...bridge,
+      tools: [{ name: 'bash', description: 'Execute shell.', inputSchema: { type: 'object' } }],
+    }, 'disabled')).toThrow(/only permits the sealed typescript_repl model tool bridge/iu)
+    expect(() => validateResidentModelToolBridge({
+      ...bridge,
+      tools: [...bridge.tools, { name: 'bash', description: 'Execute shell.', inputSchema: { type: 'object' } }],
+    }, 'disabled')).toThrow(/only permits the sealed typescript_repl model tool bridge/iu)
+    expect(validateResidentModelToolBridge({
+      ...bridge,
+      tools: [{ name: 'bash', description: 'Execute shell.', inputSchema: { type: 'object' } }],
+    }, 'inherit')).toEqual({
+      ...bridge,
+      tools: [{ name: 'bash', description: 'Execute shell.', inputSchema: { type: 'object' } }],
+    })
   })
 
   it('removes the Claude native tool surface for a sealed no-tool execution', () => {
@@ -378,6 +478,10 @@ describe('Codex RLM host tool', () => {
           arguments: { code: '40 + 2' },
         },
       }])
+      await expect(handler({
+        threadId: 'thread-1', turnId: 'turn-1', callId: 'call-2',
+        tool: 'bash', arguments: { command: 'id' },
+      })).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' })
     } finally {
       await new Promise<void>((resolve) => { bridgeServer.close(() => { resolve() }) })
       rmSync(root, { recursive: true, force: true })

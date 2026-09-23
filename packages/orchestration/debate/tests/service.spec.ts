@@ -319,6 +319,20 @@ describe('Debate Service Definition', () => {
     expect(() => validateDebateStartRequest(withoutWorkspace)).toThrow('workspace')
     expect(() => validateDebateStartRequest(startRequest({ execution: { version: 1, kind: 'taskgraph-node', runId: 'run-1' } }))).toThrow('requires runId and nodeId only')
     expect(() => validateDebateStartRequest(startRequest({ sourceRefs: [{ version: 1, ref: 'source', kind: 'artifact', unsupported: true } as never] }))).toThrow('unknown field')
+    const withContext = startRequest({
+      sourceSessionId: 'session-1',
+      runtimeContext: {
+        version: 1,
+        sourceSessionId: 'session-1',
+        contextSnapshotMessageId: 'snapshot-1',
+        sections: [{ name: 'mnemon:runtime-memory', text: 'USER preference: concise Chinese evidence.' }],
+      },
+    })
+    expect(validateDebateStartRequest(withContext)).toMatchObject({ runtimeContext: withContext.runtimeContext })
+    expect(() => validateDebateStartRequest({
+      ...withContext,
+      runtimeContext: { ...withContext.runtimeContext!, sourceSessionId: 'another-session' },
+    })).toThrow('must equal request.sourceSessionId')
   })
 
   it('validates revision-safe controls and bounded event reads', () => {

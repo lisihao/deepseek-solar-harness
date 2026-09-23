@@ -49,6 +49,7 @@ Here are some core packages that contribute to the Cordis tree.
 | [`core/agent-loop`](subsystems/core.md) | The default driver implementing that interface | `ctx.agentLoop` |
 | [`core/scope`](subsystems/scope.md) | The per-agent scoped-registration primitive | library, no key |
 | [`llm/llm`](subsystems/llm-streaming.md) | Message and stream vocabulary plus the adapter seam | `ctx.llm` |
+| [`prompt/task-template`](subsystems/system-prompt.md#task-templates) | Private task-template lifecycle and deterministic selection | `ctx.taskTemplates` |
 | [`orchestration/orchestration`](../packages/orchestration/orchestration/README.md) | Persistent TaskGraph, approval, recovery, and sealed execution plans | `ctx.orchestrations` |
 
 ## Events
@@ -121,6 +122,7 @@ New behavior attaches to a documented extension point. Changing the loop itself 
 | Confine spawned processes | use a `ctx.sandbox` backend; consumers wrap argv before spawning |
 | Intercept a request, tool, or turn | use its `agent/*` or `tools/*` event; `agent/turn-stopping` stops a turn |
 | Add model-facing context | call `agent.inject()`; it lands in the next admitted request |
+| Add reusable task guidance | store and select it through `ctx.taskTemplates`; inject once at each logical task boundary |
 | Add UI or editor integration | drive `ctx.agents` and render from `session/event` |
 | Add a Web Client Chat node | register a `ConversationNodeDefinition` + keyed renderer |
 | Add durable session state | extend `SessionEventMap`; render and replay from the log |

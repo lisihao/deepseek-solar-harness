@@ -13,6 +13,7 @@ import {
 } from '@deepseek-ai/dsh-physical-operator'
 import {
   parseRemoteResidentResult,
+  type RemoteResidentAcceptedTurn,
   type RemoteResidentProviderStatus,
   type RemoteResidentTurnSnapshot,
 } from '@deepseek-ai/dsh-client-connection'
@@ -153,7 +154,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         { cause },
       )
     }
-    let accepted: PhysicalOperatorAcceptedReceipt
+    let accepted: RemoteResidentAcceptedTurn
     try {
       accepted = await this.client.operatorExecute({
         commandId: String(request.executionId),
@@ -163,6 +164,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         ...request.label === undefined ? {} : { taskLabel: request.label },
         prompt: request.prompt,
         ...request.systemPrompt === undefined ? {} : { systemPrompt: request.systemPrompt },
+        ...request.contextEnvelope === undefined ? {} : { contextEnvelope: request.contextEnvelope },
         ...request.residentProfile === undefined ? {} : { profile: request.residentProfile },
         ...request.nativeToolPolicy === undefined ? {} : { nativeToolPolicy: request.nativeToolPolicy },
       }, request.signal)
@@ -179,6 +181,22 @@ export class RemotePhysicalOperator implements PhysicalOperator {
         'COMMAND_INDETERMINATE',
         { cause: error },
       )
+    }
+    if (request.contextEnvelope !== undefined) {
+      const receipt = accepted.contextReceipt
+      if (receipt === undefined) {
+        throw new PhysicalOperatorError(
+          `remote physical operator did not acknowledge context envelope ${request.contextEnvelope.digest}`,
+          'CONTEXT_ENVELOPE_DROPPED',
+        )
+      }
+      if (receipt.digest !== request.contextEnvelope.digest
+        || receipt.receiver !== `remote-resident:${this.provider.operatorId}`) {
+        throw new PhysicalOperatorError(
+          `remote physical operator returned an invalid context receipt for ${request.contextEnvelope.digest}`,
+          'CONTEXT_ENVELOPE_INVALID',
+        )
+      }
     }
     return this.observe(accepted, request.signal)
   }
@@ -207,7 +225,7 @@ export class RemotePhysicalOperator implements PhysicalOperator {
   }
 
   private observe(
-    accepted: PhysicalOperatorAcceptedReceipt,
+    accepted: RemoteResidentAcceptedTurn,
     executionSignal?: AbortSignal,
   ): PhysicalOperatorProviderRun {
     const polling = new AbortController()
@@ -220,7 +238,12 @@ export class RemotePhysicalOperator implements PhysicalOperator {
     const result = this.settle(accepted.turnId, polling.signal)
       .finally(() => { executionSignal?.removeEventListener('abort', interrupt) })
     return {
-      receipt: accepted,
+      ...accepted.contextReceipt === undefined ? {} : { contextReceipt: accepted.contextReceipt },
+      receipt: {
+        sessionId: accepted.sessionId,
+        turnId: accepted.turnId,
+        stateRevision: accepted.stateRevision,
+      },
       readEvents: async (afterSequence, limit, signal) => {
         const page = await this.client.operatorEvents(accepted.sessionId, afterSequence, limit, signal)
         return residentProgressPage(page)

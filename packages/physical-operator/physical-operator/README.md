@@ -10,6 +10,8 @@ Providers register a `PhysicalOperator` with a stable lowercase id, presentation
 
 Accepted executions survive provider-plugin disposal. Re-registering the same operator id during HMR sees the outstanding capacity until the old run settles. The service emits `physical-operator/start` and `physical-operator/end` exactly once around every published execution. Listener failures are contained and cannot change execution settlement.
 
+Callers may attach a versioned operator-context envelope containing the exact current system prompt, current task, named runtime contexts, and durable provenance. Every Provider must materialize all fields and return a digest-bound receipt. Missing, mismatched, or rejected receipts fail admission and release capacity; local, remote, Web, Resident, and subagent transports cannot silently substitute a generic prompt.
+
 | Error code | Meaning |
 |---|---|
 | `NO_OPERATOR` | The requested stable id is not registered. |
@@ -19,6 +21,9 @@ Accepted executions survive provider-plugin disposal. Re-registering the same op
 | `OPERATOR_MODE_UNSUPPORTED` | The requested execution lifetime is not declared by the Provider. |
 | `DUPLICATE_OPERATOR` | Two live registrations claim the same stable id. |
 | `INVALID_OPERATOR` | Descriptor identity or metadata is invalid. |
+| `CONTEXT_ENVELOPE_DROPPED` | The Provider omitted the required context receipt. |
+| `CONTEXT_ENVELOPE_INVALID` | The receipt does not identify the supplied envelope. |
+| `CONTEXT_ENVELOPE_REJECTED` | The Provider explicitly refused to materialize the envelope. |
 
 ## Authority boundary
 

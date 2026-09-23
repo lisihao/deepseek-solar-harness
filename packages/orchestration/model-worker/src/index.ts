@@ -1,6 +1,7 @@
 /** Pluggable one-shot model worker registry. @module @deepseek-ai/dsh-model-worker */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { HarnessError, type ContentBlock, type TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type { RlmExecutionPlanV1 } from '@deepseek-ai/dsh-rlm-strategy'
@@ -23,6 +24,8 @@ export interface ModelWorkerExecuteRequest {
   readonly workerId: string
   readonly model: string
   readonly prompt: readonly ContentBlock[]
+  /** Exact orchestration Agent when this worker must enter a physical operator. */
+  readonly parent?: Agent
   readonly rlmPlan?: RlmExecutionPlanV1
   readonly modelToolBridge?: ModelWorkerToolBridgeV1
   readonly signal: AbortSignal

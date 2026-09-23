@@ -42,7 +42,7 @@ class CatalogAdapter extends LlmAdapter {
     return { id: provider, name: this.name }
   }
 
-  override listModels(): Promise<readonly LlmModelInfo[]> {
+  override listModels(_provider: string, _options?: { readonly refresh?: boolean }): Promise<readonly LlmModelInfo[]> {
     return this.models instanceof Error
       ? Promise.reject(this.models)
       : Promise.resolve(this.models)
@@ -304,6 +304,24 @@ describe('Web session model selection', () => {
         message: 'adapter returned invalid or duplicate model metadata for provider "duplicate"',
       },
     ])
+    await ctx.fiber.dispose()
+  })
+
+  it('forwards an explicit refresh request through the session catalog handler', async () => {
+    const { ctx, sessionId } = await harness()
+    const seen: (boolean | undefined)[] = []
+    ctx.llm.registerAdapter(['tracked'], new class extends CatalogAdapter {
+      override listModels(provider: string, options?: { readonly refresh?: boolean }): Promise<readonly LlmModelInfo[]> {
+        seen.push(options?.refresh)
+        return super.listModels(provider, options)
+      }
+    }('Tracked', [{ provider: 'tracked', id: 'tracked-model', name: 'Tracked Model' }]))
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+
+    expectValue(await api.sessions.models(request({ sessionId, refresh: true })))
+    expect(seen).toEqual([true])
+    expectValue(await api.sessions.models(request({ sessionId })))
+    expect(seen).toEqual([true, undefined])
     await ctx.fiber.dispose()
   })
 

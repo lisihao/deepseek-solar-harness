@@ -117,9 +117,10 @@ export function registerResidentDashboard(ctx: Context): () => void {
         return
       }
       const sessionId = url.searchParams.get('session_id') ?? undefined
+      const refresh = url.searchParams.get('refresh') === '1'
       try {
         const [providers, sessions] = await Promise.all([
-          providerCache !== undefined && providerCache.expiresAt > Date.now()
+          !refresh && providerCache !== undefined && providerCache.expiresAt > Date.now()
             ? providerCache.value
             : ctx.residentOperators.providers().then((value) => {
               providerCache = { expiresAt: Date.now() + 60_000, value }

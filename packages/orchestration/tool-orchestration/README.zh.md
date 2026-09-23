@@ -22,4 +22,6 @@
 
 ## Known Limitations and Deferred Work
 
+- `/orchestration-strategy` 命令会拒绝 `rlm=disabled` 与 `autonomous=enabled` 的组合；daemon 在 TaskGraph 准入时重复执行相同检查。已有 Session 日志仍可读取，只会在尝试使用无效准入时拒绝。
+
 - 基础消费方以 JSON 接收完整 `LogicalTaskGraphV1`。未来语义 Intent/Graph Compiler 提供方可以替换由模型构造 Graph 的方式，而无需修改 `ctx.orchestrations`。

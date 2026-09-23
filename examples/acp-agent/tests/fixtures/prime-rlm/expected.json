@@ -1,0 +1,106 @@
+{
+  "output": {
+    "child": {
+      "operatorId": "codex",
+      "model": "gpt-5.6-sol",
+      "profile": {
+        "model": "gpt-5.6-sol",
+        "effort": "high"
+      },
+      "modelOrigin": "parent-inherited"
+    },
+    "skillsCatalog": {
+      "ok": true,
+      "result": [
+        {
+          "alias": "summarize-evidence",
+          "title": "Summarize evidence",
+          "callable": "summarizeEvidence",
+          "available": true
+        }
+      ]
+    },
+    "skillResult": {
+      "ok": true,
+      "result": {
+        "entryId": "summarize-evidence",
+        "entryVersion": 4,
+        "digest": "sealed-entry-digest",
+        "result": "sealed skill result"
+      }
+    }
+  },
+  "dispatches": [
+    {
+      "name": "strict-child",
+      "model": {
+        "operatorId": "codex",
+        "model": "gpt-5.6-sol",
+        "profile": {
+          "model": "gpt-5.6-sol",
+          "effort": "high"
+        }
+      },
+      "modelOrigin": "parent-inherited",
+      "executionOptions": {
+        "version": 1,
+        "tools": [
+          {
+            "name": "typescript_repl",
+            "description": "Execute one TypeScript cell in the persistent RLM namespace. Use context as programmable state; await rlm(task, { name, model }) to admit asynchronous child agents. rlm returns only a handle. Results arrive through agentMessage or artifacts.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "TypeScript cell with persistent lexical variables and top-level await."
+                }
+              },
+              "required": [
+                "code"
+              ],
+              "additionalProperties": false
+            }
+          }
+        ],
+        "skills": [
+          {
+            "alias": "summarize-evidence",
+            "title": "Summarize evidence",
+            "callable": "summarizeEvidence",
+            "available": true,
+            "binding": {
+              "entryId": "summarize-evidence",
+              "entryVersion": 4,
+              "digest": "sealed-entry-digest",
+              "moduleId": "trusted-skill-provider",
+              "callable": "summarizeEvidence"
+            }
+          }
+        ],
+        "retryPolicy": {
+          "mode": "normal",
+          "maxRetries": 2,
+          "retryableCodes": [
+            "TIMEOUT"
+          ],
+          "initialDelayMs": 25,
+          "maxDelayMs": 25,
+          "jitterRatio": 0
+        },
+        "capabilityContext": {
+          "runtimeContextRef": "snapshot:prime-loader"
+        }
+      }
+    }
+  ],
+  "skillBindings": [
+    {
+      "entryId": "summarize-evidence",
+      "entryVersion": 4,
+      "digest": "sealed-entry-digest",
+      "moduleId": "trusted-skill-provider",
+      "callable": "summarizeEvidence"
+    }
+  ]
+}

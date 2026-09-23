@@ -9,6 +9,7 @@ import ResidentOperatorService, {
   type ResidentExecuteRequest,
 } from '@deepseek-ai/dsh-resident-operator'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { buildOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
 import SubagentRuntime, {
   type ResolvedSubagentStartRequest,
   type SubagentProvider,
@@ -152,6 +153,38 @@ describe('physical-operator-resident', () => {
       taskLabel: 'Continue the proof',
     })
     expect(oneShot.starts).toBe(1)
+  })
+
+  it('forwards a sealed envelope as native prompt fields and NativeContext identity', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(PhysicalOperatorRuntime)
+    new ResidentStub(ctx)
+    await ctx.plugin(provider, {
+      operators: [{
+        id: 'codex', residentProvider: 'codex', displayName: 'Codex', description: 'Runs Codex through the user subscription.',
+      }],
+    })
+    const envelope = buildOperatorContextEnvelope({
+      systemText: 'sealed system',
+      task: [{ type: 'text', text: 'sealed task' }],
+      contexts: [{ name: 'memory', text: 'sealed preference' }],
+      source: { kind: 'taskgraph', runId: 'run-1', nodeId: 'node-1', contextPacketRef: 'sha256:context' },
+    })
+
+    const run = await ctx.physicalOperators.start('codex', {
+      mode: 'resident', prompt: [...envelope.task], contextEnvelope: envelope,
+      parent: parent(), signal: new AbortController().signal,
+    })
+
+    await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' })
+    const forwarded = (ctx.residentOperators as ResidentStub).requests[0]
+    expect(forwarded).toMatchObject({
+      systemPrompt: 'sealed system',
+      nativeContext: { version: 1, digest: envelope.digest },
+    })
+    expect(forwarded?.prompt).toContainEqual({ type: 'text', text: 'sealed task' })
+    expect(run.contextReceipt).toMatchObject({ digest: envelope.digest, format: 'native', roleFidelity: 'native' })
   })
 
   it('keeps resident available when only the ephemeral subagent lacks subscription attestation', async () => {

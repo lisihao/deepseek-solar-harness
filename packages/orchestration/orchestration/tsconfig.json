@@ -13,6 +13,7 @@
     { "path": "../context-compiler" },
     { "path": "../capability-capsule" },
     { "path": "../../physical-operator/physical-operator" },
+    { "path": "../../prompt/task-template" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

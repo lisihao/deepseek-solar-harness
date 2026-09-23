@@ -50,6 +50,12 @@ function turn(
     sourceRefs: [{ version: 1, ref: 'artifact:brief', kind: 'artifact' }],
     execution: { version: 1, kind: 'taskgraph-node', runId: 'parent-run', nodeId: 'parent-node' },
     sourceSessionId: 'session-1',
+    runtimeContext: {
+      version: 1,
+      sourceSessionId: 'session-1',
+      contextSnapshotMessageId: 'snapshot-1',
+      sections: [{ name: 'mnemon:runtime-memory', text: 'USER preference: concise Chinese evidence.' }],
+    },
     priorLedger: { version: 1, claims: [], coverage: 0, digest: 'sha256:empty' },
     priorDissent: [],
     priorUnresolved: [],
@@ -466,7 +472,13 @@ describe('Debate TaskGraph round adapter', () => {
 
     expect(compileRequests).toHaveLength(1)
     expect(startRequests).toEqual([{ commandId: 'debate:debate-1:round:1', compilationId: 'cmp-1' }])
-    expect(compileRequests[0]?.admission).toMatchObject({ rlm: 'disabled', autonomous: 'disabled', continualHarness: 'off' })
+    expect(compileRequests[0]?.admission).toMatchObject({
+      rlm: 'disabled', autonomous: 'disabled', continualHarness: 'off',
+      runtimeContext: {
+        sourceSessionId: 'session-1',
+        sections: [{ name: 'mnemon:runtime-memory', text: 'USER preference: concise Chinese evidence.' }],
+      },
+    })
     expect(result.resultsBySlot['decision-judge']).toMatchObject({
       confidence: 0.9,
       outputRef: 'sha256:decision-judge',

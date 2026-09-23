@@ -286,9 +286,11 @@ export interface SessionsApi {
 
   /**
    * Reads a fresh advisory model directory for an ordinary session. Provider
-   * lookups run independently; subagents reject with `agent-busy`.
+   * lookups run independently; subagents reject with `agent-busy`. Set
+   * `refresh` to ask adapters that support live discovery to refresh their
+   * catalog; omission keeps the adapter's existing cached/static behavior.
    */
-  models(request: RpcRequest<{ sessionId: SessionId }>): Promise<RpcResponse<SessionModels>>
+  models(request: RpcRequest<{ sessionId: SessionId; refresh?: boolean }>): Promise<RpcResponse<SessionModels>>
 
   /**
    * Selects the complete model selection for this session. Exact model metadata

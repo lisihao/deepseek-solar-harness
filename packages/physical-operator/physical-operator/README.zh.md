@@ -10,6 +10,8 @@ Provider 使用稳定的小写 ID、展示元数据、选择标签、正数 `max
 
 已经接受的执行可以在 Provider 插件释放后继续完成。HMR 期间重新注册同一算子 ID 时，替代实现会继续看到旧运行占用的容量，直至旧运行结束。服务会围绕每个已发布的执行恰好发出一次 `physical-operator/start` 与 `physical-operator/end`。监听器失败会被隔离，不能改变执行结果。
 
+调用方可以附加版本化算子上下文信封，其中包含精确的当前 system prompt、当前任务、命名运行时上下文与持久来源。每个 Provider 都必须物化全部字段并返回绑定摘要的回执。缺失、不匹配或已拒绝的回执会使准入失败并释放容量；本机、远程、Web、Resident 与 subagent 传输都不能静默替换为通用提示词。
+
 | 错误码 | 含义 |
 |---|---|
 | `NO_OPERATOR` | 请求的稳定 ID 未注册。 |
@@ -19,6 +21,9 @@ Provider 使用稳定的小写 ID、展示元数据、选择标签、正数 `max
 | `OPERATOR_MODE_UNSUPPORTED` | Provider 未声明支持请求的执行生命周期。 |
 | `DUPLICATE_OPERATOR` | 两个活动注册占用同一稳定 ID。 |
 | `INVALID_OPERATOR` | 描述符身份或元数据无效。 |
+| `CONTEXT_ENVELOPE_DROPPED` | Provider 遗漏必需的上下文回执。 |
+| `CONTEXT_ENVELOPE_INVALID` | 回执未标识所提供的信封。 |
+| `CONTEXT_ENVELOPE_REJECTED` | Provider 明确拒绝物化该信封。 |
 
 ## 权威边界
 

@@ -10,7 +10,7 @@
 
 export { JsonRpcLineTransport, JsonRpcResponseError } from './transport.ts'
 export type { JsonRpcTransportPeer } from './transport.ts'
-export { LocalJsonRpcRequestServer } from './local-request-server.ts'
+export { LocalJsonRpcRequestServer, requestLocalJsonRpc } from './local-request-server.ts'
 export type { LocalJsonRpcEndpoint, LocalJsonRpcRequestHandler } from './local-request-server.ts'
 export type {
   HarnessSdkNotificationMap,

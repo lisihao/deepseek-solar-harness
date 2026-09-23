@@ -6,7 +6,18 @@
  * @module @deepseek-ai/dsh-physical-operator-chatgpt-web
  */
 
+export type {} from './model-preferences.ts'
+export type {} from './web-session.ts'
+
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { ChatGptWebCoordination } from './coordination.ts'
+import { ProgressLog, settleForDisposal, textPromptForRequest } from './run-support.ts'
+import { registerWebCoordinatorSetup } from './setup.ts'
+import { registerWebCoordinationTools } from './coordination-tools.ts'
+import { ChatGptWebModelWorker } from './model-worker.ts'
+import { buildWebModelCatalogEvaluatorSource, type WebModelPreferences } from './model-catalog.ts'
 import z from '@deepseek-ai/schemastery'
 import {
   BrowserError,
@@ -19,12 +30,11 @@ import {
   PhysicalOperatorId,
   type PhysicalOperator,
   type PhysicalOperatorDescriptor,
-  type PhysicalOperatorProgressEvent,
-  type PhysicalOperatorProgressPage,
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
+import { receiveOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
 
 /** Cordis plugin name used by Loader diagnostics. */
 export const name = 'physical-operator-chatgpt-web'
@@ -38,7 +48,7 @@ export const DEFAULT_DISPLAY_NAME = 'ChatGPT Web'
 /** Default discovery description for the ChatGPT web operator. */
 export const DEFAULT_DESCRIPTION = 'Uses the authenticated ChatGPT website through the configured browser provider.'
 /** Default discovery tags for the ChatGPT web operator. */
-export const DEFAULT_TAGS = Object.freeze(['chatgpt', 'browser', 'subscription'])
+export const DEFAULT_TAGS = Object.freeze(['chatgpt', 'browser', 'subscription', 'planning', 'research', 'analysis'])
 /** Default named Ego Lite task space reused by this operator. */
 export const DEFAULT_WORKSPACE_NAME = 'dsh-chatgpt-web'
 /** Default ChatGPT website opened inside the named browser workspace. */
@@ -87,6 +97,18 @@ export interface Config {
   readonly progressIntervalMs?: number
   /** Maximum serialized output retained from the webpage. */
   readonly outputMaxBytes?: number
+  /** Private owner-local directory for connector identity and mode. */
+  readonly stateRoot?: string
+  /** Exact visible ChatGPT custom MCP app name required for tool coordination. */
+  readonly connectorName?: string
+  /** Stable loopback port for the user-configured MCP tunnel; zero is useful for isolated tests. */
+  readonly coordinatorPort?: number
+  /** Maximum HTTP JSON body accepted by the MCP connector. */
+  readonly coordinatorRequestMaxBytes?: number
+  /** Maximum MCP request lifetime, including delegated tools. */
+  readonly coordinatorRequestTimeoutMs?: number
+  /** Maximum wait for matching native webpage request evidence. */
+  readonly identityTimeoutMs?: number
 }
 
 /** Loader schema for the deployment-owned ChatGPT web settings. */
@@ -102,9 +124,21 @@ export const Config: z<Config> = z.object({
   pollIntervalMs: z.number().default(DEFAULT_POLL_INTERVAL_MS),
   progressIntervalMs: z.number().default(DEFAULT_PROGRESS_INTERVAL_MS),
   outputMaxBytes: z.number().default(DEFAULT_OUTPUT_MAX_BYTES),
+  stateRoot: z.string(),
+  connectorName: z.string().default('DSH'),
+  coordinatorPort: z.number().default(61847),
+  coordinatorRequestMaxBytes: z.number().default(1024 * 1024),
+  coordinatorRequestTimeoutMs: z.number().default(DEFAULT_GENERATION_TIMEOUT_MS),
+  identityTimeoutMs: z.number().default(15_000),
 })
 
 interface ResolvedConfig {
+  readonly stateRoot: string
+  readonly connectorName: string
+  readonly coordinatorPort: number
+  readonly coordinatorRequestMaxBytes: number
+  readonly coordinatorRequestTimeoutMs: number
+  readonly identityTimeoutMs: number
   readonly id: string
   readonly displayName: string
   readonly description: string
@@ -123,6 +157,7 @@ interface ProgramRequest {
   readonly workspaceName: string
   readonly prompt: string
   readonly model?: string
+  readonly effort?: string
   readonly generationTimeoutMs: number
   readonly submissionTimeoutMs: number
   readonly pollIntervalMs: number
@@ -145,21 +180,131 @@ interface ProgramDiagnostic {
   readonly sendAvailable: boolean
 }
 
+interface DraftDiagnostic {
+  readonly page: 'root' | 'conversation' | 'other'
+  readonly inputCharacters: number
+  readonly attachmentCount: number
+}
+
 type ProgramOutcome = CompletedProgramOutcome
   | { readonly status: 'auth-required' }
   | { readonly status: 'input-unavailable' }
   | { readonly status: 'context-not-isolated' }
   | { readonly status: 'model-selection-unavailable' }
+  | { readonly status: 'effort-selection-unavailable' }
+  | { readonly status: 'draft-present'; readonly diagnostic: DraftDiagnostic }
   | { readonly status: 'submission-failed'; readonly diagnostic: ProgramDiagnostic }
   | { readonly status: 'generation-timeout'; readonly diagnostic: ProgramDiagnostic }
   | { readonly status: 'protocol-error' }
 
-const INSPECT_PAGE = String.raw`() => {
+const COMPOSER_DOM_HELPERS = String.raw`
   const visible = (element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
   };
+  const normalizeNewlines = (value) => String(value ?? '').replace(/\r\n?/g, '\n');
+  const composer = () => {
+    const candidates = [...document.querySelectorAll('div.ProseMirror[contenteditable="true"]')].filter(visible);
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+  const newline = String.fromCharCode(10);
+  const nodeText = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const element = node;
+    if (element.tagName === 'BR') {
+      return element.classList.contains('ProseMirror-trailingBreak') ? '' : newline;
+    }
+    return [...element.childNodes].map(nodeText).join('');
+  };
+  const composerText = (element) => {
+    if (element === null) return '';
+    const blocks = [...element.children];
+    const text = blocks.length === 0
+      ? [...element.childNodes].map(nodeText).join('')
+      : blocks.map(nodeText).join(newline);
+    return normalizeNewlines(text);
+  };
+  const composerAttachmentCount = (element) => {
+    if (element === null) return 0;
+    const form = element.closest('form');
+    if (form === null) return 0;
+    const fileInputs = [...form.querySelectorAll('input[type="file"]')]
+      .filter((input) => input.files !== null && input.files.length > 0).length;
+    const candidates = [...form.querySelectorAll('[data-testid],[aria-label],[data-file-id],[data-attachment-id],[role="progressbar"]')]
+      .filter(visible);
+    return fileInputs + candidates.filter((candidate) => {
+      if (candidate.matches('[data-file-id],[data-attachment-id],[role="progressbar"]')) return true;
+      const label = [
+        candidate.getAttribute('aria-label'),
+        candidate.getAttribute('title'),
+      ].map((value) => String(value ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase()).join(' ');
+      const testId = String(candidate.getAttribute('data-testid') ?? '')
+        .replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      return /(?:remove|delete)\s+(?:file|attachment)\b/.test(label)
+        || /(?:file|attachment)/.test(testId) && !/(?:add|upload|send|submit|input)/.test(testId);
+    }).length;
+  };
+  const outermost = (elements) => {
+    const unique = [...new Set(elements)];
+    const roots = unique.filter((element) => !unique.some((other) => other !== element && other.contains(element)));
+    return roots.sort((left, right) => (
+      left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING
+    ) !== 0 ? -1 : 1);
+  };
+  const messageUnits = () => {
+    const contentUnits = [...document.querySelectorAll('[data-content-search-unit-key]')];
+    const key = (element) => String(element.getAttribute('data-content-search-unit-key') ?? '');
+    const users = contentUnits.filter((element) => key(element).endsWith(':user')
+      && element.querySelector('[data-user-message-bubble="true"]') !== null);
+    const assistants = contentUnits.filter((element) => key(element).endsWith(':assistant')
+      && element.querySelector('[data-markdown-text-style="assistant-message"]') !== null);
+    return {
+      users: outermost([...document.querySelectorAll('[data-message-author-role="user"]'), ...users]),
+      assistants: outermost([...document.querySelectorAll('[data-message-author-role="assistant"]'), ...assistants]),
+    };
+  };
+  const assistantText = (element) => {
+    if (element === null) return '';
+    const body = element.querySelector('[data-markdown-text-style="assistant-message"]')
+      ?? element.querySelector('.markdown')
+      ?? element;
+    return body.textContent ?? '';
+  };
+  const latestAssistantSettled = (latest, assistants) => {
+    if (latest === null || latest.querySelector('[data-markdown-text-style="assistant-message"]') === null) return false;
+    let ancestor = latest.parentElement;
+    while (ancestor !== null && ancestor !== document.body && ancestor.tagName !== 'MAIN') {
+      if (assistants.filter((assistant) => ancestor.contains(assistant)).length > 1) return false;
+      const copied = [...ancestor.querySelectorAll('button')].some((button) => {
+        const label = String(button.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+        return label === 'copy' || label === '复制';
+      });
+      if (copied) return true;
+      ancestor = ancestor.parentElement;
+    }
+    return false;
+  };
+  const sendButton = (editor) => {
+    if (editor === null) return null;
+    const form = editor.closest('form');
+    if (form === null) return null;
+    const semanticLabels = new Set(['send', 'send message', 'send prompt', '发送', '发送消息']);
+    const candidates = [...form.querySelectorAll('button')].filter((element) => {
+      if (!visible(element) || element.disabled || element.getAttribute('aria-disabled') === 'true'
+        || element.type !== 'submit') return false;
+      const ariaLabel = String(element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      return element.id === 'composer-submit-button'
+        || element.getAttribute('data-testid') === 'send-button'
+        || semanticLabels.has(ariaLabel);
+    });
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+`
+
+const INSPECT_PAGE = String.raw`() => {
+  ${COMPOSER_DOM_HELPERS}
   const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
   const label = (element) => normalize(
     element.getAttribute('aria-label') ?? element.getAttribute('title') ?? element.textContent,
@@ -167,111 +312,107 @@ const INSPECT_PAGE = String.raw`() => {
   const loginRequired = [...document.querySelectorAll('button,a')]
     .filter(visible)
     .some((element) => /^(log in|sign in|登录)$/i.test(label(element)));
-  const replies = [...document.querySelectorAll('[data-message-author-role="assistant"]')]
-    .map((element) => element.querySelector('.markdown') ?? element)
-    .map((element) => element.textContent ?? '')
-    .filter((text) => text.trim().length > 0);
-  const userCount = document.querySelectorAll('[data-message-author-role="user"]').length;
+  const { users, assistants } = messageUnits();
+  const assistantCount = assistants.length;
+  const userCount = users.length;
   const page = location.pathname === '/'
     ? 'root'
     : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
-  let input = document.querySelector('#prompt-textarea');
-  if (input === null || !visible(input)) {
-    input = [...document.querySelectorAll('textarea,div[contenteditable="true"]')]
-      .find((element) => visible(element)) ?? null;
-  }
   document.querySelectorAll('[data-dsh-chatgpt-web-input="true"]')
     .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-input'));
-  if (input !== null && page === 'root' && userCount === 0 && replies.length === 0) {
+  document.querySelectorAll('[data-dsh-chatgpt-web-send="true"]')
+    .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-send'));
+  const input = composer();
+  const inputText = composerText(input);
+  const attachmentCount = composerAttachmentCount(input);
+  if (input !== null && page === 'root' && userCount === 0 && assistantCount === 0) {
     input.setAttribute('data-dsh-chatgpt-web-input', 'true');
   }
   return {
     page,
     loginRequired,
     inputReady: input !== null,
-    assistantCount: replies.length,
+    assistantCount,
     userCount,
+    inputCharacters: inputText.length,
+    attachmentCount,
+    draftPresent: inputText.length > 0 || attachmentCount > 0,
   };
 }`
 
-const SELECT_MODEL = String.raw`async (input) => {
-  if (input === null || typeof input !== 'object') return { selected: false };
-  const record = input;
-  if (typeof record.model !== 'string' || typeof record.waitMs !== 'number') return { selected: false };
-  const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
-  const target = normalize(record.model);
-  const visible = (element) => {
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+const PREPARE_SUBMISSION = String.raw`(input) => {
+  ${COMPOSER_DOM_HELPERS}
+  if (input === null || typeof input !== 'object' || typeof input.prompt !== 'string') return { valid: false };
+  document.querySelectorAll('[data-dsh-chatgpt-web-send="true"]')
+    .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-send'));
+  const { users, assistants } = messageUnits();
+  const assistantCount = assistants.length;
+  const userCount = users.length;
+  const page = location.pathname === '/'
+    ? 'root'
+    : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
+  const editor = composer();
+  const inputText = composerText(editor);
+  const send = sendButton(editor);
+  const promptMatches = editor !== null && inputText === normalizeNewlines(input.prompt);
+  const ready = page === 'root' && userCount === 0 && assistantCount === 0 && promptMatches && send !== null;
+  if (ready) send.setAttribute('data-dsh-chatgpt-web-send', 'true');
+  return {
+    page,
+    userCount,
+    assistantCount,
+    inputCharacters: inputText.length,
+    generating: false,
+    settled: false,
+    sendAvailable: send !== null,
+    promptMatches,
+    ready,
   };
-  const label = (element) => normalize(
-    element.getAttribute('aria-label') ?? element.getAttribute('title') ?? element.textContent,
-  );
-  const controls = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
-  const selectors = controls.filter((element) => /model|模型/i.test(label(element)));
-  if (selectors.length !== 1) return { selected: false };
-  const selector = selectors[0];
-  selector.click();
-  await new Promise((resolve) => setTimeout(resolve, record.waitMs));
-  const options = [...document.querySelectorAll('button,[role="menuitem"],[role="option"]')]
-    .filter(visible)
-    .filter((element) => label(element) === target);
-  if (options.length !== 1) return { selected: false };
-  options[0].click();
-  await new Promise((resolve) => setTimeout(resolve, record.waitMs));
-  return { selected: label(selector) === target };
 }`
 
 const RESPONSE_STATE = String.raw`() => {
-  const replyElements = [...document.querySelectorAll('[data-message-author-role="assistant"]')];
-  const replies = replyElements
-    .map((element) => element.querySelector('.markdown') ?? element)
-    .map((element) => element.textContent ?? '')
-    .filter((text) => text.trim().length > 0);
-  const latestReply = replyElements.at(-1) ?? null;
-  const turn = latestReply?.closest('[data-testid^="conversation-turn-"]') ?? null;
-  const settled = turn !== null && turn.querySelector(
+  ${COMPOSER_DOM_HELPERS}
+  const { users, assistants } = messageUnits();
+  const latestReply = assistants.at(-1) ?? null;
+  const response = assistantText(latestReply);
+  const legacyTurn = latestReply?.closest('[data-testid^="conversation-turn-"]') ?? null;
+  const legacySettled = legacyTurn !== null && legacyTurn.querySelector(
     '[data-testid="copy-turn-action-button"],[aria-label="Copy response"],[aria-label="复制回复"]',
   ) !== null;
   const generating = [...document.querySelectorAll('button,[role="button"]')].some((element) => {
     const label = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/g, ' ').trim();
     return /stop generating|stop streaming|停止生成/i.test(label);
   });
-  const visible = (element) => {
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-  };
-  const input = document.querySelector('#prompt-textarea')
-    ?? [...document.querySelectorAll('textarea,div[contenteditable="true"]')].find(visible)
-    ?? null;
-  const inputText = String(input?.value ?? input?.textContent ?? '').trim();
-  const send = document.querySelector('#composer-submit-button,button[data-testid="send-button"]');
+  const editor = composer();
+  const inputText = composerText(editor);
+  const send = sendButton(editor);
   const page = location.pathname === '/'
     ? 'root'
     : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
   return {
     page,
-    userCount: document.querySelectorAll('[data-message-author-role="user"]').length,
-    assistantCount: replies.length,
+    userCount: users.length,
+    assistantCount: assistants.length,
     inputCharacters: inputText.length,
-    response: replies.at(-1) ?? '',
+    response,
     generating,
-    settled,
-    sendAvailable: send !== null && visible(send) && !send.disabled,
+    settled: legacySettled || latestAssistantSettled(latestReply, assistants),
+    sendAvailable: send !== null,
   };
 }`
 
-const REMOVE_INPUT_MARKER = String.raw`() => {
-  document.querySelectorAll('[data-dsh-chatgpt-web-input="true"]')
-    .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-input'));
+const REMOVE_COMPOSER_MARKERS = String.raw`() => {
+  document.querySelectorAll('[data-dsh-chatgpt-web-input="true"],[data-dsh-chatgpt-web-send="true"]')
+    .forEach((element) => {
+      element.removeAttribute('data-dsh-chatgpt-web-input');
+      element.removeAttribute('data-dsh-chatgpt-web-send');
+    });
   return true;
 }`
 
 /**
  * Build one trusted browser program for a single ChatGPT webpage request.
- * @param request - normalized prompt, optional model, and browser bounds.
+ * @param request - normalized prompt, optional model and reasoning effort, and browser bounds.
  * @returns a provider-neutral browser-js-v1 request for the configured workspace.
  */
 export function buildChatGptWebProgram(request: ProgramRequest): BrowserRunProgramV1 {
@@ -289,6 +430,11 @@ export function buildChatGptWebProgram(request: ProgramRequest): BrowserRunProgr
     source: String.raw`const request = ${encodedRequest};
 const page = 'chatgpt-web';
 const asRecord = (value) => value !== null && typeof value === 'object' ? value : undefined;
+const draftDiagnostic = (value) => ({
+  page: value.page,
+  inputCharacters: value.inputCharacters,
+  attachmentCount: value.attachmentCount,
+});
 await browser.run({
   id: 'chatgpt-open',
   kind: 'open',
@@ -313,9 +459,17 @@ while (Date.now() - readinessStartedAt <= readinessTimeoutMs) {
   if (inspect.loginRequired === true) return { status: 'auth-required' };
   if (!['root', 'conversation', 'other'].includes(inspect.page)
     || !Number.isSafeInteger(inspect.userCount)
-    || !Number.isSafeInteger(inspect.assistantCount)) return { status: 'protocol-error' };
+    || !Number.isSafeInteger(inspect.assistantCount)
+    || !Number.isSafeInteger(inspect.inputCharacters)
+    || inspect.inputCharacters < 0
+    || !Number.isSafeInteger(inspect.attachmentCount)
+    || inspect.attachmentCount < 0
+    || typeof inspect.draftPresent !== 'boolean') return { status: 'protocol-error' };
   if (inspect.page !== 'root' || inspect.userCount !== 0 || inspect.assistantCount !== 0) {
     return { status: 'context-not-isolated' };
+  }
+  if (inspect.draftPresent === true) {
+    return { status: 'draft-present', diagnostic: draftDiagnostic(inspect) };
   }
   if (inspect.inputReady === true && Number.isSafeInteger(inspect.assistantCount)) break;
   await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
@@ -323,13 +477,48 @@ while (Date.now() - readinessStartedAt <= readinessTimeoutMs) {
 if (inspect.inputReady !== true || !Number.isSafeInteger(inspect.assistantCount)) {
   return { status: 'input-unavailable' };
 }
-if (request.model !== undefined) {
-  const selection = asRecord(await browser.evaluate(page, ${JSON.stringify(SELECT_MODEL)}, {
-    model: request.model,
-    waitMs: request.pollIntervalMs,
+if (request.model !== undefined || request.effort !== undefined) {
+  const selection = asRecord(await browser.evaluate(page, ${JSON.stringify(buildWebModelCatalogEvaluatorSource())}, {
+    pollIntervalMs: request.pollIntervalMs,
+    timeoutMs: request.submissionTimeoutMs,
+    selection: {
+      ...request.model === undefined ? {} : { model: request.model },
+      ...request.effort === undefined ? {} : { effort: request.effort },
+    },
   }));
-  if (selection?.selected !== true) return { status: 'model-selection-unavailable' };
+  if (selection === undefined || typeof selection.status !== 'string') return { status: 'protocol-error' };
+  switch (selection.status) {
+    case 'ok': break;
+    case 'auth-required': return { status: 'auth-required' };
+    case 'effort-selection-unavailable':
+    case 'reasoning-options-unavailable':
+      return { status: 'effort-selection-unavailable' };
+    case 'model-picker-unavailable':
+    case 'model-options-unavailable':
+    case 'model-selection-unavailable':
+    case 'menu-close-failed':
+      return { status: 'model-selection-unavailable' };
+    default: return { status: 'protocol-error' };
+  }
 }
+inspect = asRecord(await browser.evaluate(page, ${JSON.stringify(INSPECT_PAGE)}));
+if (inspect === undefined) return { status: 'protocol-error' };
+if (inspect.loginRequired === true) return { status: 'auth-required' };
+if (!['root', 'conversation', 'other'].includes(inspect.page)
+  || !Number.isSafeInteger(inspect.userCount)
+  || !Number.isSafeInteger(inspect.assistantCount)
+  || !Number.isSafeInteger(inspect.inputCharacters)
+  || inspect.inputCharacters < 0
+  || !Number.isSafeInteger(inspect.attachmentCount)
+  || inspect.attachmentCount < 0
+  || typeof inspect.draftPresent !== 'boolean') return { status: 'protocol-error' };
+if (inspect.page !== 'root' || inspect.userCount !== 0 || inspect.assistantCount !== 0) {
+  return { status: 'context-not-isolated' };
+}
+if (inspect.draftPresent === true) {
+  return { status: 'draft-present', diagnostic: draftDiagnostic(inspect) };
+}
+if (inspect.inputReady !== true) return { status: 'input-unavailable' };
 await browser.run({
   id: 'chatgpt-fill',
   kind: 'fill',
@@ -337,17 +526,58 @@ await browser.run({
   locator: { kind: 'css', selector: '[data-dsh-chatgpt-web-input="true"]' },
   value: request.prompt,
 });
-await browser.run({
-  id: 'chatgpt-send',
-  kind: 'click',
-  page,
-  locator: { kind: 'css', selector: '#composer-submit-button,button[data-testid="send-button"]' },
-});
-await browser.evaluate(page, ${JSON.stringify(REMOVE_INPUT_MARKER)});
+await browser.evaluate(page, ${JSON.stringify(REMOVE_COMPOSER_MARKERS)});
 const initialCount = inspect.assistantCount;
 const initialUserCount = inspect.userCount;
 const submissionStartedAt = Date.now();
 let state;
+let sendReady = false;
+const diagnostic = (value) => ({
+  page: value.page,
+  userCount: value.userCount,
+  assistantCount: value.assistantCount,
+  inputCharacters: value.inputCharacters,
+  generating: value.generating,
+  settled: value.settled,
+  sendAvailable: value.sendAvailable,
+});
+while (Date.now() - submissionStartedAt <= request.submissionTimeoutMs) {
+  state = asRecord(await browser.evaluate(page, ${JSON.stringify(PREPARE_SUBMISSION)}, { prompt: request.prompt }));
+  if (state === undefined
+    || !['root', 'conversation', 'other'].includes(state.page)
+    || !Number.isSafeInteger(state.userCount)
+    || !Number.isSafeInteger(state.assistantCount)
+    || !Number.isSafeInteger(state.inputCharacters)
+    || typeof state.generating !== 'boolean'
+    || typeof state.settled !== 'boolean'
+    || typeof state.sendAvailable !== 'boolean'
+    || typeof state.promptMatches !== 'boolean'
+    || typeof state.ready !== 'boolean') {
+    return { status: 'protocol-error' };
+  }
+  if (state.page !== 'root' || state.userCount !== 0 || state.assistantCount !== 0) {
+    return { status: 'context-not-isolated' };
+  }
+  if (state.ready) {
+    sendReady = true;
+    break;
+  }
+  await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
+}
+if (!sendReady) {
+  if (state === undefined) return { status: 'protocol-error' };
+  return { status: 'submission-failed', diagnostic: diagnostic(state) };
+}
+try {
+  await browser.run({
+    id: 'chatgpt-send',
+    kind: 'click',
+    page,
+    locator: { kind: 'css', selector: '[data-dsh-chatgpt-web-send="true"]' },
+  });
+} finally {
+  await browser.evaluate(page, ${JSON.stringify(REMOVE_COMPOSER_MARKERS)});
+}
 let submitted = false;
 while (Date.now() - submissionStartedAt <= request.submissionTimeoutMs) {
   state = asRecord(await browser.evaluate(page, ${JSON.stringify(RESPONSE_STATE)}));
@@ -369,15 +599,6 @@ while (Date.now() - submissionStartedAt <= request.submissionTimeoutMs) {
   if (submitted) break;
   await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
 }
-const diagnostic = (value) => ({
-  page: value.page,
-  userCount: value.userCount,
-  assistantCount: value.assistantCount,
-  inputCharacters: value.inputCharacters,
-  generating: value.generating,
-  settled: value.settled,
-  sendAvailable: value.sendAvailable,
-});
 if (!submitted) return { status: 'submission-failed', diagnostic: diagnostic(state) };
 const startedAt = Date.now();
 let stableResponse = '';
@@ -439,6 +660,7 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
   constructor(
     private readonly ctx: Context,
     private readonly config: ResolvedConfig,
+    private readonly coordination: ChatGptWebCoordination,
   ) {
     this.descriptor = Object.freeze({
       id: PhysicalOperatorId(config.id),
@@ -446,12 +668,15 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
       description: config.description,
       tags: config.tags,
       maxConcurrency: 1,
-      executionModes: ['ephemeral'] as const,
+      executionModes: coordination.mode === 'coordinator'
+        ? ['ephemeral', 'resident'] as const
+        : ['ephemeral'] as const,
     })
   }
 
   /** Return whether one available browser-js-v1 Provider has the required capabilities. */
   availability() {
+    if (this.coordination.transitioning) return { available: false as const, reason: 'ChatGPT Web configuration is changing' }
     try {
       const capabilities = this.ctx.browser.capabilities('browser-js-v1')
       const missing = REQUIRED_BROWSER_CAPABILITIES.filter(capability => !capabilities.includes(capability))
@@ -471,17 +696,23 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
    * @returns a bounded progress reader and the terminal ChatGPT result.
    */
   start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
-    if (request.mode !== 'ephemeral') {
-      throw new PhysicalOperatorError(
-        'ChatGPT Web supports only ephemeral execution',
-        'OPERATOR_MODE_UNSUPPORTED',
-      )
+    if (request.mode === 'resident') {
+      if (modelForRequest(request) !== undefined) {
+        throw new PhysicalOperatorError('Select the coordinated ChatGPT model in its owned webpage before sending', 'MODEL_SELECTION_UNAVAILABLE')
+      }
+      return this.coordination.start(request)
     }
     if (request.signal.aborted) {
       throw new PhysicalOperatorError('ChatGPT Web execution was aborted before startup', 'OPERATOR_ABORTED')
     }
-    const prompt = promptForRequest(request)
-    const model = modelForRequest(request)
+    const prompt = textPromptForRequest(request)
+    const explicitModel = modelForRequest(request)
+    const profile = resolveWebModelPreferences(
+      explicitModel,
+      this.coordination.preferences(String(request.parent.id)),
+    )
+    const model = profile.model
+    const effort = profile.effort
     const progress = new ProgressLog(String(request.executionId))
     progress.append('chatgpt-web.connecting', { phase: 'connecting' })
     const controller = new AbortController()
@@ -492,6 +723,7 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
       workspaceName: this.config.workspaceName,
       prompt,
       ...model === undefined ? {} : { model },
+      ...effort === undefined ? {} : { effort },
       generationTimeoutMs: this.config.generationTimeoutMs,
       submissionTimeoutMs: this.config.submissionTimeoutMs,
       pollIntervalMs: this.config.pollIntervalMs,
@@ -503,6 +735,9 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
     )
     let disposal: Promise<void> | undefined
     return Promise.resolve({
+      ...request.contextEnvelope === undefined ? {} : {
+        contextReceipt: receiveOperatorContextEnvelope(request.contextEnvelope, String(this.descriptor.id), 'text'),
+      },
       result,
       readEvents: (afterSequence, limit, signal) => progress.read(afterSequence, limit, signal),
       dispose: (): Promise<void> => {
@@ -523,6 +758,7 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
       progress.append('chatgpt-web.submitting', {
         phase: 'submitting',
         ...request.model === undefined ? {} : { requestedModel: request.model },
+        ...request.effort === undefined ? {} : { requestedEffort: request.effort },
       })
       progress.append('chatgpt-web.waiting', { phase: 'waiting' })
       const waitingStartedAt = Date.now()
@@ -555,6 +791,12 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
           throw new PhysicalOperatorError('ChatGPT Web requires a logged-in browser session', 'CHATGPT_WEB_AUTH_REQUIRED')
         case 'input-unavailable':
           throw new PhysicalOperatorError('ChatGPT Web input is unavailable in the selected browser workspace', 'RUNTIME_UNAVAILABLE')
+        case 'draft-present':
+          throw new PhysicalOperatorError(
+            'ChatGPT Web has an existing composer draft or attachment (' + draftDiagnosticText(outcome.diagnostic)
+              + '). Clear or send it in the browser workspace, then retry.',
+            'CHATGPT_WEB_DRAFT_PRESENT',
+          )
         case 'context-not-isolated':
           throw new PhysicalOperatorError(
             'ChatGPT Web could not establish a fresh conversation before prompt submission',
@@ -562,6 +804,8 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
           )
         case 'model-selection-unavailable':
           throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested model selection', 'MODEL_SELECTION_UNAVAILABLE')
+        case 'effort-selection-unavailable':
+          throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested reasoning effort', 'MODEL_SELECTION_UNAVAILABLE')
         case 'submission-failed':
           throw new PhysicalOperatorError(
             `ChatGPT Web did not accept the filled prompt (${diagnosticText(outcome.diagnostic)})`,
@@ -588,7 +832,36 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
 
 /** Register the browser-backed ChatGPT physical operator. */
 export function apply(ctx: Context, config: Config): void {
-  ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolveConfig(config)))
+  const resolved = resolveConfig(config)
+  const coordination = new ChatGptWebCoordination(ctx, resolved)
+  let unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, coordination))
+  const publish = async (): Promise<void> => {
+    await unregister()
+    unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, coordination))
+  }
+  ctx.effect(() => async () => {
+    await unregister()
+    await coordination.dispose()
+  }, 'physical-operator-chatgpt-web: coordinator lifecycle')
+  ctx.inject(['tools', 'systemPrompt'], (toolCtx) => {
+    toolCtx.effect(() => registerWebCoordinationTools(toolCtx, {
+      isCoordinating: (owner, callId) => coordination.isCoordinating(owner, callId),
+      maxHandoffBytes: resolved.outputMaxBytes,
+    }), 'physical-operator-chatgpt-web: coordination tools')
+  })
+  ctx.inject(['modelWorkers'], (workerCtx) => {
+    workerCtx.modelWorkers.register(new ChatGptWebModelWorker(workerCtx, resolved.id))
+  })
+  ctx.inject(['webServer'], (webCtx) => {
+    webCtx.effect(() => registerWebCoordinatorSetup(webCtx, {
+      status: () => coordination.status(),
+      endpoint: () => coordination.endpoint(),
+      select: mode => coordination.select(mode, publish),
+      refreshCatalog: sessionId => coordination.refreshCatalog(sessionId),
+      preferences: sessionId => coordination.preferences(sessionId),
+      selectPreferences: (sessionId, profile) => coordination.selectPreferences(sessionId, profile),
+    }), 'physical-operator-chatgpt-web: local setup')
+  })
 }
 
 function resolveConfig(config: Config): ResolvedConfig {
@@ -618,7 +891,21 @@ function resolveConfig(config: Config): ResolvedConfig {
   if (!Number.isSafeInteger(outputMaxBytes) || outputMaxBytes < MIN_OUTPUT_MAX_BYTES) {
     throw new Error(`physical-operator-chatgpt-web: outputMaxBytes must be an integer of at least ${MIN_OUTPUT_MAX_BYTES}`)
   }
+  const coordinatorPort = config.coordinatorPort ?? 61847
+  if (!Number.isSafeInteger(coordinatorPort) || coordinatorPort < 0 || coordinatorPort > 65535) {
+    throw new Error('physical-operator-chatgpt-web: coordinatorPort must be an integer between 0 and 65535')
+  }
+  const coordinatorRequestMaxBytes = config.coordinatorRequestMaxBytes ?? 1024 * 1024
+  if (!Number.isSafeInteger(coordinatorRequestMaxBytes) || coordinatorRequestMaxBytes <= 0) {
+    throw new Error('physical-operator-chatgpt-web: coordinatorRequestMaxBytes must be a positive integer')
+  }
   return Object.freeze({
+    stateRoot: requiredTrimmed('stateRoot', config.stateRoot ?? join(resolveDshHome(), 'chatgpt-web')),
+    connectorName: requiredTrimmed('connectorName', config.connectorName ?? 'DSH'),
+    coordinatorPort,
+    coordinatorRequestMaxBytes,
+    coordinatorRequestTimeoutMs: positiveTimer('coordinatorRequestTimeoutMs', config.coordinatorRequestTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS),
+    identityTimeoutMs: positiveTimer('identityTimeoutMs', config.identityTimeoutMs ?? 15_000),
     id,
     displayName,
     description,
@@ -657,23 +944,6 @@ function positiveTimer(field: string, value: number): number {
   return value
 }
 
-function promptForRequest(request: PhysicalOperatorProviderStartRequest): string {
-  const text: string[] = []
-  for (const block of request.prompt) {
-    if (block.type !== 'text') {
-      throw new PhysicalOperatorError('ChatGPT Web accepts text prompt blocks only', 'INVALID_RESULT')
-    }
-    text.push(block.text)
-  }
-  const task = text.join('\n')
-  if (task.trim().length === 0) {
-    throw new PhysicalOperatorError('ChatGPT Web prompt must not be empty', 'INVALID_RESULT')
-  }
-  return request.systemPrompt === undefined || request.systemPrompt.length === 0
-    ? task
-    : `${request.systemPrompt}\n\n---\n\n${task}`
-}
-
 function modelForRequest(request: PhysicalOperatorProviderStartRequest): string | undefined {
   if (request.residentProfile?.effort !== undefined) {
     throw new PhysicalOperatorError('ChatGPT Web does not expose a verified reasoning-effort control', 'OPERATOR_OPTION_UNSUPPORTED')
@@ -684,6 +954,26 @@ function modelForRequest(request: PhysicalOperatorProviderStartRequest): string 
     throw new PhysicalOperatorError('ChatGPT Web model selection must be a trimmed bounded model name', 'MODEL_SELECTION_UNAVAILABLE')
   }
   return model
+}
+
+/**
+ * Resolve the ephemeral Web controls without letting an explicit model borrow a stale effort.
+ * @param explicitModel - model explicitly requested for this provider run.
+ * @param saved - session-owned Web model and reasoning preferences.
+ * @returns the model and effort forwarded to the same-page browser program.
+ */
+export function resolveWebModelPreferences(
+  explicitModel: string | undefined,
+  saved: WebModelPreferences,
+): WebModelPreferences {
+  const model = explicitModel ?? saved.model
+  const effort = explicitModel !== undefined && saved.model !== explicitModel
+    ? undefined
+    : saved.effort
+  return {
+    ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
+  }
 }
 
 function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
@@ -697,6 +987,11 @@ function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
     case 'input-unavailable': return { status: 'input-unavailable' }
     case 'context-not-isolated': return { status: 'context-not-isolated' }
     case 'model-selection-unavailable': return { status: 'model-selection-unavailable' }
+    case 'effort-selection-unavailable': return { status: 'effort-selection-unavailable' }
+    case 'draft-present': {
+      const diagnostic = programDraftDiagnostic(value.diagnostic)
+      return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'draft-present', diagnostic }
+    }
     case 'submission-failed': {
       const diagnostic = programDiagnostic(value.diagnostic)
       return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'submission-failed', diagnostic }
@@ -708,6 +1003,22 @@ function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
     case 'protocol-error': return { status: 'protocol-error' }
     default:
       return { status: 'protocol-error' }
+  }
+}
+
+function programDraftDiagnostic(value: BrowserJsonValue | undefined): DraftDiagnostic | undefined {
+  if (!isRecord(value)) return undefined
+  const page = value.page
+  if (page !== 'root' && page !== 'conversation' && page !== 'other') return undefined
+  if (!Number.isSafeInteger(value.inputCharacters)
+    || !Number.isSafeInteger(value.attachmentCount)) return undefined
+  const inputCharacters = value.inputCharacters as number
+  const attachmentCount = value.attachmentCount as number
+  if (inputCharacters < 0 || attachmentCount < 0) return undefined
+  return {
+    page,
+    inputCharacters,
+    attachmentCount,
   }
 }
 
@@ -733,6 +1044,10 @@ function diagnosticText(diagnostic: ProgramDiagnostic): string {
   return `page=${diagnostic.page}, userMessages=${diagnostic.userCount}, assistantMessages=${diagnostic.assistantCount}, inputCharacters=${diagnostic.inputCharacters}, generating=${diagnostic.generating}, settled=${diagnostic.settled}, sendAvailable=${diagnostic.sendAvailable}`
 }
 
+function draftDiagnosticText(diagnostic: DraftDiagnostic): string {
+  return `page=${diagnostic.page}, inputCharacters=${diagnostic.inputCharacters}, attachments=${diagnostic.attachmentCount}`
+}
+
 function isRecord(value: unknown): value is Readonly<Record<string, BrowserJsonValue>> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -740,38 +1055,4 @@ function isRecord(value: unknown): value is Readonly<Record<string, BrowserJsonV
 function errorCode(error: unknown): string {
   if (error instanceof BrowserError || error instanceof PhysicalOperatorError) return error.code
   return 'CHATGPT_WEB_PROVIDER_FAILED'
-}
-
-async function settleForDisposal(result: Promise<PhysicalOperatorResult>): Promise<void> {
-  try {
-    await result
-  } catch {
-    // `result` preserves the terminal failure for the caller; disposal only
-    // waits for cancellation to settle and must not replace that failure.
-  }
-}
-
-class ProgressLog {
-  private sequence = 0
-  private readonly events: PhysicalOperatorProgressEvent[] = []
-
-  constructor(private readonly commandId: string) {}
-
-  append(type: string, data: Readonly<Record<string, unknown>>): void {
-    this.sequence += 1
-    this.events.push(Object.freeze({
-      sequence: this.sequence,
-      type,
-      time: new Date().toISOString(),
-      data: Object.freeze({ ...data, commandId: this.commandId }),
-    }))
-  }
-
-  read(afterSequence: number, limit: number, signal?: AbortSignal): Promise<PhysicalOperatorProgressPage> {
-    if (signal?.aborted) {
-      return Promise.reject(new PhysicalOperatorError('ChatGPT Web progress read was aborted', 'OPERATOR_ABORTED'))
-    }
-    const events = this.events.filter(event => event.sequence > afterSequence).slice(0, Math.max(0, limit))
-    return Promise.resolve({ events, nextSequence: events.at(-1)?.sequence ?? afterSequence })
-  }
 }

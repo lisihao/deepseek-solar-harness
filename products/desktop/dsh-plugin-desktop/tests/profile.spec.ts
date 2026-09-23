@@ -190,13 +190,15 @@ describe('desktop profile composition', () => {
     }
   })
 
-  it('mounts the shared output style policy on Desktop and Product Server', () => {
+  it('mounts the shared output style policy exactly once on Desktop and Product Server', () => {
     const home = temporaryHome()
     const desktopRows = composeEntries([prepareDesktopProfile(undefined, home, 'darwin').patches])
     const serverRows = composeEntries([prepareProductServerProfile(undefined, home, 'darwin').patches])
 
     for (const rows of [desktopRows, serverRows]) {
-      const outputStyle = rows.find(row => row.id === 'output-style')
+      const outputStyles = rows.filter(row => row.id === 'output-style')
+      expect(outputStyles).toHaveLength(1)
+      const outputStyle = outputStyles[0]
       expect(outputStyle).toEqual(expect.objectContaining({
         name: '@deepseek-ai/dsh-output-style',
       }))

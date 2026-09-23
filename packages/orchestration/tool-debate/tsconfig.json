@@ -12,6 +12,7 @@
     { "path": "../../core/system-prompt" },
     { "path": "../../session/session-projection" },
     { "path": "../debate" },
+    { "path": "../../plan/plan-mode" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

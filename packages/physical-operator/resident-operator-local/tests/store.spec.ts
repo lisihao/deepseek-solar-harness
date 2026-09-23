@@ -19,6 +19,22 @@ afterEach(() => {
 })
 
 describe('ResidentStore', () => {
+  it('binds the sealed NativeContext identity into a command hash', () => {
+    const prompt = [{ type: 'text' as const, text: 'continue the native turn' }]
+    const first = canonicalRequestHash(
+      'codex', '/workspace', prompt, PROFILE, undefined, 'lane-a', undefined, 'system', 'inherit',
+      { version: 1, digest: 'a'.repeat(64) },
+    )
+    const second = canonicalRequestHash(
+      'codex', '/workspace', prompt, PROFILE, undefined, 'lane-a', undefined, 'system', 'inherit',
+      { version: 1, digest: 'b'.repeat(64) },
+    )
+    const legacy = canonicalRequestHash('codex', '/workspace', prompt, PROFILE, undefined, 'lane-a', undefined, 'system')
+
+    expect(first).not.toBe(second)
+    expect(first).not.toBe(legacy)
+  })
+
   it('deduplicates one command and rejects conflicting content', () => {
     const store = new ResidentStore(root())
     const prompt = [{ type: 'text' as const, text: 'remember alpha' }]

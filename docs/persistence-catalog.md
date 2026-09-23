@@ -235,6 +235,156 @@ Types: [TokenUsage](subsystems/llm-streaming.md)
 
 Source: [`packages/core/session/src/types.ts:273`](../packages/core/session/src/types.ts)
 
+### `chatgpt-web/*`
+
+<a id="chatgpt-webaccepted--log-only"></a>
+
+#### `chatgpt-web/accepted` — log-only
+
+```ts persistence-catalog
+/**
+ * A website observation proved the exact native user message created for
+ * one command in its owned lane.
+ */
+'chatgpt-web/accepted': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  workspaceName: string
+  conversationId: string
+  conversationUrl: string
+  userMessageId: string
+  connectorName: string
+  requestIds: string[]
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:55`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webcompleted--log-only"></a>
+
+#### `chatgpt-web/completed` — log-only
+
+```ts persistence-catalog
+/**
+ * A strong terminal signal or exact final action produced one completed
+ * assistant result for the accepted native user message.
+ */
+'chatgpt-web/completed': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  conversationId: string
+  conversationUrl: string
+  userMessageId: string
+  assistantMessageId: string
+  response: string
+  responseSha256: string
+  truncated: boolean
+  model: string
+  effort?: string
+  requestIds: string[]
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:71`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webintent--log-only"></a>
+
+#### `chatgpt-web/intent` — log-only
+
+```ts persistence-catalog
+/**
+ * Pre-send identity for one command. It proves only that DSH began a
+ * browser attempt; it never proves that ChatGPT accepted the prompt.
+ */
+'chatgpt-web/intent': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  workspaceName: string
+  promptSha256: string
+  targetUrl: string
+  connectorName: string
+  baselineUserMessageIds: string[]
+  profile?: WebModelPreferences
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:39`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webprofile--log-only"></a>
+
+#### `chatgpt-web/profile` — log-only
+
+```ts persistence-catalog
+/** Whole-value Web model preference saved only after native picker verification. */
+'chatgpt-web/profile': { model?: string; effort?: string }
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/model-preferences.ts:9`](../packages/physical-operator/physical-operator-chatgpt-web/src/model-preferences.ts)
+
+<a id="chatgpt-webrejected--log-only"></a>
+
+#### `chatgpt-web/rejected` — log-only
+
+```ts persistence-catalog
+/**
+ * A known local refusal before the send click. It prevents a duplicate
+ * command from silently re-evaluating a changed browser draft or connector.
+ */
+'chatgpt-web/rejected': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  code: string
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:91`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-websubmission-pending--log-only"></a>
+
+#### `chatgpt-web/submission-pending` — log-only
+
+```ts persistence-catalog
+/**
+ * A send click returned before a native user-message identity was observed.
+ * The candidate page is retained solely for a no-send recovery inspection.
+ */
+'chatgpt-web/submission-pending': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  candidateUrl: string
+  baselineUserMessageIds: string[]
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:102`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webterminal--log-only"></a>
+
+#### `chatgpt-web/terminal` — log-only
+
+```ts persistence-catalog
+/** Exact user-turn observation reached a stopped or failed provider outcome. */
+'chatgpt-web/terminal': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  outcome: 'stopped' | 'failed'
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:111`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
 ### `command/*`
 
 <a id="commanddone--log-only"></a>
@@ -405,7 +555,7 @@ Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compactio
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:120`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:126`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatedispatch--log-only"></a>
 
@@ -418,16 +568,18 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:120`](../packages/orch
  * @param promptMessageId User message owned by this admission.
  * @param turn Agent turn receiving the message.
  * @param step Agent step replaced by the Debate host adapter.
+ * @param planModeActive Effective Plan state captured for this host step.
  */
 'debate/dispatch': {
   readonly commandId: string
   readonly promptMessageId: string
   readonly turn: number
   readonly step: number
+  readonly planModeActive?: boolean
 }
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:133`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:140`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatepreferences--log-only"></a>
 
@@ -438,7 +590,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:133`](../packages/orch
 'debate/preferences': DebateExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:118`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:124`](../packages/orchestration/tool-debate/src/index.ts)
 
 <a id="debatetrace--log-only"></a>
 
@@ -453,7 +605,7 @@ Source: [`packages/orchestration/tool-debate/src/index.ts:118`](../packages/orch
 'debate/trace': DebateTraceSessionEventV1
 ```
 
-Source: [`packages/orchestration/tool-debate/src/index.ts:144`](../packages/orchestration/tool-debate/src/index.ts)
+Source: [`packages/orchestration/tool-debate/src/index.ts:152`](../packages/orchestration/tool-debate/src/index.ts)
 
 ### `feedback/*`
 
@@ -582,7 +734,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 }
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:40`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 <a id="orchestrationpreferences--log-only"></a>
 
@@ -593,7 +745,7 @@ Source: [`packages/orchestration/tool-orchestration/src/index.ts:40`](../package
 'orchestration/preferences': OrchestrationExecutionPreferences
 ```
 
-Source: [`packages/orchestration/tool-orchestration/src/index.ts:53`](../packages/orchestration/tool-orchestration/src/index.ts)
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:56`](../packages/orchestration/tool-orchestration/src/index.ts)
 
 ### `permission/*`
 
@@ -614,6 +766,27 @@ Source: [`packages/orchestration/tool-orchestration/src/index.ts:53`](../package
 Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/interaction/permission-presets/src/index.ts)
 
 ### `physical-operator/*`
+
+<a id="physical-operatorcontext-envelope--log-only"></a>
+
+#### `physical-operator/context-envelope` — log-only
+
+```ts persistence-catalog
+/** Durable proof that one current-task context envelope crossed the operator boundary. */
+'physical-operator/context-envelope': {
+  commandId: string
+  operatorId: string
+  digest: string
+  source: OperatorContextEnvelopeSourceV1
+  receipt: OperatorContextEnvelopeReceiptV1
+  /** Exact tool-subtask template selection, when this handoff selected one. */
+  taskTemplate?: TaskTemplateSelection
+  /** Complete frozen model input materialized by the receiving operator. */
+  envelope: OperatorContextEnvelopeV1
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:114`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch--log-only"></a>
 
@@ -637,7 +810,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:73`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:86`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -651,7 +824,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:73`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:96`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:109`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -665,7 +838,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:96`](..
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:58`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:71`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -679,7 +852,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:58`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:60`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:73`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprogress--log-only"></a>
 
@@ -697,7 +870,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:60`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:101`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:126`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -714,7 +887,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:101`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:65`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:78`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-call--log-only"></a>
 
@@ -735,7 +908,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:65`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:117`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:142`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-dispatch--log-only"></a>
 
@@ -752,7 +925,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:117`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:88`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:101`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-indeterminate--log-only"></a>
 
@@ -771,7 +944,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:88`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:145`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:170`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -796,7 +969,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:145`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:129`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:154`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -812,7 +985,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:129`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:110`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:135`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 
@@ -1007,6 +1180,31 @@ Source: [`packages/core/session/src/types.ts:254`](../packages/core/session/src/
 ```
 
 Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent/subagent/src/descriptor.ts)
+
+### `task-template/*`
+
+<a id="task-templatedecided--log-only"></a>
+
+#### `task-template/decided` — log-only
+
+```ts persistence-catalog
+/**
+ * One decision for the open turn's logical user task — log-only, no
+ * surfaceOp, always appended with `ignorable: true` since it is this
+ * plugin's own attributable record and its loss cannot affect core
+ * session reconstruction. `restored: true` marks a compaction-recovery
+ * re-append of the exact pinned receipt from an earlier `inject` in the
+ * same turn, rather than a fresh selection, so a reader can tell the two
+ * apart without re-deriving the decision.
+ */
+'task-template/decided': {
+  turn: number
+  receipt: TaskTemplateInjectionReceipt
+  restored?: true
+}
+```
+
+Source: [`packages/prompt/task-template-context/src/index.ts:57`](../packages/prompt/task-template-context/src/index.ts)
 
 ### `todo/*`
 

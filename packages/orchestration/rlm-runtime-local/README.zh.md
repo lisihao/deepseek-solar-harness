@@ -12,7 +12,11 @@
 
 `rlm(task, { name })` 通过 Consumer 提供的 Host binding 准入 Child，并在 Child result settle 前返回 handle。`skills.list()` 投影父执行已经密封的 Skill catalog；`skills.call(name, args)` 只通过 Consumer 持有的 Host binding 转发该 catalog 中可用且由 Host 签发的 alias，因此 Runtime 代码既不能提交 import path，也不能在同一 Attempt 中观察到目录更新。Cell 串行执行，已准入的 Child execution 可以并发推进。显式消息和 Artifact reference 才是答案通道。Local Provider 还实现了版本化的 Agents View `attach → input → detach` 控制面：一个存活 caller 只能持有一个 lease，控制输入通过现有 message/continuation pump 排队，进程重启后可回收死进程遗留的 lease。
 
+持久 Root 同时记录 Child model rule。`parent-inherit` 下，省略 Child model 必定使用当前 Parent 的完整选择；意外携带的 allocator default 会被拒绝。`allocator-default` 下，省略 model 只能使用 Scheduler 已密封的 default child selection。每个 Child 都持久化其 `modelOrigin`，每一次 child dispatch 都携带 Parent 已密封的 tools、Skills、retry policy 和 capability context。Kernel 会拒绝 `name`、`model`、`thinking` 以外的全部 `rlm()` option；显式选择会原样交给 Consumer 的 catalog validation，而不是静默 fallback。
+
 状态原子写入配置的 owner-local root。重启恢复会分别恢复可序列化变量，把未完成 Receipt 变为 `indeterminate`，并要求显式放弃，绝不重放无法证明的原生 effect。`compact.run()` 只记录 Receipt 绑定的 Host 调度决定；真实原生历史压缩必须由 Host 在 turn boundary 执行，TypeScript namespace 不会被重置。
+
+Provider 在 `state.json` 中保存版本 5 状态。构造时会迁移版本 1 至 4，并在注册 runtime owner 前原子重写该文件。迁移后的 Child 标记为 `modelOrigin: legacy`；缺少结果的已结算 Child Receipt 会变为 `indeterminate`，绝不会自动再次派发。替换旧 Provider 时保留私有的升级前状态副本：回退旧二进制时也必须恢复兼容的状态文件。
 
 ## Model Experience
 

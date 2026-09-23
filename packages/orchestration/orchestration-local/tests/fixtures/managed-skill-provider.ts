@@ -16,5 +16,13 @@ export default {
         }
       },
     })
+    ctx.continualHarnessSkills.register({
+      moduleId: 'prime-e2e-replacement-skill-provider',
+      callables: ['summarizeReplacement'],
+      invoke: async ({ args }) => ({
+        summary: `replacement:${typeof args.text === 'string' ? args.text : JSON.stringify(args.text ?? '')}`,
+        source: 'live-catalog-replacement',
+      }),
+    })
   },
 }

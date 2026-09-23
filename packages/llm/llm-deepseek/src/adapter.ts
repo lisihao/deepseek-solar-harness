@@ -24,6 +24,7 @@ import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import { serializeRequest, serializeRequestWithImages } from './serialize.ts'
 import type { RequestDefaults } from './serialize.ts'
+import { discoverDeepSeekModels } from './discovery.ts'
 import { parseSse } from './sse.ts'
 import { translate } from './translate.ts'
 import type { WireError } from './types.ts'
@@ -124,6 +125,11 @@ function modelInfo(provider: string, model: DeepSeekCatalogModel): LlmModelInfo 
   }
 }
 
+/** Keep discovered IDs isolated by endpoint and credential reference, never by secret value. */
+function discoveryScope(connection: DeepSeekConnectionOptions): string {
+  return JSON.stringify([connection.baseURL, String(connection.apiKeyEnv)])
+}
+
 function providerRetryAfterMs(value: string | null): number | undefined {
   if (value === null) return undefined
   if (/^\d+$/.test(value)) {
@@ -167,6 +173,11 @@ export function httpErrorCode(status: number, error?: WireError['error']): strin
  * map to `ABORTED`; the configured per-read idle watchdog maps to `TIMEOUT`.
  */
 export class DeepSeekAdapter extends LlmAdapter {
+  /** Endpoint/account-local IDs returned by successful directory listings. */
+  private readonly discoveredModelIds = new Map<string, readonly string[]>()
+  /** Refresh order per endpoint/account scope; stale results cannot republish. */
+  private readonly discoveryGenerations = new Map<string, number>()
+
   constructor(private readonly config: DeepSeekAdapterOptions) {
     super()
   }
@@ -179,8 +190,43 @@ export class DeepSeekAdapter extends LlmAdapter {
     return this.config.options().retryPolicy
   }
 
-  override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
-    return Promise.resolve(this.config.options().models.map(model => modelInfo(provider, model)))
+  override async listModels(
+    provider: string,
+    options?: { readonly refresh?: boolean },
+  ): Promise<readonly LlmModelInfo[]> {
+    const connection = this.config.options()
+    const scope = discoveryScope(connection)
+    if (options?.refresh === true) {
+      const generation = (this.discoveryGenerations.get(scope) ?? 0) + 1
+      this.discoveryGenerations.set(scope, generation)
+      const apiKey = await this.config.resolveApiKey(connection)
+      const userId = this.config.resolveUserId()
+      const discovered = await discoverDeepSeekModels({
+        baseURL: connection.baseURL,
+        apiKey,
+        userId: String(userId),
+        timeoutMs: connection.streamIdleTimeoutMs,
+      })
+      if (this.discoveryGenerations.get(scope) === generation) {
+        this.discoveredModelIds.set(scope, discovered)
+      }
+    }
+    return this.catalog(provider, connection)
+  }
+
+  /** Combine configured model metadata with IDs from the last successful endpoint listing. */
+  private catalog(provider: string, connection: DeepSeekConnectionOptions): LlmModelInfo[] {
+    const known = new Set<string>()
+    const models = connection.models.map((model) => {
+      known.add(model.id)
+      return modelInfo(provider, model)
+    })
+    for (const id of this.discoveredModelIds.get(discoveryScope(connection)) ?? []) {
+      if (known.has(id)) continue
+      known.add(id)
+      models.push(modelInfo(provider, { id }))
+    }
+    return models
   }
 
   override resolveModel(

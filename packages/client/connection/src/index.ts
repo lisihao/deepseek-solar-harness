@@ -6,6 +6,7 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ResidentExecuteRequest } from '@deepseek-ai/dsh-resident-operator'
+import { parseOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
 import type {
   OrchestrationClusterHeartbeatRequest,
   OrchestrationClusterInstallRequest,
@@ -469,6 +470,9 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
               prompt: body.prompt as ContentBlock[],
               ...(typeof body.taskLabel === 'string' ? { taskLabel: body.taskLabel } : {}),
               ...(typeof body.systemPrompt === 'string' ? { systemPrompt: body.systemPrompt } : {}),
+              ...body.contextEnvelope === undefined
+                ? {}
+                : { contextEnvelope: remoteOperatorContextEnvelope(body.contextEnvelope) },
               ...profile === undefined ? {} : { profile },
               ...body.nativeToolPolicy === undefined
                 ? {}
@@ -778,6 +782,17 @@ function requireCurrentRemoteSyncProtocol(value: unknown): void {
     : recordPayload(value)
   if (protocol.major !== REMOTE_SYNC_PROTOCOL.major || protocol.minor !== REMOTE_SYNC_PROTOCOL.minor) {
     throw new ConnectionRpcHttpError(409, 'remote operator execution requires remote sync protocol 1.4')
+  }
+}
+
+function remoteOperatorContextEnvelope(value: unknown) {
+  try {
+    return parseOperatorContextEnvelope(value)
+  } catch (error) {
+    throw new ConnectionRpcHttpError(
+      400,
+      error instanceof Error ? error.message : 'contextEnvelope is invalid',
+    )
   }
 }
 

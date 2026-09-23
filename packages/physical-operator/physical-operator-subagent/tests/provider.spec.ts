@@ -10,6 +10,10 @@ import SubagentRuntime, {
   type SubagentResult,
   type SubagentRun,
 } from '@deepseek-ai/dsh-subagent'
+import {
+  buildOperatorContextEnvelope,
+  renderOperatorContextEnvelopeText,
+} from '@deepseek-ai/dsh-system-prompt'
 import * as adapter from '../src/index.ts'
 
 function fakeParent(): Agent {
@@ -111,6 +115,36 @@ describe('physical-operator subagent provider', () => {
     })
     expect(provider.disposed).toBe(1)
   })
+
+  it.each(['codex', 'claude-code'] as const)(
+    'materializes the complete sealed context as text for the %s one-shot provider',
+    async (providerName) => {
+      const ctx = await setup()
+      const provider = new StubSubagentProvider(undefined, {
+        name: providerName,
+        authentication: { mode: 'native-subscription' },
+      })
+      ctx.subagents.registerProvider(provider)
+      await ctx.plugin(adapter, {
+        operators: [{ ...config.operators[0]!, provider: providerName }],
+      })
+      const envelope = buildOperatorContextEnvelope({
+        systemText: 'sealed system',
+        task: [{ type: 'text', text: 'sealed task' }],
+        contexts: [{ name: 'memory', text: 'sealed memory' }],
+        source: { kind: 'tool', requestHeaderEventSeq: 1, toolCallId: 'fixture-tool' },
+      })
+
+      const run = await ctx.physicalOperators.start('physics-solver', {
+        prompt: [...envelope.task], contextEnvelope: envelope, parent: fakeParent(), signal: new AbortController().signal,
+      })
+      await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' })
+      expect(run.contextReceipt).toMatchObject({ digest: envelope.digest, format: 'text', roleFidelity: 'text-downgrade' })
+      expect(provider.lastRequest?.prompt).toEqual([{ type: 'text', text: renderOperatorContextEnvelopeText(envelope) }])
+
+      await ctx.fiber.dispose()
+    },
+  )
 
   it('preserves accepted subagent execution across adapter disposal', async () => {
     const result = Promise.withResolvers<SubagentResult>()

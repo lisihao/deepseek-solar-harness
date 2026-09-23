@@ -71,6 +71,7 @@ import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
+import { registerWebCoordinationTools } from '../packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts'
 import { githubSlug } from './verify-md-links.ts'
 
 /** Attachment seam marker that makes the attachments-conditional `read_image` schema harvestable. */
@@ -177,7 +178,7 @@ async function mountCatalogChildScope(
 export interface ToolPackage {
   /** The npm package name, used as the catalog section heading. */
   pkg: string
-  /** The `packages/<group>/<dir>` leaf name — matched by the completeness guard. */
+  /** The `packages/<group>/<dir>` leaf name — matched by the completeness guard for `tool-*` entries. */
   dir: string
   /**
    * Repo-relative implementation source linked per harvested tool. Packages
@@ -215,8 +216,9 @@ export interface ToolPackage {
 
 /**
  * The boot manifest: every shipped tool package (a `tool-*` leaf under
- * `packages/`). Ordered by package name (the render order); the completeness
- * guard proves it is exhaustive against the on-disk glob.
+ * `packages/`) plus explicitly listed provider-owned model-facing tools.
+ * Ordered by package name (the render order); the completeness guard proves
+ * the `tool-*` subset is exhaustive against the on-disk glob.
  */
 const TOOL_PACKAGES: ToolPackage[] = [
   {
@@ -290,6 +292,24 @@ const TOOL_PACKAGES: ToolPackage[] = [
     note:
       'The schema exposes stable physical-operator ids rather than provider transports. '
       + 'Deployments register operators separately; the catalog intentionally harvests the empty-registry schema.',
+  },
+  {
+    // Provider-owned model-facing tool; this explicit entry stays outside the
+    // `tool-*` completeness scan because its registration belongs to ChatGPT Web.
+    pkg: '@deepseek-ai/dsh-physical-operator-chatgpt-web',
+    dir: 'physical-operator-chatgpt-web',
+    source: 'packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts',
+    requires: ['ctx.tools', 'ctx.systemPrompt', 'a coordinating ChatGPT Web Agent'],
+    writes: ['tool/call', 'tool/result', 'Agent inbox handoff messages'],
+    mount(ctx) {
+      ctx.effect(() => registerWebCoordinationTools(ctx, {
+        isCoordinating: () => false,
+        maxHandoffBytes: 24 * 1024,
+      }), 'tool-catalog: ChatGPT Web coordination tool')
+      return Promise.resolve()
+    },
+    note:
+      'Provider-owned coordination control for an authenticated ChatGPT Web response. The catalog mounts only the registration helper with a representative handoff limit; it does not boot the browser, MCP connector, or provider state. Runtime execution remains restricted to the coordinating Web call.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-debate',
@@ -791,7 +811,7 @@ export function render(catalog: ToolCatalog): string {
     '',
     'This file is GENERATED and verified fresh by `pnpm run verify-tool-catalog` (part of `doc-sync`) — do not edit it by hand. Unlike the cordis catalog (a pure source-AST pass), this generator BOOTS each tool plugin on a real context and reads `ctx.tools.schemas()`, because a tool schema is not statically knowable (runtime-spread enums, concatenated descriptions, config-driven names, raw-JSON-Schema MCP tools). A completeness guard globs `packages/*/tool-*` and fails if any package is missing from the generator\'s boot manifest, so a new tool cannot be silently undocumented. See [the tool-schema-catalog Agent Note](../.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md).',
     '',
-    'Scope: shipped product tools under `packages/*/tool-*`, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`\'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog\'s packages-only scope.',
+    'Scope: shipped product tools under `packages/*/tool-*` plus explicitly listed provider-owned model-facing tools, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`\'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog\'s packages-only scope.',
     '',
     '## Tool Package Map',
     '',

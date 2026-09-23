@@ -5,6 +5,7 @@
   "references": [
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
+    { "path": "../../core/agent" },
     { "path": "../../llm/llm" },
     { "path": "../../runtime-diagnostics/invariants" },
     { "path": "../model-allocation" },

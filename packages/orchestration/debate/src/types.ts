@@ -202,6 +202,14 @@ export interface DebateTopicV1 {
   readonly source: 'user' | 'objective' | 'legacy-missing'
 }
 
+/** Frozen parent-request dynamic contexts carried into every Debate turn. */
+export interface DebateRuntimeContextV1 {
+  readonly version: 1
+  readonly sourceSessionId: string
+  readonly contextSnapshotMessageId: string
+  readonly sections: readonly { readonly name: string; readonly text: string }[]
+}
+
 /** Provider input. `commandId` is the adapter's idempotency identity. */
 export interface DebateStartRequestV1 {
   readonly version: 1
@@ -214,6 +222,8 @@ export interface DebateStartRequestV1 {
   readonly sourceRefs?: readonly DebateSourceRefV1[]
   readonly execution?: DebateExecutionRefV1
   readonly sourceSessionId?: string
+  /** Current-request preference and memory contexts from the owning DSH Session. */
+  readonly runtimeContext?: DebateRuntimeContextV1
 }
 
 /** Current evidence-backed disposition of a normalized claim. */

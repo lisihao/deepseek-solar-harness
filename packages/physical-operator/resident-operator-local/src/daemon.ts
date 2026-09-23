@@ -20,6 +20,7 @@ import {
   ResidentOperatorError,
   RESIDENT_PROTOCOL_VERSION,
   RESIDENT_STATE_SCHEMA_VERSION,
+  type NativeContext,
   type ResidentProviderStatus,
   type ResidentProductDriver,
 } from '@deepseek-ai/dsh-resident-operator'
@@ -32,11 +33,12 @@ import {
   EXPECTED_CODEX_SCHEMA_SHA256,
 } from './drivers.ts'
 import { residentDriverManifestSha256 } from './driver-modules.ts'
+import { validateResidentModelToolBridge } from './model-tool-bridge.ts'
 import { wireFailure, wireSuccess } from './protocol.ts'
 import { canonicalCompactRequestHash, canonicalRequestHash, ResidentStore } from './store.ts'
 import { resolveResidentExecutionProfile } from './profile.ts'
 
-/** Public protocol-v13 method set advertised by daemon handshake. */
+/** Public protocol-v14 method set advertised by daemon handshake. */
 export const RESIDENT_METHODS = Object.freeze([
   'system.handshake',
   'system.shutdown',
@@ -175,6 +177,21 @@ function systemPromptParam(params: Record<string, unknown>): string | undefined 
     throw new ResidentOperatorError('resident protocol system_prompt exceeds 1000000 characters', 'INVALID_RESULT')
   }
   return value
+}
+
+/** Validate the digest identity of context materialized into native prompt fields. */
+function nativeContextParam(params: Record<string, unknown>): NativeContext | undefined {
+  const value = params.native_context
+  if (value === undefined) return undefined
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ResidentOperatorError('resident protocol native_context must be an object', 'INVALID_RESULT')
+  }
+  const context = value as Record<string, unknown>
+  if (Object.keys(context).length !== 2 || context.version !== 1
+    || typeof context.digest !== 'string' || !/^[a-f0-9]{64}$/u.test(context.digest)) {
+    throw new ResidentOperatorError('resident protocol native_context is invalid', 'INVALID_RESULT')
+  }
+  return { version: 1, digest: context.digest }
 }
 
 const PROFILE_EFFORTS = new Set<PhysicalOperatorReasoningEffort>([
@@ -575,12 +592,10 @@ export class ResidentDaemon {
     const taskLabel = taskLabelParam(params)
     const prompt = promptParam(params)
     const systemPrompt = systemPromptParam(params)
+    const nativeContext = nativeContextParam(params)
     const requestedProfile = profileParam(params)
-    const modelToolBridge = modelToolBridgeParam(params)
     const nativeToolPolicy = nativeToolPolicyParam(params)
-    if (nativeToolPolicy === 'disabled' && modelToolBridge !== undefined) {
-      throw new ResidentOperatorError('a no-tool resident turn cannot expose a model tool bridge', 'INVALID_RESULT')
-    }
+    const modelToolBridge = validateResidentModelToolBridge(modelToolBridgeParam(params), nativeToolPolicy)
     if (nativeToolPolicy === 'dsh-tools-authoritative' && modelToolBridge === undefined) {
       throw new ResidentOperatorError('a DSH-tool-authoritative resident turn requires a model tool bridge', 'INVALID_RESULT')
     }
@@ -627,6 +642,7 @@ export class ResidentDaemon {
       modelToolBridge,
       systemPrompt,
       nativeToolPolicy,
+      nativeContext,
     )
     const accepted = this.store.accept(
       commandId,

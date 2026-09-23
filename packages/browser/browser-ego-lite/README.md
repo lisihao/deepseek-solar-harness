@@ -43,6 +43,8 @@ Native `EGO_TASK_SPACE_USER_IN_CONTROL` maps to `BROWSER_USER_CONTROL`; `EGO_TAS
 
 The Provider supports named and stable `ego-lite:<numeric-id>` task spaces; exact-URL open/reuse and selection; close, navigation, reload, page metadata, snapshot and bounded screenshot bytes; semantic/CSS locator interactions and reads; waits; explicit handoff/takeover; completion; and page evaluation inside `browser-js-v1`.
 
+The flat-helper adapter preserves replacement semantics for contenteditable `fill` and `clear`: it selects the target editor contents and deletes them through a native Backspace before invoking the fill helper. This prevents retained drafts from being appended to the next request. Plain inputs and the object-facade implementation retain their existing behavior.
+
 | Upstream v1.2.5 contract | DSH realization | Status |
 |---|---|---|
 | One `ego-browser nodejs` heredoc composes a complete task | `browser-js-v1` preserves one process and JavaScript variables, branches, loops, actions, and verification | faithful |

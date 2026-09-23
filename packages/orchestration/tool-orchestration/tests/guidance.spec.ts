@@ -1,5 +1,27 @@
+import { Context } from '@deepseek-ai/cordis'
+import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { describe, expect, it } from 'vitest'
+import * as tool from '../src/index.ts'
 import { foldOrchestrationPreferences, orchestrationGuidance } from '../src/index.ts'
+
+async function setupCommand(): Promise<{ readonly ctx: Context; readonly agent: Agent }> {
+  const ctx = new Context()
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(CommandRuntime)
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  ctx.provide('orchestrations', {} as never)
+  await ctx.plugin(tool)
+  const session = ctx.sessions.create(SessionId('orchestration-strategy'))
+  return { ctx, agent: { id: session.id, session } as Agent }
+}
 
 describe('orchestration model guidance', () => {
   it('exposes every Resident operator and preserves explicit user selection', () => {
@@ -45,6 +67,30 @@ describe('orchestration model guidance', () => {
     }])).toEqual({
       rlm: 'disabled', autonomous: 'disabled', continualHarness: 'global', optimization: 'balanced',
       plannerVerifierPreference: 'best-high-tier', executionPreference: 'balanced',
+    })
+  })
+
+  it('rejects Autonomous Mode with disabled RLM before appending a preference', async () => {
+    const { ctx, agent } = await setupCommand()
+    const result = await ctx.commands.execute(
+      agent,
+      '/orchestration-strategy disabled enabled auto balanced codex-sol luna-first',
+      new AbortController().signal,
+    )
+    expect(result?.result).toEqual({ kind: 'error', text: 'autonomous=enabled requires rlm=auto or enabled' })
+    expect(agent.session.events.some(event => event.type === 'orchestration/preferences')).toBe(false)
+  })
+
+  it('preserves valid automatic RLM and Autonomous selections', async () => {
+    const { ctx, agent } = await setupCommand()
+    const result = await ctx.commands.execute(
+      agent,
+      '/orchestration-strategy auto enabled auto balanced codex-sol luna-first',
+      new AbortController().signal,
+    )
+    expect(result?.result).toEqual({ kind: 'success', text: 'orchestration strategy auto/enabled/auto/balanced/codex-sol/luna-first' })
+    expect(agent.session.events.find(event => event.type === 'orchestration/preferences')?.data).toMatchObject({
+      rlm: 'auto', autonomous: 'enabled',
     })
   })
 })
