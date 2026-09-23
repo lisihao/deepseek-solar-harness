@@ -1,7 +1,7 @@
 /** Owner-local JSON-RPC request server over a caller-selected IPC endpoint. */
 
 import { chmodSync, mkdirSync, rmSync } from 'node:fs'
-import { createServer, type Server, type Socket } from 'node:net'
+import { createConnection, createServer, type Server, type Socket } from 'node:net'
 import { JsonRpcLineTransport } from './transport.ts'
 
 /** Address and optional filesystem owner directory for a local IPC endpoint. */
@@ -64,5 +64,41 @@ export class LocalJsonRpcRequestServer {
     transport.onRequest(this.onRequest)
     socket.on('close', () => { transport.close() })
     transport.start()
+  }
+}
+
+/**
+ * Send one JSON-RPC request to a local request server over a fresh connection.
+ *
+ * @param path - Unix-domain socket or Windows named-pipe path of the server.
+ * @param method - JSON-RPC method name.
+ * @param params - JSON-RPC params object.
+ * @param signal - Aborting destroys the connection and rejects the request.
+ * @param abortError - Builds the error the connection is destroyed with on abort.
+ * @returns the server's JSON-RPC result.
+ */
+export async function requestLocalJsonRpc(
+  path: string,
+  method: string,
+  params: Readonly<Record<string, unknown>>,
+  signal: AbortSignal,
+  abortError: () => Error,
+): Promise<unknown> {
+  const socket = createConnection(path)
+  const transport = new JsonRpcLineTransport(socket, socket)
+  const connected = new Promise<void>((resolve, reject) => {
+    socket.once('connect', resolve)
+    socket.once('error', reject)
+  })
+  const abort = (): void => { socket.destroy(abortError()) }
+  signal.addEventListener('abort', abort, { once: true })
+  try {
+    await connected
+    transport.start()
+    return await transport.request(method, params, signal)
+  } finally {
+    signal.removeEventListener('abort', abort)
+    transport.close()
+    socket.destroy()
   }
 }

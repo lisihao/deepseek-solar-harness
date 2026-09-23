@@ -1,8 +1,7 @@
 /** Exact webpage request evidence binds MCP calls to one active DSH execution. */
 
-import { createConnection } from 'node:net'
 import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
-import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
+import { requestLocalJsonRpc } from '@deepseek-ai/dsh-sdk-protocol'
 import type { WebMcpCallId } from './types.ts'
 
 interface Owner {
@@ -182,27 +181,10 @@ async function callOwnerTool(
   signal: AbortSignal,
 ): Promise<unknown> {
   signal.throwIfAborted()
-  const socket = createConnection(bridge.socketPath)
-  const transport = new JsonRpcLineTransport(socket, socket)
-  const connected = new Promise<void>((resolve, reject) => {
-    socket.once('connect', resolve)
-    socket.once('error', reject)
-  })
-  const abort = (): void => { socket.destroy(new Error('Web tool execution was cancelled')) }
-  signal.addEventListener('abort', abort, { once: true })
-  try {
-    await connected
-    signal.throwIfAborted()
-    transport.start()
-    return await transport.request('tool.call', {
-      session_id: bridge.sessionId,
-      command_id: commandId,
-      tool: name,
-      arguments: args,
-    }, signal)
-  } finally {
-    signal.removeEventListener('abort', abort)
-    transport.close()
-    socket.destroy()
-  }
+  return await requestLocalJsonRpc(bridge.socketPath, 'tool.call', {
+    session_id: bridge.sessionId,
+    command_id: commandId,
+    tool: name,
+    arguments: args,
+  }, signal, () => new Error('Web tool execution was cancelled'))
 }

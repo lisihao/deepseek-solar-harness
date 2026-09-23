@@ -134,22 +134,27 @@ export function WebCoordinationSetup({
       : current)
     if (status !== undefined) onStatusChange(status)
   }
+  const setupUrl = (name: string, value: string): URL => {
+    const url = new URL(CHATGPT_WEB_SETUP_PATH, window.location.origin)
+    addSessionId(url, sessionId)
+    url.searchParams.set(name, value)
+    return url
+  }
+  const adoptStatus = (next: WebCoordinationStatus): void => {
+    setState(current => current.kind === 'ready'
+      ? { ...current, status: next }
+      : { kind: 'ready', status: next })
+    callback.current(next)
+  }
   const selectMode = async (mode: WebCoordinationMode): Promise<void> => {
     if (locked || saving || status === undefined || status.active || status.mode === mode) return
     setSaving(true)
     setError(undefined)
     try {
-      const url = new URL(CHATGPT_WEB_SETUP_PATH, window.location.origin)
-      addSessionId(url, sessionId)
-      url.searchParams.set('mode', mode)
-      const response = await request(url, { method: 'POST', cache: 'no-store' })
-      const value = await readJson(response)
-      const next = parseStatus(value)
+      const response = await request(setupUrl('mode', mode), { method: 'POST', cache: 'no-store' })
+      const next = parseStatus(await readJson(response))
       if (next === undefined) throw new Error('ChatGPT Web 协作状态无效')
-      setState(current => current.kind === 'ready'
-        ? { ...current, status: next }
-        : { kind: 'ready', status: next })
-      callback.current(next)
+      adoptStatus(next)
     } catch (reason: unknown) {
       setError(webSetupError(reason))
     } finally {
@@ -164,18 +169,11 @@ export function WebCoordinationSetup({
     setEndpoint(undefined)
     setCopied(false)
     try {
-      const url = new URL(CHATGPT_WEB_SETUP_PATH, window.location.origin)
-      addSessionId(url, sessionId)
-      url.searchParams.set('setup', '1')
-      const response = await request(url, { cache: 'no-store' })
-      const value = await readJson(response)
-      const next = parseSetupResponse(value)
+      const response = await request(setupUrl('setup', '1'), { cache: 'no-store' })
+      const next = parseSetupResponse(await readJson(response))
       if (next === undefined) throw new Error('ChatGPT Web 连接设置无效')
       setEndpoint(next.mcpUrl)
-      setState(current => current.kind === 'ready'
-        ? { ...current, status: next }
-        : { kind: 'ready', status: next })
-      callback.current(next)
+      adoptStatus(next)
     } catch (reason: unknown) {
       setError(webSetupError(reason))
     } finally {

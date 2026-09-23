@@ -13,13 +13,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import { BrowserError, type BrowserJsonValue, type BrowserRunProgramV1 } from '@deepseek-ai/dsh-browser'
 import {
   PhysicalOperatorError,
-  type PhysicalOperatorProgressEvent,
-  type PhysicalOperatorProgressPage,
   type PhysicalOperatorProviderRun,
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
-import { receiveOperatorContextEnvelope, renderOperatorContextEnvelopeText } from '@deepseek-ai/dsh-system-prompt'
+import { receiveOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
 import {
   buildCoordinatedWebInspectProgram,
   buildCoordinatedWebPollProgram,
@@ -30,6 +28,7 @@ import {
   type CoordinatedWebSubmitProgramRequest,
 } from './web-session-browser.ts'
 import type { WebModelPreferences } from './model-catalog.ts'
+import { ProgressLog, settleForDisposal, textPromptForRequest } from './run-support.ts'
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -829,21 +828,7 @@ function promptForRequest(request: PhysicalOperatorProviderStartRequest, rendere
     }
     return renderedPrompt
   }
-  if (request.contextEnvelope !== undefined) return renderOperatorContextEnvelopeText(request.contextEnvelope)
-  const text: string[] = []
-  for (const block of request.prompt) {
-    if (block.type !== 'text') {
-      throw new PhysicalOperatorError('ChatGPT Web accepts text prompt blocks only', 'INVALID_RESULT')
-    }
-    text.push(block.text)
-  }
-  const task = text.join('\n')
-  if (task.trim().length === 0) {
-    throw new PhysicalOperatorError('ChatGPT Web prompt must not be empty', 'INVALID_RESULT')
-  }
-  return request.systemPrompt === undefined || request.systemPrompt.length === 0
-    ? task
-    : `${request.systemPrompt}\n\n---\n\n${task}`
+  return textPromptForRequest(request)
 }
 
 function assertOptions(options: CoordinatedWebSessionOptions): void {
@@ -1265,39 +1250,4 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 
 function abortReason(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error('ChatGPT Web coordinated session was aborted')
-}
-
-async function settleForDisposal(result: Promise<PhysicalOperatorResult>): Promise<void> {
-  try {
-    await result
-  } catch {
-    // Disposal only establishes quiescence. The holder still receives the
-    // original terminal failure from `result`.
-  }
-}
-
-/** Content-free progress retained only for the holder's bounded reader. */
-class ProgressLog {
-  private sequence = 0
-  private readonly events: PhysicalOperatorProgressEvent[] = []
-
-  constructor(private readonly commandId: string) {}
-
-  append(type: string, data: Readonly<Record<string, unknown>>): void {
-    this.sequence += 1
-    this.events.push(Object.freeze({
-      sequence: this.sequence,
-      type,
-      time: new Date().toISOString(),
-      data: Object.freeze({ ...data, commandId: this.commandId }),
-    }))
-  }
-
-  read(afterSequence: number, limit: number, signal?: AbortSignal): Promise<PhysicalOperatorProgressPage> {
-    if (signal?.aborted) {
-      return Promise.reject(new PhysicalOperatorError('ChatGPT Web progress read was aborted', 'OPERATOR_ABORTED'))
-    }
-    const events = this.events.filter(event => event.sequence > afterSequence).slice(0, Math.max(0, limit))
-    return Promise.resolve({ events, nextSequence: events.at(-1)?.sequence ?? afterSequence })
-  }
 }

@@ -260,7 +260,7 @@ Source: [`packages/core/session/src/types.ts:273`](../packages/core/session/src/
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:56`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:55`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-webcompleted--log-only"></a>
 
@@ -289,7 +289,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:72`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:71`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-webintent--log-only"></a>
 
@@ -314,7 +314,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:40`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:39`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-webprofile--log-only"></a>
 
@@ -345,7 +345,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/model-pre
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:92`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:91`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-websubmission-pending--log-only"></a>
 
@@ -366,7 +366,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:103`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:102`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-webterminal--log-only"></a>
 
@@ -383,7 +383,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:112`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:111`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 ### `command/*`
 
