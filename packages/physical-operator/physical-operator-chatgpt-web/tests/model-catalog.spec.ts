@@ -423,8 +423,10 @@ describe('ChatGPT Web model catalog', () => {
       prompt: 'selected task',
       model: 'future/lattice-9',
       effort: 'sprint',
-      generationTimeoutMs: 100,
-      submissionTimeoutMs: 20,
+      // Generous budgets: the fixture settles on the first poll, while slow CI
+      // runners spend real milliseconds in the model and effort pickers.
+      generationTimeoutMs: 5_000,
+      submissionTimeoutMs: 5_000,
       pollIntervalMs: 1,
       outputMaxBytes: 2_048,
     })
