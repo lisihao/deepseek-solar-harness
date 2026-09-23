@@ -3,7 +3,7 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import { ResidentOperatorsPanel } from './ResidentOperatorsPanel.tsx'
+import { loadResidentDashboard, ResidentOperatorsPanel } from './ResidentOperatorsPanel.tsx'
 import {
   PhysicalOperatorRoutingControl,
   type PhysicalOperatorRoutingInjected,
@@ -39,6 +39,32 @@ export function apply(ctx: ClientContext): void {
   }, ResidentOperatorsPanel))
   ctx.inject(['slots', 'modelDirectories'], (scope: ClientContext) => {
     const models = scope.modelDirectories
+    // The model menu's refresh also refreshes the native and website model
+    // catalogs this plugin owns; the Host caches keep the fresh values for
+    // the collaboration panel's next read.
+    scope.effect(() => models.registerRefreshSource({
+      name: '原生算子',
+      refresh: async (sessionId) => {
+        const dashboard = await loadResidentDashboard(String(sessionId), undefined, connection.request, { refresh: true })
+        return dashboard.providers.map(provider => provider.available
+          ? `${provider.displayName} ${String(provider.models.length)} 个模型`
+          : `${provider.displayName} 不可用`).join('，')
+      },
+    }), 'ui-physical-operator: native model refresh')
+    scope.effect(() => models.registerRefreshSource({
+      name: 'ChatGPT Web',
+      refresh: async (sessionId) => {
+        const url = new URL('/api/chatgpt-web', window.location.origin)
+        url.searchParams.set('catalog', '1')
+        url.searchParams.set('refresh', '1')
+        url.searchParams.set('session_id', String(sessionId))
+        const response = await connection.request(url, { cache: 'no-store' })
+        if (response.ok) return undefined
+        if (response.status === 404) return '未安装，已跳过'
+        if (response.status === 409) throw new Error('正忙，请完成当前请求后重试')
+        throw new Error(`HTTP ${String(response.status)}`)
+      },
+    }), 'ui-physical-operator: ChatGPT Web model refresh')
     scope.slots.inject('conversation.input.right', () => scope.slots.register({
       name: 'conversation.input.right',
       id: 'physical-operator-routing',

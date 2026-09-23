@@ -7,6 +7,7 @@
 import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ModelDirectoryState } from './directory.ts'
+import type { ModelRefreshReport } from './service.ts'
 
 /** Injected business face of the composer model seat. */
 export interface ModelSelectInjected {
@@ -16,6 +17,11 @@ export interface ModelSelectInjected {
   directory: SnapshotStore<ModelDirectoryState>
   /** Refresh the advisory directory (fire-and-forget; errors land on the store). */
   load: () => void
+  /**
+   * Refresh live provider catalogs and every registered model source.
+   * @returns newly listed models and per-catalog outcomes.
+   */
+  refresh: () => Promise<ModelRefreshReport>
   /**
    * Select a complete provider/model/reasoning selection.
    * @param selection - model selection and optional adapter-owned effort.
