@@ -68,6 +68,8 @@ export class ModelDirectory {
   /** Latest operation wins; an older response never overwrites a newer one. */
   private generation = 0
   private disposed = false
+  /** In-flight live-catalog refresh that plain loads join instead of superseding. */
+  private refreshing: Promise<SessionModels> | undefined
 
   /**
    * @param sessions - the session wire face (captured from the plugin's root connection).
@@ -82,19 +84,32 @@ export class ModelDirectory {
 
   /**
    * Refresh the advisory directory (both entries call this on open).
-   * Failure preserves the last good groups and current selection.
+   * Failure preserves the last good groups and current selection. A plain
+   * load issued while a live-catalog refresh is in flight joins that refresh,
+   * so opening the menu cannot discard newly discovered models.
    * @param options - optional live-catalog refresh request forwarded to the Host.
    * @returns the fresh directory value.
    */
   async load(options?: { readonly refresh?: boolean }): Promise<SessionModels> {
     this.assertAvailable()
+    if (options?.refresh !== true) return await (this.refreshing ?? this.request(false))
+    const refreshing = this.request(true)
+    this.refreshing = refreshing
+    try {
+      return await refreshing
+    } finally {
+      if (this.refreshing === refreshing) this.refreshing = undefined
+    }
+  }
+
+  private async request(refresh: boolean): Promise<SessionModels> {
     const generation = ++this.generation
     this.store.update((s) => { s.status = 'loading'; s.error = null })
     let response: SessionModelsResponse
     try {
       response = await this.sessions.models({
         sessionId: this.sessionId,
-        ...options?.refresh === true ? { refresh: true } : {},
+        ...refresh ? { refresh: true } : {},
       })
     } catch (error: unknown) {
       if (!this.disposed && generation === this.generation) {
@@ -116,7 +131,7 @@ export class ModelDirectory {
     this.store.update((s) => {
       s.current = current
       s.routable = routable
-      s.groups = options?.refresh === true
+      s.groups = refresh
         ? mergeRefreshGroups(s.groups, groups, failures)
         : groups
       s.failures = failures
@@ -170,6 +185,7 @@ export class ModelDirectory {
   resetConnected(): void {
     if (this.disposed) return
     ++this.generation
+    this.refreshing = undefined
     this.store.update((s) => {
       s.current = null
       s.routable = null
