@@ -10,10 +10,10 @@
 
 ## 决策
 
-在 DSH 中，Code-as-Harness 只指用户在 Codex 中创建并导入 `plugins/managed/governance` 的 `agent-development-governance` 项目。由它导出的仓库内执行 bundle、Profile、attestation、DSH 完成工具、CI 和受保护分支共同决定准入。仓库内 `dsh-code-as-harness` skill 只是 DSH 入口，绝不是第二套实现。
+在 DSH 中，Code-as-Harness 只指用户创建并导入 `plugins/managed/governance` 的 `agent-development-governance` 项目。它导出的 bundle 与 Profile 在每个指向 `solar` 的 PR 上由 `solar-governance.yml` 运行；该 CI 结果、其他必需检查和受保护分支共同决定准入。仓库内 `dsh-code-as-harness` skill 用于复现失败的门禁或按要求运行 harness，绝不是第二套实现。
 
-每个 Agent 任务都要从严格 audit 和变更感知 plan 开始，在隔离 worktree 中工作，使用项目原生控制，完成 full verify 与 attestation，并在 push 前重新验证提交后的精确字节。完成还要求远端 SHA 一致，以及所有适用的运行时或 Desktop D00-D08 证据。
+Agent 在隔离 worktree 中工作，push 前通过 `dsh-pre-push-checks` 运行与改动相关的聚焦证据。它们不在每个任务中本地重复 audit、plan、full verify 或 attestation：CI 会针对实际 push 的提交运行这些步骤，本地重跑只消耗 Agent 时间和 token，不增加准入证据。Desktop 打包与安装只在明确的发布或安装请求下遵循 `products/desktop/AGENTS.md`。
 
 ## 后果
 
-Agent 不能仅凭宣称遵循规则来自我认证。接线缺失、证据陈旧、门禁跳过、远端移动或完成权威不可用时，状态只能是 `pending` 或 `error`。提示词与 skill 负责引导行为，可执行控制负责决定是否接受。
+Agent 不能仅凭宣称遵循规则来自我认证。PR 在其 head 提交上通过治理工作流和必需检查之前保持未合并。聚焦的本地检查可能漏掉只由 CI 运行的门禁；这类失败会在 PR 上暴露并在那里修复，而不是靠完整的本地预演来预防。提示词与 skill 负责引导行为，可执行控制负责决定是否接受。

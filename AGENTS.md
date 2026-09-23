@@ -34,7 +34,7 @@ Package groups: [packages/README.md](packages/README.md).
 ## Solar product governance
 
 - `solar` is protected. Use a separate branch and worktree; never commit directly to `solar` or edit another task's worktree. Upstreams are fetch-only: no upstream push, PR, package, or credential use.
-- **Code-as-Harness means only the Codex-created `agent-development-governance`** imported at `plugins/managed/governance`. Every task MUST invoke [dsh-code-as-harness](.agents/skills/dsh-code-as-harness/SKILL.md) and complete its audit, plan, full verify, attestation, admission, push, and remote-SHA checks; prose is not evidence.
+- **Code-as-Harness is a CI merge gate.** `solar-governance.yml` runs the `plugins/managed/governance` Profile on every PR to `solar` and gates merge. Run it locally only to reproduce a failure or on request ([dsh-code-as-harness](.agents/skills/dsh-code-as-harness/SKILL.md); [why](docs/architecture/adr-005-ai-agent-authority.md)).
 - Stable Desktop releases use annotated tags matching `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$`, such as `DSH-desktop-v2.4.3`; lowercase, prerelease, and display-only variants are invalid.
 - Desktop application, runtime, or artifact changes also follow `products/desktop/AGENTS.md`; migration-only imports never authorize changing `/Applications/DSH Desktop.app`.
 
