@@ -1839,7 +1839,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:78`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:77`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-resident"></a>
 

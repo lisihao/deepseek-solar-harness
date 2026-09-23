@@ -537,6 +537,25 @@ const INSPECT_UNPROVEN = String.raw`(input) => {
   };
 }`
 
+/** Browser statement that opens or reuses the lane page at `request.url`. */
+const OPEN_SESSION_PAGE = "await browser.run({ id: 'chatgpt-web-session-open', kind: 'open', page, url: request.url, reuse: 'exact-url', waitUntil: 'dom-content-loaded' });"
+
+function sessionProgram(
+  request: { readonly workspaceName: string; readonly outputMaxBytes: number },
+  body: string,
+): BrowserRunProgramV1 {
+  return {
+    version: 1,
+    language: 'browser-js-v1',
+    workspace: { kind: 'named', name: request.workspaceName, createIfMissing: true },
+    requiredCapabilities: COORDINATED_WEB_SESSION_CAPABILITIES,
+    output: { kind: 'json', maxBytes: request.outputMaxBytes },
+    source: `const request = ${JSON.stringify(request)};
+const page = 'chatgpt-web-session';
+${body}`,
+  }
+}
+
 /**
  * Build one non-mutating pre-send program that validates a lane and captures
  * the native user-message baseline persisted before any click.
@@ -544,16 +563,7 @@ const INSPECT_UNPROVEN = String.raw`(input) => {
  * @returns a browser-js-v1 program with no composer mutation.
  */
 export function buildCoordinatedWebPrepareProgram(request: CoordinatedWebPrepareProgramRequest): BrowserRunProgramV1 {
-  const encoded = JSON.stringify(request)
-  return {
-    version: 1,
-    language: 'browser-js-v1',
-    workspace: { kind: 'named', name: request.workspaceName, createIfMissing: true },
-    requiredCapabilities: COORDINATED_WEB_SESSION_CAPABILITIES,
-    output: { kind: 'json', maxBytes: request.outputMaxBytes },
-    source: String.raw`const request = ${encoded};
-const page = 'chatgpt-web-session';
-await browser.run({ id: 'chatgpt-web-session-open', kind: 'open', page, url: request.url, reuse: 'exact-url', waitUntil: 'dom-content-loaded' });
+  return sessionProgram(request, String.raw`${OPEN_SESSION_PAGE}
 ${APPLY_PROFILE}
 const profile = await applyProfile();
 if (profile.status !== 'ok') return profile;
@@ -564,8 +574,7 @@ return await browser.evaluate(page, ${JSON.stringify(PREPARE_SUBMIT)}, {
   previousUserMessageId: request.previousTurn?.userMessageId,
   previousAssistantMessageId: request.previousTurn?.assistantMessageId,
   outputMaxBytes: request.outputMaxBytes,
-});`,
-  }
+});`)
 }
 
 /**
@@ -575,16 +584,7 @@ return await browser.evaluate(page, ${JSON.stringify(PREPARE_SUBMIT)}, {
  * @returns a single browser-js-v1 program with bounded same-page post-click observation.
  */
 export function buildCoordinatedWebSubmitProgram(request: CoordinatedWebSubmitProgramRequest): BrowserRunProgramV1 {
-  const encoded = JSON.stringify(request)
-  return {
-    version: 1,
-    language: 'browser-js-v1',
-    workspace: { kind: 'named', name: request.workspaceName, createIfMissing: true },
-    requiredCapabilities: COORDINATED_WEB_SESSION_CAPABILITIES,
-    output: { kind: 'json', maxBytes: request.outputMaxBytes },
-    source: String.raw`const request = ${encoded};
-const page = 'chatgpt-web-session';
-await browser.run({ id: 'chatgpt-web-session-open', kind: 'open', page, url: request.url, reuse: 'exact-url', waitUntil: 'dom-content-loaded' });
+  return sessionProgram(request, String.raw`${OPEN_SESSION_PAGE}
 ${APPLY_PROFILE}
 const profile = await applyProfile();
 if (profile.status !== 'ok') return profile;
@@ -616,8 +616,7 @@ while (Date.now() <= submissionDeadline) {
   if (isExactConversationUrl(observed.candidateUrl) || Date.now() >= submissionDeadline) return observed;
   await new Promise(resolve => setTimeout(resolve, Math.min(request.pollIntervalMs, Math.max(0, submissionDeadline - Date.now()))));
 }
-return pendingSubmission ?? { status: 'submission-pending', phase: 'after-submit' };`,
-  }
+return pendingSubmission ?? { status: 'submission-pending', phase: 'after-submit' };`)
 }
 
 /**
@@ -626,20 +625,10 @@ return pendingSubmission ?? { status: 'submission-pending', phase: 'after-submit
  * @returns a browser-js-v1 program that performs one page observation.
  */
 export function buildCoordinatedWebPollProgram(request: CoordinatedWebPollProgramRequest): BrowserRunProgramV1 {
-  const encoded = JSON.stringify(request)
-  return {
-    version: 1,
-    language: 'browser-js-v1',
-    workspace: { kind: 'named', name: request.workspaceName, createIfMissing: true },
-    requiredCapabilities: COORDINATED_WEB_SESSION_CAPABILITIES,
-    output: { kind: 'json', maxBytes: request.outputMaxBytes },
-    source: String.raw`const request = ${encoded};
-const page = 'chatgpt-web-session';
-await browser.run({ id: 'chatgpt-web-session-open', kind: 'open', page, url: request.url, reuse: 'exact-url', waitUntil: 'dom-content-loaded' });
+  return sessionProgram(request, String.raw`${OPEN_SESSION_PAGE}
 return await browser.evaluate(page, ${JSON.stringify(POLL_EXACT_USER)}, {
   userMessageId: request.userMessageId, outputMaxBytes: request.outputMaxBytes,
-});`,
-  }
+});`)
 }
 
 /**
@@ -650,22 +639,12 @@ return await browser.evaluate(page, ${JSON.stringify(POLL_EXACT_USER)}, {
 export function buildCoordinatedWebSubmissionProofProgram(
   request: CoordinatedWebSubmissionProofProgramRequest,
 ): BrowserRunProgramV1 {
-  const encoded = JSON.stringify(request)
-  return {
-    version: 1,
-    language: 'browser-js-v1',
-    workspace: { kind: 'named', name: request.workspaceName, createIfMissing: true },
-    requiredCapabilities: COORDINATED_WEB_SESSION_CAPABILITIES,
-    output: { kind: 'json', maxBytes: request.outputMaxBytes },
-    source: String.raw`const request = ${encoded};
-const page = 'chatgpt-web-session';
-${EXACT_CONVERSATION_URL}
+  return sessionProgram(request, String.raw`${EXACT_CONVERSATION_URL}
 if (!isExactConversationUrl(request.url)) return { status: 'submission-pending', phase: 'submission-proof' };
-await browser.run({ id: 'chatgpt-web-session-open', kind: 'open', page, url: request.url, reuse: 'exact-url', waitUntil: 'dom-content-loaded' });
+${OPEN_SESSION_PAGE}
 return await browser.evaluate(page, ${JSON.stringify(PROVE_SUBMITTED_USER)}, {
   prompt: request.prompt, expectedUrl: request.url, beforeUserIds: request.baselineUserMessageIds, outputMaxBytes: request.outputMaxBytes,
-});`,
-  }
+});`)
 }
 
 /**
@@ -674,20 +653,10 @@ return await browser.evaluate(page, ${JSON.stringify(PROVE_SUBMITTED_USER)}, {
  * @returns a browser-js-v1 program that cannot mutate the composer.
  */
 export function buildCoordinatedWebInspectProgram(request: CoordinatedWebInspectProgramRequest): BrowserRunProgramV1 {
-  const encoded = JSON.stringify(request)
-  return {
-    version: 1,
-    language: 'browser-js-v1',
-    workspace: { kind: 'named', name: request.workspaceName, createIfMissing: true },
-    requiredCapabilities: COORDINATED_WEB_SESSION_CAPABILITIES,
-    output: { kind: 'json', maxBytes: request.outputMaxBytes },
-    source: String.raw`const request = ${encoded};
-const page = 'chatgpt-web-session';
-try {
+  return sessionProgram(request, String.raw`try {
   await browser.run({ id: 'chatgpt-web-session-select', kind: 'select-page', page, match: { kind: 'exact-url', url: request.expectedUrl } });
 } catch {
   return { status: 'identity-unproven', phase: 'inspect-unproven' };
 }
-return await browser.evaluate(page, ${JSON.stringify(INSPECT_UNPROVEN)}, { expectedUrl: request.expectedUrl });`,
-  }
+return await browser.evaluate(page, ${JSON.stringify(INSPECT_UNPROVEN)}, { expectedUrl: request.expectedUrl });`)
 }

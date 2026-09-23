@@ -262,7 +262,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:56`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:55`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-webcompleted--log-only"></a>
 
@@ -291,7 +291,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:72`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:71`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-webintent--log-only"></a>
 
@@ -316,7 +316,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:40`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:39`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-webprofile--log-only"></a>
 
@@ -347,7 +347,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:92`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:91`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-websubmission-pending--log-only"></a>
 
@@ -368,7 +368,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:103`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:102`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 <a id="chatgpt-webterminal--log-only"></a>
 
@@ -385,7 +385,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:112`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:111`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
 
 ### `command/*`
 

@@ -906,18 +906,7 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
     if (isContinuation(text)
       && previous?.executionMode === 'resident'
       && selectedPrimaryOperator === previous.operatorId) {
-      const recoverable = resumableResidentDispatch(agent.session.events)
-      const hostRoute = recoverable === undefined
-        ? newHostRoute(ctx, agent, current.id, previous.operatorId)
-        : recoveredHostRoute(recoverable, current.id)
-      return {
-        policy,
-        route: routeKind(hostRoute.executionMode),
-        operatorId: previous.operatorId,
-        requestedByMessageId: current.id,
-        reason: '当前已选主模型继续上一条物理算子任务',
-        hostRoute,
-      }
+      return continuationDecision(ctx, agent, current.id, policy, previous.operatorId, '当前已选主模型继续上一条物理算子任务')
     }
     if (selectedPrimaryOperator !== undefined) {
       return operatorDecision(
@@ -951,18 +940,7 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
   if (isContinuation(text)
     && previous?.executionMode === 'resident'
     && (!modelSelection.installed || selected === previous.operatorId)) {
-    const recoverable = resumableResidentDispatch(agent.session.events)
-    const hostRoute = recoverable === undefined
-      ? newHostRoute(ctx, agent, current.id, previous.operatorId)
-      : recoveredHostRoute(recoverable, current.id)
-    return {
-      policy,
-      route: routeKind(hostRoute.executionMode),
-      operatorId: previous.operatorId,
-      requestedByMessageId: current.id,
-      reason: '继续上一条物理算子任务',
-      hostRoute,
-    }
+    return continuationDecision(ctx, agent, current.id, policy, previous.operatorId, '继续上一条物理算子任务')
   }
   if (selected !== undefined) {
     return operatorDecision(ctx, agent, current.id, policy, selected, `当前主模型已选择 ${operatorDisplayName(selected)}`)
@@ -1057,6 +1035,28 @@ function selectedModelDisplayName(selection: ModelSelection): string {
 
 function smartAutoUnavailable(code: string): boolean {
   return SMART_AUTO_UNAVAILABLE_CODES.has(code)
+}
+
+function continuationDecision(
+  ctx: Context,
+  agent: Agent,
+  messageId: string,
+  policy: PhysicalOperatorRoutingPolicy,
+  operatorId: string,
+  reason: string,
+): HostRoutingDecision {
+  const recoverable = resumableResidentDispatch(agent.session.events)
+  const hostRoute = recoverable === undefined
+    ? newHostRoute(ctx, agent, messageId, operatorId)
+    : recoveredHostRoute(recoverable, messageId)
+  return {
+    policy,
+    route: routeKind(hostRoute.executionMode),
+    operatorId,
+    requestedByMessageId: messageId,
+    reason,
+    hostRoute,
+  }
 }
 
 function primaryDecision(
