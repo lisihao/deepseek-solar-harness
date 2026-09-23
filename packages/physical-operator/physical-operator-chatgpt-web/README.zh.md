@@ -43,7 +43,8 @@
 
 ## 行为
 
-- 发现界面暴露一个 `chatgpt-web` 算子，固定 `maxConcurrency: 1`、`executionModes: [ephemeral]`。
+- 发现界面暴露一个 `chatgpt-web` 算子，固定 `maxConcurrency: 1`。直接模式提供 `ephemeral`；显式配置 MCP 协调后还提供 `resident`。切换模式要求算子空闲。
+- 当组合注入 `modelWorkers` 时，它可以为这个已配置算子 ID 注册 `ChatGptWebModelWorker`。该 worker 将 `website-default` 作为原生订阅的高层级规划/研究路由提供；高层级只表示路由偏好，令牌表示网站当前选择，不是 GPT 模型身份。它需要编排 parent，只接受纯文本 ephemeral 工作，在启动浏览器前拒绝已启用的 RLM 和所有 model-tool bridge，并在算子结束后 dispose。
 - 每次已接受调用都会复用已认证的命名工作区，但在填入提示词前先把选中的页面导航到全新的 `https://chatgpt.com/` 根对话。根对话中的用户轮次与助手轮次必须均为零；否则本次调用会以 `CHATGPT_WEB_CONTEXT_NOT_ISOLATED` 失败且不会提交。在该空根页面上，程序会等待唯一可见的 `div.ProseMirror[contenteditable="true"]` 编辑器，并忽略服务端渲染的 textarea 占位框。填入后，它会规范化换行符、确认编辑器仍包含完整请求，并保持根页面为空。随后它只会在该编辑器所属 form 内选择唯一可见、启用且 `type="submit"` 的发送按钮：旧版 `#composer-submit-button`、`data-testid="send-button"`，或 `aria-label` 精确为 `Send`、`Send message`、`Send prompt`、`发送`、`发送消息` 的按钮。它只点击一次，并在等待最终助手文本前证明新用户轮次或生成已经开始。
 - 填入前若发现可见的非空编辑器草稿或附件，本算子会以 `CHATGPT_WEB_DRAFT_PRESENT` 拒绝，并只报告有界计数，提示调用方先在浏览器中清除或发送后再重试；填入前还会立即复查，不会把本次自身填入的文字误判为恢复草稿。
 - 缺少或被改写的编辑器、不可用或歧义的发送控件，或网页未接受点击时，都会在 `submissionTimeoutMs` 内以 `CHATGPT_WEB_SUBMIT_FAILED` 失败，不进入更长的生成等待；生成超时只附带不含提示或回复正文的有界页面状态。
@@ -51,6 +52,16 @@
 - 若物理算子调用方提供 `systemPrompt`，它会按 `systemPrompt + "\n\n---\n\n" + task` 与任务合并；这与旧 Solar 网页路由一致。
 - `AbortSignal` 会取消浏览器程序并得到 aborted 终态。dispose 不会关闭用户浏览器或已认证工作区。
 - 进度流只保存生命周期阶段、等待时长心跳、失败状态和结果大小元数据；它刻意不包含 prompt 或网页回复正文。
+
+## 动态模型控制
+
+本地所有者接口 `/api/chatgpt-web` 从已认证网站发现账户可见的模型和推理选项。DSH 刷新控件更新此目录，不发送提示。失败时保留上一次成功目录；已下架的已保存模型保留为不可用偏好，不会阻止发现替代模型。推理选项属于观察到的当前模型，不是所有模型通用的等级列表。
+
+显式选择先经网站验证，再通过 `chatgpt-web/profile` Session 事件保存。每个 Session 独立保存 Web 偏好；原生 CLI 配置不提供 Web 推理等级。刷新不会改变 Session 偏好或主路由。Web 任务运行期间不能发现或选择模型。新增目录项不代表支持新的输入模态、本地工具或已变化的网站协议。
+
+## MCP 协调
+
+协调需要 ChatGPT 自定义 MCP 应用通过已配置隧道连接 Provider 的私有端点。本地设置区分已选模式与最近一次已验证工具调用。只有精确匹配的原生网页请求身份才能取得当前执行的 DSH 工具权限。MCP 会话 ID 和模型提供的参数不能选择另一个 DSH 所有者。命令回执保留原生轮次身份；恢复时观察不确定的提交，不会再次发送。
 
 ## 旧 Solar 保真矩阵
 
@@ -66,7 +77,7 @@
 | 填写输入框、按 Enter、等待并提取最新 Markdown 回复 | 点击当前可见发送控件，证明提交后在同一可信 browser program 中等待并提取 | 平台适配；避免依赖编辑器的 Enter 行为 |
 | 可选模型选择失败时静默保留当前模型 | 显式请求的模型必须被选择并验证，否则调用失败 | 有意的可靠性改进 |
 | 断开但不关闭用户浏览器 | dispose 只取消当前调用并保留命名 workspace | faithful |
-| 不存在 durable receipt、`submit/poll/collect`、原生 resume 或 Deep Research 模式 | 首版 Provider 不宣称支持这些能力 | faithful 的范围边界 |
+| 不存在 durable receipt、`submit/poll/collect`、原生 resume 或 Deep Research 模式 | 独立路径保持有界；可选 resident 协调持有持久回执与恢复 | faithful 的范围边界 |
 | 顺序执行的人格比较脚本 | 交由 Debate/Orchestration，而不在 Provider 中重复实现 | 有意放在正确的 capability seam |
 
 ## 模型体验
@@ -75,11 +86,11 @@
 
 #### 模型可见内容
 
-本 Provider 包不会直接向模型暴露内容。现有的 [`physical_operator` Consumer](../../../docs/tool-catalog.md#deepseek-aidsh-tool-physical-operator) 持有模型可见 schema；当它选择 `chatgpt-web` 后，只渲染最终的有界文本结果或稳定的物理算子错误。它不会暴露调试端点、浏览器工作区、页面选择器、网页 DOM 或原始进度事件。
+直接模式下，现有的 [`physical_operator` Consumer](../../../docs/tool-catalog.md#deepseek-aidsh-tool-physical-operator) 持有模型可见 schema；当它选择 `chatgpt-web` 后，只渲染最终的有界文本结果或稳定的物理算子错误。它不会暴露调试端点、浏览器工作区、页面选择器、网页 DOM 或原始进度事件。
 
 #### Token 影响
 
-Provider 不增加 prompt section 或工具 schema。Consumer 的固定 schema 不变；只有选中的最终助手文本进入父级历史，生命周期进度和浏览器程序内部细节都不会进入模型上下文。
+直接模式不增加 prompt section 或工具 schema。协调模式通过 MCP 暴露所属 DSH 工具 schema，并增加仅用于当前任务的检查点指导；工具参数和结果使用现有 Session 日志。直接调用 Consumer 的固定 schema 不变；只有选中的最终助手文本进入父级历史，生命周期进度和浏览器程序内部细节都不会进入模型上下文。
 
 #### 对 KV Cache 的影响
 
@@ -87,8 +98,8 @@ Provider 不增加 prompt section 或工具 schema。Consumer 的固定 schema �
 
 ## 已知限制与后续工作
 
-- **仅 ephemeral**：本包不创建持久 ChatGPT turn receipt，也无法在 DSH 重启后续接网页生成。
-- **不隐式继承追问上下文**：每次调用都会启动全新的 ChatGPT 对话。在存在持久网页 turn 身份之前，追问必须作为完整、独立的任务提交。
+- **账户支持的协调**：无密钥协议测试不能证明账户允许自定义 MCP 应用，也不能证明配置的隧道可被 ChatGPT 访问。
+- **独立调用的上下文**：ephemeral 调用启动新对话，需要完整任务。持久轮次身份和续接属于已配置的 resident 协调。
 - **仅文本任务**：首发 Provider 不接受图片、文件或原生工具负载。
 - **网站 UI 是约定边界**：ChatGPT UI 变更可能令登录、输入、模型选择或回复提取不可用；不存在 API 回退。
 - **显式模型选择采取保守策略**：ChatGPT 套餐能力与 UI 标签会变化。未指定模型时使用用户当前网页默认值；指定但无法验证时明确失败。

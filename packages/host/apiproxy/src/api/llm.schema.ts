@@ -28,7 +28,9 @@ export const llmProvidersValueSchema = z.object({
 }) satisfies z.ZodType<Wire<ResponseValue<'llm.providers'>>>
 
 /** llm.models request payload. */
-export const llmModelsRequestSchema = z.object({}) satisfies z.ZodType<Wire<RequestPayload<'llm.models'>>>
+export const llmModelsRequestSchema = z.object({
+  refresh: z.boolean().optional(),
+}) satisfies z.ZodType<Wire<RequestPayload<'llm.models'>>>
 
 /** llm.models response value. */
 export const llmModelsValueSchema = z.object({

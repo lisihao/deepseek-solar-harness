@@ -681,9 +681,13 @@ declare abstract class LlmAdapter {
    * The result is advisory: an adapter may accept unlisted model ids, and
    * consumers must not turn absence into request rejection.
    * @param _provider - one provider route owned by this adapter.
+   * @param _options - optional query controls; adapters may refresh their catalog only when requested.
    * @returns discoverable models in adapter-preferred order.
    */
-  listModels(_provider: string): Promise<readonly LlmModelInfo[]>;
+  listModels(
+    _provider: string,
+    _options?: { readonly refresh?: boolean },
+  ): Promise<readonly LlmModelInfo[]>;
   /**
    * Resolve all metadata available for one exact model. This query is
    * independent of the advisory catalog and does not validate request routing.
@@ -790,9 +794,10 @@ providerRetryPolicy(provider: string): ResolvedRetryPolicy
  * Discover models advertised by one registered provider. Catalog membership
  * is advisory and never changes routing or request validation.
  * @param provider - registered provider route to inspect.
+ * @param options - optional query controls; `refresh` is `false` by default.
  * @returns detached model metadata in adapter-preferred order.
  */
-async listModels(provider: string): Promise<LlmModelInfo[]>
+async listModels( provider: string, options?: { readonly refresh?: boolean }, ): Promise<LlmModelInfo[]>
 
 /**
  * Resolve and validate all metadata from the adapter that owns one exact
@@ -841,7 +846,7 @@ async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<Prepared
 stream(options: GenerateOptions): AsyncIterable<StreamChunk>
 ```
 
-Source: [`packages/llm/llm/src/index.ts:284`](../../packages/llm/llm/src/index.ts)
+Source: [`packages/llm/llm/src/index.ts:288`](../../packages/llm/llm/src/index.ts)
 
 <a id="llm-events"></a>
 

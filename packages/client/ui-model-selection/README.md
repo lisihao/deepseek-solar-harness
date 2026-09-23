@@ -12,6 +12,8 @@ Directories are per-session, resolved lazily through `ctx.modelDirectories.direc
 
 Every resident directory refetches directly on forwarded `llm/adapters-updated` and `settings/document-updated` owner events. Provider topology, provider catalogs, and the default selection therefore converge without the Host or client runtime deriving a separate model-change alias.
 
+An explicit `ModelDirectory.load({ refresh: true })` forwards discovery refresh to the Host. Successful provider groups replace their previous entries; failed providers retain their last successful groups alongside visible failure details. Refresh does not select a model or invent metadata for an unavailable provider.
+
 The `/client` exports are the plugin body (`apply`/`inject`), `ModelDirectoryResolver`, `ModelDirectory` with its state fields, and the seat's injected face type.
 
 ## Model Experience

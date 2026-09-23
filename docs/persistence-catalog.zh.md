@@ -237,6 +237,156 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/core/session/src/types.ts:273`](../packages/core/session/src/types.ts)
 
+### `chatgpt-web/*`
+
+<a id="chatgpt-webaccepted--log-only"></a>
+
+#### `chatgpt-web/accepted` — log-only
+
+```ts persistence-catalog
+/**
+ * A website observation proved the exact native user message created for
+ * one command in its owned lane.
+ */
+'chatgpt-web/accepted': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  workspaceName: string
+  conversationId: string
+  conversationUrl: string
+  userMessageId: string
+  connectorName: string
+  requestIds: string[]
+}
+```
+
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:56`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webcompleted--log-only"></a>
+
+#### `chatgpt-web/completed` — log-only
+
+```ts persistence-catalog
+/**
+ * A strong terminal signal or exact final action produced one completed
+ * assistant result for the accepted native user message.
+ */
+'chatgpt-web/completed': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  conversationId: string
+  conversationUrl: string
+  userMessageId: string
+  assistantMessageId: string
+  response: string
+  responseSha256: string
+  truncated: boolean
+  model: string
+  effort?: string
+  requestIds: string[]
+}
+```
+
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:72`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webintent--log-only"></a>
+
+#### `chatgpt-web/intent` — log-only
+
+```ts persistence-catalog
+/**
+ * Pre-send identity for one command. It proves only that DSH began a
+ * browser attempt; it never proves that ChatGPT accepted the prompt.
+ */
+'chatgpt-web/intent': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  workspaceName: string
+  promptSha256: string
+  targetUrl: string
+  connectorName: string
+  baselineUserMessageIds: string[]
+  profile?: WebModelPreferences
+}
+```
+
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:40`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webprofile--log-only"></a>
+
+#### `chatgpt-web/profile` — log-only
+
+```ts persistence-catalog
+/** Whole-value Web model preference saved only after native picker verification. */
+'chatgpt-web/profile': { model?: string; effort?: string }
+```
+
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/model-preferences.ts:9`](../packages/physical-operator/physical-operator-chatgpt-web/src/model-preferences.ts)
+
+<a id="chatgpt-webrejected--log-only"></a>
+
+#### `chatgpt-web/rejected` — log-only
+
+```ts persistence-catalog
+/**
+ * A known local refusal before the send click. It prevents a duplicate
+ * command from silently re-evaluating a changed browser draft or connector.
+ */
+'chatgpt-web/rejected': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  code: string
+}
+```
+
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:92`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-websubmission-pending--log-only"></a>
+
+#### `chatgpt-web/submission-pending` — log-only
+
+```ts persistence-catalog
+/**
+ * A send click returned before a native user-message identity was observed.
+ * The candidate page is retained solely for a no-send recovery inspection.
+ */
+'chatgpt-web/submission-pending': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  candidateUrl: string
+  baselineUserMessageIds: string[]
+}
+```
+
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:103`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webterminal--log-only"></a>
+
+#### `chatgpt-web/terminal` — log-only
+
+```ts persistence-catalog
+/** Exact user-turn observation reached a stopped or failed provider outcome. */
+'chatgpt-web/terminal': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  outcome: 'stopped' | 'failed'
+}
+```
+
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:112`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
 ### `command/*`
 
 <a id="commanddone--log-only"></a>
@@ -638,7 +788,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:113`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:114`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch--log-only"></a>
 
@@ -662,7 +812,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:85`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:86`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -676,7 +826,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:108`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:109`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -690,7 +840,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:70`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:71`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -704,7 +854,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:72`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:73`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprogress--log-only"></a>
 
@@ -722,7 +872,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:125`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:126`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -739,7 +889,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:77`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:78`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-call--log-only"></a>
 
@@ -760,7 +910,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:141`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:142`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-dispatch--log-only"></a>
 
@@ -777,7 +927,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:100`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:101`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-indeterminate--log-only"></a>
 
@@ -796,7 +946,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:169`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:170`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -821,7 +971,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:153`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:154`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -837,7 +987,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:134`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:135`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

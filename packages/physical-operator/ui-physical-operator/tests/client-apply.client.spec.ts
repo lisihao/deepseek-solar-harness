@@ -85,7 +85,8 @@ describe('physical operator client plugin', () => {
     })
     const request = vi.fn()
     const directory = {}
-    const modelDirectories = { directoryFor: vi.fn(() => ({ store: directory })) }
+    const refreshModels = vi.fn(async () => undefined)
+    const modelDirectories = { directoryFor: vi.fn(() => ({ store: directory, load: refreshModels })) }
     const inject = vi.fn()
     const ctx = {
       effect: vi.fn(),
@@ -112,10 +113,12 @@ describe('physical operator client plugin', () => {
     expect(routing?.options.name).toBe('conversation.input.right')
     const injected = routing?.options.inject?.('session-1') as Pick<
       PhysicalOperatorRoutingInjected,
-      'directory' | 'select' | 'selectProfile' | 'selectOrchestrationStrategy' | 'selectDebateMode'
+      'directory' | 'refreshModels' | 'select' | 'selectProfile' | 'selectOrchestrationStrategy' | 'selectDebateMode'
     >
     expect(injected.directory).toBe(directory)
     expect(modelDirectories.directoryFor).toHaveBeenCalledWith('session-1')
+    await injected.refreshModels()
+    expect(refreshModels).toHaveBeenCalledWith({ refresh: true })
     await expect(injected.select('codex')).resolves.toBeNull()
     await expect(injected.select('chatgpt-web')).resolves.toBeNull()
     await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBeNull()

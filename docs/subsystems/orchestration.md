@@ -335,7 +335,7 @@ async offers(): Promise<ModelExecutionOffer[]>
 execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult>
 ```
 
-Source: [`packages/orchestration/model-worker/src/index.ts:58`](../../packages/orchestration/model-worker/src/index.ts)
+Source: [`packages/orchestration/model-worker/src/index.ts:61`](../../packages/orchestration/model-worker/src/index.ts)
 
 <a id="ctxorchestrations--orchestrationservice-abstract-seam"></a>
 

@@ -1824,10 +1824,22 @@ export interface Config {
   readonly progressIntervalMs?: number
   /** Maximum serialized output retained from the webpage. */
   readonly outputMaxBytes?: number
+  /** Private owner-local directory for connector identity and mode. */
+  readonly stateRoot?: string
+  /** Exact visible ChatGPT custom MCP app name required for tool coordination. */
+  readonly connectorName?: string
+  /** Stable loopback port for the user-configured MCP tunnel; zero is useful for isolated tests. */
+  readonly coordinatorPort?: number
+  /** Maximum HTTP JSON body accepted by the MCP connector. */
+  readonly coordinatorRequestMaxBytes?: number
+  /** Maximum MCP request lifetime, including delegated tools. */
+  readonly coordinatorRequestTimeoutMs?: number
+  /** Maximum wait for matching native webpage request evidence. */
+  readonly identityTimeoutMs?: number
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:68`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:78`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
 
 <a id="deepseek-aidsh-physical-operator-resident"></a>
 

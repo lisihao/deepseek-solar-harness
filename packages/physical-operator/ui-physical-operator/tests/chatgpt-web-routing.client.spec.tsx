@@ -28,6 +28,13 @@ const ROUTING_OPTIONS = [
   { value: 'chatgpt-web', name: 'ChatGPT Web', description: 'explicit browser subscription' },
 ] as const
 
+function requestUrl(input: RequestInfo | URL | undefined): string {
+  if (input === undefined) return ''
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.href
+  return input.url
+}
+
 function modelDirectoryState(current: ModelDirectoryState['current']): ModelDirectoryState {
   return {
     current,
@@ -97,10 +104,28 @@ function dashboardResponse(providers: DesktopResidentProvider[]): Response {
   })
 }
 
+function webCoordinationResponse(
+  mode: 'direct' | 'coordinator',
+  active = false,
+  lastVerifiedAt?: string,
+): Response {
+  return new Response(JSON.stringify({
+    mode,
+    active,
+    connectorName: 'DSH Local Tools',
+    ...(lastVerifiedAt === undefined ? {} : { lastVerifiedAt }),
+  }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
 interface FixtureOptions {
   current: ModelDirectoryState['current']
+  sessionId?: string
   policy?: string
   profiles?: Record<string, { model?: string; effort?: string }>
+  directoryFailures?: Array<{ id: string; name: string; message: string }>
   request?: BrowserRequest
   rlm?: 'auto' | 'enabled' | 'disabled'
   debate?: 'auto' | 'enabled' | 'disabled'
@@ -110,6 +135,12 @@ interface FixtureOptions {
 
 function createFixture(options: FixtureOptions) {
   const directory = createSnapshotStore(modelDirectoryState(options.current))
+  const refreshModels = vi.fn(async () => ({
+    current: options.current,
+    routable: true,
+    groups: [],
+    failures: options.directoryFailures ?? [],
+  }))
   const select = vi.fn(async () => null)
   const selectProfile = vi.fn(async () => null)
   const selectOrchestrationStrategy = vi.fn(async () => null)
@@ -139,15 +170,17 @@ function createFixture(options: FixtureOptions) {
       return undefined
     },
     session: { removed: false },
+    sessionId: options.sessionId ?? 'session-1',
     input: { phase: 'plain' },
     directory,
+    refreshModels,
     request: options.request ?? vi.fn(async () => dashboardResponse([])),
     select,
     selectProfile,
     selectOrchestrationStrategy,
     selectDebateMode,
   } as unknown as PhysicalOperatorRoutingControlProps
-  return { directory, props, select, selectProfile, selectOrchestrationStrategy, selectDebateMode }
+  return { directory, props, refreshModels, select, selectProfile, selectOrchestrationStrategy, selectDebateMode }
 }
 
 async function openPanel(): Promise<void> {
@@ -156,7 +189,7 @@ async function openPanel(): Promise<void> {
 }
 
 describe('physical primary routing control', () => {
-  it('lets a selected Claude primary override a saved Codex collaboration preference without rewriting it', async () => {
+  it('lets a selected Claude primary persist a Codex collaboration preference without changing the primary', async () => {
     window.history.replaceState({}, '', '/')
     const requestMock = vi.fn(async () => dashboardResponse([
       nativeProvider('codex'),
@@ -164,7 +197,7 @@ describe('physical primary routing control', () => {
     ]))
     const fixture = createFixture({
       current: physicalPrimary('claude-code'),
-      policy: 'codex',
+      policy: 'direct',
       profiles: { 'claude-code': { model: 'claude-live', effort: 'high' } },
       request: requestMock,
     })
@@ -178,14 +211,16 @@ describe('physical primary routing control', () => {
     expect(await screen.findByText('Claude Code 模型偏好')).toBeTruthy()
     expect(screen.queryByText('Codex 模型偏好')).toBeNull()
     expect(screen.getByText('当前主模型：Claude Code')).toBeTruthy()
-    expect(screen.getByText('已保留“优先 Codex”协作偏好。请先在模型选择器中更改主模型，再修改原生协作方式。')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /优先 Codex/ }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText('下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“仅主模型”。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /优先 Codex/ }).hasAttribute('disabled')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: /优先 Codex/ }))
+    await waitFor(() => { expect(fixture.select).toHaveBeenCalledWith('codex') })
+    expect(screen.getByRole('button', { name: '协作 · Claude Code' })).toBeTruthy()
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '执行模型' }).value).toBe('claude-live')
-    expect(fixture.select).not.toHaveBeenCalled()
     expect(fixture.selectProfile).not.toHaveBeenCalled()
   })
 
-  it('lets a selected Codex primary override a saved Claude collaboration preference and load its own catalog', async () => {
+  it('lets a selected Codex primary persist a Claude collaboration preference without changing the primary', async () => {
     window.history.replaceState({}, '', '/')
     const requestMock = vi.fn(async () => dashboardResponse([
       nativeProvider('codex', [nativeModel('codex-live')]),
@@ -193,7 +228,7 @@ describe('physical primary routing control', () => {
     ]))
     const fixture = createFixture({
       current: physicalPrimary('codex'),
-      policy: 'claude-code',
+      policy: 'direct',
       profiles: { codex: { model: 'codex-live', effort: 'high' } },
       request: requestMock,
     })
@@ -206,8 +241,11 @@ describe('physical primary routing control', () => {
     expect(await screen.findByText('Codex 模型偏好')).toBeTruthy()
     expect(screen.queryByText('Claude Code 模型偏好')).toBeNull()
     expect(screen.getByText('当前主模型：Codex')).toBeTruthy()
-    expect(screen.getByText('已保留“优先 Claude Code”协作偏好。请先在模型选择器中更改主模型，再修改原生协作方式。')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText('下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“仅主模型”。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: /优先 Claude Code/ }))
+    await waitFor(() => { expect(fixture.select).toHaveBeenCalledWith('claude-code') })
+    expect(screen.getByRole('button', { name: '协作 · Codex' })).toBeTruthy()
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '执行模型' }).value).toBe('codex-live')
   })
 
@@ -240,9 +278,149 @@ describe('physical primary routing control', () => {
     })
   })
 
+  it('refreshes model, Resident, and Web catalogs together without changing an API primary', async () => {
+    let release: ((value: Response) => void) | undefined
+    const pending = new Promise<Response>((resolve) => { release = resolve })
+    const requestCalls: Array<{ url: string; method: string | undefined }> = []
+    const requestMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requestCalls.push({ url: requestUrl(input), method: init?.method })
+      return await pending
+    })
+    const fixture = createFixture({
+      current: apiPrimary(),
+      policy: 'direct',
+      directoryFailures: [{ id: 'offline', name: 'Offline', message: 'catalog unavailable' }],
+      request: requestMock,
+    })
+
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+    await openPanel()
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型与算子' }))
+    expect(screen.getByRole('button', { name: '刷新模型与算子' }).hasAttribute('disabled')).toBe(true)
+    expect(fixture.refreshModels).toHaveBeenCalledOnce()
+    expect(requestCalls.some(call => call.url.includes('/api/resident-operators?refresh=1'))).toBe(true)
+    expect(requestCalls.some(call => call.url.includes('/api/chatgpt-web?catalog=1&refresh=1'))).toBe(true)
+    const webRefreshCall = requestCalls.find(call => call.url.includes('/api/chatgpt-web?catalog=1&refresh=1'))
+    expect(webRefreshCall === undefined ? undefined : new URL(webRefreshCall.url).searchParams.get('session_id')).toBe('session-1')
+    expect(requestCalls.every(call => call.method === undefined)).toBe(true)
+
+    release?.(dashboardResponse([]))
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toContain('模型目录已刷新，暂不可用：Offline')
+      expect(screen.getByRole('status').textContent).toContain('原生算子目录已刷新')
+      expect(screen.getByRole('status').textContent).toContain('ChatGPT Web 目录已刷新')
+    })
+    expect(screen.getByRole('button', { name: '刷新模型与算子' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: '协作 · 仅主模型' })).toBeTruthy()
+    expect(fixture.select).not.toHaveBeenCalled()
+    expect(fixture.selectProfile).not.toHaveBeenCalled()
+    expect(fixture.selectOrchestrationStrategy).not.toHaveBeenCalled()
+    expect(fixture.selectDebateMode).not.toHaveBeenCalled()
+  })
+
+  it('reports a busy Web refresh while preserving the selected native model and profile', async () => {
+    const requestMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(requestUrl(input))
+      if (url.pathname === '/api/chatgpt-web'
+        && url.searchParams.get('catalog') === '1'
+        && url.searchParams.get('refresh') === '1') {
+        return new Response('{}', { status: 409, headers: { 'content-type': 'application/json' } })
+      }
+      return dashboardResponse([nativeProvider('codex', [nativeModel('codex-live')])])
+    })
+    const fixture = createFixture({
+      current: physicalPrimary('codex'),
+      policy: 'claude-code',
+      profiles: { codex: { model: 'codex-live', effort: 'high' } },
+      request: requestMock,
+    })
+
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+    await openPanel()
+    await screen.findByRole('option', { name: 'codex-live' })
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型与算子' }))
+    await waitFor(() => {
+      expect(screen.getAllByRole('status').some(element => element.textContent?.includes('ChatGPT Web 正忙，请完成当前请求后重试'))).toBe(true)
+    })
+    expect(screen.getByRole('button', { name: '协作 · Codex' })).toBeTruthy()
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '执行模型' }).value).toBe('codex-live')
+    expect(fixture.select).not.toHaveBeenCalled()
+    expect(fixture.selectProfile).not.toHaveBeenCalled()
+    expect(fixture.refreshModels).toHaveBeenCalledOnce()
+  })
+
+  it('re-reads cached Web status after a successful catalog refresh without changing the Web primary', async () => {
+    let webCatalogRefreshed = false
+    const requestMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(requestUrl(input))
+      if (url.pathname === '/api/chatgpt-web') {
+        if (url.searchParams.get('catalog') === '1') {
+          webCatalogRefreshed = true
+          return webCoordinationResponse('coordinator')
+        }
+        return webCoordinationResponse(webCatalogRefreshed ? 'coordinator' : 'direct')
+      }
+      return dashboardResponse([])
+    })
+    const fixture = createFixture({
+      current: physicalPrimary('chatgpt-web'),
+      policy: 'direct',
+      request: requestMock,
+    })
+
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+    await openPanel()
+    await screen.findByText('连接器：DSH Local Tools')
+    expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型与算子' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(false)
+    })
+    expect(screen.getByRole('button', { name: '协作 · ChatGPT 网页版' })).toBeTruthy()
+    const catalogCall = requestMock.mock.calls.find(([input]) => {
+      const url = new URL(requestUrl(input))
+      return url.pathname === '/api/chatgpt-web' && url.searchParams.get('catalog') === '1'
+    })
+    expect(catalogCall === undefined ? undefined : new URL(requestUrl(catalogCall[0])).searchParams.get('session_id')).toBe('session-1')
+  })
+
+  it('locks Web coordination controls while the shared catalog refresh is pending', async () => {
+    const requestMock = vi.fn(async (input: RequestInfo | URL) => {
+      const rawUrl = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url
+      const url = new URL(rawUrl)
+      return url.pathname === '/api/chatgpt-web'
+        ? webCoordinationResponse('direct')
+        : dashboardResponse([])
+    })
+    const fixture = createFixture({
+      current: physicalPrimary('chatgpt-web'),
+      policy: 'direct',
+      request: requestMock,
+    })
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof fixture.refreshModels>>>()
+    fixture.refreshModels.mockImplementation(() => pending.promise)
+
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+    await openPanel()
+    const direct = await screen.findByRole('button', { name: '独立问答' })
+    expect(direct.hasAttribute('disabled')).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新模型与算子' }))
+    await waitFor(() => { expect(fixture.refreshModels).toHaveBeenCalledOnce() })
+    expect(direct.hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '工具协作' }).hasAttribute('disabled')).toBe(true)
+
+    pending.resolve({ current: physicalPrimary('chatgpt-web'), routable: true, groups: [], failures: [] })
+    await waitFor(() => { expect(direct.hasAttribute('disabled')).toBe(false) })
+  })
+
   it('keeps the browser route explicit and hides native profile controls', async () => {
     window.history.replaceState({}, '', '/')
-    const requestMock = vi.fn(async () => dashboardResponse([]))
+    const requestMock = vi.fn(async (input: RequestInfo | URL) => (
+      requestUrl(input).includes('/api/chatgpt-web')
+        ? webCoordinationResponse('direct')
+        : dashboardResponse([])
+    ))
     const fixture = createFixture({
       current: physicalPrimary('chatgpt-web'),
       policy: 'claude-code',
@@ -253,13 +431,69 @@ describe('physical primary routing control', () => {
     expect(screen.getByRole('button', { name: '协作 · ChatGPT 网页版' })).toBeTruthy()
 
     await openPanel()
-    expect(requestMock).not.toHaveBeenCalled()
+    await waitFor(() => { expect(requestMock).toHaveBeenCalledTimes(1) })
+    expect(requestUrl(requestMock.mock.calls[0]?.[0])).toContain('/api/chatgpt-web')
+    expect(await screen.findByText('连接器：DSH Local Tools')).toBeTruthy()
     expect(screen.getByText('当前主模型：ChatGPT 网页版')).toBeTruthy()
-    expect(screen.getByText('已保留“优先 Claude Code”协作偏好。请先在模型选择器中更改主模型，再修改原生协作方式。')).toBeTruthy()
+    expect(screen.getByText('下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“优先 Claude Code”。 ChatGPT 网页版需要先完成下方的协作设置。')).toBeTruthy()
     expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(true)
     expect(screen.queryByRole('combobox', { name: '执行模型' })).toBeNull()
     expect(screen.queryByRole('combobox', { name: 'Codex 推理强度' })).toBeNull()
     expect(screen.queryByRole('combobox', { name: 'Claude 思考强度' })).toBeNull()
+  })
+
+  it('enables Web collaboration only in coordinator mode and keeps native profiles labeled as downstream', async () => {
+    window.history.replaceState({}, '', '/')
+    const requestMock = vi.fn(async (input: RequestInfo | URL) => (
+      requestUrl(input).includes('/api/chatgpt-web')
+        ? webCoordinationResponse('coordinator')
+        : dashboardResponse([nativeProvider('claude-code', [nativeModel('claude-advisor')])])
+    ))
+    const fixture = createFixture({
+      current: physicalPrimary('chatgpt-web'),
+      policy: 'claude-code',
+      profiles: { 'claude-code': { model: 'claude-advisor', effort: 'high' } },
+      request: requestMock,
+    })
+
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+    expect(screen.getByRole('button', { name: '协作 · ChatGPT 网页版' })).toBeTruthy()
+    await openPanel()
+    expect(await screen.findByText('连接器：DSH Local Tools')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(false)
+    expect(await screen.findByText('Claude Code 模型偏好')).toBeTruthy()
+    expect(screen.getByText('这是下游协作端的原生配置，不会更改当前主模型。')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /优先 Codex/ }))
+    await waitFor(() => { expect(fixture.select).toHaveBeenCalledWith('codex') })
+    expect(screen.getByRole('button', { name: '协作 · ChatGPT 网页版' })).toBeTruthy()
+  })
+
+  it('keeps Web policy and TaskGraph controls disabled when the coordination status is unknown', async () => {
+    window.history.replaceState({}, '', '/')
+    const requestMock = vi.fn(async (input: RequestInfo | URL) => (
+      requestUrl(input).includes('/api/chatgpt-web')
+        ? new Response(JSON.stringify({ mode: 'legacy', active: false, connectorName: 'old-host' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+        : dashboardResponse([])
+    ))
+    const fixture = createFixture({
+      current: physicalPrimary('chatgpt-web'),
+      policy: 'claude-code',
+      request: requestMock,
+      rlm: 'auto',
+      debate: 'disabled',
+    })
+
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+    await openPanel()
+    await waitFor(() => {
+      expect(screen.getAllByRole('status').some(element => element.textContent?.includes('ChatGPT Web 协作状态无效'))).toBe(true)
+    })
+    expect(screen.getByRole('button', { name: /优先 Claude Code/ }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '高级调度' }))
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '模型分配目标' }).disabled).toBe(true)
   })
 
   it('makes Debate own the direct turn, suppresses native profile polling, and restores session routing explicitly', async () => {

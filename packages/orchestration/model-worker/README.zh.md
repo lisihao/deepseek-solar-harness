@@ -4,6 +4,8 @@
 
 可选的一次性模型 worker 注册 seam。编排分配器只在原生订阅算子之后考虑它们；Provider 不调度 TaskGraph。
 
+执行请求可携带编排 parent Agent，供需要启动物理算子的 Provider 使用；进程内 Provider 可以忽略它。
+
 ## 模型体验
 
 无直接影响，因为本注册 seam 不直接贡献模型可见内容。

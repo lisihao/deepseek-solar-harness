@@ -15,6 +15,7 @@ import {
   type ContentBlock,
   type GenerateOptions,
   type LlmCallConfig,
+  type Message,
   type StreamChunk,
   type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
@@ -183,6 +184,8 @@ export const inject = ['tools', 'physicalOperators', 'systemPrompt', 'llm', 'age
 
 const ROUTER_PROVIDER = 'dsh-physical-operator'
 const RESUME_SOURCE = 'physical-operator-resume'
+const CHATGPT_WEB_OPERATOR_ID = 'chatgpt-web'
+const CHATGPT_WEB_HANDOFF_PLUGIN = 'chatgpt-web-handoff'
 const FALLBACK_REQUIRED_CODE = 'PHYSICAL_OPERATOR_FALLBACK_REQUIRED'
 const SMART_AUTO_UNAVAILABLE_CODES = new Set([
   'AUTH_MODE_MISMATCH',
@@ -266,7 +269,7 @@ const ROUTING_OPTIONS: readonly PhysicalOperatorRoutingOption[] = [
   {
     value: 'auto',
     name: 'Smart Auto',
-    description: 'The main Agent evaluates every non-trivial task and selects a suitable physical operator and lifetime.',
+    description: 'The main Agent coordinates non-trivial work and may choose a suitable live catalog collaborator and lifetime.',
   },
   {
     value: 'direct',
@@ -276,17 +279,17 @@ const ROUTING_OPTIONS: readonly PhysicalOperatorRoutingOption[] = [
   {
     value: 'codex',
     name: 'Codex',
-    description: 'Prefer Codex automatically for delegable implementation, debugging, test, and repository work.',
+    description: 'Prefer Codex for downstream implementation, debugging, test, and repository work when no primary model is selected.',
   },
   {
     value: 'claude-code',
     name: 'Claude Code',
-    description: 'Prefer Claude Code automatically for delegable analysis, architecture, review, and long-context work.',
+    description: 'Prefer Claude Code for downstream analysis, architecture, review, and long-context work when no primary model is selected.',
   },
   {
     value: 'chatgpt-web',
     name: 'ChatGPT Web',
-    description: 'Use the authenticated ChatGPT website only when explicitly selected; Smart Auto never chooses this browser subscription route.',
+    description: 'Use ChatGPT Web directly only without a selected primary model; otherwise it is a bounded catalog advisor.',
   },
 ]
 
@@ -348,8 +351,22 @@ export function apply(ctx: Context): void {
     let route = byPosition?.get(key)
     byPosition?.delete(key)
     route ??= dispatchForPosition(agent.session.events, turn, step)
+    const selection = readModelSelection(agent)
+    const selectedPrimary = selection.installed
+      ? selectedPhysicalMainOperator(selection.selection)
+      : undefined
     if (route === undefined && base.provider === ROUTER_PROVIDER && debateEnabled(agent.session.events)) {
       return base
+    }
+    if (route === undefined && base.provider === ROUTER_PROVIDER && selectedPrimary !== undefined) {
+      const promptMessage = latestUserPromptMessage(agent.session.events)
+      if (promptMessage === undefined) {
+        throw new Error('physical-operator primary model has no current user message')
+      }
+      if (!ctx.physicalOperators.list().some(operator => String(operator.id) === selectedPrimary)) {
+        throw new Error(`physical-operator primary model is not registered: ${selectedPrimary}`)
+      }
+      route = newHostRoute(ctx, agent, promptMessage.id, selectedPrimary)
     }
     if (route === undefined && base.provider === ROUTER_PROVIDER) {
       const fallback = recoverFallbackConfig(agent, fallbackConfigs.get(agent))
@@ -371,7 +388,9 @@ export function apply(ctx: Context): void {
       return base
     }
     const fallback = base.provider === ROUTER_PROVIDER
-      ? recoverFallbackConfig(agent, fallbackConfigs.get(agent))
+      ? selectedPrimary === undefined
+        ? recoverFallbackConfig(agent, fallbackConfigs.get(agent))
+        : undefined
       : cloneCallConfig(base)
     if (base.provider !== ROUTER_PROVIDER && fallback === undefined) {
       throw new Error('physical-operator router cannot capture the primary model route')
@@ -700,7 +719,7 @@ export function apply(ctx: Context): void {
         }
       } finally {
         await observer?.stop()
-        resident?.release()
+        await resident?.release()
       }
     },
   }))
@@ -743,11 +762,11 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     if (prompt === undefined) {
       throw new Error(`physical-operator router cannot recover prompt message ${dispatch.promptMessageId}`)
     }
-    const contextEnvelope = operatorContextEnvelope(agent, options, dispatch.promptMessageId, prompt)
+    const contextEnvelope = operatorContextEnvelope(agent, options, dispatch.operatorId, dispatch.promptMessageId, prompt)
     const signal = options.signal ?? new AbortController().signal
     let run: PhysicalOperatorRun | undefined
     let observer: ReturnType<typeof observePhysicalOperatorProgress> | undefined
-    let releaseModelTools: (() => void) | undefined
+    let releaseModelTools: (() => Promise<void>) | undefined
     try {
       const bound = dispatch.executionMode === 'resident'
         ? await this.modelTools.bind(
@@ -757,7 +776,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
           signal,
         )
         : undefined
-      releaseModelTools = bound === undefined ? undefined : () => { bound.release() }
+      releaseModelTools = bound === undefined ? undefined : () => bound.release()
       run = await this.ctx.physicalOperators.start(dispatch.operatorId, {
         executionId: PhysicalOperatorExecutionId(dispatch.commandId),
         label: labelFor(prompt),
@@ -820,7 +839,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
       throw error
     } finally {
       await observer?.stop()
-      releaseModelTools?.()
+      await releaseModelTools?.()
       await run?.dispose()
     }
   }
@@ -835,7 +854,7 @@ async function prepareResidentSurface(
 ): Promise<{
   readonly systemPrompt: string
   readonly descriptor?: import('@deepseek-ai/dsh-physical-operator').PhysicalOperatorModelToolBridgeV1
-  release(): void
+  release(): Promise<void>
 }> {
   const assembly = await ctx.systemPrompt.assemble(assembleContextFor(agent, signal))
   const bound = await modelTools.bind(String(executionId), agent, assembly.tools, signal)
@@ -850,9 +869,19 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
   ))
   const previous = latestDispatch(agent.session.events)
   const policy = foldPhysicalOperatorRouting(agent.session.events)
+  const modelSelection = readModelSelection(agent)
+  const selectedPrimary = modelSelection.installed ? modelSelection.selection : undefined
+  const selectedPrimaryOperator = selectedPhysicalMainOperator(selectedPrimary)
   if (resume !== undefined) {
     const recoverable = resumableResidentDispatch(agent.session.events)
     if (recoverable === undefined) return undefined
+    if (selectedPrimary !== undefined && selectedPrimaryOperator !== recoverable.operatorId) {
+      return primaryDecision(
+        resume.id,
+        policy,
+        `当前主模型已选择 ${selectedModelDisplayName(selectedPrimary)}，保持其为协调者而不恢复旧物理算子任务`,
+      )
+    }
     const hostRoute = recoveredHostRoute(recoverable, resume.id)
     return {
       policy,
@@ -873,13 +902,55 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
     }
   }
   const text = textContent(current.content)
+  if (selectedPrimary !== undefined) {
+    if (isContinuation(text)
+      && previous?.executionMode === 'resident'
+      && selectedPrimaryOperator === previous.operatorId) {
+      const recoverable = resumableResidentDispatch(agent.session.events)
+      const hostRoute = recoverable === undefined
+        ? newHostRoute(ctx, agent, current.id, previous.operatorId)
+        : recoveredHostRoute(recoverable, current.id)
+      return {
+        policy,
+        route: routeKind(hostRoute.executionMode),
+        operatorId: previous.operatorId,
+        requestedByMessageId: current.id,
+        reason: '当前已选主模型继续上一条物理算子任务',
+        hostRoute,
+      }
+    }
+    if (selectedPrimaryOperator !== undefined) {
+      return operatorDecision(
+        ctx,
+        agent,
+        current.id,
+        policy,
+        selectedPrimaryOperator,
+        `当前主模型已选择 ${operatorDisplayName(selectedPrimaryOperator)}，保持其为协调者`,
+      )
+    }
+    if (policy !== 'direct' && isParallelCandidate(text)) {
+      const preferredOperatorId = taskGraphPreferredOperator(policy)
+      return {
+        policy,
+        route: 'taskgraph-candidate',
+        requestedByMessageId: current.id,
+        reason: `当前主模型已选择 ${selectedModelDisplayName(selectedPrimary)}，保持其为协调者并由其构造持久 TaskGraph`,
+        ...preferredOperatorId === undefined ? {} : { operatorId: preferredOperatorId },
+      }
+    }
+    return primaryDecision(
+      current.id,
+      policy,
+      `当前主模型已选择 ${selectedModelDisplayName(selectedPrimary)}，保存的协作策略只提供下游委派指导`,
+    )
+  }
   const explicit = explicitOperator(text)
   if (explicit !== undefined) return operatorDecision(ctx, agent, current.id, policy, explicit, '当前请求显式指定物理算子')
-  const selection = readModelSelection(agent)
-  const selected = selectedPhysicalMainOperator(selection.selection)
+  const selected = selectedPhysicalMainOperator(modelSelection.selection)
   if (isContinuation(text)
     && previous?.executionMode === 'resident'
-    && (!selection.installed || selected === previous.operatorId)) {
+    && (!modelSelection.installed || selected === previous.operatorId)) {
     const recoverable = resumableResidentDispatch(agent.session.events)
     const hostRoute = recoverable === undefined
       ? newHostRoute(ctx, agent, current.id, previous.operatorId)
@@ -938,6 +1009,11 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
     )
 }
 
+/** Native preferences can constrain TaskGraph workers without replacing a selected primary model. */
+function taskGraphPreferredOperator(policy: PhysicalOperatorRoutingPolicy): PhysicalOperatorProfileOwner | undefined {
+  return policy === 'codex' || policy === 'claude-code' ? policy : undefined
+}
+
 function debateEnabled(events: readonly SessionEvent[]): boolean {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index] as { readonly type: string; readonly data: unknown }
@@ -971,6 +1047,12 @@ function operatorDecision(
 function selectedPhysicalMainOperator(selection: ModelSelection | undefined): PhysicalOperatorRoutingTarget | undefined {
   if (selection?.provider !== ROUTER_PROVIDER) return undefined
   return isPhysicalOperatorRoutingTarget(selection.model) ? selection.model : undefined
+}
+
+/** Render one captured model selection in its durable routing explanation. */
+function selectedModelDisplayName(selection: ModelSelection): string {
+  const physical = selectedPhysicalMainOperator(selection)
+  return physical === undefined ? `${selection.provider}/${selection.model}` : operatorDisplayName(physical)
 }
 
 function smartAutoUnavailable(code: string): boolean {
@@ -1187,6 +1269,7 @@ function promptForMessage(events: readonly SessionEvent[], messageId: string): C
 function operatorContextEnvelope(
   agent: Agent,
   options: GenerateOptions,
+  operatorId: string,
   taskMessageId: string,
   task: ContentBlock[],
 ): OperatorContextEnvelopeV1 {
@@ -1208,10 +1291,11 @@ function operatorContextEnvelope(
     text: textContent(message.content),
   }))
   const snapshotContexts = snapshot?.sections ?? []
+  const handoffContexts = chatGptWebHandoffContexts(agent, options.messages, operatorId, taskIndex)
   return buildOperatorContextEnvelope({
     systemText: options.system ?? '',
     task,
-    contexts: [...snapshotContexts, ...instructionContexts],
+    contexts: [...snapshotContexts, ...handoffContexts, ...instructionContexts],
     source: {
       kind: 'session',
       requestHeaderEventSeq: header.seq,
@@ -1220,6 +1304,58 @@ function operatorContextEnvelope(
       ...instructions.length === 0 ? {} : { instructionMessageIds: instructions.map(message => message.id) },
     },
   })
+}
+
+/** Select current-step Web handoff material without borrowing an earlier task's history. */
+function chatGptWebHandoffContexts(
+  agent: Agent,
+  messages: readonly Message[],
+  operatorId: string,
+  taskIndex: number,
+): Array<{ name: string; text: string }> {
+  if (operatorId !== CHATGPT_WEB_OPERATOR_ID) return []
+  const currentMessageIds = currentRequestMessageIds(agent.session.events)
+  let handoffIndex = -1
+  for (let index = 0; index < taskIndex; index += 1) {
+    const message = messages[index]
+    if (message !== undefined
+      && currentMessageIds.has(String(message.id))
+      && isChatGptWebHandoff(message)) handoffIndex = index
+  }
+  const handoff = messages[handoffIndex]
+  if (handoff === undefined) return []
+  const contexts = [{
+    name: `chatgpt-web-handoff:${String(handoff.id)}`,
+    text: textContent(handoff.content),
+  }]
+  for (let index = handoffIndex + 1; index < taskIndex; index += 1) {
+    const message = messages[index]
+    if (message !== undefined
+      && currentMessageIds.has(String(message.id))
+      && message.source.kind === 'user') {
+      contexts.push({
+        name: `chatgpt-web-steering:${String(message.id)}`,
+        text: textContent(message.content),
+      })
+    }
+  }
+  return contexts
+}
+
+/** Recover only message identities admitted after the active request's step start. */
+function currentRequestMessageIds(events: readonly SessionEvent[]): Set<string> {
+  const stepStart = events.findLastIndex(event => event.type === 'step/start')
+  if (stepStart < 0) return new Set()
+  const ids = new Set<string>()
+  for (const event of events.slice(stepStart + 1)) {
+    if (event.type === 'user/message') ids.add(String(event.data.id))
+  }
+  return ids
+}
+
+/** Match the one admitted source allowed to resume a fresh ChatGPT Web task. */
+function isChatGptWebHandoff(message: Message): boolean {
+  return message.source.kind === 'plugin' && message.source.plugin === CHATGPT_WEB_HANDOFF_PLUGIN
 }
 
 /** Build a tool-issued handoff from the current durable request projection. */
@@ -1433,6 +1569,10 @@ function safeResidentProgressData(type: string, payload: unknown, commandId: str
     if (typeof data.requestedModel === 'string') {
       const requestedModel = boundedResidentText(data.requestedModel, MAX_RESIDENT_OBSERVATION_NAME)
       if (requestedModel !== undefined) projected.requestedModel = requestedModel
+    }
+    if (typeof data.requestedEffort === 'string') {
+      const requestedEffort = boundedResidentText(data.requestedEffort, MAX_RESIDENT_OBSERVATION_NAME)
+      if (requestedEffort !== undefined) projected.requestedEffort = requestedEffort
     }
     if (typeof data.outputBytes === 'number' && Number.isSafeInteger(data.outputBytes) && data.outputBytes >= 0) {
       projected.outputBytes = data.outputBytes
@@ -1707,9 +1847,10 @@ function selectionGuidance(
   if (available.length === 0) return ''
   return [
     routingPolicyGuidance(policy),
+    'An explicitly selected primary model remains the coordinator for its step. A saved routing policy or a named product guides downstream collaboration; it does not replace that selected primary. A selected native Codex or Claude Code primary has the real DSH tool bridge and may coordinate downstream collaborators, so do not describe it as a preferred worker.',
     'Physical operators use their own native subscription surface, including configured browser subscriptions; they are never an API fallback.',
     'Choose resident mode for repository implementation, multi-turn work, work that must remain inspectable across a DSH restart, or work that should continue in the same native product session. Keep ephemeral mode for one bounded independent check; a browser-only provider may intentionally support ephemeral mode only.',
-    'When routing automatically, prefer implementation/debugging/testing tags for code changes and analysis/architecture/review/long-context tags for broad reasoning. RLM and Continuous Harness are TaskGraph strategies, never operator ids. Call action=list if the suitable stable id is not already evident from the catalog below.',
+    'When routing automatically, prefer implementation/debugging/testing tags for code changes and analysis/architecture/review/long-context tags for broad reasoning. A live ChatGPT Web catalog entry may be a bounded advisor for design, high-level planning, or research. That catalog-advisor route has no DSH file-write or test-execution capability and cannot establish acceptance; Smart Collaboration may choose it only from the available catalog. RLM and Continuous Harness are TaskGraph strategies, never operator ids. Call action=list if the suitable stable id is not already evident from the catalog below.',
     'Send one complete standalone prompt. Do not delegate trivial questions, translation, or a tiny direct edit whose coordination cost exceeds the work.',
     ...available.map(operator => `- ${operator}`),
   ].join('\n')
@@ -1719,15 +1860,15 @@ function selectionGuidance(
 function routingPolicyGuidance(policy: PhysicalOperatorRoutingPolicy): string {
   switch (policy) {
     case 'auto':
-      return 'Physical-operator routing policy: SMART AUTO. At the start of every non-trivial request, explicitly decide whether durable TaskGraph orchestration or one physical operator improves the result. Use orchestration for work with parallel independent branches, explicit dependencies, recovery, or multiple roles; use one suitable operator for bounded single-worker work. Multi-file coding, debugging, refactoring, tests/builds, repository review, and long-running work normally qualify for collaboration.'
+      return 'Physical-operator routing policy: SMART AUTO. At the start of every non-trivial request, explicitly decide whether durable TaskGraph orchestration or one physical operator improves the result. Use orchestration for work with parallel independent branches, explicit dependencies, recovery, or multiple roles; use one suitable operator for bounded single-worker work. Multi-file coding, debugging, refactoring, tests/builds, repository review, and long-running work normally qualify for collaboration. Smart Auto host routing does not replace an explicitly selected primary model.'
     case 'direct':
       return 'Physical-operator routing policy: CURRENT MODEL ONLY. Do not call physical_operator unless the current user message explicitly requests an operator.'
     case 'codex':
-      return 'Physical-operator routing policy: CODEX PREFERRED. Use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["codex"] on each delegable node. Invoke one codex Resident directly for bounded single-worker work without waiting for the user to repeat the preference.'
+      return 'Physical-operator routing policy: CODEX PREFERRED. When no primary model is explicitly selected, use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["codex"] on each delegable node. Invoke one Codex Resident directly for bounded single-worker work without waiting for the user to repeat the preference. With a selected primary model, Codex is a downstream collaborator preference.'
     case 'claude-code':
-      return 'Physical-operator routing policy: CLAUDE CODE PREFERRED. Use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["claude-code"] on each delegable node. Invoke one Claude Code Resident directly for bounded single-worker work without waiting for the user to repeat the preference.'
+      return 'Physical-operator routing policy: CLAUDE CODE PREFERRED. When no primary model is explicitly selected, use durable TaskGraph orchestration for parallelizable work and set operator.preferredIds=["claude-code"] on each delegable node. Invoke one Claude Code Resident directly for bounded single-worker work without waiting for the user to repeat the preference. With a selected primary model, Claude Code is a downstream collaborator preference.'
     case 'chatgpt-web':
-      return 'Physical-operator routing policy: CHATGPT WEB EXPLICIT. Use the authenticated ChatGPT website for bounded non-trivial work through the configured browser subscription. This is an ephemeral route, does not expose a DSH model or effort setting, and is never selected by Smart Auto.'
+      return 'Physical-operator routing policy: CHATGPT WEB ADVISOR. Without an explicitly selected primary model, this policy uses the authenticated ChatGPT website for bounded non-trivial work through the configured browser subscription. With a selected primary model, ChatGPT Web is an advisor for bounded design, high-level planning, or research; it does not replace the coordinator, write repository files through DSH, execute tests, or establish acceptance. This browser route is ephemeral and exposes no DSH model or effort setting.'
   }
 }
 

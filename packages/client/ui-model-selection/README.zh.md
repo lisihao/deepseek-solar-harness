@@ -12,6 +12,8 @@ Host 报告的 `ModelSelection` 是唯一的选择事实，其中包含提供方
 
 每一份常驻目录都会直接在转发的 owner 事件 `llm/adapters-updated` 与 `settings/document-updated` 上重拉。因此提供方拓扑、提供方目录与默认选择都能收敛，Host 与 client runtime 无需再派生一个单独的模型变更别名。
 
+显式调用 `ModelDirectory.load({ refresh: true })` 会向 Host 转发发现刷新请求。成功的提供方分组替换旧条目；失败的提供方保留上一次成功分组，同时显示失败详情。刷新不会选择模型，也不会为不可用的提供方编造元数据。
+
 `/client` 导出面为插件本体（`apply`/`inject`）、`ModelDirectoryResolver`、`ModelDirectory` 及其状态形状、slot 注入面类型。
 
 ## 模型体验

@@ -201,9 +201,13 @@ export abstract class LlmAdapter {
    * The result is advisory: an adapter may accept unlisted model ids, and
    * consumers must not turn absence into request rejection.
    * @param _provider - one provider route owned by this adapter.
+   * @param _options - optional query controls; adapters may refresh their catalog only when requested.
    * @returns discoverable models in adapter-preferred order.
    */
-  listModels(_provider: string): Promise<readonly LlmModelInfo[]> {
+  listModels(
+    _provider: string,
+    _options?: { readonly refresh?: boolean },
+  ): Promise<readonly LlmModelInfo[]> {
     return Promise.resolve([])
   }
 
@@ -576,11 +580,15 @@ export class LlmRuntime extends Service {
    * Discover models advertised by one registered provider. Catalog membership
    * is advisory and never changes routing or request validation.
    * @param provider - registered provider route to inspect.
+   * @param options - optional query controls; `refresh` is `false` by default.
    * @returns detached model metadata in adapter-preferred order.
    */
-  async listModels(provider: string): Promise<LlmModelInfo[]> {
+  async listModels(
+    provider: string,
+    options?: { readonly refresh?: boolean },
+  ): Promise<LlmModelInfo[]> {
     const adapter = this.registration(provider).adapter
-    const models = await adapter.listModels(provider)
+    const models = await adapter.listModels(provider, options)
     const seen = new Set<string>()
     return models.map((model) => {
       if (

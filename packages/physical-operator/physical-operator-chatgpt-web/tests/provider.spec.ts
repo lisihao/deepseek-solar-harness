@@ -14,8 +14,12 @@ import BrowserRuntime, {
   type BrowserRunProgramResultV1,
   type BrowserRunProgramV1,
 } from '@deepseek-ai/dsh-browser'
-import PhysicalOperatorRuntime, { PhysicalOperatorError } from '@deepseek-ai/dsh-physical-operator'
+import PhysicalOperatorRuntime, {
+  PhysicalOperatorError,
+  PhysicalOperatorExecutionId,
+} from '@deepseek-ai/dsh-physical-operator'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import type { ChatGptWebCoordination } from '../src/coordination.ts'
 import {
   buildOperatorContextEnvelope,
   renderOperatorContextEnvelopeText,
@@ -286,6 +290,57 @@ afterEach(() => {
 })
 
 describe('ChatGPT Web physical operator', () => {
+  it('forwards saved Web preferences to ephemeral sends and drops stale effort for an explicit model', async () => {
+    const preferences = vi.fn(() => ({ model: 'saved-model', effort: 'deep-dive' }))
+    const provider = new StubBrowserProvider()
+    const context = {
+      browser: { runProgram: provider.runProgram.bind(provider) },
+    } as unknown as Context
+    const operator = new adapter.ChatGptWebPhysicalOperator(context, {
+      stateRoot: '/tmp/dsh-chatgpt-web-test',
+      connectorName: 'DSH',
+      coordinatorPort: 0,
+      coordinatorRequestMaxBytes: 1_024,
+      coordinatorRequestTimeoutMs: 1_000,
+      identityTimeoutMs: 1_000,
+      id: 'chatgpt-web',
+      displayName: 'ChatGPT Web',
+      description: 'fixture',
+      tags: [],
+      workspaceName: 'fixture-chatgpt-web',
+      url: 'https://chatgpt.com/',
+      generationTimeoutMs: 1_000,
+      submissionTimeoutMs: 100,
+      pollIntervalMs: 1,
+      progressIntervalMs: 20,
+      outputMaxBytes: 2_048,
+    }, {
+      mode: 'direct',
+      transitioning: false,
+      preferences,
+    } as unknown as ChatGptWebCoordination)
+
+    const savedRun = await operator.start({
+      ...request(), executionId: PhysicalOperatorExecutionId('saved-web-preferences'), mode: 'ephemeral',
+    })
+    await expect(savedRun.result).resolves.toMatchObject({ stopReason: 'completed' })
+    expect(preferences).toHaveBeenCalledWith('chatgpt-web-parent')
+    expect(serializedProgramRequest(provider.programs[0]!)).toMatchObject({
+      model: 'saved-model', effort: 'deep-dive',
+    })
+    expect((await savedRun.readEvents?.(0, 20))?.events[1]?.data).toMatchObject({
+      requestedModel: 'saved-model', requestedEffort: 'deep-dive',
+    })
+
+    const explicitRun = await operator.start({
+      ...request(), executionId: PhysicalOperatorExecutionId('explicit-web-model'), mode: 'ephemeral',
+      residentProfile: { model: 'explicit-model' },
+    })
+    await expect(explicitRun.result).resolves.toMatchObject({ stopReason: 'completed' })
+    expect(serializedProgramRequest(provider.programs[1]!)).toMatchObject({ model: 'explicit-model' })
+    expect(serializedProgramRequest(provider.programs[1]!)).not.toHaveProperty('effort')
+  })
+
   it('registers an ephemeral, single-flight browser operator and submits the merged text prompt', async () => {
     const { ctx, plugin, provider } = await setup()
     expect(ctx.physicalOperators.status('chatgpt-web')).toMatchObject({

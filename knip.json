@@ -56,6 +56,8 @@
         "headless-agent/tests/fixtures/e2b/e2b/bin.ts",
         "acp-agent/tests/snapshots/lsp-definition/workspace/subject.ts",
         "acp-agent/tests/fixtures/chatgpt-composer/browser.ts",
+        "acp-agent/tests/fixtures/web-mcp-coordination/browser.ts",
+        "acp-agent/tests/fixtures/web-mcp-coordination/native-operator.ts",
         "acp-agent/tests/fixtures/model-route-switch/external-providers.ts",
         "acp-agent/tests/fixtures/child-question-tripwire.ts",
         "acp-agent/tests/fixtures/parent-sandbox-override.ts",

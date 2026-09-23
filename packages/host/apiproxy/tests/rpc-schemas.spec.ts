@@ -204,6 +204,8 @@ describe('sessions domain schemas', () => {
       modelSelection: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
     }).hasMore).toBe(false)
     expect(sessionModelsRequestSchema.parse({ sessionId: 's1' }).sessionId).toBe('s1')
+    expect(sessionModelsRequestSchema.parse({ sessionId: 's1', refresh: true }).refresh).toBe(true)
+    expect(() => sessionModelsRequestSchema.parse({ sessionId: 's1', refresh: 'yes' })).toThrow()
     expect(sessionModelsValueSchema.parse({
       current: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'max' },
       routable: true,

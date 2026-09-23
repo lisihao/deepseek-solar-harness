@@ -44,39 +44,43 @@ export function apply(ctx: ClientContext): void {
       id: 'physical-operator-routing',
       order: 900,
       label: '物理算子执行策略',
-      inject: (sessionId: SessionId): PhysicalOperatorRoutingInjected => ({
-        directory: models.directoryFor(sessionId).store,
-        request: connection.request,
-        select: async (policy) => {
-          const result = await scope.remote.commands.execute(sessionId, `/operator ${policy}`)
-          return commandFailure(result, '/operator')
-        },
-        selectProfile: async (operatorId, model, effort) => {
-          const result = await scope.remote.commands.execute(
-            sessionId,
-            `/operator-profile ${operatorId} ${model ?? 'auto'} ${effort ?? 'auto'}`,
-          )
-          return commandFailure(result, '/operator-profile')
-        },
-        selectOrchestrationStrategy: async (
-          rlm,
-          autonomous,
-          continualHarness,
-          optimization,
-          plannerVerifierPreference,
-          executionPreference,
-        ) => {
-          const result = await scope.remote.commands.execute(
-            sessionId,
-            `/orchestration-strategy ${rlm} ${autonomous} ${continualHarness} ${optimization} ${plannerVerifierPreference} ${executionPreference}`,
-          )
-          return commandFailure(result, '/orchestration-strategy')
-        },
-        selectDebateMode: async (mode) => {
-          const result = await scope.remote.commands.execute(sessionId, `/debate-mode ${mode}`)
-          return commandFailure(result, '/debate-mode')
-        },
-      }),
+      inject: (sessionId: SessionId): PhysicalOperatorRoutingInjected => {
+        const directory = models.directoryFor(sessionId)
+        return {
+          directory: directory.store,
+          refreshModels: () => directory.load({ refresh: true }),
+          request: connection.request,
+          select: async (policy) => {
+            const result = await scope.remote.commands.execute(sessionId, `/operator ${policy}`)
+            return commandFailure(result, '/operator')
+          },
+          selectProfile: async (operatorId, model, effort) => {
+            const result = await scope.remote.commands.execute(
+              sessionId,
+              `/operator-profile ${operatorId} ${model ?? 'auto'} ${effort ?? 'auto'}`,
+            )
+            return commandFailure(result, '/operator-profile')
+          },
+          selectOrchestrationStrategy: async (
+            rlm,
+            autonomous,
+            continualHarness,
+            optimization,
+            plannerVerifierPreference,
+            executionPreference,
+          ) => {
+            const result = await scope.remote.commands.execute(
+              sessionId,
+              `/orchestration-strategy ${rlm} ${autonomous} ${continualHarness} ${optimization} ${plannerVerifierPreference} ${executionPreference}`,
+            )
+            return commandFailure(result, '/orchestration-strategy')
+          },
+          selectDebateMode: async (mode) => {
+            const result = await scope.remote.commands.execute(sessionId, `/debate-mode ${mode}`)
+            return commandFailure(result, '/debate-mode')
+          },
+        }
+      },
     }, PhysicalOperatorRoutingControl))
   })
 }

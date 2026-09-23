@@ -15,6 +15,12 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client
 
 export type BrowserRequest = ConnectionHandle['request']
 
+/** Optional owner-local projection refresh controls. */
+export interface LoadResidentDashboardOptions {
+  /** Bypass the Host's short-lived provider catalog cache. */
+  readonly refresh?: boolean
+}
+
 /** Typed failure from one explicit owner-local Resident authentication attempt. */
 export class ResidentAuthenticationError extends Error {
   constructor(
@@ -32,15 +38,18 @@ export class ResidentAuthenticationError extends Error {
  * @param sessionId - optional durable Session whose bounded events are expanded.
  * @param signal - local cancellation for the browser request.
  * @param request - authenticated same-origin browser request.
+ * @param options - optional explicit provider catalog refresh request.
  * @returns one bounded Resident dashboard projection.
  */
 export async function loadResidentDashboard(
   sessionId?: string,
   signal?: AbortSignal,
   request: BrowserRequest = globalThis.fetch,
+  options?: LoadResidentDashboardOptions,
 ): Promise<DesktopResidentDashboard> {
   const url = new URL(RESIDENT_DASHBOARD_PATH, window.location.origin)
   if (sessionId !== undefined) url.searchParams.set('session_id', sessionId)
+  if (options?.refresh === true) url.searchParams.set('refresh', '1')
   const response = await request(url, {
     cache: 'no-store',
     ...(signal === undefined ? {} : { signal }),

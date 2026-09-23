@@ -7,7 +7,7 @@ Every model-facing tool a shipped plugin contributes to `ctx.tools`: the `name`,
 
 This file is GENERATED and verified fresh by `pnpm run verify-tool-catalog` (part of `doc-sync`) — do not edit it by hand. Unlike the cordis catalog (a pure source-AST pass), this generator BOOTS each tool plugin on a real context and reads `ctx.tools.schemas()`, because a tool schema is not statically knowable (runtime-spread enums, concatenated descriptions, config-driven names, raw-JSON-Schema MCP tools). A completeness guard globs `packages/*/tool-*` and fails if any package is missing from the generator's boot manifest, so a new tool cannot be silently undocumented. See [the tool-schema-catalog Agent Note](../.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md).
 
-Scope: shipped product tools under `packages/*/tool-*`, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog's packages-only scope.
+Scope: shipped product tools under `packages/*/tool-*` plus explicitly listed provider-owned model-facing tools, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog's packages-only scope.
 
 ## Tool Package Map
 
@@ -20,6 +20,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: code` / `mode: both` (see the Code Mode Agent Note). Under `code` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
 | `@deepseek-ai/dsh-tool-physical-operator` | `physical_operator` | `ctx.tools`, `ctx.physicalOperators`, `a calling Agent for action=run` | `tool/call`, `tool/result`, `physical-operator lifecycle through the selected provider` | - | The schema exposes stable physical-operator ids rather than provider transports. Deployments register operators separately; the catalog intentionally harvests the empty-registry schema. |
+| `@deepseek-ai/dsh-physical-operator-chatgpt-web` | `web_session` | `ctx.tools`, `ctx.systemPrompt`, `a coordinating ChatGPT Web Agent` | `tool/call`, `tool/result`, `Agent inbox handoff messages` | - | Provider-owned coordination control for an authenticated ChatGPT Web response. The catalog mounts only the registration helper with a representative handoff limit; it does not boot the browser, MCP connector, or provider state. Runtime execution remains restricted to the coordinating Web call. |
 | `@deepseek-ai/dsh-tool-debate` | `debate` | `ctx.tools`, `ctx.systemPrompt`, `ctx.debates` | `tool/call`, `tool/result`, `debate lifecycle through ctx.debates` | - | The model-facing Consumer depends only on the provider-neutral ctx.debates seam; the catalog substitute cannot execute and does not start the local Debate Provider. |
 | `@deepseek-ai/dsh-tool-orchestration` | `orchestration` | `ctx.tools`, `ctx.systemPrompt`, `ctx.orchestrations` | `tool/call`, `tool/result`, `durable orchestration runs through ctx.orchestrations` | - | The model-facing Consumer depends only on the provider-neutral ctx.orchestrations seam; the catalog substitute cannot execute and does not start the local daemon. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
@@ -674,6 +675,41 @@ Discover and run deployment-defined physical operators. Use action=list to inspe
 Source: [`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 The schema exposes stable physical-operator ids rather than provider transports. Deployments register operators separately; the catalog intentionally harvests the empty-registry schema.
+
+<a id="deepseek-aidsh-physical-operator-chatgpt-web"></a>
+
+## `@deepseek-ai/dsh-physical-operator-chatgpt-web`
+
+### `web_session`
+
+Coordinate one authenticated ChatGPT Web response with the DSH loop. Use checkpoint to observe queued DSH input and handoff to queue a bounded continuation summary.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "description": "Checkpoint the current Web response or queue a continuation handoff.",
+      "enum": [
+        "checkpoint",
+        "handoff"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Required for handoff: concise work state and next steps for a fresh Web lane."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts`](../packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts)
+
+Provider-owned coordination control for an authenticated ChatGPT Web response. The catalog mounts only the registration helper with a representative handoff limit; it does not boot the browser, MCP connector, or provider state. Runtime execution remains restricted to the coordinating Web call.
 
 <a id="deepseek-aidsh-tool-debate"></a>
 

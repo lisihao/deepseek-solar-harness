@@ -328,13 +328,16 @@ function ok<T>(request: RpcRequest<unknown>, value: T): RpcResponse<T> {
  * owning catalog stops advertising it. Per-provider failures ride `failures`
  * without failing the sound groups; groups that advertise nothing are dropped.
  */
-async function buildModelCatalog(ctx: Context): Promise<{
+async function buildModelCatalog(
+  ctx: Context,
+  options?: { readonly refresh?: boolean },
+): Promise<{
   groups: ModelProviderGroup[]
   failures: ModelCatalogFailure[]
 }> {
   const catalog = await Promise.all(ctx.llm.listProviders().map(async (provider) => {
     try {
-      const models = await ctx.llm.listModels(provider.id)
+      const models = await ctx.llm.listModels(provider.id, options)
       const entries = await Promise.all(models.map(async (model) => {
         const resolved = await ctx.llm.resolveModelInfo(provider.id, model.id)
         const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined
@@ -2350,11 +2353,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async models(request) {
-        const { sessionId } = request.payload
+        const { sessionId, refresh } = request.payload
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
         const current = userFacingSelection(found.agent, selectionFor(found.agent))
-        const { groups, failures } = await buildModelCatalog(ctx)
+        const { groups, failures } = await buildModelCatalog(
+          ctx,
+          refresh === true ? { refresh: true } : undefined,
+        )
         const routable = routeServed(current.provider)
         return ok(request, { current: { ...current }, routable, groups, failures })
       },
@@ -3478,7 +3484,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async models(request) {
-        return ok(request, await buildModelCatalog(ctx))
+        const { refresh } = request.payload
+        return ok(request, await buildModelCatalog(
+          ctx,
+          refresh === true ? { refresh: true } : undefined,
+        ))
       },
 
       async discoverModels(request, signal) {

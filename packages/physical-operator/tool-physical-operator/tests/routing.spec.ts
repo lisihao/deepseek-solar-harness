@@ -4,7 +4,13 @@ import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry, { installModelSelection, type Agent, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, {
+  agentEvents,
+  assembleContextFor,
+  installModelSelection,
+  type Agent,
+  type ModelSelectionRef,
+} from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LlmRuntime, {
   CallId,
@@ -464,6 +470,108 @@ describe('host physical-operator routing', () => {
     expect(settled.data.data.stopReason).toBe('completed')
   })
 
+  it('forwards one current Web handoff and each later admitted steering in the same frozen request', async () => {
+    const { agent, chatgpt } = await setup({
+      primary: 'chatgpt-web',
+      registerDeepSeek: false,
+    })
+    const earlierHandoff = createUserMessage({
+      content: [{ type: 'text', text: 'EARLIER HANDOFF MUST NOT CROSS.' }],
+      source: { kind: 'plugin', plugin: 'chatgpt-web-handoff' },
+    })
+    agent.session.append('user/message', earlierHandoff, { surfaceOp: 'append' })
+    const unrelatedPlugin = createUserMessage({
+      content: [{ type: 'text', text: 'UNRELATED PLUGIN MUST NOT CROSS.' }],
+      source: { kind: 'plugin', plugin: 'fixture-unrelated-plugin' },
+    })
+    const handoff = createUserMessage({
+      content: [{ type: 'text', text: 'Current Web handoff summary.' }],
+      source: { kind: 'plugin', plugin: 'chatgpt-web-handoff' },
+    })
+    const firstSteering = createUserMessage({
+      content: [{ type: 'text', text: 'First direct steering must stay with this task.' }],
+      source: { kind: 'user' },
+    })
+    const finalSteering = createUserMessage({
+      content: [{ type: 'text', text: 'Final direct steering is the task.' }],
+      source: { kind: 'user' },
+    })
+    agent.inject(unrelatedPlugin)
+    agent.inject(handoff)
+    agent.inbox.append('next-step', firstSteering)
+    agent.followup(finalSteering)
+    await agent.whenIdle()
+
+    const request = chatgpt.requests[0]
+    expect(request?.prompt).toEqual(finalSteering.content)
+    expect(request?.contextEnvelope?.task).toEqual(finalSteering.content)
+    expect(request?.contextEnvelope?.contexts).toEqual([
+      { name: `chatgpt-web-handoff:${String(handoff.id)}`, text: 'Current Web handoff summary.' },
+      { name: `chatgpt-web-steering:${String(firstSteering.id)}`, text: 'First direct steering must stay with this task.' },
+    ])
+    expect(JSON.stringify(request?.contextEnvelope)).not.toContain('EARLIER HANDOFF MUST NOT CROSS.')
+    expect(JSON.stringify(request?.contextEnvelope)).not.toContain('UNRELATED PLUGIN MUST NOT CROSS.')
+
+    const stepStart = agent.session.events.findLastIndex(event => event.type === 'step/start')
+    const handoffEvent = agent.session.events.findIndex(event => (
+      event.type === 'user/message' && event.data.id === handoff.id
+    ))
+    const firstSteeringEvent = agent.session.events.findIndex(event => (
+      event.type === 'user/message' && event.data.id === firstSteering.id
+    ))
+    const finalSteeringEvent = agent.session.events.findIndex(event => (
+      event.type === 'user/message' && event.data.id === finalSteering.id
+    ))
+    const headerEvent = agent.session.events.findLastIndex(event => event.type === 'request/header')
+    expect(stepStart).toBeLessThan(handoffEvent)
+    expect(handoffEvent).toBeLessThan(firstSteeringEvent)
+    expect(firstSteeringEvent).toBeLessThan(finalSteeringEvent)
+    expect(finalSteeringEvent).toBeLessThan(headerEvent)
+    expect(agent.session.events.find(event => event.type === 'physical-operator/context-envelope')).toMatchObject({
+      data: {
+        operatorId: 'chatgpt-web',
+        envelope: {
+          task: finalSteering.content,
+          contexts: request?.contextEnvelope?.contexts,
+        },
+      },
+    })
+  })
+
+  it('keeps a Web request without a current admitted handoff unchanged', async () => {
+    const { agent, chatgpt } = await setup({
+      primary: 'chatgpt-web',
+      registerDeepSeek: false,
+    })
+    agent.session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'Historical handoff must not become current context.' }],
+      source: { kind: 'plugin', plugin: 'chatgpt-web-handoff' },
+    }), { surfaceOp: 'append' })
+
+    send(agent, 'Run the current task without a new Web handoff.')
+    await agent.whenIdle()
+
+    expect(chatgpt.requests[0]?.contextEnvelope?.contexts).toEqual([])
+    expect(JSON.stringify(chatgpt.requests[0]?.contextEnvelope)).not.toContain('Historical handoff must not become current context.')
+  })
+
+  it('does not attach a current Web handoff to a non-Web main operator', async () => {
+    const { agent, codex } = await setup({
+      primary: 'codex',
+      registerDeepSeek: false,
+    })
+    const handoff = createUserMessage({
+      content: [{ type: 'text', text: 'Web-only handoff must not cross to Codex.' }],
+      source: { kind: 'plugin', plugin: 'chatgpt-web-handoff' },
+    })
+    agent.inject(handoff)
+    send(agent, 'Run this current task with Codex.')
+    await agent.whenIdle()
+
+    expect(codex.requests[0]?.contextEnvelope?.contexts).toEqual([])
+    expect(JSON.stringify(codex.requests[0]?.contextEnvelope)).not.toContain('Web-only handoff must not cross to Codex.')
+  })
+
   it('keeps a selected ChatGPT Web main model sealed when the prompt looks Claude-shaped', async () => {
     const { agent, deepseek, codex, claude, chatgpt } = await setup({
       primary: 'chatgpt-web',
@@ -482,6 +590,154 @@ describe('host physical-operator routing', () => {
       provider: 'dsh-physical-operator',
       model: 'chatgpt-web',
     })
+  })
+
+  it('keeps an installed Codex primary as coordinator when the prompt mentions Claude and ChatGPT Web', async () => {
+    const { agent, deepseek, codex, claude, chatgpt } = await setup()
+    const disposeSelection = installModelSelection(agent.ctx, {
+      current: { provider: 'dsh-physical-operator', model: 'codex' },
+      assembled: undefined,
+    })
+    try {
+      send(agent, 'Ask ChatGPT Web to plan this repository feature, then have Claude Code implement it.')
+      await agent.whenIdle()
+
+      expect(deepseek.requests).toHaveLength(0)
+      expect(codex.requests).toHaveLength(1)
+      expect(claude.requests).toHaveLength(0)
+      expect(chatgpt.requests).toHaveLength(0)
+      expect(codex.requests[0]?.systemPrompt).toContain('selected primary model remains the coordinator')
+      expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+        data: { policy: 'auto', route: 'resident', operatorId: 'codex' },
+      })
+    } finally {
+      disposeSelection()
+    }
+  })
+
+  it('keeps a selected physical primary on tool-following steps instead of restoring an older fallback', async () => {
+    const { ctx, agent } = await setup()
+    const prompt = createUserMessage({
+      content: [{ type: 'text', text: 'Continue with the selected primary model.' }],
+      source: { kind: 'user' },
+    })
+    agent.session.append('user/message', prompt, { surfaceOp: 'append' })
+    agent.session.append('physical-operator/dispatch', {
+      commandId: 'legacy-fallback-route',
+      operatorId: 'claude-code',
+      promptMessageId: String(prompt.id),
+      requestedByMessageId: String(prompt.id),
+      turn: 1,
+      step: 1,
+      recovered: false,
+      executionMode: 'resident',
+      fallbackConfig: { provider: 'deepseek', model: 'deepseek' },
+    }, { ignorable: true })
+
+    const disposeSelection = installModelSelection(agent.ctx, {
+      current: { provider: 'dsh-physical-operator', model: 'codex' },
+      assembled: undefined,
+    })
+    try {
+      const signal = new AbortController().signal
+      await ctx.systemPrompt.assemble(assembleContextFor(agent, signal))
+      const config = await agentEvents(agent.ctx, agent).waterfall(
+        'agent/request',
+        { turn: 1, step: 2, signal },
+        () => Promise.resolve({ provider: 'dsh-physical-operator', model: 'codex' }),
+      )
+
+      expect(config).toMatchObject({ provider: 'dsh-physical-operator', model: 'codex' })
+      expect(agent.session.events.findLast(event => event.type === 'physical-operator/dispatch')).toMatchObject({
+        data: { operatorId: 'codex', turn: 1, step: 2 },
+      })
+    } finally {
+      disposeSelection()
+    }
+  })
+
+  it('keeps an installed API primary while a ChatGPT Web preference guides downstream delegation', async () => {
+    const { ctx, agent, deepseek, codex, claude, chatgpt } = await setup()
+    const disposeSelection = installModelSelection(agent.ctx, {
+      current: { provider: 'deepseek', model: 'deepseek' },
+      assembled: undefined,
+    })
+    try {
+      await ctx.commands.execute(agent, '/operator chatgpt-web', new AbortController().signal)
+      send(agent, 'Ask ChatGPT Web to plan this feature, then implement the approved plan.')
+      await agent.whenIdle()
+
+      expect(deepseek.requests).toHaveLength(1)
+      expect(codex.requests).toHaveLength(0)
+      expect(claude.requests).toHaveLength(0)
+      expect(chatgpt.requests).toHaveLength(0)
+      expect(deepseek.requests[0]?.system).toContain('CHATGPT WEB ADVISOR')
+      expect(deepseek.requests[0]?.system).toContain('selected primary model remains the coordinator')
+      expect(lastAssistantMessage(agent).source).toMatchObject({ provider: 'deepseek', model: 'deepseek' })
+      const decision = agent.session.events.find(event => event.type === 'physical-operator/routing-decision')
+      expect(decision).toMatchObject({
+        data: { policy: 'chatgpt-web', route: 'primary-model' },
+      })
+      if (decision?.type !== 'physical-operator/routing-decision') throw new Error('expected routing decision')
+      expect(decision.data.reason).toContain('下游委派指导')
+    } finally {
+      disposeSelection()
+    }
+  })
+
+  it('keeps an installed ChatGPT Web primary when Claude Code is the saved preference', async () => {
+    const { ctx, agent, deepseek, codex, claude, chatgpt } = await setup()
+    const disposeSelection = installModelSelection(agent.ctx, {
+      current: { provider: 'dsh-physical-operator', model: 'chatgpt-web' },
+      assembled: undefined,
+    })
+    try {
+      await ctx.commands.execute(agent, '/operator claude-code', new AbortController().signal)
+      send(agent, 'Use Claude Code to implement this TypeScript repository change.')
+      await agent.whenIdle()
+
+      expect(deepseek.requests).toHaveLength(0)
+      expect(codex.requests).toHaveLength(0)
+      expect(claude.requests).toHaveLength(0)
+      expect(chatgpt.requests).toHaveLength(1)
+      expect(chatgpt.requests[0]).toMatchObject({ mode: 'ephemeral' })
+      expect(chatgpt.requests[0]?.nativeToolPolicy).toBeUndefined()
+      expect(chatgpt.requests[0]?.modelToolBridge).toBeUndefined()
+      expect(lastAssistantMessage(agent).source).toMatchObject({
+        provider: 'dsh-physical-operator',
+        model: 'chatgpt-web',
+      })
+      expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+        data: { policy: 'claude-code', route: 'ephemeral', operatorId: 'chatgpt-web' },
+      })
+    } finally {
+      disposeSelection()
+    }
+  })
+
+  it('keeps legacy explicit ChatGPT Web routing when no model selection is installed', async () => {
+    const { ctx, agent, deepseek, claude, chatgpt } = await setup()
+    await ctx.commands.execute(agent, '/operator claude-code', new AbortController().signal)
+
+    send(agent, 'Ask ChatGPT Web to plan this feature before implementation.')
+    await agent.whenIdle()
+
+    expect(deepseek.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(0)
+    expect(chatgpt.requests).toHaveLength(1)
+    expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+      data: { policy: 'claude-code', route: 'ephemeral', operatorId: 'chatgpt-web' },
+    })
+  })
+
+  it('keeps legacy explicit routing ahead of an Agent option when no model selection is installed', async () => {
+    const { agent, codex, claude } = await setup({ primary: 'codex' })
+
+    send(agent, 'Use Claude Code to analyze this architecture.')
+    await agent.whenIdle()
+
+    expect(codex.requests).toHaveLength(0)
+    expect(claude.requests).toHaveLength(1)
   })
 
   it('recognizes an explicitly named ChatGPT Web request without changing Smart Auto', async () => {
@@ -562,7 +818,7 @@ describe('host physical-operator routing', () => {
         },
       }])
     } finally {
-      bound.release()
+      await bound.release()
       await bridge.dispose()
     }
 
@@ -576,7 +832,7 @@ describe('host physical-operator routing', () => {
     try {
       expect(agent.session.events.filter(event => event.type === 'physical-operator/tool-indeterminate')).toHaveLength(1)
     } finally {
-      restarted.release()
+      await restarted.release()
       await restartedBridge.dispose()
     }
   })
@@ -696,7 +952,11 @@ describe('host physical-operator routing', () => {
       required_capabilities: ['browser'],
     })
     while (codex.requests.length === 0) await new Promise(resolve => setTimeout(resolve, 1))
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await vi.waitFor(() => {
+      expect(agent.session.events.find(event => (
+        event.type === 'physical-operator/progress' && event.data.type === 'turn.observation'
+      ))).toMatchObject({ data: { data: { kind: 'tool-completed', toolName: 'Read' } } })
+    })
     expect(codex.requests[0]?.nativeToolPolicy).toBe('dsh-tools-authoritative')
     expect(codex.requests[0]?.modelToolBridge?.tools.map(value => value.name)).toContain('subscription_echo')
     expect(codex.requests[0]?.residentLaneId).toBe(`explicit-tool:${String(agent.id)}`)
@@ -860,7 +1120,7 @@ describe('host physical-operator routing', () => {
     } finally {
       transport.close()
       socket.destroy()
-      bound.release()
+      await bound.release()
       await bridge.dispose()
       await ctx.root.fiber.dispose()
     }
@@ -916,7 +1176,7 @@ describe('host physical-operator routing', () => {
     } finally {
       transport.close()
       socket.destroy()
-      bound.release()
+      await bound.release()
       await bridge.dispose()
       await ctx.root.fiber.dispose()
     }
@@ -938,8 +1198,8 @@ describe('host physical-operator routing', () => {
     try {
       expect(firstBinding.descriptor?.socketPath).not.toBe(secondBinding.descriptor?.socketPath)
     } finally {
-      firstBinding.release()
-      secondBinding.release()
+      await firstBinding.release()
+      await secondBinding.release()
       await firstBridge.dispose()
       await secondBridge.dispose()
       await first.ctx.root.fiber.dispose()
@@ -965,7 +1225,7 @@ describe('host physical-operator routing', () => {
       await once(socket, 'connect')
       socket.destroy()
     } finally {
-      bound.release()
+      await bound.release()
       await bridge.dispose()
       await ctx.root.fiber.dispose()
       if (socketPath.length > 0) expect(existsSync(socketPath)).toBe(false)

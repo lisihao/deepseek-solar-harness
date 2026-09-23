@@ -4,14 +4,63 @@
     "rootDir": "src",
     "outDir": "lib/types"
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../../../vendor/cosmokit" },
-    { "path": "../../../vendor/cordis" },
-    { "path": "../../../vendor/schemastery" },
-    { "path": "../../browser/browser" },
-    { "path": "../physical-operator" },
-    { "path": "../../core/system-prompt" },
-    { "path": "../../runtime-diagnostics/invariants" }
+    {
+      "path": "../../../vendor/cosmokit"
+    },
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../browser/browser"
+    },
+    {
+      "path": "../physical-operator"
+    },
+    {
+      "path": "../../core/system-prompt"
+    },
+    {
+      "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../core/agent"
+    },
+    {
+      "path": "../../core/session"
+    },
+    {
+      "path": "../../util/home-paths"
+    },
+    {
+      "path": "../../util/brand"
+    },
+    {
+      "path": "../../sdk/protocol"
+    },
+    {
+      "path": "../../host/webserver"
+    },
+    {
+      "path": "../../host/remote-auth"
+    },
+    {
+      "path": "../../core/tools"
+    },
+    {
+      "path": "../../llm/llm"
+    },
+    {
+      "path": "../../orchestration/model-worker"
+    },
+    {
+      "path": "../../orchestration/model-allocation"
+    }
   ]
 }

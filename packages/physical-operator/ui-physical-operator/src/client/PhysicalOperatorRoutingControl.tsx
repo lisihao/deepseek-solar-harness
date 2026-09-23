@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { createPortal } from 'react-dom'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { SessionModels } from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-plan-mode/client'
 import type {
@@ -25,11 +26,17 @@ import type {
 import type { DebateExecutionMode } from '@deepseek-ai/dsh-tool-debate/client'
 import type { DesktopResidentDashboard } from '../contracts.ts'
 import { loadResidentDashboard, type BrowserRequest } from './ResidentOperatorsPanel.tsx'
+import {
+  WebCoordinationSetup,
+  type WebCoordinationStatus,
+} from './WebCoordinationSetup.tsx'
 
 /** Command face injected by the Desktop client registration. */
 export interface PhysicalOperatorRoutingInjected extends Pick<ModelSelectInjected, 'directory'> {
   /** Authenticated same-origin request from the shared browser Connection seam. */
   request: BrowserRequest
+  /** Refresh the current Session's model directory without changing its selection. */
+  refreshModels: () => Promise<SessionModels>
   /** Persist one Session routing policy through the host command boundary. */
   select: (policy: PhysicalOperatorRoutingPolicy) => Promise<string | null>
   /** Persist one product's optional model and effort fields through the host command boundary. */
@@ -271,12 +278,23 @@ export function physicalOperatorStrategyPanelPosition(
   }
 }
 
+function refreshFailureMessage(reason: unknown): string {
+  if (reason instanceof Error) return reason.message
+  if (typeof reason === 'string') return reason
+  if (reason !== null && typeof reason === 'object' && 'message' in reason && typeof reason.message === 'string') {
+    return reason.message
+  }
+  return '未知错误'
+}
+
 /** Render the logged collaboration policy next to the primary chat-model selector. */
 export function PhysicalOperatorRoutingControl({
   useProjection,
   session,
   input,
   directory,
+  sessionId,
+  refreshModels,
   request,
   select,
   selectProfile,
@@ -297,9 +315,14 @@ export function PhysicalOperatorRoutingControl({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dashboard, setDashboard] = useState<DesktopResidentDashboard>()
+  const [webCoordinationStatus, setWebCoordinationStatus] = useState<WebCoordinationStatus>()
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMessage, setRefreshMessage] = useState<string>()
+  const [webRefreshVersion, setWebRefreshVersion] = useState(0)
   const [page, setPage] = useState<'basic' | 'advanced'>('basic')
   const [panelPosition, setPanelPosition] = useState({ right: 12, top: 12 })
   const alive = useRef(true)
+  const refreshController = useRef<AbortController>()
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLElement>(null)
   const selectedMainModel = physicalOperatorMainModel(modelDirectory)
@@ -313,9 +336,12 @@ export function PhysicalOperatorRoutingControl({
   const savedProfileOwner = routing?.currentValue === 'codex' || routing?.currentValue === 'claude-code'
     ? routing.currentValue
     : undefined
+  const webCoordinationReady = selectedMainModel === 'chatgpt-web'
+    && webCoordinationStatus?.mode === 'coordinator'
   const profileOwner = effectiveMechanism === 'debate'
     ? undefined
-    : selectedProfileOwner ?? (selectedMainModel === undefined ? savedProfileOwner : undefined)
+    : selectedProfileOwner
+      ?? (selectedMainModel === undefined || webCoordinationReady ? savedProfileOwner : undefined)
   const dashboardEligible = open
     && profileOwner !== undefined
     && effectiveMechanism !== 'debate'
@@ -324,7 +350,10 @@ export function PhysicalOperatorRoutingControl({
 
   useEffect(() => {
     alive.current = true
-    return () => { alive.current = false }
+    return () => {
+      alive.current = false
+      refreshController.current?.abort()
+    }
   }, [])
   useEffect(() => {
     if (!dashboardEligible) return
@@ -378,8 +407,11 @@ export function PhysicalOperatorRoutingControl({
   if (routing === undefined) return null
 
   const locked = session.removed || input.phase !== 'plain' || saving
-  const taskGraphInactive = effectiveMechanism === 'debate' || selectedMainModel === 'chatgpt-web'
-  const routingPreferencesLocked = locked || selectedMainModel !== undefined || effectiveMechanism === 'debate'
+  const taskGraphInactive = effectiveMechanism === 'debate'
+    || (selectedMainModel === 'chatgpt-web' && !webCoordinationReady)
+  const routingPreferencesLocked = locked
+    || (selectedMainModel === 'chatgpt-web' && !webCoordinationReady)
+    || effectiveMechanism === 'debate'
   const currentLabel = physicalOperatorEffectiveExecutionLabel(
     routing.currentValue,
     orchestrationPreferences?.rlm,
@@ -474,7 +506,7 @@ export function PhysicalOperatorRoutingControl({
   const chooseExecutionMechanism = (target: OrchestrationExecutionMechanism): void => {
     if (locked || debatePreferences === undefined
       || (target === 'debate' && planSelected)
-      || (target === 'rlm' && selectedMainModel === 'chatgpt-web')) return
+      || (target === 'rlm' && taskGraphInactive)) return
     if (orchestrationPreferences === undefined) {
       if (target === 'standard' && debatePreferences.mode !== 'disabled') {
         persist(() => selectDebateMode('disabled'))
@@ -497,6 +529,56 @@ export function PhysicalOperatorRoutingControl({
       selectDebateMode,
     ))
   }
+  const refreshModelsAndOperators = (): void => {
+    if (locked || refreshing) return
+    const controller = new AbortController()
+    refreshController.current = controller
+    setRefreshing(true)
+    setRefreshMessage('正在刷新模型与算子…')
+    const modelRefresh = refreshModels()
+    const dashboardRefresh = loadResidentDashboard(undefined, controller.signal, request, { refresh: true })
+    const webUrl = new URL('/api/chatgpt-web', window.location.origin)
+    webUrl.searchParams.set('catalog', '1')
+    webUrl.searchParams.set('refresh', '1')
+    webUrl.searchParams.set('session_id', String(sessionId))
+    const webRefresh = request(webUrl, { cache: 'no-store', signal: controller.signal })
+    void Promise.allSettled([modelRefresh, dashboardRefresh, webRefresh]).then((results) => {
+      if (!alive.current || controller.signal.aborted) return
+      const [modelResult, dashboardResult, webResult] = results
+      const messages: string[] = []
+      if (modelResult.status === 'fulfilled') {
+        const failures = modelResult.value.failures.map(failure => failure.name)
+        messages.push(failures.length === 0
+          ? '模型目录已刷新'
+          : `模型目录已刷新，暂不可用：${failures.join('、')}`)
+      } else {
+        messages.push(`模型目录刷新失败：${refreshFailureMessage(modelResult.reason)}`)
+      }
+      if (dashboardResult.status === 'fulfilled') {
+        setDashboard(dashboardResult.value)
+        messages.push('原生算子目录已刷新')
+      } else {
+        messages.push(`原生算子目录刷新失败：${refreshFailureMessage(dashboardResult.reason)}`)
+      }
+      if (webResult.status === 'fulfilled') {
+        if (webResult.value.ok) {
+          setWebRefreshVersion(version => version + 1)
+          messages.push('ChatGPT Web 目录已刷新')
+        } else if (webResult.value.status === 404) {
+          messages.push('ChatGPT Web 未安装，已跳过')
+        } else if (webResult.value.status === 409) {
+          messages.push('ChatGPT Web 正忙，请完成当前请求后重试')
+        } else {
+          messages.push(`ChatGPT Web 刷新失败（HTTP ${String(webResult.value.status)}）`)
+        }
+      } else {
+        messages.push(`ChatGPT Web 刷新失败：${refreshFailureMessage(webResult.reason)}`)
+      }
+      setRefreshMessage(messages.join('；'))
+      setRefreshing(false)
+      if (refreshController.current === controller) refreshController.current = undefined
+    })
+  }
 
   return (
     <span className="dshDesktopOperatorRoutingWrap">
@@ -507,7 +589,7 @@ export function PhysicalOperatorRoutingControl({
         aria-haspopup="dialog"
         aria-expanded={open}
         disabled={locked}
-        title={error ?? '设置主模型、订阅态 Codex/Claude Code/ChatGPT 网页版与 TaskGraph 执行机制'}
+        title={error ?? '设置当前主模型的下游协作偏好、原生执行配置与 TaskGraph 执行机制'}
         onClick={() => {
           if (locked) return
           setOpen((value) => {
@@ -531,8 +613,19 @@ export function PhysicalOperatorRoutingControl({
           >
             <header>
               <div><strong>协作方式</strong><small>先选择谁参与当前会话；需要时再调整 TaskGraph 高级调度。</small></div>
-              <button type="button" aria-label="关闭协作方式" disabled={locked} onClick={() => { if (!locked) setOpen(false) }}>×</button>
+              <div>
+                <button
+                  type="button"
+                  aria-label="刷新模型与算子"
+                  disabled={locked || refreshing}
+                  onClick={refreshModelsAndOperators}
+                >
+                  {refreshing ? '刷新中…' : '刷新模型与算子'}
+                </button>
+                <button type="button" aria-label="关闭协作方式" disabled={locked || refreshing} onClick={() => { if (!locked && !refreshing) setOpen(false) }}>×</button>
+              </div>
             </header>
+            {refreshMessage !== undefined && <p role="status">{refreshMessage}</p>}
             <nav className="dshDesktopOperatorStrategyTabs" aria-label="协作设置页面">
               <button type="button" data-selected={page === 'basic' || undefined} disabled={locked} onClick={() => { if (!locked) setPage('basic') }}>基础</button>
               <button type="button" data-selected={page === 'advanced' || undefined} disabled={locked} onClick={() => { if (!locked) setPage('advanced') }}>高级调度</button>
@@ -559,9 +652,25 @@ export function PhysicalOperatorRoutingControl({
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
                   <div>
                     <strong>当前主模型：{physicalOperatorRoutingSummary(selectedMainModel)}</strong>
-                    <small>已保留“{physicalOperatorRoutingLabel(routing.currentValue)}”协作偏好。请先在模型选择器中更改主模型，再修改原生协作方式。</small>
+                    <small>{`下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“${physicalOperatorRoutingLabel(routing.currentValue)}”。${selectedMainModel === 'chatgpt-web'
+                      ? webCoordinationReady
+                        ? ' 工具协作模式已选择；请在下方完成 Custom MCP 连接。'
+                        : ' ChatGPT 网页版需要先完成下方的协作设置。'
+                      : ''}`}</small>
                   </div>
                 </div>
+              )}
+              {selectedMainModel === 'chatgpt-web' && (
+                <WebCoordinationSetup
+                  request={request}
+                  open={open}
+                  selected
+                  locked={locked || refreshing}
+                  hidden={page !== 'basic'}
+                  sessionId={String(sessionId)}
+                  refreshVersion={webRefreshVersion}
+                  onStatusChange={setWebCoordinationStatus}
+                />
               )}
               {effectiveMechanism === 'debate' && (
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
@@ -582,6 +691,9 @@ export function PhysicalOperatorRoutingControl({
                 <div className="dshDesktopOperatorProfilePreferences" hidden={page !== 'basic'}>
                   <div>
                     <strong>{profileOwner === 'codex' ? 'Codex' : 'Claude Code'} 模型偏好</strong>
+                    <small>{selectedMainModel === undefined || webCoordinationReady
+                      ? '这是下游协作端的原生配置，不会更改当前主模型。'
+                      : '这是当前主模型的原生配置；下方按钮单独设置下游协作偏好。'}</small>
                     <small>{profileOwner === 'codex'
                       ? 'Sol 适合规划验证，Terra/Luna 适合并行执行。'
                       : 'Opus/Fable 适合复杂规划，Sonnet 适合高效执行。'}</small>
@@ -649,7 +761,9 @@ export function PhysicalOperatorRoutingControl({
               )}
               {selectedMainModel === 'chatgpt-web' && (
                 <div className="dshDesktopOperatorProfilePreferences" role="status">
-                  <small>ChatGPT 网页版只接收文本，不访问 DSH 工作区文件或执行 TaskGraph；网页模型和思考强度请在 ChatGPT 中设置。</small>
+                  <small>{webCoordinationReady
+                    ? '工具协作模式允许通过 Custom MCP 使用 DSH 工具和 TaskGraph；网页模型和思考强度仍请在 ChatGPT 中设置。'
+                    : '独立问答只接收文本，不访问 DSH 工作区文件或执行 TaskGraph；请先完成上方的 Custom MCP 协作设置。'}</small>
                 </div>
               )}
               {orchestrationPreferences !== undefined && debatePreferences !== undefined && (
@@ -674,7 +788,7 @@ export function PhysicalOperatorRoutingControl({
                     >
                       <option value="auto">{orchestrationExecutionMechanismLabel('auto')}</option>
                       <option value="standard">{orchestrationExecutionMechanismLabel('standard')}</option>
-                      <option value="rlm" disabled={selectedMainModel === 'chatgpt-web'}>{orchestrationExecutionMechanismLabel('rlm')}</option>
+                      <option value="rlm" disabled={taskGraphInactive}>{orchestrationExecutionMechanismLabel('rlm')}</option>
                       <option value="debate" disabled={planSelected}>{orchestrationExecutionMechanismLabel('debate')}</option>
                     </select>
                   </label>

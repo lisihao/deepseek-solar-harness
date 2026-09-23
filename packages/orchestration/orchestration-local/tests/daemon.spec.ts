@@ -301,6 +301,37 @@ class KeylessModelWorker implements ModelWorkerProvider {
   }
 }
 
+class ExternalWebAdvisorWorker implements ModelWorkerProvider {
+  readonly id = 'chatgpt-web'
+  available = true
+  readonly requests: ModelWorkerExecuteRequest[] = []
+
+  offers() {
+    return Promise.resolve([{
+      offerId: `${this.id}:website-default`,
+      operatorId: this.id,
+      provider: 'chatgpt-web',
+      displayName: 'ChatGPT Web — website selection',
+      model: 'website-default',
+      source: 'native-subscription' as const,
+      tier: 'high' as const,
+      available: this.available,
+      maxConcurrency: 1,
+      activeCount: 0,
+      tags: ['browser-subscription', 'text-only', 'planning', 'research'],
+      ...this.available ? {} : { unavailableReasonCode: 'OPERATOR_UNAVAILABLE' as const },
+    }])
+  }
+
+  async execute(request: ModelWorkerExecuteRequest): Promise<ModelWorkerResult> {
+    this.requests.push(request)
+    return {
+      output: [{ type: 'text', text: `website plan for ${request.commandId}` }],
+      stopReason: 'completed',
+    }
+  }
+}
+
 async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 5_000
   for (;;) {
@@ -339,6 +370,34 @@ function graph(workspace: string, risk: 'low' | 'medium' = 'low'): LogicalTaskGr
     }, {
       ...common, id: 'review', title: 'Review', task: 'Review fixture.', role: 'review', dependsOn: ['code'],
       readScopes: ['src/code'], writeScopes: ['reports'], operator: { preferredIds: ['claude-code'] },
+    }],
+  }
+}
+
+function webAdvisorGraph(workspace: string): LogicalTaskGraphV1 {
+  const base = graph(workspace)
+  const code = base.nodes[0]!
+  const review = base.nodes[1]!
+  return {
+    ...base,
+    maxParallel: 3,
+    nodes: [{
+      ...code,
+      id: 'web-plan',
+      title: 'Web research plan',
+      task: 'Research the bounded design and provide an implementation plan.',
+      role: 'planning research',
+      phase: 'planning',
+      dependsOn: [],
+      readScopes: ['src'],
+      writeScopes: [],
+      operator: { preferredIds: ['chatgpt-web'] },
+    }, {
+      ...code,
+      dependsOn: ['web-plan'],
+    }, {
+      ...review,
+      dependsOn: ['code'],
     }],
   }
 }
@@ -1332,6 +1391,114 @@ describe('orchestration daemon', () => {
       residentSequence: 5, observation: { kind: 'tool-completed', toolName: 'Read' },
     })
     expect(JSON.stringify(observations)).not.toContain('must not persist')
+  })
+
+  it('routes a no-write Web plan through an external model worker before resident code and review', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-web-advisor-'))
+    const root = join(home, 'orchestrations')
+    const resident = new FakeResidentClient()
+    const web = new ExternalWebAdvisorWorker()
+    const daemon = createDaemon(root, home, resident, 10, [web])
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const resolvedWorkspace = await realpath(workspace)
+    const compilation = await client.compile({
+      intent: { request: 'Research the plan, implement it, then review it.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'web-advisor-mixed-graph',
+        rlm: 'disabled', continualHarness: 'off', optimization: 'balanced',
+      },
+      graph: webAdvisorGraph(workspace),
+    })
+    const started = await startCompilation(client, compilation.compilationId)
+    const completed = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'completed')
+
+    expect(completed.nodes.map(node => node.state)).toEqual(['passed', 'passed', 'passed'])
+    expect(web.requests).toHaveLength(1)
+    expect(web.requests[0]?.workerId).toBe('chatgpt-web')
+    expect(web.requests[0]?.model).toBe('website-default')
+    expect(web.requests[0]?.parent?.session.header.cwd).toBe(resolvedWorkspace)
+    expect(web.requests[0]?.rlmPlan?.enabled).not.toBe(true)
+    expect(web.requests[0]?.modelToolBridge).toBeUndefined()
+    expect(resident.starts).toEqual([
+      `codex:orch:${String(started.runId)}:code:1`,
+      `claude-code:orch:${String(started.runId)}:review:1`,
+    ])
+    expect(resident.requests[0]?.prompt?.map(block => block.text).join('\n')).toContain(
+      `website plan for orch:${String(started.runId)}:web-plan:1`,
+    )
+    const events = await client.readEvents({ runId: started.runId, limit: 200 })
+    expect(events.events.filter(event => event.type === 'node.dispatched').map(event => event.nodeId))
+      .toEqual(['web-plan', 'code', 'review'])
+  })
+
+  it('does not admit the text-only Web worker for a node that can write', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-web-write-'))
+    const root = join(home, 'orchestrations')
+    const resident = new FakeResidentClient()
+    const web = new ExternalWebAdvisorWorker()
+    const daemon = createDaemon(root, home, resident, 10, [web])
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const graph = webAdvisorGraph(workspace)
+    const compilation = await client.compile({
+      intent: { request: 'Do not let the Web advisor write.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'web-advisor-write-denial',
+        rlm: 'disabled', continualHarness: 'off', optimization: 'balanced',
+      },
+      graph: {
+        ...graph,
+        nodes: graph.nodes.map(node => node.id === 'web-plan'
+          ? { ...node, writeScopes: ['plans/web'] }
+          : node),
+      },
+    })
+    const started = await startCompilation(client, compilation.compilationId)
+    const failed = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'failed')
+
+    expect(web.requests).toEqual([])
+    expect(failed.nodes.find(node => node.id === 'web-plan')).toMatchObject({
+      state: 'blocked', blockers: [{ code: 'EXPLICIT_MODEL_UNAVAILABLE' }],
+    })
+    expect(failed.nodes.filter(node => node.id !== 'web-plan').every(node => node.state === 'blocked')).toBe(true)
+  })
+
+  it('blocks Web-plan dependents when the external website subscription is unavailable', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-orch-web-unavailable-'))
+    const root = join(home, 'orchestrations')
+    const resident = new FakeResidentClient()
+    const web = new ExternalWebAdvisorWorker()
+    web.available = false
+    const daemon = createDaemon(root, home, resident, 10, [web])
+    await daemon.start()
+    cleanup.push(async () => { await daemon.close(); await rm(home, { recursive: true, force: true }) })
+    const client = new OrchestrationDaemonClient({ root, dshHome: home, autoStart: false, connectTimeoutMs: 2_000 })
+    const workspace = join(home, 'workspace')
+    await mkdir(workspace)
+    const compilation = await client.compile({
+      intent: { request: 'Block the dependent graph when Web is unavailable.' },
+      admission: {
+        policy: 'auto', route: 'taskgraph', sourceSessionId: 'web-advisor-unavailable',
+        rlm: 'disabled', continualHarness: 'off', optimization: 'balanced',
+      },
+      graph: webAdvisorGraph(workspace),
+    })
+    const started = await startCompilation(client, compilation.compilationId)
+    const failed = await eventually(() => client.inspect(String(started.runId)), value => value.state === 'failed')
+
+    expect(web.requests).toEqual([])
+    expect(resident.requests).toEqual([])
+    expect(failed.nodes.find(node => node.id === 'web-plan')).toMatchObject({
+      state: 'blocked', blockers: [{ code: 'EXPLICIT_MODEL_UNAVAILABLE' }],
+    })
+    expect(failed.nodes.filter(node => node.id !== 'web-plan').every(node => node.state === 'blocked')).toBe(true)
   })
 
   it('records one durable trace-degraded event when a Resident progress cursor fails and still settles', async () => {

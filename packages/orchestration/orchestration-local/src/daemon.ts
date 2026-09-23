@@ -277,6 +277,10 @@ function rlmAuthMode(
   return operatorId.startsWith('deepseek') ? 'api' : 'subscription'
 }
 
+function modelWorkerSupportsRlm(offer: ModelExecutionOffer): boolean {
+  return !offer.tags.includes('text-only') || offer.tags.includes('dynamic-tools')
+}
+
 function rlmUsage(result: RlmUsageResult): {
   readonly inputTokens: number
   readonly outputTokens: number
@@ -3304,6 +3308,7 @@ export class OrchestrationDaemon {
         const workerResult = this.ctx.modelWorkers.execute({
           commandId: String(executionId), workerId: request.model.operatorId,
           model: request.model.model, prompt: modelWorkerEnvelopePrompt(childEnvelope),
+          parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
           ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
           modelToolBridge: bridge, signal: controller.signal,
         })
@@ -3670,6 +3675,7 @@ export class OrchestrationDaemon {
     const result = this.ctx.modelWorkers.execute({
       commandId: String(request.commandId), workerId: request.model.operatorId,
       model: request.model.model, prompt: modelWorkerEnvelopePrompt(continuationEnvelope),
+      parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
       ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
       modelToolBridge: bridge, signal: controller.signal,
     })
@@ -4065,6 +4071,7 @@ export class OrchestrationDaemon {
         workerId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model,
         prompt: modelWorkerEnvelopePrompt(rootEnvelope),
+        parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
         rlmPlan,
         modelToolBridge: bridge,
         signal: controller.signal,
@@ -4127,6 +4134,7 @@ export class OrchestrationDaemon {
         workerId: plan.operatorPlan.operatorId,
         model: plan.allocationPlan.model,
         prompt: modelWorkerEnvelopePrompt(contextEnvelope),
+        parent: fakeParent(plan.executionWorkspace.path, String(record.snapshot.runId)),
         signal: controller.signal,
         ...plan.rlmPlan === undefined ? {} : { rlmPlan: plan.rlmPlan },
       })
@@ -4758,7 +4766,7 @@ export class OrchestrationDaemon {
   ): Promise<ModelAllocationPlan> {
     const providers = await this.ctx.physicalOperators.residentCatalogs()
     const residentOffers = this.residentOffers(record, spec, providers, false, true)
-    const modelWorkerOffers = await this.ctx.modelWorkers.offers()
+    const modelWorkerOffers = (await this.ctx.modelWorkers.offers()).filter(modelWorkerSupportsRlm)
     const offers = [...residentOffers, ...modelWorkerOffers]
     const available = offers.filter(value => value.available)
     const targetTier = available.some(value => value.tier === 'low')
@@ -4793,7 +4801,7 @@ export class OrchestrationDaemon {
       && spec.writeScopes.length === 0
       && spec.effectBudget.write.length === 0
       && spec.effectBudget.execute.length === 0
-      ? await this.ctx.modelWorkers.offers()
+      ? (await this.ctx.modelWorkers.offers()).filter(offer => !rlmPlan.enabled || modelWorkerSupportsRlm(offer))
       : []
     const phase = nodePhase(spec)
     const priorFailures = record.snapshot.nodes.find(value => value.id === spec.id)?.attempt ?? 0
@@ -4840,7 +4848,15 @@ export class OrchestrationDaemon {
       ? allocation
       : { ...allocation, fallback: { ...allocation.fallback, fromModel: requestedModel } }
     const provider = providers.find(value => value.operatorId === surfacedAllocation.operatorId)
-    if (surfacedAllocation.source === 'native-subscription' && provider === undefined) {
+    const selectedModelWorkerOffer = modelWorkerOffers.find(offer => (
+      offer.offerId === surfacedAllocation.offerId
+      && offer.operatorId === surfacedAllocation.operatorId
+      && offer.model === surfacedAllocation.model
+      && offer.source === surfacedAllocation.source
+    ))
+    if (surfacedAllocation.source === 'native-subscription'
+      && provider === undefined
+      && selectedModelWorkerOffer === undefined) {
       throw new OrchestrationError(`allocated provider disappeared: ${surfacedAllocation.operatorId}`, 'ORCHESTRATION_UNAVAILABLE')
     }
     return provider === undefined ? { allocation: surfacedAllocation } : { provider, allocation: surfacedAllocation }
