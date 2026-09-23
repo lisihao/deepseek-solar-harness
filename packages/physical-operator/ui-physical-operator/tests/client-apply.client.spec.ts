@@ -75,6 +75,58 @@ describe('physical operator client plugin', () => {
     }
   })
 
+  it('registers native and ChatGPT Web catalogs as model-menu refresh sources', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:13080' } })
+    const sources: Array<{ name: string; refresh: (sessionId: string) => Promise<string | undefined> }> = []
+    const disposers: Array<() => void> = []
+    const request = vi.fn<(input: URL, init?: RequestInit) => Promise<Response>>()
+    const ctx = {
+      effect: vi.fn((install: () => () => void, label: string) => { if (label.endsWith('model refresh')) disposers.push(install()) }),
+      get: (key: string) => key === 'connection' ? { request } : undefined,
+      inject: vi.fn((_services: readonly string[], install: (scope: ClientContext) => unknown) => install(ctx)),
+      modelDirectories: {
+        directoryFor: vi.fn(),
+        registerRefreshSource: vi.fn((source: (typeof sources)[number]) => {
+          sources.push(source)
+          return () => { sources.splice(sources.indexOf(source), 1) }
+        }),
+      },
+      remote: { commands: { execute: vi.fn() } },
+      slots: { inject: vi.fn(), register: vi.fn() },
+    } as unknown as ClientContext
+    try {
+      apply(ctx)
+      const native = sources.find(source => source.name === '原生算子')
+      const web = sources.find(source => source.name === 'ChatGPT Web')
+
+      request.mockResolvedValueOnce(Response.json({
+        providers: [
+          { displayName: 'Codex', available: true, models: [{}, {}, {}] },
+          { displayName: 'Claude Code', available: false, models: [] },
+        ],
+      }))
+      await expect(native?.refresh('s1')).resolves.toBe('Codex 3 个模型，Claude Code 不可用')
+      expect(request.mock.calls[0]?.[0].href).toContain('refresh=1')
+      expect(request.mock.calls[0]?.[0].href).toContain('session_id=s1')
+
+      request.mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      await expect(web?.refresh('s1')).resolves.toBeUndefined()
+      const webUrl = request.mock.calls[1]?.[0].href
+      expect(webUrl).toContain('/api/chatgpt-web?catalog=1&refresh=1&session_id=s1')
+      request.mockResolvedValueOnce(new Response('', { status: 404 }))
+      await expect(web?.refresh('s1')).resolves.toBe('未安装，已跳过')
+      request.mockResolvedValueOnce(new Response('', { status: 409 }))
+      await expect(web?.refresh('s1')).rejects.toThrow('正忙')
+      request.mockResolvedValueOnce(new Response('', { status: 502 }))
+      await expect(web?.refresh('s1')).rejects.toThrow('HTTP 502')
+
+      for (const dispose of disposers) dispose()
+      expect(sources).toEqual([])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('registers provider-neutral Resident and routing slots through Cordis services', async () => {
     const registrations: Array<{
       options: { id?: string; name?: string; inject?: (sessionId: string) => unknown }

@@ -24,17 +24,54 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/**
+ * A live catalog outside the Host model directory (for example native
+ * operator models) that the model menu's refresh action also refreshes.
+ */
+export interface ModelRefreshSource {
+  /** User-visible catalog name used in the refresh report. */
+  readonly name: string
+  /**
+   * Refresh this catalog for one session.
+   * @param sessionId - the session whose menu requested the refresh.
+   * @returns a short outcome note to show, or undefined when nothing needs saying.
+   */
+  refresh(sessionId: SessionId): Promise<string | undefined>
+}
+
+/** One line of a model-menu refresh report. */
+export interface ModelRefreshLine {
+  /** Catalog name. */
+  readonly name: string
+  /** Whether the catalog refreshed. */
+  readonly ok: boolean
+  /** Outcome detail: a failure reason or the source's own note. */
+  readonly message?: string
+}
+
+/** Outcome of refreshing the directory and every registered source. */
+export interface ModelRefreshReport {
+  /** Display names of models that appeared in the directory with this refresh. */
+  readonly added: readonly string[]
+  /** Whole-directory failure; absent when the Host answered. */
+  readonly directoryError?: string
+  /** Provider-local failures, then one line per registered source. */
+  readonly lines: readonly ModelRefreshLine[]
+}
+
 /** Live mutable state in one holder (service methods run behind the caller-ctx tracker). */
 interface LiveState {
   /** Per-session directories; entries are deleted by their scope disposer. */
   readonly directories: Map<SessionId, ModelDirectory>
+  /** Registered extra catalogs, in registration order. */
+  readonly sources: Set<ModelRefreshSource>
 }
 
 /** The `ctx.modelDirectories` session model-selection service. */
 export class ModelDirectoryResolver extends Service {
   static inject = ['connection', 'sessions', 'remote']
 
-  private readonly live: LiveState = { directories: new Map() }
+  private readonly live: LiveState = { directories: new Map(), sources: new Set() }
 
   /** Localized composer-block copy; this plugin owns the string it raises. */
   private readonly blockReason: () => string
@@ -58,6 +95,45 @@ export class ModelDirectoryResolver extends Service {
     }
     ctx.remote.$on('llm/adapters-updated', refresh)
     ctx.remote.$on('settings/document-updated', refresh)
+  }
+
+  /**
+   * Register a catalog the model menu's refresh action also refreshes.
+   * @param source - the catalog and its refresh operation.
+   * @returns the disposer that unregisters the source.
+   */
+  registerRefreshSource(source: ModelRefreshSource): () => void {
+    const { sources } = this.live
+    sources.add(source)
+    return () => { sources.delete(source) }
+  }
+
+  /**
+   * Refresh the session's Host directory from live provider catalogs and every
+   * registered source concurrently; one failing catalog never hides another.
+   * @param sessionId - the session whose menu requested the refresh.
+   * @returns newly listed model ids and one outcome line per catalog.
+   */
+  async refreshAll(sessionId: SessionId): Promise<ModelRefreshReport> {
+    const directory = this.directoryFor(sessionId)
+    const before = new Set(directory.store.getSnapshot().groups.flatMap(group => group.models.map(model => `${group.id}/${model.id}`)))
+    const [models, sourceLines] = await Promise.all([
+      directory.load({ refresh: true }).then(
+        value => ({ ok: true as const, value }),
+        (reason: unknown) => ({ ok: false as const, message: reasonText(reason) }),
+      ),
+      Promise.all([...this.live.sources].map(source => source.refresh(sessionId).then(
+        (note): ModelRefreshLine => ({ name: source.name, ok: true, ...note === undefined ? {} : { message: note } }),
+        (reason: unknown): ModelRefreshLine => ({ name: source.name, ok: false, message: reasonText(reason) }),
+      ))),
+    ])
+    if (!models.ok) return { added: [], directoryError: models.message, lines: sourceLines }
+    // Before the first load there is no baseline, so nothing counts as new.
+    const added = before.size === 0 ? [] : models.value.groups.flatMap(group => group.models
+      .filter(model => !before.has(`${group.id}/${model.id}`))
+      .map(model => model.name))
+    const failures = models.value.failures.map((failure): ModelRefreshLine => ({ name: failure.name, ok: false, message: failure.message }))
+    return { added, lines: [...failures, ...sourceLines] }
   }
 
   /**
@@ -107,4 +183,8 @@ export class ModelDirectoryResolver extends Service {
     }, 'ui-model-selection: session directory')
     return directory
   }
+}
+
+function reasonText(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason)
 }

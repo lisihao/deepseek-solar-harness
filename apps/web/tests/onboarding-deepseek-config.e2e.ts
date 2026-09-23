@@ -237,7 +237,7 @@ describe.skipIf(MODE === 'record')('web e2e: first-run DeepSeek credential setup
     const modelTrigger = page.getByRole('button', { name: '选择模型', exact: true })
     await modelTrigger.waitFor({ timeout: 10_000 })
     await modelTrigger.click()
-    await page.getByRole('menuitem', { name: /模型/ }).click()
+    await page.getByRole('menuitem', { name: /^模型/ }).click()
     expect(await page.getByText('deepseek-v4-flash', { exact: true }).count()).toBe(0)
     await page.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash-Vision-Exp' }).waitFor({ timeout: 10_000 })
     await page.getByRole('menuitemradio', { name: 'Private Preview' }).waitFor({ timeout: 10_000 })
