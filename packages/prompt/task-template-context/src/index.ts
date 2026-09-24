@@ -244,7 +244,8 @@ function textOf(message: UserMessage): string {
 function selectedOperator(agent: Agent): string | undefined {
   const selection = readModelSelection(agent).selection
   if (selection === undefined) return undefined
-  if (selection.provider === 'dsh-physical-operator') return selection.model
+  // A native-model entry is `operator:model`; templates match the operator.
+  if (selection.provider === 'dsh-physical-operator') return selection.model.split(':', 1)[0]
   return selection.provider
 }
 

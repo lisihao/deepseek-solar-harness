@@ -16,6 +16,7 @@ import LlmRuntime, {
   CallId,
   createUserMessage,
   LlmAdapter,
+  ReasoningEffortId,
   type GenerateOptions,
   type StreamChunk,
   type ToolSchema,
@@ -1681,6 +1682,81 @@ describe('host physical-operator routing', () => {
     expect(lastAssistantMessage(agent).content).toEqual([
       { type: 'text', text: 'primary codex result' },
     ])
+  })
+
+  it('lists each native model as a selectable operator:model entry with its native efforts', async () => {
+    const { ctx } = await setup()
+
+    expect(ctx.llm.listProviders()).toContainEqual({ id: 'dsh-physical-operator', name: '物理算子' })
+    const models = await ctx.llm.listModels('dsh-physical-operator', { refresh: true })
+    expect(models.map(model => [model.id, model.name])).toEqual([
+      ['codex', 'Codex'],
+      ['codex:gpt-5.6-sol', 'Codex · GPT-5.6 Sol'],
+      ['claude-code', 'Claude Code'],
+      ['claude-code:claude-sonnet-4', 'Claude Code · Claude Sonnet 4'],
+      ['chatgpt-web', 'ChatGPT Web'],
+    ])
+    expect(models[1]).toMatchObject({ description: 'Fixture Codex model' })
+    await expect(ctx.llm.resolveModelInfo('dsh-physical-operator', 'codex:gpt-5.6-sol')).resolves.toMatchObject({
+      name: 'GPT-5.6 Sol',
+      reasoning: {
+        efforts: [{ id: 'low', name: '低' }, { id: 'medium', name: '中' }, { id: 'high', name: '高' }, { id: 'xhigh', name: '很高' }],
+        defaultEffort: 'medium',
+      },
+    })
+    await expect(ctx.llm.resolveModelInfo('dsh-physical-operator', 'codex:unknown')).resolves.toEqual({
+      provider: 'dsh-physical-operator', id: 'codex:unknown', name: 'codex:unknown',
+    })
+    await expect(ctx.llm.resolveModelInfo('dsh-physical-operator', 'codex')).resolves.toMatchObject({ name: 'codex' })
+    await expect(ctx.llm.resolveCallConfig({
+      provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: ReasoningEffortId('ultra'),
+    })).rejects.toThrow()
+  })
+
+  it('omits native entries for an unavailable catalog and surfaces a failed refresh', async () => {
+    const { ctx, codex } = await setup({ codexCatalogAvailable: false })
+    expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).not.toContain('codex:gpt-5.6-sol')
+
+    codex.residentCatalog = () => Promise.reject(new Error('catalog offline'))
+    await expect(ctx.llm.listModels('dsh-physical-operator', { refresh: true })).rejects.toThrow('catalog offline')
+  })
+
+  it('lists only operator entries until an explicit refresh qualifies native catalogs', async () => {
+    const { ctx, codex } = await setup()
+    const catalog = codex.residentCatalog.bind(codex)
+    let qualifications = 0
+    codex.residentCatalog = () => {
+      qualifications += 1
+      return catalog()
+    }
+    expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).toEqual(['codex', 'claude-code', 'chatgpt-web'])
+    await expect(ctx.llm.resolveModelInfo('dsh-physical-operator', 'codex:gpt-5.6-sol')).resolves.toMatchObject({ name: 'codex:gpt-5.6-sol' })
+    expect(qualifications).toBe(0)
+
+    expect((await ctx.llm.listModels('dsh-physical-operator', { refresh: true })).map(model => model.id)).toContain('codex:gpt-5.6-sol')
+    expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).toContain('codex:gpt-5.6-sol')
+    expect(qualifications).toBe(1)
+  })
+
+  it('runs a selected native model entry with its model and effort as the Resident profile', async () => {
+    const { agent, codex, deepseek } = await setup()
+    const disposeSelection = installModelSelection(agent.ctx, {
+      current: { provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol', reasoningEffort: ReasoningEffortId('xhigh') },
+      assembled: undefined,
+    })
+    try {
+      send(agent, '你好')
+      await agent.whenIdle()
+
+      expect(deepseek.requests).toHaveLength(0)
+      expect(codex.requests).toHaveLength(1)
+      expect(codex.requests[0]?.residentProfile).toEqual({ model: 'gpt-5.6-sol', effort: 'xhigh' })
+      expect(agent.session.events.find(event => event.type === 'physical-operator/routing-decision')).toMatchObject({
+        data: { operatorId: 'codex' },
+      })
+    } finally {
+      disposeSelection()
+    }
   })
 
   it('reattaches a pending Resident receipt when the selected physical main model stays the same', async () => {

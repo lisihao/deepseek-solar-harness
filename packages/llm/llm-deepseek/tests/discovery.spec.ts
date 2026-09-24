@@ -12,6 +12,9 @@ import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
 import { assemble } from './assemble.ts'
 import { textEvents } from './mock-server.ts'
 
+/** Selector note the adapter attaches to endpoint-only model IDs. */
+const DISCOVERED = '服务商 /models 新列出的模型；服务商未提供名称或版本说明'
+
 const servers: Server[] = []
 let testHome: string
 
@@ -188,14 +191,14 @@ describe('DeepSeek model catalog refresh', () => {
 
     second.resolve(listingResponse(['newer-model']))
     await expect(newer).resolves.toEqual([
-      { provider: 'deepseek-official', id: 'newer-model', name: 'newer-model', inputModalities: ['text'] },
+      { provider: 'deepseek-official', id: 'newer-model', name: 'newer-model', description: DISCOVERED, inputModalities: ['text'] },
     ])
     first.resolve(listingResponse(['older-model']))
     await expect(older).resolves.toEqual([
-      { provider: 'deepseek-official', id: 'newer-model', name: 'newer-model', inputModalities: ['text'] },
+      { provider: 'deepseek-official', id: 'newer-model', name: 'newer-model', description: DISCOVERED, inputModalities: ['text'] },
     ])
     await expect(adapter.listModels('deepseek-official')).resolves.toEqual([
-      { provider: 'deepseek-official', id: 'newer-model', name: 'newer-model', inputModalities: ['text'] },
+      { provider: 'deepseek-official', id: 'newer-model', name: 'newer-model', description: DISCOVERED, inputModalities: ['text'] },
     ])
   })
 
@@ -241,6 +244,7 @@ describe('DeepSeek model catalog refresh', () => {
         provider: 'deepseek-official',
         id: 'last-good-model',
         name: 'last-good-model',
+        description: DISCOVERED,
         inputModalities: ['text'],
       }]
       await expect(adapter.listModels('deepseek-official', { refresh: true })).resolves.toEqual(expected)
@@ -311,6 +315,7 @@ describe('DeepSeek model catalog refresh', () => {
         provider: 'deepseek-official',
         id: 'live-unknown',
         name: 'live-unknown',
+        description: DISCOVERED,
         inputModalities: ['text'],
       },
     ])

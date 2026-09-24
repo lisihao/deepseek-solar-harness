@@ -145,11 +145,13 @@ function physicalOperatorMainModel(
   directory: ModelDirectoryState | undefined,
 ): PhysicalOperatorRoutingTarget | undefined {
   if (directory?.current?.provider !== 'dsh-physical-operator') return undefined
-  switch (directory.current.model) {
+  // A native-model entry is `operator:model`; the operator owns the route.
+  const operator = directory.current.model.split(':', 1)[0]
+  switch (operator) {
     case 'codex':
     case 'claude-code':
     case 'chatgpt-web':
-      return directory.current.model
+      return operator
     default:
       return undefined
   }
