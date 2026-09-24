@@ -249,6 +249,19 @@ describe('physical primary routing control', () => {
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '执行模型' }).value).toBe('codex-live')
   })
 
+  it('treats a selected Codex native-model entry as the Codex primary', async () => {
+    window.history.replaceState({}, '', '/')
+    const fixture = createFixture({
+      current: { provider: 'dsh-physical-operator', model: 'codex:codex-live' },
+      policy: 'direct',
+      request: vi.fn(async () => dashboardResponse([nativeProvider('codex', [nativeModel('codex-live')])])),
+    })
+
+    render(<PhysicalOperatorRoutingControl {...fixture.props} />)
+
+    expect(screen.getByRole('button', { name: '协作 · Codex' })).toBeTruthy()
+  })
+
   it('keeps the saved Codex profile editable when an API main model has no selected physical route', async () => {
     window.history.replaceState({}, '', '/')
     const requestMock = vi.fn(async () => dashboardResponse([

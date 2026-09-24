@@ -391,6 +391,36 @@ describe('agent task-template injection', () => {
     })
   })
 
+  it('matches operator templates for a selected native-model entry by its operator', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(MemoryTemplates)
+    await ctx.plugin(TaskTemplateContext)
+    await ctx.taskTemplates.create({
+      id: taskTemplateId('codex-native'),
+      name: 'codex-native',
+      match: { operators: ['codex'] },
+      method: 'Use the Codex method.',
+    })
+    const session = Session.create(SessionId('task-template-context-native-model'))
+    const agent = fakeAgent(session, { provider: 'dsh-physical-operator', model: 'codex:gpt-5.6-sol' }, ctx)
+    const user = createUserMessage({ content: [{ type: 'text', text: 'Inspect this task.' }], source: { kind: 'user' } })
+
+    const decision = await agentEvents(ctx, agent).waterfall(
+      'agent/pre-step',
+      { messages: [user], turn: 1, step: 1, signal: new AbortController().signal },
+      () => Promise.resolve({ kind: 'enter' as const, messages: [user] }),
+    )
+
+    if (decision.kind !== 'enter') throw new Error('fixture step was rejected')
+    const injected = decision.messages.find(message => message.source.kind === 'task-template')
+    if (injected?.source.kind !== 'task-template') throw new Error('missing task template')
+    expect(injected.source.receipt.attributes.operators).toEqual(['codex'])
+    expect(injected.source.receipt.templateId).toBe(taskTemplateId('codex-native'))
+  })
+
   it('does not inject an old or unrelated template when the current task has no match, but logs an attributable skip receipt', async () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)

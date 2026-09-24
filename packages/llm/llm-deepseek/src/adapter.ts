@@ -125,6 +125,9 @@ function modelInfo(provider: string, model: DeepSeekCatalogModel): LlmModelInfo 
   }
 }
 
+/** Selector note for an ID the endpoint lists but the configured catalog does not describe. */
+const DISCOVERED_MODEL_DESCRIPTION = '服务商 /models 新列出的模型；服务商未提供名称或版本说明'
+
 /** Keep discovered IDs isolated by endpoint and credential reference, never by secret value. */
 function discoveryScope(connection: DeepSeekConnectionOptions): string {
   return JSON.stringify([connection.baseURL, String(connection.apiKeyEnv)])
@@ -224,7 +227,7 @@ export class DeepSeekAdapter extends LlmAdapter {
     for (const id of this.discoveredModelIds.get(discoveryScope(connection)) ?? []) {
       if (known.has(id)) continue
       known.add(id)
-      models.push(modelInfo(provider, { id }))
+      models.push(modelInfo(provider, { id, description: DISCOVERED_MODEL_DESCRIPTION }))
     }
     return models
   }
