@@ -371,6 +371,18 @@ const COMPOSER_DOM_HELPERS = String.raw`
       ?? element;
     return blocksOf(body).join(newline + newline);
   };
+  const pageTurnItem = (element) => {
+    if (element === null) return null;
+    const body = element.querySelector('[data-markdown-text-style="assistant-message"]') ?? element;
+    const key = Object.keys(body).find((name) => name.startsWith('__reactFiber$'));
+    let fiber = key === undefined ? null : body[key];
+    for (let depth = 0; fiber !== null && fiber !== undefined && depth < 40; depth += 1, fiber = fiber.return) {
+      const item = fiber.memoizedProps?.item;
+      if (item !== null && typeof item === 'object' && typeof item.completed === 'boolean'
+        && typeof item.content === 'string') return item;
+    }
+    return null;
+  };
   const latestAssistantSettled = (latest, assistants) => {
     if (latest === null || latest.querySelector('[data-markdown-text-style="assistant-message"]') === null) return false;
     let ancestor = latest.parentElement;
@@ -477,11 +489,15 @@ const RESPONSE_STATE = String.raw`() => {
   const { users, assistants } = messageUnits();
   const latestReply = assistants.at(-1) ?? null;
   const response = assistantText(latestReply);
+  const turnItem = pageTurnItem(latestReply);
+  const pageCompleted = turnItem === null
+    ? undefined
+    : turnItem.completed && (turnItem.phase === undefined || turnItem.phase === 'final_answer');
   const legacyTurn = latestReply?.closest('[data-testid^="conversation-turn-"]') ?? null;
   const legacySettled = legacyTurn !== null && legacyTurn.querySelector(
     '[data-testid="copy-turn-action-button"],[aria-label="Copy response"],[aria-label="复制回复"]',
   ) !== null;
-  const generating = [...document.querySelectorAll('button,[role="button"]')].some((element) => {
+  const generating = turnItem?.completed === false || [...document.querySelectorAll('button,[role="button"]')].some((element) => {
     if (element.getAttribute('data-testid') === 'stop-button') return true;
     const label = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/g, ' ').trim();
     return /stop generating|stop streaming|停止生成|停止流式传输|^停止$|^stop$/i.test(label);
@@ -499,7 +515,7 @@ const RESPONSE_STATE = String.raw`() => {
     inputCharacters: inputText.length,
     response,
     generating,
-    settled: legacySettled || latestAssistantSettled(latestReply, assistants),
+    settled: pageCompleted ?? (legacySettled || latestAssistantSettled(latestReply, assistants)),
     sendAvailable: send !== null,
   };
 }`
