@@ -772,22 +772,25 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     return { id: provider, name: '物理算子' }
   }
 
-  /** Last successfully loaded native model catalogs, shared by directory reads. */
-  private catalogCache: readonly PhysicalOperatorResidentCatalog[] | undefined
-  private catalogLoad: Promise<readonly PhysicalOperatorResidentCatalog[] | undefined> | undefined
+  /**
+   * Native model catalogs from the last explicit refresh. Qualifying a native
+   * product spawns its CLI, so plain directory reads only consume this cache.
+   */
+  private catalogCache: readonly PhysicalOperatorResidentCatalog[] = []
 
   /**
-   * List each available operator plus one entry per native model its live
+   * List each available operator plus one entry per native model its cached
    * catalog offers, so the model menu can select an exact native model.
    * @param provider - the physical-operator router provider id.
-   * @param options - `refresh` reloads native catalogs and surfaces their failure.
+   * @param options - `refresh` qualifies native products, reloads their catalogs, and surfaces failure.
    * @returns operator entries followed by their `operator:model` entries.
    */
   override async listModels(
     provider: string,
     options?: { readonly refresh?: boolean },
   ): Promise<readonly LlmModelInfo[]> {
-    const catalogs = new Map((await this.catalogs(options?.refresh === true))
+    if (options?.refresh === true) this.catalogCache = await this.ctx.physicalOperators.residentCatalogs()
+    const catalogs = new Map(this.catalogCache
       .filter(catalog => catalog.available)
       .map(catalog => [String(catalog.operatorId), catalog]))
     return this.ctx.physicalOperators.list()
@@ -804,22 +807,22 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
   }
 
   /**
-   * Resolve a native `operator:model` entry with the efforts its product supports.
+   * Resolve a native `operator:model` entry with the efforts its cached catalog lists.
    * @param provider - the physical-operator router provider id.
    * @param model - an operator id or `operator:model` id.
    * @returns the entry's display name and native reasoning efforts when known.
    */
-  override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     const { operatorId, nativeModel } = parseOperatorModelId(model)
     const entry = nativeModel === undefined
       ? undefined
-      : (await this.catalogs(false))
+      : this.catalogCache
         .find(catalog => String(catalog.operatorId) === operatorId)?.models
         .find(candidate => candidate.model === nativeModel)
     if (entry === undefined || entry.supportedEfforts.length === 0) {
-      return { provider, id: model, name: entry?.displayName ?? model }
+      return Promise.resolve({ provider, id: model, name: entry?.displayName ?? model })
     }
-    return {
+    return Promise.resolve({
       provider,
       id: model,
       name: entry.displayName,
@@ -827,28 +830,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         efforts: entry.supportedEfforts.map(effort => ({ id: ReasoningEffortId(effort), name: EFFORT_NAMES[effort] })),
         ...entry.defaultEffort === undefined ? {} : { defaultEffort: ReasoningEffortId(entry.defaultEffort) },
       },
-    }
-  }
-
-  private async catalogs(refresh: boolean): Promise<readonly PhysicalOperatorResidentCatalog[]> {
-    if (refresh) {
-      this.catalogCache = await this.ctx.physicalOperators.residentCatalogs()
-      return this.catalogCache
-    }
-    if (this.catalogCache !== undefined) return this.catalogCache
-    this.catalogLoad ??= this.loadCatalogsQuietly().finally(() => { this.catalogLoad = undefined })
-    this.catalogCache ??= await this.catalogLoad
-    return this.catalogCache ?? []
-  }
-
-  private async loadCatalogsQuietly(): Promise<readonly PhysicalOperatorResidentCatalog[] | undefined> {
-    try {
-      return await this.ctx.physicalOperators.residentCatalogs()
-    } catch {
-      // A plain directory read still lists the operators; an explicit refresh
-      // reports catalog failure through the provider group.
-      return undefined
-    }
+    })
   }
 
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {

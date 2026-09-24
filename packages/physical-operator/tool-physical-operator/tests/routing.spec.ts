@@ -1688,7 +1688,7 @@ describe('host physical-operator routing', () => {
     const { ctx } = await setup()
 
     expect(ctx.llm.listProviders()).toContainEqual({ id: 'dsh-physical-operator', name: '物理算子' })
-    const models = await ctx.llm.listModels('dsh-physical-operator')
+    const models = await ctx.llm.listModels('dsh-physical-operator', { refresh: true })
     expect(models.map(model => [model.id, model.name])).toEqual([
       ['codex', 'Codex'],
       ['codex:gpt-5.6-sol', 'Codex · GPT-5.6 Sol'],
@@ -1721,15 +1721,21 @@ describe('host physical-operator routing', () => {
     await expect(ctx.llm.listModels('dsh-physical-operator', { refresh: true })).rejects.toThrow('catalog offline')
   })
 
-  it('keeps operator entries when the first catalog read fails, then loads it on refresh', async () => {
+  it('lists only operator entries until an explicit refresh qualifies native catalogs', async () => {
     const { ctx, codex } = await setup()
     const catalog = codex.residentCatalog.bind(codex)
-    codex.residentCatalog = () => Promise.reject(new Error('catalog offline'))
+    let qualifications = 0
+    codex.residentCatalog = () => {
+      qualifications += 1
+      return catalog()
+    }
     expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).toEqual(['codex', 'claude-code', 'chatgpt-web'])
     await expect(ctx.llm.resolveModelInfo('dsh-physical-operator', 'codex:gpt-5.6-sol')).resolves.toMatchObject({ name: 'codex:gpt-5.6-sol' })
+    expect(qualifications).toBe(0)
 
-    codex.residentCatalog = catalog
     expect((await ctx.llm.listModels('dsh-physical-operator', { refresh: true })).map(model => model.id)).toContain('codex:gpt-5.6-sol')
+    expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).toContain('codex:gpt-5.6-sol')
+    expect(qualifications).toBe(1)
   })
 
   it('runs a selected native model entry with its model and effort as the Resident profile', async () => {
