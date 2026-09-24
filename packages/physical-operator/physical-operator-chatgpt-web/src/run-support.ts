@@ -12,21 +12,21 @@ import {
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
-import { renderOperatorContextEnvelopeText } from '@deepseek-ai/dsh-system-prompt'
 
 /**
- * Render a start request as the single text prompt typed into ChatGPT Web.
+ * Render a start request as the single readable text prompt typed into ChatGPT Web.
+ * A context envelope renders as plain sections (system text, each named
+ * context, then the task) rather than a JSON document, so the website model
+ * reads the task as the request.
  *
  * @param request - Provider start request; a context envelope takes precedence over prompt blocks.
- * @returns the envelope text, or the joined text blocks prefixed by a non-empty system prompt.
+ * @returns the rendered envelope, or the joined text blocks prefixed by a non-empty system prompt.
  * @throws PhysicalOperatorError `INVALID_RESULT` for a non-text block or an empty task.
  */
 export function textPromptForRequest(request: PhysicalOperatorProviderStartRequest): string {
-  if (request.contextEnvelope !== undefined) {
-    return renderOperatorContextEnvelopeText(request.contextEnvelope)
-  }
+  const envelope = request.contextEnvelope
   const text: string[] = []
-  for (const block of request.prompt) {
+  for (const block of envelope?.task ?? request.prompt) {
     if (block.type !== 'text') {
       throw new PhysicalOperatorError('ChatGPT Web accepts text prompt blocks only', 'INVALID_RESULT')
     }
@@ -36,9 +36,13 @@ export function textPromptForRequest(request: PhysicalOperatorProviderStartReque
   if (task.trim().length === 0) {
     throw new PhysicalOperatorError('ChatGPT Web prompt must not be empty', 'INVALID_RESULT')
   }
-  return request.systemPrompt === undefined || request.systemPrompt.length === 0
-    ? task
-    : `${request.systemPrompt}\n\n---\n\n${task}`
+  const sections = envelope === undefined
+    ? request.systemPrompt === undefined || request.systemPrompt.length === 0 ? [] : [request.systemPrompt]
+    : [
+      ...envelope.systemText.length === 0 ? [] : [envelope.systemText],
+      ...envelope.contexts.map(context => `## ${context.name}\n\n${context.text}`),
+    ]
+  return [...sections, task].join('\n\n---\n\n')
 }
 
 /**

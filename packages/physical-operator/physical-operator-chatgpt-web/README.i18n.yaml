@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/physical-operator/physical-operator-chatgpt-web/README.md
-README.md: d602593c0d7a2ee5ae68f16810d12e6a9903c686
-README.zh.md: 5d0d6fe7784697fc1aa4f3e75908207efc5b5744
+README.md: 35a2379f334ef634e0f71b310db491ff0ef81082
+README.zh.md: 2b46d4384cb02d77a26399296f6cd05a0468665b

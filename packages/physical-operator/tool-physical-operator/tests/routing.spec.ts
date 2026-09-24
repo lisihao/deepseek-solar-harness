@@ -554,6 +554,11 @@ describe('host physical-operator routing', () => {
 
     expect(chatgpt.requests[0]?.contextEnvelope?.contexts).toEqual([])
     expect(JSON.stringify(chatgpt.requests[0]?.contextEnvelope)).not.toContain('Historical handoff must not become current context.')
+    // The tool-using agent's system instruction stays off the tool-less browser route.
+    const header = agent.session.events.findLast(event => event.type === 'request/header')
+    expect(header?.type === 'request/header' ? header.data.header.system : '').not.toBe('')
+    expect(chatgpt.requests[0]?.contextEnvelope?.systemText).toBe('')
+    expect(chatgpt.requests[0]?.systemPrompt).toBeUndefined()
   })
 
   it('does not attach a current Web handoff to a non-Web main operator', async () => {
