@@ -101,6 +101,9 @@ const __dshPage = __dshUsesFacadeApi ? globalThis.page : {
 
 function __dshError(code, message, operationId) {
   const error = new Error(message);
+  // Programs branch on the portable BrowserError code; dsh_code carries it
+  // across the process boundary.
+  error.code = code;
   error.dsh_code = code;
   if (operationId !== undefined) error.operationId = operationId;
   if ((code === "BROWSER_USER_CONTROL" || code === "BROWSER_WORKSPACE_INACTIVE") && __dshHardStop === null) {
