@@ -1,6 +1,6 @@
 /** Resident Operator projection and explicit owner-local authentication action. */
 
-import type { ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import { authorizeRemoteRequest } from '@deepseek-ai/dsh-host-remote-auth'
@@ -81,13 +81,8 @@ export function registerResidentDashboard(ctx: Context): () => void {
     kind: 'exact',
     path: RESIDENT_DASHBOARD_PATH,
     handler: async (request, response) => {
-      const authority = authorizeRemoteRequest(request, ctx.get('remoteAuth'))
-      if (authority === undefined) {
-        sendJson(response, ctx.get('remoteAuth') === undefined ? 503 : 401, {
-          error: ctx.get('remoteAuth') === undefined ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
-        })
-        return
-      }
+      const authority = authorize(ctx, request, response)
+      if (authority === undefined) return
       const url = new URL(request.url ?? RESIDENT_DASHBOARD_PATH, 'http://127.0.0.1')
       if (request.method === 'POST') {
         if (!authority.local) {
@@ -265,13 +260,8 @@ export function registerResidentCliRuntimes(ctx: Context): () => void {
     kind: 'exact',
     path: RESIDENT_CLI_PATH,
     handler: async (request, response) => {
-      const authority = authorizeRemoteRequest(request, ctx.get('remoteAuth'))
-      if (authority === undefined) {
-        sendJson(response, ctx.get('remoteAuth') === undefined ? 503 : 401, {
-          error: ctx.get('remoteAuth') === undefined ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
-        })
-        return
-      }
+      const authority = authorize(ctx, request, response)
+      if (authority === undefined) return
       if (request.method !== 'GET' && request.method !== 'POST') {
         response.writeHead(405, { Allow: 'GET, POST' })
         response.end()
@@ -309,6 +299,21 @@ export function registerResidentCliRuntimes(ctx: Context): () => void {
       }
     },
   })
+}
+
+/** Resolve the caller's Remote Auth authority, answering 503/401 when there is none. */
+function authorize(
+  ctx: Context,
+  request: IncomingMessage,
+  response: ServerResponse,
+): ReturnType<typeof authorizeRemoteRequest> {
+  const authority = authorizeRemoteRequest(request, ctx.get('remoteAuth'))
+  if (authority === undefined) {
+    sendJson(response, ctx.get('remoteAuth') === undefined ? 503 : 401, {
+      error: ctx.get('remoteAuth') === undefined ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
+    })
+  }
+  return authority
 }
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {

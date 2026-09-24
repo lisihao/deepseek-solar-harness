@@ -152,14 +152,17 @@ describe('compareCliVersions', () => {
 
 describe('managed runtime directories', () => {
   it('keeps runtimes beside the Resident root and puts their wrappers first on the daemon PATH', () => {
-    const runtimes = cliRuntimesRoot('/home/owner/.dsh/resident-operators')
-    expect(runtimes).toBe('/home/owner/.dsh/runtimes')
-    const environment: NodeJS.ProcessEnv = { PATH: ['/usr/bin', managedCliBinDir(runtimes), ''].join(delimiter) }
-    preferManagedCliRuntimes(environment, '/home/owner/.dsh/resident-operators')
-    expect(environment.PATH).toBe(['/home/owner/.dsh/runtimes/bin', '/usr/bin'].join(delimiter))
+    const home = join(tmpdir(), 'owner', '.dsh')
+    const runtimes = cliRuntimesRoot(join(home, 'resident-operators'))
+    expect(runtimes).toBe(join(home, 'runtimes'))
+    const bin = managedCliBinDir(runtimes)
+    expect(bin).toBe(join(home, 'runtimes', 'bin'))
+    const environment: NodeJS.ProcessEnv = { PATH: ['/usr/bin', bin, ''].join(delimiter) }
+    preferManagedCliRuntimes(environment, join(home, 'resident-operators'))
+    expect(environment.PATH).toBe([bin, '/usr/bin'].join(delimiter))
     const empty: NodeJS.ProcessEnv = {}
-    preferManagedCliRuntimes(empty, '/r/resident-operators')
-    expect(empty.PATH).toBe('/r/runtimes/bin')
+    preferManagedCliRuntimes(empty, join(home, 'resident-operators'))
+    expect(empty.PATH).toBe(bin)
   })
 })
 
