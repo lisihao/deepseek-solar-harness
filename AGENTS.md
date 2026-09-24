@@ -25,8 +25,8 @@ website/     VitePress projection of selected bilingual docs/ sources
 
 ## Source and generated runtime
 
-- MacBook is the sole DSH development host; edits, checks, builds, and commits run locally. Physical source and worktrees live only under `/Users/sihaoli/Projects`; `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness` is a compatibility symlink, never worktree or build storage.
-- `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness` is generated runtime. Never edit, commit, or reverse-copy it. Deploy only a verified source commit; on drift, redeploy from source.
+- MacBook is the sole DSH development host for edits, checks, builds, and commits. Source and worktrees live only under `/Users/sihaoli/Projects`; `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness` is a compatibility symlink, never worktree or build storage.
+- `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness` is generated runtime: never edit, commit, or reverse-copy it; deploy only a verified source commit and redeploy on drift.
 - The `com.lisihao.deepseek-solar-harness` LaunchAgents own runtime and tunnels. Acceptance verifies the recorded commit, process, port `3081`, forwards, GenesisPod, and ThunderOMLX; a loaded agent alone is insufficient.
 
 Package groups: [packages/README.md](packages/README.md).
@@ -35,8 +35,9 @@ Package groups: [packages/README.md](packages/README.md).
 
 - `solar` is protected. Use a separate branch and worktree; never commit directly to `solar` or edit another task's worktree. Upstreams are fetch-only: no upstream push, PR, package, or credential use.
 - **Code-as-Harness is a CI merge gate.** `solar-governance.yml` runs the `plugins/managed/governance` Profile on every PR to `solar` and gates merge. Run it locally only to reproduce a failure or on request ([dsh-code-as-harness](.agents/skills/dsh-code-as-harness/SKILL.md); [why](docs/architecture/adr-005-ai-agent-authority.md)).
-- Stable Desktop releases use annotated tags matching `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$`, such as `DSH-desktop-v2.4.3`; lowercase, prerelease, and display-only variants are invalid.
-- Desktop application, runtime, or artifact changes also follow `products/desktop/AGENTS.md`; migration-only imports never authorize changing `/Applications/DSH Desktop.app`.
+- **Upstream source edits are inventoried**: each changed upstream `packages/*/*/src` or `apps/*/src` file needs an entry in `distribution/upstream-source-edits.json` ([check](scripts/solar/verify-upstream-edits.mjs)); prefer a plugin.
+- Stable Desktop releases use annotated tags matching `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$` (e.g. `DSH-desktop-v2.4.3`); other variants are invalid.
+- Desktop application, runtime, or artifact changes also follow `products/desktop/AGENTS.md`; migration-only imports never authorize changing the installed app.
 
 ## Commands
 
@@ -63,14 +64,14 @@ pnpm run demo:acp       # ACP automation server (needs DEEPSEEK_API_KEY)
 
 ### Host sandbox failures
 
-When required `gh`, `pnpm`, build, test, or generator commands fail because the agent sandbox blocks credentials, network, IPC, file watching, or nested `sandbox-exec`, retry unchanged with the narrowest host escalation before diagnosing authentication or project failure. Require sandbox evidence; never bypass genuine test failures or the product sandbox under test.
+When required `gh`, `pnpm`, build, test, or generator commands fail because the agent sandbox blocks credentials, network, IPC, file watching, or nested `sandbox-exec`, retry unchanged with the narrowest host escalation before diagnosing authentication or project failure; never bypass genuine test failures or the product sandbox under test.
 
 ### Run relevant checks locally
 
 Run checks before pushes via [dsh-pre-push-checks](.agents/skills/dsh-pre-push-checks/SKILL.md); report only commands run. After `gh stack sync`, validate immediately; do not merge before checks pass.
 
 - Match evidence to the surface: focused behavior tests, snapshots, doc checks, package smokes, and real-provider E2E only for changed provider behavior.
-- Reuse passing evidence while affected inputs and execution contract are unchanged; commit, push, time, or reassurance do not invalidate it. Paid E2E also needs explicit cost authorization and defaults to its smallest representative path; CI owns exhaustive platform coverage.
+- Reuse passing evidence while affected inputs and execution contract are unchanged. Paid E2E needs explicit cost authorization and its smallest representative path; CI owns exhaustive platform coverage.
 - `test:coverage`, not `test`, is the CI coverage gate ([why](docs/testing.md)).
 
 ## Secrets / .env
