@@ -5,10 +5,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
-import { assertOwnedDaemonCommand, stopOwnedDaemon, stopProductServerDaemons } from './product-server-processes.mjs'
+import { assertOwnedDaemonCommand, processCommand, stopOwnedDaemon, stopProductServerDaemons } from './product-server-processes.mjs'
 
 function exited(child) {
   return child.exitCode !== null || child.signalCode !== null
+}
+
+/** Wait until `ps` reports the post-exec command line; right after spawn it can still show the parent's. */
+async function waitForRootArgument(pid, root) {
+  const rootArgument = ` --root ${root}`
+  const deadline = Date.now() + 5_000
+  while (!(await processCommand(pid)).includes(rootArgument)) {
+    if (Date.now() >= deadline) throw new Error(`process ${String(pid)} did not report ${rootArgument}`)
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
 }
 
 test('stops daemon pids retained below a Product Server smoke home', async () => {
@@ -24,6 +34,8 @@ test('stops daemon pids retained below a Product Server smoke home', async () =>
     assert.ok(orchestration.pid)
     await writeFile(join(residentRoot, 'daemon.pid'), `${String(resident.pid)}\n`)
     await writeFile(join(orchestrationRoot, 'daemon.pid'), `${String(orchestration.pid)}\n`)
+    await waitForRootArgument(resident.pid, residentRoot)
+    await waitForRootArgument(orchestration.pid, orchestrationRoot)
     await stopProductServerDaemons(home)
     await Promise.all([
       new Promise(resolve => exited(resident) ? resolve() : resident.once('exit', resolve)),

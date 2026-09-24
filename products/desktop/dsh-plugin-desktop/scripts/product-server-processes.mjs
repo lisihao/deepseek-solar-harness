@@ -59,7 +59,8 @@ function requestOwnerShutdown(socketPath, timeoutMs) {
   })
 }
 
-async function processCommand(pid) {
+/** Read the full command line `ps` reports for `pid`; rejects when `ps` cannot find the process. */
+export async function processCommand(pid) {
   const { stdout } = await execFileAsync('/bin/ps', ['-ww', '-p', String(pid), '-o', 'command='])
   return stdout.trim()
 }
