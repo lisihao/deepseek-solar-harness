@@ -8,6 +8,9 @@ import ResidentOperatorService, {
   type ResidentEventPage,
   type ResidentEventReadRequest,
   type ResidentCompactRequest,
+  type ResidentCliProduct,
+  type ResidentCliRuntimeStatus,
+  type ResidentCliUpdateResult,
   type ResidentCompactResult,
   type ResidentExecuteRequest,
   type ResidentIndeterminateResolutionRequest,
@@ -19,16 +22,28 @@ import ResidentOperatorService, {
   type ResidentTurnSnapshot,
 } from '@deepseek-ai/dsh-resident-operator'
 import { brandedSession, brandedTurn, ResidentDaemonClient } from './client.ts'
+import { CliRuntimeManager, cliRuntimesRoot } from './cli-runtimes.ts'
 
 export { ResidentDaemonClient, startDetachedResidentDaemon, waitForDaemonSocketRelease } from './client.ts'
 export { ResidentDaemon, RESIDENT_METHODS } from './daemon.ts'
+export {
+  CliRuntimeManager,
+  cliRuntimesRoot,
+  compareCliVersions,
+  managedCliBinDir,
+  type CliRuntimeOptions,
+} from './cli-runtimes.ts'
 export {
   ClaudeCodeResidentDriver,
   CodexResidentDriver,
   EXPECTED_CLAUDE_CLI_VERSION,
   EXPECTED_CLAUDE_SDK_VERSION,
-  EXPECTED_CODEX_CLI_VERSION,
-  EXPECTED_CODEX_SCHEMA_SHA256,
+  claudeCliCompatible,
+  codexDaemonVersion,
+  codexProtocol,
+  missingCodexProtocolMethods,
+  type CodexDaemonVersion,
+  type CodexProtocolReport,
 } from './drivers.ts'
 export type { ResidentProductDriver } from '@deepseek-ai/dsh-resident-operator'
 export { ResidentStore, canonicalCompactRequestHash, canonicalRequestHash } from './store.ts'
@@ -49,6 +64,10 @@ export interface Config {
   readonly driverModules?: string[]
   /** Explicit executable or helper used for the detached headless daemon. */
   readonly headlessNodeExecutable?: string
+  /** npm-compatible registry that publishes the native Claude Code and Codex CLIs. */
+  readonly cliRegistryUrl?: string
+  /** Bound on each CLI registry request, package download, and Codex daemon update. */
+  readonly cliDownloadTimeoutMs?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -58,10 +77,13 @@ export const Config: z<Config> = z.object({
   pollIntervalMs: z.number().step(1).min(10).max(10_000).default(250),
   headlessNodeExecutable: z.string(),
   driverModules: z.array(z.string()).default([]),
+  cliRegistryUrl: z.string().default('https://registry.npmjs.org'),
+  cliDownloadTimeoutMs: z.number().step(1).min(1_000).max(3_600_000).default(600_000),
 })
 
 class LocalResidentOperatorService extends ResidentOperatorService {
   private readonly client: ResidentDaemonClient
+  private readonly runtimes: CliRuntimeManager
 
   constructor(
     ctx: Context,
@@ -69,8 +91,14 @@ class LocalResidentOperatorService extends ResidentOperatorService {
     driverModules: readonly string[],
   ) {
     super(ctx)
+    const root = `${resolveDshHome(config.dshHome)}/resident-operators`
+    this.runtimes = new CliRuntimeManager({
+      runtimesRoot: cliRuntimesRoot(root),
+      registryUrl: config.cliRegistryUrl,
+      downloadTimeoutMs: config.cliDownloadTimeoutMs,
+    })
     this.client = new ResidentDaemonClient({
-      root: `${resolveDshHome(config.dshHome)}/resident-operators`,
+      root,
       autoStart: config.autoStart,
       connectTimeoutMs: config.connectTimeoutMs,
       pollIntervalMs: config.pollIntervalMs,
@@ -85,6 +113,14 @@ class LocalResidentOperatorService extends ResidentOperatorService {
 
   override authenticate(operatorId: string): Promise<ResidentProviderStatus> {
     return this.client.authenticate(operatorId)
+  }
+
+  override cliRuntimes(): Promise<ResidentCliRuntimeStatus[]> {
+    return this.runtimes.statuses()
+  }
+
+  override updateCli(product: ResidentCliProduct): Promise<ResidentCliUpdateResult> {
+    return this.runtimes.update(product)
   }
 
   /** Ensure the configured detached daemon owns the socket before dependants start. */

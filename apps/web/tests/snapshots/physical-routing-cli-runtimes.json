@@ -1,0 +1,12 @@
+{
+  "recommended": [
+    "Claude Code当前 2.1.239 · 最新 2.1.281验证并更新到 2.1.281有新版本",
+    "Codex当前 0.149.1 · 最新 0.156.1验证并更新到 0.156.1Codex 通过其自带的 app-server 更新生效，会中断正在运行的 Codex 任务。有新版本"
+  ],
+  "activated": "Claude Code 已切换到 2.1.281，下一次任务起生效，无需重启 DSH。",
+  "afterActivation": [
+    "Claude Code · DSH 托管当前 2.1.281 · 最新 2.1.281已是最新",
+    "Codex当前 0.149.1 · 最新 0.156.1验证并更新到 0.156.1Codex 通过其自带的 app-server 更新生效，会中断正在运行的 Codex 任务。有新版本"
+  ],
+  "refused": "Codex 0.156.1 未通过 DSH 兼容验证，继续使用 0.149.1，需等待 DSH 适配：app-server lacks required methods: ClientRequest:turn/interrupt"
+}

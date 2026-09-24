@@ -11,6 +11,7 @@ import type {
 } from '../contracts.ts'
 import { RESIDENT_DASHBOARD_PATH } from '../contracts.ts'
 import { formatResidentTimestamp } from '../presentation.ts'
+import { CliRuntimesSection } from './CliRuntimes.tsx'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 
 export type BrowserRequest = ConnectionHandle['request']
@@ -248,6 +249,14 @@ export function ResidentOperatorsPanel({ request }: { request: BrowserRequest })
                     </div>
                   )) ?? <p>正在连接 daemon…</p>}
                 </div>
+                <CliRuntimesSection
+                  request={request}
+                  localOwner={!remoteFrontend}
+                  onUpdated={() => {
+                    void loadResidentDashboard(selectedSessionId, undefined, request, { refresh: true })
+                      .then(setDashboard, (cause: unknown) => { setError(cause instanceof Error ? cause.message : String(cause)) })
+                  }}
+                />
                 <h3>如何调用</h3>
                 <div className="dshDesktopResidentHelp">
                   <p>主模型选择旁的“协作”入口缺省为“智能协作”。主模型负责对话，并在非简单任务中决定是否调用 Codex、Claude Code 或启动 TaskGraph。</p>

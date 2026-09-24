@@ -54,7 +54,19 @@ const claude = {
 }
 
 function residentOperators() {
+  const runtimes = [
+    { product: 'claude-code', currentVersion: '2.1.239', latestVersion: '2.1.281', updateAvailable: true, managed: false },
+    { product: 'codex', currentVersion: '0.149.1', latestVersion: '0.156.1', updateAvailable: true, managed: false },
+  ]
   return {
+    async cliRuntimes() { return runtimes.map(runtime => ({ ...runtime })) },
+    async updateCli(product) {
+      if (product === 'codex') {
+        return { product, version: '0.156.1', status: 'incompatible', reason: 'app-server lacks required methods: ClientRequest:turn/interrupt' }
+      }
+      runtimes[0] = { ...runtimes[0], currentVersion: '2.1.281', updateAvailable: false, managed: true }
+      return { product, version: '2.1.281', status: 'activated' }
+    },
     async providers() {
       await recordQualification()
       return [codex, claude]

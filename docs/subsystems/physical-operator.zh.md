@@ -102,6 +102,20 @@ abstract providers(): Promise<ResidentProviderStatus[]>
 authenticate(_operatorId: string): Promise<ResidentProviderStatus>
 
 /**
+ * Report the running and published version of each native product CLI.
+ * @returns one status per product in `ResidentCliProduct` order.
+ */
+cliRuntimes(): Promise<ResidentCliRuntimeStatus[]>
+
+/**
+ * Download the newest published CLI for one product, qualify it, and
+ * activate it only when qualification passes.
+ * @param _product - native product to update.
+ * @returns the candidate version and whether it was activated.
+ */
+updateCli(_product: ResidentCliProduct): Promise<ResidentCliUpdateResult>
+
+/**
  * Admit or replay one durable command for its operator/workspace/lane Session.
  * @param request - command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.
  * @returns a holder-owned turn whose result settles independently.
@@ -164,7 +178,7 @@ compact(_request: ResidentCompactRequest): Promise<ResidentCompactResult>
 abstract resolveIndeterminate(request: ResidentIndeterminateResolutionRequest): Promise<void>
 ```
 
-Source: [`packages/physical-operator/resident-operator/src/index.ts:446`](../../packages/physical-operator/resident-operator/src/index.ts)
+Source: [`packages/physical-operator/resident-operator/src/index.ts:478`](../../packages/physical-operator/resident-operator/src/index.ts)
 
 <a id="physical-operator-events"></a>
 

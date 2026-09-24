@@ -8,6 +8,7 @@ import { localIpcAddress } from '@deepseek-ai/dsh-home-paths'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
 import { describe, expect, it } from 'vitest'
+import { CODEX_APP_SERVER_METHODS } from '@deepseek-ai/dsh-subagent-codex'
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
 import {
   claudeEnvironment,
@@ -22,9 +23,11 @@ import {
   codexExecutionBoundary,
   collectCodexModelsAndQuota,
   CodexResidentDriver,
+  codexDaemonVersion,
   createClaudeRlmMcpServer,
   createCodexRlmToolHandler,
   isClaudeNativeSubscription,
+  missingCodexProtocolMethods,
   nativeToolSystemPrompt,
   parseClaudeAuthenticationStatus,
   residentQualificationFailure,
@@ -594,5 +597,77 @@ describe('Codex Resident catalog qualification', () => {
       expect.objectContaining({ poolId: 'codex', models: ['gpt-5.6-sol'] }),
       expect.objectContaining({ poolId: 'codex_bengalfox', models: ['gpt-5.3-codex-spark'] }),
     ])
+  })
+})
+
+describe('Codex protocol qualification', () => {
+  it('names every required app-server method a schema does not declare', () => {
+    const declared = Object.fromEntries(Object.entries(CODEX_APP_SERVER_METHODS).map(([union, methods]) => [union, {
+      oneOf: [
+        ...methods.filter(method => method !== 'item/tool/call').map(method => ({ properties: { method: { enum: [method] } } })),
+        { properties: { method: { enum: 'not-a-list' } } },
+        { properties: { method: { enum: [7] } } },
+      ],
+    }]))
+    expect(missingCodexProtocolMethods({ definitions: declared })).toEqual(['ServerRequest:item/tool/call'])
+    expect(missingCodexProtocolMethods(null)).toHaveLength(Object.values(CODEX_APP_SERVER_METHODS).flat().length)
+    expect(missingCodexProtocolMethods({})).toContain('ClientRequest:initialize')
+  })
+
+  it.runIf(process.platform !== 'win32')('qualifies the daemon-managed binary and rejects one missing a required method', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-codex-qualification-'))
+    const previousPath = process.env.PATH
+    try {
+      const daemonBinary = join(root, 'daemon-codex')
+      writeFileSync(join(root, 'schema.json'), JSON.stringify({ definitions: { ClientRequest: { oneOf: [] } } }))
+      writeFileSync(daemonBinary, [
+        '#!/bin/sh',
+        `[ "$2" = "generate-json-schema" ] && cp '${join(root, 'schema.json')}' "$4/codex_app_server_protocol.schemas.json"`,
+        '',
+      ].join('\n'))
+      writeFileSync(join(root, 'codex'), [
+        '#!/bin/sh',
+        'case "$1 $2 $3" in',
+        '  "--version  ") echo "codex-cli 0.151.0" ;;',
+        '  "login status ") echo "Logged in using ChatGPT" ;;',
+        '  "app-server daemon start") ;;',
+        `  "app-server daemon version") printf '{"appServerVersion":"0.160.0","managedCodexPath":"${daemonBinary}"}' ;;`,
+        '  *) exit 2 ;;',
+        'esac',
+        '',
+      ].join('\n'))
+      chmodSync(daemonBinary, 0o700)
+      chmodSync(join(root, 'codex'), 0o700)
+      process.env.PATH = [root, '/usr/bin', '/bin'].join(delimiter)
+
+      await expect(codexDaemonVersion()).resolves.toEqual({ appServerVersion: '0.160.0', managedCodexPath: daemonBinary })
+      const status = await new CodexResidentDriver().qualify()
+      expect(status).toMatchObject({
+        available: false,
+        unavailableCode: 'PROVIDER_VERSION_MISMATCH',
+        productVersion: 'codex-cli 0.160.0',
+        models: [],
+      })
+      expect(status.unavailableReason).toMatch(/^codex-cli 0\.160\.0 app-server lacks required methods: ClientRequest:initialize, /u)
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it.runIf(process.platform !== 'win32')('reads no daemon identity from failed, non-JSON, or relative version output', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-codex-daemon-version-'))
+    try {
+      const cases = ['exit 1', 'echo not-json', 'printf \'{"appServerVersion":"1","managedCodexPath":"relative/codex"}\'']
+      for (const [index, body] of cases.entries()) {
+        const executable = join(root, `codex-${String(index)}`)
+        writeFileSync(executable, `#!/bin/sh\n${body}\n`)
+        chmodSync(executable, 0o700)
+        await expect(codexDaemonVersion(executable)).resolves.toBeUndefined()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

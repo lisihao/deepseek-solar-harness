@@ -11,6 +11,37 @@ export type DesktopResidentProviderUnavailableCode =
 /** Same-origin HTTP path for the bounded Resident dashboard projection. */
 export const RESIDENT_DASHBOARD_PATH = '/api/resident-operators'
 
+/** Same-origin HTTP path for native CLI version checks and verified updates. */
+export const RESIDENT_CLI_PATH = '/api/resident-operators/cli'
+
+/** Native product whose CLI the Resident Provider can check and update. */
+export type DesktopResidentCliProduct = 'claude-code' | 'codex'
+
+/** Running and published versions of one native product CLI. */
+export interface DesktopResidentCliRuntime {
+  product: DesktopResidentCliProduct
+  currentVersion?: string
+  latestVersion?: string
+  updateAvailable: boolean
+  /** Whether Resident execution uses a DSH-managed copy instead of a system installation. */
+  managed: boolean
+  error?: string
+}
+
+/** GET response of the native CLI route. */
+export interface DesktopResidentCliRuntimes {
+  runtimes: DesktopResidentCliRuntime[]
+}
+
+/** POST response after one verified native CLI update attempt. */
+export interface DesktopResidentCliUpdate {
+  product: DesktopResidentCliProduct
+  version: string
+  /** `incompatible` leaves the running CLI unchanged. */
+  status: 'activated' | 'incompatible'
+  reason?: string
+}
+
 /** Qualification and model catalog for one Resident physical operator. */
 export interface DesktopResidentProvider {
   operatorId: string

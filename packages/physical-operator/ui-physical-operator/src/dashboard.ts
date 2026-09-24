@@ -13,13 +13,15 @@ import type {
 } from '@deepseek-ai/dsh-resident-operator'
 import type {
   DesktopResidentAuthenticationFailureReason,
+  DesktopResidentCliRuntimes,
+  DesktopResidentCliUpdate,
   DesktopResidentDashboard,
   DesktopResidentEvent,
   DesktopResidentProvider,
   DesktopResidentSession,
   DesktopResidentTurn,
 } from './contracts.ts'
-import { RESIDENT_DASHBOARD_PATH } from './contracts.ts'
+import { RESIDENT_CLI_PATH, RESIDENT_DASHBOARD_PATH } from './contracts.ts'
 import { buildResidentActivities, isDiagnosticResidentWorkspace } from './presentation.ts'
 
 /**
@@ -249,6 +251,64 @@ function eventValue(event: ResidentEvent): DesktopResidentEvent {
     time: event.time,
     data: { ...event.data },
   }
+}
+
+/**
+ * Register the authenticated native CLI route: GET checks running and
+ * published versions; a local-owner POST downloads, qualifies, and activates
+ * the newest CLI of `?product=`.
+ * @param ctx - Host context carrying Web Server, Remote Auth, and Resident services.
+ * @returns a disposer that unregisters the route.
+ */
+export function registerResidentCliRuntimes(ctx: Context): () => void {
+  return ctx.webServer.register({
+    kind: 'exact',
+    path: RESIDENT_CLI_PATH,
+    handler: async (request, response) => {
+      const authority = authorizeRemoteRequest(request, ctx.get('remoteAuth'))
+      if (authority === undefined) {
+        sendJson(response, ctx.get('remoteAuth') === undefined ? 503 : 401, {
+          error: ctx.get('remoteAuth') === undefined ? 'REMOTE_AUTH_UNAVAILABLE' : 'UNAUTHORIZED',
+        })
+        return
+      }
+      if (request.method !== 'GET' && request.method !== 'POST') {
+        response.writeHead(405, { Allow: 'GET, POST' })
+        response.end()
+        return
+      }
+      if (request.method === 'POST' && !authority.local) {
+        sendJson(response, 403, { error: 'LOCAL_OWNER_REQUIRED' })
+        return
+      }
+      const product = new URL(request.url ?? RESIDENT_CLI_PATH, 'http://127.0.0.1').searchParams.get('product')
+      if (request.method === 'POST' && product !== 'claude-code' && product !== 'codex') {
+        sendJson(response, 400, { error: 'PRODUCT_REQUIRED' })
+        return
+      }
+      try {
+        if (product === 'claude-code' || product === 'codex') {
+          const result = await ctx.residentOperators.updateCli(product)
+          sendJson(response, 200, {
+            product: result.product,
+            version: result.version,
+            status: result.status,
+            ...result.reason === undefined ? {} : { reason: result.reason },
+          } satisfies DesktopResidentCliUpdate)
+          return
+        }
+        sendJson(response, 200, {
+          runtimes: (await ctx.residentOperators.cliRuntimes()).map(runtime => ({ ...runtime })),
+        } satisfies DesktopResidentCliRuntimes)
+      } catch (cause) {
+        ctx.logger.warn(cause)
+        sendJson(response, 503, {
+          error: 'RESIDENT_CLI_UNAVAILABLE',
+          message: cause instanceof Error ? cause.message : String(cause),
+        })
+      }
+    },
+  })
 }
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {

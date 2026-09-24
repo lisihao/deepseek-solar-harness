@@ -27,7 +27,10 @@ describe('Resident owner authentication UI', () => {
     expect(request).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: /物理算子/ }))
-    await waitFor(() => { expect(request).toHaveBeenCalledOnce() })
+    await waitFor(() => {
+      expect(vi.mocked(request).mock.calls.map(([input]) => (input as URL).pathname).sort())
+        .toEqual(['/api/resident-operators', '/api/resident-operators/cli'])
+    })
   })
 
   it('expands selected turn observations without rendering tool args or credential-like output', async () => {

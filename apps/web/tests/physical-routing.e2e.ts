@@ -9,10 +9,12 @@ import { join } from 'node:path'
 import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
-import { launchWebScaffold, watchConsole, type WebScaffold } from './scaffold.ts'
+import { createChatScrollFixture } from './chat-scroll-fixture.ts'
+import { launchWebScaffold, seedSession, watchConsole, type WebScaffold } from './scaffold.ts'
 import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const ROUTE_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-options.json', import.meta.url))
+const CLI_SNAPSHOT = fileURLToPath(new URL('./snapshots/physical-routing-cli-runtimes.json', import.meta.url))
 
 const FIXTURES = fileURLToPath(new URL('./fixtures/physical-routing-fixtures.mjs', import.meta.url))
 
@@ -296,4 +298,35 @@ describe('web e2e: physical operator qualification and routing', () => {
     expect(transcript).toBe(await readFile(ROUTE_SNAPSHOT, 'utf8'))
     expect(tripwire.pageErrors).toEqual([])
   }, 90_000)
+
+  it('recommends newer native CLIs and reports verified activation or a refused candidate', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-physical-cli-runtimes'))
+    // The Resident action sits in a non-blank Session's header; open a seeded one.
+    const seed = createChatScrollFixture({ markerPrefix: 'CLIRUNTIME', title: 'Native CLI runtime check', turns: 1 })
+    await seedSession(scaffold, seed.log, 'physical-routing-cli')
+    await page.reload({ waitUntil: 'load' })
+    const searchButton = page.getByRole('button', { name: 'Search sessions' })
+    await searchButton.waitFor({ timeout: 30_000 })
+    if (await searchButton.getAttribute('aria-expanded') !== 'true') await searchButton.click()
+    await page.getByRole('textbox', { name: 'Search sessions...', exact: true }).fill(seed.markers.user(1))
+    const result = page.getByRole('tree', { name: 'Search results' }).getByRole('treeitem').first()
+    await result.waitFor({ timeout: 30_000 })
+    await result.click()
+    await page.getByRole('button', { name: /^物理算子：/ }).click()
+    const panel = page.getByRole('dialog', { name: 'Resident 物理算子' })
+    const versions = panel.getByLabel('原生 CLI 版本')
+    await versions.getByText('当前 2.1.239 · 最新 2.1.281').waitFor({ timeout: 15_000 })
+    const rows = async (): Promise<string[]> => (await versions.locator('.dshDesktopResidentProvider').allTextContents())
+    const recommended = await rows()
+    await versions.getByRole('button', { name: '验证并更新到 2.1.281' }).click()
+    const activated = await panel.getByRole('status').filter({ hasText: 'Claude Code 已切换' }).textContent({ timeout: 15_000 })
+    await versions.getByText('Claude Code · DSH 托管').waitFor({ timeout: 15_000 })
+    await versions.getByRole('button', { name: '验证并更新到 0.156.1' }).click()
+    const refused = await panel.getByRole('status').filter({ hasText: '未通过 DSH 兼容验证' }).textContent({ timeout: 15_000 })
+    const transcript = `${JSON.stringify({ recommended, activated, afterActivation: await rows(), refused }, null, 2)}\n`
+    if (scaffold.mode === 'refresh') await writeFile(CLI_SNAPSHOT, transcript)
+    expect(transcript).toBe(await readFile(CLI_SNAPSHOT, 'utf8'))
+    await panel.getByRole('button', { name: '关闭物理算子面板' }).click()
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
 })

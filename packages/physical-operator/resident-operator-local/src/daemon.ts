@@ -28,9 +28,6 @@ import {
   ClaudeCodeResidentDriver,
   claudeAuthenticationFailureCode,
   CodexResidentDriver,
-  EXPECTED_CLAUDE_CLI_VERSION,
-  EXPECTED_CODEX_CLI_VERSION,
-  EXPECTED_CODEX_SCHEMA_SHA256,
 } from './drivers.ts'
 import { residentDriverManifestSha256 } from './driver-modules.ts'
 import { validateResidentModelToolBridge } from './model-tool-bridge.ts'
@@ -272,14 +269,6 @@ function safeDiagnostic(message: string, prompt: readonly ContentBlock[]): strin
 function unavailableProviderCode(status: ResidentProviderStatus): string {
   if (status.unavailableCode !== undefined) return status.unavailableCode
   if (status.authentication !== 'native-subscription') return 'AUTH_MODE_MISMATCH'
-  if (status.product === 'claude-code' && status.productVersion !== EXPECTED_CLAUDE_CLI_VERSION) {
-    return 'PROVIDER_VERSION_MISMATCH'
-  }
-  if (status.product === 'codex'
-    && (status.productVersion !== EXPECTED_CODEX_CLI_VERSION
-      || status.protocolHash !== EXPECTED_CODEX_SCHEMA_SHA256)) {
-    return 'PROVIDER_VERSION_MISMATCH'
-  }
   return 'RUNTIME_UNAVAILABLE'
 }
 

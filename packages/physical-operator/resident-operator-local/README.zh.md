@@ -4,7 +4,7 @@
 
 `ctx.residentOperators` 的本地 Service Provider 与独立 daemon。DSH 插件只是可释放的 Unix socket 客户端；`dsh-resident-operatord` 是唯一 SQLite 写者，并跨 DSH/HMR 释放继续存在。它负责 command receipt、单 Session lease、state revision、有界结构化事件及大结果的内容寻址 Artifact。
 
-Claude Code 使用官方 Agent SDK 持久化与恢复 Session，并通过不提交 prompt 的 SDK 控制通道读取订阅可见模型。资格审查会解析一个绝对路径的用户自有 `claude` 可执行文件，SDK 模型发现与真实回合也使用同一个文件，而不是 SDK 自带的后备程序；因此版本、钥匙串刷新行为、TLS 信任和订阅状态不会在资格与执行路径之间分叉。Codex 通过固定版本 app-server daemon 的本机属主 Unix WebSocket 控制 socket 使用非临时 thread，并通过 `model/list` 读取目录；CLI `proxy` 只是 WebSocket 原始字节桥，不是 NDJSON transport。两个 Driver 都会在本机 CLI 无法证明原生订阅登录时默认拒绝，且不支持 API-key fallback。资格审查会将缺少可执行文件或超时报为 `RUNTIME_UNAVAILABLE`，将格式错误或不支持的状态输出以及产品命令失败报为 `INVALID_RESULT`，将登出或非原生订阅报为 `AUTH_MODE_MISMATCH`，并将已报告的配额耗尽报为 `QUOTA_EXHAUSTED`；Claude 的 `auth status --json` 可能在有效的 `loggedIn: false` 文档上以 1 退出，Resident probe 会将该文档解析为 `AUTH_MODE_MISMATCH`，而被 kill、收到 signal、超时、格式错误及其他非零响应仍会失败；daemon 会在每个不可用提供方的 status 中返回该代码，并用它拒绝执行。
+Claude Code 使用官方 Agent SDK 持久化与恢复 Session，并通过不提交 prompt 的 SDK 控制通道读取订阅可见模型。资格审查会解析一个绝对路径的用户自有 `claude` 可执行文件，SDK 模型发现与真实回合也使用同一个文件，而不是 SDK 自带的后备程序；因此版本、钥匙串刷新行为、TLS 信任和订阅状态不会在资格与执行路径之间分叉。Codex 通过 Codex 共享 app-server daemon 的本机属主 Unix WebSocket 控制 socket 使用非临时 thread，并通过 `model/list` 读取目录；CLI `proxy` 只是 WebSocket 原始字节桥，不是 NDJSON transport。两个 Driver 都会在本机 CLI 无法证明原生订阅登录时默认拒绝，且不支持 API-key fallback。资格审查会将缺少可执行文件或超时报为 `RUNTIME_UNAVAILABLE`，将格式错误或不支持的状态输出以及产品命令失败报为 `INVALID_RESULT`，将登出或非原生订阅报为 `AUTH_MODE_MISMATCH`，并将已报告的配额耗尽报为 `QUOTA_EXHAUSTED`；Claude 的 `auth status --json` 可能在有效的 `loggedIn: false` 文档上以 1 退出，Resident probe 会将该文档解析为 `AUTH_MODE_MISMATCH`，而被 kill、收到 signal、超时、格式错误及其他非零响应仍会失败；daemon 会在每个不可用提供方的 status 中返回该代码，并用它拒绝执行。Claude Code 需位于基线 `2.1` 发布线且不低于 `2.1.239` 才通过资格审查。Codex 需由 daemon 实际运行的二进制生成的协议 schema 声明 Driver 发送或处理的每个 app-server 方法（`dsh-subagent-codex` 中的 `CODEX_APP_SERVER_METHODS`）；缺少任一方法即为 `PROVIDER_VERSION_MISMATCH`，此时资格审查会跳过模型目录，不与不兼容的服务端通信。
 
 ## 协议、存储与恢复
 
@@ -22,6 +22,10 @@ Receipt 按 `accepted -> running -> settled` 推进；有界 `turn.progress` 阶
 
 命令准入后，调用方取消和客户端 dispose 只会分离本地轮询句柄，不会发送 `turn.interrupt`。因此 daemon 权威的原生 turn 能跨 DSH、HMR 或 Desktop 重启继续运行。可信调用方若确实要停止产品工作，必须使用显式 interrupt 方法。
 
+## 原生 CLI 运行时
+
+`cliRuntimes()` 报告每个产品正在运行的版本以及注册表中的最新版本。`updateCli(product)` 从 `cliRegistryUrl` 下载最新的平台原生包，校验注册表给出的 sha512 完整性，并在切换前完成候选版本的资格审查；不兼容的候选版本会被丢弃，正在运行的 CLI 保持不变。通过审查的 Claude Code 候选版本会解压到 `<dshHome>/runtimes/claude-code/<version>`，并通过原子重写 `<dshHome>/runtimes/bin/claude` wrapper 激活。daemon 会把该目录放在 PATH 最前面，并在每次调用时解析产品命令，因此下一次资格审查或回合即使用新副本，无需重启 DSH，系统中的 `claude` 安装也不会被改动。Codex 执行经过 Codex 共享的 app-server daemon，该 daemon 运行 Codex 自己管理的包；因此通过审查的 Codex 候选版本会运行其自带的 `app-server daemon update` 来激活，若 daemon 仍报告旧版本则再执行 `daemon restart`。该更新会中断正在运行的 Codex 任务，并同时更新属主的 Codex standalone 安装。同一产品的并发更新共享一次尝试。
+
 ## 配置与安全
 
 | 字段 | 默认值 | 含义 |
@@ -31,6 +35,8 @@ Receipt 按 `accepted -> running -> settled` 推进；有界 `turn.progress` 阶
 | `connectTimeoutMs` | `5000` | 有界连接与启动等待。 |
 | `pollIntervalMs` | `250` | turn 结算轮询间隔。 |
 | `driverModules` | `[]` | 由 detached daemon 加载的独立产品 Driver 包。 |
+| `cliRegistryUrl` | `https://registry.npmjs.org` | 发布原生 Claude Code 与 Codex CLI 的 npm 兼容注册表。 |
+| `cliDownloadTimeoutMs` | `600000` | 每次 CLI 注册表请求、包下载和 Codex daemon 更新的时间上限。 |
 
 根目录权限为 `0700`，socket、lock、pid、SQLite 文件与 Artifact 为 `0600`。系统不保存原始 prompt 或终端屏幕；Receipt 只保存 canonical hash，持久化错误会脱敏 prompt 与疑似凭据。产品子进程使用共享的凭据清理环境，产品原生权限和 approval 策略仍是权威，两个 Driver 都不会回退到 API key。
 
