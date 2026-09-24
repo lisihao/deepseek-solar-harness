@@ -628,6 +628,8 @@ export interface CodexDaemonVersion {
   readonly appServerVersion: string
   /** Absolute executable of the daemon's managed Codex package. */
   readonly managedCodexPath: string
+  /** Version of the managed package the daemon starts next, when reported. */
+  readonly managedCodexVersion?: string
 }
 
 /**
@@ -652,9 +654,9 @@ export async function codexDaemonVersion(executable = 'codex'): Promise<CodexDae
     return undefined
   }
   const record = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : {}
-  const { appServerVersion, managedCodexPath } = record
+  const { appServerVersion, managedCodexPath, managedCodexVersion } = record
   return typeof appServerVersion === 'string' && typeof managedCodexPath === 'string' && isAbsolute(managedCodexPath)
-    ? { appServerVersion, managedCodexPath }
+    ? { appServerVersion, managedCodexPath, ...typeof managedCodexVersion === 'string' ? { managedCodexVersion } : {} }
     : undefined
 }
 

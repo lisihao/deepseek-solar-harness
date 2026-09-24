@@ -274,21 +274,57 @@ export class CliRuntimeManager {
             : `Codex package ${version} reports ${reported}`,
         }
       }
-      await run(executable, ['app-server', 'daemon', 'update'], this.options.downloadTimeoutMs)
-      let daemon = await codexDaemonVersion(executable)
-      if (daemon?.appServerVersion !== version) {
-        await run(executable, ['app-server', 'daemon', 'restart'], this.options.downloadTimeoutMs)
-        daemon = await codexDaemonVersion(executable)
-      }
-      if (daemon?.appServerVersion !== version) {
-        throw new ResidentOperatorError(
-          `Codex app-server daemon reports ${daemon?.appServerVersion ?? 'no version'} after updating to ${version}`,
-          'RUNTIME_UNAVAILABLE',
-        )
-      }
+      await this.installCodexDaemonPackage(executable, version)
+      await this.restartCodexDaemon(version)
       return { product, version, status: 'activated' }
     } finally {
       rmSync(staging, { recursive: true, force: true })
+    }
+  }
+
+  /**
+   * Move the daemon's managed package to `version`. `daemon update` serves
+   * packages Codex selected from its managed releases; a standalone
+   * installation reports that command unsupported and updates through its
+   * own `codex update`. The reported package version, not the exit status,
+   * decides success.
+   */
+  private async installCodexDaemonPackage(candidate: string, version: string): Promise<void> {
+    await run(candidate, ['app-server', 'daemon', 'update'], this.options.downloadTimeoutMs).catch(() => '')
+    let daemon = await codexDaemonVersion(candidate)
+    if (daemon !== undefined && daemon.managedCodexVersion !== version
+      && daemon.managedCodexPath.split(/[\\/]/u).join('/').includes('/.codex/packages/standalone/')) {
+      await run(daemon.managedCodexPath, ['update'], this.options.downloadTimeoutMs)
+      daemon = await codexDaemonVersion(candidate)
+    }
+    if (daemon?.managedCodexVersion !== version) {
+      throw new ResidentOperatorError(
+        `Codex daemon package is ${daemon?.managedCodexVersion ?? 'unknown'} after updating to ${version}`,
+        'RUNTIME_UNAVAILABLE',
+      )
+    }
+  }
+
+  /** Restart the app-server onto the installed package unless it already serves it. */
+  private async restartCodexDaemon(version: string): Promise<void> {
+    let daemon = await codexDaemonVersion()
+    if (daemon !== undefined && daemon.appServerVersion !== version) {
+      try {
+        await run(daemon.managedCodexPath, ['app-server', 'daemon', 'restart'], this.options.downloadTimeoutMs)
+      } catch (error) {
+        // execFile failures carry the child's stderr in their message.
+        const detail = error instanceof Error ? error.message : String(error)
+        throw new ResidentOperatorError(detail.includes('not managed by codex app-server daemon')
+          ? `Codex ${version} is installed, but the running app-server ${daemon.appServerVersion} was not started by \`codex app-server daemon\` and cannot be restarted automatically; stop that app-server process and DSH starts ${version} on its next check`
+          : `Codex app-server restart failed: ${detail}`, 'RUNTIME_UNAVAILABLE')
+      }
+      daemon = await codexDaemonVersion()
+    }
+    if (daemon?.appServerVersion !== version) {
+      throw new ResidentOperatorError(
+        `Codex app-server daemon reports ${daemon?.appServerVersion ?? 'no version'} after updating to ${version}`,
+        'RUNTIME_UNAVAILABLE',
+      )
     }
   }
 
