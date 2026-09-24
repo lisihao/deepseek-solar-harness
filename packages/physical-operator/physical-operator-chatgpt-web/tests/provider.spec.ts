@@ -962,6 +962,49 @@ describe('ChatGPT Web physical operator', () => {
     })
   })
 
+  it.each([
+    { name: 'a page item still in progress outranks a turn copy action', item: { completed: false, phase: 'final_answer' }, copy: true, settles: false },
+    { name: 'a completed final page item settles without any copy action', item: { completed: true, phase: 'final_answer' }, copy: false, settles: true },
+    { name: 'completed interim commentary does not settle the turn', item: { completed: true, phase: 'commentary' }, copy: true, settles: false },
+  ])('settles from the page turn item: $name', async ({ item, copy, settles }) => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('Send')
+    form.append(editor, send)
+    document.body.append(form)
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      form.remove()
+      window.history.pushState(null, '', '/c/page-item')
+      const cluster = document.createElement('section')
+      const assistant = contentSearchAssistant('UUID:2:assistant', 'page item reply')
+      const body = assistant.querySelector('[data-markdown-text-style="assistant-message"]')
+      if (body === null) throw new Error('fixture has no assistant body')
+      Object.assign(body, {
+        __reactFiber$fixture: { memoizedProps: {}, return: { memoizedProps: { item: { ...item, content: 'page item reply' } }, return: null } },
+      })
+      cluster.append(contentSearchUser('UUID:0:user'), assistant)
+      if (copy) {
+        const action = document.createElement('button')
+        action.setAttribute('aria-label', 'Copy')
+        cluster.append(action)
+      }
+      document.body.append(cluster)
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') setComposerText(editor, operation.value ?? '')
+        if (operation.id === 'chatgpt-send') send.click()
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    const outcome = await executeGeneratedProgramWithFakeClock(programFor('page item', { generationTimeoutMs: 30 }), browser)
+    expect(outcome).toMatchObject(settles
+      ? { status: 'completed', response: 'page item reply' }
+      : { status: 'generation-timeout', diagnostic: { settled: false } })
+  })
+
   it('fails within the readiness bound when an SSR textarea never hydrates into a ProseMirror composer', async () => {
     const form = document.createElement('form')
     const ssrTextarea = document.createElement('textarea')
