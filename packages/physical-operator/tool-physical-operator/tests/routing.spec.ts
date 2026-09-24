@@ -1687,6 +1687,7 @@ describe('host physical-operator routing', () => {
   it('lists each native model as a selectable operator:model entry with its native efforts', async () => {
     const { ctx } = await setup()
 
+    expect(ctx.llm.listProviders()).toContainEqual({ id: 'dsh-physical-operator', name: '物理算子' })
     const models = await ctx.llm.listModels('dsh-physical-operator')
     expect(models.map(model => [model.id, model.name])).toEqual([
       ['codex', 'Codex'],

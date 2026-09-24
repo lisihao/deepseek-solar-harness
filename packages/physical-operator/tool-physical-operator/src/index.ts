@@ -17,6 +17,7 @@ import {
   type GenerateOptions,
   type LlmCallConfig,
   type LlmModelInfo,
+  type LlmProviderInfo,
   type LlmResolvedModelInfo,
   type Message,
   type StreamChunk,
@@ -760,6 +761,15 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     private readonly modelTools: PhysicalOperatorModelToolBridge,
   ) {
     super()
+  }
+
+  /**
+   * Name the router route for model selectors.
+   * @param provider - the physical-operator router provider id.
+   * @returns the route id with its selector group name.
+   */
+  override providerInfo(provider: string): LlmProviderInfo {
+    return { id: provider, name: '物理算子' }
   }
 
   /** Last successfully loaded native model catalogs, shared by directory reads. */
