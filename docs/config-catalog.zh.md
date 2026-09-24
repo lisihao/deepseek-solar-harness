@@ -1830,6 +1830,12 @@ export interface Config {
   readonly stateRoot?: string
   /** Exact visible ChatGPT custom MCP app name required for tool coordination. */
   readonly connectorName?: string
+  /**
+   * Allow the Custom MCP tool-coordination mode. Off by default: the mode is
+   * frozen, a saved coordinator selection reads as direct, and no MCP
+   * endpoint starts.
+   */
+  readonly coordinatorEnabled?: boolean
   /** Stable loopback port for the user-configured MCP tunnel; zero is useful for isolated tests. */
   readonly coordinatorPort?: number
   /** Maximum HTTP JSON body accepted by the MCP connector. */

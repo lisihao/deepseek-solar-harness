@@ -14,6 +14,8 @@ export const CHATGPT_WEB_SETUP_PATH = '/api/chatgpt-web'
 /** Public status contains no MCP path credential unless setup was explicitly requested. */
 export interface WebCoordinatorStatus {
   readonly mode: WebCoordinationMode
+  /** Whether this deployment allows the Custom MCP tool-coordination mode. */
+  readonly coordinatorAvailable: boolean
   readonly active: boolean
   readonly connectorName: string
   readonly lastVerifiedAt?: string

@@ -32,6 +32,7 @@
             name: '@deepseek-ai/dsh-physical-operator-chatgpt-web'
             config:
               stateRoot: !!js process.env.DSH_HOME + '/web-mcp-state'
+              coordinatorEnabled: true
               coordinatorPort: !!js Number(process.env.DSH_WEB_MCP_PORT)
               coordinatorRequestMaxBytes: 16384
               coordinatorRequestTimeoutMs: 2000

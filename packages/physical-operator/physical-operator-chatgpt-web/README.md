@@ -38,6 +38,7 @@ This physical-operator Service Provider sends one bounded text task through an a
 | `generationTimeoutMs` / `pollIntervalMs` | Bounded response wait and polling interval after submission. |
 | `progressIntervalMs` | Interval for content-free waiting heartbeats; default 15 seconds. |
 | `outputMaxBytes` | Maximum JSON result returned across `ctx.browser`; default 24 KiB. |
+| `coordinatorEnabled` | Allows the Custom MCP tool-coordination mode; default `false`. While off, the mode is frozen: a saved coordinator selection reads as direct, selecting coordination or requesting the MCP address is refused, and no MCP endpoint starts. |
 
 The configured browser Provider must declare `browser-js-v1` plus `authenticated-profile-reuse`, `named-workspace`, and `page-evaluate`. The operator starts no browser, never opens a debugging connection, and makes no OpenAI API request or API-key fallback.
 

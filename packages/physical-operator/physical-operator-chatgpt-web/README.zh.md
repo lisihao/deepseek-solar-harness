@@ -38,6 +38,7 @@
 | `generationTimeoutMs` / `pollIntervalMs` | 提交成功后的有界回复等待时间与轮询间隔。 |
 | `progressIntervalMs` | 不含内容的等待心跳间隔；默认 15 秒。 |
 | `outputMaxBytes` | 经 `ctx.browser` 返回的 JSON 最大长度；默认 24 KiB。 |
+| `coordinatorEnabled` | 是否允许 Custom MCP 工具协作模式；默认 `false`。关闭时该模式被冻结：已保存的协作选择按独立问答处理，选择协作或请求 MCP 地址会被拒绝，也不会启动 MCP 端点。 |
 
 已配置的浏览器 Provider 必须声明 `browser-js-v1`，以及 `authenticated-profile-reuse`、`named-workspace`、`page-evaluate` 三项能力。本算子不会启动浏览器、不会连接调试端口，也绝不发起 OpenAI API 请求或 API Key 回退。
 

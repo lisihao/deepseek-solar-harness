@@ -13,6 +13,7 @@ import {
   ChatGptWebCoordination,
   type WebCoordinationConfig,
 } from '../src/coordination.ts'
+import { WebCoordinatorSettings } from '../src/coordinator-settings.ts'
 import {
   discoverWebModels,
   type DiscoverWebModelsOptions,
@@ -75,6 +76,7 @@ async function harness(): Promise<Harness> {
     id: 'chatgpt-web-fixture',
     stateRoot: root,
     connectorName: 'fixture-chatgpt-web',
+    coordinatorEnabled: false,
     coordinatorPort: 0,
     coordinatorRequestMaxBytes: 4_096,
     coordinatorRequestTimeoutMs: 1_000,
@@ -115,6 +117,27 @@ function catalogWithoutSelectedEffort(overrides: Partial<WebModelCatalog> = {}):
 function appendProfile(session: Session, profile: { readonly model?: string; readonly effort?: string }): void {
   session.append('chatgpt-web/profile', profile, { ignorable: true })
 }
+
+describe('ChatGptWebCoordination frozen tool coordination', () => {
+  it('reads a saved coordinator selection as direct and refuses to enter or expose coordination', async () => {
+    const { ctx, config, root } = await harness()
+    new WebCoordinatorSettings(root).select('coordinator')
+    const frozen = new ChatGptWebCoordination(ctx, config)
+    const publish = vi.fn(async () => {})
+
+    expect(frozen.mode).toBe('direct')
+    expect(frozen.status()).toMatchObject({ mode: 'direct', coordinatorAvailable: false })
+    await expect(frozen.select('coordinator', publish)).rejects.toThrow('ChatGPT Web tool coordination is frozen in this build')
+    await expect(frozen.endpoint()).rejects.toMatchObject({ code: 'OPERATOR_UNAVAILABLE' })
+    expect(publish).not.toHaveBeenCalled()
+
+    const enabled = new ChatGptWebCoordination(ctx, { ...config, coordinatorEnabled: true })
+    expect(enabled.mode).toBe('coordinator')
+    expect(enabled.status()).toMatchObject({ mode: 'coordinator', coordinatorAvailable: true })
+    await enabled.dispose()
+    await frozen.dispose()
+  })
+})
 
 describe('ChatGptWebCoordination catalog and preferences', () => {
   it('reads the latest session preference and does not borrow an unknown session profile', async () => {
