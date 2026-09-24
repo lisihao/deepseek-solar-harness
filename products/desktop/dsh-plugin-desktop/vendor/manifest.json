@@ -362,7 +362,7 @@
     "dsh-packages/deepseek-ai-dsh-physical-operator-resident-0.1.0-rc.5.tgz": "4f5adc2fa30759099cf740e7ac07954f2cc252f6e0983501275530700433792c",
     "dsh-packages/deepseek-ai-dsh-physical-operator-subagent-0.1.0-rc.5.tgz": "9f3e0ee1832d50a8dca771dccde0f436e66981301170e8abbeebe77576982a7d",
     "dsh-packages/deepseek-ai-dsh-resident-operator-0.1.0-rc.5.tgz": "1a870935d9f270888c8103cd07ff23e7a92a6b8e76b545ec0782f735a216c8c1",
-    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "4dfeb7810d5daa3d5f716e46097240d15ed75733aea3b6c319ab73a0add50b02",
+    "dsh-packages/deepseek-ai-dsh-resident-operator-local-0.1.0-rc.5.tgz": "5005efa494ab714e9a2afc95e00f5b1c11ab90e8a7751c3bb40ecf18b0abb7fc",
     "dsh-packages/deepseek-ai-dsh-resident-operators-0.1.0-rc.5.tgz": "df547a78314532bce4f7b12c86b96d299f3e3c65be896d746efc6499d0ab7ceb",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-0.1.0-rc.5.tgz": "e3159591d26997979572f15ffa850cd88debdff3fcb0a8e9273fa8bc3a4a986e",
     "dsh-packages/deepseek-ai-dsh-rlm-runtime-local-0.1.0-rc.5.tgz": "6947ab672f81971354d22e4e93e00eaafa6dc6afbe3c04464d0836edb8da22aa",

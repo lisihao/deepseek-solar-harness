@@ -24,7 +24,7 @@ Receipt 按 `accepted -> running -> settled` 推进；有界 `turn.progress` 阶
 
 ## 原生 CLI 运行时
 
-`cliRuntimes()` 报告每个产品正在运行的版本以及注册表中的最新版本。`updateCli(product)` 从 `cliRegistryUrl` 下载最新的平台原生包，校验注册表给出的 sha512 完整性，并在切换前完成候选版本的资格审查；不兼容的候选版本会被丢弃，正在运行的 CLI 保持不变。通过审查的 Claude Code 候选版本会解压到 `<dshHome>/runtimes/claude-code/<version>`，并通过原子重写 `<dshHome>/runtimes/bin/claude` wrapper 激活。daemon 会把该目录放在 PATH 最前面，并在每次调用时解析产品命令，因此下一次资格审查或回合即使用新副本，无需重启 DSH，系统中的 `claude` 安装也不会被改动。Codex 执行经过 Codex 共享的 app-server daemon，该 daemon 运行 Codex 自己管理的包；因此通过审查的 Codex 候选版本会运行其自带的 `app-server daemon update` 来激活，若 daemon 仍报告旧版本则再执行 `daemon restart`。该更新会中断正在运行的 Codex 任务，并同时更新属主的 Codex standalone 安装。同一产品的并发更新共享一次尝试。
+`cliRuntimes()` 报告每个产品正在运行的版本以及注册表中的最新版本。`updateCli(product)` 从 `cliRegistryUrl` 下载最新的平台原生包，校验注册表给出的 sha512 完整性，并在切换前完成候选版本的资格审查；不兼容的候选版本会被丢弃，正在运行的 CLI 保持不变。通过审查的 Claude Code 候选版本会解压到 `<dshHome>/runtimes/claude-code/<version>`，并通过原子重写 `<dshHome>/runtimes/bin/claude` wrapper 激活。daemon 会把该目录放在 PATH 最前面，并在每次调用时解析产品命令，因此下一次资格审查或回合即使用新副本，无需重启 DSH，系统中的 `claude` 安装也不会被改动。Codex 执行经过 Codex 共享的 app-server daemon，该 daemon 运行 Codex 自己管理的包；因此通过审查的 Codex 候选版本会先运行其自带的 `app-server daemon update`。standalone 安装会报告该命令不受支持，此时通过该安装自身的 `codex update` 更新其运行的包；是否成功取决于 daemon 报告的包版本，而不是退出状态。随后 app-server 会重启到新包。不是由 `codex app-server daemon` 启动的 app-server 无法自动重启，更新会报告需先结束该进程，DSH 才会启动新版本。该更新会中断正在运行的 Codex 任务，并同时更新属主的 Codex standalone 安装。同一产品的并发更新共享一次尝试。
 
 ## 配置与安全
 

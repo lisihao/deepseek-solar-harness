@@ -17,7 +17,10 @@ import { preferManagedCliRuntimes } from '../src/startup.ts'
 
 const TARGET = `${process.platform === 'linux' ? 'linux' : 'darwin'}-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
 const TRIPLE = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-${process.platform === 'linux' ? 'unknown-linux-musl' : 'apple-darwin'}`
-const ENV_KEYS = ['PATH', 'FAKE_CODEX_STATE', 'FAKE_CODEX_SCHEMA', 'FAKE_CODEX_UPDATE_TO', 'FAKE_CODEX_RESTART_TO'] as const
+const ENV_KEYS = [
+  'PATH', 'FAKE_CODEX_STATE', 'FAKE_CODEX_PACKAGE', 'FAKE_CODEX_MANAGED', 'FAKE_CODEX_SCHEMA',
+  'FAKE_CODEX_UPDATE_TO', 'FAKE_CODEX_STANDALONE_TO', 'FAKE_CODEX_RESTART_ERROR',
+] as const
 
 interface Package { readonly archive: Buffer; readonly integrity: string }
 
@@ -47,9 +50,10 @@ function codexScript(version: string): string[] {
     'case "$1 $2 $3" in',
     `  "--version  ") echo "codex-cli ${version}" ;;`,
     '  "app-server generate-json-schema --out") cp "$FAKE_CODEX_SCHEMA" "$4/codex_app_server_protocol.schemas.json" ;;',
-    '  "app-server daemon update") [ -n "$FAKE_CODEX_UPDATE_TO" ] && echo "$FAKE_CODEX_UPDATE_TO" > "$FAKE_CODEX_STATE"; exit 0 ;;',
-    '  "app-server daemon restart") [ -n "$FAKE_CODEX_RESTART_TO" ] && echo "$FAKE_CODEX_RESTART_TO" > "$FAKE_CODEX_STATE"; exit 0 ;;',
-    '  "app-server daemon version") [ -f "$FAKE_CODEX_STATE" ] || exit 3; printf \'{"appServerVersion":"%s","managedCodexPath":"/opt/codex/bin/codex"}\' "$(cat "$FAKE_CODEX_STATE")" ;;',
+    '  "app-server daemon update") if [ -n "$FAKE_CODEX_UPDATE_TO" ]; then echo "$FAKE_CODEX_UPDATE_TO" > "$FAKE_CODEX_PACKAGE"; echo "$FAKE_CODEX_UPDATE_TO" > "$FAKE_CODEX_STATE"; else echo \'{"status":"unsupported"}\'; fi ;;',
+    '  "update  ") [ -n "$FAKE_CODEX_STANDALONE_TO" ] && echo "$FAKE_CODEX_STANDALONE_TO" > "$FAKE_CODEX_PACKAGE"; exit 0 ;;',
+    '  "app-server daemon restart") if [ -n "$FAKE_CODEX_RESTART_ERROR" ]; then echo "Error: $FAKE_CODEX_RESTART_ERROR" >&2; exit 1; fi; cp "$FAKE_CODEX_PACKAGE" "$FAKE_CODEX_STATE" ;;',
+    '  "app-server daemon version") [ -f "$FAKE_CODEX_STATE" ] || exit 3; printf \'{"appServerVersion":"%s","managedCodexVersion":"%s","managedCodexPath":"%s"}\' "$(cat "$FAKE_CODEX_STATE")" "$(cat "$FAKE_CODEX_PACKAGE")" "$FAKE_CODEX_MANAGED" ;;',
     '  *) exit 2 ;;',
     'esac',
   ]
@@ -125,10 +129,17 @@ beforeEach(async () => {
   executable(join(bin, 'codex'), codexScript('0.151.0'))
   process.env.PATH = [bin, '/usr/bin', '/bin'].join(delimiter)
   process.env.FAKE_CODEX_STATE = join(root, 'daemon-version')
+  process.env.FAKE_CODEX_PACKAGE = join(root, 'daemon-package')
   process.env.FAKE_CODEX_SCHEMA = schema()
   writeFileSync(process.env.FAKE_CODEX_STATE, '0.149.1\n')
+  writeFileSync(process.env.FAKE_CODEX_PACKAGE, '0.149.1\n')
+  const standalone = join(root, '.codex', 'packages', 'standalone', 'current', 'bin')
+  mkdirSync(standalone, { recursive: true })
+  process.env.FAKE_CODEX_MANAGED = join(standalone, 'codex')
+  executable(process.env.FAKE_CODEX_MANAGED, codexScript('0.149.1'))
   delete process.env.FAKE_CODEX_UPDATE_TO
-  delete process.env.FAKE_CODEX_RESTART_TO
+  delete process.env.FAKE_CODEX_STANDALONE_TO
+  delete process.env.FAKE_CODEX_RESTART_ERROR
 })
 
 afterEach(async () => {
@@ -223,20 +234,32 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('C
     await expect(manager().update('codex')).rejects.toMatchObject({ code: 'INVALID_RESULT' })
   })
 
-  it('activates a qualified Codex candidate through the daemon update and falls back to a restart', async () => {
+  it('activates a qualified Codex candidate through the daemon update', async () => {
     publishCodex('0.160.0')
     process.env.FAKE_CODEX_UPDATE_TO = '0.160.0'
     await expect(manager().update('codex')).resolves.toEqual({ product: 'codex', version: '0.160.0', status: 'activated' })
     expect(readFileSync(process.env.FAKE_CODEX_STATE ?? '', 'utf8').trim()).toBe('0.160.0')
     expect(readdirSync(join(root, 'runtimes', 'codex'))).toEqual([])
+  })
 
+  it('updates a standalone daemon package through its own updater, then restarts the app-server onto it', async () => {
     publishCodex('0.161.0')
-    delete process.env.FAKE_CODEX_UPDATE_TO
-    process.env.FAKE_CODEX_RESTART_TO = '0.161.0'
+    process.env.FAKE_CODEX_STANDALONE_TO = '0.161.0'
     await expect(manager().update('codex')).resolves.toMatchObject({ version: '0.161.0', status: 'activated' })
+    expect(readFileSync(process.env.FAKE_CODEX_STATE ?? '', 'utf8').trim()).toBe('0.161.0')
+  })
 
+  it('reports a package that did not move and an app-server the daemon does not manage', async () => {
     publishCodex('0.162.0')
-    await expect(manager().update('codex')).rejects.toThrow('daemon reports 0.161.0 after updating to 0.162.0')
+    await expect(manager().update('codex')).rejects.toThrow('daemon package is 0.149.1 after updating to 0.162.0')
+
+    process.env.FAKE_CODEX_STANDALONE_TO = '0.162.0'
+    process.env.FAKE_CODEX_RESTART_ERROR = 'app server is running but is not managed by codex app-server daemon'
+    await expect(manager().update('codex')).rejects.toThrow(
+      'Codex 0.162.0 is installed, but the running app-server 0.149.1 was not started by `codex app-server daemon`',
+    )
+    process.env.FAKE_CODEX_RESTART_ERROR = 'socket busy'
+    await expect(manager().update('codex')).rejects.toThrow(/Codex app-server restart failed: .*socket busy/su)
   })
 
   it('refuses a Codex candidate that lacks a required method or misreports its version', async () => {
