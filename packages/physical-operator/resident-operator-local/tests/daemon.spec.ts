@@ -21,10 +21,9 @@ import { normalizeResidentDriverError, ResidentDaemon } from '../src/daemon.ts'
 import { residentDriverManifestSha256 } from '../src/driver-modules.ts'
 import { unwrapWire } from '../src/protocol.ts'
 import { ResidentStore } from '../src/store.ts'
-import {
-  EXPECTED_CODEX_CLI_VERSION,
-  EXPECTED_CODEX_SCHEMA_SHA256,
-} from '../src/drivers.ts'
+
+const CODEX_VERSION = 'codex-cli 0.151.0'
+const CODEX_SCHEMA_SHA256 = '2442b15801bc019ad55987ad03e0f0ae60c51417825b9b6d708db640e6c2651c'
 
 const roots: string[] = []
 const MODELS = [{
@@ -398,8 +397,8 @@ class FailingAuthenticationDriver extends MemoryDriver {
       available: false,
       unavailableReason: 'subscription login required',
       authentication: 'unqualified',
-      productVersion: EXPECTED_CODEX_CLI_VERSION,
-      protocolHash: EXPECTED_CODEX_SCHEMA_SHA256,
+      productVersion: CODEX_VERSION,
+      protocolHash: CODEX_SCHEMA_SHA256,
       models: [],
     })
   }
@@ -556,8 +555,8 @@ class UnavailableTransportDriver extends MemoryDriver {
       unavailableReason: 'managed app-server daemon is unavailable',
       unavailableCode: 'RUNTIME_UNAVAILABLE',
       authentication: 'unqualified',
-      productVersion: EXPECTED_CODEX_CLI_VERSION,
-      protocolHash: EXPECTED_CODEX_SCHEMA_SHA256,
+      productVersion: CODEX_VERSION,
+      protocolHash: CODEX_SCHEMA_SHA256,
       models: MODELS,
     })
   }

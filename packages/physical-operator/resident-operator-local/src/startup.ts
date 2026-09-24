@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /** Standalone lifecycle entry for dsh-resident-operatord. @module @deepseek-ai/dsh-resident-operator-local/startup */
 
+import { delimiter } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { ResidentDaemon } from './daemon.ts'
 import { ClaudeCodeResidentDriver, CodexResidentDriver } from './drivers.ts'
 import { loadResidentProductDrivers, residentDriverManifestSha256 } from './driver-modules.ts'
+import { cliRuntimesRoot, managedCliBinDir } from './cli-runtimes.ts'
 
 const ELECTRON_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 
@@ -20,6 +22,19 @@ export function clearElectronRunAsNode(environment: NodeJS.ProcessEnv): void {
 }
 
 /**
+ * Put the DSH-managed CLI wrapper directory first on PATH. Product commands
+ * resolve through PATH at each call, so a later activation takes effect on the
+ * next qualification or turn without restarting the daemon.
+ * @param environment - daemon environment inherited by product Drivers.
+ * @param root - Resident daemon state root beside the managed runtimes.
+ */
+export function preferManagedCliRuntimes(environment: NodeJS.ProcessEnv, root: string): void {
+  const bin = managedCliBinDir(cliRuntimesRoot(root))
+  const rest = (environment.PATH ?? '').split(delimiter).filter(entry => entry.length > 0 && entry !== bin)
+  environment.PATH = [bin, ...rest].join(delimiter)
+}
+
+/**
  * Run one signal-aware Resident daemon until graceful closure.
  * @param root - owner-only daemon state root.
  * @param driverModules - absolute independent product Driver entries loaded before startup.
@@ -27,6 +42,7 @@ export function clearElectronRunAsNode(environment: NodeJS.ProcessEnv): void {
  */
 export async function runResidentDaemon(root: string, driverModules: readonly string[] = []): Promise<void> {
   clearElectronRunAsNode(process.env)
+  preferManagedCliRuntimes(process.env, root)
   const external = await loadResidentProductDrivers(root, driverModules)
   const daemon = new ResidentDaemon({
     root,

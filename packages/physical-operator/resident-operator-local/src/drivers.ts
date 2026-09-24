@@ -34,6 +34,7 @@ import type {
 } from '@deepseek-ai/dsh-resident-operator'
 import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
 import {
+  CODEX_APP_SERVER_METHODS,
   CodexApprovalRequiredError,
   CodexAppServerWire,
   type CodexDynamicToolCall,
@@ -62,14 +63,71 @@ export type ClaudeAuthenticationFailureCode =
   | 'NETWORK_UNAVAILABLE'
   | 'CALLBACK_LISTENER_MISSING'
 
-/** Qualified Claude Code CLI version for this Resident build. */
+/** Baseline Claude Code CLI version this Resident build was qualified with. */
 export const EXPECTED_CLAUDE_CLI_VERSION = '2.1.239 (Claude Code)'
 /** Official Claude Agent SDK version compiled into this Resident build. */
 export const EXPECTED_CLAUDE_SDK_VERSION = '0.3.220'
-/** Qualified Codex CLI version for this Resident build. */
-export const EXPECTED_CODEX_CLI_VERSION = 'codex-cli 0.151.0'
-/** SHA-256 of the qualified Codex app-server v2 JSON Schema. */
-export const EXPECTED_CODEX_SCHEMA_SHA256 = '2442b15801bc019ad55987ad03e0f0ae60c51417825b9b6d708db640e6c2651c'
+/**
+ * App-server methods a Codex build's protocol schema does not declare but the
+ * Resident wire requires. The method set, not the release number or schema
+ * digest, is what the Driver depends on.
+ * @param schema - parsed `codex_app_server_protocol.schemas.json`.
+ * @returns missing methods as `Union:method`; empty for a compatible build.
+ */
+export function missingCodexProtocolMethods(schema: unknown): string[] {
+  const definitions = typeof schema === 'object' && schema !== null
+    ? (schema as { definitions?: Record<string, { oneOf?: unknown[] } | undefined> }).definitions ?? {}
+    : {}
+  return Object.entries(CODEX_APP_SERVER_METHODS).flatMap(([union, methods]) => {
+    const declared = new Set((definitions[union]?.oneOf ?? []).flatMap((variant) => {
+      const values = (variant as { properties?: { method?: { enum?: unknown } } }).properties?.method?.enum
+      return Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : []
+    }))
+    return methods.filter(method => !declared.has(method)).map(method => `${union}:${method}`)
+  })
+}
+
+/** Protocol digest and required-method gaps of one Codex executable. */
+export interface CodexProtocolReport {
+  /** SHA-256 of the generated combined protocol schema, for diagnostics. */
+  readonly hash: string
+  /** Required methods the schema does not declare. */
+  readonly missing: readonly string[]
+}
+
+/**
+ * Generate one Codex executable's app-server protocol schema and check it
+ * against the methods the Resident wire uses.
+ * @param executable - absolute Codex executable or bare `codex`.
+ * @returns the schema digest and missing required methods.
+ */
+export async function codexProtocol(executable: string): Promise<CodexProtocolReport> {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-codex-schema-'))
+  try {
+    await command(executable, ['app-server', 'generate-json-schema', '--out', root])
+    const content = readFileSync(join(root, 'codex_app_server_protocol.schemas.json'))
+    return {
+      hash: createHash('sha256').update(content).digest('hex'),
+      missing: missingCodexProtocolMethods(JSON.parse(content.toString('utf8'))),
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Whether a Claude Code CLI release is inside the qualified window: the
+ * baseline's major.minor line at or above the baseline patch.
+ * @param version - trimmed `claude --version` output.
+ * @returns true for `2.1.N (Claude Code)` with N at or above the baseline patch.
+ */
+export function claudeCliCompatible(version: string): boolean {
+  const baseline = /^(\d+)\.(\d+)\.(\d+) \(Claude Code\)$/u.exec(EXPECTED_CLAUDE_CLI_VERSION)
+  const candidate = /^(\d+)\.(\d+)\.(\d+) \(Claude Code\)$/u.exec(version.trim())
+  return baseline !== null && candidate !== null
+    && candidate[1] === baseline[1] && candidate[2] === baseline[2]
+    && Number(candidate[3]) >= Number(baseline[3])
+}
 
 const EFFORTS = new Set<PhysicalOperatorReasoningEffort>(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
 
@@ -564,6 +622,42 @@ export async function collectCodexModelsAndQuota(
   }
 }
 
+/** Running Codex app-server daemon identity reported by `codex app-server daemon version`. */
+export interface CodexDaemonVersion {
+  /** Version of the app-server process the control socket serves. */
+  readonly appServerVersion: string
+  /** Absolute executable of the daemon's managed Codex package. */
+  readonly managedCodexPath: string
+}
+
+/**
+ * Read the running daemon identity. CLIs without `daemon version`, or a
+ * daemon that reports no managed package, yield undefined.
+ * @param executable - Codex CLI used to query the daemon.
+ * @returns the daemon's app-server version and managed executable, when reported.
+ */
+export async function codexDaemonVersion(executable = 'codex'): Promise<CodexDaemonVersion | undefined> {
+  let stdout: string
+  try {
+    stdout = (await command(executable, ['app-server', 'daemon', 'version'])).stdout
+  } catch {
+    // Pre-`daemon version` CLIs still qualify through their own schema.
+    return undefined
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stdout)
+  } catch {
+    // Non-JSON output carries no daemon identity.
+    return undefined
+  }
+  const record = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : {}
+  const { appServerVersion, managedCodexPath } = record
+  return typeof appServerVersion === 'string' && typeof managedCodexPath === 'string' && isAbsolute(managedCodexPath)
+    ? { appServerVersion, managedCodexPath }
+    : undefined
+}
+
 async function codexModelsAndQuota(): Promise<{
   readonly models: ResidentModelOption[]
   readonly quotaPools: ResidentQuotaPool[]
@@ -927,7 +1021,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
       const { stdout: version, executable } = await command('claude', ['--version'])
       const parsed = await claudeAuthenticationStatus(executable)
       const subscription = isClaudeNativeSubscription(parsed)
-      const exactVersion = version.trim() === EXPECTED_CLAUDE_CLI_VERSION
+      const exactVersion = claudeCliCompatible(version)
       const models = subscription && exactVersion ? await this.models(executable) : []
       const catalogReady = models.length > 0
       const unavailableCode = !subscription
@@ -951,7 +1045,7 @@ export class ClaudeCodeResidentDriver implements ResidentProductDriver {
           unavailableReason: !subscription
             ? 'Claude Code is not authenticated with a claude.ai subscription'
             : !exactVersion
-              ? `Claude Code version ${version.trim()} does not match ${EXPECTED_CLAUDE_CLI_VERSION}`
+              ? `Claude Code version ${version.trim()} is outside the qualified ${EXPECTED_CLAUDE_CLI_VERSION} release line`
               : 'Claude Code reported no selectable models',
         },
         authentication: subscription ? 'native-subscription' : 'unqualified',
@@ -1161,14 +1255,11 @@ export class CodexResidentDriver implements ResidentProductDriver {
 
   async qualify(): Promise<ResidentProviderStatus> {
     try {
-      const [{ stdout: version }, login, schemaHash] = await Promise.all([
+      const [{ stdout: version }, login] = await Promise.all([
         command('codex', ['--version']),
         command('codex', ['login', 'status']),
-        this.schemaHash(),
       ])
       const subscription = `${login.stdout}\n${login.stderr}`.includes('Logged in using ChatGPT')
-      const exactVersion = version.trim() === EXPECTED_CODEX_CLI_VERSION
-      const exactSchema = schemaHash === EXPECTED_CODEX_SCHEMA_SHA256
       let transportError: unknown
       try {
         await command('codex', ['app-server', 'daemon', 'start'])
@@ -1176,15 +1267,20 @@ export class CodexResidentDriver implements ResidentProductDriver {
         transportError = error
       }
       const transportReady = transportError === undefined
-      const catalog = transportReady ? await codexModelsAndQuota().catch((error: unknown) => {
+      // The daemon serves its own managed package; qualify the binary it runs.
+      const server = transportReady ? await codexDaemonVersion() : undefined
+      const protocol = await codexProtocol(server?.managedCodexPath ?? 'codex')
+      const compatible = protocol.missing.length === 0
+      const productVersion = server === undefined ? version.trim() : `codex-cli ${server.appServerVersion}`
+      const catalog = transportReady && compatible ? await codexModelsAndQuota().catch((error: unknown) => {
         transportError = error
         return { models: [], quotaPools: [], quotaUnavailableReason: undefined }
       }) : { models: [], quotaPools: [], quotaUnavailableReason: undefined }
       const { models, quotaPools, quotaUnavailableReason } = catalog
-      const available = subscription && exactVersion && exactSchema && transportReady && models.length > 0
+      const available = subscription && compatible && transportError === undefined && models.length > 0
       const unavailableCode = !subscription
         ? 'AUTH_MODE_MISMATCH'
-        : !exactVersion || !exactSchema
+        : !compatible
           ? 'PROVIDER_VERSION_MISMATCH'
           : transportError !== undefined
             ? residentQualificationFailureCode(transportError)
@@ -1204,17 +1300,15 @@ export class CodexResidentDriver implements ResidentProductDriver {
         ...available ? {} : {
           unavailableReason: !subscription
             ? 'Codex is not authenticated with a ChatGPT subscription'
-            : !exactVersion
-              ? `Codex version ${version.trim()} does not match ${EXPECTED_CODEX_CLI_VERSION}`
-              : !exactSchema
-                ? `Codex app-server schema ${schemaHash} does not match ${EXPECTED_CODEX_SCHEMA_SHA256}`
-                : transportError !== undefined
-                  ? `Codex app-server daemon unavailable: ${transportError instanceof Error ? transportError.message : 'unknown failure'}`
-                  : 'Codex app-server reported no selectable models',
+            : !compatible
+              ? `${productVersion} app-server lacks required methods: ${protocol.missing.join(', ')}`
+              : transportError !== undefined
+                ? `Codex app-server daemon unavailable: ${transportError instanceof Error ? transportError.message : 'unknown failure'}`
+                : 'Codex app-server reported no selectable models',
         },
         authentication: subscription ? 'native-subscription' : 'unqualified',
-        productVersion: version.trim(),
-        protocolHash: schemaHash,
+        productVersion,
+        protocolHash: protocol.hash,
         models,
         quotaPools,
         ...quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason },
@@ -1321,12 +1415,7 @@ export class CodexResidentDriver implements ResidentProductDriver {
   private async requireAvailable(): Promise<void> {
     const qualification = await this.qualify()
     if (qualification.available) return
-    const code = qualification.unavailableCode ?? (qualification.authentication !== 'native-subscription'
-      ? 'AUTH_MODE_MISMATCH'
-      : qualification.productVersion !== EXPECTED_CODEX_CLI_VERSION
-        || qualification.protocolHash !== EXPECTED_CODEX_SCHEMA_SHA256
-        ? 'PROVIDER_VERSION_MISMATCH'
-        : 'RUNTIME_UNAVAILABLE')
+    const code = qualification.unavailableCode ?? 'RUNTIME_UNAVAILABLE'
     throw new ResidentOperatorError(qualification.unavailableReason ?? 'Codex unavailable', code)
   }
 
@@ -1343,16 +1432,6 @@ export class CodexResidentDriver implements ResidentProductDriver {
     })
   }
 
-  private async schemaHash(): Promise<string> {
-    const root = mkdtempSync(join(tmpdir(), 'dsh-codex-schema-'))
-    try {
-      await command('codex', ['app-server', 'generate-json-schema', '--out', root])
-      const content = readFileSync(join(root, 'codex_app_server_protocol.v2.schemas.json'))
-      return createHash('sha256').update(content).digest('hex')
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  }
 }
 
 function unavailable(product: 'claude-code' | 'codex', error: unknown): ResidentProviderStatus {

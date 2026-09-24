@@ -2033,10 +2033,14 @@ export interface Config {
   readonly driverModules?: string[]
   /** Explicit executable or helper used for the detached headless daemon. */
   readonly headlessNodeExecutable?: string
+  /** npm-compatible registry that publishes the native Claude Code and Codex CLIs. */
+  readonly cliRegistryUrl?: string
+  /** Bound on each CLI registry request, package download, and Codex daemon update. */
+  readonly cliDownloadTimeoutMs?: number
 }
 ```
 
-来源：[`packages/physical-operator/resident-operator-local/src/index.ts:39`](../packages/physical-operator/resident-operator-local/src/index.ts)
+来源：[`packages/physical-operator/resident-operator-local/src/index.ts:54`](../packages/physical-operator/resident-operator-local/src/index.ts)
 
 <a id="deepseek-aidsh-rlm-runtime-local"></a>
 
@@ -2702,7 +2706,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/subagent/subagent-codex/src/index.ts:44`](../packages/subagent/subagent-codex/src/index.ts)
+来源：[`packages/subagent/subagent-codex/src/index.ts:45`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 

@@ -1456,6 +1456,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the provider status after the product CLI completes authentication.',
       },
       {
+        signature: 'cliRuntimes(): Promise<ResidentCliRuntimeStatus[]>',
+        description: 'Report the running and published version of each native product CLI.',
+        parameters: [],
+        returns: 'one status per product in `ResidentCliProduct` order.',
+      },
+      {
+        signature: 'updateCli(_product: ResidentCliProduct): Promise<ResidentCliUpdateResult>',
+        description: 'Download the newest published CLI for one product, qualify it, and activate it only when qualification passes.',
+        parameters: [{ name: '_product', description: 'native product to update.' }],
+        returns: 'the candidate version and whether it was activated.',
+      },
+      {
         signature: 'abstract execute(request: ResidentExecuteRequest): Promise<ResidentTurn>',
         description: 'Admit or replay one durable command for its operator/workspace/lane Session.',
         parameters: [{ name: 'request', description: 'command identity, optional retry lineage, prompt, workspace, lane, and cancellation signal.' }],
@@ -5410,6 +5422,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RequestRunOutcome',
     declaration: 'export type RequestRunOutcome = \'approved\' | \'completed\' | \'rejected\' | \'cancelled\' | \'failed\';',
+  },
+  {
+    name: 'ResidentCliProduct',
+    declaration: 'export type ResidentCliProduct = \'claude-code\' | \'codex\';',
+  },
+  {
+    name: 'ResidentCliRuntimeStatus',
+    declaration: 'export interface ResidentCliRuntimeStatus {\n    readonly product: ResidentCliProduct;\n    readonly currentVersion?: string;\n    readonly latestVersion?: string;\n    readonly updateAvailable: boolean;\n    readonly managed: boolean;\n    readonly error?: string;\n}',
+  },
+  {
+    name: 'ResidentCliUpdateResult',
+    declaration: 'export interface ResidentCliUpdateResult {\n    readonly product: ResidentCliProduct;\n    readonly version: string;\n    readonly status: \'activated\' | \'incompatible\';\n    readonly reason?: string;\n}',
   },
   {
     name: 'ResidentCompactRequest',

@@ -8,6 +8,7 @@
   "files": [
     "src/client/index.ts",
     "src/client/ResidentOperatorsPanel.tsx",
+    "src/client/CliRuntimes.tsx",
     "src/client/PhysicalOperatorRoutingControl.tsx",
     "src/client/WebCoordinationSetup.tsx",
     "src/client/WebModelControls.tsx",

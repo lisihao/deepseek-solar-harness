@@ -1,14 +1,35 @@
+import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import {
   assertStateRevision,
   ResidentOperatorCommandId,
   ResidentOperatorError,
+  ResidentOperatorService,
   ResidentOperatorSessionId,
   ResidentOperatorTurnId,
   type ResidentProviderStatus,
 } from '../src/index.ts'
 
+class MinimalResidentOperators extends ResidentOperatorService {
+  providers() { return Promise.resolve([]) }
+  execute(): Promise<never> { return Promise.reject(new Error('unused')) }
+  list() { return Promise.resolve([]) }
+  inspect(): Promise<never> { return Promise.reject(new Error('unused')) }
+  inspectTurn(): Promise<never> { return Promise.reject(new Error('unused')) }
+  readEvents() { return Promise.resolve({ events: [], nextSequence: 0 }) }
+  interrupt() { return Promise.resolve() }
+  reset(): Promise<never> { return Promise.reject(new Error('unused')) }
+  resolveIndeterminate() { return Promise.resolve() }
+}
+
 describe('resident operator Service Definition', () => {
+  it('rejects native CLI runtime management unless a Provider implements it', () => {
+    const service = new MinimalResidentOperators(new Context())
+    expect(() => service.cliRuntimes()).toThrow(ResidentOperatorError)
+    expect(() => service.updateCli('codex')).toThrow('does not manage native CLI runtimes')
+  })
+
+
   it('preserves opaque daemon identities', () => {
     expect(ResidentOperatorSessionId('session-1')).toBe('session-1')
     expect(ResidentOperatorTurnId('turn-1')).toBe('turn-1')

@@ -6,7 +6,7 @@ import {
   ResidentOperatorTurnId,
 } from '@deepseek-ai/dsh-resident-operator'
 import { describe, expect, it, vi } from 'vitest'
-import { readResidentDashboard, registerResidentDashboard } from '../src/dashboard.ts'
+import { readResidentDashboard, registerResidentCliRuntimes, registerResidentDashboard } from '../src/dashboard.ts'
 
 function responseRecorder(): {
   response: { writeHead: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> }
@@ -402,5 +402,92 @@ describe('Resident Operator Desktop projection', () => {
     const dashboard = await readResidentDashboard({ residentOperators } as unknown as Context)
     expect(dashboard.sessions).toEqual([])
     expect(dashboard.hiddenDiagnosticSessions).toBe(1)
+  })
+})
+
+describe('native CLI route', () => {
+  function register(residentOperators: Record<string, unknown>, withAuth = true) {
+    let handler: ((request: unknown, response: unknown) => Promise<void>) | undefined
+    const remoteAuth = {
+      authenticate: (token: string) => token === 'valid'
+        ? { deviceId: 'remote', deviceName: 'Remote', scope: 'admin' as const }
+        : undefined,
+    }
+    const warn = vi.fn()
+    registerResidentCliRuntimes({
+      residentOperators,
+      webServer: {
+        register: vi.fn((route: { handler: typeof handler }) => {
+          handler = route.handler
+          return () => {}
+        }),
+      },
+      get: (key: string) => key === 'remoteAuth' && withAuth ? remoteAuth : undefined,
+      logger: { warn },
+    } as unknown as Context)
+    if (handler === undefined) throw new Error('CLI route was not registered')
+    return { handler, warn }
+  }
+
+  it('reports versions to authorized readers and updates only for the local owner', async () => {
+    const cliRuntimes = vi.fn(async () => [
+      { product: 'claude-code', currentVersion: '2.1.239', latestVersion: '2.1.281', updateAvailable: true, managed: false },
+    ])
+    const updateCli = vi.fn()
+      .mockResolvedValueOnce({ product: 'claude-code', version: '2.1.281', status: 'activated' })
+      .mockResolvedValueOnce({ product: 'codex', version: '0.160.0', status: 'incompatible', reason: 'missing turn/interrupt' })
+    const { handler } = register({ cliRuntimes, updateCli })
+
+    const read = responseRecorder()
+    await handler({ ...localGet('/api/resident-operators/cli'), headers: { host: 'server.test', authorization: 'Bearer valid' }, socket: { remoteAddress: '100.64.0.2' } }, read.response)
+    expect(read.status()).toBe(200)
+    expect(read.json()).toEqual({ runtimes: [
+      { product: 'claude-code', currentVersion: '2.1.239', latestVersion: '2.1.281', updateAvailable: true, managed: false },
+    ] })
+
+    const remote = responseRecorder()
+    await handler({ method: 'POST', url: '/api/resident-operators/cli?product=codex', headers: { host: 'server.test', authorization: 'Bearer valid' }, socket: { remoteAddress: '100.64.0.2' } }, remote.response)
+    expect(remote.status()).toBe(403)
+
+    const missing = responseRecorder()
+    await handler({ ...localGet('/api/resident-operators/cli?product=cursor'), method: 'POST' }, missing.response)
+    expect(missing.status()).toBe(400)
+    expect(updateCli).not.toHaveBeenCalled()
+
+    const activated = responseRecorder()
+    await handler({ ...localGet('/api/resident-operators/cli?product=claude-code'), method: 'POST' }, activated.response)
+    expect(activated.json()).toEqual({ product: 'claude-code', version: '2.1.281', status: 'activated' })
+    const refused = responseRecorder()
+    await handler({ ...localGet('/api/resident-operators/cli?product=codex'), method: 'POST' }, refused.response)
+    expect(refused.json()).toEqual({ product: 'codex', version: '0.160.0', status: 'incompatible', reason: 'missing turn/interrupt' })
+    expect(updateCli.mock.calls).toEqual([['claude-code'], ['codex']])
+  })
+
+  it('rejects unauthenticated or unsupported requests and reports provider failures', async () => {
+    const { handler, warn } = register({
+      cliRuntimes: vi.fn(async () => { throw new Error('registry offline') }),
+      updateCli: vi.fn(async () => { throw 'daemon gone' }),
+    })
+    const anonymous = responseRecorder()
+    await handler({ method: 'GET', url: '/api/resident-operators/cli', headers: { host: 'server.test' }, socket: { remoteAddress: '100.64.0.2' } }, anonymous.response)
+    expect(anonymous.status()).toBe(401)
+
+    const put = responseRecorder()
+    await handler({ ...localGet('/api/resident-operators/cli'), method: 'PUT' }, put.response)
+    expect(put.status()).toBe(405)
+
+    const read = responseRecorder()
+    await handler(localGet('/api/resident-operators/cli'), read.response)
+    expect(read.status()).toBe(503)
+    expect(read.json()).toEqual({ error: 'RESIDENT_CLI_UNAVAILABLE', message: 'registry offline' })
+    const write = responseRecorder()
+    await handler({ ...localGet('/api/resident-operators/cli?product=codex'), method: 'POST' }, write.response)
+    expect(write.json()).toEqual({ error: 'RESIDENT_CLI_UNAVAILABLE', message: 'daemon gone' })
+    expect(warn).toHaveBeenCalledTimes(2)
+
+    const unauthenticated = register({}, false)
+    const noAuth = responseRecorder()
+    await unauthenticated.handler(localGet('/api/resident-operators/cli'), noAuth.response)
+    expect(noAuth.status()).toBe(503)
   })
 })

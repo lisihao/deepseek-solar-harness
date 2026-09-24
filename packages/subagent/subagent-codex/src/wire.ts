@@ -1,5 +1,5 @@
 /**
- * Minimal Codex app-server 0.151.0 protocol adapter. The shared JSON-RPC
+ * Minimal Codex app-server protocol adapter. The shared JSON-RPC
  * transport owns framing and request correlation; this module owns only the
  * product methods, current thread/turn association, unattended approval
  * responses, and terminal-answer selection.
@@ -13,6 +13,40 @@ import type { SubagentResult, SubagentUsage } from '@deepseek-ai/dsh-subagent'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 
 type JsonObject = Record<string, unknown>
+
+/**
+ * Every app-server method this adapter sends or handles, keyed by the
+ * protocol union that declares it. A Codex build qualifies only when its
+ * generated protocol schema declares each method.
+ */
+export const CODEX_APP_SERVER_METHODS = {
+  ClientRequest: [
+    'initialize',
+    'model/list',
+    'account/rateLimits/read',
+    'thread/start',
+    'thread/resume',
+    'thread/compact/start',
+    'turn/start',
+    'turn/interrupt',
+  ],
+  ClientNotification: ['initialized'],
+  ServerRequest: [
+    'item/tool/call',
+    'item/commandExecution/requestApproval',
+    'item/fileChange/requestApproval',
+    'item/permissions/requestApproval',
+    'item/tool/requestUserInput',
+    'mcpServer/elicitation/request',
+  ],
+  ServerNotification: [
+    'turn/started',
+    'thread/tokenUsage/updated',
+    'item/started',
+    'item/completed',
+    'turn/completed',
+  ],
+} as const satisfies Readonly<Record<string, readonly string[]>>
 
 /** Model catalog row returned by the qualified app-server. */
 export interface CodexAppServerModel {

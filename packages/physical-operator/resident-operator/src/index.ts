@@ -184,6 +184,38 @@ export type ResidentProviderUnavailableCode =
   | 'QUOTA_EXHAUSTED'
   | 'RUNTIME_UNAVAILABLE'
 
+/** Native product whose command-line runtime DSH can check and update. */
+export type ResidentCliProduct = 'claude-code' | 'codex'
+
+/** Running and published versions of one native product CLI. */
+export interface ResidentCliRuntimeStatus {
+  readonly product: ResidentCliProduct
+  /** Version Resident execution currently uses; absent when the product is not installed. */
+  readonly currentVersion?: string
+  /** Newest version the product's package registry publishes; absent when the check failed. */
+  readonly latestVersion?: string
+  /** Whether `latestVersion` is newer than `currentVersion`. */
+  readonly updateAvailable: boolean
+  /** Whether Resident execution uses a DSH-managed runtime instead of a system installation. */
+  readonly managed: boolean
+  /** Registry or version probe failure, when one occurred. */
+  readonly error?: string
+}
+
+/** Outcome of one verified native CLI update. */
+export interface ResidentCliUpdateResult {
+  readonly product: ResidentCliProduct
+  /** Candidate version that was downloaded and qualified. */
+  readonly version: string
+  /**
+   * `activated`: Resident execution now uses `version`. `incompatible`: the
+   * candidate failed qualification and the running version is unchanged.
+   */
+  readonly status: 'activated' | 'incompatible'
+  /** Qualification failure for an incompatible candidate. */
+  readonly reason?: string
+}
+
 /** Current qualification result for one native product Driver. */
 export interface ResidentProviderStatus {
   readonly operatorId: string
@@ -461,6 +493,24 @@ export abstract class ResidentOperatorService extends Service {
    */
   authenticate(_operatorId: string): Promise<ResidentProviderStatus> {
     throw new ResidentOperatorError('Resident Provider does not support explicit authentication', 'SESSION_UNAVAILABLE')
+  }
+
+  /**
+   * Report the running and published version of each native product CLI.
+   * @returns one status per product in `ResidentCliProduct` order.
+   */
+  cliRuntimes(): Promise<ResidentCliRuntimeStatus[]> {
+    throw new ResidentOperatorError('Resident Provider does not manage native CLI runtimes', 'SESSION_UNAVAILABLE')
+  }
+
+  /**
+   * Download the newest published CLI for one product, qualify it, and
+   * activate it only when qualification passes.
+   * @param _product - native product to update.
+   * @returns the candidate version and whether it was activated.
+   */
+  updateCli(_product: ResidentCliProduct): Promise<ResidentCliUpdateResult> {
+    throw new ResidentOperatorError('Resident Provider does not manage native CLI runtimes', 'SESSION_UNAVAILABLE')
   }
 
   /**

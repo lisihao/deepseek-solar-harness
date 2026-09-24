@@ -25,6 +25,7 @@ import {
 } from './run.ts'
 
 export {
+  CODEX_APP_SERVER_METHODS,
   CodexAppServerWire,
   CodexApprovalRequiredError,
   type CodexAppServerExecutionBoundary,
