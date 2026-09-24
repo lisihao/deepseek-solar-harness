@@ -1,0 +1,438 @@
+{
+  "schemaVersion": 1,
+  "forkPoint": "47f943859bef60e4160492346772ded9b24f765a",
+  "edits": {
+    "apps/cli/src/args.ts": {
+      "kind": "migration-debt",
+      "note": "feat(orchestration): deliver prime runtime and debate mode; feat: ship dual-mode workbench orchestration"
+    },
+    "apps/cli/src/bin.ts": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration; feat(physical-operator): add resident execution mode"
+    },
+    "apps/web/src/main.ts": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/api/remotes/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(trajectory): enforce host-safe physical traces"
+    },
+    "packages/api/remotes/src/remote-events.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/boot/app-boot/src/profile.ts": {
+      "kind": "migration-debt",
+      "note": "feat(server): mount durable execution bundles by default; feat: ship dual-mode workbench orchestration"
+    },
+    "packages/bundle/web-app/src/startup.ts": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/connection/src/api-request-trust.ts": {
+      "kind": "migration-debt",
+      "note": "fix(connection): bind loopback authority to tcp peer"
+    },
+    "packages/client/connection/src/client/api.ts": {
+      "kind": "migration-debt",
+      "note": "fix(trajectory): enforce host-safe physical traces"
+    },
+    "packages/client/connection/src/client/connection.ts": {
+      "kind": "migration-debt",
+      "note": "fix(ci): cover selective backport boundaries; feat(desktop): backport selected official behaviors"
+    },
+    "packages/client/connection/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(trajectory): enforce host-safe physical traces; feat(desktop): add durable multi-server execution"
+    },
+    "packages/client/connection/src/client/rpc.ts": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/connection/src/client/web-api-client.ts": {
+      "kind": "migration-debt",
+      "note": "refactor(remote): share durable transport primitives; feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/connection/src/http-bridge.ts": {
+      "kind": "migration-debt",
+      "note": "fix(connection): bind loopback authority to tcp peer"
+    },
+    "packages/client/connection/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "wip(prompt): preserve template and operator context integration; fix(operators): keep first-class tools in DSH authority"
+    },
+    "packages/client/connection/src/rpc-host.ts": {
+      "kind": "migration-debt",
+      "note": "fix(connection): bind loopback authority to tcp peer; feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/connection/src/rpc.ts": {
+      "kind": "migration-debt",
+      "note": "fix(connection): bind loopback authority to tcp peer; feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/hmr/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "perf(web): accelerate remote frontend loading"
+    },
+    "packages/client/modules/src/client/manifest.ts": {
+      "kind": "migration-debt",
+      "note": "perf(web): accelerate remote frontend loading"
+    },
+    "packages/client/modules/src/client/system.ts": {
+      "kind": "migration-debt",
+      "note": "perf(web): accelerate remote frontend loading"
+    },
+    "packages/client/modules/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "perf(web): accelerate remote frontend loading"
+    },
+    "packages/client/runtime/src/client/contract/conversation.ts": {
+      "kind": "migration-debt",
+      "note": "fix(trajectory): enforce host-safe physical traces"
+    },
+    "packages/client/runtime/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/runtime/src/client/sessions/conversation-assembler.ts": {
+      "kind": "migration-debt",
+      "note": "fix(trajectory): enforce host-safe physical traces"
+    },
+    "packages/client/runtime/src/client/sessions/manager.ts": {
+      "kind": "migration-debt",
+      "note": "refactor(remote): share durable transport primitives; feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/runtime/src/client/sessions/service.ts": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/runtime/src/client/sessions/session.ts": {
+      "kind": "migration-debt",
+      "note": "fix(trajectory): enforce host-safe physical traces"
+    },
+    "packages/client/runtime/src/client/workspaces/manager.ts": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/runtime/src/client/workspaces/service.ts": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/ui-conversation/src/client/skeleton/InputBar.tsx": {
+      "kind": "backport",
+      "note": "feat(desktop): backport selected official behaviors"
+    },
+    "packages/client/ui-input-trigger/src/client/controller.ts": {
+      "kind": "backport",
+      "note": "feat(desktop): backport selected official behaviors"
+    },
+    "packages/client/ui-input-trigger/src/types.ts": {
+      "kind": "backport",
+      "note": "feat(desktop): backport selected official behaviors"
+    },
+    "packages/client/ui-model-selection/src/client/directory.ts": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu; feat: add Web coordination and live catalog refresh"
+    },
+    "packages/client/ui-model-selection/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-model-selection/src/client/locales.ts": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-model-selection/src/client/ModelSelect.module.css": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-model-selection/src/client/ModelSelect.tsx": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-model-selection/src/client/service.ts": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-model-selection/src/client/slots.ts": {
+      "kind": "migration-debt",
+      "note": "feat(model-selection): refresh models and operators from the model menu"
+    },
+    "packages/client/ui-primitives/src/markdown/CodeBlock.tsx": {
+      "kind": "backport",
+      "note": "feat(desktop): backport selected official behaviors"
+    },
+    "packages/client/ui-primitives/src/markdown/highlight.ts": {
+      "kind": "backport",
+      "note": "feat(desktop): backport selected official behaviors"
+    },
+    "packages/client/ui-primitives/src/ReadBlock.tsx": {
+      "kind": "backport",
+      "note": "feat(desktop): backport selected official behaviors"
+    },
+    "packages/client/ui-settings-models/src/client/store.ts": {
+      "kind": "migration-debt",
+      "note": "fix(remote): close release contract gaps; feat(runtime): promote subscription models"
+    },
+    "packages/client/ui-sidebar/src/client/SidebarRoot.module.css": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration; fix(sidebar): stack and bound footer actions"
+    },
+    "packages/client/ui-sidebar/src/client/SidebarRoot.tsx": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/ui-trajectory/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/layout.ts": {
+      "kind": "migration-debt",
+      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
+    },
+    "packages/client/ui-trajectory/src/client/trajectory-contract.ts": {
+      "kind": "migration-debt",
+      "note": "feat(desktop): improve debate and collaboration observability; feat(debate): project native operator progress into traces"
+    },
+    "packages/client/ui-trajectory/src/client/trajectory-record.ts": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/trajectory-snapshot-builder.ts": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/TrajectoryCell.module.css": {
+      "kind": "migration-debt",
+      "note": "feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/TrajectoryCell.tsx": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/TrajectoryTable.module.css": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable"
+    },
+    "packages/client/ui-trajectory/src/client/TrajectoryTable.tsx": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/TrajectoryTimeline.module.css": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable"
+    },
+    "packages/client/ui-trajectory/src/client/TrajectoryTimeline.tsx": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/ui-trajectory/src/client/TrajectoryView.tsx": {
+      "kind": "migration-debt",
+      "note": "feat: make debate transcripts and traces readable; feat(runtime): add durable debate fallback"
+    },
+    "packages/client/web/src/app-shell.ts": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/web/src/app.tsx": {
+      "kind": "migration-debt",
+      "note": "feat: ship dual-mode workbench orchestration"
+    },
+    "packages/client/web/src/boot.tsx": {
+      "kind": "migration-debt",
+      "note": "feat(desktop): add multi-server frontend continuity"
+    },
+    "packages/core/agent/src/model-selection.ts": {
+      "kind": "migration-debt",
+      "note": "fix: honor live model selection for ChatGPT Web routing"
+    },
+    "packages/core/session/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat(session): preserve ignorable plugin events"
+    },
+    "packages/core/session/src/known-event-types.ts": {
+      "kind": "generated",
+      "note": "feat: add Web coordination and live catalog refresh; feat: unify MacBook DSH baseline and deliver Desktop 3.16.0"
+    },
+    "packages/core/session/src/types.ts": {
+      "kind": "migration-debt",
+      "note": "feat(session): preserve ignorable plugin events"
+    },
+    "packages/core/system-prompt/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix: restore ChatGPT Web submission and deliver Desktop 3.16.1; feat: unify MacBook DSH baseline and deliver Desktop 3.16.0"
+    },
+    "packages/core/tools/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(tools): carry code mode contract into Desktop 2.9.1; fix(prompt): preserve generated SDK template literals"
+    },
+    "packages/extensions/cordis-client-runner/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/extensions/cordis-client-runner/src/client/runtime.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/extensions/cordis-client-runner/src/client/slot-catalog.ts": {
+      "kind": "migration-debt",
+      "note": "feat: unify MacBook DSH baseline and deliver Desktop 3.16.0; feat(orchestration): deliver prime runtime and debate mode"
+    },
+    "packages/extensions/cordis-host-runner/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/extensions/cordis-host-runner/src/inspect-registry.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/extensions/cordis-host-runner/src/types.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/extensions/tool-cordis/src/api-catalog.ts": {
+      "kind": "generated",
+      "note": "feat(physical-operator): detect, verify, and update native Codex and Claude Code CLIs; feat: add Web coordination and live catalog refresh"
+    },
+    "packages/extensions/tool-cordis/src/providers.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/extensions/ui-cordis/src/client/index.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/extensions/ui-cordis/src/client/inventory.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/fs/tool-fs/src/read-image.ts": {
+      "kind": "backport",
+      "note": "fix(ci): cover selective backport boundaries; feat(desktop): backport selected official behaviors"
+    },
+    "packages/host/apiproxy/src/api-proxy.ts": {
+      "kind": "migration-debt",
+      "note": "feat: add Web coordination and live catalog refresh; fix(physical-operator): preserve effective execution routes"
+    },
+    "packages/host/apiproxy/src/api/events.schema.ts": {
+      "kind": "migration-debt",
+      "note": "fix(trajectory): enforce host-safe physical traces"
+    },
+    "packages/host/apiproxy/src/api/events.ts": {
+      "kind": "migration-debt",
+      "note": "feat(desktop): improve debate and collaboration observability; fix(trajectory): enforce host-safe physical traces"
+    },
+    "packages/host/apiproxy/src/api/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(trajectory): enforce host-safe physical traces"
+    },
+    "packages/host/apiproxy/src/api/llm.schema.ts": {
+      "kind": "migration-debt",
+      "note": "feat: add Web coordination and live catalog refresh"
+    },
+    "packages/host/apiproxy/src/api/llm.ts": {
+      "kind": "migration-debt",
+      "note": "feat: add Web coordination and live catalog refresh"
+    },
+    "packages/host/apiproxy/src/api/sessions.schema.ts": {
+      "kind": "migration-debt",
+      "note": "feat: add Web coordination and live catalog refresh; feat(desktop): improve debate and collaboration observability"
+    },
+    "packages/host/apiproxy/src/api/sessions.ts": {
+      "kind": "migration-debt",
+      "note": "feat: add Web coordination and live catalog refresh; fix(trajectory): enforce host-safe physical traces"
+    },
+    "packages/host/apiproxy/src/fetch/client.ts": {
+      "kind": "migration-debt",
+      "note": "test(remote): close projection coverage gaps; feat: ship dual-mode workbench orchestration"
+    },
+    "packages/host/frontend-static/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "perf(web): accelerate remote frontend loading"
+    },
+    "packages/host/webserver/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "perf(web): accelerate remote frontend loading"
+    },
+    "packages/llm/llm-deepseek/src/adapter.ts": {
+      "kind": "migration-debt",
+      "note": "feat(physical-operator): select native Codex and Claude Code models from the model menu; feat: add Web coordination and live catalog refresh"
+    },
+    "packages/llm/llm-deepseek/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat(deepseek): add native V4 Flash Vision route"
+    },
+    "packages/llm/llm-deepseek/src/serialize.ts": {
+      "kind": "migration-debt",
+      "note": "fix(ci): close cross-platform controlled-suite gates; test(vision): close coverage and Mnemon CI gaps"
+    },
+    "packages/llm/llm-deepseek/src/types.ts": {
+      "kind": "migration-debt",
+      "note": "feat(deepseek): add native V4 Flash Vision route"
+    },
+    "packages/llm/llm/src/content.ts": {
+      "kind": "migration-debt",
+      "note": "feat(deepseek): add native V4 Flash Vision route"
+    },
+    "packages/llm/llm/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat: add Web coordination and live catalog refresh"
+    },
+    "packages/sdk/protocol/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix: restore PR #89 CI gates; refactor(protocol): share local request server"
+    },
+    "packages/session/session-persistence/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "test(remote): close protocol coverage gaps; feat(remote): add stable session handoff"
+    },
+    "packages/session/session-projection-cache/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(session): refresh cold activity metadata"
+    },
+    "packages/session/session-projection-cache/src/spec.ts": {
+      "kind": "migration-debt",
+      "note": "fix(session): refresh cold activity metadata"
+    },
+    "packages/subagent/subagent-claude-code/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat: require subscription auth for physical operators"
+    },
+    "packages/subagent/subagent-codex/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat(physical-operator): detect, verify, and update native Codex and Claude Code CLIs; fix(operators): keep first-class tools in DSH authority"
+    },
+    "packages/subagent/subagent-codex/src/wire.ts": {
+      "kind": "migration-debt",
+      "note": "feat(physical-operator): detect, verify, and update native Codex and Claude Code CLIs; fix(physical-operator): preserve effective execution routes"
+    },
+    "packages/subagent/subagent/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "feat(orchestration): account native RLM usage; feat: require subscription auth for physical operators"
+    },
+    "packages/subagent/subagent/src/types.ts": {
+      "kind": "migration-debt",
+      "note": "feat(orchestration): account native RLM usage; feat: require subscription auth for physical operators"
+    },
+    "packages/terminal/terminal-bash/src/sanitize.ts": {
+      "kind": "migration-debt",
+      "note": "feat: unify MacBook DSH baseline and deliver Desktop 3.16.0"
+    },
+    "packages/test-support/acp-snapshot/src/harness.ts": {
+      "kind": "migration-debt",
+      "note": "test(snapshot): normalize loaded-runner timeout diagnostics; test(acp-snapshot): stabilize timeout diagnostics"
+    },
+    "packages/typert/generator/src/cordis-catalog.ts": {
+      "kind": "migration-debt",
+      "note": "chore(monorepo): complete solar P0-P2 integration"
+    },
+    "packages/util/atomic-write/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(runtime): make local IPC portable; fix(ci): close cross-platform controlled-suite gates"
+    },
+    "packages/util/home-paths/src/index.ts": {
+      "kind": "migration-debt",
+      "note": "fix(desktop): shorten local daemon socket paths; fix(runtime): make local IPC portable"
+    }
+  }
+}

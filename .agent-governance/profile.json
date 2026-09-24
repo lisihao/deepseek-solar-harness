@@ -131,6 +131,24 @@
       "timeout_seconds": 120
     },
     {
+      "id": "upstream-edits-tests",
+      "label": "Upstream source edit inventory invalid-case tests",
+      "command": ["node", "--test", "scripts/solar/verify-upstream-edits.test.mjs"],
+      "cwd": ".",
+      "scopes": ["tooling", "governance"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "upstream-edits",
+      "label": "Upstream source edit inventory",
+      "command": ["node", "scripts/solar/verify-upstream-edits.mjs"],
+      "cwd": ".",
+      "scopes": ["always"],
+      "levels": ["quick", "full"],
+      "timeout_seconds": 120
+    },
+    {
       "id": "source-build",
       "label": "Shared source library build",
       "command": ["pnpm", "run", "build:lib"],
