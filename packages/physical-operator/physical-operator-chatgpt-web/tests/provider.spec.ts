@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Script } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -22,7 +25,6 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { ChatGptWebCoordination } from '../src/coordination.ts'
 import {
   buildOperatorContextEnvelope,
-  renderOperatorContextEnvelopeText,
 } from '@deepseek-ai/dsh-system-prompt'
 import * as adapter from '../src/index.ts'
 
@@ -98,6 +100,8 @@ async function setup(
   await ctx.plugin(PhysicalOperatorRuntime)
   ctx.browser.registerProvider(provider)
   const plugin = await ctx.plugin(adapter, {
+    // A private state root keeps the owner's saved coordination mode out of the fixture.
+    stateRoot: mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-provider-')),
     workspaceName: 'fixture-chatgpt-web',
     generationTimeoutMs: 1_000,
     submissionTimeoutMs: 100,
@@ -384,7 +388,7 @@ describe('ChatGPT Web physical operator', () => {
     await ctx.fiber.dispose()
   })
 
-  it('submits every sealed context field through the text-only ChatGPT Web transport', async () => {
+  it('submits every sealed context field as readable text sections through the ChatGPT Web transport', async () => {
     const { ctx, plugin, provider } = await setup()
     const envelope = buildOperatorContextEnvelope({
       systemText: 'sealed system instructions',
@@ -399,7 +403,7 @@ describe('ChatGPT Web physical operator', () => {
       digest: envelope.digest, outcome: 'accepted', format: 'text', roleFidelity: 'text-downgrade',
     })
     expect(serializedProgramRequest(provider.programs[0]!)).toMatchObject({
-      prompt: renderOperatorContextEnvelopeText(envelope),
+      prompt: 'sealed system instructions\n\n---\n\n## memory\n\nsealed preference\n\n---\n\nsealed current task',
     })
 
     await plugin.dispose()
@@ -862,6 +866,99 @@ describe('ChatGPT Web physical operator', () => {
         assistantCount: 2,
         settled: false,
       },
+    })
+  })
+
+  it('returns the settled reply as Markdown instead of flattened page text', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('发送')
+    form.append(editor, send)
+    document.body.append(form)
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      form.remove()
+      window.history.pushState(null, '', '/c/markdown-reply')
+      const cluster = document.createElement('section')
+      const assistant = contentSearchAssistant('UUID:2:assistant', '')
+      const body = assistant.querySelector('[data-markdown-text-style="assistant-message"]')
+      if (body === null) throw new Error('fixture has no assistant body')
+      body.innerHTML = [
+        '<p>先给<strong>结论</strong>：见<span data-state="closed"><a data-testid="chatgpt-citation" href="https://www.wheresyoured.at/x/"><span>Ed Zitron</span><span>+2</span></a></span></p>',
+        '<h1>一、标题</h1>',
+        '<ul><li><span>servers</span></li><li><span>networking</span><ul><li>nested</li></ul></li></ul>',
+        '<blockquote><p>引用</p></blockquote>',
+        '<div><div data-markdown-copy="code-block"><div data-markdown-copy="exclude">纯文本<button aria-label="复制">复制</button></div>',
+        '<div><code class="language-text"><span>A\n  ↓\nB</span></code></div></div></div>',
+        '<p>变量 <span class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>G</mi></mrow>',
+        '<annotation encoding="application/x-tex">G_s</annotation></semantics></math></span>',
+        '<span class="katex-html" aria-hidden="true">Gs</span></span> 定义</p>',
+        '<span class="block" data-math-source="U = G_u / G_s"><span class="katex-display"><span class="katex">U</span></span></span>',
+        '<table><thead><tr><th>指标</th><th>含义</th></tr></thead><tbody><tr><td>Power</td><td>电 | 力</td></tr></tbody></table>',
+        '<hr><p>结尾</p>',
+      ].join('')
+      const copy = document.createElement('button')
+      copy.setAttribute('aria-label', '复制')
+      cluster.append(contentSearchUser('UUID:0:user'), assistant, copy)
+      document.body.append(cluster)
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') setComposerText(editor, operation.value ?? '')
+        if (operation.id === 'chatgpt-send') send.click()
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgramWithFakeClock(programFor('render markdown'), browser)).resolves.toEqual({
+      status: 'completed',
+      response: [
+        '先给**结论**：见 ([wheresyoured.at](https://www.wheresyoured.at/x/))',
+        '# 一、标题',
+        '- servers\n- networking\n  - nested',
+        '> 引用',
+        '```text\nA\n  ↓\nB\n```',
+        '变量 $G_s$ 定义',
+        '$$U = G_u / G_s$$',
+        '| 指标 | 含义 |\n| --- | --- |\n| Power | 电 \\| 力 |',
+        '---',
+        '结尾',
+      ].join('\n\n'),
+      truncated: false,
+    })
+  })
+
+  it('does not settle a streaming reply from a code-block copy button inside the answer', async () => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('Send')
+    form.append(editor, send)
+    document.body.append(form)
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      form.remove()
+      window.history.pushState(null, '', '/c/streaming-code')
+      const cluster = document.createElement('section')
+      const assistant = contentSearchAssistant('UUID:2:assistant', '')
+      const body = assistant.querySelector('[data-markdown-text-style="assistant-message"]')
+      if (body === null) throw new Error('fixture has no assistant body')
+      body.innerHTML = '<p>partial</p><div data-markdown-copy="code-block"><div data-markdown-copy="exclude"><button aria-label="复制">复制</button></div><code>x</code></div>'
+      cluster.append(contentSearchUser('UUID:0:user'), assistant)
+      document.body.append(cluster)
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') setComposerText(editor, operation.value ?? '')
+        if (operation.id === 'chatgpt-send') send.click()
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    await expect(executeGeneratedProgramWithFakeClock(programFor('still streaming', {
+      generationTimeoutMs: 30,
+    }), browser)).resolves.toMatchObject({
+      status: 'generation-timeout',
+      diagnostic: { assistantCount: 1, settled: false },
     })
   })
 

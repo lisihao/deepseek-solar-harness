@@ -846,7 +846,12 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     if (prompt === undefined) {
       throw new Error(`physical-operator router cannot recover prompt message ${dispatch.promptMessageId}`)
     }
-    const contextEnvelope = operatorContextEnvelope(agent, options, dispatch.operatorId, dispatch.promptMessageId, prompt)
+    // Direct ChatGPT Web has no DSH tools, so the tool-using agent's system
+    // instruction and runtime context would only mislead the website model.
+    const browserDirect = dispatch.operatorId === CHATGPT_WEB_OPERATOR_ID && dispatch.executionMode !== 'resident'
+    const contextEnvelope = operatorContextEnvelope(
+      agent, options, dispatch.operatorId, dispatch.promptMessageId, prompt, browserDirect,
+    )
     const signal = options.signal ?? new AbortController().signal
     let run: PhysicalOperatorRun | undefined
     let observer: ReturnType<typeof observePhysicalOperatorProgress> | undefined
@@ -875,7 +880,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
         ...(dispatch.executionMode === 'resident'
           ? { nativeToolPolicy: 'dsh-tools-authoritative' as const }
           : {}),
-        ...options.system === undefined ? {} : { systemPrompt: options.system },
+        ...options.system === undefined || browserDirect ? {} : { systemPrompt: options.system },
         ...(bound?.descriptor === undefined ? {} : { modelToolBridge: bound.descriptor }),
         ...(dispatch.executionMode === 'resident' && dispatch.residentProfile !== undefined
           ? { residentProfile: dispatch.residentProfile }
@@ -1407,13 +1412,19 @@ function promptForMessage(events: readonly SessionEvent[], messageId: string): C
   return found?.type === 'user/message' ? [...found.data.content] : undefined
 }
 
-/** Build the current-request-only envelope from the already-logged model input. */
+/**
+ * Build the current-request-only envelope from the already-logged model input.
+ * A task-only envelope, for a tool-less browser route, keeps the task, Web
+ * handoff/steering text, and operator-matched task-template instructions but
+ * not the tool-using agent's system instruction or runtime context.
+ */
 function operatorContextEnvelope(
   agent: Agent,
   options: GenerateOptions,
   operatorId: string,
   taskMessageId: string,
   task: ContentBlock[],
+  taskOnly: boolean,
 ): OperatorContextEnvelopeV1 {
   const header = [...agent.session.events].reverse().find(event => event.type === 'request/header')
   if (header?.type !== 'request/header') {
@@ -1424,7 +1435,7 @@ function operatorContextEnvelope(
   if (taskMessage === undefined) {
     throw new Error(`physical-operator router cannot locate task message ${taskMessageId} in the frozen request`)
   }
-  const snapshot = currentRuntimeContextSnapshot(options.messages)
+  const snapshot = taskOnly ? undefined : currentRuntimeContextSnapshot(options.messages)
   const instructions = options.messages.slice(taskIndex + 1).filter(message => message.source.kind === 'task-template')
   const instructionContexts = instructions.map((message, index) => ({
     name: `task-template:${message.source.kind === 'task-template'
@@ -1435,7 +1446,7 @@ function operatorContextEnvelope(
   const snapshotContexts = snapshot?.sections ?? []
   const handoffContexts = chatGptWebHandoffContexts(agent, options.messages, operatorId, taskIndex)
   return buildOperatorContextEnvelope({
-    systemText: options.system ?? '',
+    systemText: taskOnly ? '' : options.system ?? '',
     task,
     contexts: [...snapshotContexts, ...handoffContexts, ...instructionContexts],
     source: {

@@ -265,21 +265,123 @@ const COMPOSER_DOM_HELPERS = String.raw`
       assistants: outermost([...document.querySelectorAll('[data-message-author-role="assistant"]'), ...assistants]),
     };
   };
+  const TICK = String.fromCharCode(96);
+  const skipped = (element) => element.getAttribute('data-markdown-copy') === 'exclude'
+    || ['BUTTON', 'SVG', 'svg', 'STYLE', 'SCRIPT'].includes(element.tagName);
+  const mathSource = (element) => element.getAttribute('data-math-source')
+    ?? element.querySelector('annotation[encoding="application/x-tex"]')?.textContent
+    ?? '';
+  const citationLink = (element) => {
+    const href = element.getAttribute('href') ?? '';
+    if (!/^https?:/.test(href)) return '';
+    const host = href.replace(/^https?:[/][/](?:www[.])?/, '').split(/[/?#]/)[0];
+    return ' ([' + host + '](' + href + '))';
+  };
+  const inlineMarkdown = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const element = node;
+    if (skipped(element)) return '';
+    if (element.tagName === 'BR') return newline;
+    if (element.classList.contains('katex-display')) return '$$' + mathSource(element) + '$$';
+    if (element.classList.contains('katex') || element.hasAttribute('data-math-source')) {
+      return element.querySelector('.katex-display') === null
+        ? '$' + mathSource(element) + '$'
+        : '$$' + mathSource(element) + '$$';
+    }
+    if (element.tagName === 'A' && element.getAttribute('data-testid') === 'chatgpt-citation') return citationLink(element);
+    const inner = [...element.childNodes].map(inlineMarkdown).join('');
+    switch (element.tagName) {
+      case 'STRONG': case 'B': return inner.trim().length === 0 ? inner : '**' + inner + '**';
+      case 'EM': case 'I': return inner.trim().length === 0 ? inner : '*' + inner + '*';
+      case 'DEL': case 'S': return inner.trim().length === 0 ? inner : '~~' + inner + '~~';
+      case 'CODE': return TICK + (element.textContent ?? '') + TICK;
+      case 'A': {
+        const href = element.getAttribute('href') ?? '';
+        return /^https?:/.test(href) && inner.trim() !== href ? '[' + inner + '](' + href + ')' : inner;
+      }
+      default: return inner;
+    }
+  };
+  const inlineLine = (element) => inlineMarkdown(element).replace(/[ \t]*\n[ \t]*/g, newline).trim();
+  const blockTags = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'PRE', 'BLOCKQUOTE', 'TABLE', 'HR', 'DIV', 'SECTION', 'ARTICLE']);
+  const isBlock = (element) => blockTags.has(element.tagName)
+    || element.classList.contains('katex-display')
+    || element.classList.contains('block')
+    || element.hasAttribute('data-markdown-copy');
+  const listMarkdown = (list, depth) => {
+    let ordinal = Number(list.getAttribute('start') ?? '1') || 1;
+    return [...list.children].filter((item) => item.tagName === 'LI').map((item) => {
+      const marker = list.tagName === 'OL' ? String(ordinal++) + '. ' : '- ';
+      const nested = [];
+      let head = '';
+      for (const child of item.childNodes) {
+        if (child.nodeType === Node.ELEMENT_NODE && (child.tagName === 'UL' || child.tagName === 'OL')) {
+          nested.push(listMarkdown(child, depth + 1));
+        } else if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'P') {
+          head += inlineLine(child) + ' ';
+        } else {
+          head += inlineMarkdown(child);
+        }
+      }
+      return ['  '.repeat(depth) + marker + head.replace(/\s*\n\s*/g, ' ').trim(), ...nested].join(newline);
+    }).join(newline);
+  };
+  const tableMarkdown = (table) => {
+    const rows = [...table.querySelectorAll('tr')].map((row) => [...row.children]
+      .map((cell) => inlineLine(cell).replace(/\s*\n\s*/g, ' ').replace(/[|]/g, '\\|')));
+    if (rows.length === 0) return '';
+    const width = Math.max(...rows.map((row) => row.length));
+    const line = (row) => '| ' + Array.from({ length: width }, (_, index) => row[index] ?? '').join(' | ') + ' |';
+    return [line(rows[0]), '| ' + Array.from({ length: width }, () => '---').join(' | ') + ' |', ...rows.slice(1).map(line)]
+      .join(newline);
+  };
+  const blockMarkdown = (element) => {
+    if (skipped(element)) return [];
+    const tag = element.tagName;
+    if (element.getAttribute('data-markdown-copy') === 'code-block' || tag === 'PRE') {
+      const code = element.querySelector('code');
+      const language = [...(code?.classList ?? [])].find((name) => name.startsWith('language-'))?.slice(9) ?? '';
+      const text = String((code ?? element).textContent ?? '').replace(/\n+$/, '');
+      return [TICK.repeat(3) + language + newline + text + newline + TICK.repeat(3)];
+    }
+    if (/^H[1-6]$/.test(tag)) return ['#'.repeat(Number(tag[1])) + ' ' + inlineLine(element)];
+    if (tag === 'HR') return ['---'];
+    if (tag === 'UL' || tag === 'OL') return [listMarkdown(element, 0)];
+    if (tag === 'TABLE') return [tableMarkdown(element)];
+    if (tag === 'BLOCKQUOTE') {
+      return [blocksOf(element).join(newline + newline).split(newline)
+        .map((line) => line.length === 0 ? '>' : '> ' + line).join(newline)];
+    }
+    if (element.classList.contains('katex-display')
+      || element.hasAttribute('data-math-source') && element.querySelector('.katex-display') !== null) {
+      return ['$$' + mathSource(element) + '$$'];
+    }
+    if (tag !== 'P' && [...element.children].some(isBlock)) return blocksOf(element);
+    return [inlineLine(element)];
+  };
+  const blocksOf = (element) => [...element.childNodes].flatMap((child) => {
+    if (child.nodeType === Node.TEXT_NODE) return [String(child.textContent ?? '').trim()];
+    return child.nodeType === Node.ELEMENT_NODE ? blockMarkdown(child) : [];
+  }).filter((block) => block.trim().length > 0);
   const assistantText = (element) => {
     if (element === null) return '';
     const body = element.querySelector('[data-markdown-text-style="assistant-message"]')
       ?? element.querySelector('.markdown')
       ?? element;
-    return body.textContent ?? '';
+    return blocksOf(body).join(newline + newline);
   };
   const latestAssistantSettled = (latest, assistants) => {
     if (latest === null || latest.querySelector('[data-markdown-text-style="assistant-message"]') === null) return false;
     let ancestor = latest.parentElement;
     while (ancestor !== null && ancestor !== document.body && ancestor.tagName !== 'MAIN') {
       if (assistants.filter((assistant) => ancestor.contains(assistant)).length > 1) return false;
+      /* Code blocks and tables carry their own copy buttons inside the answer
+         body while it still streams; only the turn action bar settles a reply. */
       const copied = [...ancestor.querySelectorAll('button')].some((button) => {
+        if (button.closest('[data-markdown-text-style="assistant-message"],[data-markdown-copy]') !== null) return false;
         const label = String(button.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
-        return label === 'copy' || label === '复制';
+        return label === 'copy' || label === '复制' || label === 'copy response' || label === '复制回复';
       });
       if (copied) return true;
       ancestor = ancestor.parentElement;
@@ -380,8 +482,9 @@ const RESPONSE_STATE = String.raw`() => {
     '[data-testid="copy-turn-action-button"],[aria-label="Copy response"],[aria-label="复制回复"]',
   ) !== null;
   const generating = [...document.querySelectorAll('button,[role="button"]')].some((element) => {
+    if (element.getAttribute('data-testid') === 'stop-button') return true;
     const label = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/g, ' ').trim();
-    return /stop generating|stop streaming|停止生成/i.test(label);
+    return /stop generating|stop streaming|停止生成|停止流式传输|^停止$|^stop$/i.test(label);
   });
   const editor = composer();
   const inputText = composerText(editor);
