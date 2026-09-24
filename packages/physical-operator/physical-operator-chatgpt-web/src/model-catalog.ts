@@ -196,7 +196,11 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
           ? /(?:model|intelligence|模型)/.test(description)
           : /(?:reasoning|effort|thinking|think|power|推理|思考)/.test(description);
       });
-    return candidates.length === 1 ? candidates[0] : null;
+    // Sidebar chat and project titles can contain the same words, and clicking
+    // one navigates, so only a unique menu-opening control outside navigation
+    // is a picker.
+    const pickers = candidates.filter((element) => element.hasAttribute('aria-haspopup') && element.closest('nav,aside') === null);
+    return pickers.length === 1 ? pickers[0] : null;
   };
   const pause = () => new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
   const waitFor = async (read) => {
@@ -267,7 +271,9 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
   };
   const close = async (menu) => {
     if (menu === undefined || menu.closed) return true;
-    if (!await restoreView(menu)) return false;
+    // Restoring the initial view is best effort: current ChatGPT pickers have
+    // no control back from the advanced view, and closing is what matters.
+    await restoreView(menu);
     if (!menu.owned || !menu.root.isConnected || !visible(menu.root)) {
       menu.closed = true;
       return true;
@@ -463,9 +469,7 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
             }
           }
           if (outcome.status === 'protocol-error') {
-            if (livePicker && !await restoreView(modelMenu)) {
-              outcome = { status: 'menu-close-failed' };
-            }
+            if (livePicker) await restoreView(modelMenu);
             const liveControl = outcome.status === 'protocol-error' && livePicker ? liveReasoning(modelMenu.root) : { kind: 'absent' };
             if (outcome.status === 'protocol-error' && liveControl.kind === 'invalid') {
               outcome = { status: 'reasoning-options-unavailable' };

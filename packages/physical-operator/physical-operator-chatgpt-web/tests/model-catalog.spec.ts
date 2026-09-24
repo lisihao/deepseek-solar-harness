@@ -212,8 +212,16 @@ function mountPage(options: {
   }
 }
 
+/** Options for the live two-view picker fixture. */
+interface LivePageOptions {
+  readonly lockedEffort?: string
+  readonly malformedLock?: string
+  /** Omit the advanced view's way back to the simple view, as current ChatGPT pickers do. */
+  readonly oneWayViews?: boolean
+}
+
 /** Build the September 2026 two-view native model picker with its opaque reasoning slider. */
-function mountLivePage(options: { readonly lockedEffort?: string; readonly malformedLock?: string } = {}): LivePageFixture {
+function mountLivePage(options: LivePageOptions = {}): LivePageFixture {
   const effortOptions = [
     { id: 'gpt-5-6:', label: '即时', isMax: false, requiresExplicitSelection: false },
     { id: 'gpt-5-6-thinking:standard', label: '中', isMax: false, requiresExplicitSelection: false },
@@ -304,7 +312,9 @@ function mountLivePage(options: { readonly lockedEffort?: string; readonly malfo
     }
   }
   simple.querySelector<HTMLElement>('[data-model-picker-view-toggle="true"]')!.addEventListener('click', () => { setActiveView('advanced') })
-  advanced.querySelector<HTMLElement>('[data-model-picker-view-toggle="true"]')!.addEventListener('click', () => { setActiveView('simple') })
+  if (options.oneWayViews !== true) {
+    advanced.querySelector<HTMLElement>('[data-model-picker-view-toggle="true"]')!.addEventListener('click', () => { setActiveView('simple') })
+  }
   for (const row of advanced.querySelectorAll<HTMLElement>('[role="menuitemradio"]')) {
     row.addEventListener('click', () => {
       const label = row.querySelector('span')?.textContent ?? ''
@@ -585,6 +595,38 @@ describe('ChatGPT Web model catalog', () => {
     expect(page.menu.querySelector('[data-model-picker-view="simple"]')?.getAttribute('aria-hidden')).toBeNull()
     expect(page.menu.querySelector('[data-model-picker-view="advanced"]')?.getAttribute('aria-hidden')).toBe('true')
     expect(browser.operations.map(operation => operation.kind)).toEqual(['select-page', 'open'])
+  })
+
+  it('ignores sidebar chats and projects whose titles mention models when finding the picker', async () => {
+    mountLivePage()
+    const nav = document.createElement('nav')
+    for (const [label, popup] of [['开放性分析模型比较', false], ['北美开源闭源大模型之争 的项目操作', true], ['Model identity check', false]] as const) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.textContent = label
+      if (popup) button.setAttribute('aria-haspopup', 'menu')
+      makeVisible(button)
+      nav.append(button)
+    }
+    document.body.prepend(nav)
+    const { ctx } = await browserFixture()
+
+    const catalog = await discoverWebModels(ctx, discoveryOptions())
+
+    expect(catalog.models.map(choice => choice.label)).toEqual(['最新', 'GPT-5.6 Sol', 'GPT-5.5'])
+    expect(catalog.selectedModel).toBe('最新')
+  })
+
+  it('still closes the picker when the page offers no way back from the advanced view', async () => {
+    const page = mountLivePage({ oneWayViews: true })
+    const { ctx } = await browserFixture()
+
+    const catalog = await discoverWebModels(ctx, discoveryOptions())
+
+    expect(catalog.models.map(choice => choice.label)).toEqual(['最新', 'GPT-5.6 Sol', 'GPT-5.5'])
+    expect(page.menu.style.display).toBe('none')
+    expect(page.modelTrigger.getAttribute('aria-expanded')).toBe('false')
+    expect(page.sent()).toBe(0)
   })
 
   it('uses native keyboard events to select one exact opaque reasoning id after verifying its visible model route', async () => {

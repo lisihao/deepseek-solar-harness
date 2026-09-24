@@ -627,6 +627,24 @@ describe('EgoLiteBrowserProvider process protocol', () => {
     expect(subprocess.spawns).toHaveLength(1)
   })
 
+  it('lets a program branch on the portable code of an in-program browser failure', async () => {
+    const { ctx, subprocess } = await setup()
+    subprocess.run = spec => executeFixtureSource((spec.stdio.stdin as { data: string }).data)
+
+    await expect(ctx.browser.runProgram({
+      ...program,
+      source: `
+        try {
+          await browser.run({ kind: "select-page", id: "select", page: "missing", match: { kind: "url-prefix", prefix: "https://missing.invalid/" } });
+          return "selected";
+        } catch (error) {
+          return error.code;
+        }
+      `,
+      output: { kind: 'json', maxBytes: 100 },
+    })).resolves.toMatchObject({ output: { kind: 'json', value: 'BROWSER_PAGE_STALE' } })
+  })
+
   it('rejects non-JSON program output and page-evaluation values', async () => {
     const { ctx, subprocess } = await setup()
     subprocess.run = spec => executeFixtureSource((spec.stdio.stdin as { data: string }).data)
