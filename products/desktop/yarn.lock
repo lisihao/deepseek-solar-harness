@@ -4927,13 +4927,13 @@ __metadata:
 
 "@deepseek-ai/dsh-web-frontend@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh-web-frontend@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz::hash=58fca9&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-web-frontend@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-web-frontend-0.1.0-rc.5.tgz::hash=bbb198&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/dsh-client-connection": "npm:^0.1.0-rc.5"
     "@deepseek-ai/dsh-client-web": "npm:^0.1.0-rc.5"
     react: "npm:^18.2.0"
     react-dom: "npm:^18.2.0"
-  checksum: 10c0/cd90973f81a15459eadde19fac6c8a03f4fa54aba1d812f748b2629975cd8a37d0fbc9b16dab2a9cb35848fcd33a665b58b3d4d6a90eaf137c9f1cfefc27999a
+  checksum: 10c0/8b8671eba91f069ef476320754986e5f3828d4112d8eba193905606f55a98d90c0afa198e7af04535c46aec00214519205adc42a8b6c9895b7272aa3e1ca336a
   languageName: node
   linkType: hard
 
@@ -5020,7 +5020,7 @@ __metadata:
 
 "@deepseek-ai/dsh@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.1.0-rc.5
-  resolution: "@deepseek-ai/dsh@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz::hash=3b67ec&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh@file:./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz#./dsh-plugin-desktop/vendor/dsh-packages/deepseek-ai-dsh-0.1.0-rc.5.tgz::hash=df792c&locator=deepseek-harness-desktop%40workspace%3A."
   dependencies:
     "@deepseek-ai/cordis": "npm:^4.0.1"
     "@deepseek-ai/cordis-plugin-hmr": "npm:^1.0.16"
@@ -5088,7 +5088,7 @@ __metadata:
     node-addon-require-builtin: "npm:^0.1.4"
   bin:
     dsh: lib/bin.js
-  checksum: 10c0/c6bf1d408ffdd7178685a7648aaffa8f75158f43633b9da793bff3012460956f624ae5db9d8dd1006b7b8602f16a6ede9fff0133df718e31ab725794f7a66844
+  checksum: 10c0/00e311a13bee936f510751dcb3c151ec61bb2a446cbf5c6cb51d2bfb4475494ae7ae09c523e935f8c8befd6eb045aa029219bbab20d73cb24db1f36507261796
   languageName: node
   linkType: hard
 
