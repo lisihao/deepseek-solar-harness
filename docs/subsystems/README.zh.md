@@ -35,9 +35,12 @@
 | [extensions.md](extensions.md) | 带版本的动态 Cordis Plugin 与 Package、Host/Client 激活、审批、运行时检查和生命周期撤销 |
 | [filesystem.md](filesystem.md) | 文件系统 seam：`FsTarget`、读/写/编辑结果、观测到的文件状态、`FsErrorCode` |
 | [lsp.md](lsp.md) | LSP 导航 seam：`LspQueryRequest`/`Result`、`LspProvider`/`Service`、四种操作、`LspError` |
+| [browser.md](browser.md) | 供应商中立的交互式浏览器 seam：类型化计划/程序、Provider 选择、Ego Lite 适配、工作区、页面与用户控制权边界 |
 | [skills.md](skills.md) | skill（技能）服务：发现优先级、`SkillSummary`/`SkillDefinition`、会话前缀目录、面向模型的 `skill` 加载 |
 | [compaction.md](compaction.md) | 压缩（compaction）seam：`compaction/*` 会话事件、`CompactionResult`、`CompactionEngine` 接口 |
 | [subagent.md](subagent.md) | subagent seam：命名提供方注册表、`SubagentStartRequest`/`Result`/`Run`、启动时与运行时能力拆分 |
+| [physical-operator.md](physical-operator.md) | 稳定双模式物理算子 seam、ephemeral 适配器、daemon 权威的 Resident Receipt/Session、产品原生连续性及模型/管理边界 |
+| [orchestration.md](orchestration.md) | 持久 TaskGraph 权威、不可变 Intent/Context/Capability IR 流水线、晚绑定胶囊、密封执行计划与 Resident 派发 |
 | [web.md](web.md) | Web 访问 seam：`WebSearchRequest`/`Result`、`WebFetchRequest`/`Result`、`WebFetchBody`、提供方可用性、`WebError` |
 | [spill.md](spill.md) | spill 存储 seam：`SaveTextSpill`、`SpillOwner`/`SpillSource`、`SpillRef`、品牌类型 `SpillLocator` |
 | [workflow.md](workflow.md) | 工作流 seam：`WorkflowStartRequest`、`WorkflowMeta`、`WorkflowRun`/`Result`、`workflow/*` 事件载荷、`WorkflowError` 致命性 |

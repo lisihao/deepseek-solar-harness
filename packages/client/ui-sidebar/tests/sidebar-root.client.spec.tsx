@@ -15,6 +15,7 @@ const t: SidebarRootComponentProps['t'] = key => (en as Record<string, string>)[
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+  delete document.documentElement.dataset.dshRemoteScope
 })
 
 // The shell never reads the global hooks itself, but they ride the standard
@@ -83,6 +84,16 @@ describe('SidebarRoot shell', () => {
     expect(b.startSession).toHaveBeenCalledTimes(2)
     fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }))
     expect(b.toggleSidebar).toHaveBeenCalledOnce()
+  })
+
+  it('renders the pocket scope as an observation surface without session creation or Settings', () => {
+    document.documentElement.dataset.dshRemoteScope = 'pocket'
+    const b = mountShell()
+    expect(screen.queryByRole('button', { name: 'New session' })).toBeNull()
+    expect(screen.queryByTestId('settings-seat')).toBeNull()
+    expect(screen.getByTestId('region')).toBeTruthy()
+    expect(screen.getByTestId('footer-action-seat')).toBeTruthy()
+    expect(b.startSession).not.toHaveBeenCalled()
   })
 
   it('hands the region its wide flag and clamps expandSidebar to the collapsed state', () => {

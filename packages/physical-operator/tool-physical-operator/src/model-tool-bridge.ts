@@ -1,0 +1,335 @@
+/** Owner-local bridge exposing one Agent's real DSH tool surface to a Resident product. */
+
+import { createHash } from 'node:crypto'
+import { dirname, join } from 'node:path'
+import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { CallId, type ContentBlock, type ToolSchema } from '@deepseek-ai/dsh-llm'
+import { localIpcAddress, localIpcUsesFilesystem, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import type { PhysicalOperatorModelToolBridgeV1 } from '@deepseek-ai/dsh-physical-operator'
+import { LocalJsonRpcRequestServer } from '@deepseek-ai/dsh-sdk-protocol'
+import type { JsonValue, SessionEvent } from '@deepseek-ai/dsh-session'
+
+interface Binding {
+  readonly sessionId: string
+  readonly agent: Agent
+  readonly signal: AbortSignal
+  /** Parent physical execution that owns every model-visible tool call in this binding. */
+  readonly executionCommandId: string
+  readonly tools: ReadonlySet<string>
+  readonly receipts: Map<string, { readonly hash: string; readonly result?: Promise<unknown> }>
+  readonly operations: Set<Promise<void>>
+  releasePromise?: Promise<void>
+}
+
+interface RecoveredIndeterminateReceipt {
+  readonly commandId: string
+  readonly toolCallId: string
+  readonly executionCommandId?: string
+  readonly tool: string
+}
+
+interface RecoveredBridgeState {
+  readonly receipts: Binding['receipts']
+  readonly indeterminate: readonly RecoveredIndeterminateReceipt[]
+}
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`)
+  }
+  return value as Record<string, unknown>
+}
+
+function nonBlank(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) throw new Error(`${label} must be a non-empty string`)
+  return value
+}
+
+const PUBLIC_TOOL_NAME_LIMIT = 160
+const PUBLIC_TOOL_PREVIEW_LIMIT = 1_600
+const PUBLIC_TRACE_REDACTIONS = [
+  /-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/gu,
+  /\b(?:api[_-]?key|authorization|password|token|secret)\s*[:=]\s*[^\s,;]+/giu,
+  /\b(?:sk-[A-Za-z0-9_-]+|gh[pousr]_[A-Za-z0-9]+|xox[baprs]-[A-Za-z0-9-]+)\b/gu,
+] as const
+
+function publicTraceText(value: string, limit: number): string | undefined {
+  let text = value
+  for (const pattern of PUBLIC_TRACE_REDACTIONS) text = text.replace(pattern, '[REDACTED]')
+  text = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '').slice(0, limit)
+  return text.length === 0 ? undefined : text
+}
+
+function publicToolLabel(value: string): { readonly publicToolName?: string } {
+  const publicToolName = publicTraceText(value, PUBLIC_TOOL_NAME_LIMIT)
+  return publicToolName === undefined ? {} : { publicToolName }
+}
+
+function publicContentText(content: readonly ContentBlock[]): string | undefined {
+  const text = content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n')
+  return text.length === 0 ? undefined : text
+}
+
+function publicToolResultPreview(result: Awaited<ReturnType<Context['tools']['execute']>>): {
+  readonly publicResultPreview?: string
+  readonly publicErrorPreview?: string
+} {
+  const source = result.isError
+    ? result.error.message
+    : typeof result.value === 'string' ? result.value : publicContentText(result.content)
+  if (source === undefined) return {}
+  const preview = publicTraceText(source, PUBLIC_TOOL_PREVIEW_LIMIT)
+  if (preview === undefined) return {}
+  return result.isError ? { publicErrorPreview: preview } : { publicResultPreview: preview }
+}
+
+function requestHash(tool: string, args: Record<string, unknown>): string {
+  return createHash('sha256').update(canonicalJson({ tool, args })).digest('hex')
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value)
+  if (typeof value === 'number' && Number.isFinite(value)) return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (typeof value === 'object') {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(',')}}`
+  }
+  throw new Error('model tool request contains a non-JSON value')
+}
+
+let nextEndpointId = 0
+
+function socketPath(): { readonly path: string; readonly directory?: string } {
+  const root = resolveDshHome()
+  const endpointId = `${String(process.pid)}-${String(nextEndpointId++)}`
+  const directory = join(root, 'physical-operator')
+  const path = localIpcAddress(directory, `model-tools-${endpointId}`)
+  return { path, ...localIpcUsesFilesystem() ? { directory: dirname(path) } : {} }
+}
+
+/** One bridge-owned stable endpoint. Bindings exist only while their Resident turn is attached. */
+export class PhysicalOperatorModelToolBridge {
+  private readonly endpoint = socketPath()
+  private readonly bindings = new Map<string, Binding>()
+  private readonly ownedBindings = new Set<Binding>()
+  private readonly server: LocalJsonRpcRequestServer
+
+  constructor(private readonly ctx: Context) {
+    this.server = new LocalJsonRpcRequestServer(this.endpoint, (method, params) => {
+      if (method !== 'tool.call') throw new Error(`unsupported model tool bridge method: ${method}`)
+      return this.call(params)
+    })
+  }
+
+  /**
+   * Bind the exact model-visible schemas for one durable Resident command.
+   * @param commandId - durable command identity.
+   * @param agent - owning Agent whose tool surface is exposed.
+   * @param schemas - exact model-visible tool schemas.
+   * @param signal - owning turn cancellation signal.
+   * @returns the native bridge descriptor and an idempotent release handle that
+   *   waits for accepted tool calls to settle.
+   */
+  async bind(
+    commandId: string,
+    agent: Agent,
+    schemas: readonly ToolSchema[],
+    signal: AbortSignal,
+  ): Promise<{ readonly descriptor?: PhysicalOperatorModelToolBridgeV1; release(): Promise<void> }> {
+    if (schemas.length === 0) return { release: async () => {} }
+    await this.server.start()
+    const sessionId = `${String(agent.id)}:${commandId}`
+    const current = this.bindings.get(sessionId)
+    if (current !== undefined) throw new Error(`model tool bridge session is already attached: ${sessionId}`)
+    const tools = schemas.map(schema => ({
+      name: schema.name,
+      description: schema.description,
+      inputSchema: schema.parameters,
+    }))
+    const recovered = recoverReceipts(agent.session.events)
+    for (const receipt of recovered.indeterminate) {
+      if (receipt.executionCommandId !== commandId) continue
+      agent.session.append('physical-operator/tool-indeterminate', {
+        commandId: receipt.commandId,
+        toolCallId: receipt.toolCallId,
+        executionCommandId: commandId,
+        tool: receipt.tool,
+        ...publicToolLabel(receipt.tool),
+        code: 'COMMAND_INDETERMINATE',
+      }, { ignorable: true })
+    }
+    const binding: Binding = {
+      sessionId,
+      agent,
+      signal,
+      executionCommandId: commandId,
+      tools: new Set(tools.map(tool => tool.name)),
+      receipts: recovered.receipts,
+      operations: new Set(),
+    }
+    this.bindings.set(sessionId, binding)
+    this.ownedBindings.add(binding)
+    return {
+      descriptor: { version: 1, socketPath: this.endpoint.path, sessionId, tools },
+      release: () => this.release(binding),
+    }
+  }
+
+  /** Close the endpoint and remove only this bridge's socket file. */
+  async dispose(): Promise<void> {
+    await Promise.all([...this.ownedBindings].map(binding => this.release(binding)))
+    await this.server.dispose()
+  }
+
+  private release(binding: Binding): Promise<void> {
+    if (binding.releasePromise !== undefined) return binding.releasePromise
+    if (this.bindings.get(binding.sessionId) === binding) this.bindings.delete(binding.sessionId)
+    const quiesced = this.waitForOperations(binding)
+    binding.releasePromise = quiesced.then(() => {
+      this.ownedBindings.delete(binding)
+    })
+    return binding.releasePromise
+  }
+
+  private async waitForOperations(binding: Binding): Promise<void> {
+    while (binding.operations.size > 0) {
+      await Promise.all([...binding.operations])
+    }
+  }
+
+  private call(params: unknown): Promise<unknown> {
+    const input = record(params, 'model tool bridge request')
+    const sessionId = nonBlank(input.session_id, 'session_id')
+    const commandId = nonBlank(input.command_id, 'command_id')
+    const tool = nonBlank(input.tool, 'tool')
+    const args = record(input.arguments, 'arguments')
+    const binding = this.bindings.get(sessionId)
+    if (binding === undefined) throw new Error(`model tool bridge session is not attached: ${sessionId}`)
+    if (!binding.tools.has(tool)) throw new Error(`model tool bridge did not seal tool ${JSON.stringify(tool)}`)
+    const hash = requestHash(tool, args)
+    const existing = binding.receipts.get(commandId)
+    if (existing !== undefined) {
+      if (existing.hash !== hash) throw new Error(`model tool command conflict: ${commandId}`)
+      if (existing.result === undefined) {
+        // A previous in-flight execution may append its durable result after
+        // this binding recovered the call as indeterminate. Refresh only from
+        // that authority log; never invoke the tool again.
+        const settled = recoverReceipts(binding.agent.session.events).receipts.get(commandId)
+        if (settled?.result === undefined) {
+          throw new Error(`model tool command is indeterminate and will not be replayed: ${commandId}`)
+        }
+        if (settled.hash !== hash) throw new Error(`model tool command conflict: ${commandId}`)
+        binding.receipts.set(commandId, settled)
+        return settled.result
+      }
+      return existing.result
+    }
+    const result = this.execute(binding, commandId, tool, args)
+    binding.receipts.set(commandId, { hash, result })
+    const operation: Promise<void> = result.then(
+      () => { binding.operations.delete(operation) },
+      () => { binding.operations.delete(operation) },
+    )
+    binding.operations.add(operation)
+    return result
+  }
+
+  private async execute(
+    binding: Binding,
+    commandId: string,
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    const { agent } = binding
+    agent.session.append('physical-operator/tool-call', {
+      commandId,
+      toolCallId: commandId,
+      executionCommandId: binding.executionCommandId,
+      tool,
+      ...publicToolLabel(tool),
+      arguments: args as Record<string, import('@deepseek-ai/dsh-session').JsonValue>,
+    }, { ignorable: true })
+    const result = await this.ctx.tools.execute({
+      callId: CallId(commandId),
+      name: tool,
+      arguments: args,
+      agent,
+      signal: binding.signal,
+    })
+    const envelope = {
+      isError: result.isError,
+      content: result.content,
+      ...result.isError ? { error: result.error } : { value: result.value },
+      ...result.additionalContexts === undefined ? {} : { additionalContexts: result.additionalContexts },
+      ...result.concludesTurn === true ? { concludesTurn: true } : {},
+    }
+    agent.session.append('physical-operator/tool-result', {
+      commandId,
+      toolCallId: commandId,
+      executionCommandId: binding.executionCommandId,
+      tool,
+      ...publicToolLabel(tool),
+      ...publicToolResultPreview(result),
+      result: envelope as unknown as JsonValue,
+    }, { ignorable: true })
+    return envelope
+  }
+}
+
+function recoverReceipts(events: readonly SessionEvent[]): RecoveredBridgeState {
+  const calls = new Map<string, {
+    readonly hash: string
+    readonly tool: string
+    readonly toolCallId: string
+    readonly executionCommandId?: string
+  }>()
+  const receipts: Binding['receipts'] = new Map()
+  const settled = new Set<string>()
+  const markedIndeterminate = new Set<string>()
+  for (const event of events) {
+    if (event.type === 'physical-operator/tool-call') {
+      if (calls.has(event.data.commandId)) continue
+      const call = {
+        hash: requestHash(event.data.tool, event.data.arguments),
+        tool: event.data.tool,
+        toolCallId: event.data.toolCallId ?? event.data.commandId,
+        ...event.data.executionCommandId === undefined
+          ? {}
+          : { executionCommandId: event.data.executionCommandId },
+      }
+      calls.set(event.data.commandId, call)
+      if (!settled.has(event.data.commandId)) receipts.set(event.data.commandId, { hash: call.hash })
+      continue
+    }
+    if (event.type === 'physical-operator/tool-indeterminate') {
+      markedIndeterminate.add(event.data.commandId)
+      continue
+    }
+    if (event.type !== 'physical-operator/tool-result') continue
+    if (settled.has(event.data.commandId)) continue
+    const call = calls.get(event.data.commandId)
+    if (call === undefined || call.tool !== event.data.tool) continue
+    settled.add(event.data.commandId)
+    receipts.set(event.data.commandId, {
+      hash: call.hash,
+      result: Promise.resolve(event.data.result),
+    })
+  }
+  return {
+    receipts,
+    indeterminate: [...calls.entries()].flatMap(([commandId, call]) => (
+      settled.has(commandId) || markedIndeterminate.has(commandId)
+        ? []
+        : [{
+          commandId,
+          toolCallId: call.toolCallId,
+          ...call.executionCommandId === undefined ? {} : { executionCommandId: call.executionCommandId },
+          tool: call.tool,
+        }]
+    )),
+  }
+}

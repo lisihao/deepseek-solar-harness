@@ -60,6 +60,9 @@
       "path": "../../packages/mcp/mcp-client"
     },
     {
+      "path": "../../packages/physical-operator/resident-operator-local"
+    },
+    {
       "path": "../../packages/test-support/loader-smoke"
     },
     {

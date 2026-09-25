@@ -87,6 +87,15 @@
   background: var(--dsw-alias-state-warn-tertiary);
 }
 
+.tagOperator {
+  color: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  background: color-mix(
+    in srgb,
+    var(--dsw-alias-brand-primary-new-colorprimary-new-color) 13%,
+    var(--dsw-alias-bg-layer-1)
+  );
+}
+
 /* run_code sub-dispatch cells: the business tint plus an indent so the
    nesting under the parent Tool cell reads at a glance. */
 .tagSubtool {

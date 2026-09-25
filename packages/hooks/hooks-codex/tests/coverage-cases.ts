@@ -228,7 +228,7 @@ export function defineCoverageCases(groups: CoverageGroup | readonly CoverageGro
       const r = events(agent).find(e => e.type === 'tool/result')
       expect(r?.type === 'tool/result' && r.data.message.content[0].isError).toBe(true)
       expect(r?.type === 'tool/result' && r.data.message.content[0].content.some(b => b.type === 'text' && b.text.includes('blocked by PostToolUse hook'))).toBe(true)
-    })
+    }, 10_000) // The real hook subprocess needs startup and teardown headroom under full-suite contention.
 
     it('PostToolUse additionalContext (clean exit) is attached after the result', async () => {
       const d = dir()

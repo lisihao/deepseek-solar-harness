@@ -166,6 +166,8 @@ export const longProbe = 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 +
     }
     expect(parsed.ignorePatterns).toEqual(expect.arrayContaining([
       'packages/typert/generator/tests/fixtures/type-model/**',
+      'products/desktop/**',
+      'plugins/managed/**',
     ]))
     const stylisticOverride = parsed.overrides.find((value: unknown) =>
       isRecord(value) && isRecord(value.rules) && '@stylistic/max-len' in value.rules)

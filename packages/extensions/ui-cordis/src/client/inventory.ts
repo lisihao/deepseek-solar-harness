@@ -5,7 +5,7 @@
  * The panel is a frame-wide surface, so it cannot derive this from any session:
  * the registry is global and the read is a single global call. The rows are
  * re-read rather than patched, because the wire announcements
- * (`cordis/dynamic-package` / `/retract`) carry no labels and a definition
+ * (`@deepseek-ai/cordis/dynamic-package` / `/retract`) carry no labels and a definition
  * can appear or disappear between them — a patch-in-place cache would drift into
  * showing definitions the host no longer holds.
  *

@@ -10,6 +10,8 @@ GitHub sends pull-request activity for a fork contribution to the base repositor
 
 ## Decision
 
+> Superseded for this repository's current delivery flow by [Solar governance critical path](2026-08-20-solar-governance-critical-path.md). `fork-ci.yml` remains available as a manually dispatched diagnostic matrix, but it no longer runs automatically on every `codex/**` push because pull-request CI supplies the commit-bound merge verdict.
+
 The fork owns [fork-ci.yml](../../../../.github/workflows/fork-ci.yml), a push-triggered adapter limited to `codex/**` branches. It invokes the repository-owned Linux primary, Node compatibility, Python SDK, release-shaped Python runtime, and Windows blocking commands on standard GitHub-hosted runners. The adapter neither replaces nor edits the upstream [ci.yml](../../../../.github/workflows/ci.yml); it supplies the event and runner mapping that a fork cannot inherit.
 
 The final job retains the protected context name `all checks passed`, depends on every required adapter job, runs after failures, and fails when any dependency fails, is cancelled, or is skipped. It holds read-only repository permissions, cancels superseded runs for the same branch, and never consumes secrets. The Linux job compares archived Agent Notes with `origin/master` and uses bounded worker counts suitable for a standard hosted runner.

@@ -46,6 +46,21 @@ const STEER_ALL_SETTLED = join(STEER_ALL_DIR, 'settled.expected.md')
 const STEER_ONE = 'Interjection: include the word BANANA in your final reply.'
 const STEER_TWO = 'Interjection: include the word ORANGE in your final reply.'
 
+/**
+ * The pending question is the assertion target of this snapshot. Context
+ * pressure and billing projections may arrive either side of that milestone
+ * (they are deliberately independent of the still-open turn), so omit their
+ * optional composer chrome while retaining the conversation and controls.
+ * The settled snapshot below verifies both projections once the turn closes.
+ */
+function normalizePendingSteerChrome(snapshot: string): string {
+  return snapshot
+    .split('\n')
+    .filter(line => !/^- button "\d+% of context used"$/.test(line))
+    .filter(line => !/^- text: Cache hit /.test(line))
+    .join('\n')
+}
+
 /** Concatenated assistant text deltas — the model-visible reply body. */
 function assistantText(events: SessionEvent[]): string {
   return events
@@ -359,7 +374,7 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
     // visually-hidden Running label while the question keeps the turn open.
     await page.locator('[data-variant="think"][data-state="ok"]').first().waitFor({ timeout: 10_000 })
     const mid = await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd)
-    await compareOrRefreshGolden(STEER_ALL_MID, mid, MODE)
+    await compareOrRefreshGolden(STEER_ALL_MID, normalizePendingSteerChrome(mid), MODE)
 
     // Answer the question; the step closes, the loop drains both steerings
     // into one next-step request, and the final reply obeys both markers.

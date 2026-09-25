@@ -9,7 +9,7 @@
 
 英文源文件由系统**生成**，并通过 `pnpm run verify-tool-catalog`（`doc-sync`（文档同步门禁）的一部分）验证新鲜度；本中文文件作为经评审对侧通过双语配对维护。与 Cordis 目录（纯源码 AST 处理）不同，英文生成器会在真实上下文中**启动**每个工具插件并读取 `ctx.tools.schemas()`，因为工具 schema 无法通过静态分析完全确定，例如运行时展开的枚举、拼接的描述、由配置决定的名称以及使用原始 JSON Schema 的 MCP 工具。完整性守卫会 glob 匹配 `packages/*/tool-*`；如果生成器的启动 manifest（元数据清单）遗漏任何包，检查就会失败，因此新工具不会在无人察觉的情况下缺少文档。参见[工具 schema 目录 Agent Note](../.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md)。
 
-范围：`packages/*/tool-*` 下已发布的产品工具，每个工具均使用其**默认**配置启动；但如果某个 Config 字段是**必填项**且没有默认值，生成器就必须作出选择，对应包的说明会记录本页展示的是哪个分支。注册的工具**名称**可以是加载时配置，例如 `tool-subagent` 的 `toolName`，因此部署可能以不同名称或额外名称提供某个包；如果存在随产品发布的别名，对应包的说明会予以记录。`examples/` 中的演示工具（例如 `echo`）不在范围内，这与 Cordis 目录仅涵盖包的范围一致。
+范围：`packages/*/tool-*` 下已发布的产品工具，以及明确列出的、由 Provider 所有的面向模型工具；每个工具均使用其**默认**配置启动，但如果某个 Config 字段是**必填项**且没有默认值，生成器就必须作出选择，对应包的说明会记录本页展示的是哪个分支。注册的工具**名称**可以是加载时配置，例如 `tool-subagent` 的 `toolName`，因此部署可能以不同名称或额外名称提供某个包；如果存在随产品发布的别名，对应包的说明会予以记录。`examples/` 中的演示工具（例如 `echo`）不在范围内，这与 Cordis 目录仅涵盖包的范围一致。
 
 ## 工具包映射
 
@@ -18,8 +18,13 @@
 | 工具包 | 模型可见名称 | 依赖 | 写入／影响 | 随产品发布的别名 | 部署说明 |
 | --- | --- | --- | --- | --- | --- |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`、`ctx.userQuestions` | `tool/call`、`tool/result after a UI/provider answers the question` | - | ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。 |
+| `@deepseek-ai/dsh-tool-browser` | `browser` | `ctx.tools`、`ctx.browser`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`browser provider state through ctx.browser` | - | 面向模型的 `browser` 工具只接受有界的 portable-plan 词汇。提供方选择、Ego Lite 发现和浏览器生命周期都保留在 `ctx.browser` 后；browser-js-v1 仅供受信任插件使用，不向模型暴露。 |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`、`ctx.codeRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: code`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 Code Mode Agent Note）。在 `code` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。 |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`、`ctx.systemPrompt`、`ctx.userQuestions (execution time, opportunistic)` | `tool/call`、`plan/mode inactive on an approved review`、`tool/result` | - | 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。 |
+| `@deepseek-ai/dsh-tool-physical-operator` | `physical_operator` | `ctx.tools`、`ctx.physicalOperators`、`action=run 时的调用 Agent` | `tool/call`、`tool/result`、`所选 Provider 产生的 physical-operator 生命周期` | - | Schema 暴露稳定物理算子 ID，而不是 Provider 传输实现。部署方另行注册算子；目录生成器有意使用空注册表采集 Schema。 |
+| `@deepseek-ai/dsh-physical-operator-chatgpt-web` | `web_session` | `ctx.tools`、`ctx.systemPrompt`、`负责协调的 ChatGPT Web Agent` | `tool/call`、`tool/result`、`Agent inbox handoff 消息` | - | 由 Provider 所有、用于已认证 ChatGPT Web 响应的协调控制。目录只挂载注册 helper，并使用代表性的 handoff 大小上限；不会启动 browser、MCP connector 或 Provider state。运行时执行仍限制在负责协调的 Web 调用中。 |
+| `@deepseek-ai/dsh-tool-debate` | `debate` | `ctx.tools`、`ctx.systemPrompt`、`ctx.debates` | `tool/call`、`tool/result`、`ctx.debates 中的 Debate 生命周期` | - | 面向模型的 Consumer 只依赖与 Provider 无关的 `ctx.debates` seam；目录使用的替身不能执行，也不会启动本地 Debate Provider。 |
+| `@deepseek-ai/dsh-tool-orchestration` | `orchestration` | `ctx.tools`、`ctx.systemPrompt`、`ctx.orchestrations` | `tool/call`、`tool/result`、`通过 ctx.orchestrations 创建的持久编排运行` | - | 面向模型的 Consumer 只依赖与 Provider 无关的 ctx.orchestrations seam；目录替身不能执行，也不会启动本地 daemon。 |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具（来自 `@deepseek-ai/dsh-tool-jobs`）收集／停止；禁用 `enableRunInBackground` 配置（默认为 true）后，该参数会被完全移除。 |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费方（由 `@deepseek-ai/dsh-pwsh-local` 等 PowerShell 执行器为 `ctx.shell` 提供后端）；除沙箱接口外，它逐项对应 bash 工具调用。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具收集／停止；托管的 `DSH_*` 环境来自 `@deepseek-ai/dsh-shell-env`。每次调用都在新进程中运行，不使用持久 PTY 会话。路径采用原生 `C:\...` 形式，变量采用 `$env:NAME`。 |
 | `@deepseek-ai/dsh-tool-cordis` | `cordis_define`、`cordis_inspect_list`、`cordis_inspect_query`、`cordis_inspect_self`、`cordis_run`、`cordis_stop`、`cordis_undefine` | `ctx.tools`、`ctx.dynamicCordisRunner` | `tool/call`、`tool/result`、`process-local dynamic package lifecycle` | - | 不在任何随产品发布的树中，需要显式选择启用；动态 Package 代码可以访问真实运行时，见 .agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md。该工具集注入 `@deepseek-ai/dsh-cordis-host-runner` 提供的 `ctx.dynamicCordisRunner`，后者拥有定义注册表和 vm 沙箱；组合缺少它时这些工具不会激活。运行中的 Package 在停止、undefine 或 DSH 重启前可以注册**额外的**模型可见工具；发生这类工具集变化时，系统会记录完整且有变动的请求头。 |
@@ -116,6 +121,446 @@
 
 ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。
 
+<a id="deepseek-aidsh-tool-browser"></a>
+
+## `@deepseek-ai/dsh-tool-browser`
+
+### `browser`
+
+通过已配置的浏览器提供方运行一个有序的、类型化的浏览器计划。模型计划只能使用默认 Ego Lite v1.2.5 Provider 支持的命名/已有工作区、精确 URL 标签页复用和可移植页面操作；当前工作区、`reuse:"never"` 与 `pages` 不可用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "plan": {
+      "type": "object",
+      "description": "Closed BrowserRunPlanV1 model schema. Use workspace kind existing or named; open.reuse must be exact-url; pages is not a model operation. Operations are bounded to 64 and execute in order.",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "workspace": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "existing"
+                },
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "named"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "createIfMissing": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "kind",
+                "name",
+                "createIfMissing"
+              ]
+            }
+          ]
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "authenticated-profile-reuse",
+              "named-workspace",
+              "page-evaluate",
+              "semantic-snapshot"
+            ]
+          }
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "timeoutMs": {
+                "type": "integer"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "open",
+                  "select-page",
+                  "close-page",
+                  "navigate",
+                  "reload",
+                  "page-info",
+                  "snapshot",
+                  "click",
+                  "fill",
+                  "clear",
+                  "press",
+                  "check",
+                  "select",
+                  "read",
+                  "count",
+                  "wait",
+                  "complete"
+                ]
+              },
+              "page": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "reuse": {
+                "type": "string",
+                "const": "exact-url"
+              },
+              "waitUntil": {
+                "type": "string",
+                "enum": [
+                  "dom-content-loaded",
+                  "load",
+                  "network-idle"
+                ]
+              },
+              "match": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "exact-url"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "url"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "url-prefix"
+                      },
+                      "prefix": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "prefix"
+                    ]
+                  }
+                ]
+              },
+              "locator": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "css",
+                      "role",
+                      "text",
+                      "label",
+                      "placeholder",
+                      "test-id"
+                    ]
+                  },
+                  "selector": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "placeholder": {
+                    "type": "string"
+                  },
+                  "testId": {
+                    "type": "string"
+                  },
+                  "exact": {
+                    "type": "boolean"
+                  },
+                  "index": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "value": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "checked": {
+                "type": "boolean"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "text"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "value"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "html"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "attribute"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "name"
+                    ]
+                  }
+                ]
+              },
+              "condition": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "load",
+                      "url",
+                      "locator",
+                      "control"
+                    ]
+                  },
+                  "page": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "dom-content-loaded",
+                      "load",
+                      "network-idle",
+                      "attached",
+                      "detached",
+                      "visible",
+                      "hidden"
+                    ]
+                  },
+                  "match": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "exact-url"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "url-prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "css",
+                          "role",
+                          "text",
+                          "label",
+                          "placeholder",
+                          "test-id"
+                        ]
+                      },
+                      "selector": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "placeholder": {
+                        "type": "string"
+                      },
+                      "testId": {
+                        "type": "string"
+                      },
+                      "exact": {
+                        "type": "boolean"
+                      },
+                      "index": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  "control": {
+                    "type": "string",
+                    "enum": [
+                      "agent",
+                      "user"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "keep": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind"
+            ]
+          }
+        }
+      },
+      "required": [
+        "version",
+        "workspace",
+        "operations"
+      ]
+    }
+  },
+  "required": [
+    "plan"
+  ]
+}
+```
+
+来源：[`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+面向模型的 `browser` 工具只接受有界的 portable-plan 词汇。提供方选择、Ego Lite 发现和浏览器生命周期都保留在 `ctx.browser` 后；browser-js-v1 仅供受信任插件使用，不向模型暴露。
+
 <a id="deepseek-aidsh-tools"></a>
 
 ## `@deepseek-ai/dsh-tools`
@@ -174,6 +619,206 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 来源：[`packages/plan/plan-mode/src/index.ts`](../packages/plan/plan-mode/src/index.ts)
 
 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。
+
+<a id="deepseek-aidsh-tool-physical-operator"></a>
+
+## `@deepseek-ai/dsh-tool-physical-operator`
+
+### `physical_operator`
+
+发现并运行部署方定义的物理算子。使用 `action=list` 查看稳定算子 ID、实时可用性、标签和容量。使用 `action=run`，传入列表中的算子 ID 与完整的独立任务。算子 ID 是稳定能力边界：不要选择或假定其背后的 Provider。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "description": "List physical operators or run one selected operator.",
+      "enum": [
+        "list",
+        "run"
+      ]
+    },
+    "operator_id": {
+      "type": "string",
+      "description": "Stable operator id returned by action=list. Required for action=run."
+    },
+    "description": {
+      "type": "string",
+      "description": "Short 3-5 word task label. Required for action=run."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Complete standalone task for the selected operator. Required for action=run."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Execution lifetime. Omit for backward-compatible ephemeral execution.",
+      "enum": [
+        "ephemeral",
+        "resident"
+      ]
+    },
+    "required_capabilities": {
+      "type": "array",
+      "description": "Capabilities required by the delegated task, for example browser. Browser requires resident mode so the full DSH tool bridge remains authoritative.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+Schema 暴露稳定物理算子 ID，而不是 Provider 传输实现。部署方另行注册算子；目录生成器有意使用空注册表采集 Schema。
+
+<a id="deepseek-aidsh-physical-operator-chatgpt-web"></a>
+
+## `@deepseek-ai/dsh-physical-operator-chatgpt-web`
+
+### `web_session`
+
+协调一个已认证的 ChatGPT Web 响应与 DSH 循环。使用 checkpoint 观察排队的 DSH 输入，使用 handoff 排队一个有界的继续执行摘要。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "description": "Checkpoint the current Web response or queue a continuation handoff.",
+      "enum": [
+        "checkpoint",
+        "handoff"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Required for handoff: concise work state and next steps for a fresh Web lane."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts`](../packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts)
+
+由 Provider 所有、用于已认证 ChatGPT Web 响应的协调控制。目录只挂载注册 helper，并使用代表性的 handoff 大小上限；不会启动 browser、MCP connector 或 Provider state。运行时执行仍限制在负责协调的 Web 调用中。
+
+<a id="deepseek-aidsh-tool-debate"></a>
+
+## `@deepseek-ai/dsh-tool-debate`
+
+### `debate`
+
+启动有界多智能体辩论、列出或检查持久运行，或应用显式的 revision fence 控制操作。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "start",
+        "list",
+        "inspect",
+        "control"
+      ]
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Debate question or instruction; required for start."
+    },
+    "objective": {
+      "type": "string",
+      "description": "Optional concise decision objective for start."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Persistent Debate run id; required for inspect/control."
+    },
+    "expected_revision": {
+      "type": "number",
+      "description": "Current run revision; required for control."
+    },
+    "control_action": {
+      "type": "string",
+      "description": "Explicit control decision; continue grants two further rounds only when the Provider reports eligibility.",
+      "enum": [
+        "approve",
+        "reject",
+        "pause",
+        "resume",
+        "stop",
+        "continue"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human reason; required for control."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+来源：[`packages/orchestration/tool-debate/src/index.ts`](../packages/orchestration/tool-debate/src/index.ts)
+
+面向模型的 Consumer 只依赖与 Provider 无关的 `ctx.debates` seam；目录使用的替身不能执行，也不会启动本地 Debate Provider。
+
+<a id="deepseek-aidsh-tool-orchestration"></a>
+
+## `@deepseek-ai/dsh-tool-orchestration`
+
+### `orchestration`
+
+编译／启动持久 Resident TaskGraph，列出运行，或检查一个运行。复杂的低风险工作可以自动启动；有风险的工作会停在人工审批。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "start",
+        "list",
+        "inspect"
+      ]
+    },
+    "objective": {
+      "type": "string",
+      "description": "Unmodified user objective; required for start."
+    },
+    "graph_json": {
+      "type": "string",
+      "description": "Complete LogicalTaskGraphV1 JSON; required for start."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Run id; required for inspect."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+来源：[`packages/orchestration/tool-orchestration/src/index.ts`](../packages/orchestration/tool-orchestration/src/index.ts)
+
+面向模型的 Consumer 只依赖与 Provider 无关的 `ctx.orchestrations` seam；目录使用的替身不能执行，也不会启动本地 daemon。
 
 <a id="deepseek-aidsh-tool-bash"></a>
 
@@ -670,7 +1315,7 @@ pwsh 工具是 Windows 组合中 bash 执行器 seam 的 PowerShell 方言消费
 
 ### `read_image`
 
-读取 PNG/JPEG/WebP/GIF 文件并返回图像本身。要求当前模型接受图像输入。
+读取 PNG/JPEG/WebP/GIF 文件并返回图像本身。路径没有扩展名时会根据文件内容识别。要求当前模型接受图像输入。
 
 ```json
 {

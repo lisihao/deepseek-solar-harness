@@ -17,7 +17,7 @@ import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
 import type { JsonValue, Session, SessionEvent, SessionEventMap, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
-import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionPersistence, SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
 import { SubagentError } from '@deepseek-ai/dsh-subagent'
 import type { SubagentListEntry as CatalogSubagentListEntry } from '@deepseek-ai/dsh-subagent'
@@ -62,6 +62,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 // Type-only: resolves `ctx.get('tasks')` to the background job registry.
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
+import { projectPublicSessionEvent } from './physical-operator-trace.ts'
 // Type-only: resolves `ctx.get('sessionProjectionCache')` (the cold listing column).
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 // GoalError narrows domain rejections to their stable codes at the wire boundary.
@@ -327,13 +328,16 @@ function ok<T>(request: RpcRequest<unknown>, value: T): RpcResponse<T> {
  * owning catalog stops advertising it. Per-provider failures ride `failures`
  * without failing the sound groups; groups that advertise nothing are dropped.
  */
-async function buildModelCatalog(ctx: Context): Promise<{
+async function buildModelCatalog(
+  ctx: Context,
+  options?: { readonly refresh?: boolean },
+): Promise<{
   groups: ModelProviderGroup[]
   failures: ModelCatalogFailure[]
 }> {
   const catalog = await Promise.all(ctx.llm.listProviders().map(async (provider) => {
     try {
-      const models = await ctx.llm.listModels(provider.id)
+      const models = await ctx.llm.listModels(provider.id, options)
       const entries = await Promise.all(models.map(async (model) => {
         const resolved = await ctx.llm.resolveModelInfo(provider.id, model.id)
         const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined
@@ -815,7 +819,7 @@ function historyPage(
   return {
     events: page.events.map((event) => {
       const view = viewFor(ctx, event, callId => backscanArgs(page.events, callId), scope)
-      return { event, ...view === undefined ? {} : { view } }
+      return { ...projectPublicSessionEvent(event), ...view === undefined ? {} : { view } }
     }),
     hasMore: page.hasMore,
   }
@@ -865,6 +869,31 @@ function listProjectionsFor(ctx: Context, meta: SessionHeader, session: Session 
   } catch (error) {
     ctx.logger.warn(`session.list: projection column for "${meta.id}" failed (serving the row without it): ${String(error)}`)
     return undefined
+  }
+}
+
+/**
+ * Resolve a revision-exact cold projection block. A matching cache row is
+ * zero-I/O; a missing or stale row folds the stored tail once and records the
+ * observed log revision so unchanged future listings stay zero-I/O.
+ */
+async function coldListProjectionsFor(
+  ctx: Context,
+  meta: SessionHeader,
+  revision: SessionPersistenceRevision | undefined,
+  signal?: AbortSignal,
+): Promise<SessionProjectionsBlock | undefined> {
+  const cache = ctx.get('sessionProjectionCache')
+  if (cache === undefined || revision === undefined) return listProjectionsFor(ctx, meta, undefined)
+  try {
+    const cached = cache.cachedSnapshot(meta, revision)
+    const block = cached?.values.sessionListMetadata !== undefined
+      ? cached
+      : await cache.coldSnapshot(meta.id, signal, revision)
+    return Object.keys(block.values).length > 0 ? block : undefined
+  } catch (error) {
+    ctx.logger.warn(`session.list: exact projection refresh for "${meta.id}" failed (serving a stale or absent column): ${String(error)}`)
+    return listProjectionsFor(ctx, meta, undefined)
   }
 }
 
@@ -1117,6 +1146,45 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
   type WebModelSelectionRef = ModelSelectionRef & { current: ModelSelection }
   const selections = new WeakMap<Agent, WebModelSelectionRef>()
+
+  /**
+   * Debate owns the dsh-debate-host/debate route only for the turn it serves.
+   * It is an implementation route, not a model a user can select or a
+   * persistent session preference.  The actual request header still records
+   * it so the session transcript remains reconstructable; model-directory
+   * projection must therefore skip it when recovering the user's selection.
+   */
+  function isTransientDebateRoute(selection: Pick<ModelSelection, 'provider' | 'model'>): boolean {
+    return selection.provider === 'dsh-debate-host' && selection.model === 'debate'
+  }
+
+  /** Recover the most recent user-visible route from request/header history. */
+  function lastUserSelection(agent: Agent): ModelSelection | undefined {
+    for (let index = agent.session.events.length - 1; index >= 0; index -= 1) {
+      const event = agent.session.events[index]
+      if (event?.type !== 'request/header') continue
+      const { config } = event.data.header
+      if (isTransientDebateRoute(config)) continue
+      return {
+        provider: config.provider,
+        model: config.model,
+        ...config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort },
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * Value exposed by sessions.models.  A live user selection wins; after a
+   * restart, recover the last non-Debate route rather than making the
+   * implementation route appear as the selected model.  No event is written
+   * and the Debate route remains available to the runtime adapter itself.
+   */
+  function userFacingSelection(agent: Agent, selection: WebModelSelectionRef): ModelSelection {
+    const current = selection.current
+    if (!isTransientDebateRoute(current)) return current
+    return lastUserSelection(agent) ?? defaults.defaultModelSelection()
+  }
   /**
    * Serializes `agentPreset.select` per session. Two concurrent selects both
    * pass the blank check, and the second `unmountPresetFor` then finds nothing
@@ -1164,6 +1232,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // O(new events) rather than a rescan.
         const logged = agent.session.requestHeader()?.config
         if (logged === undefined) return defaults.defaultModelSelection()
+        // The Debate host route is only valid while tool-debate has a
+        // dispatch for the current turn. Its logged request header remains
+        // necessary for transcript reconstruction, but cannot seed a later
+        // ordinary turn after Debate was disabled or switched to Auto.
+        if (isTransientDebateRoute(logged)) {
+          return lastUserSelection(agent) ?? defaults.defaultModelSelection()
+        }
         return {
           provider: logged.provider,
           model: logged.model,
@@ -1739,17 +1814,23 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     const attached = new Set(items.map(item => item.sessionId))
     const persistence = ctx.get('sessionPersistence')
     if (persistence !== undefined) {
-      const cold = (await persistence.list(signal))
-        .filter(meta => !attached.has(meta.id) && meta.cwd !== undefined)
+      // Production persistence exposes source-qualified revisions. The
+      // compatibility fallback keeps narrow test/third-party doubles working,
+      // but cannot certify a cached projection as current.
+      const snapshots = typeof persistence.listSnapshots === 'function'
+        ? await persistence.listSnapshots(signal)
+        : (await persistence.list(signal)).map(header => ({ header, revision: undefined }))
+      const cold = snapshots
+        .filter(snapshot => !attached.has(snapshot.header.id) && snapshot.header.cwd !== undefined)
       signal?.throwIfAborted()
       for (let offset = 0; offset < cold.length; offset += COLD_SUMMARY_BATCH_SIZE) {
         signal?.throwIfAborted()
         const batch = cold.slice(offset, offset + COLD_SUMMARY_BATCH_SIZE)
         const settled = await Promise.allSettled(
-          batch.map(async (meta) => {
-            // Projection hints remain optional. Blank verification may read
-            // this Session's artifact only when it passes the configured size check.
-            const projections = listProjectionsFor(ctx, meta, undefined)
+          batch.map(async ({ header: meta, revision }) => {
+            // Revision-matched projections are exact. A stale or missing row
+            // is repaired from the persistence tail and cached for subsequent listings.
+            const projections = await coldListProjectionsFor(ctx, meta, revision, signal)
             const summary = await summarizeCold(
               ctx,
               persistence,
@@ -2272,11 +2353,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async models(request) {
-        const { sessionId } = request.payload
+        const { sessionId, refresh } = request.payload
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
-        const current = selectionFor(found.agent).current
-        const { groups, failures } = await buildModelCatalog(ctx)
+        const current = userFacingSelection(found.agent, selectionFor(found.agent))
+        const { groups, failures } = await buildModelCatalog(
+          ctx,
+          refresh === true ? { refresh: true } : undefined,
+        )
         const routable = routeServed(current.provider)
         return ok(request, { current: { ...current }, routable, groups, failures })
       },
@@ -3400,7 +3484,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async models(request) {
-        return ok(request, await buildModelCatalog(ctx))
+        const { refresh } = request.payload
+        return ok(request, await buildModelCatalog(
+          ctx,
+          refresh === true ? { refresh: true } : undefined,
+        ))
       },
 
       async discoverModels(request, signal) {
@@ -3492,7 +3580,12 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               callId => openCalls.get(session.id)?.get(callId) ?? backscanArgs(session.events, callId),
               ctx.agents.get(session.id),
             )
-            queue.push(frame({ type: 'session/event', sessionId: session.id, event, ...view === undefined ? {} : { view } }))
+            queue.push(frame({
+              type: 'session/event',
+              sessionId: session.id,
+              ...projectPublicSessionEvent(event),
+              ...view === undefined ? {} : { view },
+            }))
           }),
           ctx.on('session/created', (session: Session) => {
             subscribeSession(queue, session)

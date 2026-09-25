@@ -29,6 +29,7 @@ import { en, zh, type ModelKey } from './locales.ts'
 export { ModelDirectory } from './directory.ts'
 export type { ModelDirectoryState } from './directory.ts'
 export { ModelDirectoryResolver } from './service.ts'
+export type { ModelRefreshLine, ModelRefreshReport, ModelRefreshSource } from './service.ts'
 export type { ModelSelectInjected } from './slots.ts'
 export type { ModelKey } from './locales.ts'
 
@@ -166,6 +167,7 @@ export function apply(ctx: ClientContext): void {
           load: () => {
             if (available) directory.load().catch(() => { /* surfaced on the store */ })
           },
+          refresh: () => models.refreshAll(sessionId),
           select: (selection: ModelSelection) => available
             ? directory.select(selection).then(() => true, () => false)
             : Promise.resolve(false),

@@ -11,7 +11,8 @@
  */
 
 import { randomBytes } from 'node:crypto'
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { lstat, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 /**
@@ -63,9 +64,44 @@ export async function writeFileAtomic(filename: string, content: string, options
   }
 }
 
+/**
+ * Synchronous counterpart for state owners whose public contract is already
+ * synchronous. It preserves the same exclusive temp-file and atomic-rename
+ * semantics as {@link writeFileAtomic} without fire-and-forget persistence.
+ * @param filename - final path receiving the content.
+ * @param content - complete next file content.
+ * @param options - permission bits for the replacement inode.
+ */
+export function writeFileAtomicSync(filename: string, content: string, options: WriteFileAtomicOptions): void {
+  mkdirSync(dirname(filename), {
+    recursive: true,
+    ...options.dirMode === undefined ? {} : { mode: options.dirMode },
+  })
+  const temp = `${filename}.${randomBytes(6).toString('hex')}.tmp`
+  try {
+    writeFileSync(temp, content, { mode: options.mode, flag: 'wx' })
+    renameSync(temp, filename)
+  } catch (error) {
+    rmSync(temp, { force: true })
+    throw error
+  }
+}
+
 /** Whether an exclusive create failed because the path already exists. */
 function isEEXIST(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === 'EEXIST'
+}
+
+/** Windows may report an existing exclusively-created file as EPERM. */
+async function isLockContention(error: unknown, lockPath: string): Promise<boolean> {
+  if (isEEXIST(error)) return true
+  if (process.platform !== 'win32' || (error as NodeJS.ErrnoException | null)?.code !== 'EPERM') return false
+  try {
+    await lstat(lockPath)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -102,7 +138,7 @@ export async function withFileLock<T>(
       await writeFile(lockPath, `${process.pid}\n`, { mode: 0o600, flag: 'wx' })
       break
     } catch (error) {
-      if (!isEEXIST(error)) throw error
+      if (!await isLockContention(error, lockPath)) throw error
     }
     if (Date.now() >= deadline) {
       throw new Error(`atomic-write: timed out waiting for the writer lock at ${lockPath}`)

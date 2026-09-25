@@ -1,0 +1,523 @@
+/** DSH Desktop executable: minimal Electron bootstrap around the Host Cordis root. */
+
+import { app, net, safeStorage } from 'electron'
+import type { Context } from '@deepseek-ai/cordis'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  boot,
+  installFailLoud,
+  loadLayeredEnv,
+  type FailLoudProcess,
+} from '@deepseek-ai/dsh-app-boot'
+import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
+import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+import { installDesktopPnpmRuntime, resolveHeadlessNodeExecutable } from './desktop-runtime-environment.ts'
+import { ElectronDesktopRuntime } from './electron-runtime.ts'
+import { installProfilePackageResolver } from './module-resolution.ts'
+import { installNativeProductRuntime } from './native-product-runtime.ts'
+import { packagedDependencyPath, unpackedAsarPath } from './packaged-runtime-path.ts'
+import {
+  connectFrontendServer,
+  DesktopDeploymentStateStore,
+  DesktopFrontendLeaderMonitor,
+  DesktopRemoteAccessSession,
+  type DesktopDeploymentState,
+  type DesktopFrontendConnection,
+} from './deployment-state.ts'
+import { parseFrontendBillingBaseline, type FrontendBillingBaseline } from './frontend-billing.ts'
+import { FrontendSetupController } from './frontend-setup.ts'
+import { DesktopGitSyncController } from './git-sync.ts'
+import { DesktopRemoteSessionClient, DesktopSessionSyncController } from './session-sync.ts'
+import {
+  beginDesktopProfileStartup,
+  listDesktopProfiles,
+  markDesktopProfileFailed,
+  markDesktopProfileHealthy,
+  selectDesktopProfile,
+  type DesktopProfileStartup,
+} from './profile-manager.ts'
+import { DesktopProfileService } from './profile-service.ts'
+import { prepareDesktopProfile } from './profile.ts'
+import type { DesktopPnpmBootstrap } from './pnpm.ts'
+import {
+  createDesktopExitCoordinator,
+  createDesktopShutdown,
+  installShutdownRequests,
+  type DesktopShutdown,
+} from './shutdown.ts'
+
+const BIN_NAME = 'dsh-plugin-desktop'
+const PRODUCT_NAME = 'DSH Desktop'
+
+/** Read the inactive local Host's billing totals for an explicit Frontend history baseline. */
+async function readFrontendBillingBaseline(): Promise<FrontendBillingBaseline | undefined> {
+  const path = join(resolveDshHome(), 'storages', 'web-billing.json')
+  try {
+    return parseFrontendBillingBaseline(JSON.parse(await readFile(path, 'utf8')))
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
+      process.stderr.write(
+        `${BIN_NAME}: unable to read local billing baseline: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      )
+    }
+    return undefined
+  }
+}
+
+/** Resolve a packaged Desktop asset without depending on the Cordis shell plugin. */
+function desktopAssetPath(filename: string): string {
+  return unpackedAsarPath(fileURLToPath(new URL(`../build/${filename}`, import.meta.url)))
+}
+
+/** Report profile recovery without changing startup or rollback outcomes. */
+function notifyProfileRecovery(runtime: ElectronDesktopRuntime, body: string): void {
+  try {
+    runtime.updates.notify({ title: 'Unable to Open Profile', body })
+  } catch (cause) {
+    process.stderr.write(
+      `${BIN_NAME}: failed to show profile recovery notification: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+    )
+  }
+}
+
+/** Start one Electron process and leave lifetime to the mounted desktop plugin. */
+async function start(): Promise<void> {
+  app.setName(PRODUCT_NAME)
+  if (!app.requestSingleInstanceLock()) {
+    app.quit()
+    return
+  }
+
+  let current: Context | undefined
+  let profileStartup: DesktopProfileStartup | undefined
+  let profileStatePath: string | undefined
+  let shutdown: DesktopShutdown | undefined
+  let removeShutdownRequests: (() => void) | undefined
+  let disposePnpmRuntime: (() => void) | undefined
+  let disposeNativeProductRuntime: (() => void) | undefined
+  let disposeFrontend: (() => Promise<void>) | undefined
+  let frontendAccess: DesktopRemoteAccessSession | undefined
+  let frontendLeaderMonitor: DesktopFrontendLeaderMonitor | undefined
+  let frontendSetup: FrontendSetupController | undefined
+  let gitSync: DesktopGitSyncController | undefined
+  let sessionSync: DesktopSessionSyncController | undefined
+  let deploymentStore: DesktopDeploymentStateStore | undefined
+  let deploymentState: DesktopDeploymentState = {
+    version: 4,
+    role: 'server',
+    servers: [],
+    presentation: 'compatibility',
+  }
+  let runtime!: ElectronDesktopRuntime
+  const nativeExit = createDesktopExitCoordinator(
+    {
+      prepareToQuit: () => { runtime.prepareToQuit() },
+      relaunch: () => { app.relaunch() },
+      exit: code => { app.exit(code) },
+    },
+    () => { removeShutdownRequests?.() },
+  )
+  let restartRequested = false
+  runtime = new ElectronDesktopRuntime(async () => {
+    if (shutdown === undefined) {
+      throw new Error('dsh-plugin-desktop: shutdown coordinator is not ready')
+    }
+    if (restartRequested) return
+    restartRequested = true
+    nativeExit.requestRelaunch()
+    await shutdown.request(0)
+  }, {
+    currentRole: () => deploymentState.role,
+    configureFrontend: async () => {
+      if (frontendSetup === undefined) throw new Error('dsh-plugin-desktop: Frontend setup is not ready')
+      await frontendSetup.open()
+    },
+    useServer: async () => {
+      if (deploymentStore === undefined) throw new Error('dsh-plugin-desktop: deployment state is not ready')
+      deploymentState = await deploymentStore.useServer()
+      await runtime.requestRestart()
+    },
+  })
+  const finalExit = (code: number): void => { nativeExit.finish(code) }
+  shutdown = createDesktopShutdown(
+    async () => {
+      try {
+        await frontendLeaderMonitor?.stop()
+        await disposeFrontend?.()
+      } finally {
+        try {
+          await current?.fiber.dispose()
+        } finally {
+          try {
+            frontendAccess?.stop()
+            frontendSetup?.dispose()
+            gitSync?.stop()
+            sessionSync?.stop()
+            disposeNativeProductRuntime?.()
+          } finally {
+            disposePnpmRuntime?.()
+          }
+        }
+      }
+    },
+    finalExit,
+  )
+  const requestQuit = (code: number): void => { void shutdown.request(code) }
+  removeShutdownRequests = installShutdownRequests(process, app, requestQuit)
+
+  app.on('second-instance', () => { runtime.show() })
+  await app.whenReady()
+  if (process.platform === 'win32') app.setAppUserModelId('ai.deepseek.dsh.desktop')
+  if (app.isPackaged && process.cwd() === '/') process.chdir(app.getPath('home'))
+
+  const failLoudProcess: FailLoudProcess = {
+    on: (event, handler) => process.on(event, handler),
+    off: (event, handler) => process.off(event, handler),
+    stderr: process.stderr,
+    exit: finalExit,
+  }
+  installFailLoud(BIN_NAME, failLoudProcess, async () => {
+    try {
+      await frontendLeaderMonitor?.stop()
+      await disposeFrontend?.()
+    } finally {
+      try {
+        await current?.fiber.dispose()
+      } finally {
+        try {
+          frontendAccess?.stop()
+          frontendSetup?.dispose()
+          gitSync?.stop()
+          sessionSync?.stop()
+          disposeNativeProductRuntime?.()
+        } finally {
+          disposePnpmRuntime?.()
+        }
+      }
+    }
+  })
+
+  try {
+    const environment = loadLayeredEnv(BIN_NAME, process.cwd())
+    process.env.DSH_BUILD_COMMIT ??= app.isPackaged ? `desktop-${app.getVersion()}` : 'development'
+    deploymentStore = new DesktopDeploymentStateStore(
+      app.getPath('userData'),
+      safeStorage,
+      { fetch: (url, init) => net.fetch(String(url), init) },
+    )
+    deploymentState = await deploymentStore.load()
+    gitSync = new DesktopGitSyncController(app.getPath('userData'))
+    await gitSync.start()
+    sessionSync = new DesktopSessionSyncController(app.getPath('userData'), {
+      remote: async () => {
+        const serverId = deploymentState.activeServerId
+        if (serverId === undefined) return undefined
+        const server = deploymentState.servers.find(candidate => candidate.id === serverId)
+        if (server === undefined) return undefined
+        const accessToken = server.authMode === 'paired'
+          ? frontendAccess?.accessToken() ?? (await deploymentStore!.exchange(server)).accessToken
+          : undefined
+        return {
+          serverId,
+          client: new DesktopRemoteSessionClient(
+            server.endpoint,
+            accessToken,
+            (url, init) => net.fetch(String(url), init),
+          ),
+        }
+      },
+      local: () => current?.get('sessionPersistence') as SessionPersistence | undefined,
+      onError: (cause) => {
+        process.stderr.write(
+          `${BIN_NAME}: Session sync failed: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+      },
+    })
+    await sessionSync.start()
+    frontendSetup = new FrontendSetupController(
+      deploymentStore,
+      gitSync,
+      sessionSync,
+      () => deploymentState,
+      () => runtime.requestRestart(),
+    )
+    if (deploymentState.role === 'frontend') {
+      const billingBaseline = await readFrontendBillingBaseline()
+      const reportCandidateError = (candidate: { label: string }, cause: unknown): void => {
+        process.stderr.write(
+          `${BIN_NAME}: Frontend Server ${candidate.label} unavailable: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+      }
+      const mountFrontendConnection = async (connected: DesktopFrontendConnection): Promise<void> => {
+        const state = connected.state
+        const server = connected.server
+        const connectedAccess = connected.access
+        const endpoint = new URL(server.endpoint)
+        const renderer = new URL(endpoint)
+        renderer.searchParams.set('dsh-deployment-role', 'frontend')
+        renderer.searchParams.set('dsh-desktop-mode', state.presentation)
+        renderer.searchParams.set('dsh-desktop-platform', process.platform)
+        renderer.searchParams.set('dsh-desktop-version', runtime.updates.currentVersion)
+        await disposeFrontend?.()
+        frontendAccess?.stop()
+        disposeFrontend = undefined
+        frontendAccess = undefined
+        const billingSources = state.servers.map(candidate => {
+          if (candidate.authMode !== 'paired') {
+            return { id: candidate.id, label: candidate.label, origin: candidate.endpoint }
+          }
+          if (candidate.id === server.id && connectedAccess !== undefined) {
+            return {
+              id: candidate.id,
+              label: candidate.label,
+              origin: candidate.endpoint,
+              accessToken: () => connectedAccess.accessToken(),
+            }
+          }
+          let cached: Awaited<ReturnType<DesktopDeploymentStateStore['exchange']>> | undefined
+          return {
+            id: candidate.id,
+            label: candidate.label,
+            origin: candidate.endpoint,
+            accessToken: async () => {
+              if (cached === undefined || Date.parse(cached.expiresAt) - Date.now() < 60_000) {
+                cached = await deploymentStore!.exchange(candidate)
+              }
+              return cached.accessToken
+            },
+          }
+        })
+        const release = runtime.schedule({
+          mode: state.presentation,
+          width: 1280,
+          height: 840,
+          minWidth: 900,
+          minHeight: 640,
+          url: renderer.href,
+          productName: PRODUCT_NAME,
+          windowTitle: `Remote Frontend · ${server.label}`,
+          retryUnavailableNavigation: true,
+          iconPath: desktopAssetPath(process.platform === 'darwin' ? 'app-icon-mac.png' : 'app-icon.png'),
+          trayIcons: {
+            templatePath: desktopAssetPath('tray-iconTemplate.png'),
+            bluePath: desktopAssetPath('tray-icon-blue.png'),
+          },
+          ...connectedAccess === undefined ? {} : {
+            remoteAccess: {
+              origin: endpoint.origin,
+              accessToken: () => connectedAccess.accessToken(),
+            },
+          },
+          ...billingBaseline === undefined ? {} : {
+            frontendBilling: {
+              origin: endpoint.origin,
+              baseline: billingBaseline,
+              sources: billingSources,
+            },
+          },
+          readThemeSource: () => 'system',
+          requestQuit,
+          requestModeChange: async (mode) => {
+            deploymentState = await deploymentStore!.setPresentation(state, mode)
+            await runtime.requestRestart()
+          },
+          requestUseLocalServer: async () => {
+            deploymentState = await deploymentStore!.useServer()
+            await runtime.requestRestart()
+          },
+          requestConfigureDeployment: () => frontendSetup!.open(),
+        })
+        try {
+          disposeFrontend = release
+          frontendAccess = connectedAccess
+          deploymentState = connected.state
+          await runtime.mountScheduled()
+        } catch (cause) {
+          await release()
+          connectedAccess?.stop()
+          if (disposeFrontend === release) disposeFrontend = undefined
+          if (frontendAccess === connectedAccess) frontendAccess = undefined
+          throw cause
+        }
+      }
+      let connectedServerId: string | undefined
+      try {
+        const connected = await connectFrontendServer(deploymentStore, deploymentState, reportCandidateError)
+        await mountFrontendConnection(connected)
+        connectedServerId = connected.server.id
+      } catch (cause) {
+        frontendAccess = undefined
+        process.stderr.write(
+          `${BIN_NAME}: unable to open remote Frontend: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+        await frontendSetup.open()
+      }
+      frontendLeaderMonitor = new DesktopFrontendLeaderMonitor(
+        deploymentStore,
+        mountFrontendConnection,
+        {
+          intervalMs: 10_000,
+          onCandidateError: reportCandidateError,
+          onMonitorError: cause => {
+            process.stderr.write(
+              `${BIN_NAME}: Frontend leader monitor failed: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+            )
+          },
+        },
+      )
+      frontendLeaderMonitor.start(connectedServerId)
+      return
+    }
+    const electronVersion = process.versions.electron
+    if (electronVersion === undefined) {
+      throw new Error(`${BIN_NAME}: plugin runtime requires the Electron runtime version`)
+    }
+    const pnpmBinPath = packagedDependencyPath(import.meta.url, 'pnpm/bin/pnpm.mjs')
+    const headlessNodeExecutable = resolveHeadlessNodeExecutable({
+      platform: process.platform,
+      appExecutable: process.execPath,
+      environment: process.env,
+    })
+    const pnpmRuntime = installDesktopPnpmRuntime({
+      platform: process.platform,
+      appExecutable: process.execPath,
+      pnpmBinPath,
+      electronVersion,
+      stateDir: join(app.getPath('userData'), 'runtime-commands'),
+      environment: process.env,
+      ...headlessNodeExecutable === undefined ? {} : { headlessNodeExecutable },
+    })
+    const releasePnpmRuntime = (): void => { pnpmRuntime.dispose() }
+    disposePnpmRuntime = releasePnpmRuntime
+    const nativeProductRuntime = installNativeProductRuntime({
+      platform: process.platform,
+      homeDir: app.getPath('home'),
+      stateDir: join(app.getPath('userData'), 'runtime-products'),
+      nodeBinDir: pnpmRuntime.nodeBinDir,
+      environment: process.env,
+    })
+    const releaseNativeProductRuntime = (): void => { nativeProductRuntime.dispose() }
+    disposeNativeProductRuntime = releaseNativeProductRuntime
+    const homeDir = resolveDshHome()
+    const selectionStatePath = join(app.getPath('userData'), 'profile-selection', 'state.json')
+    profileStatePath = selectionStatePath
+    profileStartup = beginDesktopProfileStartup(selectionStatePath, homeDir)
+    const activeProfileName = profileStartup.profileName
+    const prepared = prepareDesktopProfile(
+      process.env.DSH_TELEMETRY_DISABLED,
+      homeDir,
+      process.platform,
+      activeProfileName,
+    )
+    for (const patch of prepared.patches) {
+      if (patch.id !== 'resident-operators' && patch.id !== 'orchestration-local') continue
+      if (patch.config === null || typeof patch.config !== 'object' || Array.isArray(patch.config)) {
+        throw new Error(`${BIN_NAME}: ${patch.id} row must expose an object config for the headless launcher`)
+      }
+      patch.config = {
+        ...patch.config,
+        headlessNodeExecutable: pnpmRuntime.headlessNodePath,
+      }
+    }
+    const desktopPnpmBootstrap: DesktopPnpmBootstrap = {
+      activeProfileName,
+      activeProfileDir: prepared.profile.dir,
+      homeDir,
+      appExecutable: process.execPath,
+      pnpmBinPath,
+      electronVersion,
+      nodeBinDir: pnpmRuntime.nodeBinDir,
+      nodeShimPath: pnpmRuntime.nodeShimPath,
+      clearEnvironmentPath: pnpmRuntime.clearEnvironmentPath,
+      dshBootstrapPath: fileURLToPath(new URL('./desktop-cli.js', import.meta.url)),
+    }
+    const releasePackageResolver = installProfilePackageResolver(prepared.bareModuleBaseUrl)
+    const ctx = await boot(
+      BIN_NAME,
+      prepared.rootConfig,
+      prepared.patches,
+      async (hostCtx) => {
+        hostCtx.effect(
+          () => releasePnpmRuntime,
+          'dsh-plugin-desktop: packaged pnpm runtime PATH',
+        )
+        hostCtx.effect(
+          () => releaseNativeProductRuntime,
+          'dsh-plugin-desktop: native product command PATH',
+        )
+        current = hostCtx
+        hostCtx.effect(
+          () => releasePackageResolver,
+          'dsh-plugin-desktop: profile package resolution',
+        )
+        hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
+        hostCtx.provide('desktopRuntime', runtime)
+        hostCtx.provide('desktopPnpmBootstrap', desktopPnpmBootstrap)
+        await hostCtx.plugin(DesktopProfileService, {
+          current: {
+            name: activeProfileName,
+            dir: prepared.profile.dir,
+          },
+          list: () => listDesktopProfiles(homeDir),
+          persistSelection: name => { selectDesktopProfile(selectionStatePath, homeDir, name) },
+          requestRestart: () => runtime.requestRestart(),
+        })
+        provideCmdline(hostCtx, {
+          args: ['--host', '127.0.0.1', '--port', '0'],
+          exit: requestQuit,
+        })
+      },
+      prepared.bareModuleBaseUrl,
+    ).catch((cause: unknown) => {
+      releasePackageResolver()
+      throw cause
+    })
+    current = ctx
+    const imported = await sessionSync.importInbox()
+    for (const result of imported) {
+      if (result.status === 'error') {
+        process.stderr.write(`${BIN_NAME}: unable to import staged Session: ${result.message}\n`)
+      }
+    }
+    runtime.configureTerminal({
+      profileName: activeProfileName,
+      profileDir: prepared.profile.dir,
+      homeDir: prepared.homeDir,
+    })
+    await runtime.mountScheduled(() => {
+      markDesktopProfileHealthy(selectionStatePath, activeProfileName)
+    })
+    if (profileStartup.rolledBackFrom !== undefined) {
+      notifyProfileRecovery(
+        runtime,
+        `Reopened last-known-good profile ${activeProfileName}.`,
+      )
+    }
+  } catch (cause) {
+    process.stderr.write(`${BIN_NAME}: ${cause instanceof Error ? cause.stack ?? cause.message : String(cause)}\n`)
+    let exitCode = 1
+    if (profileStartup !== undefined && profileStatePath !== undefined) {
+      const retryLastKnownGood = profileStartup.profileName !== profileStartup.state.lastKnownGood
+      try {
+        markDesktopProfileFailed(profileStatePath, profileStartup.profileName)
+        if (retryLastKnownGood) {
+          nativeExit.requestRelaunch()
+          exitCode = 0
+          notifyProfileRecovery(
+            runtime,
+            `Reopening last-known-good profile ${profileStartup.state.lastKnownGood}.`,
+          )
+        }
+      } catch (stateCause) {
+        process.stderr.write(`${BIN_NAME}: failed to roll back desktop profile state: ${stateCause instanceof Error ? stateCause.message : String(stateCause)}\n`)
+      }
+    }
+    await shutdown.request(exitCode)
+  }
+}
+
+void start()

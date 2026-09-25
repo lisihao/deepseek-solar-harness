@@ -1,14 +1,15 @@
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
-import type { ToolEventView } from '@deepseek-ai/dsh-api-remotes/client'
+import type { PhysicalOperatorTraceView, ToolEventView } from '@deepseek-ai/dsh-api-remotes/client'
 
 /* oxlint-disable typescript/no-duplicate-type-constituents, typescript/no-redundant-type-constituents --
  * The unaugmented declaration-merge maps intentionally resolve to never in the Runtime program;
  * installed business packages supply their concrete keys in consuming Client programs. */
 
-/** One raw log event plus its optional envelope-level presentation view. */
+/** One public log event plus its optional Host-built presentation metadata. */
 export interface ConversationEventInput {
   readonly event: SessionEvent
   readonly view: ToolEventView | undefined
+  readonly physicalOperatorTrace?: PhysicalOperatorTraceView
 }
 
 /** Definition-local identity and lifecycle role extracted from one event. */
@@ -174,10 +175,11 @@ export interface ConversationNodeDefinition<State = unknown> {
   readonly target?: string
   /**
    * Extract this Definition's stable business identity from one event.
-   * @param event - raw Session event; no Context or history access is available.
+   * @param event - public Session event; no Context or history access is available.
+   * @param input - public envelope metadata associated with the event.
    * @returns identity and lifecycle role, or null when unrelated.
    */
-  match(event: SessionEvent): ConversationMatchResult | null
+  match(event: SessionEvent, input?: ConversationEventInput): ConversationMatchResult | null
   /**
    * Create State from the unique start Match.
    * @param context - complete evidence currently collected for the Context.

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/architecture/adr-001-downstream-solar-product.md
+adr-001-downstream-solar-product.md: 957b94cc2c5685410a0a0cbbe6cc40b854939adf
+adr-001-downstream-solar-product.zh.md: ae1375caa6f98353ea66de3732273b3390da53b4

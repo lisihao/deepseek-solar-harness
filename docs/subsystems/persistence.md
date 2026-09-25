@@ -377,9 +377,21 @@ abstract list(signal?: AbortSignal): Promise<SessionHeader[]>
  * @returns one header and opaque revision per materialized session without loading full logs.
  */
 abstract listSnapshots(signal?: AbortSignal): Promise<SessionPersistenceSnapshot[]>
+
+/**
+ * Apply one complete, balanced remote log without creating a second writer.
+ * Only an absent destination or an exact prefix match can advance. A live
+ * Session, open source turn, metadata mismatch, or divergent event rejects.
+ * Calls for the same id serialize inside this Service; cross-process active
+ * authority transfer remains a deployment-level quiescence requirement.
+ * @param replica - complete source header and event log.
+ * @param signal - optional cancellation while waiting for local replication.
+ * @returns whether the destination was created, advanced, unchanged, or already ahead.
+ */
+replicate(replica: SessionReplica, signal?: AbortSignal): Promise<SessionReplicationResult>
 ```
 
 Types: [SessionEvent](session.md) · [SessionId](core.md)
 
-Source: [`packages/session/session-persistence/src/index.ts:84`](../../packages/session/session-persistence/src/index.ts)
+Source: [`packages/session/session-persistence/src/index.ts:117`](../../packages/session/session-persistence/src/index.ts)
 <!-- END GENERATED cordis-surface -->

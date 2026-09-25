@@ -13,7 +13,9 @@ import { createTrajectoryDurationStore } from './duration-store.ts'
 import { en, NS, zh } from './locales.ts'
 import { registerTrajectoryAssistantDefinition } from './trajectory-assistant-definition.ts'
 import { registerTrajectoryCompactionDefinitions } from './trajectory-compaction-definition.ts'
+import { registerTrajectoryDebateDefinition } from './trajectory-debate-definition.ts'
 import { registerTrajectoryMessageDefinitions } from './trajectory-message-definitions.ts'
+import { registerTrajectoryPhysicalOperatorDefinition } from './trajectory-physical-operator-definition.ts'
 import { registerTrajectoryRequestHeaderDefinition } from './trajectory-request-header-definition.ts'
 import { registerTrajectoryConversationView } from './trajectory-snapshot-builder.ts'
 import { registerTrajectoryToolDefinition } from './trajectory-tool-definition.ts'
@@ -35,6 +37,8 @@ export function apply(ctx: Context): void {
   const t = ctx.locale.bind(NS)
   const duration = createTrajectoryDurationStore()
   registerTrajectoryMessageDefinitions(ctx)
+  registerTrajectoryDebateDefinition(ctx)
+  registerTrajectoryPhysicalOperatorDefinition(ctx)
   registerTrajectoryRequestHeaderDefinition(ctx)
   registerTrajectoryAssistantDefinition(ctx)
   registerTrajectoryToolDefinition(ctx)

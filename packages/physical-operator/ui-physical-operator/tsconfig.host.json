@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
+  },
+  "files": ["src/index.ts", "src/invariant.ts", "src/dashboard.ts", "src/contracts.ts", "src/presentation.ts"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../host/remote-auth" },
+    { "path": "../../host/webserver" },
+    { "path": "../resident-operator" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

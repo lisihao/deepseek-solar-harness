@@ -1,0 +1,341 @@
+# Aegis for OpenCode
+
+Complete guide for using Aegis with [OpenCode.ai](https://opencode.ai).
+
+This page only covers the OpenCode host install path. For the current `Aegis Method Pack`
+authority order, release gate, and known limitations, read:
+
+- `docs/current/README.md`
+- `docs/current/AEGIS_METHOD_PACK_RELEASE_CHECKLIST.md`
+- `docs/current/AEGIS_KNOWN_LIMITATIONS.md`
+
+## Installation
+
+Add aegis to the `plugin` array in your `opencode.json` (global or project-level):
+
+```json
+{
+  "plugin": ["aegis@git+https://github.com/GanyuanRan/Aegis.git"]
+}
+```
+
+Restart OpenCode. The plugin auto-installs via Bun, mirrors aegis skills into
+OpenCode's global `~/.config/opencode/skills/` discovery path, and injects the bootstrap context automatically.
+The plugin-backed path is the recommended complete install because it keeps the
+Aegis method-pack root available for project workspace support verification.
+
+When `~/.config/aegis/config.toml` already declares a `method_pack_root`, the
+OpenCode plugin treats that configured method-pack checkout as the canonical
+Aegis body and generates the OpenCode skills view from it. The OpenCode-facing
+`~/.config/opencode/skills/` tree is therefore a host compatibility view, not a
+second editable owner.
+
+Verify by asking: "Tell me about your aegis"
+
+Then run complete-install verification from the method-pack root:
+
+```bash
+cd <aegis-method-pack-root>
+python scripts/aegis-doctor.py --write-config --json
+```
+
+Do not run the doctor command from the target project directory; it belongs to
+the installed Aegis method-pack root.
+
+Treat the install as complete only if the JSON reports `"ok": true`,
+`"workspaceSupport": "available"`, and `"configStatus": "configured"`.
+
+### Activation Mode
+
+Aegis defaults to automatic mode. To switch OpenCode to explicit mode, edit:
+
+```text
+~/.config/aegis/config.toml
+```
+
+Windows:
+
+```text
+%USERPROFILE%\.config\aegis\config.toml
+```
+
+If the file does not exist, create it manually. Add:
+
+```toml
+activation_mode = "explicit"
+```
+
+You can also write the same config from the installed Aegis method-pack root:
+
+```bash
+cd <aegis-method-pack-root>
+python scripts/aegis-doctor.py activation-mode explicit
+```
+
+Switch back to automatic mode with:
+
+```bash
+cd <aegis-method-pack-root>
+python scripts/aegis-doctor.py activation-mode auto
+```
+
+Then restart OpenCode or start a new session.
+
+`AEGIS_ACTIVATION_MODE` is still available as an environment-variable override
+for one-off runs:
+
+```bash
+AEGIS_ACTIVATION_MODE=explicit opencode
+```
+
+PowerShell one-off run:
+
+```powershell
+$env:AEGIS_ACTIVATION_MODE = "explicit"
+opencode
+```
+
+It is not a field in `opencode.json`. Environment variables override the
+user-local config when both are set.
+
+In `explicit` mode, the plugin still mirrors Aegis skills into OpenCode's skill
+discovery path, but it does not prepend the compact bootstrap. Use OpenCode's
+native `skill` tool or name an Aegis skill directly when you want Aegis.
+
+Before running runtime checks or integration tests, verify the CLI itself is runnable:
+
+```bash
+opencode --version
+```
+
+If this command fails with a platform-package error, fix the local OpenCode CLI installation first. A binary that exists on `PATH` but cannot execute is not enough for the integration suite.
+
+The current bash-based integration helper also supports Windows CLI bridging. On Windows + bash/WSL it can invoke `cmd.exe /d /c opencode.cmd`, so the next blocker is usually runtime model/auth readiness rather than CLI discovery.
+
+### Migrating from the old symlink-based install
+
+If you previously installed aegis using `git clone` and symlinks, remove the old setup:
+
+```bash
+# Remove old symlinks
+rm -f ~/.config/opencode/plugins/aegis.js
+rm -rf ~/.config/opencode/skills/aegis
+
+# Optionally remove the cloned repo
+rm -rf ~/.config/opencode/aegis
+
+# Remove skills.paths from opencode.json if you added one for aegis
+```
+
+Then follow the installation steps above.
+
+## Usage
+
+### Finding Skills
+
+Use OpenCode's native `skill` tool to list all available skills:
+
+```
+use skill tool to list skills
+```
+
+### Loading a Skill
+
+```
+use skill tool to load aegis/brainstorming
+```
+
+### Goal Framing
+
+Portable goal entry:
+
+```text
+Aegis goal: Fix the auth refresh bug without rewriting the auth system.
+```
+
+Use this when you want `goal-framing` to set goal, success evidence, stop
+condition, and non-goals before routing onward. `/aegis-goal <task>` is an
+optional shortcut only when the current host/session supports slash-style
+aliases.
+
+Notes:
+
+- In current OpenCode runtime, bare skill names are the most reliable way to load a skill the host has already discovered.
+- OpenCode's official skills docs require skill names to remain unique across locations.
+- Project-local skill discovery is based on the current working directory walking up to the git worktree root.
+- Do not assume `aegis:` or `project:` prefixes will override duplicate-name resolution. Treat explicit namespace forcing as host-defined unless verified on your exact OpenCode version.
+
+### Personal Skills
+
+Create your own skills in `~/.config/opencode/skills/`:
+
+```bash
+mkdir -p ~/.config/opencode/skills/my-skill
+```
+
+Create `~/.config/opencode/skills/my-skill/SKILL.md`:
+
+```markdown
+---
+name: my-skill
+description: Use when [condition] - [what it does]
+---
+
+# My Skill
+
+[Your skill content here]
+```
+
+### Project Skills
+
+Create project-specific skills in `.opencode/skills/` within your project.
+
+**Skill Priority:** Project skills > Personal skills > Aegis skills
+
+## Updating
+
+OpenCode installs git plugins through Bun and caches them under
+`~/.cache/opencode/packages/` (Windows:
+`%USERPROFILE%\.cache\opencode\packages\`). Because the cache is lockfile-bound,
+OpenCode does **not** re-fetch the plugin on every launch by itself.
+
+Aegis handles this for you: the plugin runs an update self-check on every
+startup. It compares the upstream HEAD of the Aegis repository against a local
+anchor; when the remote moved, it resets the stale cache entry automatically
+and shows a reminder in the injected bootstrap. **Just restart OpenCode to
+complete the upgrade** — the next launch re-installs the latest release with no
+manual steps.
+
+To force a manual refresh, delete the cached plugin package and restart
+OpenCode:
+
+```bash
+rm -rf ~/.cache/opencode/packages/aegis@git+https_/github.com/GanyuanRan/Aegis.git
+```
+
+Windows PowerShell:
+
+```powershell
+Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\opencode\packages\aegis@git+https_\github.com\GanyuanRan\Aegis.git"
+```
+
+To pin a specific version, use a branch or tag:
+
+```json
+{
+  "plugin": ["aegis@git+https://github.com/GanyuanRan/Aegis.git#vX.Y.Z"]
+}
+```
+
+Replace `vX.Y.Z` with an existing Aegis release tag. Pinned installs skip the
+automatic self-check reset; upgrade by bumping the pinned ref.
+
+If the user-local Aegis config already points to a canonical `method_pack_root`,
+restart OpenCode after updating that checkout so the plugin can refresh the
+generated OpenCode skills view from the same source.
+
+## How It Works
+
+The plugin does three things:
+
+1. **Injects compact bootstrap context** via the `experimental.chat.messages.transform` hook, adding aegis awareness to the first user message without repeating a system message every turn.
+2. **Mirrors aegis skills into OpenCode's native global skills path** (`~/.config/opencode/skills/`) so the host discovers them using its documented skill search rules.
+3. **Routing guard** (auto mode only): tracks whether the session recorded an explicit routing decision (a `skill` tool load) before its first non-readonly tool call. If not, the first such tool call carries a visible advisory marker (`AEGIS_ROUTING_GUARD`) prompting the agent to load the matching Aegis skill or explicitly declare `Route: fast-path`. The guard is advisory and never blocks tool execution; `explicit` mode disables it together with bootstrap injection.
+
+When `method_pack_root` is configured in `~/.config/aegis/config.toml`, that
+configured checkout becomes the canonical source for the mirrored skills view.
+Otherwise the plugin falls back to the bundled plugin checkout. In both cases,
+the OpenCode skills directory is a generated compatibility view rather than a
+second editable Aegis body.
+
+The plugin still appends that mirrored path to `config.skills.paths` as a compatibility fallback, but the canonical discovery chain is now the host's documented skills directory rather than an undocumented config-only contract.
+Fallback retention and retirement are tracked in `docs/current/AEGIS_KNOWN_LIMITATIONS.md`, not in this host guide.
+
+### Tool Mapping
+
+Skills written for Claude Code are automatically adapted for OpenCode:
+
+- `TodoWrite` → `todowrite`
+- `Task` with subagents → OpenCode's `@mention` system
+- `Skill` tool → OpenCode's native `skill` tool
+- File operations → Native OpenCode tools
+
+## Troubleshooting
+
+### CLI exists but is not runnable
+
+If `command -v opencode` succeeds but `opencode --version` fails, the local OpenCode install is not usable for integration testing on this platform.
+
+Reinstall the correct platform-specific OpenCode package first, then rerun:
+
+```bash
+opencode --version
+opencode run --print-logs "hello"
+```
+
+The `tests/opencode/run-tests.sh --integration` suite treats this as an environment blocker and skips the integration assertions until the CLI is runnable.
+
+### CLI runs, but real sessions fail
+
+If `opencode --version` works but `opencode run ...` fails with model-not-found, invalid-key, expired-token, or insufficient-credit errors, the CLI is present but the runtime is still not healthy enough for integration tests.
+
+The integration suite now probes runtime readiness with:
+
+```bash
+OPENCODE_TEST_MODEL=opencode/glm-5 bash tests/opencode/run-tests.sh --integration
+```
+
+Override `OPENCODE_TEST_MODEL` to a model/provider pair that is valid on your machine before expecting the integration assertions to run.
+
+### Plugin not loading
+
+1. Check OpenCode logs: `opencode run --print-logs "hello" 2>&1 | grep -i aegis`
+2. Verify the plugin line in your `opencode.json` is correct
+3. Make sure you're running a recent version of OpenCode
+
+### Skills not found
+
+1. Use OpenCode's `skill` tool to list available skills
+2. Check that the plugin is loading (see above)
+3. Check that `~/.config/opencode/skills/<skill-name>/SKILL.md` (or the test HOME equivalent) exists after startup
+4. Each skill needs a `SKILL.md` file with valid YAML frontmatter
+
+### Project workspace support not verified
+
+Skill discovery and project workspace support are separate checks. If skills
+are visible but workspace support is not verified, confirm the plugin-backed
+method-pack checkout/cache is present, then run this from that method-pack root,
+not from the target project directory:
+
+```bash
+cd <aegis-method-pack-root>
+python scripts/aegis-doctor.py --write-config --json
+```
+
+The JSON should include
+`"workspaceSupport": "available"` and `"configStatus": "configured"`.
+
+### Bootstrap not appearing
+
+1. Check OpenCode version supports the `experimental.chat.messages.transform` hook
+2. Restart OpenCode after config changes
+3. Check whether `AEGIS_ACTIVATION_MODE=explicit` is set; explicit mode
+   intentionally disables automatic bootstrap injection
+
+### Routing guard marker appearing
+
+The `AEGIS_ROUTING_GUARD` marker is advisory. It appears on the first
+non-readonly tool call of a session when the agent made no routing decision:
+it loaded no Aegis skill and declared no fast-path. This is expected behavior
+for fast-path-eligible tasks; the agent can simply declare `Route: fast-path`
+and continue. To quiet the guard for a task, load the matching Aegis skill via
+the `skill` tool first. To disable the guard entirely, set
+`activation_mode = "explicit"` in `~/.config/aegis/config.toml` (or
+`AEGIS_ACTIVATION_MODE=explicit`), which also disables bootstrap injection.
+The guard never blocks tool execution.
+
+## Getting Help
+
+- Report issues: https://github.com/GanyuanRan/Aegis/issues
+- Main documentation: https://github.com/GanyuanRan/Aegis
+- OpenCode docs: https://opencode.ai/docs/

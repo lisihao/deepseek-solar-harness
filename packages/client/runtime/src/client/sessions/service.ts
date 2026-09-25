@@ -466,6 +466,19 @@ export class SessionRuntime implements ISessions {
     this.manager.handleConnected()
   }
 
+  /**
+   * Install the Server-owned Session list captured by remote snapshot.
+   * @param items - gap-free Session summaries from the Server.
+   */
+  replaceRemoteBaseline(items: readonly import('@deepseek-ai/dsh-api-remotes/client').SessionSummary[]): void {
+    this.manager.replaceRemoteBaseline(items)
+  }
+
+  /** Resync opened Session windows after the remote cursor stream is live. */
+  handleRemoteConnected(): void {
+    this.manager.handleRemoteConnected()
+  }
+
   /** Drop generation-scoped live interaction state the moment a connection generation dies. */
   handleDisconnected(): void {
     this.manager.handleDisconnected()

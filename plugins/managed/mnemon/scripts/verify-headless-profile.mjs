@@ -1,0 +1,136 @@
+import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const dshBin = join(root, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+const marker = 'HEADLESS_MNEMON_READY'
+
+function run(args, { cwd = root, env = process.env, timeoutMs = 30_000 } = {}) {
+  return new Promise((resolveRun, reject) => {
+    const child = spawn(process.execPath, [dshBin, ...args], {
+      cwd,
+      env,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM')
+      reject(new Error(`dsh Headless verification timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+    child.on('error', (error) => {
+      clearTimeout(timeout)
+      reject(error)
+    })
+    child.on('exit', (code, signal) => {
+      clearTimeout(timeout)
+      resolveRun({ code, signal, stdout, stderr })
+    })
+  })
+}
+
+function assertSuccess(label, result) {
+  if (result.code === 0) return
+  throw new Error([
+    `${label} failed with code ${String(result.code)}${result.signal === null ? '' : ` (${result.signal})`}`,
+    result.stdout.trim(),
+    result.stderr.trim(),
+  ].filter(Boolean).join('\n'))
+}
+
+const requests = []
+const server = createServer(async (request, response) => {
+  try {
+    let body = ''
+    request.setEncoding('utf8')
+    for await (const chunk of request) body += chunk
+    requests.push(JSON.parse(body))
+    response.writeHead(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+    })
+    const id = `chatcmpl-${requests.length}`
+    response.write(`data: ${JSON.stringify({ id, choices: [{ index: 0, delta: { role: 'assistant', content: marker }, finish_reason: null }] })}\n\n`)
+    response.write(`data: ${JSON.stringify({ id, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`)
+    response.write(`data: ${JSON.stringify({ id, choices: [], usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 13 } })}\n\n`)
+    response.end('data: [DONE]\n\n')
+  } catch (error) {
+    response.writeHead(500, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ error: { message: error instanceof Error ? error.message : String(error) } }))
+  }
+})
+
+const temporaryRoot = await mkdtemp(join(tmpdir(), 'dsh-mnemon-headless-'))
+const dshHome = join(temporaryRoot, 'dsh-home')
+const storageRoot = join(temporaryRoot, 'mnemon-data')
+const workspaceRoot = join(temporaryRoot, 'workspace')
+await Promise.all([mkdir(dshHome), mkdir(storageRoot), mkdir(workspaceRoot)])
+
+try {
+  await new Promise((resolveListen, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolveListen)
+  })
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('mock DeepSeek server did not expose a TCP port')
+  const env = {
+    ...process.env,
+    DSH_HOME: dshHome,
+    DSH_TELEMETRY_DISABLED: '1',
+    DEEPSEEK_API_KEY: 'headless-verification-key',
+    DEEPSEEK_BASE_URL: `http://127.0.0.1:${address.port}`,
+    MNEMON_DATA_DIR: storageRoot,
+  }
+
+  const install = await run(['plugin', '--profile', 'headless', 'add', `link:${root}`], { env })
+  assertSuccess('installing dsh-mnemon into the Headless profile', install)
+
+  // The verification exercises Mnemon composition, not DSH's native PTY
+  // transport. Disable the unrelated shell stack so the check remains
+  // hermetic on CI Node/platform combinations without a node-pty prebuild.
+  await writeFile(join(dshHome, 'profiles', 'headless', 'cordis.patch.yml'), `
+- id: subprocess
+  disabled: true
+- id: bash-sandbox
+  disabled: true
+- id: pwsh-sandbox
+  disabled: true
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: permission
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+`.trimStart())
+
+  const execution = await run(['--profile', 'headless', 'Verify that the Mnemon tool surface is available.'], {
+    cwd: workspaceRoot,
+    env,
+  })
+  assertSuccess('running the Headless profile', execution)
+  if (!execution.stdout.includes(marker)) throw new Error(`Headless output did not contain ${marker}:\n${execution.stdout}`)
+
+  const toolRequest = requests.find(request => Array.isArray(request.tools) && request.tools.length > 0)
+  if (toolRequest === undefined) throw new Error('Headless model request did not expose any tools')
+  const toolNames = new Set(toolRequest.tools.map(tool => tool?.function?.name).filter(name => typeof name === 'string'))
+  const required = ['mnemon_status', 'mnemon_recall', 'mnemon_document_search', 'mnemon_runtime_memory', 'mnemon_remember']
+  const missing = required.filter(name => !toolNames.has(name))
+  if (missing.length > 0) throw new Error(`Headless model request is missing Mnemon tools: ${missing.join(', ')}`)
+  if (!existsSync(join(storageRoot, 'runtime', 'memories.json'))) throw new Error('Headless plugin did not initialize isolated runtime memory')
+
+  console.log(`Verified Headless profile activation with ${toolNames.size} total tools and ${required.length} representative Mnemon tools.`)
+} finally {
+  await new Promise(resolveClose => server.close(resolveClose))
+  await rm(temporaryRoot, { recursive: true, force: true })
+}

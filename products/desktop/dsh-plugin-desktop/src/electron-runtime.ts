@@ -1,0 +1,789 @@
+/** Electron implementation of the launcher-provided desktop runtime capability. */
+
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  net,
+  Notification,
+  shell,
+  Tray,
+} from 'electron'
+import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { desktopTerminalStateDirectory, openDesktopTerminal } from './desktop-terminal.ts'
+import { CONFIGURE_DEPLOYMENT_URL, USE_LOCAL_SERVER_URL } from './deployment-links.ts'
+import { solarBrandLabel } from './client/SolarBrand.tsx'
+import { SOLAR_BRAND_STYLES } from './client/styles.ts'
+import { startFrontendBillingBridge, type FrontendBillingBridge } from './frontend-billing.ts'
+import { packagedDependencyPath } from './packaged-runtime-path.ts'
+import type {
+  DesktopDeploymentAdapter,
+  DesktopNotification,
+  DesktopPlatform,
+  DesktopRuntime,
+  DesktopShellSpec,
+  DesktopTerminalSpec,
+  DesktopThemeSource,
+  DesktopTrayItem,
+  DesktopTrayItemGroup,
+  DesktopTrayItemRegistration,
+  DesktopUpdateAdapter,
+} from './runtime.ts'
+import { prepareTrayIcon } from './tray-icons.ts'
+import { downloadDesktopUpdate } from './update-download.ts'
+import type { UpdateCheckResult } from './update-checker.ts'
+import { desktopWindowOptions } from './window-options.ts'
+
+/** Return the presentation mode opposite the active generation. */
+export function nextDesktopShellMode(mode: DesktopShellSpec['mode']): DesktopShellSpec['mode'] {
+  return mode === 'compatibility' ? 'advanced' : 'compatibility'
+}
+
+/** Return the tray command describing the mode that will be activated. */
+export function modeToggleLabel(mode: DesktopShellSpec['mode']): string {
+  return mode === 'compatibility'
+    ? 'Switch to Advanced Mode'
+    : 'Switch to Compatibility Mode'
+}
+
+/**
+ * Read the desktop package version instead of Electron's development-app version.
+ * @param moduleUrl - module below the package's `src` or `lib` directory.
+ * @returns validated desktop product version.
+ */
+export function desktopProductVersion(moduleUrl: string = import.meta.url): string {
+  const value: unknown = JSON.parse(readFileSync(new URL('../package.json', moduleUrl), 'utf8'))
+  if (value === null || typeof value !== 'object' || typeof (value as { version?: unknown }).version !== 'string') {
+    throw new Error('dsh-plugin-desktop: package.json has no product version')
+  }
+  return (value as { version: string }).version
+}
+
+const PRODUCT_VERSION = desktopProductVersion()
+
+/** Build the idempotent Desktop-owned footer installed over a remote Frontend page. */
+export function frontendOwnerSurfaceScript(productVersion: string): string {
+  const label = solarBrandLabel(productVersion)
+  return `(() => {
+    if (document.querySelector('[data-testid="solar-desktop-brand"]') !== null) return;
+    const style = document.createElement('style');
+    style.dataset.plugin = 'dsh-plugin-desktop';
+    style.dataset.pluginCss = 'dsh-plugin-desktop/solar-brand';
+    style.textContent = ${JSON.stringify(SOLAR_BRAND_STYLES)};
+    document.head.appendChild(style);
+    const footer = document.createElement('footer');
+    footer.className = 'dshDesktopSolarFooter';
+    footer.dataset.testid = 'solar-desktop-brand';
+    footer.setAttribute('role', 'note');
+    footer.setAttribute('aria-label', ${JSON.stringify(label)});
+    footer.title = ${JSON.stringify(label)};
+    const marker = document.createElement('span');
+    marker.className = 'dshDesktopSolarFooterLabel';
+    marker.textContent = ${JSON.stringify(label)};
+    footer.appendChild(marker);
+    const addButton = (testid, text, title, target) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'dshDesktopUseLocalServer';
+      button.dataset.testid = testid;
+      button.textContent = text;
+      button.title = title;
+      button.addEventListener('click', () => { window.location.assign(target); });
+      footer.appendChild(button);
+    };
+    addButton('desktop-configure-deployment', '部署 / 同步', '切换本机 Server 或远程 Frontend，配置多个 Server、Git 与闭合 Session 同步', ${JSON.stringify(CONFIGURE_DEPLOYMENT_URL)});
+    addButton('desktop-use-local-server', '切换到本地 Server', '停止使用远程 Frontend，并以本机完整 DSH Server 重启', ${JSON.stringify(USE_LOCAL_SERVER_URL)});
+    document.body.dataset.dshDesktopProductFooter = 'true';
+    document.body.appendChild(footer);
+  })()`
+}
+
+/** Build the local recovery surface shown while a Frontend Server is unreachable. */
+export function frontendRecoveryPageUrl(): string {
+  const html = `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+  <title>DSH Desktop · Server 不可用</title>
+  <style>
+    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
+    main { width: min(520px, calc(100vw - 48px)); padding: 32px; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 16px; background: color-mix(in srgb, Canvas 92%, CanvasText 8%); box-shadow: 0 18px 50px rgb(0 0 0 / 18%); }
+    h1 { margin: 0 0 12px; font-size: 22px; }
+    p { margin: 0 0 24px; color: color-mix(in srgb, CanvasText 68%, transparent); line-height: 1.6; }
+    nav { display: flex; flex-wrap: wrap; gap: 12px; }
+    a { display: inline-flex; align-items: center; min-height: 38px; padding: 0 16px; border: 1px solid color-mix(in srgb, CanvasText 24%, transparent); border-radius: 9px; color: CanvasText; text-decoration: none; font-weight: 600; }
+    a.primary { border-color: #3b82f6; background: #2563eb; color: white; }
+    small { display: block; margin-top: 22px; color: color-mix(in srgb, CanvasText 52%, transparent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>远程 Server 当前不可用</h1>
+    <p>DSH Desktop 会继续尝试重新连接。你也可以立即切换到本机完整 Server，或修改远程 Server 配置。</p>
+    <nav>
+      <a class="primary" href="${USE_LOCAL_SERVER_URL}">切换到本地 Server</a>
+      <a href="${CONFIGURE_DEPLOYMENT_URL}">配置远程 Server</a>
+    </nav>
+    <small>DSH Desktop v${PRODUCT_VERSION} · 本地恢复界面不依赖远程 Server</small>
+  </main>
+</body>
+</html>`
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+}
+
+/** Native adapter used by the DSH Desktop launcher and owned by its Cordis shell plugin. */
+export class ElectronDesktopRuntime implements DesktopRuntime {
+  readonly platform: DesktopPlatform
+  readonly updates: DesktopUpdateAdapter = {
+    get isPackaged() { return app.isPackaged },
+    get canDownload() { return app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32') },
+    get currentVersion() { return PRODUCT_VERSION },
+    get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
+    request: (url, init) => net.fetch(url, init),
+    confirmDownload: version => this.confirmUpdateDownload(version),
+    showManualCheckResult: result => this.showManualUpdateCheckResult(result),
+    downloadAndOpen: (version, signal) => this.downloadAndOpenUpdate(version, signal),
+    notify: notification => { this.showNotification(notification) },
+  }
+
+  private window: BrowserWindow | undefined
+  private tray: Tray | undefined
+  private scheduled: DesktopShellSpec | undefined
+  private mountTask: Promise<void> | undefined
+  private release: (() => Promise<void>) | undefined
+  private quitting = false
+  private readonly trayItems = new Map<symbol, DesktopTrayItem>()
+  private terminalSpec: DesktopTerminalSpec | undefined
+
+  constructor(
+    private readonly restart: () => Promise<void>,
+    private readonly deployment?: DesktopDeploymentAdapter,
+  ) {
+    if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
+      throw new Error(`dsh-plugin-desktop: unsupported Electron platform ${process.platform}`)
+    }
+    this.platform = process.platform
+  }
+
+  /** @inheritdoc */
+  schedule(spec: DesktopShellSpec): () => Promise<void> {
+    if (this.scheduled !== undefined || this.mountTask !== undefined) {
+      throw new Error('dsh-plugin-desktop: a native shell generation is already registered')
+    }
+    const previousThemeSource = nativeTheme.themeSource
+    this.scheduled = spec
+    let disposed = false
+    return async () => {
+      if (disposed) return
+      disposed = true
+      try {
+        await this.mountTask
+      } finally {
+        try {
+          await this.release?.()
+        } finally {
+          this.release = undefined
+          this.mountTask = undefined
+          if (this.scheduled === spec) {
+            if (spec.mode === 'advanced') nativeTheme.themeSource = previousThemeSource
+            this.scheduled = undefined
+          }
+        }
+      }
+    }
+  }
+
+  /** @inheritdoc */
+  mountScheduled(beforeInteractive?: () => void): Promise<void> {
+    const spec = this.scheduled
+    if (spec === undefined) {
+      return Promise.reject(new Error('dsh-plugin-desktop: the Cordis shell plugin did not register a window'))
+    }
+    this.mountTask ??= this.mount(spec, beforeInteractive).then((release) => { this.release = release })
+    return this.mountTask
+  }
+
+  /** @inheritdoc */
+  show(): void {
+    const window = this.window
+    if (window === undefined || window.isDestroyed()) return
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  }
+
+  /** @inheritdoc */
+  registerTrayItem(item: DesktopTrayItem): DesktopTrayItemRegistration {
+    const key = Symbol()
+    this.trayItems.set(key, item)
+    this.rebuildTrayMenu()
+    let active = true
+    return {
+      refresh: () => {
+        if (active) this.rebuildTrayMenu()
+      },
+      dispose: () => {
+        if (!active) return
+        active = false
+        this.trayItems.delete(key)
+        this.rebuildTrayMenu()
+      },
+    }
+  }
+
+  /**
+   * Fix the profile identity before Cordis plugins can contribute terminal commands.
+   * @param spec - launcher-resolved desktop profile and Harness home.
+   */
+  configureTerminal(spec: DesktopTerminalSpec): void {
+    if (this.terminalSpec !== undefined) {
+      throw new Error('dsh-plugin-desktop: terminal profile is already configured')
+    }
+    this.terminalSpec = { ...spec }
+  }
+
+  /** @inheritdoc */
+  openTerminal(): void {
+    try {
+      const spec = this.terminalSpec
+      if (spec === undefined) {
+        throw new Error('dsh-plugin-desktop: terminal profile is not configured')
+      }
+      const electronVersion = process.versions.electron
+      if (electronVersion === undefined) {
+        throw new Error('dsh-plugin-desktop: terminal requires the Electron runtime version')
+      }
+      openDesktopTerminal({
+        platform: this.platform,
+        appExecutable: process.execPath,
+        dshBootstrapPath: fileURLToPath(new URL('./desktop-cli.js', import.meta.url)),
+        pnpmBinPath: packagedDependencyPath(import.meta.url, 'pnpm/bin/pnpm.mjs'),
+        electronVersion,
+        profileName: spec.profileName,
+        productVersion: PRODUCT_VERSION,
+        profileDir: spec.profileDir,
+        homeDir: spec.homeDir,
+        stateDir: desktopTerminalStateDirectory(app.getPath('userData'), spec.profileName),
+        spawn,
+        onLaunchError: cause => { this.reportTerminalLaunchError(cause) },
+      })
+    } catch (cause) {
+      this.reportTerminalLaunchError(cause)
+    }
+  }
+
+  /** @inheritdoc */
+  setThemeSource(source: DesktopThemeSource): void {
+    if (this.scheduled?.mode === 'advanced' && this.window !== undefined) {
+      nativeTheme.themeSource = source
+    }
+  }
+
+  /** @inheritdoc */
+  async requestRestart(): Promise<void> {
+    await this.restart()
+  }
+
+  /** @inheritdoc */
+  prepareToQuit(): void {
+    this.quitting = true
+  }
+
+  private contributedTrayItems(group: DesktopTrayItemGroup): Electron.MenuItemConstructorOptions[] {
+    return [...this.trayItems.values()]
+      .filter(item => item.group === group)
+      .sort((left, right) => left.order - right.order)
+      .map((item): Electron.MenuItemConstructorOptions => {
+        const common = {
+          label: item.label(),
+          enabled: item.enabled?.() ?? true,
+        }
+        if (item.submenu !== undefined) {
+          return {
+            ...common,
+            submenu: item.submenu().map(command => ({
+              label: command.label(),
+              enabled: command.enabled?.() ?? true,
+              ...(command.type === undefined ? {} : { type: command.type }),
+              ...(command.checked === undefined ? {} : { checked: command.checked() }),
+              click: this.menuCommand(() => command.invoke()),
+            })),
+          }
+        }
+        return {
+          ...common,
+          click: this.menuCommand(() => item.invoke()),
+        }
+      })
+  }
+
+  /** Contain asynchronous contribution failures outside Electron menu callbacks. */
+  private menuCommand(invoke: () => void | Promise<void>): () => void {
+    return () => {
+      void Promise.resolve().then(invoke).catch((cause: unknown) => {
+        process.stderr.write(`dsh-plugin-desktop: native menu command failed: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+      })
+    }
+  }
+
+  /** Install deployment recovery in the native macOS menu owned by Electron. */
+  private installApplicationMenu(): void {
+    if (this.platform !== 'darwin') return
+    const deploymentItems: Electron.MenuItemConstructorOptions[] = this.deployment === undefined
+      ? []
+      : [
+          {
+            label: `Deployment: ${this.deployment.currentRole() === 'server' ? 'Server' : 'Frontend'}`,
+            enabled: false,
+          },
+          {
+            label: 'Connect to Remote Server…',
+            click: this.menuCommand(() => this.deployment!.configureFrontend()),
+          },
+          ...this.deployment.currentRole() === 'frontend'
+            ? [{
+                label: 'Use Local Server',
+                click: this.menuCommand(() => this.deployment!.useServer()),
+              }]
+            : [],
+        ]
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      { role: 'fileMenu' },
+      { role: 'editMenu' },
+      { label: 'Deployment', submenu: deploymentItems },
+      { role: 'viewMenu' },
+      { role: 'windowMenu' },
+    ]))
+  }
+
+  private showNotification(notification: DesktopNotification): void {
+    if (!Notification.isSupported()) return
+    const nativeNotification = new Notification({
+      title: notification.title,
+      body: notification.body,
+    })
+    nativeNotification.show()
+  }
+
+  /** Ask before making the fixed download endpoint's counted request. */
+  private async confirmUpdateDownload(version: string): Promise<boolean> {
+    const result = await dialog.showMessageBox({
+      type: 'info',
+      title: 'DSH Desktop Update Available',
+      message: `DSH Desktop ${version} is available.`,
+      detail: 'Download this update now?',
+      buttons: ['Download', 'Later'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    return result.response === 0
+  }
+
+  /** Report one user-triggered check without exposing network or response details. */
+  private async showManualUpdateCheckResult(result: UpdateCheckResult | null): Promise<void> {
+    if (result === null) {
+      await dialog.showMessageBox({
+        type: 'warning',
+        title: 'Unable to Check for Updates',
+        message: 'DSH Desktop could not check for updates.',
+        detail: 'Please try again later.',
+        buttons: ['OK'],
+        defaultId: 0,
+        noLink: true,
+      })
+      return
+    }
+
+    if (result.status === 'up-to-date') {
+      await dialog.showMessageBox({
+        type: 'info',
+        title: 'DSH Desktop Is Up to Date',
+        message: 'No newer version of DSH Desktop is available.',
+        detail: `Installed version: ${result.currentVersion}`,
+        buttons: ['OK'],
+        defaultId: 0,
+        noLink: true,
+      })
+      return
+    }
+
+    await dialog.showMessageBox({
+      type: 'info',
+      title: 'DSH Desktop Update Available',
+      message: `DSH Desktop ${result.latestVersion} is available.`,
+      detail: 'Installer downloads are unavailable in this build.',
+      buttons: ['OK'],
+      defaultId: 0,
+      noLink: true,
+    })
+  }
+
+  /** Download a confirmed installer and hand it to the native installation flow. */
+  private async downloadAndOpenUpdate(version: string, signal: AbortSignal): Promise<void> {
+    if (this.platform !== 'darwin' && this.platform !== 'win32') {
+      throw new Error(`dsh-plugin-desktop: updates are unavailable on ${this.platform}`)
+    }
+    const artifactPath = await downloadDesktopUpdate({
+      platform: this.platform,
+      version,
+      userDataPath: app.getPath('userData'),
+      request: (url, init) => net.fetch(url, init),
+      signal,
+    })
+    signal.throwIfAborted()
+
+    if (this.platform === 'darwin') {
+      const openError = await shell.openPath(artifactPath)
+      if (openError !== '') throw new Error(`dsh-plugin-desktop: failed to open update disk image: ${openError}`)
+      signal.throwIfAborted()
+      await dialog.showMessageBox({
+        type: 'info',
+        title: 'DSH Desktop Update Downloaded',
+        message: `DSH Desktop ${version} is ready to install.`,
+        detail: 'The disk image has opened. Replace DSH Desktop in Applications, then reopen it.',
+        buttons: ['OK'],
+        defaultId: 0,
+        noLink: true,
+      })
+      return
+    }
+
+    const result = await dialog.showMessageBox({
+      type: 'info',
+      title: 'DSH Desktop Update Downloaded',
+      message: `DSH Desktop ${version} is ready to install.`,
+      detail: 'Restart DSH Desktop and run the installer now?',
+      buttons: ['Restart and Install', 'Later'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    if (result.response !== 0) return
+
+    const spec = this.scheduled
+    if (spec === undefined) throw new Error('dsh-plugin-desktop: no active shell can exit for update installation')
+    signal.throwIfAborted()
+    await this.launchWindowsUpdateInstaller(artifactPath)
+    this.quitting = true
+    spec.requestQuit(0)
+  }
+
+  /** Start the downloaded NSIS installer before releasing the current process. */
+  private async launchWindowsUpdateInstaller(installerPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      let child: ReturnType<typeof spawn>
+      try {
+        child = spawn(installerPath, ['--updated', '--force-run'], {
+          detached: true,
+          stdio: 'ignore',
+          shell: false,
+          windowsHide: false,
+        })
+      } catch (cause) {
+        reject(cause)
+        return
+      }
+      const fail = (cause: Error): void => { reject(cause) }
+      child.once('error', fail)
+      child.once('spawn', () => {
+        child.off('error', fail)
+        child.once('error', cause => {
+          process.stderr.write(`dsh-plugin-desktop: update installer failed after launch: ${cause.message}\n`)
+        })
+        child.unref()
+        resolve()
+      })
+    })
+  }
+
+  /** Keep native-terminal launch failures visible in a packaged GUI process. */
+  private reportTerminalLaunchError(cause: unknown): void {
+    const error = cause instanceof Error ? cause : new Error(String(cause))
+    process.stderr.write(`dsh-plugin-desktop: failed to open terminal: ${error.message}\n`)
+    try {
+      dialog.showErrorBox('Unable to Open DSH Terminal', error.message)
+    } catch (dialogCause) {
+      process.stderr.write(`dsh-plugin-desktop: failed to show terminal error: ${dialogCause instanceof Error ? dialogCause.message : String(dialogCause)}\n`)
+    }
+  }
+
+  private rebuildTrayMenu(): void {
+    const tray = this.tray
+    const spec = this.scheduled
+    if (tray === undefined || spec === undefined) return
+
+    const show = (): void => { this.show() }
+    const tools = this.contributedTrayItems('tools')
+    const profiles = this.contributedTrayItems('profiles')
+    const status = this.contributedTrayItems('status')
+    const template: Electron.MenuItemConstructorOptions[] = [
+      { label: `Open ${spec.productName}`, click: show },
+    ]
+    if (tools.length > 0) template.push({ type: 'separator' }, ...tools)
+    if (profiles.length > 0) template.push({ type: 'separator' }, ...profiles)
+    if (status.length > 0) template.push({ type: 'separator' }, ...status)
+    template.push(
+      { type: 'separator' },
+      { label: `Version ${PRODUCT_VERSION}`, enabled: false },
+      ...this.deployment === undefined ? [] : [
+        {
+          label: `Deployment: ${this.deployment.currentRole() === 'server' ? 'Server' : 'Frontend'}`,
+          enabled: false,
+        },
+        {
+          label: 'Connect to Remote Server…',
+              click: this.menuCommand(() => this.deployment!.configureFrontend()),
+        },
+        ...this.deployment.currentRole() === 'frontend'
+          ? [{
+              label: 'Use Local Server',
+              click: this.menuCommand(() => this.deployment!.useServer()),
+            }]
+          : [],
+      ],
+      {
+        label: modeToggleLabel(spec.mode),
+        enabled: this.platform !== 'linux',
+        click: () => {
+          void spec.requestModeChange(nextDesktopShellMode(spec.mode)).catch((cause: unknown) => {
+            process.stderr.write(`dsh-plugin-desktop: failed to change shell mode: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+          })
+        },
+      },
+      { type: 'separator' },
+      { label: 'Quit', click: () => { spec.requestQuit(0) } },
+    )
+    tray.setContextMenu(Menu.buildFromTemplate(template))
+  }
+
+  private async mount(
+    spec: DesktopShellSpec,
+    beforeInteractive: (() => void) | undefined,
+  ): Promise<() => Promise<void>> {
+    const icon = nativeImage.createFromPath(spec.iconPath)
+    if (icon.isEmpty()) {
+      throw new Error(`dsh-plugin-desktop: failed to load application icon ${spec.iconPath}`)
+    }
+    if (this.platform === 'darwin') app.dock?.setIcon(icon)
+    const origin = new URL(spec.url).origin
+    if (spec.mode === 'advanced') nativeTheme.themeSource = spec.readThemeSource()
+    const windowTitle = `${spec.productName} v${PRODUCT_VERSION} · ${spec.windowTitle}`
+    const window = new BrowserWindow(desktopWindowOptions({ ...spec, windowTitle }, icon, this.platform))
+    window.accessibleTitle = windowTitle
+    if (this.platform === 'win32') window.removeMenu()
+    const previousApplicationMenu = this.platform === 'darwin' ? Menu.getApplicationMenu() : undefined
+    this.installApplicationMenu()
+    this.window = window
+    const remoteAccess = spec.remoteAccess
+    if (remoteAccess !== undefined) {
+      if (new URL(spec.url).origin !== remoteAccess.origin) {
+        throw new Error('dsh-plugin-desktop: remote access origin does not match the window URL')
+      }
+      window.webContents.session.webRequest.onBeforeSendHeaders(
+        { urls: [`${remoteAccess.origin}/*`] },
+        (details, callback) => {
+          callback({
+            requestHeaders: {
+              ...details.requestHeaders,
+              Authorization: `Bearer ${remoteAccess.accessToken()}`,
+            },
+          })
+        },
+      )
+    }
+    const frontendBilling = spec.frontendBilling
+    let billingBridge: FrontendBillingBridge | undefined
+    const billingFilter = frontendBilling === undefined
+      ? undefined
+      : { urls: [`${frontendBilling.origin}/billing/state*`] }
+    try {
+      if (frontendBilling !== undefined && billingFilter !== undefined) {
+        if (new URL(spec.url).origin !== frontendBilling.origin) {
+          throw new Error('dsh-plugin-desktop: Frontend billing origin does not match the window URL')
+        }
+        billingBridge = await startFrontendBillingBridge({
+          origin: frontendBilling.origin,
+          baseline: frontendBilling.baseline,
+          sources: frontendBilling.sources,
+        })
+        window.webContents.session.webRequest.onBeforeRequest(
+          billingFilter,
+          (_details, callback) => { callback({ redirectURL: billingBridge!.url }) },
+        )
+      }
+    } catch (cause) {
+      window.destroy()
+      this.window = undefined
+      throw cause
+    }
+
+    const show = (): void => { this.show() }
+    const close = (event: Electron.Event): void => {
+      if (this.quitting) return
+      event.preventDefault()
+      window.hide()
+    }
+    const preserveBlankTitle = (event: Electron.Event): void => { event.preventDefault() }
+    const installFrontendOwnerSurface = (): void => {
+      if (spec.requestUseLocalServer === undefined && this.deployment?.currentRole() !== 'frontend') return
+      void window.webContents.executeJavaScript(frontendOwnerSurfaceScript(PRODUCT_VERSION)).catch((cause: unknown) => {
+        process.stderr.write(`dsh-plugin-desktop: failed to install Frontend owner surface: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+      })
+    }
+    const navigate = (event: Electron.Event<Electron.WebContentsWillFrameNavigateEventParams>): void => {
+      let target: URL | undefined
+      try {
+        target = new URL(event.url)
+      } catch {
+        target = undefined
+      }
+      if (event.isMainFrame && target?.href === 'dsh-desktop://deployment/local-server'
+        && spec.requestUseLocalServer !== undefined) {
+        event.preventDefault()
+        void spec.requestUseLocalServer().catch((cause: unknown) => {
+          process.stderr.write(`dsh-plugin-desktop: failed to switch to local Server: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+        })
+        return
+      }
+      if (event.isMainFrame && target?.href === 'dsh-desktop://deployment/configure') {
+        const configureDeployment = spec.requestConfigureDeployment
+          ?? (this.deployment === undefined ? undefined : () => this.deployment!.configureFrontend())
+        if (configureDeployment !== undefined) {
+          event.preventDefault()
+          void configureDeployment().catch((cause: unknown) => {
+            process.stderr.write(`dsh-plugin-desktop: failed to open deployment settings: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+          })
+          return
+        }
+      }
+      if (target?.origin === origin) return
+      // Remote Modules are rendered in subframes through product-owned local
+      // relays. Keep top-level navigation origin-locked while allowing only
+      // credential-free HTTP loopback subframes and their local redirects.
+      if (!event.isMainFrame && target?.protocol === 'http:'
+        && (target.hostname === '127.0.0.1' || target.hostname === 'localhost')) return
+      event.preventDefault()
+    }
+
+    app.on('activate', show)
+    window.on('close', close)
+    window.on('page-title-updated', preserveBlankTitle)
+    window.webContents.on('will-frame-navigate', navigate)
+    window.webContents.on('will-redirect', navigate)
+    window.webContents.on('did-finish-load', installFrontendOwnerSurface)
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      try {
+        const target = new URL(url)
+        if (target.protocol === 'https:' || target.protocol === 'http:' || target.protocol === 'mailto:') {
+          void shell.openExternal(target.href).catch((cause: unknown) => {
+            process.stderr.write(`dsh-plugin-desktop: failed to open external link: ${cause instanceof Error ? cause.message : String(cause)}\n`)
+          })
+        }
+      } catch {
+        // A malformed target is rejected with the same deny result.
+      }
+      return { action: 'deny' }
+    })
+
+    show()
+    let tray: Tray | undefined
+    let navigationRetry: NodeJS.Timeout | undefined
+    const loadPrimaryUrl = async (): Promise<void> => {
+      if (spec.retryUnavailableNavigation === true) {
+        const response = await window.webContents.session.fetch(spec.url)
+        await response.body?.cancel()
+        if (!response.ok) {
+          throw new Error(`HTTP ${String(response.status)}`)
+        }
+      }
+      await window.loadURL(spec.url)
+    }
+    const scheduleNavigationRetry = (): void => {
+      if (navigationRetry !== undefined || window.isDestroyed()) return
+      navigationRetry = setTimeout(() => {
+        navigationRetry = undefined
+        if (window.isDestroyed()) return
+        void loadPrimaryUrl().catch(() => { scheduleNavigationRetry() })
+      }, 2_000)
+    }
+    try {
+      try {
+        await loadPrimaryUrl()
+      } catch (cause) {
+        if (spec.retryUnavailableNavigation !== true) throw cause
+        process.stderr.write(
+          `dsh-plugin-desktop: Desktop navigation unavailable; retrying: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+        )
+        await window.loadURL(frontendRecoveryPageUrl())
+        scheduleNavigationRetry()
+      }
+      tray = new Tray(prepareTrayIcon(spec.trayIcons, this.platform))
+      this.tray = tray
+      tray.setToolTip(spec.productName)
+      this.rebuildTrayMenu()
+      tray.on('click', show)
+      beforeInteractive?.()
+    } catch (cause) {
+      app.off('activate', show)
+      window.off('page-title-updated', preserveBlankTitle)
+      window.webContents.off('did-finish-load', installFrontendOwnerSurface)
+      if (navigationRetry !== undefined) clearTimeout(navigationRetry)
+      tray?.off('click', show)
+      tray?.destroy()
+      window.destroy()
+      if (previousApplicationMenu !== undefined) Menu.setApplicationMenu(previousApplicationMenu)
+      this.tray = undefined
+      this.window = undefined
+      if (billingFilter !== undefined) {
+        window.webContents.session.webRequest.onBeforeRequest(billingFilter, null)
+      }
+      await billingBridge?.close()
+      throw cause
+    }
+
+    if (tray === undefined) {
+      throw new Error('dsh-plugin-desktop: native tray did not mount')
+    }
+    const mountedTray = tray
+
+    let released = false
+    return async () => {
+      if (released) return
+      released = true
+      app.off('activate', show)
+      window.off('close', close)
+      window.off('page-title-updated', preserveBlankTitle)
+      window.webContents.off('will-frame-navigate', navigate)
+      window.webContents.off('will-redirect', navigate)
+      window.webContents.off('did-finish-load', installFrontendOwnerSurface)
+      if (navigationRetry !== undefined) clearTimeout(navigationRetry)
+      if (previousApplicationMenu !== undefined) Menu.setApplicationMenu(previousApplicationMenu)
+      mountedTray.off('click', show)
+      mountedTray.destroy()
+      if (remoteAccess !== undefined) {
+        window.webContents.session.webRequest.onBeforeSendHeaders(
+          { urls: [`${remoteAccess.origin}/*`] },
+          null,
+        )
+      }
+      if (billingFilter !== undefined) {
+        window.webContents.session.webRequest.onBeforeRequest(billingFilter, null)
+      }
+      if (!window.isDestroyed()) window.destroy()
+      await billingBridge?.close()
+      if (this.tray === mountedTray) this.tray = undefined
+      if (this.window === window) this.window = undefined
+    }
+  }
+}

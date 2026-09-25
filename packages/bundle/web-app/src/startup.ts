@@ -21,6 +21,8 @@ export const WEB_STARTUP_SERVICE = 'webStartup'
 
 /** What the web rows read from {@link WEB_STARTUP_SERVICE}. */
 export interface WebStartupValues {
+  /** Deployment role controls remote projection ownership, independently of presentation style. */
+  deploymentRole: 'web' | 'server'
   /** `--host`, absent when the invocation did not name one. */
   host?: string
   /** `--port`, absent when the invocation did not name one. */
@@ -31,6 +33,7 @@ export interface WebStartupValues {
 
 /** The web flag family, as commander parsed it. */
 interface WebOptions {
+  deploymentRole?: string
   host?: string
   port?: string
   trustedHost?: string[]
@@ -45,6 +48,7 @@ function webCommand(): Command {
     .name('dsh --profile web')
     .description('Serve the DeepSeek Harness browser UI.')
     .helpOption('-h, --help', 'show this help')
+    .option('--deployment-role <role>', 'deployment role: web or server', 'web')
     .option('--host <host>', 'bind host')
     .option('--port <port>', 'listen port; pass 0 to let the OS pick a free one')
     .option('--trusted-host <authority...>', 'extra authority the /api browser-trust fence accepts (host or host:port; repeatable)')
@@ -66,6 +70,10 @@ export function apply(ctx: Context): void {
   const program = webCommand()
   program.action(() => {
     const options = program.opts<WebOptions>()
+    if (options.deploymentRole !== 'web' && options.deploymentRole !== 'server') {
+      program.error(`error: --deployment-role must be web or server, got ${JSON.stringify(options.deploymentRole)}`)
+      return
+    }
     if (options.host === '0.0.0.0') {
       program.error('error: --host 0.0.0.0 is intentionally not supported yet for safety: it would expose remote code execution to the network; use 127.0.0.1 instead')
     }
@@ -73,6 +81,7 @@ export function apply(ctx: Context): void {
       program.error(`error: --port must be a number, got ${JSON.stringify(options.port)}`)
     }
     ctx.provide(WEB_STARTUP_SERVICE, {
+      deploymentRole: options.deploymentRole,
       ...options.host !== undefined && { host: options.host },
       ...options.port !== undefined && { port: Number(options.port) },
       trustedHosts: options.trustedHost ?? [],

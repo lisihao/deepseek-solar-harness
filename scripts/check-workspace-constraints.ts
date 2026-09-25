@@ -5,7 +5,7 @@
  * Run: `tsx scripts/check-workspace-constraints.ts`.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, globSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { hasTypertRemoteNavigation, isForbiddenPublicationFile } from './publication-payload.ts'
 import { collectProjectReferenceFaceViolations } from './project-reference-faces.ts'
@@ -135,6 +135,10 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-base': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-web-app': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-headless': ['cordis.patch.yml'],
+  '@deepseek-ai/dsh-resident-operators': ['cordis.patch.yml'],
+  '@deepseek-ai/dsh-orchestrations': ['cordis.patch.yml'],
+  '@deepseek-ai/dsh-chatgpt-web-operator': ['cordis.patch.yml'],
+  '@deepseek-ai/dsh-ego-lite-browser': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-client-ui-remote-modules': ['cordis.patch.yml'],
   '@deepseek-ai/dsh-client-ui-theme': ['lib/styles'],
   // The Python runtime uses a distinct closed-resolution bin; the public CLI
@@ -144,6 +148,10 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // sandbox-local resolves it through the package's ./runner export. tsdown
   // also shares its generated FFI code through a hashed runtime chunk.
   '@deepseek-ai/dsh-sandbox-windows-acl': ['lib/runner.js', 'lib/types-*.js'],
+  // The Resident package's index and standalone daemon share one product,
+  // receipt, and SQLite implementation emitted as a content-hashed chunk.
+  '@deepseek-ai/dsh-resident-operator-local': ['lib/daemon-*.js'],
+  '@deepseek-ai/dsh-orchestration-local': ['lib/daemon-*.js'],
   '@deepseek-ai/dsh-skill-badge': ['assets'],
   '@deepseek-ai/dsh-subprocess-local': ['scripts/ensure-spawn-helper.mjs'],
 }
@@ -407,6 +415,53 @@ function checkWorkspaceProtocol(manifests: readonly WorkspaceManifest[]): string
   return errors
 }
 
+/**
+ * Keep interactive browser automation behind the provider-neutral ctx.browser
+ * seam. Test suites own their own Playwright harnesses and are outside this
+ * source scan; product runtime code has exactly one transport adapter.
+ */
+function checkBrowserCapabilityBoundary(manifests: readonly WorkspaceManifest[]): string[] {
+  const errors: string[] = []
+  const providerPackage = '@deepseek-ai/dsh-browser-ego-lite'
+  const providerDir = 'packages/browser/browser-ego-lite'
+  const providerConsumers = new Set(['packages/bundle/ego-lite-browser'])
+
+  for (const { dir, manifest } of manifests) {
+    if (providerConsumers.has(dir)) continue
+    for (const section of dependencySections) {
+      if (manifest[section]?.[providerPackage] !== undefined) {
+        errors.push(
+          `${dir}/package.json: ${section}.${providerPackage} bypasses ctx.browser; `
+          + 'only the Ego Lite product bundle may select that Provider',
+        )
+      }
+    }
+  }
+
+  const runtimeFiles = globSync([
+    'apps/*/src/**/*.{ts,tsx}',
+    'packages/*/*/src/**/*.{ts,tsx}',
+    'plugins/managed/*/src/**/*.{ts,tsx}',
+    'products/desktop/*/src/**/*.{ts,tsx}',
+  ], { cwd: root }).sort()
+  const directTransports = new RegExp(
+    String.raw`(?:from\s+|import\s*\(|require\s*\()\s*['"]`
+    + String.raw`(?:playwright(?:-core)?|puppeteer(?:-core)?|chrome-remote-interface|selenium-webdriver)(?:\/[^'"]*)?['"]`,
+  )
+
+  for (const rel of runtimeFiles) {
+    const source = readFileSync(join(root, rel), 'utf8')
+    const normalizedRel = rel.replaceAll('\\', '/')
+    if (directTransports.test(source)) {
+      errors.push(`${normalizedRel}: product runtime browser automation must inject ctx.browser instead of importing a browser transport directly`)
+    }
+    if (!normalizedRel.startsWith(`${providerDir}/src/`) && source.includes('ego-browser')) {
+      errors.push(`${normalizedRel}: only ${providerDir} may reference the Ego Lite executable; Consumers inject ctx.browser`)
+    }
+  }
+  return errors
+}
+
 const manifests = workspaceManifests()
 const errors = [
   ...checkRepositoryVersion(),
@@ -414,6 +469,7 @@ const errors = [
   ...checkWorkspaceProtocol(manifests),
   ...checkHierarchyShape(),
   ...collectProjectReferenceFaceViolations(root),
+  ...checkBrowserCapabilityBoundary(manifests),
 ]
 if (errors.length > 0) {
   console.error(errors.join('\n'))

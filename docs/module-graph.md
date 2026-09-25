@@ -28,6 +28,7 @@ flowchart TD
     pkg_agent_default_model["agent-default-model"]
     pkg_agent_loop["agent-loop"]
     pkg_agent_tool_presentation["agent-tool-presentation"]
+    pkg_output_style["output-style"]
     pkg_scope["scope"]
     pkg_session["session"]
     pkg_system_prompt["system-prompt"]
@@ -112,9 +113,18 @@ flowchart TD
     pkg_app_boot["app-boot"]
     pkg_cmdline["cmdline"]
   end
+  subgraph group_browser["packages/browser"]
+    pkg_browser["browser"]
+    pkg_browser_ego_lite["browser-ego-lite"]
+    pkg_tool_browser["tool-browser"]
+  end
   subgraph group_bundle["packages/bundle"]
     pkg_base["base"]
+    pkg_chatgpt_web_operator["chatgpt-web-operator"]
+    pkg_ego_lite_browser["ego-lite-browser"]
     pkg_headless["headless"]
+    pkg_orchestrations["orchestrations"]
+    pkg_resident_operators["resident-operators"]
     pkg_web_app["web-app"]
   end
   subgraph group_client["packages/client"]
@@ -150,6 +160,7 @@ flowchart TD
     pkg_client_ui_skill["client-ui-skill"]
     pkg_client_ui_slots["client-ui-slots"]
     pkg_client_ui_subagent["client-ui-subagent"]
+    pkg_client_ui_task_template["client-ui-task-template"]
     pkg_client_ui_theme["client-ui-theme"]
     pkg_client_ui_tool["client-ui-tool"]
     pkg_client_ui_trajectory["client-ui-trajectory"]
@@ -211,6 +222,7 @@ flowchart TD
     pkg_host_directory_picker_native["host-directory-picker-native"]
     pkg_host_frontend_static["host-frontend-static"]
     pkg_host_plugin_inventory["host-plugin-inventory"]
+    pkg_host_remote_auth["host-remote-auth"]
     pkg_host_webserver["host-webserver"]
   end
   subgraph group_identity["packages/identity"]
@@ -236,9 +248,48 @@ flowchart TD
   subgraph group_mcp["packages/mcp"]
     pkg_mcp_client["mcp-client"]
   end
+  subgraph group_orchestration["packages/orchestration"]
+    pkg_capability_capsule["capability-capsule"]
+    pkg_context_compiler["context-compiler"]
+    pkg_continual_harness["continual-harness"]
+    pkg_continual_harness_local["continual-harness-local"]
+    pkg_debate["debate"]
+    pkg_debate_local["debate-local"]
+    pkg_debate_orchestration["debate-orchestration"]
+    pkg_intent_compiler["intent-compiler"]
+    pkg_model_allocation["model-allocation"]
+    pkg_model_allocation_local["model-allocation-local"]
+    pkg_model_worker["model-worker"]
+    pkg_model_worker_deepseek["model-worker-deepseek"]
+    pkg_orchestration["orchestration"]
+    pkg_orchestration_local["orchestration-local"]
+    pkg_rlm_runtime["rlm-runtime"]
+    pkg_rlm_runtime_local["rlm-runtime-local"]
+    pkg_rlm_strategy["rlm-strategy"]
+    pkg_rlm_strategy_local["rlm-strategy-local"]
+    pkg_tool_debate["tool-debate"]
+    pkg_tool_orchestration["tool-orchestration"]
+    pkg_ui_debate["ui-debate"]
+    pkg_ui_orchestration["ui-orchestration"]
+  end
+  subgraph group_physical_operator["packages/physical-operator"]
+    pkg_physical_operator["physical-operator"]
+    pkg_physical_operator_chatgpt_web["physical-operator-chatgpt-web"]
+    pkg_physical_operator_resident["physical-operator-resident"]
+    pkg_physical_operator_subagent["physical-operator-subagent"]
+    pkg_resident_operator["resident-operator"]
+    pkg_resident_operator_local["resident-operator-local"]
+    pkg_tool_physical_operator["tool-physical-operator"]
+    pkg_ui_physical_operator["ui-physical-operator"]
+  end
   subgraph group_preset["packages/preset"]
     pkg_agent_presets["agent-presets"]
     pkg_persona["persona"]
+  end
+  subgraph group_prompt["packages/prompt"]
+    pkg_task_template["task-template"]
+    pkg_task_template_context["task-template-context"]
+    pkg_task_template_rpc["task-template-rpc"]
   end
   subgraph group_runtime_diagnostics["packages/runtime-diagnostics"]
     pkg_invariants["invariants"]
@@ -335,7 +386,10 @@ flowchart TD
   pkg_scope --> pkg_invariants
   pkg_cmdline --> pkg_invariants
   pkg_base --> pkg_invariants
-  pkg_client_modules --> pkg_invariants
+  pkg_chatgpt_web_operator --> pkg_invariants
+  pkg_ego_lite_browser --> pkg_invariants
+  pkg_orchestrations --> pkg_invariants
+  pkg_resident_operators --> pkg_invariants
   pkg_client_schema_form --> pkg_invariants
   pkg_client_ui_attachment --> pkg_invariants
   pkg_client_ui_primitives --> pkg_invariants
@@ -348,6 +402,7 @@ flowchart TD
   pkg_host_directory_picker --> pkg_invariants
   pkg_host_directory_picker_browse --> pkg_invariants
   pkg_host_directory_picker_native --> pkg_invariants
+  pkg_host_remote_auth --> pkg_invariants
   pkg_host_webserver --> pkg_invariants
   pkg_sandbox_windows_acl --> pkg_invariants
   pkg_storage --> pkg_invariants
@@ -358,11 +413,8 @@ flowchart TD
   pkg_typert_registry --> pkg_invariants
   pkg_attachment --> pkg_brand
   pkg_attachment --> pkg_invariants
-  pkg_client_connection --> pkg_host_webserver
-  pkg_client_connection --> pkg_invariants
-  pkg_client_hmr --> pkg_client_modules
-  pkg_client_hmr --> pkg_host_webserver
-  pkg_client_hmr --> pkg_invariants
+  pkg_client_modules --> pkg_host_webserver
+  pkg_client_modules --> pkg_invariants
   pkg_credentials --> pkg_brand
   pkg_credentials --> pkg_invariants
   pkg_subprocess_e2b --> pkg_e2b
@@ -377,6 +429,10 @@ flowchart TD
   pkg_anonymous_user_id --> pkg_brand
   pkg_anonymous_user_id --> pkg_home_paths
   pkg_anonymous_user_id --> pkg_invariants
+  pkg_task_template --> pkg_atomic_write
+  pkg_task_template --> pkg_brand
+  pkg_task_template --> pkg_home_paths
+  pkg_task_template --> pkg_invariants
   pkg_settings --> pkg_brand
   pkg_settings --> pkg_invariants
   pkg_storage_domain --> pkg_invariants
@@ -394,12 +450,12 @@ flowchart TD
   pkg_llm --> pkg_brand
   pkg_llm --> pkg_invariants
   pkg_llm --> pkg_timeout
-  pkg_api_gateway --> pkg_client_connection
-  pkg_api_gateway --> pkg_invariants
-  pkg_api_gateway --> pkg_typert_registry
   pkg_attachment_local --> pkg_attachment
   pkg_attachment_local --> pkg_home_paths
   pkg_attachment_local --> pkg_invariants
+  pkg_client_hmr --> pkg_client_modules
+  pkg_client_hmr --> pkg_host_webserver
+  pkg_client_hmr --> pkg_invariants
   pkg_credentials_local --> pkg_atomic_write
   pkg_credentials_local --> pkg_credentials
   pkg_credentials_local --> pkg_home_paths
@@ -410,6 +466,7 @@ flowchart TD
   pkg_settings_file --> pkg_invariants
   pkg_settings_file --> pkg_settings
   pkg_llm_deepseek --> pkg_anonymous_user_id
+  pkg_llm_deepseek --> pkg_attachment
   pkg_llm_deepseek --> pkg_credentials
   pkg_llm_deepseek --> pkg_invariants
   pkg_llm_deepseek --> pkg_launch_environment
@@ -436,15 +493,32 @@ flowchart TD
   pkg_skill --> pkg_scope
   pkg_web --> pkg_invariants
   pkg_web --> pkg_llm
+  pkg_browser --> pkg_brand
+  pkg_browser --> pkg_invariants
+  pkg_browser --> pkg_llm
   pkg_lsp --> pkg_brand
   pkg_lsp --> pkg_invariants
   pkg_lsp --> pkg_llm
+  pkg_capability_capsule --> pkg_brand
+  pkg_capability_capsule --> pkg_invariants
+  pkg_capability_capsule --> pkg_llm
+  pkg_context_compiler --> pkg_invariants
+  pkg_context_compiler --> pkg_llm
+  pkg_continual_harness --> pkg_invariants
+  pkg_continual_harness --> pkg_llm
+  pkg_debate --> pkg_invariants
+  pkg_debate --> pkg_llm
+  pkg_intent_compiler --> pkg_brand
+  pkg_intent_compiler --> pkg_invariants
+  pkg_intent_compiler --> pkg_llm
   pkg_agent --> pkg_invariants
   pkg_agent --> pkg_llm
   pkg_agent --> pkg_scope
   pkg_agent --> pkg_session
   pkg_agent --> pkg_system_prompt
   pkg_agent --> pkg_typert_protocol
+  pkg_output_style --> pkg_invariants
+  pkg_output_style --> pkg_system_prompt
   pkg_skill_badge --> pkg_invariants
   pkg_skill_badge --> pkg_skill
   pkg_web_fetch_http --> pkg_invariants
@@ -464,10 +538,20 @@ flowchart TD
   pkg_app_boot --> pkg_invariants
   pkg_app_boot --> pkg_launch_environment
   pkg_app_boot --> pkg_system_prompt
+  pkg_browser_ego_lite --> pkg_browser
+  pkg_browser_ego_lite --> pkg_invariants
+  pkg_browser_ego_lite --> pkg_subprocess
+  pkg_browser_ego_lite --> pkg_timeout
   pkg_code_runtime_worker_thread --> pkg_code_runtime
   pkg_code_runtime_worker_thread --> pkg_invariants
   pkg_code_runtime_worker_thread --> pkg_session
   pkg_code_runtime_worker_thread --> pkg_timeout
+  pkg_continual_harness_local --> pkg_atomic_write
+  pkg_continual_harness_local --> pkg_continual_harness
+  pkg_continual_harness_local --> pkg_invariants
+  pkg_debate_local --> pkg_atomic_write
+  pkg_debate_local --> pkg_debate
+  pkg_debate_local --> pkg_invariants
   pkg_persona --> pkg_invariants
   pkg_persona --> pkg_system_prompt
   pkg_sandbox --> pkg_invariants
@@ -542,6 +626,11 @@ flowchart TD
   pkg_jobs --> pkg_brand
   pkg_jobs --> pkg_invariants
   pkg_jobs --> pkg_session
+  pkg_physical_operator --> pkg_agent
+  pkg_physical_operator --> pkg_brand
+  pkg_physical_operator --> pkg_invariants
+  pkg_physical_operator --> pkg_llm
+  pkg_physical_operator --> pkg_system_prompt
   pkg_agent_presets --> pkg_agent
   pkg_agent_presets --> pkg_atomic_write
   pkg_agent_presets --> pkg_home_paths
@@ -684,6 +773,17 @@ flowchart TD
   pkg_lsp_stdio --> pkg_lsp
   pkg_lsp_stdio --> pkg_subprocess
   pkg_lsp_stdio --> pkg_timeout
+  pkg_model_allocation --> pkg_invariants
+  pkg_model_allocation --> pkg_llm
+  pkg_model_allocation --> pkg_physical_operator
+  pkg_rlm_runtime --> pkg_brand
+  pkg_rlm_runtime --> pkg_invariants
+  pkg_rlm_runtime --> pkg_llm
+  pkg_rlm_runtime --> pkg_physical_operator
+  pkg_resident_operator --> pkg_brand
+  pkg_resident_operator --> pkg_invariants
+  pkg_resident_operator --> pkg_llm
+  pkg_resident_operator --> pkg_physical_operator
   pkg_session_title_llm --> pkg_invariants
   pkg_session_title_llm --> pkg_llm
   pkg_session_title_llm --> pkg_session
@@ -821,6 +921,10 @@ flowchart TD
   pkg_tool_session_query --> pkg_system_prompt
   pkg_tool_session_query --> pkg_timeout
   pkg_tool_session_query --> pkg_tools
+  pkg_tool_browser --> pkg_browser
+  pkg_tool_browser --> pkg_invariants
+  pkg_tool_browser --> pkg_system_prompt
+  pkg_tool_browser --> pkg_tools
   pkg_command_compact --> pkg_commands
   pkg_command_compact --> pkg_compaction
   pkg_command_compact --> pkg_invariants
@@ -875,6 +979,17 @@ flowchart TD
   pkg_mcp_client --> pkg_subprocess
   pkg_mcp_client --> pkg_timeout
   pkg_mcp_client --> pkg_tools
+  pkg_model_allocation_local --> pkg_invariants
+  pkg_model_allocation_local --> pkg_model_allocation
+  pkg_rlm_strategy --> pkg_invariants
+  pkg_rlm_strategy --> pkg_llm
+  pkg_rlm_strategy --> pkg_model_allocation
+  pkg_task_template_context --> pkg_agent
+  pkg_task_template_context --> pkg_invariants
+  pkg_task_template_context --> pkg_llm
+  pkg_task_template_context --> pkg_session
+  pkg_task_template_context --> pkg_task_template
+  pkg_task_template_context --> pkg_tools
   pkg_schedule --> pkg_agent
   pkg_schedule --> pkg_brand
   pkg_schedule --> pkg_invariants
@@ -994,21 +1109,6 @@ flowchart TD
   pkg_hooks_claude_code --> pkg_session_persistence
   pkg_hooks_claude_code --> pkg_subagent
   pkg_hooks_claude_code --> pkg_tools
-  pkg_api_remotes --> pkg_agent
-  pkg_api_remotes --> pkg_agent_presets
-  pkg_api_remotes --> pkg_api_gateway
-  pkg_api_remotes --> pkg_commands
-  pkg_api_remotes --> pkg_cordis_host_runner
-  pkg_api_remotes --> pkg_credentials
-  pkg_api_remotes --> pkg_goal
-  pkg_api_remotes --> pkg_host_plugin_inventory
-  pkg_api_remotes --> pkg_invariants
-  pkg_api_remotes --> pkg_llm
-  pkg_api_remotes --> pkg_message_feedback
-  pkg_api_remotes --> pkg_session
-  pkg_api_remotes --> pkg_session_persistence
-  pkg_api_remotes --> pkg_settings
-  pkg_api_remotes --> pkg_typert_registry
   pkg_web_app --> pkg_invariants
   pkg_web_app --> pkg_shell_env
   pkg_web_app --> pkg_system_prompt
@@ -1028,6 +1128,42 @@ flowchart TD
   pkg_host_apiproxy --> pkg_agent_presets
   pkg_host_apiproxy --> pkg_cordis_host_runner
   pkg_host_apiproxy --> pkg_invariants
+  pkg_model_worker --> pkg_agent
+  pkg_model_worker --> pkg_invariants
+  pkg_model_worker --> pkg_llm
+  pkg_model_worker --> pkg_model_allocation
+  pkg_model_worker --> pkg_rlm_strategy
+  pkg_orchestration --> pkg_brand
+  pkg_orchestration --> pkg_capability_capsule
+  pkg_orchestration --> pkg_context_compiler
+  pkg_orchestration --> pkg_intent_compiler
+  pkg_orchestration --> pkg_invariants
+  pkg_orchestration --> pkg_llm
+  pkg_orchestration --> pkg_model_allocation
+  pkg_orchestration --> pkg_physical_operator
+  pkg_orchestration --> pkg_rlm_strategy
+  pkg_orchestration --> pkg_task_template
+  pkg_rlm_strategy_local --> pkg_invariants
+  pkg_rlm_strategy_local --> pkg_rlm_strategy
+  pkg_tool_debate --> pkg_agent
+  pkg_tool_debate --> pkg_commands
+  pkg_tool_debate --> pkg_debate
+  pkg_tool_debate --> pkg_invariants
+  pkg_tool_debate --> pkg_llm
+  pkg_tool_debate --> pkg_plan_mode
+  pkg_tool_debate --> pkg_session
+  pkg_tool_debate --> pkg_session_projection
+  pkg_tool_debate --> pkg_system_prompt
+  pkg_tool_debate --> pkg_tools
+  pkg_physical_operator_resident --> pkg_invariants
+  pkg_physical_operator_resident --> pkg_physical_operator
+  pkg_physical_operator_resident --> pkg_resident_operator
+  pkg_physical_operator_resident --> pkg_subagent
+  pkg_physical_operator_resident --> pkg_system_prompt
+  pkg_physical_operator_subagent --> pkg_invariants
+  pkg_physical_operator_subagent --> pkg_physical_operator
+  pkg_physical_operator_subagent --> pkg_subagent
+  pkg_physical_operator_subagent --> pkg_system_prompt
   pkg_sdk_protocol --> pkg_invariants
   pkg_sdk_protocol --> pkg_llm
   pkg_sdk_protocol --> pkg_session
@@ -1084,10 +1220,13 @@ flowchart TD
   pkg_subagent_spawn_in_process --> pkg_invariants
   pkg_subagent_spawn_in_process --> pkg_subagent
   pkg_subagent_spawn_in_process --> pkg_subagent_in_process_driver
-  pkg_client_runtime --> pkg_api_remotes
-  pkg_client_runtime --> pkg_invariants
-  pkg_client_runtime --> pkg_typert_protocol
-  pkg_client_runtime --> pkg_typert_registry
+  pkg_client_connection --> pkg_host_remote_auth
+  pkg_client_connection --> pkg_host_webserver
+  pkg_client_connection --> pkg_invariants
+  pkg_client_connection --> pkg_orchestration
+  pkg_client_connection --> pkg_physical_operator
+  pkg_client_connection --> pkg_resident_operator
+  pkg_client_connection --> pkg_session_persistence
   pkg_compaction_basic --> pkg_agent
   pkg_compaction_basic --> pkg_commands
   pkg_compaction_basic --> pkg_compaction
@@ -1118,6 +1257,60 @@ flowchart TD
   pkg_agent_spine_demo --> pkg_tool_jobs
   pkg_agent_spine_demo --> pkg_tool_skill
   pkg_agent_spine_demo --> pkg_tools
+  pkg_debate_orchestration --> pkg_debate
+  pkg_debate_orchestration --> pkg_debate_local
+  pkg_debate_orchestration --> pkg_home_paths
+  pkg_debate_orchestration --> pkg_invariants
+  pkg_debate_orchestration --> pkg_orchestration
+  pkg_model_worker_deepseek --> pkg_credentials
+  pkg_model_worker_deepseek --> pkg_invariants
+  pkg_model_worker_deepseek --> pkg_llm
+  pkg_model_worker_deepseek --> pkg_model_allocation
+  pkg_model_worker_deepseek --> pkg_model_worker
+  pkg_model_worker_deepseek --> pkg_rlm_strategy
+  pkg_model_worker_deepseek --> pkg_sdk_protocol
+  pkg_rlm_runtime_local --> pkg_atomic_write
+  pkg_rlm_runtime_local --> pkg_home_paths
+  pkg_rlm_runtime_local --> pkg_invariants
+  pkg_rlm_runtime_local --> pkg_rlm_runtime
+  pkg_rlm_runtime_local --> pkg_sdk_protocol
+  pkg_tool_orchestration --> pkg_agent
+  pkg_tool_orchestration --> pkg_commands
+  pkg_tool_orchestration --> pkg_invariants
+  pkg_tool_orchestration --> pkg_model_allocation
+  pkg_tool_orchestration --> pkg_orchestration
+  pkg_tool_orchestration --> pkg_session
+  pkg_tool_orchestration --> pkg_session_projection
+  pkg_tool_orchestration --> pkg_system_prompt
+  pkg_tool_orchestration --> pkg_tools
+  pkg_physical_operator_chatgpt_web --> pkg_agent
+  pkg_physical_operator_chatgpt_web --> pkg_brand
+  pkg_physical_operator_chatgpt_web --> pkg_browser
+  pkg_physical_operator_chatgpt_web --> pkg_home_paths
+  pkg_physical_operator_chatgpt_web --> pkg_host_remote_auth
+  pkg_physical_operator_chatgpt_web --> pkg_host_webserver
+  pkg_physical_operator_chatgpt_web --> pkg_invariants
+  pkg_physical_operator_chatgpt_web --> pkg_llm
+  pkg_physical_operator_chatgpt_web --> pkg_model_allocation
+  pkg_physical_operator_chatgpt_web --> pkg_model_worker
+  pkg_physical_operator_chatgpt_web --> pkg_physical_operator
+  pkg_physical_operator_chatgpt_web --> pkg_sdk_protocol
+  pkg_physical_operator_chatgpt_web --> pkg_session
+  pkg_physical_operator_chatgpt_web --> pkg_system_prompt
+  pkg_physical_operator_chatgpt_web --> pkg_tools
+  pkg_tool_physical_operator --> pkg_agent
+  pkg_tool_physical_operator --> pkg_commands
+  pkg_tool_physical_operator --> pkg_home_paths
+  pkg_tool_physical_operator --> pkg_invariants
+  pkg_tool_physical_operator --> pkg_llm
+  pkg_tool_physical_operator --> pkg_physical_operator
+  pkg_tool_physical_operator --> pkg_sdk_protocol
+  pkg_tool_physical_operator --> pkg_session
+  pkg_tool_physical_operator --> pkg_session_projection
+  pkg_tool_physical_operator --> pkg_system_prompt
+  pkg_tool_physical_operator --> pkg_task_template
+  pkg_tool_physical_operator --> pkg_task_template_context
+  pkg_tool_physical_operator --> pkg_tools
   pkg_sdk_client --> pkg_invariants
   pkg_sdk_client --> pkg_llm
   pkg_sdk_client --> pkg_sdk_protocol
@@ -1137,6 +1330,83 @@ flowchart TD
   pkg_subagent_dsh_sdk --> pkg_session
   pkg_subagent_dsh_sdk --> pkg_subagent
   pkg_subagent_dsh_sdk --> pkg_subprocess
+  pkg_api_gateway --> pkg_client_connection
+  pkg_api_gateway --> pkg_invariants
+  pkg_api_gateway --> pkg_typert_registry
+  pkg_acp_demo --> pkg_acp
+  pkg_acp_demo --> pkg_agent_instructions
+  pkg_acp_demo --> pkg_agent_spine_demo
+  pkg_acp_demo --> pkg_app_boot
+  pkg_acp_demo --> pkg_invariants
+  pkg_acp_demo --> pkg_session_checkpoint_policy
+  pkg_acp_demo --> pkg_session_persistence_jsonl
+  pkg_acp_demo --> pkg_session_query
+  pkg_acp_demo --> pkg_session_query_sqlite
+  pkg_acp_demo --> pkg_tools
+  pkg_resident_operator_local --> pkg_home_paths
+  pkg_resident_operator_local --> pkg_invariants
+  pkg_resident_operator_local --> pkg_llm
+  pkg_resident_operator_local --> pkg_physical_operator
+  pkg_resident_operator_local --> pkg_resident_operator
+  pkg_resident_operator_local --> pkg_sdk_protocol
+  pkg_resident_operator_local --> pkg_subagent
+  pkg_resident_operator_local --> pkg_subagent_codex
+  pkg_resident_operator_local --> pkg_subprocess
+  pkg_task_template_rpc --> pkg_client_connection
+  pkg_task_template_rpc --> pkg_invariants
+  pkg_task_template_rpc --> pkg_task_template
+  pkg_api_remotes --> pkg_agent
+  pkg_api_remotes --> pkg_agent_presets
+  pkg_api_remotes --> pkg_api_gateway
+  pkg_api_remotes --> pkg_commands
+  pkg_api_remotes --> pkg_cordis_host_runner
+  pkg_api_remotes --> pkg_credentials
+  pkg_api_remotes --> pkg_goal
+  pkg_api_remotes --> pkg_host_plugin_inventory
+  pkg_api_remotes --> pkg_invariants
+  pkg_api_remotes --> pkg_llm
+  pkg_api_remotes --> pkg_message_feedback
+  pkg_api_remotes --> pkg_session
+  pkg_api_remotes --> pkg_session_persistence
+  pkg_api_remotes --> pkg_settings
+  pkg_api_remotes --> pkg_typert_registry
+  pkg_orchestration_local --> pkg_agent
+  pkg_orchestration_local --> pkg_browser
+  pkg_orchestration_local --> pkg_capability_capsule
+  pkg_orchestration_local --> pkg_client_connection
+  pkg_orchestration_local --> pkg_context_compiler
+  pkg_orchestration_local --> pkg_continual_harness
+  pkg_orchestration_local --> pkg_continual_harness_local
+  pkg_orchestration_local --> pkg_credentials_local
+  pkg_orchestration_local --> pkg_home_paths
+  pkg_orchestration_local --> pkg_host_apiproxy
+  pkg_orchestration_local --> pkg_intent_compiler
+  pkg_orchestration_local --> pkg_invariants
+  pkg_orchestration_local --> pkg_llm
+  pkg_orchestration_local --> pkg_llm_deepseek
+  pkg_orchestration_local --> pkg_model_allocation
+  pkg_orchestration_local --> pkg_model_allocation_local
+  pkg_orchestration_local --> pkg_model_worker
+  pkg_orchestration_local --> pkg_model_worker_deepseek
+  pkg_orchestration_local --> pkg_orchestration
+  pkg_orchestration_local --> pkg_physical_operator
+  pkg_orchestration_local --> pkg_resident_operator_local
+  pkg_orchestration_local --> pkg_rlm_runtime
+  pkg_orchestration_local --> pkg_rlm_runtime_local
+  pkg_orchestration_local --> pkg_rlm_strategy
+  pkg_orchestration_local --> pkg_rlm_strategy_local
+  pkg_orchestration_local --> pkg_sdk_protocol
+  pkg_orchestration_local --> pkg_session
+  pkg_orchestration_local --> pkg_subprocess
+  pkg_orchestration_local --> pkg_subprocess_local
+  pkg_orchestration_local --> pkg_system_prompt
+  pkg_orchestration_local --> pkg_task_template
+  pkg_orchestration_local --> pkg_task_template_context
+  pkg_client_runtime --> pkg_api_remotes
+  pkg_client_runtime --> pkg_invariants
+  pkg_client_runtime --> pkg_session_projection
+  pkg_client_runtime --> pkg_typert_protocol
+  pkg_client_runtime --> pkg_typert_registry
   pkg_client_ui_settings --> pkg_api_remotes
   pkg_client_ui_settings --> pkg_client_connection
   pkg_client_ui_settings --> pkg_client_runtime
@@ -1152,16 +1422,6 @@ flowchart TD
   pkg_client_ui_settings_models --> pkg_client_ui_slots
   pkg_client_ui_settings_models --> pkg_client_web_react
   pkg_client_ui_settings_models --> pkg_invariants
-  pkg_acp_demo --> pkg_acp
-  pkg_acp_demo --> pkg_agent_instructions
-  pkg_acp_demo --> pkg_agent_spine_demo
-  pkg_acp_demo --> pkg_app_boot
-  pkg_acp_demo --> pkg_invariants
-  pkg_acp_demo --> pkg_session_checkpoint_policy
-  pkg_acp_demo --> pkg_session_persistence_jsonl
-  pkg_acp_demo --> pkg_session_query
-  pkg_acp_demo --> pkg_session_query_sqlite
-  pkg_acp_demo --> pkg_tools
   pkg_client_test_runtime --> pkg_client_runtime
   pkg_client_test_runtime --> pkg_client_ui_slots
   pkg_client_test_runtime --> pkg_client_web_react
@@ -1174,6 +1434,13 @@ flowchart TD
   pkg_client_locale --> pkg_client_ui_settings
   pkg_client_locale --> pkg_client_ui_slots
   pkg_client_locale --> pkg_invariants
+  pkg_client_ui_task_template --> pkg_client_connection
+  pkg_client_ui_task_template --> pkg_client_runtime
+  pkg_client_ui_task_template --> pkg_client_ui_settings
+  pkg_client_ui_task_template --> pkg_client_ui_slots
+  pkg_client_ui_task_template --> pkg_invariants
+  pkg_client_ui_task_template --> pkg_task_template
+  pkg_client_ui_task_template --> pkg_task_template_rpc
   pkg_client_ui_input_trigger --> pkg_client_locale
   pkg_client_ui_input_trigger --> pkg_client_runtime
   pkg_client_ui_input_trigger --> pkg_client_ui_primitives
@@ -1373,6 +1640,23 @@ flowchart TD
   pkg_host_directory_picker_auto --> pkg_host_directory_picker_native
   pkg_host_directory_picker_auto --> pkg_host_webserver
   pkg_host_directory_picker_auto --> pkg_invariants
+  pkg_ui_debate --> pkg_client_connection
+  pkg_ui_debate --> pkg_client_runtime
+  pkg_ui_debate --> pkg_client_ui_conversation
+  pkg_ui_debate --> pkg_client_ui_slots
+  pkg_ui_debate --> pkg_debate
+  pkg_ui_debate --> pkg_host_remote_auth
+  pkg_ui_debate --> pkg_host_webserver
+  pkg_ui_debate --> pkg_invariants
+  pkg_ui_orchestration --> pkg_client_connection
+  pkg_ui_orchestration --> pkg_client_runtime
+  pkg_ui_orchestration --> pkg_client_ui_conversation
+  pkg_ui_orchestration --> pkg_client_ui_slots
+  pkg_ui_orchestration --> pkg_host_remote_auth
+  pkg_ui_orchestration --> pkg_host_webserver
+  pkg_ui_orchestration --> pkg_invariants
+  pkg_ui_orchestration --> pkg_orchestration
+  pkg_ui_orchestration --> pkg_rlm_runtime
   pkg_session_log_export --> pkg_client_locale
   pkg_session_log_export --> pkg_client_runtime
   pkg_session_log_export --> pkg_client_ui_commands
@@ -1423,6 +1707,21 @@ flowchart TD
   pkg_client_ui_cordis --> pkg_client_ui_tool
   pkg_client_ui_cordis --> pkg_cordis_client_runner
   pkg_client_ui_cordis --> pkg_invariants
+  pkg_ui_physical_operator --> pkg_api_remotes
+  pkg_ui_physical_operator --> pkg_client_connection
+  pkg_ui_physical_operator --> pkg_client_runtime
+  pkg_ui_physical_operator --> pkg_client_ui_conversation
+  pkg_ui_physical_operator --> pkg_client_ui_model_selection
+  pkg_ui_physical_operator --> pkg_client_ui_primitives
+  pkg_ui_physical_operator --> pkg_client_ui_slots
+  pkg_ui_physical_operator --> pkg_host_remote_auth
+  pkg_ui_physical_operator --> pkg_host_webserver
+  pkg_ui_physical_operator --> pkg_invariants
+  pkg_ui_physical_operator --> pkg_plan_mode
+  pkg_ui_physical_operator --> pkg_resident_operator
+  pkg_ui_physical_operator --> pkg_tool_debate
+  pkg_ui_physical_operator --> pkg_tool_orchestration
+  pkg_ui_physical_operator --> pkg_tool_physical_operator
 ```
 
 | Package | Group | Depends on |
@@ -1438,7 +1737,10 @@ flowchart TD
 | [`scope`](../packages/core/scope) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`cmdline`](../packages/boot/cmdline) | `boot` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`base`](../packages/bundle/base) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
-| [`client-modules`](../packages/client/modules) | `client` | [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`chatgpt-web-operator`](../packages/bundle/chatgpt-web-operator) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`ego-lite-browser`](../packages/bundle/ego-lite-browser) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`orchestrations`](../packages/bundle/orchestrations) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`resident-operators`](../packages/bundle/resident-operators) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-schema-form`](../packages/client/schema-form) | `client` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-attachment`](../packages/client/ui-attachment) | `client` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-primitives`](../packages/client/ui-primitives) | `client` | [`invariants`](../packages/runtime-diagnostics/invariants) |
@@ -1451,6 +1753,7 @@ flowchart TD
 | [`host-directory-picker`](../packages/host/directory-picker) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`host-directory-picker-browse`](../packages/host/directory-picker-browse) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`host-directory-picker-native`](../packages/host/directory-picker-native) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`host-remote-auth`](../packages/host/remote-auth) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`host-webserver`](../packages/host/webserver) | `host` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`sandbox-windows-acl`](../packages/sandbox/sandbox-windows-acl) | `sandbox` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`storage`](../packages/storage/storage) | `storage` | [`invariants`](../packages/runtime-diagnostics/invariants) |
@@ -1460,13 +1763,13 @@ flowchart TD
 | [`typert-protocol`](../packages/typert/protocol) | `typert` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`typert-registry`](../packages/typert/registry) | `typert` | [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`attachment`](../packages/attachment/attachment) | `attachment` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
-| [`client-connection`](../packages/client/connection) | `client` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
-| [`client-hmr`](../packages/client/hmr) | `client` | [`client-modules`](../packages/client/modules), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`client-modules`](../packages/client/modules) | `client` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`credentials`](../packages/credentials/credentials) | `credentials` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`subprocess-e2b`](../packages/e2b/subprocess-e2b) | `e2b` | [`e2b`](../packages/e2b/e2b), [`invariants`](../packages/runtime-diagnostics/invariants), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
 | [`host-frontend-static`](../packages/host/frontend-static) | `host` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`host-plugin-inventory`](../packages/host/plugin-inventory) | `host` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`typert-protocol`](../packages/typert/protocol) |
 | [`anonymous-user-id`](../packages/identity/anonymous-user-id) | `identity` | [`brand`](../packages/util/brand), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`task-template`](../packages/prompt/task-template) | `prompt` | [`atomic-write`](../packages/util/atomic-write), [`brand`](../packages/util/brand), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`settings`](../packages/settings/settings) | `settings` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`storage-domain`](../packages/storage/storage-domain) | `storage` | [`invariants`](../packages/runtime-diagnostics/invariants), [`storage`](../packages/storage/storage) |
 | [`storage-json`](../packages/storage/storage-json) | `storage` | [`invariants`](../packages/runtime-diagnostics/invariants), [`storage`](../packages/storage/storage) |
@@ -1474,25 +1777,35 @@ flowchart TD
 | [`subprocess-local`](../packages/subprocess/subprocess-local) | `subprocess` | [`invariants`](../packages/runtime-diagnostics/invariants), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
 | [`typert-loader`](../packages/typert/loader) | `typert` | [`invariants`](../packages/runtime-diagnostics/invariants), [`typert-registry`](../packages/typert/registry) |
 | [`llm`](../packages/llm/llm) | `llm` | [`attachment`](../packages/attachment/attachment), [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`timeout`](../packages/util/timeout) |
-| [`api-gateway`](../packages/api/gateway) | `api` | [`client-connection`](../packages/client/connection), [`invariants`](../packages/runtime-diagnostics/invariants), [`typert-registry`](../packages/typert/registry) |
 | [`attachment-local`](../packages/attachment/attachment-local) | `attachment` | [`attachment`](../packages/attachment/attachment), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`client-hmr`](../packages/client/hmr) | `client` | [`client-modules`](../packages/client/modules), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`credentials-local`](../packages/credentials/credentials-local) | `credentials` | [`atomic-write`](../packages/util/atomic-write), [`credentials`](../packages/credentials/credentials), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`launch-environment`](../packages/util/launch-environment) |
 | [`settings-file`](../packages/settings/settings-file) | `settings` | [`atomic-write`](../packages/util/atomic-write), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`settings`](../packages/settings/settings) |
-| [`llm-deepseek`](../packages/llm/llm-deepseek) | `llm` | [`anonymous-user-id`](../packages/identity/anonymous-user-id), [`credentials`](../packages/credentials/credentials), [`invariants`](../packages/runtime-diagnostics/invariants), [`launch-environment`](../packages/util/launch-environment), [`llm`](../packages/llm/llm), [`settings`](../packages/settings/settings), [`timeout`](../packages/util/timeout) |
+| [`llm-deepseek`](../packages/llm/llm-deepseek) | `llm` | [`anonymous-user-id`](../packages/identity/anonymous-user-id), [`attachment`](../packages/attachment/attachment), [`credentials`](../packages/credentials/credentials), [`invariants`](../packages/runtime-diagnostics/invariants), [`launch-environment`](../packages/util/launch-environment), [`llm`](../packages/llm/llm), [`settings`](../packages/settings/settings), [`timeout`](../packages/util/timeout) |
 | [`llm-pi-ai`](../packages/llm/llm-pi-ai) | `llm` | [`attachment`](../packages/attachment/attachment), [`credentials`](../packages/credentials/credentials), [`invariants`](../packages/runtime-diagnostics/invariants), [`launch-environment`](../packages/util/launch-environment), [`llm`](../packages/llm/llm), [`settings`](../packages/settings/settings), [`timeout`](../packages/util/timeout) |
 | [`session`](../packages/core/session) | `core` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope), [`typert-protocol`](../packages/typert/protocol) |
 | [`system-prompt`](../packages/core/system-prompt) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope) |
 | [`skill`](../packages/skill/skill) | `skill` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope) |
 | [`web`](../packages/web/web) | `web` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`browser`](../packages/browser/browser) | `browser` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`lsp`](../packages/lsp/lsp) | `lsp` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`capability-capsule`](../packages/orchestration/capability-capsule) | `orchestration` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`context-compiler`](../packages/orchestration/context-compiler) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`continual-harness`](../packages/orchestration/continual-harness) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`debate`](../packages/orchestration/debate) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`intent-compiler`](../packages/orchestration/intent-compiler) | `orchestration` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`agent`](../packages/core/agent) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt), [`typert-protocol`](../packages/typert/protocol) |
+| [`output-style`](../packages/core/output-style) | `core` | [`invariants`](../packages/runtime-diagnostics/invariants), [`system-prompt`](../packages/core/system-prompt) |
 | [`skill-badge`](../packages/skill/skill-badge) | `skill` | [`invariants`](../packages/runtime-diagnostics/invariants), [`skill`](../packages/skill/skill) |
 | [`web-fetch-http`](../packages/web/web-fetch-http) | `web` | [`invariants`](../packages/runtime-diagnostics/invariants), [`timeout`](../packages/util/timeout), [`web`](../packages/web/web) |
 | [`web-search-exa`](../packages/web/web-search-exa) | `web` | [`invariants`](../packages/runtime-diagnostics/invariants), [`launch-environment`](../packages/util/launch-environment), [`web`](../packages/web/web) |
 | [`web-search-perplexity`](../packages/web/web-search-perplexity) | `web` | [`invariants`](../packages/runtime-diagnostics/invariants), [`launch-environment`](../packages/util/launch-environment), [`web`](../packages/web/web) |
 | [`spill`](../packages/spill/spill) | `spill` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session) |
 | [`app-boot`](../packages/boot/app-boot) | `boot` | [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`launch-environment`](../packages/util/launch-environment), [`system-prompt`](../packages/core/system-prompt) |
+| [`browser-ego-lite`](../packages/browser/browser-ego-lite) | `browser` | [`browser`](../packages/browser/browser), [`invariants`](../packages/runtime-diagnostics/invariants), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
 | [`code-runtime-worker-thread`](../packages/code-runtime/code-runtime-worker-thread) | `code-runtime` | [`code-runtime`](../packages/code-runtime/code-runtime), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session), [`timeout`](../packages/util/timeout) |
+| [`continual-harness-local`](../packages/orchestration/continual-harness-local) | `orchestration` | [`atomic-write`](../packages/util/atomic-write), [`continual-harness`](../packages/orchestration/continual-harness), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`debate-local`](../packages/orchestration/debate-local) | `orchestration` | [`atomic-write`](../packages/util/atomic-write), [`debate`](../packages/orchestration/debate), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`persona`](../packages/preset/persona) | `preset` | [`invariants`](../packages/runtime-diagnostics/invariants), [`system-prompt`](../packages/core/system-prompt) |
 | [`sandbox`](../packages/sandbox/sandbox) | `sandbox` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session) |
 | [`session-persistence`](../packages/session/session-persistence) | `session` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session), [`timeout`](../packages/util/timeout) |
@@ -1510,6 +1823,7 @@ flowchart TD
 | [`user-approval`](../packages/interaction/user-approval) | `interaction` | [`agent`](../packages/core/agent), [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt) |
 | [`user-questions`](../packages/interaction/user-questions) | `interaction` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`jobs`](../packages/jobs/jobs) | `jobs` | [`agent`](../packages/core/agent), [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session) |
+| [`physical-operator`](../packages/physical-operator/physical-operator) | `physical-operator` | [`agent`](../packages/core/agent), [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`system-prompt`](../packages/core/system-prompt) |
 | [`agent-presets`](../packages/preset/agent-presets) | `preset` | [`agent`](../packages/core/agent), [`atomic-write`](../packages/util/atomic-write), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`settings`](../packages/settings/settings), [`system-prompt`](../packages/core/system-prompt) |
 | [`sandbox-local`](../packages/sandbox/sandbox-local) | `sandbox` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sandbox`](../packages/sandbox/sandbox), [`session`](../packages/core/session) |
 | [`sandbox-policy`](../packages/sandbox/sandbox-policy) | `sandbox` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`sandbox`](../packages/sandbox/sandbox), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt) |
@@ -1541,6 +1855,9 @@ flowchart TD
 | [`permission-presets`](../packages/interaction/permission-presets) | `interaction` | [`commands`](../packages/interaction/commands), [`invariants`](../packages/runtime-diagnostics/invariants), [`sandbox`](../packages/sandbox/sandbox), [`sandbox-policy`](../packages/sandbox/sandbox-policy), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`settings`](../packages/settings/settings), [`shell`](../packages/shell/shell), [`user-approval`](../packages/interaction/user-approval) |
 | [`jobs-local`](../packages/jobs/jobs-local) | `jobs` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs`](../packages/jobs/jobs), [`scope`](../packages/core/scope), [`timeout`](../packages/util/timeout) |
 | [`lsp-stdio`](../packages/lsp/lsp-stdio) | `lsp` | [`brand`](../packages/util/brand), [`fs`](../packages/fs/fs), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`lsp`](../packages/lsp/lsp), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
+| [`model-allocation`](../packages/orchestration/model-allocation) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator) |
+| [`rlm-runtime`](../packages/orchestration/rlm-runtime) | `orchestration` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator) |
+| [`resident-operator`](../packages/physical-operator/resident-operator) | `physical-operator` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator) |
 | [`session-title-llm`](../packages/session/session-title-llm) | `session` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-title`](../packages/session/session-title), [`timeout`](../packages/util/timeout) |
 | [`bash-local`](../packages/shell/bash-local) | `shell` | [`invariants`](../packages/runtime-diagnostics/invariants), [`settings`](../packages/settings/settings), [`shell`](../packages/shell/shell), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
 | [`pwsh-local`](../packages/shell/pwsh-local) | `shell` | [`invariants`](../packages/runtime-diagnostics/invariants), [`settings`](../packages/settings/settings), [`shell`](../packages/shell/shell), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
@@ -1562,6 +1879,7 @@ flowchart TD
 | [`hooks-codex`](../packages/hooks/hooks-codex) | `hooks` | [`agent`](../packages/core/agent), [`hook-protocol`](../packages/hooks/hook-protocol), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`tools`](../packages/core/tools) |
 | [`session-query-sqlite`](../packages/session-query/session-query-sqlite) | `session-query` | [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`session-query`](../packages/session-query/session-query) |
 | [`tool-session-query`](../packages/session-query/tool-session-query) | `session-query` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-query`](../packages/session-query/session-query), [`system-prompt`](../packages/core/system-prompt), [`timeout`](../packages/util/timeout), [`tools`](../packages/core/tools) |
+| [`tool-browser`](../packages/browser/tool-browser) | `browser` | [`browser`](../packages/browser/browser), [`invariants`](../packages/runtime-diagnostics/invariants), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`command-compact`](../packages/compaction/command-compact) | `compaction` | [`commands`](../packages/interaction/commands), [`compaction`](../packages/compaction/compaction), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`agent-instructions`](../packages/context/agent-instructions) | `context` | [`agent`](../packages/core/agent), [`fs`](../packages/fs/fs), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`tools`](../packages/core/tools) |
 | [`session-reference`](../packages/context/session-reference) | `context` | [`agent`](../packages/core/agent), [`compaction`](../packages/compaction/compaction), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`output-retention`](../packages/util/output-retention), [`session`](../packages/core/session), [`session-query`](../packages/session-query/session-query) |
@@ -1572,6 +1890,9 @@ flowchart TD
 | [`tool-jobs`](../packages/jobs/tool-jobs) | `jobs` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs`](../packages/jobs/jobs), [`llm`](../packages/llm/llm), [`output-retention`](../packages/util/output-retention), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`tool-lsp`](../packages/lsp/tool-lsp) | `lsp` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`lsp`](../packages/lsp/lsp), [`system-prompt`](../packages/core/system-prompt), [`timeout`](../packages/util/timeout), [`tools`](../packages/core/tools) |
 | [`mcp-client`](../packages/mcp/mcp-client) | `mcp` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout), [`tools`](../packages/core/tools) |
+| [`model-allocation-local`](../packages/orchestration/model-allocation-local) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`model-allocation`](../packages/orchestration/model-allocation) |
+| [`rlm-strategy`](../packages/orchestration/rlm-strategy) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation) |
+| [`task-template-context`](../packages/prompt/task-template-context) | `prompt` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`task-template`](../packages/prompt/task-template), [`tools`](../packages/core/tools) |
 | [`schedule`](../packages/schedule/schedule) | `schedule` | [`agent`](../packages/core/agent), [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`tools`](../packages/core/tools) |
 | [`session-checkpoint-policy`](../packages/session/session-checkpoint-policy) | `session` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`tools`](../packages/core/tools) |
 | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | `session` | [`anonymous-user-id`](../packages/identity/anonymous-user-id), [`command-feedback`](../packages/feedback/command-feedback), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-telemetry`](../packages/session/session-telemetry) |
@@ -1592,11 +1913,16 @@ flowchart TD
 | [`tool-subagent-control`](../packages/subagent/tool-subagent-control) | `subagent` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent), [`tools`](../packages/core/tools) |
 | [`tool-subagent-report`](../packages/subagent/tool-subagent-report) | `subagent` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`subagent`](../packages/subagent/subagent), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`hooks-claude-code`](../packages/hooks/hooks-claude-code) | `hooks` | [`agent`](../packages/core/agent), [`hook-protocol`](../packages/hooks/hook-protocol), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`subagent`](../packages/subagent/subagent), [`tools`](../packages/core/tools) |
-| [`api-remotes`](../packages/api/remotes) | `api` | [`agent`](../packages/core/agent), [`agent-presets`](../packages/preset/agent-presets), [`api-gateway`](../packages/api/gateway), [`commands`](../packages/interaction/commands), [`cordis-host-runner`](../packages/extensions/cordis-host-runner), [`credentials`](../packages/credentials/credentials), [`goal`](../packages/goal/goal), [`host-plugin-inventory`](../packages/host/plugin-inventory), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`message-feedback`](../packages/feedback/message-feedback), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`settings`](../packages/settings/settings), [`typert-registry`](../packages/typert/registry) |
 | [`web-app`](../packages/bundle/web-app) | `bundle` | [`invariants`](../packages/runtime-diagnostics/invariants), [`shell-env`](../packages/shell/shell-env), [`system-prompt`](../packages/core/system-prompt) |
 | [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner) | `compaction` | [`compaction`](../packages/compaction/compaction), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`token-meter`](../packages/llm/token-meter) |
 | [`tool-cordis`](../packages/extensions/tool-cordis) | `extensions` | [`agent`](../packages/core/agent), [`cordis-host-runner`](../packages/extensions/cordis-host-runner), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`host-apiproxy`](../packages/host/apiproxy) | `host` | [`agent-presets`](../packages/preset/agent-presets), [`cordis-host-runner`](../packages/extensions/cordis-host-runner), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`model-worker`](../packages/orchestration/model-worker) | `orchestration` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`rlm-strategy`](../packages/orchestration/rlm-strategy) |
+| [`orchestration`](../packages/orchestration/orchestration) | `orchestration` | [`brand`](../packages/util/brand), [`capability-capsule`](../packages/orchestration/capability-capsule), [`context-compiler`](../packages/orchestration/context-compiler), [`intent-compiler`](../packages/orchestration/intent-compiler), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`physical-operator`](../packages/physical-operator/physical-operator), [`rlm-strategy`](../packages/orchestration/rlm-strategy), [`task-template`](../packages/prompt/task-template) |
+| [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | `orchestration` | [`invariants`](../packages/runtime-diagnostics/invariants), [`rlm-strategy`](../packages/orchestration/rlm-strategy) |
+| [`tool-debate`](../packages/orchestration/tool-debate) | `orchestration` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`debate`](../packages/orchestration/debate), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`plan-mode`](../packages/plan/plan-mode), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
+| [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | `physical-operator` | [`invariants`](../packages/runtime-diagnostics/invariants), [`physical-operator`](../packages/physical-operator/physical-operator), [`resident-operator`](../packages/physical-operator/resident-operator), [`subagent`](../packages/subagent/subagent), [`system-prompt`](../packages/core/system-prompt) |
+| [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent) | `physical-operator` | [`invariants`](../packages/runtime-diagnostics/invariants), [`physical-operator`](../packages/physical-operator/physical-operator), [`subagent`](../packages/subagent/subagent), [`system-prompt`](../packages/core/system-prompt) |
 | [`sdk-protocol`](../packages/sdk/protocol) | `sdk` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent) |
 | [`tool-bash`](../packages/shell/tool-bash) | `shell` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs`](../packages/jobs/jobs), [`llm`](../packages/llm/llm), [`sandbox`](../packages/sandbox/sandbox), [`sandbox-policy`](../packages/sandbox/sandbox-policy), [`shell`](../packages/shell/shell), [`shell-env`](../packages/shell/shell-env), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools), [`user-approval`](../packages/interaction/user-approval) |
 | [`tool-pwsh`](../packages/shell/tool-pwsh) | `shell` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs`](../packages/jobs/jobs), [`llm`](../packages/llm/llm), [`sandbox`](../packages/sandbox/sandbox), [`sandbox-policy`](../packages/sandbox/sandbox-policy), [`shell`](../packages/shell/shell), [`shell-env`](../packages/shell/shell-env), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools), [`user-approval`](../packages/interaction/user-approval) |
@@ -1605,17 +1931,30 @@ flowchart TD
 | [`subagent-codex`](../packages/subagent/subagent-codex) | `subagent` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
 | [`subagent-fork-in-process`](../packages/subagent/subagent-fork-in-process) | `subagent` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent), [`subagent-in-process-driver`](../packages/subagent/subagent-in-process-driver) |
 | [`subagent-spawn-in-process`](../packages/subagent/subagent-spawn-in-process) | `subagent` | [`invariants`](../packages/runtime-diagnostics/invariants), [`subagent`](../packages/subagent/subagent), [`subagent-in-process-driver`](../packages/subagent/subagent-in-process-driver) |
-| [`client-runtime`](../packages/client/runtime) | `client` | [`api-remotes`](../packages/api/remotes), [`invariants`](../packages/runtime-diagnostics/invariants), [`typert-protocol`](../packages/typert/protocol), [`typert-registry`](../packages/typert/registry) |
+| [`client-connection`](../packages/client/connection) | `client` | [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`orchestration`](../packages/orchestration/orchestration), [`physical-operator`](../packages/physical-operator/physical-operator), [`resident-operator`](../packages/physical-operator/resident-operator), [`session-persistence`](../packages/session/session-persistence) |
 | [`compaction-basic`](../packages/compaction/compaction-basic) | `compaction` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`compaction`](../packages/compaction/compaction), [`compaction-tool-result-pruner`](../packages/compaction/compaction-tool-result-pruner), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`session`](../packages/core/session), [`token-meter`](../packages/llm/token-meter) |
 | [`agent-spine-demo`](../packages/examples/agent-spine-demo) | `examples` | [`agent`](../packages/core/agent), [`agent-instructions`](../packages/context/agent-instructions), [`agent-loop`](../packages/core/agent-loop), [`goal`](../packages/goal/goal), [`goal-round-driver`](../packages/goal/goal-round-driver), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs-local`](../packages/jobs/jobs-local), [`llm`](../packages/llm/llm), [`llm-retry`](../packages/llm/llm-retry), [`scope`](../packages/core/scope), [`session`](../packages/core/session), [`session-title`](../packages/session/session-title), [`shell-env`](../packages/shell/shell-env), [`skill`](../packages/skill/skill), [`skill-filesystem`](../packages/skill/skill-filesystem), [`system-prompt`](../packages/core/system-prompt), [`tool-bash`](../packages/shell/tool-bash), [`tool-goal`](../packages/goal/tool-goal), [`tool-jobs`](../packages/jobs/tool-jobs), [`tool-skill`](../packages/skill/tool-skill), [`tools`](../packages/core/tools) |
+| [`debate-orchestration`](../packages/orchestration/debate-orchestration) | `orchestration` | [`debate`](../packages/orchestration/debate), [`debate-local`](../packages/orchestration/debate-local), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`orchestration`](../packages/orchestration/orchestration) |
+| [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | `orchestration` | [`credentials`](../packages/credentials/credentials), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`model-worker`](../packages/orchestration/model-worker), [`rlm-strategy`](../packages/orchestration/rlm-strategy), [`sdk-protocol`](../packages/sdk/protocol) |
+| [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | `orchestration` | [`atomic-write`](../packages/util/atomic-write), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`rlm-runtime`](../packages/orchestration/rlm-runtime), [`sdk-protocol`](../packages/sdk/protocol) |
+| [`tool-orchestration`](../packages/orchestration/tool-orchestration) | `orchestration` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`invariants`](../packages/runtime-diagnostics/invariants), [`model-allocation`](../packages/orchestration/model-allocation), [`orchestration`](../packages/orchestration/orchestration), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
+| [`physical-operator-chatgpt-web`](../packages/physical-operator/physical-operator-chatgpt-web) | `physical-operator` | [`agent`](../packages/core/agent), [`brand`](../packages/util/brand), [`browser`](../packages/browser/browser), [`home-paths`](../packages/util/home-paths), [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`model-allocation`](../packages/orchestration/model-allocation), [`model-worker`](../packages/orchestration/model-worker), [`physical-operator`](../packages/physical-operator/physical-operator), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
+| [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | `physical-operator` | [`agent`](../packages/core/agent), [`commands`](../packages/interaction/commands), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`session-projection`](../packages/session/session-projection), [`system-prompt`](../packages/core/system-prompt), [`task-template`](../packages/prompt/task-template), [`task-template-context`](../packages/prompt/task-template-context), [`tools`](../packages/core/tools) |
 | [`sdk-client`](../packages/sdk/client) | `sdk` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session) |
 | [`sdk-jsonrpc-server`](../packages/sdk/server) | `sdk` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`llm-deepseek`](../packages/llm/llm-deepseek), [`scope`](../packages/core/scope), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent) |
 | [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | `subagent` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`sdk-client`](../packages/sdk/client), [`session`](../packages/core/session), [`subagent`](../packages/subagent/subagent), [`subprocess`](../packages/subprocess/subprocess) |
+| [`api-gateway`](../packages/api/gateway) | `api` | [`client-connection`](../packages/client/connection), [`invariants`](../packages/runtime-diagnostics/invariants), [`typert-registry`](../packages/typert/registry) |
+| [`acp-demo`](../packages/examples/acp-demo) | `examples` | [`acp`](../packages/acp/acp), [`agent-instructions`](../packages/context/agent-instructions), [`agent-spine-demo`](../packages/examples/agent-spine-demo), [`app-boot`](../packages/boot/app-boot), [`invariants`](../packages/runtime-diagnostics/invariants), [`session-checkpoint-policy`](../packages/session/session-checkpoint-policy), [`session-persistence-jsonl`](../packages/session/session-persistence-jsonl), [`session-query`](../packages/session-query/session-query), [`session-query-sqlite`](../packages/session-query/session-query-sqlite), [`tools`](../packages/core/tools) |
+| [`resident-operator-local`](../packages/physical-operator/resident-operator-local) | `physical-operator` | [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`physical-operator`](../packages/physical-operator/physical-operator), [`resident-operator`](../packages/physical-operator/resident-operator), [`sdk-protocol`](../packages/sdk/protocol), [`subagent`](../packages/subagent/subagent), [`subagent-codex`](../packages/subagent/subagent-codex), [`subprocess`](../packages/subprocess/subprocess) |
+| [`task-template-rpc`](../packages/prompt/task-template-rpc) | `prompt` | [`client-connection`](../packages/client/connection), [`invariants`](../packages/runtime-diagnostics/invariants), [`task-template`](../packages/prompt/task-template) |
+| [`api-remotes`](../packages/api/remotes) | `api` | [`agent`](../packages/core/agent), [`agent-presets`](../packages/preset/agent-presets), [`api-gateway`](../packages/api/gateway), [`commands`](../packages/interaction/commands), [`cordis-host-runner`](../packages/extensions/cordis-host-runner), [`credentials`](../packages/credentials/credentials), [`goal`](../packages/goal/goal), [`host-plugin-inventory`](../packages/host/plugin-inventory), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`message-feedback`](../packages/feedback/message-feedback), [`session`](../packages/core/session), [`session-persistence`](../packages/session/session-persistence), [`settings`](../packages/settings/settings), [`typert-registry`](../packages/typert/registry) |
+| [`orchestration-local`](../packages/orchestration/orchestration-local) | `orchestration` | [`agent`](../packages/core/agent), [`browser`](../packages/browser/browser), [`capability-capsule`](../packages/orchestration/capability-capsule), [`client-connection`](../packages/client/connection), [`context-compiler`](../packages/orchestration/context-compiler), [`continual-harness`](../packages/orchestration/continual-harness), [`continual-harness-local`](../packages/orchestration/continual-harness-local), [`credentials-local`](../packages/credentials/credentials-local), [`home-paths`](../packages/util/home-paths), [`host-apiproxy`](../packages/host/apiproxy), [`intent-compiler`](../packages/orchestration/intent-compiler), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`llm-deepseek`](../packages/llm/llm-deepseek), [`model-allocation`](../packages/orchestration/model-allocation), [`model-allocation-local`](../packages/orchestration/model-allocation-local), [`model-worker`](../packages/orchestration/model-worker), [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek), [`orchestration`](../packages/orchestration/orchestration), [`physical-operator`](../packages/physical-operator/physical-operator), [`resident-operator-local`](../packages/physical-operator/resident-operator-local), [`rlm-runtime`](../packages/orchestration/rlm-runtime), [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local), [`rlm-strategy`](../packages/orchestration/rlm-strategy), [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local), [`sdk-protocol`](../packages/sdk/protocol), [`session`](../packages/core/session), [`subprocess`](../packages/subprocess/subprocess), [`subprocess-local`](../packages/subprocess/subprocess-local), [`system-prompt`](../packages/core/system-prompt), [`task-template`](../packages/prompt/task-template), [`task-template-context`](../packages/prompt/task-template-context) |
+| [`client-runtime`](../packages/client/runtime) | `client` | [`api-remotes`](../packages/api/remotes), [`invariants`](../packages/runtime-diagnostics/invariants), [`session-projection`](../packages/session/session-projection), [`typert-protocol`](../packages/typert/protocol), [`typert-registry`](../packages/typert/registry) |
 | [`client-ui-settings`](../packages/client/ui-settings) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-schema-form`](../packages/client/schema-form), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants), [`settings`](../packages/settings/settings) |
 | [`client-ui-settings-models`](../packages/client/ui-settings-models) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-schema-form`](../packages/client/schema-form), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`client-web-react`](../packages/client/web-react), [`invariants`](../packages/runtime-diagnostics/invariants) |
-| [`acp-demo`](../packages/examples/acp-demo) | `examples` | [`acp`](../packages/acp/acp), [`agent-instructions`](../packages/context/agent-instructions), [`agent-spine-demo`](../packages/examples/agent-spine-demo), [`app-boot`](../packages/boot/app-boot), [`invariants`](../packages/runtime-diagnostics/invariants), [`session-checkpoint-policy`](../packages/session/session-checkpoint-policy), [`session-persistence-jsonl`](../packages/session/session-persistence-jsonl), [`session-query`](../packages/session-query/session-query), [`session-query-sqlite`](../packages/session-query/session-query-sqlite), [`tools`](../packages/core/tools) |
 | [`client-test-runtime`](../packages/test-support/client-runtime) | `test-support` | [`client-runtime`](../packages/client/runtime), [`client-ui-slots`](../packages/client/ui-slots), [`client-web-react`](../packages/client/web-react), [`host-apiproxy`](../packages/host/apiproxy), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-locale`](../packages/client/locale) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`client-ui-task-template`](../packages/client/ui-task-template) | `client` | [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants), [`task-template`](../packages/prompt/task-template), [`task-template-rpc`](../packages/prompt/task-template-rpc) |
 | [`client-ui-input-trigger`](../packages/client/ui-input-trigger) | `client` | [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-settings-plugin-inventory`](../packages/client/ui-settings-plugin-inventory) | `client` | [`api-remotes`](../packages/api/remotes), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-settings-plugins`](../packages/client/ui-settings-plugins) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-slots`](../packages/client/ui-slots), [`client-web-react`](../packages/client/web-react), [`invariants`](../packages/runtime-diagnostics/invariants) |
@@ -1642,8 +1981,11 @@ flowchart TD
 | [`client-ui-tool`](../packages/client/ui-tool) | `client` | [`api-remotes`](../packages/api/remotes), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-workflow-run`](../packages/client/ui-workflow-run) | `client` | [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session), [`tool-workflow`](../packages/workflow/tool-workflow), [`workflow`](../packages/workflow/workflow) |
 | [`host-directory-picker-auto`](../packages/host/directory-picker-auto) | `host` | [`client-ui-directory-picker-browse`](../packages/client/ui-directory-picker-browse), [`client-ui-directory-picker-native`](../packages/client/ui-directory-picker-native), [`host-directory-picker-browse`](../packages/host/directory-picker-browse), [`host-directory-picker-native`](../packages/host/directory-picker-native), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`ui-debate`](../packages/orchestration/ui-debate) | `orchestration` | [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-slots`](../packages/client/ui-slots), [`debate`](../packages/orchestration/debate), [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`ui-orchestration`](../packages/orchestration/ui-orchestration) | `orchestration` | [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-slots`](../packages/client/ui-slots), [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`orchestration`](../packages/orchestration/orchestration), [`rlm-runtime`](../packages/orchestration/rlm-runtime) |
 | [`session-log-export`](../packages/session-query/session-log-export) | `session-query` | [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-commands`](../packages/client/ui-commands), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`commands`](../packages/interaction/commands), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-model-selection`](../packages/client/ui-model-selection) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-commands`](../packages/client/ui-commands), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-permission-presets`](../packages/client/ui-permission-presets) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-schema-form`](../packages/client/schema-form), [`client-ui-commands`](../packages/client/ui-commands), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-slots`](../packages/client/ui-slots), [`invariants`](../packages/runtime-diagnostics/invariants), [`permission-presets`](../packages/interaction/permission-presets) |
 | [`client-ui-skill`](../packages/client/ui-skill) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`client-ui-tool`](../packages/client/ui-tool), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-cordis`](../packages/extensions/ui-cordis) | `extensions` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-sidebar`](../packages/client/ui-sidebar), [`client-ui-slots`](../packages/client/ui-slots), [`client-ui-tool`](../packages/client/ui-tool), [`cordis-client-runner`](../packages/extensions/cordis-client-runner), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`ui-physical-operator`](../packages/physical-operator/ui-physical-operator) | `physical-operator` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-runtime`](../packages/client/runtime), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-model-selection`](../packages/client/ui-model-selection), [`client-ui-primitives`](../packages/client/ui-primitives), [`client-ui-slots`](../packages/client/ui-slots), [`host-remote-auth`](../packages/host/remote-auth), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`plan-mode`](../packages/plan/plan-mode), [`resident-operator`](../packages/physical-operator/resident-operator), [`tool-debate`](../packages/orchestration/tool-debate), [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) |

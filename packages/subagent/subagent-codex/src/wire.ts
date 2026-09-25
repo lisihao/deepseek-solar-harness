@@ -1,5 +1,5 @@
 /**
- * Minimal Codex app-server 0.147.0 protocol adapter. The shared JSON-RPC
+ * Minimal Codex app-server protocol adapter. The shared JSON-RPC
  * transport owns framing and request correlation; this module owns only the
  * product methods, current thread/turn association, unattended approval
  * responses, and terminal-answer selection.
@@ -9,10 +9,146 @@
 
 import type { Readable, Writable } from 'node:stream'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { SubagentResult } from '@deepseek-ai/dsh-subagent'
+import type { SubagentResult, SubagentUsage } from '@deepseek-ai/dsh-subagent'
 import { JsonRpcLineTransport } from '@deepseek-ai/dsh-sdk-protocol'
 
 type JsonObject = Record<string, unknown>
+
+/**
+ * Every app-server method this adapter sends or handles, keyed by the
+ * protocol union that declares it. A Codex build qualifies only when its
+ * generated protocol schema declares each method.
+ */
+export const CODEX_APP_SERVER_METHODS = {
+  ClientRequest: [
+    'initialize',
+    'model/list',
+    'account/rateLimits/read',
+    'thread/start',
+    'thread/resume',
+    'thread/compact/start',
+    'turn/start',
+    'turn/interrupt',
+  ],
+  ClientNotification: ['initialized'],
+  ServerRequest: [
+    'item/tool/call',
+    'item/commandExecution/requestApproval',
+    'item/fileChange/requestApproval',
+    'item/permissions/requestApproval',
+    'item/tool/requestUserInput',
+    'mcpServer/elicitation/request',
+  ],
+  ServerNotification: [
+    'turn/started',
+    'thread/tokenUsage/updated',
+    'item/started',
+    'item/completed',
+    'turn/completed',
+  ],
+} as const satisfies Readonly<Record<string, readonly string[]>>
+
+/** Model catalog row returned by the qualified app-server. */
+export interface CodexAppServerModel {
+  readonly id: string
+  readonly model: string
+  readonly displayName: string
+  readonly description: string
+  readonly hidden: boolean
+  readonly isDefault: boolean
+  readonly defaultReasoningEffort: string
+  readonly supportedReasoningEfforts: readonly {
+    readonly reasoningEffort: string
+    readonly description: string
+  }[]
+}
+
+/** Explicit model and reasoning overrides accepted by one Codex Resident turn. */
+export interface CodexAppServerExecutionProfile {
+  readonly model: string
+  readonly effort?: string
+}
+
+/** Logical app-server boundary that keeps native execution read-only while DSH owns writable effects. */
+export interface CodexAppServerExecutionBoundary {
+  readonly approval: 'never'
+  readonly nativeEffects: 'read-only'
+  readonly environmentAccess: 'disabled'
+}
+
+function threadStartBoundary(boundary?: CodexAppServerExecutionBoundary): JsonObject {
+  return boundary === undefined ? {} : {
+    approvalPolicy: boundary.approval,
+    sandbox: boundary.nativeEffects,
+    environments: [],
+  }
+}
+
+function threadResumeBoundary(boundary?: CodexAppServerExecutionBoundary): JsonObject {
+  return boundary === undefined ? {} : {
+    approvalPolicy: boundary.approval,
+    sandbox: boundary.nativeEffects,
+  }
+}
+
+function turnStartBoundary(boundary?: CodexAppServerExecutionBoundary): JsonObject {
+  return boundary === undefined ? {} : {
+    approvalPolicy: boundary.approval,
+    sandboxPolicy: { type: 'readOnly', networkAccess: false },
+    environments: [],
+  }
+}
+
+/** Experimental app-server function tool declared at persistent thread start. */
+export interface CodexDynamicToolSpec {
+  readonly type: 'function'
+  readonly name: string
+  readonly description: string
+  readonly inputSchema: Readonly<Record<string, unknown>>
+  readonly deferLoading?: boolean
+}
+
+/** One app-server dynamic tool invocation owned by the host. */
+export interface CodexDynamicToolCall {
+  readonly threadId: string
+  readonly turnId: string
+  readonly callId: string
+  readonly namespace?: string
+  readonly tool: string
+  readonly arguments: Readonly<Record<string, unknown>>
+}
+
+/** Host response rendered back into the native Codex turn. */
+export interface CodexDynamicToolResult {
+  readonly success: boolean
+  readonly text: string
+}
+
+/** One Codex account rate-limit window returned by app-server. */
+export interface CodexAppServerRateLimitWindow {
+  readonly usedPercent: number
+  readonly resetsAt?: number
+  readonly windowDurationMins?: number
+}
+
+/** One independently metered Codex subscription pool. */
+export interface CodexAppServerRateLimit {
+  readonly limitId: string
+  readonly limitName?: string
+  readonly primary?: CodexAppServerRateLimitWindow
+  readonly secondary?: CodexAppServerRateLimitWindow
+}
+
+/** Trace-safe event surfaced by the Codex app-server wire to a Resident Driver. */
+export type CodexAppServerObservation =
+  | { readonly kind: 'public-output'; readonly preview: string }
+  | { readonly kind: 'tool-started'; readonly toolName: string }
+  | { readonly kind: 'tool-completed'; readonly toolName: string }
+  | { readonly kind: 'approval-required'; readonly approvalKind: string; readonly preview?: string }
+  | { readonly kind: 'usage-updated'; readonly usage: SubagentUsage }
+
+/** Optional one-way observer for trace-safe Codex app-server activity. */
+export type CodexAppServerObserver = (observation: CodexAppServerObservation) => void
 
 function object(value: unknown, label: string): JsonObject {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -26,6 +162,60 @@ function string(value: unknown, label: string): string {
     throw new Error(`subagent-codex: app-server returned invalid ${label}`)
   }
   return value
+}
+
+function tokenCount(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    throw new Error(`subagent-codex: app-server returned invalid ${label}`)
+  }
+  return Number(value)
+}
+
+function tokenUsage(value: unknown): SubagentUsage {
+  const usage = object(value, 'turn token usage')
+  const totalInputTokens = tokenCount(usage.inputTokens, 'turn inputTokens')
+  const cacheReadInputTokens = tokenCount(usage.cachedInputTokens, 'turn cachedInputTokens')
+  const cacheWriteInputTokens = usage.cacheWriteInputTokens === undefined
+    ? 0
+    : tokenCount(usage.cacheWriteInputTokens, 'turn cacheWriteInputTokens')
+  return {
+    inputTokens: Math.max(0, totalInputTokens - cacheReadInputTokens),
+    outputTokens: tokenCount(usage.outputTokens, 'turn outputTokens'),
+    cacheReadInputTokens,
+    cacheWriteInputTokens,
+  }
+}
+
+function rateLimitWindow(value: unknown, label: string): CodexAppServerRateLimitWindow {
+  const window = object(value, `rate limit ${label} window`)
+  if (!Number.isInteger(window.usedPercent) || Number(window.usedPercent) < 0 || Number(window.usedPercent) > 100) {
+    throw new Error(`subagent-codex: app-server returned invalid rate limit ${label} usedPercent`)
+  }
+  if (window.resetsAt !== undefined && window.resetsAt !== null && !Number.isSafeInteger(window.resetsAt)) {
+    throw new Error(`subagent-codex: app-server returned invalid rate limit ${label} resetsAt`)
+  }
+  if (window.windowDurationMins !== undefined && window.windowDurationMins !== null
+    && (!Number.isSafeInteger(window.windowDurationMins) || Number(window.windowDurationMins) <= 0)) {
+    throw new Error(`subagent-codex: app-server returned invalid rate limit ${label} windowDurationMins`)
+  }
+  return {
+    usedPercent: Number(window.usedPercent),
+    ...window.resetsAt === undefined || window.resetsAt === null ? {} : { resetsAt: Number(window.resetsAt) },
+    ...window.windowDurationMins === undefined || window.windowDurationMins === null
+      ? {}
+      : { windowDurationMins: Number(window.windowDurationMins) },
+  }
+}
+
+function rateLimitSnapshot(value: unknown, fallbackId: string): CodexAppServerRateLimit {
+  const limit = object(value, `rate limit ${fallbackId}`)
+  const limitId = typeof limit.limitId === 'string' && limit.limitId.length > 0 ? limit.limitId : fallbackId
+  return {
+    limitId,
+    ...typeof limit.limitName === 'string' && limit.limitName.length > 0 ? { limitName: limit.limitName } : {},
+    ...limit.primary === undefined || limit.primary === null ? {} : { primary: rateLimitWindow(limit.primary, 'primary') },
+    ...limit.secondary === undefined || limit.secondary === null ? {} : { secondary: rateLimitWindow(limit.secondary, 'secondary') },
+  }
 }
 
 function unattendedDecision(params: JsonObject): 'cancel' | 'decline' {
@@ -56,6 +246,22 @@ function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
     ? signal.reason
     : new Error(`subagent-codex: app-server request aborted: ${String(signal.reason)}`)
+}
+
+function productToolName(item: JsonObject): string | undefined {
+  const type = item.type
+  if (typeof type !== 'string') return undefined
+  switch (type) {
+    case 'commandExecution':
+    case 'fileChange':
+    case 'mcpToolCall':
+    case 'webSearch':
+    case 'functionCall':
+    case 'dynamicToolCall':
+      return type
+    default:
+      return undefined
+  }
 }
 
 async function raceAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -93,11 +299,16 @@ export class CodexAppServerWire {
   }> = []
   private lastFinalAnswer: string | undefined
   private lastUnphasedAnswer: string | undefined
+  private lastUsage: SubagentUsage | undefined
   private closed = false
 
   constructor(
     private readonly input: Readable,
     output: Writable,
+    private readonly approvalBehavior: 'decline' | 'require' = 'decline',
+    private readonly dynamicTools: readonly CodexDynamicToolSpec[] = [],
+    private readonly dynamicToolHandler?: (call: CodexDynamicToolCall) => Promise<CodexDynamicToolResult>,
+    private readonly observer?: CodexAppServerObserver,
   ) {
     this.transport = new JsonRpcLineTransport(input, output)
     // Fatal protocol state can arrive after the current guarded operation has
@@ -137,7 +348,7 @@ export class CodexAppServerWire {
         version: '0.0.1',
       },
       capabilities: {
-        experimentalApi: false,
+        experimentalApi: this.dynamicTools.length > 0,
         requestAttestation: false,
       },
     }, signal), signal), 'initialize response')
@@ -146,21 +357,147 @@ export class CodexAppServerWire {
   }
 
   /**
-   * Create the run's private ephemeral thread and retain its identity.
+   * Read the current subscription-visible model catalog without starting a turn.
+   * @param signal - cancellation for the catalog control request.
+   * @returns the validated app-server model rows.
+   */
+  async listModels(signal: AbortSignal): Promise<CodexAppServerModel[]> {
+    const response = object(await this.guarded(this.transport.request('model/list', {
+      limit: 100,
+      includeHidden: false,
+    }, signal), signal), 'model/list response')
+    if (!Array.isArray(response.data)) {
+      throw new Error('subagent-codex: app-server returned invalid model/list data')
+    }
+    return response.data.map((value, index) => {
+      const model = object(value, `model/list model ${String(index)}`)
+      if (!Array.isArray(model.supportedReasoningEfforts)) {
+        throw new Error(`subagent-codex: app-server returned invalid model/list efforts ${String(index)}`)
+      }
+      return {
+        id: string(model.id, 'model/list id'),
+        model: string(model.model, 'model/list model'),
+        displayName: string(model.displayName, 'model/list displayName'),
+        description: string(model.description, 'model/list description'),
+        hidden: model.hidden === true,
+        isDefault: model.isDefault === true,
+        defaultReasoningEffort: string(model.defaultReasoningEffort, 'model/list default effort'),
+        supportedReasoningEfforts: model.supportedReasoningEfforts.map((entry, effortIndex) => {
+          const effort = object(entry, `model/list effort ${String(effortIndex)}`)
+          return {
+            reasoningEffort: string(effort.reasoningEffort, 'model/list reasoning effort'),
+            description: string(effort.description, 'model/list effort description'),
+          }
+        }),
+      }
+    })
+  }
+
+  /**
+   * Read the native account's independently metered allowance pools.
+   * @param signal - cancellation for this subscription control request.
+   * @returns validated standard and model-specific pools as reported by Codex.
+   */
+  async readRateLimits(signal: AbortSignal): Promise<CodexAppServerRateLimit[]> {
+    const response = object(await this.guarded(this.transport.request('account/rateLimits/read', {}, signal), signal), 'account/rateLimits/read response')
+    if (response.rateLimitsByLimitId === null || response.rateLimitsByLimitId === undefined) {
+      return [rateLimitSnapshot(response.rateLimits, 'codex')]
+    }
+    const buckets = object(response.rateLimitsByLimitId, 'account/rateLimits/read buckets')
+    return Object.entries(buckets).map(([limitId, value]) => rateLimitSnapshot(value, limitId))
+  }
+
+  /**
+   * Create the requested private thread and retain its identity.
    * @param cwd - parent Session workspace.
    * @param signal - unpublished-start cancellation.
+   * @param ephemeral - whether product history may discard the thread after this run.
+   * @param profile - optional native model override for the new thread.
+   * @param developerInstructions - optional DSH-owned system instructions for this thread.
+   * @param executionBoundary - optional sealed no-approval, read-only native execution boundary.
    */
-  async startThread(cwd: string, signal: AbortSignal): Promise<void> {
+  async startThread(
+    cwd: string,
+    signal: AbortSignal,
+    ephemeral = true,
+    profile?: CodexAppServerExecutionProfile,
+    developerInstructions?: string,
+    executionBoundary?: CodexAppServerExecutionBoundary,
+  ): Promise<void> {
     const response = object(await this.guarded(this.transport.request('thread/start', {
       cwd,
-      ephemeral: true,
+      ephemeral,
+      ...profile === undefined ? {} : { model: profile.model },
+      ...developerInstructions === undefined ? {} : { developerInstructions },
+      ...this.dynamicTools.length === 0 ? {} : { dynamicTools: this.dynamicTools },
+      ...threadStartBoundary(executionBoundary),
     }, signal), signal), 'thread/start response')
     const thread = object(response.thread, 'thread/start thread')
     const id = string(thread.id, 'thread/start thread id')
-    if (thread.ephemeral !== true) {
-      throw new Error('subagent-codex: app-server did not create an ephemeral thread')
+    if (thread.ephemeral !== ephemeral) {
+      throw new Error(ephemeral
+        ? 'subagent-codex: app-server did not create an ephemeral thread'
+        : 'subagent-codex: app-server did not create the requested persistent thread')
     }
     this.threadId = id
+  }
+
+  /**
+   * Resume one persisted app-server thread for a new turn.
+   * @param threadId - authoritative non-ephemeral product thread identity.
+   * @param cwd - canonical workspace for the resumed turn.
+   * @param signal - unpublished-start cancellation.
+   * @param profile - optional native model override for the resumed thread.
+   * @param developerInstructions - optional DSH-owned system instructions for the resumed thread.
+   * @param executionBoundary - optional sealed no-approval, read-only native execution boundary.
+   */
+  async resumeThread(
+    threadId: string,
+    cwd: string,
+    signal: AbortSignal,
+    profile?: CodexAppServerExecutionProfile,
+    developerInstructions?: string,
+    executionBoundary?: CodexAppServerExecutionBoundary,
+  ): Promise<void> {
+    const response = object(await this.guarded(this.transport.request('thread/resume', {
+      threadId,
+      cwd,
+      ...profile === undefined ? {} : { model: profile.model },
+      ...developerInstructions === undefined ? {} : { developerInstructions },
+      ...threadResumeBoundary(executionBoundary),
+    }, signal), signal), 'thread/resume response')
+    const thread = object(response.thread, 'thread/resume thread')
+    const id = string(thread.id, 'thread/resume thread id')
+    if (id !== threadId) {
+      throw new Error('subagent-codex: app-server resumed a different thread')
+    }
+    if (thread.ephemeral === true) {
+      throw new Error('subagent-codex: app-server resumed an ephemeral thread for resident execution')
+    }
+    this.threadId = id
+  }
+
+  /**
+   * Ask app-server to compact the current persistent thread in place.
+   * @param signal - cancellation for the native compaction request.
+   */
+  async compactThread(signal: AbortSignal): Promise<void> {
+    if (this.threadId === undefined) {
+      throw new Error('subagent-codex: cannot compact before a thread is started or resumed')
+    }
+    object(await this.guarded(this.transport.request('thread/compact/start', {
+      threadId: this.threadId,
+    }, signal), signal), 'thread/compact/start response')
+  }
+
+  /** Native thread identity after start or resume. */
+  get currentThreadId(): string | undefined {
+    return this.threadId
+  }
+
+  /** Native active turn identity after turn/start. */
+  get currentTurnId(): string | undefined {
+    return this.turnId
   }
 
   /**
@@ -168,27 +505,45 @@ export class CodexAppServerWire {
    * terminal notification.
    * @param texts - already validated task text blocks.
    * @param signal - local cancellation for the published run.
+   * @param onStarted - optional callback receiving the authoritative native turn identity.
+   * @param profile - optional model and reasoning override for this turn.
+   * @param executionBoundary - optional sealed no-approval, read-only native execution boundary.
    * @returns the shared subagent result.
    */
   async runTurn(
     texts: readonly string[],
     signal: AbortSignal,
+    onStarted?: (turnId: string) => void,
+    profile?: CodexAppServerExecutionProfile,
+    executionBoundary?: CodexAppServerExecutionBoundary,
   ): Promise<SubagentResult> {
+    this.resetTurnState()
     const completion = Promise.withResolvers<JsonObject>()
     this.turnCompleted = completion
     const threadId = this.threadId as string
     const response = object(await this.guarded(this.transport.request('turn/start', {
       threadId,
       input: texts.map(text => ({ type: 'text', text, text_elements: [] })),
+      ...profile === undefined ? {} : {
+        model: profile.model,
+        ...profile.effort === undefined ? {} : { effort: profile.effort },
+      },
+      ...turnStartBoundary(executionBoundary),
     }, signal), signal), 'turn/start response')
     const turn = object(response.turn, 'turn/start turn')
-    this.commitTurnId(string(turn.id, 'turn/start turn id'))
+    const startedTurnId = string(turn.id, 'turn/start turn id')
+    this.commitTurnId(startedTurnId)
+    onStarted?.(startedTurnId)
 
     const completed = await this.guarded(completion.promise, signal)
     const terminal = object(completed.turn, 'turn/completed turn')
     const status = terminal.status
     if (isContextWindowExceeded(terminal)) {
-      return { output: this.collectOutput(), stopReason: 'max-tokens' }
+      return {
+        output: this.collectOutput(),
+        stopReason: 'max-tokens',
+        ...this.lastUsage === undefined ? {} : { usage: this.lastUsage },
+      }
     }
     if (status !== 'completed') {
       const detail = status === 'failed'
@@ -200,7 +555,11 @@ export class CodexAppServerWire {
     if (output.length === 0) {
       throw new Error('subagent-codex: Codex completed without a final answer')
     }
-    return { output, stopReason: 'completed' }
+    return {
+      output,
+      stopReason: 'completed',
+      ...this.lastUsage === undefined ? {} : { usage: this.lastUsage },
+    }
   }
 
   /**
@@ -241,6 +600,15 @@ export class CodexAppServerWire {
 
   private fail(error: Error): void {
     this.fatal.reject(error)
+  }
+
+  private resetTurnState(): void {
+    this.turnId = undefined
+    this.pendingTurnId = undefined
+    this.earlyTurnNotifications.length = 0
+    this.lastFinalAnswer = undefined
+    this.lastUnphasedAnswer = undefined
+    this.lastUsage = undefined
   }
 
   private readonly onInputError = (error: Error): void => {
@@ -294,19 +662,49 @@ export class CodexAppServerWire {
   private handleServerRequest(method: string, params: JsonObject): Promise<unknown> {
     try {
       switch (method) {
+        case 'item/tool/call': {
+          this.validateRunIds(params)
+          if (this.dynamicToolHandler === undefined) throw new Error('subagent-codex: dynamic tool handler is unavailable')
+          const tool = string(params.tool, 'dynamic tool name')
+          const callId = string(params.callId, 'dynamic tool call id')
+          const argumentsValue = object(params.arguments, 'dynamic tool arguments')
+          return this.dynamicToolHandler({
+            threadId: string(params.threadId, 'dynamic tool thread id'),
+            turnId: string(params.turnId, 'dynamic tool turn id'),
+            callId,
+            ...typeof params.namespace === 'string' ? { namespace: params.namespace } : {},
+            tool,
+            arguments: argumentsValue,
+          }).then(result => ({
+            success: result.success,
+            contentItems: [{ type: 'inputText', text: result.text }],
+          }))
+        }
         case 'item/commandExecution/requestApproval':
-        case 'item/fileChange/requestApproval':
+        case 'item/fileChange/requestApproval': {
           this.validateRunIds(params)
-          return Promise.resolve({ decision: unattendedDecision(params) })
-        case 'item/permissions/requestApproval':
+          const response = { decision: unattendedDecision(params) }
+          this.requireApproval(method)
+          return Promise.resolve(response)
+        }
+        case 'item/permissions/requestApproval': {
           this.validateRunIds(params)
-          return Promise.resolve({ permissions: {}, scope: 'turn' })
-        case 'item/tool/requestUserInput':
+          const response = { permissions: {}, scope: 'turn' }
+          this.requireApproval(method)
+          return Promise.resolve(response)
+        }
+        case 'item/tool/requestUserInput': {
           this.validateRunIds(params)
-          return Promise.resolve({ answers: {} })
-        case 'mcpServer/elicitation/request':
+          const response = { answers: {} }
+          this.requireApproval(method)
+          return Promise.resolve(response)
+        }
+        case 'mcpServer/elicitation/request': {
           this.validateRunIds(params, true)
-          return Promise.resolve({ action: 'decline', content: null, _meta: null })
+          const response = { action: 'decline', content: null, _meta: null }
+          this.requireApproval(method)
+          return Promise.resolve(response)
+        }
         default:
           throw new Error(`subagent-codex: unsupported app-server request ${JSON.stringify(method)}`)
       }
@@ -314,6 +712,13 @@ export class CodexAppServerWire {
       const normalized = thrown(error)
       this.fail(normalized)
       return Promise.reject(normalized)
+    }
+  }
+
+  private requireApproval(method: string): void {
+    this.observer?.({ kind: 'approval-required', approvalKind: method })
+    if (this.approvalBehavior === 'require') {
+      this.fail(new CodexApprovalRequiredError(method))
     }
   }
 
@@ -325,6 +730,39 @@ export class CodexAppServerWire {
       if (this.turnCompleted !== undefined && this.turnId === undefined) {
         this.observePendingTurnId(string(turn.id, 'turn/started turn id'))
       }
+      return
+    }
+    if (method === 'thread/tokenUsage/updated') {
+      const threadId = string(params.threadId, 'thread/tokenUsage/updated thread id')
+      if (threadId !== this.threadId) return
+      const id = string(params.turnId, 'thread/tokenUsage/updated turn id')
+      if (this.turnId === undefined) {
+        if (this.turnCompleted !== undefined) {
+          this.observePendingTurnId(id)
+          this.earlyTurnNotifications.push({ method, params })
+        }
+        return
+      }
+      if (id !== this.turnId) return
+      const usage = object(params.tokenUsage, 'thread/tokenUsage/updated tokenUsage')
+      this.lastUsage = tokenUsage(usage.last)
+      this.observer?.({ kind: 'usage-updated', usage: this.lastUsage })
+      return
+    }
+    if (method === 'item/started') {
+      const threadId = string(params.threadId, 'item/started thread id')
+      if (threadId !== this.threadId) return
+      const id = string(params.turnId, 'item/started turn id')
+      if (this.turnId === undefined) {
+        if (this.turnCompleted !== undefined) {
+          this.observePendingTurnId(id)
+          this.earlyTurnNotifications.push({ method, params })
+        }
+        return
+      }
+      if (id !== this.turnId) return
+      const toolName = productToolName(object(params.item, 'item/started item'))
+      if (toolName !== undefined) this.observer?.({ kind: 'tool-started', toolName })
       return
     }
     if (method === 'item/completed') {
@@ -340,7 +778,11 @@ export class CodexAppServerWire {
       }
       if (id !== this.turnId) return
       const item = object(params.item, 'item/completed item')
-      if (item.type !== 'agentMessage') return
+      if (item.type !== 'agentMessage') {
+        const toolName = productToolName(item)
+        if (toolName !== undefined) this.observer?.({ kind: 'tool-completed', toolName })
+        return
+      }
       const text = typeof item.text === 'string'
         ? item.text
         : (() => { throw new Error('subagent-codex: app-server returned an invalid agent message') })()
@@ -351,6 +793,7 @@ export class CodexAppServerWire {
       } else if (item.phase !== 'commentary') {
         throw new Error(`subagent-codex: app-server returned an unknown agent message phase ${JSON.stringify(item.phase)}`)
       }
+      this.observer?.({ kind: 'public-output', preview: text })
       return
     }
     if (method !== 'turn/completed') return
@@ -370,5 +813,13 @@ export class CodexAppServerWire {
       throw new Error(`subagent-codex: app-server returned invalid terminal turn status ${String(turn.status)}`)
     }
     turnCompleted.resolve(params)
+  }
+}
+
+/** Product-native request that a headless Resident caller must resolve out of band. */
+export class CodexApprovalRequiredError extends Error {
+  constructor(readonly method: string) {
+    super(`Codex requires interactive approval for ${method}`)
+    this.name = 'CodexApprovalRequiredError'
   }
 }

@@ -1,0 +1,13 @@
+- id: browser
+  name: '@deepseek-ai/dsh-browser'
+- id: fixture-browser
+  name: './browser.ts'
+- id: physical-operator
+  name: '@deepseek-ai/dsh-physical-operator'
+- id: chatgpt-web
+  name: '@deepseek-ai/dsh-physical-operator-chatgpt-web'
+  config:
+    generationTimeoutMs: 2000
+    progressIntervalMs: 1000
+    submissionTimeoutMs: 500
+    pollIntervalMs: 1

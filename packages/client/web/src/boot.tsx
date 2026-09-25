@@ -14,7 +14,7 @@
  * page → prefetch every `immediately` row in parallel with mounting the
  * vendored cordis Loader (`internal` contract injection BEFORE any entry exists —
  * the bare-import fallback in tree.import must never run in a browser) →
- * await the prefetch tier, THEN adopt the modules entry and create one
+ * await the prefetch tier (retrying one transient bundle-load failure), THEN adopt the modules entry and create one
  * loader entry per plugin-view row plus the shell-own app-shell assembly
  * entry → loader.await() + a full fiber sweep (all ACTIVE, else fail
  * listing who/what/which service) → flip the settled signal so AppRoot
@@ -24,9 +24,10 @@
  * synchronous cross-package require edges (e.g. locale → runtime/client) that
  * fiber inject waiting cannot protect — a bundle's factory must be
  * registered before any dependent entry materializes. Per-row prefetch
- * failures still resolve silently (the create-side import reloads and
- * owns the loud failure), so the barrier never turns one bad bundle into a
- * boot-wide fail-fast.
+ * failures receive one bounded retry before entry creation. A repeated failure
+ * stops boot at the barrier, because allowing dependants to materialize without
+ * every immediately-tier factory would turn the transport error into a false
+ * cross-plugin module-table failure.
  *
  * Composition lives in the host graph; the shell makes zero composition
  * decisions (the app-shell assembly is itself a graph entry, the only
@@ -147,14 +148,27 @@ export class AppWebEntry {
     this.root?.unmount()
   }
 
-  /** Prefetch the immediately tier (factory registration only; failures defer to the import path). */
+  /** Prefetch the immediately tier and repair one transient transport failure before materialization. */
   private async prefetchImmediateTier(): Promise<void> {
-    await Promise.all(this.manifest.plugins
-      .filter(row => row.immediately)
-      .map(row => this.modules.prefetch(row.id).catch(() => {
-        // Import reloads and reports this loudly per entry; swallowing
-        // here keeps one failing prefetch from masking the others.
-      })))
+    const rows = this.manifest.plugins.filter(row => row.immediately)
+    const failed = new Map<string, unknown>()
+    await Promise.all(rows.map(async (row) => {
+      try {
+        await this.modules.prefetch(row.id)
+      } catch (error) {
+        failed.set(row.id, error)
+      }
+    }))
+    await Promise.all([...failed].map(async ([id, firstError]) => {
+      try {
+        await this.modules.prefetch(id)
+      } catch (secondError) {
+        throw new AggregateError(
+          [firstError, secondError],
+          `web boot: immediately-tier module ${JSON.stringify(id)} failed both bundle-load attempts`,
+        )
+      }
+    }))
   }
 
   /** Plugin face: mount the Loader, inject the `internal` contract, adopt modules, create the graph entries, settle, sweep. */
@@ -179,7 +193,7 @@ export class AppWebEntry {
     // Barrier before any entry exists: entry creation materializes bundles,
     // and materialization runs synchronous cross-package require edges that
     // need every immediately-tier factory already registered (module
-    // comment). Resolves even when individual prefetches failed.
+    // comment). A repeated prefetch failure rejects before any entry exists.
     await prefetching
 
     // Adoption handoff, plugin side: the modules entry is created first —

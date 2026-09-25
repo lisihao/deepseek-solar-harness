@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-23-smart-auto-with-selected-api-primary.md
+2026-09-23-smart-auto-with-selected-api-primary.md: 3b058443e9e06768f0d93741da038773ada41572
+2026-09-23-smart-auto-with-selected-api-primary.zh.md: acfb57237bac27156ddaa31c91c5da3ddf5ff417

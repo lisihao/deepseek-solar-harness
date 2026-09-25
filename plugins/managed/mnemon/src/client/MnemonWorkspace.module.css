@@ -1,0 +1,84 @@
+/* The center-column takeover mirrors dsh-web-ui's official panel pattern. */
+[data-pane='conversation'] {
+  position: relative;
+}
+
+/* DSH advanced mode replaces the layout with the .dshDesktop* frame classes;
+   the conversation surface needs the same positioning anchor there. */
+.dshDesktopConversationSurface {
+  position: relative;
+}
+
+[data-dsh-mnemon-view] {
+  position: absolute;
+  z-index: 60;
+  inset: 0;
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-overlay, var(--dsw-alias-bg-base));
+}
+
+.panelView {
+  isolation: isolate;
+}
+
+html[data-dsh-mnemon-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]) [data-dsh-mnemon-view] {
+  display: block;
+}
+
+html[data-dsh-mnemon-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]) [data-pane='conversation'] > :not([data-dsh-mnemon-view]),
+html[data-dsh-mnemon-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]) [class*='centerCol'] > :not([data-dsh-mnemon-view]),
+html[data-dsh-mnemon-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]) .dshDesktopConversationSurface > :not([data-dsh-mnemon-view]) {
+  display: none !important;
+}
+
+.entry {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.entry:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-specific-sidebar-nav-item-hover);
+}
+
+.entry[data-active] {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-specific-sidebar-nav-item-active);
+  font-weight: 600;
+}
+
+.entryIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.entryLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-dsh-frame][data-sidebar-collapsed] .entry {
+  width: 100%;
+  justify-content: center;
+  padding: 0;
+}
+
+[data-dsh-frame][data-sidebar-collapsed] .entryLabel {
+  display: none;
+}

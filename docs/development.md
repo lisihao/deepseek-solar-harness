@@ -41,6 +41,10 @@ Setup is complete when `pnpm run typecheck` exits successfully.
 
 ## Contributor reference
 
+### Development host
+
+DSH development, tests, builds, and commits run on the MacBook in an isolated worktree under `/Users/sihaoli/Projects`. Integrate identified remote source contributions into that local baseline before continuing; preserve existing worktrees and accepted source evidence. Generated runtime directories never supply development changes. The [monorepo decision](../.agents/notes/implemented/process/2026-08-17-solar-monorepo-p0-p2.md) explains this ownership.
+
 ### TypeScript project layout
 
 The repository uses isolated Host and Client aggregates. An ordinary package is registered in exactly one aggregate: Host packages in `tsconfig.host.json` and Client packages in `tsconfig.client.json`.

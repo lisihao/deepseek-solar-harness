@@ -509,6 +509,37 @@ export class SessionManager {
   }
 
   /**
+   * Replace the list from one gap-free Server snapshot before cursor replay.
+   * @param items - Server-owned Session summaries captured by the snapshot.
+   */
+  replaceRemoteBaseline(items: readonly SessionSummary[]): void {
+    const present = new Set(items.map(summary => summary.sessionId))
+    for (const sessionId of [...this.prevRunning.keys()]) {
+      if (!present.has(sessionId)) this.prevRunning.delete(sessionId)
+    }
+    for (const sessionId of [...this.completedNotifications]) {
+      if (!present.has(sessionId)) this.completedNotifications.delete(sessionId)
+    }
+    this.summaries = [...items]
+    this.listState = 'idle'
+    this.listPhase = 'ready'
+    this.listError = null
+    for (const summary of items) {
+      this.prevRunning.set(summary.sessionId, summary.running)
+      const session = this.sessions.get(summary.sessionId)
+      session?.handleBlank(summary.blank)
+      session?.handleRunning(summary.running)
+      const block = summary.projections
+      if (block === undefined) continue
+      const store = this.projectionStore(summary.sessionId)
+      const values = block.values as Record<string, unknown>
+      for (const key of Object.keys(values)) store.apply(key, values[key], block.asOfSeq)
+    }
+    this.syncCompletedNotifications()
+    this.notifier.markDirty()
+  }
+
+  /**
    * Search visible session message content without adding transient query
    * state to the list snapshot.
    * @param query - non-blank literal phrase.
@@ -901,11 +932,21 @@ export class SessionManager {
   /** After each connection generation: refresh the session baseline and rebuild opened windows. */
   handleConnected(): void {
     void this.refreshList()
+    this.refreshOpenedSubagentWindows()
+  }
+
+  /** Rebuild subagent catalogs and loaded session projections for the current generation. */
+  private refreshOpenedSubagentWindows(): void {
     const selectedAddress = this.selected === undefined ? undefined : this.addresses.get(this.selected)
     if (selectedAddress !== undefined) void this.refreshSubagents(selectedAddress.parentSessionId)
     if (this.selected !== undefined) void this.refreshSubagents(this.selected)
     for (const parentSessionId of this.openCatalogs) void this.refreshSubagents(parentSessionId)
     for (const session of this.sessions.values()) void session.resync()
+  }
+
+  /** Rebuild opened windows without re-pulling the list already supplied by RemoteSyncSnapshot. */
+  handleRemoteConnected(): void {
+    this.refreshOpenedSubagentWindows()
   }
 
   /** Debounce membership refetches while one parent catalog is selected or open. */

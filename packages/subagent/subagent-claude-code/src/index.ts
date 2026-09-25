@@ -14,6 +14,7 @@ import {
   NO_START_CAPABILITIES,
   resolveChildCwd,
   type ResolvedSubagentStartRequest,
+  type SubagentAuthentication,
   type SubagentCapabilities,
   type SubagentProvider,
 } from '@deepseek-ai/dsh-subagent'
@@ -51,13 +52,20 @@ type ResolvedConfig = Required<Config>
  * the Codex sibling; each product's lifecycle remains package-private. */
 class ClaudeCodeProvider implements SubagentProvider {
   readonly name = 'claude-code'
+  readonly authentication: SubagentAuthentication
   readonly capabilities: SubagentCapabilities = NO_START_CAPABILITIES
   readonly inheritsParentContext = false
 
   constructor(
     private readonly ctx: Context,
     private readonly config: ResolvedConfig,
-  ) {}
+  ) {
+    this.authentication = Object.freeze({
+      mode: Object.keys(config.env).length === 0
+        ? 'native-subscription'
+        : 'explicit-environment',
+    })
+  }
 
   async start(request: ResolvedSubagentStartRequest) {
     const parentCwd = request.parent.session.header.cwd

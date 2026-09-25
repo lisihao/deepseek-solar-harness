@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { collectPackageSources, EventRelationCollector } from './gen-doc-graphs.ts'
+import { collectPackageSources, compareEventNames, EventRelationCollector } from './gen-doc-graphs.ts'
 import { TypeScriptProject } from './ts-project.ts'
 
 const FIXTURE: Record<string, string> = {
@@ -94,5 +94,16 @@ describe('event relation call-site indexing', () => {
     // pkgc alone: the script helper is the first demand, so a wrongly passing
     // proof would index helper.ts only and lose the caller.ts call site.
     expect(dispatchersOf(['pkgc'], 'pkgc/script-event')).toEqual(['pkgc'])
+  })
+})
+
+describe('event relation ordering', () => {
+  it('keeps npm-scoped event namespaces in their semantic position', () => {
+    const names = ['events/change', '@deepseek-ai/cordis/request-run', 'commands/change']
+    expect(names.sort(compareEventNames)).toEqual([
+      'commands/change',
+      '@deepseek-ai/cordis/request-run',
+      'events/change',
+    ])
   })
 })

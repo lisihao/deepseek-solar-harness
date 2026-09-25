@@ -1,0 +1,26 @@
+setup ctx symbols: 
+mount OK: liangshen
+(node:12479) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+`packages/` 下的顶层目录共 **13 个**：
+
+| # | 目录 |
+|---|------|
+| 1 | `dsh-aionui-panel` |
+| 2 | `dsh-git-graph` |
+| 3 | `dsh-liangshen` |
+| 4 | `dsh-live-stats` |
+| 5 | `dsh-pet` |
+| 6 | `dsh-remote-web-ui` |
+| 7 | `dsh-skins` |
+| 8 | `dsh-ssh` |
+| 9 | `dsh-task-board` |
+| 10 | `dsh-tool-describe-image` |
+| 11 | `dsh-web-ui-all` |
+| 12 | `dsh-web-ui-settings` |
+| 13 | `skins` |
+
+说明：
+- 前 12 个目录都在顶层有各自的 `package.json`（经 glob `**/packages/*/package.json` 交叉验证一致）。
+- `skins` 是唯一没有顶层 `package.json` 的目录，它下面嵌套了多个皮肤子目录（`blue-fantasy`、`dragon-heir`、`harbor`、`miku`、`minecraft`、`qq98`、`skin-center`、`ths`、`trading`、`whale-song`、`xp`），与同级的 `dsh-skins`（含 `skins/` 子目录）是不同实体。
+- 本次 bash 工具不可用（`posix_spawnp failed`），结果来自文件系统工具（目录视图 + glob 交叉验证），均为事实性文件系统信息。

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "caseId": "trace-digest-normal",
+  "workspace": {"mustRemainClean": true},
+  "response": {
+    "requiredClaimGroups": [
+      ["Execution trace", "Execution path"],
+      ["Evidence chain"],
+      ["Verification gaps", "Verification coverage"],
+      ["Confidence"]
+    ]
+  },
+  "vetoes": ["workspace-change"]
+}

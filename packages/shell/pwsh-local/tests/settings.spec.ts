@@ -7,7 +7,7 @@ import { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { SHELL_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-shell'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
-import { PwshLocalExecutor } from '@deepseek-ai/dsh-pwsh-local'
+import { PwshLocalExecutor } from '../src/index.ts'
 
 /** The smallest real provider: one in-memory document, always writable. */
 class MemorySettings extends SettingsProvider {

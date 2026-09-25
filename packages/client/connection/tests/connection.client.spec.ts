@@ -212,16 +212,22 @@ describe('connection lifecycle', () => {
     }
   })
 
-  it('proceeds as connected via the timeout guard when a carrier never fires onOpen', async () => {
+  it('reports but does not disconnect or falsely connect when streams are slow to open', async () => {
     const api = new FakeApiClient()
     api.suppressStreamOpen = true // misbehaving carrier: streams open but onOpen never fires
     let connected = 0
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const controller = new ConnectionController(api, { onConnected: () => { connected++ } }, { ...FAST, streamOpenTimeoutMs: 20 })
     controller.start()
     try {
-      await vi.waitFor(() => { expect(connected).toBe(1) }) // handshake resolved by the guard, not wedged
+      await vi.waitFor(() => {
+        expect(warnSpy).toHaveBeenCalledWith('[web-runtime] connection streams are still not ready after 20ms')
+      })
+      expect(connected).toBe(0)
+      expect(api.openMuxCount).toBe(1)
     } finally {
       controller.stop()
+      warnSpy.mockRestore()
     }
   })
 

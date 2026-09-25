@@ -1,0 +1,32 @@
+# Keyless real-Loader composition for task-template selection and AgentLoop injection.
+- id: mock-llm
+  name: './mock-llm.ts'
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents: []
+    persona: 'Run the task-template Loader fixture.'
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+    goals: false
+    invariants:
+      enabled: true
+
+- id: task-template-provider
+  name: './provider.ts'
+  config:
+    dshHome: !!js process.env.DSH_HOME
+    watch: false
+
+- id: task-template-seed
+  name: './seed.ts'
+
+- id: task-template-context
+  name: './context.ts'
+
+- id: task-template-context-invariant
+  name: './context-invariant.ts'

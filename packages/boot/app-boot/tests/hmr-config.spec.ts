@@ -131,7 +131,9 @@ describe('HMR exact config paths', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dsh-hmr-config-'))
     const filename = join(dir, 'plugins.yml')
     writeFileSync(filename, 'one')
-    const ctx = await bootHmr(dir)
+    // Other cases in this file own native event delivery. Poll here so this
+    // case tests refresh serialization and disposal draining deterministically.
+    const ctx = await bootHmr(dir, [], true)
     const started = Promise.withResolvers<undefined>()
     const release = Promise.withResolvers<undefined>()
     const observed: string[] = []
@@ -149,10 +151,20 @@ describe('HMR exact config paths', () => {
         active -= 1
       })
       await started.promise
-      writeFileSync(filename, 'two')
-      // Chokidar coalesces atomic writes for 100 ms by default. Wait beyond
-      // that window so this edit is queued before registration disposal.
-      await new Promise(resolve => setTimeout(resolve, 250))
+      // Grow the file so polling does not depend on filesystem timestamp precision.
+      writeFileSync(filename, 'two\n')
+      // Do not guess how long a polling scan takes under CI load. Wait until
+      // the watcher has actually marked a second refresh dirty while the first
+      // callback is blocked, then verify disposal drains both in order.
+      const internals = ctx.hmr as unknown as {
+        configs: Map<string, object>
+        configRefreshes: WeakMap<object, { dirty: boolean }>
+      }
+      await eventually(
+        () => [...internals.configs.values()]
+          .some(registration => internals.configRefreshes.get(registration)?.dirty === true),
+        'HMR did not queue the second config refresh',
+      )
 
       let disposed = false
       const disposal = dispose().then(() => { disposed = true })
@@ -161,7 +173,7 @@ describe('HMR exact config paths', () => {
       release.resolve(undefined)
       await disposal
       expect(maxActive).toBe(1)
-      expect(observed).toEqual(['one', 'two'])
+      expect(observed).toEqual(['one', 'two\n'])
     } finally {
       release.resolve(undefined)
       await ctx.fiber.dispose()

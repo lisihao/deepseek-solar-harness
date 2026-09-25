@@ -195,7 +195,8 @@ export class InputTriggerController {
         this.reduce({ type: 'close' })
         return 'consumed'
       }
-      case 'enter': {
+      case 'enter':
+      case 'tab': {
         if (state.highlight === null) return 'pass'
         this.pick(state.highlight.source, state.highlight.index)
         return 'pick-highlighted'

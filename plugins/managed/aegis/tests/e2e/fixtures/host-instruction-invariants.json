@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "purpose": "Prevent drift and role overlap in agent-facing Aegis instruction surfaces without byte-for-byte copy checks.",
+  "requiredSurfaces": [
+    "AGENTS.md",
+    "docs/current/AEGIS_RULE_LAYERING.md",
+    "GLOBAL_USER_RULES_TEMPLATE.md",
+    "GLOBAL_USER_RULES_TEMPLATE.zh-CN.md",
+    ".github/copilot-instructions.md"
+  ],
+  "surfaces": [
+    {
+      "path": "AGENTS.md",
+      "requiredRegex": [
+        "Aegis Method Pack \\(runtime-ready\\)",
+        "authoritative runtime core",
+        "authoritative `GateDecision`",
+        "authoritative `PolicySnapshot`",
+        "final completion authority",
+        "fresh\\s+verification\\s+evidence"
+      ]
+    },
+    {
+      "path": "docs/current/AEGIS_RULE_LAYERING.md",
+      "requiredRegex": [
+        "skills/using-aegis/SKILL\\.md",
+        "manual host/profile routing prefix",
+        "not.*method.*owner",
+        "not\\s+updated\\s+by\\s+.*aegis:update",
+        "one functional routing-prefix profile",
+        "former.*GLOBAL_USER_RULES_LITE.*retired duplicate profiles"
+      ]
+    },
+    {
+      "path": "GLOBAL_USER_RULES_TEMPLATE.md",
+      "requiredRegex": [
+        "Aegis Global Routing Prefix",
+        "very beginning of the existing global user rules",
+        "no need to change the existing content",
+        "does not install Aegis",
+        "not\\s+updated\\s+by\\s+.*aegis:update",
+        "Activation Mode.*default.*auto",
+        "`auto`.*At the start of each turn.*smallest necessary relevant skill",
+        "`explicit`.*user explicitly invokes Aegis",
+        "no Aegis skill matches.*normal fast path",
+        "context compaction.*re-check Aegis routing",
+        "loaded Aegis skill determine.*planning.*debugging.*TDD.*verification.*governance",
+        "TDD Mode is independent of Activation Mode.*off.*auto"
+      ],
+      "forbiddenRegex": [
+        "Advanced Governance Overlay",
+        "Lite global rules",
+        "baseline read set",
+        "repair track and retirement track",
+        "evidence candidates, not persistent prompt payloads",
+        "fresh verification evidence",
+        "completion authority"
+      ],
+      "maxChars": 2300
+    },
+    {
+      "path": "GLOBAL_USER_RULES_TEMPLATE.zh-CN.md",
+      "requiredRegex": [
+        "Aegis 全局路由前缀",
+        "添加到现有全局用户规则的最开头",
+        "无需改动原有内容",
+        "不会安装 Aegis",
+        "不由\\s*.*aegis:update.*更新",
+        "Activation Mode.*默认.*auto",
+        "`auto`.*每轮开始判断.*最小必要 skill",
+        "`explicit`.*用户明确调用 Aegis",
+        "没有匹配的 Aegis skill.*普通 fast path",
+        "上下文压缩.*重新检查 Aegis 路由",
+        "分析.*规划.*调试.*TDD.*验证.*治理.*当前加载的 Aegis skill",
+        "TDD Mode 独立于 Activation Mode.*off.*auto"
+      ],
+      "forbiddenRegex": [
+        "高级治理 Overlay",
+        "轻量全局规则",
+        "baseline read set",
+        "修复轨与退役轨",
+        "证据候选.*持久 prompt payload",
+        "fresh verification evidence",
+        "completion authority"
+      ],
+      "maxChars": 2100
+    },
+    {
+      "path": ".github/copilot-instructions.md",
+      "requiredRegex": [
+        "method-pack workflow discipline",
+        "Aegis Method Pack \\(runtime-ready\\)",
+        "not a runtime core",
+        "target-project rules above Aegis guidance",
+        "do not claim authoritative `GateDecision` or final completion authority",
+        "fresh verification evidence"
+      ],
+      "maxChars": 2000
+    }
+  ],
+  "forbiddenPositiveClaims": [
+    "Aegis grants completion authority",
+    "Aegis provides authoritative GateDecision",
+    "Aegis is an authoritative runtime core",
+    "benchmark proves final evidence sufficiency",
+    "work needs a baseline read set, plan, and atomic tasks before TDD",
+    "atomic tasks，再进入 TDD",
+    "AGENTS_RULES.md"
+  ]
+}

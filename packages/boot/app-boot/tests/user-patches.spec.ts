@@ -319,7 +319,9 @@ describe('boot with user patches', () => {
     const basePatches = [{ id: 'noop', config: { value: 'generated' } }]
     const ctx = await boot(NAME, writeTree(dir), basePatches)
     await ctx.plugin(Timer)
-    await ctx.plugin(Hmr, { root: [], ignored: [], debounce: 0 })
+    // Exact native add/change/unlink behavior is owned by hmr-config.spec.ts.
+    // Poll here so this test isolates transactional patch replacement from OS watcher timing.
+    await ctx.plugin(Hmr, { root: [], ignored: [], debounce: 0, usePolling: true })
     const failures: Array<{ filename: string; error: Error }> = []
     ctx.on('hmr/config-update-failed', (failedFilename, error) => {
       failures.push({ filename: failedFilename, error })
@@ -356,11 +358,13 @@ describe('boot with user patches', () => {
       await settleChokidarChangeThrottle()
 
       // Default compose: the user layer IS the whole patch list, so a
-      // fresh generation replaces the app-owned layer instead of stacking on it.
+      // patch present during the fresh watcher's initial scan replaces the
+      // app-owned layer instead of stacking on it. Native add/change/unlink
+      // delivery is covered by hmr-config.spec.ts.
       await dispose()
+      writeFileSync(filename, '- id: noop\n  config:\n    value: identity\n')
       const disposeDefault = await watchUserPatches(ctx, { binName: NAME, filename })
       try {
-        writeFileSync(filename, '- id: noop\n  config:\n    value: identity\n')
         await eventually(() => (entryConfig(ctx, 'noop') as { value?: string }).value === 'identity', 'default-compose user patch was not applied')
       } finally {
         await disposeDefault()

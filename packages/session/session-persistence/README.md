@@ -21,6 +21,7 @@ The persisted unit IS the existing `SessionEvent` (event-sourced model — the l
 | `readFrom(id, fromSeq, signal?): Promise<{ meta; events }>` | Return valid stored events with `seq >= fromSeq` without preparation caching, truncation, closers, or coordinator state. A `fromSeq` at or past the stored end returns an empty event list; a negative or non-safe-integer `fromSeq` rejects. Seek-capable backends (SQLite) read only the suffix unless converting a supported older record requires earlier records; sequential backends (JSONL) parse the whole artifact and skip forward. Unknown-type refusal follows that access pattern: a seek read checks only the returned suffix, while the sequential fallback also refuses on an unknown required event below the window. Intended for checkpoint consumers that apply only events after a stored sequence number. |
 | `list(signal?): Promise<SessionHeader[]>` | Lightweight listing from metadata, no full-log parse. The optional signal cancels backend listing work. A zero-event lazily-materialized session is absent from `list`. |
 | `listSnapshots(signal?): Promise<SessionPersistenceSnapshot[]>` | Lightweight metadata plus an opaque branded per-log revision, without loading event logs. A revision stays equal while that log and its backing store are unchanged, changes after append or mutating load repair, and cannot collide solely because two stores use the same local counter. The optional signal requests cancellation of backend discovery work; first-party backends settle any started listing work before rejecting so an awaited call is quiescent. |
+| `replicate(replica, signal?): Promise<SessionReplicationResult>` | Apply a complete balanced cold log only when the destination is absent or an exact prefix of the source. Replays are unchanged, a longer destination remains authoritative, and a live destination, open source turn, metadata mismatch, or divergent event rejects with `SessionReplicationError`. |
 
 ## Invariants every backend must honor
 
@@ -28,6 +29,7 @@ The persisted unit IS the existing `SessionEvent` (event-sourced model — the l
 - **Contiguous seq.** `load` rejects a `seq` gap/parse error in the MIDDLE of the log; `append`'s first `seq` must equal the stored next-seq.
 - **JSON-serializable data.** `append` materializes each direct/replay batch through the shared one-pass lossless-JSON boundary. Live `Session` events are already deep-frozen, but the write coordinator still copies each event into a persistence-owned buffer.
 - **Durability.** `append` returns only once the batch is durable.
+- **Replica writes preserve one authority.** `replicate` serializes same-id calls in this Service and advances only an exact prefix. Deployment handoff must still quiesce the old writer before the destination becomes active; the method does not create a distributed lock or merge divergent logs.
 
 ## The write coordinator
 
@@ -83,3 +85,4 @@ Persistence does not mutate live request prefixes. A resumed loop can reuse prov
 - **No deletion or retention API** — pruning stored sessions is out-of-band backend maintenance.
 - **`list()` is unpaginated and unfiltered** — it returns every stored session's header; fine for local stores, unindexed at scale.
 - **Repair-time synthetic closers are the only crash story** — a backend must synthesize `tool/result`/`step/end`/`turn/end` closers on load; there is no partial-turn resume that continues an interrupted turn instead of closing it.
+- **Replication transfers stable boundaries, not active turns** — live progress remains an observation stream; only a complete balanced log can become a recoverable destination copy.

@@ -11,15 +11,15 @@ afterEach(cleanup)
 
 const configured: RemoteModulesConfig = {
   instances: [
-    { id: 'genesispod', label: 'GenesisPod', url: 'http://127.0.0.1:13000/', relayPort: 3000, order: 100 },
-    { id: 'thunder-omlx', label: 'ThunderOMLX', url: 'http://127.0.0.1:18002/admin/', relayPort: 18102, order: 200 },
+    { id: 'research-workspace', label: 'Research Workspace', url: 'http://127.0.0.1:19001/', relayPort: 29001, order: 100 },
+    { id: 'model-console', label: 'Model Console', url: 'http://127.0.0.1:19002/console/', relayPort: 29002, order: 200 },
   ],
 }
 
 function draft(overrides: Partial<RemoteModuleDraft> = {}): RemoteModuleDraft {
   return {
-    key: 'one', id: 'genesispod', label: 'GenesisPod', url: 'http://127.0.0.1:13000/',
-    relayPort: '3000', order: '100', ...overrides,
+    key: 'one', id: 'research-workspace', label: 'Research Workspace', url: 'http://127.0.0.1:19001/',
+    relayPort: '29001', order: '100', ...overrides,
   }
 }
 
@@ -38,12 +38,12 @@ describe('Remote Modules settings validation', () => {
   it('accepts a complete instance and rejects duplicate ids, ports, malformed URLs, and decimals', () => {
     expect(validateRemoteModuleDrafts([draft()]).config).toEqual({
       instances: [{
-        id: 'genesispod', label: 'GenesisPod', url: 'http://127.0.0.1:13000/', relayPort: 3000, order: 100,
+        id: 'research-workspace', label: 'Research Workspace', url: 'http://127.0.0.1:19001/', relayPort: 29001, order: 100,
       }],
     })
     const invalid = validateRemoteModuleDrafts([
       draft(),
-      draft({ key: 'two', url: 'javascript:alert(1)', relayPort: '3000', order: '1.5' }),
+      draft({ key: 'two', url: 'javascript:alert(1)', relayPort: '29001', order: '1.5' }),
     ])
     expect(invalid.config).toBeUndefined()
     expect(invalid.errors.one).toMatchObject({ id: 'duplicateId', relayPort: 'duplicatePort' })
@@ -79,7 +79,7 @@ describe('Remote Modules settings validation', () => {
 describe('Remote Modules settings surface', () => {
   it('shows every required configuration field and can add or delete instances', async () => {
     renderEditor()
-    await screen.findByDisplayValue('GenesisPod')
+    await screen.findByDisplayValue('Research Workspace')
     expect(screen.getAllByText('实例 ID')).toHaveLength(2)
     expect(screen.getAllByText('显示名称')).toHaveLength(2)
     expect(screen.getAllByText('目标网页地址')).toHaveLength(2)
@@ -98,13 +98,13 @@ describe('Remote Modules settings surface', () => {
       const instances = value as RemoteModulesConfig['instances']
       settings.publish({ value: { instances }, user: { instances }, revision: 1 })
     })
-    const label = await screen.findByDisplayValue('GenesisPod')
-    fireEvent.change(label, { target: { value: 'GenesisPod Research' } })
+    const label = await screen.findByDisplayValue('Research Workspace')
+    fireEvent.change(label, { target: { value: 'Research Workspace A' } })
     fireEvent.click(screen.getByRole('button', { name: '保存配置' }))
 
     await waitFor(() => {
       expect(settings.set).toHaveBeenCalledWith('instances', [
-        { ...configured.instances[0]!, label: 'GenesisPod Research' },
+        { ...configured.instances[0]!, label: 'Research Workspace A' },
         configured.instances[1],
       ])
     })
@@ -116,7 +116,7 @@ describe('Remote Modules settings surface', () => {
     settings.unset.mockImplementation(() => {
       settings.publish({ value: configured, user: {}, revision: 1 })
     })
-    await screen.findByDisplayValue('GenesisPod')
+    await screen.findByDisplayValue('Research Workspace')
     fireEvent.click(screen.getByRole('button', { name: '恢复部署默认值' }))
     await waitFor(() => { expect(settings.unset).toHaveBeenCalledWith('instances') })
     expect(await screen.findByText('配置已保存；重启 Harness 后生效。')).toBeTruthy()

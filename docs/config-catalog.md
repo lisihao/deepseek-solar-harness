@@ -387,6 +387,46 @@ Depends on: [`LocalConfig`](#deepseek-aidsh-bash-local)
 
 Source: [`packages/shell/bash-sandbox/src/index.ts:35`](../packages/shell/bash-sandbox/src/index.ts)
 
+<a id="deepseek-aidsh-browser"></a>
+
+## `@deepseek-ai/dsh-browser`
+
+```ts config-catalog
+/** Browser Provider selection config. */
+export interface BrowserRuntimeConfig {
+  /** Explicit provider id. Omitted = auto-select when exactly one is usable. */
+  readonly provider?: string
+}
+```
+
+Source: [`packages/browser/browser/src/index.ts:60`](../packages/browser/browser/src/index.ts)
+
+<a id="deepseek-aidsh-browser-ego-lite"></a>
+
+## `@deepseek-ai/dsh-browser-ego-lite`
+
+Requires: `browser` · `subprocess`
+
+```ts config-catalog
+/** Ego Lite process and translation settings owned by deployment composition. */
+export interface Config {
+  /** Absolute CLI path; omission probes the signed macOS app, then the user install. */
+  executable?: string
+  /** Absolute working directory for each isolated CLI invocation. */
+  cwd?: string
+  /** Process-tree termination grace in milliseconds. */
+  graceMs?: number
+  /** Maximum complete stdout retained for one framed result. */
+  stdoutMaxBytes?: number
+  /** Maximum stderr diagnostic tail retained for one invocation. */
+  stderrMaxBytes?: number
+  /** Default operation timeout when a portable operation omits `timeoutMs`. */
+  operationTimeoutMs?: number
+}
+```
+
+Source: [`packages/browser/browser-ego-lite/src/index.ts:69`](../packages/browser/browser-ego-lite/src/index.ts)
+
 <a id="deepseek-aidsh-client-connection"></a>
 
 ## `@deepseek-ai/dsh-client-connection`
@@ -407,10 +447,14 @@ export interface ConnectionConfig {
   trustedHosts?: string[]
   /** Maximum buffered JSON body for every `/api` request. */
   maxRequestBodyBytes?: number
+  /** Enable the independently versioned snapshot + cursor Server projection. */
+  remoteSync?: boolean
+  /** Retained event count and per-Frontend unsent-frame bound. */
+  remoteSyncJournalCapacity?: number
 }
 ```
 
-Source: [`packages/client/connection/src/index.ts:50`](../packages/client/connection/src/index.ts)
+Source: [`packages/client/connection/src/index.ts:102`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -564,6 +608,17 @@ export interface ToolResultPruneConfig {
 
 Source: [`packages/compaction/compaction-tool-result-pruner/src/types.ts:4`](../packages/compaction/compaction-tool-result-pruner/src/types.ts)
 
+<a id="deepseek-aidsh-continual-harness-local"></a>
+
+## `@deepseek-ai/dsh-continual-harness-local`
+
+```ts config-catalog
+/** Owner-local directory that contains the bounded Continuous Harness state. */
+export type Config = string
+```
+
+Source: [`packages/orchestration/continual-harness-local/src/index.ts:35`](../packages/orchestration/continual-harness-local/src/index.ts)
+
 <a id="deepseek-aidsh-cordis-host-runner"></a>
 
 ## `@deepseek-ai/dsh-cordis-host-runner`
@@ -599,6 +654,297 @@ export interface Config {
 ```
 
 Source: [`packages/credentials/credentials-local/src/index.ts:55`](../packages/credentials/credentials-local/src/index.ts)
+
+<a id="deepseek-aidsh-debate-local"></a>
+
+## `@deepseek-ai/dsh-debate-local`
+
+```ts config-catalog
+/** Accepted constructor input for production config, test seams, or a legacy root path. */
+export type LocalDebateConfig = Config | LocalDebateProviderOptions | string
+
+/** Cordis configuration for the local Provider. */
+export interface Config {
+  /** Owner-private directory containing the Provider state file. */
+  readonly root: string
+  /** Injected round executor; omitted only when constructing a Provider for inspection. */
+  readonly executor?: DebateRoundExecutor
+  /** Stable Provider identity written to run provenance. */
+  readonly providerId?: string
+  /** Provider implementation version written to run provenance. */
+  readonly providerVersion?: string
+}
+
+/** Programmatic options, including deterministic test seams. */
+export interface LocalDebateProviderOptions extends Config {
+  /** Owner-private directory containing the Provider state file. */
+  readonly root: string
+  /** Injected executor that maps one Debate round to the existing Scheduler. */
+  readonly executor: DebateRoundExecutor
+  /** Clock used for durable timestamps; production defaults to wall time. */
+  readonly clock?: () => string
+  /** Run-id source; production defaults to random UUIDs. */
+  readonly idFactory?: () => string
+}
+
+/** Production executor: one round maps to one durable TaskGraph. */
+export type DebateRoundExecutor = DebateRoundExecutorPort
+
+/** Existing-Scheduler execution port consumed by the local Debate owner. */
+export interface DebateRoundExecutorPort {
+  /**
+   * Optionally estimate and admit a sealed round without creating a TaskGraph
+   * or dispatching an operator.
+   * @param request - Sealed roster turns and optional transient budget bounds.
+   * @returns Deterministic token admission result.
+   */
+  preflight?(request: DebateRoundExecutionRequestV1): DebateRoundBudgetPreflightV1
+  /** Execute one complete round without creating another Scheduler. */
+  executeRound(request: DebateRoundExecutionRequestV1): Promise<DebateRoundExecutionResultV1>
+}
+
+/** One immutable round admitted as one TaskGraph. */
+export interface DebateRoundExecutionRequestV1 {
+  /** Request schema version. */
+  readonly version: 1
+  /** Stable Debate run identity. */
+  readonly runId: string
+  /** One-based round number. */
+  readonly round: number
+  /** Participant turns followed by the decision judge. */
+  readonly turns: readonly DebateTurnRequestV1[]
+  /** Certified maximum parallel participant count for this round. */
+  readonly maxParallel: number
+  /**
+   * Optional in-memory effective token ceilings for deterministic admission
+   * before the executor creates a TaskGraph. This metadata is never persisted
+   * in a Debate snapshot.
+   */
+  readonly budgetEnvelope?: DebateRoundBudgetEnvelopeV1
+  /**
+   * Optional durable-progress sink. The executor awaits it in source event
+   * order; an unavailable sink must fail the round rather than lose a claimed
+   * public trace.
+   */
+  readonly onProgress?: (progress: DebateRoundAgentProgressV1) => Promise<void>
+  /** Cancellation signal for the complete TaskGraph round. */
+  readonly signal?: AbortSignal
+}
+
+/** Deterministic result of an optional executor-side budget admission probe. */
+export type DebateRoundBudgetPreflightV1 =
+  | {
+    /** Preflight schema version. */
+    readonly version: 1
+    /** The round fits the supplied envelope. */
+    readonly status: 'admitted'
+    /** Conservative reservation calculated by the executor. */
+    readonly estimate: DebateRoundBudgetEstimateV1
+  }
+  | {
+    /** Preflight schema version. */
+    readonly version: 1
+    /** The round would exhaust a supplied token bound. */
+    readonly status: 'budget_limited'
+    /** Conservative reservation calculated by the executor. */
+    readonly estimate: DebateRoundBudgetEstimateV1
+    /** Exact bound and values that denied admission. */
+    readonly limit: DebateRoundBudgetLimitV1
+  }
+
+/** Slot-keyed results returned after the round TaskGraph reaches a terminal state. */
+export interface DebateRoundExecutionResultV1 {
+  /** Result schema version. */
+  readonly version: 1
+  /** Completed turn result indexed by its roster slot identity. */
+  readonly resultsBySlot: Readonly<Record<string, DebateTurnResultV1>>
+  /** Slot-specific failures retained instead of collapsing the whole round. */
+  readonly failuresBySlot?: Readonly<Record<string, DebateTurnFailureV1>>
+}
+
+/** Input sent to one roster slot by the local Provider. */
+export interface DebateTurnRequestV1 {
+  /** Request schema version. */
+  readonly version: 1
+  /** Stable Debate run identity. */
+  readonly runId: string
+  /** Canonical workspace admitted by the existing TaskGraph Scheduler. */
+  readonly workspace: string
+  /** One-based round number being executed. */
+  readonly round: number
+  /** Stable roster slot identity. */
+  readonly slotId: string
+  /** Fixed role assigned to the slot. */
+  readonly role: DebateRoleId
+  /** Fixed role persona retained in the sealed TaskGraph node task. */
+  readonly persona: DebateRolePersonaV1
+  /** Deployment-owned physical operator identity. */
+  readonly operatorId: string
+  /** Explicit alternatives resolved at Scheduler attempt admission. */
+  readonly fallbackOperatorIds?: readonly string[]
+  /** Model identifier selected for the slot. */
+  readonly model: string
+  /** Qualified model tier retained from the fixed roster. */
+  readonly tier: DebateModelTier
+  /** Qualified accounting/authentication source retained from the fixed roster. */
+  readonly source: DebateModelSource
+  /** Protocol phase for this turn. */
+  readonly phase: DebateTurnPhase
+  /** Prompt assembled for this role and round. */
+  readonly prompt: string
+  /** Optional objective carried from the start request. */
+  readonly objective?: string
+  /** Source identities carried without copying their contents into Debate state. */
+  readonly sourceRefs: readonly DebateSourceRefV1[]
+  /** Optional parent execution lineage retained through the TaskGraph admission. */
+  readonly execution?: DebateExecutionRefV1
+  /** Source DSH Session retained for orchestration Trace lineage. */
+  readonly sourceSessionId?: string
+  /** Frozen parent-request contexts handed to the TaskGraph admission. */
+  readonly runtimeContext?: DebateRuntimeContextV1
+  /** Claims settled before this turn began. */
+  readonly priorLedger: DebateClaimLedgerV1
+  /** Dissent retained before this turn began. */
+  readonly priorDissent: readonly DebateDissentV1[]
+  /** Unresolved gaps retained before this turn began. */
+  readonly priorUnresolved: readonly DebateUnresolvedV1[]
+  /** Cancellation signal for the current execution attempt. */
+  readonly signal?: AbortSignal
+}
+
+/** Ephemeral settled usage and effective ceilings used to admit one sealed TaskGraph round. */
+export interface DebateRoundBudgetEnvelopeV1 {
+  /** Envelope schema version. */
+  readonly version: 1
+  /** Input tokens settled before this round is admitted. */
+  readonly usedInputTokens: number
+  /** Output tokens settled before this round is admitted. */
+  readonly usedOutputTokens: number
+  /** Effective run-wide input-token cap, including accepted continuation grants. */
+  readonly maxInputTokens: number
+  /** Effective run-wide output-token cap, including accepted continuation grants. */
+  readonly maxOutputTokens: number
+  /** Effective run-wide combined token cap, including accepted continuation grants. */
+  readonly maxTotalTokens: number
+}
+
+/** One safe progress fact emitted while a TaskGraph-backed roster slot is running. */
+export interface DebateRoundAgentProgressV1 {
+  /** Progress schema version. */
+  readonly version: 1
+  /** Stable Debate run identity. */
+  readonly runId: string
+  /** One-based Debate round identity. */
+  readonly round: number
+  /** Fixed roster slot identity. */
+  readonly slotId: string
+  /** Fixed role retained even when its physical route falls back. */
+  readonly role: DebateRoleId
+  /** Whitelisted physical-operator projection and its original event position. */
+  readonly progress: DebateAgentProgressV1
+}
+
+/** Conservative token reservation for one sealed round. */
+export interface DebateRoundBudgetEstimateV1 {
+  /** Estimated input tokens for all roster slots. */
+  readonly inputTokens: number
+  /** Estimated output tokens for all roster slots. */
+  readonly outputTokens: number
+  /** Estimated combined input and output tokens for all roster slots. */
+  readonly totalTokens: number
+}
+
+/** One token bound that prevents an otherwise sealed round from starting. */
+export interface DebateRoundBudgetLimitV1 {
+  /** Token counter whose bound would be exceeded. */
+  readonly kind: 'input-tokens' | 'output-tokens' | 'total-tokens'
+  /** Settled counter value before the round. */
+  readonly used: number
+  /** Conservative reservation for the requested round. */
+  readonly reserved: number
+  /** Configured run-wide counter bound. */
+  readonly limit: number
+  /** Human-readable deterministic admission reason. */
+  readonly reason: string
+}
+
+/** Result returned by one injected executor turn; no model or CLI is assumed. */
+export interface DebateTurnResultV1 {
+  /** Scheduler attempt that produced this settled result. */
+  readonly attempt?: number
+  /** Calibrated confidence for this complete turn, required even when no claim is emitted. */
+  readonly confidence: number
+  /** Optional durable reference to the complete turn output. */
+  readonly outputRef?: string
+  /** Optional bounded preview of the turn output. */
+  readonly outputPreview?: string
+  /** Claims contributed by this turn. */
+  readonly claims?: readonly DebateClaimV1[]
+  /** Optional complete ledger supplied by the executor. */
+  readonly claimLedger?: DebateClaimLedgerV1
+  /** Minority positions preserved by this turn. */
+  readonly dissent?: readonly DebateDissentV1[]
+  /** Gaps that remain unresolved after this turn. */
+  readonly unresolved?: readonly DebateUnresolvedV1[]
+  /** Evidence identities referenced by this turn. */
+  readonly evidenceRefs?: readonly DebateEvidenceRefV1[]
+  /** Provider-reported token and cost accounting. */
+  readonly usage?: DebateUsageV1
+  /** Scheduler-owned requested/actual routing for this settled logical role. */
+  readonly routing?: DebateTurnRoutingV1
+}
+
+/** One authoritative per-slot Scheduler outcome when no settled result exists. */
+export interface DebateTurnFailureV1 {
+  /** Terminal outcome for the slot when no settled turn result exists. */
+  readonly state: 'blocked' | 'failed' | 'indeterminate'
+  /** Scheduler attempt number that produced this outcome. */
+  readonly attempt: number
+  /** Stable error code explaining why the slot did not settle. */
+  readonly errorCode: string
+  /** Structured blockers that prevent the slot from settling. */
+  readonly blockers: readonly DebateTurnBlockerV1[]
+  /** Scheduler-owned requested and actual routing for this failed slot. */
+  readonly routing?: DebateTurnRoutingV1
+}
+
+/** Round phase supplied to the injected executor. */
+export type DebateTurnPhase = 'blind-independent' | 'claim-ledger' | 'high-severity-unresolved'
+```
+
+Depends on: [`DebateAgentProgressV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimLedgerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateClaimV1`](../packages/orchestration/debate/src/index.ts) · [`DebateDissentV1`](../packages/orchestration/debate/src/index.ts) · [`DebateEvidenceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateExecutionRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateModelSource`](../packages/orchestration/debate/src/index.ts) · [`DebateModelTier`](../packages/orchestration/debate/src/index.ts) · [`DebateRoleId`](../packages/orchestration/debate/src/index.ts) · [`DebateRolePersonaV1`](../packages/orchestration/debate/src/index.ts) · [`DebateRuntimeContextV1`](../packages/orchestration/debate/src/index.ts) · [`DebateSourceRefV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnBlockerV1`](../packages/orchestration/debate/src/index.ts) · [`DebateTurnRoutingV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUnresolvedV1`](../packages/orchestration/debate/src/index.ts) · [`DebateUsageV1`](../packages/orchestration/debate/src/index.ts)
+
+Source: [`packages/orchestration/debate-local/src/types.ts:271`](../packages/orchestration/debate-local/src/types.ts)
+
+<a id="deepseek-aidsh-debate-orchestration"></a>
+
+## `@deepseek-ai/dsh-debate-orchestration`
+
+Requires: `orchestrations`
+
+```ts config-catalog
+/** Loader configuration for the local Debate owner and TaskGraph adapter. */
+export interface Config extends DebateTaskGraphAdapterOptions {
+  /** Optional DSH home; defaults to the ordinary harness-owned location. */
+  readonly dshHome?: string
+  /** Stable Provider identity retained in Debate provenance. */
+  readonly providerId?: string
+  /** Provider version retained in Debate provenance. */
+  readonly providerVersion?: string
+}
+
+/** Options that bound one adapter-owned TaskGraph admission. */
+export interface DebateTaskGraphAdapterOptions {
+  /** Maximum number of independent Debate nodes admitted in one round. */
+  readonly maxParallel?: number
+  /** Poll interval used while the durable run is still executing. */
+  readonly pollIntervalMs?: number
+  /** Wall-clock bound for one adapter call. */
+  readonly timeoutMs?: number
+}
+```
+
+Source: [`packages/orchestration/debate-orchestration/src/index.ts:58`](../packages/orchestration/debate-orchestration/src/index.ts)
 
 <a id="deepseek-aidsh-e2b"></a>
 
@@ -818,6 +1164,26 @@ export interface Config {
 
 Source: [`packages/host/frontend-static/src/index.ts:28`](../packages/host/frontend-static/src/index.ts)
 
+<a id="deepseek-aidsh-host-remote-auth"></a>
+
+## `@deepseek-ai/dsh-host-remote-auth`
+
+```ts config-catalog
+/** Persistent remote-auth service configuration. */
+export interface Config {
+  /** Harness home; the device registry lives under remote-auth/v1. */
+  dshHome?: string
+  /** One-time pairing lifetime in milliseconds. */
+  pairingTtlMs?: number
+  /** Short-lived access-session lifetime in milliseconds. */
+  accessTtlMs?: number
+  /** Bound on durable non-revoked devices. */
+  maxDevices?: number
+}
+```
+
+Source: [`packages/host/remote-auth/src/index.ts:123`](../packages/host/remote-auth/src/index.ts)
+
 <a id="deepseek-aidsh-host-webserver"></a>
 
 ## `@deepseek-ai/dsh-host-webserver`
@@ -897,11 +1263,13 @@ export interface Config {
   maxTokens?: number
   /** Positive context capacity used when the selected model has no exact value (default 1,000,000). */
   defaultContextWindow?: number
-  /** Advisory models shown by discovery consumers; defaults to V4 Flash and V4 Pro. */
+  /** Advisory models shown by discovery consumers; defaults to V4 Flash, V4 Pro, and V4 Flash Vision Exp. */
   models?: DeepSeekCatalogModel[]
   /** Maximum provider idle time while one stream read is outstanding (default five minutes). */
   streamIdleTimeoutMs?: number
-  /** Provider-owned model-request retry policy; omission uses normal defaults. */
+  /** Maximum accumulated base64 image payload per request (default 20 MiB). */
+  maxRequestImageBytes?: number
+  /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
   retryPolicy?: RetryPolicyConfig
 }
 
@@ -917,12 +1285,14 @@ export interface DeepSeekCatalogModel {
   contextWindow?: number
   /** Per-request output cap for this model; omission falls back to the profile's {@link DeepSeekConnectionOptions.maxTokens}. */
   maxTokens?: number
+  /** Accepted request modalities; omission is text-only. */
+  inputModalities?: ModelModality[]
 }
 ```
 
-Depends on: [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts)
+Depends on: [`ModelModality`](../packages/llm/llm/src/index.ts) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts)
 
-Source: [`packages/llm/llm-deepseek/src/index.ts:62`](../packages/llm/llm-deepseek/src/index.ts)
+Source: [`packages/llm/llm-deepseek/src/index.ts:72`](../packages/llm/llm-deepseek/src/index.ts)
 
 <a id="deepseek-aidsh-llm-pi-ai"></a>
 
@@ -1326,6 +1696,40 @@ export interface Config {
 
 Source: [`packages/feedback/message-feedback/src/index.ts:49`](../packages/feedback/message-feedback/src/index.ts)
 
+<a id="deepseek-aidsh-orchestration-local"></a>
+
+## `@deepseek-ai/dsh-orchestration-local`
+
+```ts config-catalog
+/** Local daemon client configuration. */
+export interface Config {
+  /** Optional DSH home; defaults to the ordinary harness-owned location. */
+  readonly dshHome?: string
+  /** Start an independent daemon when no compatible socket is available. */
+  readonly autoStart?: boolean
+  /** Maximum handshake and per-request connection wait in milliseconds. */
+  readonly connectTimeoutMs?: number
+  /** Independently packaged Resident Driver modules required by headless execution. */
+  readonly residentDriverModules?: string[]
+  /** Trusted plugins that register executable TypeScript Skills in the daemon. */
+  readonly skillProviderModules?: string[]
+  /** Trusted complete Browser Provider plugins loaded by the headless daemon. */
+  readonly browserProviderModules?: string[]
+  /** Explicit executable or helper used for the detached headless daemon. */
+  readonly headlessNodeExecutable?: string
+  /** Maximum time for one Server-side exact-commit Git materialization. */
+  readonly remoteMaterializationTimeoutMs?: number
+  /** Maximum time for one bounded Resident artifact read. */
+  readonly remoteArtifactReadTimeoutMs?: number
+  /** Maximum exact artifact bytes returned over Remote Sync. */
+  readonly remoteArtifactMaxBytes?: number
+  /** Lease retained for one command-isolated remote execution checkout. */
+  readonly remoteWorkspaceLeaseMs?: number
+}
+```
+
+Source: [`packages/orchestration/orchestration-local/src/index.ts:53`](../packages/orchestration/orchestration-local/src/index.ts)
+
 <a id="deepseek-aidsh-permission-presets"></a>
 
 ## `@deepseek-ai/dsh-permission-presets`
@@ -1388,6 +1792,126 @@ export interface Config {
 ```
 
 Source: [`packages/preset/persona/src/index.ts:34`](../packages/preset/persona/src/index.ts)
+
+<a id="deepseek-aidsh-physical-operator-chatgpt-web"></a>
+
+## `@deepseek-ai/dsh-physical-operator-chatgpt-web`
+
+Requires: `browser` · `physicalOperators`
+
+```ts config-catalog
+/** Deployment-owned settings for one ChatGPT web operator. */
+export interface Config {
+  /** Stable physical-operator identity. */
+  readonly id?: string
+  /** Human-readable discovery name. */
+  readonly displayName?: string
+  /** Concise discovery description. */
+  readonly description?: string
+  /** Selection hints with no authority semantics. */
+  readonly tags?: string[]
+  /** Named browser workspace that owns the authenticated ChatGPT page. */
+  readonly workspaceName?: string
+  /** HTTPS ChatGPT URL opened or reused within the named workspace. */
+  readonly url?: string
+  /** Maximum time spent awaiting one assistant response. */
+  readonly generationTimeoutMs?: number
+  /** Maximum time spent proving that ChatGPT accepted the filled prompt. */
+  readonly submissionTimeoutMs?: number
+  /** Polling delay while awaiting a finished assistant response. */
+  readonly pollIntervalMs?: number
+  /** Interval between bounded waiting progress events. */
+  readonly progressIntervalMs?: number
+  /** Maximum serialized output retained from the webpage. */
+  readonly outputMaxBytes?: number
+  /** Private owner-local directory for connector identity and mode. */
+  readonly stateRoot?: string
+  /** Exact visible ChatGPT custom MCP app name required for tool coordination. */
+  readonly connectorName?: string
+  /**
+   * Allow the Custom MCP tool-coordination mode. Off by default: the mode is
+   * frozen, a saved coordinator selection reads as direct, and no MCP
+   * endpoint starts.
+   */
+  readonly coordinatorEnabled?: boolean
+  /** Stable loopback port for the user-configured MCP tunnel; zero is useful for isolated tests. */
+  readonly coordinatorPort?: number
+  /** Maximum HTTP JSON body accepted by the MCP connector. */
+  readonly coordinatorRequestMaxBytes?: number
+  /** Maximum MCP request lifetime, including delegated tools. */
+  readonly coordinatorRequestTimeoutMs?: number
+  /** Maximum wait for matching native webpage request evidence. */
+  readonly identityTimeoutMs?: number
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/index.ts:77`](../packages/physical-operator/physical-operator-chatgpt-web/src/index.ts)
+
+<a id="deepseek-aidsh-physical-operator-resident"></a>
+
+## `@deepseek-ai/dsh-physical-operator-resident`
+
+Requires: `physicalOperators` · `residentOperators` · `subagents`
+
+```ts config-catalog
+/** Dual-mode router plugin configuration. */
+export interface Config {
+  /** Stable physical-operator mappings to register. */
+  readonly operators: OperatorConfig[]
+}
+
+/** One stable dual-mode physical-operator deployment mapping. */
+export interface OperatorConfig {
+  /** Stable model-selected physical operator identity. */
+  readonly id: string
+  /** Existing `ctx.subagents` Provider used by the default ephemeral mode. */
+  readonly ephemeralProvider?: string
+  /** Native product Driver id used by explicit Resident execution. */
+  readonly residentProvider?: string
+  /** Human-readable discovery name. */
+  readonly displayName: string
+  /** Concise discovery statement for model selection. */
+  readonly description: string
+  /** Selection hints only; these grant no authority. */
+  readonly tags?: string[]
+  /** Shared fail-fast capacity across both execution modes. */
+  readonly maxConcurrency?: number
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-resident/src/index.ts:49`](../packages/physical-operator/physical-operator-resident/src/index.ts)
+
+<a id="deepseek-aidsh-physical-operator-subagent"></a>
+
+## `@deepseek-ai/dsh-physical-operator-subagent`
+
+Requires: `physicalOperators` · `subagents`
+
+```ts config-catalog
+/** Plugin configuration containing one or more operator mappings. */
+export interface Config {
+  /** Stable operator identities and their existing subagent provider bindings. */
+  readonly operators: OperatorConfig[]
+}
+
+/** Declarative mapping from one physical operator to a DSH subagent provider. */
+export interface OperatorConfig {
+  /** Stable caller-visible operator identity. */
+  readonly id: string
+  /** Existing `ctx.subagents` provider name, such as `codex` or `claude-code`. */
+  readonly provider: string
+  /** Human-readable operator name. */
+  readonly displayName: string
+  /** Concise intended-use description. */
+  readonly description: string
+  /** Selection hints surfaced by discovery; no authority semantics. */
+  readonly tags?: string[]
+  /** Fail-fast concurrent execution capacity. Defaults to one. */
+  readonly maxConcurrency?: number
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-subagent/src/index.ts:60`](../packages/physical-operator/physical-operator-subagent/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 
@@ -1493,6 +2017,45 @@ export interface Config {
 ```
 
 Source: [`packages/guard/repeat-tool-reminder/src/index.ts:28`](../packages/guard/repeat-tool-reminder/src/index.ts)
+
+<a id="deepseek-aidsh-resident-operator-local"></a>
+
+## `@deepseek-ai/dsh-resident-operator-local`
+
+```ts config-catalog
+/** Local Resident Service Provider configuration. */
+export interface Config {
+  /** Optional DSH home override whose `resident-operators` child holds daemon state. */
+  readonly dshHome?: string
+  /** Start an independent local daemon when no compatible socket is reachable. */
+  readonly autoStart?: boolean
+  /** Bounded socket connection and daemon startup wait in milliseconds. */
+  readonly connectTimeoutMs?: number
+  /** Turn-settlement polling interval in milliseconds. */
+  readonly pollIntervalMs?: number
+  /** Independently packaged Driver modules loaded by the detached daemon. */
+  readonly driverModules?: string[]
+  /** Explicit executable or helper used for the detached headless daemon. */
+  readonly headlessNodeExecutable?: string
+  /** npm-compatible registry that publishes the native Claude Code and Codex CLIs. */
+  readonly cliRegistryUrl?: string
+  /** Bound on each CLI registry request, package download, and Codex daemon update. */
+  readonly cliDownloadTimeoutMs?: number
+}
+```
+
+Source: [`packages/physical-operator/resident-operator-local/src/index.ts:54`](../packages/physical-operator/resident-operator-local/src/index.ts)
+
+<a id="deepseek-aidsh-rlm-runtime-local"></a>
+
+## `@deepseek-ai/dsh-rlm-runtime-local`
+
+```ts config-catalog
+/** Owner-local directory that contains the RLM runtime state. */
+export type Config = string
+```
+
+Source: [`packages/orchestration/rlm-runtime-local/src/index.ts:67`](../packages/orchestration/rlm-runtime-local/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -1682,7 +2245,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/session/session-projection-cache/src/index.ts:42`](../packages/session/session-projection-cache/src/index.ts)
+Source: [`packages/session/session-projection-cache/src/index.ts:43`](../packages/session/session-projection-cache/src/index.ts)
 
 <a id="deepseek-aidsh-session-query-sqlite"></a>
 
@@ -2126,7 +2689,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/subagent/subagent-claude-code/src/index.ts:32`](../packages/subagent/subagent-claude-code/src/index.ts)
+Source: [`packages/subagent/subagent-claude-code/src/index.ts:33`](../packages/subagent/subagent-claude-code/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-codex"></a>
 
@@ -2147,7 +2710,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/subagent/subagent-codex/src/index.ts:30`](../packages/subagent/subagent-codex/src/index.ts)
+Source: [`packages/subagent/subagent-codex/src/index.ts:45`](../packages/subagent/subagent-codex/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-dsh-sdk"></a>
 
@@ -2275,7 +2838,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/core/system-prompt/src/index.ts:186`](../packages/core/system-prompt/src/index.ts)
+Source: [`packages/core/system-prompt/src/index.ts:284`](../packages/core/system-prompt/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 
@@ -2827,7 +3390,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'code' | 'both'
 ```
 
-Source: [`packages/core/tools/src/index.ts:654`](../packages/core/tools/src/index.ts)
+Source: [`packages/core/tools/src/index.ts:656`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -3087,6 +3650,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-sidebar` ([`packages/client/ui-sidebar/src/index.ts`](../packages/client/ui-sidebar/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-skill` ([`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-subagent` ([`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-task-template` ([`packages/client/ui-task-template/src/index.ts`](../packages/client/ui-task-template/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-theme` ([`packages/client/ui-theme/src/index.ts`](../packages/client/ui-theme/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-tool` ([`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-trajectory` ([`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts))
@@ -3106,6 +3670,13 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-host-plugin-inventory` — requires `loader` ([`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts))
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-lsp` ([`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts))
+- `@deepseek-ai/dsh-model-allocation-local` ([`packages/orchestration/model-allocation-local/src/index.ts`](../packages/orchestration/model-allocation-local/src/index.ts))
+- `@deepseek-ai/dsh-model-worker` ([`packages/orchestration/model-worker/src/index.ts`](../packages/orchestration/model-worker/src/index.ts))
+- `@deepseek-ai/dsh-orchestrations` ([`packages/bundle/orchestrations/src/index.ts`](../packages/bundle/orchestrations/src/index.ts))
+- `@deepseek-ai/dsh-output-style` — requires `systemPrompt` ([`packages/core/output-style/src/index.ts`](../packages/core/output-style/src/index.ts))
+- `@deepseek-ai/dsh-physical-operator` ([`packages/physical-operator/physical-operator/src/index.ts`](../packages/physical-operator/physical-operator/src/index.ts))
+- `@deepseek-ai/dsh-resident-operators` ([`packages/bundle/resident-operators/src/index.ts`](../packages/bundle/resident-operators/src/index.ts))
+- `@deepseek-ai/dsh-rlm-strategy-local` ([`packages/orchestration/rlm-strategy-local/src/index.ts`](../packages/orchestration/rlm-strategy-local/src/index.ts))
 - `@deepseek-ai/dsh-schedule` — requires `agents` · `sessions` · `tools` · `sessionPersistence` ([`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts))
 - `@deepseek-ai/dsh-session` ([`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts))
 - `@deepseek-ai/dsh-session-checkpoint-policy` — requires `llm` · `sessionPersistence` · `sessions` · `tools` ([`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts))
@@ -3116,11 +3687,20 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-storage` ([`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts))
 - `@deepseek-ai/dsh-subagent` ([`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts))
 - `@deepseek-ai/dsh-subprocess-local` ([`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts))
+- `@deepseek-ai/dsh-task-template-context` — requires `taskTemplates` · `tools` ([`packages/prompt/task-template-context/src/index.ts`](../packages/prompt/task-template-context/src/index.ts))
+- `@deepseek-ai/dsh-task-template-rpc` — requires `taskTemplates` · `connection` ([`packages/prompt/task-template-rpc/src/index.ts`](../packages/prompt/task-template-rpc/src/index.ts))
 - `@deepseek-ai/dsh-terminal` ([`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts))
 - `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
+- `@deepseek-ai/dsh-tool-browser` — requires `browser` · `tools` · `systemPrompt` ([`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
+- `@deepseek-ai/dsh-tool-debate` — requires `debates` · `tools` · `systemPrompt` ([`packages/orchestration/tool-debate/src/index.ts`](../packages/orchestration/tool-debate/src/index.ts))
+- `@deepseek-ai/dsh-tool-orchestration` — requires `orchestrations` · `tools` · `systemPrompt` ([`packages/orchestration/tool-orchestration/src/index.ts`](../packages/orchestration/tool-orchestration/src/index.ts))
+- `@deepseek-ai/dsh-tool-physical-operator` — requires `tools` · `physicalOperators` · `systemPrompt` · `llm` · `agents` ([`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
+- `@deepseek-ai/dsh-ui-debate` — requires `debates` · `webServer` ([`packages/orchestration/ui-debate/src/index.ts`](../packages/orchestration/ui-debate/src/index.ts))
+- `@deepseek-ai/dsh-ui-orchestration` — requires `orchestrations` · `webServer` ([`packages/orchestration/ui-orchestration/src/index.ts`](../packages/orchestration/ui-orchestration/src/index.ts))
+- `@deepseek-ai/dsh-ui-physical-operator` — requires `residentOperators` · `webServer` ([`packages/physical-operator/ui-physical-operator/src/index.ts`](../packages/physical-operator/ui-physical-operator/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-workspace` — requires `storageDomain` · `sessionPersistence` ([`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts))
 
@@ -3129,12 +3709,22 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 Abstract service classes — a deployment loads a concrete implementation package instead ([capability seams](../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)).
 
 - `@deepseek-ai/dsh-attachment` — abstract `AttachmentStore` ([`packages/attachment/attachment/src/index.ts`](../packages/attachment/attachment/src/index.ts))
+- `@deepseek-ai/dsh-capability-capsule` — abstract `CapabilityCapsuleService` ([`packages/orchestration/capability-capsule/src/index.ts`](../packages/orchestration/capability-capsule/src/index.ts))
 - `@deepseek-ai/dsh-code-runtime` — abstract `CodeRuntime` ([`packages/code-runtime/code-runtime/src/index.ts`](../packages/code-runtime/code-runtime/src/index.ts))
 - `@deepseek-ai/dsh-compaction` — abstract `CompactionEngine` ([`packages/compaction/compaction/src/index.ts`](../packages/compaction/compaction/src/index.ts))
+- `@deepseek-ai/dsh-context-compiler` — abstract `ContextCompilerService` ([`packages/orchestration/context-compiler/src/index.ts`](../packages/orchestration/context-compiler/src/index.ts))
+- `@deepseek-ai/dsh-continual-harness` — abstract `ContinualHarnessService` ([`packages/orchestration/continual-harness/src/index.ts`](../packages/orchestration/continual-harness/src/index.ts))
 - `@deepseek-ai/dsh-credentials` — abstract `CredentialProvider` ([`packages/credentials/credentials/src/index.ts`](../packages/credentials/credentials/src/index.ts))
+- `@deepseek-ai/dsh-debate` — abstract `DebateService` ([`packages/orchestration/debate/src/index.ts`](../packages/orchestration/debate/src/index.ts))
 - `@deepseek-ai/dsh-fs` — abstract `FileSystem` ([`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker` — abstract `DirectoryPicker` ([`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts))
+- `@deepseek-ai/dsh-intent-compiler` — abstract `IntentCompilerService` ([`packages/orchestration/intent-compiler/src/index.ts`](../packages/orchestration/intent-compiler/src/index.ts))
 - `@deepseek-ai/dsh-jobs` — abstract `JobRegistry` ([`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts))
+- `@deepseek-ai/dsh-model-allocation` — abstract `ModelAllocationService` ([`packages/orchestration/model-allocation/src/index.ts`](../packages/orchestration/model-allocation/src/index.ts))
+- `@deepseek-ai/dsh-orchestration` — abstract `OrchestrationService` ([`packages/orchestration/orchestration/src/index.ts`](../packages/orchestration/orchestration/src/index.ts))
+- `@deepseek-ai/dsh-resident-operator` — abstract `ResidentOperatorService` ([`packages/physical-operator/resident-operator/src/index.ts`](../packages/physical-operator/resident-operator/src/index.ts))
+- `@deepseek-ai/dsh-rlm-runtime` — abstract `RlmRuntimeService` ([`packages/orchestration/rlm-runtime/src/index.ts`](../packages/orchestration/rlm-runtime/src/index.ts))
+- `@deepseek-ai/dsh-rlm-strategy` — abstract `RlmStrategyService` ([`packages/orchestration/rlm-strategy/src/index.ts`](../packages/orchestration/rlm-strategy/src/index.ts))
 - `@deepseek-ai/dsh-sandbox` — abstract `SandboxProvider` ([`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts))
 - `@deepseek-ai/dsh-session-persistence` — abstract `SessionPersistence` ([`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts))
 - `@deepseek-ai/dsh-session-query` — abstract `SessionQueryEngine` ([`packages/session-query/session-query/src/index.ts`](../packages/session-query/session-query/src/index.ts))
@@ -3155,6 +3745,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-atomic-write` ([`packages/util/atomic-write/src/index.ts`](../packages/util/atomic-write/src/index.ts))
 - `@deepseek-ai/dsh-base` ([`packages/bundle/base/src/index.ts`](../packages/bundle/base/src/index.ts))
 - `@deepseek-ai/dsh-brand` ([`packages/util/brand/src/index.ts`](../packages/util/brand/src/index.ts))
+- `@deepseek-ai/dsh-chatgpt-web-operator` ([`packages/bundle/chatgpt-web-operator/src/index.ts`](../packages/bundle/chatgpt-web-operator/src/index.ts))
 - `@deepseek-ai/dsh-client-schema-form` ([`packages/client/schema-form/src/index.ts`](../packages/client/schema-form/src/index.ts))
 - `@deepseek-ai/dsh-client-test-runtime` ([`packages/test-support/client-runtime/src/index.ts`](../packages/test-support/client-runtime/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-attachment` ([`packages/client/ui-attachment/src/index.ts`](../packages/client/ui-attachment/src/index.ts))
@@ -3163,11 +3754,13 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-client-web` ([`packages/client/web/src/index.ts`](../packages/client/web/src/index.ts))
 - `@deepseek-ai/dsh-client-web-react` ([`packages/client/web-react/src/index.ts`](../packages/client/web-react/src/index.ts))
 - `@deepseek-ai/dsh-cmdline` ([`packages/boot/cmdline/src/index.ts`](../packages/boot/cmdline/src/index.ts))
+- `@deepseek-ai/dsh-ego-lite-browser` ([`packages/bundle/ego-lite-browser/src/index.ts`](../packages/bundle/ego-lite-browser/src/index.ts))
 - `@deepseek-ai/dsh-home-paths` ([`packages/util/home-paths/src/index.ts`](../packages/util/home-paths/src/index.ts))
 - `@deepseek-ai/dsh-hook-protocol` ([`packages/hooks/hook-protocol/src/index.ts`](../packages/hooks/hook-protocol/src/index.ts))
 - `@deepseek-ai/dsh-launch-environment` ([`packages/util/launch-environment/src/index.ts`](../packages/util/launch-environment/src/index.ts))
 - `@deepseek-ai/dsh-llm-mock-server` ([`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts))
 - `@deepseek-ai/dsh-loader-smoke` ([`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts))
+- `@deepseek-ai/dsh-model-worker-deepseek` ([`packages/orchestration/model-worker-deepseek/src/index.ts`](../packages/orchestration/model-worker-deepseek/src/index.ts))
 - `@deepseek-ai/dsh-native-command` ([`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts))
 - `@deepseek-ai/dsh-output-retention` ([`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts))
 - `@deepseek-ai/dsh-sandbox-windows-acl` ([`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts))
@@ -3178,6 +3771,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-session-telemetry` ([`packages/session/session-telemetry/src/index.ts`](../packages/session/session-telemetry/src/index.ts))
 - `@deepseek-ai/dsh-session-title-llm` ([`packages/session/session-title-llm/src/index.ts`](../packages/session/session-title-llm/src/index.ts))
 - `@deepseek-ai/dsh-subagent-in-process-driver` ([`packages/subagent/subagent-in-process-driver/src/index.ts`](../packages/subagent/subagent-in-process-driver/src/index.ts))
+- `@deepseek-ai/dsh-task-template` ([`packages/prompt/task-template/src/index.ts`](../packages/prompt/task-template/src/index.ts))
 - `@deepseek-ai/dsh-timeout` ([`packages/util/timeout/src/index.ts`](../packages/util/timeout/src/index.ts))
 - `@deepseek-ai/dsh-typert-generator` ([`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts))
 - `@deepseek-ai/dsh-typert-protocol` ([`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts))

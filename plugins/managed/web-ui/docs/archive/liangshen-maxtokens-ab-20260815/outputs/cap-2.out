@@ -1,0 +1,23 @@
+setup ctx symbols: 
+mount OK: liangshen
+(node:12953) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Inspection done. The `packages/` directory of `/Users/zcl/code/dsh-web-ui` contains **13 top-level package directories**:
+
+| # | Directory |
+|---|-----------|
+| 1 | `dsh-aionui-panel` |
+| 2 | `dsh-git-graph` |
+| 3 | `dsh-liangshen` |
+| 4 | `dsh-live-stats` |
+| 5 | `dsh-pet` |
+| 6 | `dsh-remote-web-ui` |
+| 7 | `dsh-skins` |
+| 8 | `dsh-ssh` |
+| 9 | `dsh-task-board` |
+| 10 | `dsh-tool-describe-image` |
+| 11 | `dsh-web-ui-all` |
+| 12 | `dsh-web-ui-settings` |
+| 13 | `skins` (a grouping dir containing skin packages such as `blue-fantasy`, `miku`, `qq98`, etc.) |
+
+Note: the listing excluded hidden entries and `node_modules`. There is also a top-level file `packages/AGENTS.md`, which is not a package directory.

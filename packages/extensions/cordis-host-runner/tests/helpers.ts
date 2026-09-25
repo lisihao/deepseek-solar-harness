@@ -57,8 +57,8 @@ export async function setup(config?: Config): Promise<Harness> {
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRegistry)
   const gateway: Gateway = { events: [] }
-  ctx.on('cordis/request-run', (request) => {
-    gateway.events.push(['cordis/request-run', request])
+  ctx.on('@deepseek-ai/cordis/request-run', (request) => {
+    gateway.events.push(['@deepseek-ai/cordis/request-run', request])
     // The fake browser: a request reaches it, and it answers the way the real
     // client runner does — nothing here is a shortcut through the host's own
     // verbs, so the round trip under test is the real one.
@@ -95,7 +95,7 @@ export async function setup(config?: Config): Promise<Harness> {
       })
     })
   })
-  for (const name of ['cordis/request-run-resolved', 'cordis/dynamic-package', 'cordis/dynamic-retract'] as const) {
+  for (const name of ['@deepseek-ai/cordis/request-run-resolved', '@deepseek-ai/cordis/dynamic-package', '@deepseek-ai/cordis/dynamic-retract'] as const) {
     ctx.on(name, (payload: unknown) => { gateway.events.push([name, payload]) })
   }
   await ctx.plugin(DynamicCordisRunnerService, config)

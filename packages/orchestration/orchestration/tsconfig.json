@@ -1,0 +1,19 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cosmokit" },
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../util/brand" },
+    { "path": "../../llm/llm" },
+    { "path": "../intent-compiler" },
+    { "path": "../model-allocation" },
+    { "path": "../rlm-strategy" },
+    { "path": "../context-compiler" },
+    { "path": "../capability-capsule" },
+    { "path": "../../physical-operator/physical-operator" },
+    { "path": "../../prompt/task-template" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

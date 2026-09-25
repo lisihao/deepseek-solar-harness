@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "recording": "keyless-debate-transcript-v1",
+  "topic": "请比较 DSH 的可靠性与扩展能力优先级。",
+  "events": [
+    {
+      "seq": 1,
+      "type": "debate/trace",
+      "data": {
+        "version": 1,
+        "runId": "fixture-debate-run",
+        "sourceSequence": 1,
+        "state": "planned",
+        "topic": { "version": 1, "title": "请比较 DSH 的可靠性与扩展能力优先级。", "source": "user" },
+        "sessionTurn": 4,
+        "sessionStep": 1
+      },
+      "ignorable": true
+    },
+    {
+      "seq": 2,
+      "type": "debate/trace",
+      "data": {
+        "version": 1,
+        "runId": "fixture-debate-run",
+        "sourceSequence": 2,
+        "state": "settled",
+        "round": 1,
+        "role": {
+          "title": "建设性提案者",
+          "kind": "participant",
+          "requested": { "operatorId": "codex", "model": "gpt-5.6-sol" }
+        },
+        "publicOutput": { "preview": "先用可恢复性基线约束扩展。", "ref": "artifact:proposer" },
+        "claims": [{ "statement": "可靠性门禁先于新能力。", "status": "supported", "severity": "high" }],
+        "evidenceRefs": [{ "version": 1, "ref": "artifact:baseline", "kind": "artifact" }],
+        "usage": { "inputTokens": 120, "outputTokens": 40 }
+      },
+      "ignorable": true
+    },
+    {
+      "seq": 3,
+      "type": "debate/trace",
+      "data": {
+        "version": 1,
+        "runId": "fixture-debate-run",
+        "sourceSequence": 3,
+        "state": "settled",
+        "round": 1,
+        "role": {
+          "title": "怀疑式证伪者",
+          "kind": "participant",
+          "requested": { "operatorId": "codex", "model": "gpt-5.6-luna" }
+        },
+        "publicOutput": { "preview": "没有同任务基线就无法证明扩展带来净收益。" },
+        "claims": [{ "statement": "先建立同任务对照。", "status": "open", "severity": "high" }],
+        "evidenceRefs": []
+      },
+      "ignorable": true
+    },
+    {
+      "seq": 4,
+      "type": "debate/trace",
+      "data": {
+        "version": 1,
+        "runId": "fixture-debate-run",
+        "sourceSequence": 4,
+        "state": "settled",
+        "round": 1,
+        "role": {
+          "title": "决策裁判（主持人）",
+          "kind": "judge",
+          "requested": { "operatorId": "codex", "model": "gpt-5.6-sol" }
+        },
+        "publicOutput": { "preview": "先可靠性，后扩展；保留反对意见。" },
+        "claims": [],
+        "evidenceRefs": [{ "version": 1, "ref": "artifact:judge", "kind": "artifact" }]
+      },
+      "ignorable": true
+    },
+    {
+      "seq": 5,
+      "type": "debate/trace",
+      "data": {
+        "version": 1,
+        "runId": "fixture-debate-run",
+        "sourceSequence": 5,
+        "state": "budget-limited",
+        "round": 1,
+        "convergence": {
+          "status": "budget_limited",
+          "score": 0.76,
+          "threshold": 0.82,
+          "reason": "本轮达到配置预算；主持人总结已完成。"
+        },
+        "claims": [],
+        "evidenceRefs": []
+      },
+      "ignorable": true
+    },
+    {
+      "seq": 6,
+      "type": "debate/trace",
+      "data": {
+        "version": 1,
+        "runId": "fixture-debate-run",
+        "sourceSequence": 6,
+        "state": "synthesis-settled",
+        "synthesis": {
+          "state": "settled",
+          "outputPreview": "主持人总结：可靠性优先，完成一次对照后再扩展。",
+          "artifactRef": "artifact:synthesis",
+          "unresolvedCount": 1,
+          "dissentCount": 1
+        },
+        "claims": [],
+        "evidenceRefs": []
+      },
+      "ignorable": true
+    }
+  ],
+  "expectedTranscriptShape": {
+    "rosterTable": "| 角色 | 职责 | 执行算子 | 模型 | 当前状态 |\n| --- | --- | --- | --- | --- |\n| 建设性提案者 |",
+    "terminalLabels": ["本轮达到配置预算；主持人总结已完成。", "主持人总结：可靠性优先，完成一次对照后再扩展。"],
+    "forbiddenMarkup": ["<details>", "<summary>", "constructive-proposer", "roleId", "slotId"]
+  }
+}

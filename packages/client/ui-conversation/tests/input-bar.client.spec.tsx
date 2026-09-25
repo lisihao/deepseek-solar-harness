@@ -491,6 +491,14 @@ describe('Enter semantics', () => {
     expect(sink).not.toHaveBeenCalled()
   })
 
+  it('routes Tab through trigger arbitration without submitting the draft', () => {
+    const { textarea, shell, sink } = bench({ draft: '/go' })
+    const arbitrate = vi.spyOn(shell, 'arbitrate')
+    fireEvent.keyDown(textarea, { key: 'Tab' })
+    expect(arbitrate).toHaveBeenCalledWith('tab', false)
+    expect(sink).not.toHaveBeenCalled()
+  })
+
   it('Shift+Enter newline wins even inside IME composition (unconditional precedence)', () => {
     const { textarea, sink } = bench({ draft: 'hello' })
     fireEvent.compositionStart(textarea)

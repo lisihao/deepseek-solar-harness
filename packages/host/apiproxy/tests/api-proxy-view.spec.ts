@@ -103,6 +103,47 @@ async function collect(iterable: AsyncIterable<RpcRequest<MuxFrame>>, count: num
 }
 
 describe('mux live view computation', () => {
+  it('sends only fixed Physical Operator projections on the live stream', async () => {
+    const { ctx } = await harness()
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
+    const abort = new AbortController()
+    const stream = api.events.mux({ rpcId: RpcId('t-physical-trace'), payload: {} }, abort.signal)
+    const collected = collect(stream, 3, abort)
+    const session = ctx.sessions.create()
+    appendExtension(session, 'physical-operator/dispatch', {
+      commandId: 'outer-private-id', operatorId: 'codex', promptMessageId: 'private-prompt-id',
+      requestedByMessageId: 'private-request-id', turn: 1, step: 1,
+    })
+    appendExtension(session, 'physical-operator/tool-call', {
+      commandId: 'private-tool-id', toolCallId: 'private-tool-id', executionCommandId: 'outer-private-id',
+      tool: 'SecretTool', arguments: { recoveryCode: 'ORCHID-4711', prompt: 'private prompt' },
+    })
+    appendExtension(session, 'physical-operator/tool-result', {
+      commandId: 'private-tool-id', toolCallId: 'private-tool-id', executionCommandId: 'outer-private-id',
+      tool: 'SecretTool', result: { isError: false, value: { transcript: 'private transcript' } },
+    })
+
+    const frames = (await collected).filter(frame => frame.type === 'session/event')
+    expect(frames.map(frame => frame.event.data)).toEqual([{}, {}, {}])
+    const publicJson = JSON.stringify(frames)
+    for (const privateText of [
+      'outer-private-id', 'private-prompt-id', 'private-request-id', 'private-tool-id',
+      'SecretTool', 'ORCHID-4711', 'private prompt', 'private transcript', 'recoveryCode',
+    ]) expect(publicJson).not.toContain(privateText)
+    expect(frames.map(frame => frame.physicalOperatorTrace)).toMatchObject([
+      { version: 1, kind: 'dispatch', operator: 'codex', turn: 1, step: 1 },
+      {
+        version: 1, kind: 'tool', standalone: false, status: 'running',
+        argumentsShape: { kind: 'object', fields: 2 },
+      },
+      {
+        version: 1, kind: 'tool', standalone: false, status: 'completed',
+        resultShape: { kind: 'object', fields: 1 },
+      },
+    ])
+    await ctx.fiber.dispose()
+  })
+
   it('attaches the three standard card views, omits view without a presenter, soft-falls on throw', async () => {
     const { ctx } = await harness()
     const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })

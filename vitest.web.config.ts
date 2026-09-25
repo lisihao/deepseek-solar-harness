@@ -13,6 +13,9 @@ try {
   // No .env — fine, the environment may already carry the variables.
 }
 
+const processIsolatedFiles = ['apps/web/tests/cordis-tool-round.e2e.ts']
+const webSuite = process.env.DSH_WEB_SUITE
+
 export default defineConfig({
   // Same resolution note as vitest.config.ts: the tsconfig.base.json paths
   // facade has no include (match-all), so apps/web/tests resolves bare
@@ -23,10 +26,16 @@ export default defineConfig({
   ],
   test: {
     execArgv: vitestExecArgv,
-    include: [
-      'apps/web/tests/**/*.e2e.ts',
-      'apps/web/tests/**/*.snapshot.ts',
-    ],
+    include: webSuite === 'isolated'
+      ? processIsolatedFiles
+      : [
+          'apps/web/tests/**/*.e2e.ts',
+          'apps/web/tests/**/*.snapshot.ts',
+        ],
+    // The isolated case dynamically defines, mounts, and removes a browser
+    // plugin. Give that lifecycle a fresh Vitest process in the composed npm
+    // script instead of inheriting state from the preceding 76 browser files.
+    ...webSuite === 'main' ? { exclude: processIsolatedFiles } : {},
     // Browser boot + real-model turns are slow; files share one browser, run serial.
     testTimeout: 180_000,
     hookTimeout: 120_000,

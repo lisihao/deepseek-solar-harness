@@ -1,0 +1,526 @@
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type {
+  DesktopResidentDashboard,
+  DesktopResidentAuthenticationFailure,
+  DesktopResidentAuthenticationFailureReason,
+  DesktopResidentAuthenticationResponse,
+  DesktopResidentActivity,
+  DesktopResidentEvent,
+  DesktopResidentSession,
+} from '../contracts.ts'
+import { RESIDENT_DASHBOARD_PATH } from '../contracts.ts'
+import { formatResidentTimestamp } from '../presentation.ts'
+import { CliRuntimesSection } from './CliRuntimes.tsx'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+
+export type BrowserRequest = ConnectionHandle['request']
+
+/** Optional owner-local projection refresh controls. */
+export interface LoadResidentDashboardOptions {
+  /** Bypass the Host's short-lived provider catalog cache. */
+  readonly refresh?: boolean
+}
+
+/** Typed failure from one explicit owner-local Resident authentication attempt. */
+export class ResidentAuthenticationError extends Error {
+  constructor(
+    message: string,
+    readonly reason: DesktopResidentAuthenticationFailureReason,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.name = 'ResidentAuthenticationError'
+  }
+}
+
+/**
+ * Load one same-origin daemon projection for the Desktop Resident panel.
+ * @param sessionId - optional durable Session whose bounded events are expanded.
+ * @param signal - local cancellation for the browser request.
+ * @param request - authenticated same-origin browser request.
+ * @param options - optional explicit provider catalog refresh request.
+ * @returns one bounded Resident dashboard projection.
+ */
+export async function loadResidentDashboard(
+  sessionId?: string,
+  signal?: AbortSignal,
+  request: BrowserRequest = globalThis.fetch,
+  options?: LoadResidentDashboardOptions,
+): Promise<DesktopResidentDashboard> {
+  const url = new URL(RESIDENT_DASHBOARD_PATH, window.location.origin)
+  if (sessionId !== undefined) url.searchParams.set('session_id', sessionId)
+  if (options?.refresh === true) url.searchParams.set('refresh', '1')
+  const response = await request(url, {
+    cache: 'no-store',
+    ...(signal === undefined ? {} : { signal }),
+  })
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(`Resident Operator status failed (${String(response.status)}): ${message}`)
+  }
+  return await response.json() as DesktopResidentDashboard
+}
+
+/** Start one explicit owner-local native-subscription login flow. */
+export async function authenticateResidentOperator(
+  operatorId: string,
+  request: BrowserRequest = globalThis.fetch,
+): Promise<DesktopResidentAuthenticationResponse> {
+  const url = new URL(RESIDENT_DASHBOARD_PATH, window.location.origin)
+  url.searchParams.set('operator_id', operatorId)
+  const response = await request(url, { method: 'POST', cache: 'no-store' })
+  if (!response.ok) {
+    const body = await response.text()
+    let failure: DesktopResidentAuthenticationFailure | undefined
+    try {
+      const parsed = JSON.parse(body) as Partial<DesktopResidentAuthenticationFailure>
+      if (
+        parsed.error === 'RESIDENT_AUTHENTICATION_FAILED'
+        && (parsed.reason === 'auth_required'
+          || parsed.reason === 'network_unavailable'
+          || parsed.reason === 'callback_listener_missing')
+        && typeof parsed.message === 'string'
+      ) failure = parsed as DesktopResidentAuthenticationFailure
+    } catch {
+      // Non-JSON Host failures remain visible through the bounded response text.
+    }
+    if (failure !== undefined) {
+      throw new ResidentAuthenticationError(failure.message, failure.reason)
+    }
+    throw new Error(`Resident Operator login failed (${String(response.status)}): ${body}`)
+  }
+  return await response.json() as DesktopResidentAuthenticationResponse
+}
+
+/** Session-header action and local read-only overlay for persistent physical operators. */
+export function ResidentOperatorsPanel({ request }: { request: BrowserRequest }) {
+  const [open, setOpen] = useState(false)
+  const [selectedSessionId, setSelectedSessionId] = useState<string>()
+  const [selectedCommandId, setSelectedCommandId] = useState<string>()
+  const [dashboard, setDashboard] = useState<DesktopResidentDashboard>()
+  const [error, setError] = useState<string>()
+  const [authenticationFailure, setAuthenticationFailure] = useState<{
+    operatorId: string
+    reason: DesktopResidentAuthenticationFailureReason
+  }>()
+  const [authenticating, setAuthenticating] = useState<string>()
+
+  useEffect(() => {
+    if (!open) return
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = async (): Promise<void> => {
+      try {
+        const next = await loadResidentDashboard(selectedSessionId, controller.signal, request)
+        setDashboard(next)
+        setError(undefined)
+      } catch (cause) {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause))
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(() => { void refresh() }, 2_000)
+      }
+    }
+    void refresh()
+    return () => {
+      controller.abort()
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [open, request, selectedSessionId])
+
+  useEffect(() => {
+    if (!open || dashboard === undefined) return
+    const selectionExists = dashboard.sessions.some(session => session.sessionId === selectedSessionId)
+    if (!selectionExists) setSelectedSessionId(dashboard.sessions[0]?.sessionId)
+  }, [dashboard, open, selectedSessionId])
+
+  useEffect(() => {
+    if (!open || dashboard === undefined) return
+    const selectedExists = dashboard.activities.some(activity => activity.commandId === selectedCommandId)
+    if (!selectedExists) setSelectedCommandId(dashboard.activities[0]?.commandId)
+  }, [dashboard, open, selectedCommandId])
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('keydown', close)
+    return () => { document.removeEventListener('keydown', close) }
+  }, [open])
+
+  const running = dashboard?.activeWorkers ?? 0
+  const residentHosts = new Set(dashboard?.providers.filter(provider => provider.available).map(provider => provider.product) ?? []).size
+  const unavailable = dashboard?.providers.filter(provider => !provider.available).length ?? 0
+  const status = error !== undefined ? 'error' : unavailable > 0 ? 'warn' : running > 0 ? 'running' : 'idle'
+  const label = `物理算子：${String(residentHosts)} 个常驻宿主，${String(running)} 个 worker 运行中${error === undefined ? '' : '，状态不可用'}`
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const generatedTime = dashboard === undefined
+    ? undefined
+    : formatResidentTimestamp(dashboard.generatedAt, dashboard.generatedAt, timeZone)
+  const remoteFrontend = new URL(window.location.href).searchParams.get('dsh-deployment-role') === 'frontend'
+
+  const authenticate = async (operatorId: string): Promise<void> => {
+    setAuthenticating(operatorId)
+    setAuthenticationFailure(undefined)
+    setError(undefined)
+    try {
+      await authenticateResidentOperator(operatorId, request)
+      setDashboard(await loadResidentDashboard(selectedSessionId, undefined, request))
+    } catch (cause) {
+      if (cause instanceof ResidentAuthenticationError) {
+        setAuthenticationFailure({ operatorId, reason: cause.reason })
+      }
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setAuthenticating(undefined)
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="dshDesktopResidentAction"
+        data-surface="session-header"
+        data-status={status}
+        aria-label={label}
+        title={label}
+        onClick={() => { setOpen(true) }}
+      >
+        <span className="dshDesktopResidentDot" aria-hidden="true" />
+        <span>算子</span>
+      </button>
+      {open && createPortal(
+        <div className="dshDesktopResidentBackdrop" role="presentation" onMouseDown={() => { setOpen(false) }}>
+          <section
+            className="dshDesktopResidentPanel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Resident 物理算子"
+            onMouseDown={(event) => { event.stopPropagation() }}
+          >
+            <header>
+              <div>
+                <h2>Resident 物理算子</h2>
+                <p>这里展示持久任务，而不是底层 daemon 日志；DSH 重启后仍可继续查看。</p>
+                <small>本机时区：{timeZone} · {generatedTime === undefined ? '正在刷新' : `${generatedTime.absolute} 更新`}</small>
+              </div>
+              <button type="button" aria-label="关闭物理算子面板" onClick={() => { setOpen(false) }}>×</button>
+            </header>
+            {error !== undefined && <div className="dshDesktopResidentError" role="alert">{error}</div>}
+            <div className="dshDesktopResidentGrid">
+              <div className="dshDesktopResidentColumn">
+                <h3>可用算子</h3>
+                <div className="dshDesktopResidentHelp">
+                  <p><strong>{String(residentHosts)} 个常驻宿主 · {String(running)} 个活动 worker</strong></p>
+                  <p>每个原生宿主可承载多个隔离执行 lane；worker 数表示实际并行任务，不表示安装了多个应用。</p>
+                </div>
+                <div className="dshDesktopResidentProviders">
+                  {dashboard?.providers.map(provider => (
+                    <div key={provider.operatorId} className="dshDesktopResidentProvider" data-ok={provider.available || undefined}>
+                      <span className="dshDesktopResidentDot" />
+                      <div>
+                        <strong>{provider.displayName}</strong>
+                        <small>{provider.productVersion} · {String(provider.models.length)} 个模型</small>
+                        {!provider.available && provider.unavailableReason !== undefined && <small>{provider.unavailableReason}</small>}
+                        {authenticationFailure?.operatorId === provider.operatorId && (
+                          <small role="status">{authenticationFailureMessage(authenticationFailure.reason)}</small>
+                        )}
+                        {provider.quotaUnavailableReason !== undefined && <small>配额状态暂不可用，执行仍可继续</small>}
+                        {!provider.available && provider.unavailableCode === 'AUTH_MODE_MISMATCH' && provider.authentication === 'unqualified' && provider.supportsExplicitAuthentication && (
+                          remoteFrontend
+                            ? <small>请在服务器本机完成订阅登录</small>
+                            : <button
+                              type="button"
+                              className="dshDesktopResidentAuthenticate"
+                              disabled={authenticating !== undefined}
+                              onClick={() => { void authenticate(provider.operatorId) }}
+                            >
+                              {authenticating === provider.operatorId
+                                ? '正在打开登录…'
+                                : authenticationFailure?.operatorId === provider.operatorId
+                                  ? `重试登录 ${provider.displayName}`
+                                  : `登录 ${provider.displayName}`}
+                            </button>
+                        )}
+                      </div>
+                      <em>{provider.available ? '订阅可用' : '不可用'}</em>
+                    </div>
+                  )) ?? <p>正在连接 daemon…</p>}
+                </div>
+                <CliRuntimesSection
+                  request={request}
+                  localOwner={!remoteFrontend}
+                  onUpdated={() => {
+                    void loadResidentDashboard(selectedSessionId, undefined, request, { refresh: true })
+                      .then(setDashboard, (cause: unknown) => { setError(cause instanceof Error ? cause.message : String(cause)) })
+                  }}
+                />
+                <h3>如何调用</h3>
+                <div className="dshDesktopResidentHelp">
+                  <p>主模型选择旁的“协作”入口缺省为“智能协作”。主模型负责对话，并在非简单任务中决定是否调用 Codex、Claude Code 或启动 TaskGraph。</p>
+                  <code>智能协作：实现/调试/测试通常交给 Codex；架构/审查/长上下文通常交给 Claude Code；递归探索由 TaskGraph 的 RLM 节点策略完成。</code>
+                  <code>手动覆盖：可选择“仅主模型”或优先任一原生算子；短问答仍由主模型处理。</code>
+                  <p>原生模型和推理强度属于执行助手的高级偏好，不是右侧主聊天模型。通常保持“按任务推荐”即可。</p>
+                  <p>
+                    仓库修改、多轮任务和需要跨 DSH 重启继续的工作会优先使用 <code>mode=resident</code>。
+                    插件仍只依赖 <code>ctx.physicalOperators</code>，无需知道 daemon 或 CLI。
+                  </p>
+                </div>
+              </div>
+              <div className="dshDesktopResidentColumn dshDesktopResidentSessions">
+                <h3>持久任务</h3>
+                {(dashboard?.sessions.length ?? 0) === 0 && <p className="dshDesktopResidentEmpty">还没有 Resident 执行。</p>}
+                {dashboard?.sessions.map(session => (
+                  <SessionRow
+                    key={session.sessionId}
+                    session={session}
+                    selected={session.sessionId === selectedSessionId}
+                    onSelect={() => { setSelectedSessionId(session.sessionId) }}
+                  />
+                ))}
+              </div>
+              <div className="dshDesktopResidentColumn dshDesktopResidentEvents">
+                <h3>任务记录</h3>
+                {selectedSessionId === undefined
+                  ? <p className="dshDesktopResidentEmpty">选择一个持久任务查看记录。</p>
+                  : <>
+                    <ActivityTimeline
+                      activities={dashboard?.activities ?? []}
+                      generatedAt={dashboard?.generatedAt ?? new Date().toISOString()}
+                      timeZone={timeZone}
+                      selectedCommandId={selectedCommandId}
+                      onSelect={setSelectedCommandId}
+                    />
+                    <ResidentEventDetails
+                      events={dashboard?.events ?? []}
+                      commandId={selectedCommandId}
+                      generatedAt={dashboard?.generatedAt ?? new Date().toISOString()}
+                      timeZone={timeZone}
+                    />
+                  </>}
+              </div>
+            </div>
+          </section>
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+function authenticationFailureMessage(reason: DesktopResidentAuthenticationFailureReason): string {
+  switch (reason) {
+    case 'auth_required':
+      return '订阅登录尚未完成。系统不会自动重开登录；请确认后手动重试。'
+    case 'network_unavailable':
+      return '当前网络无法完成订阅登录。系统不会自动重试；网络恢复后请手动重试。'
+    case 'callback_listener_missing':
+      return '登录回调监听器已经结束或不可达。系统不会自动重开；请手动重试并完成新窗口。'
+  }
+}
+
+function SessionRow(props: { session: DesktopResidentSession; selected: boolean; onSelect: () => void }) {
+  const phase = progressLabel(props.session.latestEvent)
+  const taskLabel = props.session.latestTurn?.taskLabel ?? '历史任务（升级前未记录摘要）'
+  return (
+    <button
+      type="button"
+      className="dshDesktopResidentSession"
+      data-selected={props.selected || undefined}
+      data-health={props.session.health}
+      onClick={props.onSelect}
+      title={props.session.workspace}
+    >
+      <span className="dshDesktopResidentDot" />
+      <span>
+        <strong>{operatorLabel(props.session.operatorId)} · {taskLabel}</strong>
+        <small>{props.session.workspaceDisplay}</small>
+        <small>执行 lane · {shortLane(props.session.laneId)}</small>
+        <small>{profileLabel(props.session)}</small>
+      </span>
+      <span><em>{lifecycleLabel(props.session.lifecycle)}</em><small>{phase}</small></span>
+    </button>
+  )
+}
+
+function shortLane(laneId: string): string {
+  return laneId.length <= 28 ? laneId : `${laneId.slice(0, 27)}…`
+}
+
+function profileLabel(session: DesktopResidentSession): string {
+  const profile = session.executionProfile
+  if (profile === undefined) return '模型待首轮锁定'
+  const source = session.executionProfileSource === 'manual'
+    ? '手动'
+    : session.executionProfileSource === 'mixed'
+      ? '混合'
+      : '智能'
+  return `${profile.model} · ${profile.effort ?? '默认强度'} · ${source}`
+}
+
+function ActivityTimeline(props: {
+  activities: DesktopResidentActivity[]
+  generatedAt: string
+  timeZone: string
+  selectedCommandId: string | undefined
+  onSelect: (commandId: string) => void
+}) {
+  if (props.activities.length === 0) return <p className="dshDesktopResidentEmpty">还没有任务记录。</p>
+  return (
+    <ol>
+      {props.activities.slice(0, 20).map((activity) => {
+        const time = formatResidentTimestamp(activity.updatedAt, props.generatedAt, props.timeZone)
+        return <li key={activity.turnId}>
+          <button
+            type="button"
+            data-selected={activity.commandId === props.selectedCommandId || undefined}
+            onClick={() => { props.onSelect(activity.commandId) }}
+          >
+            <time title={time.absolute}>{time.relative}</time>
+            <strong>{activity.taskLabel}</strong>
+            <span>{activityLabel(activity)}</span>
+          </button>
+        </li>
+      })}
+    </ol>
+  )
+}
+
+const MAX_EVENT_TEXT = 240
+
+function safeEventText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/\b((?:api[_-]?key|token|secret|password)\s*=\s*)\S+/giu, '$1[REDACTED]')
+    .replace(/\b(Bearer\s+)\S+/giu, '$1[REDACTED]')
+  if (normalized === '') return undefined
+  return normalized.length > MAX_EVENT_TEXT
+    ? `${normalized.slice(0, MAX_EVENT_TEXT - 1)}…`
+    : normalized
+}
+
+function eventCommandId(event: DesktopResidentEvent): string | undefined {
+  return typeof event.data.commandId === 'string' ? event.data.commandId : undefined
+}
+
+function residentEventDetails(event: DesktopResidentEvent): { readonly title: string; readonly detail?: string; readonly state?: 'warn' | 'error' } {
+  if (event.type === 'turn.observation') {
+    switch (event.data.kind) {
+      case 'public-output': {
+        const detail = safeEventText(event.data.preview)
+        return { title: '公开输出', ...(detail === undefined ? {} : { detail }) }
+      }
+      case 'tool-started': return { title: `工具开始 · ${safeEventText(event.data.toolName) ?? '原生工具'}` }
+      case 'tool-completed': return { title: `工具完成 · ${safeEventText(event.data.toolName) ?? '原生工具'}` }
+      case 'approval-required': {
+        const detail = safeEventText(event.data.preview)
+        return {
+          title: `需要批准 · ${safeEventText(event.data.approvalKind) ?? '原生权限'}`,
+          ...(detail === undefined ? {} : { detail }),
+          state: 'warn',
+        }
+      }
+      case 'usage-updated': {
+        const usage = typeof event.data.usage === 'object' && event.data.usage !== null
+          ? event.data.usage as Record<string, unknown>
+          : undefined
+        const values = [
+          typeof usage?.inputTokens === 'number' ? `输入 ${String(usage.inputTokens)}` : undefined,
+          typeof usage?.outputTokens === 'number' ? `输出 ${String(usage.outputTokens)}` : undefined,
+        ].filter((value): value is string => value !== undefined)
+        return { title: values.length === 0 ? '用量更新' : `用量更新 · ${values.join(' · ')}` }
+      }
+      default: return { title: '原生状态更新' }
+    }
+  }
+  if (event.type === 'turn.progress') return { title: `阶段 · ${progressPhaseLabel(safeEventText(event.data.phase) ?? '')}` }
+  if (event.type === 'turn.failed' || event.type === 'turn.indeterminate') return { title: event.type === 'turn.failed' ? '任务失败' : '状态待确认', state: 'error' }
+  return { title: progressLabel(event) }
+}
+
+function ResidentEventDetails(props: {
+  events: DesktopResidentEvent[]
+  commandId: string | undefined
+  generatedAt: string
+  timeZone: string
+}) {
+  const visible = props.commandId === undefined
+    ? props.events.slice(-20)
+    : props.events.filter(event => eventCommandId(event) === props.commandId)
+  if (visible.length === 0) return <p className="dshDesktopResidentEmpty">选择一条任务以展开安全的结构化进度。</p>
+  return (
+    <details className="dshDesktopResidentTrace" open>
+      <summary>结构化执行轨迹 · {String(visible.length)} 条</summary>
+      <ol>
+        {visible.map((event) => {
+          const time = formatResidentTimestamp(event.time, props.generatedAt, props.timeZone)
+          const view = residentEventDetails(event)
+          return <li key={event.sequence} data-state={view.state}>
+            <time title={time.absolute}>{time.relative}</time>
+            <div><strong>{view.title}</strong>{view.detail !== undefined && <p>{view.detail}</p>}</div>
+          </li>
+        })}
+      </ol>
+    </details>
+  )
+}
+
+function activityLabel(activity: DesktopResidentActivity): string {
+  if (activity.status === 'running' && activity.phase !== undefined) {
+    return progressPhaseLabel(activity.phase)
+  }
+  return ({
+    queued: '等待启动',
+    running: '正在执行',
+    completed: '已完成',
+    interrupted: '已中断，可继续或重置',
+    failed: '执行失败',
+    indeterminate: '状态待人工确认，未自动重放',
+  } as const)[activity.status]
+}
+
+function progressLabel(event: DesktopResidentEvent | undefined): string {
+  if (event === undefined) return '等待执行'
+  const phase = typeof event.data.phase === 'string' ? event.data.phase : undefined
+  if (phase !== undefined) {
+    return progressPhaseLabel(phase)
+  }
+  return ({
+    'session.created': '会话已创建',
+    'turn.accepted': '任务已接收',
+    'turn.running': '任务已启动',
+    'turn.settled': '任务已完成',
+    'turn.failed': '任务失败',
+    'turn.indeterminate': '结果待人工确认',
+  } as Record<string, string>)[event.type] ?? '状态已更新'
+}
+
+function progressPhaseLabel(phase: string): string {
+  return ({
+    connecting: '正在连接原生产品',
+    session_ready: '原生会话已接通',
+    reasoning: '正在推理与执行',
+    tool_activity: '正在使用工具',
+    finalizing: '正在整理结果',
+  } as Record<string, string>)[phase] ?? '正在执行'
+}
+
+function operatorLabel(operatorId: string): string {
+  return operatorId === 'claude-code'
+    ? 'Claude Code'
+    : operatorId === 'codex'
+      ? 'Codex'
+      : operatorId
+}
+
+function lifecycleLabel(lifecycle: DesktopResidentSession['lifecycle']): string {
+  return ({
+    starting: '启动中',
+    idle: '空闲',
+    running: '运行中',
+    draining: '收尾中',
+    stopped: '已停止',
+  } as const)[lifecycle]
+}

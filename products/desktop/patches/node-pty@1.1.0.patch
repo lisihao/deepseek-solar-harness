@@ -1,0 +1,30 @@
+diff --git a/lib/unixTerminal.js b/lib/unixTerminal.js
+index 26445e8..d5ceaae 100644
+--- a/lib/unixTerminal.js
++++ b/lib/unixTerminal.js
+@@ -28,8 +28,8 @@ var native = utils_1.loadNativeModule('pty');
+ var pty = native.module;
+ var helperPath = native.dir + '/spawn-helper';
+ helperPath = path.resolve(__dirname, helperPath);
+-helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
+-helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++helperPath = helperPath.replace('app.asar' + path.sep, 'app.asar.unpacked' + path.sep);
++helperPath = helperPath.replace('node_modules.asar' + path.sep, 'node_modules.asar.unpacked' + path.sep);
+ var DEFAULT_FILE = 'sh';
+ var DEFAULT_NAME = 'xterm';
+ var DESTROY_SOCKET_TIMEOUT_MS = 200;
+diff --git a/src/unixTerminal.ts b/src/unixTerminal.ts
+index 6fe57b8..8387bb9 100644
+--- a/src/unixTerminal.ts
++++ b/src/unixTerminal.ts
+@@ -16,8 +16,8 @@ const native = loadNativeModule('pty');
+ const pty: IUnixNative = native.module;
+ let helperPath = native.dir + '/spawn-helper';
+ helperPath = path.resolve(__dirname, helperPath);
+-helperPath = helperPath.replace('app.asar', 'app.asar.unpacked');
+-helperPath = helperPath.replace('node_modules.asar', 'node_modules.asar.unpacked');
++helperPath = helperPath.replace('app.asar' + path.sep, 'app.asar.unpacked' + path.sep);
++helperPath = helperPath.replace('node_modules.asar' + path.sep, 'node_modules.asar.unpacked' + path.sep);
+ 
+ const DEFAULT_FILE = 'sh';
+ const DEFAULT_NAME = 'xterm';

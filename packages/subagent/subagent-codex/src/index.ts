@@ -14,6 +14,7 @@ import {
   NO_START_CAPABILITIES,
   resolveChildCwd,
   type ResolvedSubagentStartRequest,
+  type SubagentAuthentication,
   type SubagentCapabilities,
   type SubagentProvider,
 } from '@deepseek-ai/dsh-subagent'
@@ -22,6 +23,20 @@ import {
   startCodexRun,
   type CodexRunSpec,
 } from './run.ts'
+
+export {
+  CODEX_APP_SERVER_METHODS,
+  CodexAppServerWire,
+  CodexApprovalRequiredError,
+  type CodexAppServerExecutionBoundary,
+  type CodexAppServerExecutionProfile,
+  type CodexAppServerModel,
+  type CodexAppServerRateLimit,
+  type CodexAppServerRateLimitWindow,
+  type CodexDynamicToolCall,
+  type CodexDynamicToolResult,
+  type CodexDynamicToolSpec,
+} from './wire.ts'
 
 export const name = 'subagent-codex'
 export const inject = ['subagents', 'subprocess']
@@ -46,13 +61,20 @@ type ResolvedConfig = Required<Config>
 
 class CodexProvider implements SubagentProvider {
   readonly name = 'codex'
+  readonly authentication: SubagentAuthentication
   readonly capabilities: SubagentCapabilities = NO_START_CAPABILITIES
   readonly inheritsParentContext = false
 
   constructor(
     private readonly ctx: Context,
     private readonly config: ResolvedConfig,
-  ) {}
+  ) {
+    this.authentication = Object.freeze({
+      mode: Object.keys(config.env).length === 0
+        ? 'native-subscription'
+        : 'explicit-environment',
+    })
+  }
 
   start(request: ResolvedSubagentStartRequest) {
     const parentCwd = request.parent.session.header.cwd

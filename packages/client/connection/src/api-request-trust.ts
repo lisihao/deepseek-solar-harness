@@ -121,3 +121,26 @@ export function isTrustedApiRequest(request: ApiTrustRequest, trustedHosts: read
     return false
   }
 }
+
+/**
+ * Whether a request is the local owner reaching the API over a loopback TCP
+ * connection. Host remains the DNS-rebinding fence; the peer address is the
+ * unforgeable authentication fact. A remote caller that writes
+ * `Host: localhost` by hand must never acquire loopback authority.
+ * @param request - request headers checked by the browser-trust fence.
+ * @param remoteAddress - TCP peer address supplied by the Node transport.
+ * @returns true only when both the observed peer and HTTP authority are loopback.
+ */
+export function isLoopbackApiRequest(
+  request: ApiTrustRequest,
+  remoteAddress: string | undefined,
+): boolean {
+  return isLoopbackPeerAddress(remoteAddress) && isTrustedApiRequest(request, [])
+}
+
+function isLoopbackPeerAddress(value: string | undefined): boolean {
+  if (value === undefined) return false
+  if (value === '::1') return true
+  const ipv4 = value.startsWith('::ffff:') ? value.slice('::ffff:'.length) : value
+  return isLoopbackHostname(ipv4)
+}

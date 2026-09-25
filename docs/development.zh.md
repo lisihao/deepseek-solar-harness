@@ -41,6 +41,10 @@ pnpm run typecheck
 
 ## 贡献者参考
 
+### 开发主机
+
+DSH 的开发、测试、构建和提交在 MacBook 的 `/Users/sihaoli/Projects` 下隔离 worktree 中执行。先将身份明确的远端源码贡献合入该本地基线，再继续开发；保留已有 worktree 与已接受源码的证据。生成的运行目录不提供开发改动。[monorepo 决策](../.agents/notes/implemented/process/2026-08-17-solar-monorepo-p0-p2.md)说明该归属。
+
 ### TypeScript 项目布局
 
 仓库使用相互隔离的 Host 与 Client aggregate。普通包只登记进其中一个 aggregate；Host 包进入 `tsconfig.host.json`，Client 包进入 `tsconfig.client.json`。

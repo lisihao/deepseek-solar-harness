@@ -9,7 +9,11 @@ import { spawn } from 'node:child_process'
 import { availableParallelism } from 'node:os'
 import { resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { COVERAGE_EXEMPT_ENV, coverageExemptHeavySuites } from './coverage-exempt.ts'
+import {
+  COVERAGE_EXEMPT_ENV,
+  coverageExemptParallelSuites,
+  coverageExemptTailSuites,
+} from './coverage-exempt.ts'
 
 /** A named aggregate exposed by the gate runner. */
 export type Mode =
@@ -27,6 +31,7 @@ export type Mode =
   | 'node-compat'
   | 'check-all'
   | 'doc-sync'
+  | 'doc-sync:contracts-ready'
 
 type GateResultStatus = 'passed' | 'failed' | 'skipped'
 type GateState = 'pending' | 'running' | GateResultStatus
@@ -112,10 +117,11 @@ function parseMode(raw: string | undefined): Mode {
     case 'node-compat':
     case 'check-all':
     case 'doc-sync':
+    case 'doc-sync:contracts-ready':
       return raw
     default:
       throw new Error(
-        `run-gates: expected mode ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-observational | node-compat | check-all | doc-sync, got ${JSON.stringify(raw)}.`,
+        `run-gates: expected mode ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-observational | node-compat | check-all | doc-sync | doc-sync:contracts-ready, got ${JSON.stringify(raw)}.`,
       )
   }
 }
@@ -135,7 +141,7 @@ export function defaultConcurrency(
   if (selectedMode === 'ci-consumers') return { workers: total, source: 'ci-consumers gate count' }
   // Local modes cap workers: several doc gates each build a full ts.Program,
   // so an uncapped default on a large host trades wall clock for memory blowups.
-  const localCap = selectedMode === 'check-all' || selectedMode === 'doc-sync'
+  const localCap = selectedMode === 'check-all' || selectedMode === 'doc-sync' || selectedMode === 'doc-sync:contracts-ready'
   const modeLimit = localCap ? Math.min(4, available) : available
   return {
     workers: Math.min(total, modeLimit),
@@ -228,7 +234,7 @@ export function gatesForMode(selected: Mode): Gate[] {
         pnpmScript('duplication', 'duplication'),
         snapshotGate(),
         pnpmScript('build', 'build'),
-        pnpmScript('build:web', 'build:web'),
+        desktopVendorBuildGate(),
         ...hygieneLeafGates({ artifactNeeds: ['build'] }),
         ...docSyncLeafGates({
           docTypecheckNeeds: ['build'],
@@ -239,6 +245,11 @@ export function gatesForMode(selected: Mode): Gate[] {
       ]
     case 'doc-sync':
       return docSyncLeafGates()
+    case 'doc-sync:contracts-ready':
+      return docSyncLeafGates({
+        docTypecheckEnv: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },
+        docTypecheckScript: 'doc-typecheck:contracts-ready',
+      })
   }
 }
 
@@ -279,6 +290,7 @@ function ciPrimaryGates(): Gate[] {
       needs: ['build'],
     }),
     builtPackageInvariantsGate(['build']),
+    desktopVendorBuildGate(),
     builtBinSmokeGate(),
   ]
 }
@@ -380,6 +392,7 @@ function ciArtifactGates(): Gate[] {
       needs: ['build'],
     }),
     builtPackageInvariantsGate(['build']),
+    desktopVendorBuildGate(),
     builtBinSmokeGate(),
   ]
 }
@@ -396,7 +409,6 @@ function ciConsumerGates(): Gate[] {
       label: 'lint and duplication',
       needs: validatedBuild,
     }),
-    snapshotGate(validatedBuild),
     webSnapshotGate(validatedBuild),
     pnpmScript('doc-typecheck', 'doc-typecheck:contracts-ready', {
       needs: validatedBuild,
@@ -416,6 +428,13 @@ function webSnapshotGate(needs: string[]): Gate {
     displayCommand: 'DSH_SNAPSHOT=replay pnpm run test:web:built',
     env: { DSH_SNAPSHOT: 'replay' },
     needs,
+  })
+}
+
+function desktopVendorBuildGate(): Gate {
+  return pnpmScript('desktop-vendor-build', 'verify-desktop-vendor-build', {
+    label: 'Desktop vendor build closure',
+    needs: ['build'],
   })
 }
 
@@ -475,12 +494,14 @@ function lintGate(options: { needs?: string[] } = {}): Gate {
 // under v8 instrumentation while contributing nothing the thresholds need
 // (membership rules in scripts/coverage-exempt.ts).
 //
-// DSH_COVERAGE_MAX_WORKERS is the lane's worker budget, so the two parallel
+// DSH_COVERAGE_MAX_WORKERS is the lane's worker budget, so the two primary
 // gates split it instead of each claiming it whole (the failover pool's
 // 8 x 6-instance bound assumes one lane never exceeds its value). The exempt
-// gate's wall clock is dominated by its longest single file, so it takes the
-// small share. A budget of 1 gives each gate 1 worker; lanes that need a
-// strict total of one (the serial reference jobs) also set
+// parallel gate's wall clock is dominated by its longest single file, so it
+// takes the small share. The responsiveness-contract tail waits for both
+// primary gates and therefore does not add to their concurrent worker budget.
+// A budget of 1 gives each primary gate 1 worker; lanes that need a strict
+// total of one (the serial reference jobs) also set
 // DSH_GATE_CONCURRENCY=1, which keeps the gates from overlapping at all.
 function coverageWorkerArgs(): { instrumented: string[]; exempt: string[] } {
   const [flag] = positiveIntArg('DSH_COVERAGE_MAX_WORKERS', '--maxWorkers')
@@ -509,10 +530,19 @@ function coverageGates(): Gate[] {
     pnpmExec('coverage-exempt-heavy', [
       'vitest',
       'run',
-      ...coverageExemptHeavySuites.map(suite => suite.filter),
+      ...coverageExemptParallelSuites.map(suite => suite.filter),
       ...workers.exempt,
     ], {
       label: 'test:coverage-exempt-heavy',
+    }),
+    pnpmExec('coverage-exempt-tail', [
+      'vitest',
+      'run',
+      ...coverageExemptTailSuites.map(suite => suite.filter),
+      ...workers.exempt,
+    ], {
+      label: 'test:coverage-exempt-tail',
+      needs: ['coverage', 'coverage-exempt-heavy'],
     }),
   ]
 }

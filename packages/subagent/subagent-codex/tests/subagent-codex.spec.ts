@@ -190,12 +190,12 @@ function runSpec(
   }
 }
 
-async function initializeWire(): Promise<{
+async function initializeWire(approvalBehavior: 'decline' | 'require' = 'decline'): Promise<{
   readonly child: FakeChild
   readonly wire: CodexAppServerWire
 }> {
   const child = fakeChild()
-  const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!)
+  const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!, approvalBehavior)
   wire.start()
   const initializing = wire.initialize(new AbortController().signal)
   const initialize = await child.peer.nextMethod('initialize')
@@ -293,6 +293,7 @@ describe('task admission and package contracts', () => {
     const provider = ctx.subagents.getProvider('codex')!
     expect(provider).toMatchObject({
       name: 'codex',
+      authentication: { mode: 'native-subscription' },
       capabilities: {
         outputSchema: false,
         depthLimit: false,
@@ -304,6 +305,14 @@ describe('task admission and package contracts', () => {
     expect(ctx.subagents.list()).toEqual(['codex'])
     await fiber.dispose()
     expect(ctx.subagents.list()).toEqual([])
+
+    const explicitFiber = await ctx.plugin(codex, {
+      env: { OPENAI_API_KEY: 'test-only-key' },
+    })
+    expect(ctx.subagents.getProvider('codex')).toMatchObject({
+      authentication: { mode: 'explicit-environment' },
+    })
+    await explicitFiber.dispose()
 
     for (const disposeGraceMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       await expect(ctx.plugin(codex, { disposeGraceMs }))
@@ -423,14 +432,383 @@ describe('CodexAppServerWire', () => {
       agentMessage('unphased', null),
       agentMessage('first final', 'final_answer'),
       agentMessage('last final', 'final_answer'),
+      {
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: 'thread-1', turnId: 'turn-1',
+          tokenUsage: {
+            total: {
+              totalTokens: 180, inputTokens: 150, cachedInputTokens: 90,
+              cacheWriteInputTokens: 3, outputTokens: 30, reasoningOutputTokens: 10,
+            },
+            last: {
+              totalTokens: 48, inputTokens: 40, cachedInputTokens: 12,
+              cacheWriteInputTokens: 2, outputTokens: 8, reasoningOutputTokens: 3,
+            },
+            modelContextWindow: 258_400,
+          },
+        },
+      },
       turnCompleted('completed'),
     )
     await expect(result).resolves.toEqual({
       output: [{ type: 'text', text: 'last final' }],
       stopReason: 'completed',
+      usage: {
+        inputTokens: 28,
+        outputTokens: 8,
+        cacheReadInputTokens: 12,
+        cacheWriteInputTokens: 2,
+      },
     })
     expect(wire.collectOutput()).toEqual([{ type: 'text', text: 'last final' }])
     wire.close()
+    wire.close()
+  })
+
+  it('keeps an early item when turn/start response follows turn notifications', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.send(
+      agentMessage('early final', 'final_answer'),
+      { method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-1' } } },
+      { id: turnStart.id, result: { turn: { id: 'turn-1' } } },
+      turnCompleted('completed'),
+    )
+    await expect(result).resolves.toEqual({
+      output: [{ type: 'text', text: 'early final' }],
+      stopReason: 'completed',
+    })
+    wire.close()
+  })
+
+  it('queues the terminal notification until turn/start establishes its id', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.send(
+      { method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-1' } } },
+      agentMessage('terminal-ordered final', 'final_answer'),
+      turnCompleted('completed'),
+    )
+    await nextTask()
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await expect(result).resolves.toEqual({
+      output: [{ type: 'text', text: 'terminal-ordered final' }],
+      stopReason: 'completed',
+    })
+    wire.close()
+  })
+
+  it('keeps a late item before the authoritative terminal notification', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(agentMessage('late final', 'final_answer'))
+    child.peer.send(turnCompleted('completed'))
+    await expect(result).resolves.toEqual({
+      output: [{ type: 'text', text: 'late final' }],
+      stopReason: 'completed',
+    })
+    wire.close()
+  })
+
+  it('keeps final_answer precedence over a later unphased message', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(
+      agentMessage('explicit final', 'final_answer'),
+      agentMessage('unphased fallback', null),
+      turnCompleted('completed'),
+    )
+    await expect(result).resolves.toEqual({
+      output: [{ type: 'text', text: 'explicit final' }],
+      stopReason: 'completed',
+    })
+    wire.close()
+  })
+
+  it('rejects a completed turn that has commentary but no public answer', async () => {
+    const { child, wire } = await initializeWire()
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(agentMessage('progress only', 'commentary'), turnCompleted('completed'))
+    await expect(result).rejects.toThrow('without a final answer')
+    wire.close()
+  })
+
+  it('resets output and turn association state for consecutive turns', async () => {
+    const { child, wire } = await initializeWire()
+    const first = wire.runTurn(['first task'], new AbortController().signal)
+    const firstStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(firstStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(
+      agentMessage('first final', 'final_answer'),
+      {
+        method: 'thread/tokenUsage/updated',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          tokenUsage: { last: { inputTokens: 3, cachedInputTokens: 1, outputTokens: 2 } },
+        },
+      },
+      turnCompleted('completed'),
+    )
+    await expect(first).resolves.toEqual({
+      output: [{ type: 'text', text: 'first final' }],
+      stopReason: 'completed',
+      usage: {
+        inputTokens: 2,
+        outputTokens: 2,
+        cacheReadInputTokens: 1,
+        cacheWriteInputTokens: 0,
+      },
+    })
+
+    const second = wire.runTurn(['second task'], new AbortController().signal)
+    const secondStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(secondStart, { turn: { id: 'turn-2' } })
+    await nextTask()
+    expect(wire.currentTurnId).toBe('turn-2')
+    child.peer.send(agentMessage('second unphased', null, 'turn-2'), turnCompleted('completed', 'turn-2'))
+    await nextTask()
+    expect(wire.collectOutput()).toEqual([{ type: 'text', text: 'second unphased' }])
+    await expect(second).resolves.toEqual({
+      output: [{ type: 'text', text: 'second unphased' }],
+      stopReason: 'completed',
+    })
+    expect(wire.currentTurnId).toBe('turn-2')
+    wire.close()
+  })
+
+  it('normalizes only public text, tool lifecycle, approval, and usage for Resident trace observers', async () => {
+    const child = fakeChild()
+    const observations: unknown[] = []
+    const wire = new CodexAppServerWire(
+      child.handle.stdout!, child.handle.stdin!, 'decline', [], undefined,
+      (observation) => { observations.push(observation) },
+    )
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    child.peer.respond(await child.peer.nextMethod('initialize'), { userAgent: 'codex-cli 0.151.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+    const starting = wire.startThread('/workspace', new AbortController().signal, false)
+    child.peer.respond(await child.peer.nextMethod('thread/start'), { thread: { id: 'thread-1', ephemeral: false } })
+    await starting
+    const result = wire.runTurn(['trace task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send(
+      { method: 'item/started', params: { threadId: 'thread-1', turnId: 'turn-1', item: { type: 'commandExecution', command: 'cat .env' } } },
+      { method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: { type: 'commandExecution', aggregatedOutput: 'DATABASE_PASSWORD=never-persist-this' } } },
+      agentMessage('Visible implementation update.', 'commentary'),
+      { method: 'thread/tokenUsage/updated', params: {
+        threadId: 'thread-1', turnId: 'turn-1', tokenUsage: { last: { inputTokens: 8, cachedInputTokens: 3, outputTokens: 2 } },
+      } },
+      { id: 'approval', method: 'item/fileChange/requestApproval', params: {
+        threadId: 'thread-1', turnId: 'turn-1', availableDecisions: ['decline'],
+      } },
+    )
+    await child.peer.nextResponse('approval')
+    child.peer.send(agentMessage('Final answer.', 'final_answer'), turnCompleted('completed'))
+    await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    expect(observations).toEqual([
+      { kind: 'tool-started', toolName: 'commandExecution' },
+      { kind: 'tool-completed', toolName: 'commandExecution' },
+      { kind: 'public-output', preview: 'Visible implementation update.' },
+      { kind: 'usage-updated', usage: { inputTokens: 5, outputTokens: 2, cacheReadInputTokens: 3, cacheWriteInputTokens: 0 } },
+      { kind: 'approval-required', approvalKind: 'item/fileChange/requestApproval' },
+      { kind: 'public-output', preview: 'Final answer.' },
+    ])
+    expect(JSON.stringify(observations)).not.toContain('DATABASE_PASSWORD')
+    wire.close()
+  })
+
+  it('registers experimental dynamic tools and returns host tool results to the active turn', async () => {
+    const child = fakeChild()
+    const tools = [{
+      type: 'function' as const,
+      name: 'typescript_repl',
+      description: 'Execute one persistent TypeScript cell',
+      inputSchema: { type: 'object', properties: { code: { type: 'string' } }, required: ['code'] },
+    }]
+    const handler = vi.fn(async () => ({ success: true, text: '{"value":42}' }))
+    const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!, 'require', tools, handler)
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    expect(initialize.params).toMatchObject({ capabilities: { experimentalApi: true } })
+    child.peer.respond(initialize, { userAgent: 'codex-cli 0.147.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+
+    const starting = wire.startThread('/workspace', new AbortController().signal, false)
+    const threadStart = await child.peer.nextMethod('thread/start')
+    expect(threadStart.params).toEqual({ cwd: '/workspace', ephemeral: false, dynamicTools: tools })
+    child.peer.respond(threadStart, { thread: { id: 'thread-1', ephemeral: false } })
+    await starting
+
+    const result = wire.runTurn(['use the repl'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send({
+      id: 'tool-request-1',
+      method: 'item/tool/call',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1', namespace: null,
+        tool: 'typescript_repl', arguments: { code: '40 + 2' },
+      },
+    })
+    expect(await child.peer.nextResponse('tool-request-1')).toEqual({
+      jsonrpc: '2.0',
+      id: 'tool-request-1',
+      result: { success: true, contentItems: [{ type: 'inputText', text: '{"value":42}' }] },
+    })
+    expect(handler).toHaveBeenCalledWith({
+      threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1',
+      tool: 'typescript_repl', arguments: { code: '40 + 2' },
+    })
+    child.peer.send(agentMessage('done', 'final_answer'), turnCompleted('completed'))
+    await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    wire.close()
+  })
+
+  it('reads the native model catalog and sends explicit model and effort overrides', async () => {
+    const child = fakeChild()
+    const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!)
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    child.peer.respond(initialize, { userAgent: 'codex-cli 0.147.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+
+    const listing = wire.listModels(new AbortController().signal)
+    const modelList = await child.peer.nextMethod('model/list')
+    expect(modelList.params).toEqual({ limit: 100, includeHidden: false })
+    child.peer.respond(modelList, {
+      data: [{
+        id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test', description: 'Fixture',
+        hidden: false, isDefault: true, defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
+      }],
+    })
+    await expect(listing).resolves.toEqual([expect.objectContaining({ model: 'gpt-test', isDefault: true })])
+
+    const profile = { model: 'gpt-test', effort: 'medium' }
+    const starting = wire.startThread('/workspace', new AbortController().signal, false, profile, 'DSH system')
+    const threadStart = await child.peer.nextMethod('thread/start')
+    expect(threadStart.params).toEqual({
+      cwd: '/workspace', ephemeral: false, model: 'gpt-test', developerInstructions: 'DSH system',
+    })
+    child.peer.respond(threadStart, { thread: { id: 'thread-profile', ephemeral: false } })
+    await starting
+
+    const result = wire.runTurn(['task'], new AbortController().signal, undefined, profile)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    expect(turnStart.params).toMatchObject({
+      threadId: 'thread-profile',
+      model: 'gpt-test',
+      effort: 'medium',
+    })
+    child.peer.respond(turnStart, { turn: { id: 'turn-profile' } })
+    child.peer.send(
+      agentMessage('profile result', 'final_answer', 'turn-profile', 'thread-profile'),
+      turnCompleted('completed', 'turn-profile', 'thread-profile'),
+    )
+    await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    wire.close()
+  })
+
+  it('compacts one resumed persistent thread in place through thread/compact/start', async () => {
+    const child = fakeChild()
+    const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!)
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    child.peer.respond(initialize, { userAgent: 'codex-cli 0.147.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+
+    const resuming = wire.resumeThread(
+      'thread-persistent', '/workspace', new AbortController().signal, undefined, 'DSH resumed system',
+      { approval: 'never', nativeEffects: 'read-only', environmentAccess: 'disabled' },
+    )
+    const threadResume = await child.peer.nextMethod('thread/resume')
+    expect(threadResume.params).toEqual({
+      threadId: 'thread-persistent', cwd: '/workspace', developerInstructions: 'DSH resumed system',
+      approvalPolicy: 'never', sandbox: 'read-only',
+    })
+    child.peer.respond(threadResume, { thread: { id: 'thread-persistent', ephemeral: false } })
+    await resuming
+    const compacting = wire.compactThread(new AbortController().signal)
+    const compact = await child.peer.nextMethod('thread/compact/start')
+    expect(compact.params).toEqual({ threadId: 'thread-persistent' })
+    child.peer.respond(compact, {})
+    await compacting
+    expect(wire.currentThreadId).toBe('thread-persistent')
+    wire.close()
+  })
+
+  it('seals the DSH tool execution boundary at thread and turn start', async () => {
+    const child = fakeChild()
+    const tools = [{
+      type: 'function' as const,
+      name: 'Bash',
+      description: 'Run through DSH.',
+      inputSchema: { type: 'object' },
+    }]
+    const wire = new CodexAppServerWire(child.handle.stdout!, child.handle.stdin!, 'decline', tools)
+    wire.start()
+    const initializing = wire.initialize(new AbortController().signal)
+    const initialize = await child.peer.nextMethod('initialize')
+    child.peer.respond(initialize, { userAgent: 'codex-cli 0.151.0' })
+    await initializing
+    await child.peer.nextMethod('initialized')
+
+    const boundary = {
+      approval: 'never' as const,
+      nativeEffects: 'read-only' as const,
+      environmentAccess: 'disabled' as const,
+    }
+    const starting = wire.startThread(
+      '/workspace', new AbortController().signal, false, undefined, 'DSH authority', boundary,
+    )
+    const threadStart = await child.peer.nextMethod('thread/start')
+    expect(threadStart.params).toEqual({
+      cwd: '/workspace', ephemeral: false, developerInstructions: 'DSH authority', dynamicTools: tools,
+      approvalPolicy: 'never', sandbox: 'read-only', environments: [],
+    })
+    child.peer.respond(threadStart, { thread: { id: 'thread-dsh-tools', ephemeral: false } })
+    await starting
+
+    const result = wire.runTurn(['task'], new AbortController().signal, undefined, undefined, boundary)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    expect(turnStart.params).toMatchObject({
+      threadId: 'thread-dsh-tools',
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'readOnly', networkAccess: false },
+      environments: [],
+    })
+    expect(turnStart.params).not.toHaveProperty('sandbox')
+    child.peer.respond(turnStart, { turn: { id: 'turn-dsh-tools' } })
+    child.peer.send(
+      agentMessage('done', 'final_answer', 'turn-dsh-tools', 'thread-dsh-tools'),
+      turnCompleted('completed', 'turn-dsh-tools', 'thread-dsh-tools'),
+    )
+    await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
     wire.close()
   })
 
@@ -639,6 +1017,31 @@ describe('CodexAppServerWire', () => {
 
     child.peer.send(agentMessage('answer', 'final_answer'), turnCompleted('completed'))
     await expect(result).resolves.toMatchObject({ stopReason: 'completed' })
+    wire.close()
+  })
+
+  it('fails loud on native approval requests when a Resident caller requires out-of-band approval', async () => {
+    const { child, wire } = await initializeWire('require')
+    const result = wire.runTurn(['task'], new AbortController().signal)
+    const turnStart = await child.peer.nextMethod('turn/start')
+    child.peer.respond(turnStart, { turn: { id: 'turn-1' } })
+    await nextTask()
+    child.peer.send({
+      id: 'approval',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        availableDecisions: ['decline', 'cancel'],
+      },
+    })
+    expect(await child.peer.nextResponse('approval')).toMatchObject({
+      result: { decision: 'cancel' },
+    })
+    await expect(result).rejects.toMatchObject({
+      name: 'CodexApprovalRequiredError',
+      method: 'item/commandExecution/requestApproval',
+    })
     wire.close()
   })
 

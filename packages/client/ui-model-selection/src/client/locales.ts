@@ -27,6 +27,13 @@ export const zh = {
   'empty.models': '没有可用的模型。',
   'blocked.composer': '当前模型不可用，请先选择模型',
   'empty.efforts': '当前模型未提供推理等级。',
+  'menu.refresh': '刷新模型与算子',
+  'refresh.running': '正在从服务商和算子拉取最新列表…',
+  'refresh.added': '新增 {count} 个：{names}',
+  'refresh.none': '模型列表已是最新',
+  'refresh.directoryFailed': '模型目录刷新失败：{message}',
+  'refresh.failed': '{name} 刷新失败：{message}',
+  'refresh.note': '{name}：{message}',
 } satisfies Record<string, string>
 
 /** The model namespace key union. */
@@ -51,4 +58,11 @@ export const en = {
   'empty.models': 'No models available.',
   'blocked.composer': 'This model is unavailable — select one to continue',
   'empty.efforts': 'This model provides no reasoning effort levels.',
+  'menu.refresh': 'Refresh models and operators',
+  'refresh.running': 'Fetching the latest lists from providers and operators…',
+  'refresh.added': '{count} new: {names}',
+  'refresh.none': 'Model list is up to date',
+  'refresh.directoryFailed': 'Model directory refresh failed: {message}',
+  'refresh.failed': '{name} refresh failed: {message}',
+  'refresh.note': '{name}: {message}',
 } satisfies Record<ModelKey, string>

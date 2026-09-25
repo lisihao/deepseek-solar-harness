@@ -1,0 +1,32 @@
+# Keyless replay composition for the Debate ACP snapshot. It preserves the
+# normal ACP host and replaces only the parent model with the deterministic
+# transcript replay. The Debate Provider is a local fixture, so no external
+# operator, subscription, API key, or paid call is involved.
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - id: llm-deepseek
+        name: '@deepseek-ai/dsh-llm-deepseek'
+        disabled: true
+      # Reproduce a legacy Desktop Session that persisted the internal Debate
+      # host route as its primary model before that route was hidden from the
+      # generic model picker. The host adapter must self-admit this first turn
+      # by writing a durable dispatch; no preference event is pre-seeded.
+      - id: acp-agent
+        name: '@deepseek-ai/dsh-acp-demo'
+        config:
+          provider: dsh-debate-host
+          model: debate
+          persistenceRoot: !!js process.env.DSH_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
+          persistenceCompression: none
+          workspaceContext:
+            maxBytes: 65536
+          persona: |
+            You are a deterministic Debate host fixture. Your working directory is {{cwd}}.
+      - insert:
+          - id: debate-fixture
+            name: './tests/fixtures/debate-loader.ts'
+          - id: tool-debate
+            name: '@deepseek-ai/dsh-tool-debate'

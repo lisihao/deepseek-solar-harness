@@ -7,7 +7,7 @@
 
 export type {
   ApiProxy, SessionsApi, SessionSearchItem, SessionSummary, PromptContentPart, HostApi, EventsApi, MuxFrame, HostFrame,
-  ApprovalResponsePayload, QuestionResponsePayload, HistoryEntry, ToolEventView,
+  ApprovalResponsePayload, QuestionResponsePayload, HistoryEntry, PhysicalOperatorTraceView, ToolEventView,
   DirectoryEntry, DirectoryListing,
   ResponseValue, WorkspaceApi, WorkspaceId, WorkspaceView,
   SkillsApi, SkillEntry,

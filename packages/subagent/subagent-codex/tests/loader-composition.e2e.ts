@@ -34,6 +34,7 @@ describe('Codex provider public Loader composition', () => {
       providers: ['codex'],
       provider: {
         name: 'codex',
+        authentication: { mode: 'native-subscription' },
         capabilities: {
           outputSchema: false,
           depthLimit: false,

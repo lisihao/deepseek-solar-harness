@@ -1,0 +1,384 @@
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  apply,
+  type PhysicalOperatorRoutingInjected,
+  changeOrchestrationExecutionMechanism,
+  orchestrationAutonomousModeLabel,
+  orchestrationExecutionMechanism,
+  orchestrationExecutionMechanismLabel,
+  orchestrationExecutionModeLabel,
+  physicalOperatorDashboardRefreshMs,
+  physicalOperatorEffortLabel,
+  physicalOperatorEffectiveExecutionLabel,
+  physicalOperatorEffectiveExecutionMechanism,
+  physicalOperatorRoutingDescription,
+  physicalOperatorRoutingLabel,
+  physicalOperatorRoutingSummary,
+  physicalOperatorStrategyPanelPosition,
+} from '../src/client/index.ts'
+import {
+  authenticateResidentOperator,
+  ResidentAuthenticationError,
+} from '../src/client/ResidentOperatorsPanel.tsx'
+
+describe('physical operator client plugin', () => {
+  it('starts authentication only through an explicit owner action', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:13080' } })
+    let requestedUrl = ''
+    const request = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      requestedUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : ''
+      return new Response(JSON.stringify({
+        provider: { operatorId: 'claude-code', available: true },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+
+    try {
+      await expect(authenticateResidentOperator('claude-code', request)).resolves.toMatchObject({
+        provider: { operatorId: 'claude-code', available: true },
+      })
+      expect(request).toHaveBeenCalledOnce()
+      expect(requestedUrl).toContain('operator_id=claude-code')
+      expect(request.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', cache: 'no-store' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it.each([
+    'auth_required',
+    'network_unavailable',
+    'callback_listener_missing',
+  ] as const)('preserves the structured %s login reason for an explicit retry UI', async (reason) => {
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:13080' } })
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      error: 'RESIDENT_AUTHENTICATION_FAILED',
+      reason,
+      message: `login failed: ${reason}`,
+    }), { status: 503, headers: { 'content-type': 'application/json' } }))
+    try {
+      let failure: unknown
+      try {
+        await authenticateResidentOperator('claude-code', request)
+      } catch (cause: unknown) {
+        failure = cause
+      }
+      expect(failure).toBeInstanceOf(ResidentAuthenticationError)
+      expect(failure).toMatchObject({ reason, message: `login failed: ${reason}` })
+      expect(request).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('registers native and ChatGPT Web catalogs as model-menu refresh sources', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://127.0.0.1:13080' } })
+    const sources: Array<{ name: string; refresh: (sessionId: string) => Promise<string | undefined> }> = []
+    const disposers: Array<() => void> = []
+    const request = vi.fn<(input: URL, init?: RequestInit) => Promise<Response>>()
+    const ctx = {
+      effect: vi.fn((install: () => () => void, label: string) => { if (label.endsWith('model refresh')) disposers.push(install()) }),
+      get: (key: string) => key === 'connection' ? { request } : undefined,
+      inject: vi.fn((_services: readonly string[], install: (scope: ClientContext) => unknown) => install(ctx)),
+      modelDirectories: {
+        directoryFor: vi.fn(),
+        registerRefreshSource: vi.fn((source: (typeof sources)[number]) => {
+          sources.push(source)
+          return () => { sources.splice(sources.indexOf(source), 1) }
+        }),
+      },
+      remote: { commands: { execute: vi.fn() } },
+      slots: { inject: vi.fn(), register: vi.fn() },
+    } as unknown as ClientContext
+    try {
+      apply(ctx)
+      const native = sources.find(source => source.name === '原生算子')
+      const web = sources.find(source => source.name === 'ChatGPT Web')
+
+      request.mockResolvedValueOnce(Response.json({
+        providers: [
+          { displayName: 'Codex', available: true, models: [{}, {}, {}] },
+          { displayName: 'Claude Code', available: false, models: [] },
+        ],
+      }))
+      await expect(native?.refresh('s1')).resolves.toBe('Codex 3 个模型，Claude Code 不可用')
+      expect(request.mock.calls[0]?.[0].href).toContain('refresh=1')
+      expect(request.mock.calls[0]?.[0].href).toContain('session_id=s1')
+
+      request.mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      await expect(web?.refresh('s1')).resolves.toBeUndefined()
+      const webUrl = request.mock.calls[1]?.[0].href
+      expect(webUrl).toContain('/api/chatgpt-web?catalog=1&refresh=1&session_id=s1')
+      request.mockResolvedValueOnce(new Response('', { status: 404 }))
+      await expect(web?.refresh('s1')).resolves.toBe('未安装，已跳过')
+      request.mockResolvedValueOnce(new Response('', { status: 409 }))
+      await expect(web?.refresh('s1')).rejects.toThrow('正忙')
+      request.mockResolvedValueOnce(new Response('', { status: 502 }))
+      await expect(web?.refresh('s1')).rejects.toThrow('HTTP 502')
+
+      for (const dispose of disposers) dispose()
+      expect(sources).toEqual([])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('registers provider-neutral Resident and routing slots through Cordis services', async () => {
+    const registrations: Array<{
+      options: { id?: string; name?: string; inject?: (sessionId: string) => unknown }
+    }> = []
+    const execute = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { commandId: 'command-1', result: { kind: 'success' as const } },
+    })
+    const request = vi.fn()
+    const directory = {}
+    const refreshModels = vi.fn(async () => undefined)
+    const modelDirectories = { directoryFor: vi.fn(() => ({ store: directory, load: refreshModels })) }
+    const inject = vi.fn()
+    const ctx = {
+      effect: vi.fn(),
+      get: (key: string) => key === 'connection' ? { request } : undefined,
+      inject,
+      modelDirectories,
+      remote: { commands: { execute } },
+      slots: {
+        inject: vi.fn((_name: string, install: () => unknown) => install()),
+        register: vi.fn((options: { id?: string; name?: string; inject?: (sessionId: string) => unknown }) => {
+          registrations.push({ options })
+          return () => {}
+        }),
+      },
+    } as unknown as ClientContext
+    inject.mockImplementation((_services: readonly string[], install: (scope: ClientContext) => unknown) => install(ctx))
+
+    apply(ctx)
+
+    const resident = registrations.find(({ options }) => options.id === 'resident-physical-operators')
+    const routing = registrations.find(({ options }) => options.id === 'physical-operator-routing')
+    expect(resident?.options.name).toBe('conversation.session.header.actions')
+    expect(resident?.options.inject?.('session-1')).toEqual({ request })
+    expect(routing?.options.name).toBe('conversation.input.right')
+    const injected = routing?.options.inject?.('session-1') as Pick<
+      PhysicalOperatorRoutingInjected,
+      'directory' | 'refreshModels' | 'select' | 'selectProfile' | 'selectOrchestrationStrategy' | 'selectDebateMode'
+    >
+    expect(injected.directory).toBe(directory)
+    expect(modelDirectories.directoryFor).toHaveBeenCalledWith('session-1')
+    await injected.refreshModels()
+    expect(refreshModels).toHaveBeenCalledWith({ refresh: true })
+    await expect(injected.select('codex')).resolves.toBeNull()
+    await expect(injected.select('chatgpt-web')).resolves.toBeNull()
+    await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBeNull()
+    await expect(injected.selectOrchestrationStrategy(
+      'enabled', 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
+    )).resolves.toBeNull()
+    await expect(injected.selectDebateMode('enabled')).resolves.toBeNull()
+    expect(execute).toHaveBeenNthCalledWith(1, 'session-1', '/operator codex')
+    expect(execute).toHaveBeenNthCalledWith(2, 'session-1', '/operator chatgpt-web')
+    expect(execute).toHaveBeenNthCalledWith(3, 'session-1', '/operator-profile codex gpt-5.6-sol high')
+    expect(execute).toHaveBeenNthCalledWith(
+      4,
+      'session-1',
+      '/orchestration-strategy enabled enabled off balanced codex-sol luna-first',
+    )
+    expect(execute).toHaveBeenNthCalledWith(5, 'session-1', '/debate-mode enabled')
+
+    execute
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'command-error-1', result: { kind: 'error', text: 'operator rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'command-error-2', result: { kind: 'error', text: 'profile rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'command-error-3', result: { kind: 'error', text: 'strategy rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'command-error-4', result: { kind: 'error', text: 'debate rejected' } },
+      })
+    await expect(injected.select('codex')).resolves.toBe('operator rejected')
+    await expect(injected.selectProfile('codex', 'gpt-5.6-sol', 'high')).resolves.toBe('profile rejected')
+    await expect(injected.selectOrchestrationStrategy(
+      'enabled', 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
+    )).resolves.toBe('strategy rejected')
+    await expect(injected.selectDebateMode('enabled')).resolves.toBe('debate rejected')
+
+    execute.mockReset()
+    execute
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'transition-error-1', result: { kind: 'error', text: 'RLM rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'transition-success-1', result: { kind: 'success' } },
+      })
+    await expect(changeOrchestrationExecutionMechanism(
+      { rlm: 'enabled', debate: 'disabled' },
+      'debate',
+      mode => injected.selectOrchestrationStrategy(
+        mode, 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
+      ),
+      injected.selectDebateMode,
+    )).resolves.toBe('关闭 RLM失败：RLM rejected')
+    expect(execute).toHaveBeenCalledTimes(1)
+
+    execute.mockReset()
+    execute
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'transition-error-2', result: { kind: 'error', text: 'Debate rejected' } },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { commandId: 'transition-success-2', result: { kind: 'success' } },
+      })
+    await expect(changeOrchestrationExecutionMechanism(
+      { rlm: 'disabled', debate: 'enabled' },
+      'rlm',
+      mode => injected.selectOrchestrationStrategy(
+        mode, 'enabled', 'off', 'balanced', 'codex-sol', 'luna-first',
+      ),
+      injected.selectDebateMode,
+    )).resolves.toBe('关闭 Debate失败：Debate rejected')
+    expect(execute).toHaveBeenCalledTimes(1)
+  })
+
+  it('maps RLM and Debate preferences into one mutually exclusive execution selector', () => {
+    expect(orchestrationExecutionMechanism('auto', 'auto')).toBe('auto')
+    expect(orchestrationExecutionMechanism('auto', 'disabled')).toBe('auto')
+    expect(orchestrationExecutionMechanism('disabled', 'disabled')).toBe('standard')
+    expect(orchestrationExecutionMechanism('enabled', 'disabled')).toBe('rlm')
+    expect(orchestrationExecutionMechanism('disabled', 'enabled')).toBe('debate')
+    expect(orchestrationExecutionMechanismLabel('debate')).toBe('Debate（多 Agent 辩论）')
+    expect(physicalOperatorEffectiveExecutionMechanism('auto', 'enabled')).toBe('debate')
+    expect(physicalOperatorEffectiveExecutionMechanism('disabled', 'enabled')).toBe('debate')
+    expect(physicalOperatorEffectiveExecutionLabel('chatgpt-web', 'auto', 'enabled'))
+      .toBe('Debate（多 Agent 辩论）')
+    expect(physicalOperatorEffectiveExecutionLabel('chatgpt-web', 'auto', 'disabled'))
+      .toBe('ChatGPT 网页版')
+  })
+
+  it('closes the non-target mechanism before enabling the selected mechanism', async () => {
+    const calls: string[] = []
+    const saveRlm = vi.fn(async (mode: 'auto' | 'enabled' | 'disabled') => {
+      calls.push(`rlm:${mode}`)
+      return null
+    })
+    const saveDebate = vi.fn(async (mode: 'auto' | 'enabled' | 'disabled') => {
+      calls.push(`debate:${mode}`)
+      return null
+    })
+    await expect(changeOrchestrationExecutionMechanism(
+      { rlm: 'auto', debate: 'auto' },
+      'debate',
+      saveRlm,
+      saveDebate,
+    )).resolves.toBeNull()
+    expect(calls).toEqual(['rlm:disabled', 'debate:enabled'])
+
+    calls.length = 0
+    await expect(changeOrchestrationExecutionMechanism(
+      { rlm: 'disabled', debate: 'enabled' },
+      'rlm',
+      saveRlm,
+      saveDebate,
+    )).resolves.toBeNull()
+    expect(calls).toEqual(['debate:disabled', 'rlm:enabled'])
+
+    calls.length = 0
+    await expect(changeOrchestrationExecutionMechanism(
+      { rlm: 'disabled', debate: 'disabled' },
+      'auto',
+      saveRlm,
+      saveDebate,
+    )).resolves.toBeNull()
+    expect(calls).toEqual(['rlm:auto', 'debate:auto'])
+
+    calls.length = 0
+    await expect(changeOrchestrationExecutionMechanism(
+      { rlm: 'auto', debate: 'auto' },
+      'standard',
+      saveRlm,
+      saveDebate,
+    )).resolves.toBeNull()
+    expect(calls).toEqual(['debate:disabled', 'rlm:disabled'])
+  })
+
+  it('returns a failed transition step and allows the same selection to be retried', async () => {
+    const saveRlm = vi.fn()
+      .mockResolvedValueOnce('temporary host failure')
+      .mockResolvedValue(null)
+    const saveDebate = vi.fn().mockResolvedValue(null)
+    const current = { rlm: 'enabled' as const, debate: 'disabled' as const }
+
+    await expect(changeOrchestrationExecutionMechanism(
+      current,
+      'debate',
+      saveRlm,
+      saveDebate,
+    )).resolves.toBe('关闭 RLM失败：temporary host failure')
+    expect(saveDebate).not.toHaveBeenCalled()
+
+    await expect(changeOrchestrationExecutionMechanism(
+      current,
+      'debate',
+      saveRlm,
+      saveDebate,
+    )).resolves.toBeNull()
+    expect(saveDebate).toHaveBeenCalledWith('enabled')
+  })
+
+  it('keeps user-facing collaboration labels stable outside the Desktop product', () => {
+    expect(orchestrationExecutionModeLabel('auto')).toBe('自动（系统选择）')
+    expect(orchestrationExecutionModeLabel('enabled')).toBe('RLM（Prime 递归）')
+    expect(orchestrationExecutionModeLabel('disabled')).toBe('标准（单 Agent）')
+    expect(orchestrationAutonomousModeLabel('auto')).toBe('自动（按任务判断）')
+    expect(orchestrationAutonomousModeLabel('enabled')).toBe('自主闭环')
+    expect(orchestrationAutonomousModeLabel('disabled')).toBe('关闭')
+    expect(physicalOperatorRoutingLabel('auto')).toBe('智能协作')
+    expect(physicalOperatorRoutingLabel('codex')).toBe('优先 Codex')
+    expect(physicalOperatorRoutingSummary('claude-code')).toBe('Claude Code')
+    expect(physicalOperatorRoutingSummary('chatgpt-web')).toBe('ChatGPT 网页版')
+    expect(physicalOperatorRoutingLabel('chatgpt-web')).toBe('ChatGPT 网页订阅')
+    expect(physicalOperatorRoutingDescription('chatgpt-web')).toContain('不进入智能自动')
+    expect(physicalOperatorRoutingDescription('codex')).toContain('短问答仍由主模型处理')
+    expect(physicalOperatorEffortLabel('high')).toBe('高 · 复杂任务的深度推理')
+    expect(physicalOperatorEffortLabel('high', 'claude-code')).toBe('高 · Claude 深入思考')
+    expect(physicalOperatorEffortLabel('max', 'claude-code')).toBe('最大 · Claude 最大思考预算')
+    expect(physicalOperatorDashboardRefreshMs(false)).toBe(60_000)
+    expect(physicalOperatorDashboardRefreshMs(true)).toBe(10_000)
+  })
+
+  it('keeps the collaboration panel inside the viewport above, below, and beside a new-session composer', () => {
+    const viewport = { width: 1_440, height: 800 }
+    const middle = physicalOperatorStrategyPanelPosition(
+      { top: 360, right: 1_120, bottom: 386 },
+      520,
+      viewport,
+    )
+    expect(middle.top).toBeGreaterThanOrEqual(12)
+    expect(middle.top + 520).toBeLessThanOrEqual(788)
+    expect(middle.right).toBeGreaterThanOrEqual(12)
+
+    expect(physicalOperatorStrategyPanelPosition(
+      { top: 24, right: 1_420, bottom: 50 },
+      300,
+      viewport,
+    ).top).toBe(58)
+    expect(physicalOperatorStrategyPanelPosition(
+      { top: 750, right: 1_420, bottom: 776 },
+      300,
+      viewport,
+    ).top).toBe(442)
+  })
+})

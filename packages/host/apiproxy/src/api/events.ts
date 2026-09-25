@@ -33,6 +33,67 @@ export type ToolEventView =
   | { for: 'call'; view: ToolCallView }
   | { for: 'result'; view: ToolResultView }
 
+/** Value shape safe to expose without copying keys or scalar content. */
+export type PhysicalOperatorValueShape =
+  | { kind: 'object'; fields: number }
+  | { kind: 'array'; items: number }
+  | { kind: 'string'; characters: number }
+  | { kind: 'number' | 'boolean' | 'null' | 'unavailable' }
+
+/**
+ * Host-built Physical Operator trace carried beside a redacted Session event.
+ * Display text is bounded and Host-scrubbed; provider payload, prompt
+ * material, raw errors, and full transcripts never enter it.
+ */
+export type PhysicalOperatorTraceView =
+  | {
+    version: 1
+    kind: 'dispatch'
+    commandId: string
+    operator: 'codex' | 'claude-code' | 'physical-operator'
+    turn: number
+    step: number
+  }
+  | {
+    version: 1
+    kind: 'progress'
+    commandId: string
+    sourceSequence: number
+    phase: 'connecting' | 'session-ready' | 'reasoning' | 'tool-activity' | 'finalizing' | 'working'
+  }
+  | { version: 1; kind: 'public-output'; commandId: string; sourceSequence: number; preview?: string }
+  | { version: 1; kind: 'native-tool'; commandId: string; sourceSequence: number; status: 'running' | 'completed'; toolName?: string }
+  | { version: 1; kind: 'approval-required'; commandId: string; sourceSequence: number; approvalKind?: string; preview?: string }
+  | {
+    version: 1
+    kind: 'usage'
+    commandId: string
+    sourceSequence: number
+    inputTokens?: number
+    outputTokens?: number
+    cacheReadInputTokens?: number
+    cacheWriteInputTokens?: number
+    costUsd?: number
+  }
+  | { version: 1; kind: 'terminal'; commandId: string; sourceSequence?: number; outcome: 'success' | 'error' }
+  | { version: 1; kind: 'degraded'; commandId: string }
+  | {
+    version: 1
+    kind: 'tool'
+    commandId: string
+    toolCallId: string
+    standalone: boolean
+    status: 'running' | 'completed' | 'error' | 'indeterminate'
+    /** Bounded Host-scrubbed label from the durable tool receipt. */
+    toolName?: string
+    argumentsShape?: PhysicalOperatorValueShape
+    resultShape?: PhysicalOperatorValueShape
+    /** Bounded public text from a durable text content block or string value. */
+    resultPreview?: string
+    /** Bounded public text from a durable tool error message. */
+    errorPreview?: string
+  }
+
 /** One pending inbox occurrence in the authoritative `session/queue` snapshot. */
 export interface QueuedInboxItem {
   /** Message identity used by inbox mutations. */
@@ -67,7 +128,13 @@ export interface EventsApi {
  * approval/question frames (requested = answerable server-request, the rest are pure pushes).
  */
 export type MuxFrame =
-  | { type: 'session/event'; sessionId: SessionId; event: SessionEvent; view?: ToolEventView }
+  | {
+    type: 'session/event'
+    sessionId: SessionId
+    event: SessionEvent
+    view?: ToolEventView
+    physicalOperatorTrace?: PhysicalOperatorTraceView
+  }
   | { type: 'session/subscribed'; sessionId: SessionId; lastSeq: number }
   | { type: 'approval/requested'; sessionId: SessionId; approvalId: ApprovalRequestId; toolName: string; callId?: CallId; reason?: string }
   | { type: 'approval/resolved'; sessionId: SessionId; approvalId: ApprovalRequestId; outcome: ApprovalOutcome }

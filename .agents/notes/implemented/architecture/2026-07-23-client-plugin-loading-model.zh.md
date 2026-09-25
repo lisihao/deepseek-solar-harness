@@ -58,7 +58,7 @@ vendored Loader 经其 `internal` 约定消费模块系统——唯一调用点�
 
 共享 tsdown 预设为每个插件产出 `client.js.map`，并把第一方源码路径重写成浏览器可识别的仓库形状 `/packages/<group>/<package>/src/...`。内联进 bundle 的其他 workspace 源码同样回到其 `packages/` 归属，依赖包路径保持原样；`sourcesContent` 承载源码，因此 host 只需在 `/plugins/<id>/client.js.map` 供给 map，无需开放源码路由。Vite 壳也产出 sourcemap，使壳代码与图外插件都能从 stack 和性能 profile 回到 TypeScript/TSX。
 
-`rev` 继续作为脚本 URL 的查询参数和内容一致性锚点，bundle 与 map 都以 `no-cache` 供给。外部脚本的 `error` 事件不给响应状态与正文，因此失败诊断只报告 URL；同源 host 供给与构建期写入的 handoff id 是身份边界，`load` 后的工厂存在性检查负责拒绝未登记预期 id 的产物。
+`rev` 继续作为脚本 URL 的查询参数和内容一致性锚点。携带当前 rev 的 bundle 请求会协商 Brotli 或 gzip，并获得不可变缓存策略；缺失或过期的 rev 与所有 sourcemap 仍为 `no-cache`。`rebuilt()` 同时替换行 rev 与其记忆化正文表示，因此 HMR（热模块替换）会先改变 URL 身份，浏览器再导入新的字节。外部脚本的 `error` 事件不给响应状态与正文，因此失败诊断只报告 URL；同源 host 供给与构建期写入的 handoff id 是身份边界，`load` 后的工厂存在性检查负责拒绝未登记预期 id 的产物。
 
 ### 装载流程，端到端
 

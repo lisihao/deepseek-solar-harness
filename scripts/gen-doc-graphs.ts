@@ -76,6 +76,9 @@ const GROUP_ORDER = [
   'skill',
   'compact',
   'subagent',
+  'physical-operator',
+  'resident-operator',
+  'orchestration',
   'tasks',
   'workflow',
   'web',
@@ -198,6 +201,126 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'The seam captures, redacts, and hands session records to one backend; nothing else consumes the service — its output leaves the process.',
   },
   {
+    key: 'physicalOperators',
+    pkg: 'physical-operator',
+    title: 'Physical operator registry',
+    mode: 'seam',
+    implementations: ['physical-operator-subagent', 'physical-operator-resident'],
+    consumers: ['tool-physical-operator'],
+    note: 'Stable deployment-owned operator ids, explicit execution lifetime, live availability, fail-fast capacity admission, and paired lifecycle events; providers keep subagent and resident transports outside the consumer.',
+  },
+  {
+    key: 'residentOperators',
+    pkg: 'resident-operator',
+    title: 'Resident operator control',
+    mode: 'seam',
+    implementations: ['resident-operator-local'],
+    consumers: ['physical-operator-resident'],
+    note: 'Trusted management and durable turn execution over one daemon-owned Session, Receipt, Lease, Event, and Artifact store; model execution enters through ctx.physicalOperators.',
+  },
+  {
+    key: 'intentCompiler',
+    pkg: 'intent-compiler',
+    title: 'Immutable Intent IR compiler',
+    mode: 'seam',
+    implementations: ['orchestration-local'],
+    note: 'Providers compile immutable raw requests into versioned Intent IR with deterministic lineage; they cannot create runs or dispatch operators.',
+  },
+  {
+    key: 'contextCompiler',
+    pkg: 'context-compiler',
+    title: 'Bounded Context Packet compiler',
+    mode: 'seam',
+    implementations: ['orchestration-local'],
+    note: 'Providers project certified sources under token, lineage, redaction, and degradation policy without becoming a source of record.',
+  },
+  {
+    key: 'capabilityCapsules',
+    pkg: 'capability-capsule',
+    title: 'Capability Capsule registry and resolver',
+    mode: 'seam',
+    implementations: ['orchestration-local'],
+    note: 'Late-binds content-addressed capability manifests under the Graph certificate; bindings may only implement or narrow authority.',
+  },
+  {
+    key: 'continualHarness',
+    pkg: 'continual-harness',
+    title: 'Continuous Harness snapshot and outcome seam',
+    mode: 'seam',
+    implementations: ['continual-harness-local'],
+    consumers: ['orchestration-local'],
+    note: 'Provides bounded session/workspace outcome context while the TaskGraph daemon remains the only orchestration state authority.',
+  },
+  {
+    key: 'debates',
+    pkg: 'debate',
+    title: 'Provider-neutral bounded debate seam',
+    mode: 'seam',
+    implementations: ['debate-local'],
+    note: 'Defines bounded roster, round, evidence, dissent, convergence, and control records; a TaskGraph or RLM Consumer remains responsible for execution ownership and capability selection.',
+  },
+  {
+    key: 'continualHarnessSkills',
+    pkg: 'continual-harness',
+    title: 'Continuous Harness TypeScript skill registry',
+    mode: 'core',
+    consumers: ['continual-harness-local'],
+    note: 'Registers trusted TypeScript modules and invokes only an explicitly allowed module/callable pair; generated harness content cannot create executable code at runtime.',
+  },
+  {
+    key: 'modelAllocation',
+    pkg: 'model-allocation',
+    title: 'Quota-aware model allocation seam',
+    mode: 'seam',
+    implementations: ['model-allocation-local'],
+    consumers: ['orchestration-local'],
+    note: 'Selects qualified subscription-first execution offers and recommends parallelism without dispatching work.',
+  },
+  {
+    key: 'modelWorkers',
+    pkg: 'model-worker',
+    title: 'One-shot model worker registry',
+    mode: 'core',
+    implementations: ['model-worker-deepseek'],
+    consumers: ['orchestration-local'],
+    note: 'Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path.',
+  },
+  {
+    key: 'rlmStrategy',
+    pkg: 'rlm-strategy',
+    title: 'Node-local RLM strategy seam',
+    mode: 'seam',
+    implementations: ['rlm-strategy-local'],
+    consumers: ['orchestration-local'],
+    note: 'Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph.',
+  },
+  {
+    key: 'rlmRuntime',
+    pkg: 'rlm-runtime',
+    title: 'Persistent programmable RLM runtime',
+    mode: 'seam',
+    implementations: ['rlm-runtime-local'],
+    consumers: ['orchestration-local'],
+    note: 'Owns the node-local TypeScript kernel, asynchronous child registry, family messages, receipts, goals, and recovery without becoming a second global TaskGraph scheduler.',
+  },
+  {
+    key: 'orchestrations',
+    pkg: 'orchestration',
+    title: 'Persistent TaskGraph authority',
+    mode: 'seam',
+    implementations: ['orchestration-local'],
+    consumers: ['tool-orchestration', 'ui-orchestration'],
+    note: 'Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer.',
+  },
+  {
+    key: 'remoteAuth',
+    pkg: 'remote-auth',
+    title: 'Remote device authentication authority',
+    mode: 'core',
+    consumers: ['connection', 'ui-orchestration'],
+    note: 'The Server is the sole writer for pairing, credential exchange, fixed device scopes, revocation, and payload-free command receipts; transport and orchestration projections consume authenticated principals without owning credential state.',
+  },
+  {
     key: 'storage',
     pkg: 'storage',
     title: 'Non-session storage hub',
@@ -260,6 +383,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     mode: 'core',
     consumers: ['agent-loop', 'tools', 'tool-fs', 'tool-terminal', 'tool-web'],
     note: 'Collects prompt sections and model-facing tool schemas for each step.',
+  },
+  {
+    key: 'taskTemplates',
+    pkg: 'task-template',
+    title: 'Private task-template lifecycle and selection',
+    mode: 'seam',
+    implementations: ['task-template'],
+    consumers: ['task-template-context', 'task-template-rpc', 'tool-physical-operator', 'orchestration-local'],
+    note: 'The file Provider atomically persists private template documents; direct Agent, physical-operator, TaskGraph, and RPC Consumers select or manage them without granting execution authority.',
   },
   {
     key: 'tools',
@@ -486,6 +618,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     implementations: ['web-search-exa', 'web-search-perplexity', 'web-search-deepseek', 'web-fetch-http'],
     consumers: ['tool-web'],
     note: 'Search and fetch providers register into one ctx.web seam; tool-web owns the stable model-facing names.',
+  },
+  {
+    key: 'browser',
+    pkg: 'browser',
+    title: 'Provider-neutral interactive browser seam',
+    mode: 'seam',
+    implementations: ['browser-ego-lite'],
+    consumers: ['tool-browser', 'orchestration-local'],
+    note: 'Providers own browser transport, profile, and lifecycle; model and orchestration Consumers use the typed ctx.browser seam and never depend on Ego Lite internals.',
   },
   {
     key: 'spillStore',
@@ -1164,6 +1305,18 @@ function collectEventRelations(): Map<string, EventRelation> {
   return new EventRelationCollector(project, collectPackageSources(project)).collect()
 }
 
+/**
+ * Compare event names by their semantic namespace, independent of an npm
+ * package scope added by repository rescoping.
+ * @param left - the first event name.
+ * @param right - the second event name.
+ * @returns a stable lexical comparison for generated event tables.
+ */
+export function compareEventNames(left: string, right: string): number {
+  const orderKey = (name: string): string => name.replace(/^@[^/]+\//, '')
+  return orderKey(left).localeCompare(orderKey(right)) || left.localeCompare(right)
+}
+
 function relationPackages(map: Map<string, Set<string>>, pkgsByShort: Map<string, Pkg>): string {
   if (map.size === 0) return '-'
   return [...map.entries()]
@@ -1188,7 +1341,7 @@ function renderEventRelations(pkgs: Pkg[], events: readonly EventEntry[]): strin
     '| Event | Mode | Declared in | Dispatchers | Listeners |',
     '| --- | --- | --- | --- | --- |',
   )
-  for (const event of [...events].sort((a, b) => a.name.localeCompare(b.name))) {
+  for (const event of [...events].sort((a, b) => compareEventNames(a.name, b.name))) {
     const relation = relations.get(event.name) ?? { dispatchers: new Map<string, Set<string>>(), listeners: new Set<string>() }
     lines.push(`| \`${event.name}\` | \`${event.mode}\` | ${sourceLink(event.source)} | ${relationPackages(relation.dispatchers, pkgsByShort)} | ${listenerPackages(relation.listeners, pkgsByShort)} |`)
   }

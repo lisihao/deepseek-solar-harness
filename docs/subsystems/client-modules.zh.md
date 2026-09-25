@@ -54,7 +54,7 @@ interface WebBootGraph {
 
 ## bundle 路由与 index 转换
 
-`GET`/`HEAD /plugins/<id>/client.js` 以 `no-cache` 从磁盘提供已注册的 bundle（锚定一致性的是 rev 查询参数，而非 HTTP 缓存）；其他方法返回 405。未知 id——或已注册、但 bundle 因尚未构建而不可读的行——回应一个大声的 404，而不是让载体的 SPA 回退把 HTML 当作 JavaScript 发出。index 转换在每次 index 渲染时注入当前图，因此刷新页面总是针对实时组合启动。
+`GET`/`HEAD /plugins/<id>/client.js` 会在客户端接受时以 Brotli 或 gzip 提供已注册的 bundle。请求的 `rev` 查询参数与行精确匹配时，响应为 `public, max-age=31536000, immutable`；修订参数缺失或过期时，以及所有 sourcemap，仍为 `no-cache`。因此行 rev 同时锚定一致性与缓存身份；内容变化时，`rebuilt()` 会替换记忆化的正文表示。其他方法返回 405。未知 id——或已注册、但 bundle 因尚未构建而不可读的行——回应一个大声的 404，而不是让载体的 SPA 回退把 HTML 当作 JavaScript 发出。index 转换在每次 index 渲染时注入当前图，因此刷新页面总是针对实时组合启动。
 
 ## 服务
 
@@ -114,5 +114,5 @@ onRebuilt(listener: (id: string, rev: string) => void): () => void
 onGraphChanged(listener: () => void): () => void
 ```
 
-Source: [`packages/client/modules/src/index.ts:184`](../../packages/client/modules/src/index.ts)
+Source: [`packages/client/modules/src/index.ts:189`](../../packages/client/modules/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "sourceCommit": "29c05e6297c24bd7dd8f7cdb9ad9db6c46002901",
+  "violations": [
+    {
+      "file": "runtime/src/client/contract/session.ts",
+      "imported": "../sessions/conversation.ts",
+      "reason": "domain \"contract\" imports sibling domain \"sessions\" (route shared API through contract/)"
+    },
+    {
+      "file": "runtime/src/client/contract/sessions.ts",
+      "imported": "../agents/scope.ts",
+      "reason": "domain \"contract\" imports sibling domain \"agents\" (route shared API through contract/)"
+    },
+    {
+      "file": "runtime/src/client/contract/sessions.ts",
+      "imported": "../sessions/manager.ts",
+      "reason": "domain \"contract\" imports sibling domain \"sessions\" (route shared API through contract/)"
+    },
+    {
+      "file": "runtime/src/client/contract/sessions.ts",
+      "imported": "../sessions/service.ts",
+      "reason": "domain \"contract\" imports sibling domain \"sessions\" (route shared API through contract/)"
+    },
+    {
+      "file": "runtime/src/client/contract/sessions.ts",
+      "imported": "../agents/scope.ts",
+      "reason": "domain \"contract\" imports sibling domain \"agents\" (route shared API through contract/)"
+    },
+    {
+      "file": "runtime/src/client/contract/workspaces.ts",
+      "imported": "../workspaces/service.ts",
+      "reason": "domain \"contract\" imports sibling domain \"workspaces\" (route shared API through contract/)"
+    },
+    {
+      "file": "runtime/src/client/sessions/service.ts",
+      "imported": "../agents/scope.ts",
+      "reason": "domain \"sessions\" imports sibling domain \"agents\" (route shared API through contract/)"
+    },
+    {
+      "file": "runtime/src/client/sessions/service.ts",
+      "imported": "../agents/scope.ts",
+      "reason": "domain \"sessions\" imports sibling domain \"agents\" (route shared API through contract/)"
+    },
+    {
+      "file": "runtime/src/client/workspaces/manager.ts",
+      "imported": "../sessions/notifier.ts",
+      "reason": "domain \"workspaces\" imports sibling domain \"sessions\" (route shared API through contract/)"
+    },
+    {
+      "file": "runtime/src/client/workspaces/workspace.ts",
+      "imported": "../sessions/notifier.ts",
+      "reason": "domain \"workspaces\" imports sibling domain \"sessions\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/contract/slots.ts",
+      "imported": "../input/blocks.ts",
+      "reason": "domain \"contract\" imports sibling domain \"input\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/contract/slots.ts",
+      "imported": "../input/contract.ts",
+      "reason": "domain \"contract\" imports sibling domain \"input\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/conversation-nodes/turn-tail.ts",
+      "imported": "../chat/turn-metrics.ts",
+      "reason": "domain \"conversation-nodes\" imports sibling domain \"chat\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/input/hub.ts",
+      "imported": "../queue/store.ts",
+      "reason": "domain \"input\" imports sibling domain \"queue\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/queue/store.ts",
+      "imported": "../input/contract.ts",
+      "reason": "domain \"queue\" imports sibling domain \"input\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/service.ts",
+      "imported": "./input/blocks.ts",
+      "reason": "top-level non-assembly file imports domain \"input\" (only apply/index may assemble)"
+    },
+    {
+      "file": "ui-conversation/src/client/service.ts",
+      "imported": "./input/contract.ts",
+      "reason": "top-level non-assembly file imports domain \"input\" (only apply/index may assemble)"
+    },
+    {
+      "file": "ui-conversation/src/client/skeleton/ApprovalPanel.tsx",
+      "imported": "../chat/tool-node-reader.ts",
+      "reason": "domain \"skeleton\" imports sibling domain \"chat\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/skeleton/ContextMeter.tsx",
+      "imported": "../chat/StatsLine.tsx",
+      "reason": "domain \"skeleton\" imports sibling domain \"chat\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/skeleton/DetailsPanel.tsx",
+      "imported": "../chat/tool-node-reader.ts",
+      "reason": "domain \"skeleton\" imports sibling domain \"chat\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/skeleton/InputBar.tsx",
+      "imported": "../input/decorations.ts",
+      "reason": "domain \"skeleton\" imports sibling domain \"input\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-conversation/src/client/skeleton/InputBar.tsx",
+      "imported": "../input/decorations.ts",
+      "reason": "domain \"skeleton\" imports sibling domain \"input\" (route shared API through contract/)"
+    },
+    {
+      "file": "ui-input-trigger/src/client/controller.ts",
+      "imported": "../core/detect.ts",
+      "reason": "top-level non-assembly file imports domain \"core\" (only apply/index may assemble)"
+    },
+    {
+      "file": "ui-input-trigger/src/client/controller.ts",
+      "imported": "../core/menu.ts",
+      "reason": "top-level non-assembly file imports domain \"core\" (only apply/index may assemble)"
+    },
+    {
+      "file": "ui-input-trigger/src/client/controller.ts",
+      "imported": "../core/contract.ts",
+      "reason": "top-level non-assembly file imports domain \"core\" (only apply/index may assemble)"
+    },
+    {
+      "file": "ui-input-trigger/src/client/slots.ts",
+      "imported": "../core/contract.ts",
+      "reason": "top-level non-assembly file imports domain \"core\" (only apply/index may assemble)"
+    },
+    {
+      "file": "ui-workspace/src/client/WorkspaceBrowser.tsx",
+      "imported": "./rows/Rows.tsx",
+      "reason": "top-level non-assembly file imports domain \"rows\" (only apply/index may assemble)"
+    }
+  ]
+}

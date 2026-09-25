@@ -1,0 +1,263 @@
+/** @vitest-environment jsdom */
+
+/**
+ * Compatibility scope state machine: the official scope stays authoritative
+ * while it serves the namespace; the bridge controller takes over its
+ * unavailable state on loopback; writes route to the active transport; and a
+ * remote browser (no fetch) keeps the official process-local behavior.
+ */
+
+import { describe, expect, it, vi } from 'vitest'
+import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import { createCompatScope } from '../src/client/compat-settings-scope.ts'
+import { WEB_UI_SETTINGS_BRIDGE_PREFIX } from '../src/protocol.ts'
+
+// The rc.6 runtime client bundle registers itself through the GUI module
+// loader, so importing its value under vitest yields no exports. Provide a
+// minimal snapshot store with the same contract (getSnapshot / subscribe /
+// set / draft-style update) for the bridge controller and the fake primary.
+vi.mock('@deepseek-ai/dsh-client-runtime/client', () => ({
+  createSnapshotStore: <T>(initial: T) => {
+    let snapshot = { ...initial }
+    const listeners = new Set<() => void>()
+    const publish = (): void => {
+      for (const listener of listeners) listener()
+    }
+    return {
+      getSnapshot: (): T => snapshot,
+      subscribe: (listener: () => void): (() => void) => {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+      set: (next: T): void => {
+        snapshot = { ...next }
+        publish()
+      },
+      update: (mutator: (draft: T) => void): void => {
+        const draft = { ...snapshot }
+        mutator(draft)
+        snapshot = { ...draft }
+        publish()
+      },
+    }
+  },
+}))
+
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+
+/** A manual primary scope: a snapshot store plus recorded writes. */
+function fakePrimary<T>(initial: SettingsScopeSnapshot<T>) {
+  const store = createSnapshotStore<SettingsScopeSnapshot<T>>(initial)
+  const sets: Array<[string, unknown]> = []
+  return {
+    scope: {
+      getSnapshot: () => store.getSnapshot(),
+      subscribe: (listener: () => void) => store.subscribe(listener),
+      set: async (field: string, value: unknown) => { sets.push([field, value]) },
+      unset: async () => {},
+    } satisfies SettingsScope<T>,
+    update: (patch: Partial<SettingsScopeSnapshot<T>>) => { store.set({ ...store.getSnapshot(), ...patch }) },
+    sets,
+  }
+}
+
+/** A bridge describe payload for one namespace. */
+function bridgeView(ns: string, value: unknown, revision: number) {
+  return { ns, schema: {}, value, revision }
+}
+
+/** The describe result the fake host bridge answers. */
+function describeResult(namespaces: ReturnType<typeof bridgeView>[]) {
+  return { ok: true, value: { namespaces, writable: true } }
+}
+
+/** A fetch stub serving the bridge route pair (the spy counts calls). */
+function fakeFetch(handler: (url: string, init: RequestInit) => Promise<unknown> | unknown) {
+  const spy = vi.fn(handler)
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input)
+    const payload = await spy(url, init ?? {})
+    return { ok: true, status: 200, json: async () => payload } as unknown as Response
+  }) as unknown as typeof fetch
+  return { fetchFn, handler: spy }
+}
+
+const ready = <T>(value: T, revision = 1): SettingsScopeSnapshot<T> => ({
+  status: 'ready',
+  value,
+  base: undefined,
+  user: undefined,
+  revision,
+  writable: true,
+  mode: 'host',
+})
+
+const unavailable = (): SettingsScopeSnapshot<never> => ({
+  status: 'unavailable',
+  value: undefined,
+  base: undefined,
+  user: undefined,
+  revision: undefined,
+  writable: false,
+  mode: 'host',
+})
+
+describe('createCompatScope', () => {
+  it('passes the official scope through while it serves the namespace', () => {
+    const primary = fakePrimary<{ enabled: boolean }>(ready({ enabled: true }))
+    const { fetchFn, handler } = fakeFetch(async () => describeResult([]))
+    const scope = createCompatScope<{ enabled: boolean }>({ namespace: 'task-board', primary: primary.scope, fetchFn })
+    expect(scope.getSnapshot().status).toBe('ready')
+    expect(scope.getSnapshot().value).toEqual({ enabled: true })
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('bridges the namespace when the official scope reports unavailable', async () => {
+    const primary = fakePrimary<{ enabled: boolean }>(unavailable())
+    const { fetchFn, handler } = fakeFetch(async () => describeResult([bridgeView('task-board', { enabled: true }, 3)]))
+    const scope = createCompatScope<{ enabled: boolean }>({ namespace: 'task-board', primary: primary.scope, fetchFn })
+    await vi.waitFor(() => { expect(scope.getSnapshot().status).toBe('ready') })
+    expect(scope.getSnapshot().value).toEqual({ enabled: true })
+    expect(scope.getSnapshot().revision).toBe(3)
+    expect(scope.getSnapshot().writable).toBe(true)
+    expect(handler).toHaveBeenCalled()
+  })
+
+  it('stays unavailable when the bridge does not serve the namespace', async () => {
+    const primary = fakePrimary<{ enabled: boolean }>(unavailable())
+    const { fetchFn } = fakeFetch(async () => describeResult([]))
+    const scope = createCompatScope<{ enabled: boolean }>({ namespace: 'task-board', primary: primary.scope, fetchFn })
+    await vi.waitFor(() => { expect(scope.getSnapshot().status).toBe('unavailable') })
+    expect(scope.getSnapshot().status).toBe('unavailable')
+  })
+
+  it('never builds a bridge without a fetch (remote browser)', async () => {
+    const primary = fakePrimary<{ enabled: boolean }>(unavailable())
+    const scope = createCompatScope<{ enabled: boolean }>({ namespace: 'task-board', primary: primary.scope })
+    await vi.waitFor(() => { expect(scope.getSnapshot().status).toBe('unavailable') })
+    expect(scope.getSnapshot().status).toBe('unavailable')
+  })
+
+  it('routes writes to the official scope while it is ready', async () => {
+    const primary = fakePrimary<{ enabled: boolean }>(ready({ enabled: true }))
+    const { fetchFn } = fakeFetch(async () => describeResult([]))
+    const scope = createCompatScope<{ enabled: boolean }>({ namespace: 'task-board', primary: primary.scope, fetchFn })
+    await scope.set('enabled', false)
+    expect(primary.sets).toEqual([['enabled', false]])
+  })
+
+  it('routes writes through the bridge when it took over', async () => {
+    const primary = fakePrimary<{ enabled: boolean }>(unavailable())
+    const mutateCalls: Array<{ url: string; body: Record<string, unknown> }> = []
+    const { fetchFn } = fakeFetch(async (url, init) => {
+      if (url === WEB_UI_SETTINGS_BRIDGE_PREFIX + '/describe') return describeResult([bridgeView('task-board', { enabled: true }, 3)])
+      mutateCalls.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> })
+      return { ok: true, value: bridgeView('task-board', { enabled: false }, 4) }
+    })
+    const scope = createCompatScope<{ enabled: boolean }>({ namespace: 'task-board', primary: primary.scope, fetchFn })
+    await vi.waitFor(() => { expect(scope.getSnapshot().status).toBe('ready') })
+    await scope.set('enabled', false)
+    expect(mutateCalls).toHaveLength(1)
+    expect(mutateCalls[0].url).toBe(WEB_UI_SETTINGS_BRIDGE_PREFIX + '/mutate')
+    expect(mutateCalls[0].body.ns).toBe('task-board')
+    expect(mutateCalls[0].body.expectedRevision).toBe(3)
+  })
+
+  it('turns a dropped bridge call into a quiet unavailable', async () => {
+    const primary = fakePrimary<{ enabled: boolean }>(unavailable())
+    const { fetchFn } = fakeFetch(async () => { throw new Error('network down') })
+    const scope = createCompatScope<{ enabled: boolean }>({ namespace: 'task-board', primary: primary.scope, fetchFn })
+    await vi.waitFor(() => { expect(scope.getSnapshot().status).toBe('unavailable') })
+    expect(scope.getSnapshot().status).toBe('unavailable')
+  })
+})
+
+/** A batch-capable bridge view: user layer plus redacted-secret markers. */
+function batchView(ns: string, value: unknown, revision: number, extra: { user?: Record<string, unknown>; secrets?: { path: string[]; set: boolean }[] } = {}) {
+  return {
+    ns,
+    schema: {},
+    value,
+    revision,
+    ...extra.user === undefined ? {} : { user: extra.user },
+    ...extra.secrets === undefined ? {} : { secrets: extra.secrets },
+  }
+}
+
+describe('createCompatScope batch mutate', () => {
+  it('exposes no mutate while the official scope serves the namespace', async () => {
+    const primary = fakePrimary<{ enabled: boolean }>(ready({ enabled: true }))
+    const { fetchFn } = fakeFetch(async () => describeResult([]))
+    const scope = createCompatScope<{ enabled: boolean }>({ namespace: 'task-board', primary: primary.scope, fetchFn })
+    expect(scope.getSnapshot().status).toBe('ready')
+    expect(typeof (scope as unknown as { mutate?: unknown }).mutate).not.toBe('function')
+  })
+
+  it('posts every op in one /mutate and reports per-field success', async () => {
+    const primary = fakePrimary<{ baseURL: string; model: string }>(unavailable())
+    const calls: Array<{ body: Record<string, unknown> }> = []
+    const { fetchFn } = fakeFetch(async (url, init) => {
+      if (url === WEB_UI_SETTINGS_BRIDGE_PREFIX + '/describe') {
+        return describeResult([batchView('describe-image', { baseURL: 'https://a/v1', model: 'm' }, 3, { user: { baseURL: 'https://a/v1', model: 'm' } })])
+      }
+      calls.push({ body: JSON.parse(String(init.body)) as Record<string, unknown> })
+      return { ok: true, value: batchView('describe-image', { baseURL: 'https://a/v1', model: 'm' }, 4, { user: { baseURL: 'https://a/v1', model: 'm' } }) }
+    })
+    const scope = createCompatScope<{ baseURL: string; model: string }>({ namespace: 'describe-image', primary: primary.scope, fetchFn })
+    await vi.waitFor(() => { expect(scope.getSnapshot().status).toBe('ready') })
+    const mutate = (scope as unknown as { mutate?: (writes: unknown[]) => Promise<unknown> }).mutate
+    expect(typeof mutate).toBe('function')
+    const result = await (mutate as (writes: { field: string; op: 'set'; value: unknown }[]) => Promise<{ ok: boolean; fields: { field: string; landed: boolean }[] }>)([
+      { field: 'baseURL', op: 'set', value: 'https://a/v1' },
+      { field: 'model', op: 'set', value: 'm' },
+    ])
+    expect(calls).toHaveLength(1)
+    const body = calls[0].body
+    expect(body.ns).toBe('describe-image')
+    expect(body.expectedRevision).toBe(3)
+    expect(body.ops).toEqual([
+      { op: 'set', path: ['baseURL'], value: 'https://a/v1' },
+      { op: 'set', path: ['model'], value: 'm' },
+    ])
+    expect(result.ok).toBe(true)
+    expect(result.fields).toEqual([
+      { field: 'baseURL', landed: true },
+      { field: 'model', landed: true },
+    ])
+  })
+
+  it('judges a redacted secret field by its secret-set marker', async () => {
+    const primary = fakePrimary<{ baseURL: string; apiKey: string }>(unavailable())
+    const { fetchFn } = fakeFetch(async (url, _init) => {
+      if (url === WEB_UI_SETTINGS_BRIDGE_PREFIX + '/describe') {
+        return describeResult([batchView('describe-image', { baseURL: 'https://a/v1' }, 3, { user: { baseURL: 'https://a/v1' } })])
+      }
+      // The apiKey secret is redacted from the user layer, but its set marker
+      // is reported in the view.
+      return { ok: true, value: batchView('describe-image', { baseURL: 'https://a/v1' }, 4, { user: { baseURL: 'https://a/v1' }, secrets: [{ path: ['apiKey'], set: true }] }) }
+    })
+    const scope = createCompatScope<{ baseURL: string; apiKey: string }>({ namespace: 'describe-image', primary: primary.scope, fetchFn })
+    await vi.waitFor(() => { expect(scope.getSnapshot().status).toBe('ready') })
+    const mutate = (scope as unknown as { mutate?: (writes: unknown[]) => Promise<{ ok: boolean; fields: { field: string; landed: boolean }[] }> }).mutate
+    const result = await mutate!([{ field: 'apiKey', op: 'set', value: 'sk-x' }])
+    expect(result.ok).toBe(true)
+    expect(result.fields).toEqual([{ field: 'apiKey', landed: true }])
+  })
+
+  it('surfaces refusal code and message for a rejected batch', async () => {
+    const primary = fakePrimary<{ baseURL: string; model: string }>(unavailable())
+    const { fetchFn } = fakeFetch(async (url, _init) => {
+      if (url === WEB_UI_SETTINGS_BRIDGE_PREFIX + '/describe') {
+        return describeResult([batchView('describe-image', { baseURL: 'https://a/v1', model: 'm' }, 3, { user: {} })])
+      }
+      return { ok: false, code: 'settings-rejected', message: 'describe-image: incoherent baseURL/model pair' }
+    })
+    const scope = createCompatScope<{ baseURL: string; model: string }>({ namespace: 'describe-image', primary: primary.scope, fetchFn })
+    await vi.waitFor(() => { expect(scope.getSnapshot().status).toBe('ready') })
+    const mutate = (scope as unknown as { mutate?: (writes: unknown[]) => Promise<{ ok: boolean; code?: string; message?: string; fields: { field: string; landed: boolean }[] }> }).mutate
+    const result = await mutate!([{ field: 'baseURL', op: 'set', value: 'ftp://x' }])
+    expect(result.ok).toBe(false)
+    expect(result.code).toBe('settings-rejected')
+    expect(result.message).toBe('describe-image: incoherent baseURL/model pair')
+  })
+})

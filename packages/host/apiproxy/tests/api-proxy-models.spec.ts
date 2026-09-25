@@ -42,7 +42,7 @@ class CatalogAdapter extends LlmAdapter {
     return { id: provider, name: this.name }
   }
 
-  override listModels(): Promise<readonly LlmModelInfo[]> {
+  override listModels(_provider: string, _options?: { readonly refresh?: boolean }): Promise<readonly LlmModelInfo[]> {
     return this.models instanceof Error
       ? Promise.reject(this.models)
       : Promise.resolve(this.models)
@@ -307,6 +307,24 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('forwards an explicit refresh request through the session catalog handler', async () => {
+    const { ctx, sessionId } = await harness()
+    const seen: (boolean | undefined)[] = []
+    ctx.llm.registerAdapter(['tracked'], new class extends CatalogAdapter {
+      override listModels(provider: string, options?: { readonly refresh?: boolean }): Promise<readonly LlmModelInfo[]> {
+        seen.push(options?.refresh)
+        return super.listModels(provider, options)
+      }
+    }('Tracked', [{ provider: 'tracked', id: 'tracked-model', name: 'Tracked Model' }]))
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+
+    expectValue(await api.sessions.models(request({ sessionId, refresh: true })))
+    expect(seen).toEqual([true])
+    expectValue(await api.sessions.models(request({ sessionId })))
+    expect(seen).toEqual([true, undefined])
+    await ctx.fiber.dispose()
+  })
+
   it('accepts an advisory-unlisted model, rejects an unavailable provider, and switches only after the next assembly', async () => {
     const { ctx, agent, sessionId } = await harness()
     const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
@@ -410,6 +428,46 @@ describe('Web session model selection', () => {
     stored = { provider: 'duplicate', model: 'same' }
     expect(expectValue(await api.sessions.models(request({ sessionId }))).current)
       .toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps the user model selected when a Debate turn logs its transient host route', async () => {
+    const { ctx, agent, sessionId } = await harness({
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+      reasoningEffort: ReasoningEffortId('max'),
+    })
+    const stored = { provider: 'deepseek-official', model: 'deepseek-chat' }
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => stored,
+      cwd: '/tmp',
+    })
+
+    agent.session.append('request/header', {
+      header: { config: { provider: 'dsh-debate-host', model: 'debate' } },
+      reason: 'change',
+    })
+
+    // The Debate adapter route is an actual logged request route, but it is
+    // not a user-selectable model and must not replace the selector's durable
+    // preference after a restart/cold resume.
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).current)
+      .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner', reasoningEffort: 'max' })
+    expect(stored).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+
+    // This must also restore the live request path, not merely the model
+    // directory: otherwise a subsequent Standard or Auto turn enters the
+    // Debate adapter without a dispatch record.
+    expect((await ctx.systemPrompt.assemble()).variables)
+      .toMatchObject({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+    await expect(agentEvents(ctx, agent).waterfall(
+      'agent/request', { turn: 2, step: 1, signal: new AbortController().signal },
+      () => Promise.resolve({ provider: 'seed', model: 'seed' }),
+    )).resolves.toMatchObject({
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+      reasoningEffort: 'max',
+    })
     await ctx.fiber.dispose()
   })
 

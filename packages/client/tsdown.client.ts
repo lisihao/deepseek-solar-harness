@@ -10,7 +10,7 @@
  */
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { basename, dirname, relative, resolve as resolvePath, sep } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
@@ -168,6 +168,7 @@ function clientLibraryConfig(
 }
 
 function clientConfig(id: string, entry: string): UserConfig {
+  const cssSources = new Map<string, string>()
   return {
     name: `${id}/client`,
     entry: { client: entry },
@@ -228,22 +229,31 @@ function clientConfig(id: string, entry: string): UserConfig {
       resolveId(source: string, importer: string | undefined) {
         if (!source.endsWith('.module.css')) return null
         const abs = importer !== undefined ? sourceAssetPath(source, importer) : source
-        return CSS_VIRTUAL_PREFIX + abs + CSS_VIRTUAL_SUFFIX
+        const identity = cssModuleIdentity(id, abs)
+        const virtualId = CSS_VIRTUAL_PREFIX + identity + CSS_VIRTUAL_SUFFIX
+        const existing = cssSources.get(virtualId)
+        if (existing !== undefined && existing !== abs) {
+          throw new Error(`CSS module identity collision: ${identity}`)
+        }
+        cssSources.set(virtualId, abs)
+        return virtualId
       },
       async load(virtualId: string) {
         if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
-        const fileId = virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length)
+        const fileId = cssSources.get(virtualId)
+        if (fileId === undefined) throw new Error(`CSS module source missing for ${virtualId}`)
         // The virtual id otherwise hides the physical stylesheet from Rolldown's watch graph.
         this.addWatchFile(fileId)
         const source = await readFile(fileId)
         const { code, exports: cssExports } = transform({
-          filename: fileId,
+          filename: virtualId.slice(CSS_VIRTUAL_PREFIX.length, -CSS_VIRTUAL_SUFFIX.length),
           code: source,
           cssModules: { pattern: '[hash]_[local]' },
           minify: true,
         })
         const classMap: Record<string, string> = {}
-        for (const [local, exp] of Object.entries(cssExports ?? {})) classMap[local] = exp.name
+        for (const [local, exp] of Object.entries(cssExports ?? {}).sort(([left], [right]) =>
+          left.localeCompare(right))) classMap[local] = exp.name
         // One <style data-plugin> per module file; idempotent under re-evaluation.
         return [
           `const css = ${JSON.stringify(code.toString())};`,
@@ -271,6 +281,17 @@ function clientConfig(id: string, entry: string): UserConfig {
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
   }
+}
+
+/** Give CSS compilation a worktree-independent module identity. */
+function cssModuleIdentity(packageId: string, fileId: string): string {
+  const repositoryPath = relative(REPOSITORY_ROOT, fileId)
+  if (repositoryPath !== '..'
+    && !repositoryPath.startsWith(`..${sep}`)
+    && !isAbsolute(repositoryPath)) {
+    return repositoryPath.split(sep).join('/')
+  }
+  return `${packageId}/${basename(fileId)}`
 }
 
 /** Resolve an emitted JS asset import against its source-tree counterpart. */

@@ -12,6 +12,10 @@
     "src/index.ts",
     "src/invariant.ts",
     "src/loopback-hostname.ts",
+    "src/remote-auth-wire.ts",
+    "src/remote-operator-host.ts",
+    "src/remote-sync-host.ts",
+    "src/remote-sync.ts",
     "src/rpc-host.ts",
     "src/rpc.ts",
     "src/websocket-downlink.ts"
@@ -27,7 +31,25 @@
       "path": "../../host/webserver"
     },
     {
+      "path": "../../host/remote-auth"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../session/session-persistence"
+    },
+    {
+      "path": "../../physical-operator/resident-operator"
+    },
+    {
+      "path": "../../physical-operator/physical-operator"
+    },
+    {
+      "path": "../../orchestration/orchestration"
+    },
+    {
+      "path": "../../core/system-prompt"
     }
   ]
 }

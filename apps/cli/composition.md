@@ -40,6 +40,10 @@ flowchart LR
   cfg --> plugin_dsh_base_settings
   plugin_dsh_base_credentials["credentials<br/>@deepseek-ai/dsh-credentials-local"]
   cfg --> plugin_dsh_base_credentials
+  plugin_dsh_base_task_template["task-template<br/>@deepseek-ai/dsh-task-template"]
+  cfg --> plugin_dsh_base_task_template
+  plugin_dsh_base_task_template_context["task-template-context<br/>@deepseek-ai/dsh-task-template-context"]
+  cfg --> plugin_dsh_base_task_template_context
   plugin_dsh_base_llm_pi_ai["llm-pi-ai<br/>@deepseek-ai/dsh-llm-pi-ai"]
   cfg --> plugin_dsh_base_llm_pi_ai
   plugin_dsh_base_session_persistence_jsonl["session-persistence-jsonl<br/>@deepseek-ai/dsh-session-persistence-jsonl"]
@@ -158,6 +162,8 @@ flowchart LR
   cfg --> plugin_dsh_base_tools
   plugin_dsh_base_system_prompt["system-prompt<br/>@deepseek-ai/dsh-system-prompt"]
   cfg --> plugin_dsh_base_system_prompt
+  plugin_dsh_base_output_style["output-style<br/>@deepseek-ai/dsh-output-style"]
+  cfg --> plugin_dsh_base_output_style
   plugin_dsh_base_agent_loop["agent-loop<br/>@deepseek-ai/dsh-agent-loop"]
   cfg --> plugin_dsh_base_agent_loop
   plugin_dsh_base_fs_sandbox["fs-sandbox<br/>@deepseek-ai/dsh-fs-sandbox"]
@@ -184,6 +190,8 @@ flowchart LR
 | `llm-retry` | `@deepseek-ai/dsh-llm-retry` |
 | `settings` | `@deepseek-ai/dsh-settings-file` |
 | `credentials` | `@deepseek-ai/dsh-credentials-local` |
+| `task-template` | `@deepseek-ai/dsh-task-template` |
+| `task-template-context` | `@deepseek-ai/dsh-task-template-context` |
 | `llm-pi-ai` | `@deepseek-ai/dsh-llm-pi-ai` |
 | `session-persistence-jsonl` | `@deepseek-ai/dsh-session-persistence-jsonl` |
 | `attachment-local` | `@deepseek-ai/dsh-attachment-local` |
@@ -243,6 +251,7 @@ flowchart LR
 | `tool-web` | `@deepseek-ai/dsh-tool-web` |
 | `tools` | `@deepseek-ai/dsh-tools` |
 | `system-prompt` | `@deepseek-ai/dsh-system-prompt` |
+| `output-style` | `@deepseek-ai/dsh-output-style` |
 | `agent-loop` | `@deepseek-ai/dsh-agent-loop` |
 | `fs-sandbox` | `@deepseek-ai/dsh-fs-sandbox` |
 | `llm-deepseek` | `@deepseek-ai/dsh-llm-deepseek` |

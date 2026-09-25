@@ -1,0 +1,48 @@
+# Debate
+
+English | [中文](README.zh.md)
+
+`@deepseek-ai/dsh-debate` defines the provider-neutral `ctx.debates` seam for a bounded multi-agent debate. It is a Service Definition only: an existing TaskGraph or RLM Consumer may submit a debate, while a Provider resolves roster slots to physical operators. This package does not own a Scheduler, database, daemon, UI, or model call.
+
+## Contract
+
+- `DebatePolicyV1` fixes the permitted roster roles: constructive proposer, skeptical falsifier, evidence auditor, and decision judge. A policy must contain a judge and at least two participant roles.
+- The round protocol is fixed as blind independent first drafts, claim-ledger follow-up, and high-severity-unresolved escalation. Providers enforce the bounded `DebateBudgetV1` before dispatch.
+- Claims, evidence refs, dissent, unresolved gaps, convergence reasons, usage/cost, and provider provenance are durable JSON-compatible records. `usageStatus` and `costStatus` distinguish known, partial, and unknown accounting; missing counters are never projected as zero. Dissent is retained; convergence never means forced unanimity.
+- `start`, `list`, `inspect`, `readEvents`, and `control` are the complete seam. `control` carries an expected revision for optimistic concurrency and explicit approval, pause, resume, stop, reject, or `continue` decisions.
+- `continue` records one immutable `DebateContinuationGrantV1` for exactly the next two numbered rounds. `DebateContinuationStateV1` retains each sealed moderator summary, offers the next non-monetary allowance before a Consumer sends the command, and derives finite round, turn, and token ceilings from the initial policy plus grants. It copies `maxCostUsd` unchanged.
+- A continuation is eligible only after a fully settled `completed`, `max_rounds`, or `budget_limited` run with known token accounting and, when a monetary cap exists, known cost accounting. `DebateRunResultV1` distinguishes completed, round-limit, budget-limit, failed, indeterminate, rejected, stopped, and running outcomes; an exhausted or forecast-blocked metered cap reports the actual cap and requires the existing explicit approval path.
+- Providers may append `debate.agent.progress` while an admitted slot is running. Its v1 payload is deliberately limited to source sequence/time, phase, bounded public output preview, tool start/completion name, approval requirement, usage, and requested/actual routing. Prompt text, hidden reasoning, credentials, and native session or command identifiers are outside this event contract.
+
+## Provider boundary
+
+Providers must validate untrusted JSON with the exported policy, start, control, event-read, event, snapshot, continuation-state, and command-receipt validators. Released snapshots may omit `topic`, `continuation`, and `result`; fields that are present use exact version-1 records. Unknown fields, wrong versions, unsupported role identifiers, parent-identity mismatches, unsafe budgets, and unbounded event pages fail closed. Every start request names the canonical TaskGraph workspace.
+
+Providers own `DebateCommandReceiptV1` under their write lock. An identical `commandId`, method, and request digest replays its original response; a different request with the same id conflicts. The revision fence and receipt commit precede a continuation grant, so two stale control requests cannot both reserve the same rounds.
+
+Settled historical control receipts may omit both `action` and `expectedRevision`, including version-1 receipts normalized by an earlier load. Their recorded response remains replayable after subsequent writes and restarts. A partial control-field pair is invalid; new control requests and unfinished version-1 receipts still require both fields.
+
+The Debate package is a Consumer/Provider seam for the existing execution system. It may be called from a TaskGraph node or an RLM session through `execution`, but it cannot create graph nodes, dispatch a physical operator, mutate scheduler state, or bypass the parent run's permissions. The Provider owns those integrations and must preserve their authority boundaries.
+
+## Model Experience
+
+### Provider-neutral `ctx.debates` run contract
+
+#### What the model sees
+
+Nothing directly. The `ctx.debates` Service Definition has no model adapter and does not call a model. A Consumer owns any tool or prompt surface, while a Provider may map participant and judge slots to qualified physical operators under the parent Scheduler's quota and policy decisions.
+
+#### Token effect
+
+None at the Service Definition layer. The Consumer owns tool-schema tokens and the Provider owns role-turn prompts and bounded results.
+
+#### KV Cache effect
+
+None at the Service Definition layer. Providers may account for cache-read/write tokens in `DebateUsageV1` and `DebateCostSummaryV1`; the contract does not assume that a cache is durable or shared between slots.
+
+## Known Limitations and Deferred Work
+
+- No daemon, SQLite store, event writer, UI, local registry, or real model Provider is included.
+- Dynamic role injection and true mid-turn hot swapping are not part of this contract. A new roster or capability generation must be submitted by the owning TaskGraph/RLM integration before the next turn.
+- Convergence scoring is represented as versioned evidence, not computed here; a Provider must not treat unknown accounting, budget exhaustion, or unresolved blocking claims as success.
+- The package does not guarantee that debate improves answer quality. Consumers should compare it with standard and RLM modes using their own end-to-end evaluation fixtures.

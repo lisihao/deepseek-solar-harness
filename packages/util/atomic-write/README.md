@@ -7,12 +7,13 @@ Zero-dependency atomic file replacement shared by file-backed stores that must n
 ## Surface
 
 ```ts
-import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { withFileLock, writeFileAtomic, writeFileAtomicSync } from '@deepseek-ai/dsh-atomic-write'
 
 declare const text: string
 declare const render: (previous: string) => string
 
 await writeFileAtomic('/home/u/.dsh/settings.yaml', text, { mode: 0o600 })
+writeFileAtomicSync('/home/u/.dsh/state.json', text, { mode: 0o600 })
 
 // Read-modify-write against the same file from several processes.
 await withFileLock('/home/u/.dsh/settings.yaml', async () => {
@@ -27,6 +28,8 @@ await withFileLock('/home/u/.dsh/settings.yaml', async () => {
 - **`rename` replaces a symlinked target itself**, never writing through to its referent.
 - **Same-directory sibling** keeps the rename on one filesystem, so the swap stays atomic.
 - Parent directories are created; on any failure the temp is removed and the failure rethrown; readers observe either the old or the new complete content.
+
+`writeFileAtomicSync` provides the same replacement contract to synchronous state owners without forcing them to hide an asynchronous write behind a synchronous API.
 
 `withFileLock` serializes the writers of one file across processes, for the read-render-commit cycles a bare atomic commit cannot make safe on its own. The lock is a `wx`-created `<filename>.lock` sibling, so readers never contend; waiters back off exponentially and fail with a timeout rather than block forever. A contender never removes the existing lock: age cannot distinguish a crashed owner from a paused live writer.
 

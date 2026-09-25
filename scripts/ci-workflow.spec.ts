@@ -5,8 +5,23 @@ import { describe, expect, it } from 'vitest'
 
 const root = resolve(import.meta.dirname, '..')
 const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
+const pullRequestImpactIf = "github.event_name == 'pull_request' && needs['pr-impact'].outputs.run_ci != 'false'"
+const docsOnlyIf = "github.event_name == 'pull_request' && needs['pr-impact'].outputs.run_ci == 'false' && github.base_ref != 'solar'"
 
 describe('CI workflow', () => {
+  it('runs the dynamic Cordis browser lifecycle in a fresh Vitest process', () => {
+    const packageJson: unknown = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+    if (!isRecord(packageJson) || !isRecord(packageJson.scripts)) {
+      throw new TypeError('Root package must define scripts')
+    }
+
+    expect(packageJson.scripts['test:web:built']).toBe(
+      'npm run test:web:built:main && npm run test:web:built:cordis',
+    )
+    expect(packageJson.scripts['test:web:built:main']).toContain('DSH_WEB_SUITE=main')
+    expect(packageJson.scripts['test:web:built:cordis']).toContain('DSH_WEB_SUITE=isolated')
+  })
+
   it('isolates every pnpm action setup destination per runner', () => {
     const workflow: unknown = yaml.load(readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8'))
     if (!isRecord(workflow) || !isRecord(workflow.jobs)) throw new TypeError('CI workflow must define jobs')
@@ -59,7 +74,7 @@ describe('CI workflow', () => {
     // Required PR job: Wine on ubuntu-latest, runs wine-windows-gates.sh.
     expect(windows['runs-on']).toBe('ubuntu-latest')
     expect(windows.name).toBe('windows node 24 / wine blocking')
-    expect(windows.if).toBe("github.event_name == 'pull_request'")
+    expect(windows.if).toBe(pullRequestImpactIf)
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
 
     // windows-native: non-blocking native job with failover, runs windows-complete.
@@ -69,9 +84,10 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).not.toContain('DSH_CI_FAILOVER_LINUX')
     expect(windowsNative['runs-on']).toContain('self-hosted')
     expect(windowsNative['runs-on']).toContain('dsh-win-ci')
-    expect(windowsNative['runs-on']).toContain('dsh-windows-2025-16core')
+    expect(windowsNative['runs-on']).toContain('windows-2025')
+    expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
     expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toBe("github.event_name == 'pull_request'")
+    expect(windowsNative.if).toBe(pullRequestImpactIf)
     const nativeCommandSteps = (windowsNative.steps as unknown[]).filter((step): step is Record<string, unknown> & { run: string } => (
       isRecord(step) && typeof step.run === 'string'
     ))
@@ -82,7 +98,7 @@ describe('CI workflow', () => {
     expect(wineAptCache['runs-on']).toBe('ubuntu-latest')
 
     // serial-windows: master-only standby, self-hosted, non-blocking.
-    expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+    expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'")
     expect(serialWindows['runs-on']).toEqual(['self-hosted', 'dsh-win-ci', 'windows'])
     expect(serialWindows.name).toBe('serial / windows (self-hosted standby)')
 
@@ -99,7 +115,13 @@ describe('CI workflow', () => {
       expect(job['runs-on'], `${jobName} runs-on must use the Linux failover switch`).toContain('DSH_CI_FAILOVER_LINUX')
       expect(job['runs-on'], `${jobName} runs-on must not use the Windows failover switch`).not.toContain('DSH_CI_FAILOVER_WINDOWS')
       expect(job['runs-on']).toContain('vm-backup')
+      expect(job['runs-on']).toContain('ubuntu-24.04')
+      expect(job['runs-on']).not.toContain('dsh-ubuntu-24-04-16core')
     }
+    expect(node24Coverage.name).toBe('node 24 / coverage and semantic snapshots')
+    if (!isRecord(node24Coverage.env)) throw new TypeError('Node 24 coverage job must define env')
+    expect(node24Coverage.env.DSH_OXLINT_THREADS).toBe('1')
+    expect(node24Coverage.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain("|| '2'")
     expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
     expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
     expect(aggregate['runs-on']).toContain('vm-backup')
@@ -128,8 +150,9 @@ describe('CI workflow', () => {
       const job = workflow.jobs[name]
       if (!isRecord(job)) throw new TypeError(`${name} must be defined`)
       expect(job.concurrency).toBeUndefined()
-      // Both stay master-push-only; that is what makes the push carve-out safe.
-      expect(job.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+      // Both stay master-push-only and only allocate when their pool is configured.
+      expect(job.if).toContain("github.event_name == 'push' && github.ref == 'refs/heads/master'")
+      expect(job.if).toContain(name === 'serial-linux-selfhosted' ? 'DSH_CI_FAILOVER_LINUX' : 'DSH_CI_FAILOVER_WINDOWS')
     }
 
     // What bounds the cost of exempting push: a master push may only carry the
@@ -143,6 +166,8 @@ describe('CI workflow', () => {
     const NOT_PUSH_REACHABLE = new Set([
       "github.event_name == 'pull_request'",
       "always() && github.event_name == 'pull_request'",
+      pullRequestImpactIf,
+      docsOnlyIf,
       "github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'",
       "github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'",
     ])
@@ -189,7 +214,7 @@ describe('CI workflow', () => {
     }
 
     expect(pythonRuntime).toMatchObject({
-      if: "github.event_name == 'pull_request'",
+      if: pullRequestImpactIf,
       name: 'python runtime / release-shaped Linux x64',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: {
@@ -200,18 +225,78 @@ describe('CI workflow', () => {
     expect(aggregate.needs).toContain('python-runtime')
   })
 
+  it('classifies pull-request impact before ordinary CI and keeps docs-only green explicit', () => {
+    const workflow = loadWorkflow('.github/workflows/ci.yml')
+    const impact = workflowJob(workflow, 'pr-impact')
+    const docsOnly = workflowJob(workflow, 'docs-only')
+    const aggregate = workflowJob(workflow, 'all-checks-passed')
+    if (!Array.isArray(impact.steps) || !Array.isArray(aggregate.needs) || !Array.isArray(aggregate.steps)) {
+      throw new TypeError('CI impact and aggregate jobs must define steps and dependencies')
+    }
+
+    expect(impact).toMatchObject({
+      if: "github.event_name == 'pull_request'",
+      name: 'pull request / impact',
+      outputs: {
+        classification: '${{ steps.impact.outputs.classification }}',
+        run_ci: '${{ steps.impact.outputs.run_ci }}',
+      },
+    })
+    expect(JSON.stringify(impact.steps)).toContain('node scripts/pr-impact.mjs')
+    expect(aggregate.needs).toContain('pr-impact')
+    expect(docsOnly).toMatchObject({
+      needs: ['pr-impact'],
+      name: 'pull request / documentation',
+    })
+    expect(docsOnly.if).toBe(docsOnlyIf)
+    expect(JSON.stringify(docsOnly.steps)).toContain('pnpm run doc-sync')
+    expect(aggregate.needs).toContain('docs-only')
+
+    for (const jobName of ['node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-runtime', 'windows', 'windows-native']) {
+      const job = workflowJob(workflow, jobName)
+      expect(job.needs, `${jobName} must depend on impact classification`).toEqual(['pr-impact'])
+      expect(job.if, `${jobName} must fail open only after a classified full PR`).toBe(pullRequestImpactIf)
+    }
+
+    const aggregateText = JSON.stringify(aggregate.steps)
+    expect(aggregateText).toContain("needs['pr-impact'].outputs.run_ci == 'false'")
+    expect(aggregateText).toContain("needs['docs-only'].result != 'success'")
+    expect(aggregateText).toContain("contains(needs.*.result, 'cancelled')")
+    expect(aggregateText).toContain("needs['node-24'].result != 'success'")
+  })
+
   it('keeps every Vitest project process-isolated on native Windows', () => {
     const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
 
     expect(config).not.toContain("pool: process.platform === 'win32' ? 'threads' : 'forks'")
     expect(config.match(/pool: 'forks'/g)).toHaveLength(2)
   })
+
+  it('keeps Unix-socket authorities outside the native Windows inventory', () => {
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).toContain("'packages/orchestration/orchestration-local/tests/daemon.spec.ts'")
+    expect(config).toContain("'packages/physical-operator/resident-operator-local/tests/daemon.spec.ts'")
+    expect(config).toContain("'packages/physical-operator/resident-operator-local/tests/codex-transport.spec.ts'")
+  })
+
+  it('keeps native HMR watcher suites in the process-bound project', () => {
+    const config = readFileSync(resolve(root, 'vitest.config.ts'), 'utf8')
+
+    expect(config).toContain("'packages/boot/app-boot/tests/hmr-config.spec.ts'")
+    expect(config).toContain("'packages/boot/app-boot/tests/user-patches.spec.ts'")
+    expect(config).toContain("'packages/client/ui-primitives/tests/code-block.client.spec.tsx'")
+    const processBound = config.slice(config.indexOf('const processBoundTests = ['), config.indexOf('export default defineConfig'))
+    expect(processBound).toContain("'packages/boot/app-boot/tests/hmr-config.spec.ts'")
+    expect(processBound).toContain("'packages/boot/app-boot/tests/user-patches.spec.ts'")
+    expect(processBound).toContain("'packages/client/ui-primitives/tests/code-block.client.spec.tsx'")
+  })
 })
 
 describe('fork branch CI workflow', () => {
-  it('maps codex branch pushes to the repository-native required gates', () => {
+  it('keeps the duplicate fork matrix manual while pull-request CI owns automatic validation', () => {
     const workflow = loadWorkflow('.github/workflows/fork-ci.yml')
-    const push = workflowEvent(workflow, 'push')
+    const dispatch = workflowEvent(workflow, 'workflow_dispatch')
     const linux = workflowJob(workflow, 'linux-primary')
     const compat = workflowJob(workflow, 'node-compat')
     const pythonSdk = workflowJob(workflow, 'python-sdk')
@@ -226,7 +311,8 @@ describe('fork branch CI workflow', () => {
       throw new TypeError('fork CI jobs must define executable steps and aggregate dependencies')
     }
 
-    expect(push).toEqual({ branches: ['codex/**'] })
+    expect(dispatch).toEqual({})
+    expect(workflow.on).not.toHaveProperty('push')
     expect(workflow.permissions).toEqual({ contents: 'read' })
     expect(linux['runs-on']).toBe('ubuntu-latest')
     expect(JSON.stringify(linux.steps)).toContain('pnpm run check:ci:linux-primary')
@@ -455,7 +541,13 @@ describe('Git hooks', () => {
         (job: unknown) => isRecord(job) && job.name === 'translation pairing (staged records)',
       )
 
-      expect(pairing).toMatchObject({ exclude: ['.agents/notes/archived/**'] })
+      expect(pairing).toMatchObject({
+        exclude: [
+          '.agents/notes/archived/**',
+          'products/desktop/**',
+          'plugins/managed/**',
+        ],
+      })
     }
   })
 })

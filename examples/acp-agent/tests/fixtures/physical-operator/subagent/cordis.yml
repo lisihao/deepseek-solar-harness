@@ -1,0 +1,44 @@
+# Keyless real-Loader composition of the complete physical-operator capability seam.
+- id: fixture
+  name: './fixture.ts'
+
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+
+- id: physical-operator
+  name: '@deepseek-ai/dsh-physical-operator'
+
+- id: physical-operator-subagent
+  name: '@deepseek-ai/dsh-physical-operator-subagent'
+  config:
+    operators:
+      - id: physics-solver
+        provider: scripted-physics
+        displayName: Physics Solver
+        description: Solves one bounded physics problem.
+        tags:
+          - physics
+          - reasoning
+        maxConcurrency: 1
+
+- id: tool-physical-operator
+  name: '@deepseek-ai/dsh-tool-physical-operator'
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents:
+      - id: main
+        provider: fixture
+        model: fixture
+        cwd: !!js process.cwd()
+    persona: 'This composition fixture does not run a model turn.'
+    workspaceContext: false
+
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+
+- id: checkpoint-policy
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'

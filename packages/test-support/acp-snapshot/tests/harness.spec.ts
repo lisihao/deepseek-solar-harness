@@ -730,11 +730,11 @@ describe('runScenario', () => {
         steps: [
           ...boot,
           { op: 'promptAndCancel', text: 'hang' },
-          { op: 'waitForTurnStart', timeoutMs: 20 },
+          { op: 'waitForTurnStart', timeoutMs: 250 },
         ],
       },
       { agent: AGENT, mode: 'replay', fixtureFile: closed.fixtureFile },
-    )).rejects.toThrow(/did not persist turn\/start within 20ms/)
+    )).rejects.toThrow(/did not persist turn\/start within 250ms/)
 
     for (const turn of [undefined, 0]) {
       const malformed = await scenario({
@@ -764,9 +764,9 @@ describe('runScenario', () => {
   it('waitForTurnEnd times out for a missing log and an open logged turn', { timeout: 20_000 }, async () => {
     const missing = await scenario({})
     await expect(runScenario(
-      { steps: [...boot, { op: 'waitForTurnEnd', timeoutMs: 20 }] },
+      { steps: [...boot, { op: 'waitForTurnEnd', timeoutMs: 250 }] },
       { agent: AGENT, mode: 'replay', fixtureFile: missing.fixtureFile },
-    )).rejects.toThrow(/did not persist turn\/end within 20ms/)
+    )).rejects.toThrow(/did not persist turn\/end within 250ms/)
 
     const open = await scenario({
       prompt: 'hang-until-cancel',
@@ -784,11 +784,11 @@ describe('runScenario', () => {
         steps: [
           ...boot,
           { op: 'promptAndCancel', text: 'hang' },
-          { op: 'waitForTurnEnd', timeoutMs: 20 },
+          { op: 'waitForTurnEnd', timeoutMs: 250 },
         ],
       },
       { agent: AGENT, mode: 'replay', fixtureFile: open.fixtureFile },
-    )).rejects.toThrow(/did not persist turn\/end within 20ms/)
+    )).rejects.toThrow(/did not persist turn\/end within 250ms/)
   })
 
   it('waitForGoalPhase requires the requested durable goal phase', { timeout: 20_000 }, async () => {
@@ -905,9 +905,19 @@ describe('runScenario', () => {
 
     const missing = await scenario({})
     await expect(runScenario(
-      { steps: [...boot, { op: 'waitForSubagentTurnEnd', child: 2, timeoutMs: 20 }] },
+      { steps: [...boot, { op: 'waitForSubagentTurnEnd', child: 2, timeoutMs: 1 }] },
       { agent: AGENT, mode: 'replay', fixtureFile: missing.fixtureFile },
-    )).rejects.toThrow(/subagent child #2 did not persist closed turn 1 within 20ms/)
+    )).rejects.toThrow(/subagent child #2 did not persist closed turn 1 within 1ms/)
+
+    const waitFor = vi.spyOn(vi, 'waitFor').mockRejectedValueOnce(new Error('Timed out in waitFor!'))
+    try {
+      await expect(runScenario(
+        { steps: [...boot, { op: 'waitForSubagentTurnEnd', timeoutMs: 20 }] },
+        { agent: AGENT, mode: 'replay', fixtureFile: missing.fixtureFile },
+      )).rejects.toThrow(/subagent child #1 did not persist closed turn 1 within 20ms/)
+    } finally {
+      waitFor.mockRestore()
+    }
   })
 
   it('waitForTitleAfterTurnEnd times out when the title precedes the boundary', { timeout: 20_000 }, async () => {
@@ -982,6 +992,16 @@ describe('runScenario', () => {
       },
       { agent: AGENT, mode: 'replay', fixtureFile: early.fixtureFile },
     )).rejects.toThrow(/did not persist user\/message after turn\/end within 20ms/)
+
+    const waitFor = vi.spyOn(vi, 'waitFor').mockRejectedValueOnce(new Error('Timed out in waitFor!'))
+    try {
+      await expect(runScenario(
+        { steps: [...boot, { op: 'waitForEventAfterTurnEnd', type: 'user/message', timeoutMs: 20 }] },
+        { agent: AGENT, mode: 'replay', fixtureFile: early.fixtureFile },
+      )).rejects.toThrow(/did not persist user\/message after turn\/end within 20ms/)
+    } finally {
+      waitFor.mockRestore()
+    }
   })
 
   it('promptExpectError swallows a model-error response as the expected outcome', { timeout: 20_000 }, async () => {

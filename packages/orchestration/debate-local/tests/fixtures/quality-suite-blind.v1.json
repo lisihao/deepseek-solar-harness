@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "evidence": {
+    "evidenceKind": "synthetic-fixture",
+    "recordingId": "debate-quality-fixture-v1",
+    "recordedAt": "2026-08-29T00:00:00.000Z",
+    "sourceCommit": "fixture-source",
+    "productVersion": "fixture-version"
+  },
+  "minimumQualityDelta": 0.25,
+  "maximumTokenRatio": 1.5,
+  "maximumCostRatio": 2,
+  "cases": [
+    {
+      "id": "authority-boundary",
+      "task": "Describe the execution authority and evidence order.",
+      "criteria": [
+        { "id": "single-authority", "weight": 1, "critical": true, "requiredFacts": ["single scheduler"] },
+        { "id": "evidence-order", "weight": 1, "requiredFacts": ["evidence before judge"] }
+      ],
+      "arms": [
+        {
+          "armId": "A17",
+          "output": {
+            "text": "Use a single scheduler.",
+            "rounds": 1,
+            "earlyStopped": false,
+            "usage": { "inputTokens": 100, "outputTokens": 50, "costUsd": 0.01 }
+          }
+        },
+        {
+          "armId": "B42",
+          "output": {
+            "text": "Use a single scheduler and require evidence before judge.",
+            "rounds": 1,
+            "earlyStopped": true,
+            "usage": { "inputTokens": 160, "outputTokens": 60, "costUsd": 0.02 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "dissent-preservation",
+      "task": "State how a bounded decision retains disagreement.",
+      "criteria": [
+        { "id": "bounded", "weight": 1, "requiredFacts": ["bounded rounds"] },
+        { "id": "dissent", "weight": 1, "critical": true, "requiredFacts": ["preserve dissent"] }
+      ],
+      "arms": [
+        {
+          "armId": "C09",
+          "output": {
+            "text": "Use bounded rounds.",
+            "rounds": 1,
+            "earlyStopped": false,
+            "usage": { "inputTokens": 100, "outputTokens": 50, "costUsd": 0.01 }
+          }
+        },
+        {
+          "armId": "D31",
+          "output": {
+            "text": "Use bounded rounds and preserve dissent.",
+            "rounds": 2,
+            "earlyStopped": false,
+            "usage": { "inputTokens": 160, "outputTokens": 60, "costUsd": 0.02 }
+          }
+        }
+      ]
+    }
+  ]
+}

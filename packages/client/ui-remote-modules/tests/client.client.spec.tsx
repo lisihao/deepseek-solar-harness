@@ -58,8 +58,8 @@ async function bench() {
 }
 
 const instances: WebpageInstanceView[] = [
-  { id: 'genesispod', label: 'GenesisPod', targetUrl: 'http://127.0.0.1:13000/', embedUrl: 'http://localhost:3000/', order: 100 },
-  { id: 'thunder-omlx', label: 'ThunderOMLX', targetUrl: 'http://127.0.0.1:18002/admin/', embedUrl: 'http://localhost:18102/', order: 200 },
+  { id: 'research-workspace', label: 'Research Workspace', targetUrl: 'http://127.0.0.1:19001/', embedUrl: 'http://localhost:29001/', order: 100 },
+  { id: 'model-console', label: 'Model Console', targetUrl: 'http://127.0.0.1:19002/console/', embedUrl: 'http://localhost:29002/console/', order: 200 },
 ]
 
 function storeProps(): PropsStore<ReturnType<typeof createWebpageModulesStore>> {
@@ -122,10 +122,10 @@ describe('Web page browser plugin', () => {
 
 describe('Web page instance UI', () => {
   it('keeps relay cookies same-site when Harness uses an IPv4 loopback address', () => {
-    expect(alignLoopbackEmbedUrl('http://localhost:18102/admin/', '127.0.0.1'))
-      .toBe('http://127.0.0.1:18102/admin/')
-    expect(alignLoopbackEmbedUrl('http://localhost:18102/admin/', 'localhost'))
-      .toBe('http://localhost:18102/admin/')
+    expect(alignLoopbackEmbedUrl('http://localhost:29002/console/', '127.0.0.1'))
+      .toBe('http://127.0.0.1:29002/console/')
+    expect(alignLoopbackEmbedUrl('http://localhost:29002/console/', 'localhost'))
+      .toBe('http://localhost:29002/console/')
     expect(alignLoopbackEmbedUrl('https://example.com/admin/', '127.0.0.1'))
       .toBe('https://example.com/admin/')
   })
@@ -138,20 +138,20 @@ describe('Web page instance UI', () => {
     const stack = screen.getByTestId('remote-webpages-sidebar-stack')
     expect(stack.className).toContain('entryStack')
     expect(stack.querySelectorAll('button[aria-haspopup="dialog"]')).toHaveLength(2)
-    expect(screen.getByRole('button', { name: 'GenesisPod' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'ThunderOMLX' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Research Workspace' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Model Console' })).toBeTruthy()
   })
 
   it('opens the actual configured page in an iframe, reloads it, and closes by Escape', async () => {
     render(<WebpageEntry useSessions={vi.fn()} useWorkspaces={vi.fn()} wide {...instances[0]!} />)
-    fireEvent.click(screen.getByRole('button', { name: 'GenesisPod' }))
-    const frame = screen.getByTitle('GenesisPod 网页') as HTMLIFrameElement
-    expect(frame.src).toBe('http://localhost:3000/')
+    fireEvent.click(screen.getByRole('button', { name: 'Research Workspace' }))
+    const frame = screen.getByTitle('Research Workspace 网页') as HTMLIFrameElement
+    expect(frame.src).toBe('http://localhost:29001/')
     expect(screen.queryByText('服务状态')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: '重新加载 GenesisPod' }))
-    await waitFor(() => { expect(screen.getByTitle('GenesisPod 网页')).not.toBe(frame) })
-    expect(screen.getByRole('link', { name: '在新窗口打开 GenesisPod' }).getAttribute('href')).toBe('http://localhost:3000/')
+    fireEvent.click(screen.getByRole('button', { name: '重新加载 Research Workspace' }))
+    await waitFor(() => { expect(screen.getByTitle('Research Workspace 网页')).not.toBe(frame) })
+    expect(screen.getByRole('link', { name: '在新窗口打开 Research Workspace' }).getAttribute('href')).toBe('http://localhost:29001/')
     fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.queryByRole('dialog', { name: 'GenesisPod' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Research Workspace' })).toBeNull()
   })
 })

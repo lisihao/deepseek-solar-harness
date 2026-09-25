@@ -8,20 +8,23 @@
  * @module dsh-llm-deepseek/adapter
  */
 
-import { attributionHeaders, CONTEXT_WINDOW_EXCEEDED_CODE, isContextWindowExceededError, isQuotaExceededError, LlmAdapter, LlmError, ProviderRequestId, QUOTA_EXCEEDED_CODE, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { attributionHeaders, contentHasImage, CONTEXT_WINDOW_EXCEEDED_CODE, isContextWindowExceededError, isQuotaExceededError, LlmAdapter, LlmError, ProviderRequestId, QUOTA_EXCEEDED_CODE, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
   LlmModelInfo,
   LlmProviderInfo,
   LlmResolvedModelInfo,
+  ModelModality,
   ResolvedRetryPolicy,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
+import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
-import { serializeRequest } from './serialize.ts'
+import { serializeRequest, serializeRequestWithImages } from './serialize.ts'
 import type { RequestDefaults } from './serialize.ts'
+import { discoverDeepSeekModels } from './discovery.ts'
 import { parseSse } from './sse.ts'
 import { translate } from './translate.ts'
 import type { WireError } from './types.ts'
@@ -38,6 +41,8 @@ export interface DeepSeekCatalogModel {
   contextWindow?: number
   /** Per-request output cap for this model; omission falls back to the profile's {@link DeepSeekConnectionOptions.maxTokens}. */
   maxTokens?: number
+  /** Accepted request modalities; omission is text-only. */
+  inputModalities?: ModelModality[]
 }
 
 /**
@@ -66,6 +71,8 @@ export interface DeepSeekConnectionOptions {
   models: readonly DeepSeekCatalogModel[]
   /** Maximum provider idle time while one stream read is outstanding. */
   streamIdleTimeoutMs: number
+  /** Maximum accumulated base64 image payload in one request. */
+  maxRequestImageBytes: number
   /** Provider-owned model-request retry policy, already resolved. */
   retryPolicy: ResolvedRetryPolicy
 }
@@ -83,6 +90,8 @@ export interface DeepSeekAdapterOptions {
   resolveApiKey: (connection: DeepSeekConnectionOptions) => Promise<string>
   /** Resolve the harness-home anonymous id shared with telemetry and feedback. */
   resolveUserId: () => AnonymousUserId
+  /** Resolve the current durable attachment service; absence rejects image input. */
+  resolveAttachments?: () => AttachmentStore | undefined
 }
 
 /** Default maximum idle interval while an adapter stream read is outstanding. */
@@ -91,6 +100,8 @@ export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 export const DEFAULT_CONTEXT_WINDOW = 1_000_000
 /** Default per-request output-token cap. */
 export const DEFAULT_MAX_TOKENS = 256_000
+/** Default bound on accumulated base64 image payload per request. */
+export const DEFAULT_MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
 const STREAM_IDLE_TIMEOUT_CODE = 'LLM_STREAM_IDLE_TIMEOUT'
 const OFF_REASONING_EFFORT = ReasoningEffortId('off')
 const HIGH_REASONING_EFFORT = ReasoningEffortId('high')
@@ -110,8 +121,16 @@ function modelInfo(provider: string, model: DeepSeekCatalogModel): LlmModelInfo 
     id: model.id,
     name: model.name ?? model.id,
     ...model.description === undefined ? {} : { description: model.description },
-    inputModalities: ['text'],
+    inputModalities: model.inputModalities ?? ['text'],
   }
+}
+
+/** Selector note for an ID the endpoint lists but the configured catalog does not describe. */
+const DISCOVERED_MODEL_DESCRIPTION = '服务商 /models 新列出的模型；服务商未提供名称或版本说明'
+
+/** Keep discovered IDs isolated by endpoint and credential reference, never by secret value. */
+function discoveryScope(connection: DeepSeekConnectionOptions): string {
+  return JSON.stringify([connection.baseURL, String(connection.apiKeyEnv)])
 }
 
 function providerRetryAfterMs(value: string | null): number | undefined {
@@ -137,6 +156,7 @@ function requestId(headers: Headers): ReturnType<typeof ProviderRequestId> | und
  */
 export function httpErrorCode(status: number, error?: WireError['error']): string {
   if (status === 401 || status === 403) return 'AUTH'
+  if (status === 413) return 'INVALID_REQUEST'
   const detail = [error?.code, error?.type, error?.message].filter(Boolean).join(' ')
   if (isQuotaExceededError(detail)) return QUOTA_EXCEEDED_CODE
   if (status === 429) return 'RATE_LIMIT'
@@ -156,6 +176,11 @@ export function httpErrorCode(status: number, error?: WireError['error']): strin
  * map to `ABORTED`; the configured per-read idle watchdog maps to `TIMEOUT`.
  */
 export class DeepSeekAdapter extends LlmAdapter {
+  /** Endpoint/account-local IDs returned by successful directory listings. */
+  private readonly discoveredModelIds = new Map<string, readonly string[]>()
+  /** Refresh order per endpoint/account scope; stale results cannot republish. */
+  private readonly discoveryGenerations = new Map<string, number>()
+
   constructor(private readonly config: DeepSeekAdapterOptions) {
     super()
   }
@@ -168,8 +193,43 @@ export class DeepSeekAdapter extends LlmAdapter {
     return this.config.options().retryPolicy
   }
 
-  override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
-    return Promise.resolve(this.config.options().models.map(model => modelInfo(provider, model)))
+  override async listModels(
+    provider: string,
+    options?: { readonly refresh?: boolean },
+  ): Promise<readonly LlmModelInfo[]> {
+    const connection = this.config.options()
+    const scope = discoveryScope(connection)
+    if (options?.refresh === true) {
+      const generation = (this.discoveryGenerations.get(scope) ?? 0) + 1
+      this.discoveryGenerations.set(scope, generation)
+      const apiKey = await this.config.resolveApiKey(connection)
+      const userId = this.config.resolveUserId()
+      const discovered = await discoverDeepSeekModels({
+        baseURL: connection.baseURL,
+        apiKey,
+        userId: String(userId),
+        timeoutMs: connection.streamIdleTimeoutMs,
+      })
+      if (this.discoveryGenerations.get(scope) === generation) {
+        this.discoveredModelIds.set(scope, discovered)
+      }
+    }
+    return this.catalog(provider, connection)
+  }
+
+  /** Combine configured model metadata with IDs from the last successful endpoint listing. */
+  private catalog(provider: string, connection: DeepSeekConnectionOptions): LlmModelInfo[] {
+    const known = new Set<string>()
+    const models = connection.models.map((model) => {
+      known.add(model.id)
+      return modelInfo(provider, model)
+    })
+    for (const id of this.discoveredModelIds.get(discoveryScope(connection)) ?? []) {
+      if (known.has(id)) continue
+      known.add(id)
+      models.push(modelInfo(provider, { id, description: DISCOVERED_MODEL_DESCRIPTION }))
+    }
+    return models
   }
 
   override resolveModel(
@@ -182,10 +242,9 @@ export class DeepSeekAdapter extends LlmAdapter {
     const contextWindow = configured?.contextWindow
       ?? connection.defaultContextWindow
     return Promise.resolve({
-      // The chat-completions wire route is text-only regardless of catalog
-      // membership, so the uncatalogued fallback declares the same negative
-      // capability — "unknown" here would let the host accept and persist
-      // images the serializer must then reject.
+      // An uncatalogued endpoint is safely treated as text-only. Declaring an
+      // unverified image capability would let the host persist input that the
+      // endpoint may reject on every later turn.
       ...configured === undefined
         ? { provider, id: model, name: model, inputModalities: ['text' as const] }
         : modelInfo(provider, configured),
@@ -218,6 +277,24 @@ export class DeepSeekAdapter extends LlmAdapter {
     // The key resolves *from this snapshot*, so an endpoint and the secret
     // sent to it can never come from different configuration generations.
     const connection = this.config.options()
+    const hasImages = options.messages.some(message => contentHasImage(message.content))
+    let attachments: AttachmentStore | undefined
+    if (hasImages) {
+      const model = connection.models.find(entry => entry.id === options.model)
+      if (model?.inputModalities?.includes('image') !== true) {
+        throw new LlmError(
+          `DeepSeek model "${options.model}" does not accept image input.`,
+          'UNSUPPORTED_CONTENT',
+        )
+      }
+      attachments = this.config.resolveAttachments?.()
+      if (attachments === undefined) {
+        throw new LlmError(
+          'DeepSeek image conversion requires the durable attachment service.',
+          'UNSUPPORTED_CONTENT',
+        )
+      }
+    }
     const apiKey = await this.config.resolveApiKey(connection)
     const userId = this.config.resolveUserId()
     const consumer = new AbortController()
@@ -231,6 +308,7 @@ export class DeepSeekAdapter extends LlmAdapter {
       connection,
       apiKey,
       userId,
+      attachments,
       () => { watchdog.pulse() },
     )[Symbol.asyncIterator]()
     let exhausted = false
@@ -274,9 +352,16 @@ export class DeepSeekAdapter extends LlmAdapter {
     connection: DeepSeekConnectionOptions,
     apiKey: string,
     userId: AnonymousUserId,
+    attachments: AttachmentStore | undefined,
     onComment: () => void,
   ): AsyncIterable<StreamChunk> {
-    const body = serializeRequest(options, connection.defaults)
+    const body = attachments === undefined
+      ? serializeRequest(options, connection.defaults)
+      : await serializeRequestWithImages(options, {
+        attachments,
+        maxRequestImageBytes: connection.maxRequestImageBytes,
+        signal,
+      }, connection.defaults)
     // Prepared outside the try so the TRANSPORT label below covers exactly the
     // transport boundary, never a serialization failure.
     const payload = JSON.stringify(body)

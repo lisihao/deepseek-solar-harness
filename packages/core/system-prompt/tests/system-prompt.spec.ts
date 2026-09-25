@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SystemPrompt, { AssembleContext, PromptAssembly, renderContextSnapshot, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import SystemPrompt, {
+  AssembleContext,
+  captureRuntimeContextSnapshot,
+  currentRuntimeContextSnapshot,
+  PromptAssembly,
+  renderContextSnapshot,
+  renderPrompt,
+} from '@deepseek-ai/dsh-system-prompt'
 
 /**
  * Every assembly carries the plugin's own built-ins — `harness:identity`
@@ -15,6 +23,35 @@ function contributed(assembly: PromptAssembly): PromptAssembly['sections'] {
 }
 
 describe('SystemPrompt', () => {
+  it('does not revive an earlier runtime snapshot after the producer clears it', () => {
+    const earlier = createUserMessage({
+      content: [{ type: 'text', text: 'Earlier context.' }],
+      source: {
+        kind: 'plugin',
+        plugin: '@deepseek-ai/dsh-system-prompt',
+        form: 'snapshot',
+        sections: [{ name: 'memory', text: 'Earlier context.' }],
+      },
+    })
+    const cleared = createUserMessage({
+      content: [{ type: 'text', text: 'Current runtime context: none.' }],
+      source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt' },
+    })
+
+    expect(currentRuntimeContextSnapshot([earlier])).toEqual({
+      messageId: earlier.id,
+      sections: [{ name: 'memory', text: 'Earlier context.' }],
+    })
+    expect(currentRuntimeContextSnapshot([earlier, cleared])).toBeUndefined()
+    expect(captureRuntimeContextSnapshot([earlier], 'session-1')).toEqual({
+      version: 1,
+      sourceSessionId: 'session-1',
+      contextSnapshotMessageId: String(earlier.id),
+      sections: [{ name: 'memory', text: 'Earlier context.' }],
+    })
+    expect(captureRuntimeContextSnapshot([earlier, cleared], 'session-1')).toBeUndefined()
+  })
+
   describe('built-in sections', () => {
     it('registers the harness identity and the configured deployment persona', async () => {
       const ctx = new Context()
@@ -343,6 +380,20 @@ describe('SystemPrompt', () => {
       variables: {},
     })
     expect(result).toBe('content')
+  })
+
+  it('preserves literal variable examples in sections that opt out of interpolation', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    ctx.systemPrompt.section({
+      name: 'generated-reference',
+      order: 10,
+      text: 'Template examples: {{date}} and {{time}}.',
+      interpolate: false,
+    })
+
+    expect(renderPrompt(await ctx.systemPrompt.assemble()))
+      .toContain('Template examples: {{date}} and {{time}}.')
   })
 
   it('filters empty context, interpolates variables, and returns empty without active context', async () => {

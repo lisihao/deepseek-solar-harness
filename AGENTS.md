@@ -1,16 +1,19 @@
 # AGENTS.md
 
-DeepSeek Harness is a plugin-based agent harness on vendored Cordis: **everything is a plugin**. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
+DeepSeek Solar Harness (DSH) is the downstream, macOS-first product branch of DeepSeek Harness and remains plugin-based on vendored Cordis: **everything is a plugin**. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
 
-## Pre-release stance: foundation over blast radius
+## Released product compatibility
 
-**Remove this section at the first tagged release.** With no external consumers, prefer the correct foundation over compatibility shims: rename or repackage freely and update every reference together. Backends reject old on-disk formats. SQLite uses monotonic `SCHEMA_VERSION`; `dsh-session` keeps `SESSION_FORMAT_VERSION` at `0` with no compatibility promise.
+DSH Desktop has tagged releases and persisted state. Released on-disk, wire, session, and configuration formats require compatibility, migration, or an explicit versioned failure. Unpublished package APIs may change atomically with all consumers; `rc` packages do not waive product-data compatibility ([decision](.agents/notes/implemented/process/2026-08-22-reduce-unit-change-cost.md)).
 
 ## Repository layout
 
 ```
 vendor/      Vendored Cordis source — manifest + sync procedure in vendor/README.md
 packages/    @deepseek-ai/dsh-<pkg> workspaces; group and package map in packages/README.md
+products/    Product shells; products/desktop owns the macOS Desktop source
+plugins/     Solar-managed external plugin source and its provenance registry
+distribution/ Product version, upstream, capability, and artifact manifests
 python/      Python SDK and bundled runtime (see python/README.md)
 native/      @deepseek-ai/node-addon-landlock-run source of record (see native/README.md)
 examples/    Runnable cordis.yml leaves over packages/examples bundles (see examples/AGENTS.md)
@@ -20,15 +23,21 @@ scripts/     repo gates and generators
 website/     VitePress projection of selected bilingual docs/ sources
 ```
 
-## MacBook development and runtime copies
+## Source and generated runtime
 
-- The only development repository and source of edits, commits, builds, and pushes is `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness`.
-- The login-time runtime deployment is `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness`. Treat it as a generated deployment copy: never edit files there, never commit from it, and never copy changes from it back into the development repository.
-- `/Users/sihaoli/Library/LaunchAgents/com.lisihao.deepseek-solar-harness.plist` starts the runtime deployment. `/Users/sihaoli/Library/LaunchAgents/com.lisihao.deepseek-solar-harness.tunnels.plist` owns only the Mac mini forwards required by the Remote Modules plugin.
-- Deploy only an identified development commit to the runtime copy after relevant checks pass. Record that commit in the runtime copy, then verify the LaunchAgent, port `3081`, the four SSH forwards, GenesisPod, and ThunderOMLX. A loaded LaunchAgent is not runtime-health evidence.
-- When the two copies differ, preserve the development repository as authoritative and redeploy the runtime copy. Do not merge, reset, or overwrite the development repository from runtime state.
+- MacBook is the sole DSH development host for edits, checks, builds, and commits. Source and worktrees live only under `/Users/sihaoli/Projects`; `/Users/sihaoli/Documents/ChatGPT/DeepSeek-Solar-Harness` is a compatibility symlink, never worktree or build storage.
+- `/Users/sihaoli/Library/Application Support/DeepSeek-Solar-Harness` is generated runtime: never edit, commit, or reverse-copy it; deploy only a verified source commit and redeploy on drift.
+- The `com.lisihao.deepseek-solar-harness` LaunchAgents own runtime and tunnels. Acceptance verifies the recorded commit, process, port `3081`, forwards, GenesisPod, and ThunderOMLX; a loaded agent alone is insufficient.
 
 Package groups: [packages/README.md](packages/README.md).
+
+## Solar product governance
+
+- `solar` is protected. Use a separate branch and worktree; never commit directly to `solar` or edit another task's worktree. Upstreams are fetch-only: no upstream push, PR, package, or credential use.
+- **Code-as-Harness is a CI merge gate.** `solar-governance.yml` runs the `plugins/managed/governance` Profile on every PR to `solar` and gates merge. Run it locally only to reproduce a failure or on request ([dsh-code-as-harness](.agents/skills/dsh-code-as-harness/SKILL.md); [why](docs/architecture/adr-005-ai-agent-authority.md)).
+- **Upstream source edits are inventoried**: each changed upstream `packages/*/*/src` or `apps/*/src` file needs an entry in `distribution/upstream-source-edits.json` ([check](scripts/solar/verify-upstream-edits.mjs)); prefer a plugin.
+- Stable Desktop releases use annotated tags matching `^DSH-desktop-v[0-9]+\.[0-9]+\.[0-9]+$` (e.g. `DSH-desktop-v2.4.3`); other variants are invalid.
+- Desktop application, runtime, or artifact changes also follow `products/desktop/AGENTS.md`; migration-only imports never authorize changing the installed app.
 
 ## Commands
 
@@ -55,14 +64,14 @@ pnpm run demo:acp       # ACP automation server (needs DEEPSEEK_API_KEY)
 
 ### Host sandbox failures
 
-When required `gh`, `pnpm`, build, test, or generator commands fail because the agent sandbox blocks credentials, network, IPC, file watching, or nested `sandbox-exec`, retry unchanged with the narrowest host escalation before diagnosing authentication or project failure. Require sandbox evidence; never bypass genuine test failures or the product sandbox under test.
+When required `gh`, `pnpm`, build, test, or generator commands fail because the agent sandbox blocks credentials, network, IPC, file watching, or nested `sandbox-exec`, retry unchanged with the narrowest host escalation before diagnosing authentication or project failure; never bypass genuine test failures or the product sandbox under test.
 
 ### Run relevant checks locally
 
 Run checks before pushes via [dsh-pre-push-checks](.agents/skills/dsh-pre-push-checks/SKILL.md); report only commands run. After `gh stack sync`, validate immediately; do not merge before checks pass.
 
-- Match evidence to the surface: focused tests for behavior, snapshots for model or user output, `doc-sync` for docs, build/hygiene and built smokes for published paths, and real-API e2e for provider behavior.
-- Never default to the full suite or repeat a passing check for commit or push. CI owns exhaustive coverage and the platform matrix; rehearse all locally only by explicit request, for CI diagnosis, or for an irreducibly repository-wide change.
+- Match evidence to the surface: focused behavior tests, snapshots, doc checks, package smokes, and real-provider E2E only for changed provider behavior.
+- Reuse passing evidence while affected inputs and execution contract are unchanged. Paid E2E needs explicit cost authorization and its smallest representative path; CI owns exhaustive platform coverage.
 - `test:coverage`, not `test`, is the CI coverage gate ([why](docs/testing.md)).
 
 ## Secrets / .env
@@ -93,7 +102,7 @@ Real-API tests and demos read `DEEPSEEK_API_KEY`, optional `DEEPSEEK_BASE_URL`, 
 - Do not comment on facts obvious from code.
 - **Prefer symmetry for parallel values**; unexplained asymmetry usually signals a missed extraction.
 - **Tests describe behavior, not correctness.** Change obsolete behavior with its tests; explain why in the PR.
-- **Non-trivial changes MUST include an Agent Note in the same PR;** only mechanical/local edits are exempt ([scope](.agents/notes/README.md#when-to-write-one)). Archived notes are frozen: never edit or treat them as current authority ([archive policy](.agents/notes/README.md#archiving-and-deletion)).
+- **Durable cross-cutting decisions MUST include an Agent Note in the same PR;** ordinary implementation, isolated fixes, refactors, and documentation or test maintenance do not ([scope](.agents/notes/README.md#when-to-write-one)). Archived notes are frozen: never edit or treat them as current authority ([archive policy](.agents/notes/README.md#archiving-and-deletion)).
 - **Testing policy** — [docs/testing.md](docs/testing.md). Every non-trivial model- or product-user-visible behavior change adds or updates a keyless snapshot through a real runnable example in the same PR; package tests, e2e-only assertions, and mock-only fixtures do not substitute for the assembled application transcript. Fixtures must replay on macOS/Linux; fix fixtures, not normalizers.
 - **A tool's UI render intent is part of its design**, decided up front (`generic`/`terminal`/`diff`, `locations`); presentation methods are pure functions of `args` ([cookbook](docs/cookbook/adding-a-tool.md)).
 - **Plan unit, e2e, and snapshot coverage** for capability seams, lifecycle paths, and transcript output; include missing snapshot-harness support in the same change.

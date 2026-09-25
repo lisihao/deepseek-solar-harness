@@ -70,12 +70,12 @@ export function apply(ctx: ClientContext): void {
     if (snapshot.read) runner.reconcileApprovals(snapshot.rows)
   }), 'ui-cordis: reconcile pending approvals')
 
-  ctx.remote.$on('cordis/dynamic-package', () => { inventory.refresh() })
-  ctx.remote.$on('cordis/dynamic-retract', () => { inventory.refresh() })
-  ctx.remote.$on('cordis/request-run', (request) => {
+  ctx.remote.$on('@deepseek-ai/cordis/dynamic-package', () => { inventory.refresh() })
+  ctx.remote.$on('@deepseek-ai/cordis/dynamic-retract', () => { inventory.refresh() })
+  ctx.remote.$on('@deepseek-ai/cordis/request-run', (request) => {
     if (!inventory.getSnapshot().rows.some(row => row.pluginId === request.pluginId)) inventory.refresh()
   })
-  ctx.remote.$on('cordis/request-run-resolved', () => { inventory.refresh() })
+  ctx.remote.$on('@deepseek-ai/cordis/request-run-resolved', () => { inventory.refresh() })
   ctx.on('connection/reset', () => {
     inventory.reset()
     inventory.refresh()

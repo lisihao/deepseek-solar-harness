@@ -1,0 +1,33 @@
+{
+  "files": [
+    { "path": "package.json", "field": "version" },
+    { "path": "kimi.plugin.json", "field": "version" },
+    { "path": ".claude-plugin/plugin.json", "field": "version" },
+    { "path": ".cursor-plugin/plugin.json", "field": "version" },
+    { "path": ".codex-plugin/plugin.json", "field": "version" },
+    { "path": ".codebuddy-plugin/plugin.json", "field": "version" },
+    { "path": ".claude-plugin/marketplace.json", "field": "plugins.0.version" },
+    { "path": ".codebuddy-plugin/marketplace.json", "field": "plugins.0.version" }
+  ],
+  "audit": {
+    "exclude": [
+      "RELEASE-NOTES.md",
+      "Aegis_Codeflow",
+      "Autoloom",
+      "node_modules",
+      ".git",
+      ".tmp",
+      ".opencode",
+      ".opencode/package.json",
+      ".opencode/package-lock.json",
+      "test-subagent-driven-development-integration.sh",
+      ".version-bump.json",
+      "scripts/bump-version.sh",
+      "README.md",
+      "README.zh-CN.md",
+      "gpt-5-6-sol-xhigh-extended-*.json",
+      "agentic-benchmark-render-check.sh",
+      "docs/archive"
+    ]
+  }
+}

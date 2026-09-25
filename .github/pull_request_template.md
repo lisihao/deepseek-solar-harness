@@ -8,6 +8,20 @@
 <summary>变更与验证</summary>
 
 - 变更：
-- 验证：
+- 影响组件：
+- Code-as-Harness full 验证命令：
+- Attestation 路径/摘要：
+- 其他验收：
+
+</details>
+
+<details>
+<summary>Solar 单仓检查</summary>
+
+- [ ] 仅修改本 PR 的独立 worktree，未覆盖其他工作区或运行时
+- [ ] 新纳管源码已登记来源 SHA、许可证和上游只读地址
+- [ ] 未向任何 upstream push、提交 PR 或发布包
+- [ ] 发布或安装 Desktop 时已执行 D00–D08；功能 PR 不改版本号、不打包安装
+- [ ] 正式 Desktop 标签符合 `DSH-desktop-v<major>.<minor>.<patch>`
 
 </details>

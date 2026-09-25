@@ -1,0 +1,160 @@
+/** JSON-safe read model shared by the Resident Host route and browser panel. */
+
+/** Provider failure codes mirrored from the Resident control service for the client face. */
+export type DesktopResidentProviderUnavailableCode =
+  | 'AUTH_MODE_MISMATCH'
+  | 'INVALID_RESULT'
+  | 'PROVIDER_VERSION_MISMATCH'
+  | 'QUOTA_EXHAUSTED'
+  | 'RUNTIME_UNAVAILABLE'
+
+/** Same-origin HTTP path for the bounded Resident dashboard projection. */
+export const RESIDENT_DASHBOARD_PATH = '/api/resident-operators'
+
+/** Same-origin HTTP path for native CLI version checks and verified updates. */
+export const RESIDENT_CLI_PATH = '/api/resident-operators/cli'
+
+/** Native product whose CLI the Resident Provider can check and update. */
+export type DesktopResidentCliProduct = 'claude-code' | 'codex'
+
+/** Running and published versions of one native product CLI. */
+export interface DesktopResidentCliRuntime {
+  product: DesktopResidentCliProduct
+  currentVersion?: string
+  latestVersion?: string
+  updateAvailable: boolean
+  /** Whether Resident execution uses a DSH-managed copy instead of a system installation. */
+  managed: boolean
+  error?: string
+}
+
+/** GET response of the native CLI route. */
+export interface DesktopResidentCliRuntimes {
+  runtimes: DesktopResidentCliRuntime[]
+}
+
+/** POST response after one verified native CLI update attempt. */
+export interface DesktopResidentCliUpdate {
+  product: DesktopResidentCliProduct
+  version: string
+  /** `incompatible` leaves the running CLI unchanged. */
+  status: 'activated' | 'incompatible'
+  reason?: string
+}
+
+/** Qualification and model catalog for one Resident physical operator. */
+export interface DesktopResidentProvider {
+  operatorId: string
+  product: string
+  displayName: string
+  description: string
+  tags: string[]
+  maxConcurrency: number
+  injectionBoundaries: Array<'pre-dispatch' | 'next-turn' | 'checkpoint'>
+  available: boolean
+  unavailableReason?: string
+  /** Trusted reason for an unavailable provider; only auth mismatch is login-actionable. */
+  unavailableCode?: DesktopResidentProviderUnavailableCode
+  quotaUnavailableReason?: string
+  authentication: 'native-subscription' | 'unqualified'
+  supportsExplicitAuthentication?: boolean
+  productVersion: string
+  models: DesktopResidentModel[]
+}
+
+/** Result returned after one explicit owner-local product login flow. */
+export interface DesktopResidentAuthenticationResponse {
+  provider: DesktopResidentProvider
+}
+
+/** Owner-actionable reason for one failed native subscription login attempt. */
+export type DesktopResidentAuthenticationFailureReason =
+  | 'auth_required'
+  | 'network_unavailable'
+  | 'callback_listener_missing'
+
+/** JSON error returned after one explicit native subscription login fails. */
+export interface DesktopResidentAuthenticationFailure {
+  error: 'RESIDENT_AUTHENTICATION_FAILED'
+  reason: DesktopResidentAuthenticationFailureReason
+  message: string
+}
+
+/** Browser-facing model and effort capabilities for one provider model. */
+export interface DesktopResidentModel {
+  model: string
+  resolvedModel?: string
+  displayName: string
+  description: string
+  supportedEfforts: string[]
+  defaultEffort?: string
+  isDefault: boolean
+  supportsAdaptiveThinking: boolean
+}
+
+/** One bounded Resident daemon event. */
+export interface DesktopResidentEvent {
+  sequence: number
+  type: string
+  time: string
+  data: Record<string, unknown>
+}
+
+/** Durable turn projection without prompt or native transcript content. */
+export interface DesktopResidentTurn {
+  commandId: string
+  turnId: string
+  state: 'accepted' | 'running' | 'settled' | 'indeterminate'
+  taskLabel?: string
+  stopReason?: 'completed' | 'aborted' | 'error' | 'max-tokens' | 'refusal'
+  resultRef?: string
+  updatedAt: string
+}
+
+/** Durable Resident Session projection for one operator, workspace, and lane. */
+export interface DesktopResidentSession {
+  sessionId: string
+  operatorId: string
+  workspace: string
+  workspaceDisplay: string
+  laneId: string
+  lifecycle: 'starting' | 'idle' | 'running' | 'draining' | 'stopped'
+  health: 'ok' | 'degraded' | 'unavailable'
+  healthReason?: string
+  stateRevision: number
+  activeTurnId?: string
+  executionProfile?: { model: string; effort?: string }
+  executionProfileSource?: 'smart-auto' | 'mixed' | 'manual'
+  latestTurn?: DesktopResidentTurn
+  latestEvent?: DesktopResidentEvent
+  updatedAt: string
+}
+
+/** User-facing activity collapsed from one durable turn's event sequence. */
+export interface DesktopResidentActivity {
+  commandId: string
+  turnId: string
+  taskLabel: string
+  status: 'queued' | 'running' | 'completed' | 'interrupted' | 'failed' | 'indeterminate'
+  phase?: string
+  startedAt: string
+  updatedAt: string
+}
+
+/** Complete bounded Resident dashboard response for one browser refresh. */
+export interface DesktopResidentDashboard {
+  generatedAt: string
+  providers: DesktopResidentProvider[]
+  sessions: DesktopResidentSession[]
+  selectedSessionId?: string
+  events: DesktopResidentEvent[]
+  activities: DesktopResidentActivity[]
+  hiddenDiagnosticSessions: number
+  activeWorkers: number
+  selectedTurn?: DesktopResidentTurn & {
+    sessionId: string
+    stateRevision: number
+    result?: { stopReason: string; resultRef?: string }
+    error?: { code: string; message: string }
+  }
+}

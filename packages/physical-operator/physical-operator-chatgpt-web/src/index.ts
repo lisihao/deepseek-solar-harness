@@ -1,0 +1,1186 @@
+/**
+ * ChatGPT Web physical-operator Provider over the provider-neutral browser
+ * service. It submits one text task through the user's authenticated web
+ * session; it never calls an OpenAI API or takes ownership of the browser.
+ *
+ * @module @deepseek-ai/dsh-physical-operator-chatgpt-web
+ */
+
+export type {} from './model-preferences.ts'
+export type {} from './web-session.ts'
+
+import { join } from 'node:path'
+import type { Context } from '@deepseek-ai/cordis'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { ChatGptWebCoordination } from './coordination.ts'
+import { ProgressLog, settleForDisposal, textPromptForRequest } from './run-support.ts'
+import { registerWebCoordinatorSetup } from './setup.ts'
+import { registerWebCoordinationTools } from './coordination-tools.ts'
+import { ChatGptWebModelWorker } from './model-worker.ts'
+import { buildWebModelCatalogEvaluatorSource, type WebModelPreferences } from './model-catalog.ts'
+import z from '@deepseek-ai/schemastery'
+import {
+  BrowserError,
+  type BrowserCapabilityV1,
+  type BrowserJsonValue,
+  type BrowserRunProgramV1,
+} from '@deepseek-ai/dsh-browser'
+import {
+  PhysicalOperatorError,
+  PhysicalOperatorId,
+  type PhysicalOperator,
+  type PhysicalOperatorDescriptor,
+  type PhysicalOperatorProviderRun,
+  type PhysicalOperatorProviderStartRequest,
+  type PhysicalOperatorResult,
+} from '@deepseek-ai/dsh-physical-operator'
+import { receiveOperatorContextEnvelope } from '@deepseek-ai/dsh-system-prompt'
+
+/** Cordis plugin name used by Loader diagnostics. */
+export const name = 'physical-operator-chatgpt-web'
+/** Provider-neutral browser and physical-operator Services required by this plugin. */
+export const inject = ['browser', 'physicalOperators']
+
+/** Stable default discovery identity for the ChatGPT web operator. */
+export const DEFAULT_OPERATOR_ID = 'chatgpt-web'
+/** Default visible name for the ChatGPT web operator. */
+export const DEFAULT_DISPLAY_NAME = 'ChatGPT Web'
+/** Default discovery description for the ChatGPT web operator. */
+export const DEFAULT_DESCRIPTION = 'Uses the authenticated ChatGPT website through the configured browser provider.'
+/** Default discovery tags for the ChatGPT web operator. */
+export const DEFAULT_TAGS = Object.freeze(['chatgpt', 'browser', 'subscription', 'planning', 'research', 'analysis'])
+/** Default named Ego Lite task space reused by this operator. */
+export const DEFAULT_WORKSPACE_NAME = 'dsh-chatgpt-web'
+/** Default ChatGPT website opened inside the named browser workspace. */
+export const DEFAULT_CHATGPT_URL = 'https://chatgpt.com/'
+/** Default bounded generation wait in milliseconds. */
+export const DEFAULT_GENERATION_TIMEOUT_MS = 30 * 60_000
+/** Default bounded wait for the website to accept a filled prompt. */
+export const DEFAULT_SUBMISSION_TIMEOUT_MS = 10_000
+/** Default polling delay in milliseconds while the website is generating. */
+export const DEFAULT_POLL_INTERVAL_MS = 500
+/** Default interval for durable waiting progress while the browser program runs. */
+export const DEFAULT_PROGRESS_INTERVAL_MS = 15_000
+/** Default maximum JSON result size returned across `ctx.browser`. */
+export const DEFAULT_OUTPUT_MAX_BYTES = 24 * 1024
+
+const MAX_TIMER_DELAY_MS = 2_147_483_647
+const MIN_OUTPUT_MAX_BYTES = 1_024
+const MAX_MODEL_LENGTH = 160
+const REQUIRED_BROWSER_CAPABILITIES: readonly BrowserCapabilityV1[] = Object.freeze([
+  'authenticated-profile-reuse',
+  'named-workspace',
+  'page-evaluate',
+])
+
+/** Deployment-owned settings for one ChatGPT web operator. */
+export interface Config {
+  /** Stable physical-operator identity. */
+  readonly id?: string
+  /** Human-readable discovery name. */
+  readonly displayName?: string
+  /** Concise discovery description. */
+  readonly description?: string
+  /** Selection hints with no authority semantics. */
+  readonly tags?: string[]
+  /** Named browser workspace that owns the authenticated ChatGPT page. */
+  readonly workspaceName?: string
+  /** HTTPS ChatGPT URL opened or reused within the named workspace. */
+  readonly url?: string
+  /** Maximum time spent awaiting one assistant response. */
+  readonly generationTimeoutMs?: number
+  /** Maximum time spent proving that ChatGPT accepted the filled prompt. */
+  readonly submissionTimeoutMs?: number
+  /** Polling delay while awaiting a finished assistant response. */
+  readonly pollIntervalMs?: number
+  /** Interval between bounded waiting progress events. */
+  readonly progressIntervalMs?: number
+  /** Maximum serialized output retained from the webpage. */
+  readonly outputMaxBytes?: number
+  /** Private owner-local directory for connector identity and mode. */
+  readonly stateRoot?: string
+  /** Exact visible ChatGPT custom MCP app name required for tool coordination. */
+  readonly connectorName?: string
+  /**
+   * Allow the Custom MCP tool-coordination mode. Off by default: the mode is
+   * frozen, a saved coordinator selection reads as direct, and no MCP
+   * endpoint starts.
+   */
+  readonly coordinatorEnabled?: boolean
+  /** Stable loopback port for the user-configured MCP tunnel; zero is useful for isolated tests. */
+  readonly coordinatorPort?: number
+  /** Maximum HTTP JSON body accepted by the MCP connector. */
+  readonly coordinatorRequestMaxBytes?: number
+  /** Maximum MCP request lifetime, including delegated tools. */
+  readonly coordinatorRequestTimeoutMs?: number
+  /** Maximum wait for matching native webpage request evidence. */
+  readonly identityTimeoutMs?: number
+}
+
+/** Loader schema for the deployment-owned ChatGPT web settings. */
+export const Config: z<Config> = z.object({
+  id: z.string().default(DEFAULT_OPERATOR_ID),
+  displayName: z.string().default(DEFAULT_DISPLAY_NAME),
+  description: z.string().default(DEFAULT_DESCRIPTION),
+  tags: z.array(z.string()).default([...DEFAULT_TAGS]),
+  workspaceName: z.string().default(DEFAULT_WORKSPACE_NAME),
+  url: z.string().default(DEFAULT_CHATGPT_URL),
+  generationTimeoutMs: z.number().default(DEFAULT_GENERATION_TIMEOUT_MS),
+  submissionTimeoutMs: z.number().default(DEFAULT_SUBMISSION_TIMEOUT_MS),
+  pollIntervalMs: z.number().default(DEFAULT_POLL_INTERVAL_MS),
+  progressIntervalMs: z.number().default(DEFAULT_PROGRESS_INTERVAL_MS),
+  outputMaxBytes: z.number().default(DEFAULT_OUTPUT_MAX_BYTES),
+  stateRoot: z.string(),
+  connectorName: z.string().default('DSH'),
+  coordinatorEnabled: z.boolean().default(false),
+  coordinatorPort: z.number().default(61847),
+  coordinatorRequestMaxBytes: z.number().default(1024 * 1024),
+  coordinatorRequestTimeoutMs: z.number().default(DEFAULT_GENERATION_TIMEOUT_MS),
+  identityTimeoutMs: z.number().default(15_000),
+})
+
+interface ResolvedConfig {
+  readonly stateRoot: string
+  readonly connectorName: string
+  readonly coordinatorEnabled: boolean
+  readonly coordinatorPort: number
+  readonly coordinatorRequestMaxBytes: number
+  readonly coordinatorRequestTimeoutMs: number
+  readonly identityTimeoutMs: number
+  readonly id: string
+  readonly displayName: string
+  readonly description: string
+  readonly tags: readonly string[]
+  readonly workspaceName: string
+  readonly url: string
+  readonly generationTimeoutMs: number
+  readonly submissionTimeoutMs: number
+  readonly pollIntervalMs: number
+  readonly progressIntervalMs: number
+  readonly outputMaxBytes: number
+}
+
+interface ProgramRequest {
+  readonly url: string
+  readonly workspaceName: string
+  readonly prompt: string
+  readonly model?: string
+  readonly effort?: string
+  readonly generationTimeoutMs: number
+  readonly submissionTimeoutMs: number
+  readonly pollIntervalMs: number
+  readonly outputMaxBytes: number
+}
+
+interface CompletedProgramOutcome {
+  readonly status: 'completed'
+  readonly response: string
+  readonly truncated: boolean
+}
+
+interface ProgramDiagnostic {
+  readonly page: 'root' | 'conversation' | 'other'
+  readonly userCount: number
+  readonly assistantCount: number
+  readonly inputCharacters: number
+  readonly generating: boolean
+  readonly settled: boolean
+  readonly sendAvailable: boolean
+}
+
+interface DraftDiagnostic {
+  readonly page: 'root' | 'conversation' | 'other'
+  readonly inputCharacters: number
+  readonly attachmentCount: number
+}
+
+type ProgramOutcome = CompletedProgramOutcome
+  | { readonly status: 'auth-required' }
+  | { readonly status: 'input-unavailable' }
+  | { readonly status: 'context-not-isolated' }
+  | { readonly status: 'model-selection-unavailable' }
+  | { readonly status: 'effort-selection-unavailable' }
+  | { readonly status: 'draft-present'; readonly diagnostic: DraftDiagnostic }
+  | { readonly status: 'submission-failed'; readonly diagnostic: ProgramDiagnostic }
+  | { readonly status: 'generation-timeout'; readonly diagnostic: ProgramDiagnostic }
+  | { readonly status: 'protocol-error' }
+
+const COMPOSER_DOM_HELPERS = String.raw`
+  const visible = (element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  };
+  const normalizeNewlines = (value) => String(value ?? '').replace(/\r\n?/g, '\n');
+  const composer = () => {
+    const candidates = [...document.querySelectorAll('div.ProseMirror[contenteditable="true"]')].filter(visible);
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+  const newline = String.fromCharCode(10);
+  const nodeText = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const element = node;
+    if (element.tagName === 'BR') {
+      return element.classList.contains('ProseMirror-trailingBreak') ? '' : newline;
+    }
+    return [...element.childNodes].map(nodeText).join('');
+  };
+  const composerText = (element) => {
+    if (element === null) return '';
+    const blocks = [...element.children];
+    const text = blocks.length === 0
+      ? [...element.childNodes].map(nodeText).join('')
+      : blocks.map(nodeText).join(newline);
+    return normalizeNewlines(text);
+  };
+  const composerAttachmentCount = (element) => {
+    if (element === null) return 0;
+    const form = element.closest('form');
+    if (form === null) return 0;
+    const fileInputs = [...form.querySelectorAll('input[type="file"]')]
+      .filter((input) => input.files !== null && input.files.length > 0).length;
+    const candidates = [...form.querySelectorAll('[data-testid],[aria-label],[data-file-id],[data-attachment-id],[role="progressbar"]')]
+      .filter(visible);
+    return fileInputs + candidates.filter((candidate) => {
+      if (candidate.matches('[data-file-id],[data-attachment-id],[role="progressbar"]')) return true;
+      const label = [
+        candidate.getAttribute('aria-label'),
+        candidate.getAttribute('title'),
+      ].map((value) => String(value ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase()).join(' ');
+      const testId = String(candidate.getAttribute('data-testid') ?? '')
+        .replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      return /(?:remove|delete)\s+(?:file|attachment)\b/.test(label)
+        || /(?:file|attachment)/.test(testId) && !/(?:add|upload|send|submit|input)/.test(testId);
+    }).length;
+  };
+  const outermost = (elements) => {
+    const unique = [...new Set(elements)];
+    const roots = unique.filter((element) => !unique.some((other) => other !== element && other.contains(element)));
+    return roots.sort((left, right) => (
+      left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING
+    ) !== 0 ? -1 : 1);
+  };
+  const messageUnits = () => {
+    const contentUnits = [...document.querySelectorAll('[data-content-search-unit-key]')];
+    const key = (element) => String(element.getAttribute('data-content-search-unit-key') ?? '');
+    const users = contentUnits.filter((element) => key(element).endsWith(':user')
+      && element.querySelector('[data-user-message-bubble="true"]') !== null);
+    const assistants = contentUnits.filter((element) => key(element).endsWith(':assistant')
+      && element.querySelector('[data-markdown-text-style="assistant-message"]') !== null);
+    return {
+      users: outermost([...document.querySelectorAll('[data-message-author-role="user"]'), ...users]),
+      assistants: outermost([...document.querySelectorAll('[data-message-author-role="assistant"]'), ...assistants]),
+    };
+  };
+  const TICK = String.fromCharCode(96);
+  const skipped = (element) => element.getAttribute('data-markdown-copy') === 'exclude'
+    || ['BUTTON', 'SVG', 'svg', 'STYLE', 'SCRIPT'].includes(element.tagName);
+  const mathSource = (element) => element.getAttribute('data-math-source')
+    ?? element.querySelector('annotation[encoding="application/x-tex"]')?.textContent
+    ?? '';
+  const citationLink = (element) => {
+    const href = element.getAttribute('href') ?? '';
+    if (!/^https?:/.test(href)) return '';
+    const host = href.replace(/^https?:[/][/](?:www[.])?/, '').split(/[/?#]/)[0];
+    return ' ([' + host + '](' + href + '))';
+  };
+  const inlineMarkdown = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const element = node;
+    if (skipped(element)) return '';
+    if (element.tagName === 'BR') return newline;
+    if (element.classList.contains('katex-display')) return '$$' + mathSource(element) + '$$';
+    if (element.classList.contains('katex') || element.hasAttribute('data-math-source')) {
+      return element.querySelector('.katex-display') === null
+        ? '$' + mathSource(element) + '$'
+        : '$$' + mathSource(element) + '$$';
+    }
+    if (element.tagName === 'A' && element.getAttribute('data-testid') === 'chatgpt-citation') return citationLink(element);
+    const inner = [...element.childNodes].map(inlineMarkdown).join('');
+    switch (element.tagName) {
+      case 'STRONG': case 'B': return inner.trim().length === 0 ? inner : '**' + inner + '**';
+      case 'EM': case 'I': return inner.trim().length === 0 ? inner : '*' + inner + '*';
+      case 'DEL': case 'S': return inner.trim().length === 0 ? inner : '~~' + inner + '~~';
+      case 'CODE': return TICK + (element.textContent ?? '') + TICK;
+      case 'A': {
+        const href = element.getAttribute('href') ?? '';
+        return /^https?:/.test(href) && inner.trim() !== href ? '[' + inner + '](' + href + ')' : inner;
+      }
+      default: return inner;
+    }
+  };
+  const inlineLine = (element) => inlineMarkdown(element).replace(/[ \t]*\n[ \t]*/g, newline).trim();
+  const blockTags = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'PRE', 'BLOCKQUOTE', 'TABLE', 'HR', 'DIV', 'SECTION', 'ARTICLE']);
+  const isBlock = (element) => blockTags.has(element.tagName)
+    || element.classList.contains('katex-display')
+    || element.classList.contains('block')
+    || element.hasAttribute('data-markdown-copy');
+  const listMarkdown = (list, depth) => {
+    let ordinal = Number(list.getAttribute('start') ?? '1') || 1;
+    return [...list.children].filter((item) => item.tagName === 'LI').map((item) => {
+      const marker = list.tagName === 'OL' ? String(ordinal++) + '. ' : '- ';
+      const nested = [];
+      let head = '';
+      for (const child of item.childNodes) {
+        if (child.nodeType === Node.ELEMENT_NODE && (child.tagName === 'UL' || child.tagName === 'OL')) {
+          nested.push(listMarkdown(child, depth + 1));
+        } else if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'P') {
+          head += inlineLine(child) + ' ';
+        } else {
+          head += inlineMarkdown(child);
+        }
+      }
+      return ['  '.repeat(depth) + marker + head.replace(/\s*\n\s*/g, ' ').trim(), ...nested].join(newline);
+    }).join(newline);
+  };
+  const tableMarkdown = (table) => {
+    const rows = [...table.querySelectorAll('tr')].map((row) => [...row.children]
+      .map((cell) => inlineLine(cell).replace(/\s*\n\s*/g, ' ').replace(/[|]/g, '\\|')));
+    if (rows.length === 0) return '';
+    const width = Math.max(...rows.map((row) => row.length));
+    const line = (row) => '| ' + Array.from({ length: width }, (_, index) => row[index] ?? '').join(' | ') + ' |';
+    return [line(rows[0]), '| ' + Array.from({ length: width }, () => '---').join(' | ') + ' |', ...rows.slice(1).map(line)]
+      .join(newline);
+  };
+  const blockMarkdown = (element) => {
+    if (skipped(element)) return [];
+    const tag = element.tagName;
+    if (element.getAttribute('data-markdown-copy') === 'code-block' || tag === 'PRE') {
+      const code = element.querySelector('code');
+      const language = [...(code?.classList ?? [])].find((name) => name.startsWith('language-'))?.slice(9) ?? '';
+      const text = String((code ?? element).textContent ?? '').replace(/\n+$/, '');
+      return [TICK.repeat(3) + language + newline + text + newline + TICK.repeat(3)];
+    }
+    if (/^H[1-6]$/.test(tag)) return ['#'.repeat(Number(tag[1])) + ' ' + inlineLine(element)];
+    if (tag === 'HR') return ['---'];
+    if (tag === 'UL' || tag === 'OL') return [listMarkdown(element, 0)];
+    if (tag === 'TABLE') return [tableMarkdown(element)];
+    if (tag === 'BLOCKQUOTE') {
+      return [blocksOf(element).join(newline + newline).split(newline)
+        .map((line) => line.length === 0 ? '>' : '> ' + line).join(newline)];
+    }
+    if (element.classList.contains('katex-display')
+      || element.hasAttribute('data-math-source') && element.querySelector('.katex-display') !== null) {
+      return ['$$' + mathSource(element) + '$$'];
+    }
+    if (tag !== 'P' && [...element.children].some(isBlock)) return blocksOf(element);
+    return [inlineLine(element)];
+  };
+  const blocksOf = (element) => [...element.childNodes].flatMap((child) => {
+    if (child.nodeType === Node.TEXT_NODE) return [String(child.textContent ?? '').trim()];
+    return child.nodeType === Node.ELEMENT_NODE ? blockMarkdown(child) : [];
+  }).filter((block) => block.trim().length > 0);
+  const assistantText = (element) => {
+    if (element === null) return '';
+    const body = element.querySelector('[data-markdown-text-style="assistant-message"]')
+      ?? element.querySelector('.markdown')
+      ?? element;
+    return blocksOf(body).join(newline + newline);
+  };
+  const pageTurnItem = (element) => {
+    if (element === null) return null;
+    const body = element.querySelector('[data-markdown-text-style="assistant-message"]') ?? element;
+    const key = Object.keys(body).find((name) => name.startsWith('__reactFiber$'));
+    let fiber = key === undefined ? null : body[key];
+    for (let depth = 0; fiber !== null && fiber !== undefined && depth < 40; depth += 1, fiber = fiber.return) {
+      const item = fiber.memoizedProps?.item;
+      if (item !== null && typeof item === 'object' && typeof item.completed === 'boolean'
+        && typeof item.content === 'string') return item;
+    }
+    return null;
+  };
+  const latestAssistantSettled = (latest, assistants) => {
+    if (latest === null || latest.querySelector('[data-markdown-text-style="assistant-message"]') === null) return false;
+    let ancestor = latest.parentElement;
+    while (ancestor !== null && ancestor !== document.body && ancestor.tagName !== 'MAIN') {
+      if (assistants.filter((assistant) => ancestor.contains(assistant)).length > 1) return false;
+      /* Code blocks and tables carry their own copy buttons inside the answer
+         body while it still streams; only the turn action bar settles a reply. */
+      const copied = [...ancestor.querySelectorAll('button')].some((button) => {
+        if (button.closest('[data-markdown-text-style="assistant-message"],[data-markdown-copy]') !== null) return false;
+        const label = String(button.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+        return label === 'copy' || label === '复制' || label === 'copy response' || label === '复制回复';
+      });
+      if (copied) return true;
+      ancestor = ancestor.parentElement;
+    }
+    return false;
+  };
+  const sendButton = (editor) => {
+    if (editor === null) return null;
+    const form = editor.closest('form');
+    if (form === null) return null;
+    const semanticLabels = new Set(['send', 'send message', 'send prompt', '发送', '发送消息']);
+    const candidates = [...form.querySelectorAll('button')].filter((element) => {
+      if (!visible(element) || element.disabled || element.getAttribute('aria-disabled') === 'true'
+        || element.type !== 'submit') return false;
+      const ariaLabel = String(element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      return element.id === 'composer-submit-button'
+        || element.getAttribute('data-testid') === 'send-button'
+        || semanticLabels.has(ariaLabel);
+    });
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+`
+
+const INSPECT_PAGE = String.raw`() => {
+  ${COMPOSER_DOM_HELPERS}
+  const normalize = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const label = (element) => normalize(
+    element.getAttribute('aria-label') ?? element.getAttribute('title') ?? element.textContent,
+  );
+  const loginRequired = [...document.querySelectorAll('button,a')]
+    .filter(visible)
+    .some((element) => /^(log in|sign in|登录)$/i.test(label(element)));
+  const { users, assistants } = messageUnits();
+  const assistantCount = assistants.length;
+  const userCount = users.length;
+  const page = location.pathname === '/'
+    ? 'root'
+    : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
+  document.querySelectorAll('[data-dsh-chatgpt-web-input="true"]')
+    .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-input'));
+  document.querySelectorAll('[data-dsh-chatgpt-web-send="true"]')
+    .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-send'));
+  const input = composer();
+  const inputText = composerText(input);
+  const attachmentCount = composerAttachmentCount(input);
+  if (input !== null && page === 'root' && userCount === 0 && assistantCount === 0) {
+    input.setAttribute('data-dsh-chatgpt-web-input', 'true');
+  }
+  return {
+    page,
+    loginRequired,
+    inputReady: input !== null,
+    assistantCount,
+    userCount,
+    inputCharacters: inputText.length,
+    attachmentCount,
+    draftPresent: inputText.length > 0 || attachmentCount > 0,
+  };
+}`
+
+const PREPARE_SUBMISSION = String.raw`(input) => {
+  ${COMPOSER_DOM_HELPERS}
+  if (input === null || typeof input !== 'object' || typeof input.prompt !== 'string') return { valid: false };
+  document.querySelectorAll('[data-dsh-chatgpt-web-send="true"]')
+    .forEach((element) => element.removeAttribute('data-dsh-chatgpt-web-send'));
+  const { users, assistants } = messageUnits();
+  const assistantCount = assistants.length;
+  const userCount = users.length;
+  const page = location.pathname === '/'
+    ? 'root'
+    : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
+  const editor = composer();
+  const inputText = composerText(editor);
+  const send = sendButton(editor);
+  const promptMatches = editor !== null && inputText === normalizeNewlines(input.prompt);
+  const ready = page === 'root' && userCount === 0 && assistantCount === 0 && promptMatches && send !== null;
+  if (ready) send.setAttribute('data-dsh-chatgpt-web-send', 'true');
+  return {
+    page,
+    userCount,
+    assistantCount,
+    inputCharacters: inputText.length,
+    generating: false,
+    settled: false,
+    sendAvailable: send !== null,
+    promptMatches,
+    ready,
+  };
+}`
+
+const RESPONSE_STATE = String.raw`() => {
+  ${COMPOSER_DOM_HELPERS}
+  const { users, assistants } = messageUnits();
+  const latestReply = assistants.at(-1) ?? null;
+  const response = assistantText(latestReply);
+  const turnItem = pageTurnItem(latestReply);
+  const pageCompleted = turnItem === null
+    ? undefined
+    : turnItem.completed && (turnItem.phase === undefined || turnItem.phase === 'final_answer');
+  const legacyTurn = latestReply?.closest('[data-testid^="conversation-turn-"]') ?? null;
+  const legacySettled = legacyTurn !== null && legacyTurn.querySelector(
+    '[data-testid="copy-turn-action-button"],[aria-label="Copy response"],[aria-label="复制回复"]',
+  ) !== null;
+  const generating = turnItem?.completed === false || [...document.querySelectorAll('button,[role="button"]')].some((element) => {
+    if (element.getAttribute('data-testid') === 'stop-button') return true;
+    const label = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/g, ' ').trim();
+    return /stop generating|stop streaming|停止生成|停止流式传输|^停止$|^stop$/i.test(label);
+  });
+  const editor = composer();
+  const inputText = composerText(editor);
+  const send = sendButton(editor);
+  const page = location.pathname === '/'
+    ? 'root'
+    : /^\/c\//.test(location.pathname) ? 'conversation' : 'other';
+  return {
+    page,
+    userCount: users.length,
+    assistantCount: assistants.length,
+    inputCharacters: inputText.length,
+    response,
+    generating,
+    settled: pageCompleted ?? (legacySettled || latestAssistantSettled(latestReply, assistants)),
+    sendAvailable: send !== null,
+  };
+}`
+
+const REMOVE_COMPOSER_MARKERS = String.raw`() => {
+  document.querySelectorAll('[data-dsh-chatgpt-web-input="true"],[data-dsh-chatgpt-web-send="true"]')
+    .forEach((element) => {
+      element.removeAttribute('data-dsh-chatgpt-web-input');
+      element.removeAttribute('data-dsh-chatgpt-web-send');
+    });
+  return true;
+}`
+
+/**
+ * Build one trusted browser program for a single ChatGPT webpage request.
+ * @param request - normalized prompt, optional model and reasoning effort, and browser bounds.
+ * @returns a provider-neutral browser-js-v1 request for the configured workspace.
+ */
+export function buildChatGptWebProgram(request: ProgramRequest): BrowserRunProgramV1 {
+  const encodedRequest = JSON.stringify(request)
+  return {
+    version: 1,
+    language: 'browser-js-v1',
+    workspace: {
+      kind: 'named',
+      name: request.workspaceName,
+      createIfMissing: true,
+    },
+    requiredCapabilities: REQUIRED_BROWSER_CAPABILITIES,
+    output: { kind: 'json', maxBytes: request.outputMaxBytes },
+    source: String.raw`const request = ${encodedRequest};
+const page = 'chatgpt-web';
+const asRecord = (value) => value !== null && typeof value === 'object' ? value : undefined;
+const draftDiagnostic = (value) => ({
+  page: value.page,
+  inputCharacters: value.inputCharacters,
+  attachmentCount: value.attachmentCount,
+});
+await browser.run({
+  id: 'chatgpt-open',
+  kind: 'open',
+  page,
+  url: request.url,
+  reuse: 'exact-url',
+  waitUntil: 'dom-content-loaded',
+});
+await browser.run({
+  id: 'chatgpt-reset-conversation',
+  kind: 'navigate',
+  page,
+  url: request.url,
+  waitUntil: 'dom-content-loaded',
+});
+const readinessStartedAt = Date.now();
+const readinessTimeoutMs = Math.min(10_000, request.generationTimeoutMs);
+let inspect;
+while (Date.now() - readinessStartedAt <= readinessTimeoutMs) {
+  inspect = asRecord(await browser.evaluate(page, ${JSON.stringify(INSPECT_PAGE)}));
+  if (inspect === undefined) return { status: 'protocol-error' };
+  if (inspect.loginRequired === true) return { status: 'auth-required' };
+  if (!['root', 'conversation', 'other'].includes(inspect.page)
+    || !Number.isSafeInteger(inspect.userCount)
+    || !Number.isSafeInteger(inspect.assistantCount)
+    || !Number.isSafeInteger(inspect.inputCharacters)
+    || inspect.inputCharacters < 0
+    || !Number.isSafeInteger(inspect.attachmentCount)
+    || inspect.attachmentCount < 0
+    || typeof inspect.draftPresent !== 'boolean') return { status: 'protocol-error' };
+  if (inspect.page !== 'root' || inspect.userCount !== 0 || inspect.assistantCount !== 0) {
+    return { status: 'context-not-isolated' };
+  }
+  if (inspect.draftPresent === true) {
+    return { status: 'draft-present', diagnostic: draftDiagnostic(inspect) };
+  }
+  if (inspect.inputReady === true && Number.isSafeInteger(inspect.assistantCount)) break;
+  await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
+}
+if (inspect.inputReady !== true || !Number.isSafeInteger(inspect.assistantCount)) {
+  return { status: 'input-unavailable' };
+}
+if (request.model !== undefined || request.effort !== undefined) {
+  const selection = asRecord(await browser.evaluate(page, ${JSON.stringify(buildWebModelCatalogEvaluatorSource())}, {
+    pollIntervalMs: request.pollIntervalMs,
+    timeoutMs: request.submissionTimeoutMs,
+    selection: {
+      ...request.model === undefined ? {} : { model: request.model },
+      ...request.effort === undefined ? {} : { effort: request.effort },
+    },
+  }));
+  if (selection === undefined || typeof selection.status !== 'string') return { status: 'protocol-error' };
+  switch (selection.status) {
+    case 'ok': break;
+    case 'auth-required': return { status: 'auth-required' };
+    case 'effort-selection-unavailable':
+    case 'reasoning-options-unavailable':
+      return { status: 'effort-selection-unavailable' };
+    case 'model-picker-unavailable':
+    case 'model-options-unavailable':
+    case 'model-selection-unavailable':
+    case 'menu-close-failed':
+      return { status: 'model-selection-unavailable' };
+    default: return { status: 'protocol-error' };
+  }
+}
+inspect = asRecord(await browser.evaluate(page, ${JSON.stringify(INSPECT_PAGE)}));
+if (inspect === undefined) return { status: 'protocol-error' };
+if (inspect.loginRequired === true) return { status: 'auth-required' };
+if (!['root', 'conversation', 'other'].includes(inspect.page)
+  || !Number.isSafeInteger(inspect.userCount)
+  || !Number.isSafeInteger(inspect.assistantCount)
+  || !Number.isSafeInteger(inspect.inputCharacters)
+  || inspect.inputCharacters < 0
+  || !Number.isSafeInteger(inspect.attachmentCount)
+  || inspect.attachmentCount < 0
+  || typeof inspect.draftPresent !== 'boolean') return { status: 'protocol-error' };
+if (inspect.page !== 'root' || inspect.userCount !== 0 || inspect.assistantCount !== 0) {
+  return { status: 'context-not-isolated' };
+}
+if (inspect.draftPresent === true) {
+  return { status: 'draft-present', diagnostic: draftDiagnostic(inspect) };
+}
+if (inspect.inputReady !== true) return { status: 'input-unavailable' };
+await browser.run({
+  id: 'chatgpt-fill',
+  kind: 'fill',
+  page,
+  locator: { kind: 'css', selector: '[data-dsh-chatgpt-web-input="true"]' },
+  value: request.prompt,
+});
+await browser.evaluate(page, ${JSON.stringify(REMOVE_COMPOSER_MARKERS)});
+const initialCount = inspect.assistantCount;
+const initialUserCount = inspect.userCount;
+const submissionStartedAt = Date.now();
+let state;
+let sendReady = false;
+const diagnostic = (value) => ({
+  page: value.page,
+  userCount: value.userCount,
+  assistantCount: value.assistantCount,
+  inputCharacters: value.inputCharacters,
+  generating: value.generating,
+  settled: value.settled,
+  sendAvailable: value.sendAvailable,
+});
+while (Date.now() - submissionStartedAt <= request.submissionTimeoutMs) {
+  state = asRecord(await browser.evaluate(page, ${JSON.stringify(PREPARE_SUBMISSION)}, { prompt: request.prompt }));
+  if (state === undefined
+    || !['root', 'conversation', 'other'].includes(state.page)
+    || !Number.isSafeInteger(state.userCount)
+    || !Number.isSafeInteger(state.assistantCount)
+    || !Number.isSafeInteger(state.inputCharacters)
+    || typeof state.generating !== 'boolean'
+    || typeof state.settled !== 'boolean'
+    || typeof state.sendAvailable !== 'boolean'
+    || typeof state.promptMatches !== 'boolean'
+    || typeof state.ready !== 'boolean') {
+    return { status: 'protocol-error' };
+  }
+  if (state.page !== 'root' || state.userCount !== 0 || state.assistantCount !== 0) {
+    return { status: 'context-not-isolated' };
+  }
+  if (state.ready) {
+    sendReady = true;
+    break;
+  }
+  await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
+}
+if (!sendReady) {
+  if (state === undefined) return { status: 'protocol-error' };
+  return { status: 'submission-failed', diagnostic: diagnostic(state) };
+}
+try {
+  await browser.run({
+    id: 'chatgpt-send',
+    kind: 'click',
+    page,
+    locator: { kind: 'css', selector: '[data-dsh-chatgpt-web-send="true"]' },
+  });
+} finally {
+  await browser.evaluate(page, ${JSON.stringify(REMOVE_COMPOSER_MARKERS)});
+}
+let submitted = false;
+while (Date.now() - submissionStartedAt <= request.submissionTimeoutMs) {
+  state = asRecord(await browser.evaluate(page, ${JSON.stringify(RESPONSE_STATE)}));
+  if (state === undefined
+    || !['root', 'conversation', 'other'].includes(state.page)
+    || !Number.isSafeInteger(state.userCount)
+    || !Number.isSafeInteger(state.assistantCount)
+    || !Number.isSafeInteger(state.inputCharacters)
+    || typeof state.response !== 'string'
+    || typeof state.generating !== 'boolean'
+    || typeof state.settled !== 'boolean'
+    || typeof state.sendAvailable !== 'boolean') {
+    return { status: 'protocol-error' };
+  }
+  submitted = state.userCount > initialUserCount
+    || state.assistantCount > initialCount
+    || state.generating
+    || state.page === 'conversation' && state.inputCharacters === 0;
+  if (submitted) break;
+  await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
+}
+if (!submitted) return { status: 'submission-failed', diagnostic: diagnostic(state) };
+const startedAt = Date.now();
+let stableResponse = '';
+let stableSamples = 0;
+while (Date.now() - startedAt <= request.generationTimeoutMs) {
+  state = asRecord(await browser.evaluate(page, ${JSON.stringify(RESPONSE_STATE)}));
+  if (state === undefined
+    || !['root', 'conversation', 'other'].includes(state.page)
+    || !Number.isSafeInteger(state.userCount)
+    || !Number.isSafeInteger(state.assistantCount)
+    || !Number.isSafeInteger(state.inputCharacters)
+    || typeof state.response !== 'string'
+    || typeof state.generating !== 'boolean'
+    || typeof state.settled !== 'boolean'
+    || typeof state.sendAvailable !== 'boolean') {
+    return { status: 'protocol-error' };
+  }
+  if (state.assistantCount > initialCount && state.response.trim().length > 0) {
+    stableSamples = state.response === stableResponse && state.settled && !state.generating
+      ? stableSamples + 1
+      : 0;
+    stableResponse = state.response;
+    if (stableSamples >= 1) {
+      const reserveBytes = Math.min(512, Math.floor(request.outputMaxBytes / 2));
+      const responseBudget = request.outputMaxBytes - reserveBytes;
+      const encoder = new TextEncoder();
+      const segments = Array.from(new Intl.Segmenter('en', { granularity: 'grapheme' }).segment(state.response));
+      const kept = [];
+      let usedBytes = 0;
+      for (const segment of segments) {
+        const size = encoder.encode(segment.segment).byteLength;
+        if (usedBytes + size > responseBudget) break;
+        kept.push(segment.segment);
+        usedBytes += size;
+      }
+      return {
+        status: 'completed',
+        response: kept.join(''),
+        truncated: kept.length < segments.length,
+      };
+    }
+  }
+  await new Promise((resolve) => setTimeout(resolve, request.pollIntervalMs));
+}
+return { status: 'generation-timeout', diagnostic: diagnostic(state) };
+`,
+  }
+}
+
+/** ChatGPT website physical operator with exactly one active web turn. */
+export class ChatGptWebPhysicalOperator implements PhysicalOperator {
+  readonly descriptor: PhysicalOperatorDescriptor
+
+  /**
+   * Bind immutable discovery metadata to one deployment configuration.
+   * @param ctx - context exposing provider-neutral browser automation.
+   * @param config - fully validated deployment configuration.
+   */
+  constructor(
+    private readonly ctx: Context,
+    private readonly config: ResolvedConfig,
+    private readonly coordination: ChatGptWebCoordination,
+  ) {
+    this.descriptor = Object.freeze({
+      id: PhysicalOperatorId(config.id),
+      displayName: config.displayName,
+      description: config.description,
+      tags: config.tags,
+      maxConcurrency: 1,
+      executionModes: coordination.mode === 'coordinator'
+        ? ['ephemeral', 'resident'] as const
+        : ['ephemeral'] as const,
+    })
+  }
+
+  /** Return whether one available browser-js-v1 Provider has the required capabilities. */
+  availability() {
+    if (this.coordination.transitioning) return { available: false as const, reason: 'ChatGPT Web configuration is changing' }
+    try {
+      const capabilities = this.ctx.browser.capabilities('browser-js-v1')
+      const missing = REQUIRED_BROWSER_CAPABILITIES.filter(capability => !capabilities.includes(capability))
+      return missing.length === 0
+        ? { available: true as const }
+        : { available: false as const, reason: `browser-js-v1 provider lacks required capabilities: ${missing.join(', ')}` }
+    } catch (error) {
+      const code = error instanceof BrowserError ? error.code : 'BROWSER_UNAVAILABLE'
+      return { available: false as const, reason: `browser-js-v1 provider is unavailable (${code})` }
+    }
+  }
+
+  /**
+   * Start one browser-backed ephemeral run. `dispose()` aborts the one browser
+   * request and waits for its terminal result without closing the user browser.
+   * @param request - service-normalized execution request.
+   * @returns a bounded progress reader and the terminal ChatGPT result.
+   */
+  start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
+    if (request.mode === 'resident') {
+      if (modelForRequest(request) !== undefined) {
+        throw new PhysicalOperatorError('Select the coordinated ChatGPT model in its owned webpage before sending', 'MODEL_SELECTION_UNAVAILABLE')
+      }
+      return this.coordination.start(request)
+    }
+    if (request.signal.aborted) {
+      throw new PhysicalOperatorError('ChatGPT Web execution was aborted before startup', 'OPERATOR_ABORTED')
+    }
+    const prompt = textPromptForRequest(request)
+    const explicitModel = modelForRequest(request)
+    const profile = resolveWebModelPreferences(
+      explicitModel,
+      this.coordination.preferences(String(request.parent.id)),
+    )
+    const model = profile.model
+    const effort = profile.effort
+    const progress = new ProgressLog(String(request.executionId))
+    progress.append('chatgpt-web.connecting', { phase: 'connecting' })
+    const controller = new AbortController()
+    const forwardAbort = (): void => { controller.abort(request.signal.reason) }
+    request.signal.addEventListener('abort', forwardAbort, { once: true })
+    const result = this.execute({
+      url: this.config.url,
+      workspaceName: this.config.workspaceName,
+      prompt,
+      ...model === undefined ? {} : { model },
+      ...effort === undefined ? {} : { effort },
+      generationTimeoutMs: this.config.generationTimeoutMs,
+      submissionTimeoutMs: this.config.submissionTimeoutMs,
+      pollIntervalMs: this.config.pollIntervalMs,
+      outputMaxBytes: this.config.outputMaxBytes,
+    }, controller.signal, progress)
+    void result.then(
+      () => { request.signal.removeEventListener('abort', forwardAbort) },
+      () => { request.signal.removeEventListener('abort', forwardAbort) },
+    )
+    let disposal: Promise<void> | undefined
+    return Promise.resolve({
+      ...request.contextEnvelope === undefined ? {} : {
+        contextReceipt: receiveOperatorContextEnvelope(request.contextEnvelope, String(this.descriptor.id), 'text'),
+      },
+      result,
+      readEvents: (afterSequence, limit, signal) => progress.read(afterSequence, limit, signal),
+      dispose: (): Promise<void> => {
+        if (disposal !== undefined) return disposal
+        controller.abort(new Error('ChatGPT Web execution was disposed'))
+        disposal = settleForDisposal(result)
+        return disposal
+      },
+    })
+  }
+
+  private async execute(
+    request: ProgramRequest,
+    signal: AbortSignal,
+    progress: ProgressLog,
+  ): Promise<PhysicalOperatorResult> {
+    try {
+      progress.append('chatgpt-web.submitting', {
+        phase: 'submitting',
+        ...request.model === undefined ? {} : { requestedModel: request.model },
+        ...request.effort === undefined ? {} : { requestedEffort: request.effort },
+      })
+      progress.append('chatgpt-web.waiting', { phase: 'waiting' })
+      const waitingStartedAt = Date.now()
+      const heartbeat = setInterval(() => {
+        progress.append('chatgpt-web.waiting', {
+          phase: 'waiting',
+          elapsedMs: Date.now() - waitingStartedAt,
+        })
+      }, this.config.progressIntervalMs)
+      let result
+      try {
+        result = await this.ctx.browser.runProgram(buildChatGptWebProgram(request), signal)
+      } finally {
+        clearInterval(heartbeat)
+      }
+      const outcome = programOutcome(result.output.kind === 'json' ? result.output.value : undefined)
+      switch (outcome.status) {
+        case 'completed': {
+          if (outcome.response.length === 0) {
+            throw new PhysicalOperatorError('ChatGPT Web returned an empty assistant response', 'CHATGPT_WEB_OUTPUT_UNAVAILABLE')
+          }
+          progress.append('chatgpt-web.completed', {
+            phase: 'completed',
+            outputBytes: new TextEncoder().encode(outcome.response).byteLength,
+            truncated: outcome.truncated,
+          })
+          return { output: [{ type: 'text', text: outcome.response }], stopReason: 'completed' }
+        }
+        case 'auth-required':
+          throw new PhysicalOperatorError('ChatGPT Web requires a logged-in browser session', 'CHATGPT_WEB_AUTH_REQUIRED')
+        case 'input-unavailable':
+          throw new PhysicalOperatorError('ChatGPT Web input is unavailable in the selected browser workspace', 'RUNTIME_UNAVAILABLE')
+        case 'draft-present':
+          throw new PhysicalOperatorError(
+            'ChatGPT Web has an existing composer draft or attachment (' + draftDiagnosticText(outcome.diagnostic)
+              + '). Clear or send it in the browser workspace, then retry.',
+            'CHATGPT_WEB_DRAFT_PRESENT',
+          )
+        case 'context-not-isolated':
+          throw new PhysicalOperatorError(
+            'ChatGPT Web could not establish a fresh conversation before prompt submission',
+            'CHATGPT_WEB_CONTEXT_NOT_ISOLATED',
+          )
+        case 'model-selection-unavailable':
+          throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested model selection', 'MODEL_SELECTION_UNAVAILABLE')
+        case 'effort-selection-unavailable':
+          throw new PhysicalOperatorError('ChatGPT Web could not verify the explicitly requested reasoning effort', 'MODEL_SELECTION_UNAVAILABLE')
+        case 'submission-failed':
+          throw new PhysicalOperatorError(
+            `ChatGPT Web did not accept the filled prompt (${diagnosticText(outcome.diagnostic)})`,
+            'CHATGPT_WEB_SUBMIT_FAILED',
+          )
+        case 'generation-timeout':
+          throw new PhysicalOperatorError(
+            `ChatGPT Web did not finish generation before the configured timeout (${diagnosticText(outcome.diagnostic)})`,
+            'CHATGPT_WEB_TIMEOUT',
+          )
+        case 'protocol-error':
+          throw new PhysicalOperatorError('ChatGPT Web returned an invalid browser program result', 'CHATGPT_WEB_PROTOCOL')
+      }
+    } catch (error) {
+      if (signal.aborted || error instanceof BrowserError && error.code === 'BROWSER_ABORTED') {
+        progress.append('chatgpt-web.aborted', { phase: 'aborted' })
+        return { output: [], stopReason: 'aborted' }
+      }
+      progress.append('chatgpt-web.failed', { phase: 'failed', code: errorCode(error) })
+      throw error
+    }
+  }
+}
+
+/** Register the browser-backed ChatGPT physical operator. */
+export function apply(ctx: Context, config: Config): void {
+  const resolved = resolveConfig(config)
+  const coordination = new ChatGptWebCoordination(ctx, resolved)
+  let unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, coordination))
+  const publish = async (): Promise<void> => {
+    await unregister()
+    unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, coordination))
+  }
+  ctx.effect(() => async () => {
+    await unregister()
+    await coordination.dispose()
+  }, 'physical-operator-chatgpt-web: coordinator lifecycle')
+  ctx.inject(['tools', 'systemPrompt'], (toolCtx) => {
+    toolCtx.effect(() => registerWebCoordinationTools(toolCtx, {
+      isCoordinating: (owner, callId) => coordination.isCoordinating(owner, callId),
+      maxHandoffBytes: resolved.outputMaxBytes,
+    }), 'physical-operator-chatgpt-web: coordination tools')
+  })
+  ctx.inject(['modelWorkers'], (workerCtx) => {
+    workerCtx.modelWorkers.register(new ChatGptWebModelWorker(workerCtx, resolved.id))
+  })
+  ctx.inject(['webServer'], (webCtx) => {
+    webCtx.effect(() => registerWebCoordinatorSetup(webCtx, {
+      status: () => coordination.status(),
+      endpoint: () => coordination.endpoint(),
+      select: mode => coordination.select(mode, publish),
+      refreshCatalog: sessionId => coordination.refreshCatalog(sessionId),
+      preferences: sessionId => coordination.preferences(sessionId),
+      selectPreferences: (sessionId, profile) => coordination.selectPreferences(sessionId, profile),
+    }), 'physical-operator-chatgpt-web: local setup')
+  })
+}
+
+function resolveConfig(config: Config): ResolvedConfig {
+  const id = requiredTrimmed('id', config.id ?? DEFAULT_OPERATOR_ID)
+  const displayName = requiredTrimmed('displayName', config.displayName ?? DEFAULT_DISPLAY_NAME)
+  const description = requiredTrimmed('description', config.description ?? DEFAULT_DESCRIPTION)
+  const workspaceName = requiredTrimmed('workspaceName', config.workspaceName ?? DEFAULT_WORKSPACE_NAME)
+  const tags = uniqueTrimmed('tags', config.tags ?? DEFAULT_TAGS)
+  const url = new URL(config.url ?? DEFAULT_CHATGPT_URL)
+  if (url.toString() !== DEFAULT_CHATGPT_URL) {
+    throw new Error(`physical-operator-chatgpt-web: url must be exactly ${DEFAULT_CHATGPT_URL}`)
+  }
+  const generationTimeoutMs = positiveTimer('generationTimeoutMs', config.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS)
+  const submissionTimeoutMs = positiveTimer('submissionTimeoutMs', config.submissionTimeoutMs ?? DEFAULT_SUBMISSION_TIMEOUT_MS)
+  const pollIntervalMs = positiveTimer('pollIntervalMs', config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS)
+  const progressIntervalMs = positiveTimer('progressIntervalMs', config.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS)
+  if (pollIntervalMs > generationTimeoutMs) {
+    throw new Error('physical-operator-chatgpt-web: pollIntervalMs must not exceed generationTimeoutMs')
+  }
+  if (submissionTimeoutMs > generationTimeoutMs) {
+    throw new Error('physical-operator-chatgpt-web: submissionTimeoutMs must not exceed generationTimeoutMs')
+  }
+  if (progressIntervalMs > generationTimeoutMs) {
+    throw new Error('physical-operator-chatgpt-web: progressIntervalMs must not exceed generationTimeoutMs')
+  }
+  const outputMaxBytes = config.outputMaxBytes ?? DEFAULT_OUTPUT_MAX_BYTES
+  if (!Number.isSafeInteger(outputMaxBytes) || outputMaxBytes < MIN_OUTPUT_MAX_BYTES) {
+    throw new Error(`physical-operator-chatgpt-web: outputMaxBytes must be an integer of at least ${MIN_OUTPUT_MAX_BYTES}`)
+  }
+  const coordinatorPort = config.coordinatorPort ?? 61847
+  if (!Number.isSafeInteger(coordinatorPort) || coordinatorPort < 0 || coordinatorPort > 65535) {
+    throw new Error('physical-operator-chatgpt-web: coordinatorPort must be an integer between 0 and 65535')
+  }
+  const coordinatorRequestMaxBytes = config.coordinatorRequestMaxBytes ?? 1024 * 1024
+  if (!Number.isSafeInteger(coordinatorRequestMaxBytes) || coordinatorRequestMaxBytes <= 0) {
+    throw new Error('physical-operator-chatgpt-web: coordinatorRequestMaxBytes must be a positive integer')
+  }
+  return Object.freeze({
+    stateRoot: requiredTrimmed('stateRoot', config.stateRoot ?? join(resolveDshHome(), 'chatgpt-web')),
+    connectorName: requiredTrimmed('connectorName', config.connectorName ?? 'DSH'),
+    coordinatorEnabled: config.coordinatorEnabled ?? false,
+    coordinatorPort,
+    coordinatorRequestMaxBytes,
+    coordinatorRequestTimeoutMs: positiveTimer('coordinatorRequestTimeoutMs', config.coordinatorRequestTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS),
+    identityTimeoutMs: positiveTimer('identityTimeoutMs', config.identityTimeoutMs ?? 15_000),
+    id,
+    displayName,
+    description,
+    tags,
+    workspaceName,
+    url: url.toString(),
+    generationTimeoutMs,
+    submissionTimeoutMs,
+    pollIntervalMs,
+    progressIntervalMs,
+    outputMaxBytes,
+  })
+}
+
+function requiredTrimmed(field: string, value: string): string {
+  if (value.length === 0 || value.trim() !== value) {
+    throw new Error(`physical-operator-chatgpt-web: ${field} must be non-blank and trimmed`)
+  }
+  return value
+}
+
+function uniqueTrimmed(field: string, values: readonly string[]): readonly string[] {
+  const seen = new Set<string>()
+  for (const value of values) {
+    requiredTrimmed(field, value)
+    if (seen.has(value)) throw new Error(`physical-operator-chatgpt-web: ${field} must not contain duplicate values`)
+    seen.add(value)
+  }
+  return Object.freeze([...seen])
+}
+
+function positiveTimer(field: string, value: number): number {
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_TIMER_DELAY_MS) {
+    throw new Error(`physical-operator-chatgpt-web: ${field} must be positive and at most ${MAX_TIMER_DELAY_MS}`)
+  }
+  return value
+}
+
+function modelForRequest(request: PhysicalOperatorProviderStartRequest): string | undefined {
+  if (request.residentProfile?.effort !== undefined) {
+    throw new PhysicalOperatorError('ChatGPT Web does not expose a verified reasoning-effort control', 'OPERATOR_OPTION_UNSUPPORTED')
+  }
+  const model = request.residentProfile?.model
+  if (model === undefined) return undefined
+  if (model.length === 0 || model.trim() !== model || model.length > MAX_MODEL_LENGTH) {
+    throw new PhysicalOperatorError('ChatGPT Web model selection must be a trimmed bounded model name', 'MODEL_SELECTION_UNAVAILABLE')
+  }
+  return model
+}
+
+/**
+ * Resolve the ephemeral Web controls without letting an explicit model borrow a stale effort.
+ * @param explicitModel - model explicitly requested for this provider run.
+ * @param saved - session-owned Web model and reasoning preferences.
+ * @returns the model and effort forwarded to the same-page browser program.
+ */
+export function resolveWebModelPreferences(
+  explicitModel: string | undefined,
+  saved: WebModelPreferences,
+): WebModelPreferences {
+  const model = explicitModel ?? saved.model
+  const effort = explicitModel !== undefined && saved.model !== explicitModel
+    ? undefined
+    : saved.effort
+  return {
+    ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
+  }
+}
+
+function programOutcome(value: BrowserJsonValue | undefined): ProgramOutcome {
+  if (!isRecord(value) || typeof value.status !== 'string') return { status: 'protocol-error' }
+  switch (value.status) {
+    case 'completed':
+      return typeof value.response === 'string' && typeof value.truncated === 'boolean'
+        ? { status: 'completed', response: value.response, truncated: value.truncated }
+        : { status: 'protocol-error' }
+    case 'auth-required': return { status: 'auth-required' }
+    case 'input-unavailable': return { status: 'input-unavailable' }
+    case 'context-not-isolated': return { status: 'context-not-isolated' }
+    case 'model-selection-unavailable': return { status: 'model-selection-unavailable' }
+    case 'effort-selection-unavailable': return { status: 'effort-selection-unavailable' }
+    case 'draft-present': {
+      const diagnostic = programDraftDiagnostic(value.diagnostic)
+      return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'draft-present', diagnostic }
+    }
+    case 'submission-failed': {
+      const diagnostic = programDiagnostic(value.diagnostic)
+      return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'submission-failed', diagnostic }
+    }
+    case 'generation-timeout': {
+      const diagnostic = programDiagnostic(value.diagnostic)
+      return diagnostic === undefined ? { status: 'protocol-error' } : { status: 'generation-timeout', diagnostic }
+    }
+    case 'protocol-error': return { status: 'protocol-error' }
+    default:
+      return { status: 'protocol-error' }
+  }
+}
+
+function programDraftDiagnostic(value: BrowserJsonValue | undefined): DraftDiagnostic | undefined {
+  if (!isRecord(value)) return undefined
+  const page = value.page
+  if (page !== 'root' && page !== 'conversation' && page !== 'other') return undefined
+  if (!Number.isSafeInteger(value.inputCharacters)
+    || !Number.isSafeInteger(value.attachmentCount)) return undefined
+  const inputCharacters = value.inputCharacters as number
+  const attachmentCount = value.attachmentCount as number
+  if (inputCharacters < 0 || attachmentCount < 0) return undefined
+  return {
+    page,
+    inputCharacters,
+    attachmentCount,
+  }
+}
+
+function programDiagnostic(value: BrowserJsonValue | undefined): ProgramDiagnostic | undefined {
+  if (!isRecord(value)) return undefined
+  const page = value.page
+  if (page !== 'root' && page !== 'conversation' && page !== 'other') return undefined
+  if (!Number.isSafeInteger(value.userCount) || !Number.isSafeInteger(value.assistantCount)
+    || !Number.isSafeInteger(value.inputCharacters) || typeof value.generating !== 'boolean'
+    || typeof value.settled !== 'boolean' || typeof value.sendAvailable !== 'boolean') return undefined
+  return {
+    page,
+    userCount: value.userCount as number,
+    assistantCount: value.assistantCount as number,
+    inputCharacters: value.inputCharacters as number,
+    generating: value.generating,
+    settled: value.settled,
+    sendAvailable: value.sendAvailable,
+  }
+}
+
+function diagnosticText(diagnostic: ProgramDiagnostic): string {
+  return `page=${diagnostic.page}, userMessages=${diagnostic.userCount}, assistantMessages=${diagnostic.assistantCount}, inputCharacters=${diagnostic.inputCharacters}, generating=${diagnostic.generating}, settled=${diagnostic.settled}, sendAvailable=${diagnostic.sendAvailable}`
+}
+
+function draftDiagnosticText(diagnostic: DraftDiagnostic): string {
+  return `page=${diagnostic.page}, inputCharacters=${diagnostic.inputCharacters}, attachments=${diagnostic.attachmentCount}`
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, BrowserJsonValue>> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function errorCode(error: unknown): string {
+  if (error instanceof BrowserError || error instanceof PhysicalOperatorError) return error.code
+  return 'CHATGPT_WEB_PROVIDER_FAILED'
+}

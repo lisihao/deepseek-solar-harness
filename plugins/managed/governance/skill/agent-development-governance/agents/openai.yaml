@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Development Governance"
+  short_description: "Enforce project-native coding rules and quality gates"
+  default_prompt: "Use $agent-development-governance to discover the applicable repository rules, plan the required native quality gates, perform the requested development work without weakening controls, and verify completion with fresh evidence."

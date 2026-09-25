@@ -5,7 +5,7 @@
  * arms over the real slot stack.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
@@ -20,8 +20,11 @@ afterEach(async () => {
   document.title = ''
 })
 
-async function bench() {
+async function bench(connection: object = {
+  state: { getSnapshot: () => 'connected', subscribe: () => () => {} },
+}) {
   runtime = await SlotTestRuntime.create()
+  runtime.provide('connection', connection)
   await runtime.root.declare({}, () => <div data-testid="frame" />)
   return { runtime, renderApp: buildRenderApp({ ctx: runtime.ctx }) }
 }
@@ -29,6 +32,29 @@ async function bench() {
 describe('buildRenderApp', () => {
   it('fails loud when the sessions service is unavailable', () => {
     expect(() => buildRenderApp({ ctx: new Context() })).toThrow('sessions service unavailable')
+  })
+
+  it('keeps the stale projection visible and surfaces remote reconnecting state', async () => {
+    let state: 'connected' | 'reconnecting' = 'connected'
+    const listeners = new Set<() => void>()
+    const b = await bench({
+      transport: 'remote-projection',
+      state: {
+        getSnapshot: () => state,
+        subscribe: (listener: () => void) => {
+          listeners.add(listener)
+          return () => { listeners.delete(listener) }
+        },
+      },
+    })
+    const view = render(<>{buildRenderApp({ ctx: b.runtime.ctx })()}</>)
+    expect(view.queryByText(/当前显示上次同步结果/)).toBeNull()
+    await act(async () => {
+      state = 'reconnecting'
+      for (const listener of listeners) listener()
+    })
+    expect(await view.findByText(/当前显示上次同步结果/)).toBeTruthy()
+    expect(view.getByTestId('frame')).toBeTruthy()
   })
 
   it('renders the root slot tree through the one ctx-level renderSlot call', async () => {

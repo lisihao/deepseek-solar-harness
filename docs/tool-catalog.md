@@ -7,7 +7,7 @@ Every model-facing tool a shipped plugin contributes to `ctx.tools`: the `name`,
 
 This file is GENERATED and verified fresh by `pnpm run verify-tool-catalog` (part of `doc-sync`) — do not edit it by hand. Unlike the cordis catalog (a pure source-AST pass), this generator BOOTS each tool plugin on a real context and reads `ctx.tools.schemas()`, because a tool schema is not statically knowable (runtime-spread enums, concatenated descriptions, config-driven names, raw-JSON-Schema MCP tools). A completeness guard globs `packages/*/tool-*` and fails if any package is missing from the generator's boot manifest, so a new tool cannot be silently undocumented. See [the tool-schema-catalog Agent Note](../.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md).
 
-Scope: shipped product tools under `packages/*/tool-*`, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog's packages-only scope.
+Scope: shipped product tools under `packages/*/tool-*` plus explicitly listed provider-owned model-facing tools, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog's packages-only scope.
 
 ## Tool Package Map
 
@@ -16,8 +16,13 @@ This table connects model-visible tool names to the plugin package and service s
 | Tool package | Model-visible names | Requires | Writes / affects | Shipped aliases | Deployment note |
 | --- | --- | --- | --- | --- | --- |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
+| `@deepseek-ai/dsh-tool-browser` | `browser` | `ctx.tools`, `ctx.browser`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `browser provider state through ctx.browser` | - | The model-facing `browser` tool accepts only the bounded portable-plan vocabulary. Provider selection, Ego Lite discovery, and browser lifecycle remain behind `ctx.browser`; browser-js-v1 is trusted-plugin-only and is not exposed to the model. |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: code` / `mode: both` (see the Code Mode Agent Note). Under `code` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
+| `@deepseek-ai/dsh-tool-physical-operator` | `physical_operator` | `ctx.tools`, `ctx.physicalOperators`, `a calling Agent for action=run` | `tool/call`, `tool/result`, `physical-operator lifecycle through the selected provider` | - | The schema exposes stable physical-operator ids rather than provider transports. Deployments register operators separately; the catalog intentionally harvests the empty-registry schema. |
+| `@deepseek-ai/dsh-physical-operator-chatgpt-web` | `web_session` | `ctx.tools`, `ctx.systemPrompt`, `a coordinating ChatGPT Web Agent` | `tool/call`, `tool/result`, `Agent inbox handoff messages` | - | Provider-owned coordination control for an authenticated ChatGPT Web response. The catalog mounts only the registration helper with a representative handoff limit; it does not boot the browser, MCP connector, or provider state. Runtime execution remains restricted to the coordinating Web call. |
+| `@deepseek-ai/dsh-tool-debate` | `debate` | `ctx.tools`, `ctx.systemPrompt`, `ctx.debates` | `tool/call`, `tool/result`, `debate lifecycle through ctx.debates` | - | The model-facing Consumer depends only on the provider-neutral ctx.debates seam; the catalog substitute cannot execute and does not start the local Debate Provider. |
+| `@deepseek-ai/dsh-tool-orchestration` | `orchestration` | `ctx.tools`, `ctx.systemPrompt`, `ctx.orchestrations` | `tool/call`, `tool/result`, `durable orchestration runs through ctx.orchestrations` | - | The model-facing Consumer depends only on the provider-neutral ctx.orchestrations seam; the catalog substitute cannot execute and does not start the local daemon. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
 | `@deepseek-ai/dsh-tool-pwsh` | `pwsh` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The pwsh tool is the PowerShell-dialect consumer of the bash executor seam for Windows compositions (a PowerShell executor such as `@deepseek-ai/dsh-pwsh-local` backs `ctx.shell`); it mirrors the bash tool call-for-call minus sandbox controls — `run_in_background` runs register with the generic `ctx.jobs` runtime and are collected/stopped through the `job_*` tools, and the managed `DSH_*` environment comes from `@deepseek-ai/dsh-shell-env`. Each call runs in a fresh process (no persistent PTY session), with native `C:\...` paths and `$env:NAME` variables. |
 | `@deepseek-ai/dsh-tool-cordis` | `cordis_define`, `cordis_inspect_list`, `cordis_inspect_query`, `cordis_inspect_self`, `cordis_run`, `cordis_stop`, `cordis_undefine` | `ctx.tools`, `ctx.dynamicCordisRunner` | `tool/call`, `tool/result`, `process-local dynamic package lifecycle` | - | Not in any shipped tree (a deliberate opt-in — dynamic package code reaches the real runtime, see .agents/notes/implemented/feature/2026-07-08-self-referential-cordis-toolset.md). The toolset injects `ctx.dynamicCordisRunner` from `@deepseek-ai/dsh-cordis-host-runner`, which owns the definition registry and the vm sandbox; a composition missing it never activates the tools. A running package may register ADDITIONAL model-visible tools until it is stopped, undefined, or DSH restarts; a full changed request header logs those tool-set changes. |
@@ -114,6 +119,446 @@ Source: [`packages/interaction/tool-ask-user/src/index.ts`](../packages/interact
 
 ask_user_question pauses the tool call until the active UI provider returns a human answer.
 
+<a id="deepseek-aidsh-tool-browser"></a>
+
+## `@deepseek-ai/dsh-tool-browser`
+
+### `browser`
+
+Run an ordered, typed browser plan through the configured browser provider. The model-facing plan uses only named/existing workspaces, exact-URL tab reuse, and portable page operations supported by the default Ego Lite v1.2.5 Provider; current workspace, reuse:"never", and pages are unavailable.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "plan": {
+      "type": "object",
+      "description": "Closed BrowserRunPlanV1 model schema. Use workspace kind existing or named; open.reuse must be exact-url; pages is not a model operation. Operations are bounded to 64 and execute in order.",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "workspace": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "existing"
+                },
+                "id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "named"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "createIfMissing": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "kind",
+                "name",
+                "createIfMissing"
+              ]
+            }
+          ]
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "authenticated-profile-reuse",
+              "named-workspace",
+              "page-evaluate",
+              "semantic-snapshot"
+            ]
+          }
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "timeoutMs": {
+                "type": "integer"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "open",
+                  "select-page",
+                  "close-page",
+                  "navigate",
+                  "reload",
+                  "page-info",
+                  "snapshot",
+                  "click",
+                  "fill",
+                  "clear",
+                  "press",
+                  "check",
+                  "select",
+                  "read",
+                  "count",
+                  "wait",
+                  "complete"
+                ]
+              },
+              "page": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "reuse": {
+                "type": "string",
+                "const": "exact-url"
+              },
+              "waitUntil": {
+                "type": "string",
+                "enum": [
+                  "dom-content-loaded",
+                  "load",
+                  "network-idle"
+                ]
+              },
+              "match": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "exact-url"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "url"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "url-prefix"
+                      },
+                      "prefix": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "prefix"
+                    ]
+                  }
+                ]
+              },
+              "locator": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "css",
+                      "role",
+                      "text",
+                      "label",
+                      "placeholder",
+                      "test-id"
+                    ]
+                  },
+                  "selector": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "placeholder": {
+                    "type": "string"
+                  },
+                  "testId": {
+                    "type": "string"
+                  },
+                  "exact": {
+                    "type": "boolean"
+                  },
+                  "index": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "value": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "checked": {
+                "type": "boolean"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "text"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "value"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "html"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "attribute"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "name"
+                    ]
+                  }
+                ]
+              },
+              "condition": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "load",
+                      "url",
+                      "locator",
+                      "control"
+                    ]
+                  },
+                  "page": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "dom-content-loaded",
+                      "load",
+                      "network-idle",
+                      "attached",
+                      "detached",
+                      "visible",
+                      "hidden"
+                    ]
+                  },
+                  "match": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "exact-url"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "url-prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ]
+                      }
+                    ]
+                  },
+                  "locator": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "css",
+                          "role",
+                          "text",
+                          "label",
+                          "placeholder",
+                          "test-id"
+                        ]
+                      },
+                      "selector": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "placeholder": {
+                        "type": "string"
+                      },
+                      "testId": {
+                        "type": "string"
+                      },
+                      "exact": {
+                        "type": "boolean"
+                      },
+                      "index": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  "control": {
+                    "type": "string",
+                    "enum": [
+                      "agent",
+                      "user"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "keep": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "kind"
+            ]
+          }
+        }
+      },
+      "required": [
+        "version",
+        "workspace",
+        "operations"
+      ]
+    }
+  },
+  "required": [
+    "plan"
+  ]
+}
+```
+
+Source: [`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
+
+The model-facing `browser` tool accepts only the bounded portable-plan vocabulary. Provider selection, Ego Lite discovery, and browser lifecycle remain behind `ctx.browser`; browser-js-v1 is trusted-plugin-only and is not exposed to the model.
+
 <a id="deepseek-aidsh-tools"></a>
 
 ## `@deepseek-ai/dsh-tools`
@@ -172,6 +617,206 @@ Use only in plan mode. Present your plan for the user's review and, on approval,
 Source: [`packages/plan/plan-mode/src/index.ts`](../packages/plan/plan-mode/src/index.ts)
 
 exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary.
+
+<a id="deepseek-aidsh-tool-physical-operator"></a>
+
+## `@deepseek-ai/dsh-tool-physical-operator`
+
+### `physical_operator`
+
+Discover and run deployment-defined physical operators. Use action=list to inspect stable operator ids, live availability, tags, and capacity. Use action=run with one listed operator id and a complete standalone task. The operator id is the stable capability boundary: do not choose or assume its backing provider.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "description": "List physical operators or run one selected operator.",
+      "enum": [
+        "list",
+        "run"
+      ]
+    },
+    "operator_id": {
+      "type": "string",
+      "description": "Stable operator id returned by action=list. Required for action=run."
+    },
+    "description": {
+      "type": "string",
+      "description": "Short 3-5 word task label. Required for action=run."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Complete standalone task for the selected operator. Required for action=run."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Execution lifetime. Omit for backward-compatible ephemeral execution.",
+      "enum": [
+        "ephemeral",
+        "resident"
+      ]
+    },
+    "required_capabilities": {
+      "type": "array",
+      "description": "Capabilities required by the delegated task, for example browser. Browser requires resident mode so the full DSH tool bridge remains authoritative.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+The schema exposes stable physical-operator ids rather than provider transports. Deployments register operators separately; the catalog intentionally harvests the empty-registry schema.
+
+<a id="deepseek-aidsh-physical-operator-chatgpt-web"></a>
+
+## `@deepseek-ai/dsh-physical-operator-chatgpt-web`
+
+### `web_session`
+
+Coordinate one authenticated ChatGPT Web response with the DSH loop. Use checkpoint to observe queued DSH input and handoff to queue a bounded continuation summary.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "description": "Checkpoint the current Web response or queue a continuation handoff.",
+      "enum": [
+        "checkpoint",
+        "handoff"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Required for handoff: concise work state and next steps for a fresh Web lane."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts`](../packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts)
+
+Provider-owned coordination control for an authenticated ChatGPT Web response. The catalog mounts only the registration helper with a representative handoff limit; it does not boot the browser, MCP connector, or provider state. Runtime execution remains restricted to the coordinating Web call.
+
+<a id="deepseek-aidsh-tool-debate"></a>
+
+## `@deepseek-ai/dsh-tool-debate`
+
+### `debate`
+
+Start a bounded multi-agent debate, list or inspect persistent runs, or apply an explicit revision-fenced control action.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "start",
+        "list",
+        "inspect",
+        "control"
+      ]
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Debate question or instruction; required for start."
+    },
+    "objective": {
+      "type": "string",
+      "description": "Optional concise decision objective for start."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Persistent Debate run id; required for inspect/control."
+    },
+    "expected_revision": {
+      "type": "number",
+      "description": "Current run revision; required for control."
+    },
+    "control_action": {
+      "type": "string",
+      "description": "Explicit control decision; continue grants two further rounds only when the Provider reports eligibility.",
+      "enum": [
+        "approve",
+        "reject",
+        "pause",
+        "resume",
+        "stop",
+        "continue"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human reason; required for control."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+Source: [`packages/orchestration/tool-debate/src/index.ts`](../packages/orchestration/tool-debate/src/index.ts)
+
+The model-facing Consumer depends only on the provider-neutral ctx.debates seam; the catalog substitute cannot execute and does not start the local Debate Provider.
+
+<a id="deepseek-aidsh-tool-orchestration"></a>
+
+## `@deepseek-ai/dsh-tool-orchestration`
+
+### `orchestration`
+
+Compile/start a durable Resident TaskGraph, list runs, or inspect one run. Complex low-risk work may be started automatically; risky work remains awaiting human approval.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "start",
+        "list",
+        "inspect"
+      ]
+    },
+    "objective": {
+      "type": "string",
+      "description": "Unmodified user objective; required for start."
+    },
+    "graph_json": {
+      "type": "string",
+      "description": "Complete LogicalTaskGraphV1 JSON; required for start."
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Run id; required for inspect."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+Source: [`packages/orchestration/tool-orchestration/src/index.ts`](../packages/orchestration/tool-orchestration/src/index.ts)
+
+The model-facing Consumer depends only on the provider-neutral ctx.orchestrations seam; the catalog substitute cannot execute and does not start the local daemon.
 
 <a id="deepseek-aidsh-tool-bash"></a>
 
@@ -666,7 +1311,7 @@ Source: [`packages/fs/tool-fs/src/index.ts`](../packages/fs/tool-fs/src/index.ts
 
 ### `read_image`
 
-Read a PNG/JPEG/WebP/GIF file and return the image itself. Requires the current model to accept image input.
+Read a PNG/JPEG/WebP/GIF file and return the image itself. A path without an extension is identified from its file content. Requires the current model to accept image input.
 
 ```json
 {

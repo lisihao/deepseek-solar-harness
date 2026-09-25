@@ -50,7 +50,7 @@ describe('dynamic Plugin versions', () => {
     const controller = new AbortController()
     const pending = runner.run(AGENT_A, defined.pluginId, defined.packageId, 'run', controller.signal)
     await Promise.resolve()
-    const request = gateway.events.find(([event]) => event === 'cordis/request-run')?.[1]
+    const request = gateway.events.find(([event]) => event === '@deepseek-ai/cordis/request-run')?.[1]
     expect(request).toBeDefined()
     const approval = request as {
       requestId: Parameters<typeof runner.runHostHalf>[4]

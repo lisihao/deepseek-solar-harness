@@ -85,6 +85,14 @@
     - id: credentials
       name: '@deepseek-ai/dsh-credentials-local'
 
+    # Private, versioned task methods. The Consumer injects at most once per
+    # logical user request; TaskGraph workers select again per sealed node.
+    - id: task-template
+      name: '@deepseek-ai/dsh-task-template'
+
+    - id: task-template-context
+      name: '@deepseek-ai/dsh-task-template-context'
+
     # The pi-ai multi-provider twin, mounted dormant: zero routes (and no extra
     # models in the picker) until a `llm-pi-ai:` settings section supplies provider
     # profiles — then those routes register live, keys resolving per request
@@ -430,6 +438,13 @@
       name: '@deepseek-ai/dsh-system-prompt'
       config:
         persona: ''
+
+    # Global presentation defaults are model guidance, not an output rewriter.
+    # An explicit user-requested format still wins; complete preset personas
+    # carry the same contract themselves because they intentionally replace all
+    # additive prompt sections.
+    - id: output-style
+      name: '@deepseek-ai/dsh-output-style'
 
     # Agents created at startup. The base stays empty; raw overlays may create
     # agents, while Web creates sessions on client request.

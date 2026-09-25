@@ -17,15 +17,15 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
   disabled: false
   config:
     instances:
-      - id: genesispod
-        label: GenesisPod
-        url: http://127.0.0.1:13000/
-        relayPort: 3000
+      - id: research-workspace
+        label: Research Workspace
+        url: http://127.0.0.1:19001/
+        relayPort: 29001
         order: 100
-      - id: thunder-omlx
-        label: ThunderOMLX
-        url: http://127.0.0.1:18002/admin/
-        relayPort: 18102
+      - id: model-console
+        label: Model Console
+        url: http://127.0.0.1:19002/console/
+        relayPort: 29002
         order: 200
 ```
 
@@ -33,7 +33,7 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 
 | 配置 | 含义 |
 |---|---|
-| `instances` | 非空数组；每一项都是一个独立启动的网页实例。 |
+| `instances` | 独立启动的网页实例数组；空数组会保留配置功能，但不会随产品发布私人部署目标。 |
 | `instances[].id` | 唯一的 kebab-case 实例键。 |
 | `instances[].label` | 侧栏按钮与对话框名称。 |
 | `instances[].url` | 完整 HTTP(S) 目标网页；支持路径、查询和片段，拒绝内嵌凭据及主动 URL scheme。 |
@@ -44,7 +44,7 @@ dsh plugin --profile web add @deepseek-ai/dsh-client-ui-remote-modules
 
 每个实例都会启动一个仅监听本机、目标固定的中继。所有路径始终落在唯一配置的 origin 上，因此它不是开放代理。中继保留目标 HTML、JavaScript、CSS、Cookie、重定向、方法、流式响应与 WebSocket upgrade；它只移除 `X-Frame-Options` 和 CSP 的 `frame-ancestors` 指令，因为这两项会阻止部署者授权的应用显示在 Harness 中，其余 CSP 指令保持不变。Host 只在 `/remote-webpages/v1/instances` 发布实例清单；React 随后直接在 iframe 中加载各中继地址。
 
-对于 Mac mini 回环服务，SSH 仍由部署负责。示例要求 `13000 → Mac mini:3000` 访问 GenesisPod 前端，并要求 `18002 → Mac mini:8002` 访问 ThunderOMLX。GenesisPod 中继刻意使用 `localhost:3000`，其浏览器代码的固定 API Origin 还要求 `localhost:3001 → Mac mini:3001` 与 `localhost:4000 → Mac mini:4000`。所有 SSH 监听端口和中继端口都应只绑定 MacBook 回环地址。
+对于转发到回环地址的远程服务，SSH 仍由部署负责。每个 `url` 应指向相应的本机转发地址，SSH 监听端口与中继端口都应只绑定 MacBook 回环地址。私人主机名、地址与凭据只属于用户 profile 设置，绝不作为产品默认值发布。
 
 稳定的中继端口会在 Harness 重启后保持浏览器 Origin 不变，从而让服务自己的 Cookie 和 local storage 继续有效。认证仍完全归目标应用所有；插件不收集也不保存目标凭据。
 

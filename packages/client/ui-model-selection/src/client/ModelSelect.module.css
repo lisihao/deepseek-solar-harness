@@ -259,3 +259,17 @@
   flex: 0 0 auto;
   color: var(--dsw-alias-label-tertiary);
 }
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinning {
+    animation: none;
+  }
+}

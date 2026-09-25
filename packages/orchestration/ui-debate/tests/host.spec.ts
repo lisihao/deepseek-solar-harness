@@ -1,0 +1,450 @@
+import { DebateError } from '@deepseek-ai/dsh-debate'
+import type {
+  DebateControlRequestV1,
+  DebateEventReadRequestV1,
+  DebatePolicyV1,
+  DebateRunSnapshotV1,
+  DebateRunSummaryV1,
+} from '@deepseek-ai/dsh-debate'
+import { describe, expect, it } from 'vitest'
+import { apply, remoteDebateControlAllowed } from '../src/index.ts'
+
+const longPreview = `Round two challenge: ${'x'.repeat(900)}`
+
+function policy(): DebatePolicyV1 {
+  const persona = (title: string) => ({ title, mandate: `public responsibility ${title}`, stance: 'private stance', instructions: ['private instruction'] })
+  return {
+    version: 1,
+    mode: 'enabled',
+    roster: [
+      {
+        version: 1, role: 'constructive-proposer', kind: 'participant', operatorId: 'codex',
+        model: 'gpt-5.6-sol', tier: 'high', source: 'native-subscription', persona: persona('Proposer'), required: true,
+      },
+      {
+        version: 1, role: 'skeptical-falsifier', kind: 'participant', operatorId: 'claude-code',
+        model: 'claude-fable-5', tier: 'medium', source: 'native-subscription', persona: persona('Falsifier'), required: true,
+      },
+      {
+        version: 1, role: 'decision-judge', kind: 'judge', operatorId: 'claude-code',
+        model: 'claude-opus-5', tier: 'high', source: 'native-subscription', persona: persona('Judge'), required: true,
+      },
+    ],
+    budget: {
+      version: 1, maxRounds: 3, maxTurnsPerAgent: 3, maxAgentsPerRound: 3,
+      maxInputTokens: 10_000, maxOutputTokens: 5_000, maxTotalTokens: 15_000,
+    },
+    rounds: { version: 1, firstRound: 'blind-independent', followUp: 'claim-ledger', escalation: 'high-severity-unresolved' },
+    convergence: {
+      version: 1, scoreThreshold: 0.8, minSettledAgents: 2,
+      maxUnresolvedHighSeverity: 0, requireEvidenceForCritical: true, earlyStop: true,
+    },
+    preserveDissent: true,
+  }
+}
+
+function run(): DebateRunSnapshotV1 {
+  const evidence = { version: 1 as const, ref: 'artifact:evidence', kind: 'artifact' as const }
+  const cost = {
+    version: 1 as const,
+    usageStatus: 'partial' as const,
+    costStatus: 'unknown' as const,
+    inputTokens: 1_000,
+    outputTokens: 400,
+    cacheReadInputTokens: 200,
+    unknownUsageTurns: 1,
+    unknownCostTurns: 1,
+    bySlot: [],
+  }
+  const claims = [{
+    version: 1 as const,
+    claimId: 'claim-1',
+    statement: 'Option A is safer.',
+    status: 'supported' as const,
+    severity: 'high' as const,
+    confidence: 0.9,
+    supportingSlotIds: ['constructive-proposer'],
+    opposingSlotIds: ['skeptical-falsifier'],
+    evidenceRefs: [evidence],
+    rationale: 'Rollback is documented.',
+  }]
+  const ledger = { version: 1 as const, claims, coverage: 0.8, digest: 'sha256:ledger' }
+  return {
+    version: 1,
+    runId: 'debate-1',
+    revision: 7,
+    state: 'awaiting_approval',
+    mode: 'enabled',
+    promptSha256: 'sha256:prompt',
+    objective: 'Choose A or B.',
+    topic: { version: 1, title: 'User-selected topic: choose A or B.', source: 'user' },
+    policy: policy(),
+    roster: policy().roster,
+    currentRound: 2,
+    rounds: [{
+      version: 1,
+      round: 1,
+      state: 'completed',
+      turns: [
+        {
+          version: 1, round: 1, slotId: 'constructive-proposer', role: 'constructive-proposer', operatorId: 'codex', model: 'gpt-5.6-sol', state: 'settled',
+          outputRef: 'artifact:r1-proposer', outputPreview: 'Round one proposal: choose A.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 1_000, outputTokens: 400 }, startedAt: '2026-08-29T01:00:01.000Z', settledAt: '2026-08-29T01:00:11.000Z',
+        },
+        {
+          version: 1, round: 1, slotId: 'skeptical-falsifier', role: 'skeptical-falsifier', operatorId: 'claude-code', model: 'claude-fable-5', state: 'settled',
+          outputRef: 'artifact:r1-falsifier', outputPreview: 'Round one challenge: verify rollback.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 900, outputTokens: 350 }, startedAt: '2026-08-29T01:00:02.000Z', settledAt: '2026-08-29T01:00:12.000Z',
+        },
+        {
+          version: 1, round: 1, slotId: 'decision-judge', role: 'decision-judge', operatorId: 'claude-code', model: 'claude-opus-5', state: 'settled',
+          outputRef: 'artifact:r1-judge', outputPreview: 'Round one ruling: continue review.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 800, outputTokens: 300 }, startedAt: '2026-08-29T01:00:03.000Z', settledAt: '2026-08-29T01:00:13.000Z',
+        },
+      ],
+      claimLedger: ledger,
+      dissent: [],
+      unresolved: [],
+      convergence: { version: 1, status: 'continue', score: 0.6, threshold: 0.8, disagreement: 0.4, coverage: 0.6, unresolvedHighSeverity: 0, settledAgents: 3, reason: 'continue review' },
+    }, {
+      version: 1,
+      round: 2,
+      state: 'completed',
+      turns: [
+        {
+          version: 1, round: 2, slotId: 'constructive-proposer', role: 'constructive-proposer', operatorId: 'codex', model: 'gpt-5.6-sol', state: 'settled',
+          outputRef: 'artifact:r2-proposer', outputPreview: 'Round two proposal: retain A with a gate.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 1_100, outputTokens: 450 }, startedAt: '2026-08-29T01:01:01.000Z', settledAt: '2026-08-29T01:01:11.000Z',
+        },
+        {
+          version: 1, round: 2, slotId: 'skeptical-falsifier', role: 'skeptical-falsifier', operatorId: 'claude-code', model: 'claude-fable-5', state: 'settled',
+          outputRef: 'artifact:r2-falsifier', outputPreview: longPreview, claimIds: ['claim-1'], evidenceRefs: [evidence],
+          attempt: 2,
+          routing: {
+            version: 1, requestedOperatorId: 'claude-code', requestedModel: 'claude-fable-5',
+            actualOperatorId: 'codex', actualModel: 'gpt-5.6-luna', fallbackReasonCode: 'AUTHENTICATION_UNQUALIFIED',
+            allocationPlanRef: 'artifact:allocation-plan',
+          },
+          usage: { inputTokens: 950, outputTokens: 380 }, startedAt: '2026-08-29T01:01:02.000Z', settledAt: '2026-08-29T01:01:12.000Z',
+        },
+        {
+          version: 1, round: 2, slotId: 'decision-judge', role: 'decision-judge', operatorId: 'claude-code', model: 'claude-opus-5', state: 'settled',
+          outputRef: 'artifact:r2-judge', outputPreview: 'Round two ruling: choose A and record dissent.', claimIds: ['claim-1'], evidenceRefs: [evidence],
+          usage: { inputTokens: 850, outputTokens: 320 }, startedAt: '2026-08-29T01:01:03.000Z', settledAt: '2026-08-29T01:01:13.000Z',
+        },
+      ],
+      claimLedger: ledger,
+      dissent: [],
+      unresolved: [],
+      convergence: { version: 1, status: 'converged', score: 0.9, threshold: 0.8, disagreement: 0.1, coverage: 0.8, unresolvedHighSeverity: 0, settledAgents: 3, reason: 'supported' },
+    }],
+    claimLedger: ledger,
+    dissent: [{ version: 1, slotId: 'skeptical-falsifier', claimId: 'claim-1', position: 'B may be safer.', reason: 'Rollback evidence incomplete.', confidence: 0.4, evidenceRefs: [] }],
+    unresolved: [{ version: 1, claimId: 'claim-2', description: 'Operational cost unknown.', severity: 'medium', blocking: false, reason: 'No benchmark.', requiredEvidenceRefs: [] }],
+    evidence: { version: 1, refs: [evidence], coverage: 0.8, missingRefs: ['benchmark'], lineage: ['artifact:evidence'] },
+    cost,
+    provenance: { version: 1, providerId: 'fixture', providerVersion: '1', requestSha256: 'sha256:req', policySha256: 'sha256:policy', sourceSessionId: 'session-1' },
+    synthesis: { version: 1, state: 'settled', artifactRef: 'artifact:synthesis', outputPreview: 'Choose A and retain the cost dissent.', unresolvedClaimIds: ['claim-2'], dissentCount: 1 },
+    createdAt: '2026-08-29T01:00:00.000Z',
+    updatedAt: '2026-08-29T01:01:00.000Z',
+  }
+}
+
+function summary(snapshot = run()): DebateRunSummaryV1 {
+  return {
+    version: 1,
+    runId: snapshot.runId,
+    state: snapshot.state,
+    mode: snapshot.mode,
+    currentRound: snapshot.currentRound,
+    revision: snapshot.revision,
+    unresolvedCount: snapshot.unresolved.length,
+    cost: snapshot.cost,
+    updatedAt: snapshot.updatedAt,
+  }
+}
+
+type Handler = (request: unknown, response: unknown) => Promise<void>
+
+function response() {
+  return {
+    statusCode: 0,
+    headers: new Map<string, unknown>(),
+    body: '',
+    setHeader(name: string, value: unknown) { this.headers.set(name, value) },
+    writeHead(status: number) { this.statusCode = status },
+    end(value?: Uint8Array) { this.body = Buffer.from(value ?? []).toString('utf8') },
+  }
+}
+
+function request(
+  method: string,
+  url: string,
+  body?: Record<string, unknown>,
+  options: { remoteAddress?: string; token?: string; controlHeader?: boolean } = {},
+) {
+  return {
+    method,
+    url,
+    headers: {
+      host: '127.0.0.1:3080',
+      ...(options.token === undefined ? {} : { authorization: `Bearer ${options.token}` }),
+      ...(options.controlHeader === true ? { 'x-dsh-debate-control': '1' } : {}),
+    },
+    socket: { remoteAddress: options.remoteAddress ?? '127.0.0.1' },
+    async *[Symbol.asyncIterator]() { if (body !== undefined) yield Buffer.from(JSON.stringify(body)) },
+  }
+}
+
+describe('Debate Host projection', () => {
+  it('serves bounded list/inspect/events without exposing persona instructions', async () => {
+    let handler: Handler | undefined
+    const selected = run()
+    const ctx = {
+      webServer: { register(entry: { handler: Handler }) { handler = entry.handler; return () => {} } },
+      effect(callback: () => unknown) { callback() },
+      get() { return undefined },
+      logger: { warn() {} },
+      debates: {
+        async list() { return [summary(selected)] },
+        async inspect() { return selected },
+        async readEvents(_request: DebateEventReadRequestV1) {
+          return {
+            events: [{
+              version: 1, sequence: 1, runId: selected.runId, revision: 7, generation: 2, round: 1,
+              slotId: 'constructive-proposer', type: 'debate.agent.settled', createdAt: selected.updatedAt,
+              data: { outputRef: 'artifact:turn-1', role: 'constructive-proposer', privateInstructions: 'do not expose' },
+            }, {
+              version: 1, sequence: 2, runId: selected.runId, revision: 7, generation: 2, round: 1,
+              slotId: 'constructive-proposer', type: 'debate.agent.progress', createdAt: selected.updatedAt,
+              data: {
+                role: 'constructive-proposer', kind: 'tool-started', toolName: 'Bash',
+                routing: { requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol' },
+                orchestrationRunId: 'private-run-id', orchestrationSequence: 9,
+              },
+            }],
+            nextSequence: 3,
+          }
+        },
+      },
+    }
+    apply(ctx as never)
+    if (handler === undefined) throw new Error('Debate route was not registered')
+
+    const listed = response()
+    await handler(request('GET', '/api/debates'), listed)
+    expect(listed.statusCode).toBe(200)
+    expect(JSON.parse(listed.body)).toMatchObject({ version: 1, runs: [{ runId: 'debate-1', state: 'awaiting_approval' }] })
+
+    const inspected = response()
+    await handler(request('GET', '/api/debates?run_id=debate-1&after_sequence=0&limit=10'), inspected)
+    expect(inspected.statusCode).toBe(200)
+    const projected = JSON.parse(inspected.body) as Record<string, unknown>
+    expect(projected).toMatchObject({
+      selectedRunId: 'debate-1',
+      selectedRun: {
+        topic: { title: 'User-selected topic: choose A or B.', source: 'user' },
+        claims: [{ claimId: 'claim-1', status: 'supported' }],
+        synthesis: { artifactRef: 'artifact:synthesis' },
+        cost: { usageStatus: 'partial', costStatus: 'unknown', unknownUsageTurns: 1 },
+      },
+      events: [
+        { type: 'debate.agent.settled' },
+        { type: 'debate.agent.progress', data: { role: 'constructive-proposer', kind: 'tool-started', toolName: 'Bash' } },
+      ],
+      nextSequence: 3,
+    })
+    expect((projected.selectedRun as { roles: unknown[] }).roles[0]).toMatchObject({
+      role: 'constructive-proposer', mandate: 'public responsibility Proposer', latestTurn: { outputRef: 'artifact:r2-proposer' },
+    })
+    expect(JSON.stringify(projected)).not.toContain('private-run-id')
+    const rounds = (projected.selectedRun as { rounds: Array<{ turnStates: unknown[] }> }).rounds
+    expect(rounds).toHaveLength(2)
+    expect(rounds[0]?.turnStates).toHaveLength(3)
+    expect(rounds[1]?.turnStates).toHaveLength(3)
+    expect(rounds[0]?.turnStates[0]).toMatchObject({
+      role: 'constructive-proposer', operatorId: 'codex', model: 'gpt-5.6-sol', outputPreview: 'Round one proposal: choose A.',
+      outputRef: 'artifact:r1-proposer', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'],
+      usage: { inputTokens: 1_000, outputTokens: 400 }, startedAt: '2026-08-29T01:00:01.000Z', settledAt: '2026-08-29T01:00:11.000Z',
+    })
+    expect(rounds[1]?.turnStates[2]).toMatchObject({
+      role: 'decision-judge', operatorId: 'claude-code', model: 'claude-opus-5', outputPreview: 'Round two ruling: choose A and record dissent.',
+      outputRef: 'artifact:r2-judge', claimIds: ['claim-1'], evidenceRefs: ['artifact:evidence'],
+      usage: { inputTokens: 850, outputTokens: 320 }, startedAt: '2026-08-29T01:01:03.000Z', settledAt: '2026-08-29T01:01:13.000Z',
+    })
+    expect(rounds[1]?.turnStates[1]).toMatchObject({
+      attempt: 2,
+      routing: {
+        requestedOperatorId: 'claude-code', requestedModel: 'claude-fable-5',
+        actualOperatorId: 'codex', actualModel: 'gpt-5.6-luna', fallbackReasonCode: 'AUTHENTICATION_UNQUALIFIED',
+        allocationPlanRef: 'artifact:allocation-plan',
+      },
+    })
+    const bounded = rounds[1]?.turnStates[1] as { outputPreview?: string }
+    expect(bounded.outputPreview).toHaveLength(800)
+    expect(bounded.outputPreview?.endsWith('…')).toBe(true)
+    expect((projected.selectedRun as { cost: Record<string, unknown> }).cost).not.toHaveProperty('costUsd')
+    expect(inspected.body).not.toContain('private mandate')
+    expect(inspected.body).not.toContain('private stance')
+    expect(inspected.body).not.toContain('private instruction')
+    expect(inspected.body).not.toContain('privateInstructions')
+  })
+
+  it('projects a two-round continuation offer, terminal result, and prior moderator summary', async () => {
+    let handler: Handler | undefined
+    const selected = run()
+    const allowance = {
+      version: 1 as const,
+      additionalRounds: 2 as const,
+      additionalTurnsPerAgent: 2 as const,
+      additionalInputTokens: 600_000,
+      additionalOutputTokens: 90_000,
+      additionalTotalTokens: 690_000,
+    }
+    const settled = {
+      ...selected,
+      state: 'completed' as const,
+      cost: { ...selected.cost, usageStatus: 'known' as const, costStatus: 'known' as const, costUsd: 0 },
+      result: { version: 1 as const, outcome: 'completed' as const, reason: 'evidence-backed convergence' },
+      continuation: {
+        version: 1 as const,
+        grants: [{
+          version: 1 as const,
+          commandId: 'provider-private-command-id',
+          expectedRevision: selected.revision,
+          grantedAt: '2026-08-29T01:01:01.000Z',
+          firstRound: 3,
+          lastRound: 4,
+          allowance,
+        }],
+        synthesisHistory: [{
+          version: 1 as const,
+          throughRound: 2,
+          sealedAt: '2026-08-29T01:01:01.000Z',
+          synthesis: selected.synthesis!,
+        }],
+        effectiveBudget: {
+          version: 1 as const,
+          maxRounds: 5,
+          maxTurnsPerAgent: 5,
+          maxAgentsPerRound: 3,
+          maxInputTokens: 630_000,
+          maxOutputTokens: 95_000,
+          maxTotalTokens: 725_000,
+        },
+        offeredAllowance: allowance,
+        eligibility: {
+          version: 1 as const,
+          status: 'eligible' as const,
+          outcome: 'completed' as const,
+          accounting: 'sufficient' as const,
+          reason: 'eligible' as const,
+          message: 'the settled debate may continue for two rounds',
+        },
+      },
+    }
+    const ctx = {
+      webServer: { register(entry: { handler: Handler }) { handler = entry.handler; return () => {} } },
+      effect(callback: () => unknown) { callback() },
+      get() { return undefined },
+      logger: { warn() {} },
+      debates: {
+        async list() { return [summary(settled)] },
+        async inspect() { return settled },
+        async readEvents() {
+          return {
+            events: [{
+              version: 1 as const, sequence: 9, runId: settled.runId, revision: 8, generation: 8,
+              type: 'debate.continuation.granted' as const, createdAt: settled.updatedAt,
+              data: { firstRound: 3, lastRound: 4, additionalRounds: 2, commandId: 'provider-private-command-id' },
+            }],
+            nextSequence: 9,
+          }
+        },
+      },
+    }
+    apply(ctx as never)
+    if (handler === undefined) throw new Error('Debate route was not registered')
+
+    const inspected = response()
+    await handler(request('GET', '/api/debates?run_id=debate-1'), inspected)
+    expect(inspected.statusCode).toBe(200)
+    const projected = JSON.parse(inspected.body) as {
+      selectedRun: Record<string, unknown>
+      events: Array<{ data: Record<string, unknown> }>
+    }
+    expect(projected.selectedRun).toMatchObject({
+      initialPlan: { plannedRounds: 3, maxInputTokens: 10_000 },
+      result: { outcome: 'completed' },
+      continuation: {
+        grants: [{ firstRound: 3, lastRound: 4, allowance: { additionalRounds: 2 } }],
+        synthesisHistory: [{ throughRound: 2, synthesis: { outputPreview: 'Choose A and retain the cost dissent.' } }],
+        offeredAllowance: { additionalInputTokens: 600_000, additionalOutputTokens: 90_000 },
+        eligibility: { status: 'eligible', reason: 'eligible' },
+      },
+    })
+    expect(projected.events[0]?.data).not.toHaveProperty('commandId')
+    expect(inspected.body).not.toContain('provider-private-command-id')
+  })
+
+  it('requires a control header and applies revision-fenced controls', async () => {
+    let handler: Handler | undefined
+    const controls: DebateControlRequestV1[] = []
+    const selected = run()
+    const ctx = {
+      webServer: { register(entry: { handler: Handler }) { handler = entry.handler; return () => {} } },
+      effect(callback: () => unknown) { callback() },
+      get() { return undefined },
+      logger: { warn() {} },
+      debates: {
+        async control(control: DebateControlRequestV1) { controls.push(control); return selected },
+      },
+    }
+    apply(ctx as never)
+    if (handler === undefined) throw new Error('Debate route was not registered')
+    const body = { version: 1, commandId: 'continue-1', runId: 'debate-1', expectedRevision: 7, action: 'continue', reason: '继续讨论 2 轮' }
+
+    const denied = response()
+    await handler(request('POST', '/api/debates', body), denied)
+    expect(denied.statusCode).toBe(403)
+    expect(controls).toHaveLength(0)
+
+    const accepted = response()
+    await handler(request('POST', '/api/debates', body, { controlHeader: true }), accepted)
+    expect(accepted.statusCode).toBe(200)
+    expect(controls).toEqual([body])
+    expect(JSON.parse(accepted.body)).toMatchObject({ runId: 'debate-1', revision: 7 })
+  })
+
+  it('limits pocket controls and maps revision conflicts to HTTP 409', async () => {
+    expect(remoteDebateControlAllowed('pocket', 'pause')).toBe(true)
+    expect(remoteDebateControlAllowed('pocket', 'stop')).toBe(false)
+    expect(remoteDebateControlAllowed('pocket', 'continue')).toBe(false)
+    expect(remoteDebateControlAllowed('cockpit', 'stop')).toBe(true)
+    expect(remoteDebateControlAllowed('cockpit', 'continue')).toBe(true)
+    let handler: Handler | undefined
+    const remoteAuth = {
+      authenticate: (token: string) => token === 'pocket'
+        ? { deviceId: 'phone', deviceName: 'Phone', scope: 'pocket' as const }
+        : undefined,
+    }
+    const ctx = {
+      webServer: { register(entry: { handler: Handler }) { handler = entry.handler; return () => {} } },
+      effect(callback: () => unknown) { callback() },
+      get(name: string) { return name === 'remoteAuth' ? remoteAuth : undefined },
+      logger: { warn() {} },
+      debates: { async control() { throw new DebateError('stale revision', 'DEBATE_REVISION_CONFLICT') } },
+    }
+    apply(ctx as never)
+    if (handler === undefined) throw new Error('Debate route was not registered')
+    const stop = { version: 1, commandId: 'stop-1', runId: 'debate-1', expectedRevision: 7, action: 'stop', reason: 'stop' }
+    const forbidden = response()
+    await handler(request('POST', '/api/debates', stop, { remoteAddress: '10.0.0.5', token: 'pocket', controlHeader: true }), forbidden)
+    expect(forbidden.statusCode).toBe(403)
+
+    const pause = response()
+    await handler(request('POST', '/api/debates', { ...stop, action: 'pause' }, { remoteAddress: '10.0.0.5', token: 'pocket', controlHeader: true }), pause)
+    expect(pause.statusCode).toBe(409)
+    expect(JSON.parse(pause.body)).toMatchObject({ error: 'DEBATE_REVISION_CONFLICT' })
+  })
+})

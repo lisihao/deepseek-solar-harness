@@ -235,6 +235,156 @@ Types: [TokenUsage](subsystems/llm-streaming.md)
 
 Source: [`packages/core/session/src/types.ts:273`](../packages/core/session/src/types.ts)
 
+### `chatgpt-web/*`
+
+<a id="chatgpt-webaccepted--log-only"></a>
+
+#### `chatgpt-web/accepted` — log-only
+
+```ts persistence-catalog
+/**
+ * A website observation proved the exact native user message created for
+ * one command in its owned lane.
+ */
+'chatgpt-web/accepted': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  workspaceName: string
+  conversationId: string
+  conversationUrl: string
+  userMessageId: string
+  connectorName: string
+  requestIds: string[]
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:55`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webcompleted--log-only"></a>
+
+#### `chatgpt-web/completed` — log-only
+
+```ts persistence-catalog
+/**
+ * A strong terminal signal or exact final action produced one completed
+ * assistant result for the accepted native user message.
+ */
+'chatgpt-web/completed': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  conversationId: string
+  conversationUrl: string
+  userMessageId: string
+  assistantMessageId: string
+  response: string
+  responseSha256: string
+  truncated: boolean
+  model: string
+  effort?: string
+  requestIds: string[]
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:71`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webintent--log-only"></a>
+
+#### `chatgpt-web/intent` — log-only
+
+```ts persistence-catalog
+/**
+ * Pre-send identity for one command. It proves only that DSH began a
+ * browser attempt; it never proves that ChatGPT accepted the prompt.
+ */
+'chatgpt-web/intent': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  workspaceName: string
+  promptSha256: string
+  targetUrl: string
+  connectorName: string
+  baselineUserMessageIds: string[]
+  profile?: WebModelPreferences
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:39`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webprofile--log-only"></a>
+
+#### `chatgpt-web/profile` — log-only
+
+```ts persistence-catalog
+/** Whole-value Web model preference saved only after native picker verification. */
+'chatgpt-web/profile': { model?: string; effort?: string }
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/model-preferences.ts:9`](../packages/physical-operator/physical-operator-chatgpt-web/src/model-preferences.ts)
+
+<a id="chatgpt-webrejected--log-only"></a>
+
+#### `chatgpt-web/rejected` — log-only
+
+```ts persistence-catalog
+/**
+ * A known local refusal before the send click. It prevents a duplicate
+ * command from silently re-evaluating a changed browser draft or connector.
+ */
+'chatgpt-web/rejected': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  code: string
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:91`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-websubmission-pending--log-only"></a>
+
+#### `chatgpt-web/submission-pending` — log-only
+
+```ts persistence-catalog
+/**
+ * A send click returned before a native user-message identity was observed.
+ * The candidate page is retained solely for a no-send recovery inspection.
+ */
+'chatgpt-web/submission-pending': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  candidateUrl: string
+  baselineUserMessageIds: string[]
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:102`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
+<a id="chatgpt-webterminal--log-only"></a>
+
+#### `chatgpt-web/terminal` — log-only
+
+```ts persistence-catalog
+/** Exact user-turn observation reached a stopped or failed provider outcome. */
+'chatgpt-web/terminal': {
+  commandId: string
+  parentId: string
+  laneId: string
+  laneKey: string
+  outcome: 'stopped' | 'failed'
+}
+```
+
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:111`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+
 ### `command/*`
 
 <a id="commanddone--log-only"></a>
@@ -389,6 +539,74 @@ Types: [ContentBlock](subsystems/core.md) · [TokenUsage](subsystems/llm-streami
 
 Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compaction/compaction/src/types.ts)
 
+### `debate/*`
+
+<a id="debateadmission--log-only"></a>
+
+#### `debate/admission` — log-only
+
+```ts persistence-catalog
+/** Durable bounded link from a model tool call to the admitted Debate run. */
+'debate/admission': {
+  readonly runId: string
+  readonly mode: DebateExecutionMode
+  readonly revision: number
+  readonly state: string
+}
+```
+
+Source: [`packages/orchestration/tool-debate/src/index.ts:126`](../packages/orchestration/tool-debate/src/index.ts)
+
+<a id="debatedispatch--log-only"></a>
+
+#### `debate/dispatch` — log-only
+
+```ts persistence-catalog
+/**
+ * Durable host admission for one user message while Debate is explicitly enabled.
+ * @param commandId Idempotent Debate command identity.
+ * @param promptMessageId User message owned by this admission.
+ * @param turn Agent turn receiving the message.
+ * @param step Agent step replaced by the Debate host adapter.
+ * @param planModeActive Effective Plan state captured for this host step.
+ */
+'debate/dispatch': {
+  readonly commandId: string
+  readonly promptMessageId: string
+  readonly turn: number
+  readonly step: number
+  readonly planModeActive?: boolean
+}
+```
+
+Source: [`packages/orchestration/tool-debate/src/index.ts:140`](../packages/orchestration/tool-debate/src/index.ts)
+
+<a id="debatepreferences--log-only"></a>
+
+#### `debate/preferences` — log-only
+
+```ts persistence-catalog
+/** Whole-value strategy for future Debate admissions in this Session. */
+'debate/preferences': DebateExecutionPreferences
+```
+
+Source: [`packages/orchestration/tool-debate/src/index.ts:124`](../packages/orchestration/tool-debate/src/index.ts)
+
+<a id="debatetrace--log-only"></a>
+
+#### `debate/trace` — log-only
+
+```ts persistence-catalog
+/**
+ * One bounded public fact from a durable Debate run, keyed by its source event sequence.
+ * @param runId Persistent Debate run identity.
+ * @param sourceSequence Durable sequence from the Debate Provider.
+ */
+'debate/trace': DebateTraceSessionEventV1
+```
+
+Source: [`packages/orchestration/tool-debate/src/index.ts:152`](../packages/orchestration/tool-debate/src/index.ts)
+
 ### `feedback/*`
 
 <a id="feedbackrecord--log-only"></a>
@@ -494,6 +712,41 @@ Source: [`packages/llm/llm-retry/src/types.ts:9`](../packages/llm/llm-retry/src/
 
 Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src/types.ts)
 
+### `orchestration/*`
+
+<a id="orchestrationadmission--log-only"></a>
+
+#### `orchestration/admission` — log-only
+
+```ts persistence-catalog
+/** Durable link from one DSH collaboration decision to its TaskGraph run. */
+'orchestration/admission': {
+  policy: CollaborationPolicy
+  route: 'taskgraph'
+  runId: string
+  maxParallel: number
+  rlm: RlmExecutionMode
+  autonomous: RlmAutonomousMode
+  continualHarness: ContinualHarnessMode
+  optimization: ModelAllocationObjective
+  plannerVerifierPreference: PlannerVerifierPreference
+  executionPreference: ExecutionModelPreference
+}
+```
+
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:43`](../packages/orchestration/tool-orchestration/src/index.ts)
+
+<a id="orchestrationpreferences--log-only"></a>
+
+#### `orchestration/preferences` — log-only
+
+```ts persistence-catalog
+/** Whole-value strategy preference for future TaskGraph admissions. */
+'orchestration/preferences': OrchestrationExecutionPreferences
+```
+
+Source: [`packages/orchestration/tool-orchestration/src/index.ts:56`](../packages/orchestration/tool-orchestration/src/index.ts)
+
 ### `permission/*`
 
 <a id="permissionpreset--log-only"></a>
@@ -511,6 +764,228 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 ```
 
 Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/interaction/permission-presets/src/index.ts)
+
+### `physical-operator/*`
+
+<a id="physical-operatorcontext-envelope--log-only"></a>
+
+#### `physical-operator/context-envelope` — log-only
+
+```ts persistence-catalog
+/** Durable proof that one current-task context envelope crossed the operator boundary. */
+'physical-operator/context-envelope': {
+  commandId: string
+  operatorId: string
+  digest: string
+  source: OperatorContextEnvelopeSourceV1
+  receipt: OperatorContextEnvelopeReceiptV1
+  /** Exact tool-subtask template selection, when this handoff selected one. */
+  taskTemplate?: TaskTemplateSelection
+  /** Complete frozen model input materialized by the receiving operator. */
+  envelope: OperatorContextEnvelopeV1
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:118`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatordispatch--log-only"></a>
+
+#### `physical-operator/dispatch` — log-only
+
+```ts persistence-catalog
+/** Durable host decision that binds one DSH message to one physical-operator command. */
+'physical-operator/dispatch': {
+  commandId: string
+  operatorId: string
+  fallbackOperatorId?: string
+  promptMessageId: string
+  requestedByMessageId: string
+  turn: number
+  step: number
+  recovered: boolean
+  /** Omitted by pre-ChatGPT-Web logs; those legacy host routes were Resident. */
+  executionMode?: PhysicalOperatorExecutionMode
+  residentProfile?: PhysicalOperatorExecutionPreference
+  fallbackConfig?: LlmCallConfig
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:90`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatordispatch-terminal--log-only"></a>
+
+#### `physical-operator/dispatch-terminal` — log-only
+
+```ts persistence-catalog
+/** Non-cancellation terminal failure; prevents an endless cold-resume loop. */
+'physical-operator/dispatch-terminal': {
+  commandId: string
+  code: string
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:113`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatorpolicy--log-only"></a>
+
+#### `physical-operator/policy` — log-only
+
+```ts persistence-catalog
+/**
+ * Whole-value physical-operator routing preference for subsequent model requests.
+ * @param policy The selected automatic, direct, Codex, or Claude Code policy.
+ */
+'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:75`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatorprofile--log-only"></a>
+
+#### `physical-operator/profile` — log-only
+
+```ts persistence-catalog
+/** Whole-value preference update for one native Resident product. */
+'physical-operator/profile': {
+  operatorId: PhysicalOperatorProfileOwner
+  profile: PhysicalOperatorExecutionPreference | null
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:77`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatorprogress--log-only"></a>
+
+#### `physical-operator/progress` — log-only
+
+```ts persistence-catalog
+/** One bounded native Resident observation copied into this Session's ignorable Trace. */
+'physical-operator/progress': {
+  commandId: string
+  operatorId: string
+  sequence: number
+  type: string
+  time: string
+  data: Record<string, JsonValue>
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:130`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatorrouting-decision--log-only"></a>
+
+#### `physical-operator/routing-decision` — log-only
+
+```ts persistence-catalog
+/** Durable collaboration admission decision for one user request. */
+'physical-operator/routing-decision': {
+  policy: PhysicalOperatorRoutingPolicy
+  route: 'primary-model' | 'ephemeral' | 'resident' | 'taskgraph-candidate'
+  requestedByMessageId: string
+  reason: string
+  operatorId?: string
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:82`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortool-call--log-only"></a>
+
+#### `physical-operator/tool-call` — log-only
+
+```ts persistence-catalog
+/** One Resident-native model call into the current Agent's real DSH tool surface. */
+'physical-operator/tool-call': {
+  commandId: string
+  /** Stable receipt identity; legacy events use commandId when absent. */
+  toolCallId?: string
+  /** Parent physical execution command that owns this model-tool call. */
+  executionCommandId?: string
+  tool: string
+  /** Bounded, credential-scrubbed display label for public trajectory projection. */
+  publicToolName?: string
+  arguments: Record<string, JsonValue>
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:146`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortool-dispatch--log-only"></a>
+
+#### `physical-operator/tool-dispatch` — log-only
+
+```ts persistence-catalog
+/** Explicit physical_operator tool admission, distinct from a routed main-model turn. */
+'physical-operator/tool-dispatch': {
+  commandId: string
+  operatorId: string
+  toolCallId: string
+  mode: 'ephemeral' | 'resident'
+  description: string
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:105`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortool-indeterminate--log-only"></a>
+
+#### `physical-operator/tool-indeterminate` — log-only
+
+```ts persistence-catalog
+/** A recovered bridge Receipt has a call but no provable settled result. */
+'physical-operator/tool-indeterminate': {
+  commandId: string
+  toolCallId: string
+  executionCommandId: string
+  tool: string
+  /** Bounded, credential-scrubbed display label for public trajectory projection. */
+  publicToolName?: string
+  code: 'COMMAND_INDETERMINATE'
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:174`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortool-result--log-only"></a>
+
+#### `physical-operator/tool-result` — log-only
+
+```ts persistence-catalog
+/** Settled result of one bridged DSH tool call. */
+'physical-operator/tool-result': {
+  commandId: string
+  /** Stable receipt identity; legacy events use commandId when absent. */
+  toolCallId?: string
+  /** Parent physical execution command that owns this model-tool call. */
+  executionCommandId?: string
+  tool: string
+  /** Bounded, credential-scrubbed display label for public trajectory projection. */
+  publicToolName?: string
+  /** Bounded, credential-scrubbed public success text; raw result remains authority-only. */
+  publicResultPreview?: string
+  /** Bounded, credential-scrubbed public failure text; raw error remains authority-only. */
+  publicErrorPreview?: string
+  result: JsonValue
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:158`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+
+<a id="physical-operatortrace-degraded--log-only"></a>
+
+#### `physical-operator/trace-degraded` — log-only
+
+```ts persistence-catalog
+/** Resident progress could not be projected completely into this Session Trace. */
+'physical-operator/trace-degraded': {
+  commandId: string
+  operatorId: string
+  code: 'PROGRESS_UNAVAILABLE'
+  message: string
+}
+```
+
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:139`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 
@@ -705,6 +1180,31 @@ Source: [`packages/core/session/src/types.ts:254`](../packages/core/session/src/
 ```
 
 Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent/subagent/src/descriptor.ts)
+
+### `task-template/*`
+
+<a id="task-templatedecided--log-only"></a>
+
+#### `task-template/decided` — log-only
+
+```ts persistence-catalog
+/**
+ * One decision for the open turn's logical user task — log-only, no
+ * surfaceOp, always appended with `ignorable: true` since it is this
+ * plugin's own attributable record and its loss cannot affect core
+ * session reconstruction. `restored: true` marks a compaction-recovery
+ * re-append of the exact pinned receipt from an earlier `inject` in the
+ * same turn, rather than a fresh selection, so a reader can tell the two
+ * apart without re-deriving the decision.
+ */
+'task-template/decided': {
+  turn: number
+  receipt: TaskTemplateInjectionReceipt
+  restored?: true
+}
+```
+
+Source: [`packages/prompt/task-template-context/src/index.ts:57`](../packages/prompt/task-template-context/src/index.ts)
 
 ### `todo/*`
 

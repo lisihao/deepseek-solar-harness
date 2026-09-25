@@ -1,0 +1,23 @@
+setup ctx symbols: 
+mount OK: liangshen-baseline
+(node:11947) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Top-level directories under `/Users/zcl/code/dsh-web-ui/packages/`:
+
+1. `dsh-aionui-panel`
+2. `dsh-git-graph`
+3. `dsh-liangshen`
+4. `dsh-live-stats`
+5. `dsh-pet`
+6. `dsh-remote-web-ui`
+7. `dsh-skins`
+8. `dsh-ssh`
+9. `dsh-task-board`
+10. `dsh-tool-describe-image`
+11. `dsh-web-ui-all`
+12. `dsh-web-ui-settings`
+13. `skins`
+
+**Count: 13 top-level directories.**
+
+One nuance worth noting: `skins/` has no `package.json` at its own top level — it is a grouping folder containing 11 skin packages (`blue-fantasy`, `dragon-heir`, `harbor`, `miku`, `minecraft`, `qq98`, `skin-center`, `ths`, `trading`, `whale-song`, `xp`). The other 12 directories are each npm packages with their own `package.json`. So it's 13 directories, or 12 individual npm packages if you exclude the `skins/` container.

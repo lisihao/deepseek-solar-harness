@@ -9,7 +9,7 @@
 import { globSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { type ToolSchema } from '@deepseek-ai/dsh-llm'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createScope } from '@deepseek-ai/dsh-scope'
@@ -28,6 +28,9 @@ import { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentLimits, ImageAttachmentRef, SaveImageAttachment, StoredImageAttachment } from '@deepseek-ai/dsh-attachment'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import PlanModeController from '@deepseek-ai/dsh-plan-mode'
+import PhysicalOperatorRuntime from '@deepseek-ai/dsh-physical-operator'
+import DebateService from '@deepseek-ai/dsh-debate'
+import OrchestrationService from '@deepseek-ai/dsh-orchestration'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import * as WebSearchExa from '@deepseek-ai/dsh-web-search-exa'
 import * as WebFetchLocal from '@deepseek-ai/dsh-web-fetch-http'
@@ -40,6 +43,8 @@ import SkillRegistry from '@deepseek-ai/dsh-skill'
 import * as SkillFileSystem from '@deepseek-ai/dsh-skill-filesystem'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import * as ToolAskUser from '@deepseek-ai/dsh-tool-ask-user'
+import BrowserRuntime from '@deepseek-ai/dsh-browser'
+import * as ToolBrowser from '@deepseek-ai/dsh-tool-browser'
 import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
 import * as ToolPwsh from '@deepseek-ai/dsh-tool-pwsh'
 import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
@@ -54,6 +59,9 @@ import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
 import * as ToolSchedule from '@deepseek-ai/dsh-schedule'
 import Lsp from '@deepseek-ai/dsh-lsp'
 import * as ToolLsp from '@deepseek-ai/dsh-tool-lsp'
+import * as ToolPhysicalOperator from '@deepseek-ai/dsh-tool-physical-operator'
+import * as ToolDebate from '@deepseek-ai/dsh-tool-debate'
+import * as ToolOrchestration from '@deepseek-ai/dsh-tool-orchestration'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import * as ToolSessionQuery from '@deepseek-ai/dsh-tool-session-query'
 import * as ToolTasks from '@deepseek-ai/dsh-tool-jobs'
@@ -63,6 +71,7 @@ import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
+import { registerWebCoordinationTools } from '../packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts'
 import { githubSlug } from './verify-md-links.ts'
 
 /** Attachment seam marker that makes the attachments-conditional `read_image` schema harvestable. */
@@ -86,6 +95,35 @@ class CatalogAttachmentStore extends AttachmentStore {
   override readImage(_ref: ImageAttachmentRef): Promise<StoredImageAttachment> {
     return Promise.reject(new Error('gen-tool-catalog: attachment reads are unreachable during schema harvest'))
   }
+}
+
+/** Schema-harvest-only orchestration seam; no method can execute in the catalog pass. */
+class CatalogOrchestrationService extends OrchestrationService {
+  override compile(): never { throw new Error('tool catalog never executes orchestration') }
+  override start(): never { throw new Error('tool catalog never executes orchestration') }
+  override list(): never { throw new Error('tool catalog never executes orchestration') }
+  override inspect(): never { throw new Error('tool catalog never executes orchestration') }
+  override readEvents(): never { throw new Error('tool catalog never executes orchestration') }
+  override readArtifact(): never { throw new Error('tool catalog never executes orchestration') }
+  override control(): never { throw new Error('tool catalog never executes orchestration') }
+  override decide(): never { throw new Error('tool catalog never executes orchestration') }
+  override resolveIndeterminate(): never { throw new Error('tool catalog never executes orchestration') }
+  override resolveAutoRefineIndeterminate(): never { throw new Error('tool catalog never executes orchestration') }
+  override proposeCapabilityUpdate(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterStatus(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterRequestVote(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterHeartbeat(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterExportReplica(): never { throw new Error('tool catalog never executes orchestration') }
+  override clusterInstallReplica(): never { throw new Error('tool catalog never executes orchestration') }
+}
+
+/** Schema-harvest-only Debate seam; no method can execute in the catalog pass. */
+class CatalogDebateService extends DebateService {
+  override start(): never { throw new Error('tool catalog never executes Debate') }
+  override list(): never { throw new Error('tool catalog never executes Debate') }
+  override inspect(): never { throw new Error('tool catalog never executes Debate') }
+  override readEvents(): never { throw new Error('tool catalog never executes Debate') }
+  override control(): never { throw new Error('tool catalog never executes Debate') }
 }
 
 const root = resolve(import.meta.dirname, '..')
@@ -140,7 +178,7 @@ async function mountCatalogChildScope(
 export interface ToolPackage {
   /** The npm package name, used as the catalog section heading. */
   pkg: string
-  /** The `packages/<group>/<dir>` leaf name — matched by the completeness guard. */
+  /** The `packages/<group>/<dir>` leaf name — matched by the completeness guard for `tool-*` entries. */
   dir: string
   /**
    * Repo-relative implementation source linked per harvested tool. Packages
@@ -178,8 +216,9 @@ export interface ToolPackage {
 
 /**
  * The boot manifest: every shipped tool package (a `tool-*` leaf under
- * `packages/`). Ordered by package name (the render order); the completeness
- * guard proves it is exhaustive against the on-disk glob.
+ * `packages/`) plus explicitly listed provider-owned model-facing tools.
+ * Ordered by package name (the render order); the completeness guard proves
+ * the `tool-*` subset is exhaustive against the on-disk glob.
  */
 const TOOL_PACKAGES: ToolPackage[] = [
   {
@@ -194,6 +233,23 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'ask_user_question pauses the tool call until the active UI provider returns a human answer.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-browser',
+    dir: 'tool-browser',
+    source: 'packages/browser/tool-browser/src/index.ts',
+    requires: ['ctx.tools', 'ctx.browser', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'tool/result', 'browser provider state through ctx.browser'],
+    async mount(ctx) {
+      // The Consumer registers against the provider-neutral seam. A Provider
+      // is intentionally not mounted during schema harvest: discovery and
+      // installed-browser qualification belong to deployment composition, not
+      // to the generated model-facing catalog.
+      await ctx.plugin(BrowserRuntime)
+      await ctx.plugin(ToolBrowser)
+    },
+    note:
+      'The model-facing `browser` tool accepts only the bounded portable-plan vocabulary. Provider selection, Ego Lite discovery, and browser lifecycle remain behind `ctx.browser`; browser-js-v1 is trusted-plugin-only and is not exposed to the model.',
   },
   {
     pkg: '@deepseek-ai/dsh-tools',
@@ -220,6 +276,68 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-physical-operator',
+    dir: 'tool-physical-operator',
+    source: 'packages/physical-operator/tool-physical-operator/src/index.ts',
+    requires: ['ctx.tools', 'ctx.physicalOperators', 'a calling Agent for action=run'],
+    writes: ['tool/call', 'tool/result', 'physical-operator lifecycle through the selected provider'],
+    async mount(ctx) {
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(AgentRegistry)
+      await ctx.plugin(PhysicalOperatorRuntime)
+      await ctx.plugin(ToolPhysicalOperator)
+    },
+    note:
+      'The schema exposes stable physical-operator ids rather than provider transports. '
+      + 'Deployments register operators separately; the catalog intentionally harvests the empty-registry schema.',
+  },
+  {
+    // Provider-owned model-facing tool; this explicit entry stays outside the
+    // `tool-*` completeness scan because its registration belongs to ChatGPT Web.
+    pkg: '@deepseek-ai/dsh-physical-operator-chatgpt-web',
+    dir: 'physical-operator-chatgpt-web',
+    source: 'packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts',
+    requires: ['ctx.tools', 'ctx.systemPrompt', 'a coordinating ChatGPT Web Agent'],
+    writes: ['tool/call', 'tool/result', 'Agent inbox handoff messages'],
+    mount(ctx) {
+      ctx.effect(() => registerWebCoordinationTools(ctx, {
+        isCoordinating: () => false,
+        maxHandoffBytes: 24 * 1024,
+      }), 'tool-catalog: ChatGPT Web coordination tool')
+      return Promise.resolve()
+    },
+    note:
+      'Provider-owned coordination control for an authenticated ChatGPT Web response. The catalog mounts only the registration helper with a representative handoff limit; it does not boot the browser, MCP connector, or provider state. Runtime execution remains restricted to the coordinating Web call.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-debate',
+    dir: 'tool-debate',
+    source: 'packages/orchestration/tool-debate/src/index.ts',
+    requires: ['ctx.tools', 'ctx.systemPrompt', 'ctx.debates'],
+    writes: ['tool/call', 'tool/result', 'debate lifecycle through ctx.debates'],
+    async mount(ctx) {
+      await ctx.plugin(CatalogDebateService)
+      await ctx.plugin(ToolDebate)
+    },
+    note:
+      'The model-facing Consumer depends only on the provider-neutral ctx.debates seam; '
+      + 'the catalog substitute cannot execute and does not start the local Debate Provider.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-orchestration',
+    dir: 'tool-orchestration',
+    source: 'packages/orchestration/tool-orchestration/src/index.ts',
+    requires: ['ctx.tools', 'ctx.systemPrompt', 'ctx.orchestrations'],
+    writes: ['tool/call', 'tool/result', 'durable orchestration runs through ctx.orchestrations'],
+    async mount(ctx) {
+      await ctx.plugin(CatalogOrchestrationService)
+      await ctx.plugin(ToolOrchestration)
+    },
+    note:
+      'The model-facing Consumer depends only on the provider-neutral ctx.orchestrations seam; '
+      + 'the catalog substitute cannot execute and does not start the local daemon.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-bash',
@@ -693,7 +811,7 @@ export function render(catalog: ToolCatalog): string {
     '',
     'This file is GENERATED and verified fresh by `pnpm run verify-tool-catalog` (part of `doc-sync`) — do not edit it by hand. Unlike the cordis catalog (a pure source-AST pass), this generator BOOTS each tool plugin on a real context and reads `ctx.tools.schemas()`, because a tool schema is not statically knowable (runtime-spread enums, concatenated descriptions, config-driven names, raw-JSON-Schema MCP tools). A completeness guard globs `packages/*/tool-*` and fails if any package is missing from the generator\'s boot manifest, so a new tool cannot be silently undocumented. See [the tool-schema-catalog Agent Note](../.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md).',
     '',
-    'Scope: shipped product tools under `packages/*/tool-*`, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`\'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog\'s packages-only scope.',
+    'Scope: shipped product tools under `packages/*/tool-*` plus explicitly listed provider-owned model-facing tools, each booted with its DEFAULT config, except where a Config field is REQUIRED with no default — there the generator must choose, and the per-package note records which branch this page shows. The registered tool NAME can be a load-time config (e.g. `tool-subagent`\'s `toolName`), so a deployment may expose a package under a different or additional name — a per-package note records those shipped aliases where they exist. The `examples/` demo tools (e.g. `echo`) are excluded, matching the cordis catalog\'s packages-only scope.',
     '',
     '## Tool Package Map',
     '',

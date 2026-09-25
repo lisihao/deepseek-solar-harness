@@ -1,0 +1,33 @@
+{
+  "requiredSkills": [
+    "systematic-debugging"
+  ],
+  "mustContain": [
+    "change necessity",
+    "user-visible need",
+    "no-change / non-code option",
+    "canonical owner",
+    "evidence"
+  ],
+  "assistantMustContain": [
+    "change necessity",
+    "user-visible need",
+    "no-change / non-code option",
+    "why code change is necessary",
+    "minimum change boundary",
+    "decision: code-change",
+    "canonical owner"
+  ],
+  "assistantOrderedTerms": [
+    [
+      "change necessity",
+      "fix boundary"
+    ]
+  ],
+  "mustNotContain": [
+    "completion granted",
+    "authoritative gate decision",
+    "I changed src",
+    "added a fallback"
+  ]
+}

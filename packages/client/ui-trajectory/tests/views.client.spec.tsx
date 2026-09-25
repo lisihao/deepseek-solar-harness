@@ -84,6 +84,8 @@ function historySnapshot(
     callSchemas: new Map(),
     partial: null,
     runningCalls: [],
+    physicalOperatorExecutions: [],
+    debateExecutions: [],
     ...inspection,
   }
   return {

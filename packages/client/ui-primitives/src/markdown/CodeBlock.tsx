@@ -8,6 +8,7 @@ import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 're
 import clsx from 'clsx'
 import { writeClipboard } from '../clipboard.ts'
 import { grammarLoadCount, highlightToHtml, subscribeGrammarLoaded } from './highlight.ts'
+import { useViewportHighlighting } from './useViewportHighlighting.ts'
 import css from './CodeBlock.module.css'
 
 export interface CodeBlockProps {
@@ -25,12 +26,16 @@ export interface CodeBlockProps {
 
 export function CodeBlock({ code, lang, className, copyLabel = '复制', copiedLabel = '复制成功' }: CodeBlockProps) {
   const trimmed = code.endsWith('\n') ? code.slice(0, -1) : code
+  const rootRef = useRef<HTMLDivElement>(null)
+  const highlighting = useViewportHighlighting(rootRef, lang)
   // Re-render when a lazy grammar finishes loading, so a fence that showed plain
   // text while its language's grammar imported picks up highlighting. The
   // snapshot value is opaque; only its change across renders drives the memo.
   const loaded = useSyncExternalStore(subscribeGrammarLoaded, grammarLoadCount, grammarLoadCount)
-  const html = useMemo(() => highlightToHtml(trimmed, lang), [trimmed, lang, loaded])
-  const rootRef = useRef<HTMLDivElement>(null)
+  const html = useMemo(
+    () => highlighting ? highlightToHtml(trimmed, lang) : undefined,
+    [highlighting, trimmed, lang, loaded],
+  )
   const [copied, setCopied] = useState(false)
 
   const onCopy = useCallback(() => {

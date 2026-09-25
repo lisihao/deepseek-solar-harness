@@ -1,0 +1,37 @@
+# `@deepseek-ai/dsh-debate-orchestration`
+
+English | [中文](README.zh.md)
+
+This package binds one Debate round to the existing durable `ctx.orchestrations` TaskGraph service. Participant nodes are independent and may run in parallel; the single `decision-judge` node depends on all participants and therefore receives their settled Evidence through the ordinary Context Packet path.
+
+## Authority
+
+The plugin injects only `orchestrations`. It never imports, injects, or calls `physicalOperators`, and it does not create another scheduler. Every node pins the roster's operator and native model, disables RLM and Autonomous Mode, requests no write or execution effects, and is dispatched only after the existing Scheduler seals its `NodeExecutionPlan`.
+
+The first adapter accepts native-subscription roster slots only because the current TaskGraph service can enforce exact native Resident model profiles. Metered/local slots fail explicitly until their Scheduler offer path exposes the same exact-model guarantee.
+
+One round produces one TaskGraph. While it is running, the adapter cursor-reads `ctx.orchestrations.readEvents` and forwards only ordered, whitelisted `node.operator.progress` / `node.operator.observation` facts to the local Provider: phase, bounded public output, tool names, approval requirements, and usage. The callback is awaited in source sequence order and never forwards prompts, private reasoning, credentials, or native identifiers. The adapter returns a slot-keyed result map after reading immutable execution Evidence. Missing usage remains absent; the Debate Provider projects it as unknown rather than zero.
+
+The Debate command receipt is durable before this adapter is called, and the TaskGraph start command is deterministically `debate:<run>:round:<n>`. A continuation reaches this adapter only after the Provider records its grant, so it uses new round and node identifiers instead of replaying a sealed TaskGraph. Its transient budget envelope contains the Provider-derived effective token ceilings; the adapter neither changes the immutable policy nor expands a caller cost cap. A stop signal uses the existing Orchestration `cancel` control and waits for a confirmed cancelled projection. Revision conflict or an otherwise unproven cancellation returns `DEBATE_INDETERMINATE`; the Provider does not replay the round.
+
+The optional `dshHome` configuration follows the harness-wide home resolution rules. Debate run state is stored under `$DSH_HOME/debates`; Bundle users do not configure an independent state path.
+
+## Model Experience
+
+### Sealed `NodeExecutionPlan` round
+
+#### What the model sees
+
+Each participant executing a sealed `NodeExecutionPlan` sees its fixed role persona, the user request, objective, source lineage, prior claim ledger, dissent, and unresolved gaps. The judge additionally receives bounded participant Evidence through the ordinary Context Packet path.
+
+#### Token effect
+
+Each roster slot receives one bounded prompt. Its certified context budget includes the estimated serialized task, objective and workspace, plus 16,000 tokens for Context Packet metadata, capsule instructions and bounded upstream Evidence. The complete task includes the prior ledger, dissent and unresolved gaps, so later rounds retain them without a fixed total-context cutoff. Participant turns can overlap, while the judge starts only after their Evidence settles. The adapter uses the same context reservation when preflighting each new round against the Provider's effective token envelope; an insufficient envelope stops admission before any participant dispatch. A reservation does not represent actual billed usage.
+
+#### KV Cache effect
+
+No cross-node cache contract is assumed.
+
+## Known Limitations and Deferred Work
+
+- The current TaskGraph Context Packet gives the judge bounded previews of participant Evidence. Source refs outside the orchestration artifact store remain lineage-only until their owning source provider materializes them.

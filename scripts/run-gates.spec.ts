@@ -70,11 +70,20 @@ describe('gate graph validation', () => {
     'node-compat',
     'check-all',
     'doc-sync',
+    'doc-sync:contracts-ready',
   ] as const)('constructs and executes preflight for a valid non-empty %s graph', async (mode) => {
     const subject = withPnpmEntrypoint(() => gatesForMode(mode))
     const execute = vi.fn(async (item: Gate) => resultFor(item))
 
     await expect(runGates(subject, subject.length, execute)).resolves.toHaveLength(subject.length)
+  })
+
+  it('uses one top-level build gate instead of a separate web build in check-all', () => {
+    const gates = withPnpmEntrypoint(() => gatesForMode('check-all'))
+
+    expect(gates.filter(subject => subject.id === 'build')).toHaveLength(1)
+    expect(gates.find(subject => subject.id === 'build:web')).toBeUndefined()
+    expect(gates.find(subject => subject.id === 'build')?.displayCommand).toBe('pnpm run build')
   })
 
   it('keeps the public repository link policy in the documentation gate', () => {
@@ -92,12 +101,26 @@ describe('gate graph validation', () => {
     },
   )
 
+  it.each(['ci-primary', 'ci-artifacts', 'check-all'] as const)(
+    'checks Desktop sealed core archives against the current build in %s',
+    (mode) => {
+      const gate = withPnpmEntrypoint(() =>
+        gatesForMode(mode).find(subject => subject.id === 'desktop-vendor-build'))
+
+      expect(gate).toMatchObject({
+        displayCommand: 'pnpm run verify-desktop-vendor-build',
+        needs: ['build'],
+      })
+    },
+  )
+
   it('keeps native Windows coverage blocking while portability inventory remains observational', () => {
     const gates = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
     const byId = new Map(gates.map(subject => [subject.id, subject]))
 
     expect(byId.get('coverage')?.allowFailure).not.toBe(true)
     expect(byId.get('coverage-exempt-heavy')?.allowFailure).not.toBe(true)
+    expect(byId.get('coverage-exempt-tail')?.allowFailure).not.toBe(true)
     expect(byId.get('duplication')?.allowFailure).toBe(true)
   })
 
@@ -130,6 +153,29 @@ describe('gate graph validation', () => {
     expect(execute).toHaveBeenCalledOnce()
     expect(execute).toHaveBeenCalledWith(root)
     expect(results[0]).toMatchObject({ gate: dependent, status: 'skipped', error: 'dependency failed or skipped: root' })
+  })
+})
+
+describe('coverage gate resource graph', () => {
+  it('runs the Oxlint responsiveness contract only after both primary coverage gates', () => {
+    const subject = withEnv('DSH_COVERAGE_MAX_WORKERS', '2', () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-coverage')))
+    const byId = new Map(subject.map(gate => [gate.id, gate]))
+
+    expect(subject.map(gate => gate.id)).toEqual([
+      'coverage',
+      'coverage-exempt-heavy',
+      'coverage-exempt-tail',
+    ])
+    expect(byId.get('coverage-exempt-heavy')?.args).not.toContain('scripts/oxlint-contract.spec.ts')
+    expect(byId.get('coverage-exempt-tail')).toMatchObject({
+      label: 'test:coverage-exempt-tail',
+      needs: ['coverage', 'coverage-exempt-heavy'],
+    })
+    expect(byId.get('coverage-exempt-tail')?.args).toEqual(expect.arrayContaining([
+      'scripts/oxlint-contract.spec.ts',
+      '--maxWorkers=1',
+    ]))
   })
 })
 
@@ -205,6 +251,16 @@ describe('Typert contract preparation', () => {
 
     expect(docTypecheck?.displayCommand).toBe('pnpm run doc-typecheck')
   })
+
+  it('reuses prepared contracts in the governance documentation aggregate', () => {
+    const docTypecheck = withPnpmEntrypoint(() =>
+      gatesForMode('doc-sync:contracts-ready').find(item => item.id === 'doc-typecheck'))
+
+    expect(docTypecheck).toMatchObject({
+      displayCommand: 'pnpm run doc-typecheck:contracts-ready',
+      env: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },
+    })
+  })
 })
 
 describe('Node compatibility graph', () => {
@@ -236,7 +292,7 @@ describe('Node 24 lane ownership', () => {
     const subject = withPnpmEntrypoint(() => gatesForMode('ci-consumers'))
 
     expect(defaultConcurrency('ci-consumers', subject.length, 4)).toEqual({
-      workers: 10,
+      workers: 9,
       source: 'ci-consumers gate count',
     })
     expect(subject.map(item => item.id)).toEqual([
@@ -245,7 +301,6 @@ describe('Node 24 lane ownership', () => {
       'publint',
       'built-package-invariants',
       'lint-and-duplication',
-      'snapshot',
       'web-snapshot',
       'doc-typecheck',
       'node-next-types',
@@ -255,7 +310,6 @@ describe('Node 24 lane ownership', () => {
     expect(subject.find(item => item.id === 'built-package-invariants')?.needs).toEqual(['publint'])
     expect(subject.find(item => item.id === 'lint-and-duplication')?.needs).toEqual(['built-package-invariants'])
     for (const id of [
-      'snapshot',
       'web-snapshot',
       'doc-typecheck',
       'node-next-types',
@@ -263,7 +317,6 @@ describe('Node 24 lane ownership', () => {
     ]) {
       expect(subject.find(item => item.id === id)?.needs).toEqual(['built-package-invariants'])
     }
-    expect(subject.find(item => item.id === 'snapshot')?.env).toEqual({ DSH_EXAMPLE_MODE: 'lib' })
     expect(subject.find(item => item.id === 'doc-typecheck')?.env).toEqual({
       DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1',
     })
@@ -276,6 +329,16 @@ describe('Node 24 lane ownership', () => {
     expect(subject.find(item => item.id === 'web-snapshot')).toMatchObject({
       displayCommand: 'DSH_SNAPSHOT=replay pnpm run test:web:built',
       env: { DSH_SNAPSHOT: 'replay' },
+    })
+  })
+
+  it('keeps semantic snapshots in their isolated build-backed aggregate', () => {
+    const subject = withPnpmEntrypoint(() => gatesForMode('ci-snapshot'))
+
+    expect(subject.map(item => item.id)).toEqual(['build', 'snapshot'])
+    expect(subject.find(item => item.id === 'snapshot')).toMatchObject({
+      env: { DSH_EXAMPLE_MODE: 'lib' },
+      needs: ['build'],
     })
   })
 })

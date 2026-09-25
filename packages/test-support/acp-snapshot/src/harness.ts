@@ -576,16 +576,26 @@ async function waitForPersistedChildTurnEnd(
   timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
   minimumTurn = 1,
 ): Promise<void> {
-  await vi.waitFor(async () => {
-    const log = (await harvestSessionLogs(root))[child]
-    if (log === undefined || !latestTurnIsClosed(log.content)
-      || !hasRequestHeaderAfterDescriptor(log.content)
-      || !hasClosedTurn(log.content, minimumTurn)) {
-      throw new Error(
-        `snapshot-harness: subagent child #${child} did not persist closed turn ${minimumTurn} within ${timeoutMs}ms`,
-      )
+  const timeoutMessage
+    = `snapshot-harness: subagent child #${child} did not persist closed turn ${minimumTurn} within ${timeoutMs}ms`
+  try {
+    await vi.waitFor(async () => {
+      const log = (await harvestSessionLogs(root))[child]
+      if (log === undefined || !latestTurnIsClosed(log.content)
+        || !hasRequestHeaderAfterDescriptor(log.content)
+        || !hasClosedTurn(log.content, minimumTurn)) {
+        throw new Error(timeoutMessage)
+      }
+    }, { interval: WAIT_POLL_INTERVAL_MS, timeout: timeoutMs })
+  } catch (error) {
+    // On a loaded runner Vitest can expire before it preserves the callback's
+    // last assertion error. Keep the harness contract deterministic while
+    // allowing malformed-log and other callback failures to surface unchanged.
+    if (error instanceof Error && error.message === 'Timed out in waitFor!') {
+      throw new Error(timeoutMessage)
     }
-  }, { interval: WAIT_POLL_INTERVAL_MS, timeout: timeoutMs })
+    throw error
+  }
 }
 
 /** Whether a raw session log contains the requested closed turn. */
@@ -672,12 +682,24 @@ async function waitForPersistedEventAfterTurnEnd(
   type: string,
   timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
 ): Promise<void> {
-  await vi.waitFor(async () => {
-    const log = (await harvestSessionLogs(root)).find(candidate => candidate.id === sessionId)
-    if (log === undefined || !latestEventFollowsTurnEnd(log.content, type)) {
-      throw new Error(`snapshot-harness: session "${sessionId}" did not persist ${type} after turn/end within ${timeoutMs}ms`)
+  const timeoutMessage
+    = `snapshot-harness: session "${sessionId}" did not persist ${type} after turn/end within ${timeoutMs}ms`
+  try {
+    await vi.waitFor(async () => {
+      const log = (await harvestSessionLogs(root)).find(candidate => candidate.id === sessionId)
+      if (log === undefined || !latestEventFollowsTurnEnd(log.content, type)) {
+        throw new Error(timeoutMessage)
+      }
+    }, { interval: WAIT_POLL_INTERVAL_MS, timeout: timeoutMs })
+  } catch (error) {
+    // Under full-suite runner load Vitest may publish its generic timeout before
+    // preserving the callback's last error. Keep the public harness diagnostic
+    // stable while allowing malformed-log and other callback failures through.
+    if (error instanceof Error && error.message === 'Timed out in waitFor!') {
+      throw new Error(timeoutMessage)
     }
-  }, { interval: WAIT_POLL_INTERVAL_MS, timeout: timeoutMs })
+    throw error
+  }
 }
 
 /** Wait for a cwd-relative marker proving an external action reached readiness. */

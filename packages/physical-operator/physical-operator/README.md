@@ -1,0 +1,46 @@
+# @deepseek-ai/dsh-physical-operator
+
+English | [中文](README.zh.md)
+
+The Service Definition for deployment-defined physical operators. It owns the `ctx.physicalOperators` registry, stable identity, live discovery, fail-fast capacity admission, and paired execution lifecycle events. It owns no execution transport, scheduler, queue, task graph, or persistent research state.
+
+## Contract and lifecycle
+
+Providers register a `PhysicalOperator` with a stable lowercase id, presentation metadata, selection tags, positive `maxConcurrency`, and optional execution modes. Omission means `ephemeral` only. `list()` and `status()` return normalized modes, live availability, and service-owned active capacity. `start()` defaults to `ephemeral`, rejects unsupported modes without fallback, reserves capacity, and returns a Provider-owned result/disposal handle. Ordinary callers receive a generated execution id; a trusted durable router may supply one derived from persisted message identity, an optional Resident model/effort preference, and a sealed native-tool policy. `nativeToolPolicy: disabled` removes the product's native tool surface instead of asking an unattended caller for approval. `dsh-tools-authoritative` requires a model-tool bridge and makes that governed DSH surface authoritative while native approval requests are declined. A Resident Provider uses the execution id as its durable command identity and forwards the preference and policy to its own authority, so a disconnected caller can retry without starting duplicate work or changing authority.
+
+Accepted executions survive provider-plugin disposal. Re-registering the same operator id during HMR sees the outstanding capacity until the old run settles. The service emits `physical-operator/start` and `physical-operator/end` exactly once around every published execution. Listener failures are contained and cannot change execution settlement.
+
+Callers may attach a versioned operator-context envelope containing the exact current system prompt, current task, named runtime contexts, and durable provenance. Every Provider must materialize all fields and return a digest-bound receipt. Missing, mismatched, or rejected receipts fail admission and release capacity; local, remote, Web, Resident, and subagent transports cannot silently substitute a generic prompt.
+
+| Error code | Meaning |
+|---|---|
+| `NO_OPERATOR` | The requested stable id is not registered. |
+| `OPERATOR_UNAVAILABLE` | The provider reports unavailable. |
+| `OPERATOR_BUSY` | The configured concurrent capacity is full. |
+| `OPERATOR_ABORTED` | The caller signal was already aborted before admission. |
+| `OPERATOR_MODE_UNSUPPORTED` | The requested execution lifetime is not declared by the Provider. |
+| `DUPLICATE_OPERATOR` | Two live registrations claim the same stable id. |
+| `INVALID_OPERATOR` | Descriptor identity or metadata is invalid. |
+| `CONTEXT_ENVELOPE_DROPPED` | The Provider omitted the required context receipt. |
+| `CONTEXT_ENVELOPE_INVALID` | The receipt does not identify the supplied envelope. |
+| `CONTEXT_ENVELOPE_REJECTED` | The Provider explicitly refused to materialize the envelope. |
+
+## Authority boundary
+
+This package was extracted from the useful identity and execution boundary of AI4Research, not by copying its retired physical-operator daemon. It does not read `physical-operators.json`, mutate Solar or AI4Research state, infer operator selection, or create a second scheduler. Provider implementations remain free to evolve behind this contract.
+
+## Model Experience
+
+Indirectly, through [`dsh-tool-physical-operator`](../tool-physical-operator/README.md), which owns the model-visible schema and results.
+
+#### KV Cache effect
+
+No direct invalidation; the named Consumer owns any request-prefix changes.
+
+## Known Limitations and Deferred Work
+
+- **Fail-fast admission only** — there is no queue, priority, fairness, quota, or cooldown; durable receipts belong to Resident Providers, not this registry.
+- **Process-local discovery and counters** — registrations and active capacity are not shared across hosts or restored after process restart.
+- **No selector or scoring policy** — callers choose a stable id; tags are only discovery metadata.
+- **Generic subagent-shaped result** — structured physics schemas, content-addressed artifacts, provenance, progress streaming, and checkpoints remain future provider/contract work.
+- **Cancellation is cooperative** — the service forwards the signal and owns no rollback for provider or external side effects.

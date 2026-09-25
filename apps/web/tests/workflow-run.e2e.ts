@@ -107,7 +107,7 @@ describe.skipIf(MODE === 'record')('web e2e: durable workflow run in Chat', () =
       const phaseTitleRight = phaseTitle?.getBoundingClientRect().right ?? 0
       const phaseStatusLeft = phaseStatus?.getBoundingClientRect().left ?? 0
       if (phaseTitle !== null) phaseTitle.textContent = originalPhaseTitle
-      return {
+      const measurements = {
         clientWidth: element.clientWidth,
         scrollWidth: element.scrollWidth,
         color: label === null ? '' : getComputedStyle(label).color,
@@ -120,6 +120,10 @@ describe.skipIf(MODE === 'record')('web e2e: durable workflow run in Chat', () =
         phaseTitleRight,
         phaseStatusLeft,
       }
+      panel.style.removeProperty('width')
+      document.body.removeAttribute('data-ds-dark-theme')
+      panel.querySelector<HTMLButtonElement>('[data-member-status]')?.click()
+      return measurements
     })
     expect(darkNarrow.clientWidth).toBe(356)
     expect(darkNarrow.scrollWidth).toBeLessThanOrEqual(darkNarrow.clientWidth)
@@ -131,13 +135,8 @@ describe.skipIf(MODE === 'record')('web e2e: durable workflow run in Chat', () =
     expect(darkNarrow.runHeight).toBe(32)
     expect(darkNarrow.phaseHeight).toBe(32)
     expect(darkNarrow.phaseTitleRight).toBeLessThanOrEqual(darkNarrow.phaseStatusLeft)
-    await page.locator('[data-workflow-run]').evaluate((element) => {
-      (element as HTMLElement).style.removeProperty('width')
-      document.body.removeAttribute('data-ds-dark-theme')
-    })
     await page.setViewportSize({ width: 1280, height: 800 })
 
-    await member.click()
     await page.getByText(CHILD_PROMPT, { exact: true }).waitFor({ timeout: 15_000 })
 
     const sessions = page.getByRole('tree', { name: 'Sessions' })

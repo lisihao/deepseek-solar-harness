@@ -63,4 +63,20 @@ describe('SidebarRoot.module.css', () => {
     expect(declarations('.collapsed .newSession')?.get('align-self')).toBe('flex-start')
     expect(declarations('.collapsed .newSession')?.get('width')).toBe('36px')
   })
+
+  it('stacks plugin footer actions without consuming the session browser', () => {
+    const foot = declarations('.footArea')
+    expect(foot?.get('flex')).toBe('none')
+    expect(foot?.get('min-height')).toBe('0')
+    expect(foot?.get('flex-direction')).toBe('column')
+
+    const actions = declarations('.footerActions')
+    expect(actions?.get('flex-direction')).toBe('column')
+    expect(actions?.get('align-items')).toBe('stretch')
+    expect(actions?.get('max-height')).toBe('min(40vh, 320px)')
+    expect(actions?.get('overflow-x')).toBe('hidden')
+    expect(actions?.get('overflow-y')).toBe('auto')
+    expect(actions?.get('scrollbar-gutter')).toBe('stable')
+    expect(declarations('.collapsed .footerActions')?.get('scrollbar-gutter')).toBe('auto')
+  })
 })

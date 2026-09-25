@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, CallId  } from '@deepseek-ai/dsh-llm'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import type { Scope } from '@deepseek-ai/dsh-scope'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { CodeRuntime } from '@deepseek-ai/dsh-code-runtime'
 import type { CodeRunRequest, CodeRunResult } from '@deepseek-ai/dsh-code-runtime'
 import ToolRuntime, { CodeRunFailedError, RUN_CODE_NAME, TOOL_ABORTED_BEFORE_DISPATCH, defineContentToolFixture, defineTool } from '@deepseek-ai/dsh-tools'
@@ -145,7 +145,8 @@ describe('mode-aware wire contribution', () => {
     const assembly = await systemPrompt.assemble()
     const names = assembly.sections.map(section => section.name)
     const rule = assembly.sections.find(section => section.name === 'tools:code-only')
-    expect(rule?.text).toContain(`\`${RUN_CODE_NAME}\` is the only tool you can call directly`)
+    expect(rule?.text).toContain(`For this request, \`${RUN_CODE_NAME}\` is the only valid direct tool call`)
+    expect(rule?.text).toContain('Ignore direct native tool calls from earlier messages')
     // The rule is worthless after the guidance it qualifies.
     expect(names.indexOf('tools:code-only')).toBeLessThan(names.indexOf('tool:echo'))
     expect(names.indexOf('tools:code-only')).toBeLessThan(names.indexOf('tools:sdk'))
@@ -356,6 +357,23 @@ describe('mode-aware wire contribution', () => {
     expect(text(first)).toBe(text(second))
   })
 
+  it('renders literal prompt-variable examples from generated tool SDK descriptions', async () => {
+    const { ctx, systemPrompt } = await setup({ mode: 'code' })
+    ctx.tools.register(defineTool({
+      name: 'template_reference',
+      description: 'Accepts literal {{date}} and {{time}} template examples.',
+      parameters: {},
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      execute: () => Promise.resolve('ok'),
+    }))
+
+    expect(renderPrompt(await systemPrompt.assemble()))
+      .toContain('Accepts literal {{date}} and {{time}} template examples.')
+  })
+
   it('rejects every assembly when a non-native mode has no code runtime', async () => {
     const { systemPrompt } = await setup({ mode: 'code', runtime: false })
     await expect(systemPrompt.assemble()).rejects.toThrow(/requires a code runtime/)
@@ -397,6 +415,8 @@ describe('mode-aware wire contribution', () => {
     registerEcho(ctx)
     const assembly = await systemPrompt.assemble()
     const runCodeSchema = assembly.tools.find(tool => tool.name === RUN_CODE_NAME)
+    expect(runCodeSchema?.description).toContain(`For this request, \`${RUN_CODE_NAME}\` is the only valid direct tool call`)
+    expect(runCodeSchema?.description).toContain('Ignore direct native tool calls from earlier messages')
     expect(runCodeSchema?.description).toContain('Execute a TypeScript program')
     expect(runCodeSchema?.description).toContain('BODY of an')
     // Both required arguments are named here, not only in the parameter
@@ -412,12 +432,23 @@ describe('mode-aware wire contribution', () => {
     registerEcho(ctx)
     const assembly = await systemPrompt.assemble()
     const runCodeSchema = assembly.tools.find(tool => tool.name === RUN_CODE_NAME)
+    expect(runCodeSchema?.description).toContain(`For this request, \`${RUN_CODE_NAME}\` is the only valid direct tool call`)
+    expect(runCodeSchema?.description).toContain('Ignore direct native tool calls from earlier messages')
     expect(runCodeSchema?.description).toContain('Execute a Python program')
     expect(runCodeSchema?.description).toContain('`return <value>`')
     expect(runCodeSchema?.description).toContain('`description`')
     expect(runCodeSchema?.description).not.toContain('TypeScript')
     const codeParam = (runCodeSchema?.parameters as { properties: { code: { description: string } } }).properties.code
     expect(codeParam.description).toBe('The program: the body of an async Python function.')
+  })
+
+  it("keeps the run_code schema non-exclusive in mode 'both', where native tools remain callable", async () => {
+    const { ctx, systemPrompt } = await setup({ mode: 'both', runtime: { language: 'typescript' } })
+    registerEcho(ctx)
+    const assembly = await systemPrompt.assemble()
+    const runCodeSchema = assembly.tools.find(tool => tool.name === RUN_CODE_NAME)
+    expect(runCodeSchema?.description).not.toContain('only valid direct tool call')
+    expect(assembly.tools.map(tool => tool.name)).toContain('echo')
   })
 
   it('resolves the run_code schema flavor lazily and fails loud on a language absent from the flavor table', async () => {

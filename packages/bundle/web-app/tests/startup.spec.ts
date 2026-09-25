@@ -55,6 +55,7 @@ export const apply = ctx => globalThis.__webStartupApply(ctx)
     `  name: ${pathToFileURL(join(dir, 'reader.mjs')).href}`,
     `  inject: [${WEB_STARTUP_SERVICE}]`,
     '  config:',
+    '    deploymentRole: !!js ctx.webStartup.deploymentRole',
     "    host: !!js ctx.webStartup.host ?? '127.0.0.1'",
     '    port: !!js ctx.webStartup.port ?? 3080',
     '    trustedHosts: !!js ctx.webStartup.trustedHosts',
@@ -94,6 +95,7 @@ describe('web command-line provider', () => {
       '--trusted-host', '10.0.0.9',
     ])
     expect(values).toEqual({
+      deploymentRole: 'web',
       host: '127.0.0.1',
       port: 8080,
       trustedHosts: ['lab.internal', 'lab-2.internal', '10.0.0.9'],
@@ -104,8 +106,9 @@ describe('web command-line provider', () => {
 
   it('leaves deployment values to each consumer when flags omit them', async () => {
     const { values, observed } = await bootProvider([])
-    expect(values).toEqual({ trustedHosts: [] })
+    expect(values).toEqual({ deploymentRole: 'web', trustedHosts: [] })
     expect(observed.readerConfig).toEqual({
+      deploymentRole: 'web',
       host: '127.0.0.1',
       port: 3080,
       trustedHosts: [],
@@ -127,6 +130,18 @@ describe('web command-line provider', () => {
     expect(values).toBeUndefined()
     expect(observed.readerConfig).toBeUndefined()
     expect(observed.exits).toEqual([1])
+  })
+
+  it('publishes the persistent server role and rejects unknown roles', async () => {
+    const server = await bootProvider(['--deployment-role', 'server'])
+    expect(server.values).toEqual({ deploymentRole: 'server', trustedHosts: [] })
+    expect(server.observed.readerConfig).toMatchObject({ deploymentRole: 'server' })
+
+    const unknown = await bootProvider(['--deployment-role', 'worker'])
+    expect(unknown.observed.out).toContain('--deployment-role must be web or server')
+    expect(unknown.values).toBeUndefined()
+    expect(unknown.observed.readerConfig).toBeUndefined()
+    expect(unknown.observed.exits).toEqual([1])
   })
 
   it('rejects the intentionally unsupported all-interfaces host before the consumer activates', async () => {

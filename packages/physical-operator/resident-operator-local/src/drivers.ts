@@ -1,0 +1,1461 @@
+/** Native subscription resident drivers for Claude Code and Codex. @module @deepseek-ai/dsh-resident-operator-local/drivers */
+
+import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { extname, isAbsolute, join, resolve } from 'node:path'
+import { promisify } from 'node:util'
+import {
+  createSdkMcpServer,
+  query as claudeQuery,
+  tool as claudeTool,
+  type CanUseTool,
+  type ModelInfo,
+  type SDKResultMessage,
+} from '@anthropic-ai/claude-agent-sdk'
+import { z } from 'zod'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type {
+  PhysicalOperatorNativeToolPolicy,
+  PhysicalOperatorReasoningEffort,
+} from '@deepseek-ai/dsh-physical-operator'
+import type {
+  ResidentDriverExecuteRequest,
+  ResidentDriverCompactRequest,
+  ResidentModelOption,
+  ResidentObservation,
+  ResidentProductDriver,
+  ResidentProviderStatus,
+  ResidentQuotaPool,
+  ResidentQuotaWindow,
+  ResidentStopReason,
+  ResidentTurnResult,
+} from '@deepseek-ai/dsh-resident-operator'
+import { ResidentOperatorError } from '@deepseek-ai/dsh-resident-operator'
+import {
+  CODEX_APP_SERVER_METHODS,
+  CodexApprovalRequiredError,
+  CodexAppServerWire,
+  type CodexDynamicToolCall,
+  type CodexDynamicToolResult,
+  type CodexDynamicToolSpec,
+  type CodexAppServerExecutionBoundary,
+  type CodexAppServerModel,
+  type CodexAppServerRateLimit,
+} from '@deepseek-ai/dsh-subagent-codex'
+import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { openCodexDaemonStream } from './codex-transport.ts'
+import {
+  callModelToolBridge,
+  claudeMcpRequestId,
+  modelToolCommandId,
+  RESIDENT_RLM_TOOL_NAME,
+  validateResidentModelToolBridge,
+} from './model-tool-bridge.ts'
+
+const execFileAsync = promisify(execFile)
+const CLAUDE_AUTH_LOGIN_TIMEOUT_MS = 10 * 60_000
+
+/** Stable Claude subscription-login failure codes carried over Resident IPC. */
+export type ClaudeAuthenticationFailureCode =
+  | 'AUTH_REQUIRED'
+  | 'NETWORK_UNAVAILABLE'
+  | 'CALLBACK_LISTENER_MISSING'
+
+/** Baseline Claude Code CLI version this Resident build was qualified with. */
+export const EXPECTED_CLAUDE_CLI_VERSION = '2.1.239 (Claude Code)'
+/** Official Claude Agent SDK version compiled into this Resident build. */
+export const EXPECTED_CLAUDE_SDK_VERSION = '0.3.220'
+/**
+ * App-server methods a Codex build's protocol schema does not declare but the
+ * Resident wire requires. The method set, not the release number or schema
+ * digest, is what the Driver depends on.
+ * @param schema - parsed `codex_app_server_protocol.schemas.json`.
+ * @returns missing methods as `Union:method`; empty for a compatible build.
+ */
+export function missingCodexProtocolMethods(schema: unknown): string[] {
+  const definitions = typeof schema === 'object' && schema !== null
+    ? (schema as { definitions?: Record<string, { oneOf?: unknown[] } | undefined> }).definitions ?? {}
+    : {}
+  return Object.entries(CODEX_APP_SERVER_METHODS).flatMap(([union, methods]) => {
+    const declared = new Set((definitions[union]?.oneOf ?? []).flatMap((variant) => {
+      const values = (variant as { properties?: { method?: { enum?: unknown } } }).properties?.method?.enum
+      return Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : []
+    }))
+    return methods.filter(method => !declared.has(method)).map(method => `${union}:${method}`)
+  })
+}
+
+/** Protocol digest and required-method gaps of one Codex executable. */
+export interface CodexProtocolReport {
+  /** SHA-256 of the generated combined protocol schema, for diagnostics. */
+  readonly hash: string
+  /** Required methods the schema does not declare. */
+  readonly missing: readonly string[]
+}
+
+/**
+ * Generate one Codex executable's app-server protocol schema and check it
+ * against the methods the Resident wire uses.
+ * @param executable - absolute Codex executable or bare `codex`.
+ * @returns the schema digest and missing required methods.
+ */
+export async function codexProtocol(executable: string): Promise<CodexProtocolReport> {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-codex-schema-'))
+  try {
+    await command(executable, ['app-server', 'generate-json-schema', '--out', root])
+    const content = readFileSync(join(root, 'codex_app_server_protocol.schemas.json'))
+    return {
+      hash: createHash('sha256').update(content).digest('hex'),
+      missing: missingCodexProtocolMethods(JSON.parse(content.toString('utf8'))),
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Whether a Claude Code CLI release is inside the qualified window: the
+ * baseline's major.minor line at or above the baseline patch.
+ * @param version - trimmed `claude --version` output.
+ * @returns true for `2.1.N (Claude Code)` with N at or above the baseline patch.
+ */
+export function claudeCliCompatible(version: string): boolean {
+  const baseline = /^(\d+)\.(\d+)\.(\d+) \(Claude Code\)$/u.exec(EXPECTED_CLAUDE_CLI_VERSION)
+  const candidate = /^(\d+)\.(\d+)\.(\d+) \(Claude Code\)$/u.exec(version.trim())
+  return baseline !== null && candidate !== null
+    && candidate[1] === baseline[1] && candidate[2] === baseline[2]
+    && Number(candidate[3]) >= Number(baseline[3])
+}
+
+const EFFORTS = new Set<PhysicalOperatorReasoningEffort>(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+
+/**
+ * Build the credential-scrubbed Claude subprocess environment.
+ *
+ * Claude Code's standalone macOS runtime otherwise uses only its bundled CA
+ * set. Native subscription traffic must honor certificates trusted by the
+ * owner's macOS system store, while preserving an explicit caller override.
+ *
+ * @param parent Credential-scrubbed parent environment to extend.
+ * @param platform Platform whose native trust behavior should be selected.
+ * @returns A new subprocess environment without mutating the supplied parent.
+ */
+export function claudeEnvironment(
+  parent: NodeJS.ProcessEnv = scrubbedParentEnv(),
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const environment = { ...parent }
+  if (platform === 'darwin' && environment.NODE_USE_SYSTEM_CA === undefined) {
+    environment.NODE_USE_SYSTEM_CA = '1'
+  }
+  return environment
+}
+
+/**
+ * Build Claude Code's native slash command without persisting its optional guidance.
+ * @param instructions - optional native compaction guidance.
+ * @returns the bounded Claude Code slash command.
+ */
+export function claudeCompactPrompt(instructions?: string): string {
+  return instructions === undefined ? '/compact' : `/compact ${instructions}`
+}
+
+/**
+ * Decide whether Claude Code proved a first-party claude.ai login.
+ *
+ * Claude Code 2.1.239 may report `subscriptionType: null` for a valid
+ * claude.ai session, so that advisory field is not part of the authentication
+ * boundary. API-key-shaped environment values are already removed before the
+ * command runs by {@link scrubbedParentEnv}.
+ *
+ * @param status Parsed output from `claude auth status --json`.
+ * @returns Whether the native product attested a first-party claude.ai login.
+ */
+export function isClaudeNativeSubscription(status: Readonly<Record<string, unknown>>): boolean {
+  return status.loggedIn === true
+    && status.authMethod === 'claude.ai'
+    && status.apiProvider === 'firstParty'
+}
+
+/**
+ * Parse the supported Claude Code authentication-status envelope.
+ *
+ * @param output Native `claude auth status --json` output.
+ * @returns A status record whose login discriminator can be evaluated safely.
+ */
+export function parseClaudeAuthenticationStatus(output: string): Readonly<Record<string, unknown>> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(output)
+  } catch (error) {
+    throw new ResidentOperatorError(
+      `Claude Code authentication status returned malformed JSON: ${error instanceof Error ? error.message : String(error)}`,
+      'INVALID_RESULT',
+      { cause: error },
+    )
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ResidentOperatorError('Claude Code authentication status returned an unsupported JSON value', 'INVALID_RESULT')
+  }
+  const status = parsed as Record<string, unknown>
+  if (typeof status.loggedIn !== 'boolean') {
+    throw new ResidentOperatorError('Claude Code authentication status omitted its loggedIn discriminator', 'INVALID_RESULT')
+  }
+  if (status.loggedIn && (typeof status.authMethod !== 'string' || typeof status.apiProvider !== 'string')) {
+    throw new ResidentOperatorError('Claude Code authentication status omitted its native-subscription fields', 'INVALID_RESULT')
+  }
+  return status
+}
+
+/**
+ * Classify one failed explicit Claude subscription-login attempt.
+ *
+ * The native CLI owns OAuth and its loopback callback listener. DSH only
+ * reports the observed terminal failure and never starts a replacement login
+ * attempt on behalf of polling or qualification.
+ *
+ * @param error Failure emitted by `claude auth login`.
+ * @returns Stable failure code for the owner-local UI.
+ */
+export function claudeAuthenticationFailureCode(error: unknown): ClaudeAuthenticationFailureCode {
+  const detail = error instanceof Error ? error.message : String(error)
+  if (
+    /(?:callback|redirect(?:_uri| uri)?|loopback)/iu.test(detail)
+    || /(?:localhost|127\.0\.0\.1)(?::\d+)?[^\n]*(?:ECONNREFUSED|connection refused|refused to connect)/iu.test(detail)
+    || /(?:ECONNREFUSED|connection refused|refused to connect)[^\n]*(?:localhost|127\.0\.0\.1)(?::\d+)?/iu.test(detail)
+  ) return 'CALLBACK_LISTENER_MISSING'
+  if (
+    /\b(?:EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|ECONNRESET|EPIPE)\b/iu.test(detail)
+    || /(?:network (?:is )?unavailable|unable to connect|connection timed out|certificate verification|fetch failed)/iu.test(detail)
+  ) return 'NETWORK_UNAVAILABLE'
+  return 'AUTH_REQUIRED'
+}
+
+function environmentValue(environment: NodeJS.ProcessEnv, name: string): string | undefined {
+  const exact = environment[name]
+  if (exact !== undefined || process.platform !== 'win32') return exact
+  const entry = Object.entries(environment).find(([key]) => key.toUpperCase() === name)
+  return entry?.[1]
+}
+
+/**
+ * Resolve the exact native product executable that qualification and SDK execution must share.
+ *
+ * @param command Absolute executable or bare product command.
+ * @param environment Child environment whose PATH owns command selection.
+ * @param platform Platform used for PATH extension rules.
+ * @returns An absolute executable path.
+ */
+export function resolveProductExecutable(
+  command: string,
+  environment: NodeJS.ProcessEnv = scrubbedParentEnv(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (command.length === 0) {
+    throw new ResidentOperatorError('resident product executable must be non-empty', 'INVALID_RESULT')
+  }
+  const absolute = isAbsolute(command)
+  if (!absolute && (command.includes('/') || (platform === 'win32' && command.includes('\\')))) {
+    throw new ResidentOperatorError(
+      `resident product executable ${JSON.stringify(command)} must be absolute or a bare PATH name`,
+      'INVALID_RESULT',
+    )
+  }
+  const extensions = platform === 'win32' && extname(command) === ''
+    ? (environmentValue(environment, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';')
+    : ['']
+  const candidates = absolute
+    ? [command]
+    : (environmentValue(environment, 'PATH') ?? '').split(platform === 'win32' ? ';' : ':').flatMap(directory =>
+      extensions.map(extension => resolve(process.cwd(), directory, command + extension)))
+  for (const candidate of candidates) {
+    try {
+      if (!statSync(candidate).isFile()) continue
+      accessSync(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // Try the next PATH candidate; the final miss receives one stable error.
+    }
+  }
+  throw new ResidentOperatorError(
+    `resident product executable ${JSON.stringify(command)} was not found`,
+    'RUNTIME_UNAVAILABLE',
+  )
+}
+
+function reasoningEffort(value: string | undefined): PhysicalOperatorReasoningEffort | undefined {
+  return value !== undefined && EFFORTS.has(value as PhysicalOperatorReasoningEffort)
+    ? value as PhysicalOperatorReasoningEffort
+    : undefined
+}
+
+function observationRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+/**
+ * Normalize only Claude Agent SDK public text and tool lifecycle messages.
+ * Thinking blocks, user prompt text, tool inputs, tool outputs, stderr, and
+ * all unrecognized SDK envelopes intentionally produce no observation.
+ *
+ * @param message - one SDK stream message.
+ * @param toolNames - turn-local tool-use identity to display-name mapping.
+ * @returns safe, provider-neutral trace observations.
+ */
+export function residentClaudeObservations(
+  message: unknown,
+  toolNames: Map<string, string>,
+): readonly ResidentObservation[] {
+  const record = observationRecord(message)
+  if (record?.type === 'assistant') {
+    const assistant = observationRecord(record.message)
+    const content = assistant?.content
+    if (!Array.isArray(content)) return []
+    const observations: ResidentObservation[] = []
+    for (const block of content) {
+      const value = observationRecord(block)
+      if (value?.type === 'text' && typeof value.text === 'string') {
+        observations.push({ kind: 'public-output', preview: value.text })
+      }
+      if (value?.type === 'tool_use' && typeof value.id === 'string' && typeof value.name === 'string') {
+        toolNames.set(value.id, value.name)
+        observations.push({ kind: 'tool-started', toolName: value.name })
+      }
+    }
+    return observations
+  }
+  if (record?.type === 'user' && typeof record.parent_tool_use_id === 'string') {
+    const user = observationRecord(record.message)
+    const content = user?.content
+    if (!Array.isArray(content) || !content.some(block => observationRecord(block)?.type === 'tool_result')) return []
+    const toolName = toolNames.get(record.parent_tool_use_id)
+    return toolName === undefined ? [] : [{ kind: 'tool-completed', toolName }]
+  }
+  if (record?.type === 'system' && record.subtype === 'permission_denied' && typeof record.tool_name === 'string') {
+    return [{ kind: 'approval-required', approvalKind: record.tool_name }]
+  }
+  return []
+}
+
+function ensureModelToolBridge(request: ResidentDriverExecuteRequest): NonNullable<ResidentDriverExecuteRequest['modelToolBridge']> | undefined {
+  return validateResidentModelToolBridge(request.modelToolBridge, request.nativeToolPolicy)
+}
+
+function isRlmOnlyBridge(bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>): boolean {
+  return bridge.tools.length === 1 && bridge.tools[0]?.name === RESIDENT_RLM_TOOL_NAME
+}
+
+function codexDynamicTools(request: ResidentDriverExecuteRequest): readonly CodexDynamicToolSpec[] {
+  const bridge = ensureModelToolBridge(request)
+  if (bridge === undefined) return []
+  return bridge.tools.map(spec => ({
+    type: 'function', name: spec.name, description: spec.description, inputSchema: spec.inputSchema, deferLoading: false,
+  }))
+}
+
+/**
+ * Build the in-process Claude Agent SDK MCP adapter for one sealed RLM turn.
+ * @param executionId - outer Physical Operator execution identity.
+ * @param bridge - sealed owner-local model tool bridge.
+ * @param signal - turn cancellation signal.
+ * @returns the configured Claude Agent SDK MCP server.
+ */
+export function createClaudeRlmMcpServer(
+  executionId: string,
+  bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
+  signal: AbortSignal,
+): ReturnType<typeof createSdkMcpServer> {
+  const name = claudeBridgeName(bridge)
+  return createSdkMcpServer({
+    name,
+    version: '1.0.0',
+    instructions: isRlmOnlyBridge(bridge)
+      ? 'Use typescript_repl as the persistent programming surface. Calls to rlm(...) return admission handles, never child answers; read explicit messages or artifacts for results.'
+      : 'These are the current DSH Agent tools. Their calls execute through DSH scope, guard, approval, logging, and plugin ownership; use them as the task requires.',
+    alwaysLoad: true,
+    tools: bridge.tools.map(toolSpec => claudeTool(
+      toolSpec.name,
+      toolSpec.description,
+      zodShape(toolSpec.inputSchema),
+      async (args, extra) => {
+        const commandId = modelToolCommandId(executionId, 'claude', claudeMcpRequestId(extra))
+        const result = bridgeToolResult(await callModelToolBridge(
+          bridge,
+          toolSpec.name,
+          args,
+          commandId,
+          signal,
+        ))
+        return {
+          content: [{ type: 'text', text: bridgeToolText(result) }],
+          ...result.isError ? { isError: true } : {},
+        }
+      },
+      { alwaysLoad: true },
+    )),
+  })
+}
+
+/**
+ * Build the Codex app-server callback for one sealed RLM turn.
+ * @param executionId - outer Physical Operator execution identity.
+ * @param bridge - sealed owner-local model tool bridge.
+ * @param signal - turn cancellation signal.
+ * @returns a callback that settles Codex dynamic tool calls through the bridge.
+ */
+export function createCodexRlmToolHandler(
+  executionId: string,
+  bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
+  signal: AbortSignal,
+): (call: CodexDynamicToolCall) => Promise<CodexDynamicToolResult> {
+  return async (call) => {
+    if (!bridge.tools.some(spec => spec.name === call.tool)) {
+      throw new ResidentOperatorError(
+        `Codex requested a model tool that is not allowlisted: ${JSON.stringify(call.tool)}`,
+        'PROTOCOL_MISMATCH',
+      )
+    }
+    const commandId = modelToolCommandId(executionId, 'codex', call.callId)
+    const result = bridgeToolResult(await callModelToolBridge(bridge, call.tool, call.arguments, commandId, signal))
+    return { success: !result.isError, text: bridgeToolText(result) }
+  }
+}
+
+interface BridgeToolResult {
+  readonly isError: boolean
+  readonly content: readonly ContentBlock[]
+  readonly value?: unknown
+  readonly error?: unknown
+  readonly additionalContexts?: unknown
+  readonly concludesTurn?: boolean
+}
+
+function bridgeToolResult(value: unknown): BridgeToolResult {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ResidentOperatorError('DSH model tool bridge returned a non-object result', 'INVALID_RESULT')
+  }
+  const result = value as Record<string, unknown>
+  if (typeof result.isError === 'boolean' && Array.isArray(result.content)) {
+    return result as unknown as BridgeToolResult
+  }
+  // Protocol v1 RLM bridges returned the evaluator value directly. Preserve
+  // that stable Prime surface while the generic DSH bridge returns the richer
+  // tool-runtime envelope above.
+  return {
+    isError: false,
+    content: [{ type: 'text', text: JSON.stringify(value) }],
+  }
+}
+
+function bridgeToolText(result: BridgeToolResult): string {
+  const text = result.content.map(block => block.type === 'text' || block.type === 'reasoning'
+    ? block.text
+    : JSON.stringify(block)).join('\n')
+  const details = {
+    ...result.value === undefined ? {} : { value: result.value },
+    ...result.error === undefined ? {} : { error: result.error },
+    ...result.additionalContexts === undefined ? {} : { additionalContexts: result.additionalContexts },
+    ...result.concludesTurn === true ? { concludesTurn: true } : {},
+  }
+  const encoded = Object.keys(details).length === 0 ? '' : JSON.stringify(details)
+  return [text, encoded].filter(value => value.length > 0).join('\n') || (result.isError ? 'DSH tool failed' : 'DSH tool completed')
+}
+
+function zodShape(schema: Readonly<Record<string, unknown>>): z.ZodRawShape {
+  const parsed = z.fromJSONSchema(schema)
+  if (!(parsed instanceof z.ZodObject)) {
+    throw new ResidentOperatorError('Claude model tool input schema must describe an object', 'PROTOCOL_MISMATCH')
+  }
+  return parsed.shape
+}
+
+function claudeBridgeName(bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>): 'dsh_rlm' | 'dsh_tools' {
+  return isRlmOnlyBridge(bridge) ? 'dsh_rlm' : 'dsh_tools'
+}
+
+function claudeQualifiedToolNames(bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>): string[] {
+  const prefix = `mcp__${claudeBridgeName(bridge)}__`
+  return bridge.tools.map(tool => `${prefix}${tool.name}`)
+}
+
+/**
+ * Map bare DSH tool names used by shared Skills onto the qualified Claude MCP surface.
+ *
+ * @param bridge DSH model-tool bridge whose tools are exposed through Claude MCP.
+ * @returns Bare tool names mapped to their qualified Claude MCP names.
+ */
+export function claudeToolAliases(
+  bridge: NonNullable<ResidentDriverExecuteRequest['modelToolBridge']>,
+): Record<string, string> {
+  const qualified = claudeQualifiedToolNames(bridge)
+  return Object.fromEntries(bridge.tools.map((tool, index) => [tool.name, qualified[index] as string]))
+}
+
+function claudeModelOption(model: ModelInfo, index: number): ResidentModelOption {
+  const efforts: PhysicalOperatorReasoningEffort[] = [...(model.supportedEffortLevels ?? [])]
+  return {
+    model: model.value,
+    ...model.resolvedModel === undefined ? {} : { resolvedModel: model.resolvedModel },
+    displayName: model.displayName,
+    description: model.description,
+    supportedEfforts: efforts,
+    ...efforts.includes('high') ? { defaultEffort: 'high' as const } : {},
+    isDefault: model.value === 'default' || index === 0,
+    supportsAdaptiveThinking: model.supportsAdaptiveThinking === true,
+  }
+}
+
+function codexModelOption(model: CodexAppServerModel): ResidentModelOption {
+  const efforts = model.supportedReasoningEfforts
+    .map(option => reasoningEffort(option.reasoningEffort))
+    .filter((value): value is PhysicalOperatorReasoningEffort => value !== undefined)
+  const defaultEffort = reasoningEffort(model.defaultReasoningEffort)
+  return {
+    model: model.model,
+    displayName: model.displayName,
+    description: model.description,
+    supportedEfforts: efforts,
+    ...defaultEffort === undefined ? {} : { defaultEffort },
+    isDefault: model.isDefault,
+    supportsAdaptiveThinking: false,
+  }
+}
+
+async function claudeModels(claudeExecutable: string): Promise<ResidentModelOption[]> {
+  async function* idleInput(): AsyncGenerator<never> {
+    await new Promise<never>(() => {})
+  }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => {
+    controller.abort(new Error('Claude model catalog timed out'))
+  }, 15_000)
+  const query = claudeQuery({
+    prompt: idleInput(),
+    options: {
+      abortController: controller,
+      cwd: process.cwd(),
+      env: claudeEnvironment(),
+      pathToClaudeCodeExecutable: claudeExecutable,
+      persistSession: false,
+      // Qualification is a DSH-owned read-only probe. Loading the owner's
+      // Claude settings here would start every user MCP server on each status
+      // poll and can orphan those subprocesses when the short-lived probe
+      // closes. Product turns may still opt into their explicit tool surface.
+      settingSources: [],
+      mcpServers: {},
+      strictMcpConfig: true,
+      tools: [],
+      allowedTools: [],
+      disallowedTools: ['AskUserQuestion'],
+    },
+  })
+  try {
+    return (await query.supportedModels()).map(claudeModelOption)
+  } catch (error) {
+    throw residentQualificationFailure(
+      'Claude Code model catalog',
+      controller.signal.reason instanceof Error ? controller.signal.reason : error,
+    )
+  } finally {
+    clearTimeout(timeout)
+    query.close()
+  }
+}
+
+function codexQuotaPool(
+  limit: CodexAppServerRateLimit,
+  models: readonly ResidentModelOption[],
+  observedAt: string,
+): ResidentQuotaPool {
+  const label = limit.limitName ?? limit.limitId
+  const spark = /spark|bengalfox/iu.test(`${limit.limitId} ${label}`)
+  const mappedModels = models
+    .filter(model => /spark/iu.test(`${model.model} ${model.displayName}`) === spark)
+    .map(model => model.model)
+  const window = (value: NonNullable<CodexAppServerRateLimit['primary']>): ResidentQuotaWindow => ({
+    usedPercent: value.usedPercent,
+    ...value.resetsAt === undefined ? {} : { resetsAt: value.resetsAt },
+    ...value.windowDurationMins === undefined ? {} : { windowDurationMinutes: value.windowDurationMins },
+  })
+  return {
+    poolId: limit.limitId,
+    displayName: label,
+    models: mappedModels,
+    meter: 'native-subscription',
+    ...limit.primary === undefined ? {} : { primary: window(limit.primary) },
+    ...limit.secondary === undefined ? {} : { secondary: window(limit.secondary) },
+    observedAt,
+  }
+}
+
+/**
+ * Read the required Codex model catalog and optional subscription quota snapshot.
+ *
+ * @param listModels Reads the native product model catalog and rejects when it is unavailable.
+ * @param readRateLimits Reads advisory quota telemetry; failures leave quota pools unknown.
+ * @param observedAt Timestamp attached to successfully observed quota pools.
+ * @returns Qualified models plus either mapped quota pools or a non-fatal telemetry reason.
+ */
+export async function collectCodexModelsAndQuota(
+  listModels: () => Promise<readonly CodexAppServerModel[]>,
+  readRateLimits: () => Promise<readonly CodexAppServerRateLimit[]>,
+  observedAt = new Date().toISOString(),
+): Promise<{
+  readonly models: ResidentModelOption[]
+  readonly quotaPools: ResidentQuotaPool[]
+  readonly quotaUnavailableReason?: string
+}> {
+  const models = (await listModels()).map(codexModelOption)
+  try {
+    const limits = await readRateLimits()
+    return { models, quotaPools: limits.map(limit => codexQuotaPool(limit, models, observedAt)) }
+  } catch (error) {
+    return {
+      models,
+      quotaPools: [],
+      quotaUnavailableReason: `Codex subscription quota telemetry unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+}
+
+/** Running Codex app-server daemon identity reported by `codex app-server daemon version`. */
+export interface CodexDaemonVersion {
+  /** Version of the app-server process the control socket serves. */
+  readonly appServerVersion: string
+  /** Absolute executable of the daemon's managed Codex package. */
+  readonly managedCodexPath: string
+  /** Version of the managed package the daemon starts next, when reported. */
+  readonly managedCodexVersion?: string
+}
+
+/**
+ * Read the running daemon identity. CLIs without `daemon version`, or a
+ * daemon that reports no managed package, yield undefined.
+ * @param executable - Codex CLI used to query the daemon.
+ * @returns the daemon's app-server version and managed executable, when reported.
+ */
+export async function codexDaemonVersion(executable = 'codex'): Promise<CodexDaemonVersion | undefined> {
+  let stdout: string
+  try {
+    stdout = (await command(executable, ['app-server', 'daemon', 'version'])).stdout
+  } catch {
+    // Pre-`daemon version` CLIs still qualify through their own schema.
+    return undefined
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stdout)
+  } catch {
+    // Non-JSON output carries no daemon identity.
+    return undefined
+  }
+  const record = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : {}
+  const { appServerVersion, managedCodexPath, managedCodexVersion } = record
+  return typeof appServerVersion === 'string' && typeof managedCodexPath === 'string' && isAbsolute(managedCodexPath)
+    ? { appServerVersion, managedCodexPath, ...typeof managedCodexVersion === 'string' ? { managedCodexVersion } : {} }
+    : undefined
+}
+
+async function codexModelsAndQuota(): Promise<{
+  readonly models: ResidentModelOption[]
+  readonly quotaPools: ResidentQuotaPool[]
+  readonly quotaUnavailableReason?: string
+}> {
+  const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
+  if (!existsSync(socketPath)) throw new Error('Codex app-server control socket is unavailable')
+  const signal = AbortSignal.timeout(15_000)
+  const stream = await openCodexDaemonStream(socketPath, signal)
+  const wire = new CodexAppServerWire(stream, stream, 'require')
+  try {
+    wire.start()
+    await wire.initialize(signal)
+    return await collectCodexModelsAndQuota(
+      () => wire.listModels(signal),
+      () => wire.readRateLimits(signal),
+    )
+  } finally {
+    wire.close()
+    stream.destroy()
+  }
+}
+
+function textPrompt(prompt: readonly ContentBlock[], product: string): string[] {
+  if (prompt.length === 0) throw new ResidentOperatorError(`${product} prompt must not be empty`, 'INVALID_RESULT')
+  const texts: string[] = []
+  for (const block of prompt) {
+    if (block.type !== 'text') {
+      throw new ResidentOperatorError(`${product} resident execution accepts text blocks only`, 'INVALID_RESULT')
+    }
+    texts.push(block.text)
+  }
+  if (texts.every(value => value.trim().length === 0)) {
+    throw new ResidentOperatorError(`${product} prompt must not be blank`, 'INVALID_RESULT')
+  }
+  return texts
+}
+
+/**
+ * Append the sealed no-tool contract to the product-owned instruction channel.
+ * @param systemPrompt - optional caller-owned instructions.
+ * @param policy - sealed native product-tool authority.
+ * @returns effective product system prompt, or undefined when no prompt is needed.
+ */
+export function nativeToolSystemPrompt(
+  systemPrompt: string | undefined,
+  policy?: PhysicalOperatorNativeToolPolicy,
+): string | undefined {
+  if (policy === 'inherit' || policy === undefined) return systemPrompt
+  const authority = policy === 'disabled'
+    ? [
+      'This execution plan grants no native tool authority.',
+      'Do not invoke shell, filesystem, network, browser, search, MCP, or other product tools.',
+      'Reason only from the supplied prompt and return the requested text answer directly.',
+    ].join(' ')
+    : [
+      'This execution plan grants tool authority only through the DSH model-tool bridge.',
+      'Do not invoke product-native shell, filesystem, network, browser, search, other tools, or any MCP server except the DSH model-tool bridge.',
+      'Use the DSH tools exposed for this turn; any product-native approval request will be declined.',
+    ].join(' ')
+  return systemPrompt === undefined ? authority : `${systemPrompt}\n\n${authority}`
+}
+
+/**
+ * Build Agent SDK options that remove Claude Code's built-in tool surface for a sealed no-tool turn.
+ * @param policy - sealed native product-tool authority.
+ * @returns SDK tool selection options for the requested policy.
+ */
+export function claudeNativeToolOptions(policy?: PhysicalOperatorNativeToolPolicy): {
+  readonly tools?: []
+  readonly allowedTools?: string[]
+} {
+  return policy === 'disabled' || policy === 'dsh-tools-authoritative'
+    ? { tools: [], allowedTools: [] }
+    : {}
+}
+
+/**
+ * Resolve how native Codex approval requests behave for the sealed tool authority.
+ *
+ * @param policy Sealed native product-tool authority for the turn.
+ * @returns Whether native approval requests are declined or surfaced for settlement.
+ */
+export function codexApprovalBehavior(
+  policy?: PhysicalOperatorNativeToolPolicy,
+): 'decline' | 'require' {
+  return policy === 'dsh-tools-authoritative' ? 'decline' : 'require'
+}
+
+/**
+ * Seal a read-only, no-approval native Codex environment while DSH tools remain dynamic functions.
+ *
+ * @param policy Sealed native product-tool authority for the turn.
+ * @returns Codex execution boundary for DSH-authoritative turns, otherwise undefined.
+ */
+export function codexExecutionBoundary(
+  policy?: PhysicalOperatorNativeToolPolicy,
+): CodexAppServerExecutionBoundary | undefined {
+  return policy === 'dsh-tools-authoritative'
+    ? { approval: 'never', nativeEffects: 'read-only', environmentAccess: 'disabled' }
+    : undefined
+}
+
+/** Stable error codes emitted for trusted native-product qualification failures. */
+export type ResidentQualificationFailureCode =
+  | 'AUTH_MODE_MISMATCH'
+  | 'INVALID_RESULT'
+  | 'PROVIDER_VERSION_MISMATCH'
+  | 'QUOTA_EXHAUSTED'
+  | 'RUNTIME_UNAVAILABLE'
+
+interface QualificationProcessError {
+  readonly code?: unknown
+  readonly killed?: unknown
+  readonly signal?: unknown
+  readonly timedOut?: unknown
+  readonly stderr?: unknown
+}
+
+function qualificationProcessError(error: unknown): QualificationProcessError | undefined {
+  return error !== null && typeof error === 'object' ? error : undefined
+}
+
+function qualificationFailureDetail(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const stderr = qualificationProcessError(error)?.stderr
+  return typeof stderr === 'string' && stderr.length > 0 ? `${message}\n${stderr}` : message
+}
+
+/**
+ * Classify a trusted native-product qualification failure without treating every process error as authentication.
+ *
+ * @param error Failure from executable resolution, a bounded product command, or model discovery.
+ * @returns One stable Resident error code.
+ */
+export function residentQualificationFailureCode(error: unknown): ResidentQualificationFailureCode {
+  if (error instanceof ResidentOperatorError) {
+    switch (error.code) {
+      case 'AUTH_MODE_MISMATCH':
+      case 'INVALID_RESULT':
+      case 'PROVIDER_VERSION_MISMATCH':
+      case 'QUOTA_EXHAUSTED':
+      case 'RUNTIME_UNAVAILABLE':
+        return error.code
+      default:
+        return 'INVALID_RESULT'
+    }
+  }
+  const processError = qualificationProcessError(error)
+  const code = processError?.code
+  const detail = qualificationFailureDetail(error)
+  const processSignal = typeof processError?.signal === 'string' && processError.signal.length > 0
+  const processCode = typeof code === 'string' ? code : undefined
+  const processRuntime = processCode === 'ENOENT'
+    || processCode === 'EACCES'
+    || processCode === 'ENOTDIR'
+    || processCode === 'EPERM'
+    || processCode === 'ETIMEDOUT'
+    || processCode === 'EAI_AGAIN'
+    || processCode === 'ECONNREFUSED'
+    || processCode === 'ENETUNREACH'
+    || processCode === 'EHOSTUNREACH'
+    || processCode === 'ECONNABORTED'
+    || processCode === 'ECONNRESET'
+    || processCode === 'EPIPE'
+    || processError?.killed === true
+    || processSignal
+    || processError?.timedOut === true
+    // A timeout is a runtime failure even when the product's diagnostic also mentions login.
+    || /\b(?:timed out|timeout)\b/iu.test(detail)
+  if (processRuntime) return 'RUNTIME_UNAVAILABLE'
+  if (/(?:usage limit|quota (?:is )?(?:exhausted|reached)|rate limit|too many requests|\b429\b)/iu.test(detail)) {
+    return 'QUOTA_EXHAUSTED'
+  }
+  const authenticationMismatch = [
+    /not (?:logged in|authenticated)/iu,
+    /(?:please |must )?(?:log in|login)/iu,
+    /authentication (?:is )?required/iu,
+    /native subscription|api key|\b401\b/iu,
+  ].some(pattern => pattern.test(detail))
+  if (authenticationMismatch) {
+    return 'AUTH_MODE_MISMATCH'
+  }
+  const runtimeDiagnostic = [
+    /executable .* was not found/iu,
+    /timed out|timeout/iu,
+    /unable to connect|certificate verification/iu,
+    /network (?:is )?unavailable/iu,
+  ].some(pattern => pattern.test(detail))
+  if (runtimeDiagnostic) return 'RUNTIME_UNAVAILABLE'
+  return 'INVALID_RESULT'
+}
+
+/**
+ * Preserve a trusted native-product qualification failure as a stable Resident error.
+ *
+ * @param command Product command or qualification operation that failed.
+ * @param error Original process or control-channel failure.
+ * @returns The original Resident error or one classified Resident error.
+ */
+export function residentQualificationFailure(command: string, error: unknown): ResidentOperatorError {
+  if (error instanceof ResidentOperatorError) return error
+  return new ResidentOperatorError(
+    `${command} qualification failed: ${error instanceof Error ? error.message : String(error)}`,
+    residentQualificationFailureCode(error),
+    { cause: error },
+  )
+}
+
+async function command(command: string, args: string[]): Promise<{ stdout: string; stderr: string; executable: string }> {
+  try {
+    const executable = resolveProductExecutable(command)
+    const result = await execFileAsync(executable, args, {
+      encoding: 'utf8',
+      env: scrubbedParentEnv(),
+      timeout: 15_000,
+      maxBuffer: 2 * 1024 * 1024,
+    })
+    return { ...result, executable }
+  } catch (error) {
+    throw residentQualificationFailure(command, error)
+  }
+}
+
+interface ClaudeAuthenticationStatusProcessError {
+  readonly code?: number | string
+  readonly killed?: boolean
+  readonly signal?: NodeJS.Signals | null
+  readonly timedOut?: boolean
+  readonly stdout?: unknown
+}
+
+/**
+ * Read Claude's authentication status while preserving its structured logged-out response.
+ *
+ * The native CLI exits with status 1 for a valid "loggedIn: false" status document. A
+ * generic "execFile" wrapper treats that expected product result as a process failure, so
+ * this probe accepts only that exact exit/status combination. Signals, kills, timeouts,
+ * malformed documents, and non-logged-out status documents remain failures.
+ * @param executable - resolved native Claude executable.
+ * @returns validated authentication status from the native product.
+ */
+async function claudeAuthenticationStatus(
+  executable: string,
+): Promise<Readonly<Record<string, unknown>>> {
+  try {
+    const { stdout } = await execFileAsync(executable, ['auth', 'status', '--json'], {
+      encoding: 'utf8',
+      env: claudeEnvironment(),
+      timeout: 15_000,
+      maxBuffer: 2 * 1024 * 1024,
+    })
+    return parseClaudeAuthenticationStatus(stdout)
+  } catch (error: unknown) {
+    const processError = error as ClaudeAuthenticationStatusProcessError
+    if (
+      processError.code === 1
+      && processError.killed !== true
+      && processError.signal == null
+      && processError.timedOut !== true
+      && typeof processError.stdout === 'string'
+    ) {
+      try {
+        const status = parseClaudeAuthenticationStatus(processError.stdout)
+        if (status.loggedIn === false) return status
+      } catch {
+        // Keep the original process failure so malformed output remains INVALID_RESULT.
+      }
+    }
+    throw error
+  }
+}
+
+function claudeStopReason(result: SDKResultMessage): ResidentStopReason {
+  if (result.subtype === 'success' && !result.is_error) return 'completed'
+  if (result.subtype === 'error_max_turns' || result.subtype === 'error_max_budget_usd') return 'max-tokens'
+  return 'error'
+}
+
+/**
+ * Convert a terminal Claude API result into the stable Resident error taxonomy.
+ *
+ * @param result Terminal result emitted by the Claude Agent SDK.
+ * @returns A classified Resident error, or undefined for a successful result.
+ */
+export function claudeResultFailure(result: SDKResultMessage): ResidentOperatorError | undefined {
+  if (!result.is_error) return undefined
+  const detail = 'result' in result && typeof result.result === 'string' && result.result.trim().length > 0
+    ? result.result.trim()
+    : 'Claude Code returned an unspecified error result'
+  if (/(?:oauth access token has expired|re-authenticate to continue|\b401\b)/iu.test(detail)) {
+    return new ResidentOperatorError(
+      'Claude Code subscription authentication expired; run `claude auth login` and retry the node.',
+      'AUTH_MODE_MISMATCH',
+    )
+  }
+  if (/(?:usage limit|quota (?:is )?exhausted|rate limit)/iu.test(detail)) {
+    return new ResidentOperatorError(`Claude Code subscription quota is exhausted: ${detail}`, 'QUOTA_EXHAUSTED')
+  }
+  if (/(?:certificate verification|unable to connect to api)/iu.test(detail)) {
+    return new ResidentOperatorError(`Claude Code runtime is unavailable: ${detail}`, 'RUNTIME_UNAVAILABLE')
+  }
+  return new ResidentOperatorError(`Claude Code returned an error result: ${detail}`, 'INVALID_RESULT')
+}
+
+/**
+ * Convert Codex transport and terminal failures into the stable Resident taxonomy.
+ * @param error - product protocol or terminal failure.
+ * @returns a retryable runtime failure for transient transport loss, otherwise an invalid result.
+ */
+export function codexExecutionFailure(error: unknown): ResidentOperatorError {
+  if (error instanceof ResidentOperatorError) return error
+  const message = error instanceof Error ? error.message : String(error)
+  if (/(?:usageLimitExceeded|hit your usage limit|quota (?:is )?exhausted)/iu.test(message)) {
+    return new ResidentOperatorError(message, 'QUOTA_EXHAUSTED')
+  }
+  const unavailable = /stream disconnected before completion/iu.test(message)
+    || /error sending request for url/iu.test(message)
+    || /app-server protocol stream closed/iu.test(message)
+    || /\b(?:ECONNRESET|ETIMEDOUT|EPIPE)\b/iu.test(message)
+  return new ResidentOperatorError(message, unavailable ? 'RUNTIME_UNAVAILABLE' : 'INVALID_RESULT')
+}
+
+/** Claude Code Agent SDK Driver using persisted native subscription Sessions. */
+export class ClaudeCodeResidentDriver implements ResidentProductDriver {
+  readonly operatorId = 'claude-code' as const
+  private modelCatalog: { readonly executable: string; readonly promise: Promise<ResidentModelOption[]> } | undefined
+
+  private models(executable: string): Promise<ResidentModelOption[]> {
+    if (this.modelCatalog?.executable === executable) return this.modelCatalog.promise
+    const catalog = { executable, promise: claudeModels(executable) }
+    this.modelCatalog = catalog
+    void catalog.promise.catch(() => {
+      if (this.modelCatalog === catalog) this.modelCatalog = undefined
+    })
+    return catalog.promise
+  }
+
+  async authenticate(): Promise<ResidentProviderStatus> {
+    const executable = resolveProductExecutable('claude')
+    try {
+      await execFileAsync(executable, ['auth', 'login'], {
+        encoding: 'utf8',
+        env: claudeEnvironment(),
+        timeout: CLAUDE_AUTH_LOGIN_TIMEOUT_MS,
+        maxBuffer: 2 * 1024 * 1024,
+      })
+    } catch (error) {
+      const code = claudeAuthenticationFailureCode(error)
+      throw new ResidentOperatorError(
+        `Claude Code subscription login failed: ${error instanceof Error ? error.message : String(error)}`,
+        code,
+        { cause: error },
+      )
+    }
+    return this.qualify()
+  }
+
+  async qualify(): Promise<ResidentProviderStatus> {
+    try {
+      const { stdout: version, executable } = await command('claude', ['--version'])
+      const parsed = await claudeAuthenticationStatus(executable)
+      const subscription = isClaudeNativeSubscription(parsed)
+      const exactVersion = claudeCliCompatible(version)
+      const models = subscription && exactVersion ? await this.models(executable) : []
+      const catalogReady = models.length > 0
+      const unavailableCode = !subscription
+        ? 'AUTH_MODE_MISMATCH'
+        : !exactVersion
+          ? 'PROVIDER_VERSION_MISMATCH'
+          : !catalogReady
+            ? 'RUNTIME_UNAVAILABLE'
+            : undefined
+      return {
+        operatorId: this.operatorId,
+        product: this.operatorId,
+        displayName: 'Claude Code',
+        description: 'Persistent native Claude Code analysis, architecture, review, and implementation.',
+        tags: ['analysis', 'architecture', 'review', 'long-context', 'coding', 'subscription'],
+        maxConcurrency: 4,
+        injectionBoundaries: ['pre-dispatch', 'next-turn'],
+        available: subscription && exactVersion && catalogReady,
+        ...unavailableCode === undefined ? {} : { unavailableCode },
+        ...subscription && exactVersion && catalogReady ? {} : {
+          unavailableReason: !subscription
+            ? 'Claude Code is not authenticated with a claude.ai subscription'
+            : !exactVersion
+              ? `Claude Code version ${version.trim()} is outside the qualified ${EXPECTED_CLAUDE_CLI_VERSION} release line`
+              : 'Claude Code reported no selectable models',
+        },
+        authentication: subscription ? 'native-subscription' : 'unqualified',
+        productVersion: version.trim(),
+        protocolHash: createHash('sha256').update(`claude-agent-sdk@${EXPECTED_CLAUDE_SDK_VERSION}`).digest('hex'),
+        models,
+        quotaUnavailableReason: 'Claude Code does not expose machine-readable subscription quota telemetry; automatic scheduling remains behind the protected reserve guard',
+      }
+    } catch (error) {
+      return unavailable(this.operatorId, error)
+    }
+  }
+
+  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
+    const qualification = await this.qualify()
+    if (!qualification.available) {
+      throw new ResidentOperatorError(
+        qualification.unavailableReason ?? 'Claude Code unavailable',
+        qualification.unavailableCode ?? (qualification.authentication === 'native-subscription'
+          ? 'PROVIDER_VERSION_MISMATCH'
+          : 'AUTH_MODE_MISMATCH'),
+      )
+    }
+    const texts = textPrompt(request.prompt, 'Claude Code')
+    const claudeExecutable = resolveProductExecutable('claude')
+    request.onProgress('connecting')
+    const controller = new AbortController()
+    const abort = (): void => { controller.abort(request.signal.reason) }
+    if (request.signal.aborted) abort()
+    else request.signal.addEventListener('abort', abort, { once: true })
+    let nativeSessionId = request.nativeSessionId
+    let final: SDKResultMessage | undefined
+    let approvalRequired: string | undefined
+    const running = new Set<string>()
+    const observedToolNames = new Map<string, string>()
+    const modelToolBridge = ensureModelToolBridge(request)
+    const effectiveSystemPrompt = nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy)
+    const modelToolNames = new Set(modelToolBridge === undefined ? [] : claudeQualifiedToolNames(modelToolBridge))
+    const canUseTool: CanUseTool = (toolName, _input, options) => {
+      if (modelToolNames.has(toolName)) return Promise.resolve({ behavior: 'allow' })
+      approvalRequired = options.title ?? options.displayName ?? toolName
+      request.onObservation({ kind: 'approval-required', approvalKind: toolName, preview: approvalRequired })
+      return Promise.resolve({
+        behavior: 'deny',
+        message: `Resident execution requires out-of-band approval for ${toolName}`,
+        interrupt: true,
+      })
+    }
+    const rlmServer = modelToolBridge === undefined
+      ? undefined
+      : createClaudeRlmMcpServer(String(request.commandId), modelToolBridge, controller.signal)
+    const query = claudeQuery({
+      prompt: texts.join(''),
+      options: {
+        abortController: controller,
+        cwd: request.workspace,
+        env: claudeEnvironment(),
+        pathToClaudeCodeExecutable: claudeExecutable,
+        persistSession: true,
+        model: request.profile.model,
+        ...request.profile.effort === undefined ? {} : {
+          effort: request.profile.effort as Exclude<PhysicalOperatorReasoningEffort, 'ultra'>,
+        },
+        ...qualification.models.find(model => model.model === request.profile.model)?.supportsAdaptiveThinking === true
+          ? { thinking: { type: 'adaptive' as const } }
+          : {},
+        ...nativeSessionId === undefined ? {} : { resume: nativeSessionId },
+        ...effectiveSystemPrompt === undefined ? {} : {
+          systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: effectiveSystemPrompt },
+        },
+        disallowedTools: ['AskUserQuestion'],
+        ...claudeNativeToolOptions(request.nativeToolPolicy),
+        ...modelToolBridge === undefined || rlmServer === undefined ? {} : {
+          ...isRlmOnlyBridge(modelToolBridge) ? { tools: [] as const } : {},
+          allowedTools: [...modelToolNames],
+          mcpServers: { [claudeBridgeName(modelToolBridge)]: rlmServer },
+          strictMcpConfig: true,
+          toolAliases: claudeToolAliases(modelToolBridge),
+        },
+        canUseTool,
+      },
+    })
+    try {
+      for await (const message of query) {
+        for (const observation of residentClaudeObservations(message, observedToolNames)) {
+          request.onObservation(observation)
+        }
+        const session = message.session_id
+        if (typeof session === 'string' && session.length > 0) {
+          nativeSessionId = session
+          if (!running.has(session)) {
+            running.add(session)
+            request.onRunning(session)
+            request.onProgress('session_ready')
+          }
+        }
+        if (message.type === 'assistant') request.onProgress('reasoning')
+        if (message.type === 'user') request.onProgress('tool_activity')
+        if (message.type === 'result') {
+          request.onProgress('finalizing')
+          final = message
+        }
+      }
+    } catch (error) {
+      if (approvalRequired !== undefined) {
+        throw new ResidentOperatorError(
+          `Claude Code requires interactive approval: ${approvalRequired}`,
+          'APPROVAL_REQUIRED',
+        )
+      }
+      throw error
+    } finally {
+      request.signal.removeEventListener('abort', abort)
+      query.close()
+    }
+    if (nativeSessionId === undefined) {
+      throw new ResidentOperatorError('Claude Code returned no persistent session id', 'INVALID_RESULT')
+    }
+    if (final === undefined) {
+      throw new ResidentOperatorError('Claude Code ended without a result', 'INVALID_RESULT')
+    }
+    if (approvalRequired !== undefined) {
+      throw new ResidentOperatorError(
+        `Claude Code requires interactive approval: ${approvalRequired}`,
+        'APPROVAL_REQUIRED',
+      )
+    }
+    const resultFailure = claudeResultFailure(final)
+    if (resultFailure !== undefined) throw resultFailure
+    const stopReason = claudeStopReason(final)
+    const output = final.subtype === 'success' && final.result.trim().length > 0
+      ? [{ type: 'text' as const, text: final.result }]
+      : []
+    const usage = {
+      inputTokens: final.usage.input_tokens,
+      outputTokens: final.usage.output_tokens,
+      cacheReadInputTokens: final.usage.cache_read_input_tokens,
+      cacheWriteInputTokens: final.usage.cache_creation_input_tokens,
+      costUsd: final.total_cost_usd,
+    }
+    request.onObservation({ kind: 'usage-updated', usage })
+    return {
+      output,
+      stopReason,
+      nativeSessionId,
+      usage,
+    }
+  }
+
+  async compact(request: ResidentDriverCompactRequest): Promise<{ nativeSessionId: string }> {
+    const qualification = await this.qualify()
+    if (!qualification.available) {
+      throw new ResidentOperatorError(
+        qualification.unavailableReason ?? 'Claude Code unavailable',
+        qualification.unavailableCode ?? (qualification.authentication === 'native-subscription'
+          ? 'PROVIDER_VERSION_MISMATCH'
+          : 'AUTH_MODE_MISMATCH'),
+      )
+    }
+    const controller = new AbortController()
+    const abort = (): void => { controller.abort(request.signal.reason) }
+    if (request.signal.aborted) abort()
+    else request.signal.addEventListener('abort', abort, { once: true })
+    let observedSessionId = request.nativeSessionId
+    let final: SDKResultMessage | undefined
+    const query = claudeQuery({
+      prompt: claudeCompactPrompt(request.instructions),
+      options: {
+        abortController: controller,
+        cwd: request.workspace,
+        env: claudeEnvironment(),
+        pathToClaudeCodeExecutable: resolveProductExecutable('claude'),
+        persistSession: true,
+        resume: request.nativeSessionId,
+        tools: [],
+        allowedTools: [],
+        disallowedTools: ['AskUserQuestion'],
+      },
+    })
+    try {
+      for await (const message of query) {
+        const session = message.session_id
+        if (typeof session === 'string' && session.length > 0) {
+          if (session !== request.nativeSessionId) {
+            throw new ResidentOperatorError('Claude Code /compact replaced the native Session identity', 'INVALID_RESULT')
+          }
+          observedSessionId = session
+        }
+        if (message.type === 'result') final = message
+      }
+    } finally {
+      request.signal.removeEventListener('abort', abort)
+      query.close()
+    }
+    if (final === undefined) {
+      throw new ResidentOperatorError('Claude Code /compact ended without a result', 'INVALID_RESULT')
+    }
+    const failure = claudeResultFailure(final)
+    if (failure !== undefined) throw failure
+    return { nativeSessionId: observedSessionId }
+  }
+}
+
+/** Codex app-server Driver using non-ephemeral native subscription threads. */
+export class CodexResidentDriver implements ResidentProductDriver {
+  readonly operatorId = 'codex' as const
+
+  async qualify(): Promise<ResidentProviderStatus> {
+    try {
+      const [{ stdout: version }, login] = await Promise.all([
+        command('codex', ['--version']),
+        command('codex', ['login', 'status']),
+      ])
+      const subscription = `${login.stdout}\n${login.stderr}`.includes('Logged in using ChatGPT')
+      let transportError: unknown
+      try {
+        await command('codex', ['app-server', 'daemon', 'start'])
+      } catch (error) {
+        transportError = error
+      }
+      const transportReady = transportError === undefined
+      // The daemon serves its own managed package; qualify the binary it runs.
+      const server = transportReady ? await codexDaemonVersion() : undefined
+      const protocol = await codexProtocol(server?.managedCodexPath ?? 'codex')
+      const compatible = protocol.missing.length === 0
+      const productVersion = server === undefined ? version.trim() : `codex-cli ${server.appServerVersion}`
+      const catalog = transportReady && compatible ? await codexModelsAndQuota().catch((error: unknown) => {
+        transportError = error
+        return { models: [], quotaPools: [], quotaUnavailableReason: undefined }
+      }) : { models: [], quotaPools: [], quotaUnavailableReason: undefined }
+      const { models, quotaPools, quotaUnavailableReason } = catalog
+      const available = subscription && compatible && transportError === undefined && models.length > 0
+      const unavailableCode = !subscription
+        ? 'AUTH_MODE_MISMATCH'
+        : !compatible
+          ? 'PROVIDER_VERSION_MISMATCH'
+          : transportError !== undefined
+            ? residentQualificationFailureCode(transportError)
+            : !available
+              ? 'RUNTIME_UNAVAILABLE'
+              : undefined
+      return {
+        operatorId: this.operatorId,
+        product: this.operatorId,
+        displayName: 'Codex',
+        description: 'Persistent native Codex implementation, debugging, testing, and repository review.',
+        tags: ['coding', 'implementation', 'debugging', 'testing', 'review', 'subscription'],
+        maxConcurrency: 4,
+        injectionBoundaries: ['pre-dispatch', 'next-turn'],
+        available,
+        ...unavailableCode === undefined ? {} : { unavailableCode },
+        ...available ? {} : {
+          unavailableReason: !subscription
+            ? 'Codex is not authenticated with a ChatGPT subscription'
+            : !compatible
+              ? `${productVersion} app-server lacks required methods: ${protocol.missing.join(', ')}`
+              : transportError !== undefined
+                ? `Codex app-server daemon unavailable: ${transportError instanceof Error ? transportError.message : 'unknown failure'}`
+                : 'Codex app-server reported no selectable models',
+        },
+        authentication: subscription ? 'native-subscription' : 'unqualified',
+        productVersion,
+        protocolHash: protocol.hash,
+        models,
+        quotaPools,
+        ...quotaUnavailableReason === undefined ? {} : { quotaUnavailableReason },
+      }
+    } catch (error) {
+      return unavailable(this.operatorId, error)
+    }
+  }
+
+  async execute(request: ResidentDriverExecuteRequest): Promise<ResidentTurnResult & { nativeSessionId: string }> {
+    await this.requireAvailable()
+    const texts = textPrompt(request.prompt, 'Codex')
+    request.onProgress('connecting')
+    const stream = await this.openStream(request.signal)
+    const modelToolBridge = ensureModelToolBridge(request)
+    const dynamicTools = codexDynamicTools(request)
+    const executionBoundary = codexExecutionBoundary(request.nativeToolPolicy)
+    const wire = new CodexAppServerWire(
+      stream,
+      stream,
+      codexApprovalBehavior(request.nativeToolPolicy),
+      dynamicTools,
+      modelToolBridge === undefined
+        ? undefined
+        : createCodexRlmToolHandler(String(request.commandId), modelToolBridge, request.signal),
+      (observation) => { request.onObservation(observation) },
+    )
+    const abort = (): void => { wire.interrupt() }
+    if (request.signal.aborted) abort()
+    else request.signal.addEventListener('abort', abort, { once: true })
+    try {
+      wire.start()
+      await wire.initialize(request.signal)
+      if (request.nativeSessionId === undefined) {
+        await wire.startThread(
+          request.workspace,
+          request.signal,
+          false,
+          request.profile,
+          nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy),
+          executionBoundary,
+        )
+      } else {
+        await wire.resumeThread(
+          request.nativeSessionId,
+          request.workspace,
+          request.signal,
+          request.profile,
+          nativeToolSystemPrompt(request.systemPrompt, request.nativeToolPolicy),
+          executionBoundary,
+        )
+      }
+      const threadId = wire.currentThreadId
+      if (threadId === undefined) {
+        throw new ResidentOperatorError('Codex returned no persistent thread id', 'INVALID_RESULT')
+      }
+      request.onRunning(threadId)
+      request.onProgress('session_ready')
+      request.onProgress('reasoning')
+      const result = await wire.runTurn(texts, request.signal, (turnId) => {
+        request.onRunning(threadId, turnId)
+      }, request.profile, executionBoundary)
+      request.onProgress('finalizing')
+      return { ...result, nativeSessionId: threadId }
+    } catch (error) {
+      if (error instanceof CodexApprovalRequiredError) {
+        throw new ResidentOperatorError(error.message, 'APPROVAL_REQUIRED')
+      }
+      throw codexExecutionFailure(error)
+    } finally {
+      request.signal.removeEventListener('abort', abort)
+      wire.close()
+      stream.destroy()
+    }
+  }
+
+  async compact(request: ResidentDriverCompactRequest): Promise<{ nativeSessionId: string }> {
+    if (request.instructions !== undefined) {
+      throw new ResidentOperatorError(
+        'Codex app-server thread/compact/start does not support compaction instructions',
+        'INVALID_RESULT',
+      )
+    }
+    await this.requireAvailable()
+    const stream = await this.openStream(request.signal)
+    const wire = new CodexAppServerWire(stream, stream, 'require')
+    try {
+      wire.start()
+      await wire.initialize(request.signal)
+      await wire.resumeThread(request.nativeSessionId, request.workspace, request.signal)
+      await wire.compactThread(request.signal)
+      if (wire.currentThreadId !== request.nativeSessionId) {
+        throw new ResidentOperatorError('Codex compaction replaced the native thread identity', 'INVALID_RESULT')
+      }
+      return { nativeSessionId: request.nativeSessionId }
+    } catch (error) {
+      throw codexExecutionFailure(error)
+    } finally {
+      wire.close()
+      stream.destroy()
+    }
+  }
+
+  private async requireAvailable(): Promise<void> {
+    const qualification = await this.qualify()
+    if (qualification.available) return
+    const code = qualification.unavailableCode ?? 'RUNTIME_UNAVAILABLE'
+    throw new ResidentOperatorError(qualification.unavailableReason ?? 'Codex unavailable', code)
+  }
+
+  private async openStream(signal: AbortSignal) {
+    const socketPath = join(homedir(), '.codex', 'app-server-control', 'app-server-control.sock')
+    if (!existsSync(socketPath)) {
+      throw new ResidentOperatorError('Codex app-server control socket is unavailable', 'RUNTIME_UNAVAILABLE')
+    }
+    return openCodexDaemonStream(socketPath, signal).catch((error: unknown) => {
+      throw new ResidentOperatorError(
+        `Codex app-server WebSocket unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        'RUNTIME_UNAVAILABLE',
+      )
+    })
+  }
+
+}
+
+function unavailable(product: 'claude-code' | 'codex', error: unknown): ResidentProviderStatus {
+  const claude = product === 'claude-code'
+  return {
+    operatorId: product,
+    product,
+    displayName: claude ? 'Claude Code' : 'Codex',
+    description: claude
+      ? 'Persistent native Claude Code analysis, architecture, review, and implementation.'
+      : 'Persistent native Codex implementation, debugging, testing, and repository review.',
+    tags: claude
+      ? ['analysis', 'architecture', 'review', 'long-context', 'coding', 'subscription']
+      : ['coding', 'implementation', 'debugging', 'testing', 'review', 'subscription'],
+    maxConcurrency: 4,
+    injectionBoundaries: ['pre-dispatch', 'next-turn'],
+    available: false,
+    unavailableReason: error instanceof Error ? error.message : String(error),
+    unavailableCode: residentQualificationFailureCode(error),
+    authentication: 'unqualified',
+    productVersion: 'unavailable',
+    protocolHash: 'unavailable',
+    models: [],
+  }
+}

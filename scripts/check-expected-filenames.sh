@@ -8,7 +8,8 @@ trap 'unlink "$candidate_file"' EXIT
 git -C "$root" ls-files -z -- \
   ':(icase,glob)*golden*' \
   ':(icase,glob)**/*golden*' \
-  ':(exclude,glob)vendor/**' > "$candidate_file"
+  ':(exclude,glob)vendor/**' \
+  ':(exclude,glob)**/vendor/**' > "$candidate_file"
 
 violations=()
 while IFS= read -r -d '' path; do

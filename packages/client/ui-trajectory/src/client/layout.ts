@@ -17,6 +17,10 @@ import type {
   TrajectoryCellProps,
   TrajectorySourceBlock,
 } from './trajectory-record.ts'
+import type {
+  TrajectoryDebateExecution, TrajectoryDebateProgress, TrajectoryDebateTraceEntry,
+  TrajectoryPhysicalOperatorExecution,
+} from './trajectory-contract.ts'
 import { formatElapsedSeconds } from './trajectory-record.ts'
 
 /** One Message or Step group inside a turn. */
@@ -40,6 +44,8 @@ export interface TrajectoryLayoutInput {
   runningCalls: ConversationSnapshot['runningCalls']
   requests?: readonly RequestView[]
   callSchemas?: RequestInspectionSnapshot['callSchemas']
+  physicalOperatorExecutions?: readonly TrajectoryPhysicalOperatorExecution[]
+  debateExecutions?: readonly TrajectoryDebateExecution[]
 }
 
 interface UsageLike {
@@ -48,6 +54,26 @@ interface UsageLike {
   cacheWriteTokens?: number
   outputTokens?: number
   reasoningTokens?: number
+}
+
+interface DetailedUsageLike {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly cacheReadInputTokens?: number
+  readonly cacheWriteInputTokens?: number
+  readonly costUsd?: number
+}
+
+function detailedUsageProps(usage: DetailedUsageLike | undefined): Pick<
+  TrajectoryCellProps,
+  'input' | 'output' | 'cacheRead' | 'cacheWrite'
+> {
+  return {
+    ...(usage?.inputTokens === undefined ? {} : { input: usage.inputTokens }),
+    ...(usage?.outputTokens === undefined ? {} : { output: usage.outputTokens }),
+    ...(usage?.cacheReadInputTokens === undefined ? {} : { cacheRead: usage.cacheReadInputTokens }),
+    ...(usage?.cacheWriteInputTokens === undefined ? {} : { cacheWrite: usage.cacheWriteInputTokens }),
+  }
 }
 
 /** Cell plus absolute ms for group wall-span descriptions. */
@@ -138,6 +164,7 @@ function inputCellDetail(node: InputNode): Pick<
 export function deriveTrajectoryLayout(input: TrajectoryLayoutInput): readonly TrajectoryTurnModel[] {
   const {
     nodes, eventLocations, partial, runningCalls, requests = [], callSchemas,
+    physicalOperatorExecutions = [], debateExecutions = [],
   } = input
   const resultByCall = indexResults(nodes)
   const callById = new Map<string, ToolCallBlock>(resultByCall)
@@ -153,6 +180,7 @@ export function deriveTrajectoryLayout(input: TrajectoryLayoutInput): readonly T
     const startedAt = finiteTime(call.time)
     if (startedAt !== null) callStartById.set(call.callId, startedAt)
   }
+
   const turns = new Map<number, TurnBucket>()
   const standaloneCompactions: TurnBucket[] = []
   let index = 0
@@ -500,6 +528,43 @@ export function deriveTrajectoryLayout(input: TrajectoryLayoutInput): readonly T
     else for (const laid of laidList) pushMessage(call.turn, laid)
   }
 
+  for (const current of [...physicalOperatorExecutions]
+    .sort((left, right) => left.dispatchSeq - right.dispatchSeq)) {
+    const operatorGroup: LaidGroup = {
+      title: `Operator · ${physicalOperatorLabel(current.operatorId)} · ${shortCommandId(current.commandId)}`,
+      laid: current.entries.map(entry => ({
+        absTime: finiteTime(entry.time),
+        cell: physicalOperatorCell(current, entry, ++index),
+      })),
+    }
+    if (operatorGroup.laid.length === 0) continue
+    bucket(current.turn).groups.push(operatorGroup)
+  }
+
+  for (const current of [...debateExecutions]
+    .sort((left, right) => left.dispatchSeq - right.dispatchSeq || left.runId.localeCompare(right.runId))) {
+    const laid: LaidCell[] = []
+    for (const entry of current.entries) {
+      if (entry.progress === undefined) {
+        laid.push({
+          absTime: finiteTime(entry.time),
+          cell: debateCell(current, entry, ++index),
+        })
+      } else {
+        laid.push({
+          absTime: debateProgressTime(entry.progress, entry.time),
+          cell: debateProgressCell(current, entry, entry.progress, ++index),
+        })
+      }
+    }
+    const debateGroup: LaidGroup = {
+      title: `Debate · ${current.topic ?? '未记录议题'}`,
+      laid,
+    }
+    if (debateGroup.laid.length === 0) continue
+    bucket(current.turn).groups.push(debateGroup)
+  }
+
   // Orphan turn-0 cells (orphaned tools) fold into Turn 1.
   const prologue = turns.get(0)
   if (prologue !== undefined) {
@@ -510,16 +575,420 @@ export function deriveTrajectoryLayout(input: TrajectoryLayoutInput): readonly T
     turns.set(1, first)
   }
 
+  // Physical commands are session events, not a trailing appendix. Sort all
+  // groups by their first source sequence (then wall time) so a command that
+  // started between a user message and its assistant/tool records stays in
+  // that position. Cell indexes are reassigned after this ordering step.
+  for (const turn of turns.values()) {
+    turn.groups.sort(compareLaidGroups)
+  }
+
   for (const entry of [...turns.values(), ...standaloneCompactions]) {
     for (const group of entry.groups) {
       for (const laid of group.laid) attachToolSchema(laid, callSchemas)
     }
   }
 
-  return [
+  const ordered = [
     ...[...turns.entries()].map(([turn, entry]) => toTurnModel(turn, entry)),
     ...standaloneCompactions.map(entry => toTurnModel(null, entry)),
-  ].sort((left, right) => firstCellIndex(left) - firstCellIndex(right))
+  ].sort(compareTurnModels)
+  let nextIndex = 0
+  return ordered.map(turn => ({
+    ...turn,
+    groups: turn.groups.map(group => ({
+      ...group,
+      cells: group.cells.map(cell => ({ ...cell, index: ++nextIndex })),
+    })),
+  }))
+}
+
+function compareLaidGroups(left: LaidGroup, right: LaidGroup): number {
+  const leftKey = laidGroupOrder(left)
+  const rightKey = laidGroupOrder(right)
+  return compareOrderPair(leftKey, rightKey)
+}
+
+function laidGroupOrder(group: LaidGroup): { sequence: number; time: number } {
+  const sequence = Math.min(
+    ...group.laid.flatMap(value => typeof value.cell.sourceSeq === 'number' && Number.isFinite(value.cell.sourceSeq)
+      ? [value.cell.sourceSeq]
+      : []),
+    Number.POSITIVE_INFINITY,
+  )
+  const time = Math.min(
+    ...group.laid.flatMap(value => value.absTime !== null && Number.isFinite(value.absTime)
+      ? [value.absTime]
+      : []),
+    Number.POSITIVE_INFINITY,
+  )
+  return { sequence, time }
+}
+
+function compareTurnModels(left: TrajectoryTurnModel, right: TrajectoryTurnModel): number {
+  const leftKey = turnModelOrder(left)
+  const rightKey = turnModelOrder(right)
+  const order = compareOrderPair(leftKey, rightKey)
+  return order !== 0 ? order : firstCellIndex(left) - firstCellIndex(right)
+}
+
+function compareOrderPair(
+  left: { sequence: number; time: number },
+  right: { sequence: number; time: number },
+): number {
+  if (left.sequence !== right.sequence) return left.sequence < right.sequence ? -1 : 1
+  if (left.time !== right.time) return left.time < right.time ? -1 : 1
+  // Modern JS sorting is stable; returning zero preserves the source order
+  // when both source coordinates are identical or unavailable.
+  return 0
+}
+
+function turnModelOrder(turn: TrajectoryTurnModel): { sequence: number; time: number } {
+  const cells = turn.groups.flatMap(group => group.cells)
+  return {
+    sequence: Math.min(
+      ...cells.flatMap(cell => typeof cell.sourceSeq === 'number' && Number.isFinite(cell.sourceSeq)
+        ? [cell.sourceSeq]
+        : []),
+      Number.POSITIVE_INFINITY,
+    ),
+    time: Math.min(
+      ...cells.flatMap(cell => cell.startedAt !== null && cell.startedAt !== undefined && Number.isFinite(cell.startedAt)
+        ? [cell.startedAt]
+        : []),
+      Number.POSITIVE_INFINITY,
+    ),
+  }
+}
+
+function physicalOperatorLabel(operatorId: string): string {
+  return operatorId === 'claude-code' ? 'Claude Code' : operatorId === 'codex' ? 'Codex' : operatorId
+}
+
+function shortCommandId(commandId: string): string {
+  return commandId.length <= 12 ? commandId : `${commandId.slice(0, 11)}…`
+}
+
+function physicalOperatorCell(
+  execution: TrajectoryPhysicalOperatorExecution,
+  entry: TrajectoryPhysicalOperatorExecution['entries'][number],
+  index: number,
+): TrajectoryCellProps {
+  const base = {
+    index,
+    recordId: entry.type === 'tool' && entry.tool !== undefined
+      ? `physical-operator\u0000${execution.commandId}\u0000tool\u0000${entry.tool.toolCallId}`
+      : `physical-operator\u0000${execution.commandId}\u0000${entry.seq}`,
+    kind: 'operator' as const,
+    sourceSeq: entry.seq,
+    timeSeconds: 0,
+    startedAt: finiteTime(entry.time),
+  }
+  if (entry.type === 'dispatch') return { ...base, text: `${physicalOperatorLabel(execution.operatorId)} 已派发` }
+  if (entry.type === 'progress') return {
+    ...base,
+    text: `阶段 · ${physicalOperatorPhaseLabel(entry.phase)}`,
+  }
+  if (entry.type === 'terminal') return {
+    ...base,
+    text: entry.outcome === 'success' || entry.code === 'completed'
+      ? `执行完成 · ${entry.code ?? 'completed'}`
+      : `执行终止 · ${entry.code ?? '未知原因'}`,
+    ...(entry.outcome === 'success' || entry.code === 'completed' ? {} : { isError: true }),
+  }
+  if (entry.type === 'degraded') return {
+    ...base,
+    text: `轨迹降级 · ${entry.code ?? 'PROGRESS_UNAVAILABLE'}`,
+    isError: true,
+  }
+  if (entry.type === 'tool') {
+    const tool = entry.tool
+    if (tool === undefined) return { ...base, text: '工具状态已更新' }
+    const status = tool.status === 'running'
+      ? '运行中'
+      : tool.status === 'indeterminate'
+        ? '状态不确定'
+        : tool.status === 'error' ? '失败' : '完成'
+    const inputDetail = physicalOperatorShapeLabel(tool.argumentsShape)
+    const resultDetail = physicalOperatorShapeLabel(tool.resultShape)
+    const preview = tool.status === 'error' ? tool.errorPreview : tool.resultPreview
+    const previewLabel = tool.status === 'error' ? '错误预览' : '公开结果预览'
+    const resultPreview = preview ?? resultDetail
+    const outputDetail = [
+      resultDetail === undefined ? undefined : `结果结构\n${resultDetail}`,
+      preview === undefined ? undefined : `${previewLabel}\n\n${preview}`,
+      tool.status === 'error' ? '工具报告失败' : undefined,
+      tool.status === 'indeterminate' ? '工具结果尚无法证明' : undefined,
+    ].filter((value): value is string => value !== undefined).join('\n\n')
+    return {
+      ...base,
+      text: `DSH 工具${status}${tool.toolName === undefined ? '' : ` · ${tool.toolName}`}`,
+      callId: tool.toolCallId,
+      ...(tool.toolName === undefined ? {} : { toolName: tool.toolName }),
+      ...(inputDetail === undefined ? {} : {
+        inputDetail,
+        previewMarkdown: inputDetail,
+      }),
+      ...(resultPreview === undefined ? {} : { resultPreviewMarkdown: resultPreview }),
+      ...(outputDetail === '' ? {} : { outputDetail }),
+      ...(tool.status === 'error' || tool.status === 'indeterminate' ? { isError: true } : {}),
+    }
+  }
+  const observation = entry.observation
+  if (observation === undefined) return { ...base, text: '已收到原生状态更新' }
+  if (observation.kind === 'public-output') {
+    const preview = observation.publicOutputPreview
+    return {
+      ...base,
+      text: preview === undefined ? '公开输出已更新' : '公开输出',
+      ...(preview === undefined ? {} : {
+        previewMarkdown: preview,
+        outputDetail: `公开输出\n\n${preview}`,
+      }),
+    }
+  }
+  if (observation.kind === 'tool-started' || observation.kind === 'tool-completed') {
+    const toolName = observation.toolName
+    const phase = observation.kind === 'tool-started' ? '开始' : '完成'
+    return {
+      ...base,
+      text: `原生工具${phase}${toolName === undefined ? '' : ` · ${toolName}`}`,
+      ...(toolName === undefined ? {} : { toolName, outputDetail: `原生工具\n\n${toolName}` }),
+    }
+  }
+  if (observation.kind === 'approval-required') {
+    const approvalDetail = [
+      observation.approvalKind === undefined ? undefined : `权限：${observation.approvalKind}`,
+      observation.approvalPreview,
+    ].filter((value): value is string => value !== undefined && value.length > 0).join('\n\n')
+    return {
+      ...base,
+      text: `需要批准 · ${observation.approvalKind ?? '原生权限'}`,
+      ...(approvalDetail === '' ? {} : { outputDetail: approvalDetail }),
+      isError: true,
+    }
+  }
+  const usage = observation.usage
+  const fragments = [
+    usage?.inputTokens === undefined ? undefined : `输入 ${String(usage.inputTokens)}`,
+    usage?.outputTokens === undefined ? undefined : `输出 ${String(usage.outputTokens)}`,
+    usage?.costUsd === undefined ? undefined : `费用 $${usage.costUsd.toFixed(6)}`,
+  ].filter((value): value is string => value !== undefined)
+  const usageLines = [
+    usage?.inputTokens === undefined ? undefined : `- 输入：${String(usage.inputTokens)}`,
+    usage?.outputTokens === undefined ? undefined : `- 输出：${String(usage.outputTokens)}`,
+    usage?.cacheReadInputTokens === undefined ? undefined : `- 缓存命中：${String(usage.cacheReadInputTokens)}`,
+    usage?.cacheWriteInputTokens === undefined ? undefined : `- 缓存写入：${String(usage.cacheWriteInputTokens)}`,
+    usage?.costUsd === undefined ? undefined : `- 费用：$${usage.costUsd.toFixed(6)}`,
+  ].filter((value): value is string => value !== undefined)
+  return {
+    ...base,
+    text: fragments.length === 0 ? '用量已更新' : `用量更新 · ${fragments.join(' · ')}`,
+    ...(usageLines.length === 0 ? {} : { outputDetail: `用量\n\n${usageLines.join('\n')}` }),
+    ...detailedUsageProps(usage),
+  }
+}
+
+function debateCell(
+  execution: TrajectoryDebateExecution,
+  entry: TrajectoryDebateTraceEntry,
+  index: number,
+): TrajectoryCellProps {
+  const role = entry.role
+  const roleTitle = role?.title
+  const round = entry.round === undefined ? undefined : `第 ${String(entry.round)} 轮`
+  const route = role === undefined
+    ? undefined
+    : debateRouteLabel(role)
+  const status = debateStateLabel(entry.state)
+  const heading = [round, roleTitle, status].filter((value): value is string => value !== undefined).join(' · ')
+  const base: TrajectoryCellProps = {
+    index,
+    recordId: `debate\u0000${execution.runId}\u0000${String(entry.sourceSequence)}`,
+    kind: 'debate',
+    sourceSeq: entry.seq,
+    text: heading === '' ? `Debate · ${status}` : heading,
+    timeSeconds: 0,
+    startedAt: finiteTime(entry.time),
+    ...(entry.state === 'failed' || entry.state === 'blocked' || entry.state === 'indeterminate'
+      ? { isError: true }
+      : {}),
+  }
+  const output = entry.synthesis?.outputPreview ?? entry.publicOutputPreview
+  const details = debateDetails(entry, route)
+  const usage = entry.usage
+  return {
+    ...base,
+    ...(output === undefined ? {} : { previewMarkdown: output }),
+    ...(details === undefined ? {} : { outputDetail: details }),
+    ...detailedUsageProps(usage),
+  }
+}
+
+function debateProgressTime(progress: TrajectoryDebateProgress, fallback: number): number | null {
+  const timestamp = Date.parse(progress.sourceTime)
+  return Number.isFinite(timestamp) ? timestamp : finiteTime(fallback)
+}
+
+function debateProgressCell(
+  execution: TrajectoryDebateExecution,
+  entry: TrajectoryDebateTraceEntry,
+  progress: TrajectoryDebateProgress,
+  index: number,
+): TrajectoryCellProps {
+  const role = entry.role
+  const roleTitle = role?.title
+  const round = entry.round === undefined ? undefined : `第 ${String(entry.round)} 轮`
+  const prefix = [round, roleTitle].filter((value): value is string => value !== undefined)
+  const label = debateProgressLabel(progress)
+  const output = progress.publicOutputPreview ?? progress.approvalPreview
+  const details = debateProgressDetails(progress, role === undefined ? undefined : debateRouteLabel(role))
+  return {
+    index,
+    recordId: `debate\u0000${execution.runId}\u0000${String(entry.sourceSequence)}\u0000progress`,
+    kind: 'debate',
+    sourceSeq: entry.seq,
+    text: [...prefix, label].join(' · '),
+    ...(output === undefined ? {} : { previewMarkdown: output }),
+    ...(details === undefined ? {} : { outputDetail: details }),
+    ...(progress.kind === 'approval-required' ? { isError: true } : {}),
+    timeSeconds: 0,
+    startedAt: debateProgressTime(progress, entry.time),
+    ...detailedUsageProps(progress.usage),
+  }
+}
+
+function debateProgressLabel(progress: TrajectoryDebateProgress): string {
+  if (progress.kind === 'phase') {
+    return `阶段 · ${physicalOperatorPhaseLabel(progress.phase)}`
+  }
+  if (progress.kind === 'public-output') return '公开输出更新'
+  if (progress.kind === 'tool-started') {
+    return `工具开始${progress.toolName === undefined ? '' : ` · ${progress.toolName}`}`
+  }
+  if (progress.kind === 'tool-completed') {
+    return `工具完成${progress.toolName === undefined ? '' : ` · ${progress.toolName}`}`
+  }
+  if (progress.kind === 'approval-required') {
+    return `需要批准${progress.approvalKind === undefined ? '' : ` · ${progress.approvalKind}`}`
+  }
+  const usage = progress.usage
+  const fragments = [
+    usage?.inputTokens === undefined ? undefined : `输入 ${String(usage.inputTokens)}`,
+    usage?.outputTokens === undefined ? undefined : `输出 ${String(usage.outputTokens)}`,
+  ].filter((value): value is string => value !== undefined)
+  return fragments.length === 0 ? '用量更新' : `用量更新 · ${fragments.join(' · ')}`
+}
+
+function debateProgressDetails(
+  progress: TrajectoryDebateProgress,
+  route: string | undefined,
+): string | undefined {
+  const usage = progress.usage
+  const usageLines = [
+    usage?.inputTokens === undefined ? undefined : `- 输入：${String(usage.inputTokens)}`,
+    usage?.outputTokens === undefined ? undefined : `- 输出：${String(usage.outputTokens)}`,
+    usage?.cacheReadInputTokens === undefined ? undefined : `- 缓存命中：${String(usage.cacheReadInputTokens)}`,
+    usage?.cacheWriteInputTokens === undefined ? undefined : `- 缓存写入：${String(usage.cacheWriteInputTokens)}`,
+    usage?.costUsd === undefined ? undefined : `- 成本：$${usage.costUsd.toFixed(6)}`,
+  ].filter((value): value is string => value !== undefined)
+  const sections = [
+    route === undefined ? undefined : `**模型路由**：${route}`,
+    progress.phase === undefined ? undefined : `**执行阶段**：${physicalOperatorPhaseLabel(progress.phase)}`,
+    progress.toolName === undefined ? undefined : `### 工具\n\n- ${progress.toolName}`,
+    progress.approvalKind === undefined ? undefined : [
+      '### 权限请求',
+      '',
+      `- 类型：${progress.approvalKind}`,
+      ...(progress.approvalPreview === undefined ? [] : ['', progress.approvalPreview]),
+    ].join('\n'),
+    progress.publicOutputPreview === undefined ? undefined : `### 公开输出\n\n${progress.publicOutputPreview}`,
+    usageLines.length === 0 ? undefined : `### 用量\n\n${usageLines.join('\n')}`,
+  ].filter((value): value is string => value !== undefined)
+  return sections.length === 0 ? undefined : sections.join('\n\n')
+}
+
+function debateRouteLabel(role: NonNullable<TrajectoryDebateTraceEntry['role']>): string {
+  const requested = `${physicalOperatorLabel(role.requestedOperatorId)} / ${role.requestedModel}`
+  if (role.actualOperatorId === undefined || role.actualModel === undefined) return requested
+  const actual = `${physicalOperatorLabel(role.actualOperatorId)} / ${role.actualModel}`
+  return requested === actual ? actual : `${requested} → ${actual}`
+}
+
+function debateStateLabel(state: string): string {
+  return ({
+    planned: '已创建',
+    dispatched: '已派发',
+    running: '讨论中',
+    settled: '已提交观点',
+    blocked: '等待批准',
+    failed: '执行失败',
+    indeterminate: '状态不确定',
+    'round-completed': '本轮完成',
+    'synthesis-running': '主持人整理中',
+    'synthesis-settled': '主持人总结完成',
+    'run-completed': '讨论完成',
+    'budget-limited': '预算已到上限',
+    'max-rounds': '达到轮次上限',
+    stopped: '已停止',
+  } as Record<string, string>)[state] ?? '状态已更新'
+}
+
+function debateDetails(
+  entry: TrajectoryDebateTraceEntry,
+  route: string | undefined,
+): string | undefined {
+  const sections = [
+    route === undefined ? undefined : `**模型路由**：${route}`,
+    entry.publicOutputRef === undefined ? undefined : `**结果引用**：${entry.publicOutputRef}`,
+    entry.publicOutputPreview === undefined ? undefined : `### 公开观点\n\n${entry.publicOutputPreview}`,
+    entry.claims.length === 0
+      ? undefined
+      : `### 本楼主张\n\n${entry.claims.map(claim => `- ${claim.statement}（${claim.status} · ${claim.severity}）`).join('\n')}`,
+    entry.evidenceRefs.length === 0
+      ? undefined
+      : `### 证据\n\n${entry.evidenceRefs.map(ref => `- ${ref}`).join('\n')}`,
+    entry.convergence === undefined
+      ? undefined
+      : `### 收敛判断\n\n- 状态：${entry.convergence.status}\n- 分数：${entry.convergence.score.toFixed(2)} / ${entry.convergence.threshold.toFixed(2)}\n- 原因：${entry.convergence.reason}`,
+    entry.synthesis === undefined
+      ? undefined
+      : [
+        '### 主持人总结',
+        '',
+        `- 状态：${entry.synthesis.state}`,
+        `- 未解决问题：${String(entry.synthesis.unresolvedCount)}`,
+        `- 保留异议：${String(entry.synthesis.dissentCount)}`,
+        ...(entry.synthesis.artifactRef === undefined ? [] : [`- 结果引用：${entry.synthesis.artifactRef}`]),
+        ...(entry.synthesis.outputPreview === undefined ? [] : ['', entry.synthesis.outputPreview]),
+      ].join('\n'),
+  ].filter((value): value is string => value !== undefined)
+  return sections.length === 0 ? undefined : sections.join('\n\n')
+}
+
+function physicalOperatorPhaseLabel(phase: string | undefined): string {
+  return ({
+    connecting: '连接原生产品',
+    'session-ready': '原生会话已接通',
+    reasoning: '推理与执行',
+    'tool-activity': '使用工具',
+    finalizing: '整理结果',
+  } as Record<string, string>)[phase ?? ''] ?? '正在执行'
+}
+
+function physicalOperatorShapeLabel(
+  shape: NonNullable<TrajectoryPhysicalOperatorExecution['entries'][number]['tool']>['argumentsShape'] | undefined,
+): string | undefined {
+  if (shape === undefined) return undefined
+  if (shape.kind === 'object') return `对象 · ${String(shape.fields)} 个字段`
+  if (shape.kind === 'array') return `数组 · ${String(shape.items)} 项`
+  if (shape.kind === 'string') return `文本 · ${String(shape.characters)} 字符`
+  return ({
+    number: '数字',
+    boolean: '布尔值',
+    null: '空值',
+    unavailable: '结构不可用',
+  } as Record<string, string>)[shape.kind]
 }
 
 /**

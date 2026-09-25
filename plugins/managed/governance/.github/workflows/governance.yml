@@ -1,0 +1,46 @@
+name: Governance Harness
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    name: Governance Harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify packaged DSH runtime provenance
+        run: python3 scripts/build_dsh_plugin.py --check
+
+      - name: Audit governance wiring
+        run: python3 scripts/governance.py audit --project . --strict-warnings
+
+      - name: Run full project-native gates
+        run: |
+          python3 scripts/governance.py verify \
+            --project . \
+            --scope full \
+            --level full \
+            --report "$RUNNER_TEMP/governance-attestation.json"
+
+      - name: Reject stale or incomplete evidence
+        run: |
+          python3 scripts/governance.py attest \
+            --project . \
+            --report "$RUNNER_TEMP/governance-attestation.json" \
+            --require-level full
+
+      - name: Upload governance evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: governance-attestation
+          path: ${{ runner.temp }}/governance-attestation.json
+          if-no-files-found: error

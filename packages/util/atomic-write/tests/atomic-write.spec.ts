@@ -2,13 +2,29 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, stat, symlink, writeFile } fr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { withFileLock, writeFileAtomic } from '../src/index.ts'
+import { withFileLock, writeFileAtomic, writeFileAtomicSync } from '../src/index.ts'
 
 async function scratch(): Promise<string> {
   return mkdtemp(join(tmpdir(), 'dsh-atomic-write-'))
 }
 
 describe('writeFileAtomic', () => {
+  it('offers the same replacement contract to synchronous state owners', async () => {
+    const dir = await scratch()
+    const target = join(dir, 'sync', 'state.json')
+    writeFileAtomicSync(target, '{"version":1}\n', { mode: 0o600, dirMode: 0o700 })
+    expect(await readFile(target, 'utf8')).toBe('{"version":1}\n')
+    if (process.platform !== 'win32') expect((await stat(target)).mode & 0o777).toBe(0o600)
+  })
+
+  it('removes the synchronous temp file when replacement fails', async () => {
+    const dir = await scratch()
+    const occupied = join(dir, 'occupied')
+    await mkdir(occupied)
+    expect(() => { writeFileAtomicSync(occupied, 'blocked', { mode: 0o600 }) }).toThrow()
+    expect(await readdir(dir)).toEqual(['occupied'])
+  })
+
   it('creates the file and its parents with exactly the stated mode', async () => {
     const dir = await scratch()
     const target = join(dir, 'nested', 'deep', 'doc.yaml')

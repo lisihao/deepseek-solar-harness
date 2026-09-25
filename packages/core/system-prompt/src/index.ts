@@ -8,7 +8,35 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { AnonymousEntries, NamedEntries, ScopedLayers, scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
-import type { ContextSnapshotSection, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { ContextSnapshotSection, Message, MessageId, ToolSchema } from '@deepseek-ai/dsh-llm'
+
+export {
+  buildOperatorContextEnvelope,
+  materializeOperatorContextEnvelopeNative,
+  OPERATOR_CONTEXT_ENVELOPE_VERSION,
+  operatorContextEnvelopeDigest,
+  parseOperatorContextEnvelope,
+  rejectOperatorContextEnvelope,
+  receiveOperatorContextEnvelope,
+  renderOperatorContextEnvelopeText,
+} from './envelope.ts'
+export type {
+  OperatorContextEnvelopeAcceptedReceiptV1,
+  OperatorContextEnvelopeContextV1,
+  OperatorContextEnvelopeContextSegmentV1,
+  OperatorContextEnvelopeInput,
+  OperatorContextEnvelopeNativeMaterializationV1,
+  OperatorContextEnvelopeReceiptV1,
+  OperatorContextEnvelopeRejectedReceiptV1,
+  OperatorContextEnvelopeSessionInputSourceV1,
+  OperatorContextEnvelopeSessionSourceV1,
+  OperatorContextEnvelopeSourceV1,
+  OperatorContextEnvelopeTaskGraphInputSourceV1,
+  OperatorContextEnvelopeTaskGraphSourceV1,
+  OperatorContextEnvelopeToolInputSourceV1,
+  OperatorContextEnvelopeToolSourceV1,
+  OperatorContextEnvelopeV1,
+} from './envelope.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -49,6 +77,69 @@ export interface AssembleContext {
   signal?: AbortSignal
 }
 
+/** Stable producer identity for dynamic runtime-context messages. */
+export const SYSTEM_PROMPT_RUNTIME_CONTEXT_SOURCE = '@deepseek-ai/dsh-system-prompt'
+
+/** The effective dynamic-context snapshot in one derived request history. */
+export interface CurrentRuntimeContextSnapshot {
+  /** Durable message identity of the active snapshot. */
+  readonly messageId: MessageId
+  /** Exact named sections supplied by the snapshot. */
+  readonly sections: readonly ContextSnapshotSection[]
+}
+
+/**
+ * Read the current runtime-context snapshot without reviving a cleared one.
+ * The newest system-prompt context message is authoritative: a snapshot
+ * supplies its sections, while the producer's form-less clearance marker
+ * explicitly removes every earlier snapshot.
+ * @param messages - ordered derived model history for one request.
+ * @returns the active snapshot, or `undefined` when none is active.
+ */
+export function currentRuntimeContextSnapshot(
+  messages: readonly Message[],
+): CurrentRuntimeContextSnapshot | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.source.kind !== 'plugin' || message.source.plugin !== SYSTEM_PROMPT_RUNTIME_CONTEXT_SOURCE) continue
+    if (message.source.form !== 'snapshot') return undefined
+    return { messageId: message.id, sections: message.source.sections }
+  }
+  return undefined
+}
+
+/** Detached v1 projection of the active runtime-context snapshot for a downstream request. */
+export interface RuntimeContextSnapshotV1 {
+  /** Schema version for downstream durable request records. */
+  readonly version: 1
+  /** Session that supplied the already-rendered dynamic contexts. */
+  readonly sourceSessionId: string
+  /** Durable identity of the source snapshot message. */
+  readonly contextSnapshotMessageId: string
+  /** Exact named sections from the source snapshot. */
+  readonly sections: readonly ContextSnapshotSection[]
+}
+
+/**
+ * Capture the active runtime-context snapshot for one downstream request.
+ * @param messages - ordered derived model history for the owning Session.
+ * @param sourceSessionId - stable string identity of that Session.
+ * @returns a detached v1 projection, or `undefined` after a clearance marker.
+ */
+export function captureRuntimeContextSnapshot(
+  messages: readonly Message[],
+  sourceSessionId: string,
+): RuntimeContextSnapshotV1 | undefined {
+  const snapshot = currentRuntimeContextSnapshot(messages)
+  if (snapshot === undefined) return undefined
+  return {
+    version: 1,
+    sourceSessionId,
+    contextSnapshotMessageId: String(snapshot.messageId),
+    sections: snapshot.sections.map(section => ({ name: section.name, text: section.text })),
+  }
+}
+
 /** One contributed section of the system prompt (registry input). */
 export interface PromptSection {
   /** Unique name — a duplicate registration throws (see {@link SystemPrompt.section}). */
@@ -65,6 +156,11 @@ export interface PromptSection {
    * interpolated later, by {@link renderPrompt}.
    */
   readonly text: string | ((context: AssembleContext) => string)
+  /**
+   * Whether {@link renderPrompt} interprets `{{variable}}` references. Defaults
+   * to true; generated text that documents another template language sets false.
+   */
+  readonly interpolate?: boolean
   /**
    * Treat this contribution as the complete system prompt. Assembly still
    * runs the cooperative waterfall so tools, contexts, and variables can be
@@ -90,6 +186,8 @@ export interface AssembledSection {
   name: string
   /** The resolved (but not yet interpolated) section text. */
   text: string
+  /** Whether `{{variable}}` references in this section are interpolated. */
+  interpolate?: boolean
 }
 
 /** One resolved dynamic context contribution. */
@@ -211,7 +309,9 @@ export interface Config {
  */
 export function renderPrompt(assembly: PromptAssembly): string {
   return assembly.sections
-    .map(section => interpolate(section, assembly.variables, 'section'))
+    .map(section => section.interpolate === false
+      ? section.text
+      : interpolate(section, assembly.variables, 'section'))
     .filter(text => text.length > 0)
     .join('\n\n')
 }
@@ -512,6 +612,7 @@ export class SystemPrompt extends Service {
         const assembled = {
           name: section.name,
           text: typeof section.text === 'function' ? section.text(context) : section.text,
+          ...section.interpolate === false ? { interpolate: false } : {},
         }
         if (section.complete === true) completeSection = { ...assembled }
         return assembled

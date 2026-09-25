@@ -139,7 +139,7 @@ class CatalogAdapter extends LlmAdapter {
     return { id: provider, name: this.name }
   }
 
-  override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
+  override listModels(provider: string, _options?: { readonly refresh?: boolean }): Promise<readonly LlmModelInfo[]> {
     return Promise.resolve(this.models.map(id => ({ provider, id, name: id })))
   }
 
@@ -669,6 +669,23 @@ describe('llm domain', () => {
       ],
     }])
     expect(value.failures).toEqual([{ id: 'broken', name: 'Broken', message: 'catalog backend down' }])
+  })
+
+  it('forwards an explicit refresh request to provider catalog adapters', async () => {
+    const ctx = await harness()
+    const seen: (boolean | undefined)[] = []
+    ctx.llm.registerAdapter(['tracked'], new class extends CatalogAdapter {
+      override listModels(provider: string, options?: { readonly refresh?: boolean }): Promise<readonly LlmModelInfo[]> {
+        seen.push(options?.refresh)
+        return super.listModels(provider, options)
+      }
+    }('Tracked', ['tracked-model']))
+    const api = createApiProxy(ctx, DEFAULTS)
+
+    expectOk(await api.llm.models(request({ refresh: true })))
+    expect(seen).toEqual([true])
+    expectOk(await api.llm.models(request({})))
+    expect(seen).toEqual([true, undefined])
   })
 
   it('forwards llm/adapters-updated at every topology commit point', async () => {

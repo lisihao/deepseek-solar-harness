@@ -1,0 +1,4 @@
+[
+  { "caseId": "scheduler-authority-blind", "directArmId": "B2", "rlmArmId": "A7" },
+  { "caseId": "quota-routing-blind", "directArmId": "Q4", "rlmArmId": "P9" }
+]

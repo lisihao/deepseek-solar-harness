@@ -54,6 +54,47 @@ flowchart LR
   pkg_session_telemetry["session-telemetry"]
   svc_sessionTelemetry["ctx.sessionTelemetry<br/>Session telemetry seam"]
   pkg_session_telemetry_otel["session-telemetry-otel"]
+  pkg_physical_operator["physical-operator"]
+  svc_physicalOperators["ctx.physicalOperators<br/>Physical operator registry"]
+  pkg_physical_operator_subagent["physical-operator-subagent"]
+  pkg_physical_operator_resident["physical-operator-resident"]
+  pkg_tool_physical_operator["tool-physical-operator"]
+  pkg_resident_operator["resident-operator"]
+  svc_residentOperators["ctx.residentOperators<br/>Resident operator control"]
+  pkg_resident_operator_local["resident-operator-local"]
+  pkg_intent_compiler["intent-compiler"]
+  svc_intentCompiler["ctx.intentCompiler<br/>Immutable Intent IR compiler"]
+  pkg_orchestration_local["orchestration-local"]
+  pkg_context_compiler["context-compiler"]
+  svc_contextCompiler["ctx.contextCompiler<br/>Bounded Context Packet compiler"]
+  pkg_capability_capsule["capability-capsule"]
+  svc_capabilityCapsules["ctx.capabilityCapsules<br/>Capability Capsule registry and resolver"]
+  pkg_continual_harness["continual-harness"]
+  svc_continualHarness["ctx.continualHarness<br/>Continuous Harness snapshot and outcome seam"]
+  pkg_continual_harness_local["continual-harness-local"]
+  pkg_debate["debate"]
+  svc_debates["ctx.debates<br/>Provider-neutral bounded debate seam"]
+  pkg_debate_local["debate-local"]
+  svc_continualHarnessSkills["ctx.continualHarnessSkills<br/>Continuous Harness TypeScript skill registry"]
+  pkg_model_allocation["model-allocation"]
+  svc_modelAllocation["ctx.modelAllocation<br/>Quota-aware model allocation seam"]
+  pkg_model_allocation_local["model-allocation-local"]
+  pkg_model_worker["model-worker"]
+  svc_modelWorkers["ctx.modelWorkers<br/>One-shot model worker registry"]
+  pkg_model_worker_deepseek["model-worker-deepseek"]
+  pkg_rlm_strategy["rlm-strategy"]
+  svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
+  pkg_rlm_strategy_local["rlm-strategy-local"]
+  pkg_rlm_runtime["rlm-runtime"]
+  svc_rlmRuntime["ctx.rlmRuntime<br/>Persistent programmable RLM runtime"]
+  pkg_rlm_runtime_local["rlm-runtime-local"]
+  pkg_orchestration["orchestration"]
+  svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
+  pkg_tool_orchestration["tool-orchestration"]
+  pkg_ui_orchestration["ui-orchestration"]
+  pkg_remote_auth["remote-auth"]
+  svc_remoteAuth["ctx.remoteAuth<br/>Remote device authentication authority"]
+  pkg_connection["connection"]
   pkg_storage["storage"]
   svc_storage["ctx.storage<br/>Non-session storage hub"]
   pkg_storage_json["storage-json"]
@@ -77,6 +118,10 @@ flowchart LR
   pkg_tool_fs["tool-fs"]
   pkg_tool_terminal["tool-terminal"]
   pkg_tool_web["tool-web"]
+  pkg_task_template["task-template"]
+  svc_taskTemplates["ctx.taskTemplates<br/>Private task-template lifecycle and selection"]
+  pkg_task_template_context["task-template-context"]
+  pkg_task_template_rpc["task-template-rpc"]
   svc_tools["ctx.tools<br/>Tool registry and guarded execution pipeline"]
   pkg_tool_ask_user["tool-ask-user"]
   pkg_tool_cordis["tool-cordis"]
@@ -167,6 +212,10 @@ flowchart LR
   pkg_web_search_perplexity["web-search-perplexity"]
   pkg_web_search_deepseek["web-search-deepseek"]
   pkg_web_fetch_http["web-fetch-http"]
+  pkg_browser["browser"]
+  svc_browser["ctx.browser<br/>Provider-neutral interactive browser seam"]
+  pkg_browser_ego_lite["browser-ego-lite"]
+  pkg_tool_browser["tool-browser"]
   pkg_spill["spill"]
   svc_spillStore["ctx.spillStore<br/>Spill storage seam"]
   pkg_spill_local["spill-local"]
@@ -177,7 +226,6 @@ flowchart LR
   pkg_directory_picker_browse["directory-picker-browse"]
   pkg_webserver["webserver"]
   svc_webServer["ctx.webServer<br/>HTTP route registration"]
-  pkg_connection["connection"]
   pkg_modules["modules"]
   pkg_hmr["hmr"]
   svc_clientModules["ctx.clientModules<br/>Client plugin graph host"]
@@ -205,16 +253,25 @@ flowchart LR
   pkg_attachment_local --> svc_attachments
   pkg_bash_local --> svc_shell
   pkg_bash_sandbox --> svc_shell
+  pkg_browser --> svc_browser
+  pkg_browser_ego_lite --> svc_browser
+  pkg_capability_capsule --> svc_capabilityCapsules
   pkg_code_runtime --> svc_codeRuntime
   pkg_code_runtime_worker --> svc_codeRuntime
   pkg_commands --> svc_commands
   pkg_compaction --> svc_compaction
   pkg_compaction_basic --> svc_compaction
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
+  pkg_context_compiler --> svc_contextCompiler
+  pkg_continual_harness --> svc_continualHarness
+  pkg_continual_harness --> svc_continualHarnessSkills
+  pkg_continual_harness_local --> svc_continualHarness
   pkg_cordis_host_runner --> svc_cordisInspect
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
   pkg_credentials_local --> svc_credentials
+  pkg_debate --> svc_debates
+  pkg_debate_local --> svc_debates
   pkg_directory_picker --> svc_directoryPicker
   pkg_directory_picker_browse --> svc_directoryPicker
   pkg_directory_picker_native --> svc_directoryPicker
@@ -224,6 +281,7 @@ flowchart LR
   pkg_fs_local --> svc_fs
   pkg_fs_sandbox --> svc_fs
   pkg_goal --> svc_goals
+  pkg_intent_compiler --> svc_intentCompiler
   pkg_invariants --> svc_invariants
   pkg_jobs --> svc_jobs
   pkg_jobs_local --> svc_jobs
@@ -234,10 +292,29 @@ flowchart LR
   pkg_lsp --> svc_lsp
   pkg_lsp_local --> svc_lsp
   pkg_message_feedback --> svc_messageFeedback
+  pkg_model_allocation --> svc_modelAllocation
+  pkg_model_allocation_local --> svc_modelAllocation
+  pkg_model_worker --> svc_modelWorkers
+  pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
+  pkg_orchestration --> svc_orchestrations
+  pkg_orchestration_local --> svc_capabilityCapsules
+  pkg_orchestration_local --> svc_contextCompiler
+  pkg_orchestration_local --> svc_intentCompiler
+  pkg_orchestration_local --> svc_orchestrations
   pkg_permission_presets --> svc_permissionPresets
+  pkg_physical_operator --> svc_physicalOperators
+  pkg_physical_operator_resident --> svc_physicalOperators
+  pkg_physical_operator_subagent --> svc_physicalOperators
   pkg_plan_mode --> svc_planMode
   pkg_pwsh_local --> svc_shell
+  pkg_remote_auth --> svc_remoteAuth
+  pkg_resident_operator --> svc_residentOperators
+  pkg_resident_operator_local --> svc_residentOperators
+  pkg_rlm_runtime --> svc_rlmRuntime
+  pkg_rlm_runtime_local --> svc_rlmRuntime
+  pkg_rlm_strategy --> svc_rlmStrategy
+  pkg_rlm_strategy_local --> svc_rlmStrategy
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
@@ -279,6 +356,7 @@ flowchart LR
   pkg_subprocess_e2b --> svc_subprocess
   pkg_subprocess_local --> svc_subprocess
   pkg_system_prompt --> svc_systemPrompt
+  pkg_task_template --> svc_taskTemplates
   pkg_terminal --> svc_terminals
   pkg_terminal_bash --> svc_terminals
   pkg_token_meter --> svc_tokenMeter
@@ -305,9 +383,13 @@ flowchart LR
   svc_approval --> pkg_tools
   svc_attachments --> pkg_host_runtime
   svc_attachments --> pkg_llm_pi_ai
+  svc_browser --> pkg_orchestration_local
+  svc_browser --> pkg_tool_browser
   svc_clientModules --> pkg_hmr
   svc_codeRuntime --> pkg_tools
   svc_compaction --> pkg_compaction_basic
+  svc_continualHarness --> pkg_orchestration_local
+  svc_continualHarnessSkills --> pkg_continual_harness_local
   svc_cordisInspect --> pkg_tool_cordis
   svc_credentials --> pkg_apiproxy
   svc_credentials --> pkg_llm_deepseek
@@ -328,6 +410,16 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_modelAllocation --> pkg_orchestration_local
+  svc_modelWorkers --> pkg_orchestration_local
+  svc_orchestrations --> pkg_tool_orchestration
+  svc_orchestrations --> pkg_ui_orchestration
+  svc_physicalOperators --> pkg_tool_physical_operator
+  svc_remoteAuth --> pkg_connection
+  svc_remoteAuth --> pkg_ui_orchestration
+  svc_residentOperators --> pkg_physical_operator_resident
+  svc_rlmRuntime --> pkg_orchestration_local
+  svc_rlmStrategy --> pkg_orchestration_local
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -383,6 +475,10 @@ flowchart LR
   svc_systemPrompt --> pkg_tool_terminal
   svc_systemPrompt --> pkg_tool_web
   svc_systemPrompt --> pkg_tools
+  svc_taskTemplates --> pkg_orchestration_local
+  svc_taskTemplates --> pkg_task_template_context
+  svc_taskTemplates --> pkg_task_template_rpc
+  svc_taskTemplates --> pkg_tool_physical_operator
   svc_terminals --> pkg_tool_terminal
   svc_tokenMeter --> pkg_compaction_basic
   svc_toolResultPruner --> pkg_compaction_basic
@@ -423,6 +519,20 @@ flowchart LR
 | `ctx.settings` | `seam` | [`settings`](../packages/settings/settings) | [`settings-file`](../packages/settings/settings-file) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), `apiproxy` | - | Plugins register namespace schemas and resolve layered values; providers store the raw document. The LLM adapters register their entry config as the composition base under the user section; the web gateway serves redacted layered descriptors and writes the user layer. |
 | `ctx.credentials` | `seam` | [`credentials`](../packages/credentials/credentials) | [`credentials-local`](../packages/credentials/credentials-local) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), `apiproxy` | - | Configuration carries references to secrets; providers own the values. Consumers resolve per operation, so a rotated credential reaches the very next request; the web gateway exposes value-free views and write-only storage. |
 | `ctx.sessionTelemetry` | `seam` | [`session-telemetry`](../packages/session/session-telemetry) | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | - | - | The seam captures, redacts, and hands session records to one backend; nothing else consumes the service — its output leaves the process. |
+| `ctx.physicalOperators` | `seam` | [`physical-operator`](../packages/physical-operator/physical-operator) | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent), [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | - | Stable deployment-owned operator ids, explicit execution lifetime, live availability, fail-fast capacity admission, and paired lifecycle events; providers keep subagent and resident transports outside the consumer. |
+| `ctx.residentOperators` | `seam` | [`resident-operator`](../packages/physical-operator/resident-operator) | [`resident-operator-local`](../packages/physical-operator/resident-operator-local) | [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | - | Trusted management and durable turn execution over one daemon-owned Session, Receipt, Lease, Event, and Artifact store; model execution enters through ctx.physicalOperators. |
+| `ctx.intentCompiler` | `seam` | [`intent-compiler`](../packages/orchestration/intent-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers compile immutable raw requests into versioned Intent IR with deterministic lineage; they cannot create runs or dispatch operators. |
+| `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Providers project certified sources under token, lineage, redaction, and degradation policy without becoming a source of record. |
+| `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Late-binds content-addressed capability manifests under the Graph certificate; bindings may only implement or narrow authority. |
+| `ctx.continualHarness` | `seam` | [`continual-harness`](../packages/orchestration/continual-harness) | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Provides bounded session/workspace outcome context while the TaskGraph daemon remains the only orchestration state authority. |
+| `ctx.debates` | `seam` | [`debate`](../packages/orchestration/debate) | [`debate-local`](../packages/orchestration/debate-local) | - | - | Defines bounded roster, round, evidence, dissent, convergence, and control records; a TaskGraph or RLM Consumer remains responsible for execution ownership and capability selection. |
+| `ctx.continualHarnessSkills` | `core` | [`continual-harness`](../packages/orchestration/continual-harness) | - | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | - | Registers trusted TypeScript modules and invokes only an explicitly allowed module/callable pair; generated harness content cannot create executable code at runtime. |
+| `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Selects qualified subscription-first execution offers and recommends parallelism without dispatching work. |
+| `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Registers provider-neutral one-shot model lanes; the metered DeepSeek Provider remains a last-resort execution path. |
+| `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Seals bounded recursive execution instructions inside a node attempt and never creates or mutates the global TaskGraph. |
+| `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Owns the node-local TypeScript kernel, asynchronous child registry, family messages, receipts, goals, and recovery without becoming a second global TaskGraph scheduler. |
+| `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Owns provider-neutral compile, run, event, control, approval, indeterminate-resolution, and capability-update APIs; the local daemon is the sole writer. |
+| `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | The Server is the sole writer for pairing, credential exchange, fixed device scopes, revocation, and payload-free command receipts; transport and orchestration projections consume authenticated principals without owning credential state. |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | Waits for every configured backend, then publishes the domain form as one lifecycle-bound service for typed durable state. |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | Owns local per-assistant-message feedback, lifecycle and target validation, per-item compare-and-set, and the Host unary Remote contract without entering Session history or telemetry. |
@@ -431,6 +541,7 @@ flowchart LR
 | `ctx.sessionReferenceResolver` | `core` | [`session-reference`](../packages/context/session-reference) | - | - | - | Projects bounded current-surface conversation snapshots into durable untrusted message context; host adapters own mention syntax. |
 | `ctx.sessionTitle` | `seam` | [`session-title`](../packages/session/session-title) | [`session-title-first-prompt-llm`](../packages/session/session-title-first-prompt-llm), [`session-title-all-prompts-llm`](../packages/session/session-title-all-prompts-llm) | - | - | Owns the deterministic fallback, latest-title fold, and sole optional asynchronous provider registration. |
 | `ctx.systemPrompt` | `core` | [`system-prompt`](../packages/core/system-prompt) | - | [`agent-loop`](../packages/core/agent-loop), [`tools`](../packages/core/tools), [`tool-fs`](../packages/fs/tool-fs), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-web`](../packages/web/tool-web) | - | Collects prompt sections and model-facing tool schemas for each step. |
+| `ctx.taskTemplates` | `seam` | [`task-template`](../packages/prompt/task-template) | [`task-template`](../packages/prompt/task-template) | [`task-template-context`](../packages/prompt/task-template-context), [`task-template-rpc`](../packages/prompt/task-template-rpc), [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator), [`orchestration-local`](../packages/orchestration/orchestration-local) | - | The file Provider atomically persists private template documents; direct Agent, physical-operator, TaskGraph, and RPC Consumers select or manage them without granting execution authority. |
 | `ctx.tools` | `core` | [`tools`](../packages/core/tools) | - | [`agent-loop`](../packages/core/agent-loop), [`tool-ask-user`](../packages/interaction/tool-ask-user), [`tool-bash`](../packages/shell/tool-bash), [`tool-cordis`](../packages/extensions/tool-cordis), [`tool-fs`](../packages/fs/tool-fs), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-skill`](../packages/skill/tool-skill), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-todo`](../packages/todo/tool-todo), [`tool-web`](../packages/web/tool-web) | - | Registers capabilities, owns Code Mode transport, and routes calls through pre-policy, monotonic guards, around dispatch, post-policy, and final-result observation. |
 | `ctx.userQuestions` | `seam` | [`user-questions`](../packages/interaction/user-questions) | - | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | UI front ends provide the active human-answer provider; tool-ask-user pauses a tool call on the provider-neutral ask() promise. |
 | `ctx.planMode` | `core` | [`plan-mode`](../packages/plan/plan-mode) | - | - | - | Folds logged plan/mode state, flushes user selections at turn boundaries, renders deployment-owned guidance, registers /plan, and keeps the plan-exit schema stable across transitions. |
@@ -458,6 +569,7 @@ flowchart LR
 | `ctx.subagents` | `seam` | [`subagent`](../packages/subagent/subagent) | [`subagent-spawn-in-process`](../packages/subagent/subagent-spawn-in-process), [`subagent-fork-in-process`](../packages/subagent/subagent-fork-in-process), [`subagent-acp`](../packages/subagent/subagent-acp), [`subagent-codex`](../packages/subagent/subagent-codex), [`subagent-claude-code`](../packages/subagent/subagent-claude-code), [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-subagent-control`](../packages/subagent/tool-subagent-control), [`tool-ralph`](../packages/workflow/tool-ralph) | - | Providers implement transports; the service also owns optional Activation-based continuation orchestration, tool-subagent selects one-shot or continuable delegation, tool-subagent-control delivers follow-ups, and tool-ralph requires one fresh structured-output route. |
 | `ctx.jobs` | `seam` | [`jobs`](../packages/jobs/jobs) | [`jobs-local`](../packages/jobs/jobs-local) | [`tool-bash`](../packages/shell/tool-bash), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-jobs`](../packages/jobs/tool-jobs) | - | Producers (background bash, PTY sends, and subagent delegations) register running work; tool-jobs is the model-facing controller that reads, lists, and kills it; jobs-local is the process-local registry. |
 | `ctx.web` | `seam` | [`web`](../packages/web/web) | [`web-search-exa`](../packages/web/web-search-exa), [`web-search-perplexity`](../packages/web/web-search-perplexity), [`web-search-deepseek`](../packages/web/web-search-deepseek), [`web-fetch-http`](../packages/web/web-fetch-http) | [`tool-web`](../packages/web/tool-web) | - | Search and fetch providers register into one ctx.web seam; tool-web owns the stable model-facing names. |
+| `ctx.browser` | `seam` | [`browser`](../packages/browser/browser) | [`browser-ego-lite`](../packages/browser/browser-ego-lite) | [`tool-browser`](../packages/browser/tool-browser), [`orchestration-local`](../packages/orchestration/orchestration-local) | - | Providers own browser transport, profile, and lifecycle; model and orchestration Consumers use the typed ctx.browser seam and never depend on Ego Lite internals. |
 | `ctx.spillStore` | `seam` | [`spill`](../packages/spill/spill) | [`spill-local`](../packages/spill/spill-local) | [`spill-policy`](../packages/spill/spill-policy) | - | The backend saves oversized tool text and returns a model-facing locator plus retrieval hint; spill-policy is the tools/post-execute consumer that decides when to spill. |
 | `ctx.directoryPicker` | `seam` | `directory-picker` | `directory-picker-native`, `directory-picker-browse` | `apiproxy` | - | Discriminated interaction capability: the native backend opens one OS chooser on the host display, the browse backend serves listing/creation primitives for the in-app browser; dual-face backends fill ui-workspace directory-flow slots from their browser halves (no wire advertisement). |
 | `ctx.webServer` | `core` | `webserver` | - | `connection`, `modules`, `hmr` | - | Plain node:http carrier: named-route registry, index transform taps, and the static dist fallback; web-transport plugins register their own routes. |

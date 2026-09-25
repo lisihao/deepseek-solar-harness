@@ -29,7 +29,11 @@ import { dirname, join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
-import type {} from '@deepseek-ai/dsh-host-webserver'
+import {
+  createHttpBodyVariants,
+  encodedHttpBodyHeaders,
+  type HttpBodyVariants,
+} from '@deepseek-ai/dsh-host-webserver'
 import type { WebBootEntry, WebBootGraph } from './client/manifest.ts'
 
 export type {
@@ -103,6 +107,7 @@ class ClientPackageCompositionError extends AggregateError {
 interface WebPluginRecord {
   entry: WebBootEntry
   clientPath: string
+  body: HttpBodyVariants
 }
 
 /** Narrow an unknown parsed JSON value to the `dsh.client` declaration, throwing on malformed fields. */
@@ -274,9 +279,11 @@ export class ClientModuleRegistry extends Service {
   rebuilt(id: string): string | undefined {
     const record = this.table.get(id)
     if (record === undefined) return undefined
-    const rev = shortHash(readFileSync(record.clientPath))
+    const body = readFileSync(record.clientPath)
+    const rev = shortHash(body)
     if (rev === record.entry.rev) return rev
     record.entry = graphRow(id, rev, record.entry.inject, record.entry.immediately === true)
+    record.body = createHttpBodyVariants(body)
     this.composed = this.compose()
     for (const notify of this.rebuildListeners) {
       // Containment: rebuilt() runs inside the HMR watch callback — a
@@ -365,15 +372,16 @@ export class ClientModuleRegistry extends Service {
   }
 
   /**
-   * Read the activation-time bundle revision.
+   * Read the activation-time bundle and revision.
    * @param pkgName - package that declares the client bundle.
    * @param clientPath - absolute path of the built client artifact.
-   * @returns the bundle content's short hash for use as its revision.
+   * @returns the bundle body variants and content hash revision.
    * @throws {MissingClientBundleError} when the read fails with `ENOENT`; other filesystem errors are rethrown unchanged.
    */
-  private initialBundleRevision(pkgName: string, clientPath: string): string {
+  private initialBundle(pkgName: string, clientPath: string): { rev: string; body: HttpBodyVariants } {
     try {
-      return shortHash(readFileSync(clientPath))
+      const body = readFileSync(clientPath)
+      return { rev: shortHash(body), body: createHttpBodyVariants(body) }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       throw new MissingClientBundleError(pkgName, clientPath, error)
@@ -395,8 +403,12 @@ export class ClientModuleRegistry extends Service {
     if (meta === null) return false
     // The rev rides the row from here on: a fiber restart reuses the row (and
     // its rev) untouched; only rebuilt() re-reads the bundle.
-    const rev = this.initialBundleRevision(entryName, meta.clientPath)
-    this.table.set(entryName, { entry: graphRow(entryName, rev, meta.inject, meta.immediately), clientPath: meta.clientPath })
+    const { rev, body } = this.initialBundle(entryName, meta.clientPath)
+    this.table.set(entryName, {
+      entry: graphRow(entryName, rev, meta.inject, meta.immediately),
+      clientPath: meta.clientPath,
+      body,
+    })
     return true
   }
 
@@ -425,7 +437,8 @@ export class ClientModuleRegistry extends Service {
       return
     }
     /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server requests. */
-    const pathname = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)
+    const requestUrl = new URL(req.url ?? '/', 'http://x')
+    const pathname = decodeURIComponent(requestUrl.pathname)
     // The id may contain a scope slash. Anything else under /plugins (including
     // /plugins/events when the HMR row is absent) is an unknown resource.
     const prefix = '/plugins/'
@@ -433,27 +446,37 @@ export class ClientModuleRegistry extends Service {
     const bundleSuffix = '/client.js'
     const isSourceMap = pathname.startsWith(prefix) && pathname.endsWith(mapSuffix)
     const suffix = isSourceMap ? mapSuffix : bundleSuffix
-    const clientPath = pathname.startsWith(prefix) && pathname.endsWith(suffix)
-      ? this.clientPath(pathname.slice(prefix.length, -suffix.length))
+    const id = pathname.startsWith(prefix) && pathname.endsWith(suffix)
+      ? pathname.slice(prefix.length, -suffix.length)
       : undefined
-    const path = clientPath === undefined ? undefined : `${clientPath}${isSourceMap ? '.map' : ''}`
-    if (path === undefined) {
+    const record = id === undefined ? undefined : this.table.get(id)
+    if (record === undefined) {
       res.writeHead(404)
       res.end()
       return
     }
-    try {
-      const body = await readFile(path)
-      res.writeHead(200, {
-        'content-type': isSourceMap ? 'application/json; charset=utf-8' : 'text/javascript; charset=utf-8',
-        'cache-control': 'no-cache',
-      })
-      res.end(body)
-    } catch {
-      // Registered but unreadable (bundle not built yet): loud 404 beats a silent SPA-fallback HTML page.
-      res.writeHead(404)
-      res.end()
+    const path = `${record.clientPath}${isSourceMap ? '.map' : ''}`
+    let bodyVariants = record.body
+    if (isSourceMap) {
+      try {
+        bodyVariants = createHttpBodyVariants(await readFile(path))
+      } catch {
+        // A missing map is a loud 404 rather than SPA-fallback HTML served as JSON.
+        res.writeHead(404)
+        res.end()
+        return
+      }
     }
+    const selected = await bodyVariants.select(req.headers['accept-encoding'])
+    const cacheControl = !isSourceMap && requestUrl.searchParams.get('rev') === record.entry.rev
+      ? 'public, max-age=31536000, immutable'
+      : 'no-cache'
+    res.writeHead(200, {
+      'content-type': isSourceMap ? 'application/json; charset=utf-8' : 'text/javascript; charset=utf-8',
+      'cache-control': cacheControl,
+      ...encodedHttpBodyHeaders(selected),
+    })
+    res.end(req.method === 'HEAD' ? undefined : selected.body)
   }
 }
 

@@ -9,6 +9,7 @@
 | [`scope/`](scope/README.md) | 作用域上下文注册原语 | 库，不使用 ctx key |
 | [`session/`](session/README.md) | 事件溯源会话日志和内存存储 | `ctx.sessions` |
 | [`system-prompt/`](system-prompt/README.md) | 提示词和工具 schema 组装注册表 | `ctx.systemPrompt` |
+| [`output-style/`](output-style/README.md) | 可卸载的回答排版指引 | 向 `ctx.systemPrompt` 贡献内容 |
 | [`tools/`](tools/README.md) | 作用域工具注册表和执行流水线 | `ctx.tools` |
 | [`agent/`](agent/README.md) | Agent 接口、注册表和事件词汇 | `ctx.agents` |
 | [`agent-default-model/`](agent-default-model/README.md) | 各 Agent 入口共享的默认模型选择 | `ctx.agentDefaultModel` |

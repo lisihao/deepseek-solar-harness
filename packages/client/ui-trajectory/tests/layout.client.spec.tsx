@@ -109,6 +109,291 @@ describe('deriveTrajectoryLayout', () => {
     })
   })
 
+  it('adds one bounded physical-operator group without exposing a full final transcript', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-123456789', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [
+          { seq: 10, time: 10_000, type: 'dispatch' },
+          { seq: 11, time: 10_100, type: 'progress', phase: 'reasoning' },
+          {
+            seq: 12, time: 10_200, type: 'observation',
+            observation: { kind: 'public-output', publicOutputPreview: '已完成物理执行阶段。' },
+          },
+          {
+            seq: 13, time: 10_300, type: 'observation',
+            observation: { kind: 'tool-started', toolName: 'Bash' },
+          },
+          {
+            seq: 14, time: 10_400, type: 'observation',
+            observation: { kind: 'usage-updated', usage: { inputTokens: 120, outputTokens: 48, costUsd: 0.012345 } },
+          },
+        ],
+      }],
+    })
+    const group = turns[0]?.groups.find(value => value.title.startsWith('Operator · Codex'))
+    expect(group?.cells).toMatchObject([
+      { kind: 'operator', text: 'Codex 已派发' },
+      { kind: 'operator', text: '阶段 · 推理与执行' },
+      { kind: 'operator', text: '公开输出' },
+      { kind: 'operator', text: '原生工具开始 · Bash' },
+      { kind: 'operator', text: '用量更新 · 输入 120 · 输出 48 · 费用 $0.012345' },
+    ])
+    expect(group?.cells[2]?.outputDetail).toContain('已完成物理执行阶段。')
+    expect(group?.cells[4]?.outputDetail).toContain('- 费用：$0.012345')
+  })
+
+  it('lays out public Debate rounds, fallback routing, convergence, and synthesis as readable records', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      debateExecutions: [{
+        runId: 'debate-run-123456789', topic: '当前用户议题', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [
+          { seq: 10, time: 10_000, sourceSequence: 1, state: 'planned', claims: [], evidenceRefs: [] },
+          {
+            seq: 11, time: 10_100, sourceSequence: 2, state: 'settled', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            publicOutputPreview: '先建立恢复基线。', publicOutputRef: 'artifact:proposer-r1',
+            claims: [{ statement: '先补齐恢复基线。', status: 'supported', severity: 'high' }],
+            evidenceRefs: ['artifact:baseline'], usage: { inputTokens: 120, outputTokens: 48 },
+          },
+          {
+            seq: 12, time: 10_200, sourceSequence: 3, state: 'failed', round: 1,
+            role: {
+              title: '怀疑式证伪者', kind: 'participant', requestedOperatorId: 'claude-code', requestedModel: 'claude-fable-5',
+              actualOperatorId: 'codex', actualModel: 'gpt-5.6-sol', fallbackReasonCode: 'MODEL_UNAVAILABLE',
+            },
+            claims: [], evidenceRefs: [],
+          },
+          {
+            seq: 13, time: 10_300, sourceSequence: 4, state: 'budget-limited', round: 2,
+            claims: [], evidenceRefs: [],
+            convergence: { status: 'budget_limited', score: 0.44, threshold: 0.82, reason: '输入预算已用完。' },
+          },
+          {
+            seq: 14, time: 10_400, sourceSequence: 5, state: 'synthesis-settled', claims: [], evidenceRefs: [],
+            synthesis: {
+              state: 'settled', outputPreview: '主持人结论：先测量再重构。', artifactRef: 'artifact:synthesis',
+              unresolvedCount: 1, dissentCount: 1,
+            },
+          },
+        ],
+      }],
+    })
+
+    const group = turns[0]?.groups.find(value => value.title === 'Debate · 当前用户议题')
+    expect(group?.cells).toMatchObject([
+      { kind: 'debate', text: '已创建' },
+      { kind: 'debate', text: '第 1 轮 · 建设性提案者 · 已提交观点', previewMarkdown: '先建立恢复基线。', input: 120, output: 48 },
+      { kind: 'debate', text: '第 1 轮 · 怀疑式证伪者 · 执行失败', isError: true },
+      { kind: 'debate', text: '第 2 轮 · 预算已到上限' },
+      { kind: 'debate', text: '主持人总结完成', previewMarkdown: '主持人结论：先测量再重构。' },
+    ])
+    const settled = group?.cells[1]
+    expect(settled?.outputDetail).toContain('### 本楼主张')
+    expect(settled?.outputDetail).toContain('- 先补齐恢复基线。（supported · high）')
+    expect(settled?.outputDetail).toContain('**模型路由**：Codex / gpt-5.6-sol')
+    expect(group?.cells[2]?.outputDetail).toContain('Claude Code / claude-fable-5 → Codex / gpt-5.6-sol')
+    expect(group?.cells[3]?.outputDetail).toContain('### 收敛判断')
+    expect(group?.cells[4]?.outputDetail).toContain('### 主持人总结')
+    expect(group?.cells[1]?.recordId).toBe(['debate', 'debate-run-123456789', '2'].join('\u0000'))
+  })
+
+  it('expands each native Debate progress fact into one readable record with origin timing', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      debateExecutions: [{
+        runId: 'debate-progress-123456789', topic: '进度议题', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [
+          { seq: 10, time: 10_000, sourceSequence: 1, state: 'planned', claims: [], evidenceRefs: [] },
+          {
+            seq: 11, time: 10_100, sourceSequence: 2, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+              actualOperatorId: 'codex', actualModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'phase', sourceTime: '2026-09-03T09:00:00.000Z', phase: 'reasoning' },
+          },
+          {
+            seq: 12, time: 10_200, sourceSequence: 3, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'public-output', sourceTime: '2026-09-03T09:00:01.000Z', publicOutputPreview: '已完成基线。' },
+          },
+          {
+            seq: 13, time: 10_300, sourceSequence: 4, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'tool-started', sourceTime: '2026-09-03T09:00:02.000Z', toolName: 'Bash' },
+          },
+          {
+            seq: 14, time: 10_400, sourceSequence: 5, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'tool-completed', sourceTime: '2026-09-03T09:00:03.000Z', toolName: 'Bash' },
+          },
+          {
+            seq: 15, time: 10_500, sourceSequence: 6, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'approval-required', sourceTime: '2026-09-03T09:00:04.000Z', approvalKind: 'workspace-write', approvalPreview: '需要批准工作区写入。' },
+          },
+          {
+            seq: 16, time: 10_600, sourceSequence: 7, state: 'progress', round: 1,
+            role: {
+              title: '建设性提案者', kind: 'participant', requestedOperatorId: 'codex', requestedModel: 'gpt-5.6-sol',
+            },
+            claims: [], evidenceRefs: [],
+            progress: { kind: 'usage-updated', sourceTime: '2026-09-03T09:00:05.000Z', usage: { inputTokens: 120, outputTokens: 48 } },
+          },
+        ],
+      }],
+    })
+
+    const group = turns[0]?.groups.find(value => value.title === 'Debate · 进度议题')
+    // A native progress event replaces the generic lifecycle row rather than
+    // producing a duplicate “状态已更新” row.
+    expect(group?.cells).toHaveLength(7)
+    expect(group?.cells.map(cell => cell.text)).toEqual([
+      '已创建',
+      '第 1 轮 · 建设性提案者 · 阶段 · 推理与执行',
+      '第 1 轮 · 建设性提案者 · 公开输出更新',
+      '第 1 轮 · 建设性提案者 · 工具开始 · Bash',
+      '第 1 轮 · 建设性提案者 · 工具完成 · Bash',
+      '第 1 轮 · 建设性提案者 · 需要批准 · workspace-write',
+      '第 1 轮 · 建设性提案者 · 用量更新 · 输入 120 · 输出 48',
+    ])
+    expect(group?.cells[1]?.startedAt).toBe(Date.parse('2026-09-03T09:00:00.000Z'))
+    expect(group?.cells[2]?.previewMarkdown).toBe('已完成基线。')
+    expect(group?.cells[2]?.outputDetail).toContain('### 公开输出')
+    expect(group?.cells[3]?.outputDetail).toContain('- Bash')
+    expect(group?.cells[5]).toMatchObject({ isError: true, previewMarkdown: '需要批准工作区写入。' })
+    expect(group?.cells[5]?.outputDetail).toContain('### 权限请求')
+    expect(group?.cells[6]).toMatchObject({ input: 120, output: 48 })
+    expect(group?.cells[6]?.outputDetail).toContain('### 用量')
+    expect(group?.cells[6]?.recordId).toBe(['debate', 'debate-progress-123456789', '7', 'progress'].join('\u0000'))
+  })
+
+  it('renders a paired physical tool call with bounded input/result details and stable identity', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [],
+      partial: null,
+      runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-tools', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [{
+          seq: 11, time: 10_100, type: 'tool',
+          tool: {
+            toolCallId: 'tool-call-1', status: 'error',
+            toolName: 'Bash',
+            argumentsShape: { kind: 'object', fields: 1 },
+            resultShape: { kind: 'object', fields: 1 },
+            errorPreview: '权限被拒绝；未执行写入。',
+            callSeq: 11, resultSeq: 12,
+          },
+        }],
+      }],
+    })
+    const cell = turns[0]?.groups[0]?.cells[0]
+    expect(cell).toMatchObject({
+      kind: 'operator', text: 'DSH 工具失败 · Bash', callId: 'tool-call-1', toolName: 'Bash', isError: true,
+      inputDetail: '对象 · 1 个字段',
+      outputDetail: '结果结构\n对象 · 1 个字段\n\n错误预览\n\n权限被拒绝；未执行写入。\n\n工具报告失败',
+      previewMarkdown: '对象 · 1 个字段',
+      resultPreviewMarkdown: '权限被拒绝；未执行写入。',
+    })
+    expect(cell?.recordId).toBe(['physical-operator', 'command-tools', 'tool', 'tool-call-1'].join('\u0000'))
+  })
+
+  it('renders an indeterminate recovered physical tool as a terminal error state', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [], partial: null, runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-indeterminate', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [{
+          seq: 11, time: 10_100, type: 'tool',
+          tool: {
+            toolCallId: 'tool-call-1', status: 'indeterminate', callSeq: 10, resultSeq: 11,
+          },
+        }],
+      }],
+    })
+    expect(turns[0]?.groups[0]?.cells[0]).toMatchObject({
+      kind: 'operator', text: 'DSH 工具状态不确定', isError: true,
+      outputDetail: '工具结果尚无法证明',
+    })
+  })
+
+  it('orders a physical command by source sequence and keeps a settled success out of error state', () => {
+    const nodes = [
+      { kind: 'user', seq: 1, time: 1_000, content: [{ type: 'text', text: 'start' }], source: null },
+      {
+        kind: 'assistant', seq: 5, time: 5_000, turn: 1, step: 1,
+        blocks: [{ kind: 'text', text: 'done' }],
+      },
+    ] as unknown as ConversationSnapshot['nodes']
+    const turns = deriveTrajectoryLayout({
+      nodes,
+      partial: null,
+      runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'command-2', operatorId: 'codex', turn: 1, step: 1,
+        dispatchSeq: 3, dispatchTime: 3_000,
+        entries: [
+          { seq: 3, time: 3_000, type: 'dispatch' },
+          { seq: 4, time: 4_000, type: 'terminal', code: 'completed', outcome: 'success' },
+        ],
+      }],
+    })
+    const groups = turns[0]?.groups ?? []
+    expect(groups.map(group => group.title)).toEqual([
+      'Message', 'Operator · Codex · command-2', 'Step 1',
+    ])
+    const terminal = groups[1]?.cells[1]
+    expect(terminal?.text).toBe('执行完成 · completed')
+    expect(terminal?.isError).toBeUndefined()
+    expect(groups.flatMap(group => group.cells).map(cell => cell.index)).toEqual([1, 2, 3, 4])
+  })
+
+  it('folds an explicit tool-dispatch without an agent-loop location into the first visible turn', () => {
+    const turns = deriveTrajectoryLayout({
+      nodes: [], partial: null, runningCalls: [],
+      physicalOperatorExecutions: [{
+        commandId: 'tool-command', operatorId: 'claude-code', turn: 0, step: 0,
+        dispatchSeq: 10, dispatchTime: 10_000,
+        entries: [{ seq: 10, time: 10_000, type: 'dispatch' }],
+      }],
+    })
+
+    expect(turns).toMatchObject([{
+      turn: 1,
+      groups: [{ title: 'Operator · Claude Code · tool-command' }],
+    }])
+  })
+
   it('appends a streaming partial without rebuilding unaffected finalized turns', () => {
     const nodes = [{
       kind: 'assistant', seq: 2, time: 2_000, turn: 1, step: 1,

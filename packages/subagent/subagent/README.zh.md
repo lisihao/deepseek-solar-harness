@@ -31,6 +31,8 @@ subagent seam 允许一个 agent（智能体）通过具名提供方把工作委
 
 同进程请求、描述符、结果和事件 payload 都是可信的类型值，并按不可变约定借用。服务不会克隆或冻结它们；序列化和不可信输入校验属于真实的进程、worker、持久化和模型边界。
 
+产品型 Provider 可以通过 `provider.authentication` 提供一份由 Provider 自己负责的计费权威声明。`native-subscription` 表示 Provider 没有提供显式子进程环境，而是把身份验证交给宿主产品的原生账户状态；`explicit-environment` 表示部署配置至少提供了一个子进程环境条目。字段缺失代表不可信，而不是隐式模式。Registry 只报告该元数据，不做全局强制；物理算子等受限 Consumer 必须在发现阶段和真正执行前各检查一次。
+
 ## 能力
 
 启动时功能通过 `provider.capabilities` 声明，因为服务必须在创建子 agent 前拒绝不受支持的一次性请求：

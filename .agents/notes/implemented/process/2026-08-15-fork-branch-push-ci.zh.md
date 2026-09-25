@@ -10,6 +10,8 @@ GitHub 会把 fork 贡献的拉取请求事件发送给目标仓库，而不会�
 
 ## Decision
 
+> 本仓当前交付流程已由 [Solar 治理关键路径](2026-08-20-solar-governance-critical-path.md) 取代本决策。`fork-ci.yml` 仍可手工调度为诊断矩阵，但不再随每次 `codex/**` 推送自动运行，因为拉取请求 CI 已提供与提交绑定的合并结论。
+
 该 fork 由 [fork-ci.yml](../../../../.github/workflows/fork-ci.yml) 提供只作用于 `codex/**` 分支的推送触发适配层。它在标准 GitHub 托管 runner 上调用仓库原生的 Linux 主门禁、Node 兼容性、Python SDK、发布形态 Python 运行时和 Windows 阻塞命令。该适配层不替换也不修改上游 [ci.yml](../../../../.github/workflows/ci.yml)，只补充 fork 无法继承的事件和 runner 映射。
 
 最终任务保留分支保护使用的 `all checks passed` 名称，依赖全部必需适配任务，并在失败后继续运行；任一依赖失败、取消或跳过都会使它失败。工作流只有仓库只读权限，会取消同一分支上被新提交取代的运行，也不会读取 secret。Linux 任务使用 `origin/master` 检查归档 Agent Note，并采用适合标准托管 runner 的有界 worker 数量。

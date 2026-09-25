@@ -56,6 +56,47 @@ flowchart LR
   pkg_session_telemetry["session-telemetry"]
   svc_sessionTelemetry["ctx.sessionTelemetry<br/>Session telemetry seam"]
   pkg_session_telemetry_otel["session-telemetry-otel"]
+  pkg_physical_operator["physical-operator"]
+  svc_physicalOperators["ctx.physicalOperators<br/>Physical operator registry"]
+  pkg_physical_operator_subagent["physical-operator-subagent"]
+  pkg_physical_operator_resident["physical-operator-resident"]
+  pkg_tool_physical_operator["tool-physical-operator"]
+  pkg_resident_operator["resident-operator"]
+  svc_residentOperators["ctx.residentOperators<br/>Resident operator control"]
+  pkg_resident_operator_local["resident-operator-local"]
+  pkg_intent_compiler["intent-compiler"]
+  svc_intentCompiler["ctx.intentCompiler<br/>Immutable Intent IR compiler"]
+  pkg_orchestration_local["orchestration-local"]
+  pkg_context_compiler["context-compiler"]
+  svc_contextCompiler["ctx.contextCompiler<br/>Bounded Context Packet compiler"]
+  pkg_capability_capsule["capability-capsule"]
+  svc_capabilityCapsules["ctx.capabilityCapsules<br/>Capability Capsule registry and resolver"]
+  pkg_continual_harness["continual-harness"]
+  svc_continualHarness["ctx.continualHarness<br/>Continuous Harness snapshot and outcome seam"]
+  pkg_continual_harness_local["continual-harness-local"]
+  pkg_debate["debate"]
+  svc_debates["ctx.debates<br/>Provider-neutral bounded debate seam"]
+  pkg_debate_local["debate-local"]
+  svc_continualHarnessSkills["ctx.continualHarnessSkills<br/>Continuous Harness TypeScript skill registry"]
+  pkg_model_allocation["model-allocation"]
+  svc_modelAllocation["ctx.modelAllocation<br/>Quota-aware model allocation seam"]
+  pkg_model_allocation_local["model-allocation-local"]
+  pkg_model_worker["model-worker"]
+  svc_modelWorkers["ctx.modelWorkers<br/>One-shot model worker registry"]
+  pkg_model_worker_deepseek["model-worker-deepseek"]
+  pkg_rlm_strategy["rlm-strategy"]
+  svc_rlmStrategy["ctx.rlmStrategy<br/>Node-local RLM strategy seam"]
+  pkg_rlm_strategy_local["rlm-strategy-local"]
+  pkg_rlm_runtime["rlm-runtime"]
+  svc_rlmRuntime["ctx.rlmRuntime<br/>Persistent programmable RLM runtime"]
+  pkg_rlm_runtime_local["rlm-runtime-local"]
+  pkg_orchestration["orchestration"]
+  svc_orchestrations["ctx.orchestrations<br/>Persistent TaskGraph authority"]
+  pkg_tool_orchestration["tool-orchestration"]
+  pkg_ui_orchestration["ui-orchestration"]
+  pkg_remote_auth["remote-auth"]
+  svc_remoteAuth["ctx.remoteAuth<br/>Remote device authentication authority"]
+  pkg_connection["connection"]
   pkg_storage["storage"]
   svc_storage["ctx.storage<br/>Non-session storage hub"]
   pkg_storage_json["storage-json"]
@@ -79,6 +120,10 @@ flowchart LR
   pkg_tool_fs["tool-fs"]
   pkg_tool_terminal["tool-terminal"]
   pkg_tool_web["tool-web"]
+  pkg_task_template["task-template"]
+  svc_taskTemplates["ctx.taskTemplates<br/>Private task-template lifecycle and selection"]
+  pkg_task_template_context["task-template-context"]
+  pkg_task_template_rpc["task-template-rpc"]
   svc_tools["ctx.tools<br/>Tool registry and guarded execution pipeline"]
   pkg_tool_ask_user["tool-ask-user"]
   pkg_tool_cordis["tool-cordis"]
@@ -169,6 +214,10 @@ flowchart LR
   pkg_web_search_perplexity["web-search-perplexity"]
   pkg_web_search_deepseek["web-search-deepseek"]
   pkg_web_fetch_http["web-fetch-http"]
+  pkg_browser["browser"]
+  svc_browser["ctx.browser<br/>Provider-neutral interactive browser seam"]
+  pkg_browser_ego_lite["browser-ego-lite"]
+  pkg_tool_browser["tool-browser"]
   pkg_spill["spill"]
   svc_spillStore["ctx.spillStore<br/>Spill storage seam"]
   pkg_spill_local["spill-local"]
@@ -179,7 +228,6 @@ flowchart LR
   pkg_directory_picker_browse["directory-picker-browse"]
   pkg_webserver["webserver"]
   svc_webServer["ctx.webServer<br/>HTTP route registration"]
-  pkg_connection["connection"]
   pkg_modules["modules"]
   pkg_hmr["hmr"]
   svc_clientModules["ctx.clientModules<br/>Client plugin graph host"]
@@ -207,16 +255,25 @@ flowchart LR
   pkg_attachment_local --> svc_attachments
   pkg_bash_local --> svc_shell
   pkg_bash_sandbox --> svc_shell
+  pkg_browser --> svc_browser
+  pkg_browser_ego_lite --> svc_browser
+  pkg_capability_capsule --> svc_capabilityCapsules
   pkg_code_runtime --> svc_codeRuntime
   pkg_code_runtime_worker --> svc_codeRuntime
   pkg_commands --> svc_commands
   pkg_compaction --> svc_compaction
   pkg_compaction_basic --> svc_compaction
   pkg_compaction_tool_result_pruner --> svc_toolResultPruner
+  pkg_context_compiler --> svc_contextCompiler
+  pkg_continual_harness --> svc_continualHarness
+  pkg_continual_harness --> svc_continualHarnessSkills
+  pkg_continual_harness_local --> svc_continualHarness
   pkg_cordis_host_runner --> svc_cordisInspect
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
   pkg_credentials_local --> svc_credentials
+  pkg_debate --> svc_debates
+  pkg_debate_local --> svc_debates
   pkg_directory_picker --> svc_directoryPicker
   pkg_directory_picker_browse --> svc_directoryPicker
   pkg_directory_picker_native --> svc_directoryPicker
@@ -226,6 +283,7 @@ flowchart LR
   pkg_fs_local --> svc_fs
   pkg_fs_sandbox --> svc_fs
   pkg_goal --> svc_goals
+  pkg_intent_compiler --> svc_intentCompiler
   pkg_invariants --> svc_invariants
   pkg_jobs --> svc_jobs
   pkg_jobs_local --> svc_jobs
@@ -236,10 +294,29 @@ flowchart LR
   pkg_lsp --> svc_lsp
   pkg_lsp_local --> svc_lsp
   pkg_message_feedback --> svc_messageFeedback
+  pkg_model_allocation --> svc_modelAllocation
+  pkg_model_allocation_local --> svc_modelAllocation
+  pkg_model_worker --> svc_modelWorkers
+  pkg_model_worker_deepseek --> svc_modelWorkers
   pkg_modules --> svc_clientModules
+  pkg_orchestration --> svc_orchestrations
+  pkg_orchestration_local --> svc_capabilityCapsules
+  pkg_orchestration_local --> svc_contextCompiler
+  pkg_orchestration_local --> svc_intentCompiler
+  pkg_orchestration_local --> svc_orchestrations
   pkg_permission_presets --> svc_permissionPresets
+  pkg_physical_operator --> svc_physicalOperators
+  pkg_physical_operator_resident --> svc_physicalOperators
+  pkg_physical_operator_subagent --> svc_physicalOperators
   pkg_plan_mode --> svc_planMode
   pkg_pwsh_local --> svc_shell
+  pkg_remote_auth --> svc_remoteAuth
+  pkg_resident_operator --> svc_residentOperators
+  pkg_resident_operator_local --> svc_residentOperators
+  pkg_rlm_runtime --> svc_rlmRuntime
+  pkg_rlm_runtime_local --> svc_rlmRuntime
+  pkg_rlm_strategy --> svc_rlmStrategy
+  pkg_rlm_strategy_local --> svc_rlmStrategy
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
@@ -281,6 +358,7 @@ flowchart LR
   pkg_subprocess_e2b --> svc_subprocess
   pkg_subprocess_local --> svc_subprocess
   pkg_system_prompt --> svc_systemPrompt
+  pkg_task_template --> svc_taskTemplates
   pkg_terminal --> svc_terminals
   pkg_terminal_bash --> svc_terminals
   pkg_token_meter --> svc_tokenMeter
@@ -307,9 +385,13 @@ flowchart LR
   svc_approval --> pkg_tools
   svc_attachments --> pkg_host_runtime
   svc_attachments --> pkg_llm_pi_ai
+  svc_browser --> pkg_orchestration_local
+  svc_browser --> pkg_tool_browser
   svc_clientModules --> pkg_hmr
   svc_codeRuntime --> pkg_tools
   svc_compaction --> pkg_compaction_basic
+  svc_continualHarness --> pkg_orchestration_local
+  svc_continualHarnessSkills --> pkg_continual_harness_local
   svc_cordisInspect --> pkg_tool_cordis
   svc_credentials --> pkg_apiproxy
   svc_credentials --> pkg_llm_deepseek
@@ -330,6 +412,16 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_modelAllocation --> pkg_orchestration_local
+  svc_modelWorkers --> pkg_orchestration_local
+  svc_orchestrations --> pkg_tool_orchestration
+  svc_orchestrations --> pkg_ui_orchestration
+  svc_physicalOperators --> pkg_tool_physical_operator
+  svc_remoteAuth --> pkg_connection
+  svc_remoteAuth --> pkg_ui_orchestration
+  svc_residentOperators --> pkg_physical_operator_resident
+  svc_rlmRuntime --> pkg_orchestration_local
+  svc_rlmStrategy --> pkg_orchestration_local
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -385,6 +477,10 @@ flowchart LR
   svc_systemPrompt --> pkg_tool_terminal
   svc_systemPrompt --> pkg_tool_web
   svc_systemPrompt --> pkg_tools
+  svc_taskTemplates --> pkg_orchestration_local
+  svc_taskTemplates --> pkg_task_template_context
+  svc_taskTemplates --> pkg_task_template_rpc
+  svc_taskTemplates --> pkg_tool_physical_operator
   svc_terminals --> pkg_tool_terminal
   svc_tokenMeter --> pkg_compaction_basic
   svc_toolResultPruner --> pkg_compaction_basic
@@ -425,6 +521,20 @@ flowchart LR
 | `ctx.settings` | `seam` | [`settings`](../packages/settings/settings) | [`settings-file`](../packages/settings/settings-file) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), `apiproxy` | - | 插件注册命名空间 schema 并解析分层值；提供方存储原始文档。LLM（大语言模型）适配器在用户分区下将其入口配置注册为组合基础；Web 网关提供经过脱敏的分层描述符，并写入用户层。 |
 | `ctx.credentials` | `seam` | [`credentials`](../packages/credentials/credentials) | [`credentials-local`](../packages/credentials/credentials-local) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), `apiproxy` | - | 配置携带对机密信息的引用；提供方拥有实际值。消费方按操作解析，因此轮换后的凭据会在紧接着的下一次请求中生效；Web 网关提供不含实际值的视图和只写存储。 |
 | `ctx.sessionTelemetry` | `seam` | [`session-telemetry`](../packages/session/session-telemetry) | [`session-telemetry-otel`](../packages/session/session-telemetry-otel) | - | - | 该 seam 捕获会话记录、进行脱敏并交给一个后端；没有其他组件消费该服务，其输出会离开当前进程。 |
+| `ctx.physicalOperators` | `seam` | [`physical-operator`](../packages/physical-operator/physical-operator) | [`physical-operator-subagent`](../packages/physical-operator/physical-operator-subagent), [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator) | - | 提供部署方拥有的稳定算子 ID、显式执行生命周期、实时可用性、快速失败容量准入和成对生命周期事件；Provider 将 subagent 与 Resident 传输保持在 Consumer 边界之外。 |
+| `ctx.residentOperators` | `seam` | [`resident-operator`](../packages/physical-operator/resident-operator) | [`resident-operator-local`](../packages/physical-operator/resident-operator-local) | [`physical-operator-resident`](../packages/physical-operator/physical-operator-resident) | - | 通过 daemon 唯一持有的 Session、Receipt、Lease、Event 和 Artifact 存储提供可信管理与持久 turn 执行；模型执行仍从 ctx.physicalOperators 进入。 |
+| `ctx.intentCompiler` | `seam` | [`intent-compiler`](../packages/orchestration/intent-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 把不可变原始请求编译为带确定性溯源的版本化 Intent IR；它们不能创建 Run 或派发算子。 |
+| `ctx.contextCompiler` | `seam` | [`context-compiler`](../packages/orchestration/context-compiler) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | Provider 在 token、溯源、脱敏和降级策略下投影认证过的来源，但不成为事实源。 |
+| `ctx.capabilityCapsules` | `seam` | [`capability-capsule`](../packages/orchestration/capability-capsule) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | - | 在 Graph Certificate 下晚绑定内容寻址的能力 Manifest；绑定只能实现或缩小权限。 |
+| `ctx.continualHarness` | `seam` | [`continual-harness`](../packages/orchestration/continual-harness) | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 提供有界的会话／工作区结果上下文，TaskGraph daemon 仍是唯一编排状态权威。 |
+| `ctx.debates` | `seam` | [`debate`](../packages/orchestration/debate) | [`debate-local`](../packages/orchestration/debate-local) | - | - | 定义有界议程、回合、证据、异议、收敛和控制记录；TaskGraph 或 RLM Consumer 仍负责执行所有权和能力选择。 |
+| `ctx.continualHarnessSkills` | `core` | [`continual-harness`](../packages/orchestration/continual-harness) | - | [`continual-harness-local`](../packages/orchestration/continual-harness-local) | - | 注册可信 TypeScript 模块，并且只调用明确允许的模块／可调用项组合；生成的 Harness 内容不能在运行时创建可执行代码。 |
+| `ctx.modelAllocation` | `seam` | [`model-allocation`](../packages/orchestration/model-allocation) | [`model-allocation-local`](../packages/orchestration/model-allocation-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 选择合格的订阅优先执行 Offer 并建议并行度，但不派发任务。 |
+| `ctx.modelWorkers` | `core` | [`model-worker`](../packages/orchestration/model-worker) | [`model-worker-deepseek`](../packages/orchestration/model-worker-deepseek) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 注册与 Provider 无关的一次性模型通道；计费 DeepSeek Provider 仍是最后兜底执行路径。 |
+| `ctx.rlmStrategy` | `seam` | [`rlm-strategy`](../packages/orchestration/rlm-strategy) | [`rlm-strategy-local`](../packages/orchestration/rlm-strategy-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 在节点 Attempt 内封存有界递归执行指令，永不创建或修改全局 TaskGraph。 |
+| `ctx.rlmRuntime` | `seam` | [`rlm-runtime`](../packages/orchestration/rlm-runtime) | [`rlm-runtime-local`](../packages/orchestration/rlm-runtime-local) | [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 持有节点内 TypeScript Kernel、异步子项注册表、家族消息、Receipt、Goal 与恢复机制，不成为第二个全局 TaskGraph 调度器。 |
+| `ctx.orchestrations` | `seam` | [`orchestration`](../packages/orchestration/orchestration) | [`orchestration-local`](../packages/orchestration/orchestration-local) | [`tool-orchestration`](../packages/orchestration/tool-orchestration), [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | 持有与 Provider 无关的编译、运行、事件、控制、审批、不确定结果处置和能力更新 API；本地 daemon 是唯一写者。 |
+| `ctx.remoteAuth` | `core` | `remote-auth` | - | `connection`, [`ui-orchestration`](../packages/orchestration/ui-orchestration) | - | Server 是配对、凭据交换、固定设备范围、撤销和无正文命令回执的唯一写者；传输和编排投影消费已认证 principal，但不持有凭据状态。 |
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | 等待所有已配置后端就绪，然后将领域形态发布为一个受生命周期约束的服务，用于类型化持久状态。 |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | 拥有本地逐 assistant 消息反馈、生命周期与目标校验、逐条目 compare-and-set 及 Host 一元 Remote 契约，且不进入 Session 历史或遥测。 |
@@ -433,6 +543,7 @@ flowchart LR
 | `ctx.sessionReferenceResolver` | `core` | [`session-reference`](../packages/context/session-reference) | - | - | - | 将当前表层中有界的对话快照投影为持久但不可信的消息上下文；Host 适配器负责提及语法。 |
 | `ctx.sessionTitle` | `seam` | [`session-title`](../packages/session/session-title) | [`session-title-first-prompt-llm`](../packages/session/session-title-first-prompt-llm), [`session-title-all-prompts-llm`](../packages/session/session-title-all-prompts-llm) | - | - | 负责确定性回退、最新标题折叠区，以及唯一的可选异步提供方注册。 |
 | `ctx.systemPrompt` | `core` | [`system-prompt`](../packages/core/system-prompt) | - | [`agent-loop`](../packages/core/agent-loop), [`tools`](../packages/core/tools), [`tool-fs`](../packages/fs/tool-fs), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-web`](../packages/web/tool-web) | - | 为每个步骤收集提示词各部分和面向模型的工具 schema。 |
+| `ctx.taskTemplates` | `seam` | [`task-template`](../packages/prompt/task-template) | [`task-template`](../packages/prompt/task-template) | [`task-template-context`](../packages/prompt/task-template-context), [`task-template-rpc`](../packages/prompt/task-template-rpc), [`tool-physical-operator`](../packages/physical-operator/tool-physical-operator), [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 文件 Provider 以原子方式持久化私有模板文档；直接 Agent、physical-operator、TaskGraph 和 RPC 消费方选择或管理这些模板，但不授予执行权威。 |
 | `ctx.tools` | `core` | [`tools`](../packages/core/tools) | - | [`agent-loop`](../packages/core/agent-loop), [`tool-ask-user`](../packages/interaction/tool-ask-user), [`tool-bash`](../packages/shell/tool-bash), [`tool-cordis`](../packages/extensions/tool-cordis), [`tool-fs`](../packages/fs/tool-fs), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-skill`](../packages/skill/tool-skill), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-todo`](../packages/todo/tool-todo), [`tool-web`](../packages/web/tool-web) | - | 注册能力，负责 Code Mode 传输，并让调用依次经过策略前处理、单调守卫、环绕分派、策略后处理和最终结果观测。 |
 | `ctx.userQuestions` | `seam` | [`user-questions`](../packages/interaction/user-questions) | - | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | UI 前端提供当前生效的人工回答提供方；tool-ask-user 在提供方无关的 ask() promise 上暂停工具调用。 |
 | `ctx.planMode` | `core` | [`plan-mode`](../packages/plan/plan-mode) | - | - | - | 折叠已记录的计划／模式状态，在轮次边界刷新用户选择，渲染由部署方拥有的指导信息，注册 /plan，并在状态转换期间保持计划退出 schema 稳定。 |
@@ -460,6 +571,7 @@ flowchart LR
 | `ctx.subagents` | `seam` | [`subagent`](../packages/subagent/subagent) | [`subagent-spawn-in-process`](../packages/subagent/subagent-spawn-in-process), [`subagent-fork-in-process`](../packages/subagent/subagent-fork-in-process), [`subagent-acp`](../packages/subagent/subagent-acp), [`subagent-codex`](../packages/subagent/subagent-codex), [`subagent-claude-code`](../packages/subagent/subagent-claude-code), [`subagent-dsh-sdk`](../packages/subagent/subagent-dsh-sdk) | [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-subagent-control`](../packages/subagent/tool-subagent-control), [`tool-ralph`](../packages/workflow/tool-ralph) | - | 提供方实现传输；该服务还负责可选的、基于 Activation 的延续编排，tool-subagent 选择一次性或可延续委派，tool-subagent-control 传递后续消息，而 tool-ralph 要求一条全新的结构化输出路由。 |
 | `ctx.jobs` | `seam` | [`jobs`](../packages/jobs/jobs) | [`jobs-local`](../packages/jobs/jobs-local) | [`tool-bash`](../packages/shell/tool-bash), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-jobs`](../packages/jobs/tool-jobs) | - | 生产方（后台 bash、PTY 发送和 subagent 委派）登记正在运行的工作；tool-jobs 是面向模型的控制器，用于读取、列出和终止这些工作；jobs-local 是进程本地注册表。 |
 | `ctx.web` | `seam` | [`web`](../packages/web/web) | [`web-search-exa`](../packages/web/web-search-exa), [`web-search-perplexity`](../packages/web/web-search-perplexity), [`web-search-deepseek`](../packages/web/web-search-deepseek), [`web-fetch-http`](../packages/web/web-fetch-http) | [`tool-web`](../packages/web/tool-web) | - | 搜索和抓取提供方注册到同一个 ctx.web seam；tool-web 负责稳定的面向模型名称。 |
+| `ctx.browser` | `seam` | [`browser`](../packages/browser/browser) | [`browser-ego-lite`](../packages/browser/browser-ego-lite) | [`tool-browser`](../packages/browser/tool-browser), [`orchestration-local`](../packages/orchestration/orchestration-local) | - | 提供方负责浏览器传输、配置与生命周期；模型和编排消费方只使用类型化的 ctx.browser 接缝，绝不依赖 Ego Lite 内部实现。 |
 | `ctx.spillStore` | `seam` | [`spill`](../packages/spill/spill) | [`spill-local`](../packages/spill/spill-local) | [`spill-policy`](../packages/spill/spill-policy) | - | 后端保存过大的工具文本，并返回面向模型的定位信息和取回提示；spill-policy 是 tools/post-execute 消费方，负责决定何时 spill。 |
 | `ctx.directoryPicker` | `seam` | `directory-picker` | `directory-picker-native`, `directory-picker-browse` | `apiproxy` | - | 带判别标记的交互能力：原生后端在 Host 显示设备上打开一个操作系统选择器，浏览后端为应用内浏览器提供列表与创建原语；双端后端通过其浏览器侧填充 ui-workspace 目录流程的 slot（不通过协议发布）。 |
 | `ctx.webServer` | `core` | `webserver` | - | `connection`, `modules`, `hmr` | - | 普通的 node:http 载体：具名路由注册表、索引转换 tap，以及静态 dist 回退；Web 传输插件注册自己的路由。 |

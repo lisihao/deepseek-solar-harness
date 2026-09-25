@@ -27,7 +27,7 @@ declare module '@deepseek-ai/cordis' {
 export const name = 'app-shell'
 
 /** Services required before shell assembly. */
-export const inject = ['slots', 'sessions', 'layout']
+export const inject = ['slots', 'sessions', 'layout', 'connection']
 
 /** Installs the React renderer and exposes the assembled application.
  * @param ctx - Plugin context.

@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { exactEditState } from './rescope-vendor.ts'
+import { exactEditState, excluded, genericRenameSkipped } from './rescope-vendor.ts'
 
 const ANCHOR = '\n## Sync procedure'
 const INSERTED = `\n15. **rescope**: one log entry.\n${ANCHOR}`
@@ -37,5 +37,21 @@ describe('exactEditState', () => {
     // A moved or partially applied site: neither state is complete.
     expect(exactEditState('a = 1\nb = 2\n', 'a = 1', 'b = 2', 1)).toBe('invalid')
     expect(exactEditState('x\n', 'a = 1', 'b = 2', 1)).toBe('invalid')
+  })
+})
+
+describe('root rescope ownership boundary', () => {
+  it('leaves independently gated product and managed-component sources untouched', () => {
+    expect(excluded('products/desktop/package.json')).toBe(true)
+    expect(excluded('plugins/managed/memory-evolve/package.json')).toBe(true)
+    expect(excluded('packages/core/agent/package.json')).toBe(false)
+  })
+
+  it('does not rewrite the Cordis locale key as an npm package name', () => {
+    expect(genericRenameSkipped(
+      'packages/client/ui-settings-plugin-inventory/src/client/PluginInventorySettingsTab.tsx',
+      'cordis',
+    )).toBe(true)
+    expect(genericRenameSkipped('packages/extensions/ui-cordis/src/client/index.ts', 'cordis')).toBe(true)
   })
 })

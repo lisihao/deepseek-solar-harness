@@ -60,9 +60,14 @@ async function mount(): Promise<Bench> {
   })
   const handle: ConnectionHandle = {
     api,
+    request: () => Promise.reject(new Error('unexpected browser request')),
     isLoopback: true,
     hostDescription: {
       getSnapshot: () => undefined,
+      subscribe: () => () => {},
+    },
+    state: {
+      getSnapshot: () => 'connected',
       subscribe: () => () => {},
     },
     rpc: {

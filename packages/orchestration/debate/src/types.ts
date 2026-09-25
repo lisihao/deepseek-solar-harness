@@ -1,0 +1,768 @@
+/** Serializable, versioned contracts for the provider-neutral Debate seam. */
+
+/** JSON-compatible value accepted in an event payload or other durable record. */
+export type DebateJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly DebateJsonValue[]
+  | { readonly [key: string]: DebateJsonValue }
+
+/** User-selected debate behavior. `auto` is a policy decision, not a provider. */
+export type DebateMode = 'auto' | 'enabled' | 'disabled'
+
+/** Durable lifecycle of a debate run. */
+export type DebateLifecycle =
+  | 'planned'
+  | 'awaiting_approval'
+  | 'admitting'
+  | 'round_running'
+  | 'reviewing'
+  | 'converged'
+  | 'next_round'
+  | 'budget_limited'
+  | 'max_rounds'
+  | 'synthesizing'
+  | 'completed'
+  | 'stopped'
+  | 'failed'
+  | 'indeterminate'
+
+/**
+ * User-observable disposition of a run. `rejected` remains distinct from a
+ * user stop even though both use the historical `stopped` lifecycle state.
+ */
+export type DebateRunOutcomeV1 =
+  | 'running'
+  | 'completed'
+  | 'max_rounds'
+  | 'budget_limited'
+  | 'failed'
+  | 'indeterminate'
+  | 'rejected'
+  | 'stopped'
+
+/** Durable result metadata for a run whose lifecycle alone is ambiguous. */
+export interface DebateRunResultV1 {
+  readonly version: 1
+  readonly outcome: DebateRunOutcomeV1
+  readonly reason: string
+  readonly settledAt?: string
+}
+
+/** The only role identifiers admitted by the first Debate contract. */
+export type DebateRoleId =
+  | 'constructive-proposer'
+  | 'skeptical-falsifier'
+  | 'evidence-auditor'
+  | 'decision-judge'
+
+/** Whether a roster slot contributes arguments or makes the final decision. */
+export type DebateRoleKind = 'participant' | 'judge'
+/** Capability tier required by a fixed roster slot. */
+export type DebateModelTier = 'low' | 'medium' | 'high'
+/** Billing/authentication source used by a roster slot. */
+export type DebateModelSource = 'native-subscription' | 'metered-api' | 'local'
+
+/** A fixed-roster persona; providers may map it to a supported operator. */
+export interface DebateRolePersonaV1 {
+  readonly title: string
+  readonly mandate: string
+  readonly stance: string
+  readonly instructions: readonly string[]
+}
+
+/** One immutable slot in a debate roster. */
+export interface DebateRoleSpecV1 {
+  readonly version: 1
+  readonly role: DebateRoleId
+  readonly kind: DebateRoleKind
+  readonly operatorId: string
+  /** Explicit deployment-owned alternatives resolved only by the Scheduler. */
+  readonly fallbackOperatorIds?: readonly string[]
+  readonly model: string
+  readonly tier: DebateModelTier
+  readonly source: DebateModelSource
+  readonly persona: DebateRolePersonaV1
+  readonly required?: boolean
+}
+
+/** Deterministic round protocol: independent first pass, then ledger-focused review. */
+export interface DebateRoundStrategyV1 {
+  readonly version: 1
+  readonly firstRound: 'blind-independent'
+  readonly followUp: 'claim-ledger'
+  readonly escalation: 'high-severity-unresolved'
+}
+
+/** Hard bounds for the immutable initial v1 plan; providers derive later effective bounds from continuation grants. */
+export interface DebateBudgetV1 {
+  readonly version: 1
+  readonly maxRounds: number
+  readonly maxTurnsPerAgent: number
+  readonly maxAgentsPerRound: number
+  readonly maxInputTokens: number
+  readonly maxOutputTokens: number
+  readonly maxTotalTokens: number
+  readonly maxCostUsd?: number
+}
+
+/**
+ * Finite run ceilings derived from the immutable initial policy and accepted
+ * continuation grants. Providers stop at the first exhausted ceiling;
+ * `maxCostUsd` remains the original caller cap.
+ */
+export interface DebateEffectiveBudgetV1 {
+  readonly version: 1
+  readonly maxRounds: number
+  readonly maxTurnsPerAgent: number
+  readonly maxAgentsPerRound: number
+  readonly maxInputTokens: number
+  readonly maxOutputTokens: number
+  readonly maxTotalTokens: number
+  readonly maxCostUsd?: number
+}
+
+/** Fresh non-monetary capacity added by one deliberate two-round continuation. */
+export interface DebateContinuationAllowanceV1 {
+  readonly version: 1
+  /** A continuation command always authorizes exactly two numbered rounds. */
+  readonly additionalRounds: 2
+  /** One additional turn per roster slot in each newly authorized round. */
+  readonly additionalTurnsPerAgent: 2
+  readonly additionalInputTokens: number
+  readonly additionalOutputTokens: number
+  readonly additionalTotalTokens: number
+}
+
+/**
+ * Immutable receipt of one accepted continuation command. `firstRound` and
+ * `lastRound` reserve the two next round numbers without reopening old rounds.
+ */
+export interface DebateContinuationGrantV1 {
+  readonly version: 1
+  readonly commandId: string
+  readonly expectedRevision: number
+  readonly grantedAt: string
+  readonly firstRound: number
+  readonly lastRound: number
+  readonly allowance: DebateContinuationAllowanceV1
+}
+
+/** Explicit convergence policy; dissent remains observable even after convergence. */
+export interface DebateConvergencePolicyV1 {
+  readonly version: 1
+  readonly scoreThreshold: number
+  readonly minSettledAgents: number
+  readonly maxUnresolvedHighSeverity: number
+  readonly requireEvidenceForCritical: boolean
+  readonly earlyStop: boolean
+}
+
+/** Complete provider-independent policy selected for a run. */
+export interface DebatePolicyV1 {
+  readonly version: 1
+  readonly mode: DebateMode
+  readonly roster: readonly DebateRoleSpecV1[]
+  readonly budget: DebateBudgetV1
+  readonly rounds: DebateRoundStrategyV1
+  readonly convergence: DebateConvergencePolicyV1
+  readonly preserveDissent: boolean
+}
+
+/** Existing DSH execution seam that owns a Debate run. */
+export type DebateExecutionKind = 'standalone' | 'taskgraph-node' | 'rlm-session'
+
+/** Optional parent identity proving which existing DSH seam owns the run. */
+export interface DebateExecutionRefV1 {
+  readonly version: 1
+  readonly kind: DebateExecutionKind
+  readonly runId?: string
+  readonly nodeId?: string
+  readonly sessionId?: string
+}
+
+/** Lineage-only source identity; source contents remain owned by the source system. */
+export interface DebateSourceRefV1 {
+  readonly version: 1
+  readonly ref: string
+  readonly kind: 'artifact' | 'evidence' | 'context' | 'document' | 'url'
+  readonly digest?: string
+}
+
+/**
+ * The public topic of a Debate run. New writers record the user-selected
+ * title explicitly so consumer projections never infer it from an unrelated
+ * Session message. Older persisted runs may omit this field.
+ */
+export interface DebateTopicV1 {
+  readonly version: 1
+  readonly title: string
+  readonly source: 'user' | 'objective' | 'legacy-missing'
+}
+
+/** Frozen parent-request dynamic contexts carried into every Debate turn. */
+export interface DebateRuntimeContextV1 {
+  readonly version: 1
+  readonly sourceSessionId: string
+  readonly contextSnapshotMessageId: string
+  readonly sections: readonly { readonly name: string; readonly text: string }[]
+}
+
+/** Provider input. `commandId` is the adapter's idempotency identity. */
+export interface DebateStartRequestV1 {
+  readonly version: 1
+  readonly commandId: string
+  /** Canonical workspace in which the existing TaskGraph Scheduler admits every round. */
+  readonly workspace: string
+  readonly prompt: string
+  readonly objective?: string
+  readonly policy: DebatePolicyV1
+  readonly sourceRefs?: readonly DebateSourceRefV1[]
+  readonly execution?: DebateExecutionRefV1
+  readonly sourceSessionId?: string
+  /** Current-request preference and memory contexts from the owning DSH Session. */
+  readonly runtimeContext?: DebateRuntimeContextV1
+}
+
+/** Current evidence-backed disposition of a normalized claim. */
+export type DebateClaimStatus = 'open' | 'supported' | 'refuted' | 'settled' | 'unresolved'
+/** Review severity assigned to a normalized claim or unresolved item. */
+export type DebateClaimSeverity = 'low' | 'medium' | 'high' | 'critical'
+
+/** Evidence identity attached to a claim or dissent, never inline source content. */
+export interface DebateEvidenceRefV1 {
+  readonly version: 1
+  readonly ref: string
+  readonly kind: 'source' | 'artifact' | 'observation' | 'quote'
+  readonly digest?: string
+}
+
+/** A normalized claim ledger entry shared by later rounds and synthesis. */
+export interface DebateClaimV1 {
+  readonly version: 1
+  readonly claimId: string
+  readonly statement: string
+  readonly status: DebateClaimStatus
+  readonly severity: DebateClaimSeverity
+  readonly confidence: number
+  readonly supportingSlotIds: readonly string[]
+  readonly opposingSlotIds: readonly string[]
+  readonly evidenceRefs: readonly DebateEvidenceRefV1[]
+  readonly rationale?: string
+}
+
+/** Content-addressed claim projection shared between rounds. */
+export interface DebateClaimLedgerV1 {
+  readonly version: 1
+  readonly claims: readonly DebateClaimV1[]
+  readonly coverage: number
+  readonly digest: string
+}
+
+/** A preserved minority position; convergence never erases dissent. */
+export interface DebateDissentV1 {
+  readonly version: 1
+  readonly slotId: string
+  readonly claimId: string
+  readonly position: string
+  readonly reason: string
+  readonly confidence: number
+  readonly evidenceRefs: readonly DebateEvidenceRefV1[]
+}
+
+/** A gap that remains unresolved and may block a successful synthesis. */
+export interface DebateUnresolvedV1 {
+  readonly version: 1
+  readonly claimId: string
+  readonly description: string
+  readonly severity: DebateClaimSeverity
+  readonly blocking: boolean
+  readonly reason: string
+  readonly requiredEvidenceRefs: readonly DebateEvidenceRefV1[]
+}
+
+/** Model usage reported by one agent turn; `costUsd` is actual account-sourced API spend, never subscription usage. */
+export interface DebateUsageV1 {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadInputTokens?: number
+  readonly cacheWriteInputTokens?: number
+  readonly costUsd?: number
+}
+
+/** One public claim summary carried in the Session trace without private slot identities. */
+export interface DebateTraceClaimV1 {
+  readonly statement: string
+  readonly status: DebateClaimStatus
+  readonly severity: DebateClaimSeverity
+}
+
+/** Requested and actual product route shown for one public Debate role. */
+export interface DebateTraceRoleV1 {
+  readonly title: string
+  readonly kind: 'participant' | 'judge' | 'moderator'
+  readonly requested: {
+    readonly operatorId: string
+    readonly model: string
+  }
+  readonly actual?: {
+    readonly operatorId: string
+    readonly model: string
+  }
+  readonly fallbackReasonCode?: string
+}
+
+/** Safe usage counters reported while one physical Debate turn is still running. */
+export interface DebateAgentProgressUsageV1 {
+  readonly inputTokens?: number
+  readonly outputTokens?: number
+  readonly cacheReadInputTokens?: number
+  readonly cacheWriteInputTokens?: number
+  readonly costUsd?: number
+}
+
+/** One whitelisted public detail received from a physical operator. */
+export type DebateAgentProgressKindV1 =
+  | 'phase'
+  | 'public-output'
+  | 'tool-started'
+  | 'tool-completed'
+  | 'approval-required'
+  | 'usage-updated'
+
+/**
+ * Durable, source-addressable operator progress for one Debate roster slot.
+ * It intentionally carries only a whitelisted public projection; prompt text,
+ * hidden reasoning, credentials, and native product identifiers are absent.
+ */
+export interface DebateAgentProgressV1 {
+  readonly version: 1
+  readonly kind: DebateAgentProgressKindV1
+  readonly source: {
+    readonly orchestrationRunId: string
+    readonly sequence: number
+    readonly time: string
+  }
+  readonly phase?: string
+  readonly publicOutputPreview?: string
+  readonly toolName?: string
+  readonly approvalKind?: string
+  readonly approvalPreview?: string
+  readonly usage?: DebateAgentProgressUsageV1
+  /** Requested/actual public route known when the progress was observed. */
+  readonly routing?: DebateTurnRoutingV1
+}
+
+/** Public subset of one durable physical-operator progress fact in a Session trace. */
+export interface DebateTraceProgressV1 {
+  readonly kind: DebateAgentProgressKindV1
+  readonly sourceTime: string
+  readonly phase?: string
+  readonly publicOutputPreview?: string
+  readonly toolName?: string
+  readonly approvalKind?: string
+  readonly approvalPreview?: string
+  readonly usage?: DebateAgentProgressUsageV1
+}
+
+/** Bounded public synthesis data retained in a Debate Session trace. */
+export interface DebateTraceSynthesisV1 {
+  readonly state: DebateSynthesisState
+  /** Bounded public user-facing summary; never hidden reasoning or private analysis. */
+  readonly outputPreview?: string
+  readonly artifactRef?: string
+  readonly unresolvedCount: number
+  readonly dissentCount: number
+}
+
+/** Public lifecycle fact projected from a Debate provider into a Session log. */
+export type DebateTraceStateV1 =
+  | 'planned'
+  | 'dispatched'
+  | 'running'
+  | 'progress'
+  | 'settled'
+  | 'blocked'
+  | 'failed'
+  | 'indeterminate'
+  | 'round-completed'
+  | 'synthesis-running'
+  | 'synthesis-settled'
+  | 'run-completed'
+  | 'budget-limited'
+  | 'max-rounds'
+  | 'stopped'
+
+/**
+ * Ignorable, replayable public Debate trace record appended as
+ * `debate/trace` to a DSH Session. The producer owns redaction: this payload
+ * may contain only public result text, never raw prompts, hidden reasoning,
+ * credentials, or native-product transcripts.
+ *
+ * `sourceSequence` is the source Debate event's durable sequence rather than
+ * the enclosing Session sequence. Consumers therefore deduplicate reconnect
+ * replays by `(runId, sourceSequence)` and preserve source ordering.
+ */
+export interface DebateTraceSessionEventV1 {
+  readonly version: 1
+  readonly runId: string
+  readonly sourceSequence: number
+  readonly state: DebateTraceStateV1
+  /** Public topic copied from the run snapshot; never inferred by a renderer. */
+  readonly topic?: DebateTopicV1
+  readonly sessionTurn?: number
+  readonly sessionStep?: number
+  readonly round?: number
+  readonly role?: DebateTraceRoleV1
+  readonly publicOutput?: {
+    readonly preview?: string
+    readonly ref?: string
+  }
+  readonly claims?: readonly DebateTraceClaimV1[]
+  readonly evidenceRefs?: readonly DebateEvidenceRefV1[]
+  readonly usage?: DebateUsageV1
+  /** Safe, incrementally projected operator detail for a running Debate turn. */
+  readonly progress?: DebateTraceProgressV1
+  readonly convergence?: DebateConvergenceV1
+  readonly synthesis?: DebateTraceSynthesisV1
+}
+
+/** Usage and account-sourced cost attributed to one roster slot. */
+export interface DebateSlotCostV1 {
+  readonly version: 1
+  readonly slotId: string
+  readonly model: string
+  readonly usage: DebateUsageV1
+}
+
+/** Aggregated token accounting and actual account-sourced API spend, retained as a projection rather than authority. */
+export interface DebateCostSummaryV1 {
+  readonly version: 1
+  /** Whether token totals cover every settled turn. */
+  readonly usageStatus: 'known' | 'partial' | 'unknown'
+  /** Whether account-sourced cost covers every settled turn. */
+  readonly costStatus: 'known' | 'partial' | 'unknown'
+  /** Reported token subtotal; absent when no settled turn supplied token usage. */
+  readonly inputTokens?: number
+  /** Reported token subtotal; absent when no settled turn supplied token usage. */
+  readonly outputTokens?: number
+  /** Reported cache subtotal; absent when no settled turn supplied this counter. */
+  readonly cacheReadInputTokens?: number
+  /** Reported cache subtotal; absent when no settled turn supplied this counter. */
+  readonly cacheWriteInputTokens?: number
+  /** Account-sourced cost subtotal; absent when no settled turn supplied cost. */
+  readonly costUsd?: number
+  /** Settled turns whose Evidence contained no token usage. */
+  readonly unknownUsageTurns: number
+  /** Settled turns whose Evidence contained no account-sourced cost. */
+  readonly unknownCostTurns: number
+  readonly bySlot: readonly DebateSlotCostV1[]
+}
+
+/** Whether recorded usage is sufficient to admit a continuation safely. */
+export type DebateContinuationAccountingStatusV1 =
+  | 'sufficient'
+  | 'usage_unknown'
+  | 'cost_unknown'
+
+/** Specific monetary cap that prevents automatic continuation admission. */
+export interface DebateContinuationCostLimitV1 {
+  readonly version: 1
+  readonly limitUsd: number
+  readonly usedUsd: number
+  readonly reservedUsd?: number
+}
+
+/** Explainable continuation decision rendered by trusted Consumers. */
+export type DebateContinuationEligibilityReasonV1 =
+  | 'eligible'
+  | 'run_not_settled'
+  | 'last_round_not_settled'
+  | 'usage_accounting_unknown'
+  | 'cost_accounting_unknown'
+  | 'cost_cap_requires_approval'
+
+/**
+ * Provider decision about whether a deliberate continuation may be admitted.
+ * A metered cap can require the existing explicit approval path without
+ * changing the caller's cap.
+ */
+export interface DebateContinuationEligibilityV1 {
+  readonly version: 1
+  readonly status: 'eligible' | 'ineligible' | 'approval_required'
+  readonly outcome: DebateRunOutcomeV1
+  readonly accounting: DebateContinuationAccountingStatusV1
+  readonly reason: DebateContinuationEligibilityReasonV1
+  readonly message: string
+  readonly costLimit?: DebateContinuationCostLimitV1
+}
+
+/** Bounded Evidence coverage projection for one run. */
+export interface DebateEvidenceSummaryV1 {
+  readonly version: 1
+  readonly refs: readonly DebateEvidenceRefV1[]
+  readonly coverage: number
+  readonly missingRefs: readonly string[]
+  readonly lineage: readonly string[]
+}
+
+/** Provenance of the provider that produced a run projection. */
+export interface DebateProvenanceV1 {
+  readonly version: 1
+  readonly providerId: string
+  readonly providerVersion: string
+  readonly requestSha256: string
+  readonly policySha256: string
+  readonly sourceSessionId?: string
+  readonly parentRunId?: string
+  readonly parentNodeId?: string
+  readonly parentRlmSessionId?: string
+  readonly outputSha256?: string
+}
+
+/** Durable lifecycle of one roster slot turn. */
+export type DebateAgentTurnState = 'planned' | 'dispatched' | 'settled' | 'blocked' | 'failed' | 'indeterminate'
+
+/** Scheduler-owned reason why a roster slot did not produce a settled result. */
+export interface DebateTurnBlockerV1 {
+  readonly code: string
+  readonly message: string
+  readonly nodeId?: string
+}
+
+/** Requested and actual physical routing retained without changing the logical role. */
+export interface DebateTurnRoutingV1 {
+  readonly version: 1
+  readonly requestedOperatorId: string
+  readonly requestedModel: string
+  readonly actualOperatorId?: string
+  readonly actualModel?: string
+  readonly fallbackReasonCode?: string
+  readonly allocationPlanRef?: string
+}
+
+/** One provider-reported attempt of one fixed roster slot. */
+export interface DebateAgentTurnV1 {
+  readonly version: 1
+  readonly round: number
+  readonly slotId: string
+  readonly role: DebateRoleId
+  readonly operatorId: string
+  readonly model: string
+  readonly state: DebateAgentTurnState
+  readonly attempt?: number
+  readonly routing?: DebateTurnRoutingV1
+  readonly blockers?: readonly DebateTurnBlockerV1[]
+  readonly outputRef?: string
+  /** Bounded public user-facing summary; never hidden reasoning or private analysis. */
+  readonly outputPreview?: string
+  readonly claimIds: readonly string[]
+  readonly evidenceRefs: readonly DebateEvidenceRefV1[]
+  readonly usage?: DebateUsageV1
+  readonly startedAt?: string
+  readonly settledAt?: string
+  readonly errorCode?: string
+}
+
+/** Result of the deterministic convergence evaluator. */
+export type DebateConvergenceStatus = 'converged' | 'continue' | 'budget_limited' | 'max_rounds'
+
+/** Explainable result of one round's convergence evaluation. */
+export interface DebateConvergenceV1 {
+  readonly version: 1
+  readonly status: DebateConvergenceStatus
+  readonly score: number
+  readonly threshold: number
+  readonly disagreement: number
+  readonly coverage: number
+  readonly unresolvedHighSeverity: number
+  readonly settledAgents: number
+  readonly reason: string
+}
+
+/** Durable lifecycle of one Debate round. */
+export type DebateRoundState = 'planned' | 'running' | 'reviewing' | 'completed' | 'failed' | 'indeterminate'
+
+/** Complete projection of one round and its claim review. */
+export interface DebateRoundSnapshotV1 {
+  readonly version: 1
+  readonly round: number
+  readonly state: DebateRoundState
+  readonly turns: readonly DebateAgentTurnV1[]
+  readonly claimLedger: DebateClaimLedgerV1
+  readonly dissent: readonly DebateDissentV1[]
+  readonly unresolved: readonly DebateUnresolvedV1[]
+  readonly convergence?: DebateConvergenceV1
+}
+
+/** Lifecycle of the final Debate synthesis. */
+export type DebateSynthesisState = 'pending' | 'running' | 'settled' | 'failed'
+
+/** Final synthesis reference with preserved dissent and unresolved claims. */
+export interface DebateSynthesisV1 {
+  readonly version: 1
+  readonly state: DebateSynthesisState
+  readonly artifactRef?: string
+  /** Bounded public moderator summary; never hidden reasoning or private analysis. */
+  readonly outputPreview?: string
+  readonly unresolvedClaimIds: readonly string[]
+  readonly dissentCount: number
+}
+
+/** Sealed moderator summary retained before an accepted continuation starts. */
+export interface DebateSynthesisHistoryEntryV1 {
+  readonly version: 1
+  readonly throughRound: number
+  readonly sealedAt: string
+  readonly synthesis: DebateSynthesisV1
+}
+
+/**
+ * Durable continuation projection. Providers persist grants and summary
+ * history, then derive `effectiveBudget` from the immutable policy and grants.
+ */
+export interface DebateContinuationStateV1 {
+  readonly version: 1
+  readonly grants: readonly DebateContinuationGrantV1[]
+  readonly synthesisHistory: readonly DebateSynthesisHistoryEntryV1[]
+  readonly effectiveBudget: DebateEffectiveBudgetV1
+  /** Capacity shown before a Consumer sends its next continuation command. */
+  readonly offeredAllowance?: DebateContinuationAllowanceV1
+  readonly eligibility: DebateContinuationEligibilityV1
+}
+
+/** Full inspect projection. It deliberately contains no scheduler or database handle. */
+export interface DebateRunSnapshotV1 {
+  readonly version: 1
+  readonly runId: string
+  readonly revision: number
+  readonly state: DebateLifecycle
+  readonly mode: DebateMode
+  readonly promptSha256: string
+  /** Present on newly written runs; absent only on pre-topic persisted data. */
+  readonly topic?: DebateTopicV1
+  readonly objective?: string
+  readonly policy: DebatePolicyV1
+  readonly roster: readonly DebateRoleSpecV1[]
+  readonly currentRound: number
+  readonly rounds: readonly DebateRoundSnapshotV1[]
+  readonly claimLedger: DebateClaimLedgerV1
+  readonly dissent: readonly DebateDissentV1[]
+  readonly unresolved: readonly DebateUnresolvedV1[]
+  readonly evidence: DebateEvidenceSummaryV1
+  readonly cost: DebateCostSummaryV1
+  readonly provenance: DebateProvenanceV1
+  readonly synthesis?: DebateSynthesisV1
+  /** Present on new writes; omitted by released snapshots with no continuation data. */
+  readonly continuation?: DebateContinuationStateV1
+  /** Present on new writes when a Provider records a distinct terminal disposition. */
+  readonly result?: DebateRunResultV1
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+/** Bounded list projection for one Debate run. */
+export interface DebateRunSummaryV1 {
+  readonly version: 1
+  readonly runId: string
+  readonly state: DebateLifecycle
+  readonly mode: DebateMode
+  readonly currentRound: number
+  readonly revision: number
+  readonly unresolvedCount: number
+  readonly cost: DebateCostSummaryV1
+  readonly updatedAt: string
+}
+
+/** Append-only Debate event names consumed by durable projections. */
+export type DebateEventType =
+  | 'debate.planned'
+  | 'debate.roster.qualified'
+  | 'debate.roster.rejected'
+  | 'debate.admitted'
+  | 'debate.round.started'
+  | 'debate.agent.dispatched'
+  | 'debate.agent.progress'
+  | 'debate.agent.settled'
+  | 'debate.agent.blocked'
+  | 'debate.agent.failed'
+  | 'debate.agent.indeterminate'
+  | 'debate.claims.compiled'
+  | 'debate.convergence.evaluated'
+  | 'debate.synthesis.started'
+  | 'debate.synthesis.settled'
+  | 'debate.continuation.granted'
+  | 'debate.cost.accounted'
+  | 'debate.stopped'
+  | 'debate.failed'
+  | 'debate.indeterminate'
+
+/** Append-only event contract used by UI/consumer projections. */
+export interface DebateEventV1 {
+  readonly version: 1
+  readonly sequence: number
+  readonly runId: string
+  readonly revision: number
+  readonly generation: number
+  readonly round?: number
+  readonly slotId?: string
+  readonly type: DebateEventType
+  readonly createdAt: string
+  readonly data: Readonly<Record<string, DebateJsonValue>>
+}
+
+/** Bounded cursor request for one run's append-only events. */
+export interface DebateEventReadRequestV1 {
+  readonly runId: string
+  readonly afterSequence?: number
+  readonly limit?: number
+}
+
+/** Cursor page returned by the Debate event reader. */
+export interface DebateEventPageV1 {
+  readonly events: readonly DebateEventV1[]
+  readonly nextSequence: number
+}
+
+/** Revision-fenced lifecycle actions accepted by the Debate Provider. */
+export type DebateControlAction = 'approve' | 'reject' | 'pause' | 'resume' | 'stop' | 'continue'
+
+/** Idempotent, revision-fenced control command. */
+export interface DebateControlRequestV1 {
+  readonly version: 1
+  readonly commandId: string
+  readonly runId: string
+  readonly expectedRevision: number
+  readonly action: DebateControlAction
+  readonly reason: string
+}
+
+/** Durable receipt state for an idempotent start or revision-fenced control command. */
+export type DebateCommandReceiptStateV1 = 'accepted' | 'running' | 'settled' | 'indeterminate'
+
+/**
+ * Provider-owned receipt fields persisted under its write lock. A settled
+ * receipt stores the original response so an identical command replay cannot
+ * create another continuation grant.
+ */
+export interface DebateCommandReceiptV1 {
+  readonly version: 1
+  readonly commandId: string
+  readonly method: 'start' | 'control'
+  readonly requestSha256: string
+  readonly runId: string
+  readonly state: DebateCommandReceiptStateV1
+  readonly action?: DebateControlAction
+  readonly expectedRevision?: number
+  readonly response?: DebateRunSnapshotV1
+}
+
+/** Stable role order advertised to Providers and Consumers. */
+export const DEBATE_ROLE_ORDER = [
+  'constructive-proposer',
+  'skeptical-falsifier',
+  'evidence-auditor',
+  'decision-judge',
+] as const satisfies readonly DebateRoleId[]

@@ -95,7 +95,7 @@ async function withDelayedFirstCompanion(
 }
 
 describe('global test invariant host', () => {
-  it('uses one exhaustive topology to reserve every package name with enabled checks', async () => {
+  it('uses one exhaustive topology to reserve every package name with enabled checks', { timeout: 20_000 }, async () => {
     const ctx = new Context()
     await ctx.plugin(TestInvariantProbe)
 

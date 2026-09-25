@@ -5,6 +5,7 @@ import {
   countVisibleUnits,
   nextResolvingIssueStatus,
   parseReferences,
+  repositoryCoordinates,
   retainIssueReferences,
   resolvingIssueStatusCommand,
   requiresPullRequestPolicy,
@@ -12,6 +13,21 @@ import {
   validateIssue,
   validatePullRequest,
 } from './policy.mjs'
+
+test('uses the current GitHub repository and retains a local fallback', () => {
+  assert.deepEqual(repositoryCoordinates({ GITHUB_REPOSITORY: 'lisihao/deepseek-solar-harness' }), {
+    organization: 'lisihao',
+    repository: 'deepseek-solar-harness',
+  })
+  assert.deepEqual(repositoryCoordinates({}), {
+    organization: 'deepseek-harness',
+    repository: 'deepseek-harness',
+  })
+  assert.throws(
+    () => repositoryCoordinates({ GITHUB_REPOSITORY: 'invalid' }),
+    /GITHUB_REPOSITORY/,
+  )
+})
 
 const withDetails = (summary) =>
   `${summary}\n\n<details><summary>验收与细节</summary>待补充。</details>`
