@@ -8,7 +8,7 @@ import { discoverWebModels, type WebModelCatalog, type WebModelPreferences } fro
 import { webModelPreferences } from './model-preferences.ts'
 import { PhysicalOperatorError, type PhysicalOperatorProviderRun, type PhysicalOperatorProviderStartRequest } from '@deepseek-ai/dsh-physical-operator'
 import { ChatGptWebMcpBridge } from './mcp-bridge.ts'
-import { WebCoordinatorSettings, type WebCoordinationMode } from './coordinator-settings.ts'
+import { WebCoordinatorSettings, WebModelCatalogCache, type WebCoordinationMode } from './coordinator-settings.ts'
 import type { WebCoordinatorStatus } from './setup.ts'
 import { WebToolOwners } from './tool-owner.ts'
 import { runCoordinatedWebSession } from './web-session.ts'
@@ -40,6 +40,7 @@ export class ChatGptWebCoordination {
   private lastVerifiedAt: string | undefined
   private readonly mainOwners = new Map<string, string>()
   private changing = false
+  private readonly catalogCache: WebModelCatalogCache
   private catalogValue: WebModelCatalog | undefined
   private catalogPending: Promise<WebModelCatalog> | undefined
   private catalogAbort: AbortController | undefined
@@ -47,6 +48,8 @@ export class ChatGptWebCoordination {
 
   constructor(private readonly ctx: Context, private readonly config: WebCoordinationConfig) {
     this.settings = new WebCoordinatorSettings(config.stateRoot)
+    this.catalogCache = new WebModelCatalogCache(config.stateRoot)
+    this.catalogValue = this.catalogCache.read()
     this.owners = new WebToolOwners(config.identityTimeoutMs)
     this.mcp = new ChatGptWebMcpBridge({
       port: config.coordinatorPort,
@@ -123,7 +126,7 @@ export class ChatGptWebCoordination {
       const catalog = offered && observed.selectedModel !== model
         ? await discoverWebModels(this.ctx, { ...this.catalogOptions(), selection: { model } }, controller.signal)
         : observed
-      this.catalogValue = catalog
+      this.rememberCatalog(catalog)
       return catalog
     }).finally(() => {
       if (this.catalogPending === operation) {
@@ -174,7 +177,7 @@ export class ChatGptWebCoordination {
         ...selection.effort === undefined ? {} : { effort: catalog.selectedEffort as string },
       }
       agent.session.append('chatgpt-web/profile', profile, { ignorable: true })
-      this.catalogValue = catalog
+      this.rememberCatalog(catalog)
       return catalog
     } finally {
       if (this.catalogPending === operation) {
@@ -222,6 +225,15 @@ export class ChatGptWebCoordination {
       this.settings.select(mode)
       try { await publish() } catch (error) { this.settings.select(previous); await publish(); throw error }
     } finally { this.changing = false }
+  }
+
+  private rememberCatalog(catalog: WebModelCatalog): void {
+    this.catalogValue = catalog
+    try {
+      this.catalogCache.write(catalog)
+    } catch (error) {
+      this.ctx.logger.warn('ChatGPT Web model catalog was not persisted: %s', String(error))
+    }
   }
 
   private requireCoordinator(): void {

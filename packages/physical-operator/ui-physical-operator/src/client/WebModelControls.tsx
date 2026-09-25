@@ -110,6 +110,7 @@ export function WebModelControls({
   onChange,
 }: WebModelControlsProps) {
   const [busy, setBusy] = useState(false)
+  const [reading, setReading] = useState(false)
   const [error, setError] = useState<string>()
   const alive = useRef(true)
   const busyRef = useRef(false)
@@ -129,10 +130,36 @@ export function WebModelControls({
   const modelCatalogMismatch = savedModel !== undefined
     && catalog !== undefined
     && catalog.selectedModel !== savedModel
-  const modelDisabled = disabled || busy || catalog === undefined || catalog.models.length === 0
-  const effortDisabled = disabled || busy || catalog === undefined || catalog.efforts.length === 0
+  const modelDisabled = disabled || busy || reading || catalog === undefined || catalog.models.length === 0
+  const effortDisabled = disabled || busy || reading || catalog === undefined || catalog.efforts.length === 0
     || selectedModel === undefined || modelCatalogMismatch
   const hasProfile = savedModel !== undefined || savedEffort !== undefined
+
+  const readCatalog = async (): Promise<void> => {
+    if (disabled || busyRef.current) return
+    busyRef.current = true
+    if (alive.current) {
+      setReading(true)
+      setError(undefined)
+    }
+    try {
+      const url = new URL('/api/chatgpt-web', window.location.origin)
+      url.searchParams.set('catalog', '1')
+      url.searchParams.set('refresh', '1')
+      url.searchParams.set('session_id', sessionId)
+      const response = await request(url, { cache: 'no-store' })
+      const parsed = parseWebModelStatus(await readResponse(response))
+      if (parsed?.catalog === undefined) throw new Error('ChatGPT Web 模型目录响应无效。')
+      if (!alive.current) return
+      onChangeRef.current(parsed.profile ?? profile ?? {}, parsed.catalog)
+    } catch (reason: unknown) {
+      if (!alive.current) return
+      setError(webCatalogReadError(reason))
+    } finally {
+      busyRef.current = false
+      if (alive.current) setReading(false)
+    }
+  }
 
   const save = async (next: WebModelPreferences): Promise<void> => {
     if (disabled || busyRef.current) return
@@ -196,8 +223,11 @@ export function WebModelControls({
         <small>选项来自当前 ChatGPT 网页；部分推理档位会同时切换实际模型。按网站设置会清除对应的 DSH 偏好。</small>
       </div>
       {catalog === undefined && (
-        <p role="status">尚未读取 ChatGPT Web 模型目录，请点击“刷新模型与算子”。</p>
+        <p role="status">尚未读取 ChatGPT Web 模型目录；读取会打开 ChatGPT 网页查看可选模型，不发送提示词。</p>
       )}
+      <button type="button" disabled={disabled || busy || reading} onClick={() => { void readCatalog() }}>
+        {reading ? '正在读取网页模型…' : catalog === undefined ? '读取网页模型与推理强度' : '重新读取网页模型'}
+      </button>
       <label>
         <span>网页模型</span>
         <select
@@ -296,6 +326,14 @@ class WebModelResponseError extends Error {
     super(`ChatGPT Web 模型偏好保存失败（HTTP ${String(status)}）`)
     this.name = 'WebModelResponseError'
   }
+}
+
+function webCatalogReadError(reason: unknown): string {
+  if (reason instanceof WebModelResponseError) {
+    if (reason.status === 409) return '当前有进行中的 ChatGPT Web 请求，请等待完成后再读取网页模型。'
+    return `读取 ChatGPT Web 模型目录失败（HTTP ${String(reason.status)}）；请确认 ChatGPT 网页已登录后重试。`
+  }
+  return reason instanceof Error ? `读取 ChatGPT Web 模型目录失败：${reason.message}` : `读取 ChatGPT Web 模型目录失败：${String(reason)}`
 }
 
 function webModelSaveError(reason: unknown): string {
