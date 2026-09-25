@@ -10,22 +10,29 @@ import {
 
 const roots: string[] = []
 
-async function fixture(options: { archived: string; built: string }): Promise<string> {
+async function fixture(options: {
+  archived: string
+  built: string
+  source?: string
+  output?: string
+}): Promise<string> {
+  const source = options.source ?? 'packages/group/example'
+  const output = options.output ?? 'lib'
   const root = await mkdtemp(join(tmpdir(), 'dsh-desktop-vendor-build-'))
   roots.push(root)
-  const sourceRoot = join(root, 'packages/group/example')
+  const sourceRoot = join(root, source)
   const vendorRoot = join(root, 'products/desktop/dsh-plugin-desktop/vendor')
   const archiveRoot = join(root, 'archive/package')
-  await mkdir(join(sourceRoot, 'lib'), { recursive: true })
+  await mkdir(join(sourceRoot, output), { recursive: true })
   await mkdir(join(vendorRoot, 'dsh-packages'), { recursive: true })
-  await mkdir(join(archiveRoot, 'lib'), { recursive: true })
+  await mkdir(join(archiveRoot, output), { recursive: true })
   await writeFile(join(sourceRoot, 'package.json'), '{"name":"example"}\n')
-  await writeFile(join(sourceRoot, 'lib/index.js'), options.built)
-  await writeFile(join(archiveRoot, 'lib/index.js'), options.archived)
+  await writeFile(join(sourceRoot, output, 'index.js'), options.built)
+  await writeFile(join(archiveRoot, output, 'index.js'), options.archived)
   await writeFile(join(vendorRoot, 'manifest.json'), `${JSON.stringify({
     schemaVersion: 1,
     sourcePackages: {
-      'dsh-packages/example.tgz': 'packages/group/example/package.json',
+      'dsh-packages/example.tgz': `${source}/package.json`,
     },
   })}\n`)
   execFileSync('tar', [
@@ -46,6 +53,11 @@ describe('Desktop vendor build closure', () => {
       .toEqual(['lib/index.js'])
   })
 
+  it('includes bundled dist files', () => {
+    expect(parseGeneratedArchiveMembers('package/dist/\npackage/dist/assets/index-a.js\npackage/README.md\n'))
+      .toEqual(['dist/assets/index-a.js'])
+  })
+
   it('accepts an archive built from the current root workspace output', async () => {
     const root = await fixture({ archived: 'export const value = 1\n', built: 'export const value = 1\n' })
 
@@ -57,6 +69,14 @@ describe('Desktop vendor build closure', () => {
 
     await expect(verifyDesktopVendorBuild(root)).rejects.toThrow(
       'contains stale lib/index.js relative to packages/group/example/package.json',
+    )
+  })
+
+  it('rejects a stale app bundle', async () => {
+    const root = await fixture({ archived: 'old\n', built: 'new\n', source: 'apps/web', output: 'dist' })
+
+    await expect(verifyDesktopVendorBuild(root)).rejects.toThrow(
+      'contains stale dist/index.js relative to apps/web/package.json',
     )
   })
 })

@@ -1,4 +1,4 @@
-/** Verify that Desktop's sealed core archives contain the current root build outputs. */
+/** Verify that Desktop's sealed core archives contain the current root build outputs (`lib/` and bundled `dist/`). */
 
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url'
 
 const ARCHIVE_MEMBER_MAX_BYTES = 16 * 1024 * 1024
 
-/** Parse generated files from `tar -tzf`, accepting native LF or CRLF output. */
+/** Parse generated `lib/` and `dist/` files from `tar -tzf`, accepting native LF or CRLF output. */
 export function parseGeneratedArchiveMembers(output: string): string[] {
   return output
     .split(/\r?\n/u)
-    .filter(member => member.startsWith('package/lib/') && !member.endsWith('/'))
+    .filter(member => (member.startsWith('package/lib/') || member.startsWith('package/dist/')) && !member.endsWith('/'))
     .map(member => member.slice('package/'.length))
     .sort()
 }
@@ -52,7 +52,7 @@ export async function verifyDesktopVendorBuild(
     if (typeof sourceManifestPath !== 'string') {
       throw new Error(`verify-desktop-vendor-build: invalid source path for ${archivePath}`)
     }
-    if (!sourceManifestPath.startsWith('packages/')) continue
+    if (!sourceManifestPath.startsWith('packages/') && !sourceManifestPath.startsWith('apps/')) continue
     if (!archivePath.startsWith('dsh-packages/') || !archivePath.endsWith('.tgz')) {
       throw new Error(`verify-desktop-vendor-build: invalid archive path ${archivePath}`)
     }
@@ -69,7 +69,7 @@ export async function verifyDesktopVendorBuild(
       execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }),
     )
     if (archiveMembers.length === 0) {
-      throw new Error(`verify-desktop-vendor-build: ${archivePath} contains no generated lib files`)
+      throw new Error(`verify-desktop-vendor-build: ${archivePath} contains no generated lib or dist files`)
     }
 
     for (const member of archiveMembers) {
