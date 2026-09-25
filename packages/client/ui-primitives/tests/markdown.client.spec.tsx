@@ -390,6 +390,7 @@ describe('MarkdownText', () => {
   it('keeps ordinary dollar blocks and incomplete delimiter candidates parseable', () => {
     const cases = [
       { source: '$$\n\\theta\n$$', math: 1, display: 1 },
+      { source: '$$', math: 1, display: 1 },
       { source: '$$$\\theta$$$', math: 1, display: 0 },
       { source: '$$a$b\nc', math: 0, display: 0 },
       { source: '  \\[\n  \\theta\n  \\]', math: 1, display: 1 },
@@ -417,6 +418,29 @@ describe('MarkdownText', () => {
     }
   })
 
+  it('renders a display-dollar block whose TeX starts on the opening line and spans lines', () => {
+    const source = [
+      '条件：',
+      '',
+      '$$\\text{A}',
+      '\\approx',
+      'B$$',
+      '',
+      '于是：',
+      '',
+      '$$\\frac{1}',
+      '{2}$$',
+      '',
+      '**结论**',
+    ].join('\n')
+    const { container } = render(<MarkdownText text={source} />)
+
+    expect([...container.querySelectorAll('.katex-display annotation')].map(node => node.textContent))
+      .toEqual(['\\text{A}\n\\approx\nB', '\\frac{1}\n{2}'])
+    expect(container.querySelector('.katex-error')).toBeNull()
+    expect(container.querySelector('strong')?.textContent).toBe('结论')
+  })
+
   it('leaves a dollar block with trailing text to upstream inline math', () => {
     const { container } = render(<MarkdownText text="$$x$$ trailing" />)
 
@@ -439,6 +463,14 @@ describe('MarkdownText', () => {
 
     expect(values).toEqual([String.raw`100\$`, String.raw`a\\`, String.raw`b\\`])
     expect(container.querySelector('.katex-error')).toBeNull()
+  })
+
+  it('bounds fallback work for repeated unclosed display-dollar lines', () => {
+    const startedAt = performance.now()
+    const { container } = render(<MarkdownText text={'$$x\n'.repeat(2_000)} />)
+
+    expect(performance.now() - startedAt).toBeLessThan(3_000)
+    expect(container.querySelector('.katex-display')).toBeNull()
   })
 
   it('bounds fallback work for repeated unclosed backslash delimiters', () => {

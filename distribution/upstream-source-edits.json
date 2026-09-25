@@ -166,6 +166,14 @@
       "kind": "backport",
       "note": "feat(desktop): backport selected official behaviors"
     },
+    "packages/client/ui-primitives/src/markdown/mathCompatibility.ts": {
+      "kind": "migration-debt",
+      "note": "fix(markdown): accept display-dollar TeX that starts on the opening $$ line and closes with $$ at a later line end; upstream truncates such replies into one unterminated formula"
+    },
+    "packages/client/ui-primitives/src/markdown/parse.ts": {
+      "kind": "migration-debt",
+      "note": "fix(markdown): try the math compatibility constructs before upstream math() so multi-line display-dollar TeX on the opening line parses as one block"
+    },
     "packages/client/ui-primitives/src/ReadBlock.tsx": {
       "kind": "backport",
       "note": "feat(desktop): backport selected official behaviors"

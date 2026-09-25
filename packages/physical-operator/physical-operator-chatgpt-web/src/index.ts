@@ -279,6 +279,7 @@ const COMPOSER_DOM_HELPERS = String.raw`
   const mathSource = (element) => element.getAttribute('data-math-source')
     ?? element.querySelector('annotation[encoding="application/x-tex"]')?.textContent
     ?? '';
+  const displayMath = (element) => '$$' + newline + mathSource(element).trim() + newline + '$$';
   const citationLink = (element) => {
     const href = element.getAttribute('href') ?? '';
     if (!/^https?:/.test(href)) return '';
@@ -291,11 +292,11 @@ const COMPOSER_DOM_HELPERS = String.raw`
     const element = node;
     if (skipped(element)) return '';
     if (element.tagName === 'BR') return newline;
-    if (element.classList.contains('katex-display')) return '$$' + mathSource(element) + '$$';
+    if (element.classList.contains('katex-display')) return newline + displayMath(element) + newline;
     if (element.classList.contains('katex') || element.hasAttribute('data-math-source')) {
       return element.querySelector('.katex-display') === null
         ? '$' + mathSource(element) + '$'
-        : '$$' + mathSource(element) + '$$';
+        : newline + displayMath(element) + newline;
     }
     if (element.tagName === 'A' && element.getAttribute('data-testid') === 'chatgpt-citation') return citationLink(element);
     const inner = [...element.childNodes].map(inlineMarkdown).join('');
@@ -363,7 +364,7 @@ const COMPOSER_DOM_HELPERS = String.raw`
     }
     if (element.classList.contains('katex-display')
       || element.hasAttribute('data-math-source') && element.querySelector('.katex-display') !== null) {
-      return ['$$' + mathSource(element) + '$$'];
+      return [displayMath(element)];
     }
     if (tag !== 'P' && [...element.children].some(isBlock)) return blocksOf(element);
     return [inlineLine(element)];
