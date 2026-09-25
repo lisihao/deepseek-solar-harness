@@ -22,7 +22,8 @@
   "webDirect": {
     "chip": "协作 · ChatGPT 网页版",
     "mainModel": "Select model, current ChatGPT Web",
-    "routingDisabled": true,
+    "routingVisible": false,
+    "staleSetupNotice": 0,
     "taskGraphDisabled": true,
     "claudeEffortCount": 0,
     "webModels": [
