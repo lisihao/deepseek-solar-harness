@@ -262,18 +262,7 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
     if (changed === true) menu.viewChanged = true;
     return changed === true;
   };
-  const restoreView = async (menu) => {
-    if (menu.initialView === undefined || !menu.viewChanged) return true;
-    if (!await ensureOpen(menu)) return false;
-    const restored = await switchView(menu, menu.initialView);
-    if (restored) menu.viewChanged = false;
-    return restored;
-  };
-  const close = async (menu) => {
-    if (menu === undefined || menu.closed) return true;
-    // Restoring the initial view is best effort: current ChatGPT pickers have
-    // no control back from the advanced view, and closing is what matters.
-    await restoreView(menu);
+  const dismiss = async (menu) => {
     if (!menu.owned || !menu.root.isConnected || !visible(menu.root)) {
       menu.closed = true;
       return true;
@@ -287,6 +276,36 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
     }
     menu.closed = closed === true;
     return menu.closed;
+  };
+  const restoreView = async (menu) => {
+    if (menu.initialView === undefined || !menu.viewChanged) return true;
+    if (!await ensureOpen(menu)) return false;
+    if (await switchView(menu, menu.initialView)) {
+      menu.viewChanged = false;
+      return true;
+    }
+    // Current ChatGPT pickers have no control back from the advanced view and
+    // reset to their initial view only after staying closed for a while, so
+    // reopen with a growing closed interval within the request timeout.
+    const deadline = Date.now() + request.timeoutMs;
+    for (let attempt = 1; menu.owned && Date.now() <= deadline; attempt += 1) {
+      if (!await dismiss(menu)) return false;
+      const settled = await waitFor(() => !menu.root.isConnected || getComputedStyle(menu.root).display === 'none' ? true : null);
+      if (settled !== true) return false;
+      await new Promise((resolve) => setTimeout(resolve, attempt * request.pollIntervalMs));
+      if (!await ensureOpen(menu)) return false;
+      if (activeViewFor(menu)?.name === menu.initialView) {
+        menu.viewChanged = false;
+        return true;
+      }
+    }
+    return false;
+  };
+  const close = async (menu) => {
+    if (menu === undefined || menu.closed) return true;
+    // Closing matters even when the initial view cannot be restored.
+    await restoreView(menu);
+    return dismiss(menu);
   };
   const selectedFrom = (choices, nodes, trigger) => {
     const checked = choices.filter((_choice, index) => {
@@ -365,6 +384,7 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
   };
   const own = (value, name) => value !== null && typeof value === 'object' && !Array.isArray(value)
     && Object.prototype.hasOwnProperty.call(value, name) ? value[name] : undefined;
+  const optionalFlag = (value) => value === undefined || typeof value === 'boolean';
   const reactSliderData = (owner) => {
     const keys = Object.keys(owner).filter((name) => name.startsWith('__reactProps$'));
     if (keys.length !== 1) return undefined;
@@ -384,10 +404,10 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
       const isLocked = own(option, 'isLocked');
       const isMax = own(option, 'isMax');
       const requiresExplicitSelection = own(option, 'requiresExplicitSelection');
-      if (id === undefined || label === undefined || typeof isLocked !== 'boolean' || typeof isMax !== 'boolean'
-        || typeof requiresExplicitSelection !== 'boolean' || seen.has(id)) return undefined;
+      if (id === undefined || label === undefined || !optionalFlag(isLocked) || !optionalFlag(isMax)
+        || !optionalFlag(requiresExplicitSelection) || seen.has(id)) return undefined;
       seen.add(id);
-      raw.push({ id, label, isLocked });
+      raw.push({ id, label, isLocked: isLocked === true });
     }
     return { raw, selectedOptionId };
   };
@@ -469,7 +489,7 @@ const MODEL_CATALOG_EVALUATOR = String.raw`async (input) => {
             }
           }
           if (outcome.status === 'protocol-error') {
-            if (livePicker) await restoreView(modelMenu);
+            if (livePicker && !await restoreView(modelMenu)) outcome = { status: 'reasoning-options-unavailable' };
             const liveControl = outcome.status === 'protocol-error' && livePicker ? liveReasoning(modelMenu.root) : { kind: 'absent' };
             if (outcome.status === 'protocol-error' && liveControl.kind === 'invalid') {
               outcome = { status: 'reasoning-options-unavailable' };

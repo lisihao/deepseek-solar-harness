@@ -218,6 +218,8 @@ interface LivePageOptions {
   readonly malformedLock?: string
   /** Omit the advanced view's way back to the simple view, as current ChatGPT pickers do. */
   readonly oneWayViews?: boolean
+  /** Leave every slider option's `isLocked` undefined, as current ChatGPT pickers do. */
+  readonly unsetLocks?: boolean
 }
 
 /** Build the September 2026 two-view native model picker with its opaque reasoning slider. */
@@ -230,7 +232,9 @@ function mountLivePage(options: LivePageOptions = {}): LivePageFixture {
     { id: 'gpt-6-pro:', label: 'Pro', isMax: false, requiresExplicitSelection: false },
   ].map(option => ({
     ...option,
-    isLocked: option.id === options.malformedLock ? { unexpected: true } : option.id === options.lockedEffort,
+    isLocked: options.unsetLocks === true
+      ? undefined
+      : option.id === options.malformedLock ? { unexpected: true } : option.id === options.lockedEffort,
   }))
   let selectedModel = '最新'
   let selectedEffort = 'gpt-6-pro:'
@@ -311,6 +315,8 @@ function mountLivePage(options: LivePageOptions = {}): LivePageFixture {
       }
     }
   }
+  // A reopened ChatGPT picker starts in its simple view.
+  trigger.addEventListener('click', () => { if (menu.style.display !== 'none') setActiveView('simple') })
   simple.querySelector<HTMLElement>('[data-model-picker-view-toggle="true"]')!.addEventListener('click', () => { setActiveView('advanced') })
   if (options.oneWayViews !== true) {
     advanced.querySelector<HTMLElement>('[data-model-picker-view-toggle="true"]')!.addEventListener('click', () => { setActiveView('simple') })
@@ -617,16 +623,34 @@ describe('ChatGPT Web model catalog', () => {
     expect(catalog.selectedModel).toBe('最新')
   })
 
-  it('still closes the picker when the page offers no way back from the advanced view', async () => {
-    const page = mountLivePage({ oneWayViews: true })
+  it('reopens the picker to read reasoning when the page offers no way back from the advanced view', async () => {
+    const page = mountLivePage({ oneWayViews: true, unsetLocks: true })
     const { ctx } = await browserFixture()
 
     const catalog = await discoverWebModels(ctx, discoveryOptions())
 
     expect(catalog.models.map(choice => choice.label)).toEqual(['最新', 'GPT-5.6 Sol', 'GPT-5.5'])
+    expect(catalog.efforts.map(choice => choice.label)).toEqual(['即时', '中', '高', '极高', 'Pro'])
+    expect(catalog.selectedEffort).toBe('gpt-6-pro:')
     expect(page.menu.style.display).toBe('none')
     expect(page.modelTrigger.getAttribute('aria-expanded')).toBe('false')
     expect(page.sent()).toBe(0)
+  })
+
+  it('selects a model and reasoning id on a one-way picker whose options leave isLocked unset', async () => {
+    const page = mountLivePage({ oneWayViews: true, unsetLocks: true })
+    const { ctx } = await browserFixture(true)
+
+    const catalog = await applyWebModelPreferences(ctx, {
+      ...discoveryOptions(),
+      selection: { model: 'GPT-5.6 Sol', effort: 'gpt-5-6-thinking:extended' },
+    })
+
+    expect(catalog.selectedModel).toBe('GPT-5.6 Sol')
+    expect(catalog.selectedEffort).toBe('gpt-5-6-thinking:extended')
+    expect(page.selectedEffort()).toBe('gpt-5-6-thinking:extended')
+    expect(page.sent()).toBe(0)
+    expect(page.menu.style.display).toBe('none')
   })
 
   it('uses native keyboard events to select one exact opaque reasoning id after verifying its visible model route', async () => {
