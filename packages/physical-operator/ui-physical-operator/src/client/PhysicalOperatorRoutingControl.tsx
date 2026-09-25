@@ -340,6 +340,7 @@ export function PhysicalOperatorRoutingControl({
     : undefined
   const webCoordinationReady = selectedMainModel === 'chatgpt-web'
     && webCoordinationStatus?.mode === 'coordinator'
+  const webDirectOnly = selectedMainModel === 'chatgpt-web' && !webCoordinationReady
   const profileOwner = effectiveMechanism === 'debate'
     ? undefined
     : selectedProfileOwner
@@ -633,7 +634,7 @@ export function PhysicalOperatorRoutingControl({
               <button type="button" data-selected={page === 'advanced' || undefined} disabled={locked} onClick={() => { if (!locked) setPage('advanced') }}>高级调度</button>
             </nav>
             <div className="dshDesktopOperatorStrategyBody">
-              <div className="dshDesktopOperatorStrategyOptions" hidden={page !== 'basic'}>
+              <div className="dshDesktopOperatorStrategyOptions" hidden={page !== 'basic' || webDirectOnly}>
                 {routing.options.map(option => (
                   <button
                     key={option.value}
@@ -652,14 +653,21 @@ export function PhysicalOperatorRoutingControl({
               </div>
               {selectedMainModel !== undefined && effectiveMechanism !== 'debate' && (
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
-                  <div>
-                    <strong>当前主模型：{physicalOperatorRoutingSummary(selectedMainModel)}</strong>
-                    <small>{`下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“${physicalOperatorRoutingLabel(routing.currentValue)}”。${selectedMainModel === 'chatgpt-web'
-                      ? webCoordinationReady
-                        ? ' 工具协作模式已选择；请在下方完成 Custom MCP 连接。'
-                        : ' ChatGPT 网页版需要先完成下方的协作设置。'
-                      : ''}`}</small>
-                  </div>
+                  {webDirectOnly
+                    ? (
+                      <div>
+                        <strong>当前主模型：ChatGPT 网页版（独立问答）</strong>
+                        <small>ChatGPT 网页版只接收文本，不访问 DSH 工作区文件，也不执行 TaskGraph；可在下方选择网页模型和推理强度。</small>
+                      </div>
+                    )
+                    : (
+                      <div>
+                        <strong>当前主模型：{physicalOperatorRoutingSummary(selectedMainModel)}</strong>
+                        <small>{`下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“${physicalOperatorRoutingLabel(routing.currentValue)}”。${webCoordinationReady
+                          ? ' 工具协作模式已选择；请在下方完成 Custom MCP 连接。'
+                          : ''}`}</small>
+                      </div>
+                    )}
                 </div>
               )}
               {selectedMainModel === 'chatgpt-web' && (
@@ -761,11 +769,9 @@ export function PhysicalOperatorRoutingControl({
                   <small>Plan 需要由主模型提交计划并等待批准。请先退出 Plan 再启用 Debate；已启用 Debate 时请退出 Debate 后继续计划。</small>
                 </div>
               )}
-              {selectedMainModel === 'chatgpt-web' && (
+              {webCoordinationReady && (
                 <div className="dshDesktopOperatorProfilePreferences" role="status">
-                  <small>{webCoordinationReady
-                    ? '工具协作模式允许通过 Custom MCP 使用 DSH 工具和 TaskGraph；网页模型和思考强度仍请在 ChatGPT 中设置。'
-                    : '独立问答只接收文本，不访问 DSH 工作区文件或执行 TaskGraph；请先完成上方的 Custom MCP 协作设置。'}</small>
+                  <small>工具协作模式允许通过 Custom MCP 使用 DSH 工具和 TaskGraph；网页模型和思考强度仍请在 ChatGPT 中设置。</small>
                 </div>
               )}
               {orchestrationPreferences !== undefined && debatePreferences !== undefined && (

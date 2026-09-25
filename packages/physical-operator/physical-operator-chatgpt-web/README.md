@@ -57,7 +57,7 @@ The configured browser Provider must declare `browser-js-v1` plus `authenticated
 
 ## Live model controls
 
-The local-owner setup route `/api/chatgpt-web` exposes account-visible model and reasoning choices discovered from the authenticated website. The DSH refresh control updates this catalog without sending a prompt. It retains the last successful catalog after an error; a removed saved model remains an unavailable preference instead of preventing discovery of its replacement. Reasoning choices belong to the observed selected model and are not a universal list of levels.
+The local-owner setup route `/api/chatgpt-web` exposes account-visible model and reasoning choices discovered from the authenticated website. The DSH refresh control updates this catalog without sending a prompt. The last successful catalog is also saved as `model-catalog.json` in the state root, so the choices remain selectable after a restart until the next refresh; a missing or malformed file reads as no catalog. It retains the last successful catalog after an error; a removed saved model remains an unavailable preference instead of preventing discovery of its replacement. Reasoning choices belong to the observed selected model and are not a universal list of levels.
 
 Explicit selections are verified on the website before a `chatgpt-web/profile` Session event saves them. Each Session has independent Web preferences; native CLI profiles do not supply Web reasoning levels. Refreshing does not change the Session preference or its primary route. Discovery and selection cannot run while a Web task is active. A new catalog entry does not imply support for new input modalities, local tools, or a changed website protocol.
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -13,7 +13,7 @@ import {
   ChatGptWebCoordination,
   type WebCoordinationConfig,
 } from '../src/coordination.ts'
-import { WebCoordinatorSettings } from '../src/coordinator-settings.ts'
+import { WebCoordinatorSettings, WebModelCatalogCache } from '../src/coordinator-settings.ts'
 import {
   discoverWebModels,
   type DiscoverWebModelsOptions,
@@ -48,7 +48,7 @@ afterEach(async () => {
   }
 })
 
-async function harness(): Promise<Harness> {
+async function harness(stateRoot?: string): Promise<Harness> {
   const ctx = new Context()
   await ctx.plugin(AgentRegistry).await()
   await ctx.plugin(PhysicalOperatorRuntime).await()
@@ -71,7 +71,7 @@ async function harness(): Promise<Harness> {
     inject: (message) => { inbox.append('next-step', message) },
   }
   ctx.agents.register(agent)
-  const root = mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-coordination-catalog-'))
+  const root = stateRoot ?? mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-coordination-catalog-'))
   const config: WebCoordinationConfig = {
     id: 'chatgpt-web-fixture',
     stateRoot: root,
@@ -194,6 +194,32 @@ describe('ChatGptWebCoordination catalog and preferences', () => {
     expect(coordination.status().catalog).toBe(good)
   })
 
+  it('restores the last refreshed catalog after a restart over the same state root', async () => {
+    const first = await harness()
+    const good = catalog()
+    discover.mockResolvedValueOnce(good)
+    await first.coordination.refreshCatalog()
+
+    const restarted = new ChatGptWebCoordination(first.ctx, first.config)
+    try {
+      expect(restarted.status().catalog).toEqual(good)
+    } finally {
+      await restarted.dispose()
+    }
+  })
+
+  it('keeps the refreshed catalog in memory when the cache file cannot be replaced', async () => {
+    const { coordination, ctx, root } = await harness()
+    mkdirSync(join(root, 'model-catalog.json'))
+    const warn = vi.spyOn(ctx.logger, 'warn')
+    const good = catalog()
+    discover.mockResolvedValueOnce(good)
+
+    await expect(coordination.refreshCatalog()).resolves.toBe(good)
+    expect(coordination.status().catalog).toBe(good)
+    expect(warn).toHaveBeenCalledWith('ChatGPT Web model catalog was not persisted: %s', expect.any(String))
+  })
+
   it('coalesces a same-scope refresh and rejects a different scope while busy', async () => {
     const { coordination, session } = await harness()
     appendProfile(session, { model: 'saved-model' })
@@ -304,6 +330,24 @@ describe('ChatGptWebCoordination catalog and preferences', () => {
       await run.result
       await run.dispose()
       await remove()
+    }
+  })
+})
+
+describe('WebModelCatalogCache', () => {
+  it('round-trips a catalog without observed selections and treats malformed files as absent', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-catalog-cache-'))
+    try {
+      const cache = new WebModelCatalogCache(root)
+      expect(cache.read()).toBeUndefined()
+      const { selectedModel: _selectedModel, selectedEffort: _selectedEffort, ...withoutSelections } = catalog()
+      cache.write(withoutSelections)
+      expect(cache.read()).toEqual(withoutSelections)
+
+      writeFileSync(join(root, 'model-catalog.json'), JSON.stringify({ version: 1, catalog: { models: 'none' } }))
+      expect(cache.read()).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
     }
   })
 })
