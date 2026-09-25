@@ -303,6 +303,7 @@ describe('ChatGPT Web physical operator', () => {
     const operator = new adapter.ChatGptWebPhysicalOperator(context, {
       stateRoot: '/tmp/dsh-chatgpt-web-test',
       connectorName: 'DSH',
+      coordinatorEnabled: false,
       coordinatorPort: 0,
       coordinatorRequestMaxBytes: 1_024,
       coordinatorRequestTimeoutMs: 1_000,

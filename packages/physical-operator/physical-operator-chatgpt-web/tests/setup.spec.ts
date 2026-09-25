@@ -43,6 +43,7 @@ function fixture(overrides: Partial<WebCoordinatorStatus> = {}): SetupFixture {
   const value: SetupFixture = {} as SetupFixture
   value.status = {
     mode: 'direct',
+    coordinatorAvailable: true,
     active: false,
     connectorName: 'ChatGPT Web',
     ...overrides,

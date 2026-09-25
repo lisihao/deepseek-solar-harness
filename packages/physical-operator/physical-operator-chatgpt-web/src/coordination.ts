@@ -18,6 +18,7 @@ export interface WebCoordinationConfig {
   readonly id: string
   readonly stateRoot: string
   readonly connectorName: string
+  readonly coordinatorEnabled: boolean
   readonly coordinatorPort: number
   readonly coordinatorRequestMaxBytes: number
   readonly coordinatorRequestTimeoutMs: number
@@ -60,8 +61,12 @@ export class ChatGptWebCoordination {
     })
   }
 
-  /** Current local selection used when registering immutable operator discovery metadata. */
-  get mode(): WebCoordinationMode { return this.settings.mode }
+  /**
+   * Current local selection used when registering immutable operator discovery
+   * metadata. A frozen coordinator mode reads as direct without rewriting the
+   * saved selection.
+   */
+  get mode(): WebCoordinationMode { return this.config.coordinatorEnabled ? this.settings.mode : 'direct' }
 
   /** Whether configuration or catalog operations temporarily prevent new admission. */
   get transitioning(): boolean { return this.changing || this.catalogPending !== undefined }
@@ -89,6 +94,7 @@ export class ChatGptWebCoordination {
   status(): WebCoordinatorStatus {
     return {
       mode: this.mode,
+      coordinatorAvailable: this.config.coordinatorEnabled,
       active: this.ctx.physicalOperators.list().some(operator => String(operator.id) === this.config.id && operator.active > 0),
       connectorName: this.config.connectorName,
       ...this.catalogValue === undefined ? {} : { catalog: this.catalogValue },
@@ -194,6 +200,7 @@ export class ChatGptWebCoordination {
    * @returns the owner-only connector URL.
    */
   async endpoint(): Promise<string> {
+    this.requireCoordinator()
     this.settings.save()
     return this.mcp.start()
   }
@@ -204,6 +211,7 @@ export class ChatGptWebCoordination {
    * @param publish - synchronously replace this Provider's discovery registration.
    */
   async select(mode: WebCoordinationMode, publish: () => Promise<void>): Promise<void> {
+    if (mode === 'coordinator') this.requireCoordinator()
     if (this.changing) throw new PhysicalOperatorError('ChatGPT Web configuration is already changing', 'OPERATOR_BUSY')
     if (mode === this.mode) return
     this.changing = true
@@ -214,6 +222,12 @@ export class ChatGptWebCoordination {
       this.settings.select(mode)
       try { await publish() } catch (error) { this.settings.select(previous); await publish(); throw error }
     } finally { this.changing = false }
+  }
+
+  private requireCoordinator(): void {
+    if (!this.config.coordinatorEnabled) {
+      throw new PhysicalOperatorError('ChatGPT Web tool coordination is frozen in this build', 'OPERATOR_UNAVAILABLE')
+    }
   }
 
   /**

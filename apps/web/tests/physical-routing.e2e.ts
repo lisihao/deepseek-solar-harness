@@ -91,6 +91,7 @@ export function apply(ctx) {
       name: ${yamlString(CHATGPT_WEB_OPERATOR)}
       config:
         stateRoot: ${yamlString(join(root, 'chatgpt-web'))}
+        coordinatorEnabled: true
         connectorName: Fixture ChatGPT Web
         coordinatorPort: 0
 

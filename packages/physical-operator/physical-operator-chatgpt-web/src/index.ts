@@ -101,6 +101,12 @@ export interface Config {
   readonly stateRoot?: string
   /** Exact visible ChatGPT custom MCP app name required for tool coordination. */
   readonly connectorName?: string
+  /**
+   * Allow the Custom MCP tool-coordination mode. Off by default: the mode is
+   * frozen, a saved coordinator selection reads as direct, and no MCP
+   * endpoint starts.
+   */
+  readonly coordinatorEnabled?: boolean
   /** Stable loopback port for the user-configured MCP tunnel; zero is useful for isolated tests. */
   readonly coordinatorPort?: number
   /** Maximum HTTP JSON body accepted by the MCP connector. */
@@ -126,6 +132,7 @@ export const Config: z<Config> = z.object({
   outputMaxBytes: z.number().default(DEFAULT_OUTPUT_MAX_BYTES),
   stateRoot: z.string(),
   connectorName: z.string().default('DSH'),
+  coordinatorEnabled: z.boolean().default(false),
   coordinatorPort: z.number().default(61847),
   coordinatorRequestMaxBytes: z.number().default(1024 * 1024),
   coordinatorRequestTimeoutMs: z.number().default(DEFAULT_GENERATION_TIMEOUT_MS),
@@ -135,6 +142,7 @@ export const Config: z<Config> = z.object({
 interface ResolvedConfig {
   readonly stateRoot: string
   readonly connectorName: string
+  readonly coordinatorEnabled: boolean
   readonly coordinatorPort: number
   readonly coordinatorRequestMaxBytes: number
   readonly coordinatorRequestTimeoutMs: number
@@ -1021,6 +1029,7 @@ function resolveConfig(config: Config): ResolvedConfig {
   return Object.freeze({
     stateRoot: requiredTrimmed('stateRoot', config.stateRoot ?? join(resolveDshHome(), 'chatgpt-web')),
     connectorName: requiredTrimmed('connectorName', config.connectorName ?? 'DSH'),
+    coordinatorEnabled: config.coordinatorEnabled ?? false,
     coordinatorPort,
     coordinatorRequestMaxBytes,
     coordinatorRequestTimeoutMs: positiveTimer('coordinatorRequestTimeoutMs', config.coordinatorRequestTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS),
