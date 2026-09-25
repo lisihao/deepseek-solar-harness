@@ -120,7 +120,7 @@ const tokenizeBackslashMathText: Tokenizer = function (effects, ok, nok) {
   }
 }
 
-function createMathFlow(marker: number, openMarker: number, closeMarker: number, multiline: boolean): Construct {
+function createMathFlow(marker: number, openMarker: number, closeMarker: number): Construct {
   const tokenize: Tokenizer = function (effects, ok, nok) {
     const self = this
     let oddBackslashRun = false
@@ -150,7 +150,7 @@ function createMathFlow(marker: number, openMarker: number, closeMarker: number,
     }
 
     function afterDollarOpen(code: number | null): State | undefined {
-      return code === codes.dollarSign ? nok(code) : content(code)
+      return code === codes.dollarSign || code === codes.eof || markdownLineEnding(code) ? nok(code) : content(code)
     }
 
     function content(code: number | null): State | undefined {
@@ -162,11 +162,7 @@ function createMathFlow(marker: number, openMarker: number, closeMarker: number,
           afterClosingFenceAttempt,
         )(code)
       }
-      if (markdownLineEnding(code)) {
-        return multiline
-          ? effects.attempt(nonLazyContinuation, afterContinuation, nok)(code)
-          : nok(code)
-      }
+      if (markdownLineEnding(code)) return effects.attempt(nonLazyContinuation, afterContinuation, nok)(code)
       return valueStart(code)
     }
 
@@ -278,7 +274,7 @@ function createMathFlow(marker: number, openMarker: number, closeMarker: number,
 
   return {
     concrete: true,
-    name: marker === codes.dollarSign ? 'sameLineDollarMathFlow' : 'backslashMathFlow',
+    name: marker === codes.dollarSign ? 'openingLineDollarMathFlow' : 'backslashMathFlow',
     tokenize,
   }
 }
@@ -319,29 +315,28 @@ const backslashMathFlow = createMathFlow(
   codes.backslash,
   codes.leftSquareBracket,
   codes.rightSquareBracket,
-  true,
 )
 
-const sameLineDollarMathFlow = createMathFlow(
+const openingLineDollarMathFlow = createMathFlow(
   codes.dollarSign,
   codes.dollarSign,
   codes.dollarSign,
-  false,
 )
 
 const backslashMath: Extension = {
   flow: {
     [codes.backslash]: backslashMathFlow,
-    [codes.dollarSign]: sameLineDollarMathFlow,
+    [codes.dollarSign]: openingLineDollarMathFlow,
   },
   text: { [codes.backslash]: backslashMathText },
 }
 
 /**
- * TeX backslash delimiters and same-line display-dollar blocks as a micromark
- * syntax extension reusing `micromark-extension-math`'s token vocabulary; the
- * caller must also register `math()` on the same parse so the emitted tokens
- * compile to standard math nodes.
+ * TeX backslash delimiters and display-dollar blocks whose TeX starts on the
+ * opening `$$` line and ends with `$$` at the end of that or a later line, as a
+ * micromark syntax extension reusing `micromark-extension-math`'s token
+ * vocabulary; the caller must also register `math()` on the same parse so the
+ * emitted tokens compile to standard math nodes.
  * @returns The micromark syntax extension.
  */
 export function mathCompatibility(): Extension {
