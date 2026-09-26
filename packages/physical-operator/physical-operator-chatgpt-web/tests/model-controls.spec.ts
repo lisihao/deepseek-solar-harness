@@ -10,10 +10,10 @@ import PhysicalOperatorRuntime, {
 } from '@deepseek-ai/dsh-physical-operator'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import {
-  ChatGptWebCoordination,
-  type WebCoordinationConfig,
-} from '../src/coordination.ts'
-import { WebCoordinatorSettings, WebModelCatalogCache } from '../src/coordinator-settings.ts'
+  ChatGptWebModelControls,
+  type WebModelControlsConfig,
+} from '../src/model-controls.ts'
+import { WebModelCatalogCache } from '../src/model-catalog-cache.ts'
 import {
   discoverWebModels,
   type DiscoverWebModelsOptions,
@@ -32,17 +32,17 @@ let nextFixture = 0
 
 interface Harness {
   readonly ctx: Context
-  readonly coordination: ChatGptWebCoordination
+  readonly controls: ChatGptWebModelControls
   readonly agent: Agent
   readonly session: Session
-  readonly config: WebCoordinationConfig
+  readonly config: WebModelControlsConfig
   readonly root: string
 }
 
 afterEach(async () => {
   discover.mockReset()
   for (const fixture of fixtures.splice(0)) {
-    await fixture.coordination.dispose()
+    await fixture.controls.dispose()
     await fixture.ctx.fiber.dispose()
     rmSync(fixture.root, { recursive: true, force: true })
   }
@@ -71,24 +71,17 @@ async function harness(stateRoot?: string): Promise<Harness> {
     inject: (message) => { inbox.append('next-step', message) },
   }
   ctx.agents.register(agent)
-  const root = stateRoot ?? mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-coordination-catalog-'))
-  const config: WebCoordinationConfig = {
+  const root = stateRoot ?? mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-model-controls-'))
+  const config: WebModelControlsConfig = {
     id: 'chatgpt-web-fixture',
     stateRoot: root,
-    connectorName: 'fixture-chatgpt-web',
-    coordinatorEnabled: false,
-    coordinatorPort: 0,
-    coordinatorRequestMaxBytes: 4_096,
-    coordinatorRequestTimeoutMs: 1_000,
-    identityTimeoutMs: 1_000,
     workspaceName: 'fixture-chatgpt-web',
     url: 'https://chatgpt.com/',
-    generationTimeoutMs: 1_000,
     submissionTimeoutMs: 100,
     pollIntervalMs: 1,
     outputMaxBytes: 2_048,
   }
-  const fixture = { ctx, coordination: new ChatGptWebCoordination(ctx, config), agent, session, config, root }
+  const fixture = { ctx, controls: new ChatGptWebModelControls(ctx, config), agent, session, config, root }
   fixtures.push(fixture)
   return fixture
 }
@@ -118,44 +111,23 @@ function appendProfile(session: Session, profile: { readonly model?: string; rea
   session.append('chatgpt-web/profile', profile, { ignorable: true })
 }
 
-describe('ChatGptWebCoordination frozen tool coordination', () => {
-  it('reads a saved coordinator selection as direct and refuses to enter or expose coordination', async () => {
-    const { ctx, config, root } = await harness()
-    new WebCoordinatorSettings(root).select('coordinator')
-    const frozen = new ChatGptWebCoordination(ctx, config)
-    const publish = vi.fn(async () => {})
-
-    expect(frozen.mode).toBe('direct')
-    expect(frozen.status()).toMatchObject({ mode: 'direct', coordinatorAvailable: false })
-    await expect(frozen.select('coordinator', publish)).rejects.toThrow('ChatGPT Web tool coordination is frozen in this build')
-    await expect(frozen.endpoint()).rejects.toMatchObject({ code: 'OPERATOR_UNAVAILABLE' })
-    expect(publish).not.toHaveBeenCalled()
-
-    const enabled = new ChatGptWebCoordination(ctx, { ...config, coordinatorEnabled: true })
-    expect(enabled.mode).toBe('coordinator')
-    expect(enabled.status()).toMatchObject({ mode: 'coordinator', coordinatorAvailable: true })
-    await enabled.dispose()
-    await frozen.dispose()
-  })
-})
-
-describe('ChatGptWebCoordination catalog and preferences', () => {
+describe('ChatGptWebModelControls catalog and preferences', () => {
   it('reads the latest session preference and does not borrow an unknown session profile', async () => {
-    const { coordination, session } = await harness()
-    expect(coordination.preferences('missing-session')).toEqual({})
+    const { controls, session } = await harness()
+    expect(controls.preferences('missing-session')).toEqual({})
     appendProfile(session, { model: 'old-model', effort: 'low' })
     appendProfile(session, { model: 'saved-model', effort: 'high' })
-    expect(coordination.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
+    expect(controls.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
   })
 
   it('refreshes a saved model and scopes the follow-up to the offered model only', async () => {
-    const { coordination, session } = await harness()
+    const { controls, session } = await harness()
     appendProfile(session, { model: 'saved-model', effort: 'high' })
     discover
       .mockResolvedValueOnce(catalog({ selectedModel: 'new-model', selectedEffort: 'low' }))
       .mockResolvedValueOnce(catalog({ selectedModel: 'saved-model', selectedEffort: 'low' }))
 
-    const refreshed = await coordination.refreshCatalog(String(session.id))
+    const refreshed = await controls.refreshCatalog(String(session.id))
 
     expect(refreshed.selectedModel).toBe('saved-model')
     expect(discover).toHaveBeenCalledTimes(2)
@@ -166,7 +138,7 @@ describe('ChatGptWebCoordination catalog and preferences', () => {
   })
 
   it('returns a fresh catalog when a saved model was removed while preserving the saved preference', async () => {
-    const { coordination, session } = await harness()
+    const { controls, session } = await harness()
     appendProfile(session, { model: 'removed-model', effort: 'high' })
     const fresh = catalog({
       models: [{ id: 'new-model', label: 'New model' }],
@@ -175,32 +147,32 @@ describe('ChatGptWebCoordination catalog and preferences', () => {
     })
     discover.mockResolvedValue(fresh)
 
-    await expect(coordination.refreshCatalog(String(session.id))).resolves.toBe(fresh)
+    await expect(controls.refreshCatalog(String(session.id))).resolves.toBe(fresh)
     expect(discover).toHaveBeenCalledTimes(1)
     expect((discover.mock.calls[0]?.[1] as DiscoverWebModelsOptions).selection).toBeUndefined()
-    expect(coordination.status().catalog).toBe(fresh)
-    expect(coordination.preferences(String(session.id))).toEqual({ model: 'removed-model', effort: 'high' })
+    expect(controls.status().catalog).toBe(fresh)
+    expect(controls.preferences(String(session.id))).toEqual({ model: 'removed-model', effort: 'high' })
   })
 
   it('keeps the last good catalog when refresh fails', async () => {
-    const { coordination } = await harness()
+    const { controls } = await harness()
     const good = catalog()
     discover.mockResolvedValueOnce(good)
-    await expect(coordination.refreshCatalog()).resolves.toBe(good)
+    await expect(controls.refreshCatalog()).resolves.toBe(good)
 
     const failure = new Error('catalog unavailable')
     discover.mockRejectedValueOnce(failure)
-    await expect(coordination.refreshCatalog()).rejects.toBe(failure)
-    expect(coordination.status().catalog).toBe(good)
+    await expect(controls.refreshCatalog()).rejects.toBe(failure)
+    expect(controls.status().catalog).toBe(good)
   })
 
   it('restores the last refreshed catalog after a restart over the same state root', async () => {
     const first = await harness()
     const good = catalog()
     discover.mockResolvedValueOnce(good)
-    await first.coordination.refreshCatalog()
+    await first.controls.refreshCatalog()
 
-    const restarted = new ChatGptWebCoordination(first.ctx, first.config)
+    const restarted = new ChatGptWebModelControls(first.ctx, first.config)
     try {
       expect(restarted.status().catalog).toEqual(good)
     } finally {
@@ -209,77 +181,77 @@ describe('ChatGptWebCoordination catalog and preferences', () => {
   })
 
   it('keeps the refreshed catalog in memory when the cache file cannot be replaced', async () => {
-    const { coordination, ctx, root } = await harness()
+    const { controls, ctx, root } = await harness()
     mkdirSync(join(root, 'model-catalog.json'))
     const warn = vi.spyOn(ctx.logger, 'warn')
     const good = catalog()
     discover.mockResolvedValueOnce(good)
 
-    await expect(coordination.refreshCatalog()).resolves.toBe(good)
-    expect(coordination.status().catalog).toBe(good)
+    await expect(controls.refreshCatalog()).resolves.toBe(good)
+    expect(controls.status().catalog).toBe(good)
     expect(warn).toHaveBeenCalledWith('ChatGPT Web model catalog was not persisted: %s', expect.any(String))
   })
 
   it('coalesces a same-scope refresh and rejects a different scope while busy', async () => {
-    const { coordination, session } = await harness()
+    const { controls, session } = await harness()
     appendProfile(session, { model: 'saved-model' })
     const pending = Promise.withResolvers<WebModelCatalog>()
     discover.mockImplementation(async (_ctx, _options, _signal) => await pending.promise)
 
-    const first = coordination.refreshCatalog(String(session.id))
-    const sameScope = coordination.refreshCatalog(String(session.id))
+    const first = controls.refreshCatalog(String(session.id))
+    const sameScope = controls.refreshCatalog(String(session.id))
     expect(sameScope).toBe(first)
-    expect(coordination.transitioning).toBe(true)
-    await expect(coordination.refreshCatalog()).rejects.toMatchObject({ code: 'OPERATOR_BUSY' })
+    expect(controls.transitioning).toBe(true)
+    await expect(controls.refreshCatalog()).rejects.toMatchObject({ code: 'OPERATOR_BUSY' })
     expect(discover).toHaveBeenCalledTimes(1)
 
     pending.resolve(catalog())
     await expect(first).resolves.toEqual(expect.objectContaining({ selectedModel: 'saved-model' }))
-    expect(coordination.transitioning).toBe(false)
+    expect(controls.transitioning).toBe(false)
   })
 
   it('commits a selection only after the requested controls are verified', async () => {
-    const { coordination, session } = await harness()
+    const { controls, session } = await harness()
     const verified = catalog({ selectedModel: 'saved-model', selectedEffort: 'high' })
     discover.mockResolvedValueOnce(verified)
 
-    await expect(coordination.selectPreferences(String(session.id), { model: 'saved-model', effort: 'high' }))
+    await expect(controls.selectPreferences(String(session.id), { model: 'saved-model', effort: 'high' }))
       .resolves.toBe(verified)
-    expect(coordination.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
-    expect(coordination.status().catalog).toBe(verified)
+    expect(controls.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
+    expect(controls.status().catalog).toBe(verified)
     expect(session.events.filter(event => event.type === 'chatgpt-web/profile')).toHaveLength(1)
 
     discover.mockResolvedValueOnce(catalogWithoutSelectedModel({ selectedEffort: 'high' }))
-    await expect(coordination.selectPreferences(String(session.id), { model: 'new-model' }))
+    await expect(controls.selectPreferences(String(session.id), { model: 'new-model' }))
       .rejects.toThrow('could not verify the selected model')
-    expect(coordination.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
-    expect(coordination.status().catalog).toBe(verified)
+    expect(controls.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
+    expect(controls.status().catalog).toBe(verified)
     expect(session.events.filter(event => event.type === 'chatgpt-web/profile')).toHaveLength(1)
 
     discover.mockResolvedValueOnce(catalogWithoutSelectedEffort({ selectedModel: 'new-model' }))
-    await expect(coordination.selectPreferences(String(session.id), { model: 'new-model', effort: 'low' }))
+    await expect(controls.selectPreferences(String(session.id), { model: 'new-model', effort: 'low' }))
       .rejects.toThrow('could not verify the selected reasoning control')
-    expect(coordination.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
-    expect(coordination.status().catalog).toBe(verified)
+    expect(controls.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
+    expect(controls.status().catalog).toBe(verified)
     expect(session.events.filter(event => event.type === 'chatgpt-web/profile')).toHaveLength(1)
   })
 
   it('preserves the last committed selection and catalog when discovery rejects', async () => {
-    const { coordination, session } = await harness()
+    const { controls, session } = await harness()
     const good = catalog()
     discover.mockResolvedValueOnce(good)
-    await coordination.selectPreferences(String(session.id), { model: 'saved-model', effort: 'high' })
+    await controls.selectPreferences(String(session.id), { model: 'saved-model', effort: 'high' })
 
     const failure = new Error('browser discovery failed')
     discover.mockRejectedValueOnce(failure)
-    await expect(coordination.selectPreferences(String(session.id), { model: 'new-model' })).rejects.toBe(failure)
-    expect(coordination.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
-    expect(coordination.status().catalog).toBe(good)
+    await expect(controls.selectPreferences(String(session.id), { model: 'new-model' })).rejects.toBe(failure)
+    expect(controls.preferences(String(session.id))).toEqual({ model: 'saved-model', effort: 'high' })
+    expect(controls.status().catalog).toBe(good)
     expect(session.events.filter(event => event.type === 'chatgpt-web/profile')).toHaveLength(1)
   })
 
   it('aborts and awaits an in-flight catalog operation during dispose', async () => {
-    const { coordination } = await harness()
+    const { controls } = await harness()
     const pending = Promise.withResolvers<WebModelCatalog>()
     let seenSignal: AbortSignal | undefined
     discover.mockImplementation(async (_ctx, _options, signal) => {
@@ -287,9 +259,9 @@ describe('ChatGptWebCoordination catalog and preferences', () => {
       return await pending.promise
     })
 
-    const refresh = coordination.refreshCatalog()
+    const refresh = controls.refreshCatalog()
     let disposed = false
-    const disposing = coordination.dispose().then(() => { disposed = true })
+    const disposing = controls.dispose().then(() => { disposed = true })
     await Promise.resolve()
     expect(seenSignal?.aborted).toBe(true)
     expect(disposed).toBe(false)
@@ -301,7 +273,7 @@ describe('ChatGptWebCoordination catalog and preferences', () => {
   })
 
   it('rejects catalog reads and selections while the physical operator is active', async () => {
-    const { ctx, coordination, agent, config } = await harness()
+    const { ctx, controls, agent, config } = await harness()
     const pending = Promise.withResolvers<PhysicalOperatorResult>()
     const remove = ctx.physicalOperators.registerOperator({
       descriptor: {
@@ -321,8 +293,8 @@ describe('ChatGptWebCoordination catalog and preferences', () => {
       signal: new AbortController().signal,
     })
     try {
-      await expect(coordination.refreshCatalog()).rejects.toMatchObject({ code: 'OPERATOR_BUSY' })
-      await expect(coordination.selectPreferences(String(agent.id), { model: 'saved-model' }))
+      await expect(controls.refreshCatalog()).rejects.toMatchObject({ code: 'OPERATOR_BUSY' })
+      await expect(controls.selectPreferences(String(agent.id), { model: 'saved-model' }))
         .rejects.toMatchObject({ code: 'OPERATOR_BUSY' })
       expect(discover).not.toHaveBeenCalled()
     } finally {

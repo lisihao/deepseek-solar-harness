@@ -22,7 +22,6 @@
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`、`ctx.codeRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: code`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 Code Mode Agent Note）。在 `code` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。 |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`、`ctx.systemPrompt`、`ctx.userQuestions (execution time, opportunistic)` | `tool/call`、`plan/mode inactive on an approved review`、`tool/result` | - | 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。 |
 | `@deepseek-ai/dsh-tool-physical-operator` | `physical_operator` | `ctx.tools`、`ctx.physicalOperators`、`action=run 时的调用 Agent` | `tool/call`、`tool/result`、`所选 Provider 产生的 physical-operator 生命周期` | - | Schema 暴露稳定物理算子 ID，而不是 Provider 传输实现。部署方另行注册算子；目录生成器有意使用空注册表采集 Schema。 |
-| `@deepseek-ai/dsh-physical-operator-chatgpt-web` | `web_session` | `ctx.tools`、`ctx.systemPrompt`、`负责协调的 ChatGPT Web Agent` | `tool/call`、`tool/result`、`Agent inbox handoff 消息` | - | 由 Provider 所有、用于已认证 ChatGPT Web 响应的协调控制。目录只挂载注册 helper，并使用代表性的 handoff 大小上限；不会启动 browser、MCP connector 或 Provider state。运行时执行仍限制在负责协调的 Web 调用中。 |
 | `@deepseek-ai/dsh-tool-debate` | `debate` | `ctx.tools`、`ctx.systemPrompt`、`ctx.debates` | `tool/call`、`tool/result`、`ctx.debates 中的 Debate 生命周期` | - | 面向模型的 Consumer 只依赖与 Provider 无关的 `ctx.debates` seam；目录使用的替身不能执行，也不会启动本地 Debate Provider。 |
 | `@deepseek-ai/dsh-tool-orchestration` | `orchestration` | `ctx.tools`、`ctx.systemPrompt`、`ctx.orchestrations` | `tool/call`、`tool/result`、`通过 ctx.orchestrations 创建的持久编排运行` | - | 面向模型的 Consumer 只依赖与 Provider 无关的 ctx.orchestrations seam；目录替身不能执行，也不会启动本地 daemon。 |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具（来自 `@deepseek-ai/dsh-tool-jobs`）收集／停止；禁用 `enableRunInBackground` 配置（默认为 true）后，该参数会被完全移除。 |
@@ -677,41 +676,6 @@ ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类�
 来源：[`packages/physical-operator/tool-physical-operator/src/index.ts`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 Schema 暴露稳定物理算子 ID，而不是 Provider 传输实现。部署方另行注册算子；目录生成器有意使用空注册表采集 Schema。
-
-<a id="deepseek-aidsh-physical-operator-chatgpt-web"></a>
-
-## `@deepseek-ai/dsh-physical-operator-chatgpt-web`
-
-### `web_session`
-
-协调一个已认证的 ChatGPT Web 响应与 DSH 循环。使用 checkpoint 观察排队的 DSH 输入，使用 handoff 排队一个有界的继续执行摘要。
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "action": {
-      "type": "string",
-      "description": "Checkpoint the current Web response or queue a continuation handoff.",
-      "enum": [
-        "checkpoint",
-        "handoff"
-      ]
-    },
-    "summary": {
-      "type": "string",
-      "description": "Required for handoff: concise work state and next steps for a fresh Web lane."
-    }
-  },
-  "required": [
-    "action"
-  ]
-}
-```
-
-来源：[`packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts`](../packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts)
-
-由 Provider 所有、用于已认证 ChatGPT Web 响应的协调控制。目录只挂载注册 helper，并使用代表性的 handoff 大小上限；不会启动 browser、MCP connector 或 Provider state。运行时执行仍限制在负责协调的 Web 调用中。
 
 <a id="deepseek-aidsh-tool-debate"></a>
 

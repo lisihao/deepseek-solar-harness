@@ -260,7 +260,7 @@ Source: [`packages/core/session/src/types.ts:273`](../packages/core/session/src/
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:55`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:34`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-webcompleted--log-only"></a>
 
@@ -289,7 +289,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:71`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:50`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-webintent--log-only"></a>
 
@@ -314,7 +314,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:39`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:18`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-webprofile--log-only"></a>
 
@@ -345,7 +345,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/model-pre
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:91`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:70`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-websubmission-pending--log-only"></a>
 
@@ -366,7 +366,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:102`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:81`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 <a id="chatgpt-webterminal--log-only"></a>
 
@@ -383,7 +383,7 @@ Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-sessi
 }
 ```
 
-Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts:111`](../packages/physical-operator/physical-operator-chatgpt-web/src/web-session.ts)
+Source: [`packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts:90`](../packages/physical-operator/physical-operator-chatgpt-web/src/receipt-events.ts)
 
 ### `command/*`
 
@@ -786,7 +786,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:118`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:117`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch--log-only"></a>
 
@@ -810,7 +810,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:118`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:90`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:89`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatordispatch-terminal--log-only"></a>
 
@@ -824,7 +824,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:90`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:113`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:112`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorpolicy--log-only"></a>
 
@@ -838,7 +838,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:113`](.
 'physical-operator/policy': { policy: PhysicalOperatorRoutingPolicy }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:75`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:74`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprofile--log-only"></a>
 
@@ -852,7 +852,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:75`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:77`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:76`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorprogress--log-only"></a>
 
@@ -870,7 +870,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:77`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:130`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:129`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatorrouting-decision--log-only"></a>
 
@@ -887,7 +887,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:130`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:82`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:81`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-call--log-only"></a>
 
@@ -908,7 +908,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:82`](..
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:146`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:145`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-dispatch--log-only"></a>
 
@@ -925,7 +925,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:146`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:105`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:104`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-indeterminate--log-only"></a>
 
@@ -944,7 +944,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:105`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:174`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:173`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortool-result--log-only"></a>
 
@@ -969,7 +969,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:174`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:158`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:157`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="physical-operatortrace-degraded--log-only"></a>
 
@@ -985,7 +985,7 @@ Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:158`](.
 }
 ```
 
-Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:139`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+Source: [`packages/physical-operator/tool-physical-operator/src/index.ts:138`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 ### `plan/*`
 

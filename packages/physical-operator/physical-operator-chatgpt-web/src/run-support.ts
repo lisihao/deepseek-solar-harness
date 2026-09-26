@@ -1,6 +1,6 @@
 /**
- * Prompt rendering, disposal, and progress helpers shared by the ephemeral
- * ChatGPT Web Provider and its coordinated Resident sessions.
+ * Prompt rendering, disposal, and progress helpers for the ephemeral ChatGPT
+ * Web Provider.
  *
  * @module @deepseek-ai/dsh-physical-operator-chatgpt-web/run-support
  */

@@ -91,9 +91,6 @@ export function apply(ctx) {
       name: ${yamlString(CHATGPT_WEB_OPERATOR)}
       config:
         stateRoot: ${yamlString(join(root, 'chatgpt-web'))}
-        coordinatorEnabled: true
-        connectorName: Fixture ChatGPT Web
-        coordinatorPort: 0
 
     - id: tool-orchestration
       name: '@deepseek-ai/dsh-tool-orchestration'
@@ -249,10 +246,8 @@ describe('web e2e: physical operator qualification and routing', () => {
     await expect.poll(() => page.getByRole('button', { name: '协作 · ChatGPT 网页版' }).isVisible()).toBe(true)
 
     const webPanel = await collaborationPanel()
-    await webPanel.getByText('连接器：Fixture ChatGPT Web').waitFor({ timeout: 10_000 })
-    const webMode = webPanel.getByRole('group', { name: 'ChatGPT 网页版协作模式' })
+    await webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' }).waitFor({ timeout: 10_000 })
     const webClaudeOption = webPanel.getByRole('button', { name: /优先 Claude Code/ })
-    await expect.poll(() => webMode.getByRole('button', { name: '独立问答' }).getAttribute('aria-pressed')).toBe('true')
     await expect.poll(() => webPanel.getByText('当前主模型：ChatGPT 网页版（独立问答）').isVisible()).toBe(true)
     expect(await webClaudeOption.isVisible()).toBe(false)
     expect(await webPanel.getByRole('button', { name: '刷新模型与算子' }).isEnabled()).toBe(true)
@@ -277,26 +272,14 @@ describe('web e2e: physical operator qualification and routing', () => {
       chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
       mainModel: primaryBeforeRefresh,
       routingVisible: await webClaudeOption.isVisible(),
-      staleSetupNotice: await webPanel.getByText(/Custom MCP 协作设置|需要先完成下方的协作设置/).count(),
+      staleSetupNotice: await webPanel.getByText(/Custom MCP|工具协作/).count(),
       taskGraphDisabled: directTaskGraphDisabled,
       claudeEffortCount: await webPanel.getByRole('combobox', { name: 'Claude 思考强度' }).count(),
       webModels: await webModel.locator('option').allTextContents(),
       webEfforts: await webEffort.locator('option').allTextContents(),
     }
 
-    await webMode.getByRole('button', { name: '工具协作' }).click()
-    await expect.poll(() => webMode.getByRole('button', { name: '工具协作' }).getAttribute('aria-pressed'), { timeout: 15_000 }).toBe('true')
-    await expect.poll(() => webClaudeOption.isDisabled()).toBe(false)
-    const coordinatorRoutingDisabled = await webClaudeOption.isDisabled()
-    await webPanel.getByRole('button', { name: '高级调度' }).click()
-    await expect.poll(() => webPanel.getByRole('combobox', { name: '模型分配目标' }).isEnabled()).toBe(true)
-    const webCoordinator = {
-      chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
-      routingDisabled: coordinatorRoutingDisabled,
-      taskGraphDisabled: await webPanel.getByRole('combobox', { name: '模型分配目标' }).isDisabled(),
-      toolsNotice: await webPanel.getByText(/工具协作模式允许通过 Custom MCP 使用 DSH 工具和 TaskGraph/).isVisible(),
-    }
-    const transcript = `${JSON.stringify({ native, debate, restored, webDirect, webCoordinator }, null, 2)}\n`
+    const transcript = `${JSON.stringify({ native, debate, restored, webDirect }, null, 2)}\n`
     if (scaffold.mode === 'refresh') await writeFile(ROUTE_SNAPSHOT, transcript)
     expect(transcript).toBe(await readFile(ROUTE_SNAPSHOT, 'utf8'))
     expect(tripwire.pageErrors).toEqual([])

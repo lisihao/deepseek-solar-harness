@@ -1,6 +1,0 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
-#   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-09-23-chatgpt-web-coordination.md
-2026-09-23-chatgpt-web-coordination.md: 8732284895793cd491139b1471464bf1c56b8a09
-2026-09-23-chatgpt-web-coordination.zh.md: 8f36b4203621afd44196a25230e7c53ac45d1f9d

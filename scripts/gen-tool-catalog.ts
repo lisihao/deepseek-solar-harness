@@ -71,7 +71,6 @@ import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
-import { registerWebCoordinationTools } from '../packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts'
 import { githubSlug } from './verify-md-links.ts'
 
 /** Attachment seam marker that makes the attachments-conditional `read_image` schema harvestable. */
@@ -292,24 +291,6 @@ const TOOL_PACKAGES: ToolPackage[] = [
     note:
       'The schema exposes stable physical-operator ids rather than provider transports. '
       + 'Deployments register operators separately; the catalog intentionally harvests the empty-registry schema.',
-  },
-  {
-    // Provider-owned model-facing tool; this explicit entry stays outside the
-    // `tool-*` completeness scan because its registration belongs to ChatGPT Web.
-    pkg: '@deepseek-ai/dsh-physical-operator-chatgpt-web',
-    dir: 'physical-operator-chatgpt-web',
-    source: 'packages/physical-operator/physical-operator-chatgpt-web/src/coordination-tools.ts',
-    requires: ['ctx.tools', 'ctx.systemPrompt', 'a coordinating ChatGPT Web Agent'],
-    writes: ['tool/call', 'tool/result', 'Agent inbox handoff messages'],
-    mount(ctx) {
-      ctx.effect(() => registerWebCoordinationTools(ctx, {
-        isCoordinating: () => false,
-        maxHandoffBytes: 24 * 1024,
-      }), 'tool-catalog: ChatGPT Web coordination tool')
-      return Promise.resolve()
-    },
-    note:
-      'Provider-owned coordination control for an authenticated ChatGPT Web response. The catalog mounts only the registration helper with a representative handoff limit; it does not boot the browser, MCP connector, or provider state. Runtime execution remains restricted to the coordinating Web call.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-debate',
