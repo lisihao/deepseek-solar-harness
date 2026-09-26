@@ -471,75 +471,7 @@ describe('host physical-operator routing', () => {
     expect(settled.data.data.stopReason).toBe('completed')
   })
 
-  it('forwards one current Web handoff and each later admitted steering in the same frozen request', async () => {
-    const { agent, chatgpt } = await setup({
-      primary: 'chatgpt-web',
-      registerDeepSeek: false,
-    })
-    const earlierHandoff = createUserMessage({
-      content: [{ type: 'text', text: 'EARLIER HANDOFF MUST NOT CROSS.' }],
-      source: { kind: 'plugin', plugin: 'chatgpt-web-handoff' },
-    })
-    agent.session.append('user/message', earlierHandoff, { surfaceOp: 'append' })
-    const unrelatedPlugin = createUserMessage({
-      content: [{ type: 'text', text: 'UNRELATED PLUGIN MUST NOT CROSS.' }],
-      source: { kind: 'plugin', plugin: 'fixture-unrelated-plugin' },
-    })
-    const handoff = createUserMessage({
-      content: [{ type: 'text', text: 'Current Web handoff summary.' }],
-      source: { kind: 'plugin', plugin: 'chatgpt-web-handoff' },
-    })
-    const firstSteering = createUserMessage({
-      content: [{ type: 'text', text: 'First direct steering must stay with this task.' }],
-      source: { kind: 'user' },
-    })
-    const finalSteering = createUserMessage({
-      content: [{ type: 'text', text: 'Final direct steering is the task.' }],
-      source: { kind: 'user' },
-    })
-    agent.inject(unrelatedPlugin)
-    agent.inject(handoff)
-    agent.inbox.append('next-step', firstSteering)
-    agent.followup(finalSteering)
-    await agent.whenIdle()
-
-    const request = chatgpt.requests[0]
-    expect(request?.prompt).toEqual(finalSteering.content)
-    expect(request?.contextEnvelope?.task).toEqual(finalSteering.content)
-    expect(request?.contextEnvelope?.contexts).toEqual([
-      { name: `chatgpt-web-handoff:${String(handoff.id)}`, text: 'Current Web handoff summary.' },
-      { name: `chatgpt-web-steering:${String(firstSteering.id)}`, text: 'First direct steering must stay with this task.' },
-    ])
-    expect(JSON.stringify(request?.contextEnvelope)).not.toContain('EARLIER HANDOFF MUST NOT CROSS.')
-    expect(JSON.stringify(request?.contextEnvelope)).not.toContain('UNRELATED PLUGIN MUST NOT CROSS.')
-
-    const stepStart = agent.session.events.findLastIndex(event => event.type === 'step/start')
-    const handoffEvent = agent.session.events.findIndex(event => (
-      event.type === 'user/message' && event.data.id === handoff.id
-    ))
-    const firstSteeringEvent = agent.session.events.findIndex(event => (
-      event.type === 'user/message' && event.data.id === firstSteering.id
-    ))
-    const finalSteeringEvent = agent.session.events.findIndex(event => (
-      event.type === 'user/message' && event.data.id === finalSteering.id
-    ))
-    const headerEvent = agent.session.events.findLastIndex(event => event.type === 'request/header')
-    expect(stepStart).toBeLessThan(handoffEvent)
-    expect(handoffEvent).toBeLessThan(firstSteeringEvent)
-    expect(firstSteeringEvent).toBeLessThan(finalSteeringEvent)
-    expect(finalSteeringEvent).toBeLessThan(headerEvent)
-    expect(agent.session.events.find(event => event.type === 'physical-operator/context-envelope')).toMatchObject({
-      data: {
-        operatorId: 'chatgpt-web',
-        envelope: {
-          task: finalSteering.content,
-          contexts: request?.contextEnvelope?.contexts,
-        },
-      },
-    })
-  })
-
-  it('keeps a Web request without a current admitted handoff unchanged', async () => {
+  it('keeps a logged Web handoff message and the system instruction out of a Web request', async () => {
     const { agent, chatgpt } = await setup({
       primary: 'chatgpt-web',
       registerDeepSeek: false,
@@ -549,7 +481,7 @@ describe('host physical-operator routing', () => {
       source: { kind: 'plugin', plugin: 'chatgpt-web-handoff' },
     }), { surfaceOp: 'append' })
 
-    send(agent, 'Run the current task without a new Web handoff.')
+    send(agent, 'Run the current task.')
     await agent.whenIdle()
 
     expect(chatgpt.requests[0]?.contextEnvelope?.contexts).toEqual([])
@@ -559,23 +491,6 @@ describe('host physical-operator routing', () => {
     expect(header?.type === 'request/header' ? header.data.header.system : '').not.toBe('')
     expect(chatgpt.requests[0]?.contextEnvelope?.systemText).toBe('')
     expect(chatgpt.requests[0]?.systemPrompt).toBeUndefined()
-  })
-
-  it('does not attach a current Web handoff to a non-Web main operator', async () => {
-    const { agent, codex } = await setup({
-      primary: 'codex',
-      registerDeepSeek: false,
-    })
-    const handoff = createUserMessage({
-      content: [{ type: 'text', text: 'Web-only handoff must not cross to Codex.' }],
-      source: { kind: 'plugin', plugin: 'chatgpt-web-handoff' },
-    })
-    agent.inject(handoff)
-    send(agent, 'Run this current task with Codex.')
-    await agent.whenIdle()
-
-    expect(codex.requests[0]?.contextEnvelope?.contexts).toEqual([])
-    expect(JSON.stringify(codex.requests[0]?.contextEnvelope)).not.toContain('Web-only handoff must not cross to Codex.')
   })
 
   it('keeps a selected ChatGPT Web main model sealed when the prompt looks Claude-shaped', async () => {

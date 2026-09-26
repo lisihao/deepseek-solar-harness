@@ -38,15 +38,14 @@ This physical-operator Service Provider sends one bounded text task through an a
 | `generationTimeoutMs` / `pollIntervalMs` | Bounded response wait and polling interval after submission. |
 | `progressIntervalMs` | Interval for content-free waiting heartbeats; default 15 seconds. |
 | `outputMaxBytes` | Maximum JSON result returned across `ctx.browser`; default 24 KiB. |
-| `coordinatorEnabled` | Allows the Custom MCP tool-coordination mode; default `false`. While off, the mode is frozen: a saved coordinator selection reads as direct, selecting coordination or requesting the MCP address is refused, and no MCP endpoint starts. |
 
 The configured browser Provider must declare `browser-js-v1` plus `authenticated-profile-reuse`, `named-workspace`, and `page-evaluate`. The operator starts no browser, never opens a debugging connection, and makes no OpenAI API request or API-key fallback.
 
 ## Behavior
 
-- Discovery exposes one `chatgpt-web` operator with `maxConcurrency: 1`. Direct mode offers `ephemeral`; explicitly configured MCP coordination additionally offers `resident`. Mode changes require an idle operator.
+- Discovery exposes one `chatgpt-web` operator with `maxConcurrency: 1` and only the `ephemeral` execution mode. The operator never receives DSH tools.
 - When the composition injects `modelWorkers`, it can register `ChatGptWebModelWorker` for this configured operator id. The worker offers `website-default` as a native-subscription high-tier planning/research route; high tier is a routing preference, and the token means the website's current selection rather than a GPT model identity. It requires the orchestration parent, accepts text-only ephemeral work, rejects enabled RLM and every model-tool bridge before browser startup, and disposes after the operator settles.
-- A context envelope is typed as readable text sections, not a JSON document: its system text, each named context under a `## name` heading, then the task. A direct Web request carries the task, any current Web handoff or steering, and matching task-template instructions; the tool-using agent's system instruction and runtime context are not sent.
+- A context envelope is typed as readable text sections, not a JSON document: its system text, each named context under a `## name` heading, then the task. A Web request carries the task and matching task-template instructions; the tool-using agent's system instruction and runtime context are not sent.
 - Each accepted call reuses the authenticated named workspace but navigates the selected page to a fresh `https://chatgpt.com/` root conversation before filling the prompt. The root must contain zero user and assistant turns; otherwise the call fails as `CHATGPT_WEB_CONTEXT_NOT_ISOLATED` without submitting. On that empty root, it waits for exactly one visible `div.ProseMirror[contenteditable="true"]` editor and ignores server-rendered textarea placeholders. After filling, it normalizes line endings and verifies that the editor still contains the complete request while the root remains empty. It then selects one visible enabled `type="submit"` button in that editor's form: legacy `#composer-submit-button`, `data-testid="send-button"`, or an exact `aria-label` of `Send`, `Send message`, `Send prompt`, `发送`, or `发送消息`. It clicks once and proves that a new user turn or generation began before waiting for the final assistant text.
 - Before filling, the operator refuses a visible non-empty composer draft or attachment with `CHATGPT_WEB_DRAFT_PRESENT`, reports only bounded counts, and tells the caller to clear or send it before retrying. It rechecks immediately before fill and never treats the text from its own fill as a restored draft.
 - A missing or changed editor, unavailable or ambiguous send control, or click that the website does not accept fails as `CHATGPT_WEB_SUBMIT_FAILED` within `submissionTimeoutMs`; it never enters the longer generation wait. A generation timeout includes bounded page state without prompt or response text.
@@ -61,9 +60,9 @@ The local-owner setup route `/api/chatgpt-web` exposes account-visible model and
 
 Explicit selections are verified on the website before a `chatgpt-web/profile` Session event saves them. Each Session has independent Web preferences; native CLI profiles do not supply Web reasoning levels. Refreshing does not change the Session preference or its primary route. Discovery and selection cannot run while a Web task is active. A new catalog entry does not imply support for new input modalities, local tools, or a changed website protocol.
 
-## MCP coordination
+## Earlier tool-coordination state
 
-Coordination requires a ChatGPT custom MCP app connected to the Provider's private endpoint through a configured tunnel. The local setup view distinguishes selected mode from the last verified tool call. Only an exact native webpage request identity grants access to the current execution's DSH tools. MCP session IDs and model-supplied arguments cannot choose another DSH owner. Command receipts preserve native turn identity; recovery observes an uncertain submission instead of sending it again.
+Desktop 3.17.1 through 3.20.x shipped a Custom MCP tool-coordination mode that has since been removed. Session logs from those versions can contain its `chatgpt-web/intent`, `accepted`, `completed`, `rejected`, `submission-pending`, and `terminal` receipt events. The package still declares those event types so the logs load; nothing writes them. A leftover `coordination.json` in the state root and the removed `connectorName`, `coordinatorEnabled`, `coordinatorPort`, `coordinatorRequestMaxBytes`, `coordinatorRequestTimeoutMs`, and `identityTimeoutMs` config keys are ignored.
 
 ## Legacy Solar fidelity
 
@@ -79,7 +78,7 @@ The migration baseline is Solar commit `cf7df54d0`, where `core/chatgpt-web/clie
 | Fill the composer, press Enter, wait, and extract the newest Markdown reply | Clicks the current visible send control, proves submission, then waits and extracts in one trusted browser program | platform adaptation; avoids editor-specific Enter behavior |
 | Optional model selector could fail and silently keep the current model | A requested model must be selected and verified or the call fails | deliberate reliability improvement |
 | Disconnect without closing the user's browser | Dispose cancels only this call and keeps the named workspace | faithful |
-| No durable receipt, `submit/poll/collect`, native resume, or Deep Research mode | The standalone path remains bounded; optional resident coordination owns durable receipts and recovery | faithful scope boundary |
+| No durable receipt, `submit/poll/collect`, native resume, or Deep Research mode | Each call remains one bounded request with no durable receipt or resume | faithful |
 | Sequential personality comparison script | Left to Debate/Orchestration rather than duplicated in the Provider | deliberate capability-seam placement |
 
 ## Model Experience
@@ -88,11 +87,11 @@ The migration baseline is Solar commit `cf7df54d0`, where `core/chatgpt-web/clie
 
 #### What the model sees
 
-In direct mode, the existing [`physical_operator` Consumer](../../../docs/tool-catalog.md#deepseek-aidsh-tool-physical-operator) owns the model-facing schema and, after it selects `chatgpt-web`, renders only the final bounded text result or a stable physical-operator error. It does not expose a debugging endpoint, browser workspace, page selector, webpage DOM, or raw progress events.
+The existing [`physical_operator` Consumer](../../../docs/tool-catalog.md#deepseek-aidsh-tool-physical-operator) owns the model-facing schema and, after it selects `chatgpt-web`, renders only the final bounded text result or a stable physical-operator error. It does not expose a debugging endpoint, browser workspace, page selector, webpage DOM, or raw progress events.
 
 #### Token effect
 
-Direct mode adds no prompt section or tool schema. Coordinated mode exposes the owning DSH tool schemas through MCP and adds scoped checkpoint guidance; tool arguments and results use the existing Session log. The direct Consumer's fixed schema is unchanged; only the selected final assistant text enters parent history, while lifecycle progress and browser-program internals remain outside model context.
+The Provider adds no prompt section or tool schema. The Consumer's fixed schema is unchanged; only the selected final assistant text enters parent history, while lifecycle progress and browser-program internals remain outside model context.
 
 #### KV Cache effect
 
@@ -100,8 +99,7 @@ The stable `physical_operator` Consumer contract does not change. Web-session co
 
 ## Known Limitations and Deferred Work
 
-- **Account-backed coordination** — keyless protocol tests do not establish that the account permits custom MCP apps or that the configured tunnel reaches ChatGPT.
-- **Standalone context** — ephemeral calls start a fresh conversation and require a complete task. Durable turn identity and continuation belong to configured resident coordination.
+- **Standalone context** — each call starts a fresh conversation and requires a complete task; there is no durable turn identity or continuation.
 - **Text task only** — image, file, and native tool payloads are not accepted by this first Provider slice.
 - **Website UI is the contract boundary** — a ChatGPT UI change can make login, input, model selection, or extraction unavailable; no API fallback exists.
 - **Explicit model selection is conservative** — ChatGPT plan availability and UI labels vary. Omitted model selection uses the user's current web default; requested but unverified selection fails loud.

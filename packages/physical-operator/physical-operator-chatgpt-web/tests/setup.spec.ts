@@ -3,13 +3,12 @@ import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { PhysicalOperatorError } from '@deepseek-ai/dsh-physical-operator'
 import { request as httpRequest } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { WebCoordinationMode } from '../src/coordinator-settings.ts'
 import type { WebModelCatalog, WebModelPreferences } from '../src/model-catalog.ts'
 import {
   CHATGPT_WEB_SETUP_PATH,
-  registerWebCoordinatorSetup,
-  type WebCoordinatorSetup,
-  type WebCoordinatorStatus,
+  registerWebSetup,
+  type WebSetup,
+  type WebSetupStatus,
 } from '../src/setup.ts'
 
 interface RunningServer {
@@ -19,13 +18,11 @@ interface RunningServer {
 }
 
 interface SetupFixture {
-  endpoint: ReturnType<typeof vi.fn<() => Promise<string>>>
-  select: ReturnType<typeof vi.fn<(mode: WebCoordinationMode) => Promise<void>>>
   refreshCatalog: ReturnType<typeof vi.fn<(sessionId?: string) => Promise<WebModelCatalog>>>
   preferences: ReturnType<typeof vi.fn<(sessionId: string) => WebModelPreferences>>
   selectPreferences: ReturnType<typeof vi.fn<(sessionId: string, profile: WebModelPreferences) => Promise<WebModelCatalog | undefined>>>
-  setup: WebCoordinatorSetup
-  status: WebCoordinatorStatus
+  setup: WebSetup
+  status: WebSetupStatus
   catalog: WebModelCatalog
   profile: WebModelPreferences
 }
@@ -39,19 +36,12 @@ afterEach(async () => {
   await current?.fiber.dispose()
 })
 
-function fixture(overrides: Partial<WebCoordinatorStatus> = {}): SetupFixture {
+function fixture(overrides: Partial<WebSetupStatus> = {}): SetupFixture {
   const value: SetupFixture = {} as SetupFixture
   value.status = {
-    mode: 'direct',
-    coordinatorAvailable: true,
     active: false,
-    connectorName: 'ChatGPT Web',
     ...overrides,
   }
-  value.endpoint = vi.fn<() => Promise<string>>(async () => 'http://127.0.0.1/mcp/dsh/secret-token')
-  value.select = vi.fn<(mode: WebCoordinationMode) => Promise<void>>(async (mode) => {
-    value.status = { ...value.status, mode }
-  })
   value.profile = { model: 'gpt-5', effort: 'high' }
   value.catalog = {
     models: [{ id: 'gpt-5', label: 'GPT-5' }],
@@ -70,8 +60,6 @@ function fixture(overrides: Partial<WebCoordinatorStatus> = {}): SetupFixture {
   })
   value.setup = {
     status: () => value.status,
-    endpoint: value.endpoint,
-    select: value.select,
     refreshCatalog: value.refreshCatalog,
     preferences: value.preferences,
     selectPreferences: value.selectPreferences,
@@ -79,11 +67,11 @@ function fixture(overrides: Partial<WebCoordinatorStatus> = {}): SetupFixture {
   return value
 }
 
-async function start(setup: WebCoordinatorSetup): Promise<number> {
+async function start(setup: WebSetup): Promise<number> {
   const ctx = new Context()
   const fiber = ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
   await fiber.await()
-  const disposeRoute = registerWebCoordinatorSetup(ctx, setup)
+  const disposeRoute = registerWebSetup(ctx, setup)
   running = { disposeRoute, fiber, port: ctx.webServer.port }
   return ctx.webServer.port
 }
@@ -121,7 +109,7 @@ async function requestWithHeaders(
 }
 
 describe('ChatGPT Web setup route', () => {
-  it('returns public status without invoking endpoint setup or exposing its secret', async () => {
+  it('returns public status without refreshing the catalog', async () => {
     const value = fixture()
     const port = await start(value.setup)
 
@@ -129,22 +117,10 @@ describe('ChatGPT Web setup route', () => {
 
     expect(response.status).toBe(200)
     expect(response.body).toEqual(value.status)
-    expect(value.endpoint).not.toHaveBeenCalled()
-    expect(response.text).not.toContain('secret-token')
+    expect(value.refreshCatalog).not.toHaveBeenCalled()
   })
 
-  it('returns the connector endpoint only for an explicit setup request', async () => {
-    const value = fixture()
-    const port = await start(value.setup)
-
-    const response = await request(port, `${CHATGPT_WEB_SETUP_PATH}?setup=1`)
-
-    expect(response.status).toBe(200)
-    expect(response.body).toEqual({ ...value.status, mcpUrl: 'http://127.0.0.1/mcp/dsh/secret-token' })
-    expect(value.endpoint).toHaveBeenCalledTimes(1)
-  })
-
-  it('forwards a session to profile and catalog reads without exposing the connector endpoint', async () => {
+  it('forwards a session to profile and catalog reads', async () => {
     const value = fixture()
     const port = await start(value.setup)
 
@@ -155,7 +131,7 @@ describe('ChatGPT Web setup route', () => {
 
     const catalog = await request(
       port,
-      `${CHATGPT_WEB_SETUP_PATH}?catalog=1&setup=1&session_id=session-42`,
+      `${CHATGPT_WEB_SETUP_PATH}?catalog=1&session_id=session-42`,
     )
     expect(catalog.status).toBe(200)
     expect(catalog.body).toEqual({
@@ -164,9 +140,6 @@ describe('ChatGPT Web setup route', () => {
       catalog: value.catalog,
     })
     expect(value.refreshCatalog).toHaveBeenCalledWith('session-42')
-    expect(value.endpoint).not.toHaveBeenCalled()
-    expect(catalog.body).not.toHaveProperty('mcpUrl')
-    expect(catalog.text).not.toContain('secret-token')
   })
 
   it('saves a session-scoped profile selection and returns the saved profile', async () => {
@@ -267,26 +240,6 @@ describe('ChatGPT Web setup route', () => {
     expect(value.selectPreferences).not.toHaveBeenCalled()
   })
 
-  it('reports unavailable catalog and profile capabilities as 501', async () => {
-    const value = fixture()
-    const setup: WebCoordinatorSetup = { ...value.setup }
-    delete setup.refreshCatalog
-    delete setup.selectPreferences
-    const port = await start(setup)
-
-    const catalog = await request(port, `${CHATGPT_WEB_SETUP_PATH}?catalog=1`)
-    expect(catalog.status).toBe(501)
-    expect(catalog.body).toEqual({ error: 'WEB_CATALOG_UNAVAILABLE' })
-
-    const profile = await request(
-      port,
-      `${CHATGPT_WEB_SETUP_PATH}?action=profile&session_id=session-42&model=gpt-5-mini`,
-      { method: 'POST' },
-    )
-    expect(profile.status).toBe(501)
-    expect(profile.body).toEqual({ error: 'WEB_PROFILE_UNAVAILABLE' })
-  })
-
   it('contains catalog and profile refresh failures without returning secrets', async () => {
     const value = fixture()
     value.refreshCatalog.mockRejectedValue(new Error('catalog-secret-token'))
@@ -308,24 +261,14 @@ describe('ChatGPT Web setup route', () => {
     expect(profile.text).not.toContain('profile-secret-token')
   })
 
-  it('validates POST mode, persists a local selection, and rejects a busy provider', async () => {
+  it('rejects a POST that is not a profile selection', async () => {
     const value = fixture()
     const port = await start(value.setup)
 
-    const invalid = await request(port, `${CHATGPT_WEB_SETUP_PATH}?mode=unknown`, { method: 'POST' })
-    expect(invalid.status).toBe(400)
-    expect(value.select).not.toHaveBeenCalled()
-
-    const selected = await request(port, `${CHATGPT_WEB_SETUP_PATH}?mode=coordinator`, { method: 'POST' })
-    expect(selected.status).toBe(200)
-    expect(selected.body).toEqual({ ...value.status, mode: 'coordinator' })
-    expect(value.select).toHaveBeenCalledWith('coordinator')
-
-    value.status = { ...value.status, active: true }
-    const busy = await request(port, `${CHATGPT_WEB_SETUP_PATH}?mode=direct`, { method: 'POST' })
-    expect(busy.status).toBe(409)
-    expect(busy.body).toEqual({ error: 'CHATGPT_WEB_BUSY' })
-    expect(value.select).toHaveBeenCalledTimes(1)
+    const response = await request(port, `${CHATGPT_WEB_SETUP_PATH}?mode=coordinator`, { method: 'POST' })
+    expect(response.status).toBe(400)
+    expect(response.body).toEqual({ error: 'INVALID_WEB_ACTION' })
+    expect(value.selectPreferences).not.toHaveBeenCalled()
   })
 
   it('requires loopback host and origin authorization', async () => {
@@ -352,29 +295,6 @@ describe('ChatGPT Web setup route', () => {
 
     expect(response.status).toBe(405)
     expect(response.headers.get('allow')).toBe('GET, POST')
-  })
-
-  it('contains endpoint and mode-selection failures without returning secrets', async () => {
-    const endpoint = vi.fn(async (): Promise<string> => {
-      throw new Error('secret-endpoint-token')
-    })
-    const select = vi.fn(async (): Promise<void> => {
-      throw new Error('secret-mode-token')
-    })
-    const value = fixture()
-    value.endpoint.mockImplementation(endpoint)
-    value.select.mockImplementation(select)
-    const port = await start(value.setup)
-
-    const endpointFailure = await request(port, `${CHATGPT_WEB_SETUP_PATH}?setup=1`)
-    expect(endpointFailure.status).toBe(503)
-    expect(endpointFailure.body).toEqual({ error: 'CHATGPT_WEB_CONNECTOR_START_FAILED' })
-    expect(endpointFailure.text).not.toContain('secret-endpoint-token')
-
-    const selectFailure = await request(port, `${CHATGPT_WEB_SETUP_PATH}?mode=coordinator`, { method: 'POST' })
-    expect(selectFailure.status).toBe(503)
-    expect(selectFailure.body).toEqual({ error: 'CHATGPT_WEB_MODE_CHANGE_FAILED' })
-    expect(selectFailure.text).not.toContain('secret-mode-token')
   })
 
   it('removes the exact route when its disposer runs', async () => {

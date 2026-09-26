@@ -1,6 +1,6 @@
 # Agent Note: ChatGPT Web 顾问与主控路径
 
-Status: proposed
+Status: rejected — Web 主控路径已删除（[删除说明](../../implemented/feature/2026-09-26-remove-chatgpt-web-tool-coordination.md)）；顾问路径和目录刷新不依赖它，已单独交付
 
 [English](2026-09-23-chatgpt-web-coordination.md) | 中文
 

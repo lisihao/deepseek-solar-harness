@@ -10,7 +10,7 @@
     "src/client/ResidentOperatorsPanel.tsx",
     "src/client/CliRuntimes.tsx",
     "src/client/PhysicalOperatorRoutingControl.tsx",
-    "src/client/WebCoordinationSetup.tsx",
+    "src/client/WebModelSetup.tsx",
     "src/client/WebModelControls.tsx",
     "src/client/styles.ts",
     "src/contracts.ts",

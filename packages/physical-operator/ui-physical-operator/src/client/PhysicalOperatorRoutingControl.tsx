@@ -26,10 +26,7 @@ import type {
 import type { DebateExecutionMode } from '@deepseek-ai/dsh-tool-debate/client'
 import type { DesktopResidentDashboard } from '../contracts.ts'
 import { loadResidentDashboard, type BrowserRequest } from './ResidentOperatorsPanel.tsx'
-import {
-  WebCoordinationSetup,
-  type WebCoordinationStatus,
-} from './WebCoordinationSetup.tsx'
+import { WebModelSetup } from './WebModelSetup.tsx'
 
 /** Command face injected by the Desktop client registration. */
 export interface PhysicalOperatorRoutingInjected extends Pick<ModelSelectInjected, 'directory'> {
@@ -317,7 +314,6 @@ export function PhysicalOperatorRoutingControl({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dashboard, setDashboard] = useState<DesktopResidentDashboard>()
-  const [webCoordinationStatus, setWebCoordinationStatus] = useState<WebCoordinationStatus>()
   const [refreshing, setRefreshing] = useState(false)
   const [refreshMessage, setRefreshMessage] = useState<string>()
   const [webRefreshVersion, setWebRefreshVersion] = useState(0)
@@ -338,13 +334,11 @@ export function PhysicalOperatorRoutingControl({
   const savedProfileOwner = routing?.currentValue === 'codex' || routing?.currentValue === 'claude-code'
     ? routing.currentValue
     : undefined
-  const webCoordinationReady = selectedMainModel === 'chatgpt-web'
-    && webCoordinationStatus?.mode === 'coordinator'
-  const webDirectOnly = selectedMainModel === 'chatgpt-web' && !webCoordinationReady
+  const webPrimary = selectedMainModel === 'chatgpt-web'
   const profileOwner = effectiveMechanism === 'debate'
     ? undefined
     : selectedProfileOwner
-      ?? (selectedMainModel === undefined || webCoordinationReady ? savedProfileOwner : undefined)
+      ?? (selectedMainModel === undefined ? savedProfileOwner : undefined)
   const dashboardEligible = open
     && profileOwner !== undefined
     && effectiveMechanism !== 'debate'
@@ -410,11 +404,8 @@ export function PhysicalOperatorRoutingControl({
   if (routing === undefined) return null
 
   const locked = session.removed || input.phase !== 'plain' || saving
-  const taskGraphInactive = effectiveMechanism === 'debate'
-    || (selectedMainModel === 'chatgpt-web' && !webCoordinationReady)
-  const routingPreferencesLocked = locked
-    || (selectedMainModel === 'chatgpt-web' && !webCoordinationReady)
-    || effectiveMechanism === 'debate'
+  const taskGraphInactive = effectiveMechanism === 'debate' || webPrimary
+  const routingPreferencesLocked = locked || webPrimary || effectiveMechanism === 'debate'
   const currentLabel = physicalOperatorEffectiveExecutionLabel(
     routing.currentValue,
     orchestrationPreferences?.rlm,
@@ -634,7 +625,7 @@ export function PhysicalOperatorRoutingControl({
               <button type="button" data-selected={page === 'advanced' || undefined} disabled={locked} onClick={() => { if (!locked) setPage('advanced') }}>高级调度</button>
             </nav>
             <div className="dshDesktopOperatorStrategyBody">
-              <div className="dshDesktopOperatorStrategyOptions" hidden={page !== 'basic' || webDirectOnly}>
+              <div className="dshDesktopOperatorStrategyOptions" hidden={page !== 'basic' || webPrimary}>
                 {routing.options.map(option => (
                   <button
                     key={option.value}
@@ -653,7 +644,7 @@ export function PhysicalOperatorRoutingControl({
               </div>
               {selectedMainModel !== undefined && effectiveMechanism !== 'debate' && (
                 <div className="dshDesktopOperatorProfilePreferences dshDesktopOperatorTaskGraphPreferences" hidden={page !== 'basic'} role="status">
-                  {webDirectOnly
+                  {webPrimary
                     ? (
                       <div>
                         <strong>当前主模型：ChatGPT 网页版（独立问答）</strong>
@@ -663,15 +654,13 @@ export function PhysicalOperatorRoutingControl({
                     : (
                       <div>
                         <strong>当前主模型：{physicalOperatorRoutingSummary(selectedMainModel)}</strong>
-                        <small>{`下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“${physicalOperatorRoutingLabel(routing.currentValue)}”。${webCoordinationReady
-                          ? ' 工具协作模式已选择；请在下方完成 Custom MCP 连接。'
-                          : ''}`}</small>
+                        <small>{`下面设置的是下游协作偏好，不会更改当前主模型。当前保存：“${physicalOperatorRoutingLabel(routing.currentValue)}”。`}</small>
                       </div>
                     )}
                 </div>
               )}
-              {selectedMainModel === 'chatgpt-web' && (
-                <WebCoordinationSetup
+              {webPrimary && (
+                <WebModelSetup
                   request={request}
                   open={open}
                   selected
@@ -679,7 +668,6 @@ export function PhysicalOperatorRoutingControl({
                   hidden={page !== 'basic'}
                   sessionId={String(sessionId)}
                   refreshVersion={webRefreshVersion}
-                  onStatusChange={setWebCoordinationStatus}
                 />
               )}
               {effectiveMechanism === 'debate' && (
@@ -701,7 +689,7 @@ export function PhysicalOperatorRoutingControl({
                 <div className="dshDesktopOperatorProfilePreferences" hidden={page !== 'basic'}>
                   <div>
                     <strong>{profileOwner === 'codex' ? 'Codex' : 'Claude Code'} 模型偏好</strong>
-                    <small>{selectedMainModel === undefined || webCoordinationReady
+                    <small>{selectedMainModel === undefined
                       ? '这是下游协作端的原生配置，不会更改当前主模型。'
                       : '这是当前主模型的原生配置；下方按钮单独设置下游协作偏好。'}</small>
                     <small>{profileOwner === 'codex'
@@ -767,11 +755,6 @@ export function PhysicalOperatorRoutingControl({
                 <div className="dshDesktopOperatorProfilePreferences" role="status">
                   <strong>Plan 与直接 Debate 不能同时执行</strong>
                   <small>Plan 需要由主模型提交计划并等待批准。请先退出 Plan 再启用 Debate；已启用 Debate 时请退出 Debate 后继续计划。</small>
-                </div>
-              )}
-              {webCoordinationReady && (
-                <div className="dshDesktopOperatorProfilePreferences" role="status">
-                  <small>工具协作模式允许通过 Custom MCP 使用 DSH 工具和 TaskGraph；网页模型和思考强度仍请在 ChatGPT 中设置。</small>
                 </div>
               )}
               {orchestrationPreferences !== undefined && debatePreferences !== undefined && (
