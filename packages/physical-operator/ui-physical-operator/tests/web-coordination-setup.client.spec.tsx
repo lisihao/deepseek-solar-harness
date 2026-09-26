@@ -21,7 +21,7 @@ function response(value: unknown, status = 200): Response {
 }
 
 function status(mode: 'direct' | 'coordinator', active = false): WebCoordinationStatus {
-  return { mode, active, connectorName: 'DSH Local Tools' }
+  return { mode, coordinatorAvailable: true, active, connectorName: 'DSH Local Tools' }
 }
 
 function requestUrl(input: RequestInfo | URL | undefined): string {
@@ -49,6 +49,17 @@ function renderSetup(
 }
 
 describe('ChatGPT Web coordination setup', () => {
+  it('offers only direct questions and no connection setup when the Host freezes tool coordination', async () => {
+    const request = vi.fn(async () => response({ ...status('direct'), coordinatorAvailable: false }))
+    renderSetup(request)
+    expect(await screen.findByText(/工具协作已冻结/u)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '工具协作' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '独立问答' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '连接设置' })).toBeNull()
+    expect(screen.queryByText(/最近一次经过验证的 MCP 调用/u)).toBeNull()
+    expect(screen.queryByText(/连接器：/u)).toBeNull()
+  })
+
   it('loads owner status, changes mode, and reveals the MCP endpoint only on explicit setup', async () => {
     const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(requestUrl(input))

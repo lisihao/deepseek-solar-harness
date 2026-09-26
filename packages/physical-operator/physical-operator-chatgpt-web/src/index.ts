@@ -101,6 +101,12 @@ export interface Config {
   readonly stateRoot?: string
   /** Exact visible ChatGPT custom MCP app name required for tool coordination. */
   readonly connectorName?: string
+  /**
+   * Allow the Custom MCP tool-coordination mode. Off by default: the mode is
+   * frozen, a saved coordinator selection reads as direct, and no MCP
+   * endpoint starts.
+   */
+  readonly coordinatorEnabled?: boolean
   /** Stable loopback port for the user-configured MCP tunnel; zero is useful for isolated tests. */
   readonly coordinatorPort?: number
   /** Maximum HTTP JSON body accepted by the MCP connector. */
@@ -126,6 +132,7 @@ export const Config: z<Config> = z.object({
   outputMaxBytes: z.number().default(DEFAULT_OUTPUT_MAX_BYTES),
   stateRoot: z.string(),
   connectorName: z.string().default('DSH'),
+  coordinatorEnabled: z.boolean().default(false),
   coordinatorPort: z.number().default(61847),
   coordinatorRequestMaxBytes: z.number().default(1024 * 1024),
   coordinatorRequestTimeoutMs: z.number().default(DEFAULT_GENERATION_TIMEOUT_MS),
@@ -135,6 +142,7 @@ export const Config: z<Config> = z.object({
 interface ResolvedConfig {
   readonly stateRoot: string
   readonly connectorName: string
+  readonly coordinatorEnabled: boolean
   readonly coordinatorPort: number
   readonly coordinatorRequestMaxBytes: number
   readonly coordinatorRequestTimeoutMs: number
@@ -271,6 +279,7 @@ const COMPOSER_DOM_HELPERS = String.raw`
   const mathSource = (element) => element.getAttribute('data-math-source')
     ?? element.querySelector('annotation[encoding="application/x-tex"]')?.textContent
     ?? '';
+  const displayMath = (element) => '$$' + newline + mathSource(element).trim() + newline + '$$';
   const citationLink = (element) => {
     const href = element.getAttribute('href') ?? '';
     if (!/^https?:/.test(href)) return '';
@@ -283,11 +292,11 @@ const COMPOSER_DOM_HELPERS = String.raw`
     const element = node;
     if (skipped(element)) return '';
     if (element.tagName === 'BR') return newline;
-    if (element.classList.contains('katex-display')) return '$$' + mathSource(element) + '$$';
+    if (element.classList.contains('katex-display')) return newline + displayMath(element) + newline;
     if (element.classList.contains('katex') || element.hasAttribute('data-math-source')) {
       return element.querySelector('.katex-display') === null
         ? '$' + mathSource(element) + '$'
-        : '$$' + mathSource(element) + '$$';
+        : newline + displayMath(element) + newline;
     }
     if (element.tagName === 'A' && element.getAttribute('data-testid') === 'chatgpt-citation') return citationLink(element);
     const inner = [...element.childNodes].map(inlineMarkdown).join('');
@@ -355,7 +364,7 @@ const COMPOSER_DOM_HELPERS = String.raw`
     }
     if (element.classList.contains('katex-display')
       || element.hasAttribute('data-math-source') && element.querySelector('.katex-display') !== null) {
-      return ['$$' + mathSource(element) + '$$'];
+      return [displayMath(element)];
     }
     if (tag !== 'P' && [...element.children].some(isBlock)) return blocksOf(element);
     return [inlineLine(element)];
@@ -370,6 +379,18 @@ const COMPOSER_DOM_HELPERS = String.raw`
       ?? element.querySelector('.markdown')
       ?? element;
     return blocksOf(body).join(newline + newline);
+  };
+  const pageTurnItem = (element) => {
+    if (element === null) return null;
+    const body = element.querySelector('[data-markdown-text-style="assistant-message"]') ?? element;
+    const key = Object.keys(body).find((name) => name.startsWith('__reactFiber$'));
+    let fiber = key === undefined ? null : body[key];
+    for (let depth = 0; fiber !== null && fiber !== undefined && depth < 40; depth += 1, fiber = fiber.return) {
+      const item = fiber.memoizedProps?.item;
+      if (item !== null && typeof item === 'object' && typeof item.completed === 'boolean'
+        && typeof item.content === 'string') return item;
+    }
+    return null;
   };
   const latestAssistantSettled = (latest, assistants) => {
     if (latest === null || latest.querySelector('[data-markdown-text-style="assistant-message"]') === null) return false;
@@ -477,11 +498,15 @@ const RESPONSE_STATE = String.raw`() => {
   const { users, assistants } = messageUnits();
   const latestReply = assistants.at(-1) ?? null;
   const response = assistantText(latestReply);
+  const turnItem = pageTurnItem(latestReply);
+  const pageCompleted = turnItem === null
+    ? undefined
+    : turnItem.completed && (turnItem.phase === undefined || turnItem.phase === 'final_answer');
   const legacyTurn = latestReply?.closest('[data-testid^="conversation-turn-"]') ?? null;
   const legacySettled = legacyTurn !== null && legacyTurn.querySelector(
     '[data-testid="copy-turn-action-button"],[aria-label="Copy response"],[aria-label="复制回复"]',
   ) !== null;
-  const generating = [...document.querySelectorAll('button,[role="button"]')].some((element) => {
+  const generating = turnItem?.completed === false || [...document.querySelectorAll('button,[role="button"]')].some((element) => {
     if (element.getAttribute('data-testid') === 'stop-button') return true;
     const label = String(element.getAttribute('aria-label') ?? element.textContent ?? '').replace(/\s+/g, ' ').trim();
     return /stop generating|stop streaming|停止生成|停止流式传输|^停止$|^stop$/i.test(label);
@@ -499,7 +524,7 @@ const RESPONSE_STATE = String.raw`() => {
     inputCharacters: inputText.length,
     response,
     generating,
-    settled: legacySettled || latestAssistantSettled(latestReply, assistants),
+    settled: pageCompleted ?? (legacySettled || latestAssistantSettled(latestReply, assistants)),
     sendAvailable: send !== null,
   };
 }`
@@ -1005,6 +1030,7 @@ function resolveConfig(config: Config): ResolvedConfig {
   return Object.freeze({
     stateRoot: requiredTrimmed('stateRoot', config.stateRoot ?? join(resolveDshHome(), 'chatgpt-web')),
     connectorName: requiredTrimmed('connectorName', config.connectorName ?? 'DSH'),
+    coordinatorEnabled: config.coordinatorEnabled ?? false,
     coordinatorPort,
     coordinatorRequestMaxBytes,
     coordinatorRequestTimeoutMs: positiveTimer('coordinatorRequestTimeoutMs', config.coordinatorRequestTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS),

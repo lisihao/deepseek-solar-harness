@@ -170,11 +170,42 @@ describe('ChatGPT Web model controls', () => {
   it('disables controls without a catalog and tells the owner how to load it', () => {
     renderControls({ profile: { model: 'future/lattice-9', effort: 'sprint' } })
 
-    expect(screen.getByText(/请点击“刷新模型与算子”/)).toBeTruthy()
+    expect(screen.getByText(/尚未读取 ChatGPT Web 模型目录/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '读取网页模型与推理强度' })).toBeTruthy()
     expect(selectControl('ChatGPT Web 模型').disabled).toBe(true)
     expect(selectControl('ChatGPT Web 推理强度').disabled).toBe(true)
     expect(screen.getByRole('option', { name: /future\/lattice-9/ })).toBeTruthy()
     expect(screen.getByRole('option', { name: /sprint/ })).toBeTruthy()
+  })
+
+  it('reads the account catalog in place and enables the model and reasoning choices', async () => {
+    const request = vi.fn(async () => new Response(JSON.stringify({ mode: 'direct', profile: {}, catalog }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as BrowserRequest
+    const { onChange } = renderControls({ request })
+
+    fireEvent.click(screen.getByRole('button', { name: '读取网页模型与推理强度' }))
+
+    await waitFor(() => { expect(onChange).toHaveBeenCalledWith({}, catalog) })
+    const url = new URL(requestUrl(vi.mocked(request).mock.calls[0]![0]))
+    expect(url.pathname).toBe('/api/chatgpt-web')
+    expect(url.searchParams.get('catalog')).toBe('1')
+    expect(url.searchParams.get('refresh')).toBe('1')
+    expect(url.searchParams.get('session_id')).toBe('session-1')
+  })
+
+  it('explains a busy catalog read without changing the saved profile', async () => {
+    const request = vi.fn(async () => new Response(JSON.stringify({ error: 'CHATGPT_WEB_BUSY' }), {
+      status: 409,
+      headers: { 'content-type': 'application/json' },
+    })) as BrowserRequest
+    const { onChange } = renderControls({ request, profile: { model: 'future/lattice-9' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '读取网页模型与推理强度' }))
+
+    expect((await screen.findByRole('alert')).textContent).toContain('请等待完成后再读取网页模型')
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it('disables the reasoning control when the website exposes no reasoning choices', () => {

@@ -303,6 +303,7 @@ describe('ChatGPT Web physical operator', () => {
     const operator = new adapter.ChatGptWebPhysicalOperator(context, {
       stateRoot: '/tmp/dsh-chatgpt-web-test',
       connectorName: 'DSH',
+      coordinatorEnabled: false,
       coordinatorPort: 0,
       coordinatorRequestMaxBytes: 1_024,
       coordinatorRequestTimeoutMs: 1_000,
@@ -894,6 +895,10 @@ describe('ChatGPT Web physical operator', () => {
         '<annotation encoding="application/x-tex">G_s</annotation></semantics></math></span>',
         '<span class="katex-html" aria-hidden="true">Gs</span></span> 定义</p>',
         '<span class="block" data-math-source="U = G_u / G_s"><span class="katex-display"><span class="katex">U</span></span></span>',
+        '<span class="katex-display"><span class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>S</mi></mrow>',
+        '<annotation encoding="application/x-tex">\\text{S}\n\\approx\nI\\times T</annotation></semantics></math></span></span></span>',
+        '<p>于是<span class="katex-display"><span class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>R</mi></mrow>',
+        '<annotation encoding="application/x-tex">R\\approx11\\%</annotation></semantics></math></span></span></span>成立</p>',
         '<table><thead><tr><th>指标</th><th>含义</th></tr></thead><tbody><tr><td>Power</td><td>电 | 力</td></tr></tbody></table>',
         '<hr><p>结尾</p>',
       ].join('')
@@ -919,7 +924,9 @@ describe('ChatGPT Web physical operator', () => {
         '> 引用',
         '```text\nA\n  ↓\nB\n```',
         '变量 $G_s$ 定义',
-        '$$U = G_u / G_s$$',
+        '$$\nU = G_u / G_s\n$$',
+        '$$\n\\text{S}\n\\approx\nI\\times T\n$$',
+        '于是\n$$\nR\\approx11\\%\n$$\n成立',
         '| 指标 | 含义 |\n| --- | --- |\n| Power | 电 \\| 力 |',
         '---',
         '结尾',
@@ -960,6 +967,49 @@ describe('ChatGPT Web physical operator', () => {
       status: 'generation-timeout',
       diagnostic: { assistantCount: 1, settled: false },
     })
+  })
+
+  it.each([
+    { name: 'a page item still in progress outranks a turn copy action', item: { completed: false, phase: 'final_answer' }, copy: true, settles: false },
+    { name: 'a completed final page item settles without any copy action', item: { completed: true, phase: 'final_answer' }, copy: false, settles: true },
+    { name: 'completed interim commentary does not settle the turn', item: { completed: true, phase: 'commentary' }, copy: true, settles: false },
+  ])('settles from the page turn item: $name', async ({ item, copy, settles }) => {
+    const form = document.createElement('form')
+    const editor = createComposer()
+    const send = createSendButton('Send')
+    form.append(editor, send)
+    document.body.append(form)
+    send.addEventListener('click', (event) => {
+      event.preventDefault()
+      form.remove()
+      window.history.pushState(null, '', '/c/page-item')
+      const cluster = document.createElement('section')
+      const assistant = contentSearchAssistant('UUID:2:assistant', 'page item reply')
+      const body = assistant.querySelector('[data-markdown-text-style="assistant-message"]')
+      if (body === null) throw new Error('fixture has no assistant body')
+      Object.assign(body, {
+        __reactFiber$fixture: { memoizedProps: {}, return: { memoizedProps: { item: { ...item, content: 'page item reply' } }, return: null } },
+      })
+      cluster.append(contentSearchUser('UUID:0:user'), assistant)
+      if (copy) {
+        const action = document.createElement('button')
+        action.setAttribute('aria-label', 'Copy')
+        cluster.append(action)
+      }
+      document.body.append(cluster)
+    })
+    const browser: ProgramBrowser = {
+      run: async (operation) => {
+        if (operation.id === 'chatgpt-fill') setComposerText(editor, operation.value ?? '')
+        if (operation.id === 'chatgpt-send') send.click()
+      },
+      evaluate: async (_page, evaluator, input) => evaluatePage(evaluator, input),
+    }
+
+    const outcome = await executeGeneratedProgramWithFakeClock(programFor('page item', { generationTimeoutMs: 30 }), browser)
+    expect(outcome).toMatchObject(settles
+      ? { status: 'completed', response: 'page item reply' }
+      : { status: 'generation-timeout', diagnostic: { settled: false } })
   })
 
   it('fails within the readiness bound when an SSR textarea never hydrates into a ProseMirror composer', async () => {

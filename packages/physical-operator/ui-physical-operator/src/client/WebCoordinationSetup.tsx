@@ -16,6 +16,8 @@ export type WebCoordinationMode = 'direct' | 'coordinator'
 /** Public ChatGPT Web coordination status returned by the authenticated Host. */
 export interface WebCoordinationStatus {
   readonly mode: WebCoordinationMode
+  /** Whether the Host allows Custom MCP tool coordination; a frozen build offers only direct questions. */
+  readonly coordinatorAvailable: boolean
   readonly active: boolean
   readonly connectorName: string
   readonly lastVerifiedAt?: string
@@ -196,13 +198,18 @@ export function WebCoordinationSetup({
     }
   }
 
+  const coordinatorAvailable = status?.coordinatorAvailable !== false
   return (
     <section className="dshDesktopOperatorProfilePreferences" hidden={hidden} role="group" aria-label="ChatGPT 网页版协作设置">
       <div>
         <strong>ChatGPT 网页版协作</strong>
-        <small>工具协作需要在 ChatGPT 自定义连接器中配置 Custom MCP；连接地址只在你点击“连接设置”后显示。</small>
+        <small>
+          {coordinatorAvailable
+            ? '工具协作需要在 ChatGPT 自定义连接器中配置 Custom MCP；连接地址只在你点击“连接设置”后显示。'
+            : '工具协作已冻结：ChatGPT 网页版只作为独立问答使用，需要 GPT 模型调用 DSH 工具时请选择 Codex。'}
+        </small>
       </div>
-      <div role="group" aria-label="ChatGPT 网页版协作模式">
+      {coordinatorAvailable && <div role="group" aria-label="ChatGPT 网页版协作模式">
         <button
           type="button"
           aria-pressed={status?.mode === 'direct'}
@@ -219,13 +226,13 @@ export function WebCoordinationSetup({
         >
           工具协作
         </button>
-      </div>
+      </div>}
       {state.kind === 'loading' && <p>正在读取 ChatGPT Web 协作设置…</p>}
       {state.kind === 'unavailable' && <p role="status">{state.message} 请更新 Host 后重试。</p>}
       {status !== undefined && (
         <>
-          <p>连接器：{status.connectorName}</p>
-          <p>最近一次经过验证的 MCP 调用：{status.lastVerifiedAt ?? '尚未验证'}</p>
+          {coordinatorAvailable && <p>连接器：{status.connectorName}</p>}
+          {coordinatorAvailable && <p>最近一次经过验证的 MCP 调用：{status.lastVerifiedAt ?? '尚未验证'}</p>}
           {status.active && <p role="status">当前有进行中的 ChatGPT Web 请求，完成后才能切换协作模式。</p>}
           {sessionId !== undefined && (
             <WebModelControls
@@ -237,9 +244,11 @@ export function WebCoordinationSetup({
               onChange={onModelChange}
             />
           )}
-          <button type="button" disabled={locked || saving} onClick={() => { void revealEndpoint() }}>
-            连接设置
-          </button>
+          {coordinatorAvailable && (
+            <button type="button" disabled={locked || saving} onClick={() => { void revealEndpoint() }}>
+              连接设置
+            </button>
+          )}
           {endpoint !== undefined && (
             <div>
               <code>{endpoint}</code>
@@ -274,6 +283,7 @@ function parseStatus(value: unknown): WebCoordinationStatus | undefined {
     || typeof record.connectorName !== 'string') return undefined
   return {
     mode: record.mode,
+    coordinatorAvailable: record.coordinatorAvailable !== false,
     active: record.active,
     connectorName: record.connectorName,
     ...typeof record.lastVerifiedAt === 'string' ? { lastVerifiedAt: record.lastVerifiedAt } : {},

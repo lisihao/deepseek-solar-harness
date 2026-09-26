@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-24-freeze-chatgpt-web-tool-coordination.md
+2026-09-24-freeze-chatgpt-web-tool-coordination.md: 2e195d29c0b6c92163caa3eda9a147a7e2e0cb26
+2026-09-24-freeze-chatgpt-web-tool-coordination.zh.md: f85dd5cb5267324b16812e88863f5898571fce6a

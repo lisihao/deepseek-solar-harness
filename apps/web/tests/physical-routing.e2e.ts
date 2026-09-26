@@ -91,6 +91,7 @@ export function apply(ctx) {
       name: ${yamlString(CHATGPT_WEB_OPERATOR)}
       config:
         stateRoot: ${yamlString(join(root, 'chatgpt-web'))}
+        coordinatorEnabled: true
         connectorName: Fixture ChatGPT Web
         coordinatorPort: 0
 
@@ -252,7 +253,8 @@ describe('web e2e: physical operator qualification and routing', () => {
     const webMode = webPanel.getByRole('group', { name: 'ChatGPT 网页版协作模式' })
     const webClaudeOption = webPanel.getByRole('button', { name: /优先 Claude Code/ })
     await expect.poll(() => webMode.getByRole('button', { name: '独立问答' }).getAttribute('aria-pressed')).toBe('true')
-    await expect.poll(() => webClaudeOption.isDisabled()).toBe(true)
+    await expect.poll(() => webPanel.getByText('当前主模型：ChatGPT 网页版（独立问答）').isVisible()).toBe(true)
+    expect(await webClaudeOption.isVisible()).toBe(false)
     expect(await webPanel.getByRole('button', { name: '刷新模型与算子' }).isEnabled()).toBe(true)
     expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 模型' }).isDisabled()).toBe(true)
     expect(await webPanel.getByRole('combobox', { name: 'ChatGPT Web 推理强度' }).isDisabled()).toBe(true)
@@ -274,7 +276,8 @@ describe('web e2e: physical operator qualification and routing', () => {
     const webDirect = {
       chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
       mainModel: primaryBeforeRefresh,
-      routingDisabled: await webClaudeOption.isDisabled(),
+      routingVisible: await webClaudeOption.isVisible(),
+      staleSetupNotice: await webPanel.getByText(/Custom MCP 协作设置|需要先完成下方的协作设置/).count(),
       taskGraphDisabled: directTaskGraphDisabled,
       claudeEffortCount: await webPanel.getByRole('combobox', { name: 'Claude 思考强度' }).count(),
       webModels: await webModel.locator('option').allTextContents(),
