@@ -49,10 +49,15 @@ function renderSetup(
 }
 
 describe('ChatGPT Web coordination setup', () => {
-  it('offers only direct questions and no connection setup when the Host freezes tool coordination', async () => {
+  it('shows no coordination heading, choice, or connection setup when the Host freezes tool coordination', async () => {
     const request = vi.fn(async () => response({ ...status('direct'), coordinatorAvailable: false }))
-    renderSetup(request)
-    expect(await screen.findByText(/工具协作已冻结/u)).toBeTruthy()
+    const onStatusChange = vi.fn()
+    renderSetup(request, onStatusChange)
+    await waitFor(() => {
+      expect(onStatusChange).toHaveBeenCalledWith(expect.objectContaining({ coordinatorAvailable: false }))
+    })
+    expect(screen.queryByText('ChatGPT 网页版协作')).toBeNull()
+    expect(screen.queryByText(/Custom MCP|Codex/u)).toBeNull()
     expect(screen.queryByRole('button', { name: '工具协作' })).toBeNull()
     expect(screen.queryByRole('button', { name: '独立问答' })).toBeNull()
     expect(screen.queryByRole('button', { name: '连接设置' })).toBeNull()

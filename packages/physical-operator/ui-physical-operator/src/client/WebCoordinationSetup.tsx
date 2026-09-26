@@ -201,14 +201,10 @@ export function WebCoordinationSetup({
   const coordinatorAvailable = status?.coordinatorAvailable !== false
   return (
     <section className="dshDesktopOperatorProfilePreferences" hidden={hidden} role="group" aria-label="ChatGPT 网页版协作设置">
-      <div>
+      {coordinatorAvailable && <div>
         <strong>ChatGPT 网页版协作</strong>
-        <small>
-          {coordinatorAvailable
-            ? '工具协作需要在 ChatGPT 自定义连接器中配置 Custom MCP；连接地址只在你点击“连接设置”后显示。'
-            : '工具协作已冻结：ChatGPT 网页版只作为独立问答使用，需要 GPT 模型调用 DSH 工具时请选择 Codex。'}
-        </small>
-      </div>
+        <small>工具协作需要在 ChatGPT 自定义连接器中配置 Custom MCP；连接地址只在你点击“连接设置”后显示。</small>
+      </div>}
       {coordinatorAvailable && <div role="group" aria-label="ChatGPT 网页版协作模式">
         <button
           type="button"

@@ -10,7 +10,7 @@ ChatGPT Web tool coordination lets the website model call DSH tools through a Ch
 
 ## Decision
 
-`physical-operator-chatgpt-web` gains `coordinatorEnabled`, default `false`. While it is off, a saved coordinator selection reads as direct without being rewritten, selecting coordination or requesting the MCP address fails with `OPERATOR_UNAVAILABLE`, no MCP endpoint starts, and the operator advertises only ephemeral execution. The setup status carries `coordinatorAvailable`, and the Web setup panel hides the coordination choice, connector status, MCP verification, and connection setup while pointing GPT tool work to Codex. The code, tests, and assembled fixtures remain; the Web MCP snapshot and the physical-routing Web test set `coordinatorEnabled: true`.
+`physical-operator-chatgpt-web` gains `coordinatorEnabled`, default `false`. While it is off, a saved coordinator selection reads as direct without being rewritten, selecting coordination or requesting the MCP address fails with `OPERATOR_UNAVAILABLE`, no MCP endpoint starts, and the operator advertises only ephemeral execution. The setup status carries `coordinatorAvailable`, and the Web setup panel hides the coordination heading and guidance, the coordination choice, connector status, MCP verification, and connection setup, leaving only the Web model controls. The code, tests, and assembled fixtures remain; the Web MCP snapshot and the physical-routing Web test set `coordinatorEnabled: true`.
 
 ## Alternatives considered
 

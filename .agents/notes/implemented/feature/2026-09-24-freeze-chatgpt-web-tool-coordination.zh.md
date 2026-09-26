@@ -10,7 +10,7 @@ ChatGPT Web 工具协作让网页模型通过 ChatGPT Custom MCP 连接器调用
 
 ## 决策
 
-`physical-operator-chatgpt-web` 新增 `coordinatorEnabled`，默认 `false`。关闭时，已保存的协作选择按直连处理且不被改写；选择协作或请求 MCP 地址会以 `OPERATOR_UNAVAILABLE` 失败；不启动 MCP 端点；算子只声明临时执行。设置状态携带 `coordinatorAvailable`，Web 设置面板会隐藏协作选项、连接器状态、MCP 验证和连接设置，并提示 GPT 工具任务改用 Codex。代码、测试和组装 fixture 均保留；Web MCP 快照与物理路由 Web 测试设置 `coordinatorEnabled: true`。
+`physical-operator-chatgpt-web` 新增 `coordinatorEnabled`，默认 `false`。关闭时，已保存的协作选择按直连处理且不被改写；选择协作或请求 MCP 地址会以 `OPERATOR_UNAVAILABLE` 失败；不启动 MCP 端点；算子只声明临时执行。设置状态携带 `coordinatorAvailable`，Web 设置面板会隐藏协作标题与说明、协作选项、连接器状态、MCP 验证和连接设置，只保留 Web 模型控件。代码、测试和组装 fixture 均保留；Web MCP 快照与物理路由 Web 测试设置 `coordinatorEnabled: true`。
 
 ## 备选方案
 
