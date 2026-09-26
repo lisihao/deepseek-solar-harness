@@ -19,7 +19,6 @@ import {
   type LlmModelInfo,
   type LlmProviderInfo,
   type LlmResolvedModelInfo,
-  type Message,
   type StreamChunk,
   type TokenUsage,
 } from '@deepseek-ai/dsh-llm'
@@ -191,7 +190,6 @@ const RESUME_SOURCE = 'physical-operator-resume'
 const TASKGRAPH_SOURCE = 'physical-operator-taskgraph'
 const ORCHESTRATION_TOOL = 'orchestration'
 const CHATGPT_WEB_OPERATOR_ID = 'chatgpt-web'
-const CHATGPT_WEB_HANDOFF_PLUGIN = 'chatgpt-web-handoff'
 const FALLBACK_REQUIRED_CODE = 'PHYSICAL_OPERATOR_FALLBACK_REQUIRED'
 const SMART_AUTO_UNAVAILABLE_CODES = new Set([
   'AUTH_MODE_MISMATCH',
@@ -850,7 +848,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     // instruction and runtime context would only mislead the website model.
     const browserDirect = dispatch.operatorId === CHATGPT_WEB_OPERATOR_ID && dispatch.executionMode !== 'resident'
     const contextEnvelope = operatorContextEnvelope(
-      agent, options, dispatch.operatorId, dispatch.promptMessageId, prompt, browserDirect,
+      agent, options, dispatch.promptMessageId, prompt, browserDirect,
     )
     const signal = options.signal ?? new AbortController().signal
     let run: PhysicalOperatorRun | undefined
@@ -1414,14 +1412,13 @@ function promptForMessage(events: readonly SessionEvent[], messageId: string): C
 
 /**
  * Build the current-request-only envelope from the already-logged model input.
- * A task-only envelope, for a tool-less browser route, keeps the task, Web
- * handoff/steering text, and operator-matched task-template instructions but
- * not the tool-using agent's system instruction or runtime context.
+ * A task-only envelope, for a tool-less browser route, keeps the task and
+ * operator-matched task-template instructions but not the tool-using agent's
+ * system instruction or runtime context.
  */
 function operatorContextEnvelope(
   agent: Agent,
   options: GenerateOptions,
-  operatorId: string,
   taskMessageId: string,
   task: ContentBlock[],
   taskOnly: boolean,
@@ -1444,11 +1441,10 @@ function operatorContextEnvelope(
     text: textContent(message.content),
   }))
   const snapshotContexts = snapshot?.sections ?? []
-  const handoffContexts = chatGptWebHandoffContexts(agent, options.messages, operatorId, taskIndex)
   return buildOperatorContextEnvelope({
     systemText: taskOnly ? '' : options.system ?? '',
     task,
-    contexts: [...snapshotContexts, ...handoffContexts, ...instructionContexts],
+    contexts: [...snapshotContexts, ...instructionContexts],
     source: {
       kind: 'session',
       requestHeaderEventSeq: header.seq,
@@ -1457,58 +1453,6 @@ function operatorContextEnvelope(
       ...instructions.length === 0 ? {} : { instructionMessageIds: instructions.map(message => message.id) },
     },
   })
-}
-
-/** Select current-step Web handoff material without borrowing an earlier task's history. */
-function chatGptWebHandoffContexts(
-  agent: Agent,
-  messages: readonly Message[],
-  operatorId: string,
-  taskIndex: number,
-): Array<{ name: string; text: string }> {
-  if (operatorId !== CHATGPT_WEB_OPERATOR_ID) return []
-  const currentMessageIds = currentRequestMessageIds(agent.session.events)
-  let handoffIndex = -1
-  for (let index = 0; index < taskIndex; index += 1) {
-    const message = messages[index]
-    if (message !== undefined
-      && currentMessageIds.has(String(message.id))
-      && isChatGptWebHandoff(message)) handoffIndex = index
-  }
-  const handoff = messages[handoffIndex]
-  if (handoff === undefined) return []
-  const contexts = [{
-    name: `chatgpt-web-handoff:${String(handoff.id)}`,
-    text: textContent(handoff.content),
-  }]
-  for (let index = handoffIndex + 1; index < taskIndex; index += 1) {
-    const message = messages[index]
-    if (message !== undefined
-      && currentMessageIds.has(String(message.id))
-      && message.source.kind === 'user') {
-      contexts.push({
-        name: `chatgpt-web-steering:${String(message.id)}`,
-        text: textContent(message.content),
-      })
-    }
-  }
-  return contexts
-}
-
-/** Recover only message identities admitted after the active request's step start. */
-function currentRequestMessageIds(events: readonly SessionEvent[]): Set<string> {
-  const stepStart = events.findLastIndex(event => event.type === 'step/start')
-  if (stepStart < 0) return new Set()
-  const ids = new Set<string>()
-  for (const event of events.slice(stepStart + 1)) {
-    if (event.type === 'user/message') ids.add(String(event.data.id))
-  }
-  return ids
-}
-
-/** Match the one admitted source allowed to resume a fresh ChatGPT Web task. */
-function isChatGptWebHandoff(message: Message): boolean {
-  return message.source.kind === 'plugin' && message.source.plugin === CHATGPT_WEB_HANDOFF_PLUGIN
 }
 
 /** Build a tool-issued handoff from the current durable request projection. */

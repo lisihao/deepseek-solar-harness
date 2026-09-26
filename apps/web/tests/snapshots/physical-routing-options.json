@@ -34,11 +34,5 @@
       "按网站设置",
       "Fixture Web Reasoning"
     ]
-  },
-  "webCoordinator": {
-    "chip": "协作 · ChatGPT 网页版",
-    "routingDisabled": false,
-    "taskGraphDisabled": false,
-    "toolsNotice": true
   }
 }

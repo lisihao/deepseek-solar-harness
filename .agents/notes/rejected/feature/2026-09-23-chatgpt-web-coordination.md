@@ -1,6 +1,6 @@
 # Agent Note: ChatGPT Web advisor and coordinator paths
 
-Status: proposed
+Status: rejected — the Web coordinator path was removed ([removal](../../implemented/feature/2026-09-26-remove-chatgpt-web-tool-coordination.md)); the advisor route and catalog refresh shipped without it
 
 English | [中文](2026-09-23-chatgpt-web-coordination.zh.md)
 

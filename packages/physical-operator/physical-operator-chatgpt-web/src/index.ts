@@ -7,15 +7,14 @@
  */
 
 export type {} from './model-preferences.ts'
-export type {} from './web-session.ts'
+export type {} from './receipt-events.ts'
 
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { ChatGptWebCoordination } from './coordination.ts'
+import { ChatGptWebModelControls } from './model-controls.ts'
 import { ProgressLog, settleForDisposal, textPromptForRequest } from './run-support.ts'
-import { registerWebCoordinatorSetup } from './setup.ts'
-import { registerWebCoordinationTools } from './coordination-tools.ts'
+import { registerWebSetup } from './setup.ts'
 import { ChatGptWebModelWorker } from './model-worker.ts'
 import { buildWebModelCatalogEvaluatorSource, type WebModelPreferences } from './model-catalog.ts'
 import z from '@deepseek-ai/schemastery'
@@ -97,24 +96,8 @@ export interface Config {
   readonly progressIntervalMs?: number
   /** Maximum serialized output retained from the webpage. */
   readonly outputMaxBytes?: number
-  /** Private owner-local directory for connector identity and mode. */
+  /** Private owner-local directory for the cached model catalog. */
   readonly stateRoot?: string
-  /** Exact visible ChatGPT custom MCP app name required for tool coordination. */
-  readonly connectorName?: string
-  /**
-   * Allow the Custom MCP tool-coordination mode. Off by default: the mode is
-   * frozen, a saved coordinator selection reads as direct, and no MCP
-   * endpoint starts.
-   */
-  readonly coordinatorEnabled?: boolean
-  /** Stable loopback port for the user-configured MCP tunnel; zero is useful for isolated tests. */
-  readonly coordinatorPort?: number
-  /** Maximum HTTP JSON body accepted by the MCP connector. */
-  readonly coordinatorRequestMaxBytes?: number
-  /** Maximum MCP request lifetime, including delegated tools. */
-  readonly coordinatorRequestTimeoutMs?: number
-  /** Maximum wait for matching native webpage request evidence. */
-  readonly identityTimeoutMs?: number
 }
 
 /** Loader schema for the deployment-owned ChatGPT web settings. */
@@ -131,22 +114,10 @@ export const Config: z<Config> = z.object({
   progressIntervalMs: z.number().default(DEFAULT_PROGRESS_INTERVAL_MS),
   outputMaxBytes: z.number().default(DEFAULT_OUTPUT_MAX_BYTES),
   stateRoot: z.string(),
-  connectorName: z.string().default('DSH'),
-  coordinatorEnabled: z.boolean().default(false),
-  coordinatorPort: z.number().default(61847),
-  coordinatorRequestMaxBytes: z.number().default(1024 * 1024),
-  coordinatorRequestTimeoutMs: z.number().default(DEFAULT_GENERATION_TIMEOUT_MS),
-  identityTimeoutMs: z.number().default(15_000),
 })
 
 interface ResolvedConfig {
   readonly stateRoot: string
-  readonly connectorName: string
-  readonly coordinatorEnabled: boolean
-  readonly coordinatorPort: number
-  readonly coordinatorRequestMaxBytes: number
-  readonly coordinatorRequestTimeoutMs: number
-  readonly identityTimeoutMs: number
   readonly id: string
   readonly displayName: string
   readonly description: string
@@ -788,7 +759,7 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
   constructor(
     private readonly ctx: Context,
     private readonly config: ResolvedConfig,
-    private readonly coordination: ChatGptWebCoordination,
+    private readonly controls: ChatGptWebModelControls,
   ) {
     this.descriptor = Object.freeze({
       id: PhysicalOperatorId(config.id),
@@ -796,15 +767,13 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
       description: config.description,
       tags: config.tags,
       maxConcurrency: 1,
-      executionModes: coordination.mode === 'coordinator'
-        ? ['ephemeral', 'resident'] as const
-        : ['ephemeral'] as const,
+      executionModes: ['ephemeral'] as const,
     })
   }
 
   /** Return whether one available browser-js-v1 Provider has the required capabilities. */
   availability() {
-    if (this.coordination.transitioning) return { available: false as const, reason: 'ChatGPT Web configuration is changing' }
+    if (this.controls.transitioning) return { available: false as const, reason: 'ChatGPT Web model controls are changing' }
     try {
       const capabilities = this.ctx.browser.capabilities('browser-js-v1')
       const missing = REQUIRED_BROWSER_CAPABILITIES.filter(capability => !capabilities.includes(capability))
@@ -824,12 +793,6 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
    * @returns a bounded progress reader and the terminal ChatGPT result.
    */
   start(request: PhysicalOperatorProviderStartRequest): Promise<PhysicalOperatorProviderRun> {
-    if (request.mode === 'resident') {
-      if (modelForRequest(request) !== undefined) {
-        throw new PhysicalOperatorError('Select the coordinated ChatGPT model in its owned webpage before sending', 'MODEL_SELECTION_UNAVAILABLE')
-      }
-      return this.coordination.start(request)
-    }
     if (request.signal.aborted) {
       throw new PhysicalOperatorError('ChatGPT Web execution was aborted before startup', 'OPERATOR_ABORTED')
     }
@@ -837,7 +800,7 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
     const explicitModel = modelForRequest(request)
     const profile = resolveWebModelPreferences(
       explicitModel,
-      this.coordination.preferences(String(request.parent.id)),
+      this.controls.preferences(String(request.parent.id)),
     )
     const model = profile.model
     const effort = profile.effort
@@ -961,34 +924,19 @@ export class ChatGptWebPhysicalOperator implements PhysicalOperator {
 /** Register the browser-backed ChatGPT physical operator. */
 export function apply(ctx: Context, config: Config): void {
   const resolved = resolveConfig(config)
-  const coordination = new ChatGptWebCoordination(ctx, resolved)
-  let unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, coordination))
-  const publish = async (): Promise<void> => {
-    await unregister()
-    unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, coordination))
-  }
-  ctx.effect(() => async () => {
-    await unregister()
-    await coordination.dispose()
-  }, 'physical-operator-chatgpt-web: coordinator lifecycle')
-  ctx.inject(['tools', 'systemPrompt'], (toolCtx) => {
-    toolCtx.effect(() => registerWebCoordinationTools(toolCtx, {
-      isCoordinating: (owner, callId) => coordination.isCoordinating(owner, callId),
-      maxHandoffBytes: resolved.outputMaxBytes,
-    }), 'physical-operator-chatgpt-web: coordination tools')
-  })
+  const controls = new ChatGptWebModelControls(ctx, resolved)
+  ctx.effect(() => {
+    const unregister = ctx.physicalOperators.registerOperator(new ChatGptWebPhysicalOperator(ctx, resolved, controls))
+    return async () => {
+      await unregister()
+      await controls.dispose()
+    }
+  }, 'physical-operator-chatgpt-web: operator lifecycle')
   ctx.inject(['modelWorkers'], (workerCtx) => {
     workerCtx.modelWorkers.register(new ChatGptWebModelWorker(workerCtx, resolved.id))
   })
   ctx.inject(['webServer'], (webCtx) => {
-    webCtx.effect(() => registerWebCoordinatorSetup(webCtx, {
-      status: () => coordination.status(),
-      endpoint: () => coordination.endpoint(),
-      select: mode => coordination.select(mode, publish),
-      refreshCatalog: sessionId => coordination.refreshCatalog(sessionId),
-      preferences: sessionId => coordination.preferences(sessionId),
-      selectPreferences: (sessionId, profile) => coordination.selectPreferences(sessionId, profile),
-    }), 'physical-operator-chatgpt-web: local setup')
+    webCtx.effect(() => registerWebSetup(webCtx, controls), 'physical-operator-chatgpt-web: local setup')
   })
 }
 
@@ -1019,22 +967,8 @@ function resolveConfig(config: Config): ResolvedConfig {
   if (!Number.isSafeInteger(outputMaxBytes) || outputMaxBytes < MIN_OUTPUT_MAX_BYTES) {
     throw new Error(`physical-operator-chatgpt-web: outputMaxBytes must be an integer of at least ${MIN_OUTPUT_MAX_BYTES}`)
   }
-  const coordinatorPort = config.coordinatorPort ?? 61847
-  if (!Number.isSafeInteger(coordinatorPort) || coordinatorPort < 0 || coordinatorPort > 65535) {
-    throw new Error('physical-operator-chatgpt-web: coordinatorPort must be an integer between 0 and 65535')
-  }
-  const coordinatorRequestMaxBytes = config.coordinatorRequestMaxBytes ?? 1024 * 1024
-  if (!Number.isSafeInteger(coordinatorRequestMaxBytes) || coordinatorRequestMaxBytes <= 0) {
-    throw new Error('physical-operator-chatgpt-web: coordinatorRequestMaxBytes must be a positive integer')
-  }
   return Object.freeze({
     stateRoot: requiredTrimmed('stateRoot', config.stateRoot ?? join(resolveDshHome(), 'chatgpt-web')),
-    connectorName: requiredTrimmed('connectorName', config.connectorName ?? 'DSH'),
-    coordinatorEnabled: config.coordinatorEnabled ?? false,
-    coordinatorPort,
-    coordinatorRequestMaxBytes,
-    coordinatorRequestTimeoutMs: positiveTimer('coordinatorRequestTimeoutMs', config.coordinatorRequestTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS),
-    identityTimeoutMs: positiveTimer('identityTimeoutMs', config.identityTimeoutMs ?? 15_000),
     id,
     displayName,
     description,

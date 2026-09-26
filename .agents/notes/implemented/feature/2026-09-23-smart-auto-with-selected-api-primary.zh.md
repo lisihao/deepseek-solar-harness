@@ -6,7 +6,7 @@
 
 ## 问题
 
-Desktop 总会安装模型选择，因此每个请求都带有已选主模型。[ChatGPT Web 协作](../../proposed/feature/2026-09-23-chatgpt-web-coordination.md)变更引入的主模型归属规则，在 Smart Auto 评估已选 API 主模型之前就已返回。因此 Smart Auto 在 Desktop 中从不把可识别的工作路由到物理算子；它唯一的自动路径只在未安装模型选择时运行，而路由测试恰好使用这条路径。`taskgraph-candidate` 决策只是一条无人读取的 ignorable 日志事件，模型从未收到构建该决策所描述 TaskGraph 的请求。任何 180 字符及以上的请求都被视为可并行，所以一篇长粘贴文档会被标记为 TaskGraph 候选。
+Desktop 总会安装模型选择，因此每个请求都带有已选主模型。[ChatGPT Web 协作](../../rejected/feature/2026-09-23-chatgpt-web-coordination.md)变更引入的主模型归属规则，在 Smart Auto 评估已选 API 主模型之前就已返回。因此 Smart Auto 在 Desktop 中从不把可识别的工作路由到物理算子；它唯一的自动路径只在未安装模型选择时运行，而路由测试恰好使用这条路径。`taskgraph-candidate` 决策只是一条无人读取的 ignorable 日志事件，模型从未收到构建该决策所描述 TaskGraph 的请求。任何 180 字符及以上的请求都被视为可并行，所以一篇长粘贴文档会被标记为 TaskGraph 候选。
 
 ## 决策
 

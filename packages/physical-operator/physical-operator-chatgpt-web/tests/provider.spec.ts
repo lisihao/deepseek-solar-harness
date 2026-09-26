@@ -22,7 +22,7 @@ import PhysicalOperatorRuntime, {
   PhysicalOperatorExecutionId,
 } from '@deepseek-ai/dsh-physical-operator'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import type { ChatGptWebCoordination } from '../src/coordination.ts'
+import type { ChatGptWebModelControls } from '../src/model-controls.ts'
 import {
   buildOperatorContextEnvelope,
 } from '@deepseek-ai/dsh-system-prompt'
@@ -100,7 +100,7 @@ async function setup(
   await ctx.plugin(PhysicalOperatorRuntime)
   ctx.browser.registerProvider(provider)
   const plugin = await ctx.plugin(adapter, {
-    // A private state root keeps the owner's saved coordination mode out of the fixture.
+    // A private state root keeps the owner's cached model catalog out of the fixture.
     stateRoot: mkdtempSync(join(tmpdir(), 'dsh-chatgpt-web-provider-')),
     workspaceName: 'fixture-chatgpt-web',
     generationTimeoutMs: 1_000,
@@ -302,12 +302,6 @@ describe('ChatGPT Web physical operator', () => {
     } as unknown as Context
     const operator = new adapter.ChatGptWebPhysicalOperator(context, {
       stateRoot: '/tmp/dsh-chatgpt-web-test',
-      connectorName: 'DSH',
-      coordinatorEnabled: false,
-      coordinatorPort: 0,
-      coordinatorRequestMaxBytes: 1_024,
-      coordinatorRequestTimeoutMs: 1_000,
-      identityTimeoutMs: 1_000,
       id: 'chatgpt-web',
       displayName: 'ChatGPT Web',
       description: 'fixture',
@@ -320,10 +314,9 @@ describe('ChatGPT Web physical operator', () => {
       progressIntervalMs: 20,
       outputMaxBytes: 2_048,
     }, {
-      mode: 'direct',
       transitioning: false,
       preferences,
-    } as unknown as ChatGptWebCoordination)
+    } as unknown as ChatGptWebModelControls)
 
     const savedRun = await operator.start({
       ...request(), executionId: PhysicalOperatorExecutionId('saved-web-preferences'), mode: 'ephemeral',
