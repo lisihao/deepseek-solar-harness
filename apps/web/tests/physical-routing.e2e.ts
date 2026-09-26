@@ -161,6 +161,10 @@ describe('web e2e: physical operator qualification and routing', () => {
       .toBe(1)
   }
 
+  async function showPage(dialog: Locator, name: '基础' | '高级调度'): Promise<void> {
+    await dialog.getByRole('button', { name, exact: true }).click()
+  }
+
   async function expectSelectedRoute(dialog: Locator, name: RegExp): Promise<void> {
     await expect.poll(
       () => dialog.getByRole('button', { name }).getAttribute('data-selected'),
@@ -181,6 +185,9 @@ describe('web e2e: physical operator qualification and routing', () => {
 
     const dialog = await collaborationPanel()
     expect(qualificationRequests).toEqual([])
+    const basicRoutes = await dialog.getByRole('button', { name: /智能协作|仅主模型|优先 Codex|优先 Claude Code|ChatGPT 网页订阅/ })
+      .evaluateAll(nodes => nodes.filter(node => node.checkVisibility()).map(node => node.querySelector('strong')?.textContent ?? ''))
+    await showPage(dialog, '高级调度')
     await dialog.getByRole('button', { name: /优先 Claude Code/ }).click()
     await expect.poll(() => qualificationRequests.length, { timeout: 10_000 }).toBeGreaterThan(0)
     await expect.poll(() => numberInFile(codexQualification), { timeout: 10_000 }).toBeGreaterThan(0)
@@ -188,8 +195,10 @@ describe('web e2e: physical operator qualification and routing', () => {
 
     await dialog.getByRole('button', { name: /优先 Codex/ }).click()
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible(), { timeout: 10_000 }).toBe(true)
+    await showPage(dialog, '基础')
     await setMechanism(dialog, 'debate', '协作 · Debate（多 Agent 辩论）')
     await setMechanism(dialog, 'standard', '协作 · Codex')
+    await showPage(dialog, '高级调度')
     await expectSelectedRoute(dialog, /优先 Codex/)
 
     for (const route of [
@@ -198,12 +207,15 @@ describe('web e2e: physical operator qualification and routing', () => {
     ]) {
       await dialog.getByRole('button', { name: route.option }).click()
       await expectSelectedRoute(dialog, route.option)
+      await showPage(dialog, '基础')
       await setMechanism(dialog, 'debate', '协作 · Debate（多 Agent 辩论）')
       await setMechanism(dialog, 'standard', route.label)
+      await showPage(dialog, '高级调度')
       await expectSelectedRoute(dialog, route.option)
     }
     await dialog.getByRole('button', { name: /优先 Codex/ }).click()
     await expectSelectedRoute(dialog, /优先 Codex/)
+    await showPage(dialog, '基础')
 
     await dialog.getByRole('button', { name: '关闭协作方式' }).click()
     await page.getByRole('button', { name: /^Select model/ }).click()
@@ -211,6 +223,7 @@ describe('web e2e: physical operator qualification and routing', () => {
     await page.getByRole('menuitemradio', { name: 'Codex', exact: true }).click()
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
     const selectedPanel = await collaborationPanel()
+    await showPage(selectedPanel, '高级调度')
     const claudeOption = selectedPanel.getByRole('button', { name: /优先 Claude Code/ })
     const webOption = selectedPanel.getByRole('button', { name: /ChatGPT 网页订阅/ })
     await expect.poll(() => claudeOption.isDisabled()).toBe(false)
@@ -218,23 +231,27 @@ describe('web e2e: physical operator qualification and routing', () => {
     await webOption.click()
     await expectSelectedRoute(selectedPanel, /ChatGPT 网页订阅/)
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
-    await expect.poll(() => selectedPanel.getByRole('combobox', { name: '执行模型' }).isEnabled()).toBe(true)
     const native = {
+      basicRoutes,
       chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
       mainModel: await page.getByRole('button', { name: /^Select model/ }).getAttribute('aria-label'),
       claudeAdvisorDisabled: await claudeOption.isDisabled(),
       webAdvisorDisabled: await webOption.isDisabled(),
       webAdvisorSelected: await webOption.getAttribute('data-selected'),
-      executionModels: await selectedPanel.getByRole('combobox', { name: '执行模型' }).locator('option').allTextContents(),
+      primaryProfileCount: await selectedPanel.getByRole('combobox', { name: '执行模型', exact: true }).count(),
     }
+    await showPage(selectedPanel, '基础')
     await setMechanism(selectedPanel, 'debate', '协作 · Debate（多 Agent 辩论）')
+    await showPage(selectedPanel, '高级调度')
     const debate = {
       chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
       claudeAdvisorDisabled: await claudeOption.isDisabled(),
-      nativeProfileCount: await selectedPanel.getByRole('combobox', { name: '执行模型' }).count(),
+      nativeProfileCount: await selectedPanel.getByRole('combobox', { name: '执行模型', exact: true }).count(),
     }
+    await showPage(selectedPanel, '基础')
     await selectedPanel.getByRole('button', { name: '退出 Debate（恢复会话路由）' }).click()
     await expect.poll(() => page.getByRole('button', { name: '协作 · Codex' }).isVisible()).toBe(true)
+    await showPage(selectedPanel, '高级调度')
     const restored = {
       chip: await page.getByRole('button', { name: /^协作 ·/ }).textContent(),
       claudeAdvisorDisabled: await claudeOption.isDisabled(),

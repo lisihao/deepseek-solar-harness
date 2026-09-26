@@ -1,6 +1,7 @@
 import { once } from 'node:events'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { createConnection } from 'node:net'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -268,6 +269,7 @@ async function setup(options: {
   mountTool?: boolean
   echoResult?: string
   taskTemplate?: TaskTemplateDraft
+  toolConfig?: tool.Config
 } = {}) {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
@@ -342,7 +344,7 @@ async function setup(options: {
   ctx.physicalOperators.registerOperator(codex)
   ctx.physicalOperators.registerOperator(claude)
   ctx.physicalOperators.registerOperator(chatgpt)
-  const mounted = options.mountTool === false ? undefined : await ctx.plugin(tool)
+  const mounted = options.mountTool === false ? undefined : await ctx.plugin(tool, options.toolConfig)
   const primary = options.primary ?? 'deepseek'
   const agent = ctx.agentLoop.create(SessionId('router-session'), primary === 'deepseek'
     ? { provider: 'deepseek', model: 'deepseek' }
@@ -1656,6 +1658,62 @@ describe('host physical-operator routing', () => {
     expect((await ctx.llm.listModels('dsh-physical-operator', { refresh: true })).map(model => model.id)).toContain('codex:gpt-5.6-sol')
     expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => model.id)).toContain('codex:gpt-5.6-sol')
     expect(qualifications).toBe(1)
+  })
+
+  it('offers the configured entries, moves the Codex entries on refresh, and runs the bare entry on its flagship', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-router-entries-'))
+    const toolConfig = {
+      entryOperatorIds: ['chatgpt-web'],
+      latestModelEntries: [{ operatorId: 'codex', count: 2 }],
+      stateRoot: root,
+    }
+    try {
+      const { ctx, agent, codex, mounted } = await setup({ toolConfig })
+      const catalog = codex.residentCatalog.bind(codex)
+      const nativeModel = (model: string, displayName: string) => ({
+        model, displayName, description: '', supportedEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
+        defaultEffort: 'high' as const, isDefault: false, supportsAdaptiveThinking: false,
+      })
+      let codexModels = [nativeModel('gpt-6-astra', 'GPT-6-Astra'), nativeModel('gpt-6-sol', 'GPT-6-Sol'), nativeModel('gpt-6-luna', 'GPT-6-Luna')]
+      codex.residentCatalog = async () => ({ ...await catalog(), models: codexModels })
+
+      expect((await ctx.llm.listModels('dsh-physical-operator', { refresh: true })).map(model => [model.id, model.name])).toEqual([
+        ['codex', 'Codex · GPT-6-Astra'],
+        ['codex:gpt-6-sol', 'Codex · GPT-6-Sol'],
+        ['chatgpt-web', 'ChatGPT Web'],
+      ])
+      await expect(ctx.llm.resolveModelInfo('dsh-physical-operator', 'codex')).resolves.toMatchObject({
+        name: 'GPT-6-Astra',
+        reasoning: { defaultEffort: 'high' },
+      })
+
+      const disposeSelection = installModelSelection(agent.ctx, {
+        current: { provider: 'dsh-physical-operator', model: 'codex', reasoningEffort: ReasoningEffortId('xhigh') },
+        assembled: undefined,
+      })
+      try {
+        send(agent, '你好')
+        await agent.whenIdle()
+        expect(codex.requests[0]?.residentProfile).toEqual({ model: 'gpt-6-astra', effort: 'xhigh' })
+      } finally {
+        disposeSelection()
+      }
+
+      codexModels = [nativeModel('gpt-7-nova', 'GPT-7-Nova'), nativeModel('gpt-7-sol', 'GPT-7-Sol'), ...codexModels]
+      expect((await ctx.llm.listModels('dsh-physical-operator', { refresh: true })).map(model => model.id))
+        .toEqual(['codex', 'codex:gpt-7-sol', 'chatgpt-web'])
+      await expect(ctx.llm.resolveModelInfo('dsh-physical-operator', 'codex:gpt-6-sol')).resolves.toMatchObject({ name: 'GPT-6-Sol' })
+
+      await mounted?.dispose()
+      await ctx.plugin(tool, toolConfig)
+      expect((await ctx.llm.listModels('dsh-physical-operator')).map(model => [model.id, model.name])).toEqual([
+        ['codex', 'Codex · GPT-7-Nova'],
+        ['codex:gpt-7-sol', 'Codex · GPT-7-Sol'],
+        ['chatgpt-web', 'ChatGPT Web'],
+      ])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('runs a selected native model entry with its model and effort as the Resident profile', async () => {

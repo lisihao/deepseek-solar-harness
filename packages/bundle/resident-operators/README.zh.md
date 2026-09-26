@@ -8,7 +8,7 @@
 
 ## Composition
 
-Patch 挂载 physical-operator Service Definition、Resident Service Definition、本地 Resident Provider、现有 Codex 与 Claude Code subagent Provider、模式感知路由器，以及唯一模型 Consumer。路由器依赖 definitions 而非实现内部；Consumer 只依赖 physical definition。
+Patch 挂载 physical-operator Service Definition、Resident Service Definition、本地 Resident Provider、现有 Codex 与 Claude Code subagent Provider、模式感知路由器，以及唯一模型 Consumer。路由器依赖 definitions 而非实现内部；Consumer 只依赖 physical definition。模型菜单提供 DeepSeek-V4-Pro、ChatGPT Web 和 Codex 最新的两款原生模型，`codex` 本身的入口运行其中的旗舰模型；该 patch 把 DeepSeek 目录收窄为 V4-Pro 并关闭其端点模型发现，其他 DeepSeek 模型只能从 Models 设置页加回；Claude Code 与其他原生模型仍可用于委派，刷新得到的目录保存在 `$DSH_HOME/physical-operator`。
 
 默认执行模式保持 `ephemeral`。Resident Session 按工作区确定。Bundle/HMR 释放只断开客户端，不停止独立 daemon；禁用 Bundle 会恢复现有一次性路径，并保留 SQLite、Artifact 与产品原生 Session。
 

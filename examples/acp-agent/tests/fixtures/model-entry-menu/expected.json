@@ -1,0 +1,29 @@
+{
+  "menuBeforeRefresh": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "物理算子 / Codex",
+    "物理算子 / ChatGPT Web"
+  ],
+  "menuAfterRefresh": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "物理算子 / Codex · GPT-6-Astra",
+    "物理算子 / Codex · GPT-6-Sol",
+    "物理算子 / ChatGPT Web"
+  ],
+  "menuAfterCodexUpgrade": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "物理算子 / Codex · GPT-7-Nova",
+    "物理算子 / Codex · GPT-7-Sol",
+    "物理算子 / ChatGPT Web"
+  ],
+  "menuAfterRestart": [
+    "DeepSeek / DeepSeek-V4-Pro",
+    "物理算子 / Codex · GPT-7-Nova",
+    "物理算子 / Codex · GPT-7-Sol",
+    "物理算子 / ChatGPT Web"
+  ],
+  "codexEntryRuns": {
+    "model": "gpt-7-nova"
+  },
+  "reply": "codex ran gpt-7-nova"
+}

@@ -69,5 +69,8 @@
     "@deepseek-ai/dsh-commands": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "zod": "^4.4.3"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "workspace:^"
   }
 }
