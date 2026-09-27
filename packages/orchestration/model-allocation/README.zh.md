@@ -8,6 +8,8 @@
 
 显式 `preferredOperatorIds` 选择仍然保持锁定。调用方可以另行准入 `fallbackOperatorIds`；只有全部首选 lane 因算子不可用、认证不合格、缺少请求模型或配额准入拒绝而不合格时，提供方才会考虑这些候选。临时容量饱和返回 `MODEL_CAPACITY_BUSY`，绝不切换算子。选中 fallback 后，已封存计划会增加结构化 `fromOperatorId`、可选 `fromModel` 和 `reasonCode` 来源记录。省略 fallback id 时严格保持原有硬锁定行为。
 
+报价可以带 `rank`：在其他方面得分相同的报价中，rank 较小者胜出，未设 rank 的报价排在所有已设 rank 的报价之后。报价构建方用它表达目录的新款优先顺序。`nativeModelTier(model)` 为报价划分原生目录条目的档位：名字属于前沿系列（`astra`、`sol`、`opus`、`fable`）或描述含 "frontier" 的为高档，名字属于快速系列（`luna`、`spark`、`haiku`、`flash`）或描述含 "fast"/"affordable" 的为低档，其余为中档；没有描述的条目按名字划分。
+
 ## Adaptive execution preference
 
 `ModelAllocationRequest` 可以携带 `adaptiveExecutionPreference`，包括 `version: 1`、`executionRisk`（`low`、`medium` 或 `high`）、非负的 `priorFailures` 计数和可选的 `crossDomain` 标记。该字段出现时，单个编程执行请求启用一个小而确定性的策略：

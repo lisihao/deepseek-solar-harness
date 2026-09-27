@@ -1,6 +1,6 @@
-# Keyless model-menu composition: the real physical-operator route with the
-# Solar product's entry configuration (ChatGPT Web plus Codex's two newest
-# models) and a DeepSeek catalog narrowed to V4-Pro. The fixture replaces only
+# Keyless model-menu composition: the real physical-operator route and
+# allocator with the Solar product's entry configuration (ChatGPT Web plus
+# Codex's two newest models) and a DeepSeek catalog narrowed to V4-Pro. The fixture replaces only
 # the native Codex, Claude Code, and ChatGPT Web product boundaries.
 - id: base
   name: '@deepseek-ai/cordis-plugin-include'
@@ -23,6 +23,8 @@
             name: '@deepseek-ai/dsh-physical-operator'
           - id: model-entry-menu-operators
             name: './tests/fixtures/model-entry-menu/operators.ts'
+          - id: model-allocation
+            name: '@deepseek-ai/dsh-model-allocation-local'
           - id: tool-physical-operator
             name: '@deepseek-ai/dsh-tool-physical-operator'
             config:

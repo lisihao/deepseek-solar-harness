@@ -8,6 +8,8 @@ This package has no model-visible surface. The orchestration Consumer records th
 
 An explicit `preferredOperatorIds` selection remains pinned. A caller may separately admit `fallbackOperatorIds`; the Provider considers them only when every preferred lane is unavailable, unauthenticated, missing the requested model, or rejected by quota admission. Temporary saturation returns `MODEL_CAPACITY_BUSY` and never changes operators. A selected fallback adds structured `fromOperatorId`, optional `fromModel`, and `reasonCode` provenance to the sealed plan. Omitting fallback ids preserves the prior hard-pin behavior.
 
+An offer may carry a `rank`: among offers that otherwise score equally, the lower rank wins, and an unranked offer follows every ranked one. Offer builders use it for a catalog's newest-first order. `nativeModelTier(model)` classifies a native catalog entry for offers: named frontier families (`astra`, `sol`, `opus`, `fable`) or a description containing "frontier" are high, named fast families (`luna`, `spark`, `haiku`, `flash`) or a "fast"/"affordable" description are low, and the rest are medium; an entry without a description is classified by its name.
+
 ## Adaptive execution preference
 
 `ModelAllocationRequest` may carry an `adaptiveExecutionPreference` with `version: 1`, an `executionRisk` (`low`, `medium`, or `high`), a non-negative `priorFailures` count, and an optional `crossDomain` flag. Its presence opts one coding execution request into a small, deterministic policy:

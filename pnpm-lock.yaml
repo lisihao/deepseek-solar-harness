@@ -572,6 +572,9 @@ importers:
       '@deepseek-ai/dsh-lsp-stdio':
         specifier: workspace:*
         version: link:../packages/lsp/lsp-stdio
+      '@deepseek-ai/dsh-model-allocation-local':
+        specifier: workspace:*
+        version: link:../packages/orchestration/model-allocation-local
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:*
         version: link:../packages/interaction/permission-presets
@@ -1521,6 +1524,9 @@ importers:
 
   packages/bundle/resident-operators:
     dependencies:
+      '@deepseek-ai/dsh-model-allocation-local':
+        specifier: workspace:^
+        version: link:../../orchestration/model-allocation-local
       '@deepseek-ai/dsh-physical-operator':
         specifier: workspace:^
         version: link:../../physical-operator/physical-operator
@@ -6814,6 +6820,12 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-model-allocation':
+        specifier: workspace:^
+        version: link:../../orchestration/model-allocation
+      '@deepseek-ai/dsh-model-allocation-local':
+        specifier: workspace:^
+        version: link:../../orchestration/model-allocation-local
       '@deepseek-ai/dsh-physical-operator':
         specifier: workspace:^
         version: link:../physical-operator

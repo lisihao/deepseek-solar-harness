@@ -279,7 +279,9 @@ export class SubscriptionFirstModelAllocation extends ModelAllocationService {
     const nowSeconds = Math.floor(Date.parse(request.now) / 1_000)
     const [selected] = [...routedCandidates].sort((left, right) => {
       const difference = score(right, request, nowSeconds) - score(left, request, nowSeconds)
-      return difference === 0 ? left.offerId.localeCompare(right.offerId) : difference
+      if (difference !== 0) return difference
+      const rank = (left.rank ?? Number.POSITIVE_INFINITY) - (right.rank ?? Number.POSITIVE_INFINITY)
+      return Number.isNaN(rank) || rank === 0 ? left.offerId.localeCompare(right.offerId) : rank
     })
     if (selected === undefined) throw new ModelAllocationError('no qualified model execution capacity is available', 'NO_MODEL_CAPACITY')
     const adaptiveTargetModel = adaptiveTarget(request, adaptivePreference)

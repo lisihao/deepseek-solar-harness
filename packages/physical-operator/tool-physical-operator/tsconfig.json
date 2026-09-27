@@ -55,6 +55,9 @@
     },
     {
       "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../orchestration/model-allocation"
     }
   ]
 }

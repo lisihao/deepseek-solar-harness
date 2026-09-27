@@ -36,6 +36,7 @@ import type {
   ModelExecutionOffer,
   ModelTaskPhase,
 } from '@deepseek-ai/dsh-model-allocation'
+import { nativeModelTier } from '@deepseek-ai/dsh-model-allocation'
 import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
 import ModelWorkerRuntime, { type ModelWorkerProvider, type ModelWorkerResult } from '@deepseek-ai/dsh-model-worker'
 import DeepSeekModelWorker from '@deepseek-ai/dsh-model-worker-deepseek'
@@ -975,22 +976,6 @@ function validateAdmissionRuntimeContext(admission: OrchestrationAdmissionTraceV
 /** Text-only model workers receive the same envelope with an explicit role downgrade. */
 function modelWorkerEnvelopePrompt(envelope: OperatorContextEnvelopeV1): ContentBlock[] {
   return [{ type: 'text', text: renderOperatorContextEnvelopeText(envelope) }]
-}
-
-/**
- * Classify one native model's allocation tier from its catalog name and
- * description: named frontier families or a "frontier" description are high,
- * named fast families or a "fast"/"affordable" description are low.
- * @param model - one native catalog entry.
- * @returns the tier used by quality gates and parallel worker selection.
- */
-export function modelTier(model: PhysicalOperatorResidentModel): ModelExecutionOffer['tier'] {
-  const label = `${model.model} ${model.displayName}`.toLowerCase()
-  // Catalogs cross the Resident process boundary, where an entry may omit its description.
-  const description = typeof model.description === 'string' ? model.description.toLowerCase() : ''
-  if (/\b(?:astra|sol|opus|fable)\b|xhigh|max|ultra/u.test(label) || /\bfrontier\b/u.test(description)) return 'high'
-  if (/\b(?:luna|spark|haiku|flash)\b/u.test(label) || /\b(?:fast|affordable)\b/u.test(description)) return 'low'
-  return 'medium'
 }
 
 /**
@@ -4747,7 +4732,7 @@ export class OrchestrationDaemon {
               model: model.model,
               displayName: `${status.displayName} · ${model.displayName}`,
               source: 'native-subscription',
-              tier: modelTier(model),
+              tier: nativeModelTier(model),
               available: unavailableReasonCode === undefined,
               maxConcurrency: status.maxConcurrency,
               activeCount: activeByOperator.get(provider.operatorId) ?? 0,

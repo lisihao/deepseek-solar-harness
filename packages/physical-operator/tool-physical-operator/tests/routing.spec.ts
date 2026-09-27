@@ -46,6 +46,7 @@ import PhysicalOperatorRuntime, {
   type PhysicalOperatorProviderStartRequest,
   type PhysicalOperatorResult,
 } from '@deepseek-ai/dsh-physical-operator'
+import SubscriptionFirstModelAllocation from '@deepseek-ai/dsh-model-allocation-local'
 import * as tool from '../src/index.ts'
 import { PhysicalOperatorModelToolBridge } from '../src/model-tool-bridge.ts'
 
@@ -270,6 +271,7 @@ async function setup(options: {
   echoResult?: string
   taskTemplate?: TaskTemplateDraft
   toolConfig?: tool.Config
+  mountAllocator?: boolean
 } = {}) {
   const ctx = new Context()
   await ctx.plugin(LlmRuntime)
@@ -344,6 +346,7 @@ async function setup(options: {
   ctx.physicalOperators.registerOperator(codex)
   ctx.physicalOperators.registerOperator(claude)
   ctx.physicalOperators.registerOperator(chatgpt)
+  if (options.mountAllocator === true) await ctx.plugin(SubscriptionFirstModelAllocation)
   const mounted = options.mountTool === false ? undefined : await ctx.plugin(tool, options.toolConfig)
   const primary = options.primary ?? 'deepseek'
   const agent = ctx.agentLoop.create(SessionId('router-session'), primary === 'deepseek'
@@ -1349,6 +1352,132 @@ describe('host physical-operator routing', () => {
     expect(decision.data.policy).toBe('auto')
     expect(decision.data.route).toBe('taskgraph-candidate')
     expect(decision.data.reason).toContain('Debate')
+  })
+
+  describe('Smart Auto allocation', () => {
+    const nativeModel = (model: string, displayName: string, description = '') => ({
+      model, displayName, description, supportedEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
+      defaultEffort: 'high' as const, isDefault: false, supportsAdaptiveThinking: false,
+    })
+    const codexModels = [
+      nativeModel('gpt-6-astra', 'GPT-6-Astra', 'Frontier intelligence for the most demanding work.'),
+      nativeModel('gpt-6-sol', 'GPT-6-Sol'),
+      nativeModel('gpt-6-luna', 'GPT-6-Luna', 'Fast and affordable model for easier tasks.'),
+      nativeModel('openrouter/grok-9', 'Grok 9 (OpenRouter)', 'Frontier model through OpenRouter.'),
+    ]
+    const claudeModels = [nativeModel('claude-opus-5', 'Claude Opus 5'), nativeModel('sonnet', 'Sonnet', 'Efficient for routine tasks')]
+
+    async function allocationSetup(options: {
+      readonly codexAvailable?: boolean
+      readonly codexUsedPercent?: number
+      readonly claudeAvailable?: boolean
+      readonly catalogMaxAgeMs?: number
+    } = {}) {
+      const fixture = await setup({ mountAllocator: true, toolConfig: { catalogMaxAgeMs: options.catalogMaxAgeMs ?? 600_000 } })
+      const reads = { codex: 0, claude: 0 }
+      const codexCatalog = fixture.codex.residentCatalog.bind(fixture.codex)
+      const claudeCatalog = fixture.claude.residentCatalog.bind(fixture.claude)
+      fixture.codex.residentCatalog = async () => {
+        reads.codex += 1
+        return {
+          ...await codexCatalog(),
+          product: 'codex',
+          available: options.codexAvailable ?? true,
+          models: codexModels,
+          ...options.codexUsedPercent === undefined ? {} : {
+            quotaPools: [{
+              poolId: 'codex-plan', displayName: 'Codex plan', models: codexModels.map(model => model.model),
+              meter: 'native-subscription' as const, primary: { usedPercent: options.codexUsedPercent }, observedAt: '2026-09-26T00:00:00.000Z',
+            }],
+          },
+        }
+      }
+      fixture.claude.residentCatalog = async () => {
+        reads.claude += 1
+        return { ...await claudeCatalog(), product: 'claude-code', available: options.claudeAvailable ?? true, models: claudeModels }
+      }
+      const disposeSelection = installModelSelection(fixture.agent.ctx, {
+        current: { provider: 'deepseek', model: 'deepseek' },
+        assembled: undefined,
+      })
+      return { ...fixture, reads, disposeSelection }
+    }
+
+    function routingReason(agent: Awaited<ReturnType<typeof setup>>['agent']): string | undefined {
+      const decision = agent.session.events.findLast(event => event.type === 'physical-operator/routing-decision')
+      return decision?.type === 'physical-operator/routing-decision' ? decision.data.reason : undefined
+    }
+
+    it('lets the allocator pick the strongest Codex model for implementation work', async () => {
+      const { agent, codex, claude, deepseek, disposeSelection } = await allocationSetup()
+      try {
+        send(agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
+        await agent.whenIdle()
+        expect(deepseek.requests).toHaveLength(0)
+        expect(claude.requests).toHaveLength(0)
+        expect(codex.requests[0]?.residentProfile).toEqual({ model: 'gpt-6-astra', effort: 'high' })
+        expect(routingReason(agent)).toMatch(/^智能协作由调度器选择 Codex · GPT-6-Astra（强度 high）：/u)
+      } finally {
+        disposeSelection()
+      }
+    })
+
+    it('lets the allocator pick a frontier Claude model for analysis work', async () => {
+      const { agent, codex, claude, disposeSelection } = await allocationSetup()
+      try {
+        send(agent, '请深度分析这个系统的架构并给出评审意见')
+        await agent.whenIdle()
+        expect(codex.requests).toHaveLength(0)
+        expect(claude.requests[0]?.residentProfile).toEqual({ model: 'claude-opus-5', effort: 'high' })
+        expect(routingReason(agent)).toContain('Claude Code · Claude Opus 5')
+      } finally {
+        disposeSelection()
+      }
+    })
+
+    it.each([
+      { name: 'an unavailable Codex catalog', options: { codexAvailable: false } },
+      { name: 'an exhausted Codex quota', options: { codexUsedPercent: 100 } },
+    ])('moves implementation work to Claude Code for $name', async ({ options }) => {
+      const { agent, codex, claude, disposeSelection } = await allocationSetup(options)
+      try {
+        send(agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
+        await agent.whenIdle()
+        expect(codex.requests).toHaveLength(0)
+        expect(claude.requests[0]?.residentProfile?.model).toBe('claude-opus-5')
+      } finally {
+        disposeSelection()
+      }
+    })
+
+    it('keeps the classifier operator when no offer qualifies', async () => {
+      const { agent, codex, disposeSelection } = await allocationSetup({ codexAvailable: false, claudeAvailable: false })
+      try {
+        send(agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
+        await agent.whenIdle()
+        expect(codex.requests).toHaveLength(1)
+        expect(routingReason(agent)).toMatch(/^智能协作选择一个有界物理算子（调度器未给出结果：/u)
+      } finally {
+        disposeSelection()
+      }
+    })
+
+    it.each([
+      { maxAge: 600_000, reads: 1 },
+      { maxAge: 0, reads: 2 },
+    ])('qualifies native catalogs $reads time(s) for two delegations with catalogMaxAgeMs $maxAge', async ({ maxAge, reads }) => {
+      const fixture = await allocationSetup({ catalogMaxAgeMs: maxAge })
+      try {
+        send(fixture.agent, '给我修复这个 TypeScript 构建 bug 并补齐测试')
+        await fixture.agent.whenIdle()
+        send(fixture.agent, '再实现一个解析函数并补测试')
+        await fixture.agent.whenIdle()
+        expect(fixture.codex.requests).toHaveLength(2)
+        expect(fixture.reads.codex).toBe(reads)
+      } finally {
+        fixture.disposeSelection()
+      }
+    })
   })
 
   it('lets Smart Auto dispatch recognized work to a physical operator while an API primary is selected', async () => {

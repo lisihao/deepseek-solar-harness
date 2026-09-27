@@ -7,7 +7,7 @@ import {
   type PhysicalOperatorResidentCatalog,
   type PhysicalOperatorResidentModel,
 } from '@deepseek-ai/dsh-physical-operator'
-import { latestNativeModels, ModelEntries, NativeCatalogCache } from '../src/model-entries.ts'
+import { LiveCatalogs, latestNativeModels, ModelEntries, NativeCatalogCache } from '../src/model-entries.ts'
 
 const roots: string[] = []
 
@@ -167,5 +167,36 @@ describe('ModelEntries', () => {
     const empty = new ModelEntries({ latestModelEntries: [{ operatorId: 'codex', count: 2 }] }, new NativeCatalogCache(undefined, () => {}), ':')
     expect(empty.rows([operators[0]!])).toEqual([{ id: 'codex', name: 'Codex' }])
     expect(empty.flagship('codex')).toBeUndefined()
+  })
+})
+
+describe('LiveCatalogs', () => {
+  it('reuses a read younger than the maximum age, shares one concurrent read, and adopts a recorded refresh', async () => {
+    let clock = 1_000
+    let reads = 0
+    const seen: number[] = []
+    const live = new LiveCatalogs(
+      async () => {
+        reads += 1
+        return [catalog('codex', [model(`gpt-${String(reads)}`)])]
+      },
+      100,
+      (catalogs) => { seen.push(catalogs.length) },
+      () => clock,
+    )
+
+    const [first, concurrent] = await Promise.all([live.current(), live.current()])
+    expect(reads).toBe(1)
+    expect(concurrent).toBe(first)
+    clock += 99
+    expect(await live.current()).toBe(first)
+    clock += 1
+    expect((await live.current())[0]?.models[0]?.model).toBe('gpt-2')
+    expect(seen).toEqual([1, 1])
+
+    const refreshed = [catalog('codex', [model('gpt-9')])]
+    live.record(refreshed)
+    expect(await live.current()).toBe(refreshed)
+    expect(reads).toBe(2)
   })
 })
