@@ -47,6 +47,10 @@
             description: Analyzes codebases, architecture, and long-context reviews through the user's native Claude subscription.
             tags: [analysis, architecture, review, long-context, coding, subscription]
             maxConcurrency: 4
+    # Smart Collaboration asks this allocator for the collaborator, model, and
+    # effort of each delegated request.
+    - id: model-allocation
+      name: '@deepseek-ai/dsh-model-allocation-local'
     # The model menu offers ChatGPT Web and Codex's two newest models; the bare
     # `codex` entry runs the flagship. Claude Code and the other native models
     # stay registered for delegation. Refreshed catalogs survive restarts.

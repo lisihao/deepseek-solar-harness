@@ -127,6 +127,7 @@
     "@deepseek-ai/dsh-agent-instructions": "workspace:*",
     "@deepseek-ai/dsh-browser": "workspace:*",
     "@deepseek-ai/dsh-physical-operator-chatgpt-web": "workspace:*",
+    "@deepseek-ai/dsh-model-allocation-local": "workspace:*",
     "jsdom": "29.1.1"
   }
 }

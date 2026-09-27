@@ -52,7 +52,8 @@ import type {
 } from '@deepseek-ai/dsh-physical-operator'
 import { PhysicalOperatorError, PhysicalOperatorExecutionId } from '@deepseek-ai/dsh-physical-operator'
 import type {} from '@deepseek-ai/dsh-commands'
-import { ModelEntries, NativeCatalogCache, type LatestModelEntries } from './model-entries.ts'
+import { LiveCatalogs, latestNativeModels, ModelEntries, NativeCatalogCache, type LatestModelEntries } from './model-entries.ts'
+import { nativeModelTier, type ModelAllocationPlan, type ModelExecutionOffer } from '@deepseek-ai/dsh-model-allocation'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {
   PhysicalOperatorRoutingOption,
@@ -187,6 +188,9 @@ declare module '@deepseek-ai/dsh-session/types' {
 export const name = 'tool-physical-operator'
 export const inject = ['tools', 'physicalOperators', 'systemPrompt', 'llm', 'agents']
 
+/** Default oldest native catalog read reused by Smart Collaboration allocation. */
+const DEFAULT_CATALOG_MAX_AGE_MS = 10 * 60_000
+
 /** Model-menu entries and the retained native catalogs; every field is optional. */
 export interface Config {
   /**
@@ -207,6 +211,12 @@ export interface Config {
    * restarts. Omitted, they are kept in memory until the next refresh.
    */
   readonly stateRoot?: string
+  /**
+   * Oldest native catalog read, in milliseconds, that Smart Collaboration
+   * reuses when it asks `ctx.modelAllocation` for a collaborator; an older
+   * read qualifies the native products again. Defaults to ten minutes.
+   */
+  readonly catalogMaxAgeMs?: number
 }
 
 /** Loader schema for the model-menu entry settings. */
@@ -221,10 +231,15 @@ export const Config: z<Config> = z.object({
     z.const(undefined),
   ]),
   stateRoot: z.string(),
+  catalogMaxAgeMs: z.natural().default(DEFAULT_CATALOG_MAX_AGE_MS),
 })
 
 /** The resolved menu entries and catalogs of one mounted router, keyed by its plugin context. */
-const modelEntries = new WeakMap<Context, ModelEntries>()
+interface RouterCatalogs {
+  readonly entries: ModelEntries
+  readonly live: LiveCatalogs
+}
+const routerCatalogs = new WeakMap<Context, RouterCatalogs>()
 
 const ROUTER_PROVIDER = 'dsh-physical-operator'
 const RESUME_SOURCE = 'physical-operator-resume'
@@ -377,17 +392,22 @@ export function apply(ctx: Context, config: Config = {}): void {
     new NativeCatalogCache(config.stateRoot, (message) => { ctx.logger.warn(message) }),
     OPERATOR_MODEL_SEPARATOR,
   )
+  const live = new LiveCatalogs(
+    () => ctx.physicalOperators.residentCatalogs(),
+    config.catalogMaxAgeMs ?? DEFAULT_CATALOG_MAX_AGE_MS,
+    (catalogs) => { entries.catalogs.replace(catalogs) },
+  )
   ctx.effect(function* () {
     yield async () => { await modelTools.dispose() }
   }, 'tool-physical-operator: model tool bridge')
   ctx.effect(() => {
-    modelEntries.set(ctx, entries)
-    return () => { modelEntries.delete(ctx) }
+    routerCatalogs.set(ctx, { entries, live })
+    return () => { routerCatalogs.delete(ctx) }
   }, 'tool-physical-operator: model entries')
-  ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx, modelTools, entries))
+  ctx.llm.registerAdapter([ROUTER_PROVIDER], new PhysicalOperatorLlmAdapter(ctx, modelTools, entries, live))
 
   ctx.on('agent/pre-step', async ({ agent, messages, turn, step }, next): Promise<PreStepDecision> => {
-    const decision = decideHostRoute(ctx, agent, messages)
+    const decision = await decideHostRoute(ctx, agent, messages)
     const route = decision?.hostRoute
     const firstDecision = decision !== undefined && !hasRoutingDecision(agent.session.events, decision.requestedByMessageId)
     if (decision !== undefined && firstDecision) {
@@ -808,6 +828,7 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     private readonly ctx: Context,
     private readonly modelTools: PhysicalOperatorModelToolBridge,
     private readonly entries: ModelEntries,
+    private readonly live: LiveCatalogs,
   ) {
     super()
   }
@@ -833,7 +854,11 @@ class PhysicalOperatorLlmAdapter extends LlmAdapter {
     provider: string,
     options?: { readonly refresh?: boolean },
   ): Promise<readonly LlmModelInfo[]> {
-    if (options?.refresh === true) this.entries.catalogs.replace(await this.ctx.physicalOperators.residentCatalogs())
+    if (options?.refresh === true) {
+      const catalogs = await this.ctx.physicalOperators.residentCatalogs()
+      this.entries.catalogs.replace(catalogs)
+      this.live.record(catalogs)
+    }
     const operators = this.ctx.physicalOperators.list()
       .filter(operator => operator.state !== 'unavailable')
       .map(operator => ({ id: String(operator.id), displayName: operator.displayName }))
@@ -984,7 +1009,11 @@ async function prepareResidentSurface(
 }
 
 /** Resolve explicit, continuation, preferred, and smart-auto routing in strict priority order. */
-function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRouteMessage[]): HostRoutingDecision | undefined {
+async function decideHostRoute(
+  ctx: Context,
+  agent: Agent,
+  messages: readonly HostRouteMessage[],
+): Promise<HostRoutingDecision | undefined> {
   const current = [...messages].reverse().find(message => message.source.kind === 'user')
   const resume = [...messages].reverse().find(message => (
     message.source.kind === 'plugin' && message.source.plugin === RESUME_SOURCE
@@ -1040,7 +1069,7 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
         `当前主模型已选择 ${operatorDisplayName(selectedPrimaryOperator)}，保持其为协调者`,
       )
     }
-    if (policy === 'auto') return smartAutoDecision(ctx, agent, current.id, text)
+    if (policy === 'auto') return await smartAutoDecision(ctx, agent, current.id, text)
     if (policy !== 'direct' && isParallelCandidate(text)) {
       const preferredOperatorId = taskGraphPreferredOperator(policy)
       return {
@@ -1088,7 +1117,7 @@ function decideHostRoute(ctx: Context, agent: Agent, messages: readonly HostRout
       ? operatorDecision(ctx, agent, current.id, policy, policy, `用户策略为优先 ${operatorDisplayName(policy)}`)
       : primaryDecision(current.id, policy, '请求过小，不值得启动物理算子')
   }
-  return smartAutoDecision(ctx, agent, current.id, text)
+  return await smartAutoDecision(ctx, agent, current.id, text)
 }
 
 /**
@@ -1116,7 +1145,7 @@ function taskGraphDirective(preferredOperatorId: string | undefined): UserMessag
  * by the current model, recognized implementation or analysis work routes to
  * one bounded physical operator, and everything else stays on the current model.
  */
-function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, text: string): HostRoutingDecision {
+async function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, text: string): Promise<HostRoutingDecision> {
   if (isParallelCandidate(text)) {
     return {
       policy: 'auto',
@@ -1126,17 +1155,123 @@ function smartAutoDecision(ctx: Context, agent: Agent, messageId: string, text: 
     }
   }
   const automatic = automaticOperator(text)
-  return automatic === undefined
-    ? primaryDecision(messageId, 'auto', '未发现需要物理算子或 TaskGraph 的工作')
-    : operatorDecision(
+  if (automatic === undefined) return primaryDecision(messageId, 'auto', '未发现需要物理算子或 TaskGraph 的工作')
+  const allocation = await allocateSmartAuto(ctx, agent, messageId, text, automatic)
+  if (allocation.plan === undefined) {
+    return operatorDecision(
       ctx,
       agent,
       messageId,
       'auto',
       automatic,
-      '智能协作选择一个有界物理算子',
+      `智能协作选择一个有界物理算子${allocation.unavailable === undefined ? '' : `（调度器未给出结果：${allocation.unavailable}）`}`,
       automatic === 'claude-code' ? 'codex' : undefined,
     )
+  }
+  const { plan } = allocation
+  const operatorId = plan.operatorId as PhysicalOperatorRoutingTarget
+  const effort = plan.profile?.effort
+  return operatorDecision(
+    ctx,
+    agent,
+    messageId,
+    'auto',
+    operatorId,
+    `智能协作由调度器选择 ${allocation.displayName}${effort === undefined ? '' : `（强度 ${effort}）`}：${plan.rationale.join('、')}`,
+    operatorId === 'claude-code' ? 'codex' : undefined,
+    plan.profile,
+  )
+}
+
+/** Outcome of one Smart Collaboration allocation; without a plan the classifier's operator is used. */
+type SmartAutoAllocation =
+  | { readonly plan: ModelAllocationPlan; readonly displayName: string }
+  | { readonly plan?: undefined; readonly unavailable?: string }
+
+/**
+ * Ask the mounted allocator for the collaborator, model, and effort of one
+ * delegated request. The classifier's domain becomes the allocation role, so
+ * implementation-shaped work favors Codex and analysis-shaped work favors
+ * Claude Code while quota, capacity, and tier decide the exact model.
+ * Claude Code reports no quota telemetry, so unknown quota is admitted.
+ */
+async function allocateSmartAuto(
+  ctx: Context,
+  agent: Agent,
+  messageId: string,
+  text: string,
+  automatic: PhysicalOperatorProfileOwner,
+): Promise<SmartAutoAllocation> {
+  const allocator = ctx.get('modelAllocation')
+  const catalogs = routerCatalogs.get(ctx)?.live
+  if (allocator === undefined || catalogs === undefined) return {}
+  let offers: ModelExecutionOffer[]
+  try {
+    offers = smartAutoOffers(ctx, await catalogs.current())
+  } catch (error) {
+    return { unavailable: `原生目录读取失败：${error instanceof Error ? error.message : String(error)}` }
+  }
+  try {
+    const plan = await allocator.allocate({
+      runId: `session:${String(agent.id)}`,
+      nodeId: messageId,
+      phase: 'execution',
+      role: automatic === 'codex' ? 'implementation' : 'analysis',
+      task: text,
+      preferredOperatorIds: [],
+      objective: 'quality',
+      rlm: 'disabled',
+      graphMaxParallel: 1,
+      offers,
+      now: new Date().toISOString(),
+    })
+    const offer = offers.find(candidate => candidate.offerId === plan.offerId)
+    if (offer === undefined || !isPhysicalOperatorRoutingTarget(plan.operatorId)) {
+      return { unavailable: `调度器选择了未知报价 ${plan.offerId}` }
+    }
+    return { plan, displayName: offer.displayName }
+  } catch (error) {
+    return { unavailable: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * Subscription offers for Smart Collaboration: each native model of an
+ * available Codex or Claude Code catalog that accepts the DSH tool bridge.
+ * Proxied models that name another provider (`openrouter/…`) are excluded,
+ * and each offer's rank follows the newest-first order of the model menu so
+ * an equally scored newer model wins.
+ */
+function smartAutoOffers(ctx: Context, catalogs: readonly PhysicalOperatorResidentCatalog[]): ModelExecutionOffer[] {
+  const statuses = new Map(ctx.physicalOperators.list().map(status => [String(status.id), status] as const))
+  return catalogs.flatMap((catalog) => {
+    const operatorId = String(catalog.operatorId)
+    const status = statuses.get(operatorId)
+    if (status === undefined || !isPhysicalOperatorProfileOwner(operatorId) || !catalog.supportsModelToolBridge) return []
+    const qualified = catalog.available && catalog.authentication === 'native-subscription' && status.state !== 'unavailable'
+    return latestNativeModels(catalog.models, catalog.models.length)
+      .map((model, rank): ModelExecutionOffer => {
+        const quotaPool = catalog.quotaPools?.find(pool => pool.models.includes(model.model))
+        return {
+          offerId: `${operatorId}:${model.model}`,
+          operatorId,
+          provider: catalog.product,
+          model: model.model,
+          displayName: `${status.displayName} · ${model.displayName}`,
+          source: 'native-subscription',
+          tier: nativeModelTier(model),
+          available: qualified,
+          maxConcurrency: status.maxConcurrency,
+          activeCount: status.active,
+          tags: status.tags,
+          ...qualified ? {} : { unavailableReasonCode: 'OPERATOR_UNAVAILABLE' as const },
+          ...quotaPool === undefined ? {} : { quotaPool },
+          quotaGuard: { unknownQuota: 'allow', protectedRemainingPercent: 0, stopAdmissionAtRemainingPercent: 0, accelerateBeforeReset: true },
+          profile: { model: model.model, ...model.defaultEffort === undefined ? {} : { effort: model.defaultEffort } },
+          rank,
+        }
+      })
+  })
 }
 
 /** Native preferences can constrain TaskGraph workers without replacing a selected primary model. */
@@ -1161,8 +1296,9 @@ function operatorDecision(
   operatorId: PhysicalOperatorRoutingTarget,
   reason: string,
   fallbackOperatorId?: PhysicalOperatorRoutingTarget,
+  profile?: PhysicalOperatorExecutionPreference,
 ): HostRoutingDecision {
-  const hostRoute = newHostRoute(ctx, agent, messageId, operatorId, fallbackOperatorId)
+  const hostRoute = newHostRoute(ctx, agent, messageId, operatorId, fallbackOperatorId, profile)
   return {
     policy,
     route: routeKind(hostRoute.executionMode),
@@ -1203,7 +1339,7 @@ function selectedOperatorProfile(
   if (selection?.provider !== ROUTER_PROVIDER) return undefined
   const { operatorId: selected, nativeModel } = parseOperatorModelId(selection.model)
   if (selected !== operatorId) return undefined
-  const model = nativeModel ?? modelEntries.get(ctx)?.flagship(operatorId)?.model
+  const model = nativeModel ?? routerCatalogs.get(ctx)?.entries.flagship(operatorId)?.model
   if (model === undefined) return undefined
   const effort = PROFILE_EFFORTS.find(value => value === selection.reasoningEffort)
   return { model, ...effort === undefined ? {} : { effort } }
@@ -1260,10 +1396,13 @@ function newHostRoute(
   messageId: string,
   operatorId: string,
   fallbackOperatorId?: string,
+  allocatedProfile?: PhysicalOperatorExecutionPreference,
 ): PendingHostRoute {
   const executionMode = executionModeFor(ctx, operatorId)
   const residentProfile = executionMode === 'resident' && isPhysicalOperatorProfileOwner(operatorId)
-    ? selectedOperatorProfile(ctx, agent, operatorId) ?? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
+    ? allocatedProfile
+      ?? selectedOperatorProfile(ctx, agent, operatorId)
+      ?? foldPhysicalOperatorProfiles(agent.session.events)[operatorId]
     : undefined
   return {
     commandId: `resident-${createHash('sha256').update(`${agent.id}\0${messageId}`).digest('hex').slice(0, 32)}`,

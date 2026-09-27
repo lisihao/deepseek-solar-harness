@@ -39,4 +39,4 @@ The collaboration panel's basic page offers Smart Collaboration and Current Mode
 
 ## Deferred
 
-The single-delegation allocator path, task-feature matching, reasoning-effort selection, and per-turn DeepSeek effort remain proposals from the same design. Smart Auto still maps a request to Codex or Claude Code with its text classifier and the saved native profile.
+[Smart Collaboration allocation](2026-09-26-smart-collaboration-allocation.md) now chooses the collaborator and model of a delegated request. Task-feature matching, reasoning-effort selection, and per-turn DeepSeek effort remain proposals from the same design.

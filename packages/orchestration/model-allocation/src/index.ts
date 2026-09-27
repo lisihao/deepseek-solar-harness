@@ -2,7 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import type { PhysicalOperatorExecutionPreference } from '@deepseek-ai/dsh-physical-operator'
+import type { PhysicalOperatorExecutionPreference, PhysicalOperatorResidentModel } from '@deepseek-ai/dsh-physical-operator'
 import type {
   AdaptiveExecutionRisk,
   AdaptiveExecutionPreferenceV1,
@@ -107,6 +107,12 @@ export interface ModelExecutionOffer {
   readonly quotaPool?: ModelQuotaPool
   readonly quotaGuard?: ModelQuotaGuard
   readonly profile?: PhysicalOperatorExecutionPreference
+  /**
+   * Offer-builder preference among offers that otherwise score equally, such
+   * as a catalog's newest-first order; a lower rank wins the tie, and an
+   * unranked offer follows every ranked one.
+   */
+  readonly rank?: number
 }
 
 /** Complete deterministic allocation input for one ready node. */
@@ -188,6 +194,22 @@ export abstract class ModelAllocationService extends Service {
    * model is unavailable, or qualified capacity is busy.
    */
   abstract allocate(request: ModelAllocationRequest): Promise<ModelAllocationPlan>
+}
+
+/**
+ * Classify one native model's allocation tier from its catalog name and
+ * description: named frontier families or a "frontier" description are high,
+ * named fast families or a "fast"/"affordable" description are low.
+ * @param model - one native catalog entry.
+ * @returns the tier used by quality gates and parallel worker selection.
+ */
+export function nativeModelTier(model: PhysicalOperatorResidentModel): ModelExecutionOffer['tier'] {
+  const label = `${model.model} ${model.displayName}`.toLowerCase()
+  // Catalogs cross the Resident process boundary, where an entry may omit its description.
+  const description = typeof model.description === 'string' ? model.description.toLowerCase() : ''
+  if (/\b(?:astra|sol|opus|fable)\b|xhigh|max|ultra/u.test(label) || /\bfrontier\b/u.test(description)) return 'high'
+  if (/\b(?:luna|spark|haiku|flash)\b/u.test(label) || /\b(?:fast|affordable)\b/u.test(description)) return 'low'
+  return 'medium'
 }
 
 export default ModelAllocationService

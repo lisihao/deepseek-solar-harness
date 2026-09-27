@@ -39,4 +39,4 @@ Desktop 与 Product Server 都会加载的 resident-operators bundle 设置 `ent
 
 ## 延后事项
 
-单次委派接入分配器、任务特征匹配、推理强度选择，以及 DeepSeek 按轮次选强度，仍是同一设计中的提案。智能协作目前仍用文本分类器和已保存的原生配置把请求映射到 Codex 或 Claude Code。
+[智能协作分配](2026-09-26-smart-collaboration-allocation.md)现在负责为被委派的请求选择协作者和模型。任务特征匹配、推理强度选择，以及 DeepSeek 按轮次选强度，仍是同一设计中的提案。

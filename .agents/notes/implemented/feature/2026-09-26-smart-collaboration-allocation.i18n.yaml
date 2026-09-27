@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-26-smart-collaboration-allocation.md
+2026-09-26-smart-collaboration-allocation.md: 65d64782e45af0ce97d4a9a43ee6d1d29b42ddea
+2026-09-26-smart-collaboration-allocation.zh.md: a5fc6f43e341fae4c762159d1f8296bee1bb30f4

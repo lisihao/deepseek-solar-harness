@@ -254,3 +254,52 @@ export class ModelEntries {
     }
   }
 }
+
+/**
+ * The full native catalogs, including availability and quota pools, with the
+ * time they were read. Reading them qualifies every native product, which
+ * spawns its CLI, so a caller reuses a read younger than `maxAgeMs`; an
+ * explicit menu refresh also records its read here. Concurrent stale reads
+ * share one qualification.
+ */
+export class LiveCatalogs {
+  private value: readonly PhysicalOperatorResidentCatalog[] | undefined
+  private observedAt = 0
+  private pending: Promise<readonly PhysicalOperatorResidentCatalog[]> | undefined
+
+  /**
+   * @param read - qualifies native products and returns their catalogs.
+   * @param maxAgeMs - oldest read that `current()` reuses.
+   * @param onRead - receives every fresh read, such as the menu catalog cache.
+   * @param now - clock in milliseconds.
+   */
+  constructor(
+    private readonly read: () => Promise<readonly PhysicalOperatorResidentCatalog[]>,
+    private readonly maxAgeMs: number,
+    private readonly onRead: (catalogs: readonly PhysicalOperatorResidentCatalog[]) => void,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  /**
+   * Record catalogs read elsewhere, such as by an explicit menu refresh.
+   * @param catalogs - catalogs just returned by a qualification.
+   */
+  record(catalogs: readonly PhysicalOperatorResidentCatalog[]): void {
+    this.value = catalogs
+    this.observedAt = this.now()
+  }
+
+  /**
+   * Catalogs no older than `maxAgeMs`, qualifying products only when the last read is older.
+   * @returns the reused or freshly read catalogs.
+   */
+  current(): Promise<readonly PhysicalOperatorResidentCatalog[]> {
+    if (this.value !== undefined && this.now() - this.observedAt < this.maxAgeMs) return Promise.resolve(this.value)
+    this.pending ??= this.read().then((catalogs) => {
+      this.record(catalogs)
+      this.onRead(catalogs)
+      return catalogs
+    }).finally(() => { this.pending = undefined })
+    return this.pending
+  }
+}
