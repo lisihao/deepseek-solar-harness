@@ -1,6 +1,9 @@
+import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { createConnection, type Socket } from 'node:net'
-import { afterEach, describe, expect, it } from 'vitest'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createConnection, createServer, type Socket } from 'node:net'
+import { basename, dirname, join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
@@ -12,9 +15,19 @@ import { PhysicalOperatorModelToolBridge } from '../src/model-tool-bridge.ts'
 
 const contexts: Context[] = []
 let nextAgentId = 0
+let dshHome: string
+
+// A short root keeps bridge sockets at their direct `physical-operator/model-tools-<pid>-<n>.sock`
+// address instead of the hashed temporary-directory fallback for long Unix socket paths.
+beforeEach(() => {
+  dshHome = mkdtempSync('/tmp/dsh-bridge-')
+  vi.stubEnv('DSH_HOME', dshHome)
+})
 
 afterEach(async () => {
   for (const ctx of contexts.splice(0)) await ctx.root.fiber.dispose()
+  vi.unstubAllEnvs()
+  rmSync(dshHome, { recursive: true, force: true })
 })
 
 const schema = {
@@ -169,5 +182,105 @@ describe('PhysicalOperatorModelToolBridge lifecycle', () => {
     expect(bound.descriptor).toBeUndefined()
     await expect(bound.release()).resolves.toBeUndefined()
     await expect(bridge.dispose()).resolves.toBeUndefined()
+  })
+})
+
+/** Leave a socket file behind the way a crashed process does, and return the dead owner's pid. */
+async function crashedOwnerSocket(directory: string): Promise<number> {
+  const child = spawn(process.execPath, ['-e', `
+    const { createServer } = require('node:net')
+    const path = require('node:path').join(${JSON.stringify(directory)}, 'model-tools-' + process.pid + '-0.sock')
+    createServer().listen(path, () => { process.kill(process.pid, 'SIGKILL') })
+  `], { stdio: 'ignore' })
+  await once(child, 'exit')
+  if (child.pid === undefined) throw new Error('expected a child pid')
+  return child.pid
+}
+
+describe.skipIf(process.platform === 'win32')('PhysicalOperatorModelToolBridge socket files', () => {
+  it('unlinks the socket when the last binding is released and listens again for the next binding', async () => {
+    const { agent, bridge } = await setup(async value => value)
+    const first = await bridge.bind('first-command', agent, [schema], new AbortController().signal)
+    if (first.descriptor === undefined) throw new Error('expected a bridge descriptor')
+    const { socketPath } = first.descriptor
+    expect(dirname(socketPath)).toBe(join(dshHome, 'physical-operator'))
+    expect(basename(socketPath)).toMatch(new RegExp(`^model-tools-${String(process.pid)}-\\d+\\.sock$`, 'u'))
+    expect(existsSync(socketPath)).toBe(true)
+    const { socket, transport } = await connect(first.descriptor)
+    try {
+      await expect(request(transport, first.descriptor, 'first-call', 'one')).resolves.toMatchObject({ value: 'one' })
+      await first.release()
+      expect(existsSync(socketPath)).toBe(false)
+
+      const second = await bridge.bind('second-command', agent, [schema], new AbortController().signal)
+      if (second.descriptor === undefined) throw new Error('expected a bridge descriptor')
+      expect(second.descriptor.socketPath).toBe(socketPath)
+      const next = await connect(second.descriptor)
+      await expect(request(next.transport, second.descriptor, 'second-call', 'two')).resolves.toMatchObject({ value: 'two' })
+      await close(next.socket, next.transport)
+      await second.release()
+      expect(existsSync(socketPath)).toBe(false)
+    } finally {
+      await close(socket, transport)
+      await bridge.dispose()
+    }
+  })
+
+  it('keeps the socket while another binding remains attached', async () => {
+    const { agent, bridge } = await setup(async value => value)
+    const first = await bridge.bind('kept-first', agent, [schema], new AbortController().signal)
+    const second = await bridge.bind('kept-second', agent, [schema], new AbortController().signal)
+    if (second.descriptor === undefined) throw new Error('expected a bridge descriptor')
+    try {
+      await first.release()
+      expect(existsSync(second.descriptor.socketPath)).toBe(true)
+      const { socket, transport } = await connect(second.descriptor)
+      await expect(request(transport, second.descriptor, 'kept-call', 'kept')).resolves.toMatchObject({ value: 'kept' })
+      await close(socket, transport)
+    } finally {
+      await bridge.dispose()
+    }
+    expect(existsSync(second.descriptor.socketPath)).toBe(false)
+  })
+
+  it('unlinks the socket on dispose while a binding and an idle connection remain open', async () => {
+    const { agent, bridge } = await setup(async value => value)
+    const bound = await bridge.bind('disposed-command', agent, [schema], new AbortController().signal)
+    if (bound.descriptor === undefined) throw new Error('expected a bridge descriptor')
+    const { socket, transport } = await connect(bound.descriptor)
+    try {
+      await bridge.dispose()
+      expect(existsSync(bound.descriptor.socketPath)).toBe(false)
+    } finally {
+      await close(socket, transport)
+    }
+  })
+
+  it('removes only sockets whose owning process no longer exists when it first starts listening', async () => {
+    const directory = join(dshHome, 'physical-operator')
+    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    const deadPid = await crashedOwnerSocket(directory)
+    const deadSocket = `model-tools-${String(deadPid)}-0.sock`
+    expect(readdirSync(directory)).toContain(deadSocket)
+    const liveSocket = `model-tools-${String(process.pid)}-999999.sock`
+    const live = createServer()
+    await new Promise<void>((resolve) => { live.listen(join(directory, liveSocket), resolve) })
+    writeFileSync(join(directory, 'native-catalogs.json'), '{}')
+    writeFileSync(join(directory, `model-tools-${String(deadPid)}-1.sock`), 'not a socket')
+
+    const { agent, bridge } = await setup(async value => value)
+    const bound = await bridge.bind('sweep-command', agent, [schema], new AbortController().signal)
+    try {
+      expect(readdirSync(directory).sort()).toEqual([
+        `model-tools-${String(deadPid)}-1.sock`,
+        liveSocket,
+        basename(bound.descriptor?.socketPath ?? ''),
+        'native-catalogs.json',
+      ].sort())
+    } finally {
+      await bound.release()
+      await bridge.dispose()
+      await new Promise<void>((resolve) => { live.close(() => { resolve() }) })
+    }
   })
 })

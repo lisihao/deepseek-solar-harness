@@ -1,6 +1,7 @@
 /** Owner-local bridge exposing one Agent's real DSH tool surface to a Resident product. */
 
 import { createHash } from 'node:crypto'
+import { readdir, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -103,20 +104,72 @@ function canonicalJson(value: unknown): string {
 
 let nextEndpointId = 0
 
-function socketPath(): { readonly path: string; readonly directory?: string } {
-  const root = resolveDshHome()
-  const endpointId = `${String(process.pid)}-${String(nextEndpointId++)}`
-  const directory = join(root, 'physical-operator')
-  const path = localIpcAddress(directory, `model-tools-${endpointId}`)
-  return { path, ...localIpcUsesFilesystem() ? { directory: dirname(path) } : {} }
+const ENDPOINT_PREFIX = 'model-tools'
+const OWNED_SOCKET_NAME = /^model-tools-(\d+)-\d+\.sock$/u
+
+/** Directories already swept in this process; every bridge in one process shares one owner directory. */
+const sweptDirectories = new Set<string>()
+
+interface BridgeEndpoint {
+  readonly path: string
+  readonly directory?: string
+  /** Owner directory whose names carry the owning pid; absent for hashed or named-pipe addresses. */
+  readonly ownerDirectory?: string
 }
 
-/** One bridge-owned stable endpoint. Bindings exist only while their Resident turn is attached. */
+function socketPath(): BridgeEndpoint {
+  const directory = join(resolveDshHome(), 'physical-operator')
+  const path = localIpcAddress(directory, `${ENDPOINT_PREFIX}-${String(process.pid)}-${String(nextEndpointId++)}`)
+  if (!localIpcUsesFilesystem()) return { path }
+  return { path, directory: dirname(path), ...dirname(path) === directory ? { ownerDirectory: directory } : {} }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // ESRCH is the only proof of absence; EPERM means another user's live process owns the pid.
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+
+/**
+ * Remove bridge sockets whose owning process no longer exists. Only socket
+ * entries named `model-tools-<pid>-<n>.sock` are considered; every other entry
+ * in the directory, such as the model catalog cache, is left untouched.
+ * @param directory - owner-local bridge directory under the DSH home.
+ */
+async function sweepDeadOwnerSockets(directory: string): Promise<void> {
+  if (sweptDirectories.has(directory)) return
+  sweptDirectories.add(directory)
+  const entries = await readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
+    // A missing directory has no stale sockets; start() creates it.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  })
+  const stale = entries.flatMap((entry) => {
+    const owner = OWNED_SOCKET_NAME.exec(entry.name)?.[1]
+    return entry.isSocket() && owner !== undefined && !processAlive(Number(owner)) ? [join(directory, entry.name)] : []
+  })
+  await Promise.all(stale.map(path => rm(path, { force: true })))
+}
+
+/**
+ * One bridge-owned endpoint path. The listener and its socket file exist only
+ * while at least one binding is attached; releasing the last binding closes the
+ * listener and unlinks the socket. The first listener start in a process also
+ * unlinks sockets left in the owner directory by processes that no longer exist.
+ */
 export class PhysicalOperatorModelToolBridge {
   private readonly endpoint = socketPath()
   private readonly bindings = new Map<string, Binding>()
   private readonly ownedBindings = new Set<Binding>()
   private readonly server: LocalJsonRpcRequestServer
+  /** Bindings attached or attaching; the listener runs while this is positive. */
+  private leases = 0
+  /** Serializes listener start and close so a new binding never races a closing listener. */
+  private transition: Promise<void> = Promise.resolve()
 
   constructor(private readonly ctx: Context) {
     this.server = new LocalJsonRpcRequestServer(this.endpoint, (method, params) => {
@@ -141,7 +194,21 @@ export class PhysicalOperatorModelToolBridge {
     signal: AbortSignal,
   ): Promise<{ readonly descriptor?: PhysicalOperatorModelToolBridgeV1; release(): Promise<void> }> {
     if (schemas.length === 0) return { release: async () => {} }
-    await this.server.start()
+    await this.acquireEndpoint()
+    try {
+      return this.attach(commandId, agent, schemas, signal)
+    } catch (error) {
+      await this.releaseEndpoint()
+      throw error
+    }
+  }
+
+  private attach(
+    commandId: string,
+    agent: Agent,
+    schemas: readonly ToolSchema[],
+    signal: AbortSignal,
+  ): { readonly descriptor: PhysicalOperatorModelToolBridgeV1; release(): Promise<void> } {
     const sessionId = `${String(agent.id)}:${commandId}`
     const current = this.bindings.get(sessionId)
     if (current !== undefined) throw new Error(`model tool bridge session is already attached: ${sessionId}`)
@@ -182,7 +249,36 @@ export class PhysicalOperatorModelToolBridge {
   /** Close the endpoint and remove only this bridge's socket file. */
   async dispose(): Promise<void> {
     await Promise.all([...this.ownedBindings].map(binding => this.release(binding)))
+    await this.transition
     await this.server.dispose()
+  }
+
+  private async acquireEndpoint(): Promise<void> {
+    this.leases++
+    try {
+      await this.serialize(async () => {
+        if (this.endpoint.ownerDirectory !== undefined) await sweepDeadOwnerSockets(this.endpoint.ownerDirectory)
+        await this.server.start()
+      })
+    } catch (error) {
+      await this.releaseEndpoint()
+      throw error
+    }
+  }
+
+  private releaseEndpoint(): Promise<void> {
+    this.leases--
+    return this.serialize(async () => {
+      if (this.leases === 0) await this.server.dispose()
+    })
+  }
+
+  private serialize(step: () => Promise<void>): Promise<void> {
+    const run = this.transition.then(step)
+    // The step's failure is returned to the caller that queued it; later
+    // transitions still run in order.
+    this.transition = run.catch(() => {})
+    return run
   }
 
   private release(binding: Binding): Promise<void> {
@@ -191,6 +287,7 @@ export class PhysicalOperatorModelToolBridge {
     const quiesced = this.waitForOperations(binding)
     binding.releasePromise = quiesced.then(() => {
       this.ownedBindings.delete(binding)
+      return this.releaseEndpoint()
     })
     return binding.releasePromise
   }

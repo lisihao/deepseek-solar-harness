@@ -60,7 +60,7 @@ prompt 必须包含本轮所需的完整工作。Ephemeral Provider 会在全新
 ## 已知限制与后续工作
 
 - **仅前台执行**：模型不会获得后台句柄、进度流、管理状态、reset 或 interrupt 操作；可信 CLI 和插件负责 Resident 管理。
-- **模型桥跟随 DSH attach 生命周期**：稳定 socket 与已记录 Receipt 允许重载后的 DSH 客户端重新附着同一命令，但在没有 DSH Host 持有桥的间隔内，DSH 所有的工具不可用；原生产品工作与产品内置工具仍由 daemon 持有。
+- **模型桥跟随 DSH attach 生命周期**：桥只在 Resident 绑定附着期间监听。释放最后一个绑定或销毁插件会删除其 socket，进程内首次监听会删除所属进程已不存在的 `model-tools-<pid>-<n>.sock` 文件；长 DSH home 路径使用的哈希临时地址不含所属 pid，不参与清理。已记录的 Receipt 允许重载后的 DSH 客户端重新附着同一命令，但在没有 DSH Host 持有桥的间隔内，DSH 所有的工具不可用；原生产品工作与产品内置工具仍由 daemon 持有。
 - **保守的确定性分类器**：明确点名和已选择产品策略由宿主硬路由。智能自动使用可审计的任务形态规则，无法匹配或琐碎工作仍留给当前模型；首版没有另行训练的排序服务或成本/容量优化器。
 - **直接调用没有队列或亲和调度器**：一次直接 turn 仍在前台运行。多算子 DAG 调度属于 `ctx.orchestrations`；workspace/provider 亲和性优化仍属后置。
 - **没有类型化物理 payload**：首版接受文本任务，返回普通内容块或 Provider 持有的产物引用。
