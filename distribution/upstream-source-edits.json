@@ -436,7 +436,7 @@
     },
     "packages/util/atomic-write/src/index.ts": {
       "kind": "migration-debt",
-      "note": "fix(runtime): make local IPC portable; fix(ci): close cross-platform controlled-suite gates"
+      "note": "fix(runtime): make local IPC portable; fix(ci): close cross-platform controlled-suite gates; fix(atomic-write): retry Windows rename sharing violations"
     },
     "packages/util/home-paths/src/index.ts": {
       "kind": "migration-debt",
