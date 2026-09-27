@@ -3114,6 +3114,12 @@ export interface Config {
    * restarts. Omitted, they are kept in memory until the next refresh.
    */
   readonly stateRoot?: string
+  /**
+   * Oldest native catalog read, in milliseconds, that Smart Collaboration
+   * reuses when it asks `ctx.modelAllocation` for a collaborator; an older
+   * read qualifies the native products again. Defaults to ten minutes.
+   */
+  readonly catalogMaxAgeMs?: number
 }
 
 /** One operator whose newest native models the model menu offers as entries. */
@@ -3125,7 +3131,7 @@ export interface LatestModelEntries {
 }
 ```
 
-来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:191`](../packages/physical-operator/tool-physical-operator/src/index.ts)
+来源：[`packages/physical-operator/tool-physical-operator/src/index.ts:195`](../packages/physical-operator/tool-physical-operator/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 

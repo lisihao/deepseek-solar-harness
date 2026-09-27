@@ -500,4 +500,21 @@ describe('subscription-first model allocation', () => {
     expect(result.suggestedParallelism).toBe(1)
     await ctx.root.fiber.dispose()
   })
+
+  it('breaks a score tie by the offer rank before the offer id', async () => {
+    const service = new SubscriptionFirstModelAllocation(new Context())
+    const request = {
+      runId: 'r', nodeId: 'n', phase: 'execution' as const, role: 'implementation', task: 'implement the change',
+      preferredOperatorIds: [], objective: 'quality' as const, rlm: 'disabled' as const, graphMaxParallel: 1, now: '2026-09-26T00:00:00.000Z',
+    }
+    const offers = [
+      offer({ offerId: 'codex:gpt-6-astra', model: 'gpt-6-astra', tier: 'high', rank: 2 }),
+      offer({ offerId: 'codex:gpt-7-nova', model: 'gpt-7-nova', tier: 'high', rank: 0 }),
+      offer({ offerId: 'codex:gpt-7-sol', model: 'gpt-7-sol', tier: 'high', rank: 1 }),
+    ]
+    await expect(service.allocate({ ...request, offers })).resolves.toMatchObject({ model: 'gpt-7-nova' })
+    const unranked = offers.map(({ rank: _rank, ...rest }) => rest)
+    await expect(service.allocate({ ...request, offers: unranked })).resolves.toMatchObject({ model: 'gpt-6-astra' })
+    await expect(service.allocate({ ...request, offers: [unranked[0]!, offers[2]!] })).resolves.toMatchObject({ model: 'gpt-7-sol' })
+  })
 })

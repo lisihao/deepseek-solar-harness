@@ -37,6 +37,24 @@ async function menu(api: ReturnType<typeof createApiProxy>, refresh: boolean): P
   return response.result.value.groups.flatMap(group => group.models.map(model => `${group.name} / ${model.name}`))
 }
 
+/** Send one request from a DeepSeek main model under Smart Collaboration and report the routed collaborator. */
+async function delegate(ctx: Context, id: string, text: string) {
+  const agent = ctx.agentLoop.create(SessionId(id), { provider: 'deepseek-official', model: 'deepseek-v4-pro' }, { cwd: process.cwd() })
+  const idle = new Promise<void>((resolve) => {
+    const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
+      if (subject === agent && status === 'idle') {
+        dispose()
+        resolve()
+      }
+    })
+  })
+  agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
+  await idle
+  const decision = agent.session.events.findLast(event => event.type === 'physical-operator/routing-decision')
+  if (decision?.type !== 'physical-operator/routing-decision') throw new Error(`no routing decision for ${id}`)
+  return { operatorId: decision.data.operatorId, profile: fixture.profiles.at(-1), reason: decision.data.reason }
+}
+
 const before = await withHost(async (_ctx, api) => {
   const cold = await menu(api, false)
   const refreshed = await menu(api, true)
@@ -65,7 +83,12 @@ const restarted = await withHost(async (ctx, api) => {
   const text = reply?.type === 'assistant/message'
     ? reply.data.message.content.filter(block => block.type === 'text').map(block => block.text).join('')
     : undefined
-  return { entries, codexEntryRuns: fixture.profiles.at(-1), reply: text }
+  const codexEntryRuns = fixture.profiles.at(-1)
+  const smartAuto = {
+    implementation: await delegate(ctx, 'smart-auto-implementation', '给我修复这个 TypeScript 构建 bug 并补齐测试'),
+    analysis: await delegate(ctx, 'smart-auto-analysis', '请深度分析这个系统的架构并给出评审意见'),
+  }
+  return { entries, codexEntryRuns, reply: text, smartAuto }
 })
 
 process.stdout.write(`${JSON.stringify({
@@ -75,4 +98,5 @@ process.stdout.write(`${JSON.stringify({
   menuAfterRestart: restarted.entries,
   codexEntryRuns: restarted.codexEntryRuns,
   reply: restarted.reply,
+  smartAuto: restarted.smartAuto,
 }, null, 2)}\n`)

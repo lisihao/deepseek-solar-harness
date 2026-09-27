@@ -25,5 +25,23 @@
   "codexEntryRuns": {
     "model": "gpt-7-nova"
   },
-  "reply": "codex ran gpt-7-nova"
+  "reply": "codex ran gpt-7-nova",
+  "smartAuto": {
+    "implementation": {
+      "operatorId": "codex",
+      "profile": {
+        "model": "gpt-7-nova",
+        "effort": "high"
+      },
+      "reason": "智能协作由调度器选择 Codex · GPT-7-Nova（强度 high）：native-subscription-first、worker-tier-throughput"
+    },
+    "analysis": {
+      "operatorId": "claude-code",
+      "profile": {
+        "model": "claude-opus-5",
+        "effort": "high"
+      },
+      "reason": "智能协作由调度器选择 Claude Code · Claude Opus 5（强度 high）：native-subscription-first、worker-tier-throughput"
+    }
+  }
 }
